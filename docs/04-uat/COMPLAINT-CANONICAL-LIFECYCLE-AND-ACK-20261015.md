@@ -409,3 +409,53 @@ Reviewer 明確要求不要只列「新表／舊欄位」兩個 alternative，�
    寫入時機：僅在 `persistChanges` catch 到 `ComplaintCommitOutcomeUnknownError` 之後，用獨立的一次 `INSERT ... ON CONFLICT (command_key) DO UPDATE`（非原本那個結果未知的交易）盡力登記；若這次登記本身也失敗，則該次重試退回目前的「僅行程內 `Map`」保底行為，不視為新的回歸。確認／清除時機：`reconcilePendingCase` 判定 `confirmed`/`failed` 後，刪除對應 `command_key` 列（或視覺化稽核需求改為 `status` 更新而非刪除，兩者皆可，建議刪除以維持表的小體積）。
 
 **5) 超 scope 的必要 caller hunk**：`complaint.repository.ts` 需新增 `recordPendingCommit`/`loadPendingCommitsByCaseNo`/`clearPendingCommit` 三個方法（已在本任務 15 個 write_scopes 內，可隨 P1 一併實作）；但新 migration 檔本身（`infra/migrations/` 下的新檔案）**不在**本任務 write_scopes 內，需要 Root 協調的新 migration 編號與獨立 review/scope 擴充後才能落地，本輪不猜測編號、不建立該檔案。
+
+### 10.5 restart/replica durable command identity 實作記錄（V0123 落地）
+
+Root 已配發 `V0123`（`.local/passenger-bureau-gap-correction-20261018/Complaint-V0123-exact-root-allocation-20261018/result.json`），本輪依 §10.4 方案落地，過程中發現並修正方案文字一處會導致正式 bug 的細節：
+
+1. **`command_key` 公式修正為包含 `caseNo`**：§10.4 原文字只寫 `sha256(action || ':' || stableStringify(matchCommand))`。但 `resolve_complaint_case`/`close_complaint_case`/`reopen_complaint_case`/`mark_complaint_sla_breach`/`escalate_to_incident`/`link_incident` 六個 update 類動作本來就不靠內容比對重試（純靠 `pendingUncertainCommits.get(caseNo)` + `action` 比對），`markComplaintSlaBreach` 甚至完全沒有 `command` 物件（只有 `caseNo`）。若維持原公式，這六種動作的 `command_key` 要嘛恆為同一值（sla-breach，所有案件共用一列、互相覆寫），要嘛在兩個不同案件剛好帶相同 resolutionCode/closingNote 文字時發生 PRIMARY KEY 碰撞（同一 commandKey 覆寫成另一案件的 pending 列）。實作改為 `sha256(action + ':' + caseNo + ':' + stableStringify(matchCommand))`：
+   - 對 `create_complaint_case`（唯一需要跨 caseNo 內容比對找 retry 的動作）不影響比對邏輯——`findPendingUncertainCreate` 仍然是對記憶體 Map 的 `values()` 做 `stableStringify` 內容比對，從未用 `command_key` 反查；`command_key` 只是 DB 層的 upsert/delete 身分，兩個關注點已解耦。
+   - 對六個純 caseNo 鍵控的動作則保證每個 (action, caseNo) 恰有一列，與既有記憶體語意完全對齊。
+2. **Cold-read 的落地方式：重用既有的 `refreshSettlementCases()` 前置掛鉤，不把任何 public 方法改成 async**：`complaint.controller.ts`/`fleet-partner-case.service.ts`/`incident.controller.ts` 的每個端點已經在呼叫 mutation 方法前 `await this.complaintService.refreshSettlementCases()`（唯一例外見下）。新增 `hydratePendingCommitsFromDurableStore()` 掛在 `reconcilePendingCases()`（`refreshSettlementCases` 內部已呼叫）最前面：讀出所有 `status = 'pending'` 的 durable 列，凡本行程記憶體 Map 裡還沒有的 caseNo，就還原成 `PendingUncertainComplaintCommit`（`rollback` 用 `previousCaseSnapshot` + `revertComplaintCaseMutation` 重建，取代無法序列化的原始閉包）寫回 Map。這樣一來，既有的同步 `pendingUncertainCommits.get(caseNo)`/`findPendingUncertainCreate` 讀取路徑完全不用改，等到它們執行時，跨行程/重啟前留下的 pending 紀錄已經「看起來」就在本行程記憶體裡。沒有把 `assignComplaintCase`/`resolveComplaintCase`/... 等 9 個 public 方法改成 async（風險太高、也沒有測試要求），是刻意的範圍控制。
+   - 唯一原本沒有呼叫 `refreshSettlementCases()` 的真實重送 caller：`callcenter.controller.ts` 的 `transferCallToComplaint`（§10.4 item 1 點名的「通話逾時後 callcenter 重送同一通話/案件的轉案指令」）。本輪在 `createComplaintCase` 呼叫前補上這一行 `await`，使其納入同一套跨行程還原機制。
+3. **寫入/清除時機**：`persistChanges` 新增第 6 個參數 `previousCaseSnapshot`（9 個呼叫點與 `retryUncertainComplaintWrite` 都已傳入），在 `ComplaintCommitOutcomeUnknownError` 分支呼叫 `recordDurablePendingCommit`（best-effort，失敗吞掉、退回純記憶體行為）；在既有「成功 `.then()`」與 `reconcilePendingCase` 的「已判定 confirmed/failed」兩處呼叫 `clearDurablePendingCommit`（同樣 best-effort，DELETE 0 列也安全）。`ComplaintRepository` 新增 `recordPendingCommit`/`loadPendingCommits`/`clearPendingCommit` 三個方法，皆以 `typeof this.complaintRepository?.xxx === "function"` 容忍只實作部分方法的輕量測試替身（沿用既有 `canonicalDbEnabled()` 的容忍慣例），避免測試替身缺方法時拋 TypeError。
+4. **驗證**：`infra/migrations/V0123__complaint_command_identity.sql`、`docs/04-uat/system-remediation-20260906/schema-allocation.json`（新增 `complaint_command_allocations` 群組）、三個 allocation-collector 測試（`sr-recovery-contracts-20260911`/`sr-partner-notify-con-20260917`/`push-channel-sd-20261006`）已納入並通過；`tsc -p apps/api/tsconfig.json --noEmit` 與 `eslint` 乾淨；本任務既有 5 個測試檔（`tests/unit/complaint.test.ts`、`apps/api/tests/unit/complaint-taxonomy-reopen-sla.test.ts`、`apps/api/tests/unit/complaint-incident-escalation.test.ts`、`tests/unit/complaint-canonical-lifecycle-and-ack-20261015/*`、`tests/unit/system-remediation/sr-qa-call-001/c045-complaint-lifecycle-sla.test.ts`、`tests/unit/system-remediation/sr-fleet-case-001/*`）全數通過；另外跑過 `fleet-statement-decisions-20261013`、`sr-qa-call-001`、`incident.test.ts`、`idempotency-foundation`/`client-idempotency`/`wire-contract-conformance`、`ops-complaint-*`、`pax-receipt-complaint-20261009` 等鄰近套件共 400+ 項測試，皆綠。本節原文曾記錄「未新增專屬 restart/replica 測試」，已在 §10.6 補上。
+
+### 10.6 restart/replica durable command identity 的專屬回歸（補 §10.5 第 4 點缺口）
+
+新增 `tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-durable-pending-commit-identity.test.ts`（既有 write_scopes 目錄內新檔），涵蓋 §10.4/10.5 新增機制本身，而非只靠既有 F1/F2/F3 測試間接覆蓋：
+
+- **`ComplaintRepository` 層（5 案例）**：`recordPendingCommit` 對 `crm.phase1_complaint_pending_commits` 發出的 `INSERT ... ON CONFLICT (command_key) DO UPDATE` SQL 與逐欄 JSON 編碼參數；canonical DB 停用時為 no-op（不發出查詢）；`loadPendingCommits` 只選 `status = 'pending'` 並把 snake_case 欄位解析回 camelCase 的 `ComplaintPendingCommitRecord`，停用時回傳 `[]` 且不查詢；`clearPendingCommit` 依 `command_key` 發出 `DELETE`，且停用時為 no-op。
+- **`ComplaintService` 跨行程案例（1 案例，端到端）**：建立「process A」（原始嘗試）與完全獨立的「process B」（模擬不同 replica／行程重啟後的全新 `ComplaintService` 實例，彼此不共用任何記憶體 Map）。Process A 對一筆已確定建立成功的案件發出 assign，COMMIT 結果回 `ComplaintCommitOutcomeUnknownError`；斷言 `recordPendingCommit` 真的被呼叫一次並擷取其寫入的 durable row。Process B 只靠 `loadState`（讀回案件原本的、assign 從未落地的真實狀態：`status: "new"`）與 `loadPendingCommits`（回傳 A 寫入的 durable row）建立，`onModuleInit` 後直接 readback 驗證狀態確實是真實的 `"new"`（不是 A 樂觀的 `"assigned"`）；呼叫 `refreshSettlementCases()`（每個 controller endpoint 既有的前置呼叫）後，對 B 重送與 A 完全相同的 assign command：斷言這次重送確實重用了 A 原始嘗試的同一個 `caseNo`／timeline `entryId`（而非配置新的一組），且成功 commit 後呼叫了 `clearPendingCommit`（帶正確的 `commandKey`）。這證明本機制在真正跨行程（不只是同行程 Map）下也成立，而不只是文件描述。
+
+驗證：
+```bash
+$ pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-durable-pending-commit-identity.test.ts
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+
+$ pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/ tests/unit/complaint.test.ts \
+    tests/unit/system-remediation/sr-qa-call-001/c045-complaint-lifecycle-sla.test.ts \
+    tests/unit/system-remediation/sr-fleet-case-001/sr-fleet-case-001.test.ts
+ Test Files  6 passed (6)
+      Tests  66 passed (66)
+
+$ pnpm exec vitest run tests/unit/fleet-statement-decisions-20261013/ tests/unit/push-channel-sd-20261006/ \
+    tests/unit/system-remediation/sr-recovery-contracts-20260911/ tests/unit/system-remediation/sr-partner-notify-con-20260917/
+ Test Files  10 passed (10)
+      Tests  157 passed (157)
+
+$ (cd apps/api && pnpm exec vitest run tests/unit/complaint-taxonomy-reopen-sla.test.ts tests/unit/complaint-incident-escalation.test.ts)
+ Test Files  2 passed (2)
+      Tests  24 passed (24)
+
+$ (cd apps/api && pnpm exec tsc --noEmit)   # exit 0
+$ pnpm exec tsc --noEmit -p apps/ops-console-web/tsconfig.json   # exit 0
+$ pnpm exec eslint tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-durable-pending-commit-identity.test.ts --max-warnings=0   # exit 0
+
+$ pnpm exec vitest run tests/unit/pax-receipt-complaint-20261009/ tests/unit/pax-postride-same-order-20261016/ \
+    tests/unit/pax-booking-history-20261009/ tests/unit/reporting-filing.test.ts tests/unit/system-remediation/sr-release-001/
+ Test Files  15 passed | 2 skipped (17)
+      Tests  370 passed | 10 skipped (380)
+```

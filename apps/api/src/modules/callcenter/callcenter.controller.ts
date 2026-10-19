@@ -282,6 +282,11 @@ export class CallcenterController {
     @Headers("x-request-id") requestId?: string,
   ) {
     const session = this.callcenterService.getCallSession(callId);
+    // A real caller that resends the same transfer-to-complaint command
+    // (e.g. after a call timeout) must have its retry recognized across an
+    // API restart or a different replica, not only within this process's
+    // memory; see ComplaintService.refreshSettlementCases.
+    await this.complaintService.refreshSettlementCases();
     const complaintCase = this.complaintService.createComplaintCase(
       {
         caseSource: "phone",

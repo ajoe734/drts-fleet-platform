@@ -33,6 +33,34 @@ export interface PassengerIntakeResult {
   replayed: boolean;
 }
 
+export type ComplaintPendingCommitStatus = "pending" | "confirmed" | "failed";
+
+/** Durable mirror of a ComplaintService in-memory PendingUncertainComplaintCommit,
+ * so a same-logical-command retry can recover the originally allocated
+ * caseNo/entryIds across an API process restart or on a different replica,
+ * not only within the originating process's Map. */
+export type ComplaintPendingCommitRecord = {
+  commandKey: string;
+  caseNo: string;
+  action: string;
+  commandPayload: unknown;
+  caseSnapshot: ComplaintCaseRecord;
+  timelineSnapshot: ComplaintTimelineEntry[];
+  previousCaseSnapshot: ComplaintCaseRecord | null;
+  status: ComplaintPendingCommitStatus;
+};
+
+type PendingCommitRow = {
+  command_key: string;
+  case_no: string;
+  action: string;
+  command_payload: unknown;
+  case_snapshot: unknown;
+  timeline_snapshot: unknown;
+  previous_case_snapshot: unknown;
+  status: ComplaintPendingCommitStatus;
+};
+
 /** Thrown when the client failed after issuing COMMIT: the transaction may
  * have actually been applied server-side. Callers must not assume rollback
  * (and must not treat the write as a fresh, safely-retryable attempt). */
@@ -627,6 +655,103 @@ export class ComplaintRepository {
           "crm.phase1_complaint_cases",
         )
       : null;
+  }
+
+  /** Best-effort durable registration of an ordinary write whose COMMIT
+   * outcome was left unknown, so a same-logical-command retry on a
+   * different replica (or after this process restarts) can recover the
+   * originally allocated caseNo/entryIds instead of only within this
+   * process's in-memory pendingUncertainCommits Map. A separate statement
+   * from the uncertain write itself; never a second commit-outcome
+   * authority for crm.phase1_complaint_cases itself. */
+  async recordPendingCommit(
+    record: ComplaintPendingCommitRecord,
+  ): Promise<void> {
+    if (!this.isEnabled()) return;
+    await this.databaseService!.query(
+      `
+        INSERT INTO crm.phase1_complaint_pending_commits (
+          command_key,
+          case_no,
+          action,
+          command_payload,
+          case_snapshot,
+          timeline_snapshot,
+          previous_case_snapshot,
+          status,
+          updated_at
+        ) VALUES (
+          $1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8, now()
+        )
+        ON CONFLICT (command_key) DO UPDATE SET
+          case_no = EXCLUDED.case_no,
+          action = EXCLUDED.action,
+          command_payload = EXCLUDED.command_payload,
+          case_snapshot = EXCLUDED.case_snapshot,
+          timeline_snapshot = EXCLUDED.timeline_snapshot,
+          previous_case_snapshot = EXCLUDED.previous_case_snapshot,
+          status = EXCLUDED.status,
+          updated_at = now()
+      `,
+      [
+        record.commandKey,
+        record.caseNo,
+        record.action,
+        JSON.stringify(record.commandPayload ?? null),
+        JSON.stringify(record.caseSnapshot),
+        JSON.stringify(record.timelineSnapshot),
+        record.previousCaseSnapshot
+          ? JSON.stringify(record.previousCaseSnapshot)
+          : null,
+        record.status,
+      ],
+    );
+  }
+
+  /** Cold-read for restart/replica recovery: every still-`pending` durable
+   * row, so a replica with an empty in-memory Map (fresh process, or one
+   * that never saw the original attempt) can rehydrate it before deciding
+   * whether a caller's retry resends an already-allocated command. */
+  async loadPendingCommits(): Promise<ComplaintPendingCommitRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<PendingCommitRow>(
+      `
+        SELECT command_key, case_no, action, command_payload, case_snapshot,
+               timeline_snapshot, previous_case_snapshot, status
+        FROM crm.phase1_complaint_pending_commits
+        WHERE status = 'pending'
+      `,
+    );
+    return result.rows.map((row) => ({
+      commandKey: row.command_key,
+      caseNo: row.case_no,
+      action: row.action,
+      commandPayload: row.command_payload,
+      caseSnapshot: this.parseRecord<ComplaintCaseRecord>(
+        row.case_snapshot,
+        "crm.phase1_complaint_pending_commits.case_snapshot",
+      ),
+      timelineSnapshot: Array.isArray(row.timeline_snapshot)
+        ? (row.timeline_snapshot as ComplaintTimelineEntry[])
+        : [],
+      previousCaseSnapshot: row.previous_case_snapshot
+        ? this.parseRecord<ComplaintCaseRecord>(
+            row.previous_case_snapshot,
+            "crm.phase1_complaint_pending_commits.previous_case_snapshot",
+          )
+        : null,
+      status: row.status,
+    }));
+  }
+
+  /** Clears the durable pending-commit marker once reconcilePendingCase has
+   * definitively resolved it (confirmed landed, or proven not to have). */
+  async clearPendingCommit(commandKey: string): Promise<void> {
+    if (!this.isEnabled()) return;
+    await this.databaseService!.query(
+      `DELETE FROM crm.phase1_complaint_pending_commits WHERE command_key = $1`,
+      [commandKey],
+    );
   }
 
   async loadSettlementState(): Promise<ComplaintState> {

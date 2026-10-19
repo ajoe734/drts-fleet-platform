@@ -149,6 +149,12 @@
       "amended_at": "2026-10-18",
       "scope": "Append V0121 to voice_callback_allocations; original allocation entries unchanged",
       "reason": "Extends the callback functionality on exact parent48bf70e, whose highest reserved migration is V0120. Existing allocation collectors already include voice_callback_allocations; no guard or assertion is changed."
+    },
+    {
+      "amended_by_task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "amended_at": "2026-10-18",
+      "scope": "Appended `complaint_command_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations, voice_callback_allocations, passenger_push_channel_allocations, passenger_app_allocations, fleet_statement_decision_allocations and public_fare_management_allocations entries above are unchanged",
+      "reason": "Registers V0123 (Root allocation record: .local/passenger-bureau-gap-correction-20261018/Complaint-V0123-exact-root-allocation-20261018/result.json, V0122 reserved separately for Voice and not reused) for the original C045 restart/replica same-logical-command durable identity gap (docs/04-uat/COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015.md §10.4): a durable pending-commit table so an ordinary complaint mutation whose COMMIT outcome was left unknown keeps its allocated caseNo/entryId recoverable by a same-command retry even across an API process restart or a different replica, not only within the originating process's in-memory Map. This task writes both the migration file and the caller wiring (complaint.repository.ts/complaint.service.ts are already in its write_scopes); highest canonical migration at allocation time was V0121."
     }
   ],
   "voice_application_allocations": [
@@ -652,6 +658,29 @@
         "Filing metadata records actual operator evidence; simulations never write official authority.",
         "Schedule splits one covered published interval; historical published rows and immutable quote snapshots remain available.",
         "Tariff mutation, audit and command receipt commit or roll back together; receipt retry returns current row without replaying interval changes."
+      ]
+    }
+  ],
+  "complaint_command_allocations": [
+    {
+      "task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "version": "V0123",
+      "migration_filename": "V0123__complaint_command_identity.sql",
+      "domain": "complaint_command_identity",
+      "target_schema": "crm",
+      "primary_tables": ["crm.phase1_complaint_pending_commits"],
+      "referenced_tables": [
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "Durable cross-process pending-commit identity for an ordinary (non-settlement) complaint mutation whose COMMIT outcome was left unknown, so a same-logical-command retry recovers the originally allocated caseNo/entryId after an API restart or on a different replica instead of only within the originating process's in-memory pendingUncertainCommits Map.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "crm.phase1_complaint_pending_commits: command_key varchar(64) PRIMARY KEY, computed as sha256(action || ':' || stableStringify(matchCommand)) — the same action+command-content comparison ComplaintService already uses in-memory (findPendingUncertainCreate and the per-action pendingUncertainCommits.get(caseNo) match), so no caller needs to supply a new explicit idempotency key.",
+        "case_no varchar(100) NOT NULL, action varchar(100) NOT NULL, command_payload jsonb NOT NULL (the original matchCommand, re-hydrated into PendingUncertainComplaintCommit.matchCommand on recovery so the existing stableStringify comparison keeps working verbatim), case_snapshot jsonb NOT NULL, timeline_snapshot jsonb NOT NULL, previous_case_snapshot jsonb NULL (NULL for a create-type action; the update-type actions' pre-mutation snapshot otherwise, used to rebuild the existing in-memory revertComplaintCaseMutation rollback instead of a non-serializable closure).",
+        "status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','failed')), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now().",
+        "CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no) — reconcilePendingCase's existing durable-store sweep scans by case_no.",
+        "Write timing: only a best-effort upsert (INSERT ... ON CONFLICT (command_key) DO UPDATE) performed after persistChanges already caught ComplaintCommitOutcomeUnknownError, on a separate statement from the uncertain write itself; if this bookkeeping upsert also fails, the retry falls back to the existing in-memory-only pendingUncertainCommits behavior rather than regressing below it. Deleted once reconcilePendingCase resolves the case to 'confirmed' or 'failed'; never a second commit-outcome authority for crm.phase1_complaint_cases itself."
       ]
     }
   ]
