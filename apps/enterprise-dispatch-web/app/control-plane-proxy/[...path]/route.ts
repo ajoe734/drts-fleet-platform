@@ -87,7 +87,11 @@ function isAllowedEnterprisePath(path: string[], method: string) {
   if (path.length === 3) {
     return method === "GET" || method === "PUT" || method === "PATCH";
   }
-  return path.length === 4 && path[3] === "cancel" && method === "POST";
+  return (
+    path.length === 4 &&
+    ((path[3] === "cancel" && method === "POST") ||
+      (path[3] === "driver-contact" && method === "GET"))
+  );
 }
 
 function buildTargetUrl(request: NextRequest, path: string[]) {

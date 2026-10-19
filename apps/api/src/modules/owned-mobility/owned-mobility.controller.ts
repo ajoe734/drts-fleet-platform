@@ -558,6 +558,27 @@ export class OwnedMobilityController {
     );
   }
 
+  @Get("tenant/bookings/:bookingId/driver-contact")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getTenantBookingDriverContact(
+    @Param("bookingId") bookingId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolvedTenantId = this.requireTenantId(tenantId);
+    this.assertTenantAccessScope(resolvedTenantId, identity);
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getTenantBookingDriverContact(
+        resolvedTenantId,
+        bookingId,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Put("tenant/bookings/:bookingId")
   async updateTenantBooking(
     @Param("bookingId") bookingId: string,
