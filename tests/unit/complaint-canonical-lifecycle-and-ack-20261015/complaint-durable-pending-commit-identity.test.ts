@@ -68,7 +68,10 @@ describe("ComplaintRepository: crm.phase1_complaint_pending_commits read/write",
 
   it("recordPendingCommit upserts by command_key with JSON-encoded snapshots", async () => {
     const query = vi.fn<
-      (text: string, values?: readonly unknown[]) => Promise<{
+      (
+        text: string,
+        values?: readonly unknown[],
+      ) => Promise<{
         rows: unknown[];
         rowCount: number;
       }>
@@ -111,9 +114,12 @@ describe("ComplaintRepository: crm.phase1_complaint_pending_commits read/write",
     expect(query).not.toHaveBeenCalled();
   });
 
-  it("loadPendingCommits selects only status='pending' rows and parses snapshots back into camelCase records", async () => {
+  it("loadPendingCommits selects prepared and confirmed rows and parses snapshots back into camelCase records", async () => {
     const query = vi.fn<
-      (text: string, values?: readonly unknown[]) => Promise<{
+      (
+        text: string,
+        values?: readonly unknown[],
+      ) => Promise<{
         rows: unknown[];
       }>
     >(async () => ({
@@ -137,9 +143,8 @@ describe("ComplaintRepository: crm.phase1_complaint_pending_commits read/write",
 
     const rows = await repository.loadPendingCommits();
 
-    expect(query.mock.calls[0]![0]).toContain(
-      "WHERE status = 'pending'",
-    );
+    expect(query.mock.calls[0]![0]).toContain("WHERE status = 'pending'");
+    expect(query.mock.calls[0]![0]).toContain("OR status = 'confirmed'");
     expect(rows).toEqual([
       {
         commandKey: "abc123",
@@ -244,10 +249,12 @@ describe("ComplaintService: a same-command retry is recognized across a process 
     await processA.complaintService.awaitSettlementPersistence(
       complaintCase.caseNo,
     );
-    const durableCreateTimeline = processA.complaintService.getComplaintTimeline(
-      complaintCase.caseNo,
-    );
+    const durableCreateTimeline =
+      processA.complaintService.getComplaintTimeline(complaintCase.caseNo);
 
+    // PREPARED registration now also protects the successful initial create.
+    // This test's existing single-call assertions concern the assign attempt.
+    vi.mocked(processA.repository.recordPendingCommit).mockClear();
     const assignCommand = { assigneeId: "ops-1", note: "Taking this case" };
     const gate = processA.pauseWrite();
     processA.complaintService.assignComplaintCase(

@@ -25,6 +25,8 @@ type ComplaintState = {
 type PersistComplaintChanges = {
   complaintCases?: readonly ComplaintCaseRecord[];
   complaintTimelines?: readonly ComplaintTimelineEntry[];
+  /** Prepared ordinary command identities confirmed by this same transaction. */
+  commandKeys?: readonly string[];
 };
 
 export interface PassengerIntakeResult {
@@ -238,6 +240,15 @@ export class ComplaintRepository {
     }
 
     await Promise.all(writes);
+    // The prepared identity already exists outside this transaction. Its
+    // confirmed result changes atomically with the canonical case/timeline.
+    for (const commandKey of changes.commandKeys ?? []) {
+      await transaction!.query(
+        `UPDATE crm.phase1_complaint_pending_commits
+         SET status = 'confirmed', updated_at = now() WHERE command_key = $1`,
+        [commandKey],
+      );
+    }
   }
 
   /** Commit intake, canonical CRM case and timeline together; fail closed. */
@@ -657,42 +668,21 @@ export class ComplaintRepository {
       : null;
   }
 
-  /** Best-effort durable registration of an ordinary write whose COMMIT
-   * outcome was left unknown, so a same-logical-command retry on a
-   * different replica (or after this process restarts) can recover the
-   * originally allocated caseNo/entryIds instead of only within this
-   * process's in-memory pendingUncertainCommits Map. A separate statement
-   * from the uncertain write itself; never a second commit-outcome
-   * authority for crm.phase1_complaint_cases itself. */
+  /** Reserve PREPARED identity before the business transaction. A concurrent
+   * retry can observe the original IDs; it must never replace them. */
   async recordPendingCommit(
     record: ComplaintPendingCommitRecord,
-  ): Promise<void> {
+  ): Promise<ComplaintPendingCommitRecord | undefined> {
     if (!this.isEnabled()) return;
-    await this.databaseService!.query(
-      `
-        INSERT INTO crm.phase1_complaint_pending_commits (
-          command_key,
-          case_no,
-          action,
-          command_payload,
-          case_snapshot,
-          timeline_snapshot,
-          previous_case_snapshot,
-          status,
-          updated_at
-        ) VALUES (
-          $1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8, now()
-        )
-        ON CONFLICT (command_key) DO UPDATE SET
-          case_no = EXCLUDED.case_no,
-          action = EXCLUDED.action,
-          command_payload = EXCLUDED.command_payload,
-          case_snapshot = EXCLUDED.case_snapshot,
-          timeline_snapshot = EXCLUDED.timeline_snapshot,
-          previous_case_snapshot = EXCLUDED.previous_case_snapshot,
-          status = EXCLUDED.status,
-          updated_at = now()
-      `,
+    const result = await this.databaseService!.query<PendingCommitRow>(
+      `INSERT INTO crm.phase1_complaint_pending_commits (
+         command_key, case_no, action, command_payload, case_snapshot,
+         timeline_snapshot, previous_case_snapshot, status, updated_at
+       ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8, now())
+       ON CONFLICT (command_key) DO UPDATE SET
+         command_key = EXCLUDED.command_key
+       RETURNING command_key, case_no, action, command_payload, case_snapshot,
+                 timeline_snapshot, previous_case_snapshot, status`,
       [
         record.commandKey,
         record.caseNo,
@@ -705,13 +695,27 @@ export class ComplaintRepository {
           : null,
         record.status,
       ],
-    );
+    ).catch((error: unknown) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "23505"
+      ) {
+        throw new ApiRequestError(
+          409,
+          "IDEMPOTENCY_IN_PROGRESS",
+          "Another complaint creation has reserved this case number; retry the same key.",
+          undefined,
+          true,
+        );
+      }
+      throw error;
+    });
+    return result.rows[0] ? this.parsePendingCommit(result.rows[0]) : undefined;
   }
 
-  /** Cold-read for restart/replica recovery: every still-`pending` durable
-   * row, so a replica with an empty in-memory Map (fresh process, or one
-   * that never saw the original attempt) can rehydrate it before deciding
-   * whether a caller's retry resends an already-allocated command. */
+  /** Prepared commands and confirmed replay results survive process restarts. */
   async loadPendingCommits(): Promise<ComplaintPendingCommitRecord[]> {
     if (!this.isEnabled()) return [];
     const result = await this.databaseService!.query<PendingCommitRow>(
@@ -719,10 +723,16 @@ export class ComplaintRepository {
         SELECT command_key, case_no, action, command_payload, case_snapshot,
                timeline_snapshot, previous_case_snapshot, status
         FROM crm.phase1_complaint_pending_commits
-        WHERE status = 'pending'
+        WHERE status = 'pending' OR status = 'confirmed'
       `,
     );
-    return result.rows.map((row) => ({
+    return result.rows.map((row) => this.parsePendingCommit(row));
+  }
+
+  private parsePendingCommit(
+    row: PendingCommitRow,
+  ): ComplaintPendingCommitRecord {
+    return {
       commandKey: row.command_key,
       caseNo: row.case_no,
       action: row.action,
@@ -741,7 +751,42 @@ export class ComplaintRepository {
           )
         : null,
       status: row.status,
-    }));
+    };
+  }
+
+  /** One statement gives the ordinary case and its full timeline one
+   * canonical snapshot, including changes made by another API replica. */
+  async loadCaseState(caseNo: string): Promise<ComplaintState> {
+    if (!this.isEnabled())
+      return { complaintCases: [], complaintTimelines: [] };
+    const result = await this.databaseService!.query<
+      JsonRecordRow & { kind: "case" | "timeline" }
+    >(
+      `SELECT kind, record FROM (
+         SELECT 'case' AS kind, record, created_at FROM crm.phase1_complaint_cases WHERE case_no = $1
+         UNION ALL
+         SELECT 'timeline' AS kind, record, created_at FROM crm.phase1_complaint_timelines WHERE case_no = $1
+       ) complaint_case_snapshot ORDER BY kind, created_at`,
+      [caseNo],
+    );
+    return {
+      complaintCases: result.rows
+        .filter((row) => row.kind === "case")
+        .map((row) =>
+          this.parseRecord<ComplaintCaseRecord>(
+            row.record,
+            "crm.phase1_complaint_cases",
+          ),
+        ),
+      complaintTimelines: result.rows
+        .filter((row) => row.kind === "timeline")
+        .map((row) =>
+          this.parseRecord<ComplaintTimelineEntry>(
+            row.record,
+            "crm.phase1_complaint_timelines",
+          ),
+        ),
+    };
   }
 
   /** Clears the durable pending-commit marker once reconcilePendingCase has

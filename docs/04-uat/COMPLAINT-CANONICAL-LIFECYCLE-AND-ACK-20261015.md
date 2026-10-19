@@ -1,13 +1,13 @@
 # COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015 — 客訴終止狀態契約與 ordinary CRM 誠實 ACK 修復
 
-| 欄位          | 內容                                                                                                                          |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Task spec     | `.local/goal-continuation-20261015T1628-original-passenger-dispatch-call-root/COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015-R1.task-spec.json` |
-| Owner         | Claude2                                                                                                                       |
-| Reviewer      | Gemini2                                                                                                                       |
-| Base SHA      | `431966bdf2728a76f7b03907974a124ab4a48ae7`（= 任務指派時 `origin/dev` tip）                                                   |
-| 前一輪候選     | `66f3a4c4c90892b905f112084311ce9beda7208e`（被 Gemini2 reopen；本輪在其基礎上繼續修復） |
-| 本輪候選 SHA  | 記錄於 `handoff`（`git rev-parse HEAD`，見 task board）                                                                      |
+| 欄位         | 內容                                                                                                                                            |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task spec    | `.local/goal-continuation-20261015T1628-original-passenger-dispatch-call-root/COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015-R1.task-spec.json` |
+| Owner        | Claude2                                                                                                                                         |
+| Reviewer     | Gemini2                                                                                                                                         |
+| Base SHA     | `431966bdf2728a76f7b03907974a124ab4a48ae7`（= 任務指派時 `origin/dev` tip）                                                                     |
+| 前一輪候選   | `66f3a4c4c90892b905f112084311ce9beda7208e`（被 Gemini2 reopen；本輪在其基礎上繼續修復）                                                         |
+| 本輪候選 SHA | 記錄於 `handoff`（`git rev-parse HEAD`，見 task board）                                                                                         |
 
 ## 1. 背景與三個缺口（C045-F1/F2/F3）
 
@@ -45,13 +45,13 @@
 
 ## 3. 驗收條件對應
 
-| 驗收條件 | 對應實作與證據 |
-| :--- | :--- |
-| **complaint_original_terminal_state_and_actual_Ops_actions** | F1（本輪修復，2.1 節）+ F2（前一輪已修復，維持不變）；`complaint-terminal-state-and-ack.test.ts` 的 F2 群組 + 新增 `complaint-ops-ui-actions.test.tsx`（真實 Ops 列表頁/詳情頁渲染，驗證 resolved 案件不再顯示 add_note/assign）。 |
-| **complaint_ordinary_case_and_timeline_canonical_ACK** | 2.2 節三個機制；`complaint-terminal-state-and-ack.test.ts` 新增 4 個案例涵蓋失敗回滾（readback 真值、retry 真的重新寫入、create 幽靈案件消失）、稽核延後（失敗不記、retry 成功才記）；新增 repository 層交易原子性測試。settlement 既有 transaction/wait/refresh 邏輯未變動。 |
-| **complaint_actual_callers_readback_failure_and_same_case_recovery** | 經由真實 `ComplaintController`（`resolveComplaintCase`/`reopenComplaintCase`/`createComplaintCase`/`assignComplaintCase`）與真實 Ops 頁面渲染驗證：失敗後 readback 顯示真實未變更狀態、retry 真正重新寫入並成功；caller 介面/型別簽章未變動。 |
-| **complaint_preserved_settlement_PAX_fleet_auth_noDB_and_SLA** | 未改動乘客受理/評分交易、settlement dispute ACK/refresh/escalation 排序、Fleet case scope/closed/readback、SLA、noDB 行為；`isOrdinaryDbWrite`/`emitAfterOrdinaryPersistence` 明確排除 `settlement_dispute` 與 disabled 分支。 |
-| **complaint_exact_candidate_validation** | 第 4 節記錄本機實際執行指令、exit code 與套件範圍；獨立 reviewer（Gemini2）、CI 與保護合併為候選最終判定。 |
+| 驗收條件                                                             | 對應實作與證據                                                                                                                                                                                                                                                                |
+| :------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **complaint_original_terminal_state_and_actual_Ops_actions**         | F1（本輪修復，2.1 節）+ F2（前一輪已修復，維持不變）；`complaint-terminal-state-and-ack.test.ts` 的 F2 群組 + 新增 `complaint-ops-ui-actions.test.tsx`（真實 Ops 列表頁/詳情頁渲染，驗證 resolved 案件不再顯示 add_note/assign）。                                            |
+| **complaint_ordinary_case_and_timeline_canonical_ACK**               | 2.2 節三個機制；`complaint-terminal-state-and-ack.test.ts` 新增 4 個案例涵蓋失敗回滾（readback 真值、retry 真的重新寫入、create 幽靈案件消失）、稽核延後（失敗不記、retry 成功才記）；新增 repository 層交易原子性測試。settlement 既有 transaction/wait/refresh 邏輯未變動。 |
+| **complaint_actual_callers_readback_failure_and_same_case_recovery** | 經由真實 `ComplaintController`（`resolveComplaintCase`/`reopenComplaintCase`/`createComplaintCase`/`assignComplaintCase`）與真實 Ops 頁面渲染驗證：失敗後 readback 顯示真實未變更狀態、retry 真正重新寫入並成功；caller 介面/型別簽章未變動。                                 |
+| **complaint_preserved_settlement_PAX_fleet_auth_noDB_and_SLA**       | 未改動乘客受理/評分交易、settlement dispute ACK/refresh/escalation 排序、Fleet case scope/closed/readback、SLA、noDB 行為；`isOrdinaryDbWrite`/`emitAfterOrdinaryPersistence` 明確排除 `settlement_dispute` 與 disabled 分支。                                                |
+| **complaint_exact_candidate_validation**                             | 第 4 節記錄本機實際執行指令、exit code 與套件範圍；獨立 reviewer（Gemini2）、CI 與保護合併為候選最終判定。                                                                                                                                                                    |
 
 ## 4. 實際指令與結果（本輪）
 
@@ -251,6 +251,7 @@ Merge 後重跑 `apps/api` 與 `apps/ops-console-web` 的 `tsc --noEmit` 皆 exi
 修法：在該 catch 分支清 `pendingUncertainCommits` 的同一個迴圈內，若 `settlementPersistence.get(caseNo) === persistence`（即尚未被其他寫入覆蓋），一併刪除該項目，與 `awaitSettlementPersistence(caseNo)` 既有的定點 drain 邏輯行為一致，避免確定失敗且已回滾的寫入被重複掃到。
 
 驗證：
+
 ```bash
 $ pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-terminal-state-and-ack.test.ts
  Test Files  1 passed (1)
@@ -284,6 +285,7 @@ $ pnpm exec eslint apps/api/src/modules/complaint/complaint.service.ts \
 ```
 
 本輪改動檔案：`apps/api/src/modules/complaint/complaint.service.ts`（8.6 的 settlementPersistence 清理修正；write_scopes 內）、`vitest.config.ts`（接續前一 session 已完成的 alias 新增，供 write_scopes 內測試執行；非本任務政策變更）。
+
 - 本文件（8 節）
 
 ## 9. Root ca237 review 六項 unknown-COMMIT findings ＋ captureAudit TypeError 修復
@@ -390,23 +392,25 @@ Reviewer 明確要求不要只列「新表／舊欄位」兩個 alternative，�
 **2) caseNo/entryId 何時持久分配**：目前兩者都是在呼叫當下、持久化嘗試**之前**於記憶體中同步分配（`caseSequence++`／`appendTimelineEntry` 產生的 `entryId`），而不是由 DB 預設值/序列分配；也就是說「身分」在第一次嘗試時就已決定，問題只在於這個「command key → caseNo/entryId」的映射目前只存在於行程內的 `Map`。新 schema 必須保留「身分在首次嘗試即分配、於 DB 落地前就已固定」這個既有語意，只把映射本身改成跨行程可讀。
 
 **3) pending/confirmed/unknown 與 TX/reconcile/cold-read 語意**：
-   - `pending`：`persistChanges` 拋出 `ComplaintCommitOutcomeUnknownError`（COMMIT 送出後連線中斷等，無法判斷是否落地）。
-   - `confirmed`：同一 caseNo 的後續 `persistChanges` 正常 resolve（含重試自己的 commit 成功），或 `reconcilePendingCase` 的 `loadCaseByCaseNo` 讀到與 `pending.complaintCase` 逐位元組相同的 durable 列。
-   - `failed`（確定未落地）：對 `create_complaint_case` 而言是 `loadCaseByCaseNo` 回 `null`；對既有案件的 update 而言，`null` 或讀到的列與 pending 快照不同，都不能確定未落地（`reconcilePendingCase` 現有的「update 查無列不代表未 commit」規則必須原樣保留），只有讀到「存在但內容不同」才能判定未落地並 rollback。
-   - `cold-read`（跨行程/重啟）：目前完全沒有——這正是本項要新增的能力：下一個收到相同 command key 的 replica（或重啟後的同一行程）必須能從 durable pending-commit 紀錄還原 `complaintCase`/`complaintTimelines` 快照與 `rollback` 所需的「之前狀態」，才能重建 `PendingUncertainComplaintCommit` 並走既有的 `retryUncertainComplaintWrite`/`reconcilePendingCase` 路徑。`rollback` 閉包本身無法序列化，跨行程還原後必須改用「讀取 `previousCaseSnapshot` 欄位 + 呼叫既有的 `revertComplaintCaseMutation`」取代原本捕捉在閉包裡的 in-memory 還原。
+
+- `pending`：`persistChanges` 拋出 `ComplaintCommitOutcomeUnknownError`（COMMIT 送出後連線中斷等，無法判斷是否落地）。
+- `confirmed`：同一 caseNo 的後續 `persistChanges` 正常 resolve（含重試自己的 commit 成功），或 `reconcilePendingCase` 的 `loadCaseByCaseNo` 讀到與 `pending.complaintCase` 逐位元組相同的 durable 列。
+- `failed`（確定未落地）：對 `create_complaint_case` 而言是 `loadCaseByCaseNo` 回 `null`；對既有案件的 update 而言，`null` 或讀到的列與 pending 快照不同，都不能確定未落地（`reconcilePendingCase` 現有的「update 查無列不代表未 commit」規則必須原樣保留），只有讀到「存在但內容不同」才能判定未落地並 rollback。
+- `cold-read`（跨行程/重啟）：目前完全沒有——這正是本項要新增的能力：下一個收到相同 command key 的 replica（或重啟後的同一行程）必須能從 durable pending-commit 紀錄還原 `complaintCase`/`complaintTimelines` 快照與 `rollback` 所需的「之前狀態」，才能重建 `PendingUncertainComplaintCommit` 並走既有的 `retryUncertainComplaintWrite`/`reconcilePendingCase` 路徑。`rollback` 閉包本身無法序列化，跨行程還原後必須改用「讀取 `previousCaseSnapshot` 欄位 + 呼叫既有的 `revertComplaintCaseMutation`」取代原本捕捉在閉包裡的 in-memory 還原。
 
 **4) 確切新 migration/table/columns/index**（單一方案，非 alternative）：新增 `crm.phase1_complaint_pending_commits`：
-   - `command_key TEXT PRIMARY KEY`（`sha256(action || ':' || stableStringify(matchCommand))`）
-   - `case_no TEXT NOT NULL`
-   - `action TEXT NOT NULL`
-   - `case_snapshot JSONB NOT NULL`（即 `pending.complaintCase`）
-   - `timeline_snapshot JSONB NOT NULL`（即 `pending.complaintTimelines`，陣列）
-   - `previous_case_snapshot JSONB`（update 類動作的還原快照；create 類為 `NULL`，還原時等同現行「整列刪除」）
-   - `status TEXT NOT NULL DEFAULT 'pending'`（`CHECK (status IN ('pending','confirmed','failed'))`）
-   - `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
-   - `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
-   - `CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no);`（供 `reconcilePendingCase` 依 caseNo 掃描）
-   寫入時機：僅在 `persistChanges` catch 到 `ComplaintCommitOutcomeUnknownError` 之後，用獨立的一次 `INSERT ... ON CONFLICT (command_key) DO UPDATE`（非原本那個結果未知的交易）盡力登記；若這次登記本身也失敗，則該次重試退回目前的「僅行程內 `Map`」保底行為，不視為新的回歸。確認／清除時機：`reconcilePendingCase` 判定 `confirmed`/`failed` 後，刪除對應 `command_key` 列（或視覺化稽核需求改為 `status` 更新而非刪除，兩者皆可，建議刪除以維持表的小體積）。
+
+- `command_key TEXT PRIMARY KEY`（`sha256(action || ':' || stableStringify(matchCommand))`）
+- `case_no TEXT NOT NULL`
+- `action TEXT NOT NULL`
+- `case_snapshot JSONB NOT NULL`（即 `pending.complaintCase`）
+- `timeline_snapshot JSONB NOT NULL`（即 `pending.complaintTimelines`，陣列）
+- `previous_case_snapshot JSONB`（update 類動作的還原快照；create 類為 `NULL`，還原時等同現行「整列刪除」）
+- `status TEXT NOT NULL DEFAULT 'pending'`（`CHECK (status IN ('pending','confirmed','failed'))`）
+- `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- `CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no);`（供 `reconcilePendingCase` 依 caseNo 掃描）
+  寫入時機：僅在 `persistChanges` catch 到 `ComplaintCommitOutcomeUnknownError` 之後，用獨立的一次 `INSERT ... ON CONFLICT (command_key) DO UPDATE`（非原本那個結果未知的交易）盡力登記；若這次登記本身也失敗，則該次重試退回目前的「僅行程內 `Map`」保底行為，不視為新的回歸。確認／清除時機：`reconcilePendingCase` 判定 `confirmed`/`failed` 後，刪除對應 `command_key` 列（或視覺化稽核需求改為 `status` 更新而非刪除，兩者皆可，建議刪除以維持表的小體積）。
 
 **5) 超 scope 的必要 caller hunk**：`complaint.repository.ts` 需新增 `recordPendingCommit`/`loadPendingCommitsByCaseNo`/`clearPendingCommit` 三個方法（已在本任務 15 個 write_scopes 內，可隨 P1 一併實作）；但新 migration 檔本身（`infra/migrations/` 下的新檔案）**不在**本任務 write_scopes 內，需要 Root 協調的新 migration 編號與獨立 review/scope 擴充後才能落地，本輪不猜測編號、不建立該檔案。
 
@@ -430,6 +434,7 @@ Root 已配發 `V0123`（`.local/passenger-bureau-gap-correction-20261018/Compla
 - **`ComplaintService` 跨行程案例（1 案例，端到端）**：建立「process A」（原始嘗試）與完全獨立的「process B」（模擬不同 replica／行程重啟後的全新 `ComplaintService` 實例，彼此不共用任何記憶體 Map）。Process A 對一筆已確定建立成功的案件發出 assign，COMMIT 結果回 `ComplaintCommitOutcomeUnknownError`；斷言 `recordPendingCommit` 真的被呼叫一次並擷取其寫入的 durable row。Process B 只靠 `loadState`（讀回案件原本的、assign 從未落地的真實狀態：`status: "new"`）與 `loadPendingCommits`（回傳 A 寫入的 durable row）建立，`onModuleInit` 後直接 readback 驗證狀態確實是真實的 `"new"`（不是 A 樂觀的 `"assigned"`）；呼叫 `refreshSettlementCases()`（每個 controller endpoint 既有的前置呼叫）後，對 B 重送與 A 完全相同的 assign command：斷言這次重送確實重用了 A 原始嘗試的同一個 `caseNo`／timeline `entryId`（而非配置新的一組），且成功 commit 後呼叫了 `clearPendingCommit`（帶正確的 `commandKey`）。這證明本機制在真正跨行程（不只是同行程 Map）下也成立，而不只是文件描述。
 
 驗證：
+
 ```bash
 $ pnpm exec vitest run tests/unit/complaint-canonical-lifecycle-and-ack-20261015/complaint-durable-pending-commit-identity.test.ts
  Test Files  1 passed (1)
@@ -459,3 +464,20 @@ $ pnpm exec vitest run tests/unit/pax-receipt-complaint-20261009/ tests/unit/pax
  Test Files  15 passed | 2 skipped (17)
       Tests  370 passed | 10 skipped (380)
 ```
+
+## 11. Codex2 normal owner continuation — original R1/R2/R3/R5 (2026-10-19)
+
+This continues the original twenty write scopes, five complete criteria and five acceptance keys. Root's `9f64e145f397477c7c36a6c434b2a0a9b40ec58f` request-changes and original `7eeb` review/addendum remain the finding authority. R4's original typed-fixture fix remains credited. The exact Claude2 WIP was preserved at `8e7f29108853ac81c60abe6f46d4db27a6176a0c`; Codex2 normally merged accepted `origin/dev` (`61fa7cf44fb25d8be36634357fa3549286b96b84`) in `f1e2c5d0e`. This section is an implementation checkpoint, not acceptance, CI, merge or deployment credit.
+
+| Original finding | Source repair                                                                                                                                                                                                                                                                                                                                                                                                                         | Before → current socket-free evidence                                                                                                                                                                                                                       | Remaining verification                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| R1               | `ComplaintService.persistChanges` awaits durable PREPARED reservation before any business transaction. `ComplaintRepository.recordPendingCommit` preserves the winning reservation; the business transaction confirms the same marker with case/timeline. V0123 reserves a create case number once. Identity reads propagate failures.                                                                                                | Original `9f64` fails the actual marker-failure/order checks; current wire controls show failed preparation has zero business COMMITs, and PREPARED/confirmation precede COMMIT.                                                                            | Real PostgreSQL constraints/isolation remain hosted-only; wire fixture is not PostgreSQL.                                     |
+| R2               | Caller scope/key, original payload, allocated case/entry IDs and original request correlation survive restart. Confirmed replay returns the original result without a new business write. An older/missing observation or failed retry preserves prepared IDs.                                                                                                                                                                        | Original actual Callcenter retry returns `000002`; current returns the original case and entry IDs, including unknown-not-landed → definite failed retry → successful retry.                                                                                | Full preserved positive suites and exact-candidate checks below.                                                              |
+| R3               | Recovery reads canonical case and complete timeline in one production SQL snapshot before cache reuse. It checks committed entry IDs, preserves unresolved identity, and updates the live cache before a later note.                                                                                                                                                                                                                  | Original warm replica loses `ops-assignee-A`; current refresh and later note both preserve it and the complete timeline.                                                                                                                                    | Full settlement/PAX/Fleet/SLA/auth/noDB regressions below.                                                                    |
+| R5               | Actual Ops create header and Callcenter stable call intent reach domain scope/key/payload binding. Optional existing action keys and Fleet reply keys also reach the domain. Generated escalation IDs do not replace the original caller payload. Distinct equal-content keys remain distinct; changed payload under one key conflicts. Existing audit UUID support and original request correlation keep the key's receipt identity. | Original K2 reuses K1's pending case; current actual Ops K1/K2 produce two cases, K1 restarts/replays its original case, and changed payload conflicts. Equal keyed notes, concurrent reservations and actual escalation recovery have additional controls. | Generic IdempotencyService policy is unchanged. Real browser/HTTP/PG/provider work remains at its original separate boundary. |
+
+Evidence is under this owner worktree's `.local/complaint-codex2-repair-20261019/`. `before-9f64.log` records six actual semantic failures against immutable production modules loaded with `git show`; no baseline worktree or copied business logic was created. `fixed-wire.log` records the same six passing assertions. Later controls extend those original six without changing their assertions. `canonical-regression-fixed-r3.log` records 79/79 passing across the original seven task/lifecycle/Ops/Fleet files and thirteen actual-caller wire cases. The wire process blocks network/listen attempts and uses production controllers, services, repositories and SQL with scripted external database responses only.
+
+The first broader run's `canonical-regression.log` honestly retains two ENOSPC import-write failures plus then-unfixed legacy retry failures. The successful later run supersedes those only for the same rerun paths; it does not turn the old failures into passes. Existing assertions remain: the older durable-assign fixture only clears setup-create mock history before checking exactly one assign PREPARED registration, since successful creation is now prepared too. No skip, timeout increase or assertion suppression was added. The isolated dependency helper succeeded using this worktree's own `.pnpm`; only the existing `control-plane-auth` package was built to satisfy its declared dist entry.
+
+All original lifecycle/terminal Ops, settlement transaction/wait/refresh, passenger complaint/rating intake/dedup/auth/E04, Fleet scope/reply failure, noDB and SLA obligations remain. No product, HTTP, browser, PG or Compose server was started on this VM. Full preserved regressions and exact-candidate verification are still in progress at this checkpoint.

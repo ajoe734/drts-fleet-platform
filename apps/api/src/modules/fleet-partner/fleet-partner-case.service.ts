@@ -887,14 +887,23 @@ export class FleetPartnerCaseService {
       // deduplicated-but-never-recorded receipt behind for an idempotency
       // retry to find.
       try {
-        this.complaintService.addComplaintCaseNote(
+        await this.complaintService.addComplaintCaseNote(
           caseItem.caseNo,
           { note: notePayload },
           requestId,
+          {
+            captureAudit: true,
+            ...(idempotencyKey
+              ? {
+                  commandIdentity: {
+                    scope: `fleet:${fleetPartnerId}:complaint:${caseItem.caseNo}:reply`,
+                    key: idempotencyKey,
+                  },
+                }
+              : {}),
+          },
         );
-        await this.complaintService.awaitSettlementPersistence(
-          caseItem.caseNo,
-        );
+        await this.complaintService.awaitSettlementPersistence(caseItem.caseNo);
       } catch (error) {
         if (error instanceof ApiRequestError && error.code === "NOT_FOUND") {
           // ComplaintService has no record of this caseNo; the fleet-side

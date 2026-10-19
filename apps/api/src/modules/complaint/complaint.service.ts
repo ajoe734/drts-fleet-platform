@@ -24,6 +24,7 @@ import {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import { generateDeterministicUuid } from "../../common/durable-identity";
 import type { AuditedActionResult } from "../../common/action-receipt";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import type { PoolClient } from "pg";
@@ -31,10 +32,7 @@ import type {
   PassengerTripRatingRecord,
   PassengerRideAccessToken,
 } from "@drts/contracts";
-import type {
-  ComplaintPendingCommitRecord,
-  PassengerIntakeResult,
-} from "./complaint.repository";
+import type { PassengerIntakeResult } from "./complaint.repository";
 import {
   ComplaintCommitOutcomeUnknownError,
   ComplaintRepository,
@@ -43,6 +41,19 @@ import {
   normalizePassengerComplaintIntake,
   type PassengerComplaintIntake,
 } from "./passenger-complaint-intake";
+
+export type ComplaintCommandIdentity = { scope: string; key: string };
+type ComplaintActionOptions<Capture extends boolean> = {
+  captureAudit?: Capture;
+  commandIdentity?: ComplaintCommandIdentity;
+  /** Original caller payload when domain preparation adds generated IDs. */
+  commandPayload?: unknown;
+};
+type IdentifiedComplaintPayload = {
+  complaintCommandIdentity: ComplaintCommandIdentity;
+  payload: unknown;
+  originalRequestId?: string;
+};
 
 type ComplaintActionResult<T, Capture extends boolean> = Capture extends true
   ? AuditedActionResult<T>
@@ -56,7 +67,9 @@ type OrdinaryComplaintActionResult<
   T,
   Capture extends boolean,
 > = Capture extends true
-  ? ComplaintActionResult<T, Capture> | Promise<ComplaintActionResult<T, Capture>>
+  ?
+      | ComplaintActionResult<T, Capture>
+      | Promise<ComplaintActionResult<T, Capture>>
   : ComplaintActionResult<T, Capture>;
 
 const COMPLAINT_CATEGORY_VALUES = [
@@ -114,6 +127,7 @@ type PendingUncertainComplaintCommit = {
    * `rollback` via revertComplaintCaseMutation without a non-serializable
    * closure. */
   previousCaseSnapshot?: ComplaintCaseRecord | null;
+  confirmed?: boolean;
 };
 
 @Injectable()
@@ -138,6 +152,11 @@ export class ComplaintService implements OnModuleInit {
 
   /** Keyed by caseNo; see PendingUncertainComplaintCommit. */
   private pendingUncertainCommits = new Map<
+    string,
+    PendingUncertainComplaintCommit
+  >();
+
+  private identifiedComplaintCommands = new Map<
     string,
     PendingUncertainComplaintCommit
   >();
@@ -202,63 +221,76 @@ export class ComplaintService implements OnModuleInit {
   private async reconcilePendingCases(): Promise<void> {
     await this.hydratePendingCommitsFromDurableStore();
     const caseNos = [...this.pendingUncertainCommits.keys()];
-    await Promise.all(caseNos.map((caseNo) => this.reconcilePendingCase(caseNo)));
+    await Promise.all(
+      caseNos.map((caseNo) => this.reconcilePendingCase(caseNo)),
+    );
   }
 
-  /** Cold-read recovery: loads every still-`pending` durable commit row not
-   * already tracked by this process (a fresh replica, or this same process
-   * after a restart) and rebuilds it as an in-memory
-   * PendingUncertainComplaintCommit, including a `rollback` reconstructed
-   * from `previousCaseSnapshot` since the original closure cannot survive a
-   * process boundary. Every caller already runs this via
-   * refreshSettlementCases()/reconcilePendingCases() before the existing
-   * synchronous retry-detection reads (pendingUncertainCommits.get /
-   * findPendingUncertainCreate), so those need no further change to see a
-   * durable-only pending commit. Best-effort: a repository that cannot
-   * answer right now leaves the in-memory Map as-is for a later attempt. */
+  /** Load prepared and confirmed identities before actual callers decide
+   * whether a command is new. Confirmed results remain available for replay;
+   * configured storage failures remain failures, never an empty identity set. */
   private async hydratePendingCommitsFromDurableStore(): Promise<void> {
     if (!this.canonicalDbEnabled()) return;
     if (typeof this.complaintRepository?.loadPendingCommits !== "function")
       return;
-    let durableRows: ComplaintPendingCommitRecord[];
-    try {
-      durableRows = await this.complaintRepository!.loadPendingCommits();
-    } catch {
-      return;
-    }
+    // A failed identity read cannot authorize a fresh allocation on another
+    // replica. Surface the failure instead of pretending no prior command exists.
+    const durableRows = await this.complaintRepository!.loadPendingCommits();
+    this.caseSequence = Math.max(
+      this.caseSequence,
+      this.deriveNextCaseSequence(durableRows.map((row) => row.caseSnapshot)),
+    );
     for (const row of durableRows) {
-      if (this.pendingUncertainCommits.has(row.caseNo)) continue;
-      this.pendingUncertainCommits.set(row.caseNo, {
+      const pending: PendingUncertainComplaintCommit = {
         action: row.action,
         complaintCase: row.caseSnapshot,
         complaintTimelines: row.timelineSnapshot,
         matchCommand: row.commandPayload,
         previousCaseSnapshot: row.previousCaseSnapshot,
+        confirmed: row.status === "confirmed",
         rollback: () =>
           this.revertComplaintCaseMutation(
             row.caseNo,
             row.previousCaseSnapshot,
             row.timelineSnapshot.map((entry) => entry.entryId),
           ),
-      });
+      };
+      const existing = this.pendingUncertainCommits.get(row.caseNo);
+      const samePending =
+        existing &&
+        this.computeCommandKey(
+          existing.action,
+          row.caseNo,
+          existing.matchCommand,
+        ) === row.commandKey;
+      const current = samePending ? existing : pending;
+      if (row.status === "confirmed") current.confirmed = true;
+      if (this.identifiedPayload(row.commandPayload)) {
+        this.identifiedComplaintCommands.set(row.commandKey, current);
+      }
+      // A confirmed result must still refresh a warm replica's canonical
+      // case and full timeline before another mutation can reuse its cache.
+      if (!this.pendingUncertainCommits.has(row.caseNo)) {
+        this.pendingUncertainCommits.set(row.caseNo, pending);
+      }
     }
   }
 
-  /** Identifies one pending attempt durably: stable across processes since
-   * it is derived only from the action, the caseNo it targets, and the
-   * attempted command content (the same comparison the in-memory retry
-   * checks already use), so a retry on another replica recomputes the same
-   * key without needing a new explicit idempotency parameter. caseNo is
-   * included because several actions (resolve/close/reopen/sla-breach/
-   * escalate/link) key their retry purely by caseNo + action and carry no
-   * comparable command content at all. */
+  /** Caller scope/key identifies a logical intent independently of its
+   * allocated caseNo. Legacy non-keyed updates retain their same-case identity. */
   private computeCommandKey(
     action: string,
     caseNo: string,
     matchCommand: unknown,
   ): string {
+    const identity =
+      this.identifiedPayload(matchCommand)?.complaintCommandIdentity;
     return createHash("sha256")
-      .update(`${action}:${caseNo}:${this.stableStringify(matchCommand)}`)
+      .update(
+        identity
+          ? this.stableStringify([action, identity.scope, identity.key.trim()])
+          : `${action}:${caseNo}:${this.stableStringify(matchCommand)}`,
+      )
       .digest("hex");
   }
 
@@ -282,7 +314,7 @@ export class ComplaintService implements OnModuleInit {
     if (!this.canonicalDbEnabled()) return;
     if (typeof this.complaintRepository?.recordPendingCommit !== "function")
       return;
-    await this.complaintRepository.recordPendingCommit({
+    const reserved = await this.complaintRepository.recordPendingCommit({
       commandKey: this.computeCommandKey(action, caseNo, matchCommand),
       caseNo,
       action,
@@ -292,6 +324,30 @@ export class ComplaintService implements OnModuleInit {
       previousCaseSnapshot,
       status: "pending",
     });
+    if (
+      reserved &&
+      !this.sameComplaintCommandPayload(reserved.commandPayload, matchCommand)
+    ) {
+      throw new ApiRequestError(
+        409,
+        "IDEMPOTENCY_KEY_REUSED",
+        "The complaint command key was already used for a different payload.",
+      );
+    }
+    if (
+      reserved &&
+      (reserved.caseNo !== caseNo ||
+        this.stableStringify(reserved.timelineSnapshot) !==
+          this.stableStringify(complaintTimelines))
+    ) {
+      // Another replica won reservation. Do not issue business writes with
+      // the losing allocation. Its next retry reads and replays the winner.
+      throw new ApiRequestError(
+        409,
+        "IDEMPOTENCY_IN_PROGRESS",
+        "The original complaint command is already prepared; retry the same key.",
+      );
+    }
   }
 
   /** Best-effort durable clear once a pending commit is no longer uncertain
@@ -313,72 +369,73 @@ export class ComplaintService implements OnModuleInit {
       });
   }
 
-  /** For a create, a missing durable row definitively proves the write never
-   * landed. For an update, the case row already existed before the attempt,
-   * so existence alone cannot tell a committed new state from the untouched
-   * old one; only an exact match against the attempted snapshot proves the
-   * COMMIT landed. Anything else (not found, or found but still the older
-   * state) is safe to roll back now that it is no longer merely "unknown". */
+  /** Refresh canonical case and timeline before reusing any cache. Missing
+   * or older observations preserve prepared identity; only confirmed outcome
+   * or the original committed entry IDs allow a successful replay. */
   private async reconcilePendingCase(caseNo: string): Promise<void> {
     const pending = this.pendingUncertainCommits.get(caseNo);
     if (!pending || !this.canonicalDbEnabled()) return;
     let durableCase: ComplaintCaseRecord | null;
+    let durableTimeline: ComplaintTimelineEntry[] | undefined;
     try {
-      durableCase = await this.complaintRepository!.loadCaseByCaseNo(caseNo);
+      if (typeof this.complaintRepository!.loadCaseState === "function") {
+        const state = await this.complaintRepository!.loadCaseState(caseNo);
+        durableCase = state.complaintCases[0] ?? null;
+        durableTimeline = state.complaintTimelines;
+      } else {
+        durableCase = await this.complaintRepository!.loadCaseByCaseNo(caseNo);
+      }
     } catch {
-      // Cannot reconcile right now; leave the pending marker for a later
-      // read or retry rather than guessing in either direction.
       return;
     }
-    // A newer attempt may have already superseded or resolved this entry
-    // while the read above was in flight.
     if (this.pendingUncertainCommits.get(caseNo) !== pending) return;
-    if (durableCase === null) {
-      // A missing row only definitively proves a create never landed. For an
-      // update the row already existed before the attempt, so a missing row
-      // is a repository/connectivity anomaly, not proof either way; leave
-      // the pending marker for a later read or retry rather than guessing.
-      if (pending.action !== "create_complaint_case") return;
-      if (pending.rollback) pending.rollback();
-      this.pendingUncertainCommits.delete(caseNo);
-      this.clearDurablePendingCommit(pending.action, caseNo, pending.matchCommand);
+    // An old/missing observation does not prove an ambiguous COMMIT rolled
+    // back. Preserve the original prepared IDs for a real same-command retry.
+    if (!durableCase) {
+      pending.rollback?.();
       return;
     }
     const committed =
-      JSON.stringify(durableCase) === JSON.stringify(pending.complaintCase);
-    if (!committed) {
-      if (pending.rollback) pending.rollback();
-      this.pendingUncertainCommits.delete(caseNo);
-      this.clearDurablePendingCommit(pending.action, caseNo, pending.matchCommand);
-      return;
-    }
-    // The commit landed. Reconcile the canonical result into the live cache
-    // right now, before any other read or mutation on this case can see a
-    // stale snapshot and clobber a confirmed field (e.g. a warm replica's own
-    // outdated complaintCases entry overwriting a committed assignee with a
-    // later, unrelated note write).
+      pending.confirmed ||
+      (durableTimeline
+        ? pending.complaintTimelines.every((entry) =>
+            durableTimeline.some((saved) => saved.entryId === entry.entryId),
+          )
+        : this.stableStringify(durableCase) ===
+          this.stableStringify(pending.complaintCase));
     this.reconcileComplaintCaseIntoCache(durableCase);
-    this.mergeTimelineEntriesIntoCache(caseNo, pending.complaintTimelines);
-    if (pending.action === "create_complaint_case") {
-      // Unlike resolve/close/... (which fall back to existingComplaintAction
-      // by reading the now-reconciled case state above), a create has no
-      // other idempotent-replay mechanism once its caseNo exists: keep this
-      // identity discoverable so the *same* logical create command's actual
-      // retry (this replica or another) still replays this exact case/
-      // timeline instead of allocating a new one. Only a real replay (via
-      // retryUncertainComplaintWrite's own successful persistChanges) clears
-      // pendingUncertainCommits/the durable marker.
-      return;
+    if (durableTimeline) this.complaintTimelines.set(caseNo, durableTimeline);
+    if (!committed) return;
+    if (!durableTimeline)
+      this.mergeTimelineEntriesIntoCache(caseNo, pending.complaintTimelines);
+    pending.confirmed = true;
+    if (this.identifiedPayload(pending.matchCommand)) {
+      this.identifiedComplaintCommands.set(
+        this.computeCommandKey(pending.action, caseNo, pending.matchCommand),
+        pending,
+      );
+      this.pendingUncertainCommits.delete(caseNo);
+    } else if (
+      !["create_complaint_case", "escalate_to_incident"].includes(
+        pending.action,
+      )
+    ) {
+      this.pendingUncertainCommits.delete(caseNo);
+      this.clearDurablePendingCommit(
+        pending.action,
+        caseNo,
+        pending.matchCommand,
+      );
     }
-    this.pendingUncertainCommits.delete(caseNo);
-    this.clearDurablePendingCommit(pending.action, caseNo, pending.matchCommand);
   }
 
   /** Writes the canonical durable case into the live optimistic cache,
    * inserting it if this process never had it (e.g. a create confirmed by
    * reconciliation that originated on another replica). */
   private reconcileComplaintCaseIntoCache(durableCase: ComplaintCaseRecord) {
-    if (this.complaintCases.some((item) => item.caseNo === durableCase.caseNo)) {
+    if (
+      this.complaintCases.some((item) => item.caseNo === durableCase.caseNo)
+    ) {
       this.replaceComplaintCase(durableCase);
     } else {
       this.complaintCases = [durableCase, ...this.complaintCases];
@@ -456,6 +513,39 @@ export class ComplaintService implements OnModuleInit {
 
   /** Hold the source complaint before an escalation allocates an incident.
    * Link controllers acquire this queue before the shared incident queue. */
+  getPreparedEscalationIncidentId(
+    caseNo: string,
+    options?: ComplaintActionOptions<boolean>,
+  ): string | undefined {
+    const pending = options?.commandIdentity
+      ? this.findComplaintCommand(
+          "escalate_to_incident",
+          caseNo,
+          options.commandPayload,
+          options,
+        )
+      : this.pendingUncertainCommits.get(caseNo);
+    return pending?.action === "escalate_to_incident"
+      ? (pending.complaintCase.relatedIncidentId ?? undefined)
+      : undefined;
+  }
+
+  completePreparedEscalation(caseNo: string): void {
+    const pending = this.pendingUncertainCommits.get(caseNo);
+    if (
+      pending?.action === "escalate_to_incident" &&
+      pending.confirmed &&
+      !this.identifiedPayload(pending.matchCommand)
+    ) {
+      this.pendingUncertainCommits.delete(caseNo);
+      this.clearDurablePendingCommit(
+        pending.action,
+        caseNo,
+        pending.matchCommand,
+      );
+    }
+  }
+
   async withIncidentLink<T>(
     caseNo: string,
     operation: () => Promise<T>,
@@ -480,7 +570,7 @@ export class ComplaintService implements OnModuleInit {
   createComplaintCase<Capture extends boolean = false>(
     command: CreateComplaintCaseCommand,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertValidCategory(command.category);
     this.assertNonBlank(command.description, "description");
@@ -489,7 +579,7 @@ export class ComplaintService implements OnModuleInit {
     // case; reuse the pending attempt's caseNo/entryId instead.
     const pendingRetry = this.findPendingUncertainCreate(
       "create_complaint_case",
-      command,
+      this.bindComplaintCommand(command, options),
     );
     if (pendingRetry) {
       return this.retryUncertainComplaintWrite(
@@ -556,9 +646,12 @@ export class ComplaintService implements OnModuleInit {
       },
       "create_complaint_case",
       isOrdinaryDbWrite
-        ? () => this.revertComplaintCaseMutation(caseNo, null, [createdEntry.entryId])
+        ? () =>
+            this.revertComplaintCaseMutation(caseNo, null, [
+              createdEntry.entryId,
+            ])
         : undefined,
-      command,
+      this.bindComplaintCommand(command, options, requestId),
       false,
       null,
     );
@@ -910,42 +1003,19 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     command: AssignComplaintCaseCommand,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.assigneeId, "assigneeId");
 
+    const replay = this.recoverPreparedCommand(
+      "assign_complaint_case",
+      caseNo,
+      command,
+      requestId,
+      options,
+    );
+    if (replay) return replay;
     const complaintCase = this.requireComplaintCase(caseNo);
-    // A retry of the exact same assignment while its earlier commit outcome
-    // is still unknown must actually re-attempt the write (same caseNo/
-    // entryId, idempotent via ON CONFLICT DO UPDATE) and only acknowledge
-    // once that retry resolves, instead of fabricating success for a commit
-    // that is still unverified. A genuinely different assignment is not a
-    // retry and falls through unaffected.
-    const pendingAssign = this.pendingUncertainCommits.get(caseNo);
-    if (
-      pendingAssign?.action === "assign_complaint_case" &&
-      this.stableStringify(pendingAssign.matchCommand) ===
-        this.stableStringify(command)
-    ) {
-      return this.retryUncertainComplaintWrite(
-        pendingAssign,
-        {
-          actorId: pendingAssign.complaintCase.assigneeId,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "assign_complaint_case",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            assigneeId: pendingAssign.complaintCase.assigneeId,
-            status: pendingAssign.complaintCase.status,
-          },
-        },
-        requestId,
-        options,
-      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
-    }
     this.assertCaseOpenForAction(complaintCase, "assign");
 
     const note = this.normalizeNullableText(command.note);
@@ -974,7 +1044,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
-      command,
+      this.bindComplaintCommand(command, options, requestId),
       false,
       complaintCase,
     );
@@ -1004,7 +1074,7 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     command: AddComplaintCaseNoteCommand,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     return this.addComplaintCaseNoteInternal(
       caseNo,
@@ -1039,42 +1109,19 @@ export class ComplaintService implements OnModuleInit {
     command: AddComplaintCaseNoteCommand,
     requestId?: string,
     allowResolvedSettlement = false,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.note, "note");
 
+    const replay = this.recoverPreparedCommand(
+      "add_complaint_case_note",
+      caseNo,
+      command,
+      requestId,
+      options,
+    );
+    if (replay) return replay;
     const complaintCase = this.requireComplaintCase(caseNo);
-    // A retry of the exact same note while its earlier commit outcome is
-    // still unknown must actually re-attempt the write (same entryId,
-    // idempotent via ON CONFLICT DO UPDATE) and only acknowledge once that
-    // retry resolves, instead of fabricating success for a commit that is
-    // still unverified (e.g. a Fleet idempotency-key retry). A genuinely
-    // different note still falls through to a fresh mutation below.
-    const pendingNote = this.pendingUncertainCommits.get(caseNo);
-    if (
-      pendingNote?.action === "add_complaint_case_note" &&
-      this.stableStringify(pendingNote.matchCommand) ===
-        this.stableStringify(command)
-    ) {
-      return this.retryUncertainComplaintWrite(
-        pendingNote,
-        {
-          actorId: pendingNote.complaintCase.assigneeId,
-          actorType: "ops_user",
-          tenantId: null,
-          moduleName: "complaint",
-          actionName: "add_complaint_case_note",
-          resourceType: "complaint_case",
-          resourceId: caseNo,
-          newValuesSummary: {
-            status: pendingNote.complaintCase.status,
-            note: command.note.trim(),
-          },
-        },
-        requestId,
-        options,
-      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
-    }
     if (!(allowResolvedSettlement && complaintCase.status === "resolved")) {
       this.assertCaseOpenForAction(complaintCase, "note");
     }
@@ -1109,7 +1156,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
-      command,
+      this.bindComplaintCommand(command, options, requestId),
       false,
       complaintCase,
     );
@@ -1152,36 +1199,21 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     command: ResolveComplaintCaseCommand,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.resolutionCode, "resolutionCode");
     this.assertNonBlank(command.closingNote, "closingNote");
 
+    const replay = this.recoverPreparedCommand(
+      "resolve_complaint_case",
+      caseNo,
+      command,
+      requestId,
+      options,
+    );
+    if (replay) return replay;
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.status === "resolved") {
-      // A retry of an uncertain-commit resolve must actually re-attempt the
-      // write, not silently no-op on the optimistic in-memory "resolved".
-      const pending = this.pendingUncertainCommits.get(caseNo);
-      if (pending?.action === "resolve_complaint_case") {
-        return this.retryUncertainComplaintWrite(
-          pending,
-          {
-            actorId: null,
-            actorType: "ops_user",
-            tenantId: null,
-            moduleName: "complaint",
-            actionName: "resolve_complaint_case",
-            resourceType: "complaint_case",
-            resourceId: caseNo,
-            newValuesSummary: {
-              status: pending.complaintCase.status,
-              resolutionCode: pending.complaintCase.resolutionCode,
-            },
-          },
-          requestId,
-          options,
-        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
-      }
       return this.existingComplaintAction(
         this.cloneComplaintCase(complaintCase),
         "resolve_complaint_case",
@@ -1232,7 +1264,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
-      command,
+      this.bindComplaintCommand(command, options, requestId),
       false,
       complaintCase,
     );
@@ -1262,36 +1294,21 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     command: ResolveComplaintCaseCommand,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.resolutionCode, "resolutionCode");
     this.assertNonBlank(command.closingNote, "closingNote");
 
+    const replay = this.recoverPreparedCommand(
+      "close_complaint_case",
+      caseNo,
+      command,
+      requestId,
+      options,
+    );
+    if (replay) return replay;
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.status === "closed") {
-      // A retry of an uncertain-commit close must actually re-attempt the
-      // write, not silently no-op on the optimistic in-memory "closed".
-      const pending = this.pendingUncertainCommits.get(caseNo);
-      if (pending?.action === "close_complaint_case") {
-        return this.retryUncertainComplaintWrite(
-          pending,
-          {
-            actorId: null,
-            actorType: "ops_user",
-            tenantId: null,
-            moduleName: "complaint",
-            actionName: "close_complaint_case",
-            resourceType: "complaint_case",
-            resourceId: caseNo,
-            newValuesSummary: {
-              status: pending.complaintCase.status,
-              resolutionCode: pending.complaintCase.resolutionCode,
-            },
-          },
-          requestId,
-          options,
-        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
-      }
       return this.existingComplaintAction(
         this.cloneComplaintCase(complaintCase),
         "close_complaint_case",
@@ -1331,7 +1348,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
-      command,
+      this.bindComplaintCommand(command, options, requestId),
       false,
       complaintCase,
     );
@@ -1361,42 +1378,20 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     command: ReopenComplaintCaseCommand,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.reason, "reason");
 
+    const replay = this.recoverPreparedCommand(
+      "reopen_complaint_case",
+      caseNo,
+      command,
+      requestId,
+      options,
+    );
+    if (replay) return replay;
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.status !== "closed") {
-      // A retry of an uncertain-commit reopen must actually re-attempt the
-      // write instead of being rejected by the optimistic in-memory
-      // "reopened" state that the original, never-confirmed attempt left.
-      const pending = this.pendingUncertainCommits.get(caseNo);
-      if (
-        complaintCase.status === "reopened" &&
-        pending?.action === "reopen_complaint_case"
-      ) {
-        return this.retryUncertainComplaintWrite(
-          pending,
-          {
-            actorId: null,
-            actorType: "ops_user",
-            tenantId: null,
-            moduleName: "complaint",
-            actionName: "reopen_complaint_case",
-            resourceType: "complaint_case",
-            resourceId: caseNo,
-            newValuesSummary: {
-              status: pending.complaintCase.status,
-              reason: command.reason,
-              reopenCount: pending.complaintCase.reopenCount,
-              slaDueAt: pending.complaintCase.slaDueAt,
-              slaBreach: false,
-            },
-          },
-          requestId,
-          options,
-        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
-      }
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "COMPLAINT_NOT_CLOSED",
@@ -1450,7 +1445,7 @@ export class ComplaintService implements OnModuleInit {
               slaEntry.entryId,
             ])
         : undefined,
-      command,
+      this.bindComplaintCommand(command, options, requestId),
       false,
       complaintCase,
     );
@@ -1482,43 +1477,18 @@ export class ComplaintService implements OnModuleInit {
   markComplaintSlaBreach<Capture extends boolean = false>(
     caseNo: string,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
+    const replay = this.recoverPreparedCommand(
+      "mark_complaint_sla_breach",
+      caseNo,
+      undefined,
+      requestId,
+      options,
+    );
+    if (replay) return replay;
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.slaBreach) {
-      // A retry of an uncertain-commit breach mark must actually re-attempt
-      // the write (and its delayed notification) instead of a silent no-op
-      // on the optimistic in-memory "breached" flag that never confirmed.
-      const pending = this.pendingUncertainCommits.get(caseNo);
-      if (pending?.action === "mark_complaint_sla_breach") {
-        return this.retryUncertainComplaintWrite(
-          pending,
-          {
-            actorId: null,
-            actorType: "system",
-            tenantId: null,
-            moduleName: "complaint",
-            actionName: "mark_complaint_sla_breach",
-            resourceType: "complaint_case",
-            resourceId: caseNo,
-            newValuesSummary: {
-              status: pending.complaintCase.status,
-              slaBreach: true,
-              slaDueAt: pending.complaintCase.slaDueAt,
-            },
-          },
-          requestId,
-          options,
-          () =>
-            this.auditNotificationService.recordNotification({
-              tenantId: null,
-              channel: "ops_notice",
-              title: "Complaint SLA breached",
-              message: `Complaint ${caseNo} exceeded SLA due at ${pending.complaintCase.slaDueAt}.`,
-              status: "unread",
-            }),
-        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
-      }
       return this.existingComplaintAction(
         this.cloneComplaintCase(complaintCase),
         "mark_complaint_sla_breach",
@@ -1551,7 +1521,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
-      undefined,
+      this.bindComplaintCommand(undefined, options, requestId),
       false,
       complaintCase,
     );
@@ -1591,40 +1561,20 @@ export class ComplaintService implements OnModuleInit {
     incidentId: string,
     reason: string,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(reason, "reason");
 
+    const replay = this.recoverPreparedCommand(
+      "escalate_to_incident",
+      caseNo,
+      { incidentId, reason },
+      requestId,
+      options,
+    );
+    if (replay) return replay;
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.relatedIncidentId) {
-      // A retry of the same uncertain-commit escalation must actually
-      // re-attempt the write instead of being rejected as already-escalated
-      // by its own never-confirmed optimistic state. A different incident
-      // target is a genuine conflict and still throws.
-      const pending = this.pendingUncertainCommits.get(caseNo);
-      if (
-        pending?.action === "escalate_to_incident" &&
-        complaintCase.relatedIncidentId === incidentId
-      ) {
-        return this.retryUncertainComplaintWrite(
-          pending,
-          {
-            actorId: null,
-            actorType: "ops_user",
-            tenantId: null,
-            moduleName: "complaint",
-            actionName: "escalate_to_incident",
-            resourceType: "complaint_case",
-            resourceId: caseNo,
-            newValuesSummary: {
-              relatedIncidentId: incidentId,
-              reason,
-            },
-          },
-          requestId,
-          options,
-        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
-      }
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "COMPLAINT_ALREADY_ESCALATED",
@@ -1660,7 +1610,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
-      { incidentId, reason },
+      this.bindComplaintCommand({ incidentId, reason }, options, requestId),
       false,
       complaintCase,
     );
@@ -1690,11 +1640,19 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     command: LinkComplaintToIncidentCommand,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
     this.assertNonBlank(command.incidentId, "incidentId");
     const incidentId = command.incidentId.trim();
 
+    const replay = this.recoverPreparedCommand(
+      "link_incident",
+      caseNo,
+      { incidentId },
+      requestId,
+      options,
+    );
+    if (replay) return replay;
     const complaintCase = this.requireComplaintCase(caseNo);
     if (
       complaintCase.relatedIncidentId &&
@@ -1712,29 +1670,6 @@ export class ComplaintService implements OnModuleInit {
       );
     }
     if (complaintCase.relatedIncidentId === incidentId) {
-      // A retry of the same uncertain-commit link must actually re-attempt
-      // the write instead of a silent no-op on the optimistic in-memory
-      // link that never confirmed (0 canonical writes, 0 notification).
-      const pending = this.pendingUncertainCommits.get(caseNo);
-      if (pending?.action === "link_incident") {
-        return this.retryUncertainComplaintWrite(
-          pending,
-          {
-            actorId: null,
-            actorType: "ops_user",
-            tenantId: null,
-            moduleName: "complaint",
-            actionName: "link_incident",
-            resourceType: "complaint_case",
-            resourceId: caseNo,
-            newValuesSummary: {
-              relatedIncidentId: incidentId,
-            },
-          },
-          requestId,
-          options,
-        ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
-      }
       return this.existingComplaintAction(
         this.cloneComplaintCase(complaintCase),
         "link_incident",
@@ -1767,7 +1702,7 @@ export class ComplaintService implements OnModuleInit {
               timelineEntry.entryId,
             ])
         : undefined,
-      { incidentId },
+      this.bindComplaintCommand({ incidentId }, options, requestId),
       false,
       complaintCase,
     );
@@ -1998,6 +1933,7 @@ export class ComplaintService implements OnModuleInit {
     const persistPayload: {
       complaintCases?: ComplaintCaseRecord[];
       complaintTimelines?: ComplaintTimelineEntry[];
+      commandKeys?: string[];
     } = {};
 
     if (changes.complaintCases) {
@@ -2047,14 +1983,15 @@ export class ComplaintService implements OnModuleInit {
           })
         : [];
       const persistence = Promise.all(previous)
-        // Durably persist the prepared caseNo/entryIds identity BEFORE the
-        // potentially ambiguous business COMMIT below, not after: a marker
-        // write that fails here throws (an honest, definite failure of this
-        // whole attempt, handled by the non-ComplaintCommitOutcomeUnknownError
-        // branch further down) instead of silently leaving cross-replica
-        // recovery to only this process's in-memory Map.
-        .then(() =>
-          Promise.all(
+        .then(() => {
+          if (
+            typeof this.complaintRepository!.recordPendingCommit !==
+              "function" ||
+            !durablePrepareTargets.length
+          ) {
+            return this.complaintRepository!.persistChanges(persistPayload);
+          }
+          return Promise.all(
             durablePrepareTargets.map(
               ({ caseNo, complaintCase, timelineForCase }) =>
                 this.recordDurablePendingCommit(
@@ -2066,22 +2003,58 @@ export class ComplaintService implements OnModuleInit {
                   matchCommand,
                 ),
             ),
-          ),
-        )
-        .then(() => this.complaintRepository!.persistChanges(persistPayload))
+          ).then(() => {
+            persistPayload.commandKeys = durablePrepareTargets.map(
+              ({ caseNo }) =>
+                this.computeCommandKey(context, caseNo, matchCommand),
+            );
+            return this.complaintRepository!.persistChanges(persistPayload);
+          });
+        })
         .then(() => {
           for (const caseNo of affectedCaseNos) {
             this.pendingUncertainCommits.delete(caseNo);
-            this.clearDurablePendingCommit(context, caseNo, matchCommand);
+            const committedTarget = durablePrepareTargets.find(
+              (item) => item.caseNo === caseNo,
+            );
+            if (committedTarget) {
+              this.reconcileComplaintCaseIntoCache(
+                committedTarget.complaintCase,
+              );
+              this.mergeTimelineEntriesIntoCache(
+                caseNo,
+                committedTarget.timelineForCase,
+              );
+            }
+            if (this.identifiedPayload(matchCommand)) {
+              const target = durablePrepareTargets.find(
+                (item) => item.caseNo === caseNo,
+              );
+              if (target)
+                this.identifiedComplaintCommands.set(
+                  this.computeCommandKey(context, caseNo, matchCommand),
+                  {
+                    action: context,
+                    complaintCase: target.complaintCase,
+                    complaintTimelines: target.timelineForCase,
+                    matchCommand,
+                    previousCaseSnapshot,
+                    confirmed: true,
+                  },
+                );
+            } else
+              this.clearDurablePendingCommit(context, caseNo, matchCommand);
           }
         })
         .catch((error: unknown) => {
           this.complaintRepository!.reportPersistenceFailure(error, context);
           if (error instanceof ComplaintCommitOutcomeUnknownError) {
             if (rollback) {
-              for (const { caseNo, complaintCase, timelineForCase } of (
-                durablePrepareTargets
-              )) {
+              for (const {
+                caseNo,
+                complaintCase,
+                timelineForCase,
+              } of durablePrepareTargets) {
                 this.pendingUncertainCommits.set(caseNo, {
                   action: context,
                   complaintCase,
@@ -2122,7 +2095,15 @@ export class ComplaintService implements OnModuleInit {
               // This attempt's own prepared durable marker (if any) never saw
               // a business commit at all, so it must not linger as if it
               // were still an unresolved cross-replica identity.
-              this.clearDurablePendingCommit(context, caseNo, matchCommand);
+              if (
+                !(
+                  error instanceof ApiRequestError &&
+                  (error.code === "IDEMPOTENCY_IN_PROGRESS" ||
+                    error.code === "IDEMPOTENCY_KEY_REUSED")
+                )
+              ) {
+                this.clearDurablePendingCommit(context, caseNo, matchCommand);
+              }
               // A definite (non-uncertain) failure has already been rolled
               // back and surfaced to its own caller above; leaving this
               // rejected promise keyed by caseNo would otherwise make a
@@ -2164,20 +2145,33 @@ export class ComplaintService implements OnModuleInit {
     pending: PendingUncertainComplaintCommit,
     auditInput: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
     onCommitted?: () => void,
   ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> {
-    const persistence = this.persistChanges(
-      {
-        complaintCases: [pending.complaintCase],
-        complaintTimelines: pending.complaintTimelines,
-      },
-      pending.action,
-      pending.rollback,
-      pending.matchCommand,
-      true,
-      pending.previousCaseSnapshot ?? null,
-    );
+    requestId =
+      this.identifiedPayload(pending.matchCommand)?.originalRequestId ??
+      requestId;
+    if (pending.confirmed && !this.identifiedPayload(pending.matchCommand)) {
+      this.pendingUncertainCommits.delete(pending.complaintCase.caseNo);
+      this.clearDurablePendingCommit(
+        pending.action,
+        pending.complaintCase.caseNo,
+        pending.matchCommand,
+      );
+    }
+    const persistence = pending.confirmed
+      ? Promise.resolve()
+      : this.persistChanges(
+          {
+            complaintCases: [pending.complaintCase],
+            complaintTimelines: pending.complaintTimelines,
+          },
+          pending.action,
+          pending.rollback,
+          pending.matchCommand,
+          true,
+          pending.previousCaseSnapshot ?? null,
+        );
     return this.finishOrdinaryComplaintAction(
       this.cloneComplaintCase(pending.complaintCase),
       persistence,
@@ -2196,16 +2190,215 @@ export class ComplaintService implements OnModuleInit {
     action: string,
     command: unknown,
   ): PendingUncertainComplaintCommit | undefined {
-    const target = this.stableStringify(command);
-    for (const pending of this.pendingUncertainCommits.values()) {
-      if (
-        pending.action === action &&
-        this.stableStringify(pending.matchCommand) === target
-      ) {
-        return pending;
+    return this.findComplaintCommandPayload(action, undefined, command);
+  }
+
+  private identifiedPayload(
+    value: unknown,
+  ): IdentifiedComplaintPayload | undefined {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      !("complaintCommandIdentity" in value)
+    )
+      return;
+    return value as IdentifiedComplaintPayload;
+  }
+
+  private bindComplaintCommand(
+    command: unknown,
+    options?: ComplaintActionOptions<boolean>,
+    originalRequestId?: string,
+  ): unknown {
+    return options?.commandIdentity
+      ? {
+          complaintCommandIdentity: {
+            ...options.commandIdentity,
+            key: options.commandIdentity.key.trim(),
+          },
+          payload: options.commandPayload ?? command ?? null,
+          ...(originalRequestId ? { originalRequestId } : {}),
+        }
+      : command;
+  }
+
+  private recoverPreparedCommand<Capture extends boolean>(
+    action: string,
+    caseNo: string,
+    command: unknown,
+    requestId?: string,
+    options?: ComplaintActionOptions<Capture>,
+  ): OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture> | undefined {
+    const pending = this.findComplaintCommand(action, caseNo, command, options);
+    requestId =
+      this.identifiedPayload(pending?.matchCommand)?.originalRequestId ??
+      requestId;
+    if (pending?.confirmed)
+      return this.existingComplaintAction(
+        this.cloneComplaintCase(pending.complaintCase),
+        action,
+        requestId,
+        options,
+      ) as OrdinaryComplaintActionResult<ComplaintCaseRecord, Capture>;
+    if (pending) {
+      return this.retryUncertainComplaintWrite(
+        pending,
+        {
+          actorId: [
+            "assign_complaint_case",
+            "add_complaint_case_note",
+          ].includes(action)
+            ? pending.complaintCase.assigneeId
+            : null,
+          actorType:
+            action === "mark_complaint_sla_breach" ? "system" : "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName: action,
+          resourceType: "complaint_case",
+          resourceId: caseNo,
+          newValuesSummary: this.preparedCommandAuditSummary(pending),
+        },
+        requestId,
+        options,
+        action === "mark_complaint_sla_breach"
+          ? () =>
+              this.auditNotificationService.recordNotification({
+                tenantId: null,
+                channel: "ops_notice",
+                title: "Complaint SLA breached",
+                message: `Complaint ${caseNo} exceeded SLA due at ${pending.complaintCase.slaDueAt}.`,
+                status: "unread",
+              })
+          : undefined,
+      );
+    }
+    const unresolved = this.pendingUncertainCommits.get(caseNo);
+    if (unresolved && !unresolved.confirmed && unresolved !== pending) {
+      throw new ApiRequestError(
+        409,
+        "IDEMPOTENCY_IN_PROGRESS",
+        "An earlier complaint command still needs canonical confirmation.",
+        { caseNo },
+        true,
+      );
+    }
+  }
+
+  private preparedCommandAuditSummary(
+    pending: PendingUncertainComplaintCommit,
+  ): Record<string, unknown> {
+    const record = pending.complaintCase;
+    const raw =
+      this.identifiedPayload(pending.matchCommand)?.payload ??
+      pending.matchCommand;
+    const payload =
+      raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    switch (pending.action) {
+      case "assign_complaint_case":
+        return { status: record.status, assigneeId: record.assigneeId };
+      case "add_complaint_case_note":
+        return {
+          status: record.status,
+          note:
+            typeof payload.note === "string" ? payload.note.trim() : undefined,
+        };
+      case "resolve_complaint_case":
+      case "close_complaint_case":
+        return { status: record.status, resolutionCode: record.resolutionCode };
+      case "reopen_complaint_case":
+        return {
+          status: record.status,
+          reason: payload.reason,
+          reopenCount: record.reopenCount,
+          slaDueAt: record.slaDueAt,
+          slaBreach: false,
+        };
+      case "mark_complaint_sla_breach":
+        return {
+          status: record.status,
+          slaBreach: true,
+          slaDueAt: record.slaDueAt,
+        };
+      case "escalate_to_incident":
+        return {
+          relatedIncidentId: record.relatedIncidentId,
+          reason: payload.reason,
+        };
+      case "link_incident":
+        return { relatedIncidentId: record.relatedIncidentId };
+      default:
+        return { status: record.status };
+    }
+  }
+
+  private findComplaintCommand(
+    action: string,
+    caseNo: string,
+    command: unknown,
+    options?: ComplaintActionOptions<boolean>,
+  ) {
+    return this.findComplaintCommandPayload(
+      action,
+      caseNo,
+      this.bindComplaintCommand(command, options),
+    );
+  }
+
+  private findComplaintCommandPayload(
+    action: string,
+    caseNo: string | undefined,
+    command: unknown,
+  ): PendingUncertainComplaintCommit | undefined {
+    if (this.identifiedPayload(command)) {
+      const identified = this.identifiedComplaintCommands.get(
+        this.computeCommandKey(action, caseNo ?? "", command),
+      );
+      if (identified) {
+        if (
+          (caseNo && identified.complaintCase.caseNo !== caseNo) ||
+          !this.sameComplaintCommandPayload(identified.matchCommand, command)
+        ) {
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_KEY_REUSED",
+            "The complaint command key was already used for a different payload.",
+          );
+        }
+        return identified;
       }
     }
+    for (const pending of this.pendingUncertainCommits.values()) {
+      const legacyTerminalRetry =
+        !this.identifiedPayload(command) &&
+        !this.identifiedPayload(pending.matchCommand) &&
+        !!caseNo &&
+        !["assign_complaint_case", "add_complaint_case_note"].includes(action);
+      if (
+        pending.action === action &&
+        (!caseNo || pending.complaintCase.caseNo === caseNo) &&
+        (legacyTerminalRetry ||
+          this.sameComplaintCommandPayload(pending.matchCommand, command))
+      )
+        return pending;
+    }
     return undefined;
+  }
+
+  private sameComplaintCommandPayload(left: unknown, right: unknown) {
+    const normalize = (value: unknown) => {
+      const identified = this.identifiedPayload(value);
+      return identified
+        ? {
+            complaintCommandIdentity: identified.complaintCommandIdentity,
+            payload: identified.payload,
+          }
+        : value;
+    };
+    return (
+      this.stableStringify(normalize(left)) ===
+      this.stableStringify(normalize(right))
+    );
   }
 
   private stableStringify(value: unknown): string {
@@ -2296,7 +2489,7 @@ export class ComplaintService implements OnModuleInit {
     isOrdinaryDbWrite: boolean,
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
     onCommitted?: () => void,
   ): OrdinaryComplaintActionResult<T, Capture> {
     const finish = () => {
@@ -2353,9 +2546,27 @@ export class ComplaintService implements OnModuleInit {
     data: T,
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): ComplaintActionResult<T, Capture> {
-    const auditLog = this.recordAudit(input, requestId);
+    const identity = this.canonicalDbEnabled()
+      ? options?.commandIdentity
+      : undefined;
+    const auditId = identity
+      ? generateDeterministicUuid(
+          "complaint_command_audit",
+          this.stableStringify([
+            input.actionName,
+            identity.scope,
+            identity.key.trim(),
+          ]),
+        )
+      : undefined;
+    const auditLog =
+      (auditId
+        ? this.auditNotificationService
+            .getAuditLogsSnapshot()
+            .find((entry) => entry.auditId === auditId)
+        : undefined) ?? this.recordAudit(input, requestId, auditId);
     return (
       options?.captureAudit ? { data, auditLog } : data
     ) as ComplaintActionResult<T, Capture>;
@@ -2365,10 +2576,30 @@ export class ComplaintService implements OnModuleInit {
     data: ComplaintCaseRecord,
     actionName: string,
     requestId?: string,
-    options?: { captureAudit?: Capture },
+    options?: ComplaintActionOptions<Capture>,
   ): ComplaintActionResult<ComplaintCaseRecord, Capture> {
     if (!options?.captureAudit) {
       return data as ComplaintActionResult<ComplaintCaseRecord, Capture>;
+    }
+    if (options.commandIdentity) {
+      return this.finishComplaintAction(
+        data,
+        {
+          actorId: null,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "complaint",
+          actionName,
+          resourceType: "complaint_case",
+          resourceId: data.caseNo,
+          newValuesSummary: {
+            outcome: "already_completed",
+            status: data.status,
+          },
+        },
+        requestId,
+        options,
+      );
     }
     const auditLog = this.auditNotificationService
       .getAuditLogsSnapshot()
@@ -2442,13 +2673,15 @@ export class ComplaintService implements OnModuleInit {
   private recordAudit(
     input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
     requestId?: string,
+    auditId?: string,
   ) {
     const auditLogInput: Omit<
       AuditLogRecord,
       "auditId" | "createdAt" | "requestId"
     > & {
       requestId?: string;
-    } = { ...input };
+      auditId?: string;
+    } = { ...input, ...(auditId ? { auditId } : {}) };
     if (requestId) {
       auditLogInput.requestId = requestId;
     }
