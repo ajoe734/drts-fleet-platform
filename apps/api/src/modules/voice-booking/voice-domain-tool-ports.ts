@@ -182,7 +182,9 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
       timeZone: "Asia/Taipei" as const,
       requirements: {
         passengerCount: Number(
-          snapshot.content.slots.passengerCount?.normalizedValue ?? 1,
+          snapshot.content.slots.passengerCount?.normalizedValue ??
+            snapshot.content.slots.passengerCount?.candidate ??
+            1,
         ),
         luggageCount: 0,
         luggageSize: "standard" as const,
@@ -202,15 +204,18 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
         error instanceof ApiRequestError &&
         error.code === "VOICE_SERVICE_AREA_REVIEW_REQUIRED"
       ) {
-        const decision = (
-          error.getResponse() as { error?: { details?: { decision?: string } } }
-        ).error?.details?.decision;
+        const rejection = (
+          error.getResponse() as {
+            error?: { message?: string; details?: { decision?: string } };
+          }
+        ).error;
+        const decision = rejection?.details?.decision;
         return {
           status:
             decision === "not_serviceable"
               ? "not_serviceable"
               : "manual_review",
-          reason: error.message,
+          reason: rejection?.message ?? error.code,
         };
       }
       throw error;

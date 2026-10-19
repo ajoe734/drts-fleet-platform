@@ -274,6 +274,30 @@ describe.skipIf(!hostedPaymentEnabled)(
       return { f, commands, accepted };
     }
 
+    // External call-close authority is SIM; journal persistence and its
+    // original call-close work identity are the actual production repository.
+    async function seedSimulatedRecordingClosure(
+      p: ReturnType<typeof makePeer>,
+      f: Awaited<ReturnType<typeof seedVoiceDispatchWorkFixture>>,
+    ) {
+      await p.voice.appendRecordingContinuation(f.request.voiceSessionId, {
+        kind: "closure",
+        eventKey: "closure",
+        scope: {
+          brandId: f.authority.brandId,
+          callId: f.callId,
+          recordingId: `SIM-recording:${f.request.voiceSessionId}`,
+          legId: `SIM-leg:${f.request.voiceSessionId}`,
+        },
+        payload: {
+          closedEventId: `SIM-closure:SIM-recording:${f.request.voiceSessionId}`,
+          endedAt: new Date(Date.now() - 1000).toISOString(),
+          endMs: 1000,
+          checkpointRefs: [],
+        },
+      });
+    }
+
     function simulatedRecorder(
       beforeAck?: (
         params: Parameters<VoiceMediaRecordingAdapter["finalizeRecording"]>[0],
@@ -284,12 +308,20 @@ describe.skipIf(!hostedPaymentEnabled)(
           await beforeAck?.(params);
           return {
             recordingId: params.scope.recordingId,
+            scope: { ...params.scope, legId: params.scope.legId! },
             manifestRef: {
               objectKey: "simulation/original-call-manifest",
               objectVersion: "simulation-v1",
-              checksum: "simulation-checksum",
-              byteLength: 0,
+              checksum: "a".repeat(64),
+              byteLength: 128,
               durableAt: new Date().toISOString(),
+            },
+            coverage: {
+              startMs: 0,
+              endMs: 1000,
+              channels: ["inbound", "outbound"],
+              closedEventId: `SIM-closure:${params.scope.recordingId}`,
+              endedAt: new Date(Date.now() - 1000).toISOString(),
             },
             verifiedAt: new Date().toISOString(),
           };
@@ -520,6 +552,7 @@ describe.skipIf(!hostedPaymentEnabled)(
         f.request.voiceSessionId,
         closed.sessionVersion,
       );
+      await seedSimulatedRecordingClosure(a, f);
       let calls = 0;
       const recorder: VoiceMediaRecordingAdapter = {
         async finalizeRecording(params) {
@@ -533,12 +566,20 @@ describe.skipIf(!hostedPaymentEnabled)(
           // original close transaction, work item and state writes are real.
           return {
             recordingId: params.scope.recordingId,
+            scope: { ...params.scope, legId: params.scope.legId! },
             manifestRef: {
               objectKey: "simulation/recording-manifest",
               objectVersion: "simulation-v1",
-              checksum: "simulation-checksum",
-              byteLength: 0,
+              checksum: "a".repeat(64),
+              byteLength: 128,
               durableAt: new Date().toISOString(),
+            },
+            coverage: {
+              startMs: 0,
+              endMs: 1000,
+              channels: ["inbound", "outbound"],
+              closedEventId: `SIM-closure:${params.scope.recordingId}`,
+              endedAt: new Date(Date.now() - 1000).toISOString(),
             },
             verifiedAt: new Date().toISOString(),
           };
@@ -575,6 +616,7 @@ describe.skipIf(!hostedPaymentEnabled)(
     it("an accepted booking committed after recording finalization retains its original completed manifest", async () => {
       const { a, b } = await seededPeers();
       const { f, commands, accepted } = await pendingVoiceOrder(a);
+      await seedSimulatedRecordingClosure(a, f);
       expect(
         await runnerFor(
           b,
@@ -607,6 +649,7 @@ describe.skipIf(!hostedPaymentEnabled)(
     it("acknowledgement binds an order committed while the simulated external recorder was completing", async () => {
       const { a, b } = await seededPeers();
       const { f, commands, accepted } = await pendingVoiceOrder(a);
+      await seedSimulatedRecordingClosure(a, f);
       let orderId: string | null = null;
       const recorder = simulatedRecorder(async (params) => {
         expect(params.linkedOrderId).toBeNull();

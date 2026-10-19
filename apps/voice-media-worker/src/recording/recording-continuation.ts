@@ -58,7 +58,8 @@ export class RecordingContinuation {
     this.recorder = new SealedRecorder(source.ingress, store);
   }
   attach(voiceSessionId: string, scope: RecordingScope) {
-    return this.source.subscribe(voiceSessionId, Object.freeze({ ...scope }), {
+    scope = Object.freeze({ ...scope });
+    return this.source.subscribe(voiceSessionId, scope, {
       fork: async ({ credential, input }) => {
         await this.recordFork(voiceSessionId, scope, credential, input);
       },
@@ -76,6 +77,10 @@ export class RecordingContinuation {
     credential: string,
     input: Parameters<SealedRecorder["seal"]>[1],
   ) {
+    // Snapshot before the first async journal/authority operation, just as
+    // SealedRecorder does before external object-store writes.
+    scope = Object.freeze({ ...scope });
+    input = { ...input, bytes: Uint8Array.from(input.bytes) };
     for (const key of ["brandId", "callId", "recordingId", "legId"] as const)
       if (scope[key] !== input[key])
         throw new RecordingEvidenceError("Recording fork scope mismatch");
@@ -119,6 +124,8 @@ export class RecordingContinuation {
     scope: RecordingScope,
     ref: RecordingManifestRef,
   ) {
+    scope = Object.freeze({ ...scope });
+    ref = Object.freeze({ ...ref });
     // Only a readable immutable manifest for this exact scope may join the
     // closure's checkpoint index. Confirmation proof remains a separate gate.
     // The immutable checkpoint reader is shared with final verification.
@@ -137,7 +144,9 @@ export class RecordingContinuation {
     scope: RecordingScope,
     credential: string,
   ) {
-    const closure = await this.source.closure.resolve(credential, scope);
+    scope = Object.freeze({ ...scope });
+    const resolved = await this.source.closure.resolve(credential, scope);
+    const closure = resolved && structuredClone(resolved);
     if (!closure)
       throw new RecordingEvidenceError("Trusted call closure unavailable");
     const events = await this.journal.read(voiceSessionId, scope);
@@ -165,6 +174,7 @@ export class RecordingContinuation {
     voiceSessionId: string,
     scope: RecordingScope,
   ): Promise<VoiceRecordingFinalization> {
+    scope = Object.freeze({ ...scope });
     const events = (await this.journal.read(voiceSessionId, scope)).map((e) =>
       voiceRecordingContinuationEventSchema.parse(e),
     );

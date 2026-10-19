@@ -136,23 +136,10 @@ async function main(
     callAuthorityVerifier: options.callAuthorityVerifier,
     voiceRuntimeProductionCapable: composition.productionCapable,
     voiceRuntimeNotCapableReason: composition.notCapableReason,
-    // `recordingAdapter` is now constructed whenever this worker's own
-    // `VOICE_RECORDING_OBJECT_STORE_PROVIDER` is configured (see
-    // ./recording/recording-adapter-factory.ts): the dependency-manifest/
-    // lockfile gap that previously blocked a concrete `ObjectStoreClient`
-    // backend is resolved -- `@aws-sdk/client-s3` is now this package's own
-    // dependency (AUDIT-DEPENDENCY-GATES-20261002 #2287 delegated that
-    // addition to this task; see
-    // docs/04-uat/audit-voice-application-wiring-20261003.md). `undefined`
-    // when unconfigured (e.g. this VM, with no `VOICE_RECORDING_S3_*`
-    // variables set), which still correctly fails `/recording/finalize`
-    // closed at 503 exactly as before. Even when configured, sealing a
-    // recording still correctly fails closed: the adapter's
-    // `RecordingClosureLedger` has no trusted call-close event source yet
-    // (that is the separate, still-missing `apps/api/src/modules/cti-ivr`
-    // `callAuthorityVerifier` channel below is also blocked on), so
-    // `/recording/finalize` now fails at that specific, real remaining
-    // gate instead of a generic "adapter not configured" one.
+    // The configured continuation above consumes real fork/closure events,
+    // durable journal metadata and immutable S3 readback. The legacy adapter
+    // preserves the original unconfigured-source denial when no upstream
+    // recording source is supplied; storage configuration alone is insufficient.
     recordingAdapter: createVoiceRecordingAdapter(),
   });
 

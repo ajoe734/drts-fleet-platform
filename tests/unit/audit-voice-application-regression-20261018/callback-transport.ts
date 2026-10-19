@@ -33,6 +33,7 @@ export function callbackTransport() {
           "reason",
           "role_source",
           "replaced_revision",
+          "retention_expires_at",
         ];
         const row = Object.fromEntries(keys.map((key, i) => [key, args[i]]));
         revisions.push({

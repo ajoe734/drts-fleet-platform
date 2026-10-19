@@ -623,8 +623,15 @@ export class VoiceCommandRunnerService
             "voice_recording_manifest_unverified: original session scope mismatch",
           );
         if (!parsedPayload.recordingId) {
-          const canonical=await this.commands.repository.resolveRecordingContinuationScope(voiceSessionId,tx);
-          if (!isDeepStrictEqual(canonical,verified.scope)) throw new Error("voice_recording_manifest_unverified: durable recording identity mismatch");
+          const canonical =
+            await this.commands.repository.resolveRecordingContinuationScope(
+              voiceSessionId,
+              tx,
+            );
+          if (!isDeepStrictEqual(canonical, verified.scope))
+            throw new Error(
+              "voice_recording_manifest_unverified: durable recording identity mismatch",
+            );
         }
         callId = context.callId;
         linkedOrderId = context.linkedOrderId;
@@ -1420,9 +1427,14 @@ export class VoiceCommandRunnerService
     }
     let recordingId = (payload.recordingId as string | undefined) ?? "";
     if (work.voiceSessionId && (!recordingId || !legId)) {
-      const canonical = await this.commands.repository.resolveRecordingContinuationScope(work.voiceSessionId);
-      if (canonical.brandId !== brandId || canonical.callId !== callId) throw new Error("voice_recording_context_mismatch");
-      recordingId=canonical.recordingId;legId=canonical.legId;
+      const canonical =
+        await this.commands.repository.resolveRecordingContinuationScope(
+          work.voiceSessionId,
+        );
+      if (canonical.brandId !== brandId || canonical.callId !== callId)
+        throw new Error("voice_recording_context_mismatch");
+      recordingId = canonical.recordingId;
+      legId = canonical.legId;
     }
 
     let finalResult: unknown;
@@ -1443,8 +1455,8 @@ export class VoiceCommandRunnerService
     // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F3): the
     // VERIFIED `recordingId`/`verifiedAt` the adapter actually finalized and
     // attested to -- NOT the locally computed `recordingId` above, which is
-    // only a priori guess this method sends the adapter to tell it what to
-    // look for (payload-supplied or a synthesized `rec-${callId}`). An
+    // the canonical journal identity this method asks the adapter to finalize.
+    // An
     // adapter finalizing a different segment than requested must surface as
     // a mismatch at `completeWorkItemWithDomainState`'s verification choke
     // point, not be silently overwritten by the unverified guess.

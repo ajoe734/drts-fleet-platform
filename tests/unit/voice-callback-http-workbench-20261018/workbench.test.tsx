@@ -1,9 +1,9 @@
+// @vitest-environment jsdom
 import { callbackTransport } from "../audit-voice-application-regression-20261018/callback-transport";
 import { VoiceCallbackService } from "../../../apps/api/src/modules/voice-booking/voice-callback.service";
 import { VoiceCallbackController } from "../../../apps/api/src/modules/voice-booking/voice-callback.controller";
 import { VoiceBookingController } from "../../../apps/api/src/modules/voice-booking/voice-booking.controller";
 import { randomBytes } from "node:crypto";
-// @vitest-environment jsdom
 import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";

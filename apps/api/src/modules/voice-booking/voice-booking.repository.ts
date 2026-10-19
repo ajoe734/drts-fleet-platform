@@ -879,7 +879,10 @@ export class VoiceBookingRepository {
         throw new Error("voice_recording_closed_history_immutable");
       if (event.kind === "closure") {
         const payload = JSON.stringify({ ...event.scope, voiceSessionId });
-        const dedupeKey = `finalize_recording:recording:${voiceSessionId}:${event.scope.recordingId}`;
+        // The original call-close producer already owns this session work key.
+        // Closure metadata joins that durable work rather than enqueueing a
+        // second finalization when close and recorder events arrive in either order.
+        const dedupeKey = `finalize_recording:ai:${voiceSessionId}`;
         await tx.query(
           `INSERT INTO voice.work_item (voice_session_id,work_type,dedupe_key,payload_ref)
           VALUES ($1,'finalize_recording',$2,$3) ON CONFLICT (dedupe_key) DO NOTHING`,
@@ -893,12 +896,17 @@ export class VoiceBookingRepository {
           "SELECT voice_session_id,work_type,payload_ref FROM voice.work_item WHERE dedupe_key = $1",
           [dedupeKey],
         );
+        const savedWork = work.rows[0];
+        const savedPayload = savedWork && JSON.parse(savedWork.payload_ref);
         if (
-          work.rows[0]?.voice_session_id !== voiceSessionId ||
-          work.rows[0]?.work_type !== "finalize_recording" ||
-          !isDeepStrictEqual(
-            JSON.parse(work.rows[0].payload_ref),
-            JSON.parse(payload),
+          savedWork?.voice_session_id !== voiceSessionId ||
+          savedWork?.work_type !== "finalize_recording" ||
+          savedPayload?.voiceSessionId !== voiceSessionId ||
+          ["brandId", "callId", "recordingId", "legId"].some(
+            (key) =>
+              savedPayload[key] != null &&
+              savedPayload[key] !==
+                event.scope[key as keyof typeof event.scope],
           )
         )
           throw new Error("voice_recording_work_payload_conflict");
@@ -933,8 +941,15 @@ export class VoiceBookingRepository {
       return saved;
     });
   }
-  async resolveRecordingContinuationScope(voiceSessionId: string, executor?:VoiceQueryExecutor) {
-    const events = await this.readRecordingContinuation(voiceSessionId,undefined,executor);
+  async resolveRecordingContinuationScope(
+    voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
+  ) {
+    const events = await this.readRecordingContinuation(
+      voiceSessionId,
+      undefined,
+      executor,
+    );
     const scopes = events
       .filter((e) => e.kind === "closure")
       .map((e) => e.scope);

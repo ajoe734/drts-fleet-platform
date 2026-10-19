@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   voiceDialogueSnapshotContentSchema,
+  voiceToolResultSchemas,
   type VoiceCapabilityScope,
   type VoiceDialogueOutput,
 } from "@drts/contracts";
@@ -1641,26 +1642,20 @@ export class VoiceCallTurnCoordinator {
       !turnSession.released &&
       turnSession.activeAbort === abortController &&
       !abortController.signal.aborted;
-    const readback = result.results.find(
+    const readbackRaw = result.results.find(
       (value: unknown) =>
         typeof value === "object" && value !== null && "confirmation" in value,
-    ) as
-      | {
-          confirmation: {
-            confirmationId: string;
-            readbackPlaybackId: string;
-            script: string;
-            readbackScriptHash: string;
-            expiresAt: string;
-            templateVersion: string;
-            expectedDigit: string;
-          };
-        }
-      | undefined;
+    );
+    const readback =
+      readbackRaw === undefined
+        ? undefined
+        : voiceToolResultSchemas.prepare_booking_readback.parse(readbackRaw);
     const plan = readback?.confirmation;
     if (
       plan &&
-      (plan.templateVersion !== "zh-TW-booking-v1" ||
+      (readback!.script !== plan.script ||
+        readback!.playbackTaskId !== plan.readbackPlaybackId ||
+        plan.templateVersion !== "zh-TW-booking-v1" ||
         plan.expectedDigit !== "1" ||
         createHash("sha256").update(plan.script).digest("hex") !==
           plan.readbackScriptHash ||
@@ -1669,7 +1664,8 @@ export class VoiceCallTurnCoordinator {
     )
       throw new Error("voice_readback_invalid");
     const spoken = plan?.script ?? result.prompt;
-    if (plan) turnSession.state.confirmationId = plan.confirmationId;
+    if (plan && isCurrent)
+      turnSession.state.confirmationId = plan.confirmationId;
     if (spoken && isCurrent) {
       // Deliberately not awaited (Codex reopen round 3, R3): the engine
       // stage above (`propose`/`persist`/`execute`) is what needs

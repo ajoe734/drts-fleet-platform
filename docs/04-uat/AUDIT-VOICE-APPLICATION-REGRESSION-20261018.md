@@ -1,9 +1,25 @@
 # AUDIT-VOICE-APPLICATION-REGRESSION-20261018
 
 Source regression child of AUDIT-VOICE-APPLICATION-WIRING-20261003 at `ba0b164ed8fab3f0dd68ace92a18d0376c0a9031`.
-Owner: Claude2. Reviewer: Codex. Priority: P2.
+Current owner: Codex2. Original WIP author: Claude2. Reviewer: Codex. Priority: P2.
 Required acceptance: `composed_turn_and_recording_path`, `authority_epoch_consent_fences`,
 `precise_unimplemented_and_external_boundaries`, `same_sha_review_ci`.
+
+The current continuation retains the original full A/B/C/D seventeen clauses,
+F1–F8, and all four acceptance keys. The canonical Supervisor transferred the
+original task from Claude2 after the actual provider billing failure. Claude2's
+ten-file custody checkpoint is `040256fd6`; ordinary merge `1b05c3a1ff1e3765253ea1d00ac5abc8ab716524`
+includes accepted baseline `61fa7cf44fb25d8be36634357fa3549286b96b84` without
+rewriting either history. Original checkpoint notes below remain historical.
+
+Current implementation connects qualified booking/readback, independent recording
+fork/closure persistence and finalization, durable contact revisions, immutable
+callback bindings and the mounted zh/en correction/replacement flow. Local
+socketfree evidence and explicit external boundaries are recorded in the latest
+section at the end. Genuine PG/browser execution and independent same-candidate
+review must be recorded separately; local transport doubles do not certify them.
+
+## Historical original-author custody notes
 
 This document records the state of this task across two sessions. Session 1 delivered one
 confirmed, scoped repair each to packages A (tools) and B (recording finalization), and left C
@@ -335,3 +351,161 @@ still pending. No result from these socket-free doubles certifies genuine
 external recording authority, S3 resources, CTI, issuer, model or PSTN. Actual
 main composition keeps those unconfigured boundaries visible and
 productionCapable remains false. No VM runtime/server/database was started.
+
+## Codex2 complete-scope implementation and verification, 2026-10-19
+
+The latest source finishes the internal implementation identified by the original
+review on `749ff69b8c28166106b600d6966bc45c1fc44292`. This is an owner evidence
+record; approval, merge, shared deployment and live external-provider readiness
+remain independent. The four acceptance keys and all original clauses remain.
+
+| Finding | Current source/behavior                                                                                                                                                                                                                                                                                                                                                                  | Meaningful before → fixed evidence                                                                                                                                                                                                                                                            | Limits                                                                                                                                               |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1      | `VoiceDomainToolPorts.prepareBooking` uses current durable contacts and explicit provider selections, calls the original qualifier, promotes an immutable intent/draft and calls `beginReadback`. Coordinator consumes the complete matching script/playback plan; media session registers that controlled ID under original generation/cancellation fences.                             | Immutable 1b05 ports: two 501 failures; fixed qualified composition passes with the actual encrypted contact repository. Immutable 1b05 media playback returned a different ID; fixed controlled playback and original UV008 pass. Full server-plan positive and mismatched-ID negative pass. | Geo/model/issuer/SQL transport are SIM; playback completion remains distinct from consent.                                                           |
+| F2      | Actual composer subscribes to independently normalized recorder input. `RecordingContinuation` seals/readbacks bytes, verifies checkpoints and trusted closure, persists through actual first-party client/controller/repository/V0125, then configured factory/API adapter/worker reads the durable final version. Original close work key is shared with closure; no second queue row. | Actual composer→SealedRecorder→object readback→journal→adapter→manifest/cold replay passes. Immutable aef3 double enqueue reproduces two work rows instead of one; current regression passes. Missing outbound and different replay payload remain denied.                                    | External fork/call authority and object/HTTP/SQL transport doubled locally. No TTS/WS-close-generated closure. True hosted durability is pending CI. |
+| F3      | `validateFinalRecordingResult` requires correlated recording/brand/call/leg, immutable object/version/SHA/positive bytes/times and full bidirectional closure coverage before original domain writes. Canonical journal supplies missing recording identity; no `rec-callId` guess.                                                                                                      | Immutable 1b05: six manifest failures; fixed manifests plus original zero/one-order, late-order and no-audit-table positives pass. Missing adapter still leaves work retryable. Two typed hosted external-recorder fixtures now produce full SIM attestations from real scope.                | Synthetic attestation fixtures only model the external recorder; genuine SQL/order/queue checks remain hosted.                                       |
+| F4      | Actual worker binding reader seeds original durable CRM ANI; mounted original ops/platform contact routes and current snapshot typed A/B consumer call the durable contact service.                                                                                                                                                                                                      | Actual original `getSession` producer before: zero ledger rows; fixed producer and real service/SDK/mounted page pass.                                                                                                                                                                        | No new identity/permission mechanism. ANI is never replaced by model or contact correction.                                                          |
+| F5      | Same session transaction selects server contact revision/consent, encrypts the genuine server phone and appends a unique callback creation binding. Receipts and tasks keep that original selection; cancelled original plus new consent creates a related replacement.                                                                                                                  | Original callback service before: ciphertext shown as phone/stale consent accepted; fixed actual service/cold read/receipt and mounted replacement recovery pass.                                                                                                                             | PG concurrency/rollback is covered in the hosted suite, not claimed from local doubles.                                                              |
+| F6      | Original session lock precedes every init/read/max+1 append. Durable readers refresh; cache changes only after successful commit.                                                                                                                                                                                                                                                        | Original concurrent init: duplicate revisions; fixed concurrent init and warm reader pass. Invalidation failure rolls back revision and cache; retry receives the same next revision.                                                                                                         | Added real two-repository initialization/edit/transaction refusal retry checks await hosted CI.                                                      |
+| F7      | Persisted `role_source` distinguishes default pointer, selected pointer and explicit edits. Free reason text cannot change semantics; automatic A-for-B driver defaults follow B while selected/custom roles remain intentional.                                                                                                                                                         | Original regression for reason literally `default_role:passenger` stays explicit across cold reconstruction; default/selected controls pass.                                                                                                                                                  | No new consent inferred from A/B dialogue content.                                                                                                   |
+| F8      | Actual task DTO, SDK and mounted zh/en workbench show server phone/role/revision/consent/history and original/replacement relation. Correction submits a genuine revision plus consent; ambiguous replacement reuses stored request identity and reads its receipt first.                                                                                                                | Mounted real services/SDK/page and original intent/receipt/action controls pass.                                                                                                                                                                                                              | JSDOM is local mounted coverage; real hosted browser run remains required.                                                                           |
+
+C's required retention follows the existing `voice_booking_evidence` catalog and
+`VoiceRetentionService`, with a finite expiry fixed from the original session's
+creation time. Replay/correction cannot extend it. Durable and cached reads stop
+exposing expired contact content; old sessions cannot recreate purged revision
+identities. The bounded operational purge follows V0093's transaction-local
+archival setting, excludes existing active legal holds before its page limit,
+deletes only expired closed-session bindings/revisions, and writes the existing
+execution log in the same transaction. Original callback tasks/receipts remain.
+No new scheduler, permission policy, provider setup or real-data purge was run.
+The immutable aef3 retention probe fails for missing finite expiry; current local
+expiry/read/reinitialization checks pass. Hosted checks include actual archival,
+hold/release, dry-run/apply and preserved original task rows.
+
+| Original clause | Implemented chain / retained boundary                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A1              | Real Geo candidates, at most three; persisted place/entrance selection re-resolves fresh provider candidate identity.                                         |
+| A2              | Durable session/dialogue/current contacts → existing qualifier; serviceable/manual-review/not-serviceable outcomes preserved, no vehicle promise.             |
+| A3              | Immutable intent draft transaction → original beginReadback/proof/command writer; V0106 remains candidate dialogue only.                                      |
+| A4              | Authorized bound order → persisted dispatch projection/status.                                                                                                |
+| A5              | Existing route/client/gateway/coordinator with stage aborts and current authority fences; original handoff and disabled operations retained.                  |
+| B1              | Missing adapter or incomplete manifest cannot complete work or mark recorded.                                                                                 |
+| B2              | Configured first-party adapter → worker durable journal/final version; cold/lost-response replay retains exact immutable object identity.                     |
+| B3              | Full correlated manifest/recording/coverage validation before domain writes; original checkpoint refs and call/order locking remain.                          |
+| B4              | Actual independent recorder fork/closure producer → append-only V0125 journal → finalize; upstream authority remains explicitly SIM/unconfigured when absent. |
+| B5              | Original late-tail zero/one-order/late-order/on-trip recovery positives retained.                                                                             |
+| B6              | Existing background loop includes finalize only with configured actual adapter; closure and call close share one original work key.                           |
+| C1              | Encrypted durable session-wide role revisions, original ANI immutable, A/B distinct, original finite retention convention consumed.                           |
+| C2              | Same transaction appends material changes and invalidates relevant unconsumed confirmation, preserving accepted pending proof.                                |
+| C3              | Callback create/receipt binds genuine server revision and consent with original key/payload/CAS/closed-call operations.                                       |
+| C4              | Existing tasks never silently retarget; new consent plus explicit cancelled-task replacement preserves history.                                               |
+| C5              | Existing DTO/SDK/workbench exposes usable actual phone/role/revision/evidence/history and authorized outcomes.                                                |
+| D1              | Actual mounted zh/en contacts and sealed-consent projection/correction/replacement uses C's readers and original policies.                                    |
+
+Verification evidence lives in the owned worktree `.local/voice-evidence/`:
+
+- `original-full-socketfree.log`: original full selected command, **exit 0,
+  36 files / 679 passed**, no skips. Original listener file is excluded.
+  Original default 5000ms, 10000 held receipts, three previews and all 62
+  snapshot assertions are preserved. The fixture sorts decorate each row once
+  per fresh query; no cached pages, fewer rows or removed assertions.
+- `full-functional-final.log`: initial 238 pass / two fixture scope failures
+  (`binding` helper declared inside its describe). This is retained as a test
+  failure, not a product reproduction. Fixed helper scope and re-execution in
+  `full-functional-fixed.log`: **exit 0, 19 files / 240 passed**, no skips.
+- `retention-work-fixed.log`: **exit 0, 16 passed**. `recording-dedup-before.log`
+  and `contact-retention-before.log`: genuine immutable aef3 product failures,
+  one selected failure each; nonselected cases are not coverage.
+- API source check `api-source-final.log`: exit 0. Worker source check
+  `worker-source-final.log`: exit 0. Source aliases avoid the VM's stale shared
+  workspace dist; normal clean builds remain a hosted requirement.
+- Final root source check and scoped lint are recorded at candidate preparation;
+  earlier root check found the same newly added helper scope error, corrected
+  above. No historical root/dist failure is relabelled as success.
+- Full-schema hosted additions in original callback create-receipt suite cover
+  real two-instance contact init/edit/replay/rollback, sealed original/replacement,
+  finite expiry/hold/archival, and V0125 same-payload replay/different-payload
+  refusal without control-watermark consumption. Original dispatch hosted
+  positives seed only SIM upstream closure through the real journal and retain
+  every original dispatch/order/lease/single-work assertion and timeout.
+- Formal schema consumers include V0122/V0125 and both new table names. Shared
+  ledger/guard edits remain confined to this task's entries; Complaint V0123,
+  SOS V0124 and all other allocations remain for Root's serial integration.
+
+| Required acceptance key                       | Evidence / outstanding acceptance                                                                                                                                                                           |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| composed_turn_and_recording_path              | Actual internal producer/consumer compositions and original regressions pass locally; full hosted PG/browser run and Root review pending.                                                                   |
+| authority_epoch_consent_fences                | Original full regression and new role/revision/manifest/controlled playback/receipt negatives retained; true PG transactions await same-candidate hosted evidence.                                          |
+| precise_unimplemented_and_external_boundaries | Default missing issuer/model/fork/call authority/storage/PSTN stays explicit/unavailable; external SIM labelled. `productionCapable=false` remains. No internal API/DB work is excused by external absence. |
+| same_sha_review_ci                            | Final source SHA, remote head, new PR and exact hosted runs are recorded in the canonical handoff after checks. No self-approval/merge/deploy/acceptance claim.                                             |
+
+Final local checks: `root-source-fixed-final.log`,
+`ops-source-fixed-final.log`, `api-source-final.log`, and
+`worker-source-final.log` each completed with exit 0. Root includes `.ts`
+checks; the separate Ops source check covers the mounted `.tsx` application.
+The Ops check's initial missing Google namespace was a task-local config type
+lookup relative to `.local`; restoring the app's original `@types` lookup
+completed without source type-policy changes. `final-scoped-lint-complete.log`
+completed exit 0. `workbench-workflow-final.log` completed exit 0, five files /
+70 passed after the real replacement queue refresh fix.
+
+The real browser's normal preparation now writes explicit SIM consent through
+`/callcenter/voice/sessions/:id/contacts` and consumes the server's revision/ref.
+Its existing isolated hosted job supplies a public SIM contact-crypto fixture
+key/version; no native account/provider/deployed credential is changed. The
+original three-task/eight-receipt browser assertions remain intact. Added
+browser steps verify actual contact correction, immutable original phone/consent,
+new replacement binding, a committed-but-lost response, reload/receipt recovery
+with one create request and the same original order. This browser code was not
+executed on the VM; exact-candidate hosted evidence remains required.
+
+Authorship correction: the four anchors `040256fd6`, `1b05c3a1f`, `6b3178bf9`
+and `aef3a7dbd` were executed by Codex2, but mistakenly inherited the machine's
+Git author `Gemini2 <gemini2@google.com>`. Their Codex2 trailers and original
+Claude2 WIP credit remain factual. These commits are preserved without amend,
+rebase or force-push. Subsequent normal commits explicitly select the existing
+Codex2 identity for that command only; no shared/global configuration is changed.
+
+Final composed boundary follow-through:
+
+- `VoiceApiClient` now consumes the actual global `SnakeCaseInterceptor` wire
+  contract using the same recursive key restoration convention as the existing
+  SDK. The original aef3 client reproduces missing camel scope/event/readback
+  fields (`voice-api-wire-before.log`: one failure); values such as immutable
+  ids, hashes and opaque strings are unchanged. F1 now exercises actual HTTP
+  client → controller → original gateway → durable encrypted contacts → real
+  qualifier/immutable draft/readback; F2 composition uses the actual snake wire
+  producer before its client reads the journal. `full-http-continuation-final.log`:
+  exit 0, five files / 68 passed, including original client regressions.
+- Actual A2 service-area manual-review and not-serviceable outcomes preserve the
+  domain's reason and cannot create drafts/confirmations. Current durable
+  passenger-count candidate is consumed when no normalized value exists;
+  candidate 5 retains the original verified-capability/human-handling refusal.
+  `qualified-conditional-final.log`: five cases passed before adding the full
+  HTTP composition, which is included above.
+- The original call-close service genuinely downgraded already-finalized
+  recording state when control close arrived later: `late-control-close-before.log`
+  is one failed / one positive. Root formally added the exact service hunk as
+  scope 63; the repair preserves `finalized` and otherwise retains `finalizing`.
+  Control events/sequences/version/lease/work/replay remain unchanged.
+  `late-control-close-fixed.log`: exit 0, both cases pass. True hosted ordering
+  now covers actual journal/runner/domain completion before actual control close
+  and asserts one original completed work row; pending hosted is not a pass.
+
+Final complete socketfree union: `complete-socketfree-final.log` completed
+**exit 0, 61 files / 987 passed, zero skips**, with the original default
+5000ms, `--maxWorkers=1 --no-cache`, original 10000 held/three-preview/62-assertion
+snapshot regression and every old positive retained. The union includes the
+original complete socketfree selection, UV010 checkpoint writer, all new
+original-task regressions, callback memory/intent/mounted workbench, recording
+order context/recovery, allocation guard and original Ops Shell unit suite.
+Only the original listener file and formal hosted-only PG/browser execution
+remain outside that local command. API and worker final source checks completed
+exit 0 in `api-source-delivery.log` and `worker-source-delivery.log`.
+
+Delivery-source checks also terminated successfully: `root-source-delivery.log`
+and `lint-delivery.log` each exit 0. These include the final HTTP wire, conditional
+qualification, late-close and hosted test source. Final source is submitted by a
+normal Codex2 commit/plain push; the exact SHA/PR/hosted results are frozen in the
+canonical handoff, and hosted failures remain implementation work until resolved.

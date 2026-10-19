@@ -438,6 +438,7 @@ export type InsertContactRoleRevisionInput = {
   reason: string;
   roleSource: ContactRoleSource;
   replacedRevision: number | null;
+  retentionExpiresAt: string;
 };
 
 export type ContactRoleRevisionRow = {
@@ -459,6 +460,7 @@ export type ContactRoleRevisionRow = {
   reason: string;
   roleSource: ContactRoleSource;
   replacedRevision: number | null;
+  retentionExpiresAt: string;
   createdAt: string;
 };
 
@@ -477,6 +479,7 @@ type VoiceContactRoleRevisionRow = QueryResultRow & {
   role_source: string;
   replaced_revision: number | null;
   created_at: Date | string;
+  retention_expires_at: Date | string;
 };
 
 function mapContactRoleRevisionRow(
@@ -497,6 +500,7 @@ function mapContactRoleRevisionRow(
     roleSource: row.role_source as ContactRoleSource,
     replacedRevision: row.replaced_revision,
     createdAt: new Date(row.created_at).toISOString(),
+    retentionExpiresAt: new Date(row.retention_expires_at).toISOString(),
   };
 }
 
@@ -886,8 +890,8 @@ export class VoiceSessionRepository {
         INSERT INTO voice.contact_role_revision (
           voice_session_id, role, revision_number, name,
           phone_key_version, phone_nonce, phone_ciphertext, phone_auth_tag,
-          consent_ref, reason, role_source, replaced_revision
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          consent_ref, reason, role_source, replaced_revision, retention_expires_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         RETURNING *
       `,
       [
@@ -903,6 +907,7 @@ export class VoiceSessionRepository {
         input.reason,
         input.roleSource,
         input.replacedRevision,
+        input.retentionExpiresAt,
       ],
     );
     return mapContactRoleRevisionRow(result.rows[0]!);
@@ -927,12 +932,72 @@ export class VoiceSessionRepository {
     const result = await exec.query<VoiceContactRoleRevisionRow>(
       `
         SELECT * FROM voice.contact_role_revision
-        WHERE voice_session_id = $1
+        WHERE voice_session_id = $1 AND retention_expires_at > now()
         ORDER BY revision_number ASC
       `,
       [voiceSessionId],
     );
     return result.rows.map(mapContactRoleRevisionRow);
+  }
+
+  /** Governed contact expiry uses the original evidence family and V0093
+   * archival transaction. Held sessions are excluded before LIMIT, so a held
+   * prefix cannot starve later eligible sessions. Tasks/receipts stay intact. */
+  async purgeExpiredContactRoleRevisions(input: {
+    dryRun: boolean;
+    operatorId: string;
+    policyVersion: string;
+    retentionDays: number;
+  }) {
+    return this.withTransaction(async (tx) => {
+      const candidates = await tx.query<{ voice_session_id: string }>(
+        `SELECT s.voice_session_id FROM voice.session s
+         WHERE s.dialog_state = 'closed'
+           AND EXISTS (SELECT 1 FROM voice.contact_role_revision r WHERE r.voice_session_id=s.voice_session_id)
+           AND NOT EXISTS (SELECT 1 FROM voice.contact_role_revision r WHERE r.voice_session_id=s.voice_session_id AND r.retention_expires_at > now())
+           AND NOT EXISTS (SELECT 1 FROM voice.legal_hold l WHERE l.evidence_family='voice_booking_evidence' AND l.subject_ref=s.voice_session_id::text AND l.status='active')
+         ORDER BY s.created_at,s.voice_session_id LIMIT 200 FOR UPDATE OF s`,
+      );
+      let deletedRevisions = 0,
+        deletedBindings = 0;
+      if (!input.dryRun) {
+        await tx.query(`SET LOCAL voice.allow_retention_archival = 'on'`);
+        for (const { voice_session_id: id } of candidates.rows) {
+          const bindings = await tx.query(
+            `DELETE FROM voice.callback_task_contact_binding WHERE voice_session_id=$1`,
+            [id],
+          );
+          const revisions = await tx.query(
+            `DELETE FROM voice.contact_role_revision WHERE voice_session_id=$1 AND retention_expires_at <= now()`,
+            [id],
+          );
+          deletedBindings += bindings.rowCount ?? 0;
+          deletedRevisions += revisions.rowCount ?? 0;
+        }
+      }
+      await tx.query(
+        `INSERT INTO voice.retention_execution_log (evidence_family,mode,retention_days,candidates_count,purged_count,skipped_held_count,operator_id,details)
+         VALUES ('voice_booking_evidence',$1,$2,$3,$4,0,$5,$6::jsonb)`,
+        [
+          input.dryRun ? "dry-run" : "apply",
+          input.retentionDays,
+          candidates.rows.length,
+          input.dryRun ? 0 : candidates.rows.length,
+          input.operatorId,
+          JSON.stringify({
+            kind: "contact_role_revision",
+            policyVersion: input.policyVersion,
+            deletedRevisions,
+            deletedBindings,
+          }),
+        ],
+      );
+      return {
+        examinedSessions: candidates.rows.length,
+        deletedRevisions,
+        deletedBindings,
+      };
+    });
   }
 
   /**

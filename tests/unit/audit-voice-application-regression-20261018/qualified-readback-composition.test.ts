@@ -1,5 +1,10 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+import { VoiceApiClient } from "../../../apps/voice-media-worker/src/server/voice-api-client";
+import { VoiceBookingController } from "../../../apps/api/src/modules/voice-booking/voice-booking.controller";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
+import { VoiceSessionRepository } from "../../../apps/api/src/modules/voice-booking/voice-session.repository";
 import { VoiceDomainToolPorts as CurrentPorts } from "../../../apps/api/src/modules/voice-booking/voice-domain-tool-ports";
 import { VoiceBookingRepository } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { VoiceBookingDraftService } from "../../../apps/api/src/modules/voice-booking/voice-booking-draft.service";
@@ -19,9 +24,18 @@ const Ports = process.env.VOICE_ORIGINAL_REF
     ).VoiceDomainToolPorts
   : CurrentPorts;
 const NOW = "2026-10-19T03:00:00.000Z";
-beforeEach(() => vi.useFakeTimers().setSystemTime(new Date(NOW)));
-afterEach(() => vi.useRealTimers());
-async function harness() {
+beforeEach(() => {
+  vi.useFakeTimers().setSystemTime(new Date(NOW));
+  process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "SIM-qualified-contact-key";
+  process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+    randomBytes(32).toString("base64");
+});
+afterEach(() => {
+  vi.useRealTimers();
+  delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+  delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+});
+async function harness(coordinates = { lat: 25.03, lng: 121.56 }) {
   const session = {
     voice_session_id: "session",
     call_id: "call",
@@ -42,14 +56,16 @@ async function harness() {
   };
   let intent: Record<string, unknown> | null = null;
   const drafts: Record<string, unknown>[] = [],
-    confirmations: Record<string, unknown>[] = [];
+    confirmations: Record<string, unknown>[] = [],
+    contactRows: Record<string, unknown>[] = [];
   const db = {
     isEnabled: () => true,
     connect: async () => ({ query: db.query, release() {} }),
     query: async (sql: string, args: readonly unknown[] = []) => {
       let rows: Record<string, unknown>[] = [];
-      if (sql.includes("UPDATE voice.session SET confirmation_state")) {session.session_version += 1;}
-      else if (sql.includes("FROM voice.resource_scope"))
+      if (sql.includes("UPDATE voice.session SET confirmation_state")) {
+        session.session_version += 1;
+      } else if (sql.includes("FROM voice.resource_scope"))
         rows = [
           {
             scope_id: "scope",
@@ -64,7 +80,40 @@ async function harness() {
           },
         ];
       else if (sql.includes("FROM voice.session ")) rows = [session];
-      else if (sql.includes("MAX(revision_number)")) rows = [{ revision: 3 }];
+      else if (sql.includes("INSERT INTO voice.contact_role_revision")) {
+        const keys = [
+          "voice_session_id",
+          "role",
+          "revision_number",
+          "name",
+          "phone_key_version",
+          "phone_nonce",
+          "phone_ciphertext",
+          "phone_auth_tag",
+          "consent_ref",
+          "reason",
+          "role_source",
+          "replaced_revision",
+          "retention_expires_at",
+        ];
+        const row = {
+          ...Object.fromEntries(keys.map((key, i) => [key, args[i]])),
+          revision_id: `revision-${contactRows.length + 1}`,
+          created_at: NOW,
+        };
+        contactRows.push(row);
+        rows = [row];
+      } else if (sql.includes("SELECT * FROM voice.contact_role_revision"))
+        rows = contactRows;
+      else if (sql.includes("MAX(revision_number)"))
+        rows = [
+          {
+            revision: Math.max(
+              0,
+              ...contactRows.map((row) => Number(row.revision_number)),
+            ),
+          },
+        ];
       else if (sql.includes("INSERT INTO voice.intent")) {
         intent ??= {
           intent_id: "intent",
@@ -138,7 +187,9 @@ async function harness() {
     },
   };
   const repository = new VoiceBookingRepository(db as never);
-  const contacts = new VoiceContactService();
+  const contacts = new VoiceContactService(
+    new VoiceSessionRepository(db as never),
+  );
   await contacts.initializeContacts({
     voiceSessionId: "session",
     callerPhone: "0911000111",
@@ -169,8 +220,8 @@ async function harness() {
       address: {
         address: "Taipei",
         normalizedAddress: "Taipei",
-        lat: 25.03,
-        lng: 121.56,
+        lat: coordinates.lat,
+        lng: coordinates.lng,
         placeId: "place",
         coordinateSource: "provider_candidate",
         geocodeConfidence: "exact",
@@ -269,7 +320,22 @@ async function harness() {
     boundOrderId: null,
     signal: new AbortController().signal,
   };
-  return { ports, context, drafts, confirmations, content, areas };
+  return {
+    ports,
+    context,
+    drafts,
+    confirmations,
+    content,
+    areas,
+    contacts,
+    contactRows,
+    db,
+    repository,
+    sessions,
+    geo,
+    draftsService,
+    confirmation,
+  };
 }
 it("F1: selected provider addresses run real qualification and immutable draft/readback, preserving A/B contacts and retry identity", async () => {
   const h = await harness();
@@ -284,6 +350,11 @@ it("F1: selected provider addresses run real qualification and immutable draft/r
     draftVersion: 1,
     confirmation: { templateVersion: "zh-TW-booking-v1", expectedDigit: "1" },
   });
+  expect(h.contactRows).toHaveLength(5);
+  expect(
+    (await h.contacts.getEffectiveContactsDurable("session"))
+      ?.assertedCallerPhone,
+  ).toBe("0911000111");
   expect(h.drafts).toHaveLength(1);
   expect(h.confirmations).toHaveLength(1);
   expect(h.drafts[0]!.canonical_snapshot).toMatchObject({
@@ -318,4 +389,120 @@ it("F1: no explicit selection and aborted original input remain denied before dr
     ),
   ).rejects.toThrow();
   expect(h.drafts).toHaveLength(0);
+});
+
+it.each([
+  { lat: 25.0478, lng: 121.517, status: "not_serviceable" },
+  { lat: 25.0338, lng: 121.5645, status: "manual_review" },
+])(
+  "A2 real service-area $status survives tool qualification without creating a draft or confirmation",
+  async ({ lat, lng, status }) => {
+    const h = await harness({ lat, lng });
+    const result = await h.ports.execute(
+      { name: "check_booking_eligibility", args: {} },
+      h.context,
+    );
+    expect(result).toMatchObject({
+      status,
+      reason:
+        "Service-area review must be resolved before autonomous booking or dispatch.",
+    });
+    await expect(
+      h.ports.execute(
+        { name: "prepare_booking_readback", args: {} },
+        h.context,
+      ),
+    ).rejects.toMatchObject({ code: "VOICE_SERVICE_AREA_REVIEW_REQUIRED" });
+    expect(h.drafts).toHaveLength(0);
+    expect(h.confirmations).toHaveLength(0);
+  },
+);
+
+it("A2 preserves the real qualifier's conditional passenger-capacity refusal from the current durable candidate", async () => {
+  const h = await harness();
+  const content = h.content as { slots: Record<string, unknown> };
+  content.slots.passengerCount = {
+    ...h.content.slots.time,
+    candidate: "5",
+    normalizedValue: null,
+  };
+  await expect(
+    h.ports.execute({ name: "prepare_booking_readback", args: {} }, h.context),
+  ).rejects.toMatchObject({ code: "BOOKING_REQUIREMENTS_UNSUPPORTED" });
+  expect(h.drafts).toHaveLength(0);
+  expect(h.confirmations).toHaveLength(0);
+});
+
+it("F1 actual first-party HTTP client -> controller -> original gateway -> durable roles/qualifier/immutable draft/readback across canonical snake wire", async () => {
+  const h = await harness();
+  const guard = {
+    authenticate: async () => ({
+      voiceSessionId: "session",
+      resourceScopeId: "scope",
+      routeProfileVersion: 1,
+      leaseEpoch: 1,
+      scopes: ["session_execute"],
+    }),
+  };
+  const controller = new VoiceBookingController(
+    {} as never,
+    {} as never,
+    undefined,
+    undefined,
+    guard as never,
+    h.sessions as never,
+    h.repository,
+    {} as never,
+    {} as never,
+    undefined,
+    h.geo as never,
+    undefined,
+    h.contacts,
+    new VoiceSessionRepository(h.db as never),
+    h.draftsService,
+    h.confirmation,
+  );
+  const client = new VoiceApiClient(
+    {
+      baseUrl: "https://firstparty.example.test",
+      fetchImpl: async (raw, init) => {
+        expect(String(raw)).toContain(
+          "/callcenter/voice/sessions/session/handoffs",
+        );
+        const result = await controller.requestHandoff(
+          "session",
+          { authorization: new Headers(init?.headers).get("authorization")! },
+          JSON.parse(String(init?.body)),
+        );
+        return Response.json(deepToSnakeCase(result));
+      },
+    },
+    { getToken: async () => "SIM-workload-identity" },
+  );
+  const response = await client.requestHandoff("session", "SIM-capability", {
+    inputEpoch: 1,
+    output: {
+      intent: "book",
+      text: "",
+      slots: [],
+      tools: [
+        { name: "check_booking_eligibility", args: {} },
+        { name: "prepare_booking_readback", args: {} },
+      ],
+      usage: { inputTokens: null, outputTokens: null },
+      terminal: "tool_required",
+    },
+  });
+  expect(response.results[0]).toMatchObject({ status: "serviceable" });
+  expect(response.results[1]).toMatchObject({
+    playbackTaskId: expect.any(String),
+    draftVersion: 1,
+    confirmation: {
+      readbackPlaybackId: expect.any(String),
+      templateVersion: "zh-TW-booking-v1",
+    },
+  });
+  expect(h.contactRows).toHaveLength(5);
+  expect(h.drafts).toHaveLength(1);
+  expect(h.confirmations).toHaveLength(1);
 });

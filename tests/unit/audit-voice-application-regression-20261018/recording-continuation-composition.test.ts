@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import { expect, it } from "vitest";
 import {
   RecordingContinuation,
@@ -13,11 +14,20 @@ import {
   SandboxTextToSpeechAdapter,
 } from "../../../apps/voice-media-worker/src/media-provider";
 import { VoiceApiClient } from "../../../apps/voice-media-worker/src/server/voice-api-client";
-import { VoiceBookingRepository } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
+import { resolve } from "node:path";
+import { sourceModuleLoader } from "./source-module-loader";
+import { VoiceBookingRepository as CurrentRepository } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { VoiceBookingController } from "../../../apps/api/src/modules/voice-booking/voice-booking.controller";
 import { FirstPartyVoiceMediaRecordingAdapter } from "../../../apps/api/src/modules/voice-booking/voice-media-recording.adapter";
 import type { VoiceRecordingContinuationEvent } from "@drts/contracts";
 
+const VoiceBookingRepository = process.env.VOICE_ORIGINAL_REF
+  ? sourceModuleLoader({}, [
+      "apps/api/src/modules/voice-booking/voice-booking.repository.ts",
+    ])<{ VoiceBookingRepository: typeof CurrentRepository }>(
+      resolve("apps/api/src/modules/voice-booking/voice-booking.repository.ts"),
+    ).VoiceBookingRepository
+  : CurrentRepository;
 const scope = {
   brandId: "SIM-brand",
   callId: "call-1",
@@ -109,7 +119,7 @@ async function harness() {
                 JSON.parse(String(init.body)),
               )
             : await controller.getRecordingEvents(session);
-        return Response.json(result);
+        return Response.json(deepToSnakeCase(result));
       },
     },
     { getToken: async () => "SIM-workload-identity" },
@@ -320,4 +330,37 @@ it("F2: missing outbound coverage cannot journal a closure or enqueue finalizati
     } as VoiceRecordingContinuationEvent),
   ).rejects.toThrow(/payload_conflict/);
   expect(h.rows).toHaveLength(1);
+});
+
+it("F2: recorder closure joins the original close work with compatible payload and rejects a changed recording identity", async () => {
+  const h = await harness();
+  h.work.push({
+    voice_session_id: "session-1",
+    dedupe_key: "finalize_recording:ai:session-1",
+    work_type: "finalize_recording",
+    payload_ref: JSON.stringify({
+      voiceSessionId: "session-1",
+      brandId: scope.brandId,
+      callId: scope.callId,
+      recordingId: null,
+      closedAt: new Date().toISOString(),
+    }),
+  });
+  await h.fork("inbound");
+  await h.fork("outbound");
+  await h.checkpoint();
+  await h.close();
+  expect(h.work).toHaveLength(1);
+  expect(h.work[0]!.dedupe_key).toBe("finalize_recording:ai:session-1");
+  const closure = h.rows.find((e) => e.kind === "closure")!;
+  h.work[0]!.payload_ref = JSON.stringify({
+    voiceSessionId: "session-1",
+    ...scope,
+  });
+  await expect(
+    h.journal.append("session-1", {
+      ...closure,
+      scope: { ...scope, recordingId: "other-recording" },
+    }),
+  ).rejects.toThrow(/work_payload_conflict|identity/);
 });

@@ -19,6 +19,8 @@ import {
   type DialogueSnapshotEncryptionKey,
 } from "./voice-dialogue-snapshot-crypto";
 
+import { VoiceRetentionService } from "./voice-retention.service";
+
 export type ContactRole =
   | "caller"
   | "booker"
@@ -51,6 +53,7 @@ export interface ContactRevision {
 export interface VoiceContactState {
   voiceSessionId: string;
   assertedCallerPhone: string;
+  retentionExpiresAt?: string;
   bookerContact: ContactInfo;
   passengerContact: ContactInfo;
   driverContactRole: "booker" | "passenger";
@@ -144,6 +147,8 @@ export class VoiceContactService {
 
   constructor(
     @Optional() private readonly sessionRepository?: VoiceSessionRepository,
+    @Optional()
+    private readonly retentionService: VoiceRetentionService = new VoiceRetentionService(),
   ) {}
 
   /**
@@ -198,7 +203,19 @@ export class VoiceContactService {
     revision: ContactRevision,
     key: DialogueSnapshotEncryptionKey,
     tx: VoiceQueryExecutor,
-  ): Promise<void> {
+  ): Promise<string> {
+    const session = await this.sessionRepository!.findSessionById(
+      voiceSessionId,
+      tx,
+    );
+    if (!session) throw new Error("voice_contact_session_missing");
+    const retention = this.contactRetention(voiceSessionId, session.createdAt);
+    if (retention.isExpired)
+      throw new ApiRequestError(
+        410,
+        "VOICE_CONTACT_RETENTION_EXPIRED",
+        "The original session contact retention period has expired.",
+      );
     const encrypted = encryptDialogueSnapshotContent(
       { phone: revision.phone },
       key,
@@ -222,9 +239,38 @@ export class VoiceContactService {
         reason: revision.reason,
         roleSource: revision.roleSource,
         replacedRevision: revision.replacedRevision,
+        retentionExpiresAt: retention.expiresAt,
       },
       tx,
     );
+    return retention.expiresAt;
+  }
+
+  private contactRetention(voiceSessionId: string, createdAt: string) {
+    return this.retentionService.evaluateRecordRetention({
+      family: "voice_booking_evidence",
+      subjectRef: voiceSessionId,
+      createdAt,
+    });
+  }
+
+  /** Same operational entry as the existing dialogue snapshot purge: no
+   * scheduler, public endpoint or independent permission mechanism. */
+  async purgeExpiredContactRevisions(operatorId: string, dryRun = true) {
+    const policy = this.retentionService.assertRetentionDefined(
+      "voice_booking_evidence",
+    );
+    if (!this.isDbBacked())
+      throw new Error("voice_contact_persistence_required");
+    const result =
+      await this.sessionRepository!.purgeExpiredContactRoleRevisions({
+        operatorId,
+        dryRun,
+        retentionDays: policy.hotRetentionDays,
+        policyVersion: this.retentionService.getPolicyCatalog().version,
+      });
+    if (!dryRun) this.states.clear();
+    return result;
   }
 
   private decryptRevisionPhone(row: ContactRoleRevisionRow): string {
@@ -267,10 +313,12 @@ export class VoiceContactService {
     voiceSessionId: string,
     executor?: VoiceQueryExecutor,
   ): Promise<VoiceContactState | undefined> {
-    const rows = await this.sessionRepository!.listContactRoleRevisions(
-      voiceSessionId,
-      executor,
-    );
+    const rows = (
+      await this.sessionRepository!.listContactRoleRevisions(
+        voiceSessionId,
+        executor,
+      )
+    ).filter((row) => Date.parse(row.retentionExpiresAt) > Date.now());
     if (rows.length === 0) return undefined;
 
     const revisions: ContactRevision[] = rows.map((row) => ({
@@ -339,6 +387,7 @@ export class VoiceContactService {
     const state: VoiceContactState = {
       voiceSessionId,
       assertedCallerPhone: callerRev.phone,
+      retentionExpiresAt: rows[0]!.retentionExpiresAt,
       bookerContact: { name: bookerRev.name, phone: bookerRev.phone },
       passengerContact: { name: passengerRev.name, phone: passengerRev.phone },
       driverContactRole,
@@ -374,7 +423,10 @@ export class VoiceContactService {
   ): Promise<EffectiveContactsResult | null> {
     if (this.isDbBacked()) {
       const fresh = await this.coldReconstructState(voiceSessionId, executor);
-      if (!fresh) return null;
+      if (!fresh) {
+        if (!executor) this.states.delete(voiceSessionId);
+        return null;
+      }
       if (!executor) this.states.set(voiceSessionId, fresh);
       return this.projectContacts(fresh);
     }
@@ -410,10 +462,20 @@ export class VoiceContactService {
       try {
         candidate = JSON.parse(slot.normalizedValue ?? slot.candidate);
       } catch {
-        continue;
+        throw new ApiRequestError(
+          400,
+          "VOICE_CONTACT_CANDIDATE_INVALID",
+          "Contact selection must contain typed name and phone data.",
+        );
       }
       const parsed = voiceDialogueContactCandidateSchema.safeParse(candidate);
-      if (parsed.success) changes.push({ role, contact: parsed.data });
+      if (!parsed.success)
+        throw new ApiRequestError(
+          400,
+          "VOICE_CONTACT_CANDIDATE_INVALID",
+          "Contact selection must contain typed name and phone data.",
+        );
+      changes.push({ role, contact: parsed.data });
     }
     if (!changes.length) return;
     if (!this.isDbBacked())
@@ -501,10 +563,12 @@ export class VoiceContactService {
     executor?: VoiceQueryExecutor,
   ): Promise<ContactRevision | null> {
     if (!this.isDbBacked()) return null;
-    const rows = await this.sessionRepository!.listContactRoleRevisions(
-      voiceSessionId,
-      executor,
-    );
+    const rows = (
+      await this.sessionRepository!.listContactRoleRevisions(
+        voiceSessionId,
+        executor,
+      )
+    ).filter((row) => Date.parse(row.retentionExpiresAt) > Date.now());
     const row = rows.find((r) => r.revisionNumber === revisionNumber);
     if (!row) return null;
     return {
@@ -725,7 +789,12 @@ export class VoiceContactService {
     if (tx) {
       const key = this.requireEncryptionKey();
       for (const revision of revisions)
-        await this.persistRevision(input.voiceSessionId, revision, key, tx);
+        state.retentionExpiresAt = await this.persistRevision(
+          input.voiceSessionId,
+          revision,
+          key,
+          tx,
+        );
     } else {
       this.states.set(input.voiceSessionId, state);
     }
@@ -1114,6 +1183,18 @@ export class VoiceContactService {
       );
     }
 
+    if (
+      this.isDbBacked() &&
+      (!state.retentionExpiresAt ||
+        Date.parse(state.retentionExpiresAt) <= Date.now())
+    ) {
+      this.states.delete(voiceSessionId);
+      throw new ApiRequestError(
+        410,
+        "VOICE_CONTACT_RETENTION_EXPIRED",
+        "Contact retention period has expired.",
+      );
+    }
     return this.projectContacts(state);
   }
 
@@ -1198,6 +1279,18 @@ export class VoiceContactService {
       );
     }
 
+    if (
+      this.isDbBacked() &&
+      (!state.retentionExpiresAt ||
+        Date.parse(state.retentionExpiresAt) <= Date.now())
+    ) {
+      this.states.delete(voiceSessionId);
+      throw new ApiRequestError(
+        410,
+        "VOICE_CONTACT_RETENTION_EXPIRED",
+        "Contact retention period has expired.",
+      );
+    }
     if (role) {
       return state.revisions
         .filter((r) => r.role === role)

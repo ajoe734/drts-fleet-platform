@@ -1,5 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { VoiceContactService } from "../../../apps/api/src/modules/voice-booking/voice-contact.service";
+import { randomUUID, randomBytes } from "node:crypto";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { VoiceCallbackService } from "../../../apps/api/src/modules/voice-booking/voice-callback.service";
 import { VoiceBookingRepository } from "../../../apps/api/src/modules/voice-booking/voice-booking.repository";
 import { VoiceBookingCommandService } from "../../../apps/api/src/modules/voice-booking/voice-booking-command.service";
@@ -336,6 +345,459 @@ describe.skipIf(!hostedPaymentEnabled)(
       expect(replay.replayed).toBe(true);
       expect(replay.task).toEqual(first.task);
       expect(replay.receipt).toEqual(first.receipt);
+    });
+
+    it("original Voice F4-F8: two real repositories serialize contact initialization/revisions and preserve sealed original/replacement callbacks after restart", async () => {
+      const previousKey = process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY,
+        previousVersion = process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+      process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION =
+        "voice-contact-hosted-fixture";
+      process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+        randomBytes(32).toString("base64");
+      try {
+        const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+        const session = fixture.request.voiceSessionId;
+        const repoA = new VoiceSessionRepository(h.database),
+          repoB = new VoiceSessionRepository(h.peerDatabase());
+        const a = new VoiceContactService(repoA),
+          b = new VoiceContactService(repoB);
+        const initial = {
+          voiceSessionId: session,
+          callerPhone: "0911000111",
+          bookerName: "A",
+          passengerName: "B",
+          passengerPhone: "0922000222",
+          isSelfBooking: false,
+          consentRef: "SIM-explicit-consent-A",
+        };
+        await Promise.all([
+          a.initializeContacts(initial),
+          b.initializeContacts(initial),
+        ]);
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT revision_number FROM voice.contact_role_revision WHERE voice_session_id = $1 ORDER BY revision_number",
+              [session],
+            )
+          ).rows.map((row) => row.revision_number),
+        ).toEqual([1, 2, 3, 4, 5]);
+        await h.pool!.query(
+          `CREATE FUNCTION voice.contact_test_refusal() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.reason='SIM-failed-revision' THEN RAISE EXCEPTION 'SIM-contact-transaction-refusal'; END IF; RETURN NEW; END $$`,
+        );
+        await h.pool!.query(
+          `CREATE TRIGGER contact_test_refusal AFTER INSERT ON voice.contact_role_revision FOR EACH ROW EXECUTE FUNCTION voice.contact_test_refusal()`,
+        );
+        const correction = {
+          voiceSessionId: session,
+          role: "booker" as const,
+          name: "A",
+          phone: "0911000111",
+          consentRef: "SIM-explicit-consent-A",
+          reason: "SIM-failed-revision",
+        };
+        try {
+          await expect(a.updateContactRole(correction)).rejects.toThrow(
+            "SIM-contact-transaction-refusal",
+          );
+          expect(
+            (
+              await h.pool!.query(
+                "SELECT COUNT(*)::integer AS n FROM voice.contact_role_revision WHERE voice_session_id=$1",
+                [session],
+              )
+            ).rows[0].n,
+          ).toBe(5);
+          expect(a.getEffectiveContacts(session).bookerContact.name).toBe("A");
+        } finally {
+          await h.pool!.query(
+            "DROP TRIGGER contact_test_refusal ON voice.contact_role_revision",
+          );
+          await h.pool!.query("DROP FUNCTION voice.contact_test_refusal()");
+        }
+        expect(
+          (await a.updateContactRole(correction)).newRevision.revision,
+        ).toBe(6);
+        await b.getEffectiveContactsDurable(session);
+        await Promise.all([
+          a.updateContactRole({
+            voiceSessionId: session,
+            role: "booker",
+            name: "A corrected",
+            phone: "0933000333",
+            consentRef: "SIM-fresh-consent-A",
+            reason: "booker corrected",
+          }),
+          b.updateContactRole({
+            voiceSessionId: session,
+            role: "passenger",
+            name: "B corrected",
+            phone: "0944000444",
+            reason: "passenger corrected",
+          }),
+        ]);
+        const current = await b.getEffectiveContactsDurable(session);
+        expect(current?.bookerContact.phone).toBe("0933000333");
+        expect(current?.passengerContact.phone).toBe("0944000444");
+        const callbackA = new VoiceCallbackService(repoA, h.database, a),
+          callbackB = new VoiceCallbackService(
+            repoB,
+            h.peerDatabase(),
+            new VoiceContactService(repoB),
+          );
+        const input = {
+          voiceSessionId: session,
+          actionKey: "hosted-sealed-original",
+          contactRevisionNumber: current!.callbackRecipientRevisionNumber!,
+          consentRef: current!.callbackRecipientConsentRef!,
+        };
+        const original = await callbackA.createCallbackDurable(input);
+        await a.updateContactRole({
+          voiceSessionId: session,
+          role: "callbackRecipient",
+          name: "C",
+          phone: "0955000555",
+          consentRef: "SIM-fresh-consent-C",
+          reason: "default_role:passenger",
+        });
+        const cold = await new VoiceContactService(
+          repoB,
+        ).getEffectiveContactsDurable(session);
+        expect(cold?.callbackRecipient).toEqual({
+          name: "C",
+          phone: "0955000555",
+        });
+        const replay = await callbackB.createCallbackDurable(input);
+        expect(replay.receipt).toEqual(original.receipt);
+        expect(replay.replayed).toBe(true);
+        expect(replay.task).toMatchObject({
+          contactName: "A corrected",
+          contactPhone: "0933000333",
+          consentRef: "SIM-fresh-consent-A",
+          contactRevisionNumber: input.contactRevisionNumber,
+        });
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT COUNT(*)::integer AS n FROM voice.callback_task_contact_binding WHERE task_id = $1",
+              [original.task.taskId],
+            )
+          ).rows[0].n,
+        ).toBe(1);
+        await callbackA.cancelCallbackDurable({
+          taskId: original.task.taskId,
+          operatorId: "SIM-operator",
+          expectedVersion: 1,
+          reason: "recipient replacement",
+        });
+        const replacement = await callbackB.createCallbackDurable({
+          voiceSessionId: session,
+          actionKey: "hosted-sealed-replacement",
+          contactRevisionNumber: cold!.callbackRecipientRevisionNumber!,
+          consentRef: "SIM-fresh-consent-C",
+          replacesTaskId: original.task.taskId,
+        });
+        expect(replacement.task).toMatchObject({
+          contactPhone: "0955000555",
+          replacesTaskId: original.task.taskId,
+        });
+        expect(
+          (await callbackA.getTaskForRead(original.task.taskId))?.contactPhone,
+        ).toBe("0933000333");
+        await expect(
+          h.pool!.query(
+            "UPDATE voice.contact_role_revision SET name = 'tamper' WHERE voice_session_id = $1",
+            [session],
+          ),
+        ).rejects.toThrow();
+        await expect(
+          h.pool!.query(
+            "DELETE FROM voice.callback_task_contact_binding WHERE task_id = $1",
+            [original.task.taskId],
+          ),
+        ).rejects.toThrow();
+      } finally {
+        if (previousKey === undefined)
+          delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+        else process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY = previousKey;
+        if (previousVersion === undefined)
+          delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+        else process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = previousVersion;
+      }
+    });
+
+    it("original C retention: finite session expiry, actual legal-hold-aware dry-run/apply and immutable receipt preservation on PostgreSQL", async () => {
+      const priorKey = process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY,
+        priorVersion = process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+      process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "SIM-retention-key";
+      process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+        randomBytes(32).toString("base64");
+      const clock = Date.now;
+      try {
+        const f = await seedVoiceDispatchWorkFixture(h.pool!);
+        const session = f.request.voiceSessionId;
+        const old = new Date(clock() - 100 * 86400000).toISOString();
+        await h.pool!.query(
+          "UPDATE voice.session SET created_at=$2 WHERE voice_session_id=$1",
+          [session, old],
+        );
+        const repo = new VoiceSessionRepository(h.database),
+          contacts = new VoiceContactService(repo);
+        const historicalClock = vi
+          .spyOn(Date, "now")
+          .mockReturnValue(Date.parse(old));
+        try {
+          await contacts.initializeContacts({
+            voiceSessionId: session,
+            callerPhone: "0911000111",
+          });
+        } finally {
+          historicalClock.mockRestore();
+        }
+        expect(await contacts.getEffectiveContactsDurable(session)).toBeNull();
+        await expect(
+          contacts.initializeContacts({
+            voiceSessionId: session,
+            callerPhone: "0911000111",
+          }),
+        ).rejects.toMatchObject({ code: "VOICE_CONTACT_RETENTION_EXPIRED" });
+        const legacy = await new VoiceCallbackService(
+          undefined,
+          h.database,
+        ).createCallbackDurable({
+          voiceSessionId: session,
+          contactPhoneEncrypted: "SIM-existing-task-envelope",
+          contactPhoneLookupToken: "SIM-existing-task-lookup",
+          consentSnapshotHash: "SIM-explicit-consent",
+          reason: "SIM historical callback",
+        });
+        await repo.insertCallbackTaskContactBinding(
+          legacy.task.taskId,
+          session,
+          2,
+          "SIM-historical-binding",
+        );
+        const before = (
+          await h.pool!.query(
+            "SELECT * FROM voice.callback_task WHERE task_id=$1",
+            [legacy.task.taskId],
+          )
+        ).rows[0];
+        const original = await repo.findSessionById(session);
+        await new VoiceSessionService(repo).closeSession(
+          session,
+          original!.sessionVersion,
+        );
+        await h.pool!.query(
+          "INSERT INTO voice.legal_hold(case_number,evidence_family,subject_ref,reason_code,placed_by) VALUES ('SIM-retention-case','voice_booking_evidence',$1,'internal_investigation','SIM-operator')",
+          [session],
+        );
+        expect(
+          await contacts.purgeExpiredContactRevisions("SIM-operator", false),
+        ).toMatchObject({ deletedRevisions: 0, deletedBindings: 0 });
+        await h.pool!.query(
+          "UPDATE voice.legal_hold SET status='released' WHERE subject_ref=$1",
+          [session],
+        );
+        expect(
+          await contacts.purgeExpiredContactRevisions("SIM-operator", true),
+        ).toMatchObject({
+          examinedSessions: 1,
+          deletedRevisions: 0,
+          deletedBindings: 0,
+        });
+        expect(
+          await contacts.purgeExpiredContactRevisions("SIM-operator", false),
+        ).toMatchObject({ deletedRevisions: 5, deletedBindings: 1 });
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT * FROM voice.callback_task WHERE task_id=$1",
+              [legacy.task.taskId],
+            )
+          ).rows[0],
+        ).toEqual(before);
+        expect(
+          (
+            await h.pool!.query(
+              "SELECT details FROM voice.retention_execution_log WHERE details->>'kind'='contact_role_revision'",
+            )
+          ).rows,
+        ).toHaveLength(3);
+        expect(await contacts.getEffectiveContactsDurable(session)).toBeNull();
+        await expect(
+          contacts.initializeContacts({
+            voiceSessionId: session,
+            callerPhone: "0911000111",
+          }),
+        ).rejects.toMatchObject({ code: "VOICE_CONTACT_RETENTION_EXPIRED" });
+      } finally {
+        if (priorKey === undefined)
+          delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+        else process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY = priorKey;
+        if (priorVersion === undefined)
+          delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+        else process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = priorVersion;
+      }
+    });
+
+    it("original F2: actual finalization before control close stays finalized with one original work item", async () => {
+      const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+      const repository = new VoiceBookingRepository(h.database),
+        session = fixture.request.voiceSessionId;
+      const scope = {
+        brandId: fixture.authority.brandId,
+        callId: fixture.callId,
+        recordingId: "SIM-late-close-recording",
+        legId: "SIM-late-close-leg",
+      };
+      const endedAt = new Date(Date.now() - 1000).toISOString();
+      await repository.appendRecordingContinuation(session, {
+        kind: "closure",
+        eventKey: "closure",
+        scope,
+        payload: {
+          endMs: 1000,
+          endedAt,
+          closedEventId: "SIM-late-close-event",
+          checkpointRefs: [],
+        },
+      });
+      const commands = new VoiceBookingCommandService(
+        repository,
+        fixture.makeEvidence(repository) as never,
+        fixture.products as never,
+        fixture.areas as never,
+        fixture.access,
+      );
+      const runner = new VoiceCommandRunnerService(
+        commands,
+        new OwnedMobilityRepository(h.database),
+        undefined,
+        undefined,
+        undefined,
+        {
+          async finalizeRecording(params) {
+            const durableAt = new Date().toISOString();
+            return {
+              recordingId: params.scope.recordingId,
+              scope: { ...params.scope, legId: params.scope.legId! },
+              manifestRef: {
+                objectKey: "SIM/late-close-manifest",
+                objectVersion: "SIM-late-close-version",
+                checksum: "a".repeat(64),
+                byteLength: 128,
+                durableAt,
+              },
+              coverage: {
+                startMs: 0,
+                endMs: 1000,
+                endedAt,
+                closedEventId: "SIM-late-close-event",
+                channels: ["inbound", "outbound"],
+              },
+              verifiedAt: durableAt,
+            };
+          },
+        },
+      );
+      expect(
+        await runner.runOnce({ supportedTypes: ["finalize_recording"] }),
+      ).toMatchObject({ success: true });
+      const sessions = new VoiceSessionRepository(h.peerDatabase()),
+        original = await sessions.findSessionById(session);
+      expect(original?.recordingState).toBe("finalized");
+      const closed = await new VoiceSessionService(sessions).closeSession(
+        session,
+        original!.sessionVersion,
+      );
+      expect(closed).toMatchObject({
+        dialogState: "closed",
+        recordingState: "finalized",
+      });
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT status FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'",
+            [session],
+          )
+        ).rows,
+      ).toEqual([{ status: "completed" }]);
+      expect(
+        await runner.runOnce({ supportedTypes: ["finalize_recording"] }),
+      ).toBeNull();
+    });
+
+    it("original Voice B V0125: real session-locked event replay/conflict and finalize work survive two instances without consuming control watermarks", async () => {
+      const fixture = await seedVoiceDispatchWorkFixture(h.pool!);
+      const session = fixture.request.voiceSessionId;
+      const a = new VoiceBookingRepository(h.database),
+        b = new VoiceBookingRepository(h.peerDatabase());
+      const before = await a.findSessionById(session);
+      const scope = {
+        brandId: fixture.authority.brandId,
+        callId: fixture.callId,
+        recordingId: "SIM-recording-1",
+        legId: "SIM-recording-leg-1",
+      };
+      const event = {
+        kind: "closure" as const,
+        eventKey: "closure",
+        scope,
+        payload: {
+          closedEventId: "SIM-authoritative-close",
+          endMs: 1000,
+          endedAt: new Date().toISOString(),
+          checkpointRefs: [],
+        },
+      };
+      const [first, replayed] = await Promise.all([
+        a.appendRecordingContinuation(session, event),
+        b.appendRecordingContinuation(session, event),
+      ]);
+      expect(first).toEqual(replayed);
+      expect(await b.readRecordingContinuation(session, scope)).toEqual([
+        event,
+      ]);
+      const tasks = await h.pool!.query(
+        "SELECT * FROM voice.work_item WHERE voice_session_id = $1 AND work_type = 'finalize_recording'",
+        [session],
+      );
+      expect(tasks.rows).toHaveLength(1);
+      await expect(
+        b.appendRecordingContinuation(session, {
+          ...event,
+          payload: { ...event.payload, endMs: 2000 },
+        }),
+      ).rejects.toThrow("voice_recording_event_payload_conflict");
+      expect(await a.readRecordingContinuation(session, scope)).toEqual([
+        event,
+      ]);
+      const after = await b.findSessionById(session);
+      expect(after?.lastAppliedControlSequence).toBe(
+        before?.lastAppliedControlSequence,
+      );
+      expect(after?.inputEpoch).toBe(before?.inputEpoch);
+      expect(after?.sessionVersion).toBe(before?.sessionVersion);
+      const sessionStore = new VoiceSessionRepository(h.database);
+      await new VoiceSessionService(sessionStore).closeSession(
+        session,
+        after!.sessionVersion,
+      );
+      expect(
+        (
+          await h.pool!.query(
+            "SELECT work_id FROM voice.work_item WHERE voice_session_id=$1 AND work_type='finalize_recording'",
+            [session],
+          )
+        ).rows,
+      ).toHaveLength(1);
+      await expect(
+        h.pool!.query(
+          "DELETE FROM voice.recording_continuation_event WHERE voice_session_id = $1",
+          [session],
+        ),
+      ).rejects.toThrow();
     });
   },
 );

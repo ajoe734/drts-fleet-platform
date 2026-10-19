@@ -5,7 +5,6 @@ import { VoiceContactService as CurrentVoiceContactService } from "../../../apps
 import type {
   ContactRoleRevisionRow,
   InsertContactRoleRevisionInput,
-  VoiceQueryExecutor,
   VoiceSessionRepository,
 } from "../../../apps/api/src/modules/voice-booking/voice-session.repository";
 
@@ -33,7 +32,7 @@ const VoiceContactService = process.env.VOICE_ORIGINAL_REF
 
 const VOICE_SESSION_ID = "66666666-6666-4666-8666-666666666666";
 
-function fakeContactRepository() {
+function fakeContactRepository(createdAt = new Date().toISOString()) {
   const rows: ContactRoleRevisionRow[] = [];
   const invalidateUnconsumed = vi.fn(async () => null);
   const rebindCalls: Array<{
@@ -85,7 +84,7 @@ function fakeContactRepository() {
     // only checks this is non-null (the session exists) before reading
     // revisions under its lock -- the real column values are irrelevant to
     // this fixture's `rows`-backed revision ledger.
-    findSessionById: vi.fn(async () => ({}) as never),
+    findSessionById: vi.fn(async () => ({ createdAt }) as never),
     insertContactRoleRevision: vi.fn(
       async (
         input: InsertContactRoleRevisionInput,
@@ -104,6 +103,7 @@ function fakeContactRepository() {
           reason: input.reason,
           roleSource: input.roleSource,
           replacedRevision: input.replacedRevision,
+          retentionExpiresAt: input.retentionExpiresAt,
           createdAt: new Date().toISOString(),
         };
         rows.push(row);
@@ -470,6 +470,92 @@ it("F6: concurrent production-service initialization serializes before allocatin
       true,
     );
   } finally {
+    delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+    delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+  }
+});
+
+it("F6: failed invalidation rolls back both revision and in-memory state; retry uses the original next revision", async () => {
+  process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+  process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+    randomBytes(32).toString("base64");
+  try {
+    const { repo, rows, invalidateUnconsumed } = fakeContactRepository();
+    const service = new VoiceContactService(repo);
+    await service.initializeContacts({
+      voiceSessionId: VOICE_SESSION_ID,
+      callerPhone: "0911000111",
+    });
+    invalidateUnconsumed.mockRejectedValueOnce(
+      new Error("SIM-transaction-refusal"),
+    );
+    const correction = {
+      voiceSessionId: VOICE_SESSION_ID,
+      role: "booker" as const,
+      name: "A corrected",
+      phone: "0922000222",
+      reason: "correction",
+    };
+    await expect(service.updateContactRole(correction)).rejects.toThrow(
+      "SIM-transaction-refusal",
+    );
+    expect(rows).toHaveLength(5);
+    expect(
+      service.getEffectiveContacts(VOICE_SESSION_ID).bookerContact.phone,
+    ).toBe("0911000111");
+    const retry = await service.updateContactRole(correction);
+    expect(retry.newRevision.revision).toBe(6);
+    expect(rows.map((row) => row.revisionNumber)).toEqual([
+      1, 2, 3, 4, 5, 6, 7,
+    ]); // automatic driver pointer is its own immutable revision
+  } finally {
+    delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+    delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+  }
+});
+
+it("C retention: every revision keeps the original session expiry; expired durable/cached reads and reinitialization cannot renew or expose contact content", async () => {
+  vi.useFakeTimers().setSystemTime(new Date("2026-10-19T00:00:00Z"));
+  process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+  process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+    randomBytes(32).toString("base64");
+  try {
+    const { repo, rows } = fakeContactRepository();
+    const service = new VoiceContactService(repo);
+    const initial = {
+      voiceSessionId: VOICE_SESSION_ID,
+      callerPhone: "0911000111",
+    };
+    await service.initializeContacts(initial);
+    const expiry = rows[0]!.retentionExpiresAt;
+    expect(Number.isFinite(Date.parse(expiry))).toBe(true);
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000);
+    await service.updateContactRole({
+      ...initial,
+      role: "booker",
+      name: "A corrected",
+      phone: "0922000222",
+      reason: "correction",
+    });
+    expect(rows.every((row) => row.retentionExpiresAt === expiry)).toBe(true);
+    vi.setSystemTime(new Date(Date.parse(expiry) + 1));
+    expect(() => service.getEffectiveContacts(VOICE_SESSION_ID)).toThrowError(
+      expect.objectContaining({ code: "VOICE_CONTACT_RETENTION_EXPIRED" }),
+    );
+    expect(
+      await service.getEffectiveContactsDurable(VOICE_SESSION_ID),
+    ).toBeNull();
+    expect(
+      await service.getContactRevisionByNumber(VOICE_SESSION_ID, 1),
+    ).toBeNull();
+    await expect(service.initializeContacts(initial)).rejects.toMatchObject({
+      code: "VOICE_CONTACT_RETENTION_EXPIRED",
+    });
+    expect(rows.map((row) => row.revisionNumber)).toEqual([
+      1, 2, 3, 4, 5, 6, 7,
+    ]);
+  } finally {
+    vi.useRealTimers();
     delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
     delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
   }

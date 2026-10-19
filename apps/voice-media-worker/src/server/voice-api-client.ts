@@ -26,6 +26,24 @@ import type { WorkloadIdentityTokenSource } from "./workload-identity-token-sour
  * this client method exists so a future caller has a real seam to call
  * through rather than none at all.
  */
+/** apps/api's global SnakeCaseInterceptor emits canonical wire keys. Match
+ * the existing SDK's recursive response conversion before any typed worker
+ * consumer sees a session, snapshot, recording event or readback plan. Opaque
+ * values (ids, hashes, credentials and model strings) are never rewritten. */
+function fromVoiceApiWire(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(fromVoiceApiWire);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [
+        key.replace(/_([a-z])/g, (_match, letter: string) =>
+          letter.toUpperCase(),
+        ),
+        fromVoiceApiWire(nested),
+      ]),
+    );
+  return value;
+}
+
 export class VoiceApiError extends Error {
   constructor(
     readonly code: string,
@@ -623,6 +641,6 @@ export class VoiceApiClient {
       );
     }
 
-    return (parsed as { data: T }).data;
+    return fromVoiceApiWire((parsed as { data: unknown }).data) as T;
   }
 }

@@ -7,7 +7,7 @@
 -- reference. Root-reserved scope, see
 -- .local/passenger-bureau-gap-correction-20261018/Voice-C-V0122-exact-root-allocation-20261018/result.json.
 --
--- One row per revision, EVER (never updated, never deleted): `caller`,
+-- One row per revision (never updated; governed V0093 retention deletion only): `caller`,
 -- `booker` and `passenger` are seeded at session start (revisions 1-3),
 -- and `driverContact`/`callbackRecipient` custom overrides or role
 -- corrections append further revisions. `revision_number` is a SINGLE
@@ -74,11 +74,16 @@ CREATE TABLE IF NOT EXISTS voice.contact_role_revision (
   ),
   replaced_revision integer,
   created_at        timestamptz NOT NULL DEFAULT now(),
+  retention_expires_at timestamptz NOT NULL,
+  CHECK (isfinite(retention_expires_at)),
   UNIQUE (voice_session_id, revision_number)
 );
 
 CREATE INDEX IF NOT EXISTS idx_voice_contact_role_revision_session_role
   ON voice.contact_role_revision (voice_session_id, role, revision_number DESC);
+
+CREATE INDEX IF NOT EXISTS idx_voice_contact_role_revision_expiry
+  ON voice.contact_role_revision (retention_expires_at, voice_session_id);
 
 SELECT voice._make_append_only('voice.contact_role_revision');
 

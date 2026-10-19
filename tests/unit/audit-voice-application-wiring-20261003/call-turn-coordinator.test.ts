@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { createHash } from "node:crypto";
 import {
   VoiceCallTurnCoordinator,
   type VoiceCallTurnSpeaker,
@@ -482,7 +483,11 @@ describe("AUDIT-VOICE-APPLICATION-WIRING-20261003: VoiceCallTurnCoordinator", ()
     expect(speakCalls).toBe(1);
 
     const secondSpeaker = trackingSpeaker();
-    coordinator.handle(attachment, finalSegment("", "seg-second"), secondSpeaker);
+    coordinator.handle(
+      attachment,
+      finalSegment("", "seg-second"),
+      secondSpeaker,
+    );
 
     await new Promise((resolve) => setTimeout(resolve, 90));
     await flush();
@@ -610,8 +615,15 @@ function fakeBoundApiClient(binding: VoiceSessionBinding): {
     }),
   );
   const requestHandoff = vi.fn(
-    async (_sessionId: string, _token: string, command: { output: VoiceDialogueOutput }) => ({
-      results: command.output.tools.map(() => ({ status: "unavailable", handoffId: null })),
+    async (
+      _sessionId: string,
+      _token: string,
+      command: { output: VoiceDialogueOutput },
+    ) => ({
+      results: command.output.tools.map(() => ({
+        status: "unavailable",
+        handoffId: null,
+      })),
     }),
   );
   const apiClient = {
@@ -630,21 +642,27 @@ function fakeBoundApiClient(binding: VoiceSessionBinding): {
       },
       snapshot: null,
     })),
-    recordControlEvent: vi.fn(async (_sessionId: string, _token: string, command: { sequence: number }) => {
-      binding.sessionVersion += 1;
-      return {
-        deduped: false,
-        applied: true,
-        gap: false,
-        appliedThroughSequence: command.sequence,
-        session: {
-          voiceSessionId: binding.voiceSessionId,
-          sessionVersion: binding.sessionVersion,
-          inputEpoch: 1,
-          pendingInput: true,
-        },
-      };
-    }),
+    recordControlEvent: vi.fn(
+      async (
+        _sessionId: string,
+        _token: string,
+        command: { sequence: number },
+      ) => {
+        binding.sessionVersion += 1;
+        return {
+          deduped: false,
+          applied: true,
+          gap: false,
+          appliedThroughSequence: command.sequence,
+          session: {
+            voiceSessionId: binding.voiceSessionId,
+            sessionVersion: binding.sessionVersion,
+            inputEpoch: 1,
+            pendingInput: true,
+          },
+        };
+      },
+    ),
     resolveInput: vi.fn(
       async (
         _sessionId: string,
@@ -718,7 +736,9 @@ function boundProvider(output: VoiceDialogueOutput): VoiceDialogueProvider {
  * tests/unit/audit-voice-application-regression-20261018/.
  */
 describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018: VoiceCallTurnCoordinator executeTools generalized tool routing", () => {
-  function binding(overrides: Partial<VoiceSessionBinding> = {}): VoiceSessionBinding {
+  function binding(
+    overrides: Partial<VoiceSessionBinding> = {},
+  ): VoiceSessionBinding {
     return {
       voiceSessionId: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
       resourceScopeId: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
@@ -750,7 +770,10 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018: VoiceCallTurnCoordinator 
       apiClient,
     );
     const speaker = trackingSpeaker();
-    const attachment = coordinator.attach(sessionBinding.voiceSessionId, sessionBinding);
+    const attachment = coordinator.attach(
+      sessionBinding.voiceSessionId,
+      sessionBinding,
+    );
 
     coordinator.handle(attachment, finalSegment("台北車站"), speaker);
     await flush();
@@ -761,7 +784,9 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018: VoiceCallTurnCoordinator 
       resolveLocationOutput.tools,
     );
     const scopedCall = issueCapability.mock.calls.find((call) =>
-      (call[0] as { scopes: readonly string[] }).scopes.includes("address_resolve"),
+      (call[0] as { scopes: readonly string[] }).scopes.includes(
+        "address_resolve",
+      ),
     );
     expect(scopedCall).toBeDefined();
   });
@@ -788,7 +813,10 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018: VoiceCallTurnCoordinator 
       apiClient,
     );
     const speaker = trackingSpeaker();
-    const attachment = coordinator.attach(sessionBinding.voiceSessionId, sessionBinding);
+    const attachment = coordinator.attach(
+      sessionBinding.voiceSessionId,
+      sessionBinding,
+    );
 
     coordinator.handle(attachment, finalSegment("確認叫車"), speaker);
     await flush();
@@ -797,4 +825,70 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018: VoiceCallTurnCoordinator 
     expect(requestHandoff.mock.calls[0]?.[2].output).toEqual(readbackOutput);
     expect(speaker.calls).toHaveLength(0);
   });
+  it.each([false, true])(
+    "F1 controlled readback uses the complete server plan and denies a mismatched playback identity (mismatch=%s)",
+    async (mismatch) => {
+      const sessionBinding = binding({
+        voiceSessionId: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        resourceScopeId: "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      });
+      const { apiClient, requestHandoff } = fakeBoundApiClient(sessionBinding);
+      const script =
+        "SIM server qualified readback: A books for B; press 1 to confirm.";
+      const plan = {
+        script,
+        playbackTaskId: mismatch ? "wrong-playback" : "server-playback",
+        draftVersion: 1,
+        confirmation: {
+          confirmationId: "server-confirmation",
+          readbackPlaybackId: "server-playback",
+          snapshotHash: "server-snapshot",
+          script,
+          readbackScriptHash: createHash("sha256").update(script).digest("hex"),
+          templateVersion: "zh-TW-booking-v1",
+          expectedDigit: "1",
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+        },
+      };
+      requestHandoff.mockImplementation(
+        async () => ({ results: [plan] }) as never,
+      );
+      const output: VoiceDialogueOutput = {
+        intent: "book",
+        text: "model diagnostic must not replace readback",
+        slots: [],
+        tools: [{ name: "prepare_booking_readback", args: {} }],
+        usage: { inputTokens: null, outputTokens: null },
+        terminal: "tool_required",
+      };
+      const coordinator = new VoiceCallTurnCoordinator(
+        () => boundProvider(output),
+        undefined,
+        undefined,
+        true,
+        apiClient,
+      );
+      const speak = vi.fn(async () => {});
+      const attachment = coordinator.attach(
+        sessionBinding.voiceSessionId,
+        sessionBinding,
+      );
+      coordinator.handle(attachment, finalSegment("確認叫車"), {
+        speak,
+        currentMediaEpoch: () => 1,
+      });
+      await flush();
+      expect(requestHandoff).toHaveBeenCalledTimes(1);
+      if (mismatch) expect(speak).not.toHaveBeenCalled();
+      else
+        expect(speak).toHaveBeenCalledWith(
+          script,
+          "cmn-TW",
+          expect.any(AbortSignal),
+          1,
+          "server-playback",
+        );
+      coordinator.release(attachment);
+    },
+  );
 });

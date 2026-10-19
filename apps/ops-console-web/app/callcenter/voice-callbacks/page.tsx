@@ -286,7 +286,7 @@ export default function VoiceCallbacksPage() {
       if (!result.task) throw new Error("callback replacement result unknown");
       sessionStorage.removeItem(storageKey);
       setCurrentContacts(null);
-      await readQueue();
+      await readQueue(scope, status);
       await readDetail(result.task.taskId);
       setNotice(copy.saved);
     } catch {

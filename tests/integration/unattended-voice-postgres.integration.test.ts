@@ -147,6 +147,8 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       "V0106__voice_dialogue_snapshot.sql",
       "V0120__voice_callback_attempt_details.sql",
       "V0121__voice_callback_create_receipt.sql",
+      "V0122__voice_contact_role_revision.sql",
+      "V0125__voice_recording_continuation_event.sql",
     ]) {
       await pool.query(migration(name));
     }
