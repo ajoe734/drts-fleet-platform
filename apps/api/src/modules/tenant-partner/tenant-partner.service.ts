@@ -5141,19 +5141,33 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
     createInitialReferralRevenueShareRules();
 
-  listReferralRevenueShareRules(
+  async listReferralRevenueShareRules(
     entrySlug?: string,
-  ): ReferralRevenueShareRule[] {
+  ): Promise<ReferralRevenueShareRule[]> {
     const slug = entrySlug?.trim();
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      const entries =
+        await this.tenantPartnerRepository.loadReferralRateEntries(slug);
+      return entries.flatMap((entry) =>
+        (entry.referralRevenueShareRules ?? [])
+          .filter(
+            (rule) =>
+              rule.partnerEntrySlug === entry.entrySlug &&
+              rule.partnerId === entry.partnerId,
+          )
+          .map((rule) => ({ ...rule })),
+      );
+    }
+    // Deliberate noDB/demo mode; enabled persistence never uses this cache.
     return this.referralRevenueShareRules
       .filter((rule) => !slug || rule.partnerEntrySlug === slug)
       .map((rule) => ({ ...rule }));
   }
 
-  upsertReferralRevenueShareRule(
+  async upsertReferralRevenueShareRule(
     command: UpsertReferralRevenueShareRuleCommand,
     requestId?: string,
-  ): ReferralRevenueShareRule {
+  ): Promise<ReferralRevenueShareRule> {
     const partnerEntrySlug = this.requireNonBlank(
       command.partnerEntrySlug,
       "partnerEntrySlug",
@@ -5179,43 +5193,117 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const now = new Date().toISOString();
-    const existing = this.referralRevenueShareRules.find(
-      (rule) => rule.partnerEntrySlug === partnerEntrySlug,
-    );
-    const record: ReferralRevenueShareRule = {
-      ruleId: existing?.ruleId ?? `referral-rule-${randomUUID()}`,
-      partnerId:
-        this.normalizeNullableText(command.partnerId ?? null) ??
-        existing?.partnerId ??
-        `partner_${partnerEntrySlug}`,
-      partnerEntrySlug,
-      rateType: command.rateType,
-      value: command.value,
-      currency:
-        this.normalizeNullableText(command.currency ?? null) ??
-        existing?.currency ??
-        PLATFORM_CURRENCY,
-      effectiveFrom:
-        this.normalizeNullableText(command.effectiveFrom ?? null) ??
-        existing?.effectiveFrom ??
-        now,
-      effectiveUntil:
-        command.effectiveUntil === undefined
-          ? (existing?.effectiveUntil ?? null)
-          : this.normalizeNullableText(command.effectiveUntil),
-      settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
-      channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
-
-    if (existing) {
-      this.referralRevenueShareRules = this.referralRevenueShareRules.map(
-        (rule) => (rule.ruleId === record.ruleId ? record : rule),
+    let record!: ReferralRevenueShareRule;
+    let updatedExisting = false;
+    const update = (
+      entry: PartnerChannelEntryRecord | null,
+      rules: ReferralRevenueShareRule[],
+    ) => {
+      if (!entry)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "PARTNER_ENTRY_NOT_FOUND",
+          "The partner entry could not be found.",
+          { entrySlug: partnerEntrySlug },
+        );
+      if (entry.status === "revoked")
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "PARTNER_ENTRY_REVOKED",
+          "The partner entry has been revoked.",
+        );
+      if (!entry.activeFlag || entry.status !== "active")
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "PARTNER_ENTRY_INACTIVE",
+          "The partner entry is inactive and cannot be used.",
+        );
+      if (entry.partnerType !== "referral_channel")
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "PARTNER_SCOPE_UNSUPPORTED",
+          "The partner entry is not a referral channel.",
+        );
+      if (command.partnerId && command.partnerId.trim() !== entry.partnerId)
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "PARTNER_SCOPE_MISMATCH",
+          "The rate cannot be bound to another partner.",
+        );
+      const history = rules.filter(
+        (rule) =>
+          rule.partnerEntrySlug === partnerEntrySlug &&
+          rule.partnerId === entry.partnerId,
       );
+      const latest = [...history].sort(
+        (left, right) =>
+          new Date(right.effectiveFrom).getTime() -
+          new Date(left.effectiveFrom).getTime(),
+      )[0];
+      const now = new Date().toISOString();
+      const effectiveFrom =
+        this.normalizeNullableText(command.effectiveFrom ?? null) ??
+        latest?.effectiveFrom ??
+        now;
+      const existing = history.find(
+        (rule) =>
+          new Date(rule.effectiveFrom).getTime() ===
+          new Date(effectiveFrom).getTime(),
+      );
+      updatedExisting = Boolean(existing);
+      record = {
+        ruleId: existing?.ruleId ?? `referral-rule-${randomUUID()}`,
+        partnerId: entry.partnerId,
+        partnerEntrySlug,
+        rateType: command.rateType,
+        value: command.value,
+        currency:
+          this.normalizeNullableText(command.currency ?? null) ??
+          existing?.currency ??
+          latest?.currency ??
+          PLATFORM_CURRENCY,
+        effectiveFrom,
+        effectiveUntil:
+          command.effectiveUntil === undefined
+            ? (existing?.effectiveUntil ?? null)
+            : this.normalizeNullableText(command.effectiveUntil),
+        settlementDirection: REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+        channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      };
+      return [
+        ...history.filter((rule) => rule.ruleId !== existing?.ruleId),
+        record,
+      ];
+    };
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      try {
+        await this.tenantPartnerRepository.updateReferralRevenueShareRules(
+          partnerEntrySlug,
+          (entry) => update(entry, entry?.referralRevenueShareRules ?? []),
+        );
+      } catch (error) {
+        if (error instanceof ApiRequestError) throw error;
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "PARTNER_REFERRAL_RATE_PERSISTENCE_UNAVAILABLE",
+          "Referral rate persistence was not acknowledged.",
+          { partnerEntrySlug },
+          true,
+        );
+      }
     } else {
-      this.referralRevenueShareRules.push(record);
+      const history = update(
+        this.findPartnerEntryBySlug(partnerEntrySlug),
+        this.referralRevenueShareRules,
+      );
+      this.referralRevenueShareRules = [
+        ...this.referralRevenueShareRules.filter(
+          (rule) => rule.partnerEntrySlug !== partnerEntrySlug,
+        ),
+        ...history,
+      ];
     }
 
     this.auditNotificationService.recordAuditLog({
@@ -5223,7 +5311,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       actorType: "system",
       tenantId: null,
       moduleName: "tenant-partner",
-      actionName: existing
+      actionName: updatedExisting
         ? "referral.revenue_share_rule.updated"
         : "referral.revenue_share_rule.created",
       resourceType: "referral_revenue_share_rule",
@@ -5370,7 +5458,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       periodMonth?.trim() ||
       statements[0]?.period ||
       new Date().toISOString().slice(0, 7);
-    const statement = billingSettlementService.getReferralStatement(
+    const statement = await billingSettlementService.getReferralStatement(
       entry.entrySlug,
       period,
     );
@@ -5428,12 +5516,12 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return billingSettlementService.listReferralStatements(entry.entrySlug);
   }
 
-  getPartnerReferralStatement(
+  async getPartnerReferralStatement(
     identity: IdentityContext | null,
     billingSettlementService: BillingSettlementService,
     periodMonth: string,
     requestId?: string,
-  ): ReferralStatementRecord {
+  ): Promise<ReferralStatementRecord> {
     const entry = this.requirePartnerReferralPortalEntry(identity, requestId);
     return billingSettlementService.getReferralStatement(
       entry.entrySlug,

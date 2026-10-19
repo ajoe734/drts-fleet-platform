@@ -136,7 +136,7 @@ describe("BillingSettlementService card-benefit settlement statements", () => {
 
     expect(statements).toEqual([]);
     expect(
-      service.resolveReferralRevenueShareRule(
+      await service.resolveReferralRevenueShareRule(
         "referral-demo-community",
         "2026-06-15T00:00:00.000Z",
       ),

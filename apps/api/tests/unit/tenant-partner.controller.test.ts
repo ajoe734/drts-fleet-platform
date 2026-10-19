@@ -693,7 +693,7 @@ describe("tenant partner ingress handoff controller", () => {
       {} as never,
     );
 
-    const artifact = controller.getPartnerReferralStatementArtifact(
+    const artifact = await controller.getPartnerReferralStatementArtifact(
       null,
       statement.period,
       "req-referral-statement-artifact",

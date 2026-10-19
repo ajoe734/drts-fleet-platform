@@ -5,6 +5,8 @@ import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   ActionReceipt,
+  PartnerChannelEntryRecord,
+  ReferralRevenueShareRule,
   FulfillmentSegmentRecord,
   DriverTaskRecord,
   DriverFeePlanRecord,
@@ -296,6 +298,21 @@ export class BillingSettlementRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  /** Read the same entry JSONB history acknowledged by the configuration writer. */
+  async loadReferralRateEntry(entrySlug: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1",
+      [entrySlug],
+    );
+    return result.rows[0]
+      ? this.parseRecord<
+          PartnerChannelEntryRecord & {
+            referralRevenueShareRules?: ReferralRevenueShareRule[];
+          }
+        >(result.rows[0].record, "admin.phase1_partner_channel_entries")
+      : null;
   }
 
   async bindMonthlyBillingOperation(operationId: string, periodMonth: string) {
@@ -1074,6 +1091,23 @@ export class BillingSettlementRepository {
     return result.rows
       .map((row) => row.period_month)
       .filter((value): value is string => Boolean(value));
+  }
+
+  async listLiveReferralSettlementPeriods(
+    tenantId: string,
+    entrySlug: string,
+  ): Promise<string[]> {
+    const result = await this.databaseService!.query<{ period_month: string }>(
+      `SELECT DISTINCT substring(${LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL} FROM 1 FOR 7) AS period_month
+       FROM ops.phase1_driver_tasks AS tasks
+       INNER JOIN ops.phase1_owned_orders AS orders ON orders.order_id = tasks.order_id
+       WHERE tasks.status = 'completed' AND ${LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL}
+         AND COALESCE(orders.record->>'tenantId', '') = $1
+         AND COALESCE(orders.record->>'partnerEntrySlug', '') = $2
+         AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'`,
+      [tenantId, entrySlug],
+    );
+    return result.rows.map((row) => row.period_month);
   }
 
   async listLiveDriverTripsInPeriod(
