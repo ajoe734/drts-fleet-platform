@@ -1,7 +1,9 @@
 # Driver terminal location display — 2026-10-19
 
-Task: `DRIVER-TERMINAL-LOCATION-DISPLAY-20261019`  
-Owner: Codex2; independent reviewer: Codex  
+Task: `DRIVER-TERMINAL-LOCATION-DISPLAY-20261019`
+
+Owner: Codex2; independent reviewer: Codex
+
 Base: `61fa7cf44fb25d8be36634357fa3549286b96b84`
 
 ## Observed defect
