@@ -1,5 +1,115 @@
 # Operational Document Upload Harness 2026-10-08
 
+## Current continuation — 2026-10-19, canonical Admin session and action-proof consumer
+
+The reviewer normally reopened the original HARNESS after actual G
+`df602a82d29d9bce65aaee84af8925b42ee1b7f2` deployment **39251228957**:
+18 jobs succeeded, the operational prerequisite failed, and its original report
+was **0 passed / 1 failed / 15 skipped / 0 retries**, with **zero PDF receipts**.
+The five built-in Passenger suites did not execute. The first bound Fleet
+partner-entry create received HTTP 403; the old consumer discarded the response
+code. This is a new consumer repair, not a claim that the deployed G passed.
+The earlier `2006d4752863ae3e45f8da5cb73ac6eb4df18ca9` own CI/review and protected
+G source merge remain historical source credit. All preceding history below is
+retained, including the observed original-spec SHA `74dbd080...` versus recorded
+`acc94138...` qualification and the separate exact-owned business cleanup gate.
+
+Owner **Codex2**, reviewer **Codex**, original **eight scopes / three acceptance
+keys** are unchanged. Work uses the clean former Journey worktree on
+`codex2/sr-operational-document-upload-canonical-admin-20261019`, normally created
+from immutable G; the former Journey branch is retained. The separate original
+`ENTRY-IAP-WORKFORCE-AUTH-20261005` task supplies the product exchange and BFF
+canonical-token preservation contract. Those product changes are not authored,
+authorized, deployed or verified by this HARNESS consumer change.
+
+The issuer now uses the existing private Admin invocation proof separately from
+its application JWT. An optional supplied
+`DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN` is verified with the normal
+`/control-plane-proxy/auth/session`; denial never falls back to issuing another
+identity and cleanup preserves that supplied session. Without it, the normal
+private Admin `/control-plane-proxy/auth/token` exchange supplies a real token
+and same-issuance `sessionId`, `principalId`, platform realm and Admin actor ACK.
+The normal session authority must report active JWT mode, platform Admin role,
+nonempty principal/membership/session identity and the same acknowledged session
+and principal. No JWT decoding, invented sid/MFA/auth time, caller role headers,
+new grant, internal-key exception or harness policy waiver establishes authority.
+
+Four mutations each obtain their own normal `/identity/step-up-proofs` response
+using the same verified application session and exact upstream POST path:
+partner-entry create, first minimal key issue, own key revoke and own entry
+revoke. The returned action ID and required reference must match. References,
+JWTs and plaintext keys stay in native-fetch memory and are immediately masked;
+they never enter Playwright requests, traces or evidence metadata. Secret-bearing
+errors expose only an internal stage, numeric HTTP status and an allowlisted
+public error code; raw response messages, headers and transport errors are not
+reported. The original candidate, redirect, origin, binding and receipt guards
+remain. Native issuer JSON reads are bounded to 1 MiB and the remaining request
+budget, including a hanging response body.
+
+Cleanup preserves the original owned Fleet session/key/entry rules and then
+revokes only the newly exchanged Admin session through the normal native API
+self-session endpoint. An exchange ACK identifies its own session even if the
+subsequent authority readback fails before entry creation. Exact ownership ACKs
+are captured before rejecting a late successful create/key response, so the
+original deadline failure still cleans the resource it actually created. No
+foreign credential or supplied session is revoked. Cleanup failures remain
+failures with safe diagnostics; they are not ignored or retried into success.
+All issuer/proof calls share the existing **60-second** deadline and all cleanup
+calls share the existing **20-second** deadline, within the original
+**90-second** Playwright budget. No wait, attempt, retry or timeout was extended.
+
+The Admin operations consumer now starts review, opens the existing approval
+confirmation, clicks its real confirm button and matches the exact current
+submission's `/approve` response. It retains the original `approved` authority
+readback. The route-only Admin case still only sets up and navigates. Literal
+manifest comparison preserves all original **seven operation cases + seven
+route cases + two guards = 16 cases**, all seven journey IDs, both original
+Fleet/Admin setup arrays and their **eight required PDF lifecycles** across the
+two modes. Only the three Admin operation caller fields change. The original
+Playwright configuration remains byte-identical to G: zero retries and 90 seconds.
+
+Socket-free evidence is under the machine-local
+`final-public-guide-readback-20261019/` directory. These are protocol boundary
+fixtures, not live canonical-session, MFA, scanner, browser or Cloud Run proof:
+
+- `HARNESS-Admin-protocol-before.json`: the old G helper failed all **13 new
+  selected protocol cases**; three selected existing cases passed and 73 cases
+  were filtered by the explicit test-name selection. Filtered cases are not
+  hosted skips. The new fixture rejects missing application authority/proofs.
+- `HARNESS-Admin-protocol-fixed-first.json`: **84 passed / 5 failed** while safe
+  error envelope and post-ACK deadline handling were being corrected. The next
+  single-file run, `HARNESS-Admin-protocol-fixed-second.json`, passed **89/89**.
+- `HARNESS-Admin-full-eight-scope-units-first.json`: **145 passed / 1 failed**;
+  the new missing-session-ACK fixture had not applied its fault flag. That
+  fixture was corrected, without relaxing the receipt assertion.
+- `HARNESS-Admin-full-eight-scope-units-fixed.json`: **145 passed / 1 failed /
+  0 skipped**: document helper **99/99**, manifest **4/4**, restart consumer
+  **2/2**, identity **40 passed / 1 failed**. The unchanged legacy identity
+  test's dynamic import took **5015.7 ms**, exceeding its original 5000 ms limit;
+  its raw JSON reports `STACK_TRACE_ERROR`. The original deadline/assertions
+  remain, matching the separately retained older 120/1 cold-import limitation.
+  This failure is not presented as a clean combined pass.
+- After adding the two late-ACK ownership regressions, only the two changed
+  suites were rerun: `HARNESS-Admin-protocol-and-manifest-final.json` passed
+  **105/105**, comprising document helper **101/101** and manifest **4/4**,
+  zero skips. The unchanged legacy identity limitation remains separate.
+- Root's pre-candidate readback identified the exact new public code
+  `DEV_WORKFORCE_SESSION_EXCHANGE_DENIED`. It is added literally to the safe
+  allowlist with one protocol regression; arbitrary codes remain suppressed.
+  `HARNESS-Admin-exact-exchange-code-final.json` records the resulting
+  **106/106** changed-suite pass (helper **102**, manifest **4**, zero skips).
+- Scoped ESLint and the final true-imports typecheck are recorded by exact
+  source hashes in `HARNESS-canonical-admin-checks/`; only completed exit-zero
+  receipts can establish their own static-check credit.
+
+The corrected immutable candidate still needs its own mandatory hosted CI,
+independent full-eight-scope review and normal protected merge. Only the
+Operator may then run the original full 16-case, eight-PDF shared-dev acceptance
+on one actual immutable release. All three original acceptance keys retain their
+separate scope; no local protocol result closes the live full-16/zero-skip or
+exact-owned business cleanup requirements. No VM product/browser/HTTP/DB/server
+was started for this repair.
+
 ## Current continuation — 2026-10-19, consumer repair WIP after candidate CI failure
 
 The normal Supervisor continuation assigns the original task

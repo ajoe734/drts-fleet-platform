@@ -600,7 +600,15 @@ for (const journey of manifest.journeys) {
       const responsePromise = page.waitForResponse(
         (response) =>
           response.request().method() === operation.requestMethod &&
-          response.url().includes(operation.requestUrlIncludes),
+          response
+            .url()
+            .includes(
+              interpolatePath(
+                operation.requestUrlIncludes,
+                lastResultId,
+                variables,
+              ),
+            ),
         { timeout: interactionTimeoutMs },
       );
       // Begin reading before a mutation-triggered navigation can detach the
