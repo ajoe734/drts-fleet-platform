@@ -16,6 +16,9 @@ import { ServiceAreaService } from "../../../apps/api/src/modules/service-area/s
 import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { sourceModuleLoader } from "./source-module-loader";
+import { VoiceDialogueEngine } from "../../../apps/voice-media-worker/src/dialogue/dialogue-engine";
+import { VoiceDialogueState } from "../../../apps/voice-media-worker/src/dialogue/dialogue-state";
+import { voiceDialogueSnapshotContentSchema } from "@drts/contracts";
 const Ports = process.env.VOICE_ORIGINAL_REF
   ? sourceModuleLoader({}, [
       "apps/api/src/modules/voice-booking/voice-domain-tool-ports.ts",
@@ -432,6 +435,166 @@ it("A2 preserves the real qualifier's conditional passenger-capacity refusal fro
   expect(h.drafts).toHaveLength(0);
   expect(h.confirmations).toHaveLength(0);
 });
+
+it("A2 durable luggage count is an immutable booking requirement rather than pickup notes", async () => {
+  const h = await harness();
+  const content = h.content as { slots: Record<string, unknown> };
+  content.slots.luggageCount = {
+    ...h.content.slots.time,
+    candidate: "2",
+    normalizedValue: null,
+  };
+  const plan = await h.ports.execute(
+    { name: "prepare_booking_readback", args: {} },
+    h.context,
+  );
+  expect(h.drafts[0]!.canonical_snapshot).toMatchObject({
+    bookingRequirements: { luggageCount: 2, luggageSize: "standard" },
+  });
+  expect(plan).toMatchObject({ script: expect.stringContaining("行李 2 件") });
+});
+
+it.each([
+  ["wheelchair", "requiredCapabilities", '["wheelchair"]'],
+  ["child seat", "requiredCapabilities", '["child_seat"]'],
+  ["oversized luggage", "luggageSize", "oversized"],
+])(
+  "A2 durable %s requirement reaches the original human-handling refusal",
+  async (_name, field, candidate) => {
+    const h = await harness();
+    const content = h.content as { slots: Record<string, unknown> };
+    content.slots[field!] = {
+      ...h.content.slots.time,
+      candidate,
+      normalizedValue: null,
+    };
+    await expect(
+      h.ports.execute(
+        { name: "prepare_booking_readback", args: {} },
+        h.context,
+      ),
+    ).rejects.toMatchObject({ code: "BOOKING_REQUIREMENTS_UNSUPPORTED" });
+    expect(h.drafts).toHaveLength(0);
+    expect(h.confirmations).toHaveLength(0);
+  },
+);
+
+it("A2 actual dialogue producer, serialized cold snapshot and qualifier retain typed luggage requirements", async () => {
+  const h = await harness();
+  const state = new VoiceDialogueState();
+  state.restoreFromSnapshotContent(
+    voiceDialogueSnapshotContentSchema.parse(h.content),
+  );
+  const engine = new VoiceDialogueEngine(
+    {
+      mode: "fixture",
+      profileVersion: "SIM-requirements-v1",
+      propose: async () => ({
+        intent: "book",
+        text: "",
+        slots: [
+          {
+            field: "luggageCount",
+            rawText: "兩件行李",
+            candidate: "2",
+            sourceSegmentIds: ["requirements-segment"],
+            providerConfidence: 1,
+          },
+          {
+            field: "luggageSize",
+            rawText: "一般尺寸",
+            candidate: "standard",
+            sourceSegmentIds: ["requirements-segment"],
+            providerConfidence: 1,
+          },
+          {
+            field: "requiredCapabilities",
+            rawText: "無特殊設備需求",
+            candidate: "[]",
+            sourceSegmentIds: ["requirements-segment"],
+            providerConfidence: 1,
+          },
+        ],
+        tools: [],
+        usage: { inputTokens: null, outputTokens: null },
+        terminal: "turn_complete",
+      }),
+    },
+    false,
+  );
+  await engine.turn(
+    {
+      sessionId: "session",
+      turnId: "requirements-turn",
+      inputEpoch: 1,
+      mediaEpoch: 1,
+      segmentIds: ["requirements-segment"],
+      transcript: "兩件行李，一般尺寸，無特殊設備需求",
+      verifiedContext: {},
+      deadline: Date.now() + 1000,
+      signal: new AbortController().signal,
+    },
+    state,
+    () => 1,
+    {
+      // Only SQL transport is doubled. Use the actual serializer/schema and cold
+      // state reader before the original ports perform qualification/draft writes.
+      persist: async (next) => {
+        const saved = voiceDialogueSnapshotContentSchema.parse(
+          JSON.parse(JSON.stringify(next.toSnapshotContent())),
+        );
+        const cold = new VoiceDialogueState();
+        cold.restoreFromSnapshotContent(saved);
+        Object.assign(h.content, cold.toSnapshotContent());
+      },
+      execute: async () => [],
+    },
+    () => 1,
+  );
+  await h.ports.execute(
+    { name: "prepare_booking_readback", args: {} },
+    h.context,
+  );
+  expect(h.drafts[0]!.canonical_snapshot).toMatchObject({
+    bookingRequirements: {
+      luggageCount: 2,
+      luggageSize: "standard",
+      requiredCapabilities: [],
+    },
+  });
+  expect(h.drafts[0]!.slots).toMatchObject({
+    luggageCount: {
+      candidate: "2",
+      sourceSegmentIds: ["requirements-segment"],
+    },
+  });
+});
+
+it.each([
+  ["luggageCount", "-1"],
+  ["luggageSize", "unknown"],
+  ["requiredCapabilities", "wheelchair"],
+  ["requiredCapabilities", '["unknown"]'],
+])(
+  "A2 rejects malformed explicit %s=%s rather than silently using defaults",
+  async (field, candidate) => {
+    const h = await harness();
+    const content = h.content as { slots: Record<string, unknown> };
+    content.slots[field!] = {
+      ...h.content.slots.time,
+      candidate,
+      normalizedValue: null,
+    };
+    await expect(
+      h.ports.execute(
+        { name: "prepare_booking_readback", args: {} },
+        h.context,
+      ),
+    ).rejects.toMatchObject({ code: "BOOKING_REQUIREMENTS_INVALID" });
+    expect(h.drafts).toHaveLength(0);
+    expect(h.confirmations).toHaveLength(0);
+  },
+);
 
 it("F1 actual first-party HTTP client -> controller -> original gateway -> durable roles/qualifier/immutable draft/readback across canonical snake wire", async () => {
   const h = await harness();

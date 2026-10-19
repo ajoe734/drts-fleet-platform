@@ -547,3 +547,30 @@ an aborted command and is never pass evidence. No process was left running.
 Subsequent VM commands select only the socket-free idle case. The final delivery
 packet records all started hosted runs to terminal with pass/fail/skip separated,
 binds them to the exact source and retains the full four-key/F1–F8/17-clause map.
+
+### Original A2 structured luggage and capability continuation
+
+Independent full-scope readback identified that d656's real domain ports discarded
+luggage and equipment requirements even though the original qualifier and dispatch
+already enforce them. `a2-requirements-d656-before.log` runs the real immutable
+d656 ports and records four actual failures: two luggage items became zero in the
+immutable draft, and wheelchair, child-seat and oversized-luggage requests wrongly
+produced ordinary readback plans. Seven unselected cases are not coverage.
+
+The original dialogue contract now exposes structured luggage count, size and
+capability fields; the original per-turn seven-slot limit remains. The generic
+dialogue engine/state serializer and cold reader preserve their source evidence.
+Ports consume the current durable candidates, validate them with the existing
+booking-requirements schema and call the existing qualifier. Notes never infer
+equipment. Explicit malformed values are rejected rather than discarded. Ordinary
+two-item luggage remains in the immutable draft and actual server readback;
+wheelchair/child-seat/oversized requests retain the original human-handling refusal
+with no draft or confirmation. No vehicle capability or booking policy changed.
+
+`a2-requirements-final.log`: **exit 0, two files / 42 passed, zero skips**,
+including every original UV013 provider/time/product/requirements/assignment
+case, original count-five and service-area positives/negatives, the real dialogue
+producer → serialized cold snapshot → qualifier/draft path and four malformed
+explicit-slot refusals. UV013's real candidate/assignment path continues rejecting
+changed luggage capacity. SQL/model/provider transport is SIM locally; actual
+formal-schema and browser evidence still must bind to the final successor.

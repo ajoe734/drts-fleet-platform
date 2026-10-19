@@ -8,6 +8,12 @@ export const voiceDialogueSlotFieldSchema = z.enum([
   "passengerContact",
   "time",
   "passengerCount",
+  // Structured requirement candidates: integer text, standard/oversized, and
+  // a JSON array of wheelchair/child_seat respectively. Domain validation is
+  // authoritative; the separate notes field never supplies these constraints.
+  "luggageCount",
+  "luggageSize",
+  "requiredCapabilities",
   "notes",
 ]);
 export type VoiceDialogueSlotField = z.infer<

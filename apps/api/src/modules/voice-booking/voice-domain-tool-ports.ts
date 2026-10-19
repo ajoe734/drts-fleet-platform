@@ -1,6 +1,7 @@
-import type {
-  VoiceCapabilityTokenClaims,
-  VoiceToolProposal,
+import {
+  bookingRequirementsSchema,
+  type VoiceCapabilityTokenClaims,
+  type VoiceToolProposal,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -174,6 +175,44 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
         "VOICE_ABSOLUTE_TIME_REQUIRED",
         "Confirm an absolute immediate pickup time.",
       );
+    const candidate = (field: string) => {
+      const slot = snapshot.content.slots[field];
+      return slot?.normalizedValue ?? slot?.candidate;
+    };
+    let capabilities: unknown = [];
+    const capabilityCandidate = candidate("requiredCapabilities");
+    if (capabilityCandidate !== undefined) {
+      try {
+        capabilities = JSON.parse(capabilityCandidate);
+      } catch {
+        throw new ApiRequestError(
+          400,
+          "BOOKING_REQUIREMENTS_INVALID",
+          "Structured booking requirements are invalid.",
+        );
+      }
+    }
+    // Consume only explicit structured slots. Notes never imply equipment or
+    // capacity, and malformed or unsupported requests are never defaulted away.
+    const requirements = bookingRequirementsSchema
+      .pick({
+        passengerCount: true,
+        luggageCount: true,
+        luggageSize: true,
+        requiredCapabilities: true,
+      })
+      .safeParse({
+        passengerCount: Number(candidate("passengerCount") ?? 1),
+        luggageCount: Number(candidate("luggageCount") ?? 0),
+        luggageSize: candidate("luggageSize") ?? "standard",
+        requiredCapabilities: capabilities,
+      });
+    if (!requirements.success)
+      throw new ApiRequestError(
+        400,
+        "BOOKING_REQUIREMENTS_INVALID",
+        "Structured booking requirements are invalid.",
+      );
     const command = {
       pickup,
       dropoff,
@@ -181,14 +220,7 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
       requestedAt: time.normalizedValue ?? time.candidate,
       timeZone: "Asia/Taipei" as const,
       requirements: {
-        passengerCount: Number(
-          snapshot.content.slots.passengerCount?.normalizedValue ??
-            snapshot.content.slots.passengerCount?.candidate ??
-            1,
-        ),
-        luggageCount: 0,
-        luggageSize: "standard" as const,
-        requiredCapabilities: [],
+        ...requirements.data,
         bookerContact: contacts.bookerContact,
         passengerContact: contacts.passengerContact,
         driverContactRole: contacts.driverContactRole,
