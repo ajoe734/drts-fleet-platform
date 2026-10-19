@@ -81,18 +81,16 @@ describe.skipIf(!hostedUnit)(
           // pg-pool can resolve end() before an idle backend finishes closing.
           // Observe only this suite's database, then use ordinary DROP so a
           // remaining connection fails cleanup instead of receiving 57P01.
-          await expect
-            .poll(
-              async () => {
-                const result = await admin!.query<{ connections: number }>(
-                  "SELECT count(*)::integer AS connections FROM pg_stat_activity WHERE datname = $1",
-                  [dbName],
-                );
-                return result.rows[0]!.connections;
-              },
-              { timeout: 20_000, interval: 50 },
-            )
-            .toBe(0);
+          await vi.waitFor(
+            async () => {
+              const result = await admin!.query<{ connections: number }>(
+                "SELECT count(*)::integer AS connections FROM pg_stat_activity WHERE datname = $1",
+                [dbName],
+              );
+              expect(result.rows[0]!.connections).toBe(0);
+            },
+            { timeout: 20_000, interval: 50 },
+          );
           await admin!.query(`DROP DATABASE "${dbName}"`);
         }
       } finally {

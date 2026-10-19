@@ -446,6 +446,55 @@ export async function onTripCancellationRejectionJourney(
     expect(completed.order.status).toBe("completed");
     expect(completed.task.status).toBe("completed");
     handled = true;
+    await step(
+      "The original Passenger ride and Driver task render completed tracking before the original screenshots",
+      async () => {
+        await expect(pax).toHaveURL(new RegExp(`/rides/${bookedOrderId}$`));
+        const passengerStatus = pax.getByText("行程已完成", { exact: true });
+        await expect(passengerStatus).toBeVisible();
+        const livePosition = pax.getByTestId("passenger-live-driver-position");
+        await expect(livePosition).toHaveCount(0);
+        await expect(driver).toHaveURL(/\/trip(?:[?#]|$)/);
+        const driverOrder = driver
+          .getByText(bookedOrderId, { exact: true })
+          .first();
+        const driverTask = driver.getByText(taskId, { exact: true }).first();
+        await expect(driverOrder).toBeVisible();
+        await expect(driverTask).toBeVisible();
+        const trackingStatus = driver.getByText("追蹤 · 已結束", {
+          exact: true,
+        });
+        const trackingDetail = driver.getByText(
+          "行程已完成，追蹤已結束，不再更新里程與時長。",
+          { exact: true },
+        );
+        const mapStatus = driver.getByText("本任務定位已停止", {
+          exact: true,
+        });
+        await expect(trackingStatus).toBeVisible();
+        await expect(trackingDetail).toBeVisible();
+        await expect(mapStatus).toBeVisible();
+        await expect(
+          driver.getByText("追蹤 · 待開始", { exact: true }),
+        ).toHaveCount(0);
+        await info.attach("UC05-normal-completion-UI-facts", {
+          body: JSON.stringify({
+            orderId: bookedOrderId,
+            taskId,
+            passengerUrl: pax.url(),
+            passengerStatus: await passengerStatus.innerText(),
+            liveDriverPositionCount: await livePosition.count(),
+            driverUrl: driver.url(),
+            driverOrderId: await driverOrder.innerText(),
+            driverTaskId: await driverTask.innerText(),
+            driverTrackingStatus: await trackingStatus.innerText(),
+            driverTrackingDetail: await trackingDetail.innerText(),
+            driverMapStatus: await mapStatus.innerText(),
+          }),
+          contentType: "application/json",
+        });
+      },
+    );
     await recordOrderEvidence(
       bookedOrderId,
       "UC05-normal-completion",

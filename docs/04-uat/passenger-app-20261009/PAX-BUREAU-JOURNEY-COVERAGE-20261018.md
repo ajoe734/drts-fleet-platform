@@ -177,6 +177,18 @@ main的真失敗是既有C114合成PG fixture清理race：shard2原JSON為2565 a
 
 本次等f85 bureau與additional全部終態後才整理修補。Fresh accepted dev `88bde9b6df9826d6a52b5297ebbc91b692ff112e` 的Voice／Tenant72檔與Journey原38檔及新fixture零重疊；已普通合併為 `f228d62df1127b21d38aa86a1e56a3730df91290`，72個peer blobs與39個自有committed blobs跨合併均逐byte核對不變，peer作者／Source保留。整批差異39 paths／27 scopes；合併後兩個受影響檔及其真imports TypeScript亦exit0，未變動47unit不重跑，C114仍未取得修後PG信用。實際immutable及byte manifest另存機器證據。全部五組、UC01–16、原兩keys及外部E04／USER／真車供給／same-release shared界線保留，新完整CI及Root獨立review不可省。
 
+## 第六輪 faf6 的八案正向、hook 退修與完程畫面等待
+
+候選 `faf6475fdf94b36187204c93d10f909e8bdb80ce` 的五 runs 全部自然終態，沒有手動取消。main `39213303382` failure（14 success／4 skip／2 failure）；前三個 skip 為原 scope，Product smoke acceptance 因 unit failure未執行。Integration `39213303583` failure（19 success／4原 scope skip／3 failure，unit shard2及兩 aggregates），但 bureau、core／additional均 success。quote `39213303490`、60秒 `39213303450`、decline `39213303548` 各自 success。原 reports／raw logs／實際 checkout與逐檔 hash 保存於 `source-checks/hosted-faf647-watch/`，不把 workflow head 與 synthetic checkout `50d39e54ea3814b858611004d45615b76024bcde` 混寫；兩者 tree 同為 `73e3e113fefce0e3750df9ed5e525b83ddebff42`。
+
+Bureau 原 artifact `12169687003` ZIP SHA256=`90b75b6551c0f15db292e5c4b059a2b190d66a70003af471bb92187e4f01e3f6`，真 **8 pass／0 fail／0 skip／0 timeout／0 retry**，保留24份 JSON facts與36張原PNG。ordinary90為110115ms、on_trip及aftercare258954ms、reliability64075ms；五OTP分別801／56937／61502／301662／60552ms，原301000ms過期等待與60秒cooldown未縮短。UC15同原order `534be8a1-0aac-4c0a-97c5-b2047f7fcab0`，fare案 `PAX-36e8d199-cb7d-4390-9053-318648ec450c` 與service案 `PAX-6b7104ac-19bb-423b-9c5f-284caf96c844` 均完成四個真action receipts／audit UUID／狀態readback，及精確五筆 created／note／assigned／resolved／closed timeline。Root已獨立核原ZIP／報告／雙類別facts；此成功僅屬faf的hosted disposable CI，不是新Source或shared全16案通過。
+
+兩個 unit lanes的原booking nativePG四案、receipt四案與on_trip兩案各實際pass／0 skip；C114六項native業務assert也各pass，但**兩lane的C114 suite及job都失敗**。本次Source使用 `expect.poll` 於afterAll，installed Vitest明確要求它只能在test內；原log為 `expect.poll() must be called inside a test`，不是外部阻塞，也不能以六assert成功採認清理修復。Root正常reopen後，只換為 `vi.waitFor`，在原hook內真查自己dbName的pg_stat_activity並expect連線0，保留20秒／50ms、原30秒afterAll、普通DROP及六assert。socket-free實際afterAll framework probe在原API為1 test pass但suite fail／exit1；同hook改用vi.waitFor後1 suite／1 test pass／exit0。這只證明framework context可用，尚未驗新PG清理；前次Source no-findings初review與其後修正歷史均保留。
+
+原完程PNG亦不能代替Passenger主ride終態：`22-UC05-normal-completion-pax.png` 取圖時仍為「行程進行中」並有live driver marker；Driver原圖已見「追蹤 · 已結束」。API／SQL完成與後續receipt頁已完成均不授予主ride／Driver全部終態畫面信用。依Root及supervisor授權，在原handled=true後、原recordOrderEvidence前加有界真UI等待：Passenger仍原UUID，精確「行程已完成」可見且live driver position消失；Driver仍/trip、原order/task可見、完成追蹤與停止定位文字可見且待開始文字不存在，再附actual innerText／URLs／IDs及原三角色圖。沒有reload、sleep、產品改動或延長原deadline；新guard仍須下一候選hosted實跑。
+
+兩項小修與真imports TypeScript／scoped ESLint均exit0；未變動47unit不重跑或改標新版本信用。五組、UC01–16、兩keys與正式E04／USER／真車供給／same-runtime shared條件全部保留。新immutable候選仍須自身完整CI與Root獨立review，不借faf的八案正向、PG窄成功或舊版檢查當新清理與終態畫面通過。
+
 ## 原兩個 acceptance keys
 
 - `pax-bureau-coverage_each-finding-real-evidence-and-applicability`
