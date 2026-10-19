@@ -68,11 +68,16 @@ Post-change checks:
 
 | Command / check                                                                                                               | Actual result                                                                                          | Raw log in the task's `.local/passenger-bureau-gap-correction-20261018/guide-current-evidence-20261019/` directory |
 | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `pnpm exec vitest run tests/unit/pax-bureau-browser-entry-20261018/bureau-review-page.test.tsx`                               | Exit 0, 9/9 passed                                                                                     | `page-after.log`                                                                                                   |
+| `pnpm exec vitest run tests/unit/pax-bureau-browser-entry-20261018/bureau-review-page.test.tsx`                               | Exit 0, 9/9 passed; repeated after simplifying the visible login wording, still 9/9                    | `page-after.log`, `page-final.log`                                                                                 |
 | Scoped `pnpm exec eslint --max-warnings=0` on the four changed TS/TSX files                                                   | Exit 0                                                                                                 | `scoped-eslint-final.log`                                                                                          |
+| Scoped ESLint after simplifying visible login wording                                                                         | Exit 0                                                                                                 | `copy-eslint-final.log`                                                                                            |
 | `node tools/ci/i18n-guard.mjs`                                                                                                | Exit 0, 683 files / 81 existing exemptions; no new exemption                                           | `i18n-guard.log`                                                                                                   |
 | `git diff --exit-code 61fa7cf44fb25d8be36634357fa3549286b96b84 -- apps/passenger-app-web/components/bureau-review/content.ts` | Exit 0; historical file SHA-256 `5ff1320b7350042fb340cfbe215781e00de1b5f147aefc5ed5105dbf1bf108ba`     | Exact base blob comparison                                                                                         |
 | `pnpm --filter @drts/passenger-app-web typecheck`                                                                             | `next typegen` passed; first `tsc` exited 2 on four unchanged contracts files missing `zod` resolution | `passenger-typecheck.log`                                                                                          |
+
+The final full `pnpm --filter @drts/passenger-app-web typecheck` exited 0:
+`next typegen` and `tsc --noEmit` both passed. Its separate raw output is
+`passenger-typecheck-final.log` in the same task evidence directory.
 
 The original typecheck failure is preserved, not labelled a pass. Root then
 reused the accepted package-local contracts dependencies via an ignored,
@@ -80,8 +85,18 @@ read-only symlink after verifying identical package manifests (SHA-256
 `97a356560520c3a424be18162291bf1aa6bf8c53c749fc6db45170d49a35f405`).
 The receipt is `normal-own-contracts-dependency-resolution-reuse.json` in the
 same task evidence directory. No installation, shared distribution build or
-product change was needed. Root is serializing the final full typecheck behind
-the active Journey unit run; its result is pending at this checkpoint.
+product change was needed. The successful full typecheck ran in the serialized
+check window after the active Journey app typecheck ended.
+
+Checkpoint `227c7e476d4862613e86f60eddbb3d04e9b5170a` was an ordinary commit
+without `--no-verify` or a hook-skip environment variable. Its own new worktree
+initially lacked the ignored Husky bootstrap, so that checkpoint did not run
+hooks. The canonical generated-file range guard and commit-trailer range guard
+were then run explicitly and both exited 0 (`generated-file-range.log` and
+`commit-trailers-range.log`). Root restored the identical accepted bootstrap as
+an ignored directory without changing tracked hooks or configuration. The
+finalizing commit uses these normal hooks; the original checkpoint remains in
+history without amendment.
 
 No VM product, HTTP/browser/PG/Compose server was started. Own required hosted
 CI and the assigned independent review must still validate the final candidate.
