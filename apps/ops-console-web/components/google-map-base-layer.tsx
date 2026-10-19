@@ -2,7 +2,13 @@
 
 import type { GeoPoint, ServiceAreaGeoJsonFeature } from "@drts/contracts";
 import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
-import { createElement, useEffect, useEffectEvent, useRef, useState } from "react";
+import {
+  createElement,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 
 export type GoogleMapStatus = "loading" | "ready" | "fallback" | "error";
 
@@ -122,7 +128,30 @@ async function loadMapsLibrary(config: MapProviderConfig) {
   return importLibrary("maps") as Promise<google.maps.MapsLibrary>;
 }
 
-function polygonStyle(feature: ServiceAreaGeoJsonFeature) {
+/**
+ * Groups every ring of a feature's GeoJSON `Polygon` (exterior + holes) into
+ * the path list for a single `google.maps.Polygon`. Exported so the
+ * outer/hole grouping that fixes HCD-R3 (one Polygon instance per feature,
+ * not one per ring) is unit-testable without a `google.maps` SDK boundary.
+ */
+export function buildFeaturePolygonPaths(
+  feature: ServiceAreaGeoJsonFeature,
+): { lat: number; lng: number }[][] {
+  return feature.geometry.coordinates
+    .map((ring) =>
+      ring.flatMap(([lng, lat]) =>
+        typeof lat === "number" &&
+        typeof lng === "number" &&
+        Number.isFinite(lat) &&
+        Number.isFinite(lng)
+          ? [{ lat, lng }]
+          : [],
+      ),
+    )
+    .filter((ringPath) => ringPath.length >= 3);
+}
+
+export function polygonStyle(feature: ServiceAreaGeoJsonFeature) {
   if (feature.properties.recordKind === "service_area") {
     return {
       fillColor: "#0ea5e9",
@@ -218,7 +247,9 @@ export function GoogleMapBaseLayer({
         if (active) {
           setProvider("fallback");
           setReasonCode(
-            error instanceof Error ? error.name || error.message : "load_failed",
+            error instanceof Error
+              ? error.name || error.message
+              : "load_failed",
           );
           setStatus("error");
         }
@@ -269,21 +300,20 @@ export function GoogleMapBaseLayer({
     if (status !== "ready" || !mapRef.current) {
       return;
     }
-    polygonsRef.current = features.flatMap((feature) =>
-      feature.geometry.coordinates.map(
-        (ring) =>
-          new google.maps.Polygon({
-            map: mapRef.current,
-            paths: ring.flatMap(([lng, lat]) =>
-              typeof lat === "number" && typeof lng === "number"
-                ? [{ lat, lng }]
-                : [],
-            ),
-            clickable: false,
-            ...polygonStyle(feature),
-          }),
-      ),
-    );
+    polygonsRef.current = features.flatMap((feature) => {
+      const paths = buildFeaturePolygonPaths(feature);
+      if (paths.length === 0) {
+        return [];
+      }
+      return [
+        new google.maps.Polygon({
+          map: mapRef.current,
+          paths,
+          clickable: false,
+          ...polygonStyle(feature),
+        }),
+      ];
+    });
     return () => {
       polygonsRef.current.forEach((polygon) => polygon.setMap(null));
       polygonsRef.current = [];
