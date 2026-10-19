@@ -795,13 +795,19 @@ describe.skipIf(!hostedPaymentEnabled)(
       const historicalToken = await fixture();
       const grant = await h.receiptToken(historicalToken.event.orderId);
       const seed = async (f: typeof historicalAccount) => {
+        const assignment =
+          await f.owned.resolvePersistedPassengerAssignmentDisclosure(
+            f.event.orderId,
+          );
+        if (!assignment)
+          throw new Error("Historical rating requires a persisted assignment.");
         const now = new Date().toISOString();
         return (
           await h.taxi.persistPassengerRating({
             ratingId: randomUUID(),
             orderId: f.event.orderId,
-            tripId: f.event.tripId,
-            driverId: "qa-driver",
+            tripId: assignment.assignmentId,
+            driverId: assignment.driver.driverId,
             passengerSubjectRef: f.owner,
             score: 2,
             tags: [],

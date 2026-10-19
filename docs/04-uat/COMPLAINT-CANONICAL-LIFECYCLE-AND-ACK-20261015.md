@@ -619,3 +619,11 @@ Journey 正常 protected merge `607cf709dabbd115df77b491419506de8cfd61d9` 已接
 整合後 `4fd` 的 API 真 Source noEmit exit 0（20.6946 秒）、HTTP＋E actual-import noEmit exit 0（16.4117 秒），兩個 account／token 評分 wire suites 實際 131 PASS／0 FAIL／0 skip（9.4929 秒），均為本機 socket-free；未再重跑沒有新差異的原 501。其餘 7193 個 accepted peer entries 逐 blob 保留，原 12 個 own paths 除 E 精確 union 外其餘 11 個與 `a2cc` 相同。最後只追加此 UAT，編譯／測試輸入不變；raw logs／JSON／命令／退出碼／SHA 與完整五鍵矩陣由本輪 review packet 資格對照。
 
 最後候選自己的 hosted CI 尚待真終態，尤其 V0126 舊資料轉換／新 constraints、receipt PG 44（43 native＋1 adapter）、mounted HTTP 17 及 additional E 的真 case／timeline／409 readback。原 43 PG skip 仍是未執行，Python gate 8 PASS 或 Journey own CI 不能替代；不能將 Source 交審當完整五鍵已通過或本任務 DONE。全五條仍包括原 lifecycle／terminal Ops、PREPARED／durable ACK／多命令及 fresh recovery、實際 callers、settlement／PAX／Fleet／auth／noDB／SLA。正式 E04 issuer、PSP、真 SMS、實體裝置及其他外部條件仍屬原來的獨立驗收；未在 VM 啟動 HTTP／PG／browser／產品或 Compose，作者不自行 approve／merge／deploy。
+
+### 原生 PostgreSQL 實敗：歷史評分 seed 的 assignment 身份更正
+
+`71752c03f3ca21121cc2dc9d7b4c69dad0b29bd2` 自身 main CI `39321705385` 的 root shard 2／4 真正執行 receipt inventory 44 個 assertions，結果為 43 PASS／1 FAIL／0 skip；43 個通過包含一個 server-free adapter，並非 44 個原生 PG 通過。唯一失敗為 `V0126 exact transition preserves original low opt-outs, case IDs and constraints before new writes` 的舊 token 評分重送，原生 repository 回應 `PASSENGER_RATING_ASSIGNMENT_MISSING`。原始 ZIP、CRC、job log、報告及失敗全部保留；實際 checkout 為 `579d5206e66c1f2907c302d02bab51837dd84867`，其 parents 為 accepted `607cf709dabbd115df77b491419506de8cfd61d9` 與 `71752c03f3ca21121cc2dc9d7b4c69dad0b29bd2`，tree 與 717 相同，沒有把 synthetic SHA 冒稱候選 SHA。
+
+作者新加的 transition seed 將完成事件的 `tripId`（實際 DriverTask 的 `taskId`）誤填為 rating 的 `tripId`，但原 token writer 正確使用持久 disclosure 的 `assignmentId`。既有 production guard 對不同 assignment 拒絕 409 是正確行為。Root 正常退修後，僅更正原 PG test 的 seed：透過既有 `resolvePersistedPassengerAssignmentDisclosure(orderId)` 讀取真實已存在的 disclosure，明確要求非 null，再使用其 `assignmentId` 與 `driver.driverId` 建立兩筆歷史評分。沒有改 production、harness、V0126、guard、分數／聯絡選擇、原案例或斷言；既有 legacy false／省略、原 case／timeline IDs、缺整 consent 分支、新資料 fail-closed、原生 constraints 及全 44 inventory 保留。
+
+受影響 PG test 的 actual-import scoped noEmit exit 0（15.2958 秒）、ESLint exit 0、Prettier check exit 0；其餘原檔及全部斷言逐 byte 保留。沒有在 VM 啟動 PG 或重跑無變的 131／501。這些靜態檢查不是修復後原生 PG 通過；717 其餘 CI 自然收尾後，下一個候選仍須自己的完整 hosted CI、真 44／17／E 結果與 Root 原五條獨立 review，不借舊綠、不取消或重跑原失敗。
