@@ -360,28 +360,76 @@ describe.skipIf(!hostedPaymentEnabled)(
       { score: 2, contactRequested: false },
       { score: 5, contactRequested: true },
       { score: 2 },
-    ])("mounted token %j retains choice without a complaint", async (body) => {
-      const grant = await h.receiptToken(event.orderId);
-      expect(
-        (
-          await request(
-            "POST",
-            `passenger-rides/${grant.raw}/ratings`,
-            undefined,
-            body,
-          )
-        ).status,
-      ).toBe(201);
-      const state = await h.receiptState(event.orderId);
-      expect(state.rideConsents).toHaveLength(1);
-      expect(state.rideConsents[0]).toMatchObject({
-        contact_requested: body.contactRequested ?? false,
-        complaint_case_no: null,
-      });
-      expect(state.ratings).toHaveLength(1);
-      expect(state.cases).toHaveLength(0);
-      expect(state.timelines).toHaveLength(0);
-    });
+    ])(
+      "mounted token %j retains choice and its score-based case requirement",
+      async (body) => {
+        const grant = await h.receiptToken(event.orderId);
+        expect(
+          (
+            await request(
+              "POST",
+              `passenger-rides/${grant.raw}/ratings`,
+              undefined,
+              body,
+            )
+          ).status,
+        ).toBe(201);
+        const state = await h.receiptState(event.orderId);
+        expect(state.rideConsents).toHaveLength(1);
+        expect(state.rideConsents[0]).toMatchObject({
+          contact_requested: body.contactRequested ?? false,
+          case_required: body.score <= 2,
+          rating_id: state.ratings[0]!.rating_id,
+        });
+        expect(state.ratings).toHaveLength(1);
+        expect(state.consents).toHaveLength(0);
+        expect(state.intakes).toHaveLength(0);
+        if (body.score > 2) {
+          expect(state.rideConsents[0]!.complaint_case_no).toBeNull();
+          expect(state.cases).toHaveLength(0);
+          expect(state.timelines).toHaveLength(0);
+          return;
+        }
+        expect(state.cases).toHaveLength(1);
+        expect(state.timelines).toHaveLength(1);
+        const id = state.cases[0]!.case_no;
+        expect(state.rideConsents[0]!.complaint_case_no).toBe(id);
+        expect(state.timelines[0]).toMatchObject({
+          case_no: id,
+          action: "case_created",
+        });
+        const ops = await request(
+          "GET",
+          `complaints/${id}`,
+          undefined,
+          undefined,
+          opsHeaders,
+        );
+        expect(ops.status).toBe(200);
+        expect(ops.json.data).toMatchObject({
+          case_no: id,
+          related_order_id: event.orderId,
+          category: "driver_service",
+        });
+        expect(ops.json.data.description).toContain("同意客服聯繫：否");
+        expect(ops.json.data.description).toContain("不需客服聯繫");
+        const timeline = await request(
+          "GET",
+          `complaints/${id}/timeline`,
+          undefined,
+          undefined,
+          opsHeaders,
+        );
+        expect(timeline.status).toBe(200);
+        expect(timeline.json.data.items).toHaveLength(1);
+        expect(timeline.json.data.items[0]).toMatchObject({
+          entry_id: state.timelines[0]!.entry_id,
+          case_no: id,
+          action: "case_created",
+        });
+        expect(timeline.json.data.items[0].note).toContain("同意客服聯繫：否");
+      },
+    );
 
     it("mounted invalid token, persisted revocation/scope and malformed choice return lawful denials", async () => {
       expect(
@@ -521,7 +569,7 @@ describe.skipIf(!hostedPaymentEnabled)(
       { rating: 1, contactRequested: false },
       { rating: 5, contactRequested: true },
     ])(
-      "mounted rating $rating contact=$contactRequested persists consent without case",
+      "mounted rating $rating contact=$contactRequested persists consent and its score-based case requirement",
       async (body) => {
         expect(
           (await request("POST", `${ridePath()}/ratings`, token, body)).status,
@@ -531,8 +579,61 @@ describe.skipIf(!hostedPaymentEnabled)(
         expect(state.consents[0]!.contact_requested).toBe(
           body.contactRequested,
         );
-        expect(state.consents[0]!.complaint_case_no).toBeNull();
-        expect(state.cases).toHaveLength(0);
+        expect(state.consents).toHaveLength(1);
+        expect(state.consents[0]).toMatchObject({
+          case_required: body.rating <= 2,
+          rating_id: state.ratings[0]!.rating_id,
+        });
+        if (body.rating > 2) {
+          expect(state.consents[0]!.complaint_case_no).toBeNull();
+          expect(state.cases).toHaveLength(0);
+          expect(state.timelines).toHaveLength(0);
+          expect(state.intakes).toHaveLength(0);
+          return;
+        }
+        expect(state.cases).toHaveLength(1);
+        expect(state.timelines).toHaveLength(1);
+        expect(state.intakes).toHaveLength(1);
+        const id = state.cases[0]!.case_no;
+        expect(state.consents[0]!.complaint_case_no).toBe(id);
+        expect(state.intakes[0]).toMatchObject({
+          case_no: id,
+          contact_consent: false,
+        });
+        expect(state.timelines[0]).toMatchObject({
+          case_no: id,
+          action: "case_created",
+        });
+        const ops = await request(
+          "GET",
+          `complaints/${id}`,
+          undefined,
+          undefined,
+          opsHeaders,
+        );
+        expect(ops.status).toBe(200);
+        expect(ops.json.data).toMatchObject({
+          case_no: id,
+          related_order_id: event.orderId,
+          category: "driver_service",
+        });
+        expect(ops.json.data.description).toContain("同意客服聯繫：否");
+        expect(ops.json.data.description).toContain("不需客服聯繫");
+        const timeline = await request(
+          "GET",
+          `complaints/${id}/timeline`,
+          undefined,
+          undefined,
+          opsHeaders,
+        );
+        expect(timeline.status).toBe(200);
+        expect(timeline.json.data.items).toHaveLength(1);
+        expect(timeline.json.data.items[0]).toMatchObject({
+          entry_id: state.timelines[0]!.entry_id,
+          case_no: id,
+          action: "case_created",
+        });
+        expect(timeline.json.data.items[0].note).toContain("同意客服聯繫：否");
       },
     );
 

@@ -18,7 +18,7 @@ COUNTS = {
     "payment-http.test.ts": 8,
     "payment.postgres.test.ts": 19,
     "receipt-complaint-http.test.ts": 17,
-    "receipt-complaint.postgres.test.ts": 36,
+    "receipt-complaint.postgres.test.ts": 44,
 }
 ADAPTER = "PAX QA instrumentation callback contract (server-free, no DB acceptance) preserves the native callback overload and restores query before returning a lease"
 
@@ -137,7 +137,7 @@ class PassengerAppGateTests(unittest.TestCase):
                 self.assertEqual(gate.main([str(path)]), 1)
             path.write_text(json.dumps(evidence()))
             self.assertEqual(gate.main([str(path)]), 0)
-            self.assertIn("native PG=109; HTTP=38; business=147; adapter=1; total=148", self.output.getvalue())
+            self.assertIn("native PG=117; HTTP=38; business=155; adapter=1; total=156", self.output.getvalue())
             report = evidence()
             report["testResults"][2]["assertionResults"][0]["status"] = "pending"
             path.write_text(json.dumps(report))

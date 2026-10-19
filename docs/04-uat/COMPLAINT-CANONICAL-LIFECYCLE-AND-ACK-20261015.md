@@ -596,3 +596,16 @@ V0126 的真資料庫轉換、原生 FK／unique／CHECK／NOT NULL、舊資料�
 另已定位原 `ci-integ.yml` 的 additional passenger rail 會執行 `tests/e2e/pax-review-additional-branches.spec.ts`。其 E 段首次及拒絕改分後原期待 low-score／false-contact 的 caseNo 為 null、Ops 案件數為零，與本次 USER 明答衝突。Root 正常 R5a 協調將原 31 scopes 精確加為 32，五鍵及全部原條件不變。本分支只修改這兩段業務 consumer：真實評分／付款／同意紀錄須連到唯一 canonical case，正常 Ops GET 須讀回同案及唯一 `case_created` timeline、明示不需聯繫；真實改分請求仍必須回 409，分數／聯絡旗標／ratingId 不變，且同一 caseNo／timeline entryId 不增加或替換。原 checkbox 操作完整保留給 Journey 的獨立 switch hunk，沒有搬入未 accepted Source、skip 案例或放寬期限。此 browser consumer 尚未在本 VM 執行；初步 Source checkpoint 不等於 hosted 通過，最終 own CI 將於正常整合 accepted Journey 的 UC03／switch 修復後執行。最後候選仍須自己的完整 hosted CI 與 Root 五條獨立 review／protected merge；E04 issuer、PSP、真 SMS 及其他外部條件不因此下修。
 
 R5a E 業務 hunk 的 ESLint 與包含實際 imported helpers 的 scoped noEmit 各 exit 0；沒有新增鏡像業務測試。該檔 E 段以外的 Source、原 checkbox 操作及原期限均與 b16 相同，精確 bytes／hash 證據另存本輪 source-checks。這些靜態檢查只證明 consumer 接線與型別，不取代 browser 操作、真 PG 或外聯結果。
+
+### R6：既有 mounted HTTP 與固定 PG inventory consumer 補齊
+
+Root／owner 在 immutable `ed521f33622a35b235a36d339b69c3b8a733cd6c` 只讀核對，發現兩個未同步的既有 consumer：mounted HTTP 的 token 2 星 false／省略及 account 1 星 false 仍期待無案；固定 PG inventory gate 及其獨立 unit fixture 仍期待 receipt PG 36 案。這是 Source 靜態矛盾，尚未啟動新 CI，也沒有捏造本輪 hosted 失敗結果。Root 正常 R6 協調僅加該 HTTP suite、原 gate 與原 gate unit 三個精確路徑為 35 scopes，原 32 scopes、五鍵、角色及全部條件保持。
+
+- HTTP 只更正原兩矩陣的業務期待，保留原請求資料、201、原高 5 星 no-case、原 harness／角色／授權／其他案例與原期限。低 false／省略須在實際 DB 保留 false 聯絡、`case_required=true`、原 rating 關聯、唯一 case／`case_created` timeline；正常 Ops detail／timeline HTTP 回應須讀回相同 caseNo／entryId 與不需聯繫說明。Account intake 保留 false；token 不創造 account consent／intake。兩個矩陣仍是 3＋2 案，加原 12 個直接案例，共 17，沒有用高分替換低分或刪除案例。
+- receipt PG 原報告實際已有 44 個 assertions（43 native PG skip＋1 server-free adapter），不是 44 PASS。相對舊 36 增 8：高 4 星 no-case 一案、1／2 星各 true／false／省略共六組雙入口案、exact V0126 舊資料轉換一案。
+- 九套固定 inventory 依序為 account-auth-fare HTTP 13、account-session PG 13、booking-history PG 5、fare-quote PG 15、OTP/OAuth PG 22、payment HTTP 8、payment PG 19、receipt HTTP 17、receipt PG 44。未來真執行應為 native PG 117＋HTTP 38＝155 business，另 adapter 1，共 156；此為 Source-derived inventory，尚非本輪已通過數。
+- 原 gate 與獨立 unit fixture 僅同步上述固定數及摘要。固定九套集合、每套唯一、精確案例數、全斷言 passed、零 failed／pending／skipped／todo、hook error、唯一具名 adapter 及全部原負向測試不變；獨立 fixture 不從 `gate.EXPECTED` 產生。
+
+這輪只執行原 Python gate unit、精確 HTTP consumer 的真 import noEmit／lint／format 及正常 hooks；實值另存本輪 source-checks，不重跑既有 501 或把原 43 PG skip 改稱通過。VM 不執行 mounted HTTP／PG、不偽設 `GITHUB_ACTIONS`。`ed521` 舊 checkpoint、歷史 R6 QA 147／148 證據及已發佈 migrations 原樣保留；新 checkpoint 仍須等 Journey 正常 accepted 後普通整合，再建立最後候選及 own mandatory CI／完整五條 Root review，不能借歷史數字或未接受 Source。
+
+R6 本輪既有 Python gate unit 實際 8 tests／exit 0；HTTP consumer ESLint exit 0，包含真 API／controller／repository imports 的 scoped noEmit exit 0。這些是 consumer 與 verifier 的靜態／工具測試，不是 17 個 mounted HTTP 或 43 個 native PG 通過。兩個原 HTTP 矩陣以外逐 byte 不變，gate 與獨立 fixture 除固定數、摘要及必要註解外逐 byte 不變；兩個 production Complaint 檔、V0126、E consumer 與原 `ed521` checkpoint 相同。
