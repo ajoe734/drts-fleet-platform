@@ -1670,6 +1670,92 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/reimbursements/proofs/finance-staged-content:
+    post:
+      tags:
+        - RemittanceProof
+      operationId: financeStageRemittanceProofContent
+      summary: 財務角色暫存匯款證明原始位元組 (C081 出納)
+      description: |
+        RBAC: realm `system`/`platform`/`ops`, scope `billing:write`。
+        與 driver-only 的 `POST /api/reimbursements/proofs/staged-content`
+        平行、獨立的路由；不修改、不放寬該路由的既有 RBAC。回傳的
+        `stagedContentRef` 供後續 `POST
+        /api/reimbursements/proofs/finance-upload` 使用。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - contentBase64
+                - contentType
+              properties:
+                contentBase64:
+                  type: string
+                  description: Base64 編碼之原始位元組。
+                contentType:
+                  type: string
+      responses:
+        "200":
+          description: 暫存成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stagedContentRef:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/reimbursements/proofs/finance-upload:
+    post:
+      tags:
+        - RemittanceProof
+      operationId: financeUploadRemittanceProof
+      summary: 財務角色上傳匯款證明 (C081 出納)
+      description: |
+        RBAC: realm `system`/`platform`/`ops`, scope `billing:write`。
+        與 driver-only 的 `POST /api/reimbursements/proofs` 平行、獨立的
+        路由；不修改、不放寬該路由的既有 RBAC。`proofId` 與內容雜湊
+        (`content.contentHash`) 皆由伺服器產生；`driverId` 一律由
+        `batchId` 對應之既有批次取值 (絕非 caller 指定)，
+        `uploadedByActorId` 記錄實際財務呼叫者，與收款司機分屬兩個欄位。
+        新建證明的掃描狀態恆為 `pending_scan` 或由本次同步掃描結果決定。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadRemittanceProofCommand"
+      responses:
+        "201":
+          description: 匯款證明建立成功 (已同步嘗試掃描)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemittanceProofEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/reimbursements/proofs/{proofId}:
     get:
       tags:
