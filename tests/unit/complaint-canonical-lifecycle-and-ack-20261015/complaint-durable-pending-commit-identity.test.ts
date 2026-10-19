@@ -67,7 +67,15 @@ describe("ComplaintRepository: crm.phase1_complaint_pending_commits read/write",
   };
 
   it("recordPendingCommit upserts by command_key with JSON-encoded snapshots", async () => {
-    const query = vi.fn(async () => ({ rows: [], rowCount: 1 }));
+    const query = vi.fn<
+      (text: string, values?: readonly unknown[]) => Promise<{
+        rows: unknown[];
+        rowCount: number;
+      }>
+    >(async () => ({
+      rows: [],
+      rowCount: 1,
+    }));
     const repository = new ComplaintRepository({
       isEnabled: () => true,
       query,
@@ -104,7 +112,11 @@ describe("ComplaintRepository: crm.phase1_complaint_pending_commits read/write",
   });
 
   it("loadPendingCommits selects only status='pending' rows and parses snapshots back into camelCase records", async () => {
-    const query = vi.fn(async () => ({
+    const query = vi.fn<
+      (text: string, values?: readonly unknown[]) => Promise<{
+        rows: unknown[];
+      }>
+    >(async () => ({
       rows: [
         {
           command_key: "abc123",
@@ -260,7 +272,7 @@ describe("ComplaintService: a same-command retry is recognized across a process 
     expect(processA.repository.recordPendingCommit).toHaveBeenCalledTimes(1);
     const durableRow = (
       processA.repository.recordPendingCommit as ReturnType<typeof vi.fn>
-    ).mock.calls[0][0] as ComplaintPendingCommitRecord;
+    ).mock.calls[0]![0] as ComplaintPendingCommitRecord;
     expect(durableRow.caseNo).toBe(complaintCase.caseNo);
     expect(durableRow.action).toBe("assign_complaint_case");
     expect(durableRow.status).toBe("pending");
@@ -271,7 +283,9 @@ describe("ComplaintService: a same-command retry is recognized across a process 
     // knowledge of the durably-committed truth (the case is still "new",
     // since the assign never actually landed) comes from loadState/
     // loadPendingCommits, not a shared in-memory Map. ---
-    const persistChangesB = vi.fn(async () => {});
+    const persistChangesB = vi.fn<(changes: unknown) => Promise<void>>(
+      async () => {},
+    );
     const clearPendingCommitB = vi.fn(async () => {});
     const repositoryB = {
       isEnabled: () => true,

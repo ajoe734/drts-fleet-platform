@@ -9,6 +9,7 @@ import {
 } from "../../../apps/api/src/modules/complaint/complaint.repository";
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { IncidentService } from "../../../apps/api/src/modules/incident/incident.service";
+import type { ComplaintCaseRecord } from "@drts/contracts";
 
 function setupService() {
   const auditService = new AuditNotificationService();
@@ -653,7 +654,9 @@ describe("Root ca237 follow-up: readback reconciliation, link/SLA/escalation ret
       const gate = writeGates.shift();
       if (gate) await gate.promise;
     });
-    const loadCaseByCaseNo = vi.fn(async () => null);
+    const loadCaseByCaseNo = vi.fn(
+      async (): Promise<ComplaintCaseRecord | null> => null,
+    );
     const repository = {
       isEnabled: () => true,
       persistChanges,
