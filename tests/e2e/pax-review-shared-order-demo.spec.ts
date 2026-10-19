@@ -1477,9 +1477,12 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           })
           .toBe("captured");
         await pax.getByRole("button", { name: "1 星", exact: true }).click();
-        await pax
-          .getByRole("checkbox", { name: "需要客服與您聯繫嗎？" })
-          .check();
+        const contactSwitch = pax.getByRole("switch", {
+          name: "需要客服與您聯繫嗎？",
+        });
+        if ((await contactSwitch.getAttribute("aria-checked")) !== "true")
+          await contactSwitch.click();
+        await expect(contactSwitch).toHaveAttribute("aria-checked", "true");
         await pax
           .getByRole("button", { name: "送出評價", exact: true })
           .click();
