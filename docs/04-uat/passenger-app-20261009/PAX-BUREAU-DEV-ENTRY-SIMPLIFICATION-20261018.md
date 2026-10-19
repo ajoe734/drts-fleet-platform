@@ -106,3 +106,28 @@ Driver token 不借用其他角色憑證。相同 18 項在原 e88 Source 實際
 
 Docker 內 Expo export／封裝及完整原 browser 腳本尚待新完整候選自己的
 hosted CI／正常共享部署，不把上述單元、型別或 Source 接線當成已部署驗收。
+
+後續 fee5f4db68f81bdebead2652f41dfea436e2772b／gen6c69 已由 owner
+正常撤回：自己的 CI 39180785177／job117833009515 在既有 cross-app
+import guard 實際 exit 1，拒絕兩個 Ops routes 直接相對匯入 Passenger。
+這是本 task 漏檢及實作缺陷，沒有削弱 guard 或把失敗歸給外部環境。
+
+同一 task 正常追加六個精確路徑，19→25 scopes；原九 requirements、
+兩 Source keys、owner／reviewer 與 spec hash 保持。將原 Driver SPA／
+狹義 transport 及 metadata upstream helper 移入既有 Node server 專用的
+`@drts/control-plane-auth`，原角色簽章與政策程式沒有行為變更。
+兩 App 各自保留薄 route adapters，Passenger upstream 模組 re-export
+同一函式；Ops Docker 不再複製 sibling App。Passenger 的 dependency、
+Docker build 與 lock importer 同步，沒有新增 package 或服務。
+原單元 mock 仍只替換 fs／metadata／遠端 API 邊界與個別 app adapter 的
+upstream transport，不替換被測共用 handler。
+
+原 fee guard 本機實跑 exit 1；修後同一 CLI 掃描 1,908 檔 exit 0。
+套件直接 build exit 0；原入口／BFF／browser factory 與原三檔 caller／
+失敗取證合跑 14 檔／157 項 exit 0，既有斷言不變。七個共用套件及
+兩 App adapters 相關 TS 檔 scoped lint exit 0。
+鎖定檔僅新增三行既有 workspace link，原 pinned dependency graph 保持；
+一般全圖重解的暫存結果已捨棄，frozen-lockfile 隔離安裝實際 exit 0。
+這些結果不冒領之前整體 build 的 ENOSPC 失敗或尚未執行的雲端 browser。
+共用套件移動後，Passenger、Ops 的 Next route typegen／tsc 及根目錄
+`pnpm typecheck:root` 均重新實跑，三者底層 exit 0。

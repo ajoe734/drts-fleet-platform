@@ -1,11 +1,18 @@
-// Reuse the narrow Driver transport, including its original device JWT and
-// separate upstream runtime identity. The Ops control-plane proxy is unrelated.
-export {
-  GET,
-  POST,
-  PATCH,
-  PUT,
-  DELETE,
-} from "../../../../../passenger-app-web/app/api/review-driver-api/[...path]/route";
+import {
+  applyUpstreamAuth,
+  forwardReviewDriver,
+} from "@drts/control-plane-auth";
 
 export const dynamic = "force-dynamic";
+
+async function forward(
+  request: Request,
+  context: { params: Promise<{ path: string[] }> },
+) {
+  return forwardReviewDriver(request, context, applyUpstreamAuth);
+}
+export const GET = forward;
+export const POST = forward;
+export const PATCH = forward;
+export const PUT = forward;
+export const DELETE = forward;

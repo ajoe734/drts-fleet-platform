@@ -478,7 +478,17 @@ export function verifyIapJwtAssertion(
     const algorithms: jwt.Algorithm[] = looksLikePemKey(
       options.jwtSecretOrPublicKey,
     )
-      ? ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512"]
+      ? [
+          "RS256",
+          "RS384",
+          "RS512",
+          "ES256",
+          "ES384",
+          "ES512",
+          "PS256",
+          "PS384",
+          "PS512",
+        ]
       : ["HS256", "HS384", "HS512"];
     try {
       payload = jwt.verify(trimmed, options.jwtSecretOrPublicKey, {
@@ -713,7 +723,7 @@ export async function issueControlPlaneRequestAuth(options: {
     hasJwtSecret ? "jwt_bearer" : "bootstrap_headers",
     verifiedSubject,
     undefined,
-    options.assumeTenantId
+    options.assumeTenantId,
   );
 
   const rawAssertion = options.headers
@@ -784,3 +794,9 @@ export async function issueControlPlaneRequestAuth(options: {
     headers,
   };
 }
+
+export {
+  applyUpstreamAuth,
+  forwardReviewDriver,
+  serveReviewDriverPage,
+} from "./review-driver-web.js";

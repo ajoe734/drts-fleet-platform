@@ -25,7 +25,9 @@ API 與其他後臺維持原設定。不可把尚未包含此修補的舊版直�
 - 公開模式會略過既有 IAP grant step，不需要為這條入口新增
   Service Usage／Compute／IAP 權限。Root 不再續跑原失敗的 IAP 佈建請求。
 - 既有私有 `ops-console-web` 映像同時產生原 Driver Expo export，掛在
-  `/review-driver`，並直接共用原 Driver HTML／狹義 API route handlers。
+  `/review-driver`。兩 App 的薄 route adapters 共用既有
+  `@drts/control-plane-auth` 內的原 Driver HTML／狹義 API transport；
+  不再跨 App 相對匯入。Passenger 原 upstream helper 亦 re-export 同一實作。
   司機裝置 Bearer 及上游 runtime identity 保持分開，不走 Ops 角色代理。
   原 Driver SQLite／WASM isolation 與 Blob worker headers 只加在此 mount。
 - 原 core A／B、additional、預約接單逾時與 Ops 拒絕指派復原腳本，
