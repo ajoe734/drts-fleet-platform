@@ -7,6 +7,10 @@ import {
   BUREAU_REVIEW_STAGE_GROUPS,
   BUREAU_REVIEW_TOTAL_STAGES,
 } from "../../../apps/passenger-app-web/components/bureau-review/content";
+import {
+  BUREAU_REVIEW_CURRENT_CASES,
+  BUREAU_REVIEW_CURRENT_EVIDENCE,
+} from "../../../apps/passenger-app-web/components/bureau-review/shared-run";
 
 const originalHost = process.env.PAX_BUREAU_ENTRY_HOST;
 const originalMode = process.env.PAX_PUBLIC_PASSENGER_ONLY;
@@ -55,10 +59,13 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: BureauReviewPage", () => {
 
   it("lists all 16 cases (UC01-UC16) with their own precondition/steps/expected/verified/missing text", () => {
     render(<BureauReviewPage />);
+    const historical = screen.getByRole("region", {
+      name: "歷史案例清單（UC01–UC16，原文封存）",
+    });
 
     expect(BUREAU_REVIEW_CASES).toHaveLength(16);
     for (const entry of BUREAU_REVIEW_CASES) {
-      const details = screen.getByText(entry.id).closest("details");
+      const details = within(historical).getByText(entry.id).closest("details");
       expect(details).not.toBeNull();
       for (const text of [
         entry.preconditions,
@@ -90,7 +97,7 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: BureauReviewPage", () => {
   it("separates the checked 61fa run from the unchanged 48d94 historical cases", () => {
     const { container } = render(<BureauReviewPage />);
     const current = screen.getByRole("region", {
-      name: "最近已核對的共享實測",
+      name: "先前已核對的共享實測（61fa）",
     });
     expect(current.textContent).toContain(
       "61fa7cf44fb25d8be36634357fa3549286b96b84",
@@ -109,10 +116,10 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: BureauReviewPage", () => {
     expect(container.querySelectorAll("details")).toHaveLength(16);
   });
 
-  it("shows current positive evidence together with the unverified branches and policy limits", () => {
+  it("keeps previous 61fa positive evidence together with its original unverified branches and policy limits", () => {
     render(<BureauReviewPage />);
     const current = screen.getByRole("region", {
-      name: "最近已核對的共享實測",
+      name: "先前已核對的共享實測（61fa）",
     });
     for (const required of [
       "首次條款視窗確實出現",
@@ -127,6 +134,91 @@ describe("PAX-BUREAU-BROWSER-ENTRY-20261018: BureauReviewPage", () => {
       "追蹤卡不在原圖範圍",
     ]) {
       expect(current.textContent).toContain(required);
+    }
+    expect(current.textContent).not.toContain(".local/");
+  });
+
+  it("publishes all 16 current procedures and their 83 ordered steps separately from the historical details", () => {
+    render(<BureauReviewPage />);
+    const current = screen.getByRole("region", {
+      name: "目前操作程序（UC01–UC16）",
+    });
+    const articles = within(current).getAllByRole("article");
+    expect(articles).toHaveLength(16);
+    expect(BUREAU_REVIEW_CURRENT_CASES).toHaveLength(16);
+    let renderedSteps = 0;
+    for (const entry of BUREAU_REVIEW_CURRENT_CASES) {
+      const article = within(current).getByRole("article", {
+        name: `${entry.id} ${entry.title}`,
+      });
+      expect(article.id).toBe(`current-${entry.id}`);
+      for (const text of [
+        entry.status,
+        entry.scenarios,
+        entry.preconditions,
+        entry.expected,
+        entry.verified,
+        entry.missing,
+      ]) {
+        expect(article.textContent).toContain(text);
+      }
+      const steps = within(article).getAllByRole("listitem");
+      expect(steps.map((item) => item.textContent)).toEqual(entry.steps);
+      renderedSteps += steps.length;
+      expect(
+        within(current)
+          .getByRole("link", {
+            name: `${entry.id} ${entry.title}`,
+          })
+          .getAttribute("href"),
+      ).toBe(`#current-${entry.id}`);
+    }
+    expect(renderedSteps).toBe(83);
+    expect(current.querySelectorAll("details")).toHaveLength(0);
+  });
+
+  it("qualifies hosted and checked shared evidence without declaring all 16 cases passed", () => {
+    render(<BureauReviewPage />);
+    const evidence = screen.getByRole("region", {
+      name: "本次資料來源與實跑範圍",
+    });
+    expect(evidence.textContent).toContain("GitHub隔離環境的8個測試通過");
+    expect(evidence.textContent).toContain("不是全部16案通過");
+    expect(evidence.textContent).toContain(
+      BUREAU_REVIEW_CURRENT_EVIDENCE.hosted.sourceSha,
+    );
+    expect(evidence.textContent).toContain(
+      BUREAU_REVIEW_CURRENT_EVIDENCE.shared.sourceSha,
+    );
+    expect(evidence.textContent).toContain("25份資料紀錄及36張原圖");
+    expect(evidence.textContent).toContain("同版共享實跑的8個測試通過");
+    expect(evidence.textContent).toContain("26份資料紀錄及33張原圖");
+    expect(evidence.textContent).toContain("測試數不是訂單數");
+    expect(evidence.textContent).toContain("本次沒有執行不完整司機／車輛資料");
+    expect(evidence.textContent).toContain("沒有控制共享Google外部故障");
+    expect(evidence.textContent).not.toContain("163");
+    expect(evidence.textContent).not.toContain(".local/");
+  });
+
+  it("keeps concrete current limitations and the synthetic-passenger and authorized-staff boundaries visible", () => {
+    render(<BureauReviewPage />);
+    const current = screen.getByRole("region", {
+      name: "目前操作程序（UC01–UC16）",
+    });
+    for (const text of [
+      "合成手機",
+      "模擬簡訊碼",
+      "既有授權人員協作",
+      "正式E04",
+      "正式E04開立業者",
+      "手機系統關閉應用程式",
+      "福利方案",
+      "真正合格供給",
+      "四筆後續完成回執",
+      "五筆歷程",
+      "不收取消費",
+    ]) {
+      expect(current.textContent).toContain(text);
     }
     expect(current.textContent).not.toContain(".local/");
   });

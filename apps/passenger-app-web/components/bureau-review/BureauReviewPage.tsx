@@ -4,7 +4,11 @@ import {
   BUREAU_REVIEW_STAGE_GROUPS,
   BUREAU_REVIEW_TOTAL_STAGES,
 } from "./content";
-import { BUREAU_REVIEW_SHARED_RUN } from "./shared-run";
+import {
+  BUREAU_REVIEW_CURRENT_CASES,
+  BUREAU_REVIEW_CURRENT_EVIDENCE,
+  BUREAU_REVIEW_SHARED_RUN,
+} from "./shared-run";
 import { t } from "./translations";
 
 // Read-only reference entry for the New Taipei transport bureau, served from
@@ -76,6 +80,94 @@ export function BureauReviewPage() {
             {t.fullConfigSuffix}
           </p>
         )}
+      </section>
+
+      <section aria-labelledby="current-cases-heading">
+        <h2 id="current-cases-heading">{t.currentCasesHeading}</h2>
+        <p>{t.currentCasesIntro}</p>
+        <p>{t.currentActorsNote}</p>
+        <section aria-labelledby="current-evidence-heading">
+          <h3 id="current-evidence-heading">{t.currentEvidenceHeading}</h3>
+          <p>
+            {t.currentHostedSummary(
+              BUREAU_REVIEW_CURRENT_EVIDENCE.hosted.testCount,
+              BUREAU_REVIEW_CURRENT_EVIDENCE.hosted.factCount,
+              BUREAU_REVIEW_CURRENT_EVIDENCE.hosted.imageCount,
+            )}
+            <code>{BUREAU_REVIEW_CURRENT_EVIDENCE.hosted.sourceSha}</code>
+          </p>
+          <p>
+            {t.currentSharedSummary(
+              BUREAU_REVIEW_CURRENT_EVIDENCE.shared.testCount,
+              BUREAU_REVIEW_CURRENT_EVIDENCE.shared.factCount,
+              BUREAU_REVIEW_CURRENT_EVIDENCE.shared.imageCount,
+            )}
+            <code>{BUREAU_REVIEW_CURRENT_EVIDENCE.shared.sourceSha}</code>
+          </p>
+          <p>
+            {t.sharedRunCheckedAtLabel}
+            <time dateTime={BUREAU_REVIEW_CURRENT_EVIDENCE.shared.checkedAtUtc}>
+              {BUREAU_REVIEW_CURRENT_EVIDENCE.shared.checkedAtUtc}
+            </time>
+            {t.currentSharedBatchLabel}
+            <code>{BUREAU_REVIEW_CURRENT_EVIDENCE.shared.workflowRunId}</code>
+            {t.currentDeploymentBatchLabel}
+            <code>{BUREAU_REVIEW_CURRENT_EVIDENCE.shared.deploymentRunId}</code>
+          </p>
+          <p>{t.currentSharedLimits}</p>
+        </section>
+        <nav aria-label={t.currentIndexLabel}>
+          <ol>
+            {BUREAU_REVIEW_CURRENT_CASES.map((entry) => (
+              <li key={entry.id}>
+                <a href={`#current-${entry.id}`}>
+                  {entry.id} {entry.title}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+        {BUREAU_REVIEW_CURRENT_CASES.map((entry) => (
+          <article
+            id={`current-${entry.id}`}
+            key={entry.id}
+            aria-labelledby={`current-${entry.id}-heading`}
+            style={{ marginTop: 24 }}
+          >
+            <h3 id={`current-${entry.id}-heading`}>
+              {entry.id} {entry.title}
+            </h3>
+            <p>{entry.status}</p>
+            <p>
+              <strong>{t.scenarioLabel}</strong>
+              {entry.scenarios}
+            </p>
+            <p>
+              <strong>{t.preconditionLabel}</strong>
+              {entry.preconditions}
+            </p>
+            <p>
+              <strong>{t.currentStepsLabel}</strong>
+            </p>
+            <ol>
+              {entry.steps.map((step, index) => (
+                <li key={index}>{step}</li>
+              ))}
+            </ol>
+            <p>
+              <strong>{t.expectedLabel}</strong>
+              {entry.expected}
+            </p>
+            <p>
+              <strong>{t.currentVerifiedLabel}</strong>
+              {entry.verified}
+            </p>
+            <p>
+              <strong>{t.currentMissingLabel}</strong>
+              {entry.missing}
+            </p>
+          </article>
+        ))}
       </section>
 
       <section aria-labelledby="shared-run-heading">
@@ -167,8 +259,8 @@ export function BureauReviewPage() {
         </table>
       </section>
 
-      <section>
-        <h2>{t.caseListHeading}</h2>
+      <section aria-labelledby="historical-cases-heading">
+        <h2 id="historical-cases-heading">{t.caseListHeading}</h2>
         <p>{t.caseListIntro}</p>
         {BUREAU_REVIEW_CASES.map((entry) => (
           <details key={entry.id} style={{ marginBottom: 10 }}>
