@@ -5,7 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 const harness = vi.hoisted(() => ({
   callbacks: new Map<string, (fixtures: unknown) => Promise<void>>(),
-  flush: () => {},
+  beforeAllCallbacks: [] as Array<() => void | Promise<void>>,
+  flush: (): void | Promise<void> => {},
   workerIndex: 0,
 }));
 vi.mock("@playwright/test", async () => {
@@ -17,7 +18,10 @@ vi.mock("@playwright/test", async () => {
         harness.callbacks.set(title, callback);
       },
       {
-        afterAll: (callback: () => void) => {
+        beforeAll: (callback: () => void | Promise<void>) => {
+          harness.beforeAllCallbacks.push(callback);
+        },
+        afterAll: (callback: () => void | Promise<void>) => {
           harness.flush = callback;
         },
         info: () => ({
@@ -73,8 +77,12 @@ afterEach(() => {
 async function runWorker(index: number, label: string) {
   harness.workerIndex = index;
   harness.callbacks.clear();
+  harness.beforeAllCallbacks.length = 0;
   vi.resetModules();
   await import("../../e2e/operational-browser-acceptance.spec");
+  // Import registers hooks; this fixture manually runs only retired-surface
+  // callbacks and does not claim to exercise the separate issuer lifecycle.
+  expect(harness.beforeAllCallbacks).toHaveLength(1);
   const callback = harness.callbacks.get(
     "paused Partner Booking and retired Concierge remain unreachable",
   );
@@ -87,7 +95,7 @@ async function runWorker(index: number, label: string) {
       }),
     },
   });
-  harness.flush();
+  await harness.flush();
 }
 
 it("the actual spec retains previous worker events after failure/reload and afterAll", async () => {

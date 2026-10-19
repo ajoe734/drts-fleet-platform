@@ -1,6 +1,6 @@
 # Operational Document Upload Harness 2026-10-08
 
-## Current continuation — 2026-10-19, accepted binding integrated; candidate CI pending
+## Current continuation — 2026-10-19, consumer repair WIP after candidate CI failure
 
 The normal Supervisor continuation assigns the original task
 `SR-OPERATIONAL-DOCUMENT-UPLOAD-HARNESS-20261008` to available owner **Codex2**,
@@ -24,6 +24,8 @@ checkpoint records: binding Source integration is now complete, while this
 candidate's own CI, Root exact-source review and runtime acceptance remain pending.
 Accepted binding Source does not establish a live issuer or override the actual
 deployment failure recorded below.
+
+Exact candidate `9aaa8cbeaba0c3c1c1443424f2ce84971bfe9a9b` reached its own CI, where run `39244424979` / job `118033040980` failed both existing `spec-restart.test.ts` cases: the external Playwright registration mock lacked `beforeAll`. Root normally reopened the same HARNESS task, and Supervisor coordinated only that existing consumer path in addition to the original seven scopes; the original RESTART task remains DONE with Pi authorship. The fixture now captures hook registration and awaits the actual asynchronous `afterAll` flush, while still manually exercising only the real retired-surface callback and journal, preserving every original assertion and the no-network check. It does not execute or claim an issuer lifecycle. `restart-consumer-old-9aaa-two-red.log` reproduces the original two failures; `restart-consumer-fixed-same-two.log` passes the same two, and `restart-consumer-whole-existing-unit.log` passes all 13 existing restart tests. The requested single affected 121-case run, `restart-consumer-original-121-affected-once.log`, is **120 passed / 1 failed**: the unchanged identity case's cold dynamic import exceeded its original 5000 ms limit at 5013 ms. That timing failure is retained separately from the repaired registration contract, with no timeout change or green-seeking rerun. The six harness code/data files remain exact to `9aaa8cbe` / the reviewed `268875cda` anchor; only this fixture and current UAT change. Earlier 121-pass and split 80/41 results below retain their stated version scope and do not replace this failure. The corrected candidate still requires its own complete CI and Root review before any normal merge or runtime acceptance.
 
 Actual deployment **39229683109** completed 18 jobs successfully and failed its
 operational prerequisite: **12 operational cases passed, four Fleet/Admin setup
