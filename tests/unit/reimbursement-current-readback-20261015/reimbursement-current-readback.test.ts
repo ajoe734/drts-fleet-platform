@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Buffer as NodeBuffer } from "node:buffer";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import * as React from "react";
@@ -30,6 +31,13 @@ import { BillingSettlementService } from "../../../apps/api/src/modules/billing-
 import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
 
 const apiRequire = createRequire(resolve("apps/api/package.json"));
+// The mounted UI calls the real Node PDF producer. fs.readFileSync returns
+// Node Buffer bytes, which fail PDFKit's instanceof checks against jsdom's
+// separate typed-array realm. Restore these stubs in the existing cleanup.
+const NodeUint8Array = Object.getPrototypeOf(NodeBuffer.prototype)
+  .constructor as Uint8ArrayConstructor;
+const NodeArrayBuffer = new NodeUint8Array().buffer
+  .constructor as ArrayBufferConstructor;
 const { Reflector } = apiRequire("@nestjs/core") as {
   Reflector: new () => ConstructorParameters<typeof BootstrapAuthGuard>[0];
 };
@@ -252,6 +260,8 @@ function getDlValueByLabel(container: HTMLElement, labelText: string): string {
 
 describe("REIMBURSEMENT-CURRENT-READBACK-20261015: canonical minor-unit money display and status readback", () => {
   beforeEach(() => {
+    vi.stubGlobal("Uint8Array", NodeUint8Array);
+    vi.stubGlobal("ArrayBuffer", NodeArrayBuffer);
     localStorage.clear();
   });
 
