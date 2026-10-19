@@ -2373,6 +2373,8 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     "admin-wrong-realm",
     "admin-proxy-identity",
     "admin-missing-session",
+    "admin-foreign-session",
+    "admin-foreign-principal",
     "admin-inactive",
   ])("rejects %s before proof or owned business mutation", async (failure) => {
     fault = failure;
@@ -2386,6 +2388,15 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
           c.path.includes("step-up-proofs"),
       ),
     ).toBe(false);
+    expect(
+      calls
+        .filter((c) => c.path === "/api/auth/sessions/revoke")
+        .map((c) => c.body),
+    ).toEqual([{ sessionId: adminSessionId }]);
+    expect(
+      calls.some((c) => c.body.sessionId === "foreign-admin-session-dummy"),
+    ).toBe(false);
+    expect(adminRevoked).toBe(true);
   });
 
   it.each([

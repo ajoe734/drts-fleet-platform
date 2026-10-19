@@ -98,6 +98,12 @@ fixtures, not live canonical-session, MFA, scanner, browser or Cloud Run proof:
   allowlist with one protocol regression; arbitrary codes remain suppressed.
   `HARNESS-Admin-exact-exchange-code-final.json` records the resulting
   **106/106** changed-suite pass (helper **102**, manifest **4**, zero skips).
+- Root also found two defined identity variants missing from the executed
+  rejection matrix. Foreign-principal and foreign-session readbacks now actually
+  run against the valid exchange ACK; both forbid proof/business mutation and
+  revoke only the original ACK's own session, never the foreign readback sid.
+  `HARNESS-Admin-ACK-identity-binding-final.json` records **108/108** changed-suite
+  passes (helper **104**, manifest **4**, zero skips). Earlier runs remain above.
 - Scoped ESLint and the final true-imports typecheck are recorded by exact
   source hashes in `HARNESS-canonical-admin-checks/`; only completed exit-zero
   receipts can establish their own static-check credit.
