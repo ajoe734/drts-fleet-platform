@@ -416,3 +416,97 @@ package outputs or dependencies were changed to erase those diagnostics;
 no installation or large build was performed. Local full-root green is
 **not** claimed. New exact-candidate hosted typecheck/full CI and independent
 review remain required; neither old failed run is rerun or relabeled green.
+
+## 2026-10-19 deployed-wrapper same-origin continuation
+
+This is the same original Fleet task, with its four acceptance criteria,
+keys, dependencies and preceding evidence retained. The normally reopened
+seventeen-scope continuation starts from deployed accepted
+`daebd72eeef12229cb59d3750b7a288b1dab7448`. Passenger phase 2 remains separate.
+
+The original operational artifact `12198712708` from run `39271315521`
+contains 14 passed and 2 failed cases, with no skips or retries. The Fleet
+case reached a browser POST to the original submission's `/submit` with
+`expectedRevisionNo: 3`, then received HTTP 403 `FLEET_ORIGIN_DENIED`. Its
+Origin genuinely matched the external HTTPS portal. The public runtime
+wrapper retained that Origin but replaced the Next hop with loopback HTTP,
+so the production guard compared the external origin with the child URL.
+The prior setup's two document categories had already uploaded/confirmed;
+this failure preceded principal resolution and the submission command.
+Withdraw/resubmit did not execute in that original case. The separate
+Channel failure is not repaired or claimed here.
+
+The wrapper now validates the actual ingress Host as one canonical authority
+and reconstructs a private `x-drts-runtime-origin` only for the exact existing
+Fleet Docker child entry. Existing Cloud Run `K_SERVICE` identifies its HTTPS
+termination; outside Cloud Run, the real socket's TLS state determines the
+scheme. Neither browser Origin nor forwarded headers establish authority.
+Missing/duplicate/multivalued or malformed Host, invalid ports and a
+request-target authority override reject before the child. The request
+destination remains the fixed loopback child, and the API destination remains
+the existing configured API URL.
+
+Every public entry strips caller-supplied provenance and forwarding metadata,
+including originless requests. Fleet compares a present Origin against the
+wrapper-owned external origin, retaining the original direct-Next comparison
+when the marker is absent. An empty, malformed or foreign Origin is denied.
+The marker is filtered before any API forwarding. The other five wrapper
+consumers receive no marker; this is Fleet-specific origin metadata, not a
+new origin guard for all six applications. All six actual Docker entry/port
+pairs remain loopback-bound: platform Admin, Ops, Tenant, Fleet, Channel and
+ROC. An unrecognized child entry receives no marker and retains the original
+guard behavior. This metadata grants no application identity or capability.
+
+The new socket-free regression imports the executable wrapper with only its
+listener and child-process I/O replaced, then runs the actual Fleet
+middleware, proxy, signed-session authority, auth guard, Controller and
+Supply services. Its storage/scanner fixture is the existing in-memory
+document fixture, not a real provider. It transfers exact raw bytes for both
+required document categories, checks scan/confirm/download, then submits,
+withdraws and resubmits the same draft with the verified actor and revision.
+It also covers foreign/malformed Origin, forged provenance/forwarding,
+invalid authorities, missing CSRF, missing/expired/revoked/invalid credentials,
+wrong realm/scope, cross-fleet selectors, independent invocation/application
+bearers, and unchanged streamed bytes/status/cookie/no-store behavior.
+No listening socket, product server, browser or PostgreSQL runs on the VM.
+
+Evidence is under
+`.local/passenger-bureau-gap-correction-20261018/shared-H-A-full-deploy-20261019/fleet-origin-source-20261019/`:
+
+| Check                                                         | Actual result                                                                                                             |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `before-actual-wrapper.json`                                  | Original product: valid external HTTPS POST fails 403 vs expected 200; foreign-Origin rejection passes (1 FAIL / 1 PASS). |
+| `accepted-1c0c-wrapper-unit.json`                             | New composition: 51 PASS / 0 FAIL / 0 SKIP, including both document categories and same-draft submit/withdraw/resubmit.   |
+| `accepted-1c0c-retained-Fleet-full.json`                      | Original full Fleet regression: 26 files / 263 PASS / 0 FAIL / 0 SKIP.                                                    |
+| `accepted-1c0c-Fleet-app-noEmit.check.json`                   | Fleet app noEmit exits 0; its production inputs are unchanged by the later test-only type corrections.                    |
+| `accepted-1c0c-wrapper-imports-noEmit.check.json`             | New unit's actual import graph noEmit exits 0, without changing tracked TypeScript configuration or flags.                |
+| Final scoped lint, syntax/format and immutable handoff packet | Recorded separately against final bytes before candidate handoff.                                                         |
+
+The initial test collection's unnecessary direct `reflect-metadata` import
+failed, and is retained as preparation evidence. The first product-fixed
+run reached HTTP 200 but exposed a new assertion against a nonexistent
+`created_by` response field; the test now uses the actual draft/fleet contract
+and later verifies the canonical submitted actor. The expanded fixture's
+first PUT incorrectly supplied `application/pdf` instead of the returned
+upload intent's `application/octet-stream` headers, producing 42 PASS / 1
+fixture failure. Using the actual intent headers produced 43 PASS. Subsequent
+auth/authority additions produced 51 PASS. The first new-unit compiler exited
+2 for two test adapter types (Node module namespace and nullable signal);
+their corrected actual-import compiler and 51-case rerun both exit 0. These
+failed attempts are preserved and are not described as old product defects.
+
+Before freezing the candidate, a fresh fetch found accepted peer
+`1c0c3f954e5d067156732ce973ccc8cbcc2b02c6`. Ordinary merge fast-forwarded
+without conflict; all forty-four peer paths remain exact and do not overlap
+the four owned changed paths. The `accepted-1c0c-` records in the table are
+actual post-integration runs: 51 new and 263 retained tests pass with zero
+skips; Fleet app and new-test actual-import compilers both exit 0. Earlier
+daeb-based checks remain separate evidence. No peer Source credit is borrowed
+as this continuation's own CI.
+
+These are controlled Source regressions. This continuation has not yet been
+deployed or rerun against shared Cloud Run, real document storage/scanning or
+browser sessions. New immutable candidate CI, independent review and normal
+protected merge remain required. The original failed operational run and
+all earlier accepted Source/CI/runtime evidence retain their own exact
+versions; neither is silently replaced by this local result.
