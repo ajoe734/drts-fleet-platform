@@ -67,6 +67,12 @@ env:
   DEV_MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.DEV_MAP_PROVIDER_ALLOWED_ORIGINS }}
   # Explicit shared rehearsal selection. No public access or role policy change.
   DEV_PAX_REVIEW_DEMO_ENABLED: ${{ vars.DEV_PAX_REVIEW_DEMO_ENABLED }}
+  # Hostname of the Cloud IAP public front door provisioned by
+  # operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh
+  # (see domain-mappings-dev.yml). Empty until that workflow has been run for
+  # this project; passenger-app-web itself stays --no-allow-unauthenticated
+  # either way (see "Grant Cloud IAP service agent run.invoker" below).
+  DEV_PAX_BUREAU_ENTRY_HOST: ${{ vars.DEV_PAX_BUREAU_ENTRY_HOST }}
   DEV_JWT_ISSUER: ${{ vars.DEV_JWT_ISSUER }}
   DEV_JWT_AUDIENCE: ${{ vars.DEV_JWT_AUDIENCE }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
@@ -1271,7 +1277,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false},PAX_PUBLIC_PASSENGER_ONLY=false" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1438,6 +1444,12 @@ jobs:
           # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
           env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
           env_vars="${env_vars},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          passenger_public_only=false
+          if [[ "${{ needs.prepare.outputs.passenger_app_exposure_flag }}" == "--allow-unauthenticated" ]]; then
+            passenger_public_only=true
+          fi
+          env_vars="${env_vars},PAX_PUBLIC_PASSENGER_ONLY=${passenger_public_only}"
+          env_vars="${env_vars},PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
@@ -1459,6 +1471,19 @@ jobs:
         if: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--no-allow-unauthenticated' }}
         run: |
           ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.passenger_app_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
+      # Additive only: grants run.invoker solely to the Cloud IAP service
+      # agent (see grant-passenger-app-iap-invoker.sh), never to allUsers or
+      # allAuthenticatedUsers. Gated on DEV_PAX_BUREAU_ENTRY_HOST so dev
+      # environments that have not run domain-mappings-dev.yml's bureau
+      # public-entry provisioning step are unaffected.
+      - name: Grant Cloud IAP service agent run.invoker — passenger-app-web
+        if: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--no-allow-unauthenticated' && env.DEV_PAX_BUREAU_ENTRY_HOST != '' }}
+        run: |
+          ./operations/deployment/passenger-bureau-entry/grant-passenger-app-iap-invoker.sh \
             "${{ needs.prepare.outputs.passenger_app_service }}" \
             "${{ needs.prepare.outputs.region }}" \
             "${{ needs.prepare.outputs.project_id }}"
@@ -2414,21 +2439,27 @@ jobs:
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_PLATFORM_ADMIN_ORIGIN: ${{ needs.health-check.outputs.platform_admin }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
           PAX_REVIEW_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
       - name: Exercise additional real shared-dev passenger branches
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
       - name: Upload additional shared-dev passenger branch evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
@@ -2452,6 +2483,7 @@ jobs:
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           PAX_QUOTE_EXPIRY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
@@ -2472,11 +2504,14 @@ jobs:
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           PAX_DISPATCH_TIMEOUT_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-real-dispatch-timeout.config.ts
       - name: Upload shared-dev reservation offer timeout evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
@@ -2492,11 +2527,14 @@ jobs:
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           OPS_REVIEW_RECOVERY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.ops-review-recovery.config.ts
       - name: Upload shared-dev Ops declined-command recovery evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'

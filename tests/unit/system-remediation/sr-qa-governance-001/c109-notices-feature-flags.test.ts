@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   CreatePlatformNoticeCommand,
@@ -10,6 +10,7 @@ import { FeatureFlagsService } from "../../../../apps/api/src/modules/feature-fl
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 
 describe("C109: 公告／維護通知與分租戶功能旗標驗收", () => {
+  afterEach(() => vi.useRealTimers());
   function setupPlatformAdmin() {
     const auditNotificationService = new AuditNotificationService();
     const service = new PlatformAdminService(auditNotificationService);
@@ -29,6 +30,8 @@ describe("C109: 公告／維護通知與分租戶功能旗標驗收", () => {
 
   describe("1. 平台公告與通知管理 (Platform Notices)", () => {
     it("1.1 建立平台公告草稿與排程，包含受眾、嚴重度，並寫入審計日誌", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-09-30T00:00:00Z"));
       const { service, auditNotificationService } = setupPlatformAdmin();
 
       const command: CreatePlatformNoticeCommand = {
@@ -231,12 +234,12 @@ describe("C109: 公告／維護通知與分租戶功能旗標驗收", () => {
       expect(globalAfter?.enabled).toBe(false);
 
       // isEnabled 輔助方法
-      expect(await service.isEnabled("driver-app.shift", "tenant-corp-alpha")).toBe(
-        true,
-      );
-      expect(await service.isEnabled("driver-app.shift", "tenant-corp-beta")).toBe(
-        false,
-      );
+      expect(
+        await service.isEnabled("driver-app.shift", "tenant-corp-alpha"),
+      ).toBe(true);
+      expect(
+        await service.isEnabled("driver-app.shift", "tenant-corp-beta"),
+      ).toBe(false);
       expect(await service.isEnabled("driver-app.shift")).toBe(false);
     });
 

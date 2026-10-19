@@ -567,13 +567,13 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
     it("denies driver viewing or acting on tasks not broadcasted or assigned to them without leaking existence", async () => {
       const { forwarderController, forwarderService } = createDriverFixture();
 
-      const order = forwarderService.ingestExternalOrder({
+      const order = await forwarderService.ingestExternalOrder({
         platformCode: "uber",
         externalOrderId: "EXT-001",
         payload: { serviceBucket: "standard_taxi" },
       });
 
-      forwarderService.broadcastOrder(order.mirrorOrderId, {
+      await forwarderService.broadcastOrder(order.mirrorOrderId, {
         candidateDriverIds: ["drv-demo-001"], // broadcasted to drv-demo-001
       });
 
@@ -628,16 +628,16 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       }
 
       // Driver 1 trying to reject Driver 2's task
-      expect(() =>
+      await expect(
         forwarderController.rejectForwardedOrder(
           order.mirrorOrderId,
           driver1Identity,
           { driverId: "drv-001", reason: "not interested" },
         ),
-      ).toThrowError(ApiRequestError);
+      ).rejects.toThrowError(ApiRequestError);
 
       try {
-        forwarderController.rejectForwardedOrder(
+        await forwarderController.rejectForwardedOrder(
           order.mirrorOrderId,
           driver1Identity,
           { driverId: "drv-001", reason: "not interested" },

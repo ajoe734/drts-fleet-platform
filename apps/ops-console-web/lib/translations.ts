@@ -1,6 +1,10 @@
 export type Locale = "en" | "zh";
 
 const en = {
+  "platformNotice.section": "Platform notices",
+  "platformNotice.read": "Read",
+  "platformNotice.markRead": "Mark as read",
+  "platformNotice.readNotAcknowledged": "Read was not acknowledged",
   // ── App ──
   "app.name": "DRTS Fleet",
   "app.sub": "Ops Console",
@@ -4652,6 +4656,10 @@ const en = {
 };
 
 const zh: Record<keyof typeof en, string> = {
+  "platformNotice.section": "平台公告",
+  "platformNotice.read": "已讀",
+  "platformNotice.markRead": "標示已讀",
+  "platformNotice.readNotAcknowledged": "讀取未獲確認",
   // ── App ──
   "app.name": "DRTS 車隊",
   "app.sub": "營運控制台",

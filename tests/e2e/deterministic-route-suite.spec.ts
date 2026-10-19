@@ -259,8 +259,7 @@ async function exerciseModal(page: Page) {
 
 async function exerciseSafeButton(page: Page) {
   const buttons = page.locator("main button");
-  for (let index = 0; index < (await buttons.count()); index += 1) {
-    const button = buttons.nth(index);
+  for (const button of await buttons.elementHandles()) {
     const name = (
       (await button.getAttribute("aria-label")) ??
       (await button.innerText().catch(() => ""))
