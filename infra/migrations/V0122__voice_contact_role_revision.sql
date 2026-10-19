@@ -82,36 +82,22 @@ CREATE INDEX IF NOT EXISTS idx_voice_contact_role_revision_session_role
 
 SELECT voice._make_append_only('voice.contact_role_revision');
 
--- `voice.callback_task_contact_binding` (review round 2, F5): pins a
--- `voice.callback_task` row to the SPECIFIC `contact_role_revision` that was
--- effective for its `callbackRecipient` at the moment the binding was
--- written, so a later contact correction cannot retroactively change what
--- an existing task's `contactName`/consent reference reads back as (the
--- task's own `contact_phone_encrypted`/`consent_snapshot_hash` sealed
--- columns, defined by an earlier migration, already behave this way for the
--- caller-supplied phone/consent-hash; this table gives the SAME
--- point-in-time sealing to the server-resolved contact projection added by
--- V0122/this task). Append-only and multi-row per task (never updated) so
--- a later AUTHORIZED replacement (an explicit `updateContactRole` on
--- `callbackRecipient` for the same session) can append a new binding
--- without destroying the original one -- "current" is simply the latest row
--- for a `task_id` ordered by `bound_at`, and the full row set IS the
--- replacement history requested by the review (no separate audit table
--- needed). Scoped to `callbackRecipient` only: that is the only role a
--- callback task ever projects (`VoiceCallbackService.loadDbTask`).
+-- One immutable creation snapshot per task. A recipient replacement creates
+-- a new task after the original is cancelled through its existing CAS action;
+-- the original task/receipt always keeps its original phone and consent.
 CREATE TABLE IF NOT EXISTS voice.callback_task_contact_binding (
   binding_id        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  task_id           uuid NOT NULL REFERENCES voice.callback_task (task_id),
+  task_id           uuid NOT NULL UNIQUE REFERENCES voice.callback_task (task_id),
   voice_session_id  uuid NOT NULL REFERENCES voice.session (voice_session_id),
   role              text NOT NULL CHECK (role = 'callbackRecipient'),
   revision_number   integer NOT NULL,
   bind_reason       text NOT NULL,
+  replaces_task_id  uuid REFERENCES voice.callback_task (task_id),
   bound_at          timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (voice_session_id, revision_number)
     REFERENCES voice.contact_role_revision (voice_session_id, revision_number)
 );
-
-CREATE INDEX IF NOT EXISTS idx_voice_callback_task_contact_binding_task
-  ON voice.callback_task_contact_binding (task_id, bound_at DESC);
-
+CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_callback_contact_replacement
+  ON voice.callback_task_contact_binding (replaces_task_id)
+  WHERE replaces_task_id IS NOT NULL;
 SELECT voice._make_append_only('voice.callback_task_contact_binding');

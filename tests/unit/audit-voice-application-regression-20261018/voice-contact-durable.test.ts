@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 
-import { VoiceContactService } from "../../../apps/api/src/modules/voice-booking/voice-contact.service";
+import { VoiceContactService as CurrentVoiceContactService } from "../../../apps/api/src/modules/voice-booking/voice-contact.service";
 import type {
   ContactRoleRevisionRow,
   InsertContactRoleRevisionInput,
@@ -20,12 +20,29 @@ import type {
  * not re-run here.
  */
 
+import { resolve } from "node:path";
+import { sourceModuleLoader } from "./source-module-loader";
+const VoiceContactService = process.env.VOICE_ORIGINAL_REF
+  ? sourceModuleLoader({}, [
+      "apps/api/src/modules/voice-booking/voice-contact.service.ts",
+    ])<{
+      VoiceContactService: typeof CurrentVoiceContactService;
+    }>(resolve("apps/api/src/modules/voice-booking/voice-contact.service.ts"))
+      .VoiceContactService
+  : CurrentVoiceContactService;
+
 const VOICE_SESSION_ID = "66666666-6666-4666-8666-666666666666";
 
 function fakeContactRepository() {
   const rows: ContactRoleRevisionRow[] = [];
   const invalidateUnconsumed = vi.fn(async () => null);
-  const rebindCalls: Array<{ voiceSessionId: string; revisionNumber: number; reason: string }> = [];
+  const rebindCalls: Array<{
+    voiceSessionId: string;
+    revisionNumber: number;
+    reason: string;
+  }> = [];
+
+  let pending = Promise.resolve();
 
   const repo: Pick<
     VoiceSessionRepository,
@@ -35,18 +52,36 @@ function fakeContactRepository() {
     | "insertContactRoleRevision"
     | "listContactRoleRevisions"
     | "invalidateUnconsumedConfirmationForContactChange"
-    | "rebindOpenCallbackTaskContacts"
   > = {
     isEnabled: () => true,
-    withTransaction: async (work: (tx: VoiceQueryExecutor) => Promise<unknown>) =>
-      work({} as VoiceQueryExecutor),
+    withTransaction: async (
+      work: (tx: VoiceQueryExecutor) => Promise<unknown>,
+    ) => {
+      const previous = pending;
+      let release!: () => void;
+      pending = new Promise<void>((done) => {
+        release = done;
+      });
+      await previous;
+      const snapshot = rows.slice();
+      try {
+        return await work({} as VoiceQueryExecutor);
+      } catch (error) {
+        rows.splice(0, rows.length, ...snapshot);
+        throw error;
+      } finally {
+        release();
+      }
+    },
     // A fake, but present, locked session row: `updateContactRoleDurable`
     // only checks this is non-null (the session exists) before reading
     // revisions under its lock -- the real column values are irrelevant to
     // this fixture's `rows`-backed revision ledger.
     findSessionById: vi.fn(async () => ({}) as never),
     insertContactRoleRevision: vi.fn(
-      async (input: InsertContactRoleRevisionInput): Promise<ContactRoleRevisionRow> => {
+      async (
+        input: InsertContactRoleRevisionInput,
+      ): Promise<ContactRoleRevisionRow> => {
         const row: ContactRoleRevisionRow = {
           revisionId: `rev-${rows.length + 1}`,
           voiceSessionId: input.voiceSessionId,
@@ -73,15 +108,19 @@ function fakeContactRepository() {
         .sort((a, b) => a.revisionNumber - b.revisionNumber),
     ),
     invalidateUnconsumedConfirmationForContactChange: invalidateUnconsumed,
-    rebindOpenCallbackTaskContacts: vi.fn(
-      async (voiceSessionId: string, revisionNumber: number, reason: string) => {
-        rebindCalls.push({ voiceSessionId, revisionNumber, reason });
-      },
-    ),
   };
 
   return {
-    repo: repo as unknown as VoiceSessionRepository,
+    repo: {
+      ...repo,
+      rebindOpenCallbackTaskContacts: vi.fn(async (...args: unknown[]) => {
+        rebindCalls.push({
+          voiceSessionId: String(args[0]),
+          revisionNumber: Number(args[1]),
+          reason: String(args[2]),
+        });
+      }),
+    } as unknown as VoiceSessionRepository,
     rows,
     invalidateUnconsumed,
     rebindCalls,
@@ -171,23 +210,38 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: durable VoiceCo
     // A brand new instance == a fresh process; its RAM map is empty, forcing
     // the cold-reconstruction path to be the ONLY way this can succeed.
     const reader = new VoiceContactService(repo);
-    const effective = await reader.getEffectiveContactsDurable(VOICE_SESSION_ID);
+    const effective =
+      await reader.getEffectiveContactsDurable(VOICE_SESSION_ID);
 
     expect(effective).not.toBeNull();
     expect(effective?.assertedCallerPhone).toBe("0911000111");
-    expect(effective?.bookerContact).toEqual({ name: "Alice", phone: "0911000111" });
-    expect(effective?.passengerContact).toEqual({ name: "Bob", phone: "0922000222" });
+    expect(effective?.bookerContact).toEqual({
+      name: "Alice",
+      phone: "0911000111",
+    });
+    expect(effective?.passengerContact).toEqual({
+      name: "Bob",
+      phone: "0922000222",
+    });
     expect(effective?.driverContactRole).toBe("passenger");
-    expect(effective?.driverContact).toEqual({ name: "Bob", phone: "0922000222" });
+    expect(effective?.driverContact).toEqual({
+      name: "Bob",
+      phone: "0922000222",
+    });
     expect(effective?.callbackRecipientRole).toBe("booker");
-    expect(effective?.callbackRecipient).toEqual({ name: "Alice", phone: "0911000111" });
+    expect(effective?.callbackRecipient).toEqual({
+      name: "Alice",
+      phone: "0911000111",
+    });
   });
 
   it("returns null (not a thrown error) from the durable read when no contact state was ever recorded", async () => {
     const { repo } = fakeContactRepository();
     const service = new VoiceContactService(repo);
     await expect(
-      service.getEffectiveContactsDurable("77777777-7777-4777-8777-777777777777"),
+      service.getEffectiveContactsDurable(
+        "77777777-7777-4777-8777-777777777777",
+      ),
     ).resolves.toBeNull();
   });
 
@@ -288,9 +342,9 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: durable VoiceCo
       consentRef: "consent-c",
     });
 
-    const cold = await new VoiceContactService(repo).getEffectiveContactsDurable(
-      VOICE_SESSION_ID,
-    );
+    const cold = await new VoiceContactService(
+      repo,
+    ).getEffectiveContactsDurable(VOICE_SESSION_ID);
     expect(cold?.callbackRecipientRole).toBe("custom");
     expect(cold?.callbackRecipient).toEqual({
       name: "Custom C",
@@ -327,7 +381,7 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: durable VoiceCo
     expect(rows).toHaveLength(6);
   });
 
-  it("review round 2 (F5): updating callbackRecipient rebinds every still-open callback task for the session, not completed/cancelled ones", async () => {
+  it("F5: a role edit never retargets an already sealed callback task", async () => {
     const { repo, rebindCalls } = fakeContactRepository();
     const service = new VoiceContactService(repo);
     await service.initializeContacts({
@@ -348,13 +402,7 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: durable VoiceCo
       consentRef: "consent-c",
     });
 
-    expect(rebindCalls).toEqual([
-      {
-        voiceSessionId: VOICE_SESSION_ID,
-        revisionNumber: 6,
-        reason: "explicit later recipient change",
-      },
-    ]);
+    expect(rebindCalls).toEqual([]);
   });
 
   it("review round 2 (F6): re-asserting the SAME caller phone on a reconstructed instance replays the existing revision without allocating a new one", async () => {
@@ -388,4 +436,33 @@ describe("AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C: durable VoiceCo
       expect.objectContaining({ code: "ASSERTED_CALLER_PHONE_IMMUTABLE" }),
     );
   });
+});
+
+it("F6: concurrent production-service initialization serializes before allocating seed revisions", async () => {
+  process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
+  process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
+    randomBytes(32).toString("base64");
+  try {
+    const { repo, rows } = fakeContactRepository();
+    const a = new VoiceContactService(repo),
+      b = new VoiceContactService(repo);
+    const input = {
+      voiceSessionId: VOICE_SESSION_ID,
+      callerPhone: "0911000111",
+      bookerName: "Alice",
+    };
+    await Promise.all([
+      a.initializeContacts(input),
+      b.initializeContacts(input),
+    ]);
+    expect(rows.map((row) => row.revisionNumber)).toEqual([1, 2, 3, 4, 5]);
+    expect(repo.findSessionById).toHaveBeenCalledWith(
+      VOICE_SESSION_ID,
+      expect.anything(),
+      true,
+    );
+  } finally {
+    delete process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION;
+    delete process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY;
+  }
 });

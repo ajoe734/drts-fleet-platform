@@ -287,9 +287,10 @@ export type DialogueSnapshotPurgeReceiptCursor = {
  * `mapDialogueSnapshotPurgeReceiptRow`) also needs `purgedAtCursor` -- see
  * `DialogueSnapshotPurgeReceiptCursor`'s own doc.
  */
-export type DialogueSnapshotPurgeReceiptScanRow = DialogueSnapshotPurgeReceiptRow & {
-  purgedAtCursor: string;
-};
+export type DialogueSnapshotPurgeReceiptScanRow =
+  DialogueSnapshotPurgeReceiptRow & {
+    purgedAtCursor: string;
+  };
 
 type VoiceDialogueSnapshotPurgeReceiptRow = QueryResultRow & {
   voice_session_id: string;
@@ -301,14 +302,15 @@ type VoiceDialogueSnapshotPurgeReceiptRow = QueryResultRow & {
   purged_at: Date | string;
 };
 
-type VoiceDialogueSnapshotPurgeReceiptScanRow = VoiceDialogueSnapshotPurgeReceiptRow & {
-  /**
-   * `purged_at::text` cast IN SQL, never parsed into a JS `Date` -- the
-   * only lossless carrier of `purged_at`'s full stored precision. See
-   * `DialogueSnapshotPurgeReceiptCursor`'s own doc.
-   */
-  purged_at_raw: string;
-};
+type VoiceDialogueSnapshotPurgeReceiptScanRow =
+  VoiceDialogueSnapshotPurgeReceiptRow & {
+    /**
+     * `purged_at::text` cast IN SQL, never parsed into a JS `Date` -- the
+     * only lossless carrier of `purged_at`'s full stored precision. See
+     * `DialogueSnapshotPurgeReceiptCursor`'s own doc.
+     */
+    purged_at_raw: string;
+  };
 
 /**
  * AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purged revision
@@ -417,7 +419,12 @@ export type ContactRoleSource = "default_pointer" | "explicit";
 
 export type InsertContactRoleRevisionInput = {
   voiceSessionId: string;
-  role: "caller" | "booker" | "passenger" | "driverContact" | "callbackRecipient";
+  role:
+    | "caller"
+    | "booker"
+    | "passenger"
+    | "driverContact"
+    | "callbackRecipient";
   revisionNumber: number;
   name: string;
   phoneKeyVersion: string;
@@ -433,7 +440,12 @@ export type InsertContactRoleRevisionInput = {
 export type ContactRoleRevisionRow = {
   revisionId: string;
   voiceSessionId: string;
-  role: "caller" | "booker" | "passenger" | "driverContact" | "callbackRecipient";
+  role:
+    | "caller"
+    | "booker"
+    | "passenger"
+    | "driverContact"
+    | "callbackRecipient";
   revisionNumber: number;
   name: string;
   phoneKeyVersion: string;
@@ -845,6 +857,22 @@ export class VoiceSessionRepository {
    * conflict, never a silent duplicate or overwrite -- the caller must
    * allocate a fresh number and retry, exactly like a CAS failure.
    */
+  async findAssertedCallerPhone(
+    voiceSessionId: string,
+  ): Promise<string | null> {
+    const result = await this.requireDatabase().query<{
+      record: Record<string, unknown>;
+    }>(
+      `SELECT c.record FROM crm.phase1_call_sessions c
+       JOIN voice.session s ON s.call_id = c.call_id WHERE s.voice_session_id = $1`,
+      [voiceSessionId],
+    );
+    const phone = result.rows[0]?.record.callerPhone;
+    return typeof phone === "string" && phone.trim() && phone !== "unknown"
+      ? phone.trim()
+      : null;
+  }
+
   async insertContactRoleRevision(
     input: InsertContactRoleRevisionInput,
     executor?: VoiceQueryExecutor,
@@ -918,45 +946,22 @@ export class VoiceSessionRepository {
     revisionNumber: number,
     bindReason: string,
     executor?: VoiceQueryExecutor,
+    replacesTaskId?: string,
   ): Promise<void> {
     const exec = executor ?? this.requireDatabase();
     await exec.query(
       `
         INSERT INTO voice.callback_task_contact_binding (
-          task_id, voice_session_id, role, revision_number, bind_reason
-        ) VALUES ($1,$2,'callbackRecipient',$3,$4)
+          task_id, voice_session_id, role, revision_number, bind_reason, replaces_task_id
+        ) VALUES ($1,$2,'callbackRecipient',$3,$4,$5)
       `,
-      [taskId, voiceSessionId, revisionNumber, bindReason],
-    );
-  }
-
-  /**
-   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F5): the
-   * AUTHORIZED replacement path -- called from
-   * `VoiceContactService.updateContactRole` (same transaction as the new
-   * `callbackRecipient` revision insert) to rebind every still-open
-   * callback task for the session to the new revision. Terminal tasks
-   * (`completed`/`cancelled`/`unreachable`) are deliberately excluded: their
-   * sealed contact snapshot is history, not a live pointer to correct.
-   */
-  async rebindOpenCallbackTaskContacts(
-    voiceSessionId: string,
-    revisionNumber: number,
-    bindReason: string,
-    executor?: VoiceQueryExecutor,
-  ): Promise<void> {
-    const exec = executor ?? this.requireDatabase();
-    await exec.query(
-      `
-        INSERT INTO voice.callback_task_contact_binding (
-          task_id, voice_session_id, role, revision_number, bind_reason
-        )
-        SELECT t.task_id, $1, 'callbackRecipient', $2, $3
-        FROM voice.callback_task t
-        WHERE t.voice_session_id = $1
-          AND t.status NOT IN ('completed', 'cancelled', 'unreachable')
-      `,
-      [voiceSessionId, revisionNumber, bindReason],
+      [
+        taskId,
+        voiceSessionId,
+        revisionNumber,
+        bindReason,
+        replacesTaskId ?? null,
+      ],
     );
   }
 
@@ -969,7 +974,11 @@ export class VoiceSessionRepository {
   async getLatestCallbackTaskContactBinding(
     taskId: string,
     executor?: VoiceQueryExecutor,
-  ): Promise<{ revisionNumber: number; boundAt: string; bindReason: string } | null> {
+  ): Promise<{
+    revisionNumber: number;
+    boundAt: string;
+    bindReason: string;
+  } | null> {
     const exec = executor ?? this.requireDatabase();
     const result = await exec.query<{
       revision_number: number;
@@ -1280,7 +1289,9 @@ export class VoiceSessionRepository {
     executor?: VoiceQueryExecutor,
   ): Promise<number> {
     const exec = executor ?? this.requireDatabase();
-    const result = await exec.query<{ dialogue_snapshot_fence_version: number }>(
+    const result = await exec.query<{
+      dialogue_snapshot_fence_version: number;
+    }>(
       `
         UPDATE voice.session
         SET dialogue_snapshot_fence_version =
@@ -1529,9 +1540,7 @@ export class VoiceSessionRepository {
     if (!this.isEnabled()) {
       return null;
     }
-    const result = await (
-      executor ?? this.requireDatabase()
-    ).query<{
+    const result = await (executor ?? this.requireDatabase()).query<{
       purged_at_text: string | null;
       voice_session_id: string | null;
       session_version: number | null;

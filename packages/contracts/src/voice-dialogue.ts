@@ -10,7 +10,9 @@ export const voiceDialogueSlotFieldSchema = z.enum([
   "passengerCount",
   "notes",
 ]);
-export type VoiceDialogueSlotField = z.infer<typeof voiceDialogueSlotFieldSchema>;
+export type VoiceDialogueSlotField = z.infer<
+  typeof voiceDialogueSlotFieldSchema
+>;
 export const voiceIntentSchema = z.enum([
   "book",
   "status",
@@ -27,7 +29,12 @@ export const voiceToolProposalSchema = z.discriminatedUnion("name", [
   z
     .object({
       name: z.literal("resolve_location"),
-      args: z.object({ query: text }).strict(),
+      args: z
+        .object({
+          query: text,
+          field: z.enum(["pickup", "dropoff"]).optional(),
+        })
+        .strict(),
     })
     .strict(),
   z
@@ -102,7 +109,16 @@ export const voiceToolResultSchemas = {
   resolve_location: z
     .object({
       candidates: z
-        .array(z.object({ placeId: label, label, region: label }).strict())
+        .array(
+          z
+            .object({
+              placeId: label,
+              label,
+              region: label,
+              entranceId: label.optional(),
+            })
+            .strict(),
+        )
         .max(3),
     })
     .strict(),
@@ -115,6 +131,19 @@ export const voiceToolResultSchemas = {
   prepare_booking_readback: z
     .object({
       script: z.string().min(1).max(4000),
+      confirmation: z
+        .object({
+          confirmationId: label,
+          readbackPlaybackId: label,
+          snapshotHash: label,
+          script: z.string().min(1).max(4000),
+          readbackScriptHash: label,
+          templateVersion: z.literal("zh-TW-booking-v1"),
+          expectedDigit: z.literal("1"),
+          expiresAt: z.string().datetime(),
+        })
+        .strict()
+        .optional(),
       playbackTaskId: label,
       draftVersion: z.number().int().nonnegative(),
     })
@@ -166,6 +195,7 @@ export const voiceDialogueSnapshotAddressCandidateSchema = z
     placeId: z.string().max(200),
     label: z.string().max(500),
     region: z.string().max(200),
+    entranceId: z.string().max(200).optional(),
   })
   .strict();
 

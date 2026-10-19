@@ -68,15 +68,15 @@ export interface InitializeContactsInput {
   driverContactRole?: "booker" | "passenger";
   callbackRecipientRole?: "booker" | "passenger" | "custom";
   customCallbackRecipient?: ContactInfo;
-  consentRef?: string | null;
+  consentRef?: string | null | undefined;
 }
 
 export interface UpdateContactRoleInput {
   voiceSessionId: string;
   role: ContactRole;
   phone: string;
-  name?: string;
-  consentRef?: string | null;
+  name?: string | undefined;
+  consentRef?: string | null | undefined;
   reason: string;
   invalidateConfirmation?: boolean;
 }
@@ -349,7 +349,6 @@ export class VoiceContactService {
       latestRevisionNumber,
       updatedAt: revisions[revisions.length - 1]!.updatedAt,
     };
-    this.states.set(voiceSessionId, state);
     return state;
   }
 
@@ -371,11 +370,13 @@ export class VoiceContactService {
    */
   async getEffectiveContactsDurable(
     voiceSessionId: string,
+    executor?: VoiceQueryExecutor,
   ): Promise<EffectiveContactsResult | null> {
     if (this.isDbBacked()) {
-      const fresh = await this.coldReconstructState(voiceSessionId);
+      const fresh = await this.coldReconstructState(voiceSessionId, executor);
       if (!fresh) return null;
-      return this.getEffectiveContacts(voiceSessionId);
+      if (!executor) this.states.set(voiceSessionId, fresh);
+      return this.projectContacts(fresh);
     }
     const state = this.states.get(voiceSessionId);
     if (!state) return null;
@@ -392,16 +393,25 @@ export class VoiceContactService {
   async getContactRevisionByNumber(
     voiceSessionId: string,
     revisionNumber: number,
-  ): Promise<{ name: string; phone: string; consentRef: string | null } | null> {
+    executor?: VoiceQueryExecutor,
+  ): Promise<ContactRevision | null> {
     if (!this.isDbBacked()) return null;
-    const rows =
-      await this.sessionRepository!.listContactRoleRevisions(voiceSessionId);
+    const rows = await this.sessionRepository!.listContactRoleRevisions(
+      voiceSessionId,
+      executor,
+    );
     const row = rows.find((r) => r.revisionNumber === revisionNumber);
     if (!row) return null;
     return {
       name: row.name,
       phone: this.decryptRevisionPhone(row),
       consentRef: row.consentRef,
+      revision: row.revisionNumber,
+      role: row.role,
+      roleSource: row.roleSource,
+      reason: row.reason,
+      updatedAt: row.createdAt,
+      replacedRevision: row.replacedRevision,
     };
   }
 
@@ -411,10 +421,48 @@ export class VoiceContactService {
   async initializeContacts(
     input: InitializeContactsInput,
   ): Promise<VoiceContactState> {
-    let existing = this.states.get(input.voiceSessionId);
-    if (!existing && this.isDbBacked()) {
-      existing = await this.coldReconstructState(input.voiceSessionId);
+    if (!this.isDbBacked()) return this.createInitialContacts(input);
+    const state = await this.sessionRepository!.withTransaction(async (tx) => {
+      const session = await this.sessionRepository!.findSessionById(
+        input.voiceSessionId,
+        tx,
+        true,
+      );
+      if (!session)
+        throw new ApiRequestError(
+          404,
+          "VOICE_SESSION_NOT_FOUND",
+          "Voice session was not found.",
+        );
+      const existing = await this.coldReconstructState(
+        input.voiceSessionId,
+        tx,
+      );
+      if (existing) {
+        this.requireSameCaller(existing, input.callerPhone);
+        return existing;
+      }
+      return this.createInitialContacts(input, tx);
+    });
+    this.states.set(input.voiceSessionId, state);
+    return this.cloneState(state);
+  }
+
+  private requireSameCaller(state: VoiceContactState, phone: string): void {
+    if (state.assertedCallerPhone !== phone.trim()) {
+      throw new ApiRequestError(
+        409,
+        "ASSERTED_CALLER_PHONE_IMMUTABLE",
+        "原始 assertedCallerPhone 在適用保存期間不可覆寫。",
+      );
     }
+  }
+
+  private async createInitialContacts(
+    input: InitializeContactsInput,
+    tx?: VoiceQueryExecutor,
+  ): Promise<VoiceContactState> {
+    const existing = tx ? undefined : this.states.get(input.voiceSessionId);
     if (existing) {
       // Validate caller phone immutability if re-asserted
       if (existing.assertedCallerPhone !== input.callerPhone.trim()) {
@@ -437,14 +485,15 @@ export class VoiceContactService {
       );
     }
 
-    const isSelfBooking = input.isSelfBooking ?? (!input.passengerName && !input.passengerPhone);
+    const isSelfBooking =
+      input.isSelfBooking ?? (!input.passengerName && !input.passengerPhone);
     const bookerName = input.bookerName?.trim() || "代叫聯絡人";
     const passengerName = isSelfBooking
       ? bookerName
-      : (input.passengerName?.trim() || "乘車人");
+      : input.passengerName?.trim() || "乘車人";
     const passengerPhone = isSelfBooking
       ? callerPhone
-      : (input.passengerPhone?.trim() || callerPhone);
+      : input.passengerPhone?.trim() || callerPhone;
 
     const driverContactRole: "booker" | "passenger" =
       input.driverContactRole ?? (isSelfBooking ? "booker" : "passenger");
@@ -492,7 +541,9 @@ export class VoiceContactService {
       name: passengerName,
       phone: passengerPhone,
       consentRef: input.consentRef ?? null,
-      reason: isSelfBooking ? "self_booking_passenger" : "third_party_passenger",
+      reason: isSelfBooking
+        ? "self_booking_passenger"
+        : "third_party_passenger",
       roleSource: "explicit",
       updatedAt: now,
       replacedRevision: null,
@@ -535,7 +586,8 @@ export class VoiceContactService {
           revision: ++revCounter,
           role: "callbackRecipient",
           name: callbackRecipientRole === "booker" ? bookerName : passengerName,
-          phone: callbackRecipientRole === "booker" ? callerPhone : passengerPhone,
+          phone:
+            callbackRecipientRole === "booker" ? callerPhone : passengerPhone,
           consentRef: null,
           reason: `default_role:${callbackRecipientRole}`,
           roleSource: "default_pointer",
@@ -559,16 +611,13 @@ export class VoiceContactService {
       updatedAt: now,
     };
 
-    if (this.isDbBacked()) {
+    if (tx) {
       const key = this.requireEncryptionKey();
-      await this.sessionRepository!.withTransaction(async (tx) => {
-        for (const revision of revisions) {
-          await this.persistRevision(input.voiceSessionId, revision, key, tx);
-        }
-      });
+      for (const revision of revisions)
+        await this.persistRevision(input.voiceSessionId, revision, key, tx);
+    } else {
+      this.states.set(input.voiceSessionId, state);
     }
-
-    this.states.set(input.voiceSessionId, state);
     return this.cloneState(state);
   }
 
@@ -581,7 +630,10 @@ export class VoiceContactService {
    * since a sync caller somewhere relying on its current signature is a
    * worse regression than this method staying process-local.
    */
-  assertCallerPhone(voiceSessionId: string, callerPhone: string): VoiceContactState {
+  assertCallerPhone(
+    voiceSessionId: string,
+    callerPhone: string,
+  ): VoiceContactState {
     const normalized = callerPhone.trim();
     if (!normalized) {
       throw new ApiRequestError(
@@ -645,9 +697,11 @@ export class VoiceContactService {
    * FRESH, lock-serialized read instead of this instance's possibly-stale
    * `states` cache -- see that method's own doc.
    */
-  async updateContactRole(
-    input: UpdateContactRoleInput,
-  ): Promise<{ state: VoiceContactState; newRevision: ContactRevision; confirmationInvalidated: boolean }> {
+  async updateContactRole(input: UpdateContactRoleInput): Promise<{
+    state: VoiceContactState;
+    newRevision: ContactRevision;
+    confirmationInvalidated: boolean;
+  }> {
     const normalizedPhone = input.phone.trim();
     if (!normalizedPhone) {
       throw new ApiRequestError(
@@ -680,7 +734,9 @@ export class VoiceContactService {
         );
       }
       // If same phone, return current state without creating redundant revision
-      const currentRev = [...state.revisions].reverse().find((r) => r.role === "caller")!;
+      const currentRev = [...state.revisions]
+        .reverse()
+        .find((r) => r.role === "caller")!;
       return {
         state: this.cloneState(state),
         newRevision: currentRev,
@@ -689,12 +745,17 @@ export class VoiceContactService {
     }
 
     // Find the latest previous revision for this role
-    const previousRev = [...state.revisions].reverse().find((r) => r.role === input.role);
+    const previousRev = [...state.revisions]
+      .reverse()
+      .find((r) => r.role === input.role);
     const replacedRevisionNumber = previousRev ? previousRev.revision : null;
 
     const now = new Date().toISOString();
     const nextRevisionNumber = ++state.latestRevisionNumber;
-    const resolvedName = input.name?.trim() || previousRev?.name || (input.role === "passenger" ? "乘車人" : "聯絡人");
+    const resolvedName =
+      input.name?.trim() ||
+      previousRev?.name ||
+      (input.role === "passenger" ? "乘車人" : "聯絡人");
 
     const newRevision: ContactRevision = {
       revision: nextRevisionNumber,
@@ -720,10 +781,16 @@ export class VoiceContactService {
         state.passengerContact = { name: resolvedName, phone: normalizedPhone };
         break;
       case "driverContact":
-        state.customDriverContact = { name: resolvedName, phone: normalizedPhone };
+        state.customDriverContact = {
+          name: resolvedName,
+          phone: normalizedPhone,
+        };
         break;
       case "callbackRecipient":
-        state.customCallbackRecipient = { name: resolvedName, phone: normalizedPhone };
+        state.customCallbackRecipient = {
+          name: resolvedName,
+          phone: normalizedPhone,
+        };
         state.callbackRecipientRole = "custom";
         break;
     }
@@ -749,29 +816,8 @@ export class VoiceContactService {
     };
   }
 
-  /**
-   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 review round 2 (F6/F5): the
-   * DB-backed `updateContactRole` path. Everything that decides the next
-   * revision number, the previous-revision lookup and the caller-phone
-   * immutability check is computed from a FRESH `listContactRoleRevisions`
-   * read taken AFTER locking the owning `voice.session` row
-   * (`FOR UPDATE`) inside the same transaction as the insert -- a second
-   * instance's concurrent `updateContactRole` for the same session
-   * genuinely blocks on that lock until this transaction commits, so two
-   * racing corrections can never allocate the same `revision_number` or
-   * compute a `replacedRevision`/default-name fallback from data that is
-   * about to be superseded. This REPLACES trusting `this.states` (which can
-   * be stale -- another instance's write, or even this instance's own
-   * earlier read, is invisible to a warm `Map` entry) for every decision
-   * that must be authoritative.
-   *
-   * F5: when the role is `callbackRecipient`, the new revision is also
-   * propagated to every still-open callback task for the session
-   * (`rebindOpenCallbackTaskContacts`) in the SAME transaction -- an
-   * AUTHORIZED replacement (this method call IS the authorization), with
-   * the full append-only `callback_task_contact_binding` row history
-   * standing in as the "replacement history" the review required.
-   */
+  /** The original session row lock serializes revision allocation and proof
+   * invalidation. A contact edit never rewrites an existing task's snapshot. */
   private async updateContactRoleDurable(
     input: UpdateContactRoleInput,
     normalizedPhone: string,
@@ -784,7 +830,11 @@ export class VoiceContactService {
     let confirmationInvalidated = false;
     let newRevision: ContactRevision | undefined;
     let callerNoopReturn:
-      | { state: VoiceContactState; newRevision: ContactRevision; confirmationInvalidated: boolean }
+      | {
+          state: VoiceContactState;
+          newRevision: ContactRevision;
+          confirmationInvalidated: boolean;
+        }
       | undefined;
 
     await this.sessionRepository!.withTransaction(async (tx) => {
@@ -882,19 +932,15 @@ export class VoiceContactService {
         confirmationInvalidated = invalidated !== null;
       }
 
-      if (input.role === "callbackRecipient") {
-        await this.sessionRepository!.rebindOpenCallbackTaskContacts(
-          input.voiceSessionId,
-          nextRevisionNumber,
-          input.reason,
-          tx,
-        );
-      }
+      // A role edit never changes a callback's sealed recipient. Operators
+      // cancel the old task through its existing CAS command, then create an
+      // explicitly related replacement with fresh consent.
     });
 
     if (callerNoopReturn) return callerNoopReturn;
 
     const fresh = await this.coldReconstructState(input.voiceSessionId);
+    if (fresh) this.states.set(input.voiceSessionId, fresh);
     return {
       state: this.cloneState(fresh!),
       newRevision: newRevision!,
@@ -919,6 +965,10 @@ export class VoiceContactService {
       );
     }
 
+    return this.projectContacts(state);
+  }
+
+  private projectContacts(state: VoiceContactState): EffectiveContactsResult {
     // Driver contact resolution
     let driverContact: ContactInfo;
     if (state.customDriverContact) {
@@ -941,11 +991,21 @@ export class VoiceContactService {
 
     // Derive active revision per role
     const activeRevisions: Record<ContactRole, ContactRevision | null> = {
-      caller: [...state.revisions].reverse().find((r) => r.role === "caller") ?? null,
-      booker: [...state.revisions].reverse().find((r) => r.role === "booker") ?? null,
-      passenger: [...state.revisions].reverse().find((r) => r.role === "passenger") ?? null,
-      driverContact: [...state.revisions].reverse().find((r) => r.role === "driverContact") ?? null,
-      callbackRecipient: [...state.revisions].reverse().find((r) => r.role === "callbackRecipient") ?? null,
+      caller:
+        [...state.revisions].reverse().find((r) => r.role === "caller") ?? null,
+      booker:
+        [...state.revisions].reverse().find((r) => r.role === "booker") ?? null,
+      passenger:
+        [...state.revisions].reverse().find((r) => r.role === "passenger") ??
+        null,
+      driverContact:
+        [...state.revisions]
+          .reverse()
+          .find((r) => r.role === "driverContact") ?? null,
+      callbackRecipient:
+        [...state.revisions]
+          .reverse()
+          .find((r) => r.role === "callbackRecipient") ?? null,
     };
 
     const callbackRecipientConsentRef =
@@ -990,7 +1050,9 @@ export class VoiceContactService {
     }
 
     if (role) {
-      return state.revisions.filter((r) => r.role === role).map((r) => ({ ...r }));
+      return state.revisions
+        .filter((r) => r.role === role)
+        .map((r) => ({ ...r }));
     }
     return state.revisions.map((r) => ({ ...r }));
   }
@@ -1020,7 +1082,8 @@ export class VoiceContactService {
       passengerContact: contacts.passengerContact,
       driverContactRole: contacts.driverContactRole,
       policyVersion: params.policyVersion ?? "v2026.09.06",
-      validationReference: params.validationReference ?? `val-ref-${randomUUID()}`,
+      validationReference:
+        params.validationReference ?? `val-ref-${randomUUID()}`,
     };
   }
 
@@ -1029,8 +1092,12 @@ export class VoiceContactService {
       ...state,
       bookerContact: { ...state.bookerContact },
       passengerContact: { ...state.passengerContact },
-      customDriverContact: state.customDriverContact ? { ...state.customDriverContact } : null,
-      customCallbackRecipient: state.customCallbackRecipient ? { ...state.customCallbackRecipient } : null,
+      customDriverContact: state.customDriverContact
+        ? { ...state.customDriverContact }
+        : null,
+      customCallbackRecipient: state.customCallbackRecipient
+        ? { ...state.customCallbackRecipient }
+        : null,
       revisions: state.revisions.map((r) => ({ ...r })),
     };
   }

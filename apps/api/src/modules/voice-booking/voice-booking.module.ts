@@ -1,4 +1,9 @@
-import { VoiceConfirmationService } from "./voice-confirmation.service";
+import { ApiRequestError } from "../../common/api-envelope";
+import { assertVoiceCapabilityScope } from "../../common/auth/voice-capability.service";
+import {
+  VoiceConfirmationService,
+  VOICE_CONFIRMATION_ACCESS,
+} from "./voice-confirmation.service";
 import { GeoModule } from "../geo/geo.module";
 import { ServiceAreaModule } from "../service-area/service-area.module";
 import { ServiceProductModule } from "../service-product/service-product.module";
@@ -72,6 +77,39 @@ import {
     },
     VoiceBookingDraftService,
     VoiceConfirmationService,
+    {
+      provide: VOICE_CONFIRMATION_ACCESS,
+      inject: [VoiceCapabilityGuard, VoiceBookingRepository],
+      useFactory: (
+        guard: VoiceCapabilityGuard,
+        repository: VoiceBookingRepository,
+      ) => ({
+        authorize: async (credential: string, sessionId: string) => {
+          const claims = await guard.authenticate({
+            authorization: credential,
+          });
+          assertVoiceCapabilityScope(claims, "session_execute");
+          const session = await repository.findSessionById(sessionId);
+          if (
+            !session ||
+            claims.voiceSessionId !== sessionId ||
+            session.resourceScopeId !== claims.resourceScopeId ||
+            session.routeProfileVersion !== claims.routeProfileVersion ||
+            session.leaseEpoch !== claims.leaseEpoch
+          )
+            throw new ApiRequestError(
+              403,
+              "VOICE_SESSION_NOT_OWNER",
+              "Confirmation authority is stale.",
+            );
+          return {
+            leaseEpoch: claims.leaseEpoch,
+            resourceScopeId: claims.resourceScopeId,
+            providerAccountId: session.providerAccountId,
+          };
+        },
+      }),
+    },
     VoiceCheckpointRepository,
     VoiceEvidenceService,
     VoiceBookingRepository,

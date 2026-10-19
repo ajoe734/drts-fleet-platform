@@ -801,6 +801,116 @@ export class VoiceBookingRepository {
     return result.rows.map(mapSessionEventRow);
   }
 
+  /** Promote a qualified candidate using the original session/intent/draft
+   * transaction. sourceSnapshotId makes response-loss retries reuse the exact
+   * immutable draft even though a fresh qualification has transient timestamps. */
+  async promoteQualifiedDialogueDraft(input: {
+    session: VoiceSessionRecord;
+    sourceSnapshotId: string;
+    contactRevision: number;
+    canonicalSnapshot: Record<string, unknown>;
+    snapshotHash: string;
+    slots: unknown;
+    signal: AbortSignal;
+  }): Promise<{
+    intentId: string;
+    draftVersion: number;
+    session: VoiceSessionRecord;
+  }> {
+    return this.withTransaction(async (tx) => {
+      input.signal.throwIfAborted();
+      await tx.query(
+        "SELECT voice_session_id FROM voice.session WHERE voice_session_id = $1 FOR UPDATE",
+        [input.session.voiceSessionId],
+      );
+      const current = await this.findSessionById(
+        input.session.voiceSessionId,
+        tx,
+      );
+      if (
+        !current ||
+        current.sessionVersion !== input.session.sessionVersion ||
+        current.inputEpoch !== input.session.inputEpoch ||
+        current.leaseEpoch !== input.session.leaseEpoch ||
+        current.resourceScopeId !== input.session.resourceScopeId ||
+        current.routeProfileVersion !== input.session.routeProfileVersion ||
+        current.controlOwner !== "ai" ||
+        current.dialogState === "closed" ||
+        current.pendingInput ||
+        current.commitStatus !== "none"
+      )
+        throw new Error("voice_qualified_draft_stale");
+      const contacts = await tx.query<{ revision: number }>(
+        "SELECT COALESCE(MAX(revision_number), 0)::integer AS revision FROM voice.contact_role_revision WHERE voice_session_id = $1",
+        [current.voiceSessionId],
+      );
+      if (contacts.rows[0]?.revision !== input.contactRevision)
+        throw new Error("voice_qualified_contact_stale");
+      await tx.query(
+        `INSERT INTO voice.intent (voice_session_id, action) VALUES ($1, 'create_owned_order')
+        ON CONFLICT (voice_session_id) WHERE action = 'create_owned_order' DO NOTHING`,
+        [current.voiceSessionId],
+      );
+      const intent = await this.findActiveCreateIntent(
+        current.voiceSessionId,
+        tx,
+      );
+      if (!intent || intent.boundOrderId)
+        throw new Error("voice_create_intent_unavailable");
+      const replay = await tx.query<{ draft_version: number }>(
+        `SELECT draft_version FROM voice.draft_revision
+        WHERE intent_id = $1 AND validation_refs @> $2::jsonb ORDER BY draft_version DESC LIMIT 1`,
+        [
+          intent.intentId,
+          JSON.stringify([
+            {
+              sourceSnapshotId: input.sourceSnapshotId,
+              contactRevision: input.contactRevision,
+            },
+          ]),
+        ],
+      );
+      if (replay.rows[0])
+        return {
+          intentId: intent.intentId,
+          draftVersion: replay.rows[0].draft_version,
+          session: current,
+        };
+      input.signal.throwIfAborted();
+      const version = intent.currentDraftVersion + 1;
+      await tx.query(
+        `UPDATE voice.confirmation SET state = 'invalidated' WHERE intent_id = $1 AND state IN ('readback_playing','awaiting_answer','accepted')`,
+        [intent.intentId],
+      );
+      await tx.query(
+        `INSERT INTO voice.draft_revision (intent_id, draft_version, slots, validation_refs, canonical_snapshot, snapshot_hash)
+        VALUES ($1,$2,$3::jsonb,$4::jsonb,$5::jsonb,$6)`,
+        [
+          intent.intentId,
+          version,
+          JSON.stringify(input.slots),
+          JSON.stringify([
+            {
+              sourceSnapshotId: input.sourceSnapshotId,
+              contactRevision: input.contactRevision,
+            },
+          ]),
+          JSON.stringify(input.canonicalSnapshot),
+          input.snapshotHash,
+        ],
+      );
+      await tx.query(
+        "UPDATE voice.intent SET current_draft_version = $2, status = 'qualified' WHERE intent_id = $1",
+        [intent.intentId, version],
+      );
+      return {
+        intentId: intent.intentId,
+        draftVersion: version,
+        session: current,
+      };
+    });
+  }
+
   async findActiveCreateIntent(
     voiceSessionId: string,
     executor?: VoiceQueryExecutor,
@@ -1287,8 +1397,11 @@ export class VoiceBookingRepository {
       values.push(filter.windowEnd);
       conditions.push(`received_at <= $${values.length}`);
     }
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const result = await (executor ?? this.requireDatabase()).query<QueryResultRow>(
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<QueryResultRow>(
       `SELECT * FROM voice.call_admission ${whereClause} ORDER BY received_at ASC`,
       values,
     );
@@ -1318,8 +1431,11 @@ export class VoiceBookingRepository {
       values.push(filter.windowEnd);
       conditions.push(`created_at <= $${values.length}`);
     }
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const result = await (executor ?? this.requireDatabase()).query<VoiceSessionRow>(
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<VoiceSessionRow>(
       `SELECT * FROM voice.session ${whereClause} ORDER BY created_at ASC`,
       values,
     );
@@ -1455,7 +1571,9 @@ export class VoiceBookingRepository {
       }
     }
 
-    throw new Error(`Failed to insert or fetch existing voice usage record ${usageId}`);
+    throw new Error(
+      `Failed to insert or fetch existing voice usage record ${usageId}`,
+    );
   }
 
   async listUsageRecords(
@@ -1506,9 +1624,12 @@ export class VoiceBookingRepository {
       conditions.push(`created_at <= $${values.length}`);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const whereClause =
+      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const queryStr = `SELECT * FROM voice.usage_record ${whereClause} ORDER BY created_at ASC`;
-    const result = await (executor ?? this.requireDatabase()).query<QueryResultRow>(queryStr, values);
+    const result = await (
+      executor ?? this.requireDatabase()
+    ).query<QueryResultRow>(queryStr, values);
     return result.rows.map(mapVoiceUsageRow);
   }
 
@@ -1612,9 +1733,15 @@ export class VoiceBookingRepository {
       return mapVoiceRateCardRow(result.rows[0]);
     }
     // Existing rate card on conflict
-    const existing = await this.findRateCard(rateCard.rateCardId, rateCard.version, executor);
+    const existing = await this.findRateCard(
+      rateCard.rateCardId,
+      rateCard.version,
+      executor,
+    );
     if (existing) return existing;
-    throw new Error(`Failed to insert or fetch existing rate card ${rateCard.rateCardId}#${rateCard.version}`);
+    throw new Error(
+      `Failed to insert or fetch existing rate card ${rateCard.rateCardId}#${rateCard.version}`,
+    );
   }
 
   private requireDatabase(): VoiceQueryExecutor {
@@ -1629,7 +1756,9 @@ function mapVoiceUsageRow(row: QueryResultRow): VoiceUsageRowRecord {
   return {
     usageId: String(row.usage_id),
     providerAccountId: String(row.provider_account_id),
-    providerUsageRef: row.provider_usage_ref ? String(row.provider_usage_ref) : null,
+    providerUsageRef: row.provider_usage_ref
+      ? String(row.provider_usage_ref)
+      : null,
     admissionId: row.admission_id ? String(row.admission_id) : null,
     voiceSessionId: row.voice_session_id ? String(row.voice_session_id) : null,
     provider: String(row.provider),
@@ -1639,9 +1768,17 @@ function mapVoiceUsageRow(row: QueryResultRow): VoiceUsageRowRecord {
     quantity: Number(row.quantity),
     currency: String(row.currency),
     rateCardId: row.rate_card_id ? String(row.rate_card_id) : null,
-    rateCardVersion: row.rate_card_version ? Number(row.rate_card_version) : null,
-    estimatedCost: row.estimated_cost !== null && row.estimated_cost !== undefined ? Number(row.estimated_cost) : null,
-    actualCost: row.actual_cost !== null && row.actual_cost !== undefined ? Number(row.actual_cost) : null,
+    rateCardVersion: row.rate_card_version
+      ? Number(row.rate_card_version)
+      : null,
+    estimatedCost:
+      row.estimated_cost !== null && row.estimated_cost !== undefined
+        ? Number(row.estimated_cost)
+        : null,
+    actualCost:
+      row.actual_cost !== null && row.actual_cost !== undefined
+        ? Number(row.actual_cost)
+        : null,
     invoiceRef: row.invoice_ref ? String(row.invoice_ref) : null,
     brandId: row.brand_id ? String(row.brand_id) : null,
     usageDate: String(row.usage_date),
@@ -1658,10 +1795,17 @@ function mapVoiceRateCardRow(row: QueryResultRow): VoiceRateCardRowRecord {
     taxInclusive: Boolean(row.tax_inclusive),
     unitPrice: Number(row.unit_price),
     billingUnit: String(row.billing_unit),
-    effectiveFrom: new Date(row.effective_from as string | number | Date).toISOString(),
-    effectiveUntil: row.effective_until ? new Date(row.effective_until as string | number | Date).toISOString() : null,
+    effectiveFrom: new Date(
+      row.effective_from as string | number | Date,
+    ).toISOString(),
+    effectiveUntil: row.effective_until
+      ? new Date(row.effective_until as string | number | Date).toISOString()
+      : null,
     roundingRule: row.rounding_rule ? String(row.rounding_rule) : null,
-    minimumCharge: row.minimum_charge !== null && row.minimum_charge !== undefined ? Number(row.minimum_charge) : null,
+    minimumCharge:
+      row.minimum_charge !== null && row.minimum_charge !== undefined
+        ? Number(row.minimum_charge)
+        : null,
     conditions: row.conditions,
     reconciliationStatus: String(row.reconciliation_status),
     createdAt: new Date(row.created_at as string | number | Date).toISOString(),
@@ -1673,7 +1817,9 @@ function mapCallAdmissionRow(row: QueryResultRow): VoiceCallAdmissionRecord {
     admissionId: String(row.admission_id),
     providerAccountId: String(row.provider_account_id),
     providerCallId: String(row.provider_call_id),
-    receivedAt: new Date(row.received_at as string | number | Date).toISOString(),
+    receivedAt: new Date(
+      row.received_at as string | number | Date,
+    ).toISOString(),
     lineBindingId: row.line_binding_id ? String(row.line_binding_id) : null,
     brandId: row.brand_id ? String(row.brand_id) : null,
     outcome: row.outcome as "admitted" | "overflow" | "failed",

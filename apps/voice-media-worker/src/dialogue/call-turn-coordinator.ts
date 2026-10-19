@@ -487,7 +487,10 @@ export class VoiceCallTurnCoordinator {
    * supplies one yet (no call-admission flow exists -- see
    * `../dialogue/voice-session-binding.ts`'s own doc); this is the
    * composition seam a future one calls through. */
-  attach(sessionId: string, binding?: VoiceSessionBinding): VoiceCallAttachment {
+  attach(
+    sessionId: string,
+    binding?: VoiceSessionBinding,
+  ): VoiceCallAttachment {
     const attachment: VoiceCallAttachment = { sessionId };
     const turnSession: TurnSession = {
       // One engine per attachment: `VoiceDialogueEngine.turn` guards itself
@@ -662,7 +665,8 @@ export class VoiceCallTurnCoordinator {
           snapshot.sessionVersion <= restoration.session.sessionVersion &&
           snapshot.inputEpoch <= restoration.session.inputEpoch &&
           new Date(snapshot.retentionExpiresAt).getTime() > Date.now() &&
-          voiceDialogueSnapshotContentSchema.safeParse(snapshot.content).success;
+          voiceDialogueSnapshotContentSchema.safeParse(snapshot.content)
+            .success;
         if (!snapshotCorrelates) {
           throw new Error(
             "voice_restore_snapshot_mismatch: the restored dialogue-snapshot does not correlate with this session's authoritative revision, or has already expired.",
@@ -1111,10 +1115,7 @@ export class VoiceCallTurnCoordinator {
     if (evictable.length > MAX_CONTROL_EVENT_BACKLOG) {
       const oldest = evictable[0]!;
       const evictIndex = turnSession.pendingControlEvents.indexOf(oldest);
-      const [evicted] = turnSession.pendingControlEvents.splice(
-        evictIndex,
-        1,
-      );
+      const [evicted] = turnSession.pendingControlEvents.splice(evictIndex, 1);
       evicted?.settle?.reject(
         new Error(
           "voice_control_event_evicted: backlog capacity exceeded before this never-attempted observation could be delivered.",
@@ -1135,7 +1136,9 @@ export class VoiceCallTurnCoordinator {
     // currently awaiting (if any) is preserved -- its own HTTP attempt is
     // already in flight and may yet durably land -- every OTHER queued
     // entry is rejected and removed.
-    if (turnSession.pendingControlEvents.length > MAX_TOTAL_CONTROL_EVENT_BACKLOG) {
+    if (
+      turnSession.pendingControlEvents.length > MAX_TOTAL_CONTROL_EVENT_BACKLOG
+    ) {
       const inFlight = turnSession.inFlightControlEvent;
       const stuck = turnSession.pendingControlEvents.filter(
         (candidate) => candidate !== inFlight,
@@ -1396,7 +1399,10 @@ export class VoiceCallTurnCoordinator {
     // either.
     if (!turnSession || turnSession.restoreFailed) return;
 
-    if (event.type === "speech.started" || event.type === "media.epoch.advanced") {
+    if (
+      event.type === "speech.started" ||
+      event.type === "media.epoch.advanced"
+    ) {
       turnSession.inputEpoch += 1;
       turnSession.activeAbort?.abort();
       // R4-control (Codex reopen round 16/17): a real `speech.started`
@@ -1653,10 +1659,7 @@ export class VoiceCallTurnCoordinator {
         .speak(result.prompt, languageCode, abortController.signal, mediaEpoch)
         .catch((error) => {
           if (!this.isExpectedSupersession(error)) {
-            console.error(
-              "[voice-call-turn-coordinator] speak failed",
-              error,
-            );
+            console.error("[voice-call-turn-coordinator] speak failed", error);
           }
         });
     }
@@ -1681,23 +1684,7 @@ export class VoiceCallTurnCoordinator {
   ): Promise<unknown[]> {
     const { state } = turnSession;
     if (output.tools.length === 0) return [];
-    // AUDIT-VOICE-APPLICATION-REGRESSION-20261018: `resolve_location`/
-    // `check_booking_eligibility`/`get_bound_booking_status`/
-    // `request_handoff` now have real apps/api domain backing (see
-    // `VoiceDomainToolPorts`'s own doc) once this attachment has a real
-    // `VoiceSessionBinding` and the coordinator has a real `apiClient` --
-    // the same reachability gate `request_handoff` alone used before this
-    // task. `prepare_booking_readback` alone is still honestly
-    // unreachable: it requires the durable, server-resolved contact-role/
-    // sealed-consent snapshot the contact/consent unit of this same task
-    // has not landed yet (see that port's own doc), so a batch containing
-    // it is still forced into the same honest unavailable/handoff outcome
-    // a genuinely unavailable provider would produce for the WHOLE batch,
-    // exactly as every non-handoff tool was before this task.
-    const hasUnreachableTool = output.tools.some(
-      (tool) => tool.name === "prepare_booking_readback",
-    );
-    if (hasUnreachableTool || !turnSession.binding || !this.apiClient) {
+    if (!turnSession.binding || !this.apiClient) {
       state.handoff = { reason: "provider_unavailable", intent: output.intent };
       return output.tools.map(() => ({
         status: "unavailable" as const,
@@ -1772,6 +1759,26 @@ export class VoiceCallTurnCoordinator {
       { inputEpoch: authoritativeInputEpoch, output },
       request.signal,
     );
+    request.signal.throwIfAborted();
+    for (let i = 0; i < output.tools.length; i++) {
+      const tool = output.tools[i]!;
+      const value = response.results[i] as {
+        candidates?: Array<{
+          placeId: string;
+          label: string;
+          region: string;
+          entranceId?: string;
+        }>;
+      };
+      if (tool.name === "resolve_location" && value?.candidates) {
+        const field =
+          tool.args.field ??
+          (["pickup", "dropoff"] as const).find(
+            (key) => state.slots[key]?.rawText === tool.args.query,
+          );
+        if (field) state.unresolvedAddress(field, value.candidates, false);
+      }
+    }
     return [...response.results];
   }
 }

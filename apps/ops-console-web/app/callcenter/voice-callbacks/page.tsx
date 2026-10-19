@@ -328,6 +328,26 @@ export default function VoiceCallbacksPage() {
                 <dd>{task.contactName || copy.contactUnknown}</dd>
                 <dt>{copy.consent}</dt>
                 <dd>{task.consentRef || copy.contactUnknown}</dd>
+                <dt>{copy.phone}</dt>
+                <dd>{task.contactPhone || copy.contactUnknown}</dd>
+                <dt>{copy.role}</dt>
+                <dd>
+                  {task.contactRole
+                    ? copy.roles[task.contactRole]
+                    : copy.contactUnknown}
+                </dd>
+                <dt>{copy.revision}</dt>
+                <dd>{task.contactRevisionNumber ?? copy.contactUnknown}</dd>
+                <dt>{copy.boundAt}</dt>
+                <dd>
+                  {task.contactRevisionBoundAt
+                    ? time(task.contactRevisionBoundAt)
+                    : copy.contactUnknown}
+                </dd>
+                <dt>{copy.replaces}</dt>
+                <dd>{task.replacesTaskId || "—"}</dd>
+                <dt>{copy.replacement}</dt>
+                <dd>{task.replacementTaskId || "—"}</dd>
                 <dt>{copy.owner}</dt>
                 <dd>{task.assignedOperatorId || copy.none}</dd>
                 <dt>{copy.due}</dt>
@@ -337,6 +357,17 @@ export default function VoiceCallbacksPage() {
                 <dt>{copy.version}</dt>
                 <dd>{task.version}</dd>
               </dl>
+              <h3>{copy.contactHistory}</h3>
+              <ul>
+                {task.contactHistory?.map((item) => (
+                  <li key={item.taskId}>
+                    {item.taskId} · {item.name} · {copy.revision}{" "}
+                    {item.revisionNumber} ·{" "}
+                    {item.consentRef || copy.contactUnknown} ·{" "}
+                    {time(item.boundAt)} · {item.reason}
+                  </li>
+                ))}
+              </ul>
               <p>{copy.phoneNotice}</p>
               {task.dialReconcileRequired && (
                 <p role="alert">{copy.reconcile}</p>

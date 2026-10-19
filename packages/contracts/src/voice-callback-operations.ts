@@ -13,11 +13,23 @@ export const VoiceCallbackQueueFilterSchema = z.object({
   status: VoiceCallbackStatusSchema.optional(),
   voiceSessionId: z.string().uuid().optional(),
 });
+export const VoiceContactCorrectionSchema = z
+  .object({
+    role: z.enum(["booker", "passenger", "driverContact", "callbackRecipient"]),
+    phone: z.string().trim().min(1),
+    name: z.string().trim().min(1).optional(),
+    consentRef: z.string().trim().min(1).optional(),
+    reason: z.string().trim().min(1),
+  })
+  .strict();
 export const VoiceCallbackCreateRequestSchema = z
   .object({
     contactPhoneEncrypted: z.string().min(1),
     contactPhoneLookupToken: z.string().min(1),
     consentSnapshotHash: z.string().min(1),
+    contactRevisionNumber: z.number().int().positive().optional(),
+    consentRef: z.string().trim().min(1).optional(),
+    replacesTaskId: z.string().uuid().optional(),
     reason: z.string().optional(),
     priority: z.enum(["normal", "urgent", "emergency"]).optional(),
     scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
@@ -69,6 +81,27 @@ export interface VoiceCallbackTaskView {
    */
   contactName: string;
   consentRef: string;
+  contactPhone?: string;
+  contactRole?:
+    | "caller"
+    | "booker"
+    | "passenger"
+    | "driverContact"
+    | "callbackRecipient";
+  contactRevisionNumber?: number | null;
+  contactRevisionBoundAt?: string | null;
+  replacesTaskId?: string | null;
+  replacementTaskId?: string | null;
+  contactHistory?: Array<{
+    taskId: string;
+    revisionNumber: number;
+    role: string;
+    name: string;
+    consentRef: string | null;
+    boundAt: string;
+    reason: string;
+    replacesTaskId: string | null;
+  }>;
   reason: string;
   priority: "normal" | "urgent" | "emergency";
   dueAt: string;

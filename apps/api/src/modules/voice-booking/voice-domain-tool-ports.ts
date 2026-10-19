@@ -1,4 +1,7 @@
-import type { VoiceCapabilityTokenClaims, VoiceToolProposal } from "@drts/contracts";
+import type {
+  VoiceCapabilityTokenClaims,
+  VoiceToolProposal,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { GeoService } from "../geo/geo.service";
@@ -6,37 +9,34 @@ import type { VoiceToolDomainPorts } from "./voice-tool-gateway.service";
 import { VoiceDispatchProjectionService } from "./voice-dispatch-projection.service";
 import { VoiceHandoffOnlyToolPorts } from "./voice-handoff-tool-ports";
 
-/**
- * AUDIT-VOICE-APPLICATION-REGRESSION-20261018: `VoiceHandoffOnlyToolPorts`
- * (this module's prior `VoiceToolDomainPorts` implementation) answered
- * every tool other than `request_handoff` with an honest 501 because no
- * domain backing was reachable at all. `resolve_location` and
- * `get_bound_booking_status` now have real, self-contained domain backing
- * (`GeoService.search`, `VoiceBookingAuthorizationService.
- * getBoundBookingStatus` + `VoiceDispatchProjectionService.
- * projectDispatch`) and are answered for real here.
- *
- * `check_booking_eligibility` and `prepare_booking_readback` are NOT
- * implemented by this class yet -- both still delegate to
- * `VoiceHandoffOnlyToolPorts`'s own honest 501. This is a precise,
- * documented boundary, not an oversight: deriving the
- * `QualifyVoiceBookingCommand` either tool needs requires re-selecting a
- * durable address candidate from this session's `voice.dialogue_snapshot`
- * history (the snapshot only retains `{placeId, label, region}` per
- * candidate, never the ephemeral `GeoService.search` `candidateId`
- * `VoiceLocationService.resolve` actually requires -- a fresh `search`
- * re-keyed by the persisted `placeId` would be needed to recover one, and
- * no caller does that yet), and `prepare_booking_readback` additionally
- * requires the durable, server-resolved contact-role/sealed-consent
- * snapshot this task's own contact/consent unit has not landed yet (see
- * that unit's own doc). Implementing either honestly is explicitly left to
- * a follow-up change rather than fabricated here.
- */
+import { VoiceSessionService } from "./voice-session.service";
+import { VoiceContactService } from "./voice-contact.service";
+import { VoiceBookingRepository } from "./voice-booking.repository";
+import { VoiceBookingDraftService } from "./voice-booking-draft.service";
+import {
+  VoiceConfirmationService,
+  voiceSnapshotHash,
+  type ReadbackPlan,
+} from "./voice-confirmation.service";
+import type { VoiceDialogueSnapshotContent } from "@drts/contracts";
+
+/** Real domain continuation; the model proposes candidates, never coordinates,
+ * contact authority, an order receipt or affirmative confirmation. */
 export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
   constructor(
     private readonly fallback: VoiceHandoffOnlyToolPorts,
     private readonly geo: GeoService | undefined,
-    private readonly dispatchProjection: VoiceDispatchProjectionService | undefined,
+    private readonly dispatchProjection:
+      | VoiceDispatchProjectionService
+      | undefined,
+    private readonly booking?: {
+      sessions: VoiceSessionService;
+      contacts: VoiceContactService;
+      repository: VoiceBookingRepository;
+      drafts: VoiceBookingDraftService;
+      confirmation: VoiceConfirmationService;
+      credential: string;
+    },
   ) {}
 
   async execute(
@@ -54,7 +54,210 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
     if (proposal.name === "get_bound_booking_status") {
       return this.getBoundBookingStatus(context.boundOrderId, context.signal);
     }
+    if (
+      proposal.name === "check_booking_eligibility" ||
+      proposal.name === "prepare_booking_readback"
+    ) {
+      return this.prepareBooking(proposal.name, context);
+    }
     return this.fallback.execute(proposal, context);
+  }
+
+  private async selectedLocation(
+    content: VoiceDialogueSnapshotContent,
+    field: "pickup" | "dropoff",
+    signal: AbortSignal,
+  ) {
+    const slot = content.slots[field];
+    const previous = [...content.addressHistory]
+      .reverse()
+      .find((item) => item.field === field);
+    // An explicit selected provider identity is required, including for one
+    // search result. Never infer first candidate, coordinates or an entrance.
+    const selected = previous?.candidates.filter(
+      (item) => item.placeId === (slot?.normalizedValue ?? slot?.candidate),
+    );
+    if (!slot || selected?.length !== 1 || !this.geo)
+      throw new ApiRequestError(
+        409,
+        "VOICE_ADDRESS_SELECTION_REQUIRED",
+        "Select a previously resolved provider address.",
+      );
+    signal.throwIfAborted();
+    const result = await this.geo.search({
+      q: previous!.rawText,
+      limit: 3,
+      surface: "callcenter",
+    });
+    signal.throwIfAborted();
+    const matches = result.candidates.filter(
+      (item) =>
+        (item.placeId ?? item.providerCandidateId ?? item.candidateId) ===
+        selected[0]!.placeId,
+    );
+    if (result.degraded || matches.length !== 1)
+      throw new ApiRequestError(
+        409,
+        "VOICE_ADDRESS_SELECTION_REQUIRED",
+        "The selected provider address is no longer available.",
+      );
+    return {
+      rawText: previous!.rawText,
+      candidateId: matches[0]!.candidateId,
+      ...(selected[0]!.entranceId
+        ? { entranceId: selected[0]!.entranceId }
+        : {}),
+    };
+  }
+
+  private async prepareBooking(
+    name: "check_booking_eligibility" | "prepare_booking_readback",
+    context: Parameters<VoiceToolDomainPorts["execute"]>[1],
+  ) {
+    if (!this.booking)
+      throw new ApiRequestError(
+        503,
+        "VOICE_BOOKING_CONTINUATION_UNAVAILABLE",
+        "Booking continuation is not configured.",
+      );
+    const b = this.booking;
+    context.signal.throwIfAborted();
+    const { session, snapshot } =
+      await b.sessions.getDialogueSnapshotRestoration(
+        context.claims.voiceSessionId,
+      );
+    if (
+      !snapshot ||
+      snapshot.inputEpoch !== context.inputEpoch ||
+      session.inputEpoch !== context.inputEpoch ||
+      session.resourceScopeId !== context.claims.resourceScopeId ||
+      session.routeProfileVersion !== context.claims.routeProfileVersion ||
+      session.leaseEpoch !== context.claims.leaseEpoch ||
+      session.controlOwner !== "ai" ||
+      session.dialogState === "closed"
+    )
+      throw new Error("voice_tool_stale_snapshot");
+    const contacts = await b.contacts.getEffectiveContactsDurable(
+      session.voiceSessionId,
+    );
+    if (!contacts)
+      throw new ApiRequestError(
+        409,
+        "VOICE_CONTACT_NOT_FOUND",
+        "Persist contact roles before qualification.",
+      );
+    const pickup = await this.selectedLocation(
+      snapshot.content,
+      "pickup",
+      context.signal,
+    );
+    const dropoff = await this.selectedLocation(
+      snapshot.content,
+      "dropoff",
+      context.signal,
+    );
+    const time = snapshot.content.slots.time;
+    if (!time?.normalizedValue)
+      throw new ApiRequestError(
+        409,
+        "VOICE_ABSOLUTE_TIME_REQUIRED",
+        "Confirm an absolute immediate pickup time.",
+      );
+    const command = {
+      pickup,
+      dropoff,
+      timingMode: "on_demand" as const,
+      requestedAt: time.normalizedValue,
+      timeZone: "Asia/Taipei" as const,
+      requirements: {
+        passengerCount: Number(
+          snapshot.content.slots.passengerCount?.normalizedValue ?? 1,
+        ),
+        luggageCount: 0,
+        luggageSize: "standard" as const,
+        requiredCapabilities: [],
+        bookerContact: contacts.bookerContact,
+        passengerContact: contacts.passengerContact,
+        driverContactRole: contacts.driverContactRole,
+      },
+    };
+    context.signal.throwIfAborted();
+    let qualified;
+    try {
+      qualified = await b.drafts.qualify(session.voiceSessionId, command);
+    } catch (error) {
+      if (
+        name === "check_booking_eligibility" &&
+        error instanceof ApiRequestError &&
+        error.code === "VOICE_SERVICE_AREA_REVIEW_REQUIRED"
+      ) {
+        const decision = (
+          error.getResponse() as { error?: { details?: { decision?: string } } }
+        ).error?.details?.decision;
+        return {
+          status:
+            decision === "not_serviceable"
+              ? "not_serviceable"
+              : "manual_review",
+          reason: error.message,
+        };
+      }
+      throw error;
+    }
+    context.signal.throwIfAborted();
+    if (name === "check_booking_eligibility")
+      return {
+        status: "serviceable",
+        reason:
+          "Qualified immediate booking; vehicle allocation is not yet confirmed.",
+      };
+    const canonicalSnapshot = {
+      ...qualified,
+      ...(snapshot.content.slots.notes?.candidate
+        ? { pickupNotes: snapshot.content.slots.notes.candidate }
+        : {}),
+    };
+    const promoted = await b.repository.promoteQualifiedDialogueDraft({
+      session,
+      sourceSnapshotId: snapshot.snapshotId,
+      contactRevision: contacts.totalRevisions,
+      canonicalSnapshot,
+      snapshotHash: voiceSnapshotHash(canonicalSnapshot),
+      slots: snapshot.content.slots,
+      signal: context.signal,
+    });
+    context.signal.throwIfAborted();
+    const existing = await b.repository.findActiveConfirmation(
+      promoted.intentId,
+      promoted.draftVersion,
+      "create_owned_order",
+    );
+    const plan =
+      existing &&
+      existing.inputEpoch === context.inputEpoch &&
+      existing.leaseEpoch === context.claims.leaseEpoch &&
+      Date.parse(existing.expiresAt) > Date.now() &&
+      existing.state === "readback_playing"
+        ? (existing.evidence as unknown as ReadbackPlan)
+        : await b.confirmation.beginReadback(b.credential, {
+            voiceSessionId: session.voiceSessionId,
+            intentId: promoted.intentId,
+            sessionVersion: promoted.session.sessionVersion,
+            draftVersion: promoted.draftVersion,
+            inputEpoch: context.inputEpoch,
+            leaseEpoch: context.claims.leaseEpoch,
+            controlCutoff: {
+              mediaEpoch: snapshot.mediaEpoch,
+              controlSequence: session.lastAppliedControlSequence,
+            },
+          });
+    context.signal.throwIfAborted();
+    return {
+      script: plan.script,
+      playbackTaskId: plan.readbackPlaybackId,
+      draftVersion: promoted.draftVersion,
+      confirmation: plan,
+    };
   }
 
   /** Lists up to three current provider candidates for a raw query -- this
@@ -68,7 +271,14 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
   private async resolveLocation(
     query: string,
     signal: AbortSignal,
-  ): Promise<{ candidates: Array<{ placeId: string; label: string; region: string }> }> {
+  ): Promise<{
+    candidates: Array<{
+      placeId: string;
+      label: string;
+      region: string;
+      entranceId?: string;
+    }>;
+  }> {
     if (!this.geo) {
       throw new ApiRequestError(
         500,
@@ -81,14 +291,22 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
     // degraded/fixture/non-external provider must never hand the model
     // candidates it cannot actually commit to later.
     const health = this.geo.health();
-    if (health.status !== "healthy" || health.failClosed || health.mode !== "external") {
+    if (
+      health.status !== "healthy" ||
+      health.failClosed ||
+      health.mode !== "external"
+    ) {
       throw new ApiRequestError(
         409,
         "VOICE_ADDRESS_PROVIDER_UNAVAILABLE",
         "Live address truth is unavailable.",
       );
     }
-    const result = await this.geo.search({ q: query, limit: 3, surface: "callcenter" });
+    const result = await this.geo.search({
+      q: query,
+      limit: 3,
+      surface: "callcenter",
+    });
     signal.throwIfAborted();
     return {
       candidates: result.candidates.slice(0, 3).map((candidate) => ({
@@ -97,9 +315,14 @@ export class VoiceDomainToolPorts implements VoiceToolDomainPorts {
         // stable provider identifier is actually present rather than a
         // value this response never had.
         placeId:
-          candidate.placeId ?? candidate.providerCandidateId ?? candidate.candidateId,
+          candidate.placeId ??
+          candidate.providerCandidateId ??
+          candidate.candidateId,
         label: candidate.displayName || candidate.address,
         region: candidate.district ?? candidate.locality ?? candidate.address,
+        ...(typeof candidate.metadata?.entranceId === "string"
+          ? { entranceId: candidate.metadata.entranceId }
+          : {}),
       })),
     };
   }

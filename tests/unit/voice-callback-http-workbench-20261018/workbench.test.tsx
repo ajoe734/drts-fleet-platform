@@ -184,3 +184,34 @@ it("a cancelled task keeps its call and order visible, disables mutations and wa
   );
   expect(writes).toHaveLength(0);
 });
+
+it("renders sealed role/revision/phone/evidence and original-replacement history received through the real SDK", async () => {
+  Object.assign(detail.task, {
+    contactName: "Sealed A",
+    contactPhone: "0911000111",
+    consentRef: "consent-A",
+    contactRole: "booker",
+    contactRevisionNumber: 2,
+    contactRevisionBoundAt: "2026-10-18T00:00:00Z",
+    replacesTaskId: "original-task-A",
+    replacementTaskId: "replacement-task-C",
+    contactHistory: [
+      {
+        taskId: "original-task-A",
+        revisionNumber: 2,
+        role: "booker",
+        name: "Sealed A",
+        consentRef: "consent-A",
+        boundAt: "2026-10-18T00:00:00Z",
+        reason: "original consent",
+        replacesTaskId: null,
+      },
+    ],
+  });
+  render(<VoiceCallbacksPage />);
+  await selectTask();
+  expect(await screen.findByText("0911000111")).toBeTruthy();
+  expect(screen.getByText("代叫聯絡人")).toBeTruthy();
+  expect(screen.getByText("replacement-task-C")).toBeTruthy();
+  expect(screen.getByText(/original consent/)).toBeTruthy();
+});
