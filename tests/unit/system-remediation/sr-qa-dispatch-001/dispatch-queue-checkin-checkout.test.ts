@@ -19,18 +19,18 @@ describe("SR-QA-DISPATCH-001 / C039: dispatch queue check-in / check-out", () =>
     vi.useRealTimers();
   });
 
-  it("Positive: check-in creates a queue entry with an incrementing position per site", () => {
+  it("Positive: check-in creates a queue entry with an incrementing position per site", async () => {
     const { service } = buildOwnedMobilityServiceForTest();
 
-    const first = service.queueCheckIn({
+    const first = await service.queueCheckIn({
       vehicleId: "vehicle-1",
       siteId: "site-a",
     });
-    const second = service.queueCheckIn({
+    const second = await service.queueCheckIn({
       vehicleId: "vehicle-2",
       siteId: "site-a",
     });
-    const thirdOtherSite = service.queueCheckIn({
+    const thirdOtherSite = await service.queueCheckIn({
       vehicleId: "vehicle-3",
       siteId: "site-b",
     });
@@ -41,19 +41,19 @@ describe("SR-QA-DISPATCH-001 / C039: dispatch queue check-in / check-out", () =>
     expect(thirdOtherSite.position).toBe(1);
     expect(first.status).toBe("checked_in");
 
-    const readBack = service.getQueueEntry(first.queueEntryId);
+    const readBack = await service.getQueueEntry(first.queueEntryId);
     expect(readBack.vehicleId).toBe("vehicle-1");
     expect(readBack.status).toBe("checked_in");
   });
 
-  it("Negative: duplicate check-in for the same vehicle/site is idempotent (returns the existing entry, does not create a second queue slot)", () => {
+  it("Negative: duplicate check-in for the same vehicle/site is idempotent (returns the existing entry, does not create a second queue slot)", async () => {
     const { service } = buildOwnedMobilityServiceForTest();
 
-    const first = service.queueCheckIn({
+    const first = await service.queueCheckIn({
       vehicleId: "vehicle-dup",
       siteId: "site-a",
     });
-    const duplicate = service.queueCheckIn({
+    const duplicate = await service.queueCheckIn({
       vehicleId: "vehicle-dup",
       siteId: "site-a",
     });
@@ -61,20 +61,20 @@ describe("SR-QA-DISPATCH-001 / C039: dispatch queue check-in / check-out", () =>
     expect(duplicate.queueEntryId).toBe(first.queueEntryId);
     expect(duplicate.position).toBe(first.position);
 
-    const allEntries = service.listQueueEntries();
+    const allEntries = await service.listQueueEntries();
     expect(
       allEntries.filter((entry) => entry.vehicleId === "vehicle-dup"),
     ).toHaveLength(1);
   });
 
-  it("Positive: check-out closes the entry and frees the vehicle to check in again (manual override / re-entry)", () => {
+  it("Positive: check-out closes the entry and frees the vehicle to check in again (manual override / re-entry)", async () => {
     const { service } = buildOwnedMobilityServiceForTest();
 
-    const entry = service.queueCheckIn({
+    const entry = await service.queueCheckIn({
       vehicleId: "vehicle-cycle",
       siteId: "site-a",
     });
-    const closed = service.queueCheckOut({
+    const closed = await service.queueCheckOut({
       vehicleId: "vehicle-cycle",
       siteId: "site-a",
     });
@@ -85,7 +85,7 @@ describe("SR-QA-DISPATCH-001 / C039: dispatch queue check-in / check-out", () =>
     // which must mint a *new* active entry rather than resurrect the closed
     // one, and the new entry restarts fair-order position accounting for the
     // still-active queue at that site.
-    const reCheckIn = service.queueCheckIn({
+    const reCheckIn = await service.queueCheckIn({
       vehicleId: "vehicle-cycle",
       siteId: "site-a",
     });
@@ -93,12 +93,12 @@ describe("SR-QA-DISPATCH-001 / C039: dispatch queue check-in / check-out", () =>
     expect(reCheckIn.status).toBe("checked_in");
   });
 
-  it("Negative: check-out of a vehicle with no active queue entry is rejected (404 QUEUE_ENTRY_NOT_FOUND)", () => {
+  it("Negative: check-out of a vehicle with no active queue entry is rejected (404 QUEUE_ENTRY_NOT_FOUND)", async () => {
     const { service } = buildOwnedMobilityServiceForTest();
 
     let caught: unknown;
     try {
-      service.queueCheckOut({
+      await service.queueCheckOut({
         vehicleId: "vehicle-never-checked-in",
         siteId: "site-a",
       });
@@ -109,12 +109,12 @@ describe("SR-QA-DISPATCH-001 / C039: dispatch queue check-in / check-out", () =>
     expect((caught as ApiRequestError).code).toBe("QUEUE_ENTRY_NOT_FOUND");
   });
 
-  it("Negative: reading an unknown queue entry id is rejected (404 QUEUE_ENTRY_NOT_FOUND)", () => {
+  it("Negative: reading an unknown queue entry id is rejected (404 QUEUE_ENTRY_NOT_FOUND)", async () => {
     const { service } = buildOwnedMobilityServiceForTest();
 
     let caught: unknown;
     try {
-      service.getQueueEntry("queue-entry-does-not-exist");
+      await service.getQueueEntry("queue-entry-does-not-exist");
     } catch (err) {
       caught = err;
     }
@@ -122,7 +122,7 @@ describe("SR-QA-DISPATCH-001 / C039: dispatch queue check-in / check-out", () =>
     expect((caught as ApiRequestError).code).toBe("QUEUE_ENTRY_NOT_FOUND");
   });
 
-  it("Positive / Read-back: a fresh service instance reconstructs the exact same queue snapshot purely from the persisted trace-log event stream", () => {
+  it("Positive / Read-back: a fresh service instance reconstructs the exact same queue snapshot purely from the persisted trace-log event stream", async () => {
     const { service: writer } = buildOwnedMobilityServiceForTest();
 
     // Each queue trace-log event only carries millisecond-resolution
@@ -130,11 +130,11 @@ describe("SR-QA-DISPATCH-001 / C039: dispatch queue check-in / check-out", () =>
     // deterministic instead of racing same-millisecond synchronous calls.
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-29T12:00:00.000Z"));
-    writer.queueCheckIn({ vehicleId: "vehicle-1", siteId: "site-a" });
+    await writer.queueCheckIn({ vehicleId: "vehicle-1", siteId: "site-a" });
     vi.setSystemTime(new Date("2026-04-29T12:00:01.000Z"));
-    writer.queueCheckIn({ vehicleId: "vehicle-2", siteId: "site-a" });
+    await writer.queueCheckIn({ vehicleId: "vehicle-2", siteId: "site-a" });
     vi.setSystemTime(new Date("2026-04-29T12:00:02.000Z"));
-    writer.queueCheckOut({ vehicleId: "vehicle-1", siteId: "site-a" });
+    await writer.queueCheckOut({ vehicleId: "vehicle-1", siteId: "site-a" });
 
     // Pull the durable event log the writer produced (this is exactly what
     // `OwnedMobilityRepository.loadState()` would return from

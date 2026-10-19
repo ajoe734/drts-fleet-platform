@@ -128,7 +128,7 @@ async function startQueueApi() {
   app.setGlobalPrefix("api");
   await app.listen(0, "127.0.0.1");
   runningApps.push(app);
-  const ordinaryEntry = service.queueCheckIn({
+  const ordinaryEntry = await service.queueCheckIn({
     vehicleId: "veh-ordinary-001",
     siteId: "rank-tpe",
     queueMode: "physical_rank",

@@ -858,6 +858,48 @@ export class OwnedMobilityRepository {
     await this.persistChangesWithExecutor(executor, changes);
   }
 
+  /** The original queue is a trace-log stream. Serialize only one queue
+   * context, then read its committed events inside that same transaction. */
+  async withQueueCommand<T>(
+    context: { siteId: string; runtimeProfileCode: string; queueMode: string },
+    work: (executor: OwnedMobilityQueryExecutor) => Promise<T>,
+  ): Promise<T> {
+    return this.withTransaction(async (executor) => {
+      await executor.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [
+          JSON.stringify([
+            "dispatch-queue",
+            context.siteId,
+            context.runtimeProfileCode,
+            context.queueMode,
+          ]),
+        ],
+      );
+      return work(executor);
+    });
+  }
+
+  async loadQueueTraceLogs(
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+    siteId?: string,
+  ): Promise<DispatchTraceLogRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_trace_logs
+       WHERE event_type IN ('queue.entry.created', 'queue.entry.closed')
+       ${siteId === undefined ? "" : "AND record->'details'->>'siteId' = $1"}
+       ORDER BY created_at, trace_id`,
+      siteId === undefined ? [] : [siteId],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DispatchTraceLogRecord>(
+        row.record,
+        "ops.phase1_dispatch_trace_logs",
+      ),
+    );
+  }
+
   /**
    * Locks and returns the current authoritative row for CAS-protected order
    * mutations (SD §7.1 fixed lock order: "...→ order" is the last lock taken

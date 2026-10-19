@@ -511,6 +511,7 @@ export class OwnedMobilityService
   private consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
 
   private queueEntries: QueueEntryRecord[] = [];
+  private readonly queueCommands = new Map<string, Promise<unknown>>();
 
   private profileQueuePolicies: Map<
     RuntimeProfileCode,
@@ -6876,121 +6877,80 @@ export class OwnedMobilityService
     return policy ? Array.from(policy) : [];
   }
 
-  listQueueEntries(): DispatchQueueEntryReadRecord[] {
-    const registryProjection = this.buildQueueRegistryProjection();
-    return this.queueEntries.map((entry) =>
-      this.buildQueueEntryReadRecord(entry, registryProjection),
+  async listQueueEntries(): Promise<DispatchQueueEntryReadRecord[]> {
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const traces = await this.ownedMobilityRepository.loadQueueTraceLogs();
+      this.queueEntries = this.rebuildQueueEntriesFromTraceLogs(traces);
+    }
+    const registry = this.buildQueueRegistryProjection();
+    return Promise.all(
+      this.queueEntries.map(async (entry) => {
+        const record = this.buildQueueEntryReadRecord(entry, registry);
+        if (
+          entry.status === "checked_in" &&
+          record.eligibility.decision === "eligible"
+        ) {
+          try {
+            await this.assertQueuePresence(entry.vehicleId, registry);
+          } catch (error) {
+            record.eligibility = {
+              decision: "denied",
+              reasonCode: this.resolveQueueEligibilityReasonCode(error),
+              evaluatedAt: new Date().toISOString(),
+            };
+          }
+        }
+        // Keep the committed position/history. A denied row is excluded from
+        // effective eligibility without deleting or renumbering historical events.
+        return record;
+      }),
     );
   }
 
-  getQueueEntry(queueEntryId: string): DispatchQueueEntryReadRecord {
+  async getQueueEntry(
+    queueEntryId: string,
+  ): Promise<DispatchQueueEntryReadRecord> {
     const normalizedQueueEntryId = queueEntryId.trim();
-    const queueEntry = this.queueEntries.find(
-      (entry) => entry.queueEntryId === normalizedQueueEntryId,
+    const entry = (await this.listQueueEntries()).find(
+      (row) => row.queueEntryId === normalizedQueueEntryId,
     );
-    if (!queueEntry) {
+    if (!entry)
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "QUEUE_ENTRY_NOT_FOUND",
         "Queue entry was not found.",
         { queueEntryId: normalizedQueueEntryId },
       );
-    }
-
-    return this.buildQueueEntryReadRecord(
-      queueEntry,
-      this.buildQueueRegistryProjection(),
-    );
+    return entry;
   }
 
-  queueCheckIn(
+  async queueCheckIn(
     command: QueueCheckInCommand,
     requestId?: string,
     runtimeContext?: QueueRuntimeContext,
-  ) {
-    const context: QueueRuntimeContext = runtimeContext ?? {
-      runtimeProfileCode: "ordinary_taxi",
-      queueMode: command.queueMode ?? "physical_rank",
-      operatingAuthorizationId: null,
-    };
-    this.assertNonBlank(command.vehicleId, "vehicleId");
-    this.assertNonBlank(command.siteId, "siteId");
-    this.assertQueueEligibility(command.vehicleId, context);
-
-    const existingEntry = this.queueEntries.find(
-      (entry) =>
-        entry.vehicleId === command.vehicleId &&
-        entry.siteId === command.siteId &&
-        entry.status === "checked_in",
-    );
-    if (existingEntry) {
-      return { ...existingEntry };
-    }
-
-    const checkedInAt = new Date().toISOString();
-    const queueEntry: QueueEntryRecord = {
-      queueEntryId: randomUUID(),
-      vehicleId: command.vehicleId,
-      siteId: command.siteId,
-      runtimeProfileCode: context.runtimeProfileCode,
-      queueMode: context.queueMode,
-      operatingAuthorizationId: context.operatingAuthorizationId,
-      status: "checked_in",
-      position: this.nextQueuePosition(
-        command.siteId,
-        context.runtimeProfileCode,
-        context.queueMode,
-      ),
-      checkedInAt,
-      checkedOutAt: null,
-    };
-    this.queueEntries = [queueEntry, ...this.queueEntries];
-
-    const traceLog = this.appendTrace(
-      this.queueTraceOrderId(command.siteId, command.vehicleId),
-      "queue.entry.created",
-      {
-        queueEntryId: queueEntry.queueEntryId,
-        siteId: command.siteId,
-        vehicleId: command.vehicleId,
-        position: queueEntry.position,
-        runtimeProfileCode: queueEntry.runtimeProfileCode,
-        queueMode: queueEntry.queueMode,
-        operatingAuthorizationId: queueEntry.operatingAuthorizationId,
-      },
-    );
-    this.persistChanges(
-      {
-        dispatchTraceLogs: [traceLog],
-      },
-      "queue_check_in",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "dispatch",
-        actionName: "queue_check_in",
-        resourceType: "queue_entry",
-        resourceId: queueEntry.queueEntryId,
-        newValuesSummary: {
-          siteId: command.siteId,
-          vehicleId: command.vehicleId,
-          position: queueEntry.position,
-        },
-      },
-      requestId,
-    );
-
-    return { ...queueEntry };
+  ): Promise<QueueEntryRecord> {
+    return this.runQueueCommand("check_in", command, requestId, runtimeContext);
   }
 
-  queueCheckOut(
+  async queueCheckOut(
     command: QueueCheckOutCommand,
     requestId?: string,
     runtimeContext?: QueueRuntimeContext,
-  ) {
+  ): Promise<QueueEntryRecord> {
+    return this.runQueueCommand(
+      "check_out",
+      command,
+      requestId,
+      runtimeContext,
+    );
+  }
+
+  private async runQueueCommand(
+    action: "check_in" | "check_out",
+    command: QueueCheckInCommand | QueueCheckOutCommand,
+    requestId?: string,
+    runtimeContext?: QueueRuntimeContext,
+  ): Promise<QueueEntryRecord> {
     const context: QueueRuntimeContext = runtimeContext ?? {
       runtimeProfileCode: "ordinary_taxi",
       queueMode: command.queueMode ?? "physical_rank",
@@ -6998,66 +6958,163 @@ export class OwnedMobilityService
     };
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
-
-    const queueEntry = this.queueEntries.find(
-      (entry) =>
-        entry.vehicleId === command.vehicleId &&
-        entry.siteId === command.siteId &&
-        (entry.runtimeProfileCode ?? "ordinary_taxi") ===
-          context.runtimeProfileCode &&
-        (entry.queueMode ?? "physical_rank") === context.queueMode &&
-        entry.status === "checked_in",
-    );
-    if (!queueEntry) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "QUEUE_ENTRY_NOT_FOUND",
-        "Queue entry was not found.",
+    const repository = this.ownedMobilityRepository;
+    const execute = async (tx?: OwnedMobilityQueryExecutor) => {
+      const entries = tx
+        ? this.rebuildQueueEntriesFromTraceLogs(
+            await repository!.loadQueueTraceLogs(tx, command.siteId),
+          )
+        : this.queueEntries;
+      if (action === "check_in") {
+        this.assertQueueEligibility(command.vehicleId, context);
+        await this.assertQueuePresence(
+          command.vehicleId,
+          this.buildQueueRegistryProjection(),
+        );
+      }
+      const existing = entries.find(
+        (entry) =>
+          entry.vehicleId === command.vehicleId &&
+          entry.siteId === command.siteId &&
+          (entry.runtimeProfileCode ?? "ordinary_taxi") ===
+            context.runtimeProfileCode &&
+          (entry.queueMode ?? "physical_rank") === context.queueMode &&
+          entry.status === "checked_in",
+      );
+      if (action === "check_in" && existing)
+        return { entry: { ...existing }, trace: null };
+      if (action === "check_out" && !existing)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "QUEUE_ENTRY_NOT_FOUND",
+          "Queue entry was not found.",
+          { vehicleId: command.vehicleId, siteId: command.siteId },
+        );
+      const now = new Date().toISOString();
+      const entry: QueueEntryRecord =
+        action === "check_out"
+          ? { ...existing!, status: "checked_out", checkedOutAt: now }
+          : {
+              queueEntryId: randomUUID(),
+              vehicleId: command.vehicleId,
+              siteId: command.siteId,
+              ...context,
+              status: "checked_in",
+              position: this.nextQueuePosition(
+                command.siteId,
+                context.runtimeProfileCode,
+                context.queueMode,
+                entries,
+              ),
+              checkedInAt: now,
+              checkedOutAt: null,
+            };
+      const trace = this.buildTraceLog(
+        this.queueTraceOrderId(command.siteId, command.vehicleId),
+        action === "check_in" ? "queue.entry.created" : "queue.entry.closed",
         {
-          vehicleId: command.vehicleId,
-          siteId: command.siteId,
+          queueEntryId: entry.queueEntryId,
+          siteId: entry.siteId,
+          vehicleId: entry.vehicleId,
+          position: entry.position,
+          runtimeProfileCode: entry.runtimeProfileCode,
+          queueMode: entry.queueMode,
+          operatingAuthorizationId: entry.operatingAuthorizationId,
         },
       );
+      trace.createdAt = now;
+      if (tx)
+        await repository!.persistOrderWorkflow(tx, {
+          dispatchTraceLogs: [trace],
+        });
+      else
+        await this.persistChangesRequired(
+          { dispatchTraceLogs: [trace] },
+          `queue_${action}`,
+        );
+      return { entry, trace };
+    };
+    const publish = (committed: Awaited<ReturnType<typeof execute>>) => {
+      // Publish only this command's ID delta into the current cache; never
+      // replace other contexts with a pre-transaction snapshot.
+      this.queueEntries = [
+        committed.entry,
+        ...this.queueEntries.filter(
+          (row) => row.queueEntryId !== committed.entry.queueEntryId,
+        ),
+      ];
+      if (committed.trace) {
+        this.dispatchTraceLogs = [committed.trace, ...this.dispatchTraceLogs];
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "dispatch",
+            actionName: `queue_${action}`,
+            resourceType: "queue_entry",
+            resourceId: committed.entry.queueEntryId,
+            newValuesSummary:
+              action === "check_in"
+                ? {
+                    siteId: committed.entry.siteId,
+                    vehicleId: committed.entry.vehicleId,
+                    position: committed.entry.position,
+                  }
+                : {
+                    siteId: committed.entry.siteId,
+                    vehicleId: committed.entry.vehicleId,
+                    status: committed.entry.status,
+                  },
+          },
+          requestId,
+        );
+      }
+      return { ...committed.entry };
+    };
+    if (repository?.isEnabled())
+      return publish(
+        await repository.withQueueCommand(
+          { siteId: command.siteId, ...context },
+          execute,
+        ),
+      );
+    // The supported noDB mode uses the same command decisions and serializes
+    // only this instance's requested queue context, including presence awaits.
+    const key = JSON.stringify([
+      command.siteId,
+      context.runtimeProfileCode,
+      context.queueMode,
+    ]);
+    const previous = this.queueCommands.get(key) ?? Promise.resolve();
+    const pending = previous
+      .catch(() => undefined)
+      .then(() => execute())
+      .then(publish);
+    this.queueCommands.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.queueCommands.get(key) === pending)
+        this.queueCommands.delete(key);
     }
+  }
 
-    const checkedOutAt = new Date().toISOString();
-    queueEntry.status = "checked_out";
-    queueEntry.checkedOutAt = checkedOutAt;
-
-    const traceLog = this.appendTrace(
-      this.queueTraceOrderId(command.siteId, command.vehicleId),
-      "queue.entry.closed",
-      {
-        queueEntryId: queueEntry.queueEntryId,
-        siteId: command.siteId,
-        vehicleId: command.vehicleId,
-      },
-    );
-    this.persistChanges(
-      {
-        dispatchTraceLogs: [traceLog],
-      },
-      "queue_check_out",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "dispatch",
-        actionName: "queue_check_out",
-        resourceType: "queue_entry",
-        resourceId: queueEntry.queueEntryId,
-        newValuesSummary: {
-          siteId: command.siteId,
-          vehicleId: command.vehicleId,
-          status: queueEntry.status,
-        },
-      },
-      requestId,
-    );
-
-    return { ...queueEntry };
+  private async assertQueuePresence(
+    vehicleId: string,
+    registry: QueueRegistryProjection,
+  ) {
+    const driverId = registry.pairsByVehicleId.get(vehicleId)?.driverId;
+    if (!driverId || !this.platformPresenceService) return;
+    const block =
+      await this.platformPresenceService.findDispatchBlockingPresence(driverId);
+    if (block)
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "VEHICLE_NOT_DISPATCHABLE",
+        "The paired driver is not currently available for queue participation.",
+        { vehicleId, driverId, platformPresence: block },
+      );
   }
 
   queueCheckInMultiTaxi(
@@ -9306,8 +9363,9 @@ export class OwnedMobilityService
       );
       for (const order of staleReservationHolds) {
         try {
-          await this.dispatchOrder(order.orderId, { mode: "auto" });
-          summary.reservationHoldEscalations += 1;
+          if (await this.escalateReservationHoldRequired(order.orderId, now)) {
+            summary.reservationHoldEscalations += 1;
+          }
         } catch (error) {
           summary.failures += 1;
           this.reportDispatchSchedulerSweepFailure(
@@ -9322,6 +9380,57 @@ export class OwnedMobilityService
     }
 
     return summary;
+  }
+
+  private async escalateReservationHoldRequired(
+    orderId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const prepare = (order: OwnedOrderRecord) => {
+      if (
+        order.dispatchSemantics !== "reservation" ||
+        order.status !== "redispatch_required" ||
+        !this.isWithinConfirmationWindow(order, now.toISOString())
+      )
+        return null;
+      return this.prepareDispatchOrder(this.cloneOrder(order), {
+        mode: "auto",
+      });
+    };
+    const repository = this.ownedMobilityRepository;
+    if (repository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+      const prepared = await repository.withTransaction(async (tx) => {
+        // Reuse the existing assignment -> task -> order lock/current-row
+        // fence. A stale warm replica must not reopen an accepted/newer round.
+        const current = await repository.loadOrderCancellationForUpdate(
+          tx,
+          orderId,
+        );
+        if (
+          !current ||
+          current.assignment ||
+          current.dispatchJobs.some((job) =>
+            ["matching", "reserved", "assigned"].includes(job.status),
+          )
+        )
+          return null;
+        const pending = prepare(current.order);
+        if (pending) await repository.persistOrderWorkflow(tx, pending.changes);
+        return pending;
+      });
+      if (!prepared) return false;
+      prepared.apply();
+      return true;
+    }
+    const prepared = prepare(this.requireOrder(orderId));
+    if (!prepared) return false;
+    await this.persistChangesRequired(
+      prepared.changes,
+      "reservation_hold_escalation",
+    );
+    prepared.apply();
+    return true;
   }
 
   private startDriverCompletionOutboxRecoveryPolling() {
@@ -10994,8 +11103,9 @@ export class OwnedMobilityService
     siteId: string,
     runtimeProfileCode: RuntimeProfileCode = "ordinary_taxi",
     queueMode: DispatchQueueMode = "physical_rank",
+    entries: readonly QueueEntryRecord[] = this.queueEntries,
   ) {
-    const activeEntries = this.queueEntries.filter(
+    const activeEntries = entries.filter(
       (entry) =>
         entry.siteId === siteId &&
         entry.status === "checked_in" &&
@@ -11017,8 +11127,12 @@ export class OwnedMobilityService
     traceLogs: readonly DispatchTraceLogRecord[],
   ) {
     const queueEntries = new Map<string, QueueEntryRecord>();
-    const sortedTraceLogs = [...traceLogs].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
+    const sortedTraceLogs = [...traceLogs].sort(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) ||
+        Number(left.eventType === "queue.entry.closed") -
+          Number(right.eventType === "queue.entry.closed") ||
+        left.traceId.localeCompare(right.traceId),
     );
 
     for (const traceLog of sortedTraceLogs) {

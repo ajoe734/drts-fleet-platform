@@ -317,7 +317,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
     );
   });
 
-  it("wraps canonical queue list and detail reads without changing records", () => {
+  it("wraps canonical queue list and detail reads without changing records", async () => {
     const queueEntry = {
       queueEntryId: "queue-entry-001",
       vehicleId: "veh-demo-001",
@@ -347,8 +347,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
     } as unknown as OwnedMobilityService;
     const controller = new OwnedMobilityController(service, {} as never);
 
-    const listResponse = controller.listQueueEntries("req-queue-list");
-    const detailResponse = controller.getQueueEntry(
+    const listResponse = await controller.listQueueEntries("req-queue-list");
+    const detailResponse = await controller.getQueueEntry(
       queueEntry.queueEntryId,
       "req-queue-detail",
     );

@@ -1571,6 +1571,7 @@ describe("owned mobility service", () => {
   it("persists queue check-in and check-out traces through the repository", async () => {
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
+      isEnabled: vi.fn(() => false),
       loadState: vi.fn(async () => ({
         orders: [],
         dispatchJobs: [],
@@ -1586,11 +1587,11 @@ describe("owned mobility service", () => {
     const { ownedMobilityService } = createService(repository);
     await ownedMobilityService.onModuleInit();
 
-    const checkedIn = ownedMobilityService.queueCheckIn({
+    const checkedIn = await ownedMobilityService.queueCheckIn({
       vehicleId: "veh-demo-001",
       siteId: "site-demo-001",
     });
-    const checkedOut = ownedMobilityService.queueCheckOut({
+    const checkedOut = await ownedMobilityService.queueCheckOut({
       vehicleId: "veh-demo-001",
       siteId: "site-demo-001",
     });
