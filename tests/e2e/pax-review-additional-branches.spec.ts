@@ -333,9 +333,8 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
         const contactSwitch = pax.getByRole("switch", {
           name: "需要客服與您聯繫嗎？",
         });
-        if ((await contactSwitch.getAttribute("aria-checked")) !== "false")
-          await contactSwitch.click();
-        await expect(contactSwitch).toHaveAttribute("aria-checked", "false");
+        await contactSwitch.uncheck();
+        await expect(contactSwitch).not.toBeChecked();
         const [response] = await Promise.all([
           pax.waitForResponse(
             (r) =>

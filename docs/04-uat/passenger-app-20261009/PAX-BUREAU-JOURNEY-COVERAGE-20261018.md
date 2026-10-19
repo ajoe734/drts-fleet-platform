@@ -385,7 +385,7 @@ Auth9be 的原 hosted bureau 為7PASS／1FAIL；失敗是 reload 後 fixed mode 
 
 ### 原 caller 與相依政策
 
-原 core caller 保留低分要求聯絡 ON；additional caller 保留明確關閉聯絡 OFF。兩者以實際具名 button `role=switch` 讀取 `aria-checked`，必要時正常點擊並斷言原意，未使用 `.check()`／`.uncheck()` 操作 button，也沒有改請求 body、資料讀回或 deadline。defaultON 的帳戶／token 提交與明確 opt-out 已由原真 DOM 回歸覆蓋。
+原 core caller 保留低分要求聯絡 ON；additional caller 保留明確關閉聯絡 OFF。實際控制項是原生 `<input type="checkbox" role="switch">`，checked 是原生 property，沒有 `aria-checked` attribute；初版65659誤用 button／ARIA 假設，已由 Root 獨立退修。R3 以具名 switch locator 正常 `.check()`／`.uncheck()`，並用 `toBeChecked()`／`not.toBeChecked()` 確認原意，不改產品加多餘 ARIA、不改請求 body、業務讀回或 deadline。defaultON 的帳戶／token 提交與明確 opt-out 仍由原真 DOM 回歸覆蓋。
 
 使用者已確認兩星以下皆建案、開關僅決定是否聯絡；原客訴作者正在其正常任務處理 backend 及 additional E 段「無案」舊期待的精確 business hunk。本 checkpoint 只修改 switch 操作，原 `complaint_case_no=null`／Ops cases0 歷史及目前尚未合併的期待保留；不接受兩種狀態、不刪斷言、不 skip。本輪依 Root 的序列保留與目前 backend 相符的原 E 段 business 斷言，Journey 先完成自身 CI／獨立審查；後續由原客訴作者正常合併 accepted Journey，再在其精確 business hunk及自身完整 CI 驗證低分同案讀回，不等待或提前搬入其未接受 Source。本次 socket-free 結果不代表該新政策旅程已通過。
 
@@ -404,3 +404,13 @@ Auth9be 的原 hosted bureau 為7PASS／1FAIL；失敗是 reload 後 fixed mode 
 原失敗安裝 ENOSPC、Root lossless worktree 搬移／健康 local dependencies check0、普通 merge 首次 subject hook拒絕、checkpoint首次 subject格式錯誤及正常更正後 hooks0，都保留各自原始 receipt。沒有借 Root package links、繞 locality guard、清 Source／證據／DB或重試到綠。React checklist 已核：hooks無條件、technical request/timer有cleanup、設定與帳戶仍並行、沒有新輪詢／深拷貝或從不可信存檔導出 review；使用原可讀 loading copy與具名 switch，不新增 UI 框架。
 
 原物位於 `.local/passenger-bureau-gap-correction-20261018/passenger-phase2-resumption-20261019/`；每次 command／head／input hashes／exit／raw log依其執行時點分列，244在郵件 peer merge前、新最終 compiler在merge後，不混寫為同一 SHA 的全套執行。Source仍須新不可變候選、自己完整必要 CI、Root獨立全範圍 review／protected merge與統一同版共享操作；作者不 approve、merge、deploy或自錄兩keys，亦不稱全部16案例完整PASS。
+
+### 65659 自身 CI 與獨立 Source 退修後的 R3 精確消費端修正
+
+原候選 `65659c6e7eb4bf48aeaad02fe0bcb2ce604b553b`／gen `7a15316738f44610a3c6d3a7d29e99aa`／PR2848 的自身 main `39311977776` 真終態為14success／4skip／2failure；四個 skip 是三個 scope 條件及因 unit 失敗未執行的 Product smoke，不稱四個 scope skip。根因 job `118264050457` 的原 root shard2 artifact `12215943026` 是2776PASS／1FAIL／5pending；唯一失敗為既有 review-context local demo 退出案例的精確 fetch options 尚未包含新真 AbortSignal。原 local demo 不讀 API、退出後 true-mode 等行為已到達，並非 UC03 地址斷言再次失敗。原 ZIP CRC 正常，SHA256 `3ce1e7812a1ad6b1f975bb5235410f1dac8fb2b737f5910288cf6e2d7aa4cc77`；CLI原 log SHA256 `5c72a204bebcadabbf5178faf3d2d00f3b8b12c3e96089debd94063b9cec0ac3`。job 真 checkout `27194fbc484047e8520bbde5934f9e6477c73453` 是 accepted Shell17c與65659的正常 synthetic union：全部18 own blobs等於65659、其餘 entries等於17c，whole tree 不冒稱等於候選。
+
+另一項是 Root 獨立 Source review 發現的 `J-SWITCH-NATIVE-STATE`：前輪未核實實際 native input 而以不存在的 `aria-checked` 判斷，core 甚至會把 defaultON 點成 OFF。此確定 caller 缺陷與上述 root2 實敗分開記錄；不能把 Source finding 捏造成尚未讀到的 browser failure。原65659／全部五run、原sourcepacket9179db58與退修歷史保留；只停止本機 monitor，未手動取消或重跑 GitHub。停止時原 quote／integration 仍進行中，沒有虛構其全套結果。該輪60秒及decline兩專用 run各有原report1PASS／0skip／0retry與各自65659 checkout；僅保留其舊候選窄信用。
+
+Root 正常 reviewer reopen 原任務並協調唯一既有 `tests/unit/pax-review-shared-order-demo-20261015/review-context.test.tsx`，full41scopes／原兩keys／五群全保留。R3完整規格 SHA256 `26998977d2102eb7863d55fb498a3560f7f65fbaffce81e73bc76d99f1ca942a`。只更新兩個 native switch caller、該舊測試及本 UAT：原 exact options保留 `cache:no-store` 並增加 `signal:expect.any(AbortSignal)`，原三案例與 offline／無網路呼叫／退出／true-mode 斷言全部保留；在原退出案例還確認同一真 signal 未abort、unmount後確實abort及唯一呼叫。沒有移除產品 abort／逾時／晚到回應保護，亦沒有改 matcher 接受任意 options、跳過案例或放寬期限。
+
+修後原context3＋UC03原8單輪11PASS／0FAIL／0skip（原 default test deadline、maxWorkers1）；三個消費端與新UC03的精確 true-imports noEmit／incrementalfalse exit0，scoped lint及正常格式檢查exit0。產品 bytes完全未變，故保留244回歸與完整 Passenger／producer compiler各自原時點和 hash，不重跑或冒稱新執行。本輪仍須新不可變候選及自己完整必要CI；先前 main失敗、Source退修與仍未執行的共享／正式來源／真車／支付／福利等界線均未被局部11案取代。

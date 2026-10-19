@@ -1480,9 +1480,8 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         const contactSwitch = pax.getByRole("switch", {
           name: "需要客服與您聯繫嗎？",
         });
-        if ((await contactSwitch.getAttribute("aria-checked")) !== "true")
-          await contactSwitch.click();
-        await expect(contactSwitch).toHaveAttribute("aria-checked", "true");
+        await contactSwitch.check();
+        await expect(contactSwitch).toBeChecked();
         await pax
           .getByRole("button", { name: "送出評價", exact: true })
           .click();
