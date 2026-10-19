@@ -1073,7 +1073,8 @@ jobs:
           # keep startup and acceptance traffic moving; one API instance keeps
           # rollout demand below the 25-connection dev database limit.
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
-          env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
+          # Existing 2026-10-05 dev workforce policy is independent of tenant OIDC.
+          env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}@DRTS_DEV_MFA_WAIVED=true"
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
           env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
@@ -1107,7 +1108,7 @@ jobs:
               echo "::error::Google OIDC needs both tenant and dispatch HTTPS origins before it can be enabled."
               exit 1
             fi
-            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@DRTS_DEV_MFA_WAIVED=true@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
+            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
           fi
           # Dev API only: seed the fixed live-map-observer principal and its
           # read-only ops_observer membership. Never enable in staging/prod
@@ -1238,7 +1239,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,DRTS_DEV_WORKFORCE_PRINCIPAL_ID=principal_platform_admin_default,NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1277,7 +1278,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false},PAX_PUBLIC_PASSENGER_ONLY=false" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false},PAX_PUBLIC_PASSENGER_ONLY=false" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
