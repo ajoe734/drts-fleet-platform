@@ -45,6 +45,10 @@ export type PersistIncidentOptions = {
    * ownership" never does (F5 retained deferred carrying writer).
    */
   assignIntentIncidentIds?: ReadonlySet<string> | readonly string[];
+  /** Only convergence onto an already committed SOS duty owner bypasses first-owner arbitration. */
+  forceAssignmentIncidentIds?: ReadonlySet<string> | readonly string[];
+  /** Awaited SOS handover changes ownership only, preserving independently accepted fields. */
+  assignmentOnlyIncidentIds?: ReadonlySet<string> | readonly string[];
 };
 
 @Injectable()
@@ -64,28 +68,28 @@ export class IncidentRepository {
 
     const [incidentsResult, timelinesResult, suppressionsResult] =
       await Promise.all([
-      this.databaseService!.query<JsonRecordRow>(
-        `
+        this.databaseService!.query<JsonRecordRow>(
+          `
           SELECT record
           FROM ops.phase1_incidents
           ORDER BY updated_at DESC, created_at DESC
         `,
-      ),
-      this.databaseService!.query<JsonRecordRow>(
-        `
+        ),
+        this.databaseService!.query<JsonRecordRow>(
+          `
           SELECT record
           FROM ops.phase1_incident_timelines
           ORDER BY created_at ASC
         `,
-      ),
-      this.databaseService!.query<JsonRecordRow>(
-        `
+        ),
+        this.databaseService!.query<JsonRecordRow>(
+          `
           SELECT record
           FROM ops.phase1_driver_matching_suppressions
           ORDER BY updated_at DESC
         `,
-      ),
-    ]);
+        ),
+      ]);
 
     return {
       incidents: incidentsResult.rows.map((row) =>
@@ -109,13 +113,20 @@ export class IncidentRepository {
   async persistChanges(
     changes: PersistIncidentChanges,
     options?: PersistIncidentOptions,
-  ) {
+  ): Promise<{ incidents: IncidentRecord[]; newClaims: string[] } | undefined> {
     if (!this.isEnabled()) {
-      return;
+      return {
+        incidents: [...(changes.incidents ?? [])],
+        newClaims: [...(options?.assignmentOnlyIncidentIds ?? [])],
+      };
     }
 
+    const persistedIncidents: IncidentRecord[] = [];
+    const newClaims: string[] = [];
+    const assignmentOnly = new Set(options?.assignmentOnlyIncidentIds ?? []);
     const writes: Promise<unknown>[] = [];
     const assignIntent = new Set(options?.assignIntentIncidentIds ?? []);
+    const forceAssignment = new Set(options?.forceAssignmentIncidentIds ?? []);
 
     // `assigned_to`/`record.assignedTo` are guarded by explicit caller
     // *intent* ($16, `preserveAssignment`), not by comparing `updated_at`
@@ -138,14 +149,35 @@ export class IncidentRepository {
     // dropped. `updated_at` itself is kept monotonic via GREATEST so a
     // stale write can never regress the row's own last-modified marker.
     for (const incident of changes.incidents ?? []) {
+      if (assignmentOnly.has(incident.incidentId)) {
+        let decision;
+        try {
+          decision = await this.persistOwnerDecision(
+            incident,
+            (changes.timelines ?? []).filter(
+              (entry) => entry.incidentId === incident.incidentId,
+            ),
+            forceAssignment.has(incident.incidentId),
+          );
+        } catch (error) {
+          // Unlike generic legacy persistence this ownership-only transaction
+          // cannot carry another call's tentative owner into a status write.
+          throw Object.assign(
+            error instanceof Error ? error : new Error(String(error)),
+            { incidentOwnerTransaction: true },
+          );
+        }
+        persistedIncidents.push(decision.incident);
+        if (decision.wasNewClaim) newClaims.push(incident.incidentId);
+        continue;
+      }
       const closedAt =
         incident.status === "resolved" || incident.status === "closed"
           ? incident.updatedAt
           : null;
       const preserveAssignment = !assignIntent.has(incident.incidentId);
-      writes.push(
-        this.databaseService!.query(
-          `
+      const result = await this.databaseService!.query<JsonRecordRow>(
+        `
             INSERT INTO ops.phase1_incidents (
               incident_id, incident_no, status, severity, category,
               reported_by, related_order_id, related_vehicle_id,
@@ -161,15 +193,20 @@ export class IncidentRepository {
               related_vehicle_id = EXCLUDED.related_vehicle_id,
               related_complaint_no = EXCLUDED.related_complaint_no,
               assigned_to = CASE
-                WHEN $16::boolean THEN ops.phase1_incidents.assigned_to
+                WHEN $16::boolean OR (
+                  NOT $17::boolean AND ops.phase1_incidents.assigned_to IS NOT NULL
+                  AND ops.phase1_incidents.assigned_to IS DISTINCT FROM EXCLUDED.assigned_to
+                ) THEN ops.phase1_incidents.assigned_to
                 ELSE EXCLUDED.assigned_to
               END,
               description = EXCLUDED.description,
               updated_at = GREATEST(ops.phase1_incidents.updated_at, EXCLUDED.updated_at),
               closed_at = EXCLUDED.closed_at,
               record = CASE
-                WHEN $16::boolean
-                  THEN jsonb_set(
+                WHEN $16::boolean OR (
+                  NOT $17::boolean AND ops.phase1_incidents.assigned_to IS NOT NULL
+                  AND ops.phase1_incidents.assigned_to IS DISTINCT FROM EXCLUDED.assigned_to
+                ) THEN jsonb_set(
                     EXCLUDED.record,
                     '{assignedTo}',
                     COALESCE(to_jsonb(ops.phase1_incidents.assigned_to), 'null'::jsonb),
@@ -177,30 +214,40 @@ export class IncidentRepository {
                   )
                 ELSE EXCLUDED.record
               END
+            RETURNING record
           `,
-          [
-            incident.incidentId,
-            incident.incidentId, // incident_no — use incidentId as the unique human-readable key
-            incident.status,
-            incident.severity,
-            incident.category,
-            incident.reportedBy ?? null,
-            incident.relatedOrderId ?? null,
-            incident.relatedVehicleId ?? null,
-            incident.relatedComplaintCaseNo ?? null,
-            incident.assignedTo ?? null,
-            incident.description,
-            incident.createdAt,
-            incident.updatedAt,
-            closedAt,
-            JSON.stringify(incident),
-            preserveAssignment,
-          ],
-        ),
+        [
+          incident.incidentId,
+          incident.incidentId, // incident_no — use incidentId as the unique human-readable key
+          incident.status,
+          incident.severity,
+          incident.category,
+          incident.reportedBy ?? null,
+          incident.relatedOrderId ?? null,
+          incident.relatedVehicleId ?? null,
+          incident.relatedComplaintCaseNo ?? null,
+          incident.assignedTo ?? null,
+          incident.description,
+          incident.createdAt,
+          incident.updatedAt,
+          closedAt,
+          JSON.stringify(incident),
+          preserveAssignment,
+          forceAssignment.has(incident.incidentId),
+        ],
+      );
+      const row = result.rows[0];
+      if (!row)
+        throw new Error(
+          `Incident ${incident.incidentId} write returned no authoritative record.`,
+        );
+      persistedIncidents.push(
+        this.parseRecord<IncidentRecord>(row.record, "ops.phase1_incidents"),
       );
     }
 
     for (const timeline of changes.timelines ?? []) {
+      if (assignmentOnly.has(timeline.incidentId)) continue;
       writes.push(
         this.databaseService!.query(
           `
@@ -257,6 +304,98 @@ export class IncidentRepository {
     }
 
     await Promise.all(writes);
+    return { incidents: persistedIncidents, newClaims };
+  }
+
+  /** A row lock arbitrates actual durable ownership. No full-record snapshot
+   * is written here, so a deferred claim cannot undo accepted investigation,
+   * resolution or suppression changes. Timeline and decision commit together. */
+  private async persistOwnerDecision(
+    incident: IncidentRecord,
+    timelines: readonly IncidentTimelineEntry[],
+    force: boolean,
+  ): Promise<{ incident: IncidentRecord; wasNewClaim: boolean }> {
+    const client = await this.databaseService!.connect();
+    let commitAttempted = false;
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{
+        record: IncidentRecord;
+        previous_owner: string | null;
+      }>(
+        `
+          WITH current_owner AS MATERIALIZED (
+            SELECT incident_id, assigned_to
+            FROM ops.phase1_incidents
+            WHERE incident_id = $1
+            FOR UPDATE
+          )
+          UPDATE ops.phase1_incidents AS target
+          SET assigned_to = CASE
+                WHEN current_owner.assigned_to IS NULL OR current_owner.assigned_to = $2 OR $4::boolean
+                  THEN $2 ELSE current_owner.assigned_to
+              END,
+              updated_at = GREATEST(target.updated_at, $3::timestamptz),
+              record = jsonb_set(
+                jsonb_set(target.record, '{assignedTo}',
+                  COALESCE(to_jsonb(CASE
+                    WHEN current_owner.assigned_to IS NULL OR current_owner.assigned_to = $2 OR $4::boolean
+                      THEN $2::text ELSE current_owner.assigned_to
+                  END), 'null'::jsonb), true),
+                '{updatedAt}', to_jsonb(GREATEST(target.updated_at, $3::timestamptz)::text), true
+              )
+          FROM current_owner
+          WHERE target.incident_id = current_owner.incident_id
+          RETURNING target.record, current_owner.assigned_to AS previous_owner
+        `,
+        [incident.incidentId, incident.assignedTo, incident.updatedAt, force],
+      );
+      const row = result.rows[0];
+      if (!row)
+        throw new Error(`Incident ${incident.incidentId} is not durable.`);
+      const actual = this.parseRecord<IncidentRecord>(
+        row.record,
+        "ops.phase1_incidents",
+      );
+      const changedOwner = row.previous_owner !== actual.assignedTo;
+      if (changedOwner) {
+        for (const entry of timelines) {
+          await client.query(
+            `INSERT INTO ops.phase1_incident_timelines
+              (entry_id, incident_id, action, actor_id, created_at, record)
+             VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+             ON CONFLICT (entry_id) DO NOTHING`,
+            [
+              entry.entryId,
+              entry.incidentId,
+              entry.action,
+              entry.actor ?? null,
+              entry.createdAt,
+              JSON.stringify(entry),
+            ],
+          );
+        }
+      }
+      commitAttempted = true;
+      await client.query("COMMIT");
+      return {
+        incident: actual,
+        wasNewClaim: changedOwner && row.previous_owner === null,
+      };
+    } catch (error) {
+      let outcome = commitAttempted ? "unknown" : "rolled_back";
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        outcome = "unknown";
+      }
+      throw Object.assign(
+        error instanceof Error ? error : new Error(String(error)),
+        { incidentOwnerCommitOutcome: outcome },
+      );
+    } finally {
+      client.release();
+    }
   }
 
   /**
@@ -316,12 +455,58 @@ export class IncidentRepository {
     expectedCurrentOwner: string,
     nextOwner: string | null,
     updatedAt: string,
+    sosEventId?: string,
   ): Promise<boolean> {
     if (!this.isEnabled()) {
       return true;
     }
 
-    const result = await this.databaseService!.query<{
+    if (sosEventId) {
+      const client = await this.databaseService!.connect();
+      try {
+        await client.query("BEGIN");
+        const event = await client.query<{ owner: string | null }>(
+          `SELECT duty_ack_snapshot->>'acknowledgedByActorId' AS owner
+           FROM safety.driver_sos_events WHERE sos_event_id = $1 FOR UPDATE`,
+          [sosEventId],
+        );
+        if (!event.rows[0])
+          throw new Error(`Driver SOS event ${sosEventId} is not durable.`);
+        const applied = event.rows[0].owner
+          ? false
+          : await this.revertAssignedToWith(
+              client,
+              incidentId,
+              expectedCurrentOwner,
+              nextOwner,
+              updatedAt,
+            );
+        await client.query("COMMIT");
+        return applied;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+    return this.revertAssignedToWith(
+      this.databaseService!,
+      incidentId,
+      expectedCurrentOwner,
+      nextOwner,
+      updatedAt,
+    );
+  }
+
+  private async revertAssignedToWith(
+    executor: Pick<DatabaseService, "query">,
+    incidentId: string,
+    expectedCurrentOwner: string,
+    nextOwner: string | null,
+    updatedAt: string,
+  ): Promise<boolean> {
+    const result = await executor.query<{
       was_still_owner: boolean | null;
     }>(
       `
@@ -358,6 +543,20 @@ export class IncidentRepository {
       [incidentId, expectedCurrentOwner, nextOwner, updatedAt],
     );
     return result.rows[0]?.was_still_owner === true;
+  }
+
+  async loadIncident(incidentId: string): Promise<IncidentRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM ops.phase1_incidents WHERE incident_id = $1",
+      [incidentId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<IncidentRecord>(
+          result.rows[0].record,
+          "ops.phase1_incidents",
+        )
+      : null;
   }
 
   reportPersistenceFailure(error: unknown, context: string) {

@@ -456,24 +456,52 @@ export class IncidentService implements OnModuleInit {
     return this.cloneIncident(decorated);
   }
 
-  /**
-   * Narrow, additive assignment facade for cross-module callers (currently
-   * DriverSos duty acknowledgment) that need both a race-free arbitration
-   * decision AND a durable persistence confirmation before reporting their
-   * own success -- `updateIncident`'s existing fire-and-forget persistence
-   * is deliberately left unchanged for every other caller.
-   *
-   * The win/lose decision commits synchronously, reusing the exact same
-   * assignedTo conflict rule as `updateIncident` (above): nothing in this
-   * method awaits before that decision is committed to `this.incidents`, so
-   * it is atomic with respect to every other synchronous mutation of
-   * incident state, including a concurrent direct `updateIncident` call.
-   * Only the durability confirmation after that point is asynchronous. If
-   * the durable write is rejected, the in-memory claim is rolled back so
-   * this method never reports a win the database did not actually accept
-   * -- the caller gets `accepted: false` and can retry (e.g. via the next
-   * idempotent acknowledgeDuty replay) instead of a false success.
-   */
+  /** Targeted authoritative read for SOS's existing current-owner/lifecycle
+   * handover. Generic synchronous Incident callers retain their interface. */
+  async getIncidentForSosReadback(
+    incidentId: string,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<IncidentRecord> {
+    if (!this.incidentRepository?.isEnabled())
+      return this.getIncident(incidentId, identity);
+    const durable = await this.incidentRepository.loadIncident(incidentId);
+    if (!durable)
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "INCIDENT_HANDOVER_UNAVAILABLE",
+        "The canonical Incident is unavailable; retry.",
+        { incidentId },
+        true,
+      );
+    this.replace(this.decorateIncident(durable, identity));
+    return this.getIncident(incidentId, identity);
+  }
+
+  /** Consume the repository's actual owner decision, preserving unrelated
+   * in-flight status/suppression mutations in this instance. */
+  private applyPersistedOwner(
+    incidentId: string,
+    persisted: { incidents: readonly IncidentRecord[] } | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): string | null {
+    const current = this.require(incidentId);
+    const authoritative = persisted?.incidents.find(
+      (item) => item.incidentId === incidentId,
+    );
+    const owner = authoritative ? authoritative.assignedTo : current.assignedTo;
+    if (current.assignedTo !== owner) {
+      this.replace(
+        this.decorateIncident({ ...current, assignedTo: owner }, identity),
+      );
+    }
+    return owner;
+  }
+
+  /** Narrow awaited SOS assignment facade. The synchronous local reservation
+   * rejects a competing direct mutation in this instance; the locked database
+   * row decides durable current ownership across instances. Only its returned
+   * owner can produce a successful handover. Generic Incident methods retain
+   * their existing synchronous interface. */
   async assignIncidentOwnerDurable(
     incidentId: string,
     owner: string,
@@ -502,9 +530,21 @@ export class IncidentService implements OnModuleInit {
           // is already durable, it never decides ownership itself, so a
           // concurrent legitimate owner change must never be clobbered by
           // this foreign-owner snapshot.
-          await this.incidentRepository.persistChanges({
-            incidents: [this.cloneIncident(incident)],
-          });
+          const durable = this.incidentRepository.isEnabled()
+            ? await this.incidentRepository.loadIncident(incidentId)
+            : incident;
+          if (!durable)
+            return { accepted: false, currentOwner: null, wasNewClaim: false };
+          const actualOwner = this.applyPersistedOwner(
+            incidentId,
+            { incidents: [durable] },
+            identity,
+          );
+          return {
+            accepted: false,
+            currentOwner: actualOwner,
+            wasNewClaim: false,
+          };
         } catch (error) {
           this.incidentRepository.reportPersistenceFailure(
             error,
@@ -530,10 +570,40 @@ export class IncidentService implements OnModuleInit {
           // This replay is itself the decision for `owner` on `incidentId`
           // (an idempotent same-owner acknowledgment): carry assignIntent so
           // a prior persist that never landed durably still gets confirmed.
-          await this.incidentRepository.persistChanges(
-            { incidents: [this.cloneIncident(incident)] },
-            { assignIntentIncidentIds: [incidentId] },
+          const timeline = this.createTimelineEntry(
+            incidentId,
+            TIMELINE_ACTIONS.assigned,
+            `Assigned to ${owner}.`,
+            this.resolveActorId(identity, "ops_user"),
+            new Date().toISOString(),
           );
+          const persisted = await this.incidentRepository.persistChanges(
+            {
+              incidents: [this.cloneIncident(incident)],
+              timelines: [timeline],
+            },
+            {
+              assignIntentIncidentIds: [incidentId],
+              assignmentOnlyIncidentIds: [incidentId],
+            },
+          );
+          const actualOwner = this.applyPersistedOwner(
+            incidentId,
+            persisted,
+            identity,
+          );
+          const wasNewClaim =
+            persisted?.newClaims?.includes(incidentId) ?? false;
+          if (wasNewClaim)
+            this.timelines.set(incidentId, [
+              ...(this.timelines.get(incidentId) ?? []),
+              timeline,
+            ]);
+          return {
+            accepted: actualOwner === owner,
+            currentOwner: actualOwner,
+            wasNewClaim,
+          };
         } catch (error) {
           this.incidentRepository.reportPersistenceFailure(
             error,
@@ -559,9 +629,10 @@ export class IncidentService implements OnModuleInit {
       now,
     );
     const decorated = this.decorateIncident(updated, identity);
+    let wasNewClaim = true;
 
-    // Commit the claim now, before this method's first await: this is the
-    // atomic arbitration point.
+    // Reserve locally before awaiting. This is not durable ownership proof;
+    // the repository's actual returned row below decides acceptance.
     this.replace(decorated);
     this.timelines.set(incidentId, [
       ...(this.timelines.get(incidentId) ?? []),
@@ -572,13 +643,48 @@ export class IncidentService implements OnModuleInit {
       try {
         // This is the fresh-claim commit itself: assignIntent is required so
         // the durable write actually lands the new owner.
-        await this.incidentRepository.persistChanges(
+        const persisted = await this.incidentRepository.persistChanges(
           {
             incidents: [this.cloneIncident(decorated)],
             timelines: [{ ...timelineEntry }],
           },
-          { assignIntentIncidentIds: [incidentId] },
+          {
+            assignIntentIncidentIds: [incidentId],
+            assignmentOnlyIncidentIds: [incidentId],
+          },
         );
+        wasNewClaim = persisted?.newClaims?.includes(incidentId) ?? true;
+        const actualOwner = this.applyPersistedOwner(
+          incidentId,
+          persisted,
+          identity,
+        );
+        if (actualOwner !== owner) {
+          this.timelines.set(
+            incidentId,
+            (this.timelines.get(incidentId) ?? []).filter(
+              (entry) => entry.entryId !== timelineEntry.entryId,
+            ),
+          );
+          return {
+            accepted: false,
+            currentOwner: actualOwner,
+            wasNewClaim: false,
+          };
+        }
+        if (!wasNewClaim) {
+          this.timelines.set(
+            incidentId,
+            (this.timelines.get(incidentId) ?? []).filter(
+              (entry) => entry.entryId !== timelineEntry.entryId,
+            ),
+          );
+          return {
+            accepted: true,
+            currentOwner: actualOwner,
+            wasNewClaim: false,
+          };
+        }
       } catch (error) {
         this.incidentRepository.reportPersistenceFailure(
           error,
@@ -591,7 +697,6 @@ export class IncidentService implements OnModuleInit {
         // entire pre-claim snapshot captured before this method's first
         // await (F5).
         const current = this.require(incidentId);
-        let revertedOwner: string | null = current.assignedTo;
         if (current.assignedTo === owner) {
           const revertedAt = new Date().toISOString();
           const reverted: IncidentRecord = {
@@ -600,8 +705,11 @@ export class IncidentService implements OnModuleInit {
             updatedAt: revertedAt,
           };
           this.replace(this.decorateIncident(reverted, identity));
-          revertedOwner = null;
-          if (this.incidentRepository) {
+          if (
+            this.incidentRepository &&
+            !(error as { incidentOwnerTransaction?: boolean })
+              .incidentOwnerTransaction
+          ) {
             // The rejected claim may already have been carried into durable
             // state by an unrelated concurrent writer that read this
             // record's in-memory snapshot (with `owner` still set) and
@@ -616,12 +724,24 @@ export class IncidentService implements OnModuleInit {
             // stale snapshot the instant it ran after such a write (F5
             // compensation order).
             try {
-              await this.incidentRepository.revertAssignedToIfStillOwner(
-                incidentId,
-                owner,
-                null,
-                revertedAt,
-              );
+              const reverted =
+                await this.incidentRepository.revertAssignedToIfStillOwner(
+                  incidentId,
+                  owner,
+                  null,
+                  revertedAt,
+                );
+              if (!reverted) {
+                const durable =
+                  await this.incidentRepository.loadIncident(incidentId);
+                if (durable) {
+                  this.applyPersistedOwner(
+                    incidentId,
+                    { incidents: [durable] },
+                    identity,
+                  );
+                }
+              }
             } catch (compensationError) {
               this.incidentRepository.reportPersistenceFailure(
                 compensationError,
@@ -636,11 +756,24 @@ export class IncidentService implements OnModuleInit {
             (entry) => entry.entryId !== timelineEntry.entryId,
           ),
         );
-        return {
-          accepted: false,
-          currentOwner: revertedOwner,
-          wasNewClaim: false,
-        };
+        if (
+          (error as { incidentOwnerTransaction?: boolean })
+            .incidentOwnerTransaction
+        ) {
+          try {
+            const durable =
+              await this.incidentRepository.loadIncident(incidentId);
+            if (durable)
+              this.applyPersistedOwner(
+                incidentId,
+                { incidents: [durable] },
+                identity,
+              );
+          } catch {
+            /* Keep the failure retryable; never invent a rollback/owner from a failed read. */
+          }
+        }
+        return { accepted: false, currentOwner: null, wasNewClaim: false };
       }
     }
 
@@ -659,7 +792,7 @@ export class IncidentService implements OnModuleInit {
     );
     this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
 
-    return { accepted: true, currentOwner: owner, wasNewClaim: true };
+    return { accepted: true, currentOwner: owner, wasNewClaim };
   }
 
   /**
@@ -676,6 +809,7 @@ export class IncidentService implements OnModuleInit {
     owner: string,
     requestId: string | undefined,
     identity: BootstrapRequestIdentity | null,
+    sosEventId?: string,
   ): Promise<void> {
     const incident = this.require(incidentId);
     if (incident.assignedTo !== owner) {
@@ -697,12 +831,24 @@ export class IncidentService implements OnModuleInit {
         // legitimately landing before or after this release must survive
         // it unclobbered (F5 compensation order), matching
         // `assignIncidentOwnerDurable`'s own compensation write.
-        await this.incidentRepository.revertAssignedToIfStillOwner(
-          incidentId,
-          owner,
-          null,
-          now,
-        );
+        const reverted =
+          await this.incidentRepository.revertAssignedToIfStillOwner(
+            incidentId,
+            owner,
+            null,
+            now,
+            sosEventId,
+          );
+        if (!reverted) {
+          const durable =
+            await this.incidentRepository.loadIncident(incidentId);
+          if (durable)
+            this.applyPersistedOwner(
+              incidentId,
+              { incidents: [durable] },
+              identity,
+            );
+        }
       } catch (error) {
         // Best-effort durable compensation: the in-memory claim is already
         // released, and the next handover attempt (fresh claim or repair)
@@ -747,7 +893,11 @@ export class IncidentService implements OnModuleInit {
         // prior convergence that never landed durably still gets confirmed.
         await this.incidentRepository.persistChanges(
           { incidents: [this.cloneIncident(incident)] },
-          { assignIntentIncidentIds: [incidentId] },
+          {
+            assignIntentIncidentIds: [incidentId],
+            forceAssignmentIncidentIds: [incidentId],
+            assignmentOnlyIncidentIds: [incidentId],
+          },
         );
       }
       return;
@@ -783,7 +933,11 @@ export class IncidentService implements OnModuleInit {
             incidents: [this.cloneIncident(decorated)],
             timelines: [{ ...timelineEntry }],
           },
-          { assignIntentIncidentIds: [incidentId] },
+          {
+            assignIntentIncidentIds: [incidentId],
+            forceAssignmentIncidentIds: [incidentId],
+            assignmentOnlyIncidentIds: [incidentId],
+          },
         );
       } catch (error) {
         // Roll back only the claim this call made, preserving any

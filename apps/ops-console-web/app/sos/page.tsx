@@ -28,8 +28,9 @@ import {
   DEFAULT_OPS_ACTOR_ID,
   createOpsDispatchEventSource,
   getOpsClient,
-} from "@/lib/api-client";
+} from "../../lib/api-client";
 import {
+  applyCanonicalSosDuty,
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
@@ -39,8 +40,8 @@ import {
   unwrapListItems,
   type SosPillTone,
   type SosQueueRow,
-} from "@/lib/sos-view-model";
-import { useTranslation } from "@/lib/i18n";
+} from "../../lib/sos-view-model";
+import { useTranslation } from "../../lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -150,11 +151,17 @@ export default function SosQueuePage() {
             .catch(() => null as DriverSosAlertLatencySummary | null),
         ]);
 
-      setIncidents(
-        unwrapListItems<IncidentRecord>(incidentRes).filter((incident) =>
-          isSosIncident(incident),
-        ),
+      const sosIncidents =
+        unwrapListItems<IncidentRecord>(incidentRes).filter(isSosIncident);
+      const canonical = await Promise.all(
+        sosIncidents.map(async (incident) => {
+          const { event } = await client.get<{ event: DriverSosEventRecord }>(
+            `/api/ops/driver-sos/by-incident/${encodeURIComponent(incident.incidentId)}`,
+          );
+          return applyCanonicalSosDuty(incident, event);
+        }),
       );
+      setIncidents(canonical);
       setDrivers(unwrapListItems<DriverRegistryRecord>(driverRes));
       setVehicles(unwrapListItems<VehicleRegistryRecord>(vehicleRes));
       setIdentity(identityRes);

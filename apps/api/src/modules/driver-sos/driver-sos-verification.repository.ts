@@ -330,6 +330,12 @@ export class DriverSosVerificationRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      // Match the duty ACK/cleanup lock order before touching its outbox.
+      // A simultaneous first render and ACK must not wait in opposite orders.
+      await client.query(
+        "SELECT sos_event_id FROM safety.driver_sos_events WHERE sos_event_id = $1 FOR UPDATE",
+        [outbox.sosEventId],
+      );
       const updated = await client.query<AlertObservationRow>(
         `
           UPDATE safety.driver_sos_urgent_alert_outbox
@@ -337,7 +343,7 @@ export class DriverSosVerificationRepository {
               ops_alert_receipt_recorded_at = $3::timestamptz,
               alert_to_ops_latency_ms = $4::bigint,
               payload = payload || $5::jsonb,
-              status = CASE WHEN status = 'failed' THEN status ELSE 'delivered' END,
+              status = CASE WHEN status IN ('failed', 'acknowledged') THEN status ELSE 'delivered' END,
               delivered_at = COALESCE(delivered_at, $3::timestamptz)
           WHERE outbox_id = $1
             AND ops_alert_rendered_at IS NULL
@@ -445,79 +451,103 @@ export class DriverSosVerificationRepository {
     event: DriverSosEventRecord,
     timeline: DriverSosTimelineEntry,
   ): Promise<DriverSosDutyAcknowledgementPersistResult> {
-    if (!this.isEnabled()) {
+    if (!this.isEnabled())
       return {
         accepted: true,
         acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
         acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
         status: event.status,
       };
-    }
-
     const client = await this.databaseService!.connect();
+    let commitAttempted = false;
     try {
       await client.query("BEGIN");
+      // The same SOS→Incident lock order is used by rejected-claim cleanup.
+      // This serializes a same-owner retry with another instance's cleanup:
+      // a committed duty ACK can never subsequently lose its Incident owner.
+      const locked = await client.query<DutyAckRow>(
+        `SELECT duty_ack_snapshot, status FROM safety.driver_sos_events
+         WHERE sos_event_id = $1 FOR UPDATE`,
+        [event.sosEventId],
+      );
+      const existing = locked.rows[0];
+      if (!existing)
+        throw new Error(`Driver SOS event ${event.sosEventId} is not durable.`);
+      let owner = existing.duty_ack_snapshot.acknowledgedByActorId;
+      if (event.incidentId) {
+        const incident = await client.query<{ assigned_to: string | null }>(
+          "SELECT assigned_to FROM ops.phase1_incidents WHERE incident_id = $1 FOR UPDATE",
+          [event.incidentId],
+        );
+        if (!incident.rows[0])
+          throw new Error(`Incident ${event.incidentId} is not durable.`);
+        owner = owner ?? incident.rows[0].assigned_to;
+      }
+      owner = owner ?? event.dutyAcknowledgement.acknowledgedByActorId;
+      if (!owner) throw new Error("A verified current duty owner is required.");
+      const snapshot = {
+        ...event.dutyAcknowledgement,
+        acknowledgedByActorId: owner,
+      };
       const claimed = await client.query<DutyAckRow>(
-        `
-          UPDATE safety.driver_sos_events
-          SET status = CASE
-                WHEN (${sosStatusRankSql("status")}) < (${sosStatusRankSql("$2::text")})
-                THEN $2
-                ELSE status
-              END,
-              duty_ack_snapshot = $3::jsonb,
-              updated_at = $4
-          WHERE sos_event_id = $1
-            AND duty_ack_snapshot->>'acknowledgedByActorId' IS NULL
-          RETURNING duty_ack_snapshot, status
-        `,
+        `UPDATE safety.driver_sos_events
+         SET status = CASE
+               WHEN (${sosStatusRankSql("status")}) < (${sosStatusRankSql("$2::text")}) THEN $2 ELSE status END,
+             duty_ack_snapshot = $3::jsonb, updated_at = $4
+         WHERE sos_event_id = $1 AND duty_ack_snapshot->>'acknowledgedByActorId' IS NULL
+         RETURNING duty_ack_snapshot, status`,
         [
           event.sosEventId,
           event.status,
-          JSON.stringify(event.dutyAcknowledgement),
+          JSON.stringify(snapshot),
           event.updatedAt,
         ],
       );
-      let row = claimed.rows[0];
-      const accepted = Boolean(row);
-      if (accepted) {
-        await this.appendTimelineWith(client, timeline);
+      const accepted = Boolean(claimed.rows[0]);
+      const row = claimed.rows[0] ?? existing;
+      const actualOwner = row.duty_ack_snapshot.acknowledgedByActorId;
+      if (!actualOwner)
+        throw new Error("The canonical duty owner was not available.");
+      if (event.incidentId) {
         await client.query(
-          `
-            UPDATE safety.driver_sos_urgent_alert_outbox
-            SET status = 'delivered',
-                delivered_at = COALESCE(delivered_at, $2)
-            WHERE sos_event_id = $1
-              AND status <> 'failed'
-          `,
-          [event.sosEventId, event.updatedAt],
-        );
-      } else {
-        const existing = await client.query<DutyAckRow>(
-          `
-            SELECT duty_ack_snapshot, status
-            FROM safety.driver_sos_events
-            WHERE sos_event_id = $1
-          `,
-          [event.sosEventId],
-        );
-        row = existing.rows[0];
-      }
-      if (!row) {
-        throw new Error(
-          `Driver SOS event ${event.sosEventId} was not available for duty acknowledgment.`,
+          `UPDATE ops.phase1_incidents
+           SET assigned_to = $2, updated_at = GREATEST(updated_at, $3::timestamptz),
+               record = jsonb_set(jsonb_set(record, '{assignedTo}', to_jsonb($2::text), true),
+                 '{updatedAt}', to_jsonb(GREATEST(updated_at, $3::timestamptz)::text), true)
+           WHERE incident_id = $1`,
+          [event.incidentId, actualOwner, event.updatedAt],
         );
       }
+      if (accepted)
+        await this.appendTimelineWith(client, {
+          ...timeline,
+          actorId: actualOwner,
+          payload: { ...timeline.payload, acknowledgedByActorId: actualOwner },
+        });
+      await client.query(
+        `UPDATE safety.driver_sos_urgent_alert_outbox SET status = 'acknowledged'
+         WHERE sos_event_id = $1`,
+        [event.sosEventId],
+      );
+      commitAttempted = true;
       await client.query("COMMIT");
       return {
         accepted,
-        acknowledgedByActorId: row.duty_ack_snapshot.acknowledgedByActorId,
+        acknowledgedByActorId: actualOwner,
         acknowledgedAt: row.duty_ack_snapshot.acknowledgedAt,
         status: row.status,
       };
     } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
+      let outcome = commitAttempted ? "unknown" : "rolled_back";
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        outcome = "unknown";
+      }
+      throw Object.assign(
+        error instanceof Error ? error : new Error(String(error)),
+        { dutyCommitOutcome: outcome },
+      );
     } finally {
       client.release();
     }

@@ -6,12 +6,9 @@ import { IncidentRepository } from "../../../apps/api/src/modules/incident/incid
 import type { DatabaseService } from "../../../apps/api/src/common/db";
 import { FakeIncidentDatabaseService } from "./fake-incident-pg-client";
 
-// SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R10 repair: Codex fb3d/gen
-// ecc3 review (result.json, blocking_findings F5-R9-retained-deferred-
-// carrying-writer and F5-R9-new-SQL-NULL-compensation). These exercise the
-// *real* IncidentRepository SQL (via FakeIncidentPgClient's Postgres-
-// semantics interpreter, not a mock of the repository), so a regression of
-// either fix reproduces the same way real Postgres would.
+// Production repository with a sequential SQL-expression model only.
+// Official-schema lock waits and concurrency are covered by the hosted test;
+// these socket-free cases do not establish PostgreSQL execution credit.
 
 function buildIncident(overrides: Partial<IncidentRecord>): IncidentRecord {
   return {
@@ -41,7 +38,9 @@ function buildIncident(overrides: Partial<IncidentRecord>): IncidentRecord {
 
 function setup() {
   const fakeDb = new FakeIncidentDatabaseService();
-  const repository = new IncidentRepository(fakeDb as unknown as DatabaseService);
+  const repository = new IncidentRepository(
+    fakeDb as unknown as DatabaseService,
+  );
   return { fakeDb, repository };
 }
 
@@ -49,7 +48,12 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R10 repair: F5 SQL-NULL c
   it("clears assignedTo via revertAssignedToIfStillOwner without violating record's NOT NULL constraint", async () => {
     const { fakeDb, repository } = setup();
     await repository.persistChanges({
-      incidents: [buildIncident({ assignedTo: "driver-A", updatedAt: "2026-10-18T00:00:00.000Z" })],
+      incidents: [
+        buildIncident({
+          assignedTo: "driver-A",
+          updatedAt: "2026-10-18T00:00:00.000Z",
+        }),
+      ],
     });
 
     const applied = await repository.revertAssignedToIfStillOwner(
@@ -69,7 +73,12 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R10 repair: F5 SQL-NULL c
   it("is a no-op (not an error) when some other writer already moved assignedTo away from the expected owner", async () => {
     const { fakeDb, repository } = setup();
     await repository.persistChanges({
-      incidents: [buildIncident({ assignedTo: "driver-C", updatedAt: "2026-10-18T00:00:00.000Z" })],
+      incidents: [
+        buildIncident({
+          assignedTo: "driver-C",
+          updatedAt: "2026-10-18T00:00:00.000Z",
+        }),
+      ],
     });
 
     const applied = await repository.revertAssignedToIfStillOwner(
@@ -91,7 +100,13 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R10 repair: F5 retained d
 
     // T0: baseline durable state -- unowned, open.
     await repository.persistChanges({
-      incidents: [buildIncident({ assignedTo: null, status: "open", updatedAt: "2026-10-18T00:00:00.000Z" })],
+      incidents: [
+        buildIncident({
+          assignedTo: null,
+          status: "open",
+          updatedAt: "2026-10-18T00:00:00.000Z",
+        }),
+      ],
     });
 
     // T1: a concurrent generic status update captures the Incident's
@@ -129,17 +144,57 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R10 repair: F5 retained d
     expect(row.updated_at).toBe("2026-10-18T00:00:02.000Z");
   });
 
-  it("still applies assignedTo normally when a write is not stale relative to the durable row (no regression on the happy path)", async () => {
+  it.each(["2026-10-18T00:00:00.000Z", "2026-10-17T23:59:59.000Z"])(
+    "does not resurrect a rejected owner when carrying/compensation timestamps tie or clocks differ (%s)",
+    async (carryingTime) => {
+      const { fakeDb, repository } = setup();
+      await repository.persistChanges({ incidents: [buildIncident({})] });
+      await repository.revertAssignedToIfStillOwner(
+        "INC-OWN-1",
+        "rejected",
+        null,
+        "2026-10-18T00:00:00.000Z",
+      );
+      await repository.persistChanges({
+        incidents: [
+          buildIncident({
+            assignedTo: "rejected",
+            status: "investigating",
+            updatedAt: carryingTime,
+          }),
+        ],
+      });
+      const row = fakeDb.client.getRow("INC-OWN-1")!;
+      expect(row.assigned_to).toBeUndefined();
+      expect((row.record as IncidentRecord).assignedTo).toBeNull();
+      expect(row.status).toBe("investigating");
+    },
+  );
+
+  it("still applies an explicit legitimate assignment intent (no regression on the happy path)", async () => {
     const { fakeDb, repository } = setup();
     await repository.persistChanges({
-      incidents: [buildIncident({ assignedTo: null, status: "open", updatedAt: "2026-10-18T00:00:00.000Z" })],
-    });
-
-    await repository.persistChanges({
       incidents: [
-        buildIncident({ assignedTo: "driver-D", status: "open", updatedAt: "2026-10-18T00:05:00.000Z" }),
+        buildIncident({
+          assignedTo: null,
+          status: "open",
+          updatedAt: "2026-10-18T00:00:00.000Z",
+        }),
       ],
     });
+
+    await repository.persistChanges(
+      {
+        incidents: [
+          buildIncident({
+            assignedTo: "driver-D",
+            status: "open",
+            updatedAt: "2026-10-18T00:05:00.000Z",
+          }),
+        ],
+      },
+      { assignIntentIncidentIds: ["INC-OWN-1"] },
+    );
 
     const row = fakeDb.client.getRow("INC-OWN-1")!;
     expect(row.assigned_to).toBe("driver-D");
@@ -147,10 +202,16 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R10 repair: F5 retained d
     expect(row.updated_at).toBe("2026-10-18T00:05:00.000Z");
   });
 
-  it("lets the rejected owner's carrying write land first, then compensation still correctly reverts it (the already-working ordering)", async () => {
+  it("keeps ownership null when a generic carrying write lands first and then compensation runs", async () => {
     const { fakeDb, repository } = setup();
     await repository.persistChanges({
-      incidents: [buildIncident({ assignedTo: null, status: "open", updatedAt: "2026-10-18T00:00:00.000Z" })],
+      incidents: [
+        buildIncident({
+          assignedTo: null,
+          status: "open",
+          updatedAt: "2026-10-18T00:00:00.000Z",
+        }),
+      ],
     });
 
     // The carrying write lands *first* this time.
@@ -171,7 +232,7 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R10 repair: F5 retained d
       "2026-10-18T00:00:02.000Z",
     );
 
-    expect(compensationApplied).toBe(true);
+    expect(compensationApplied).toBe(false);
     const row = fakeDb.client.getRow("INC-OWN-1")!;
     expect(row.assigned_to).toBeUndefined();
     expect(row.status).toBe("investigating"); // compensation never touches status
