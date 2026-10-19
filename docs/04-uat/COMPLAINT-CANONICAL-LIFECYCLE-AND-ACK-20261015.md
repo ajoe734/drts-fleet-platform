@@ -627,3 +627,11 @@ Journey 正常 protected merge `607cf709dabbd115df77b491419506de8cfd61d9` 已接
 作者新加的 transition seed 將完成事件的 `tripId`（實際 DriverTask 的 `taskId`）誤填為 rating 的 `tripId`，但原 token writer 正確使用持久 disclosure 的 `assignmentId`。既有 production guard 對不同 assignment 拒絕 409 是正確行為。Root 正常退修後，僅更正原 PG test 的 seed：透過既有 `resolvePersistedPassengerAssignmentDisclosure(orderId)` 讀取真實已存在的 disclosure，明確要求非 null，再使用其 `assignmentId` 與 `driver.driverId` 建立兩筆歷史評分。沒有改 production、harness、V0126、guard、分數／聯絡選擇、原案例或斷言；既有 legacy false／省略、原 case／timeline IDs、缺整 consent 分支、新資料 fail-closed、原生 constraints 及全 44 inventory 保留。
 
 受影響 PG test 的 actual-import scoped noEmit exit 0（15.2958 秒）、ESLint exit 0、Prettier check exit 0；其餘原檔及全部斷言逐 byte 保留。沒有在 VM 啟動 PG 或重跑無變的 131／501。這些靜態檢查不是修復後原生 PG 通過；717 其餘 CI 自然收尾後，下一個候選仍須自己的完整 hosted CI、真 44／17／E 結果與 Root 原五條獨立 review，不借舊綠、不取消或重跑原失敗。
+
+### R8：真 Nest 評分 consumer 的單行政策同步
+
+同一 717 main CI 的 root shard 3／4 另有一個真失敗：原 `rating-injection.test.ts` wrapper 的七情境 probe 在 low-no-contact 情境已讀到 `consent=false`、`hasDraft=true`，但舊斷言仍期待 `low && contactRequested`，與 USER「1／2 星都建案，開關只決定聯絡」衝突。其餘六個情境沒有回報失敗；原始 job log、ZIP、CRC 及報告全部保留。這是既有 consumer 的舊政策期待，沒有理由改回正確的 production 行為。
+
+Root 正常 R8 僅新增這個既有 `rating-injection-probe.cjs` 精確路徑，使完整 scope 為 38，原五條／五鍵、角色、歷史與全部原 37 scopes 保留。唯一程式差異為 `hasDraft` 期待改成 `low`；前一行的 `consent === contactRequested`、其他全部 bytes、七種情境、真 AppModule／Nest injector／controller、錯誤／狀態／寫入次數及原 child 60 秒／wrapper 65 秒期限不變。
+
+修復後原既有 wrapper 實際 1 PASS／0 FAIL／0 skip（內含完整七情境，並非七個獨立 Vitest tests），耗時 14.0688 秒；CJS syntax 與 ESLint 各 exit 0。Probe 保留明確拒絕 `Server.listen` 的控制，沒有啟動 VM 服務或取得 PG／browser／runtime 信用。PG seed 修正普通 checkpoint `fb8805850fa119842ba3456ff2f8a3d868b20749` 與 717 全部失敗原物保留，待原 integration 自然終態才發佈新候選；新候選的原生 44／HTTP 17／E 與其餘 mandatory CI 仍須自行完成。
