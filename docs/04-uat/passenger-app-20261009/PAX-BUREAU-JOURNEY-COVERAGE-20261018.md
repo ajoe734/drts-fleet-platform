@@ -161,6 +161,22 @@ Root 正常 reopen，並精確加配原 Web mapper path（26 scopes）：receipt
 
 本次僅 E2E consumer／文件變動；單檔 scoped ESLint與含其真 imports 的 TypeScript `--noEmit` 均exit0。未變動產品與47項單元的原檢查保留原6636／3b08 Source byte／時間界線，未重跑或改標新版完整通過。
 
+## 第五輪 f85 自身結果與最後兩項 consumer／fixture 修補
+
+上一輪3b08最終 main／integration 因正常新 push 自動取代而 cancelled，三專用各自 success；沒有手動取消。舊 bureau ZIP只有兩份部分 safe-progress、沒有 report.json，原 collector exit1保留，不能造八案 counts；原 main native四案4 pass／0 skip仍僅保留其實際 Source／checkout窄信用。
+
+候選 `f85be4c9d391bad5a2a0fb1b42a3b053ed678076` 五 runs 全部自然終態：main `39208456680` failure（14 success／4 skip／2 failure）；4 skip中前三項為原 Repo classification／Dependency security／i18n guard，Product smoke acceptance則因 unit failure未執行。Integration `39208456689` failure（19 success／4 skip／3 failure，bureau與兩 aggregates）；core／additional真各1 pass（9.8／7.1分鐘）。quote `39208456674` 真1 pass／15.4分鐘，60秒 `39208456690` 真1 pass／1.7分鐘，decline `39208456699` 真1 pass／19.2秒，三者原 log的實際 checkout均完整f85。
+
+兩個 unit lanes的 native PostgreSQL四案、receipt四案及 on_trip control兩案均實際全部 pass／0 skip。原 log／GitHub commit核對 actual synthetic checkout `b912f438c935afa21749bd14993b9829a6c57bfc`，與f85 tree同為 `037867e73a82ed479ecbe40bc3eab4b6744efdd4`。原 artifact／JSON／原圖及逐案事實保存於 `source-checks/hosted-f85be4-watch/`；`final-enriched-evidence.json` SHA256=`4f8e5bc9df324a92ee772b63a83059123e2fc88ebcf6397a848902e79b600d57`。這些正向不掩蓋同輪 main／bureau真 failure，也不授予新 Source或 shared信用。
+
+本輪 bureau原 artifact `12168416111` ZIP SHA256=`8f1c7644a8d7cd07027c2a019a6c24a98759119f5154104e6f2924457b6a14da`，真 **7 pass／1 fail／0 skip／0 timeout／0 retry**。ordinary90為112214ms；reliability63098ms真通過外部圖資故障／真201恢復報價、午夜草稿重載／費用重確認、原卡建單、原 BFF/API/PG commit後只丟ACK、原key/body重送及並行同UUID、另一裝置／真異帳戶、active卡409／無charge取消後可刪。五個OTP全 pass，wrong57681ms實際等待跨檔同target原cooldown，resend61369ms、expiry301413ms（原301000ms不變）、returning60381ms；不另加無條件等待。
+
+on_trip原單 `0d3e6428-ef52-40b5-93c6-8b87a0cc6105` 的禁止取消UI／同session API409／SQL不變量、65秒全角色離線恢復、Driver正常完程、同單receipt斷線／重試／immutable及五星首次寫入／409均已實際走過；本輪全部案例共保留22份facts與34張原PNG。本案237067ms最後在UC15 fare首個notes後狀態斷言失敗：期待new，真writer依原規則回under_investigation；notes的成功actionReceipt、audit UUID及audit查詢都已通過。尚未走到fare assign／resolve／close／完整timeline或service類別，不把它們當通過。Root及另一位唯讀reviewer各自核原規格與writer後，只修既有helper：初始新案加精確status:new，notes加精確under_investigation；其餘四動作、雙類別、原case/order/category、receipt/audit/timeline及期限全部保留，產品不改。
+
+main的真失敗是既有C114合成PG fixture清理race：shard2原JSON為2565 assertions pass／19 skip／零failed assertion，但Vitest真catch一個未處理PG `57P01`並exit1。pool.end可早於idle backend真正退出，原FORCE DROP打到仍ending的本隨機DB連線；不歸咎同輪accepted Driver差異，也不吞error或重試舊版湊綠。Root正常加配第27個精確scope後，只修該fixture的原afterAll：關自己pool後以admin查本dbName的pg_stat_activity，最多20秒等0，再普通DROP；原30秒hook、六項native業務assert及global DatabaseService不變。VM只做scoped lint／真imports TypeScript，皆exit0，沒有執行PG；新清理仍須下一候選自身hosted驗證。
+
+本次等f85 bureau與additional全部終態後才整理修補。Fresh accepted dev `88bde9b6df9826d6a52b5297ebbc91b692ff112e` 的Voice／Tenant72檔與Journey原38檔及新fixture零重疊；已普通合併為 `f228d62df1127b21d38aa86a1e56a3730df91290`，72個peer blobs與39個自有committed blobs跨合併均逐byte核對不變，peer作者／Source保留。整批差異39 paths／27 scopes；合併後兩個受影響檔及其真imports TypeScript亦exit0，未變動47unit不重跑，C114仍未取得修後PG信用。實際immutable及byte manifest另存機器證據。全部五組、UC01–16、原兩keys及外部E04／USER／真車供給／same-release shared界線保留，新完整CI及Root獨立review不可省。
+
 ## 原兩個 acceptance keys
 
 - `pax-bureau-coverage_each-finding-real-evidence-and-applicability`
