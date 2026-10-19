@@ -20,7 +20,25 @@ export const t = {
     "司機端的上線演練與調度派遣控制畫面不在這個對外入口的範圍內：即使以上網址已經公開，一般使用者與交通局承辦同仁都無法透過這個入口看到或操作司機端功能，只能使用乘客本人既有的登入、預約與行程頁面。",
   fullConfigPrefix: "完整的部署設定、權限細節與操作指令留在",
   fullConfigSuffix: "，本頁只呈現一般使用者需要知道的存取方式與範圍。",
-  sharedRunHeading: "最近已核對的共享實測",
+  currentCasesHeading: "目前操作程序（UC01–UC16）",
+  currentCasesIntro:
+    "以下共16案、83個操作步驟，逐案列出如何核對、預期結果、已取得的證據及仍缺條件。A／B／C等字母是演練情境代碼；跨版本同字母不是同一訂單，各取消情境也各用獨立訂單。列出步驟不表示已通過；GitHub隔離驗證、共享實跑及正式外部條件分開記錄。",
+  currentActorsNote:
+    "本開發演練使用合成手機及頁面明示的模擬簡訊碼，不會發送真SMS。乘客使用本人一般登入；調度、司機及客服由負責單位既有授權人員協作。",
+  currentEvidenceHeading: "本次資料來源與實跑範圍",
+  currentHostedSummary: (tests: number, facts: number, images: number) =>
+    `GitHub隔離環境的${tests}個測試通過、0失敗、0略過、0重試，保留${facts}份資料紀錄及${images}張原圖；這不是全部16案通過，與下列共享實跑分開。驗證來源版本：`,
+  currentSharedSummary: (tests: number, facts: number, images: number) =>
+    `同版共享實跑的${tests}個測試通過、0失敗、0略過、0重試，保留${facts}份資料紀錄及${images}張原圖；測試數不是訂單數，也不是全部16案通過。實跑來源版本：`,
+  currentSharedBatchLabel: "；本次驗證批次：",
+  currentSharedLimits:
+    "本次沒有執行不完整司機／車輛資料的發布情境，也沒有控制共享Google外部故障；各案已明列未執行。付款失敗、低分及其他尚未重跑分支仍保留原版本證據與缺項。模擬簡訊、車司、定位與支付不等於真人運輸或正式憑證。",
+  currentDeploymentBatchLabel: "；部署批次：",
+  currentIndexLabel: "目前16案索引",
+  currentStepsLabel: "目前如何操作／核對：",
+  currentVerifiedLabel: "已核對的證據：",
+  currentMissingLabel: "仍缺／未涵蓋：",
+  sharedRunHeading: "先前已核對的共享實測（61fa）",
   sharedRunSourceLabel: "實測來源版本：",
   sharedRunCheckedAtLabel: "核對時間（UTC）：",
   sharedRunBatchLabel: "驗證批次：",
