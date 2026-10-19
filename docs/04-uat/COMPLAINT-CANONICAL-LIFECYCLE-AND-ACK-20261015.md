@@ -551,3 +551,24 @@ The first clean `cf4fba9bfd70a724e6243239a7cc7d5f093ef7e8` full sweep honestly e
 Root normally reopened reviewed `062e028337a5b9eec8c4feaf3f3a8728b798e9ac` after accepted dev advanced to `2460749f9a0d097973c71d91bedcc481466486dc` and the protected PR acquired two real merge conflicts. The ordinary merge preserves the complete Complaint V0123 and accepted SOS V0124 allocation groups/amendments, plus both migration collectors in the partner-notification test. The push-channel and recovery collectors retain both groups through their automatic merge. All original assertions and both migrations remain unchanged.
 
 The merged Incident controller is byte-identical to accepted dev: its ordinary Complaint link still awaits the Complaint persistence boundary, while SOS list/detail/timeline use the accepted canonical readback methods. Complaint service/repository, the original fifteen controls and the final twenty-eight controls are unchanged from `062e`. Its 412 local passes, three compiler passes, scoped lint, independent Root review/controls and ongoing own CI remain historical evidence for that exact candidate. The integration candidate receives distinct allocation/caller regressions, affected API compilation, lint, source-equivalence evidence and its own hosted CI; results are recorded separately under `.local/complaint-codex2-repair-20261019/r3-accepted-dev-integration-*`. No prior green run is relabeled as the new candidate's check.
+
+## R3 — 2026-10-19 USER：1／2 星一律建案，開關僅決定聯絡
+
+此節依完整送審圖及 USER 明答「≤2 星都建案，開關只決定聯絡」續作原五項 Source 驗收。保留前述所有候選、失敗及歷史政策紀錄；它們不代表本次新政策已驗收。評分 UI 預設開啟與開關由原 Journey 作者負責，本變更不碰其顯示或原 E04 開立／付款條件。
+
+- 帳號評分與行程連結評分的正式 hooks 均對新 1／2 星建立 canonical 客訴與 `case_created` timeline，與原評分及同意紀錄使用同一 PoolClient／交易。3／4／5 星不因評分自動建立這種客訴。原分數、文字、標籤與聯絡選擇不可事後改寫。
+- `contact_requested=false`（或 API 原本省略後正規化 false）仍建立案件；帳號 intake 的 `contact_consent=false` 保留，兩條路的案件及 timeline 明示「同意客服聯繫：否」，案件補充「不需客服聯繫，僅供內部檢視」。原客服畫面直接呈現 canonical description。此流程只作內部 CRM／稽核，不新增乘客電話、SMS 或人員聯絡工作；內部 SLA 與 Ops notice 原則不變。
+- V0126 為正向 migration，不修改 V0114／V0119／V0123。既有 consent 按原 `complaint_case_no` 是否存在明存 `case_required`，不猜測聯絡同意、不回填客訴。新 consent 必須明傳此旗標（沒有 default），並受 case FK／unique／旗標與 case 存在一致的 CHECK 保護；token case-required 仍受低分 CHECK 約束。
+- 整筆 consent 尚未存在的歷史 token rating 另由既有 rating row 的內部 `low_rating_case_policy_v2=false` 證明。migration 僅將當時既有 ratings 標記 false；之後新 row 的 DB default 為 true 且不可 NULL。只有明確歷史 false 加 omitted-contact exact retry 保留原無 consent／不回填語意；新 true、NULL、缺 marker／缺 rating 都不能當作 legacy。新要求建案的 consent 缺 caseNo／case／timeline 也 fail closed，不建立第二案掩蓋異常。
+- 舊 low／false／null-case 的 exact replay 保留原結果及不能改成 opt-in 的限制。新低分的相同 payload 重試、延遲／失敗／未知 COMMIT、audit ACK 與 fresh Ops readback 則保留原 caseNo、timeline entryId；不以未知結果宣告已回滾或成功。
+
+### 可重跑驗證與證據資格
+
+- immutable 基底 `daebd72eeef12229cb59d3750b7a288b1dab7448` 上，同四個 `USER-ALL-LOW` actual account/token controls 真終態為 4 semantic FAIL（case undefined）；修復後同四案 4 PASS。過濾掉的其餘案例不計通過。原 ENOSPC／錯誤時序的初次輸出另存 `.local`，不採為 before 證據，且唯一受截斷檔已先逐 byte 恢復基底才執行此有效 before。
+- 兩組正式 controller／service／repository socket-free wire suites 驗分數、聯絡旗標、歷史 exact replay、新 marker 缺失、未知 COMMIT、no-contact 稽核與 ACK。SQL wire 是外部資料邊界，不是 PostgreSQL migration、鎖競爭或 browser 驗收。
+- 真 V0126 舊資料轉換／新 constraints 由既有 GitHub-hosted PostgreSQL suite 執行；本 VM 不啟動 PG／HTTP／browser／產品服務。實際尚未取得的 hosted 結果維持 pending，不引用舊 SHA 的 CI 作新政策信用。
+- 原 ordinary lifecycle／terminal Ops／caller／settlement／Fleet／auth／noDB／SLA 五項完整需求保持；完成受影響回歸、候選自己的必要 CI、Root 獨立 review 及 protected merge 後才關閉 Source。Source 不代表正式 E04 issuer、PSP、真 SMS 或其他外部驗收。
+
+### 部署順序限制
+
+V0126 先將歷史資料分類，再要求新 consent 明填 `case_required`。尚未更新的 API 若在 schema 更新後寫入 consent，會因缺少必填旗標誠實失敗，不能悄悄套用 legacy。使用原部署 workflow 的 migration→新 API 順序；此短暫不相容不可用 false default 隱藏。
