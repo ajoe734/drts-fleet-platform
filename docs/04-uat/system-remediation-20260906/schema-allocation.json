@@ -157,6 +157,12 @@
       "reason": "Registers the durable contact-role revision ledger for VoiceContactService (SD §6.4), reserved by Root at exact parent 4db295df5129b57b66a27950348f6a1fbb2ae049 (.local/passenger-bureau-gap-correction-20261018/Voice-C-V0122-exact-root-allocation-20261018/result.json, sha256 b1c388065f8243ef63a4d65ee63031b3e768d9802f0c7799c12c8f0eeda9c86c). Existing allocation collectors already include voice_application_allocations; no guard or assertion beyond the group's own length is changed."
     },
     {
+      "amended_by_task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "amended_at": "2026-10-18",
+      "scope": "Appended `complaint_command_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations, voice_callback_allocations, passenger_push_channel_allocations, passenger_app_allocations, fleet_statement_decision_allocations and public_fare_management_allocations entries above are unchanged",
+      "reason": "Registers V0123 (Root allocation record: .local/passenger-bureau-gap-correction-20261018/Complaint-V0123-exact-root-allocation-20261018/result.json, V0122 reserved separately for Voice and not reused) for the original C045 restart/replica same-logical-command durable identity gap (docs/04-uat/COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015.md §10.4): a durable pending-commit table so an ordinary complaint mutation whose COMMIT outcome was left unknown keeps its allocated caseNo/entryId recoverable by a same-command retry even across an API process restart or a different replica, not only within the originating process's in-memory Map. This task writes both the migration file and the caller wiring (complaint.repository.ts/complaint.service.ts are already in its write_scopes); highest canonical migration at allocation time was V0121."
+    },
+    {
       "amended_by_task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
       "amended_at": "2026-10-19",
       "scope": "Append sos_duty_allocations V0124 only; all previous entries and V0122/V0123 reservations remain owned by their original tasks.",
@@ -714,6 +720,29 @@
       "primary_tables": ["safety.driver_sos_urgent_alert_outbox"],
       "referenced_tables": ["safety.driver_sos_events"],
       "description": "Forward ALTER of the existing V0053 status check for the original S-3 §24 acknowledged state. No new tables/columns. Backfill only same-event non-null canonical duty actor/time; preserve delivery/render as distinct transitions. Root reserved V0124 after existing Voice V0122 and Complaint V0123 reservations."
+    }
+  ],
+  "complaint_command_allocations": [
+    {
+      "task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "version": "V0123",
+      "migration_filename": "V0123__complaint_command_identity.sql",
+      "domain": "complaint_command_identity",
+      "target_schema": "crm",
+      "primary_tables": ["crm.phase1_complaint_pending_commits"],
+      "referenced_tables": [
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "Durable cross-process pending-commit identity for an ordinary (non-settlement) complaint mutation whose COMMIT outcome was left unknown, so a same-logical-command retry recovers the originally allocated caseNo/entryId after an API restart or on a different replica instead of only within the originating process's in-memory pendingUncertainCommits Map.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "crm.phase1_complaint_pending_commits: command_key varchar(64) PRIMARY KEY. Identified callers hash stableStringify([action, original caller scope, trimmed original key]); legacy unkeyed commands hash action + colon + caseNo + colon + stableStringify(matchCommand). The original payload is bound separately, so distinct keyed intents remain distinct and a changed payload under one key conflicts.",
+        "case_no varchar(100) NOT NULL, action varchar(100) NOT NULL, command_payload jsonb NOT NULL (the original matchCommand, re-hydrated into PendingUncertainComplaintCommit.matchCommand on recovery so the existing stableStringify comparison keeps working verbatim), case_snapshot jsonb NOT NULL, timeline_snapshot jsonb NOT NULL, previous_case_snapshot jsonb NULL (NULL for a create-type action; the update-type actions' pre-mutation snapshot otherwise, used to rebuild the existing in-memory revertComplaintCaseMutation rollback instead of a non-serializable closure).",
+        "status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','failed')), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now().",
+        "CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no) — reconcilePendingCase's existing durable-store sweep scans by case_no.",
+        "Write timing: mandatory durable PREPARED reservation is awaited before the ordinary business transaction can begin. The winning original caseNo, timeline entry IDs, caller identity and payload are preserved; reservation failure cannot acknowledge or issue a business COMMIT. The same transaction locks the prepared row and atomically confirms it with canonical case/timeline writes. Confirmed keyed results remain durable for original-result replay without another upsert; unknown outcomes preserve their original reservation. Only a definitely rejected new preparation or a reconciled legacy result is eligible for its own bounded cleanup; a missing or failed read cannot prove an unknown COMMIT rolled back."
+      ]
     }
   ]
 }

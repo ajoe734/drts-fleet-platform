@@ -208,6 +208,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
   let caseService: FleetPartnerCaseService;
   let mockComplaintService: {
     addComplaintCaseNote: ReturnType<typeof vi.fn>;
+    awaitSettlementPersistence: ReturnType<typeof vi.fn>;
     getComplaintByCaseNo: ReturnType<typeof vi.fn>;
     getComplaintTimeline: ReturnType<typeof vi.fn>;
   };
@@ -222,6 +223,7 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
           addedAt: new Date().toISOString(),
         };
       }),
+      awaitSettlementPersistence: vi.fn().mockResolvedValue(undefined),
       getComplaintByCaseNo: vi.fn().mockImplementation((caseNo) => ({
         caseNo,
         assignee: "陳維 (ops_compliance)",
@@ -356,6 +358,79 @@ describe("SR-FLEET-CASE-001: 車行案件回覆與 Ops timeline 閉環", () => {
         caseId,
       );
       expect(detailAfter.caseDetail.assignee).toBe("陳維 (ops_compliance)");
+    });
+
+    it("COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015 (C045-F3): propagates a canonical write failure from the ordinary Ops note sync instead of reporting the reply as succeeded", async () => {
+      const fleetPartnerId = "METRO_FLEET";
+      const caseId = "cmp_0908";
+
+      mockComplaintService.awaitSettlementPersistence.mockRejectedValueOnce(
+        new Error("canonical complaint write did not commit"),
+      );
+
+      await expect(
+        caseService.submitReply(fleetPartnerId, caseId, "陳家豪", {
+          content: "車行回覆但 Ops 寫入失敗",
+        }),
+      ).rejects.toThrow("canonical complaint write did not commit");
+
+      // The Ops-side note was attempted and the failed commit was awaited,
+      // not swallowed as a successful fleet reply.
+      expect(mockComplaintService.addComplaintCaseNote).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(
+        mockComplaintService.awaitSettlementPersistence,
+      ).toHaveBeenCalledWith("C-20260520-000001");
+    });
+
+    it("COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015 (C045-F3): does not record a fleet reply or its idempotency receipt when the ordinary Ops note sync fails, so a retry with the same idempotencyKey re-attempts the canonical write", async () => {
+      const fleetPartnerId = "METRO_FLEET";
+      const caseId = "cmp_0908";
+      const idempotencyKey = "idem-retry-after-failure-001";
+      const content = "第一次送出但 Ops 寫入失敗";
+
+      mockComplaintService.awaitSettlementPersistence.mockRejectedValueOnce(
+        new Error("canonical complaint write did not commit"),
+      );
+
+      await expect(
+        caseService.submitReply(fleetPartnerId, caseId, "陳家豪", {
+          content,
+          idempotencyKey,
+        }),
+      ).rejects.toThrow("canonical complaint write did not commit");
+
+      // The failed reply must not be visible on readback ...
+      const timelineAfterFailure = await caseService.getCaseTimeline(
+        fleetPartnerId,
+        caseId,
+      );
+      expect(timelineAfterFailure.some((entry) => entry.body === content)).toBe(
+        false,
+      );
+
+      // ... and must not leave a false deduplicated receipt behind for the
+      // same idempotencyKey to find; the retry re-attempts the canonical
+      // write rather than returning a never-written reply as a success.
+      const retryReceipt = await caseService.submitReply(
+        fleetPartnerId,
+        caseId,
+        "陳家豪",
+        { content, idempotencyKey },
+      );
+
+      expect(retryReceipt.deduplicated).toBe(false);
+      expect(mockComplaintService.addComplaintCaseNote).toHaveBeenCalledTimes(
+        2,
+      );
+      const timelineAfterRetry = await caseService.getCaseTimeline(
+        fleetPartnerId,
+        caseId,
+      );
+      expect(
+        timelineAfterRetry.filter((entry) => entry.body === content),
+      ).toHaveLength(1);
     });
   });
 

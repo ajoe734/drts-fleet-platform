@@ -1,4 +1,5 @@
 import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
+import { isDeepStrictEqual } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ComplaintCaseRecord,
@@ -41,12 +42,23 @@ type Fault =
   | "lost_commit_reply"
   | "connect"
   | "audit";
+type OrdinaryCommandWireRow = {
+  command_key: string;
+  case_no: unknown;
+  action: unknown;
+  command_payload: unknown;
+  case_snapshot: unknown;
+  timeline_snapshot: unknown;
+  previous_case_snapshot: unknown;
+  status: "pending" | "confirmed" | "failed";
+};
 type State = {
   rating?: Record<string, unknown>;
   complaintCase?: ComplaintCaseRecord;
   timeline?: ComplaintTimelineEntry;
   intake?: readonly unknown[];
   consent?: readonly unknown[];
+  ordinaryCommands?: Record<string, OrdinaryCommandWireRow>;
 };
 
 beforeEach(() => {
@@ -221,6 +233,103 @@ async function fixture() {
             ]
           : [],
       };
+    // Ordinary CRM commands now reserve IDs before their business transaction.
+    // These are external wire rows; all production persistence/locking decisions
+    // and every existing PAX/business/auth assertion remain unchanged.
+    if (text.startsWith("INSERT INTO crm.phase1_complaint_pending_commits")) {
+      const commands = (target.ordinaryCommands ??= {});
+      const key = String(values[0]);
+      commands[key] ??= {
+        command_key: key,
+        case_no: values[1],
+        action: values[2],
+        command_payload: JSON.parse(values[3] as string),
+        case_snapshot: JSON.parse(values[4] as string),
+        timeline_snapshot: JSON.parse(values[5] as string),
+        previous_case_snapshot: values[6]
+          ? JSON.parse(values[6] as string)
+          : null,
+        status: values[7] as OrdinaryCommandWireRow["status"],
+      };
+      return { rows: [commands[key]] };
+    }
+    if (
+      text.startsWith("SELECT status,") &&
+      text.includes("FROM crm.phase1_complaint_pending_commits")
+    ) {
+      const command = target.ordinaryCommands?.[String(values[0])];
+      return { rows: command ? [command] : [] };
+    }
+    if (text.includes("AS matches_prepared")) {
+      const complaintCase =
+        target.complaintCase?.caseNo === values[0]
+          ? target.complaintCase
+          : undefined;
+      return {
+        rows: complaintCase
+          ? [
+              {
+                matches_prepared: isDeepStrictEqual(
+                  complaintCase,
+                  values[1] ? JSON.parse(values[1] as string) : null,
+                ),
+              },
+            ]
+          : [],
+      };
+    }
+    if (text.startsWith("UPDATE crm.phase1_complaint_pending_commits")) {
+      const command = target.ordinaryCommands?.[String(values[0])];
+      if (command && text.includes("status = 'failed'")) {
+        if (
+          command.status === "pending" &&
+          isDeepStrictEqual(
+            command.timeline_snapshot,
+            JSON.parse(String(values[1])),
+          )
+        )
+          command.status = "failed";
+      } else if (command) command.status = "confirmed";
+    }
+    if (text.startsWith("DELETE FROM crm.phase1_complaint_pending_commits")) {
+      const row = target.ordinaryCommands?.[String(values[0])];
+      if (
+        !values[1] ||
+        (row &&
+          (values[2]
+            ? row.status === values[2]
+            : text.includes("status = 'failed'")
+              ? row.status === "failed"
+              : true) &&
+          isDeepStrictEqual(
+            row.timeline_snapshot,
+            JSON.parse(String(values[1])),
+          ))
+      )
+        delete target.ordinaryCommands?.[String(values[0])];
+    }
+    if (
+      text.startsWith("SELECT command_key") &&
+      text.includes("FROM crm.phase1_complaint_pending_commits")
+    ) {
+      return {
+        rows: Object.values(target.ordinaryCommands ?? {}).filter(
+          (row) => row.status === "pending" || row.status === "confirmed",
+        ),
+      };
+    }
+    if (text.includes("complaint_case_snapshot")) {
+      return {
+        rows: [
+          ...(state.complaintCase?.caseNo === values[0]
+            ? [{ kind: "case", record: structuredClone(state.complaintCase) }]
+            : []),
+          ...(state.timeline?.caseNo === values[0]
+            ? [{ kind: "timeline", record: structuredClone(state.timeline) }]
+            : []),
+        ],
+      };
+    }
     if (text.startsWith("INSERT INTO crm.phase1_complaint_cases")) {
       fail("case");
       target.complaintCase = JSON.parse(values[5] as string);
