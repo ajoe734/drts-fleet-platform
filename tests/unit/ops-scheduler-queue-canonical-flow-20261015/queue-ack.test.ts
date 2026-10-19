@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PoolClient, QueryResultRow } from "pg";
 import type {
   DispatchTraceLogRecord,
@@ -7,6 +7,8 @@ import type {
 import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityController } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
 import { PlatformPresenceService } from "../../../apps/api/src/modules/platform-presence/platform-presence.service";
+import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
+import { MultiTaxiController } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.controller";
 import { buildOwnedMobilityServiceForTest } from "../system-remediation/sr-qa-dispatch-001/test-support";
 import { buildOrderFixture } from "../../../apps/api/tests/integration/voice-order-fixture";
 
@@ -27,6 +29,7 @@ class QueueDatabase {
   jobs = new Map<string, Record<string, unknown>>();
   statements: string[] = [];
   commitGate: ReturnType<typeof deferred> | null = null;
+  commitSite: string | null = null;
   rejectWrite = false;
   private locks = new Map<string, Promise<void>>();
   isEnabled() {
@@ -54,7 +57,14 @@ class QueueDatabase {
         await previous;
         releases.push(held.resolve);
       } else if (/^COMMIT/.test(sql)) {
-        await this.commitGate?.promise;
+        if (
+          this.commitSite === null ||
+          [...pendingTraces.values()].some(
+            (trace) => trace.details?.siteId === this.commitSite,
+          )
+        ) {
+          await this.commitGate?.promise;
+        }
         for (const [k, v] of pendingTraces) this.traces.set(k, v);
         for (const [k, v] of pendingOrders) this.orders.set(k, v);
         for (const [k, v] of pendingJobs) this.jobs.set(k, v);
@@ -136,7 +146,7 @@ function fixture(db?: QueueDatabase, presence?: PlatformPresenceService) {
         serviceBuckets: ["standard_taxi"],
       },
     ],
-    platformPresenceService: presence,
+    ...(presence ? { platformPresenceService: presence } : {}),
   });
   f.regulatoryRegistryService.listVehicles.mockReturnValue([
     { vehicleId: "vehicle-a", plateNo: "SIM-A", operatingArea: "TPE" },
@@ -268,6 +278,120 @@ describe("original OpsQueue canonical commands", () => {
     ).toBe("checked_out");
   });
 
+  it("a pending context serializes its peer while another context commits independently", async () => {
+    const db = new QueueDatabase();
+    db.commitGate = deferred();
+    db.commitSite = "site-a";
+    const a = fixture(db);
+    const b = fixture(db);
+    const c = fixture(db);
+    let peerSettled = false;
+    const first = a.service.queueCheckIn(command);
+    await flush();
+    const peer = b.service.queueCheckIn(command).then((entry) => {
+      peerSettled = true;
+      return entry;
+    });
+    const other = await c.service.queueCheckIn({
+      vehicleId: "vehicle-b",
+      siteId: "other-context",
+    });
+    expect(peerSettled).toBe(false);
+    expect(
+      (await c.service.listQueueEntries()).map((entry) => entry.queueEntryId),
+    ).toEqual([other.queueEntryId]);
+    db.commitGate.resolve();
+    const [one, duplicate] = await Promise.all([first, peer]);
+    expect(duplicate.queueEntryId).toBe(one.queueEntryId);
+    expect(
+      new Set(
+        (await a.service.listQueueEntries()).map((entry) => entry.queueEntryId),
+      ),
+    ).toEqual(new Set([one.queueEntryId, other.queueEntryId]));
+  });
+
+  it("the actual multi-taxi controller and authorized service await virtual queue ACK and retain denials", async () => {
+    const db = new QueueDatabase();
+    const f = fixture(db);
+    const multi = new MultiTaxiService(f.service);
+    const authorization = multi.createAuthorization({
+      operatorId: "controlled-operator",
+      authorityCode: "SIM-AUTH",
+      businessPlanVersion: "original-v1",
+      serviceAreaCodes: ["TPE"],
+      activeFareVersionId: "controlled-fare",
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+    });
+    multi.activateAuthorization(authorization.authorizationId);
+    multi.addAuthorizedVehicle(authorization.authorizationId, {
+      vehicleId: command.vehicleId,
+      effectiveFrom: "2026-01-01T00:00:00.000Z",
+      effectiveUntil: "2027-01-01T00:00:00.000Z",
+    });
+    const controller = new MultiTaxiController(multi);
+    await expect(
+      controller.queueCheckIn({ ...command, queueMode: "physical_rank" }),
+    ).rejects.toMatchObject({ code: "MULTI_TAXI_QUEUE_MODE_FORBIDDEN" });
+    await expect(
+      controller.queueCheckIn({ ...command, vehicleId: "foreign-vehicle" }),
+    ).rejects.toBeInstanceOf(Error);
+    db.commitGate = deferred();
+    let settled = false;
+    const pending = controller
+      .queueCheckIn({ ...command, queueMode: "virtual_matching" })
+      .then((result) => {
+        settled = true;
+        return result;
+      });
+    await flush();
+    expect(settled).toBe(false);
+    db.commitGate.resolve();
+    const entry = (await pending).data;
+    expect(entry).toMatchObject({
+      runtimeProfileCode: "multi_taxi_direct",
+      queueMode: "virtual_matching",
+      operatingAuthorizationId: authorization.authorizationId,
+    });
+    db.rejectWrite = true;
+    await expect(
+      controller.queueCheckOut({ ...command, queueMode: "virtual_matching" }),
+    ).rejects.toThrow("controlled");
+    expect((await f.service.getQueueEntry(entry.queueEntryId)).status).toBe(
+      "checked_in",
+    );
+    db.rejectWrite = false;
+    expect(
+      (
+        await controller.queueCheckOut({
+          ...command,
+          queueMode: "virtual_matching",
+        })
+      ).data.status,
+    ).toBe("checked_out");
+  });
+
+  it("same-millisecond creation/closure reconstructs the closed entry and new current entry deterministically", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-10-19T08:00:00.000Z"));
+      const db = new QueueDatabase();
+      const f = fixture(db);
+      const old = await f.service.queueCheckIn(command);
+      await f.service.queueCheckOut(command);
+      const current = await f.service.queueCheckIn(command);
+      expect(current.queueEntryId).not.toBe(old.queueEntryId);
+      expect(
+        (await fixture(db).service.getQueueEntry(old.queueEntryId)).status,
+      ).toBe("checked_out");
+      expect(
+        (await fixture(db).service.getQueueEntry(current.queueEntryId)).status,
+      ).toBe("checked_in");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(["offline", "busy", "heartbeat_expired"] as const)(
     "uses actual current %s presence and recovers without deleting history",
     async (state) => {
@@ -381,6 +505,14 @@ describe("original existing reservation sweep", () => {
     expect(f.service.getOrder(f.order.orderId).status).toBe(
       "redispatch_required",
     );
+    expect(f.auditNotificationService.recordNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "ops_notice",
+        title: "Dispatch scheduler sweep failure",
+        message: expect.stringContaining("controlled"),
+      }),
+    );
+    expect(f.auditNotificationService.recordAuditLog).not.toHaveBeenCalled();
     db.rejectWrite = false;
     expect(await f.service.runDispatchSchedulerSweep(f.now)).toMatchObject({
       reservationHoldEscalations: 1,
@@ -391,5 +523,23 @@ describe("original existing reservation sweep", () => {
       failures: 0,
     });
     expect(db.jobs.size).toBe(1);
+  });
+
+  it("a warm replica rechecks the current locked reservation and does not dispatch a cancelled order", async () => {
+    const db = new QueueDatabase();
+    const f = reservation(db);
+    db.orders.set(f.order.orderId, { ...f.order, status: "cancelled" });
+    expect(await f.service.runDispatchSchedulerSweep(f.now)).toMatchObject({
+      reservationHoldEscalations: 0,
+      failures: 0,
+    });
+    expect(db.jobs.size).toBe(0);
+    expect(f.auditNotificationService.recordAuditLog).not.toHaveBeenCalled();
+    expect(
+      db.statements.some(
+        (sql) =>
+          sql.includes("FOR UPDATE") && sql.includes("ops.phase1_owned_orders"),
+      ),
+    ).toBe(true);
   });
 });
