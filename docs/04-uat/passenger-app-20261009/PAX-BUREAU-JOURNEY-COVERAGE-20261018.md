@@ -77,7 +77,7 @@ Supervisor 正常補配兩個 API 原檔後，`passenger-booking.service.ts` 用
 - VM 僅 socket-free lint／unit／typecheck；不開產品、browser、HTTP、Postgres、Compose 或 Expo runtime。
 - config 延用原 hosted job／正式 migrations／disposable database，保留舊 suite。bureau job 的原五 OTP 加新多角色案例；40 分鐘 job budget 與每案例等待分開，業務 OTP300000／resend60000／quote15min／acceptance60／matching90 不縮短。新增跨角色案例包含正常完程與兩條 CRM 旅程，case budget 八分鐘，仍待自己的 hosted 實測時長。
 - shared `webServer=[]`；Driver 用 `PAX_REVIEW_DRIVER_ORIGIN/review-driver`（目前 private Ops mount），非 shared 用原3101 standalone。Ops／Driver 分別沿 `PAX_REVIEW_OPS_ID_TOKEN`／`PAX_REVIEW_DRIVER_ID_TOKEN` 正確 audience；public Passenger context 不附 GCP token，僅非 public Passenger 沿其原 token。app OTP/session/Driver JWT 全保留。
-- shared fresh identities 由 `PAX_BUREAU_PHONES` JSON 明示分配既有 `09000000xx` 合成池，keys 為 consent／wrong／resend／expiry／returning／trip／reliability／matching。各 case 分配號碼不可重複；wrong-code 帳戶在五次失敗後的首次合法 OTP 另供真跨帳戶拒絕驗證，仍須實際看見 first-consent gate。沒有清使用者、偽造驗證或注入 storageState。
+- shared fresh identities 由 `PAX_BUREAU_PHONES` JSON 明示分配既有 `09000000xx` 合成池，keys 為 consent／wrong／resend／expiry／returning／trip／reliability／matching。各 case 分配號碼不可重複；wrong-code 案分配的帳戶亦供真跨帳戶拒絕驗證，其首次合法 OTP 仍須實際看見 first-consent gate；不假設兩案先後順序。沒有清使用者、偽造驗證或注入 storageState。
 - 用原 `recordOrderEvidence` 保存正式 PG joins／共享 owned readback 與原圖；不開 trace/video 記錄 OTP、Driver registration 或 headers。失敗仍失敗；原 interrupted recovery 只處置自身新單，on_trip／proof_pending 不強制取消。UC08 僅 hosted external supply row 精確復原，不刪資料。
 
 ### 可執行的 shared hosted 入口
@@ -150,6 +150,16 @@ Root 正常 reopen，並精確加配原 Web mapper path（26 scopes）：receipt
 草稿 consumer 仍沿原 `prepareBooking` 的 fixed UI；重載後驗兩個真 select 的原 `review-banqiao`／`review-city-hall` address IDs，並以第一筆真 quote POST 的兩端座標對照重載後真201 quote及合法午夜ISO。原 sessionStorage 保存／時間還原、未報價前無費用勾選、重新報價後未勾／確認 disabled等斷言全保留，不延原300秒 budget、不換訂單／授權假資料。全部五組、UC01–16、兩 keys及所有外部／shared條件仍保留；此修補須產生新 immutable candidate及自己的完整 CI。
 
 本輪普通合併 accepted dev `e4d962152e6b51ef72c2b5469d5e6dbdb38f347c`（含 accepted Complaint／public-info），無衝突；原 Journey程式／測試與合併前 repair逐byte相同，peer差異沒有被改寫。先前六個機械格式檔已屬 accepted ancestry，因此本輪完整差異是38 paths／原26 scopes。必要現值回歸在合併後實跑7 suites／47 tests全 pass、0 skip（含新增receipt四案及原ride／live presentation／role cases，原deadline、maxWorkers1）；Passenger app `tsc --noEmit`、三檔 scoped ESLint與正常hooks均exit0。新immutable候選仍須自己的完整hosted CI，沒有借4b16主CI或原PG／OTP／on_trip窄成功當新版通過。Root獨立literal review與兩keys仍循原流程。
+
+## 第四輪 3b08 的靜態 consumer 退修
+
+候選 `3b087fdfff2393ba4ebec02e6dd67ee7e85bb797` 的自身 runs 為 main `39206809985`、integration `39206809914`、quote `39206809889`、60秒 `39206809886`、decline `39206809883`；退修時尚未全部終態，不預寫成功。Root 已獨立核該候選38 paths／26 scopes並實跑 receipt四案4 pass／0 skip；這些仍限該 SHA，非完整 hosted／shared 信用。
+
+後續唯讀預檢發現 reliability 的固定卡片 consumer 錯配：前段保留第一張卡作原單測試，另將第二張設為 default；UC03 reload 後產品正常重新選 current default，原測試卻繼續刪第一張並期待 active-order409。Root 正常 reopen 後，只在重報價原費用勾選前以真 radio 重新選第一張，並斷言實際 lostACK 建單 body 的 `paymentMethodId` 正是該張。原 default 切換、未勾費用／確認 disabled、原 key/body／UUID、不准刪 active 卡409及取消後可刪200全部保留；不改產品卡片持久化或期限。這是靜態 caller 修補，未把它當 hosted fail／fixed pass。
+
+有限預檢亦核對原建單重送、跨裝置、異 body／異帳戶與最後取消／刪卡契約；未見其他確定錯配。原 workers1、retries0 下，成功跨檔沿同 worker/module cache 共用 OTP helper 的 normalized target Map，仍真等原60秒；未新增 setter、時鐘替換或無條件等待。新 immutable 候選須重新取得自身 CI，3b08 後續真結果另存原 SHA 證據，不手動取消執行中的 runs。
+
+本次僅 E2E consumer／文件變動；單檔 scoped ESLint與含其真 imports 的 TypeScript `--noEmit` 均exit0。未變動產品與47項單元的原檢查保留原6636／3b08 Source byte／時間界線，未重跑或改標新版完整通過。
 
 ## 原兩個 acceptance keys
 

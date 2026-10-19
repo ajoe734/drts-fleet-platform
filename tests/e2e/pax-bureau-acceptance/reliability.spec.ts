@@ -299,6 +299,11 @@ test("original drafts, lost acknowledgement, payment methods and a second device
         await expect(
           pax.getByRole("button", { name: "確認叫車", exact: true }),
         ).toBeDisabled();
+        // Reload selects the current default again. Use the original owned
+        // method explicitly so the later active-order deletion checks it.
+        const originalMethod = pax.locator(`input[value="${method}"]`);
+        await originalMethod.check();
+        await expect(originalMethod).toBeChecked();
         await pax
           .getByRole("checkbox", { name: "我已確認費用與優惠說明" })
           .check();
@@ -324,6 +329,9 @@ test("original drafts, lost acknowledgement, payment methods and a second device
             if (route.request().method() !== "POST") return route.continue();
             originalKey = route.request().headers()["x-request-id"]!;
             originalBody = route.request().postDataJSON();
+            expect(camel(originalBody)).toMatchObject({
+              paymentMethodId: method,
+            });
             const response = await route.fetch();
             expect(response.status()).toBe(201);
             orderId = camel(await response.json()).data.ride.order.orderId;
