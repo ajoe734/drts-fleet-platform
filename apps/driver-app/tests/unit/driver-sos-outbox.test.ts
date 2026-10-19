@@ -209,19 +209,27 @@ describe("driver-sos-outbox", () => {
   });
 
   it("maps all 6 canonical situations to typed event types and labels", () => {
-    expect(mapSituationToDriverSosEventType("passenger_conflict")).toBe("security_incident");
+    expect(mapSituationToDriverSosEventType("passenger_conflict")).toBe(
+      "security_incident",
+    );
     expect(getSituationLabel("passenger_conflict")).toBe("乘客衝突");
 
-    expect(mapSituationToDriverSosEventType("traffic_collision")).toBe("traffic_accident");
+    expect(mapSituationToDriverSosEventType("traffic_collision")).toBe(
+      "traffic_accident",
+    );
     expect(getSituationLabel("traffic_collision")).toBe("交通事故");
 
     expect(mapSituationToDriverSosEventType("vehicle_breakdown")).toBe("other");
     expect(getSituationLabel("vehicle_breakdown")).toBe("車輛故障");
 
-    expect(mapSituationToDriverSosEventType("medical_emergency")).toBe("passenger_medical");
+    expect(mapSituationToDriverSosEventType("medical_emergency")).toBe(
+      "passenger_medical",
+    );
     expect(getSituationLabel("medical_emergency")).toBe("醫療緊急");
 
-    expect(mapSituationToDriverSosEventType("route_threat")).toBe("security_incident");
+    expect(mapSituationToDriverSosEventType("route_threat")).toBe(
+      "security_incident",
+    );
     expect(getSituationLabel("route_threat")).toBe("路線威脅");
 
     expect(mapSituationToDriverSosEventType("other")).toBe("other");
@@ -260,7 +268,10 @@ describe("driver-sos-outbox", () => {
     const submitted = markDriverSosCaseSubmitted(activeCase, {
       event: {
         status: "submitted",
-        dutyAcknowledgement: { acknowledgedAt: null, acknowledgedByActorId: null },
+        dutyAcknowledgement: {
+          acknowledgedAt: null,
+          acknowledgedByActorId: null,
+        },
       } as any,
       receipt: {
         sosEventId: "sos-1",
@@ -373,7 +384,9 @@ describe("driver-sos-outbox", () => {
         "ops-duty-01",
       );
       expect(
-        acknowledged.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+        acknowledged.timeline.filter(
+          (entry) => entry.kind === "duty_acknowledged",
+        ),
       ).toHaveLength(1);
 
       // Re-applying the same readback must stay idempotent (no duplicate entry).
@@ -386,7 +399,9 @@ describe("driver-sos-outbox", () => {
       });
 
       expect(
-        reapplied.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+        reapplied.timeline.filter(
+          (entry) => entry.kind === "duty_acknowledged",
+        ),
       ).toHaveLength(1);
     });
 
@@ -403,7 +418,9 @@ describe("driver-sos-outbox", () => {
 
       expect(stillPending.dutyAcknowledgement.acknowledgedByActorId).toBeNull();
       expect(
-        stillPending.timeline.filter((entry) => entry.kind === "duty_acknowledged"),
+        stillPending.timeline.filter(
+          (entry) => entry.kind === "duty_acknowledged",
+        ),
       ).toHaveLength(0);
     });
 

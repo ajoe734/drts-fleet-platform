@@ -147,7 +147,9 @@ function formatPlatformStatusLabel(status: string | null) {
 }
 
 function isOwnedDomainTask(task: UnifiedDriverTaskView) {
-  return task.orderDomain === "owned" || isOwnedPlatformCode(task.sourcePlatform);
+  return (
+    task.orderDomain === "owned" || isOwnedPlatformCode(task.sourcePlatform)
+  );
 }
 
 function pickSosTaskContext(
@@ -157,7 +159,8 @@ function pickSosTaskContext(
     return null;
   }
 
-  const aggregationForbidden = isDriverCapabilityForbidden("forwarded_order_ui");
+  const aggregationForbidden =
+    isDriverCapabilityForbidden("forwarded_order_ui");
   const summary = summarizeWorkspaceTasks(tasks);
   const prioritizedTasks = [
     summary.activeTripTask,
@@ -682,7 +685,9 @@ export default function DriverSosScreen() {
       try {
         const readback = await getDriverClient().get<{
           event: Pick<DriverSosEventRecord, "status" | "dutyAcknowledgement">;
-        }>(`/api/driver/sos-events/${encodeURIComponent(sosEventIdForReadback!)}`);
+        }>(
+          `/api/driver/sos-events/${encodeURIComponent(sosEventIdForReadback!)}`,
+        );
         if (cancelled) {
           return;
         }
@@ -831,11 +836,11 @@ export default function DriverSosScreen() {
         resetDriverAppToOnboarding(router);
         return;
       }
-      const sanitizedError = formatDriverError(error, "SOS 送出失敗，請稍後再試。");
-      const failedCase = markDriverSosCaseFailed(
-        sendingCase,
-        sanitizedError,
+      const sanitizedError = formatDriverError(
+        error,
+        "SOS 送出失敗，請稍後再試。",
       );
+      const failedCase = markDriverSosCaseFailed(sendingCase, sanitizedError);
       await persistActiveCase(failedCase);
       setScreenError(sanitizedError);
       setUiNotice("SOS 未送達，已保留在本機 outbox。");
@@ -1224,8 +1229,16 @@ export default function DriverSosScreen() {
                   items={[
                     // Owned-domain rows, per the S3-03 canvas
                     // (docs/05-ui/drts-design-canvas/driver-sos.jsx SosCtx).
-                    { label: "行程編號", value: context.orderId ?? "—", mono: true },
-                    { label: "任務編號", value: context.taskId ?? "—", mono: true },
+                    {
+                      label: "行程編號",
+                      value: context.orderId ?? "—",
+                      mono: true,
+                    },
+                    {
+                      label: "任務編號",
+                      value: context.taskId ?? "—",
+                      mono: true,
+                    },
                     {
                       label: "目前狀態",
                       value: formatDriverTaskStatusLabel(context.localStatus),
@@ -1257,8 +1270,11 @@ export default function DriverSosScreen() {
                           },
                           {
                             label: "平台訂單編號",
-                            value: context.crossPlatform.externalOrderId ?? "未提供",
-                            mono: Boolean(context.crossPlatform.externalOrderId),
+                            value:
+                              context.crossPlatform.externalOrderId ?? "未提供",
+                            mono: Boolean(
+                              context.crossPlatform.externalOrderId,
+                            ),
                           },
                         ]
                       : []),
@@ -1305,7 +1321,8 @@ export default function DriverSosScreen() {
                 加入附件
               </Btn>
               <Text style={styles.supportingCopy}>
-                每筆 SOS 合計最多 {MAX_ATTACHMENTS} 件。附件會跟著本機紀錄一起保留。
+                每筆 SOS 合計最多 {MAX_ATTACHMENTS}{" "}
+                件。附件會跟著本機紀錄一起保留。
               </Text>
             </View>
 
@@ -1451,7 +1468,8 @@ export default function DriverSosScreen() {
                       {supplement.note || "附件補件"}
                     </Text>
                     <Text style={styles.supplementMeta}>
-                      {formatAt(supplement.createdAt)} · {supplement.state === "complete" ? "已完成" : "待處理"}
+                      {formatAt(supplement.createdAt)} ·{" "}
+                      {supplement.state === "complete" ? "已完成" : "待處理"}
                     </Text>
                   </View>
                 ))}

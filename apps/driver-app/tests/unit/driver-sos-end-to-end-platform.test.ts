@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type {
-  SubmitDriverSosEventResult,
-} from "@drts/contracts";
+import type { SubmitDriverSosEventResult } from "@drts/contracts";
 
 vi.mock("expo-secure-store", () => ({
   deleteItemAsync: vi.fn(),
@@ -117,8 +115,16 @@ describe("DRV-SOS-001 End-to-End Platform Reporting & Idempotency", () => {
         serverReceivedAt: "2026-08-30T10:00:02.000Z",
         fleetReportConfirmedAt: "2026-08-30T10:00:02.000Z",
         offlineAtTrigger: false,
-        falseAlarm: { dismissed: false, dismissedAt: null, dismissedByDriverId: null, note: null },
-        dutyAcknowledgement: { acknowledgedAt: null, acknowledgedByActorId: null },
+        falseAlarm: {
+          dismissed: false,
+          dismissedAt: null,
+          dismissedByDriverId: null,
+          note: null,
+        },
+        dutyAcknowledgement: {
+          acknowledgedAt: null,
+          acknowledgedByActorId: null,
+        },
         createdAt: "2026-08-30T10:00:02.000Z",
         updatedAt: "2026-08-30T10:00:02.000Z",
       },
@@ -133,7 +139,10 @@ describe("DRV-SOS-001 End-to-End Platform Reporting & Idempotency", () => {
       },
     };
 
-    const firstSubmission = markDriverSosCaseSubmitted(activeCase, initialResult);
+    const firstSubmission = markDriverSosCaseSubmitted(
+      activeCase,
+      initialResult,
+    );
     expect(firstSubmission.syncState).toBe("submitted");
     expect(firstSubmission.receipt?.eventNo).toBe("SOS-20260830-0099");
     expect(firstSubmission.timeline[1]?.title).toBe("已送達安全值班");
@@ -146,7 +155,10 @@ describe("DRV-SOS-001 End-to-End Platform Reporting & Idempotency", () => {
       },
     };
 
-    const replayedSubmission = markDriverSosCaseSubmitted(activeCase, replayResult);
+    const replayedSubmission = markDriverSosCaseSubmitted(
+      activeCase,
+      replayResult,
+    );
     expect(replayedSubmission.syncState).toBe("submitted");
     expect(replayedSubmission.receipt?.eventNo).toBe("SOS-20260830-0099");
     expect(replayedSubmission.timeline[1]?.title).toBe("伺服器已確認既有 SOS");
@@ -203,7 +215,12 @@ describe("DRV-SOS-001 End-to-End Platform Reporting & Idempotency", () => {
         serverReceivedAt: "2026-08-30T10:05:00.000Z",
         fleetReportConfirmedAt: "2026-08-30T10:05:00.000Z",
         offlineAtTrigger: false,
-        falseAlarm: { dismissed: false, dismissedAt: null, dismissedByDriverId: null, note: null },
+        falseAlarm: {
+          dismissed: false,
+          dismissedAt: null,
+          dismissedByDriverId: null,
+          note: null,
+        },
         dutyAcknowledgement: {
           acknowledgedAt: "2026-08-30T10:04:30.000Z",
           acknowledgedByActorId: "ops-already-claimed",

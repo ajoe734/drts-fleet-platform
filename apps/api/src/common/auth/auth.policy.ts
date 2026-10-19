@@ -827,10 +827,7 @@ export function resolveRouteAuthPolicy(
     };
   }
 
-  if (
-    /^driver\/sos-events\/[^/]+$/.test(routePath) &&
-    upperMethod === "GET"
-  ) {
+  if (/^driver\/sos-events\/[^/]+$/.test(routePath) && upperMethod === "GET") {
     return {
       routeKey: "driver:sos-events:get",
       requiredScopes: ["incident:write"],
@@ -897,10 +894,7 @@ export function resolveRouteAuthPolicy(
     };
   }
 
-  if (
-    /^ops\/driver-sos\/[^/]+$/.test(routePath) &&
-    upperMethod === "GET"
-  ) {
+  if (/^ops\/driver-sos\/[^/]+$/.test(routePath) && upperMethod === "GET") {
     return {
       routeKey: "ops:driver-sos:get",
       requiredScopes: ["incident:read"],

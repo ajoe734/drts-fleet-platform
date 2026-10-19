@@ -559,8 +559,7 @@ export function applyDriverSosDutyReadback(
       title: "值班人員已認領",
       detail: `值班人員已認領本次 SOS 通報，目前由 ${readback.dutyAcknowledgement.acknowledgedByActorId} 處理中。`,
       occurredAt:
-        readback.dutyAcknowledgement.acknowledgedAt ??
-        new Date().toISOString(),
+        readback.dutyAcknowledgement.acknowledgedAt ?? new Date().toISOString(),
       tone: "success",
     });
   }
@@ -735,9 +734,7 @@ export function queueDriverSosSupplement(
     {
       kind: "supplement_added",
       title: "已加入補充資料",
-      detail:
-        detailParts.join("，") ||
-        "補充資料已寫入本機紀錄，待後續補送。",
+      detail: detailParts.join("，") || "補充資料已寫入本機紀錄，待後續補送。",
       occurredAt: createdAt,
       tone: "info",
     },
@@ -821,4 +818,3 @@ export async function saveDriverSosActiveCase(
     JSON.stringify(activeCase),
   );
 }
-
