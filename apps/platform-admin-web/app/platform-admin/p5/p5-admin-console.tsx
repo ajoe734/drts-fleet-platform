@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import type {
   DriverPublicRegistrationCredential,
   MultiTaxiTripOperationalAdminView,
-  VehiclePassengerDisclosureProfile,
 } from "@drts/contracts";
 import {
   CanvasBanner,
@@ -19,26 +24,19 @@ import {
   CanvasTable,
   buildCanvasTheme,
   type CanvasTableColumn,
-  type CanvasTone,
 } from "@drts/ui-web";
 
+import {
+  listDisclosureReviews,
+  getDisclosureReview,
+  decideDisclosureReview,
+  disclosureReviewKey,
+  disclosureReviewFailure,
+  type DisclosureReviewItem,
+} from "./p5-disclosure-review-model";
 import { PublicFareManagement } from "./fares/public-fare-management";
 
 type P5View = "disclosure" | "queue" | "fares" | "records";
-
-type CorrectionQueueRow = Record<string, unknown> & {
-  id: string;
-  fleet: string;
-  subject: string;
-  subjectType: "vehicle" | "driver";
-  missing: string;
-  status: "pending" | "reviewing" | "returned" | "approved";
-  submittedAt: string;
-  updatedAt: string;
-  vehiclePlate: string;
-  driverName: string;
-  queueNote: string;
-};
 
 type TripOperationalRow = MultiTaxiTripOperationalAdminView &
   Record<string, unknown>;
@@ -56,15 +54,6 @@ const splitStyle: CSSProperties = {
   gap: 16,
   gridTemplateColumns: "minmax(0, 1.45fr) minmax(280px, 1fr)",
   alignItems: "start",
-};
-
-const previewCardStyle: CSSProperties = {
-  border: `1px solid ${theme.border}`,
-  borderRadius: 12,
-  padding: 14,
-  background: theme.surfaceLo,
-  display: "grid",
-  gap: 8,
 };
 
 const monoStyle: CSSProperties = {
@@ -86,138 +75,6 @@ const inputStyle: CSSProperties = {
   minHeight: 36,
 };
 
-const queueDetailListStyle: CSSProperties = {
-  margin: 0,
-  paddingLeft: 18,
-  color: theme.textMuted,
-  display: "grid",
-  gap: 6,
-  fontSize: 12,
-};
-
-const queueSeed: CorrectionQueueRow[] = [
-  {
-    id: "cq-001",
-    fleet: "大都會車隊",
-    subject: "BKR-2208 · 車輛",
-    subjectType: "vehicle",
-    missing: "車門數 · 車身顏色",
-    status: "pending",
-    submittedAt: "2026-07-14",
-    updatedAt: "2026-07-18",
-    vehiclePlate: "BKR-2208",
-    driverName: "吳明翰",
-    queueNote: "缺漏欄位需補齊後才能寫入乘客揭露檔案。",
-  },
-  {
-    id: "cq-002",
-    fleet: "大都會車隊",
-    subject: "吳明翰 · 駕駛",
-    subjectType: "driver",
-    missing: "執登效期證明",
-    status: "reviewing",
-    submittedAt: "2026-07-15",
-    updatedAt: "2026-07-19",
-    vehiclePlate: "BKR-2208",
-    driverName: "吳明翰",
-    queueNote: "人工審核與效期需共同通過，不得沿用既有駕照旗標。",
-  },
-  {
-    id: "cq-003",
-    fleet: "海線車隊",
-    subject: "TXG-1180 · 車輛",
-    subjectType: "vehicle",
-    missing: "出廠年份",
-    status: "returned",
-    submittedAt: "2026-07-10",
-    updatedAt: "2026-07-16",
-    vehiclePlate: "TXG-1180",
-    driverName: "林佩蓉",
-    queueNote: "已退件補正，待車隊重新送審後才可恢復審核。",
-  },
-  {
-    id: "cq-004",
-    fleet: "蘭陽小客車",
-    subject: "游志豪 · 駕駛",
-    subjectType: "driver",
-    missing: "—",
-    status: "approved",
-    submittedAt: "2026-07-08",
-    updatedAt: "2026-07-12",
-    vehiclePlate: "YLN-5201",
-    driverName: "游志豪",
-    queueNote: "資料已核准，可進入派車資格評估。",
-  },
-];
-
-const fallbackVehicle: VehiclePassengerDisclosureProfile = {
-  vehicleId: "vehicle-001",
-  make: "Toyota",
-  model: "Corolla Altis",
-  modelYear: 2024,
-  doorCount: 4,
-  color: "珍珠白",
-  status: "complete",
-  missingFieldCodes: [],
-  verifiedByActorId: "platform-reviewer-001",
-  verifiedAt: "2026-07-18T09:20:00.000Z",
-  sourceSubmissionId: "submission-vehicle-001",
-  version: 4,
-  updatedAt: "2026-07-18T09:20:00.000Z",
-};
-
-const fallbackDriver: DriverPublicRegistrationCredential = {
-  driverId: "drv-demo-001",
-  registrationNo: "RE***01",
-  registrationArea: "臺北市",
-  effectiveFrom: "2025-01-01",
-  effectiveUntil: "2027-12-31",
-  status: "verified_active",
-  maskedDisplay: "RE***01",
-  verifiedByActorId: "platform-reviewer-001",
-  verifiedAt: "2026-07-18T09:20:00.000Z",
-  sourceSubmissionId: "submission-driver-001",
-  version: 3,
-  updatedAt: "2026-07-18T09:20:00.000Z",
-};
-
-function getMaskedRegistrationDisplay(
-  credential: DriverPublicRegistrationCredential,
-) {
-  const masked = credential.maskedDisplay.trim();
-  return masked.length > 0 ? masked : "—";
-}
-
-function statusTone(status: CorrectionQueueRow["status"]): CanvasTone {
-  switch (status) {
-    case "approved":
-      return "success";
-    case "pending":
-      return "warn";
-    case "reviewing":
-      return "info";
-    case "returned":
-      return "danger";
-    default:
-      return "neutral";
-  }
-}
-
-function queueDetailTone(
-  status: CorrectionQueueRow["status"],
-): Exclude<CanvasTone, "neutral"> {
-  switch (status) {
-    case "approved":
-      return "success";
-    case "pending":
-      return "warn";
-    case "reviewing":
-      return "info";
-    case "returned":
-      return "danger";
-  }
-}
-
 function requiresAnyScope(scopeSet: Set<string>, scopes: string[]) {
   return scopes.some((scope) => scopeSet.has(scope));
 }
@@ -235,89 +92,342 @@ function formatMonthLabel(month: string, locale: string) {
   return locale === "zh" ? `${year}-${value}` : `${year}-${value}`;
 }
 
+function getMaskedRegistrationDisplay(
+  credential: DriverPublicRegistrationCredential,
+) {
+  const masked = credential.maskedDisplay.trim();
+  return masked.length > 0 ? masked : "—";
+}
+
 export function P5AdminConsole({ view }: { view: P5View }) {
+  return view === "disclosure" || view === "queue" ? (
+    <P5DisclosureReview view={view} />
+  ) : (
+    <P5OtherAdminConsole view={view} />
+  );
+}
+function P5DisclosureReview({ view }: { view: "disclosure" | "queue" }) {
+  const { locale, t } = useTranslation();
+  const client = usePlatformAdminClient();
+  const authority = usePlatformAdminAuthority();
+  const canRead = authority.scopes.includes("regulatory:read");
+  const canReview = authority.scopes.includes("regulatory:write");
+  const zh = locale === "zh";
+  const [items, setItems] = useState<DisclosureReviewItem[]>([]);
+  const [selected, setSelected] = useState("");
+  const [detail, setDetail] = useState<DisclosureReviewItem | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ReturnType<
+    typeof disclosureReviewFailure
+  > | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const attempt = useRef<{ payload: string; key: string } | null>(null);
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    setDetail(null);
+    setItems([]);
+    setLoading(true);
+    if (!canRead) {
+      setLoading(false);
+      return;
+    }
+    void listDisclosureReviews(client)
+      .then((result) => {
+        if (active) {
+          setItems(result.items);
+          setSelected((current) =>
+            result.items.some((item) => disclosureReviewKey(item) === current)
+              ? current
+              : result.items[0]
+                ? disclosureReviewKey(result.items[0])
+                : "",
+          );
+        }
+      })
+      .catch((failure: unknown) => {
+        if (active) setError(disclosureReviewFailure(failure));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canRead, client, view]);
+  const item = items.find(
+    (candidate) => disclosureReviewKey(candidate) === selected,
+  );
+  const subjectType = item?.subjectType;
+  const subjectId = item?.subjectId;
+  useEffect(() => {
+    let active = true;
+    setDetail(null);
+    setReason("");
+    attempt.current = null;
+    if (!subjectType || !subjectId) return;
+    void getDisclosureReview(client, { subjectType, subjectId })
+      .then((result) => {
+        if (active) {
+          setDetail(result);
+          setError(null);
+        }
+      })
+      .catch((failure: unknown) => {
+        if (active) setError(disclosureReviewFailure(failure));
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, subjectType, subjectId]);
+  async function decide(action: "approve" | "return") {
+    if (!detail || !canReview || busy || !reason.trim()) return;
+    setBusy(true);
+    setError(null);
+    const command = {
+      action,
+      reason: reason.trim(),
+      expectedVersion: detail.version,
+      sourceSubmissionId: detail.sourceSubmissionId,
+    };
+    const payload = JSON.stringify({ subject: selected, ...command });
+    if (attempt.current?.payload !== payload)
+      attempt.current = { payload, key: `p5-review-${crypto.randomUUID()}` };
+    try {
+      await decideDisclosureReview(
+        client,
+        detail,
+        command,
+        attempt.current.key,
+      );
+      const refreshed = await getDisclosureReview(client, detail);
+      const queue = await listDisclosureReviews(client);
+      setItems(queue.items);
+      setDetail(refreshed);
+      attempt.current = null;
+    } catch (failure: unknown) {
+      setError(disclosureReviewFailure(failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const record =
+    detail && "driverId" in detail.record
+      ? {
+          ...detail.record,
+          registrationNo: null,
+          maskedDisplay: getMaskedRegistrationDisplay(detail.record),
+        }
+      : detail?.record;
+  return (
+    <div style={pageBodyStyle}>
+      <CanvasPageHeader
+        theme={theme}
+        title={t(view === "queue" ? "p5.queue.title" : "p5.disclosure.title")}
+        subtitle={t(
+          view === "queue" ? "p5.queue.subtitle" : "p5.disclosure.subtitle",
+        )}
+      />
+      {!canRead ? (
+        <CanvasBanner
+          theme={theme}
+          tone="info"
+          body={t("p5.scope.locked.title")}
+        />
+      ) : (
+        <>
+          {error ? (
+            <div role="alert" data-kind={error.kind}>
+              <strong>
+                {error.kind === "denied"
+                  ? zh
+                    ? "沒有審核讀取權限"
+                    : "Access denied"
+                  : error.kind === "missing"
+                    ? zh
+                      ? "主體已不存在"
+                      : "Subject not found"
+                    : zh
+                      ? "暫時無法讀取或儲存"
+                      : "Unavailable"}
+              </strong>{" "}
+              · {error.message}
+            </div>
+          ) : null}
+          {loading ? (
+            <div role="status">{t("p5.loading")}</div>
+          ) : !items.length && !error ? (
+            <div role="status">
+              {zh ? "目前沒有揭露審核主體" : "No disclosure subjects"}
+            </div>
+          ) : null}
+          <div style={splitStyle}>
+            <CanvasCard
+              theme={theme}
+              title={zh ? "正式審核主體" : "Disclosure subjects"}
+            >
+              <ul>
+                {items.map((candidate) => (
+                  <li key={disclosureReviewKey(candidate)}>
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        setSelected(disclosureReviewKey(candidate))
+                      }
+                    >
+                      {candidate.label} · {candidate.subjectType} ·{" "}
+                      {candidate.record.status} · {t("p5.action.view")}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </CanvasCard>
+            <CanvasCard
+              theme={theme}
+              title={detail?.label ?? t("p5.queue.detailCard")}
+            >
+              {detail && record ? (
+                <>
+                  <div>
+                    {detail.subjectType} · {detail.subjectId} ·{" "}
+                    {zh ? "版本" : "Version"} {detail.version}
+                  </div>
+                  <div>
+                    {zh ? "來源申請" : "Source submission"}:{" "}
+                    {detail.sourceSubmissionId ?? "—"}
+                  </div>
+                  <div>
+                    {zh ? "狀態" : "Status"}: {record.status}
+                  </div>
+                  {"vehicleId" in record ? (
+                    <CanvasDL
+                      theme={theme}
+                      cols={2}
+                      items={[
+                        { k: t("p5.field.make"), v: record.make },
+                        { k: t("p5.field.model"), v: record.model },
+                        { k: t("p5.field.modelYear"), v: record.modelYear },
+                        { k: t("p5.field.doorCount"), v: record.doorCount },
+                        { k: t("p5.field.color"), v: record.color ?? "—" },
+                      ]}
+                    />
+                  ) : (
+                    <>
+                      <CanvasDL
+                        theme={theme}
+                        cols={2}
+                        items={[
+                          {
+                            k: t("p5.field.registrationArea"),
+                            v: record.registrationArea ?? "—",
+                          },
+                          {
+                            k: t("p5.field.registrationMasked"),
+                            v: record.maskedDisplay,
+                          },
+                          {
+                            k: t("p5.fares.col.effectiveFrom"),
+                            v: record.effectiveFrom ?? "—",
+                          },
+                          {
+                            k: t("p5.field.registrationUntil"),
+                            v: record.effectiveUntil ?? "—",
+                          },
+                        ]}
+                      />
+                      <CanvasBanner
+                        theme={theme}
+                        tone="info"
+                        body={t("p5.disclosure.maskedNote")}
+                      />
+                    </>
+                  )}
+                  <div>
+                    {zh ? "查核人員" : "Verified by"}:{" "}
+                    {record.verifiedByActorId ?? "—"} ·{" "}
+                    {record.verifiedAt ?? "—"}
+                  </div>
+                  {detail.missingFieldCodes.length ? (
+                    <div role="status">
+                      {zh ? "缺漏或失效欄位" : "Missing or invalid fields"}:{" "}
+                      {detail.missingFieldCodes.join(", ")}
+                    </div>
+                  ) : null}
+                  <label>
+                    {t("audit.page.reason")}
+                    <textarea
+                      aria-label={t("audit.page.reason")}
+                      disabled={busy || !canReview}
+                      value={reason}
+                      onChange={(event) => setReason(event.target.value)}
+                    />
+                  </label>
+                  <div style={actionRowStyle}>
+                    <CanvasBtn
+                      theme={theme}
+                      disabled={!canReview || busy || !reason.trim()}
+                      onClick={() => void decide("return")}
+                    >
+                      {t("p5.action.return")}
+                    </CanvasBtn>
+                    <CanvasBtn
+                      theme={theme}
+                      disabled={
+                        !canReview ||
+                        busy ||
+                        !reason.trim() ||
+                        !!detail.missingFieldCodes.length
+                      }
+                      onClick={() => void decide("approve")}
+                    >
+                      {t("p5.action.approve")}
+                    </CanvasBtn>
+                  </div>
+                  {!canReview ? (
+                    <CanvasBanner
+                      theme={theme}
+                      tone="info"
+                      body={t("p5.scope.reviewOnly")}
+                    />
+                  ) : null}
+                  <h3>{zh ? "審核歷史" : "Review history"}</h3>
+                  <ol>
+                    {detail.history.map((decision) => (
+                      <li key={decision.decisionId}>
+                        {decision.action} · {decision.actorId} ·{" "}
+                        {decision.reason} · {decision.decidedAt} · v
+                        {decision.toVersion}
+                      </li>
+                    ))}
+                  </ol>
+                </>
+              ) : !loading && item && !error ? (
+                <div role="status">{t("p5.loading")}</div>
+              ) : null}
+            </CanvasCard>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function P5OtherAdminConsole({ view }: { view: P5View }) {
   const { locale, t } = useTranslation();
   const client = usePlatformAdminClient();
   const authority = usePlatformAdminAuthority();
   const scopeSet = useMemo(() => new Set(authority.scopes), [authority.scopes]);
-  const canReadRegistry = requiresAnyScope(scopeSet, [
-    "reg.read",
-    "reg.review",
-  ]);
-  const canReviewRegistry = requiresAnyScope(scopeSet, ["reg.review"]);
   const canReadTripRecords = requiresAnyScope(scopeSet, [
     "multi_taxi_records:read",
   ]);
-  const [vehicle, setVehicle] =
-    useState<VehiclePassengerDisclosureProfile>(fallbackVehicle);
-  const [driver, setDriver] =
-    useState<DriverPublicRegistrationCredential>(fallbackDriver);
-  const [loading, setLoading] = useState(view === "disclosure");
-  const [queueRows, setQueueRows] = useState(queueSeed);
-  const [selectedQueueId, setSelectedQueueId] = useState(
-    queueSeed[0]?.id ?? "",
-  );
   const [recordsRows, setRecordsRows] = useState<TripOperationalRow[]>([]);
   const [recordsMonthOptions, setRecordsMonthOptions] = useState<string[]>([]);
   const [recordsMonth, setRecordsMonth] = useState("");
   const [recordsLoading, setRecordsLoading] = useState(view === "records");
   const [recordsError, setRecordsError] = useState<string | null>(null);
-  const maskedRegistrationDisplay = getMaskedRegistrationDisplay(driver);
-  const selectedQueueRow =
-    queueRows.find((row) => row.id === selectedQueueId) ?? queueRows[0] ?? null;
-  const disclosureVehiclePlate = queueSeed[0]?.vehiclePlate ?? "—";
-  const disclosureDriverName = queueSeed[0]?.driverName ?? "—";
   const canAccessView =
-    view === "records"
-      ? canReadTripRecords
-      : view === "fares"
-        ? scopeSet.has("foundation:read")
-        : canReadRegistry;
-
-  useEffect(() => {
-    if (view !== "disclosure" || !canReadRegistry) {
-      setLoading(false);
-      return;
-    }
-
-    let active = true;
-    async function load() {
-      try {
-        const [vehicleProfile, driverCredential] = await Promise.all([
-          client.get<VehiclePassengerDisclosureProfile>(
-            "/api/regulatory-registry/vehicles/vehicle-001/disclosure-profile",
-          ),
-          client.get<DriverPublicRegistrationCredential>(
-            "/api/regulatory-registry/drivers/drv-demo-001/registration-credential",
-          ),
-        ]);
-        if (!active) {
-          return;
-        }
-        setVehicle(vehicleProfile);
-        setDriver({
-          ...driverCredential,
-          registrationNo: null,
-          maskedDisplay: getMaskedRegistrationDisplay(driverCredential),
-        });
-      } catch {
-        if (!active) {
-          return;
-        }
-        setVehicle(fallbackVehicle);
-        setDriver(fallbackDriver);
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [canReadRegistry, client, view]);
+    view === "records" ? canReadTripRecords : scopeSet.has("foundation:read");
 
   useEffect(() => {
     if (view !== "records" || !canReadTripRecords) {
@@ -374,21 +484,6 @@ export function P5AdminConsole({ view }: { view: P5View }) {
     };
   }, [canReadTripRecords, client, recordsMonth, view]);
 
-  function actOnQueue(id: string, action: "return" | "approve") {
-    setQueueRows((current) =>
-      current.map((row) =>
-        row.id === id
-          ? {
-              ...row,
-              status: action === "approve" ? "approved" : "returned",
-              updatedAt: "2026-07-21",
-            }
-          : row,
-      ),
-    );
-    setSelectedQueueId(id);
-  }
-
   if (!canAccessView) {
     return (
       <div style={pageBodyStyle}>
@@ -408,356 +503,6 @@ export function P5AdminConsole({ view }: { view: P5View }) {
               : t("p5.scope.locked.body")
           }
         />
-      </div>
-    );
-  }
-
-  if (view === "disclosure") {
-    return (
-      <div style={pageBodyStyle}>
-        <CanvasPageHeader
-          theme={theme}
-          title={t("p5.disclosure.title")}
-          subtitle={t("p5.disclosure.subtitle")}
-          actions={
-            <div style={actionRowStyle}>
-              <CanvasBtn theme={theme} disabled={!canReviewRegistry}>
-                {t("p5.action.return")}
-              </CanvasBtn>
-              <CanvasBtn
-                theme={theme}
-                variant="primary"
-                icon="check"
-                disabled={!canReviewRegistry}
-              >
-                {t("p5.action.approve")}
-              </CanvasBtn>
-            </div>
-          }
-        />
-        {!canReviewRegistry ? (
-          <CanvasBanner
-            theme={theme}
-            tone="info"
-            icon="lock"
-            body={t("p5.scope.reviewOnly")}
-          />
-        ) : null}
-        <div style={splitStyle}>
-          <div style={{ display: "grid", gap: 16 }}>
-            <CanvasCard
-              theme={theme}
-              title={t("p5.disclosure.vehicleCard")}
-              subtitle={t("p5.disclosure.vehicleSubtitle")}
-            >
-              {loading ? (
-                <div>{t("p5.loading")}</div>
-              ) : (
-                <CanvasDL
-                  theme={theme}
-                  cols={2}
-                  items={[
-                    { k: t("p5.field.make"), v: vehicle.make },
-                    { k: t("p5.field.model"), v: vehicle.model },
-                    {
-                      k: t("p5.field.modelYear"),
-                      v: String(vehicle.modelYear),
-                      mono: true,
-                    },
-                    {
-                      k: t("p5.field.doorCount"),
-                      v: String(vehicle.doorCount),
-                      mono: true,
-                    },
-                    { k: t("p5.field.color"), v: vehicle.color ?? "—" },
-                    {
-                      k: t("p5.field.disclosureStatus"),
-                      v: (
-                        <CanvasPill theme={theme} tone="success" dot>
-                          {vehicle.status}
-                        </CanvasPill>
-                      ),
-                    },
-                  ]}
-                />
-              )}
-            </CanvasCard>
-            <CanvasCard
-              theme={theme}
-              title={t("p5.disclosure.driverCard")}
-              subtitle={t("p5.disclosure.driverSubtitle")}
-            >
-              {loading ? (
-                <div>{t("p5.loading")}</div>
-              ) : (
-                <CanvasDL
-                  theme={theme}
-                  cols={2}
-                  items={[
-                    {
-                      k: t("p5.field.registrationMasked"),
-                      v: maskedRegistrationDisplay,
-                      mono: true,
-                    },
-                    {
-                      k: t("p5.field.registrationArea"),
-                      v: driver.registrationArea ?? "—",
-                    },
-                    {
-                      k: t("p5.field.registrationUntil"),
-                      v: driver.effectiveUntil ?? "—",
-                      mono: true,
-                    },
-                    {
-                      k: t("p5.field.registrationStatus"),
-                      v: (
-                        <CanvasPill
-                          theme={theme}
-                          tone={
-                            driver.status === "verified_active"
-                              ? "success"
-                              : "warn"
-                          }
-                          dot
-                        >
-                          {driver.status}
-                        </CanvasPill>
-                      ),
-                    },
-                    {
-                      k: t("p5.field.reviewer"),
-                      v: driver.verifiedByActorId ?? "—",
-                    },
-                    {
-                      k: t("p5.field.fullRegistrationStored"),
-                      v: t("p5.disclosure.backendOnly"),
-                    },
-                  ]}
-                />
-              )}
-            </CanvasCard>
-          </div>
-          <CanvasCard
-            theme={theme}
-            title={t("p5.disclosure.previewCard")}
-            subtitle={t("p5.disclosure.previewSubtitle")}
-          >
-            <div style={previewCardStyle}>
-              <div style={{ fontWeight: 700, color: theme.text }}>
-                {vehicle.make} {vehicle.model}
-              </div>
-              <div style={{ color: theme.textMuted, fontSize: 11.5 }}>
-                {t("p5.disclosure.previewVehicleMeta", {
-                  year: vehicle.modelYear,
-                  doors: vehicle.doorCount,
-                  color: vehicle.color ?? "—",
-                })}
-              </div>
-              <div
-                style={{
-                  ...monoStyle,
-                  fontSize: 22,
-                  fontWeight: 700,
-                  color: theme.text,
-                }}
-              >
-                {disclosureVehiclePlate}
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <strong>{disclosureDriverName}</strong>
-                <CanvasPill theme={theme} tone="success">
-                  {t("p5.disclosure.validBadge")}
-                </CanvasPill>
-              </div>
-              <div
-                style={{ ...monoStyle, color: theme.textMuted, fontSize: 11 }}
-              >
-                {maskedRegistrationDisplay} ·{" "}
-                {t("p5.disclosure.validUntil", {
-                  date: driver.effectiveUntil ?? "—",
-                })}
-              </div>
-              <CanvasBanner
-                theme={theme}
-                tone="info"
-                icon="lock"
-                body={t("p5.disclosure.maskedNote")}
-              />
-            </div>
-          </CanvasCard>
-        </div>
-      </div>
-    );
-  }
-
-  if (view === "queue") {
-    const columns: CanvasTableColumn<CorrectionQueueRow>[] = [
-      { h: t("p5.queue.col.fleet"), k: "fleet", w: 140 },
-      { h: t("p5.queue.col.subject"), k: "subject", w: 180 },
-      { h: t("p5.queue.col.missing"), k: "missing", w: 180 },
-      {
-        h: t("p5.queue.col.status"),
-        w: 110,
-        r: (row) => (
-          <CanvasPill theme={theme} tone={statusTone(row.status)} dot>
-            {t(`p5.status.${row.status}`)}
-          </CanvasPill>
-        ),
-      },
-      { h: t("p5.queue.col.submitted"), k: "submittedAt", w: 110, mono: true },
-      { h: t("p5.queue.col.updated"), k: "updatedAt", w: 110, mono: true },
-      {
-        h: "",
-        w: 220,
-        r: (row) => (
-          <div style={actionRowStyle}>
-            <CanvasBtn
-              theme={theme}
-              size="xs"
-              variant="ghost"
-              icon="eye"
-              onClick={() => setSelectedQueueId(row.id)}
-            >
-              {t("p5.action.view")}
-            </CanvasBtn>
-            <CanvasBtn
-              theme={theme}
-              size="xs"
-              disabled={!canReviewRegistry}
-              onClick={() => actOnQueue(row.id, "return")}
-            >
-              {t("p5.action.return")}
-            </CanvasBtn>
-            <CanvasBtn
-              theme={theme}
-              size="xs"
-              variant="primary"
-              icon="check"
-              disabled={!canReviewRegistry}
-              onClick={() => actOnQueue(row.id, "approve")}
-            >
-              {t("p5.action.approve")}
-            </CanvasBtn>
-          </div>
-        ),
-      },
-    ];
-
-    return (
-      <div style={pageBodyStyle}>
-        <CanvasPageHeader
-          theme={theme}
-          title={t("p5.queue.title")}
-          subtitle={t("p5.queue.subtitle")}
-          actions={
-            <CanvasPill theme={theme} tone="warn">
-              {queueRows.filter((row) => row.status !== "approved").length}{" "}
-              {t("p5.queue.pending")}
-            </CanvasPill>
-          }
-        />
-        {!canReviewRegistry ? (
-          <CanvasBanner
-            theme={theme}
-            tone="info"
-            icon="lock"
-            body={t("p5.scope.reviewOnly")}
-          />
-        ) : null}
-        <div style={splitStyle}>
-          <CanvasCard theme={theme} padding={0}>
-            <CanvasTable theme={theme} columns={columns} rows={queueRows} />
-          </CanvasCard>
-          <CanvasCard
-            theme={theme}
-            title={t("p5.queue.detailCard")}
-            subtitle={
-              selectedQueueRow
-                ? `${selectedQueueRow.subject} · ${selectedQueueRow.fleet}`
-                : t("p5.loading")
-            }
-          >
-            {selectedQueueRow ? (
-              <>
-                <CanvasDL
-                  theme={theme}
-                  cols={1}
-                  items={[
-                    {
-                      k: t("p5.queue.detail.subjectType"),
-                      v: t(
-                        `p5.queue.subjectType.${selectedQueueRow.subjectType}`,
-                      ),
-                    },
-                    {
-                      k: t("p5.queue.detail.plate"),
-                      v: selectedQueueRow.vehiclePlate,
-                      mono: true,
-                    },
-                    {
-                      k: t("p5.queue.detail.driver"),
-                      v: selectedQueueRow.driverName,
-                    },
-                    {
-                      k: t("p5.queue.detail.status"),
-                      v: (
-                        <CanvasPill
-                          theme={theme}
-                          tone={statusTone(selectedQueueRow.status)}
-                          dot
-                        >
-                          {t(`p5.status.${selectedQueueRow.status}`)}
-                        </CanvasPill>
-                      ),
-                    },
-                  ]}
-                />
-                <div style={{ marginTop: 12 }}>
-                  <strong style={{ display: "block", marginBottom: 8 }}>
-                    {t("p5.queue.detail.missingTitle")}
-                  </strong>
-                  {selectedQueueRow.missing === "—" ? (
-                    <div style={{ color: theme.textMuted, fontSize: 12 }}>
-                      —
-                    </div>
-                  ) : (
-                    <ul style={queueDetailListStyle}>
-                      {selectedQueueRow.missing.split(" · ").map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-                <div style={{ marginTop: 12 }}>
-                  <CanvasBanner
-                    theme={theme}
-                    tone={queueDetailTone(selectedQueueRow.status)}
-                    icon="info"
-                    body={selectedQueueRow.queueNote}
-                  />
-                </div>
-                <div style={{ ...actionRowStyle, marginTop: 12 }}>
-                  <CanvasBtn
-                    theme={theme}
-                    disabled={!canReviewRegistry}
-                    onClick={() => actOnQueue(selectedQueueRow.id, "return")}
-                  >
-                    {t("p5.action.return")}
-                  </CanvasBtn>
-                  <CanvasBtn
-                    theme={theme}
-                    variant="primary"
-                    icon="check"
-                    disabled={!canReviewRegistry}
-                    onClick={() => actOnQueue(selectedQueueRow.id, "approve")}
-                  >
-                    {t("p5.action.approve")}
-                  </CanvasBtn>
-                </div>
-              </>
-            ) : null}
-          </CanvasCard>
-        </div>
       </div>
     );
   }

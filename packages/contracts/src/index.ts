@@ -354,6 +354,7 @@ export function hasAddressCoordinateProvenance(
 export type GeoPolygon = {
   type: "polygon";
   coordinates: GeoPoint[];
+  holes?: GeoPoint[][];
 };
 
 export type GeoCircle = {
@@ -1185,6 +1186,8 @@ export interface PartnerChannelEntryRecord {
 
 export interface CreatePartnerChannelEntryCommand {
   tenantId: string;
+  /** Optional existing active Fleet master reference for fleet_partner entries. */
+  fleetPartnerId?: string;
   partnerCode: string;
   partnerType: PartnerType;
   programId: string;

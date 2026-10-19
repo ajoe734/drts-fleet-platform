@@ -1,3 +1,4 @@
+import { DriverContactAction } from "./driver-contact-action";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { EnterpriseGatePage } from "../../components/enterprise-state-page";
@@ -46,7 +47,9 @@ export default async function TripPage() {
       verified.session,
     ).getDashboardSummary();
   } catch (error) {
-    return <EnterpriseGatePage kind={classifyEnterpriseDashboardFetchError(error)} />;
+    return (
+      <EnterpriseGatePage kind={classifyEnterpriseDashboardFetchError(error)} />
+    );
   }
 
   const trip = selectActiveEnterpriseTrip(summary.upcomingBookings);
@@ -155,7 +158,7 @@ export default async function TripPage() {
                   data-testid="enterprise-trip-driver-status"
                   style={{ fontSize: 14, fontWeight: 600, color: t.muted }}
                 >
-                  {tr("trip.driverContactUnavailable")}
+                  {tr("trip.contactDriver")}
                 </div>
                 <div style={{ marginTop: 5 }}>
                   <EPill t={t} tone="neutral" dot>
@@ -198,26 +201,20 @@ export default async function TripPage() {
             />
           </div>
           <div style={{ marginTop: 18, display: "flex", gap: 10 }}>
-            <button
-              type="button"
-              disabled
-              aria-disabled
-              data-testid="enterprise-trip-contact-driver"
-              title={tr("trip.driverContactUnavailable")}
-              style={entBtnStyle(t, {
-                variant: "default",
-                block: true,
-                disabled: true,
-              })}
-            >
-              <EBtnContent icon="phone">{tr("trip.contactDriver")}</EBtnContent>
-            </button>
+            <DriverContactAction
+              key={`${trip.bookingId}:${trip.status}`}
+              bookingId={trip.bookingId}
+              status={trip.status}
+              locale={locale}
+            />
             <a
               href={`tel:${supportPhone.replace(/[^+0-9]/g, "")}`}
               data-testid="enterprise-trip-contact-support"
               style={entBtnStyle(t, { variant: "default", block: true })}
             >
-              <EBtnContent icon="brief">{tr("trip.contactSupport")}</EBtnContent>
+              <EBtnContent icon="brief">
+                {tr("trip.contactSupport")}
+              </EBtnContent>
             </a>
             <Link
               href={`/bookings/${encodeURIComponent(trip.bookingId)}`}

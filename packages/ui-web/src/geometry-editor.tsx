@@ -3,10 +3,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { CanvasIcon, type CanvasIconName } from "./canvas-primitives";
-import {
-  buildCanvasTheme,
-  type CanvasTheme,
-} from "./canvas-primitives";
+import { buildCanvasTheme, type CanvasTheme } from "./canvas-primitives";
 
 export interface GeoPoint {
   lat: number;
@@ -16,6 +13,7 @@ export interface GeoPoint {
 export interface GeoPolygon {
   type: "polygon";
   coordinates: GeoPoint[];
+  holes?: GeoPoint[][];
 }
 
 export interface GeoCircle {
@@ -48,6 +46,7 @@ export interface GeometryBounds {
 export interface GeometryPolygonDraft {
   kind: "polygon";
   points: GeoPoint[];
+  holes?: GeoPoint[][];
 }
 
 export interface GeometryCircleDraft {
@@ -186,6 +185,8 @@ interface ProjectedPoint {
 interface ProjectedGeometry {
   bounds: GeometryBounds;
   polygonPoints: string | null;
+  polygonPathD: string | null;
+  holeVertices: ProjectedPoint[][];
   polylinePoints: string | null;
   routeStrokeWidth: number;
   vertices: ProjectedPoint[];
@@ -194,12 +195,22 @@ interface ProjectedGeometry {
   circleRadiusLine: ProjectedPoint | null;
 }
 
-export function createEmptyGeometryDraft(kind: GeometryDraftKind): GeometryDraft {
+export function createEmptyGeometryDraft(
+  kind: GeometryDraftKind,
+): GeometryDraft {
   switch (kind) {
     case "circle":
-      return { kind: "circle", center: null, radiusMeters: DEFAULT_CIRCLE_RADIUS_METERS };
+      return {
+        kind: "circle",
+        center: null,
+        radiusMeters: DEFAULT_CIRCLE_RADIUS_METERS,
+      };
     case "routeCorridor":
-      return { kind: "routeCorridor", points: [], radiusMeters: DEFAULT_CIRCLE_RADIUS_METERS };
+      return {
+        kind: "routeCorridor",
+        points: [],
+        radiusMeters: DEFAULT_CIRCLE_RADIUS_METERS,
+      };
     case "polygon":
     default:
       return { kind: "polygon", points: [] };
@@ -214,17 +225,94 @@ export function validateGeometryDraft(
 
   switch (draft.kind) {
     case "polygon": {
-      const unique = dedupeSequentialPoints(draft.points);
+      const unique = stripClosingDuplicatePoint(draft.points);
       errors.push(...validatePointCollection(unique, "Polygon vertex"));
+      const hasDuplicateConsecutive =
+        unique.length >= 2 &&
+        unique.some((point, index) =>
+          pointsEqual(point, unique[(index + 1) % unique.length]!),
+        );
+      if (hasDuplicateConsecutive) {
+        errors.push(
+          "Polygon cannot contain duplicate consecutive vertices or zero-length edges.",
+        );
+      }
       if (unique.length < 3) {
         errors.push("Polygon requires at least 3 vertices.");
       }
       if (unique.length >= 3 && Math.abs(signedPolygonArea(unique)) < 1e-8) {
         errors.push("Polygon area must be non-zero.");
       }
-      if (unique.length >= 4 && polygonHasSelfIntersection(unique)) {
+      if (unique.length >= 3 && polygonHasSelfIntersection(unique)) {
         errors.push("Polygon cannot self-intersect.");
       }
+
+      const validHoles: GeoPoint[][] = [];
+      (draft.holes ?? []).forEach((hole, holeIndex) => {
+        const uniqueHole = stripClosingDuplicatePoint(hole);
+        errors.push(
+          ...validatePointCollection(
+            uniqueHole,
+            `Polygon hole ${holeIndex + 1} vertex`,
+          ),
+        );
+
+        const hasDuplicateConsecutive =
+          uniqueHole.length >= 2 &&
+          uniqueHole.some((point, index) =>
+            pointsEqual(point, uniqueHole[(index + 1) % uniqueHole.length]!),
+          );
+
+        let holeValid = true;
+        if (uniqueHole.length < 3 || hasDuplicateConsecutive) {
+          errors.push("Polygon hole requires at least 3 vertices.");
+          holeValid = false;
+        }
+        if (
+          uniqueHole.length >= 3 &&
+          Math.abs(signedPolygonArea(uniqueHole)) < 1e-8
+        ) {
+          errors.push("Polygon hole area must be non-zero.");
+          holeValid = false;
+        }
+        if (uniqueHole.length >= 3 && polygonHasSelfIntersection(uniqueHole)) {
+          errors.push("Polygon hole cannot self-intersect.");
+          holeValid = false;
+        }
+
+        if (unique.length >= 3 && holeValid) {
+          const liesStrictlyInside = uniqueHole.every(
+            (vertex) =>
+              ringContainsPoint(unique, vertex) &&
+              !pointOnRingBoundary(unique, vertex),
+          );
+          if (
+            !liesStrictlyInside ||
+            ringsIntersectOrTouch(unique, uniqueHole)
+          ) {
+            errors.push(
+              "Polygon hole must lie strictly inside the outer boundary.",
+            );
+            holeValid = false;
+          } else {
+            for (const prevHole of validHoles) {
+              if (
+                ringsIntersectOrTouch(prevHole, uniqueHole) ||
+                ringContainsPoint(prevHole, uniqueHole[0]!) ||
+                ringContainsPoint(uniqueHole, prevHole[0]!)
+              ) {
+                errors.push("Polygon holes cannot intersect, touch, or nest.");
+                holeValid = false;
+                break;
+              }
+            }
+          }
+        }
+
+        if (holeValid) {
+          validHoles.push(uniqueHole);
+        }
+      });
       break;
     }
     case "circle":
@@ -281,8 +369,15 @@ export function buildGeometryEditorSnapshot(
   const validation = validateGeometryDraft(draft);
   const backendPayloads = buildBackendPayloads(draft);
   const geoJson = geometryDraftToGeoJson(draft);
-  const beforeGeoJson = baselineDraft ? geometryDraftToGeoJson(baselineDraft) : null;
-  const review = buildReviewDiff(draft, baselineDraft ?? null, geoJson, beforeGeoJson);
+  const beforeGeoJson = baselineDraft
+    ? geometryDraftToGeoJson(baselineDraft)
+    : null;
+  const review = buildReviewDiff(
+    draft,
+    baselineDraft ?? null,
+    geoJson,
+    beforeGeoJson,
+  );
 
   return {
     draft,
@@ -318,7 +413,8 @@ export function GeometryPreviewSurface({
   height = STAGE_HEIGHT,
 }: GeometryPreviewSurfaceProps) {
   const theme = themeProp ?? DEFAULT_THEME;
-  const resolvedBounds = bounds ?? resolveBounds(items.map((item) => item.draft));
+  const resolvedBounds =
+    bounds ?? resolveBounds(items.map((item) => item.draft));
   const hasVisibleGeometry = items.some((item) => hasGeometry(item.draft));
 
   return (
@@ -334,7 +430,12 @@ export function GeometryPreviewSurface({
         <svg
           viewBox={`0 0 ${STAGE_WIDTH} ${STAGE_HEIGHT}`}
           preserveAspectRatio="xMidYMid meet"
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+          }}
         >
           {items.map((item) => renderPreviewItem(theme, item, resolvedBounds))}
         </svg>
@@ -392,9 +493,13 @@ export function GeometryEditor({
 }: GeometryEditorProps) {
   const theme = themeProp ?? DEFAULT_THEME;
   const labels = { ...DEFAULT_LABELS, ...labelsProp };
-  const [history, setHistory] = useState<GeometryDraft[]>([cloneDraft(initialDraft)]);
+  const [history, setHistory] = useState<GeometryDraft[]>([
+    cloneDraft(initialDraft),
+  ]);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const [selectedVertexIndex, setSelectedVertexIndex] = useState<number | null>(null);
+  const [selectedVertexIndex, setSelectedVertexIndex] = useState<number | null>(
+    null,
+  );
   const [importValue, setImportValue] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
 
@@ -415,7 +520,9 @@ export function GeometryEditor({
   }, [onChange, snapshot]);
 
   const resolvedBounds = useMemo(
-    () => bounds ?? resolveBounds([draft, ...(baselineDraft ? [baselineDraft] : [])]),
+    () =>
+      bounds ??
+      resolveBounds([draft, ...(baselineDraft ? [baselineDraft] : [])]),
     [bounds, draft, baselineDraft],
   );
 
@@ -447,6 +554,9 @@ export function GeometryEditor({
         pushDraft({
           kind: "polygon",
           points: [...draft.points, point],
+          ...(draft.holes && draft.holes.length > 0
+            ? { holes: draft.holes }
+            : {}),
         });
         break;
       case "routeCorridor":
@@ -493,7 +603,13 @@ export function GeometryEditor({
         index === vertexIndex ? { ...point, [field]: value } : point,
       );
       return current.kind === "polygon"
-        ? { kind: "polygon", points: nextPoints }
+        ? {
+            kind: "polygon",
+            points: nextPoints,
+            ...(current.holes && current.holes.length > 0
+              ? { holes: current.holes }
+              : {}),
+          }
         : {
             kind: "routeCorridor",
             points: nextPoints,
@@ -507,10 +623,18 @@ export function GeometryEditor({
       if (current.kind === "circle") {
         return current;
       }
-      const nextPoints = current.points.filter((_, index) => index !== vertexIndex);
+      const nextPoints = current.points.filter(
+        (_, index) => index !== vertexIndex,
+      );
       setSelectedVertexIndex(null);
       return current.kind === "polygon"
-        ? { kind: "polygon", points: nextPoints }
+        ? {
+            kind: "polygon",
+            points: nextPoints,
+            ...(current.holes && current.holes.length > 0
+              ? { holes: current.holes }
+              : {}),
+          }
         : {
             kind: "routeCorridor",
             points: nextPoints,
@@ -519,10 +643,7 @@ export function GeometryEditor({
     });
   }
 
-  function updateCircle(
-    field: "lat" | "lng" | "radiusMeters",
-    value: number,
-  ) {
+  function updateCircle(field: "lat" | "lng" | "radiusMeters", value: number) {
     if (!Number.isFinite(value)) {
       return;
     }
@@ -560,10 +681,17 @@ export function GeometryEditor({
   const selectedVertex =
     draft.kind === "circle" || selectedVertexIndex === null
       ? null
-      : draft.points[selectedVertexIndex] ?? null;
+      : (draft.points[selectedVertexIndex] ?? null);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16, alignItems: "start" }}>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1.6fr 1fr",
+        gap: 16,
+        alignItems: "start",
+      }}
+    >
       <div
         style={{
           border: `1px solid ${theme.border}`,
@@ -583,11 +711,13 @@ export function GeometryEditor({
             flexWrap: "wrap",
           }}
         >
-          {([
-            ["polygon", labels.polygon, "integrationGov"],
-            ["circle", labels.circle, "pin"],
-            ["routeCorridor", labels.routeCorridor, "dispatch"],
-          ] as const).map(([kind, label, icon]) => {
+          {(
+            [
+              ["polygon", labels.polygon, "integrationGov"],
+              ["circle", labels.circle, "pin"],
+              ["routeCorridor", labels.routeCorridor, "dispatch"],
+            ] as const
+          ).map(([kind, label, icon]) => {
             const active = draft.kind === kind;
             return (
               <button
@@ -604,11 +734,17 @@ export function GeometryEditor({
           <span style={{ flex: 1 }} />
           <button
             type="button"
-            onClick={() => setHistoryIndex((current) => Math.max(0, current - 1))}
+            onClick={() =>
+              setHistoryIndex((current) => Math.max(0, current - 1))
+            }
             disabled={historyIndex === 0}
             style={toolButtonStyle(theme, false, historyIndex === 0)}
           >
-            <CanvasIcon name="arrow" size={13} style={{ transform: "rotate(180deg)" }} />
+            <CanvasIcon
+              name="arrow"
+              size={13}
+              style={{ transform: "rotate(180deg)" }}
+            />
             {labels.undo}
           </button>
           <button
@@ -634,7 +770,13 @@ export function GeometryEditor({
         >
           <svg
             viewBox={`0 0 ${STAGE_WIDTH} ${STAGE_HEIGHT}`}
-            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", cursor: "crosshair" }}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              cursor: "crosshair",
+            }}
             onClick={handleStageClick}
           >
             <rect
@@ -647,7 +789,13 @@ export function GeometryEditor({
               strokeDasharray="4 6"
             />
             {baselineDraft && hasGeometry(baselineDraft) ? (
-              <g opacity={0.45}>{renderEditorDraft(theme, projectDraft(baselineDraft, resolvedBounds), "muted")}</g>
+              <g opacity={0.45}>
+                {renderEditorDraft(
+                  theme,
+                  projectDraft(baselineDraft, resolvedBounds),
+                  "muted",
+                )}
+              </g>
             ) : null}
             {renderEditorDraft(theme, projected, "accent")}
             {draft.kind !== "circle"
@@ -656,6 +804,7 @@ export function GeometryEditor({
                   return (
                     <rect
                       key={`vertex-${index}`}
+                      data-vertex-index={index}
                       x={point.x - 5}
                       y={point.y - 5}
                       width={10}
@@ -729,7 +878,9 @@ export function GeometryEditor({
 
         <InfoCard
           theme={theme}
-          title={draft.kind === "circle" ? labels.editCircle : labels.editVertex}
+          title={
+            draft.kind === "circle" ? labels.editCircle : labels.editVertex
+          }
         >
           {draft.kind === "circle" ? (
             <div style={fieldStackStyle}>
@@ -758,13 +909,17 @@ export function GeometryEditor({
                 theme={theme}
                 label={labels.latitude}
                 value={selectedVertex.lat}
-                onChange={(value) => updateVertex(selectedVertexIndex!, "lat", value)}
+                onChange={(value) =>
+                  updateVertex(selectedVertexIndex!, "lat", value)
+                }
               />
               <NumberField
                 theme={theme}
                 label={labels.longitude}
                 value={selectedVertex.lng}
-                onChange={(value) => updateVertex(selectedVertexIndex!, "lng", value)}
+                onChange={(value) =>
+                  updateVertex(selectedVertexIndex!, "lng", value)
+                }
               />
               <button
                 type="button"
@@ -808,14 +963,24 @@ export function GeometryEditor({
               style={textAreaStyle(theme)}
             />
             {importError ? (
-              <div style={{ color: theme.danger, fontSize: 12 }}>{importError}</div>
+              <div style={{ color: theme.danger, fontSize: 12 }}>
+                {importError}
+              </div>
             ) : null}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={() => setImportValue(snapshot.geoJson)} style={inlineActionStyle(theme)}>
+              <button
+                type="button"
+                onClick={() => setImportValue(snapshot.geoJson)}
+                style={inlineActionStyle(theme)}
+              >
                 <CanvasIcon name="copy" size={13} />
                 {labels.export}
               </button>
-              <button type="button" onClick={applyImport} style={inlineActionStyle(theme)}>
+              <button
+                type="button"
+                onClick={applyImport}
+                style={inlineActionStyle(theme)}
+              >
                 <CanvasIcon name="arrow" size={13} />
                 {labels.applyImport}
               </button>
@@ -827,18 +992,28 @@ export function GeometryEditor({
   );
 }
 
-function buildBackendPayloads(draft: GeometryDraft): GeometryEditorBackendPayloads {
+function buildBackendPayloads(
+  draft: GeometryDraft,
+): GeometryEditorBackendPayloads {
   switch (draft.kind) {
     case "polygon": {
-      const points = closePolygonRing(draft.points);
+      const canonicalPoints = stripClosingDuplicatePoint(draft.points);
+      const canonicalHoles = (draft.holes ?? []).map((hole) =>
+        stripClosingDuplicatePoint(hole),
+      );
+      const outerRing = closeOrientedGeoJsonRing(canonicalPoints, "ccw");
+      const holeRings = canonicalHoles.map((hole) =>
+        closeOrientedGeoJsonRing(hole, "cw"),
+      );
       return {
         serviceAreaGeometry: {
           type: "polygon",
-          coordinates: draft.points,
+          coordinates: canonicalPoints,
+          ...(canonicalHoles.length > 0 ? { holes: canonicalHoles } : {}),
         } satisfies GeoPolygon,
         sandboxAreaGeometry: {
           type: "MultiPolygon",
-          coordinates: [[points.map((point) => [point.lng, point.lat] as [number, number])]],
+          coordinates: [[outerRing, ...holeRings]],
         },
         sandboxRouteGeometry: null,
         routeCorridor: null,
@@ -863,7 +1038,11 @@ function buildBackendPayloads(draft: GeometryDraft): GeometryEditorBackendPayloa
         sandboxAreaGeometry: null,
         sandboxRouteGeometry: {
           type: "MultiLineString",
-          coordinates: [draft.points.map((point) => [point.lng, point.lat] as [number, number])],
+          coordinates: [
+            draft.points.map(
+              (point) => [point.lng, point.lat] as [number, number],
+            ),
+          ],
         },
         routeCorridor: {
           centerline: draft.points,
@@ -887,12 +1066,19 @@ function buildReviewDiff(
   } else if (!changed) {
     summary.push("No geometry changes.");
   } else {
-    summary.push(`Changed geometry from ${baselineDraft.kind} to ${draft.kind}.`);
+    summary.push(
+      `Changed geometry from ${baselineDraft.kind} to ${draft.kind}.`,
+    );
   }
 
   switch (draft.kind) {
     case "polygon":
       summary.push(`${draft.points.length} polygon vertices.`);
+      if ((draft.holes?.length ?? 0) > 0) {
+        summary.push(
+          `${draft.holes!.length} polygon ${draft.holes!.length === 1 ? "hole" : "holes"}.`,
+        );
+      }
       break;
     case "circle":
       summary.push(
@@ -915,7 +1101,9 @@ function buildReviewDiff(
   };
 }
 
-function geometryDraftToGeoJsonObject(draft: GeometryDraft): Record<string, unknown> {
+function geometryDraftToGeoJsonObject(
+  draft: GeometryDraft,
+): Record<string, unknown> {
   switch (draft.kind) {
     case "polygon":
       return {
@@ -923,7 +1111,12 @@ function geometryDraftToGeoJsonObject(draft: GeometryDraft): Record<string, unkn
         properties: { geometryEditorKind: "polygon" },
         geometry: {
           type: "Polygon",
-          coordinates: [closePolygonRing(draft.points).map((point) => [point.lng, point.lat])],
+          coordinates: [
+            closeOrientedGeoJsonRing(draft.points, "ccw"),
+            ...(draft.holes ?? []).map((hole) =>
+              closeOrientedGeoJsonRing(hole, "cw"),
+            ),
+          ],
         },
       };
     case "circle":
@@ -953,14 +1146,18 @@ function geometryDraftToGeoJsonObject(draft: GeometryDraft): Record<string, unkn
   }
 }
 
-function geometryDraftFromGeoJsonObject(value: Record<string, unknown>): GeometryDraft {
+function geometryDraftFromGeoJsonObject(
+  value: Record<string, unknown>,
+): GeometryDraft {
   if (value.type === "FeatureCollection") {
     const features = Array.isArray(value.features) ? value.features : [];
     const firstFeature = features[0];
     if (!firstFeature || typeof firstFeature !== "object") {
       throw new Error("GeoJSON FeatureCollection is empty.");
     }
-    return geometryDraftFromGeoJsonObject(firstFeature as Record<string, unknown>);
+    return geometryDraftFromGeoJsonObject(
+      firstFeature as Record<string, unknown>,
+    );
   }
 
   if (value.type === "Feature") {
@@ -988,21 +1185,36 @@ function geometryDraftFromGeometry(
   switch (geometry.type) {
     case "Polygon": {
       const rings = geometry.coordinates as number[][][] | undefined;
-      const ring = rings?.[0];
-      if (!Array.isArray(ring) || ring.length < 4) {
-        throw new Error("Polygon ring must contain at least 4 coordinates.");
-      }
-      const points = ring.slice(0, -1).map(positionToPoint);
-      return { kind: "polygon", points };
+      const points = parsePolygonRingCoordinates(
+        rings?.[0],
+        "Polygon ring must contain at least 3 coordinates.",
+      );
+      const holes = (rings?.slice(1) ?? []).map((holeRing) =>
+        parsePolygonRingCoordinates(
+          holeRing,
+          "Polygon hole ring must contain at least 3 coordinates.",
+        ),
+      );
+      return holes.length > 0
+        ? { kind: "polygon", points, holes }
+        : { kind: "polygon", points };
     }
     case "MultiPolygon": {
       const polygons = geometry.coordinates as number[][][][] | undefined;
-      const ring = polygons?.[0]?.[0];
-      if (!Array.isArray(ring) || ring.length < 4) {
-        throw new Error("MultiPolygon requires at least one closed ring.");
-      }
-      const points = ring.slice(0, -1).map(positionToPoint);
-      return { kind: "polygon", points };
+      const rings = polygons?.[0];
+      const points = parsePolygonRingCoordinates(
+        rings?.[0],
+        "MultiPolygon requires at least one ring with 3 or more coordinates.",
+      );
+      const holes = (rings?.slice(1) ?? []).map((holeRing) =>
+        parsePolygonRingCoordinates(
+          holeRing,
+          "Polygon hole ring must contain at least 3 coordinates.",
+        ),
+      );
+      return holes.length > 0
+        ? { kind: "polygon", points, holes }
+        : { kind: "polygon", points };
     }
     case "Point": {
       const coordinates = geometry.coordinates as number[] | undefined;
@@ -1027,23 +1239,33 @@ function geometryDraftFromGeometry(
       return {
         kind: "routeCorridor",
         points: coordinates.map(positionToPoint),
-        radiusMeters: numericProperty(properties.corridorRadiusMeters, DEFAULT_CIRCLE_RADIUS_METERS),
+        radiusMeters: numericProperty(
+          properties.corridorRadiusMeters,
+          DEFAULT_CIRCLE_RADIUS_METERS,
+        ),
       };
     }
     case "MultiLineString": {
       const coordinates = geometry.coordinates as number[][][] | undefined;
       const firstLine = coordinates?.[0];
       if (!Array.isArray(firstLine) || firstLine.length < 2) {
-        throw new Error("MultiLineString requires at least one line with 2 points.");
+        throw new Error(
+          "MultiLineString requires at least one line with 2 points.",
+        );
       }
       return {
         kind: "routeCorridor",
         points: firstLine.map(positionToPoint),
-        radiusMeters: numericProperty(properties.corridorRadiusMeters, DEFAULT_CIRCLE_RADIUS_METERS),
+        radiusMeters: numericProperty(
+          properties.corridorRadiusMeters,
+          DEFAULT_CIRCLE_RADIUS_METERS,
+        ),
       };
     }
     default:
-      throw new Error(`Unsupported GeoJSON geometry type: ${String(geometry.type)}`);
+      throw new Error(
+        `Unsupported GeoJSON geometry type: ${String(geometry.type)}`,
+      );
   }
 }
 
@@ -1095,7 +1317,17 @@ function renderEditorDraft(
 
   return (
     <g>
-      {projected.polygonPoints ? (
+      {projected.holeVertices.length > 0 && projected.polygonPathD ? (
+        <path
+          d={projected.polygonPathD}
+          fill={fill}
+          fillRule="evenodd"
+          stroke={stroke}
+          strokeWidth={2}
+          strokeDasharray="6 4"
+          data-geometry-polygon-cutout="true"
+        />
+      ) : projected.polygonPoints ? (
         <polygon
           points={projected.polygonPoints}
           fill={fill}
@@ -1151,16 +1383,37 @@ function renderEditorDraft(
   );
 }
 
-function projectDraft(draft: GeometryDraft, bounds: GeometryBounds): ProjectedGeometry {
+function projectDraft(
+  draft: GeometryDraft,
+  bounds: GeometryBounds,
+): ProjectedGeometry {
   switch (draft.kind) {
     case "polygon": {
       const vertices = draft.points.map((point) => projectPoint(point, bounds));
+      const holeVertices = (draft.holes ?? []).map((hole) =>
+        hole.map((point) => projectPoint(point, bounds)),
+      );
+      const pathRings = [vertices, ...holeVertices].filter(
+        (ring) => ring.length > 0,
+      );
       return {
         bounds,
         polygonPoints:
           vertices.length > 0
-            ? vertices.map((point) => `${round(point.x)},${round(point.y)}`).join(" ")
+            ? vertices
+                .map((point) => `${round(point.x)},${round(point.y)}`)
+                .join(" ")
             : null,
+        polygonPathD:
+          pathRings.length > 0
+            ? pathRings
+                .map(
+                  (ring) =>
+                    `M ${ring.map((p) => `${round(p.x)},${round(p.y)}`).join(" L ")} Z`,
+                )
+                .join(" ")
+            : null,
+        holeVertices,
         polylinePoints: null,
         routeStrokeWidth: 0,
         vertices,
@@ -1175,12 +1428,16 @@ function projectDraft(draft: GeometryDraft, bounds: GeometryBounds): ProjectedGe
       return {
         bounds,
         polygonPoints: null,
+        polygonPathD: null,
+        holeVertices: [],
         polylinePoints: null,
         routeStrokeWidth: 0,
         vertices: [],
         circleCenter: center,
         circleRadiusPx: pxRadius,
-        circleRadiusLine: center ? { x: center.x + pxRadius, y: center.y } : null,
+        circleRadiusLine: center
+          ? { x: center.x + pxRadius, y: center.y }
+          : null,
       };
     }
     case "routeCorridor": {
@@ -1188,11 +1445,18 @@ function projectDraft(draft: GeometryDraft, bounds: GeometryBounds): ProjectedGe
       return {
         bounds,
         polygonPoints: null,
+        polygonPathD: null,
+        holeVertices: [],
         polylinePoints:
           vertices.length > 0
-            ? vertices.map((point) => `${round(point.x)},${round(point.y)}`).join(" ")
+            ? vertices
+                .map((point) => `${round(point.x)},${round(point.y)}`)
+                .join(" ")
             : null,
-        routeStrokeWidth: Math.max(12, metersToPx(draft.radiusMeters, bounds) * 2),
+        routeStrokeWidth: Math.max(
+          12,
+          metersToPx(draft.radiusMeters, bounds) * 2,
+        ),
         vertices,
         circleCenter: null,
         circleRadiusPx: 0,
@@ -1207,6 +1471,8 @@ function resolveBounds(drafts: GeometryDraft[]): GeometryBounds {
   for (const draft of drafts) {
     switch (draft.kind) {
       case "polygon":
+        points.push(...draft.points, ...(draft.holes ?? []).flat());
+        break;
       case "routeCorridor":
         points.push(...draft.points);
         break;
@@ -1215,10 +1481,17 @@ function resolveBounds(drafts: GeometryDraft[]): GeometryBounds {
           const latRadius = draft.radiusMeters / 111_320;
           const lngRadius =
             draft.radiusMeters /
-            (111_320 * Math.max(0.1, Math.cos((draft.center.lat * Math.PI) / 180)));
+            (111_320 *
+              Math.max(0.1, Math.cos((draft.center.lat * Math.PI) / 180)));
           points.push(
-            { lat: draft.center.lat - latRadius, lng: draft.center.lng - lngRadius },
-            { lat: draft.center.lat + latRadius, lng: draft.center.lng + lngRadius },
+            {
+              lat: draft.center.lat - latRadius,
+              lng: draft.center.lng - lngRadius,
+            },
+            {
+              lat: draft.center.lat + latRadius,
+              lng: draft.center.lng + lngRadius,
+            },
           );
         }
         break;
@@ -1256,7 +1529,11 @@ function projectPoint(point: GeoPoint, bounds: GeometryBounds): ProjectedPoint {
   };
 }
 
-function unprojectPoint(x: number, y: number, bounds: GeometryBounds): GeoPoint {
+function unprojectPoint(
+  x: number,
+  y: number,
+  bounds: GeometryBounds,
+): GeoPoint {
   const usableWidth = STAGE_WIDTH - STAGE_PADDING * 2;
   const usableHeight = STAGE_HEIGHT - STAGE_PADDING * 2;
   const lngSpan = bounds.maxLng - bounds.minLng;
@@ -1290,6 +1567,103 @@ function closePolygonRing(points: GeoPoint[]): GeoPoint[] {
   return [...points, first];
 }
 
+function pointsEqual(a: GeoPoint, b: GeoPoint): boolean {
+  return a.lat === b.lat && a.lng === b.lng;
+}
+
+function stripClosingDuplicatePoint(points: GeoPoint[]): GeoPoint[] {
+  if (
+    points.length >= 2 &&
+    pointsEqual(points[0]!, points[points.length - 1]!)
+  ) {
+    return points.slice(0, -1);
+  }
+  return points;
+}
+
+/**
+ * Unlike the API/fixture `pointOnSegment(point, start, end)` (collinearity +
+ * bounding-box containment), this file's `pointOnSegment(start, point, end)`
+ * only checks bounding-box containment, guarded by `orientation(...) === 0`
+ * in `segmentsIntersect`. Ring-boundary checks need both, so this combines
+ * them explicitly with the same argument order used elsewhere in this file.
+ */
+function pointOnRingBoundary(ring: GeoPoint[], point: GeoPoint): boolean {
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const current = ring[i]!;
+    const previous = ring[j]!;
+    if (
+      orientation(previous, point, current) === 0 &&
+      pointOnSegment(previous, point, current)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function ringContainsPoint(ring: GeoPoint[], point: GeoPoint): boolean {
+  if (ring.length < 3) {
+    return false;
+  }
+  if (pointOnRingBoundary(ring, point)) {
+    return true;
+  }
+
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const current = ring[i]!;
+    const previous = ring[j]!;
+    const intersects =
+      current.lng > point.lng !== previous.lng > point.lng &&
+      point.lat <
+        ((previous.lat - current.lat) * (point.lng - current.lng)) /
+          (previous.lng - current.lng) +
+          current.lat;
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function ringsIntersectOrTouch(ringA: GeoPoint[], ringB: GeoPoint[]): boolean {
+  const countA = ringA.length;
+  const countB = ringB.length;
+  for (let i = 0; i < countA; i += 1) {
+    const aStart = ringA[i]!;
+    const aEnd = ringA[(i + 1) % countA]!;
+    for (let j = 0; j < countB; j += 1) {
+      const bStart = ringB[j]!;
+      const bEnd = ringB[(j + 1) % countB]!;
+      if (segmentsIntersect(aStart, aEnd, bStart, bEnd)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function closeOrientedGeoJsonRing(
+  points: GeoPoint[],
+  winding: "ccw" | "cw",
+): [number, number][] {
+  const ring: [number, number][] = points.map((point) => [
+    point.lng,
+    point.lat,
+  ]);
+  const first = ring[0];
+  const last = ring[ring.length - 1];
+  if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
+    ring.push([first[0], first[1]]);
+  }
+  const area = signedPolygonArea(points);
+  if ((winding === "ccw" && area < 0) || (winding === "cw" && area > 0)) {
+    ring.reverse();
+  }
+  return ring;
+}
+
 function positionToPoint(position: number[]): GeoPoint {
   if (position.length < 2) {
     throw new Error("GeoJSON coordinates must include [lng, lat].");
@@ -1308,6 +1682,16 @@ function positionToPoint(position: number[]): GeoPoint {
   return { lat: lat!, lng: lng! };
 }
 
+function parsePolygonRingCoordinates(
+  ring: unknown,
+  errorMessage: string,
+): GeoPoint[] {
+  if (!Array.isArray(ring) || ring.length < 3) {
+    throw new Error(errorMessage);
+  }
+  return stripClosingDuplicatePoint(ring.map(positionToPoint));
+}
+
 function numericProperty(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -1319,7 +1703,9 @@ function cloneDraft(draft: GeometryDraft): GeometryDraft {
 function dedupeSequentialPoints(points: GeoPoint[]): GeoPoint[] {
   return points.filter((point, index) => {
     const previous = points[index - 1];
-    return !previous || previous.lat !== point.lat || previous.lng !== point.lng;
+    return (
+      !previous || previous.lat !== point.lat || previous.lng !== point.lng
+    );
   });
 }
 
@@ -1369,6 +1755,39 @@ function signedPolygonArea(points: GeoPoint[]): number {
 }
 
 function polygonHasSelfIntersection(points: GeoPoint[]): boolean {
+  const n = points.length;
+  if (n < 3) {
+    return false;
+  }
+
+  for (let i = 0; i < n; i += 1) {
+    for (let j = i + 1; j < n; j += 1) {
+      if (j === i + 1) {
+        continue;
+      }
+      if (i === 0 && j === n - 1) {
+        continue;
+      }
+      if (pointsEqual(points[i]!, points[j]!)) {
+        return true;
+      }
+    }
+  }
+
+  for (let i = 0; i < n; i += 1) {
+    const prev = points[(i - 1 + n) % n]!;
+    const curr = points[i]!;
+    const next = points[(i + 1) % n]!;
+    if (orientation(prev, curr, next) === 0) {
+      const dot =
+        (prev.lng - curr.lng) * (next.lng - curr.lng) +
+        (prev.lat - curr.lat) * (next.lat - curr.lat);
+      if (dot > 0) {
+        return true;
+      }
+    }
+  }
+
   const ring = closePolygonRing(points);
   const segmentCount = ring.length - 1;
 
@@ -1379,7 +1798,11 @@ function polygonHasSelfIntersection(points: GeoPoint[]): boolean {
       continue;
     }
 
-    for (let compareIndex = index + 1; compareIndex < segmentCount; compareIndex += 1) {
+    for (
+      let compareIndex = index + 1;
+      compareIndex < segmentCount;
+      compareIndex += 1
+    ) {
       const bStart = ring[compareIndex];
       const bEnd = ring[compareIndex + 1];
       if (!bStart || !bEnd) {
@@ -1451,7 +1874,11 @@ function orientation(a: GeoPoint, b: GeoPoint, c: GeoPoint): -1 | 0 | 1 {
   return value > 0 ? 1 : -1;
 }
 
-function pointOnSegment(start: GeoPoint, point: GeoPoint, end: GeoPoint): boolean {
+function pointOnSegment(
+  start: GeoPoint,
+  point: GeoPoint,
+  end: GeoPoint,
+): boolean {
   return (
     point.lng <= Math.max(start.lng, end.lng) + 1e-10 &&
     point.lng >= Math.min(start.lng, end.lng) - 1e-10 &&
@@ -1525,7 +1952,9 @@ function InfoCard({
         gap: 12,
       }}
     >
-      <div style={{ fontSize: 13, fontWeight: 700, color: theme.text }}>{title}</div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: theme.text }}>
+        {title}
+      </div>
       {children}
     </div>
   );
@@ -1578,7 +2007,9 @@ function NumberField({
 }) {
   return (
     <label style={{ display: "grid", gap: 6 }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>{label}</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted }}>
+        {label}
+      </span>
       <input
         type="number"
         value={value}

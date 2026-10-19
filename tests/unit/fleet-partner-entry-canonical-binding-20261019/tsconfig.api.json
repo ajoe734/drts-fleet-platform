@@ -1,0 +1,12 @@
+{
+  "extends": "../../../apps/api/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "rootDir": "../../..",
+    "paths": {
+      "@drts/contracts": ["packages/contracts/src/index.ts"],
+      "@drts/control-plane-auth": ["packages/control-plane-auth/src/index.ts"]
+    }
+  }
+}

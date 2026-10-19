@@ -1,3 +1,7 @@
+import {
+  MASKED_CALL_PORT,
+  UnavailableMaskedCallPort,
+} from "../multi-taxi/masked-call.port";
 import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
@@ -44,6 +48,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
   ],
   controllers: [OwnedMobilityController],
   providers: [
+    { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
     // Stateless DB adapter only; importing MultiTaxiModule would add a cycle.
     MultiTaxiRepository,
     FleetPartnerRepository,
