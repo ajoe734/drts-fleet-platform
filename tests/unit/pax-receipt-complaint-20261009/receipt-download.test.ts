@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CertificateSupportRepository } from "../../../apps/api/src/modules/certificate-support/certificate-support.repository";
 import { CertificateSupportService } from "../../../apps/api/src/modules/certificate-support/certificate-support.service";
 import { CertificateSupportController } from "../../../apps/api/src/modules/certificate-support/certificate-support.controller";
+import { renderCertificateArtifact } from "../../../apps/api/src/modules/certificate-support/certificate-artifact.renderer";
+import type { CertificateSupportView } from "../../../apps/api/src/modules/certificate-support/certificate-support.types";
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
 import { MultiTaxiService } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.service";
 import { MultiTaxiController } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.controller";
@@ -794,5 +796,122 @@ describe("captured E04 downstream mapping and authorized downloads (SQL fixtures
       }),
     ).rejects.toMatchObject({ code: "CERTIFICATE_E04_SNAPSHOT_INVALID" });
     expect(f.queries.length).toBe(calls);
+  });
+});
+
+function baseCertificateView(
+  overrides: Partial<CertificateSupportView> = {},
+): CertificateSupportView {
+  return {
+    certificateId: "unit-mask-cert",
+    certificateNo: "MTX-UNIT-MASK",
+    orderId: "unit-mask-order",
+    tripId: "unit-mask-trip",
+    state: "available",
+    certificateVersion: "1",
+    issuedAt: "2026-10-19T00:00:00.000Z",
+    plateNo: "UNIT-01",
+    pickupAt: "2026-10-19T00:00:00.000Z",
+    dropoffAt: "2026-10-19T00:20:00.000Z",
+    travelDurationSeconds: 1200,
+    routeSummary: "unit-origin to unit-destination",
+    distanceMeters: 2000,
+    fareMinor: 10000,
+    tollMinor: 0,
+    currency: "TWD",
+    consumerServicePhone: "02-2944-0985",
+    authorityComplaintPhone: "unit-authority",
+    htmlUrl: null,
+    pdfUrl: null,
+    supersededByCertificateId: null,
+    artifactBlockers: [],
+    regeneration: { enabled: false, reasonCode: null },
+    ...overrides,
+  };
+}
+
+function pdfText(buffer: Buffer): string {
+  return [...buffer.toString("utf8").matchAll(/<([A-F0-9]+)> Tj/g)]
+    .map((m) => Buffer.from(m[1]!, "hex").swap16().toString("utf16le"))
+    .join("\n");
+}
+
+function htmlRowValue(html: string, label: string): string | null {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(
+    `<th scope="row">${escaped}</th><td>([^<]*)</td>`,
+  ).exec(html);
+  return match ? match[1]! : null;
+}
+
+describe("certificate artifact masked public surname matrix (real renderer, no DB)", () => {
+  it.each([
+    ["蔡", "蔡○○"],
+    ["歐陽", "歐陽○○"],
+    ["蔡○○", "蔡○○"],
+  ])(
+    "renders e04Snapshot driver surname %s as fixed public redaction %s in HTML and PDF",
+    async (rawSurname, expectedMasked) => {
+      const view = baseCertificateView({
+        e04Snapshot: {
+          fleetOperatorName: "unit-operator",
+          driverSurname: rawSurname,
+          driverRegistrationMasked: "••••1234",
+          fareBreakdown: {
+            startMinor: 100,
+            distanceMinor: 200,
+            delayMinor: 0,
+            nightMinor: 0,
+          },
+          paymentMethodDisplay: "unit-pay",
+        },
+      });
+      const html = (
+        await renderCertificateArtifact(view, "html")
+      ).buffer.toString("utf8");
+      expect(htmlRowValue(html, "駕駛（姓氏＋執登證號遮碼）")).toBe(
+        `${expectedMasked} ••••1234`,
+      );
+      const pdf = pdfText(
+        (await renderCertificateArtifact(view, "pdf")).buffer,
+      );
+      expect(pdf).toContain(
+        `駕駛（姓氏＋執登證號遮碼）: ${expectedMasked} ••••1234`,
+      );
+    },
+  );
+
+  it.each([
+    ["蔡", "蔡○○"],
+    ["歐陽", "歐陽○○"],
+    ["蔡○○", "蔡○○"],
+  ])(
+    "renders declared (non-verified) driver surname %s as %s without double-masking",
+    async (rawSurname, expectedMasked) => {
+      const view = baseCertificateView({
+        driverSurname: rawSurname,
+        driverSurnameSource: "driver_profile_declared",
+        driverSurnameProfileUpdatedAt: "2026-10-19T00:00:00.000Z",
+      });
+      const html = (
+        await renderCertificateArtifact(view, "html")
+      ).buffer.toString("utf8");
+      expect(htmlRowValue(html, "駕駛自填姓氏（非身分核驗）")).toBe(
+        expectedMasked,
+      );
+      const pdf = pdfText(
+        (await renderCertificateArtifact(view, "pdf")).buffer,
+      );
+      expect(pdf).toContain(`駕駛自填姓氏（非身分核驗）: ${expectedMasked}`);
+    },
+  );
+
+  it("omits both driver surname rows when neither captured nor declared surname is present", async () => {
+    const view = baseCertificateView();
+    const html = (
+      await renderCertificateArtifact(view, "html")
+    ).buffer.toString("utf8");
+    expect(html).not.toContain("駕駛（姓氏＋執登證號遮碼）");
+    expect(html).not.toContain("駕駛自填姓氏（非身分核驗）");
   });
 });

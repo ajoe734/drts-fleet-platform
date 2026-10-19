@@ -125,13 +125,16 @@ function certificateRows(
           ["車隊／派遣業者", certificate.e04Snapshot.fleetOperatorName],
           [
             "駕駛（姓氏＋執登證號遮碼）",
-            `${certificate.e04Snapshot.driverSurname} ${certificate.e04Snapshot.driverRegistrationMasked}`,
+            `${formatMaskedSurname(certificate.e04Snapshot.driverSurname)} ${certificate.e04Snapshot.driverRegistrationMasked}`,
           ],
         ] as Array<[string, string]>)
       : []),
     ...(certificate.driverSurname
       ? ([
-          ["駕駛自填姓氏（非身分核驗）", certificate.driverSurname],
+          [
+            "駕駛自填姓氏（非身分核驗）",
+            formatMaskedSurname(certificate.driverSurname),
+          ],
           ["姓氏來源", value(certificate.driverSurnameSource ?? null)],
           [
             "駕駛資料更新時間",
@@ -194,6 +197,12 @@ function certificateRows(
 
 function value(input: string | number | null) {
   return input === null || input === "" ? "未取得" : String(input);
+}
+
+/** Fixed-length public redaction; not a claim about the real surname length. */
+function formatMaskedSurname(surname: string): string {
+  const trimmed = surname.trim();
+  return trimmed.endsWith("○○") ? trimmed : `${trimmed}○○`;
 }
 
 function money(input: number | null, currency: string, exact = false) {

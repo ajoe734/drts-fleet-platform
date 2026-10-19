@@ -376,7 +376,9 @@ export function mapNativePassengerCertificate(
   const pdfUrl = readText(record, "pdfUrl");
 
   const fleetName = e04.fleetOperatorName || readText(record, "fleetName");
-  const driverName = e04.driverSurname || readText(record, "driverName");
+  const driverName = formatMaskedSurname(
+    e04.driverSurname || readText(record, "driverName"),
+  );
   const driverRegistrationNo =
     e04.driverRegistrationMasked || readText(record, "driverRegistrationNo");
   const paymentMethod =
@@ -602,6 +604,13 @@ function formatDuration(seconds: number) {
 function readText(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** Fixed-length public redaction; not a claim about the real surname length. */
+function formatMaskedSurname(surname: string | null): string | null {
+  const trimmed = surname?.trim();
+  if (!trimmed) return trimmed ?? null;
+  return trimmed.endsWith("○○") ? trimmed : `${trimmed}○○`;
 }
 
 function readDate(record: Record<string, unknown>, key: string) {
