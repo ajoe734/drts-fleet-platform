@@ -273,7 +273,34 @@ describe("SR-QA-DISPATCH-001 / C037 + C038: automatic wall-clock trigger gap (st
     expect(sweepBody).toContain("this.handleDispatchTimeout(");
     expect(sweepBody).toContain('"matching_timeout"');
     expect(sweepBody).toContain('"acceptance_timeout"');
-    expect(sweepBody).toContain("this.dispatchOrder(");
+    expect(sweepBody).toContain("await this.escalateReservationHoldRequired(");
+
+    const reservationBodyStart = source.indexOf(
+      "private async escalateReservationHoldRequired(",
+    );
+    expect(reservationBodyStart).toBeGreaterThan(-1);
+    const reservationBodyEnd = source.indexOf(
+      "private startDriverCompletionOutboxRecoveryPolling(",
+      reservationBodyStart,
+    );
+    expect(reservationBodyEnd).toBeGreaterThan(reservationBodyStart);
+    const reservationBody = source.slice(
+      reservationBodyStart,
+      reservationBodyEnd,
+    );
+    expect(reservationBody).toContain("this.prepareDispatchOrder(");
+    expect(reservationBody).toContain("await repository.withTransaction(");
+    expect(reservationBody).toContain(
+      "await repository.loadOrderCancellationForUpdate(",
+    );
+    expect(reservationBody).toContain("await repository.persistOrderWorkflow(");
+    expect(reservationBody).toContain("await this.persistChangesRequired(");
+    expect(reservationBody.indexOf("prepared.apply()")).toBeGreaterThan(
+      reservationBody.indexOf("await repository.withTransaction("),
+    );
+    expect(reservationBody.lastIndexOf("prepared.apply()")).toBeGreaterThan(
+      reservationBody.indexOf("await this.persistChangesRequired("),
+    );
   });
 
   it("Resolved (SR-DISPATCH-SCHEDULER-001): handleDispatchTimeout now also has an automatic caller (the dispatch scheduler sweep), in addition to the explicit API/executor invocation this file documents", () => {

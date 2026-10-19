@@ -880,9 +880,9 @@ export class OwnedMobilityController {
   @Get("dispatch/queue")
   @RequireRealms("ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listQueueEntries(@Headers("x-request-id") requestId?: string) {
+  async listQueueEntries(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      toApiListData(this.ownedMobilityService.listQueueEntries()),
+      toApiListData(await this.ownedMobilityService.listQueueEntries()),
       requestId,
     );
   }
@@ -890,34 +890,34 @@ export class OwnedMobilityController {
   @Get("dispatch/queue/:queueEntryId")
   @RequireRealms("ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getQueueEntry(
+  async getQueueEntry(
     @Param("queueEntryId") queueEntryId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getQueueEntry(queueEntryId),
+      await this.ownedMobilityService.getQueueEntry(queueEntryId),
       requestId,
     );
   }
 
   @Post("dispatch/queue/check-in")
-  queueCheckIn(
+  async queueCheckIn(
     @Body() command: QueueCheckInCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.queueCheckIn(command, requestId),
+      await this.ownedMobilityService.queueCheckIn(command, requestId),
       requestId,
     );
   }
 
   @Post("dispatch/queue/check-out")
-  queueCheckOut(
+  async queueCheckOut(
     @Body() command: QueueCheckOutCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.queueCheckOut(command, requestId),
+      await this.ownedMobilityService.queueCheckOut(command, requestId),
       requestId,
     );
   }

@@ -253,24 +253,24 @@ export class MultiTaxiController {
 
   @Post("multi-taxi/dispatch/queue/check-in")
   @RequireRealms("ops")
-  queueCheckIn(
+  async queueCheckIn(
     @Body() command: QueueCheckInCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.queueCheckIn(command, requestId),
+      await this.multiTaxiService.queueCheckIn(command, requestId),
       requestId,
     );
   }
 
   @Post("multi-taxi/dispatch/queue/check-out")
   @RequireRealms("ops")
-  queueCheckOut(
+  async queueCheckOut(
     @Body() command: QueueCheckOutCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.multiTaxiService.queueCheckOut(command, requestId),
+      await this.multiTaxiService.queueCheckOut(command, requestId),
       requestId,
     );
   }
