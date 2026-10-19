@@ -1,3 +1,5 @@
+import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
+import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
@@ -96,6 +98,17 @@ function productPeers() {
         if (writeError) throw writeError;
         records.set(values[0] as string, JSON.parse(values[11] as string));
       }
+      if (
+        sql.trimStart().startsWith("UPDATE ops.phase1_service_products SET")
+      ) {
+        writeEntered?.();
+        await writeGate;
+        if (writeError) throw writeError;
+        const id = values[0] as string;
+        if (!records.has(id)) return { rows: [], rowCount: 0 };
+        records.set(id, JSON.parse(values[11] as string));
+        return { rows: [], rowCount: 1 };
+      }
       if (sql.trimStart().startsWith("SELECT record")) {
         if (readError) throw readError;
         if (sql.includes("ops.phase1_service_products")) {
@@ -160,7 +173,10 @@ function productPeers() {
   };
 }
 
-function rehearsal(p: ReturnType<typeof productPeers>) {
+function rehearsal(
+  p: ReturnType<typeof productPeers>,
+  onRegistry?: (registry: RegulatoryRegistryService) => void,
+) {
   const audit = new AuditNotificationService();
   const registry = new RegulatoryRegistryService(
     { publishSupplyLifecycleUpdated() {} } as never,
@@ -171,6 +187,7 @@ function rehearsal(p: ReturnType<typeof productPeers>) {
     ),
     new RegulatoryRegistryRepository(p.database as never),
   );
+  onRegistry?.(registry);
   return new ReviewSupplyService(
     p.database as never,
     registry,
@@ -181,6 +198,16 @@ function rehearsal(p: ReturnType<typeof productPeers>) {
       audit,
       new VehicleEligibilityRepository(p.database as never),
       p.a,
+    ),
+    new FleetPartnerService(
+      {} as never,
+      {} as never,
+      registry,
+      new FleetPartnerRepository(p.database as never),
+    ),
+    new DriverProfileService(
+      audit,
+      new DriverProfileRepository(p.database as never),
     ),
   );
 }
@@ -222,6 +249,45 @@ describe("R18: rehearsal prepares the native reservation product before real boo
       meterRequired: true,
       fixedFareAllowed: false,
     });
+  });
+
+  it("prepares twice on the same real registry after persisted supply replaces seed templates", async () => {
+    const p = productPeers();
+    let registry!: RegulatoryRegistryService;
+    const supply = rehearsal(p, (instance) => {
+      registry = instance;
+    });
+    await supply.prepare();
+    expect(
+      registry.listVehicles().some((v) => v.vehicleId === "veh-demo-001"),
+    ).toBe(false);
+    await expect(supply.prepare()).resolves.toMatchObject({ simulated: true });
+    expect(
+      registry
+        .listVehicles()
+        .filter((v) => v.vehicleId.startsWith("pax-review-vehicle-")),
+    ).toHaveLength(2);
+  });
+
+  it("prepares existing committed supply after a real registry lifecycle reload", async () => {
+    const p = productPeers();
+    await rehearsal(p).prepare();
+    let registry!: RegulatoryRegistryService;
+    const restarted = rehearsal(p, (instance) => {
+      registry = instance;
+    });
+    await registry.onModuleInit();
+    expect(
+      registry.listVehicles().some((v) => v.vehicleId === "veh-demo-001"),
+    ).toBe(false);
+    await expect(restarted.prepare()).resolves.toMatchObject({
+      simulated: true,
+    });
+    expect(
+      registry
+        .listDrivers()
+        .filter((d) => d.driverId.startsWith("pax-review-driver-")),
+    ).toHaveLength(2);
   });
 
   it("preserves the established master and other product configuration across repeated preparation", async () => {

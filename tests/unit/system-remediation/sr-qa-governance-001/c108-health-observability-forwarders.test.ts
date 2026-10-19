@@ -189,7 +189,7 @@ describe("C108: health、告警、通道與積壓可觀測性驗收", () => {
     ]);
     await service.onModuleInit();
 
-    const order = service.ingestExternalOrder({
+    const order = await service.ingestExternalOrder({
       platformCode: GRAB_TAIWAN_PLATFORM_CODE,
       externalOrderId: "grab-order-fault-001",
       payload: { serviceBucket: "standard_taxi" },
@@ -203,7 +203,7 @@ describe("C108: health、告警、通道與積壓可觀測性驗收", () => {
       nativeStatus: "504_GATEWAY_TIMEOUT",
     };
 
-    const failedOrder = service.reportSyncFailure(
+    const failedOrder = await service.reportSyncFailure(
       order.mirrorOrderId,
       retryableFailure,
       "req-c108-retryable-fault",
@@ -240,7 +240,7 @@ describe("C108: health、告警、通道與積壓可觀測性驗收", () => {
       retryable: false,
     };
 
-    service.reportSyncFailure(
+    await service.reportSyncFailure(
       order.mirrorOrderId,
       fatalFailure,
       "req-c108-fatal-fault",
@@ -258,14 +258,14 @@ describe("C108: health、告警、通道與積壓可觀測性驗收", () => {
     const { service } = setupForwarderService([liveAdapter]);
     await service.onModuleInit();
 
-    const order = service.ingestExternalOrder({
+    const order = await service.ingestExternalOrder({
       platformCode: GRAB_TAIWAN_PLATFORM_CODE,
       externalOrderId: "grab-order-signal-001",
       payload: { serviceBucket: "standard_taxi" },
     });
 
     // 3.1 速率限制 (429)
-    service.reportSyncFailure(order.mirrorOrderId, {
+    await service.reportSyncFailure(order.mirrorOrderId, {
       errorCode: "RATE_LIMIT_EXCEEDED",
       errorMessage: "HTTP 429 rate limit reached on dispatch dispatch api",
       retryable: true,
@@ -278,7 +278,7 @@ describe("C108: health、告警、通道與積壓可觀測性驗收", () => {
     expect(health?.lastRateLimitAt).toBeDefined();
 
     // 3.2 Webhook 簽章失敗
-    service.reportSyncFailure(order.mirrorOrderId, {
+    await service.reportSyncFailure(order.mirrorOrderId, {
       errorCode: "WEBHOOK_SIGNATURE_INVALID",
       errorMessage: "webhook signature verification failed",
       retryable: true,
@@ -290,7 +290,7 @@ describe("C108: health、告警、通道與積壓可觀測性驗收", () => {
     expect(health?.webhookStatus).toBe("failing");
 
     // 3.3 憑證過期 (credential expired)
-    service.reportSyncFailure(order.mirrorOrderId, {
+    await service.reportSyncFailure(order.mirrorOrderId, {
       errorCode: "CREDENTIAL_EXPIRED",
       errorMessage: "Client certificate expired for external partner secret",
       retryable: false,
@@ -302,7 +302,7 @@ describe("C108: health、告警、通道與積壓可觀測性驗收", () => {
     expect(health?.credentialStatus).toBe("expired");
 
     // 3.4 授權失效需重新認證 (401 / reauth)
-    service.reportSyncFailure(order.mirrorOrderId, {
+    await service.reportSyncFailure(order.mirrorOrderId, {
       errorCode: "AUTH_TOKEN_EXPIRED",
       errorMessage: "OAuth token 401 reauth required from upstream IDP",
       retryable: true,
@@ -372,12 +372,12 @@ describe("C108: health、告警、通道與積壓可觀測性驗收", () => {
     await forwarderService.onModuleInit();
 
     // 注入故障使其降級
-    const order = forwarderService.ingestExternalOrder({
+    const order = await forwarderService.ingestExternalOrder({
       platformCode: GRAB_TAIWAN_PLATFORM_CODE,
       externalOrderId: "grab-alert-test-001",
       payload: { serviceBucket: "standard_taxi" },
     });
-    forwarderService.reportSyncFailure(order.mirrorOrderId, {
+    await forwarderService.reportSyncFailure(order.mirrorOrderId, {
       errorCode: "DOWNSTREAM_503",
       errorMessage: "Service unavailable",
       retryable: true,

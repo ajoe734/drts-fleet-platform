@@ -14,10 +14,16 @@ import {
 } from "react";
 import { getToneRamp, passengerChrome } from "../../lib/passenger-presentation";
 import { STATUS_TONES } from "@drts/ui-tokens";
+import {
+  getPassengerLocationRecordedAt,
+  getPassengerTrackingMapPositions,
+} from "@drts/passenger-client";
 import type {
   PassengerRideFixture,
   PassengerCertificatePresentation,
+  FaresResponse,
 } from "@drts/passenger-client";
+import { passengerClient } from "../../lib/client";
 import {
   createFareQuoteAnomalyFixture,
   fetchPassengerRideAuthority,
@@ -338,6 +344,7 @@ function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
 }
 
 function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
+  const positions = getPassengerTrackingMapPositions(fixture);
   const { lastEventTime, connectionState } =
     React.useContext(ConnectionContext);
   const [now, setNow] = React.useState(Date.now());
@@ -360,6 +367,8 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
   const _isStale =
     fixture.mapState === "stale" || (fixture.mapState === "fresh" && !_isFresh);
 
+  if (fixture.status === "行程已完成") return null;
+
   return (
     <div
       style={{
@@ -373,7 +382,8 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
         flexShrink: 0,
       }}
     >
-      {fixture.mapState !== "missing" ? (
+      {positions ||
+      (fixture.tracking === undefined && fixture.mapState !== "missing") ? (
         <>
           <svg
             aria-hidden="true"
@@ -383,7 +393,11 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             style={{ position: "absolute", inset: 0 }}
           >
             <path
-              d="M50 120 C 120 90, 200 100, 310 44"
+              d={
+                positions
+                  ? `M${positions.driver.x * 3.2} ${positions.driver.y * 1.5} L${positions.target.x * 3.2} ${positions.target.y * 1.5}`
+                  : "M50 120 C 120 90, 200 100, 310 44"
+              }
               fill="none"
               stroke={passengerChrome.shell}
               strokeWidth="3"
@@ -392,10 +406,14 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             />
           </svg>
           <div
+            data-testid={
+              positions ? "passenger-live-driver-position" : undefined
+            }
             style={{
               position: "absolute",
-              left: 38,
-              top: 108,
+              left: positions ? `${positions.driver.x}%` : 38,
+              top: positions ? `${positions.driver.y}%` : 108,
+              ...(positions ? { transform: "translate(-50%, -50%)" } : {}),
               width: 26,
               height: 26,
               borderRadius: 13,
@@ -416,8 +434,13 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
             aria-hidden="true"
             style={{
               position: "absolute",
-              right: 64,
-              top: 30,
+              ...(positions
+                ? {
+                    left: `${positions.target.x}%`,
+                    top: `${positions.target.y}%`,
+                    transform: "translate(-50%, -50%)",
+                  }
+                : { right: 64, top: 30 }),
               width: 22,
               height: 22,
               borderRadius: 11,
@@ -445,6 +468,19 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           {t.GettingDriverLocation}
         </div>
       )}
+      {positions ? (
+        <span
+          style={{
+            position: "absolute",
+            left: 10,
+            top: 10,
+            fontSize: 10,
+            color: passengerChrome.muted,
+          }}
+        >
+          {t.LocationDiagram}
+        </span>
+      ) : null}
       <div
         style={{
           position: "absolute",
@@ -457,8 +493,10 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
           color: passengerChrome.muted,
         }}
       >
-        {t.PickupLabel}
-        {fixture.pickupLabel}
+        {positions?.targetLabel || t.PickupLabel}
+        {positions?.targetLabel === "下車點"
+          ? fixture.dropoffLabel
+          : fixture.pickupLabel}
       </div>
       {_isFresh ? (
         <div
@@ -582,12 +620,13 @@ function VehicleCard({
       <div
         style={{
           display: "flex",
+          flexWrap: "wrap",
           gap: 12,
           alignItems: "center",
           marginBottom: 10,
         }}
       >
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: "1 1 120px", minWidth: 0 }}>
           <div style={{ fontSize: 14.5, fontWeight: 700 }}>
             {assignment.vehicle.make} {assignment.vehicle.model}
           </div>
@@ -601,7 +640,13 @@ function VehicleCard({
             {vehicleDetails.join(" · ")}
           </div>
         </div>
-        <div style={{ textAlign: "center" }}>
+        <div
+          style={{
+            textAlign: "center",
+            maxWidth: "100%",
+            marginLeft: "auto",
+          }}
+        >
           <div
             style={{
               fontFamily: monoFont,
@@ -757,6 +802,181 @@ function VehicleCard({
   );
 }
 
+// The public passenger fare API supplies whole TWD amounts, not the separate
+// dispatch fixture.fareVersion disclosure. Never fill missing publication data
+// with prices or a version from the canvas (Oct 10 G201011 decision).
+type CurrentPublicFare = FaresResponse["currentVersion"] & {
+  nightSurchargeUnit: "TWD_per_trip";
+  nightApplication: "pickup" | "any_overlap";
+};
+
+function isCurrentPublicFare(value: unknown): value is CurrentPublicFare {
+  if (!value || typeof value !== "object") return false;
+  const fare = value as Record<string, unknown>;
+  const validNumbers = (keys: string[], minimum: number) =>
+    keys.every((key) => {
+      const number = fare[key];
+      return (
+        typeof number === "number" &&
+        Number.isSafeInteger(number) &&
+        number >= minimum
+      );
+    });
+  const validTime = (time: unknown) =>
+    typeof time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
+  return (
+    typeof fare.version === "string" &&
+    fare.version.trim().length > 0 &&
+    typeof fare.effectiveAt === "string" &&
+    Number.isFinite(Date.parse(fare.effectiveAt)) &&
+    validNumbers(
+      ["baseFare", "distanceRate", "delayRate", "nightSurcharge"],
+      0,
+    ) &&
+    validNumbers(
+      [
+        "baseDistanceMeters",
+        "distanceIncrementMeters",
+        "delayIncrementSeconds",
+      ],
+      1,
+    ) &&
+    fare.nightSurchargeUnit === "TWD_per_trip" &&
+    (fare.nightApplication === "pickup" ||
+      fare.nightApplication === "any_overlap") &&
+    validTime(fare.nightSurchargeWindowStart) &&
+    validTime(fare.nightSurchargeWindowEnd)
+  );
+}
+
+function PublicFareCard() {
+  const [fare, setFare] = useState<CurrentPublicFare | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setFare(null);
+    setFailed(false);
+    void passengerClient
+      .getFares()
+      .then(({ currentVersion }) => {
+        if (!isCurrentPublicFare(currentVersion))
+          throw new Error("invalid_fares");
+        if (active) setFare(currentVersion);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [attempt]);
+
+  if (!fare) {
+    return (
+      <Card title={t.CurrentFareTable}>
+        <div
+          role={failed ? "alert" : "status"}
+          style={{ fontSize: 12, color: passengerChrome.muted }}
+        >
+          {failed ? t.PublicFareUnavailable : t.PublicFareLoading}
+        </div>
+        {failed ? (
+          <button
+            type="button"
+            style={buttonStyle("secondary")}
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            {t.Retry}
+          </button>
+        ) : null}
+      </Card>
+    );
+  }
+  return (
+    <>
+      <Card
+        title={t.CurrentFareTable}
+        tag={
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: passengerChrome.success.fg,
+              background: passengerChrome.success.bg,
+              border: `1px solid ${passengerChrome.success.border}`,
+              padding: "2px 8px",
+              borderRadius: 999,
+            }}
+          >
+            {t.AlreadyEffective}
+          </span>
+        }
+      >
+        <div
+          style={{
+            fontSize: 11,
+            color: passengerChrome.muted,
+            marginBottom: 6,
+          }}
+        >
+          {t.VersionInfo(fare.version, fare.effectiveAt)}
+        </div>
+        {[
+          [
+            `起程運價（${fare.baseDistanceMeters / 1000} 公里）`,
+            `NT$ ${fare.baseFare}`,
+          ],
+          [
+            `續程運價（每 ${fare.distanceIncrementMeters} 公尺）`,
+            `NT$ ${fare.distanceRate}`,
+          ],
+          [
+            `延滯計時（每 ${fare.delayIncrementSeconds} 秒）`,
+            `NT$ ${fare.delayRate}`,
+          ],
+          [
+            `夜間加成（${fare.nightSurchargeWindowStart}–${fare.nightSurchargeWindowEnd}）`,
+            `每趟加 NT$ ${fare.nightSurcharge}`,
+          ],
+        ].map(([label, value], index) => (
+          <div
+            key={label}
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "8px 0",
+              borderBottom:
+                index < 3 ? `1px solid ${passengerChrome.border}` : undefined,
+              fontSize: 12.5,
+            }}
+          >
+            <span style={{ color: passengerChrome.muted }}>{label}</span>
+            <b style={{ fontFamily: monoFont }}>{value}</b>
+          </div>
+        ))}
+        <div style={{ fontSize: 11, color: passengerChrome.muted }}>
+          {fare.nightApplication === "pickup"
+            ? "夜間時段以上車時間為準"
+            : "行程與夜間時段重疊時適用"}
+        </div>
+      </Card>
+      <Card title={t.FareChangeRuleTitle}>
+        <div
+          style={{
+            fontSize: 12,
+            color: passengerChrome.muted,
+            lineHeight: 1.65,
+          }}
+        >
+          {t.FareChangeRule}
+        </div>
+      </Card>
+    </>
+  );
+}
+
 function FareCard({
   fixture,
   publicMode,
@@ -764,72 +984,7 @@ function FareCard({
   fixture: PassengerRideFixture;
   publicMode?: boolean;
 }) {
-  if (publicMode && fixture.fareVersion) {
-    return (
-      <>
-        <Card
-          title={t.CurrentFareTable}
-          tag={
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: passengerChrome.success.fg,
-                background: passengerChrome.success.bg,
-                border: `1px solid ${passengerChrome.success.border}`,
-                padding: "2px 8px",
-                borderRadius: 999,
-              }}
-            >
-              {t.AlreadyEffective}
-            </span>
-          }
-        >
-          <div
-            style={{
-              fontSize: 11,
-              color: passengerChrome.muted,
-              marginBottom: 6,
-            }}
-          >
-            {t.VersionInfo} {fixture.fareVersion.authorityFilingRef}
-          </div>
-          {[
-            ["起程運價（1.25 公里）", "NT$ 85"],
-            ["續程運價（每 200 公尺）", "NT$ 5"],
-            ["延滯計時（每 80 秒）", "NT$ 5"],
-            ["夜間加成（23:00–06:00）", "+20%"],
-          ].map(([label, value], index) => (
-            <div
-              key={label}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                padding: "8px 0",
-                borderBottom:
-                  index < 3 ? `1px solid ${passengerChrome.border}` : undefined,
-                fontSize: 12.5,
-              }}
-            >
-              <span style={{ color: passengerChrome.muted }}>{label}</span>
-              <b style={{ fontFamily: monoFont }}>{value}</b>
-            </div>
-          ))}
-        </Card>
-        <Card title={t.FareChangeRuleTitle}>
-          <div
-            style={{
-              fontSize: 12,
-              color: passengerChrome.muted,
-              lineHeight: 1.65,
-            }}
-          >
-            {t.FareChangeRule}
-          </div>
-        </Card>
-      </>
-    );
-  }
+  if (publicMode) return <PublicFareCard />;
 
   const isAnomaly = fixture.routeFareMode === "anomaly";
   return (
@@ -1888,6 +2043,8 @@ function Actions({
   onFixtureUpdate?: ((fixture: PassengerRideFixture) => void) | undefined;
 }) {
   const [actionPending, setActionPending] = useState(false);
+  const [contactFallback, setContactFallback] = useState<string | null>(null);
+  useEffect(() => setContactFallback(null), [token]);
   if (fixture.status === "行程已取消") {
     return <CancelledActions token={token} authMode={authMode} />;
   }
@@ -1911,9 +2068,15 @@ function Actions({
       action === "cancel" && authMode !== "token" ? { rideId: token } : {};
     void requestPassengerRideAction(token, action, body, authMode === "token")
       .then((res: unknown) => {
-        const result = res as { contactUri?: string };
-        if (action === "contact" && result.contactUri) {
-          window.location.href = result.contactUri;
+        const result =
+          res as import("@drts/contracts").PassengerRideContactOption;
+        if (action === "contact") {
+          if (result.mode === "masked_call" && result.contactUri) {
+            window.location.href = result.contactUri;
+          } else {
+            setContactFallback(result.contactUri || "tel:02-2944-0985");
+          }
+          setActionPending(false);
           return;
         }
         window.location.reload();
@@ -1926,7 +2089,13 @@ function Actions({
       });
   };
   const cancel = () => runLiveAction("cancel", onCancel);
-  const contact = () => runLiveAction("contact", onContact);
+  const contact = () => {
+    if (fixture.actionMode === "support_only" && !onContact) {
+      window.location.href = "tel:02-2944-0985";
+      return;
+    }
+    runLiveAction("contact", onContact);
+  };
   const requote = () => {
     if (actionPending) return;
     setActionPending(true);
@@ -2001,7 +2170,7 @@ function Actions({
             color: passengerChrome.muted,
           }}
         >
-          {t.CancelFreeBeforeAssign}
+          {t.CancelFree}
         </div>
       </ActionGroup>
     );
@@ -2167,10 +2336,21 @@ function Actions({
   }
 
   const contactLabel =
-    fixture.actionMode === "support_only" ? t.ContactSupport : "聯絡司機";
+    fixture.actionMode === "support_only"
+      ? t.ContactSupport
+      : contactFallback
+        ? t.RetryContactDriver
+        : "聯絡司機";
 
   return (
     <ActionGroup>
+      {contactFallback ? (
+        <div role="alert" style={{ padding: 12 }}>
+          <strong>{t.CannotContactDriver}</strong>
+          <p>{t.ContactSupportInstead}</p>
+          <a href={contactFallback}>{t.ContactSupport}</a>
+        </div>
+      ) : null}
       <button
         type="button"
         style={buttonStyle("primary")}
@@ -2191,6 +2371,17 @@ function Actions({
       >
         {fixture.actionLabel || t.CancelRide}
       </button>
+      {fixture.canCancel ? (
+        <div
+          style={{
+            textAlign: "center",
+            fontSize: 11,
+            color: passengerChrome.muted,
+          }}
+        >
+          {t.CancelFree}
+        </div>
+      ) : null}
       {fixture.cancelNote ? (
         <div
           style={{
@@ -2346,11 +2537,11 @@ function RideContent({
         <MapCard fixture={fixture} />
         <StatusSubline fixture={fixture} />
         <ProgressCard
-          title={t.ArrangingVehicle}
+          title={fixture.status || t.ArrangingVehicle}
           detail={
             fixture.requestedPickupText
-              ? `${fixture.requestedPickupText} · 通常 1–3 分鐘完成指派`
-              : "通常 1–3 分鐘完成指派"
+              ? `${fixture.requestedPickupText} · ${fixture.statusSubline || "通常 1–3 分鐘完成指派"}`
+              : fixture.statusSubline || "通常 1–3 分鐘完成指派"
           }
         />
         <FareCard fixture={fixture} />
@@ -2638,13 +2829,13 @@ export function PassengerRidePage({
       token,
       (nextView) => {
         startTransition(() => {
-          setLiveFixture(
-            mapPassengerRideAuthorityToFixture(nextView.data, token, kind),
+          const fixture = mapPassengerRideAuthorityToFixture(
+            nextView.data,
+            token,
+            kind,
           );
-          const newCalculatedAt =
-            nextView.data.order?.status !== "cancelled"
-              ? nextView.data.assignment?.eta?.calculatedAt
-              : null;
+          setLiveFixture(fixture);
+          const newCalculatedAt = getPassengerLocationRecordedAt(fixture);
           if (newCalculatedAt) {
             const ts = new Date(newCalculatedAt).getTime();
             setLastEventTime(Number.isNaN(ts) ? 0 : ts);
@@ -2664,10 +2855,7 @@ export function PassengerRidePage({
     (next: PassengerRideFixture) => {
       startTransition(() => {
         setLiveFixture(next);
-        const calculatedAt =
-          next.status !== "行程已取消"
-            ? next.assignment?.eta?.calculatedAt
-            : null;
+        const calculatedAt = getPassengerLocationRecordedAt(next);
         if (calculatedAt) {
           const ts = new Date(calculatedAt).getTime();
           setLastEventTime(Number.isNaN(ts) ? 0 : ts);
@@ -2703,13 +2891,12 @@ export function PassengerRidePage({
       .then((view) => {
         if (!active) return;
         startTransition(() => {
-          setLiveFixture(mapPassengerRideAuthorityToFixture(view, token, kind));
+          const fixture = mapPassengerRideAuthorityToFixture(view, token, kind);
+          setLiveFixture(fixture);
           setAuthorityError(null);
-          if (
-            view.order?.status !== "cancelled" &&
-            view.assignment?.eta?.calculatedAt
-          ) {
-            const ts = new Date(view.assignment.eta.calculatedAt).getTime();
+          const recordedAt = getPassengerLocationRecordedAt(fixture);
+          if (recordedAt) {
+            const ts = new Date(recordedAt).getTime();
             setLastEventTime(Number.isNaN(ts) ? 0 : ts);
           } else {
             setLastEventTime(0); // Make it stale if missing or cancelled

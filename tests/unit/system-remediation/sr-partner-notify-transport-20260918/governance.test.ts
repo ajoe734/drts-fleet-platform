@@ -60,7 +60,7 @@ afterEach(() => {
 });
 
 async function setup() {
-  const h = harness();
+  const h = await harness();
   services.push(h.tenant);
   const database = sharedDatabase();
   const repoA = new TenantPartnerRepository(database as never);
@@ -69,7 +69,12 @@ async function setup() {
     const service = new TenantPartnerService(
       new AuditNotificationService(),
       repo,
-      new WebhookDispatchService(h.fetch),
+      new WebhookDispatchService((url, init) =>
+        (init?.headers as Record<string, string>)["x-drts-event-type"] ===
+        "tenant.webhook.test"
+          ? Promise.resolve({ ok: true, status: 204 })
+          : h.fetch(url, init),
+      ),
     );
     services.push(service);
     return service;
@@ -88,14 +93,12 @@ async function setup() {
   });
   h.route.partnerId = entry.partnerId;
   h.binding.partnerId = entry.partnerId;
-  const endpoint = a.createWebhookEndpoint(h.route.tenantId, {
+  const endpoint = await a.createWebhookEndpoint(h.route.tenantId, {
     url: "https://partner.example.test/notification",
     secret: "shared-original-secret",
     events: ["passenger.assignment_disclosure_ready.v1"],
   });
-  a.updateWebhookEndpoint(h.route.tenantId, endpoint.webhookId, {
-    status: "active",
-  });
+  await a.sendTestWebhook(h.route.tenantId, { webhookId: endpoint.webhookId });
   h.binding.webhookId = endpoint.webhookId;
   h.binding.validatedEndpointFingerprint = computeEndpointFingerprint(
     a.listWebhookEndpoints(h.route.tenantId)[0]!,
@@ -131,19 +134,22 @@ async function setup() {
     database.tables
       .get("admin.phase1_partner_channel_entries")!
       .get(entry.entrySlug)! as unknown as PartnerChannelEntryRecord;
-  const disable = () =>
-    a.updateWebhookEndpoint(h.route.tenantId, endpoint.webhookId, {
+  const disable = async () =>
+    await a.updateWebhookEndpoint(h.route.tenantId, endpoint.webhookId, {
       status: "disabled",
       disableReason: "operator stop",
     });
-  const rotate = () =>
-    a.rotateWebhookSecret(h.route.tenantId, {
+  const rotate = async () =>
+    await a.rotateWebhookSecret(h.route.tenantId, {
       webhookId: endpoint.webhookId,
       secret: "rotated-secret",
       rotationReason: "regression",
     });
+  const initialDeliveryCount = durableEndpoint().runtimeMetadata.deliveryCount;
+  database.query.mockClear();
   return {
     ...h,
+    initialDeliveryCount,
     a,
     b,
     facade,
@@ -164,8 +170,8 @@ const changes: [string, string, (h: Fixture) => unknown][] = [
   [
     "endpoint URL changed",
     "configuration_blocked",
-    (h) =>
-      h.a.updateWebhookEndpoint(h.route.tenantId, h.binding.webhookId, {
+    async (h) =>
+      await h.a.updateWebhookEndpoint(h.route.tenantId, h.binding.webhookId, {
         url: "https://new.example.test/notification",
       }),
   ],
@@ -258,9 +264,9 @@ describe("current durable notification governance", () => {
 
   it("rejects a rotated fingerprint even after the endpoint is active again", async () => {
     const h = await setup();
-    h.rotate();
-    h.a.updateWebhookEndpoint(h.route.tenantId, h.binding.webhookId, {
-      status: "active",
+    await h.rotate();
+    await h.a.sendTestWebhook(h.route.tenantId, {
+      webhookId: h.binding.webhookId,
     });
     expect(await h.service.deliverPassengerNotification(h.row)).toMatchObject({
       failureReason: "configuration_blocked",
@@ -270,9 +276,9 @@ describe("current durable notification governance", () => {
 
   it("uses the current credential after rotation and binding revalidation", async () => {
     const h = await setup();
-    h.rotate();
-    h.a.updateWebhookEndpoint(h.route.tenantId, h.binding.webhookId, {
-      status: "active",
+    await h.rotate();
+    await h.a.sendTestWebhook(h.route.tenantId, {
+      webhookId: h.binding.webhookId,
     });
     h.binding.validatedEndpointFingerprint = computeEndpointFingerprint(
       h.durableEndpoint(),
@@ -283,7 +289,11 @@ describe("current durable notification governance", () => {
     const rows = h.database.tables.get(
       "admin.phase1_tenant_webhook_deliveries",
     )!;
-    expect([...rows.values()][0]).toMatchObject({
+    expect(
+      [...rows.values()].find((row) =>
+        String(row.eventType).startsWith("passenger."),
+      ),
+    ).toMatchObject({
       secretVersion: 2,
       status: "delivered",
     });
@@ -297,7 +307,7 @@ describe("current durable notification governance", () => {
       const h = await setup();
       const receive = h.fetch.getMockImplementation()!;
       h.fetch.mockImplementationOnce(async (...args) => {
-        h[change]();
+        await h[change]();
         return receive(...args);
       });
       expect(await h.service.deliverPassengerNotification(h.row)).toMatchObject(
@@ -310,7 +320,7 @@ describe("current durable notification governance", () => {
           runtimeMetadata: {
             disableReason: "manual_disable",
             disableReasonNote: "operator stop",
-            deliveryCount: 1,
+            deliveryCount: h.initialDeliveryCount + 1,
           },
         });
       } else {
@@ -341,7 +351,7 @@ describe("current durable notification governance", () => {
       const h = await setup();
       h.row.attemptCount = 4;
       h.fetch.mockImplementationOnce(async () => {
-        h[change]();
+        await h[change]();
         return { ok: false, status: 503, text: async () => "" };
       });
       expect(await h.service.deliverPassengerNotification(h.row)).toMatchObject(
@@ -355,7 +365,7 @@ describe("current durable notification governance", () => {
         runtimeMetadata: {
           nextAttemptAt: null,
           failedDeliveryCount: 1,
-          deliveryCount: 1,
+          deliveryCount: h.initialDeliveryCount + 1,
         },
       });
       if (change === "disable")

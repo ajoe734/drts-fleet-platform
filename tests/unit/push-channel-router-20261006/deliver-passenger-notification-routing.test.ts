@@ -59,10 +59,10 @@ function nonPartnerHarness(resolution: PassengerNotificationRouteResolution) {
   let fence = 0;
   let leasedUntil = 0;
 
-  const resolvePassengerNotificationChannel = vi.fn(
-    async () => resolution,
-  );
-  const claimPartnerNotification = vi.fn<MultiTaxiRepository["claimPartnerNotification"]>(async () => {
+  const resolvePassengerNotificationChannel = vi.fn(async () => resolution);
+  const claimPartnerNotification = vi.fn<
+    MultiTaxiRepository["claimPartnerNotification"]
+  >(async () => {
     const metadata = row.payload.channelRouting as
       | { retryDisposition?: string }
       | undefined;
@@ -135,7 +135,9 @@ describe("push-channel-router_resolution_and_no_channel", () => {
       retryDisposition: "manual_only",
     });
     expect(h.repository.recordPushDeliveryOutcome).toHaveBeenCalledOnce();
-    expect(await h.repository.claimPartnerNotification("outbox-1", "w", 120)).toBeNull();
+    expect(
+      await h.repository.claimPartnerNotification("outbox-1", "w", 120),
+    ).toBeNull();
   });
 
   it("none (no route snapshot) seals D3 no_notification_channel/none/provider_not_configured and is never rescanned", async () => {
@@ -147,11 +149,16 @@ describe("push-channel-router_resolution_and_no_channel", () => {
       failureReason: "no_notification_channel",
       retryDisposition: "none",
     });
-    expect(await h.repository.claimPartnerNotification("outbox-1", "w", 120)).toBeNull();
+    expect(
+      await h.repository.claimPartnerNotification("outbox-1", "w", 120),
+    ).toBeNull();
   });
 
   it("first_party_app resolves but has no live transport this wave -> configuration_blocked, never rescanned", async () => {
-    const h = nonPartnerHarness({ channel: "first_party_app", route: firstPartyRoute });
+    const h = nonPartnerHarness({
+      channel: "first_party_app",
+      route: firstPartyRoute,
+    });
     const outcome = await h.service.deliverPassengerNotification(h.row);
     expect(outcome).toMatchObject({
       status: "failed",
@@ -159,7 +166,9 @@ describe("push-channel-router_resolution_and_no_channel", () => {
       failureReason: "configuration_blocked",
       retryDisposition: "configuration_blocked",
     });
-    expect(await h.repository.claimPartnerNotification("outbox-1", "w", 120)).toBeNull();
+    expect(
+      await h.repository.claimPartnerNotification("outbox-1", "w", 120),
+    ).toBeNull();
   });
 
   it("a concurrent caller cannot double-seal the same row (shared claim/fence)", async () => {
@@ -176,16 +185,16 @@ describe("push-channel-router_resolution_and_no_channel", () => {
 
 describe("push-channel-router_partner_behaviour_unchanged", () => {
   it("a partner-routed order still delivers through the unchanged partner path", async () => {
-    const h = partnerHarness();
+    const h = await partnerHarness();
     const outcome = await h.service.deliverPassengerNotification(h.row);
     expect(outcome).toMatchObject({
       result: "delivered",
       deliveryStage: "partner_accepted",
       receiptId: "real-partner-receipt-42",
     });
-    expect(h.repository.resolvePassengerNotificationChannel).toHaveBeenCalledWith(
-      h.row.orderId,
-    );
+    expect(
+      h.repository.resolvePassengerNotificationChannel,
+    ).toHaveBeenCalledWith(h.row.orderId);
     expect(h.fetch).toHaveBeenCalledTimes(1);
   });
 });

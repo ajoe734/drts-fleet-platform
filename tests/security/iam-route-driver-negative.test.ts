@@ -567,13 +567,13 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
     it("denies driver viewing or acting on tasks not broadcasted or assigned to them without leaking existence", async () => {
       const { forwarderController, forwarderService } = createDriverFixture();
 
-      const order = forwarderService.ingestExternalOrder({
+      const order = await forwarderService.ingestExternalOrder({
         platformCode: "uber",
         externalOrderId: "EXT-001",
         payload: { serviceBucket: "standard_taxi" },
       });
 
-      forwarderService.broadcastOrder(order.mirrorOrderId, {
+      await forwarderService.broadcastOrder(order.mirrorOrderId, {
         candidateDriverIds: ["drv-demo-001"], // broadcasted to drv-demo-001
       });
 
@@ -628,16 +628,16 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       }
 
       // Driver 1 trying to reject Driver 2's task
-      expect(() =>
+      await expect(
         forwarderController.rejectForwardedOrder(
           order.mirrorOrderId,
           driver1Identity,
           { driverId: "drv-001", reason: "not interested" },
         ),
-      ).toThrowError(ApiRequestError);
+      ).rejects.toThrowError(ApiRequestError);
 
       try {
-        forwarderController.rejectForwardedOrder(
+        await forwarderController.rejectForwardedOrder(
           order.mirrorOrderId,
           driver1Identity,
           { driverId: "drv-001", reason: "not interested" },
@@ -722,7 +722,7 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       };
 
       // Listing shifts with no query param -> gets only drv-001 shifts
-      const selfShifts = shiftAttendanceController.listShifts(
+      const selfShifts = await shiftAttendanceController.listShifts(
         undefined,
         driver1Identity,
       );
@@ -730,20 +730,20 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       expect(selfShifts.data?.items?.[0]?.driverId).toBe("drv-001");
 
       // Listing shifts querying another driver -> gets empty list without error/leak
-      const otherShifts = shiftAttendanceController.listShifts(
+      const otherShifts = await shiftAttendanceController.listShifts(
         "drv-002",
         driver1Identity,
       );
       expect(otherShifts.data?.items).toHaveLength(0);
 
       // Attendance queries
-      const selfAttendance = shiftAttendanceController.listAttendance(
+      const selfAttendance = await shiftAttendanceController.listAttendance(
         undefined,
         driver1Identity,
       );
       expect(selfAttendance.data?.items).toHaveLength(0);
 
-      const otherAttendance = shiftAttendanceController.listAttendance(
+      const otherAttendance = await shiftAttendanceController.listAttendance(
         "drv-002",
         driver1Identity,
       );
@@ -771,28 +771,31 @@ describe("IAM Route Driver Operations Negative Matrix", () => {
       };
 
       // Viewing another driver's shift
-      expect(() =>
+      await expect(
         shiftAttendanceController.getShift(shift2.shiftId, driver1Identity),
-      ).toThrowError(ApiRequestError);
+      ).rejects.toThrowError(ApiRequestError);
 
       try {
-        shiftAttendanceController.getShift(shift2.shiftId, driver1Identity);
+        await shiftAttendanceController.getShift(
+          shift2.shiftId,
+          driver1Identity,
+        );
       } catch (error: any) {
         expect(error.getStatus()).toBe(404);
         expect(error.code).toBe("NOT_FOUND");
       }
 
       // Abandoning another driver's shift
-      expect(() =>
+      await expect(
         shiftAttendanceController.abandonShift(
           shift2.shiftId,
           { reason: "take over" },
           driver1Identity,
         ),
-      ).toThrowError(ApiRequestError);
+      ).rejects.toThrowError(ApiRequestError);
 
       try {
-        shiftAttendanceController.abandonShift(
+        await shiftAttendanceController.abandonShift(
           shift2.shiftId,
           { reason: "take over" },
           driver1Identity,

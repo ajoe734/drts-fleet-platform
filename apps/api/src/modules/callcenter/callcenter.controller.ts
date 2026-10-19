@@ -31,48 +31,60 @@ export class CallcenterController {
   ) {}
 
   @Post("webhooks/sandbox")
-  ingestSandboxWebhook(
+  async ingestSandboxWebhook(
     @Body() payload: Record<string, unknown>,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.sandboxWebhookAdapter.ingest(payload as never, requestId),
+      await this.sandboxWebhookAdapter.ingestForWrite(
+        payload as never,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Get("sessions")
   @RequireRealms("platform", "ops")
-  listCallSessions(
+  async listCallSessions(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      { items: this.callcenterService.listCallSessions(requestId, identity) },
+      {
+        items: await this.callcenterService.listCallSessionsForRead(
+          requestId,
+          identity,
+        ),
+      },
       requestId,
     );
   }
 
   @Post("sessions")
-  openCallSession(
+  async openCallSession(
     @Body() command: OpenCallSessionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.openCallSession(command, requestId),
+      await this.callcenterService.openCallSessionForWrite(command, requestId),
       requestId,
     );
   }
 
   @Get("sessions/:callId")
   @RequireRealms("platform", "ops")
-  getCallSession(
+  async getCallSession(
     @Param("callId") callId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.getCallSession(callId, requestId, identity),
+      await this.callcenterService.getCallSessionForRead(
+        callId,
+        requestId,
+        identity,
+      ),
       requestId,
     );
   }
@@ -90,13 +102,17 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/close")
-  closeCallSession(
+  async closeCallSession(
     @Param("callId") callId: string,
     @Body() command: CloseCallSessionCommand = {},
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.closeCallSession(callId, command, requestId),
+      await this.callcenterService.closeCallSessionForWrite(
+        callId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
@@ -130,13 +146,13 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/recording-callback")
-  attachRecordingCallback(
+  async attachRecordingCallback(
     @Param("callId") callId: string,
     @Body() command: AttachCallRecordingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.attachRecordingCallback(
+      await this.callcenterService.attachRecordingCallbackForWrite(
         callId,
         command,
         requestId,
@@ -146,35 +162,39 @@ export class CallcenterController {
   }
 
   @Get("callbacks")
-  listCallbackTasks(@Headers("x-request-id") requestId?: string) {
+  async listCallbackTasks(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
       {
-        items: this.callcenterService.listCallbackTasks(),
+        items: await this.callcenterService.listCallbackTasksForRead(),
       },
       requestId,
     );
   }
 
   @Post("sessions/:callId/callbacks")
-  createCallbackTask(
+  async createCallbackTask(
     @Param("callId") callId: string,
     @Body() command: CreateCallbackTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.createCallbackTask(callId, command, requestId),
+      await this.callcenterService.createCallbackTaskForWrite(
+        callId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("callbacks/:callbackTaskId/complete")
-  completeCallbackTask(
+  async completeCallbackTask(
     @Param("callbackTaskId") callbackTaskId: string,
     @Body() command: CompleteCallbackTaskCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.completeCallbackTask(
+      await this.callcenterService.completeCallbackTaskForWrite(
         callbackTaskId,
         command,
         requestId,
@@ -184,13 +204,13 @@ export class CallcenterController {
   }
 
   @Post("callbacks/:callbackTaskId/claim")
-  claimCallbackTask(
+  async claimCallbackTask(
     @Param("callbackTaskId") callbackTaskId: string,
     @Body() command: { operatorId: string; expectedVersion?: number },
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.claimCallbackTask(
+      await this.callcenterService.claimCallbackTaskForWrite(
         callbackTaskId,
         command.operatorId,
         command.expectedVersion,
@@ -201,7 +221,7 @@ export class CallcenterController {
   }
 
   @Post("callbacks/:callbackTaskId/attempt")
-  recordCallbackAttempt(
+  async recordCallbackAttempt(
     @Param("callbackTaskId") callbackTaskId: string,
     @Body()
     command: {
@@ -213,7 +233,7 @@ export class CallcenterController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.recordCallbackAttempt(
+      await this.callcenterService.recordCallbackAttemptForWrite(
         callbackTaskId,
         command,
         requestId,
@@ -223,7 +243,7 @@ export class CallcenterController {
   }
 
   @Post("callbacks/:callbackTaskId/cancel")
-  cancelCallbackTask(
+  async cancelCallbackTask(
     @Param("callbackTaskId") callbackTaskId: string,
     @Body()
     command: {
@@ -234,7 +254,7 @@ export class CallcenterController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.callcenterService.cancelCallbackTask(
+      await this.callcenterService.cancelCallbackTaskForWrite(
         callbackTaskId,
         command,
         requestId,

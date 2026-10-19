@@ -356,7 +356,7 @@ export async function seedTenantGovernance(
     ? "skipped"
     : "created";
   if (!existingQuotaPolicy) {
-    services.tenantPartnerService.upsertTenantQuotaPolicy(
+    await services.tenantPartnerService.upsertTenantQuotaPolicy(
       normalizedTenantId,
       {
         period: "monthly",
@@ -397,7 +397,7 @@ export async function seedTenantGovernance(
     template.approvalRule,
   );
   if (!existingApprovalRule) {
-    services.tenantPartnerService.upsertApprovalRule(
+    await services.tenantPartnerService.upsertApprovalRule(
       normalizedTenantId,
       {
         ruleName: template.approvalRule.ruleName,

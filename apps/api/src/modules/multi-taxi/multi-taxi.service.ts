@@ -26,6 +26,7 @@ import {
   Optional,
 } from "@nestjs/common";
 import {
+  defer,
   distinctUntilChanged,
   filter,
   from,
@@ -593,9 +594,10 @@ export class MultiTaxiService implements OnModuleInit {
       order.orderId,
       passengerSubjectRef,
     );
-    const [payment, receipt] = await Promise.all([
+    const [payment, receipt, tracking] = await Promise.all([
       this.repository?.findPassengerPayment(order.orderId) ?? null,
       this.repository?.findElectronicReceipt(order.orderId) ?? null,
+      this.ownedMobilityService.resolvePassengerRideTracking(order, assignment),
     ]);
     const bookingQuote =
       assignment?.routeFare?.bookingQuote ??
@@ -625,6 +627,7 @@ export class MultiTaxiService implements OnModuleInit {
         completedAt: ratingWindow?.completedAt ?? null,
       },
       assignment,
+      tracking,
       ...(bookingQuote ? { bookingQuote } : {}),
       rating,
       payment: payment ?? null,
@@ -873,40 +876,8 @@ export class MultiTaxiService implements OnModuleInit {
     orderId: string,
     passengerSubjectRef: string,
   ): Observable<MessageEvent> {
-    return timer(0, 3_000).pipe(
-      switchMap(() =>
-        from(this.getPassengerRideById(orderId, passengerSubjectRef)),
-      ),
-      map((view) => ({
-        view,
-        eventType: this.resolvePassengerEventType(view),
-      })),
-      filter(
-        (
-          value,
-        ): value is {
-          view: PassengerRideAuthorityView;
-          eventType: PassengerRideSseEvent;
-        } => value.eventType !== null,
-      ),
-      distinctUntilChanged(
-        (previous, current) =>
-          this.passengerViewVersionKey(previous.view, previous.eventType) ===
-          this.passengerViewVersionKey(current.view, current.eventType),
-      ),
-      map(({ view, eventType }) => ({
-        type: eventType,
-        retry: 3_000,
-        data: {
-          eventId: randomUUID(),
-          eventType,
-          eventVersion: this.nextPassengerEventVersion(view.order.orderId),
-          assignmentVersion: view.assignment?.assignmentVersion ?? null,
-          orderId: view.order.orderId,
-          occurredAt: new Date().toISOString(),
-          data: view,
-        } satisfies PassengerRideSseEventEnvelope,
-      })),
+    return this.streamPassengerAuthority(() =>
+      this.getPassengerRideById(orderId, passengerSubjectRef),
     );
   }
 
@@ -923,9 +894,10 @@ export class MultiTaxiService implements OnModuleInit {
       order.orderId,
       token.passengerSubjectRef,
     );
-    const [payment, receipt] = await Promise.all([
+    const [payment, receipt, tracking] = await Promise.all([
       this.repository?.findPassengerPayment(order.orderId) ?? null,
       this.repository?.findElectronicReceipt(order.orderId) ?? null,
+      this.ownedMobilityService.resolvePassengerRideTracking(order, assignment),
     ]);
 
     return {
@@ -942,6 +914,7 @@ export class MultiTaxiService implements OnModuleInit {
         completedAt: order.status === "completed" ? order.updatedAt : null,
       },
       assignment,
+      tracking,
       rating,
       payment: payment ?? null,
       receipt: receipt ?? null,
@@ -1354,7 +1327,20 @@ export class MultiTaxiService implements OnModuleInit {
     requestId?: string,
   ): Promise<PassengerRideContactOption> {
     const token = await this.requireAccessToken(accessToken, "ride:contact");
-    const order = await this.requireMultiTaxiOrder(token.orderId);
+    return this.getPassengerContactById(
+      token.orderId,
+      token.passengerSubjectRef,
+      requestId,
+    );
+  }
+
+  /** Account callers first use the existing booking-owner check in the controller. */
+  async getPassengerContactById(
+    orderId: string,
+    passengerSubjectRef: string,
+    requestId?: string,
+  ): Promise<PassengerRideContactOption> {
+    const order = await this.requireMultiTaxiOrder(orderId);
     const assignment =
       await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
         order.orderId,
@@ -1372,7 +1358,7 @@ export class MultiTaxiService implements OnModuleInit {
       order.orderId,
       assignment.assignmentId,
       assignment.driver.driverId,
-      token.passengerSubjectRef,
+      passengerSubjectRef,
       requestId,
     );
     if (masked.session) {
@@ -2127,42 +2113,74 @@ export class MultiTaxiService implements OnModuleInit {
   }
 
   streamPassengerRide(accessToken: string): Observable<MessageEvent> {
-    return timer(0, 3_000).pipe(
-      switchMap(() => from(this.getPassengerRide(accessToken))),
-      map((view) => ({
-        view,
-        eventType: this.resolvePassengerEventType(view),
-      })),
-      filter(
-        (
-          value,
-        ): value is {
-          view: PassengerRideAuthorityView;
-          eventType: PassengerRideSseEvent;
-        } => value.eventType !== null,
-      ),
-      distinctUntilChanged(
-        (previous, current) =>
-          this.passengerViewVersionKey(previous.view, previous.eventType) ===
-          this.passengerViewVersionKey(current.view, current.eventType),
-      ),
-      map(({ view, eventType }) => {
-        const envelope: PassengerRideSseEventEnvelope = {
-          eventId: randomUUID(),
-          eventType,
-          eventVersion: this.nextPassengerEventVersion(view.order.orderId),
-          assignmentVersion: view.assignment?.assignmentVersion ?? null,
-          orderId: view.order.orderId,
-          occurredAt: new Date().toISOString(),
-          data: view,
-        };
-        return {
-          type: eventType,
-          data: envelope,
-          retry: 3_000,
-        };
-      }),
+    return this.streamPassengerAuthority(() =>
+      this.getPassengerRide(accessToken),
     );
+  }
+
+  private streamPassengerAuthority(
+    read: () => Promise<PassengerRideAuthorityView>,
+  ): Observable<MessageEvent> {
+    return defer(() => {
+      let previous: PassengerRideAuthorityView | null = null;
+      return timer(0, 3_000).pipe(
+        switchMap(() => from(read())),
+        map((view) => ({
+          view,
+          eventType: this.resolvePassengerEventType(view),
+        })),
+        filter(
+          (
+            value,
+          ): value is {
+            view: PassengerRideAuthorityView;
+            eventType: PassengerRideSseEvent;
+          } => value.eventType !== null,
+        ),
+        distinctUntilChanged(
+          (before, current) =>
+            this.passengerViewVersionKey(before.view, before.eventType) ===
+            this.passengerViewVersionKey(current.view, current.eventType),
+        ),
+        map(({ view, eventType }) => {
+          let actualType = eventType;
+          if (
+            view.tracking &&
+            previous &&
+            previous.order.status === view.order.status &&
+            previous.assignment?.assignmentId === view.assignment?.assignmentId
+          ) {
+            if (
+              previous.tracking?.pickupEta?.minutes !==
+              view.tracking.pickupEta?.minutes
+            ) {
+              actualType = "eta_changed";
+            } else if (
+              JSON.stringify(previous.tracking?.location) !==
+                JSON.stringify(view.tracking.location) ||
+              previous.tracking?.locationFreshness !==
+                view.tracking.locationFreshness
+            ) {
+              actualType = "driver_location_updated";
+            }
+          }
+          previous = view;
+          return {
+            type: actualType,
+            retry: 3_000,
+            data: {
+              eventId: randomUUID(),
+              eventType: actualType,
+              eventVersion: this.nextPassengerEventVersion(view.order.orderId),
+              assignmentVersion: view.assignment?.assignmentVersion ?? null,
+              orderId: view.order.orderId,
+              occurredAt: new Date().toISOString(),
+              data: view,
+            } satisfies PassengerRideSseEventEnvelope,
+          };
+        }),
+      );
+    });
   }
 
   /**
@@ -3184,6 +3202,15 @@ export class MultiTaxiService implements OnModuleInit {
       status: view.order.status,
       assignmentVersion: view.assignment?.assignmentVersion ?? null,
       eta: view.assignment?.eta ?? null,
+      tracking: view.tracking
+        ? {
+            assignmentId: view.tracking.assignmentId,
+            driverId: view.tracking.driverId,
+            locationFreshness: view.tracking.locationFreshness,
+            location: view.tracking.location,
+            pickupEtaMinutes: view.tracking.pickupEta?.minutes ?? null,
+          }
+        : null,
       ratingId: view.rating?.ratingId ?? null,
       paymentStatus: view.payment?.status ?? null,
       receiptId: view.receipt?.receiptId ?? null,

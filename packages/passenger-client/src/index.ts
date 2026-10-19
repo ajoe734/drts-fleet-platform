@@ -8,6 +8,7 @@ export * from "./payment/fields.js";
 export * from "./payment/state.js";
 export * from "./payment/booking.js";
 export * from "./ride/view-model.js";
+export * from "./ride/tracking-map.js";
 export * from "./native/raw-auth.js";
 export * from "./native/session.js";
 export * from "./native/transport.js";

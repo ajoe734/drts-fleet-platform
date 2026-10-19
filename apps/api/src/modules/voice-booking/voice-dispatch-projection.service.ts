@@ -1,4 +1,11 @@
-import { HttpStatus, Inject, Injectable, Logger, Optional, forwardRef } from "@nestjs/common";
+import {
+  HttpStatus,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  forwardRef,
+} from "@nestjs/common";
 import type {
   DispatchAssignmentRecord,
   DispatchJobRecord,
@@ -70,7 +77,9 @@ export class VoiceDispatchProjectionService {
         const activeJob =
           current.dispatchJobs.find((job) =>
             ["matching", "assigned", "reserved"].includes(job.status),
-          ) ?? current.dispatchJobs[0] ?? null;
+          ) ??
+          current.dispatchJobs[0] ??
+          null;
 
         return this.projectDispatchFromEntities(
           current.order,
@@ -183,7 +192,8 @@ export class VoiceDispatchProjectionService {
         job?.latestEtaMinutes ?? order.etaSnapshot?.etaMinutes ?? null;
       const etaSource =
         etaMinutes !== null
-          ? job?.latestEtaMinutes !== null && job?.latestEtaMinutes !== undefined
+          ? job?.latestEtaMinutes !== null &&
+            job?.latestEtaMinutes !== undefined
             ? "dispatch_job"
             : "order_snapshot"
           : null;
@@ -275,6 +285,7 @@ export class VoiceDispatchProjectionService {
     // 5. Retrying state
     // SD §7.6: "delayed_queue／redispatch 或仍有有效待辦 -> 仍在找車或重新安排，不能說已取消"
     if (
+      order.status === "delayed_queue" ||
       order.status === "redispatch_required" ||
       order.reservationHoldStatus === "redispatch_queue" ||
       job?.status === "redispatch_required"

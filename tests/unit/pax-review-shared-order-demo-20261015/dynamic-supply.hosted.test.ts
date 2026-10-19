@@ -1,3 +1,5 @@
+import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
+import { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { EventEmitter } from "node:events";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DatabaseService } from "../../../apps/api/src/common/db/database.service";
@@ -186,6 +188,13 @@ describe.skipIf(!hostedPaymentEnabled)(
         a.multi,
         a.products,
         a.eligibility,
+        new FleetPartnerService(
+          {} as never,
+          a.owned,
+          a.registry,
+          new FleetPartnerRepository(h.database),
+        ),
+        a.profiles,
       ).prepare();
       expect(
         (
@@ -199,6 +208,62 @@ describe.skipIf(!hostedPaymentEnabled)(
       expect(
         b.products.getRuntimeServiceProductByType("taxi_reservation")?.active,
       ).toBe(false);
+      // Shared dev already has committed rehearsal supply when a new API
+      // revision starts. Remove only the external bootstrap fixture from this
+      // isolated hosted DB, and age the synthetic GPS; never seed an order.
+      await h.pool!.query(
+        "DELETE FROM reg.phase1_registry_vehicles WHERE vehicle_id=$1",
+        ["veh-demo-001"],
+      );
+      await h.pool!.query(
+        "UPDATE ops.phase1_driver_locations SET recorded_at=$2,updated_at=$2 WHERE driver_id=ANY($1::text[])",
+        [
+          REVIEW_SUPPLY.map((f) => f.driverId),
+          new Date(Date.now() - 3600000).toISOString(),
+        ],
+      );
+      const restarted = makePeer(h.peerDatabase());
+      peers.push(restarted);
+      await restarted.products.onModuleInit();
+      await restarted.profiles.onModuleInit();
+      await restarted.registry.onModuleInit();
+      await restarted.eligibility.onModuleInit();
+      await restarted.owned.onModuleInit();
+      await restarted.multi.onModuleInit();
+      await restarted.sessions.onModuleInit();
+      await restarted.events.onModuleInit();
+      expect(
+        restarted.registry
+          .listVehicles()
+          .some((v) => v.vehicleId === "veh-demo-001"),
+      ).toBe(false);
+      const preparationStarted = Date.now();
+      const preparedAgain = await new ReviewSupplyService(
+        restarted.database,
+        restarted.registry,
+        restarted.multi,
+        restarted.products,
+        restarted.eligibility,
+        new FleetPartnerService(
+          {} as never,
+          restarted.owned,
+          restarted.registry,
+          new FleetPartnerRepository(restarted.database),
+        ),
+        restarted.profiles,
+      ).prepare();
+      expect(preparedAgain.fleetPartnerId).toBe(prepared.fleetPartnerId);
+      const refreshedLocations = (
+        await restarted.registryStore.listLatestDriverLocations()
+      ).filter((l) => REVIEW_SUPPLY.some((f) => f.driverId === l.driverId));
+      expect(refreshedLocations).toHaveLength(2);
+      expect(
+        refreshedLocations.every(
+          (l) => Date.parse(l.recordedAt) >= preparationStarted,
+        ),
+      ).toBe(true);
+      // All original registration, ownership, offline/available, dispatch,
+      // acceptance and trip assertions below continue against that same DB.
       vi.stubEnv(
         "MULTI_TAXI_DEFAULT_AUTHORIZATION_ID",
         prepared.authorizationId,

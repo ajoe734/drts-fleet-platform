@@ -4141,8 +4141,8 @@ const en = {
   "notices.col.severityShort": "SEV",
   "notices.history.subtitle": "Broadcast history · cross-app delivery outcomes",
   "notices.history.delivery.archived": "resolved delivery archived",
-  "notices.history.delivery.all": "delivered 3 / 3",
-  "notices.history.delivery.single": "delivered 1 / 1",
+  "notices.history.delivery.all": "No recorded recipient outcome",
+  "notices.history.delivery.single": "No recorded recipient outcome",
   "notices.noticeTitleRequired": "Notice title is required.",
   "notices.noticeBodyRequired": "Notice body is required.",
   "notices.warning.operationError":
@@ -4153,9 +4153,15 @@ const en = {
   "notices.status.scheduled": "scheduled",
   "notices.status.resolved": "resolved",
   "notices.status.archived": "archived",
+  "notices.status.expired": "Expired",
+  "notices.status.unknown": "Unknown",
+  "notices.form.expiry": "Expiry (optional)",
+  "notices.form.highRiskConfirmation":
+    "Confirm this high-risk notice for the selected audience",
   "notices.severity.info": "low",
   "notices.severity.warning": "medium",
   "notices.severity.critical": "high",
+  "notices.severity.maintenance": "Maintenance",
   "notices.window.notScheduled": "Not scheduled",
   "notices.risk.high": "high risk",
   "notices.systemUser": "system",
@@ -5942,8 +5948,7 @@ const zh: typeof en = {
   "adapterRegistry.registerModal.platformCode": "平台代碼",
   "adapterRegistry.registerModal.platformCodePlaceholder": "yoxi",
   "adapterRegistry.registerModal.description": "說明",
-  "adapterRegistry.registerModal.descriptionPlaceholder":
-    "合作車隊派遣轉接器",
+  "adapterRegistry.registerModal.descriptionPlaceholder": "合作車隊派遣轉接器",
   "adapterRegistry.registerModal.environment": "環境",
   "adapterRegistry.registerModal.rolloutStage": "部署階段",
   "adapterRegistry.registerModal.adapterType": "轉接器類型",
@@ -5951,8 +5956,7 @@ const zh: typeof en = {
   "adapterRegistry.registerModal.credReference": "憑證參照（非機密）",
   "adapterRegistry.registerModal.credReferencePlaceholder":
     "vault://platform/adapters/key-ref",
-  "adapterRegistry.registerModal.credExpiresAt":
-    "憑證到期時間（ISO-8601）",
+  "adapterRegistry.registerModal.credExpiresAt": "憑證到期時間（ISO-8601）",
   "adapterRegistry.registerModal.credExpiresAtPlaceholder":
     "2026-11-15T00:00:00.000Z",
   "adapterRegistry.registerModal.serviceBucketsPlaceholder":
@@ -5976,8 +5980,7 @@ const zh: typeof en = {
   "adapterRegistry.configModal.submitting": "儲存中...",
   "adapterRegistry.configSuccess":
     "{auditPrefix}{name} 設定已更新至版本 {revision}。{reasonClause}",
-  "adapterRegistry.credentialModal.title":
-    "編輯憑證參照與到期時間：{name}",
+  "adapterRegistry.credentialModal.title": "編輯憑證參照與到期時間：{name}",
   "adapterRegistry.credentialModal.subtitle":
     "更新非機密憑證參照中繼資料與伺服端評估之到期時間戳記（expectedRevision {revision}）。",
   "adapterRegistry.credentialModal.nonSecretNotice":
@@ -5996,8 +5999,7 @@ const zh: typeof en = {
     "啟用 Webhook 時必須填寫 Webhook 網址。",
   "adapterRegistry.validation.credReferenceRequired":
     "設定憑證到期中繼資料時必須填寫憑證參照。",
-  "adapterRegistry.validation.reasonRequired":
-    "此更新必須填寫治理原因。",
+  "adapterRegistry.validation.reasonRequired": "此更新必須填寫治理原因。",
   // ── Users ──
   "users.title": "使用者與角色",
   "users.subtitle": "共 {count} 位人員",
@@ -7450,8 +7452,8 @@ const zh: typeof en = {
   "notices.col.severityShort": "SEV",
   "notices.history.subtitle": "廣播歷史 · 跨應用投遞結果",
   "notices.history.delivery.archived": "已封存的已解決投遞",
-  "notices.history.delivery.all": "已投遞 3 / 3",
-  "notices.history.delivery.single": "已投遞 1 / 1",
+  "notices.history.delivery.all": "尚無接收者結果",
+  "notices.history.delivery.single": "尚無接收者結果",
   "notices.noticeTitleRequired": "公告標題為必填。",
   "notices.noticeBodyRequired": "公告內容為必填。",
   "notices.warning.operationError": "公告/維護模式操作異常：{error}",
@@ -7460,9 +7462,14 @@ const zh: typeof en = {
   "notices.status.scheduled": "已排程",
   "notices.status.resolved": "已解決",
   "notices.status.archived": "已封存",
+  "notices.status.expired": "已到期下架",
+  "notices.status.unknown": "狀態未知",
+  "notices.form.expiry": "到期下架時間（選填）",
+  "notices.form.highRiskConfirmation": "確認向選定受眾發布此高風險公告",
   "notices.severity.info": "低",
   "notices.severity.warning": "中",
   "notices.severity.critical": "高",
+  "notices.severity.maintenance": "維護",
   "notices.window.notScheduled": "未排定",
   "notices.risk.high": "高風險",
   "notices.systemUser": "system",
@@ -8249,7 +8256,7 @@ export function getNoticesAudienceLabel(
 
 export function getNoticeSeverityLabel(
   locale: Locale,
-  severity: PlatformNoticeSeverity,
+  severity: PlatformNoticeSeverity | "maintenance",
 ): string {
   return translateKey(locale, `notices.severity.${severity}`);
 }
@@ -8282,14 +8289,18 @@ export function formatNoticeWindow(
 export function getNoticeHistoryDeliveryLabel(
   locale: Locale,
   status: PlatformNoticeStatus,
-  audience: PlatformNoticeRecord["targetAudience"],
+  _audience: PlatformNoticeRecord["targetAudience"],
 ): string {
-  if (status === "resolved") {
+  void _audience; // Audience membership cannot prove any delivery outcome.
+  if (status === "resolved")
     return translateKey(locale, "notices.history.delivery.archived");
-  }
-  return audience === "all"
-    ? translateKey(locale, "notices.history.delivery.all")
-    : translateKey(locale, "notices.history.delivery.single");
+  if (status === "scheduled")
+    return locale === "zh"
+      ? "已排程，尚未開放"
+      : "Scheduled; not yet available";
+  return locale === "zh"
+    ? "請查閱實際受眾回執"
+    : "See recorded audience receipts";
 }
 
 export function getNoticesPageCopy(locale: Locale) {
@@ -8369,6 +8380,13 @@ export function getNoticesPageCopy(locale: Locale) {
     id: translateKey(locale, "notices.col.id"),
     historySubtitle: translateKey(locale, "notices.history.subtitle"),
     archived: translateKey(locale, "notices.status.archived"),
+    expired: translateKey(locale, "notices.status.expired"),
+    unknown: translateKey(locale, "notices.status.unknown"),
+    expiry: translateKey(locale, "notices.form.expiry"),
+    highRiskConfirmation: translateKey(
+      locale,
+      "notices.form.highRiskConfirmation",
+    ),
     noticeTitleRequired: translateKey(locale, "notices.noticeTitleRequired"),
     noticeBodyRequired: translateKey(locale, "notices.noticeBodyRequired"),
     maintenanceRisk: translateKey(locale, "notices.risk.high"),
@@ -8377,6 +8395,7 @@ export function getNoticesPageCopy(locale: Locale) {
       info: translateKey(locale, "notices.severity.info"),
       warning: translateKey(locale, "notices.severity.warning"),
       critical: translateKey(locale, "notices.severity.critical"),
+      maintenance: translateKey(locale, "notices.severity.maintenance"),
     },
     audienceOptions: {
       ops: translateKey(locale, "notices.audience.ops"),

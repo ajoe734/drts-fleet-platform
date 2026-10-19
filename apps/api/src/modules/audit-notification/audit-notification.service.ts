@@ -346,6 +346,14 @@ export class AuditNotificationService implements OnModuleInit {
   }
 
   listAuditLogs(identity?: EvidenceAccessIdentity | null, requestId?: string) {
+    return this.listAuditRecords(this.auditLogs, identity, requestId);
+  }
+
+  private listAuditRecords(
+    records: AuditLogRecord[],
+    identity?: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ) {
     const policy = assertEvidenceAccess({
       family: "audit_log",
       identity,
@@ -354,7 +362,7 @@ export class AuditNotificationService implements OnModuleInit {
     // The condition this replaces narrowed only when a tenant identity carried
     // a tenantId, and its `else` was every tenant's audit trail.
     const items = filterToTenantVisibility(
-      this.auditLogs,
+      records,
       resolveTenantVisibility(identity),
     );
 
@@ -388,6 +396,21 @@ export class AuditNotificationService implements OnModuleInit {
 
   getAuditLogsSnapshot() {
     return this.auditLogs.map((auditLog) => cloneAuditLog(auditLog));
+  }
+
+  async readAuditLogById(
+    auditId: string,
+    identity?: EvidenceAccessIdentity | null,
+    requestId?: string,
+  ) {
+    const persisted = this.auditLogRepository?.isEnabled()
+      ? await this.auditLogRepository.findById(auditId)
+      : null;
+    const record =
+      persisted ?? this.auditLogs.find((entry) => entry.auditId === auditId);
+    // A deep link may point at a committed record from another API replica or
+    // outside the recent feed. Apply the same existing read policy to it.
+    return this.listAuditRecords(record ? [record] : [], identity, requestId);
   }
 
   getEvidenceGovernanceCatalog() {

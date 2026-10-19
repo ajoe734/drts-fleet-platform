@@ -1,6 +1,10 @@
 export type Locale = "en" | "zh";
 
 const en = {
+  "platformNotice.section": "Platform notices",
+  "platformNotice.read": "Read",
+  "platformNotice.markRead": "Mark as read",
+  "platformNotice.readNotAcknowledged": "Read was not acknowledged",
   // ── App ──
   "app.name": "DRTS Fleet",
   "app.sub": "Ops Console",
@@ -2332,6 +2336,14 @@ const en = {
   "dispatch.detail.overrideSummary.candidateCanBeAssigned":
     "Candidate can be assigned",
   "dispatch.detail.headerAction.contactRider": "Contact rider",
+  "dispatch.detail.headerAction.createDispatch": "Create dispatch",
+  "dispatch.detail.headerAction.assignSelectedCandidate":
+    "Assign selected driver",
+  "dispatch.detail.reassign.reason": "Reassignment reason",
+  "dispatch.detail.reassign.note": "Reassignment note (optional)",
+  "dispatch.detail.assignment.orderId": "Original order ID",
+  "dispatch.detail.assignment.current": "Current driver task",
+  "dispatch.detail.assignment.task": "Task ID",
   "dispatch.detail.headerAction.assignTopCandidate": "Assign #1",
   "dispatch.detail.headerAction.releaseDriver": "Release driver",
   "dispatch.detail.headerAction.fareOverride": "Fare override",
@@ -4365,6 +4377,8 @@ const en = {
   "opsCode.passenger_injury": "Passenger Injury",
   "opsCode.paused": "Paused",
   "opsCode.pending": "Pending",
+  "opsCode.pending_acceptance": "Awaiting Acceptance",
+  "opsCode.accepted": "Accepted",
   "opsCode.pending_review": "Pending Review",
   "opsCode.phone": "Phone",
   "opsCode.portal": "Portal",
@@ -4642,6 +4656,10 @@ const en = {
 };
 
 const zh: Record<keyof typeof en, string> = {
+  "platformNotice.section": "平台公告",
+  "platformNotice.read": "已讀",
+  "platformNotice.markRead": "標示已讀",
+  "platformNotice.readNotAcknowledged": "讀取未獲確認",
   // ── App ──
   "app.name": "DRTS 車隊",
   "app.sub": "營運控制台",
@@ -6775,6 +6793,13 @@ const zh: Record<keyof typeof en, string> = {
   "dispatch.detail.overrideSummary.candidateCanBeAssigned":
     "可直接指派或重派候選",
   "dispatch.detail.headerAction.contactRider": "聯絡乘客",
+  "dispatch.detail.headerAction.createDispatch": "建立派遣",
+  "dispatch.detail.headerAction.assignSelectedCandidate": "指派所選司機",
+  "dispatch.detail.reassign.reason": "改派原因",
+  "dispatch.detail.reassign.note": "改派備註（選填）",
+  "dispatch.detail.assignment.orderId": "原始訂單識別碼",
+  "dispatch.detail.assignment.current": "目前司機任務",
+  "dispatch.detail.assignment.task": "任務識別碼",
   "dispatch.detail.headerAction.assignTopCandidate": "指派候選 #1",
   "dispatch.detail.headerAction.releaseDriver": "釋放司機",
   "dispatch.detail.headerAction.fareOverride": "車資覆寫",
@@ -8731,6 +8756,8 @@ const zh: Record<keyof typeof en, string> = {
   "opsCode.passenger_injury": "乘客受傷",
   "opsCode.paused": "暫停",
   "opsCode.pending": "待處理",
+  "opsCode.pending_acceptance": "待接單",
+  "opsCode.accepted": "已接受",
   "opsCode.pending_review": "待審核",
   "opsCode.phone": "電話",
   "opsCode.portal": "入口網站",

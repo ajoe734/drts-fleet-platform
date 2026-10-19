@@ -139,6 +139,85 @@ class LiveApprovalResumeTests(unittest.TestCase):
         finalize.assert_called_once_with({}, {}, worker, "failed", "Operation not allowed")
         resume.assert_not_called()
 
+    def _resume_command(self, runtime_overrides: dict, provider: str = "claude2") -> list:
+        worker = self.worker(status="suspended_approval")
+        worker["provider"] = provider
+        config = {
+            "paths": {
+                "status_file": "/tmp/canonical/ai-status.json",
+                "state_file": "/tmp/canonical/state.json",
+            },
+            "providers": {
+                provider: {"runtime": {"cli": "claude", **runtime_overrides}},
+            },
+        }
+        process = mock.Mock()
+        with (
+            mock.patch.object(supervisor, "command_exists", return_value="/usr/bin/claude"),
+            mock.patch.object(
+                supervisor, "spawn_background_process",
+                return_value=(process, None),
+            ) as spawn,
+            mock.patch.object(supervisor, "background_process_pid", return_value=9999),
+            mock.patch.object(supervisor, "apply_worker_unit_env", return_value="drts-worker-x.service"),
+            mock.patch.object(supervisor, "new_runtime_id", return_value=f"{provider}-resume-test"),
+        ):
+            supervisor.resume_claude_worker(config, worker, {})
+        return spawn.call_args.args[0]
+
+    def test_configured_permission_prompt_tool_is_passed_to_resume_command(self):
+        command = self._resume_command(
+            {"permission_prompt_tool": "mcp__orchestrator_approval_broker__approval_prompt"}
+        )
+        self.assertIn("--permission-prompt-tool", command)
+        self.assertEqual(
+            command[command.index("--permission-prompt-tool") + 1],
+            "mcp__orchestrator_approval_broker__approval_prompt",
+        )
+
+    def test_unset_permission_prompt_tool_omits_flag_from_resume_for_backward_compatibility(self):
+        command = self._resume_command({})
+        self.assertNotIn("--permission-prompt-tool", command)
+
+    def test_resume_uses_print_mode_so_permission_prompt_tool_is_not_a_cli_no_op(self):
+        # The installed Claude CLI's own --help documents
+        # "--permission-prompt-tool ... (only works with --print)". Resume
+        # is spawned with no interactive stdin (see
+        # control_plane.runtime.supervisor_runtime.resume_claude_worker's
+        # call to spawn_background_process), so without -p/--print the
+        # flag this test configures would be silently inert.
+        for provider in ("claude", "claude2"):
+            with self.subTest(provider=provider):
+                command = self._resume_command(
+                    {"permission_prompt_tool": "mcp__orchestrator_approval_broker__approval_prompt"},
+                    provider=provider,
+                )
+                self.assertIn("-p", command)
+                self.assertIn("--permission-prompt-tool", command)
+                # Same-session continuation: resume targets the existing
+                # session rather than starting a fresh one.
+                self.assertIn("--resume", command)
+                self.assertEqual(
+                    command[command.index("--resume") + 1],
+                    "session-1",
+                )
+                # -p must precede --output-format so the CLI treats this as
+                # a single noninteractive continuation turn, not a fresh
+                # interactive session.
+                self.assertLess(command.index("-p"), command.index("--output-format"))
+
+    def test_resume_print_mode_continuation_message_is_configurable(self):
+        command = self._resume_command({"resume_continuation_message": "Proceed with the approved tool call."})
+        self.assertEqual(
+            command[command.index("-p") + 1],
+            "Proceed with the approved tool call.",
+        )
+
+    def test_resume_print_mode_has_a_default_continuation_message(self):
+        command = self._resume_command({})
+        self.assertIn("-p", command)
+        self.assertTrue(command[command.index("-p") + 1])
+
 
 if __name__ == "__main__":
     unittest.main()

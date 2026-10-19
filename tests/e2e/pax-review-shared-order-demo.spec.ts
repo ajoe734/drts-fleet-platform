@@ -4,19 +4,37 @@ import {
   type BrowserContext,
   type Page,
   type TestInfo,
+  type Response as BrowserResponse,
 } from "@playwright/test";
+import { trackInterruptedRehearsal } from "./pax-review-shared-order/interrupted-rehearsal-finalizer";
+import type { ActionReceipt } from "@drts/contracts";
 import { readFile } from "node:fs/promises";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
 import { bookingResponseDiagnostic } from "./pax-review-shared-order/booking-diagnostic";
 import { dispatchResponseDiagnostic } from "./pax-review-shared-order/dispatch-diagnostic";
+import {
+  createDispatchInOrdinaryWorkspace,
+  assignInOrdinaryWorkspace,
+} from "./pax-review-shared-order/ordinary-ops-dispatch";
 
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
 const sharedDev = process.env.PAX_REVIEW_SHARED_DEV_SMOKE === "true";
 const PAX = process.env.PAX_REVIEW_PASSENGER_ORIGIN || "http://localhost:3319";
 const OPS = process.env.PAX_REVIEW_OPS_ORIGIN || "http://127.0.0.1:3202";
-const DRIVER = sharedDev ? `${PAX}/review-driver` : "http://127.0.0.1:3101";
+const PLATFORM_ADMIN =
+  process.env.PAX_REVIEW_PLATFORM_ADMIN_ORIGIN ||
+  (sharedDev ? "" : "http://127.0.0.1:3204");
+const privateDriverOrigin = process.env.PAX_REVIEW_DRIVER_ORIGIN?.replace(
+  /\/$/,
+  "",
+);
+if (sharedDev && !privateDriverOrigin)
+  throw new Error("Missing configured private Driver origin");
+const DRIVER = sharedDev
+  ? `${privateDriverOrigin}/review-driver`
+  : "http://127.0.0.1:3101";
 const camel = (value: any): any =>
   Array.isArray(value)
     ? value.map(camel)
@@ -167,8 +185,573 @@ async function opsRead(ops: Page, orderId: string) {
   await expect(ops.getByTestId("ops-review-order-id")).toHaveText(orderId);
 }
 
-async function createDispatch(ops: Page, orderId: string) {
+async function readCompletedByOps(ops: Page, orderId: string) {
   await opsRead(ops, orderId);
+  await expect(ops.getByTestId("ops-review-order-status")).toHaveText(
+    "completed",
+  );
+  const response = await ops.request.get(
+    `${OPS}/control-plane-proxy/orders/${orderId}`,
+  );
+  expect(response.status()).toBe(200);
+  expect(camel(await response.json()).data).toMatchObject({
+    orderId,
+    status: "completed",
+  });
+}
+
+async function submitLostItemForCompletedRide(
+  pax: Page,
+  ops: Page,
+  orderId: string,
+  info: TestInfo,
+) {
+  const description = "演練遺失物：藍色虛構雨傘（無真人失物）";
+  const content = "同一趟已完成行程的遺失物演練，請依原客服流程處理。";
+  await pax
+    .getByRole("button", { name: "客訴與遺失物表單", exact: true })
+    .click();
+  await pax.getByRole("combobox").selectOption("lost_item");
+  await pax.getByPlaceholder("遺失物描述", { exact: true }).fill(description);
+  await pax
+    .getByPlaceholder("請描述您的問題，如為遺失物請說明特徵...", {
+      exact: true,
+    })
+    .fill(content);
+  await pax.getByRole("checkbox", { name: /同意客服人員/ }).check();
+  const submitted = pax.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname ===
+        `/api/passenger-app/rides/${orderId}/complaints` &&
+      response.request().method() === "POST",
+  );
+  await pax.getByRole("button", { name: "確認送出", exact: true }).click();
+  const response = await submitted;
+  expect(response.status()).toBeLessThan(300);
+  const caseNo = camel(await response.json()).data.complaintId as string;
+  expect(caseNo).toMatch(/^PAX-[0-9a-f-]{36}$/);
+  await expect(
+    pax.getByText("我們已收到您的問題", { exact: true }),
+  ).toBeVisible();
+  await info.attach("A-lost-item-submitted-pax", {
+    body: await pax.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  const readback = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}`,
+  );
+  expect(readback.status()).toBe(200);
+  const complaint = camel(await readback.json()).data;
+  expect(complaint).toMatchObject({
+    caseNo,
+    caseSource: "app",
+    relatedOrderId: orderId,
+    category: "lost_and_found",
+    status: "new",
+  });
+  expect(complaint.description).toContain(description);
+  expect(complaint.description).toContain(content);
+  expect(complaint.description).toContain("同意客服聯繫：是");
+  await ops.goto(`${OPS}/complaints/${caseNo}`);
+  await expect(
+    ops.locator(`a[href="/dispatch/${orderId}"]`).first(),
+  ).toBeVisible();
+  await expect(
+    ops.getByText(description, { exact: false }).first(),
+  ).toBeVisible();
+  const timelineResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}/timeline`,
+  );
+  expect(timelineResponse.status()).toBe(200);
+  const timeline = camel(await timelineResponse.json()).data.items;
+  expect(timeline).toHaveLength(1);
+  expect(timeline[0].action).toBe("case_created");
+  await expect(ops.getByText("轉入合規佇列", { exact: true })).toHaveCount(0);
+  const progress = ops.getByTestId("complaint-progress");
+  await expect(progress.getByText("complete", { exact: true })).toHaveCount(1);
+  await expect(progress.getByText("current", { exact: true })).toHaveCount(1);
+  await expect(progress.getByText("upcoming", { exact: true })).toHaveCount(2);
+  await info.attach("A-lost-item-case-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-same-order-case-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      category: complaint.category,
+      caseSource: complaint.caseSource,
+      status: complaint.status,
+      relatedOrderId: complaint.relatedOrderId,
+      contactConsent: true,
+      content,
+      lostItemDescription: description,
+      actualTimelineActions: timeline.map(
+        (entry: { action: string }) => entry.action,
+      ),
+      actualProgress: { complete: 1, current: 1, upcoming: 2 },
+      scope: "Passenger real form POST, Ops real case API and actual case page",
+      resolvedOrReturned: false,
+    }),
+    contentType: "application/json",
+  });
+  const listTimelineRequest = ops.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/complaints/${caseNo}/timeline`) &&
+      response.request().method() === "GET",
+  );
+  await ops.goto(`${OPS}/complaints?caseNo=${encodeURIComponent(caseNo)}`);
+  const listTimelineResponse = await listTimelineRequest;
+  expect(listTimelineResponse.status()).toBe(200);
+  const listTimeline = camel(await listTimelineResponse.json()).data.items;
+  expect(listTimeline).toEqual(timeline);
+  await expect(
+    ops.locator(`a[href="/dispatch?orderId=${orderId}"]`).first(),
+  ).toBeVisible();
+  await expect(
+    ops
+      .getByTestId("complaint-list-activity")
+      .getByText(timeline[0].note, { exact: true }),
+  ).toBeVisible();
+  await info.attach("A-lost-item-case-list-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-case-list-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      timelineActions: listTimeline.map(
+        (entry: { action: string }) => entry.action,
+      ),
+      displayedNote: timeline[0].note,
+      scope: "ordinary complaints workspace, actual SDK/BFF timeline and DOM",
+      resolvedOrReturned: false,
+    }),
+    contentType: "application/json",
+  });
+  const handlingNote = `演練處理備註：已核對同單 ${orderId}；真人聯繫另驗。`;
+  await ops
+    .getByTestId("complaint-list-actions")
+    .getByRole("button", { name: "新增備註", exact: true })
+    .click();
+  await ops.getByLabel("調查備註", { exact: true }).fill(handlingNote);
+  const noteRequest = ops.waitForResponse(
+    (response) =>
+      response.url().endsWith(`/complaints/${caseNo}/notes`) &&
+      response.request().method() === "POST",
+  );
+  await ops.getByRole("button", { name: "確認", exact: true }).click();
+  expect((await noteRequest).status()).toBeLessThan(300);
+  await verifyRealCaseAudit(
+    ops,
+    await noteRequest,
+    info,
+    orderId,
+    caseNo,
+    "add_complaint_case_note",
+    "add-note",
+  );
+  // Keep this page mounted: a reload would hide a stale workspace defect.
+  await expect(
+    ops
+      .getByTestId("complaint-list-activity")
+      .getByText(handlingNote, { exact: true }),
+  ).toBeVisible();
+  const updatedCaseResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}`,
+  );
+  expect(updatedCaseResponse.status()).toBe(200);
+  const updatedCase = camel(await updatedCaseResponse.json()).data;
+  expect(updatedCase).toMatchObject({
+    caseNo,
+    relatedOrderId: orderId,
+    status: "under_investigation",
+  });
+  const updatedTimelineResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}/timeline`,
+  );
+  expect(updatedTimelineResponse.status()).toBe(200);
+  const updatedTimeline = camel(await updatedTimelineResponse.json()).data
+    .items;
+  expect(
+    updatedTimeline.map((entry: { action: string }) => entry.action),
+  ).toEqual(["case_created", "case_note_added"]);
+  expect(updatedTimeline[1].note).toBe(handlingNote);
+  await info.attach("A-lost-item-case-list-after-note-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-case-list-after-note-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      status: updatedCase.status,
+      relatedOrderId: updatedCase.relatedOrderId,
+      actualTimelineActions: updatedTimeline.map(
+        (entry: { action: string }) => entry.action,
+      ),
+      displayedNote: handlingNote,
+      samePageWithoutReload: true,
+      resolvedOrReturned: false,
+      scope: "real Ops note POST and same mounted ordinary case workspace",
+    }),
+    contentType: "application/json",
+  });
+  await completeInternalLostItemCase(ops, info, orderId, caseNo);
+  await pax.getByRole("button", { name: "返回行程", exact: true }).click();
+  await ops.goto(`${OPS}/review`);
+  await readCompletedByOps(ops, orderId);
+}
+
+async function completeInternalLostItemCase(
+  ops: Page,
+  info: TestInfo,
+  orderId: string,
+  caseNo: string,
+) {
+  const assigneeId = "AGENT-OPS-002";
+  const steps = [
+    {
+      action: "assign",
+      label: "指派 / 重新指派",
+      status: "assigned",
+      event: "case_assigned",
+      note: `演練指派：既有示範處理人核對同單 ${orderId}，未通知真人。`,
+    },
+    {
+      action: "resolve",
+      label: "結案處理",
+      status: "resolved",
+      event: "case_resolved",
+      note: "演練處理完成：虛構雨傘案例；沒有真人聯絡或實物返還。",
+    },
+    {
+      action: "close",
+      label: "關閉案件",
+      status: "closed",
+      event: "case_closed",
+      note: "關閉內部演練案件：未致電、未取回實物，不代表真實失物結案。",
+    },
+  ];
+  const expectedEvents = ["case_created", "case_note_added"];
+  const observed = [];
+  for (const step of steps) {
+    await ops
+      .getByTestId("complaint-list-actions")
+      .getByRole("button", { name: step.label, exact: true })
+      .click();
+    if (step.action === "assign") {
+      await ops.getByLabel("負責人 ID", { exact: true }).fill(assigneeId);
+      await ops.getByLabel("指派備註", { exact: true }).fill(step.note);
+    } else {
+      // Playwright includes option text in this implicit label's text.
+      const resolutionField = ops.getByLabel("處理代碼");
+      await expect(resolutionField).toBeVisible();
+      await expect(
+        resolutionField.locator('option[value="resolved_other"]'),
+      ).toHaveCount(1);
+      await resolutionField.selectOption("resolved_other");
+      // Closing reuses the resolution note, which is also implicit label text.
+      const closingNoteField = ops.getByLabel("結案備註");
+      await expect(closingNoteField).toBeVisible();
+      await closingNoteField.fill(step.note);
+    }
+    const write = ops.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/complaints/${caseNo}/${step.action}`) &&
+        response.request().method() === "POST",
+    );
+    await ops.getByRole("button", { name: "確認", exact: true }).click();
+    expect((await write).status()).toBeLessThan(300);
+    await verifyRealCaseAudit(
+      ops,
+      await write,
+      info,
+      orderId,
+      caseNo,
+      `${step.action}_complaint_case`,
+      step.action,
+    );
+    // Do not navigate or reload: every action must update this same workspace.
+    await expect(
+      ops
+        .getByTestId("complaint-list-activity")
+        .getByText(step.note, { exact: true }),
+    ).toBeVisible();
+    const read = await ops.request.get(
+      `${OPS}/control-plane-proxy/complaints/${caseNo}`,
+    );
+    expect(read.status()).toBe(200);
+    const record = camel(await read.json()).data;
+    expect(record).toMatchObject({
+      caseNo,
+      relatedOrderId: orderId,
+      assigneeId,
+      status: step.status,
+    });
+    if (step.action !== "assign") {
+      expect(record).toMatchObject({
+        resolutionCode: "resolved_other",
+        closingNote: step.note,
+      });
+    }
+    const timelineResponse = await ops.request.get(
+      `${OPS}/control-plane-proxy/complaints/${caseNo}/timeline`,
+    );
+    expect(timelineResponse.status()).toBe(200);
+    const timeline = camel(await timelineResponse.json()).data.items;
+    expectedEvents.push(step.event);
+    expect(timeline.map((entry: { action: string }) => entry.action)).toEqual(
+      expectedEvents,
+    );
+    expect(timeline.at(-1).note).toBe(step.note);
+    observed.push({ action: step.action, record, timeline });
+    await info.attach(`A-lost-item-internal-case-${step.action}-facts`, {
+      body: JSON.stringify({
+        orderId,
+        caseNo,
+        action: step.action,
+        status: record.status,
+        assigneeId: record.assigneeId,
+        timelineActions: timeline.map(
+          (entry: { action: string }) => entry.action,
+        ),
+      }),
+      contentType: "application/json",
+    });
+  }
+  await expect(
+    ops
+      .getByTestId("complaint-list-actions")
+      .getByRole("button", { name: "新增備註", exact: true }),
+  ).toHaveCount(0);
+  const exportResponse = await ops.request.get(
+    `${OPS}/control-plane-proxy/complaints/${caseNo}/export`,
+  );
+  expect(exportResponse.status()).toBe(200);
+  const exported = camel(await exportResponse.json()).data;
+  expect(exported.readyForAudit).toBe(true);
+  expect(exported.complaintCase).toMatchObject({
+    caseNo,
+    relatedOrderId: orderId,
+    status: "closed",
+  });
+  expect(
+    exported.timeline.map((entry: { action: string }) => entry.action),
+  ).toEqual(expectedEvents);
+  await expect(ops.getByText("可生成審計封包", { exact: true })).toBeVisible();
+  await expect(
+    ops.locator(`a[href="/dispatch?orderId=${orderId}"]`).first(),
+  ).toBeVisible();
+  const explicitExport = ops.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith(`/complaints/${caseNo}/export`) &&
+      url.searchParams.get("action_receipt") === "true" &&
+      response.request().method() === "GET"
+    );
+  });
+  await ops
+    .getByTestId("complaint-list-actions")
+    .getByRole("button", { name: "匯出案件視圖", exact: true })
+    .click();
+  const exportReceipt = await verifyRealCaseAudit(
+    ops,
+    await explicitExport,
+    info,
+    orderId,
+    caseNo,
+    "export_complaint_case_view",
+    "export",
+  );
+  await visitActualAuditDestination(ops, info, orderId, caseNo, exportReceipt);
+  await info.attach("A-lost-item-internal-case-closed-ops", {
+    body: await ops.screenshot({ fullPage: true }),
+    contentType: "image/png",
+  });
+  await info.attach("A-lost-item-internal-case-lifecycle-facts", {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      observed,
+      finalTimelineActions: expectedEvents,
+      readyForAudit: exported.readyForAudit,
+      samePageWithoutReload: true,
+      internalStatus: "closed",
+      humanContacted: false,
+      physicalItemReturned: false,
+      auditReceiptOrLinkVerified: true,
+      auditDestinationPageRendered: true,
+      scope:
+        "real ordinary Ops forms and persisted API; external outcome is explicitly fictional",
+    }),
+    contentType: "application/json",
+  });
+}
+
+async function verifyRealCaseAudit(
+  ops: Page,
+  response: BrowserResponse,
+  info: TestInfo,
+  orderId: string,
+  caseNo: string,
+  expectedAction: string,
+  label: string,
+): Promise<ActionReceipt> {
+  expect(response.ok()).toBe(true);
+  const envelope = camel(await response.json());
+  const receipt = envelope.meta.actionReceipt as ActionReceipt;
+  expect(receipt).toMatchObject({
+    resourceType: "complaint_case",
+    resourceId: caseNo,
+    status: "completed",
+  });
+  expect(receipt.auditId).toMatch(
+    /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/,
+  );
+  expect(receipt.actionId).toBeTruthy();
+  let auditRecord: any;
+  await expect
+    .poll(async () => {
+      const read = await ops.request.get(
+        `${OPS}/control-plane-proxy/audit?auditId=${encodeURIComponent(receipt.auditId)}`,
+      );
+      expect(read.status()).toBe(200);
+      const records = camel(await read.json()).data.items;
+      auditRecord = records.find(
+        (record: { auditId: string }) => record.auditId === receipt.auditId,
+      );
+      return auditRecord?.auditId;
+    })
+    .toBe(receipt.auditId);
+  expect(auditRecord).toMatchObject({
+    auditId: receipt.auditId,
+    requestId: receipt.actionId,
+    moduleName: "complaint",
+    actionName: expectedAction,
+    resourceType: "complaint_case",
+    resourceId: caseNo,
+  });
+  const target = new URL("/audit", PLATFORM_ADMIN);
+  target.searchParams.set("auditId", receipt.auditId);
+  target.searchParams.set("resourceType", "complaint_case");
+  target.searchParams.set("resourceId", caseNo);
+  await expect(ops.getByTestId("complaint-action-audit-link")).toHaveAttribute(
+    "href",
+    target.toString(),
+  );
+  await info.attach(`A-lost-item-real-audit-${label}-facts`, {
+    body: JSON.stringify({
+      orderId,
+      caseNo,
+      receipt,
+      auditRecord: {
+        auditId: auditRecord.auditId,
+        requestId: auditRecord.requestId,
+        actionName: auditRecord.actionName,
+        resourceType: auditRecord.resourceType,
+        resourceId: auditRecord.resourceId,
+        createdAt: auditRecord.createdAt,
+      },
+      auditHref: target.toString(),
+      actualBackendRead: true,
+    }),
+    contentType: "application/json",
+  });
+  return receipt;
+}
+
+async function visitActualAuditDestination(
+  ops: Page,
+  info: TestInfo,
+  orderId: string,
+  caseNo: string,
+  receipt: ActionReceipt,
+) {
+  const request = ops.context().waitForEvent("response", {
+    timeout: 30_000,
+    predicate: (response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === new URL(PLATFORM_ADMIN).origin &&
+        url.pathname.endsWith("/control-plane-proxy/audit") &&
+        url.searchParams.get("auditId") === receipt.auditId
+      );
+    },
+  });
+  const opened = ops.context().waitForEvent("page", { timeout: 30_000 });
+  await ops.getByTestId("complaint-action-audit-link").click();
+  const audit = await opened;
+  try {
+    const actualRead = await request;
+    expect(actualRead.status()).toBe(200);
+    const items = camel(await actualRead.json()).data.items;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      auditId: receipt.auditId,
+      resourceId: caseNo,
+      actionName: "export_complaint_case_view",
+      requestId: receipt.actionId,
+    });
+    await expect(audit).toHaveURL(
+      (url) =>
+        url.pathname === "/audit" &&
+        url.searchParams.get("auditId") === receipt.auditId,
+    );
+    await expect(
+      audit
+        .getByRole("table")
+        .getByText("export_complaint_case_view", { exact: true }),
+    ).toBeVisible();
+    await expect(audit.locator("body")).toContainText(receipt.auditId);
+    await expect(audit.locator("body")).toContainText(caseNo);
+    await info.attach("A-lost-item-audit-destination-ops", {
+      body: await audit.screenshot({ fullPage: true }),
+      contentType: "image/png",
+    });
+    await info.attach("A-lost-item-audit-destination-facts", {
+      body: JSON.stringify({
+        orderId,
+        caseNo,
+        auditId: receipt.auditId,
+        actionId: receipt.actionId,
+        actualURL: audit.url(),
+        actualPageRendered: true,
+        actualOwningAppAPIRead: true,
+        APIInstance: sharedDev ? "shared CloudRun" : "second real API instance",
+      }),
+      contentType: "application/json",
+    });
+  } finally {
+    await audit.close();
+  }
+}
+
+async function createDispatch(ops: Page, orderId: string, info?: TestInfo) {
+  await opsRead(ops, orderId);
+  if (info) {
+    const facts = await createDispatchInOrdinaryWorkspace(
+      ops,
+      OPS,
+      orderId,
+      info,
+    );
+    await ops.goto(`${OPS}/review`);
+    await opsRead(ops, orderId);
+    await expect(ops.getByTestId("ops-review-job-id")).toHaveText(
+      facts.dispatchJobId,
+    );
+    await expect(ops.locator(`a[href="/dispatch/${orderId}"]`)).toBeVisible();
+    await info.attach("A-ordinary-Ops-create-dispatch-facts", {
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...facts,
+        actualReviewDetailLinkUsesOriginalOrderId: true,
+      }),
+    });
+    return;
+  }
   const job = ops.waitForResponse(
     (r) =>
       r.url().endsWith(`/orders/${orderId}/dispatch`) &&
@@ -257,9 +840,43 @@ async function finish(
   ops: Page,
   step: JourneyStep,
   stale = false,
+  ordinaryOpsInfo?: TestInfo,
 ) {
+  const ordinaryTaskId = ordinaryOpsInfo
+    ? await ops.locator("[data-ops-task-id]").getAttribute("data-ops-task-id")
+    : null;
+  if (ordinaryOpsInfo) expect(ordinaryTaskId).toMatch(/^[0-9a-f-]{36}$/);
+  const observedOrdinaryStates: {
+    status: string;
+    taskId: string;
+    observedAt: number;
+  }[] = [];
+  const ordinaryState = async (status: string) => {
+    if (!ordinaryOpsInfo) return;
+    // Stay on the original ordinary detail page: no goto, reload, direct
+    // refresh, or response substitution between Driver actions and readback.
+    expect(new URL(ops.url()).pathname).toBe(`/dispatch/${orderId}`);
+    await expect(ops.locator(`[data-ops-order-id="${orderId}"]`)).toBeVisible();
+    await expect(ops.getByText(orderId, { exact: true })).toBeVisible();
+    await expect(
+      ops.locator(
+        `[data-ops-task-id="${ordinaryTaskId}"][data-ops-task-status="${status}"]`,
+      ),
+    ).toBeVisible({ timeout: 20_000 });
+    observedOrdinaryStates.push({
+      status,
+      taskId: ordinaryTaskId!,
+      observedAt: Date.now(),
+    });
+  };
   await step("Driver read assigned trip and accept", async () => {
     await readAssignedTripAndAccept(driver, base, orderId, step);
+    await ordinaryState("accepted");
+    if (ordinaryOpsInfo)
+      await ordinaryOpsInfo.attach("A-ordinary-Ops-driver-accepted-live-ops", {
+        contentType: "image/png",
+        body: await ops.screenshot({ fullPage: true }),
+      });
   });
   for (const [label, action] of [
     ["前往接送點", "depart"],
@@ -281,6 +898,13 @@ async function finish(
       );
       await driver.getByRole("button", { name: label, exact: true }).click();
       expect((await response).status()).toBeLessThan(300);
+      await ordinaryState(
+        {
+          depart: "enroute_pickup",
+          arrived_pickup: "arrived_pickup",
+          start: "on_trip",
+        }[action],
+      );
     });
   }
   await expect
@@ -380,11 +1004,96 @@ async function finish(
       await expect
         .poll(async () => (await authority(pax, orderId)).order.status)
         .toBe("completed");
+      await ordinaryState("completed");
+      if (ordinaryOpsInfo) {
+        const taskId = await ops
+          .locator('[data-ops-task-status="completed"]')
+          .getAttribute("data-ops-task-id");
+        expect(taskId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(taskId).toBe(ordinaryTaskId);
+        expect(observedOrdinaryStates.map((state) => state.status)).toEqual([
+          "accepted",
+          "enroute_pickup",
+          "arrived_pickup",
+          "on_trip",
+          "completed",
+        ]);
+        await ordinaryOpsInfo.attach(
+          "A-ordinary-Ops-driver-completed-live-ops",
+          {
+            contentType: "image/png",
+            body: await ops.screenshot({ fullPage: true }),
+          },
+        );
+        await ordinaryOpsInfo.attach("A-ordinary-Ops-live-Driver-state-facts", {
+          contentType: "application/json",
+          body: JSON.stringify({
+            orderId,
+            taskId,
+            actualEntry: `/dispatch/${orderId}`,
+            actualVisibleDriverStates: observedOrdinaryStates.map(
+              (state) => state.status,
+            ),
+            actualObservedStates: observedOrdinaryStates,
+            actualOriginalDetailPageRetainedBetweenDriverStates: true,
+            actualManualNavigationOrReloadBetweenDriverStates: false,
+            actualInternalNetworkMocks: false,
+            actualClockAdvanced: false,
+          }),
+        });
+      }
     },
   );
 }
 
 async function download(pax: Page, orderId: string, info: TestInfo) {
+  await expect
+    .poll(
+      async () =>
+        (await authority(pax, orderId)).receipt?.record?.e04Snapshot
+          ?.fleetOperatorName,
+    )
+    .toBe("虛構演練派遣業者（合成・非正式）");
+  const ride = await authority(pax, orderId);
+  const snapshot = ride.receipt.record.e04Snapshot;
+  expect(ride.receipt.orderId).toBe(orderId);
+  expect(snapshot.driverSurname).toBe("演練");
+  expect(snapshot.driverRegistrationMasked).toMatch(/^[•*●Xx]{4,}900[12]$/);
+  expect(snapshot.paymentMethodDisplay).toMatch(/••••[0-9]{4}$/);
+  expect(snapshot.fareBreakdown).toEqual(
+    ride.receipt.record.actualFareBreakdown,
+  );
+  for (const field of [
+    "startMinor",
+    "distanceMinor",
+    "delayMinor",
+    "nightMinor",
+  ])
+    expect(Number.isSafeInteger(snapshot.fareBreakdown[field])).toBe(true);
+  // Read the normal passenger E04 API and actual receipt UI, as well as the
+  // existing explicitly nonformal rehearsal record below.
+  const downloads = await pax.request.get(
+    `${PAX}/api/passenger-app/rides/${orderId}/receipt/downloads`,
+  );
+  expect(downloads.status()).toBe(200);
+  const metadata = camel(await downloads.json()).data;
+  expect(metadata.orderId).toBe(orderId);
+  const e04 = await pax.request.get(`${PAX}${metadata.htmlUrl}`);
+  expect(e04.status()).toBe(200);
+  const e04Html = await e04.text();
+  expect(e04Html).toContain("合成・非正式");
+  expect(e04Html).toContain(snapshot.driverRegistrationMasked);
+  await info.attach(`same-order-${orderId}-e04`, {
+    body: e04Html,
+    contentType: "text/html",
+  });
+  await pax.goto(`${PAX}/rides/${orderId}/receipt`);
+  await expect(
+    pax.getByText(snapshot.fleetOperatorName, { exact: true }),
+  ).toBeVisible();
+  await expect(
+    pax.getByText("PASSENGER_RECEIPT_LEGAL_FIELDS_MISSING", { exact: true }),
+  ).toHaveCount(0);
   await pax.goto(`${PAX}/review/records/${orderId}`);
   const waiting = pax.waitForEvent("download");
   await pax.getByRole("button", { name: "下載演練紀錄 HTML" }).click();
@@ -423,6 +1132,9 @@ function assertCompletedFacts(rows: any[], orderId: string) {
 test("three new PG orders travel through real Passenger, Ops and Driver UIs, including retry/case, cancellation and exception controls", async ({
   browser,
 }, info) => {
+  const publicPassenger =
+    sharedDev && process.env.PAX_REVIEW_PUBLIC_PASSENGER === "true";
+  const mountedDriverBase = sharedDev ? DRIVER : `${PAX}/review-driver`;
   const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
   const step = progress.step;
   const contexts: BrowserContext[] = [];
@@ -430,8 +1142,12 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     const outerToken =
       role === "ops"
         ? process.env.PAX_REVIEW_OPS_ID_TOKEN
-        : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
-    if (sharedDev && !outerToken)
+        : role === "driver" && sharedDev
+          ? process.env.PAX_REVIEW_DRIVER_ID_TOKEN
+          : role === "pax" && publicPassenger
+            ? undefined
+            : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
+    if (sharedDev && !(role === "pax" && publicPassenger) && !outerToken)
       throw new Error(
         `Missing existing private-service access credential for ${role}`,
       );
@@ -446,6 +1162,21 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           }
         : {}),
     });
+    if (role === "ops" && sharedDev) {
+      const platformToken = process.env.PAX_REVIEW_PLATFORM_ADMIN_ID_TOKEN;
+      if (!PLATFORM_ADMIN || !platformToken)
+        throw new Error(
+          "Missing existing Platform Admin URL or private-service access credential",
+        );
+      await c.route(`${PLATFORM_ADMIN}/**`, (route) =>
+        route.continue({
+          headers: {
+            ...route.request().headers(),
+            "x-serverless-authorization": `Bearer ${platformToken}`,
+          },
+        }),
+      );
+    }
     contexts.push(c);
     return c.newPage();
   };
@@ -453,6 +1184,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
     ops = await step("Ops browser context", () => newRole("ops")),
     driver = await step("Driver browser context", () => newRole("driver"));
   let activeDriver = { page: driver, base: DRIVER };
+  const finalizeInterruptedOrders = trackInterruptedRehearsal(pax, info, PAX);
   const requests: {
     role: string;
     method: string;
@@ -482,41 +1214,139 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
   try {
     await step("Ops prepare real persisted rehearsal supply", async () => {
       await ops.goto(`${OPS}/review`);
+      const preparing = ops.waitForResponse(
+        (r) =>
+          new URL(r.url()).pathname.endsWith("/ops/review-demo/prepare") &&
+          r.request().method() === "POST",
+      );
       await ops.getByRole("button", { name: "準備虛構演練車司" }).click();
+      const preparedResponse = await preparing;
+      let prepareFailure = "unclassified";
+      if (!preparedResponse.ok()) {
+        const body = await preparedResponse.json().catch(() => null);
+        if (body?.error?.code === "review_supply_unavailable") {
+          const reasons: Record<string, string> = {
+            "Rehearsal product storage is unavailable.": "product-storage",
+            "Reservation product is unavailable.": "reservation-product",
+            "Established rehearsal supply templates are unavailable.":
+              "supply-templates",
+          };
+          prepareFailure =
+            reasons[body.error.message] ?? "review_supply_unavailable";
+        }
+      }
+      expect(
+        preparedResponse.ok(),
+        `Ops prepare status=${preparedResponse.status()} reason=${prepareFailure}`,
+      ).toBe(true);
       await expect(
         ops.getByText("已準備兩組合成車司；未建立訂單、派遣或付款。"),
       ).toBeVisible();
     });
     await registerDriver(ops, driver, DRIVER, step);
     await step("Passenger genuine OTP login and account", async () => {
-      await pax.goto(`${PAX}/review`);
+      await pax.goto(`${PAX}/login`);
+      await expect(
+        pax.getByLabel("同單審查演練", { exact: true }),
+      ).toBeVisible();
       await pax
-        .getByLabel("演練手機", { exact: true })
-        .fill(
-          `09000000${String(Number(process.env.GITHUB_RUN_ID ?? 1) % 100).padStart(2, "0")}`,
-        );
-      await pax.getByRole("checkbox").check();
+        .getByRole("button", { name: "手機號碼登入", exact: true })
+        .click();
+      await info.attach("ordinary-entry-phone-login-pax", {
+        body: await pax.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+      const phone = `09000000${String(Number(process.env.GITHUB_RUN_ID ?? 1) % 100).padStart(2, "0")}`;
+      await pax.getByLabel("請輸入您的手機號碼", { exact: true }).fill(phone);
       const requestedOtp = pax.waitForResponse(
         (response) =>
           new URL(response.url()).pathname ===
             "/api/passenger-app/review-demo/otp" &&
           response.request().method() === "POST",
       );
-      await pax.getByRole("button", { name: "取得模擬簡訊" }).click();
+      await pax
+        .getByRole("button", { name: "取得驗證碼", exact: true })
+        .click();
       const otpResponse = await requestedOtp;
-      let failureCode = "unclassified";
-      if (!otpResponse.ok()) {
-        const body = await otpResponse.json().catch(() => null);
-        // Report only this fixed known code; never print OTPs or raw bodies.
-        if (body?.error === "CSRF_CHECK_FAILED")
-          failureCode = "CSRF_CHECK_FAILED";
-      }
       expect(
         otpResponse.ok(),
-        `Review OTP status=${otpResponse.status()} code=${failureCode}`,
+        `Rehearsal SMS HTTP${otpResponse.status()}`,
       ).toBe(true);
-      await pax.getByRole("button", { name: "驗證並登入演練帳戶" }).click();
-      await expect(pax.getByTestId("review-passenger-id")).toBeVisible();
+      // The page shows the external simulated inbox. Do not attach its code,
+      // challenge, request bodies or screenshot to the exported evidence.
+      const code =
+        (await pax
+          .getByLabel("模擬簡訊驗證碼", { exact: true })
+          .textContent()) ?? "";
+      expect(/^\d{6}$/.test(code)).toBe(true);
+      await pax
+        .getByRole("textbox", { name: "6 位數驗證碼 1", exact: true })
+        .fill(code);
+      const verification = pax.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname.endsWith("/auth/otp/verify") &&
+          response.request().method() === "POST",
+      );
+      await pax.getByRole("button", { name: "驗證", exact: true }).click();
+      const actualVerificationStatus = (await verification).status();
+      expect(actualVerificationStatus).toBe(201);
+      const accountResponse = await pax.request.get(
+        `${PAX}/api/passenger-app/me`,
+      );
+      expect(accountResponse.ok()).toBe(true);
+      const account = camel(await accountResponse.json()).data.account;
+      const returningConsent =
+        account.termsVersion === "review-terms-v1" &&
+        account.privacyVersion === "review-privacy-v1";
+      if (!returningConsent) {
+        await expect(
+          pax.getByText("歡迎加入，請同意服務條款", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          pax.getByRole("link", { name: "服務條款", exact: true }),
+        ).toHaveAttribute("href", "/review/terms");
+        await expect(
+          pax.getByRole("link", { name: "隱私權政策", exact: true }),
+        ).toHaveAttribute("href", "/review/terms");
+        await pax.getByRole("checkbox").check();
+        const persisted = pax.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === "/api/passenger-app/me" &&
+            response.request().method() === "PATCH",
+        );
+        await pax.getByRole("button", { name: "繼續", exact: true }).click();
+        expect((await persisted).ok()).toBe(true);
+      }
+      await expect(pax).toHaveURL(`${PAX}/`);
+      const afterResponse = await pax.request.get(
+        `${PAX}/api/passenger-app/me`,
+      );
+      expect(afterResponse.ok()).toBe(true);
+      const after = camel(await afterResponse.json()).data.account;
+      expect(after).toMatchObject({
+        drtsPassengerId: account.drtsPassengerId,
+        termsVersion: "review-terms-v1",
+        privacyVersion: "review-privacy-v1",
+      });
+      await info.attach("ordinary-entry-login-complete-pax", {
+        body: await pax.screenshot({ fullPage: true }),
+        contentType: "image/png",
+      });
+      await info.attach("ordinary-entry-login-and-consent-facts", {
+        body: JSON.stringify({
+          entry: "/login",
+          actualSMSDeliverySimulated: true,
+          actualOrdinaryOtpVerificationStatus: actualVerificationStatus,
+          actualOrdinaryConsentPromptPresented: !returningConsent,
+          returningAccountConsentAlreadyCurrent: returningConsent,
+          actualPersistedTermsVersion: after.termsVersion,
+          actualPersistedPrivacyVersion: after.privacyVersion,
+          actualPassengerId: after.drtsPassengerId,
+          authLocalStorageSubstituteUsed: false,
+          realSMSOrFormalServiceContractClaimed: false,
+        }),
+        contentType: "application/json",
+      });
       expect(
         await pax.evaluate(() =>
           localStorage.getItem("drts.passenger.functional-demo.v1"),
@@ -527,11 +1357,13 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       bind(pax, "success"),
     );
     const normal = await step("A Passenger book", () => book(pax, firstMethod));
-    await step("A Ops create dispatch", () => createDispatch(ops, normal));
+    await step("A Ops create dispatch", () =>
+      createDispatch(ops, normal, info),
+    );
     await step(
       "A Ops assign then reassign while Passenger offline",
       async () => {
-        await assign(ops, "pax-review-driver-b");
+        await assignInOrdinaryWorkspace(ops, OPS, normal, "b", false, info);
         await expect
           .poll(
             async () =>
@@ -539,7 +1371,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           )
           .toBe("pax-review-driver-b");
         await pax.context().setOffline(true);
-        await assign(ops, "pax-review-driver-a", true);
+        await assignInOrdinaryWorkspace(ops, OPS, normal, "a", true, info);
         await pax.context().setOffline(false);
         await expect(
           pax.getByText("SIM-1001", { exact: false }).first(),
@@ -558,7 +1390,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       expect(peer.status()).toBe(200);
       expect(camel(await peer.json()).data.ride.order.orderId).toBe(normal);
     }
-    await finish(driver, DRIVER, pax, normal, ops, step, true);
+    await finish(driver, DRIVER, pax, normal, ops, step, true, info);
+    await ops.goto(`${OPS}/review`);
+    await opsRead(ops, normal);
     await step(
       "A captured payment, high rating, document and relational facts",
       async () => {
@@ -573,6 +1407,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           .poll(async () => (await authority(pax, normal)).rating?.score)
           .toBe(5);
         await download(pax, normal, info);
+        await readCompletedByOps(ops, normal);
         const normalFacts = await recordOrderEvidence(
           normal,
           "A-completed-high-rating",
@@ -588,6 +1423,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
               r.order_id === normal,
           ),
         ).toBe(true);
+        await submitLostItemForCompletedRide(pax, ops, normal, info);
       },
     );
 
@@ -600,13 +1436,13 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       await createDispatch(ops, retry);
       await assign(ops);
     });
-    // Also exercise the production export mounted in the same private PAX
-    // service, including its real driver BFF and SQLite/WASM headers.
+    // Exercise the production mount and its real Driver BFF/SQLite/WASM headers.
+    // Shared dev hosts it on private Ops; source CI keeps its private PAX mount.
     const mountedDriver = await newRole("driver");
     observe("driver", mountedDriver);
-    activeDriver = { page: mountedDriver, base: `${PAX}/review-driver` };
-    await registerDriver(ops, mountedDriver, `${PAX}/review-driver`, step);
-    await finish(mountedDriver, `${PAX}/review-driver`, pax, retry, ops, step);
+    activeDriver = { page: mountedDriver, base: mountedDriverBase };
+    await registerDriver(ops, mountedDriver, mountedDriverBase, step);
+    await finish(mountedDriver, mountedDriverBase, pax, retry, ops, step);
     await step(
       "B failed payment, same-payment retry, low-rating CRM and document",
       async () => {
@@ -614,6 +1450,8 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           .poll(async () => (await authority(pax, retry)).payment?.status)
           .toBe("failed");
         expect((await authority(pax, retry)).actions.canRate).toBe(false);
+        await readCompletedByOps(ops, retry);
+        await expect(pax.getByText("付款失敗", { exact: true })).toBeVisible();
         const failedFacts = await recordOrderEvidence(
           retry,
           "B-first-capture-failed",
@@ -664,6 +1502,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await ops.goto(`${OPS}/complaints/${row!.complaint_case_no}`);
         await expect(
           ops.getByText(row!.complaint_case_no, { exact: false }).first(),
+        ).toBeVisible();
+        await expect(
+          ops.locator(`a[href="/dispatch/${retry}"]`).first(),
         ).toBeVisible();
         await ops.screenshot({
           path: info.outputPath("same-order-CRM-case.png"),
@@ -723,10 +1564,17 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           driver.getByText(cancellationHeader, { exact: true }),
         ).toBeVisible();
         pax.on("dialog", (dialog) => void dialog.accept());
+        // The real cancel action reloads the Passenger page after committing.
+        // Observe that navigation before the independent reload/readback below.
+        const cancellationNavigation = pax.waitForEvent("framenavigated", {
+          predicate: (frame) => frame === pax.mainFrame(),
+        });
         await pax
           .getByRole("button", { name: "取消行程", exact: true })
           .first()
           .click();
+        await cancellationNavigation;
+        await pax.waitForLoadState("domcontentloaded");
         await expect
           .poll(async () => (await authority(pax, cancelled)).order.status)
           .toBe("cancelled");
@@ -850,6 +1698,14 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
           })
           .catch(() => undefined);
     }
+    await finalizeInterruptedOrders().catch(() =>
+      info
+        .attach("interrupted-rehearsal-finalization-unavailable", {
+          body: "Original journey remains failed; the original owner finalization could not finish.",
+          contentType: "text/plain",
+        })
+        .catch(() => undefined),
+    );
     await Promise.allSettled(contexts.map((c) => c.close()));
     throw error;
   }

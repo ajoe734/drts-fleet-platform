@@ -34,6 +34,7 @@ function createService(options?: {
     getOrder: vi.fn(() => ({ ...order })),
     resolvePersistedOrder: vi.fn(async () => ({ ...order })),
     listOrders: vi.fn(() => [{ ...order }]),
+    resolvePassengerRideTracking: async () => null,
     resolvePersistedPassengerAssignmentDisclosure: vi.fn(
       async () => options?.assignment ?? null,
     ),

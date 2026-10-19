@@ -11,13 +11,17 @@ import { PassengerAccountService } from "../../../apps/api/src/modules/passenger
 import { PassengerAccountController } from "../../../apps/api/src/modules/passenger-app/account/passenger-account.controller";
 import { PassengerOtpService } from "../../../apps/api/src/modules/passenger-app/otp/passenger-otp.service";
 import { PassengerOtpController } from "../../../apps/api/src/modules/passenger-app/otp/passenger-otp.controller";
+import { ReviewDemoController } from "../../../apps/api/src/modules/passenger-app/review-demo/review-demo.controller";
+import { ReviewSmsPort } from "../../../apps/api/src/modules/passenger-app/review-demo/review-sms.port";
 import { NotificationDeliveryService } from "../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
 import { MemoryOtpStore } from "../pax-otp-20261009/memory-store";
 import { MemoryPassengerStore } from "../pax-account-session-20261009/memory-store";
 import type { AuthProvider, RequestOtpCommand } from "@drts/contracts";
 
 export const origin = "http://localhost:3000";
-export function createFixture() {
+export function createFixture({ review = false } = {}) {
+  vi.stubEnv("DRTS_ENV", "test");
+  vi.stubEnv("PAX_REVIEW_DEMO_ENABLED", String(review));
   vi.stubEnv("DRTS_API_URL", "https://upstream.example.invalid");
   vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
   vi.stubEnv("JWT_SECRET", "unit-only-session-key");
@@ -90,6 +94,7 @@ export function createFixture() {
       },
     },
   );
+  const sms = new ReviewSmsPort();
   const otpService = new PassengerOtpService(
     new MemoryOtpStore(),
     accounts,
@@ -97,14 +102,23 @@ export function createFixture() {
     {
       availability: () =>
         fixture.enabled.includes("phone") ? "available" : "not_configured",
-      sendOtp: async (_target, code) => {
+      sendOtp: async (target, code, expiresAt) => {
         codes.push(code);
+        if (review) return sms.sendOtp(target, code, expiresAt);
         return { status: "sent" };
       },
     },
     settings,
   );
   const otp = new PassengerOtpController(otpService, settings);
+  const reviewController = new ReviewDemoController(
+    otpService,
+    sms,
+    accounts,
+    null!,
+    null!,
+    null!,
+  );
   let nextAccountRead:
     | { started: () => void; wait: Promise<void>; readsBeforeHold: number }
     | undefined;
@@ -143,6 +157,15 @@ export function createFixture() {
         : null;
       if (path === "auth/providers")
         return Response.json({ data: { providers: fixture.enabled } });
+      if (path === "review-demo/config")
+        return Response.json(reviewController.config());
+      if (path === "review-demo/otp")
+        return Response.json(
+          await reviewController.requestOtp(body, {
+            headers: {},
+            socket: { remoteAddress: "192.0.2.10" },
+          }),
+        );
       if (path === "auth/otp/request") {
         if (fixture.otpError)
           return fail(

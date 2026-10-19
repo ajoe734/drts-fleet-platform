@@ -25,14 +25,14 @@ export class FeatureFlagsController {
   async getAllFlags(
     @Headers("x-request-id") requestId?: string,
     @Headers("x-tenant-id") tenantId?: string,
+    @Query("tenantId") selectedTenantId?: string,
   ) {
-    const flags = await this.service.getAll(tenantId);
+    const flags = await this.service.getAll(selectedTenantId || tenantId);
     const summary: FeatureFlagSummary = {
       flags,
       notes: [
         "Feature flags control module-level rollout for Phase 1 client surfaces.",
-        "Flags are tenant-scoped; include x-tenant-id header for tenant-specific overrides.",
-        "This endpoint is admin-only; smoke test with x-actor-type=platform_admin.",
+        "Authorized administrators may select tenantId for tenant-specific overrides.",
       ],
     };
     return toApiSuccessEnvelope(summary, requestId);
@@ -58,7 +58,15 @@ export class FeatureFlagsController {
     @Body() body: { enabled: boolean },
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertEnabled(body?.enabled);
     const updated = await this.service.updateFlag(key, body.enabled);
+    if (!updated) {
+      throw new ApiRequestError(
+        404,
+        "FLAG_NOT_FOUND",
+        "Global flag not found; write was not acknowledged.",
+      );
+    }
     return toApiSuccessEnvelope(updated, requestId);
   }
 
@@ -71,6 +79,7 @@ export class FeatureFlagsController {
     @Body() body: { enabled: boolean; description?: string },
     @Headers("x-request-id") requestId?: string,
   ) {
+    this.assertEnabled(body?.enabled);
     if (!tenantId) {
       throw new ApiRequestError(
         400,
@@ -85,6 +94,16 @@ export class FeatureFlagsController {
       body.description,
     );
     return toApiSuccessEnvelope(updated, requestId);
+  }
+
+  private assertEnabled(enabled: unknown) {
+    if (typeof enabled !== "boolean") {
+      throw new ApiRequestError(
+        400,
+        "FLAG_ENABLED_REQUIRED",
+        "enabled must be a boolean.",
+      );
+    }
   }
 
   @Get("flags/:key/enabled")

@@ -1,10 +1,10 @@
 import type { LlmGatewayProvider } from "../../common/llm-gateway";
 import type {
   ActionReceipt,
-  CreatePlatformNoticeCommand,
   ResourceActionDescriptor,
   SetPlatformMaintenanceModeCommand,
 } from "@drts/contracts";
+import type { NoticeCommand } from "../platform-admin/platform-notice-lifecycle";
 
 import type { RetrievalResult } from "./knowledge";
 export type PlatformAdminAssistantProviderKind = LlmGatewayProvider;
@@ -83,7 +83,7 @@ export type PlatformAdminAssistantActionToolName =
   | "action.set_maintenance_mode";
 
 interface PlatformAdminAssistantActionPayloadMap {
-  "action.create_platform_notice": CreatePlatformNoticeCommand;
+  "action.create_platform_notice": NoticeCommand;
   "action.set_maintenance_mode": SetPlatformMaintenanceModeCommand;
 }
 
