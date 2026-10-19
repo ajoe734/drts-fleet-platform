@@ -95,8 +95,14 @@ test("wrong OTP codes count down remaining attempts and lock after five", async 
     expect(response.status()).toBe(400);
     expect((await response.json()).error.code).toBe("invalid_code");
     if (attempt < 5) {
-      await expect(page.getByText("驗證碼錯誤", { exact: true })).toBeVisible();
       const remaining = 5 - attempt;
+      const errorAlert = page.getByRole("alert").filter({
+        has: page.getByText(`本次操作剩餘嘗試次數: ${remaining}`, {
+          exact: true,
+        }),
+      });
+      await expect(errorAlert).toBeVisible();
+      await expect(errorAlert).toContainText("驗證碼錯誤");
       await expect(
         page.getByText(`本次操作剩餘嘗試次數: ${remaining}`, { exact: true }),
       ).toBeVisible();

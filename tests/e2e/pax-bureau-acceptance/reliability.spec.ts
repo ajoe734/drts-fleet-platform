@@ -99,8 +99,12 @@ test("original drafts, lost acknowledgement, payment methods and a second device
           const empty = await search("交通局零候選");
           expect(empty.status()).toBe(200);
           expect(camel(await empty.json()).data.candidates).toEqual([]);
+          // The picker also announces this text in a visually hidden live
+          // region. Assert the actual visible empty-state banner here.
           await expect(
-            picker.getByText("找不到相符的地址", { exact: true }),
+            picker
+              .getByText("找不到相符的地址", { exact: true })
+              .and(picker.locator(":not([aria-live])")),
           ).toBeVisible();
           const ambiguous = await search("交通局同名地址");
           const candidates = camel(await ambiguous.json()).data.candidates;

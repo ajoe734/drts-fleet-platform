@@ -29,7 +29,7 @@
 
 Supervisor 正常補配兩個 API 原檔後，`passenger-booking.service.ts` 用現有 canonical hash，先核已登入帳戶，再讀帳戶 scope 的原 command result；成功結果的 owner 仍由 booking history 查核。`passenger-booking.repository.ts::commitBooking` 在原 transaction 內，以既有 `ops.idempotency_records` 的 unique scope/key、row lock、payload hash，將原 order／access token／history 與只含原 orderId 的結果一起 commit。不是在業務 commit 後另存 idempotency reply。另一個並行 caller 已準備的臨時 order／access grant 若碰到完成結果，沿既有 rejection cleanup 捨棄並讀回原 owned UUID，不進入 memory 或 publish 第二單。
 
-同 key／異 body 回原 `409 IDEMPOTENCY_KEY_REUSED`；不同帳戶有不同 scope、不能讀原 result，仍須過原 quote／method ownership。新 command 的電話、付款、lead、fee、quote expiry 與原3秒lock／8秒statement timeout不變；成功舊 command 的結果可在 quote 到期後讀回，沒有延長新報價期限。沒有 request key 的舊 service caller 沿原行為，普通 UI 一直送不可變 key。新七個單元包含 lost COMMIT reply／rollback／race cleanup／account scope，已先窄跑通過；真 PostgreSQL 並行與普通 UI／跨帳戶請求由 hosted suite 驗證，尚未執行，不能把前端恢復或單元當成真共享查重成功。
+同 key／異 body 回原 `409 IDEMPOTENCY_KEY_REUSED`；不同帳戶有不同 scope、不能讀原 result，仍須過原 quote／method ownership。新 command 的電話、付款、lead、fee、quote expiry 與原3秒lock／8秒statement timeout不變；成功舊 command 的結果可在 quote 到期後讀回，沒有延長新報價期限。沒有 request key 的舊 service caller 沿原行為，普通 UI 一直送不可變 key。新七個單元包含 lost COMMIT reply／rollback／race cleanup／account scope，已先窄跑通過；首輪 e3a 的四項真 PostgreSQL hosted 案例亦已執行通過，來源與界線見下方。普通 UI lostACK／跨裝置旅程尚未走到；不能把前端恢復、單元或 hosted PG 當成真共享查重成功。
 
 原 lock timeout 仍為3秒：成功重播指向同 UUID，不承諾所有長時間競爭都立即回201。逾時／未知結果保留原 key 正常重試，不延長鎖定期限。unknown COMMIT 案例只核 receipt／order／history／access token；audit 與通知實際送達尚未驗證，不從 durable booking 自動授予它們信用。
 
@@ -105,7 +105,21 @@ shared config 的 `webServer=[]`，不啟本機產品或 PG。Google 外部故�
 
 實際本機證據位於 `.local/passenger-bureau-gap-correction-20261018/journey-normal-fallback-20261019/source-checks/`。`booking-remount-before.json` 保存原4264 caller exit1及 fixed 檔 byte 還原 hash；`booking-401-before.json` 保存真 401 原 caller 的 1 pass／2 fail；`server-booking-before-61fa.json` 保存真正 production caller 的五項語意失敗。第一次135pass／1測試準備失敗、修後單案pass、舊136pass、並行負載下135pass／3原5秒timeout、修後138pass、早期SQL wire fixture失敗及修後結果皆保留，沒有把測試準備錯誤稱產品修前。
 
-最終凍結程式檢查為 `final-frozen-unit.json`：23檔、333 pass／19 hosted-only skip、原 deadline、maxWorkers=1、exit0（2026-10-19 03:28:43 UTC）。19 skip 包含四項新增原生 PostgreSQL 情境；它們沿既有正式 migration／production repository／兩獨立 pool，包含真 row-lock 競爭、異 body／異帳戶、真正 COMMIT 後 reply 遺失、真正 history INSERT 後 rollback，但尚未 hosted 執行。`final-root-typecheck.json`、`api-typecheck-atomic.json`、`passenger-typecheck-fixed.json` 與 `final-scoped-eslint.json` 均 exit0；`shared-runtime-unit-final.json` 為七項 Python 單元 pass。每份 JSON 保存實際命令、退出碼、原 log 及開始時 Source hash；最後僅補本段證據文字，不借舊版檢查給後續程式。這些結果沒有啟 VM 產品或 PG，也沒有授予 browser／shared／正式 E04 信用。
+首輪 e3a 凍結程式的本機檢查為 `final-frozen-unit.json`：23檔、333 pass／19 hosted-only skip、原 deadline、maxWorkers=1、exit0（2026-10-19 03:28:43 UTC）。19 skip 包含四項新增原生 PostgreSQL 情境；VM 沒有執行 PG。`final-root-typecheck.json`、`api-typecheck-atomic.json`、`passenger-typecheck-fixed.json` 與 `final-scoped-eslint.json` 均 exit0；`shared-runtime-unit-final.json` 為七項 Python 單元 pass。每份 JSON 保存實際命令、退出碼、原 log 及開始時 Source hash；該輪最後僅補證據文字，不借舊版檢查給後續程式。這些結果沒有啟 VM 產品或 PG，也沒有授予 browser／shared／正式 E04 信用。
+
+### 首輪 hosted 真結果與原 consumer 退修
+
+原候選 `e3a22291903289539780696b9cef991707771a35` 的 READY 主 CI `39195252634` 真 success（17 jobs success／3原 scope skip）；quote `39195248212`、60秒 `39195248177`、拒單 `39195248257` 亦各真 success。quote 原等待約901秒後拒絕舊快照、重報價及唯一新單正常取消；60秒與拒單各沿同原 UUID 恢復。這些是該輪自身結果，不能授予新候選整版信用。
+
+主 CI 原 artifact `12162034297` 的四項新 native PostgreSQL 案例為4 pass／0 skip：兩獨立 pool 真 unique／row-lock 競爭同 UUID、異 body 409／真帳戶隔離、actual COMMIT 後失去回應由新 actor 找回、actual history INSERT 後 rollback／同 key 重試。它們沿既有正式 migration 與 production repository。Root 已獨立讀原 ZIP／JSON／GitHub source binding；第二個 integration unit-shard3 原報告亦四項 pass。VM 的19 skip紀錄仍原樣保留，不能改稱本機 PG 通過。
+
+GitHub 的 artifact workflow head 是 e3a；原 PR 預設 checkout 為 synthetic merge `dee038e19028e3abe6a6513214b128200cba5b6e`，parents 是 accepted Guide `a7ec8281ff35399eb35728facca75c54af0d5cf1` 與 e3a。兩個 tree 不同，差異只為已 accepted Guide 五檔；本 task 的 booking／API／nativePG Source 相同。原始 commit／tree 比較另存 `hosted-e3a-watch/ci-integ-actual-merge-checkout-binding.json`，不把 workflow head 與實際 checkout 混寫。修補分支已普通 merge 該 accepted dev，沒有 rebase／force。
+
+同輪 bureau job `117879312318`（integration `39195252739`）真 **2 pass／3 fail／3 skip，0 retry**，不能由主 CI 或 PG 綠燈掩蓋。原 artifact `12162546063`、ZIP SHA256 `ceee72ef864d97bb156a099a674c2f9e0215de78853acbe67d6892f404e5048e`、原 JSON／error-context／safe-progress 與逐案診斷存 `source-checks/hosted-e3a-watch/`。
+
+三項真 consumer 失敗為：OTP alert 同時含錯誤與剩餘次數，舊 exact 全文 selector 找不到；舊 Driver task 已在真 API 取消，但 caller 沒操作產品既有的手動刷新；零候選同時有 visually hidden live 公告與 visible StatusBanner，舊 selector 真找到兩個節點。Root 正常 reopen 後，只修原 alert 及剩餘次數的同容器斷言、重用原60秒旅程的正常 Driver 刷新與同 UUID／取消／操作阻擋核對、限定真正可見 no-match banner。三檔 scoped ESLint exit0，語法 transpile exit0（不當 typecheck）；沒有修改產品或任一原業務／測試期限，新的完整 hosted CI 仍必須執行。
+
+首輪 bureau 只有首次 consent 與新 ordinary90 matching 完整 pass；後者真 elapsed98532ms、reason=matching_timeout、manualTimeoutCalls=0，原 UUID 重派／Driver接受／正常取消。UC08 color 缺漏真409且 Passenger assignment null，以及外部 Google 斷線／timeout／零候選 API 到達只列部分結果。五次錯碼未完成，重寄／真正301000ms／回訪因原 serial 前案失敗而真 skip；on_trip409／65秒全斷線／正常完程／receipt與aftercare、lostACK／跨裝置均未走到。原五組與 UC01–16 全部保留，不能把這些列為通過；上方表格的待驗 Source 以本段逐案實際結果為準。
 
 ## 原兩個 acceptance keys
 

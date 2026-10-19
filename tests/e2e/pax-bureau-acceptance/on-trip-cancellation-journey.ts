@@ -168,7 +168,25 @@ export async function onTripCancellationRejectionJourney(
           orderId: bookedOrderId,
           status: "cancelled",
         });
-        await expect(previousDriver.getByText(/已取消/).first()).toBeVisible();
+        // The real trip screen loads on mount/manual refresh. Use the same
+        // normal refresh action as the original real acceptance-timeout case.
+        await previousDriver
+          .getByRole("button")
+          .filter({ hasText: "重新整理" })
+          .first()
+          .click({ timeout: 15_000 });
+        await expect(
+          previousDriver.getByText(bookedOrderId, { exact: false }).first(),
+        ).toBeVisible();
+        await expect(
+          previousDriver.getByText(/已取消|平台取消/).first(),
+        ).toBeVisible();
+        await expect(
+          previousDriver.getByRole("button", {
+            name: "接受任務",
+            exact: true,
+          }),
+        ).toHaveCount(0, { timeout: 15_000 });
         for (const label of [
           "前往接送點",
           "抵達上車點",
