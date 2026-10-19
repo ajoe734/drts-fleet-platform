@@ -119,3 +119,55 @@ Acceptance keys
 `driver_terminal_location_display_exact_candidate_validation` are submitted for
 independent reviewer assessment; the owner does not record them or approve,
 merge, publish or deploy this candidate.
+
+## Successor integration after the accepted Session correction
+
+The original candidate `2212d215dc25929594e1f58eac0a6048a93943d4`, its
+independent Source review, the meaningful before/fixed results above, and its
+actual CI failure remain preserved. That CI failure concerned the separate
+platform Session error display: a typed 503 could be shown as a 403 when its
+message contained those digits. The independent Session correction was accepted
+in dev commit `2460749f9a0d097973c71d91bedcc481466486dc`; this continuation
+integrates that accepted correction through an ordinary merge rather than
+rerunning the old failing candidate.
+
+Merge `ba3e3ea2c4ea6dce941074878aa69474b75125fc` has parents `2212d215` and
+`2460749f`. All six original GPS files were byte-identical to 2212 immediately
+after the merge. This section is the only subsequent GPS documentation change;
+the five application/test files remain byte-identical. The original five task
+conditions and two acceptance keys remain intact.
+
+The normal merge hook also formatted six already accepted SOS/auth files. Their
+exact hunks were coordinated through Supervisor; they have no functional change.
+Each resulting blob equals both frozen Journey `4b1696dd` and Complaint
+`024569c3` candidates. Full TypeScript AST comparison preserves their expressions,
+operators, literals and statements, with React JSX whitespace normalization for
+Prettier's explicit space expressions. All 298 existing `expect` call ASTs across
+the three affected test files are identical before and after formatting. The
+whole-tree comparison against accepted dev bounds the successor delta to the
+original six GPS paths and these six formatter-only paths.
+
+With the accepted Session source merged, the original navigation/map command
+again passed all 18 tests; Driver typecheck and scoped ESLint each exited 0.
+These checks apply to the unchanged GPS application/test bytes. The normal merge
+hook's formatter and ESLint also exited 0. No product or browser runtime,
+PostgreSQL server, dependency installation, or hosted workflow dispatch was used
+on this VM.
+
+Complete command logs and direct exit records for this continuation are under
+`.local/driver-terminal-location-display-20261019-evidence/successor-session246-20261019/`.
+The initial ordinary merge attempts retained their hook failures: first an
+incorrect commit-subject format, then missing accepted files/API tsconfig in the
+sparse checkout. Materializing the required tracked read paths and using the
+required task-prefix subject allowed the ordinary hooks to complete. A read-only
+formatter check failed before the hook, as expected. An initial bare AST
+comparison also required JSX text normalization to compare the rendered spaces
+correctly; its diagnostic remains in the evidence. These are integration-tool
+preparation results, not additional product defects.
+
+The new full candidate's SHA, generation, PR, source identities, normal handoff
+readback and check records are bound in that directory's `result.json` and hash
+manifest. Its own hosted CI and independent review remain required; neither old
+CI nor another task's green run supplies that credit. The native device,
+shared-cloud, browser, external provider and heartbeat-observation limits above
+continue to apply.
