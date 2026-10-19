@@ -2,6 +2,10 @@
   "$schema": "https://drts.local/schemas/operational-browser-journeys.v2.json",
   "version": 2,
   "candidateSha": "__SET_DRTS_CANDIDATE_SHA__",
+  "fleetApplicationSetup": {
+    "fleetPartnerId": "fleet-demo-001",
+    "tenantId": "10000000-0000-0000-0000-000000000201"
+  },
   "journeys": [
     {
       "id": "referral-create-read-cancel-receipt",

@@ -1,5 +1,134 @@
 # Operational Document Upload Harness 2026-10-08
 
+## Current continuation — 2026-10-19, Source-ready WIP pending product integration
+
+The normal Supervisor continuation assigns the original task
+`SR-OPERATIONAL-DOCUMENT-UPLOAD-HARNESS-20261008` to available owner **Codex2**,
+with independent reviewer **Codex**. Original Gemini2 authorship and accepted
+`915f35d34fb31c3f62b33e84af9de38482d83df3` / merge
+`03a1c98af9bddfacf3feb2b0b9b8bd00283717bf` evidence remain historical credit.
+The original seven scopes, three acceptance keys and all 16 operational cases
+are retained. The isolated source starts at accepted
+`4cf8eadadb4e74e736c1c5f88286645e0fa84aa0` and has no new committed candidate,
+review verdict, CI, merge or runtime acceptance. Root requested WIP until the
+separate `FLEET-PARTNER-ENTRY-CANONICAL-BINDING-20261019` product task is
+independently accepted and normally integrated before the final checkpoint.
+
+Actual deployment **39229683109** completed 18 jobs successfully and failed its
+operational prerequisite: **12 operational cases passed, four Fleet/Admin setup
+cases failed**. The first Fleet driver-create setup received HTTP **401**. The
+five built-in Passenger suites did not execute. A separate Passenger eight-flow
+run is not a replacement for these 16 operational cases or for all Passenger
+UC01–UC16 requirements. No local mock proves a live key, JWT, scanner receipt,
+new issuer deployment, or a full-system runtime pass.
+
+### Actual consumers and normal issuer
+
+- `uploadOperationalDocument` now retains independent application/invocation
+  proof at the authoritative GET, raw PUT and final download GET, alongside the
+  already correct intent/confirm POSTs. The same valid PDF, authoritative
+  parent/object and revision binding, real-byte SHA/length/MIME, clean receipt,
+  deployed-candidate checks, manual redirects, 1 MiB response limit and existing
+  60,000 ms / 45-attempt scanner observation remain.
+- `operationalRequestHeaders` validates the exact credential-free target origin.
+  Fleet uses `x-drts-authorization` for a legitimate partner application JWT and
+  separate invocation `Authorization`. Invocation proof does not grant partner
+  authority. Missing proof, conflicting declared proof, or relabelled invocation
+  proof fails closed. Cross-Fleet Admin setup gets Fleet proof only at the Fleet
+  origin; original Admin review retains its original identity.
+- `fetchOperationalSurface` uses **Node native fetch only for Fleet**, including
+  generic setup and explicit readback/download. Other surfaces keep their
+  existing APIRequestContext rail. Both browser modes delegate to
+  `installOperationalBrowserHeaders`: native fetch performs Fleet-origin I/O and
+  fulfills the browser response, with manual redirects and a finite timeout.
+  Application proof is never added to Playwright request options or browser
+  context headers. Foreign browser requests receive no injected proof. Native
+  body bytes, status, candidate headers, content type and multiple Set-Cookie
+  values are preserved; stale compressed length/encoding/transfer headers are
+  removed after native decompression. The trace-boundary test verifies this
+  exact adapter; it is not browser-rendering evidence.
+- The original suite's `beforeAll` calls `prepareOperationalFleetSession` once
+  **per worker**, not once per job: Playwright can replace failed workers even
+  with workers=1/retries=0. A supplied legitimate session is masked and verified
+  by actual `/api/auth/session`; denial never triggers a substitute identity.
+  Otherwise the normal existing Admin BFF creates one UUID-scoped synthetic
+  Entry referencing the existing active canonical Fleet, lists that Entry's
+  credentials and requires none, issues its first normal key with exactly
+  `billing:read`, then calls normal partner bootstrap and actual auth/session.
+  New metadata uses the original manifest tenant and a dedicated worker program;
+  it does not create a new tenant, Fleet master, role, IAM grant or auth bypass.
+- The new product's optional `fleetPartnerId` reference must first be accepted
+  and merged. An old server's random-bound Entry is explicitly rejected and its
+  acknowledged own Entry is cleaned up. This harness does not change API/auth,
+  TenantPartner policy, SDK, IAM, deployment workflow or runtime configuration.
+  Before use, the actual issued session must match its key/principal, realm,
+  actor type, canonical Fleet, Entry, tenant, program and single minimal scope.
+- All issuer/key/session bodies use native fetch with validated origins, manual
+  redirects, a finite setup budget and sanitized errors. Fresh secrets stay in
+  module/closure memory and are immediately GitHub-masked; no minted secret is
+  exported into process.env, generated fixtures, records or Playwright traces.
+  The existing lightweight `normalizeApiResponse` is reused **only at issuer
+  JSON response boundaries**, because API SnakeCaseInterceptor and passthrough
+  Admin BFF return snake_case. Token strings, resource-scope strings and other
+  opaque scalar values remain byte-identical. Original document/setup capture
+  paths continue to consume their original snake_case wire shape.
+- `afterAll` revokes only the acknowledged own session, own issued key and own
+  Entry through original endpoints, and records non-secret cleanup metadata.
+  Setup failure runs bounded own cleanup. Supplied session owners are preserved.
+  Unknown or foreign ownership is not inferred. If the new Entry unexpectedly
+  has existing/unowned keys, issuance and Entry-wide revocation are withheld so
+  those keys remain untouched; the non-secret attempted slug is reported for
+  normal operator recovery. An unavailable/unknown session acknowledgment is
+  not called a successful session revoke. This credential cleanup does not
+  replace original exact-owned document/business-data cleanup requirements.
+
+Mandatory repository formatting changes historical UAT and source-block bytes; pre-format hashes/blobs remain in `consumer-source-ready-pre-binding-integration.json`, while historical facts, PDF bytes and guards are preserved and post-format AST/check results plus updated seven-file hashes are recorded in `consumer-formatted-source-ready-pre-binding-integration.json`. The table's `lawful-issuer-three-files-final.log` 121-pass result is pre-format history. The actual post-format run in `formatter-application-20261019/affected-121-units.log` had 120 passed and 1 failed: only a source-string assertion rejected the formatter's multiline receiver chain. After the approved exact whitespace-tolerant receiver/method assertion, `final-identity-41-units.log` had 41/41 passed, exit0. The 76 document and 4 manifest cases had already passed that same post-format run on unchanged final helper/spec/document/manifest hashes. Thus final coverage is 80 earlier passes on those final hashes plus 41 final identity passes, not a single final 121-pass run; no timeout or acceptance guard changed.
+
+### Executed evidence and remaining acceptance
+
+Machine evidence is under
+`.local/passenger-bureau-gap-correction-20261018/operational-Fleet-caller-correction-20261019/`.
+All local boundary tests mock external transport, never the helper's request,
+normalization, validation, identity selection or cleanup logic. No product
+server/browser/HTTP/PG/cloud operation was run on this VM.
+
+| Finding / original acceptance                          | Executed evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Remaining boundary                                                                                                                                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Original three header-loss consumers                   | `old-4cf8-three-hop-regression.log`: actual accepted helper failed the new regression at first GET, expected200/received401, exit1. `fixed-three-hop-regression.log`: identical case passed after repair, exit0.                                                                                                                                                                                                                                                                                 | Mocked server, not a new live Fleet session or storage receipt.                                                                                                                    |
+| Root's actual HTTP snake_case finding                  | `root-wire-production-interceptor-red.log`: production `deepToSnakeCase` wrapped the same complete normal-controller response fixture; the unnormalized helper failed ownership, exit1. `root-wire-production-interceptor-fixed.log`: same case passed after reusing the existing normalizer, exit0. `root-wire-production-interceptor-harness80.log`: 80/80 document/manifest cases passed. Raw key/token values containing underscores remain unchanged through bootstrap/session and masking. | This corrects the earlier erroneous controller-only camelCase assumption. No live wire result is claimed.                                                                          |
+| Full affected local regression                         | `lawful-issuer-three-files-final.log`: **121 passed, zero skipped, exit0**: document/setup/proof/issuer76 + manifest4 + original identity41; Vitest4.1.4, Node22.23.2. Includes normal issuer chain, provided-session verification, minimal scope/role/origin isolation, no rotation, wrong bindings/denials, deadline, exact-own cleanup, sanitized errors, native-only trace boundary, decompression and multiple cookies.                                                                     | Local mocked boundaries, not 16 operational or Passenger UC01–UC16 passes.                                                                                                         |
+| Scoped static checks                                   | `lawful-issuer-typescript-final.log`: scoped TypeScript5.9.3 exit0. `lawful-issuer-eslint-final.log`: five changed TypeScript files with max-warnings0, exit0. `lawful-issuer-diff-check-final.log`: exit0.                                                                                                                                                                                                                                                                                      | These checks do not establish full repository typecheck/CI.                                                                                                                        |
+| `operational_harness_real_document_bytes_and_receipts` | Historical real-byte receipts stay attributed to their original source/run. Local original real-byte/hash/scan boundary assertions remain.                                                                                                                                                                                                                                                                                                                                                       | New real storage/scanner receipts are still required after normal integration/deployment.                                                                                          |
+| `operational_harness_exact_sha_review_ci_merge`        | Original accepted history retained; current seven-file Source-ready WIP is separately hashed in the machine checkpoint report.                                                                                                                                                                                                                                                                                                                                                                   | Accepted binding integration, compliant final candidate, push/PR, independent exact-source review, complete matching CI and protected merge pending. No acceptance key was filled. |
+| `shared_dev_full_16_operational_cases_zero_skips`      | Original journeys, operations, setup arrays and retired-surface inventory are unchanged. Only top-level normal Fleet setup metadata is added to the original manifest; it uses the existing tenant fixture.                                                                                                                                                                                                                                                                                      | Actual prior deployment remains12pass/4fail. New full16 zero-skip, original role-negative and exact-owned business cleanup requirements remain; no skip or waiver was introduced.  |
+
+Commands: final units use `node node_modules/vitest/vitest.mjs run` with the two
+original harness unit files and
+`tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`,
+`--maxWorkers=1`. Scoped lint uses `node node_modules/eslint/bin/eslint.js` on the
+two E2E files and three unit files, `--max-warnings=0`. Scoped types use
+`node node_modules/typescript/bin/tsc --noEmit --skipLibCheck --module commonjs
+--moduleResolution node --target ES2022 --esModuleInterop --resolveJsonModule
+--strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess` on the two E2E
+files and two harness unit files. No config or source timeout was changed.
+
+Earlier results are retained: initial104/104 in `narrow-three-files-complete.log`
+precedes the issuer/native-trace extension and cannot validate it. Initial
+`lawful-issuer-native-trace-first.log` is120pass/1fail from the original identity
+case's5second dynamic-import timeout while the peer compiler was active; the
+later complete121 pass uses the unchanged default timeout. Earlier scoped type
+exit2 from new test-fixture typing errors and missing isolated dependency
+resolution are kept in their original logs, followed by actual fixes. Ignored
+links reuse matching existing root/API/contracts dependencies and this
+worktree's tenant-auth Source; no install, dependency build, package/config
+change or shared distribution write was performed.
+
+Root alone coordinates product integration, review, deployment and acceptance.
+The records below are historical: their counts, bounds, reviews and claims
+apply only to their named versions and dates.
+
+## Historical harness record
+
 This document records the fix for the operational document upload harness.
 
 ## Issue
@@ -17,34 +146,35 @@ The previous test harness setup only performed intent and confirm requests, bypa
 
 ## Evidence and Review Table
 
-| Finding／驗收項                                | 原始碼依據與修改位置   | 舊版重現 → 修正版結果                     | 命令、退出碼、執行版本與證據位置                            | 未驗項與具體限制               |
-| ---------------------------------------------- | ---------------------- | ----------------------------------------- | ----------------------------------------------------------- | ------------------------------ |
-| R1: Intent headers / route discarded | `tests/e2e/operational-document-upload.ts` | 靜態重現: frontend emitted `/api/...` PUT with `application/pdf` → 修正版: rewrites to `/control-plane-proxy/` and sends `application/octet-stream` exactly as requested by backend intent | Unit test `tests/unit/operational-document-upload.test.ts` pass, Exit 0 | live 部署於 shared_dev 執行 |
-| R2: Admin journey loses partner authority | `tests/e2e/fixtures/operational-browser-journeys.json` | 靜態重現: both admin upload origins resolved platform-admin env → 修正版: `baseUrlEnv` restored to `DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL` | Code inspection | 同上 |
-| R3: Target/redirect/candidate checks absent | `tests/e2e/operational-document-upload.ts` | 靜態重現: foreign targets like `https://foreign.example.invalid/collect` received Authorization and success status; no candidate checking → 修正版: enforces same origin, no credentials in URL, checks `x-drts-candidate-sha` on all requests | Unit tests coverage updated and passed | 同上 |
-| R4: Required receipt & readback missing | `tests/e2e/operational-document-upload.ts` | 靜態重現: empty 200 PUT accepted, no GET → 修正版: requires explicit download (GET) readback verification with size, SHA256 and content-type match | Unit tests cover GET readback | 同上 |
-| R5: Transient retry logic incorrect | `tests/e2e/operational-document-upload.ts` | 靜態重現: 503 `{error:{code:DOCUMENT_SCANNER_UNAVAILABLE}}` rejected after puts=1 (mock mismatch) → 修正版: Correctly matches `error.code` envelope and retries | Unit tests `retries PUT on 503...` pass | 同上 |
-| R6: PDF structure invalid | `tests/e2e/operational-document-upload.ts` | 靜態重現: fake root dictionary → 修正版: Minimal structurally valid PDF with Catalog and Pages | Checksum verified: `d7afa78...` | 同上 |
-| `operational_harness_real_document_bytes_and_receipts` | N/A | Pending | Pending | VM 無法啟動端對端環境，待 merge 後至 shared_dev 驗證 |
-| `operational_harness_exact_sha_review_ci_merge` | N/A | Pending | Pending | 待 CI |
-| `shared_dev_full_16_operational_cases_zero_skips` | N/A | Pending | Pending | 本 VM 限制不可啟動 e2e |
-
+| Finding／驗收項                                        | 原始碼依據與修改位置                                   | 舊版重現 → 修正版結果                                                                                                                                                                                                                          | 命令、退出碼、執行版本與證據位置                                        | 未驗項與具體限制                                     |
+| ------------------------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------- |
+| R1: Intent headers / route discarded                   | `tests/e2e/operational-document-upload.ts`             | 靜態重現: frontend emitted `/api/...` PUT with `application/pdf` → 修正版: rewrites to `/control-plane-proxy/` and sends `application/octet-stream` exactly as requested by backend intent                                                     | Unit test `tests/unit/operational-document-upload.test.ts` pass, Exit 0 | live 部署於 shared_dev 執行                          |
+| R2: Admin journey loses partner authority              | `tests/e2e/fixtures/operational-browser-journeys.json` | 靜態重現: both admin upload origins resolved platform-admin env → 修正版: `baseUrlEnv` restored to `DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL`                                                                                                    | Code inspection                                                         | 同上                                                 |
+| R3: Target/redirect/candidate checks absent            | `tests/e2e/operational-document-upload.ts`             | 靜態重現: foreign targets like `https://foreign.example.invalid/collect` received Authorization and success status; no candidate checking → 修正版: enforces same origin, no credentials in URL, checks `x-drts-candidate-sha` on all requests | Unit tests coverage updated and passed                                  | 同上                                                 |
+| R4: Required receipt & readback missing                | `tests/e2e/operational-document-upload.ts`             | 靜態重現: empty 200 PUT accepted, no GET → 修正版: requires explicit download (GET) readback verification with size, SHA256 and content-type match                                                                                             | Unit tests cover GET readback                                           | 同上                                                 |
+| R5: Transient retry logic incorrect                    | `tests/e2e/operational-document-upload.ts`             | 靜態重現: 503 `{error:{code:DOCUMENT_SCANNER_UNAVAILABLE}}` rejected after puts=1 (mock mismatch) → 修正版: Correctly matches `error.code` envelope and retries                                                                                | Unit tests `retries PUT on 503...` pass                                 | 同上                                                 |
+| R6: PDF structure invalid                              | `tests/e2e/operational-document-upload.ts`             | 靜態重現: fake root dictionary → 修正版: Minimal structurally valid PDF with Catalog and Pages                                                                                                                                                 | Checksum verified: `d7afa78...`                                         | 同上                                                 |
+| `operational_harness_real_document_bytes_and_receipts` | N/A                                                    | Pending                                                                                                                                                                                                                                        | Pending                                                                 | VM 無法啟動端對端環境，待 merge 後至 shared_dev 驗證 |
+| `operational_harness_exact_sha_review_ci_merge`        | N/A                                                    | Pending                                                                                                                                                                                                                                        | Pending                                                                 | 待 CI                                                |
+| `shared_dev_full_16_operational_cases_zero_skips`      | N/A                                                    | Pending                                                                                                                                                                                                                                        | Pending                                                                 | 本 VM 限制不可啟動 e2e                               |
 
 ## Second Review Resolution (2026-10-08)
 
 Addressed the Codex REOPEN findings:
+
 - **R3**: Enforced strict route bounds (`/documents/content` for exactly the same `parentPrefix`), enforced single query parameter (`objectKey`), enforced 200/201 exact status codes (blocking 302 redirects), and added unit test regressions for redirects.
 - **R4**: Corrected the lifecycle order. Removed the invalid `GET` before `confirm`. The helper now parses the `confirm` response to extract the `documentId`, validates the returned confirmation metadata, constructs the formal download route (`/control-plane-proxy/fleet-partner/supply-submissions/.../documents/:documentId/download`), and verifies the downloaded bytes against the original. Updated `runSetup` in `operational-browser-acceptance.spec.ts` to capture and record the returned lifecycle evidence.
 - **R5**: Added a finite total lifecycle budget (`totalBudget = 30000ms`), replacing hardcoded timeouts. Re-calculated `timeout` for each request based on `getRemainingTime()`. Added unit tests for time budget exhaustion.
 - **R6**: Added `xref` and `startxref` to the generated PDF to satisfy strict parsers. Expanded `operational-browser-manifest.test.ts` to verify BOTH `document-upload` entries in BOTH journeys, and fleet origin/token selection in both `runSetup` callers. Added strict negative assertions across all operations.
 
 Execution evidence:
+
 - `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts` passed (7 tests)
 - `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0` passed
 - `git diff --check` passed
 - `pnpm exec tsc --noEmit -p tsconfig.json` passed
 
-*Note: E2E checks `operational_harness_real_document_bytes_and_receipts` and `shared_dev_full_16_operational_cases_zero_skips` remain blocked because VM restriction prohibits starting product/browser servers locally. They require integration CI.*
+_Note: E2E checks `operational_harness_real_document_bytes_and_receipts` and `shared_dev_full_16_operational_cases_zero_skips` remain blocked because VM restriction prohibits starting product/browser servers locally. They require integration CI._
 
 ## Third Review Findings (2026-10-08)
 
@@ -61,6 +191,7 @@ However, the following findings remain:
 - **R6 [P2, repeated valid-PDF/regression/evidence gap]:** `helper:41-43` xref/startxref values are wrong: declared offsets 9,58,122,200; actual emitted offsets 9,58,115,184. Construct a well-formed harmless document and validate its structure/parser, not a duplicated literal. `tests/unit/operational-document-upload.test.ts` uses nonexistent `/api/.../documents/intent` and `{doc:type1}`; copied PDF masks bad offsets. Only four helper tests; missing candidate env enabled, other status/candidate/scope/receipt/readback negatives or setup-origin/token execution in both modes. Manifest additions cover both uploads but do not execute helper. This revision also removes existing fleet `supportedServiceProductCodes/capture` assertions from manifest test `:35-38`; restore original guards.
 
 ### Next minimal repair unit/scope:
+
 1. Real manifest/helper route normalization and full lifecycle positive test.
 2. Bounded/scoped evidence and negatives.
 3. PDF and affected regression.
@@ -70,22 +201,25 @@ However, the following findings remain:
 ## Fourth Review Resolution (2026-10-08)
 
 Addressed the Codex fourth review REOPEN findings:
+
 - **R3**: Validated initial intent and confirm URLs before any credentialed I/O. Added strict validation that intent/confirm URLs are same-origin, have no embedded credentials, queries, or fragments. Normalized intent and confirm paths (`/api/` -> `/control-plane-proxy/`) and enforced exact known fleet-partner route shape for the parent scope.
 - **R4**: Bound expected fleet ownership from an authoritative scoped readback fetched during the upload lifecycle. Validated intent submission ID and object-key scope against the authoritative expectation, and strictly compared the actual returned `fleet_partner_id` on confirm. Enforced strict MIME validation (`application/pdf`) on the readback download.
 - **R5**: Implemented finite byte processing. Created a `boundedFetch` helper (using `globalThis.fetch` with `AbortController` and `ReadableStream`) to stream responses, accumulating chunks and aggressively aborting if response size exceeds 1MB (rejecting oversized multi-byte decompression bombs) before JSON parsing.
 - **R6**: Expanded `tests/unit/operational-document-upload.test.ts` to mock `globalThis.fetch` rather than `request.post` due to the required streaming constraints. Added positive and negative regressions using production-shaped fixtures (`professional_driver_license` / `/upload-url`). Added strict tests for oversized responses, strict MIME gaps, wrong fleet ID bindings, foreign origins, and missing candidate SHAs. Restored all original manifest guards.
 
 Execution evidence:
+
 - `pnpm exec vitest run tests/unit/operational-document-upload.test.ts` passed (7 tests)
 - `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0` passed (0 warnings/errors)
 - `git diff --check` passed
 - `pnpm exec tsc --noEmit -p tsconfig.json` exit code 2 (known environment TS2688 missing Node type definitions limitation, not source type failure)
 
-*Note: E2E checks `operational_harness_real_document_bytes_and_receipts` and `shared_dev_full_16_operational_cases_zero_skips` remain blocked because VM restriction prohibits starting product/browser servers locally. They require integration CI.*
+_Note: E2E checks `operational_harness_real_document_bytes_and_receipts` and `shared_dev_full_16_operational_cases_zero_skips` remain blocked because VM restriction prohibits starting product/browser servers locally. They require integration CI._
 
 ## Fifth Review Resolution (2026-10-08)
 
 Addressed remaining defect boundary failures identified in the explicit Supervisor source resume:
+
 - **Authority Candidate Header Validation**: Added `expectCandidateRevision` check on the authoritative GET readback response headers to enforce deployed candidate tracking, fixing the 'authority candidate header missing' and 'wrong' defects.
 - **Authority Submission Validation**: Added exact match assertion between `readbackData?.data?.submission?.submission_id` and `expectedSubmissionId` from the intent URL, repairing the 'authority submission wrong' defect.
 - **Object Key Exact Prefixing**: Switched `includes()` checks on `object_key` to a strict `startsWith()` exact known authoritative prefix matcher (`fleet-partner/${authoritativeFleetId}/supply-submissions/${expectedSubmissionId}/`), enforcing isolation and addressing 'object key only contains expected IDs in filename'.
@@ -94,14 +228,17 @@ Addressed remaining defect boundary failures identified in the explicit Supervis
 - **Unit Test Mocks**: Corrected internal test mocks to return the strictly required `submission_id` on authoritative readbacks to align with the repaired assertions.
 
 Execution evidence:
+
 - `.local/fleet-storage-diagnosis-20261008/inspect-harness-boundaries.cjs` run with `EXPECT_FIXED=1` against current tree reported 0 defects.
 - `pnpm exec vitest run tests/unit/operational-document-upload.test.ts` passed (7 tests).
 - `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0` passed.
+
 ## Sixth Review Findings (2026-10-08)
 
 Codex2 independent review REOPEN for exact candidate da4c68142c05ab00ee7745e0f5ff2956f8e8a130, generation ab071c916ddb4776bbcb191b3e8aa8bf. HEAD verified detached and clean before review. No candidate files edited, no commits/branch changes, no product/dev/browser/HTTP/DB/Docker/ClamAV/cloud/deploy/live probes. Only socket-free unit/lint/static/diff/typecheck and in-memory helper probes were run, mocking external fetch only.
 
 Confirmed fixes versus fifth review:
+
 - Current tests/e2e/operational-document-upload.ts now has strict /control-plane-proxy/fleet-partner/supply-submissions/:id route matching at lines 108-128, candidate SHA validation on the authoritative submission GET at line 137, authoritative submission_id check at lines 139-142, exact object-key prefix check at lines 166-172, exact upload header/method checks at lines 178-181, strict documentId single-segment check at lines 291-292, confirm submission/type/fleet metadata checks at lines 297-301, and download candidate/hash/size/MIME checks at lines 315-325.
 - Current manifest has four document-upload setup entries for the two fleet/admin journeys at tests/e2e/fixtures/operational-browser-journeys.json:188-219 and 297-330, with admin setup using DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL.
 - The authorized current-tree boundary probe passed: EXPECT_FIXED=1 PROBE_CANDIDATE_SHA=da4c68142c05ab00ee7745e0f5ff2956f8e8a130 HARNESS_PROBE_OUTPUT=/home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/codex2-da4-current-boundary-proof.json node /home/lupin/workspace/drts-fleet-platform/.local/fleet-storage-diagnosis-20261008/inspect-harness-boundaries.cjs /home/lupin/workspace/drts-fleet-platform/.local/harness-supported-codex-review-20261008 ; EXIT0, defects=[], socketCount=0, positive valid. I am not re-reporting the six fifth-review bypasses as open.
@@ -116,6 +253,7 @@ Blocking finding R3/R6 evidence mismatch [P2]: the current unit tests use fronte
 Blocking finding hygiene/docs [P2]: repository diff hygiene fails and UAT evidence is inaccurate/incomplete. Command: git diff --check b2dfb0ef812ad11fa431b5b174f173ffd2a8143b..HEAD -- scoped six files ; EXIT2. Offenders: tests/e2e/operational-document-upload.ts:173, :299, :322 and tests/unit/operational-document-upload.test.ts:45 trailing whitespace. docs/04-uat/operational-document-upload-harness-20261008.md still states earlier git diff --check/tsc passed and the Fifth Review Resolution lists only the route/boundary probe plus 7 unit tests; it does not record the current normalization failure, actual runSetup coverage gap, complete required negative matrix status, or pending runtime acceptance. Expected under Guide 0.7: exact-source table maps every unresolved finding and required_acceptance item to current source evidence, command/exit, and untested limits. Actual: blanket fixed claims remain and required acceptance rows are pending without the missing local evidence spelled out. Repair: remove trailing whitespace and have owner append the full current finding-level report to the existing UAT artifact; reviewer must not edit candidate files.
 
 Checks completed, all processes terminated and outputs read:
+
 - git rev-parse HEAD && git status --short --branch: da4c68142c05ab00ee7745e0f5ff2956f8e8a130, detached, clean.
 - pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts: EXIT0, Vitest 4.1.4, 2 files/10 tests pass.
 - pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0: EXIT0.
@@ -137,20 +275,21 @@ Addressed the Codex2 sixth review REOPEN findings:
 - **Hygiene/Docs**: Removed trailing whitespace from all `tests/e2e/` and `tests/unit/` candidate files. Updated this UAT artifact to accurately record the complete current finding-level report and pending acceptance.
 
 Execution evidence:
+
 - `.local/fleet-storage-diagnosis-20261008/inspect-harness-normalized-destinations.cjs` run with `EXPECT_FIXED=1` against current tree reported exact normalization dispatch.
 - `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts` passed (19 tests).
 - `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts --max-warnings=0` passed.
 - `git diff --check b2dfb0ef812ad11fa431b5b174f173ffd2a8143b..HEAD` passed (0 trailing whitespaces).
 
-| Finding / Acceptance Item | Status & Local Evidence | Untested Limits / Pending |
-|---------------------------|-------------------------|---------------------------|
-| **R3/R6 Normalization** | Resolved. Unit tests added. `inspect-harness-normalized-destinations.cjs` passes on current tree. | None locally. |
-| **R6 Setup Evidence** | Resolved. `runSetup` is exported and unit tested under both operational modes. | Requires full E2E execution in CI. |
-| **R6 Negatives Matrix** | Resolved. Full socket-free test suite added to `operational-document-upload.test.ts` (19 tests total). | None locally. |
-| **Hygiene** | Resolved. `git diff --check` passes cleanly. | None. |
-| `operational_harness_real_document_bytes_and_receipts` | Pending. Requires E2E harness in a real environment. | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
-| `operational_harness_exact_sha_review_ci_merge` | Pending. | Awaiting Codex2 review of exact SHA, CI execution, and merge. |
-| `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run needed post-merge. |
+| Finding / Acceptance Item                              | Status & Local Evidence                                                                                | Untested Limits / Pending                                                               |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| **R3/R6 Normalization**                                | Resolved. Unit tests added. `inspect-harness-normalized-destinations.cjs` passes on current tree.      | None locally.                                                                           |
+| **R6 Setup Evidence**                                  | Resolved. `runSetup` is exported and unit tested under both operational modes.                         | Requires full E2E execution in CI.                                                      |
+| **R6 Negatives Matrix**                                | Resolved. Full socket-free test suite added to `operational-document-upload.test.ts` (19 tests total). | None locally.                                                                           |
+| **Hygiene**                                            | Resolved. `git diff --check` passes cleanly.                                                           | None.                                                                                   |
+| `operational_harness_real_document_bytes_and_receipts` | Pending. Requires E2E harness in a real environment.                                                   | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
+| `operational_harness_exact_sha_review_ci_merge`        | Pending.                                                                                               | Awaiting Codex2 review of exact SHA, CI execution, and merge.                           |
+| `shared_dev_full_16_operational_cases_zero_skips`      | Pending.                                                                                               | Operator-only authorized fresh shared-dev run needed post-merge.                        |
 
 ## Seventh & Eighth Review Resolution (2026-10-08)
 
@@ -163,6 +302,7 @@ Addressed the latest reviewer findings (from f309/gen6cd):
 
 Review Outcome for Candidate `e9e614b70349cb9c48731ee86d41b3b71cae11f7` (Generation `eb7445589d264d9ca3539f76cd61be01`):
 Codex independent review legitimately REOPENed at 23:26:26Z with four findings:
+
 1. Delivery provenance: `e9e614` was local-only on top of published `f30955b56c21d444f2491e7355ecd871aee00477`, PR head remained `f30955`, and commit lacked `LLM-Agent`, `Task-ID`, and `Reviewer` trailers.
 2. Trailing whitespace in UAT (line 160) and unit test.
 3. Regression bounds gaps: committed tests did not prove 15-retry exhaustion, total 30s deadline, hanging body cancellation, or multi-chunk cumulative 1MiB streaming limits.
@@ -190,28 +330,32 @@ Addressed all four Codex review findings on clean replacement branch `gemini2/sr
 - **Truthful Provenance & Status (Finding 4)**: Records predecessor `e9` rejection details, replacement branch status, exact executed test counts (89 passing tests across 3 suites), and explicitly documents remaining CI/merge and live acceptance limits.
 
 Execution evidence:
+
 - `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`: EXIT 0, 3 files / 89 tests passed (45 document upload, 3 manifest, 41 healthcheck identity).
 - `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts --max-warnings=0`: EXIT 0.
 - `git diff --check b2dfb0ef812ad11fa431b5b174f173ffd2a8143b`: EXIT 0 (clean).
 - `pnpm exec tsc --noEmit -p tsconfig.json --incremental false`: EXIT 2 due ONLY to broad external dependency block (`apps/voice-media-worker/src/recording/s3-object-store-client.ts:7:8 - error TS2307: Cannot find module '@aws-sdk/client-s3'`). All candidate-owned files compile with 0 errors.
 
-| Finding / Acceptance Item | Status & Local Evidence | Untested Limits / Pending |
-|---------------------------|-------------------------|---------------------------|
-| **P0 Delivery Provenance** | Resolved on replacement branch `gemini2/sr-operational-document-upload-harness-20261008-final-repaired-v2` with compliant commit trailers and push. | Pending remote push and PR creation. |
-| **P1 Diff Hygiene** | Resolved. Trailing whitespace eliminated; `git diff --check` passes cleanly. | None. |
-| **P2 Regression Matrix Bounds** | Resolved. 15-retry exhaustion, 30s deadline, hanging body cancellation, and multi-chunk streaming bounds verified (89 tests pass). | Socket-free unit/manifest verification; real network and scanner runtime deferred to shared_dev. |
-| **P2 UAT Provenance** | Resolved. Accurate history of f309/e9 predecessor REOPEN and new replacement verification recorded. | Awaiting review of replacement candidate. |
-| `operational_harness_real_document_bytes_and_receipts` | Pending. Requires real scanner and storage in hosted environment. | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
-| `operational_harness_exact_sha_review_ci_merge` | Pending. | Needs Codex review of replacement candidate SHA, green hosted CI, and normal merge. |
-| `shared_dev_full_16_operational_cases_zero_skips` | Pending. | Operator-only authorized fresh shared-dev run post-merge, plus original 44 findings/134 capabilities/C125 supply and case-cross roles/native/external/manual/same release gates. |
+| Finding / Acceptance Item                              | Status & Local Evidence                                                                                                                             | Untested Limits / Pending                                                                                                                                                        |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **P0 Delivery Provenance**                             | Resolved on replacement branch `gemini2/sr-operational-document-upload-harness-20261008-final-repaired-v2` with compliant commit trailers and push. | Pending remote push and PR creation.                                                                                                                                             |
+| **P1 Diff Hygiene**                                    | Resolved. Trailing whitespace eliminated; `git diff --check` passes cleanly.                                                                        | None.                                                                                                                                                                            |
+| **P2 Regression Matrix Bounds**                        | Resolved. 15-retry exhaustion, 30s deadline, hanging body cancellation, and multi-chunk streaming bounds verified (89 tests pass).                  | Socket-free unit/manifest verification; real network and scanner runtime deferred to shared_dev.                                                                                 |
+| **P2 UAT Provenance**                                  | Resolved. Accurate history of f309/e9 predecessor REOPEN and new replacement verification recorded.                                                 | Awaiting review of replacement candidate.                                                                                                                                        |
+| `operational_harness_real_document_bytes_and_receipts` | Pending. Requires real scanner and storage in hosted environment.                                                                                   | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI.                                                                                          |
+| `operational_harness_exact_sha_review_ci_merge`        | Pending.                                                                                                                                            | Needs Codex review of replacement candidate SHA, green hosted CI, and normal merge.                                                                                              |
+| `shared_dev_full_16_operational_cases_zero_skips`      | Pending.                                                                                                                                            | Operator-only authorized fresh shared-dev run post-merge, plus original 44 findings/134 capabilities/C125 supply and case-cross roles/native/external/manual/same release gates. |
 
 ## Tenth Review Resolution — Real Cold-Readiness Bound Alignment (2026-10-09)
 
 ### 1. Historical Review & Predecessor Provenance
+
 Predecessor candidate `1c73331babbf14a5b1fe0f56001685a6636aea27` (generation `896f73bf4b974c70918e8cdcbc5b3d8a`) was reviewed by independent reviewer Codex and received an APPROVE verdict. All 89 socket-free unit tests passed, scoped ESLint passed with 0 warnings, diff hygiene clean (0 trailing whitespace), all 3 external socket-free probes passed (0 sockets), commit trailers passed in CI, matching green CI across all jobs, and merged normally into `dev` at commit `8d7e14eaa8debbe967d6cf6f05359ce70e30b3c7` (PR #2453).
 
 ### 2. Live Runtime Observation & Finding R10/P1 REOPEN
+
 Operator authorized immutable deployment of `8d7e14eaa` in shared_dev run `37864425192`:
+
 - Contract tests passed (14/14).
 - Operational tests resulted in 15 passed, 1 failed, 0 skipped, 0 flaky.
 - Six genuine 327-byte PDF lifecycles passed completely (intent 201 -> PUT 200 clean receipt -> confirm 201 -> download 200 readback, SHA256 `4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784`, MIME `application/pdf`), proving the native GCS client fix, storage rails, MIME handling, and product integration work in real dev environment.
@@ -224,7 +368,9 @@ Operator authorized immutable deployment of `8d7e14eaa` in shared_dev run `37864
 - Canonical finding R10/P1 REOPEN recorded by Codex at 2026-10-09T01:06:30Z.
 
 ### 3. Approved Minimal Repair Unit
+
 Modifications restricted strictly to the 3 authorized candidate files:
+
 1. `tests/e2e/operational-document-upload.ts`:
    - Aligned finite bounds to `totalBudget = 60000ms` (line 60) and `maxAttempts = 45` (line 207).
    - Retained strict 503 `DOCUMENT_SCANNER_UNAVAILABLE` classification only, idempotent exact same-byte retry with 1s bounded delay, native AbortSignal cancellation, manual redirect, and 1MiB bounded stream reader.
@@ -239,6 +385,7 @@ Modifications restricted strictly to the 3 authorized candidate files:
    - Updated with complete Tenth Review resolution, dev runtime diagnostic proofs, executed commands, and pending acceptance gates.
 
 ### 4. Executed Verification Evidence
+
 - `pnpm exec vitest run tests/unit/operational-document-upload.test.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts`: EXIT 0, 3 test files / 90 tests passed (46 document upload, 3 manifest, 41 healthcheck identity).
 - `pnpm exec eslint tests/e2e/operational-document-upload.ts tests/unit/operational-document-upload.test.ts tests/e2e/operational-browser-acceptance.spec.ts tests/unit/operational-browser-manifest.test.ts tests/unit/system-remediation/sr-dev-healthcheck-identity-20260915/healthcheck-identity.test.ts --max-warnings=0`: EXIT 0 (0 errors, 0 warnings).
 - `git diff --check 8d7e14eaa8debbe967d6cf6f05359ce70e30b3c7`: EXIT 0 (clean, 0 trailing whitespace).
@@ -248,14 +395,14 @@ Modifications restricted strictly to the 3 authorized candidate files:
 
 ### 5. Compliance Evidence Table
 
-| Finding / Acceptance Item | Source Reference & Modified Location | Old Reproduction -> Fixed Result | Command, Exit Code, Version & Evidence Location | Untested Limits & Concrete Constraints |
-|---------------------------|-------------------------------------|----------------------------------|--------------------------------------------------|---------------------------------------|
-| **R10/P1 Cold-Readiness Bound** | `tests/e2e/operational-document-upload.ts` (lines 60, 207) | 15 attempts (~21s) exited before cold readiness (27-28s) -> 45 attempts / 60000ms covers cold start | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0, 46/46 passed | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
-| **P1 Diff Hygiene** | Candidate 3 files under worktree | 0 trailing whitespace | `git diff --check 8d7e14eaa8debbe967d6cf6f05359ce70e30b3c7`, EXIT 0 | None. |
-| **P2 Cold Observation Regression** | `tests/unit/operational-document-upload.test.ts` (line 608) | Added positive cold-start fixture with 20 pending 503s + 400ms overhead + 1s delay | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0 | Socket-free unit/manifest verification. |
-| **P2 Pending Exhaustion to 45** | `tests/unit/operational-document-upload.test.ts` (line 648) | Updated from 15 to 45 attempts (exact 47 calls, 0 confirm/download, identical bytes) | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0 | Socket-free unit verification. |
-| **P2 Deadline & Signal Bounds** | `tests/unit/operational-document-upload.test.ts` (lines 679, 690) | Updated total budget and hanging body timeouts from 30001ms to 60001ms | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0 | Socket-free unit verification. |
-| **Legacy Proof Generation** | `.local/fleet-storage-diagnosis-20261008/owner-cold-repair-20261009T012221Z/cold-comparison.test.ts` | 1c fails at 15 attempts (~21s), new helper passes after 20 pending attempts (~28s) | `pnpm exec vitest run -c .../vitest.config.ts`, EXIT 0, proof in `cold-readiness-proof.json` | Reuses published 1c helper and new helper without duplication. |
-| `operational_harness_real_document_bytes_and_receipts` | Shared dev run 37864425192 (6 receipts verified) | Pending full 16/16 run | Live hosted shared_dev deployment post-merge | VM restriction prohibits running product on VM. |
-| `operational_harness_exact_sha_review_ci_merge` | Task board lifecycle | Pending fresh exact-SHA review by Codex, CI, and normal merge | `ai-status.sh handoff` | Awaiting independent reviewer review. |
-| `shared_dev_full_16_operational_cases_zero_skips` | Live acceptance gate | Pending full 16/16 operational cases | Operator authorized fresh run post-merge | Requires Operator immutable deployment. |
+| Finding / Acceptance Item                              | Source Reference & Modified Location                                                                 | Old Reproduction -> Fixed Result                                                                    | Command, Exit Code, Version & Evidence Location                                              | Untested Limits & Concrete Constraints                                                  |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **R10/P1 Cold-Readiness Bound**                        | `tests/e2e/operational-document-upload.ts` (lines 60, 207)                                           | 15 attempts (~21s) exited before cold readiness (27-28s) -> 45 attempts / 60000ms covers cold start | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0, 46/46 passed  | VM restriction prohibits local browser/server startup. Must run in `shared_dev` via CI. |
+| **P1 Diff Hygiene**                                    | Candidate 3 files under worktree                                                                     | 0 trailing whitespace                                                                               | `git diff --check 8d7e14eaa8debbe967d6cf6f05359ce70e30b3c7`, EXIT 0                          | None.                                                                                   |
+| **P2 Cold Observation Regression**                     | `tests/unit/operational-document-upload.test.ts` (line 608)                                          | Added positive cold-start fixture with 20 pending 503s + 400ms overhead + 1s delay                  | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0                | Socket-free unit/manifest verification.                                                 |
+| **P2 Pending Exhaustion to 45**                        | `tests/unit/operational-document-upload.test.ts` (line 648)                                          | Updated from 15 to 45 attempts (exact 47 calls, 0 confirm/download, identical bytes)                | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0                | Socket-free unit verification.                                                          |
+| **P2 Deadline & Signal Bounds**                        | `tests/unit/operational-document-upload.test.ts` (lines 679, 690)                                    | Updated total budget and hanging body timeouts from 30001ms to 60001ms                              | `pnpm exec vitest run tests/unit/operational-document-upload.test.ts`, EXIT 0                | Socket-free unit verification.                                                          |
+| **Legacy Proof Generation**                            | `.local/fleet-storage-diagnosis-20261008/owner-cold-repair-20261009T012221Z/cold-comparison.test.ts` | 1c fails at 15 attempts (~21s), new helper passes after 20 pending attempts (~28s)                  | `pnpm exec vitest run -c .../vitest.config.ts`, EXIT 0, proof in `cold-readiness-proof.json` | Reuses published 1c helper and new helper without duplication.                          |
+| `operational_harness_real_document_bytes_and_receipts` | Shared dev run 37864425192 (6 receipts verified)                                                     | Pending full 16/16 run                                                                              | Live hosted shared_dev deployment post-merge                                                 | VM restriction prohibits running product on VM.                                         |
+| `operational_harness_exact_sha_review_ci_merge`        | Task board lifecycle                                                                                 | Pending fresh exact-SHA review by Codex, CI, and normal merge                                       | `ai-status.sh handoff`                                                                       | Awaiting independent reviewer review.                                                   |
+| `shared_dev_full_16_operational_cases_zero_skips`      | Live acceptance gate                                                                                 | Pending full 16/16 operational cases                                                                | Operator authorized fresh run post-merge                                                     | Requires Operator immutable deployment.                                                 |

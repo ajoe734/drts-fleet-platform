@@ -5,7 +5,12 @@ import { createOperationalEvidenceJournal } from "./operational-evidence-journal
 import {
   runSetup,
   requiredOrigin,
-  getIdentityToken,
+  operationalRequestHeaders,
+  fetchOperationalSurface,
+  installOperationalBrowserHeaders,
+  prepareOperationalFleetSession,
+  type FleetApplicationSetup,
+  type PreparedOperationalFleetSession,
   valueAtPath,
   materializeString,
   type HttpMethod,
@@ -81,6 +86,7 @@ type RetiredSurface = { id: string; baseUrlEnv: string; path: string };
 type Manifest = {
   version: number;
   candidateSha: string;
+  fleetApplicationSetup: FleetApplicationSetup;
   journeys: Journey[];
   retiredSurfaces: RetiredSurface[];
 };
@@ -175,16 +181,19 @@ async function assertReadback(
   variables: TemplateVariables,
 ) {
   const readbackPath = interpolatePath(readback.url, resultId, variables);
-  const idToken = getIdentityToken(journey.baseUrlEnv);
-  const readbackHeaders: Record<string, string> = {};
-  if (idToken) {
-    readbackHeaders["Authorization"] = `Bearer ${idToken}`;
-  }
-  const readbackResponse = await page
-    .context()
-    .request.get(new URL(readbackPath, origin).toString(), {
-      ...(idToken ? { headers: readbackHeaders } : {}),
-    });
+  const readbackUrl = new URL(readbackPath, origin).toString();
+  const readbackHeaders = operationalRequestHeaders(
+    journey.baseUrlEnv,
+    readbackUrl,
+  );
+  const readbackResponse = await fetchOperationalSurface(
+    page.context().request,
+    journey.baseUrlEnv,
+    readbackUrl,
+    {
+      headers: readbackHeaders,
+    },
+  );
   expect(
     readbackResponse.ok(),
     `${journey.id}/${operationName} readback`,
@@ -283,8 +292,37 @@ function installEnvironmentVariables(
   }
 }
 
-test.afterAll(() => {
-  evidenceJournal.flush();
+let fleetSession: PreparedOperationalFleetSession | undefined;
+test.beforeAll(async () => {
+  fleetSession = await prepareOperationalFleetSession(
+    manifest.fleetApplicationSetup,
+  );
+  record({ kind: "fleet-application-session", ...fleetSession.metadata });
+});
+
+test.afterAll(async () => {
+  try {
+    await fleetSession?.cleanup();
+    if (fleetSession)
+      record({
+        kind: "fleet-application-session-cleanup",
+        ...fleetSession.metadata,
+        outcome:
+          fleetSession.metadata.source === "provided-session"
+            ? "provided-session-preserved"
+            : "own-session-key-entry-revoked",
+      });
+  } catch (error) {
+    if (fleetSession)
+      record({
+        kind: "fleet-application-session-cleanup",
+        ...fleetSession.metadata,
+        outcome: "failed",
+      });
+    throw error;
+  } finally {
+    evidenceJournal.flush();
+  }
 });
 
 test("requires a single immutable candidate SHA and complete formal journey manifest", () => {
@@ -373,12 +411,7 @@ for (const journey of manifest.journeys) {
       runId: `${journey.id}-${Date.now().toString(36)}`,
     };
     installEnvironmentVariables(journey, variables);
-    const idToken = getIdentityToken(journey.baseUrlEnv);
-    if (idToken) {
-      await page.context().setExtraHTTPHeaders({
-        Authorization: `Bearer ${idToken}`,
-      });
-    }
+    await installOperationalBrowserHeaders(page, journey.baseUrlEnv);
     await installBrowserSession(page, journey, origin, variables);
     await runSetup(
       { request: page.context().request, record },
@@ -517,14 +550,18 @@ for (const journey of manifest.journeys) {
         ).toBeTruthy();
 
         const downloadUrl = download.url();
-        const opIdToken = getIdentityToken(journey.baseUrlEnv);
-        const downloadHeaders: Record<string, string> = {};
-        if (opIdToken) {
-          downloadHeaders["Authorization"] = `Bearer ${opIdToken}`;
-        }
-        const downloadResponse = await page.context().request.get(downloadUrl, {
-          ...(opIdToken ? { headers: downloadHeaders } : {}),
-        });
+        const downloadHeaders = operationalRequestHeaders(
+          journey.baseUrlEnv,
+          downloadUrl,
+        );
+        const downloadResponse = await fetchOperationalSurface(
+          page.context().request,
+          journey.baseUrlEnv,
+          downloadUrl,
+          {
+            headers: downloadHeaders,
+          },
+        );
         expect(
           downloadResponse.ok(),
           `${journey.id}/${operation.name} download response ok`,
@@ -623,12 +660,7 @@ for (const journey of manifest.journeys) {
       runId: `${journey.id}-route-${Date.now().toString(36)}`,
     };
     installEnvironmentVariables(journey, variables);
-    const idToken = getIdentityToken(journey.baseUrlEnv);
-    if (idToken) {
-      await page.context().setExtraHTTPHeaders({
-        Authorization: `Bearer ${idToken}`,
-      });
-    }
+    await installOperationalBrowserHeaders(page, journey.baseUrlEnv);
     await installBrowserSession(page, journey, origin, variables);
     await runSetup(
       { request: page.context().request, record },
