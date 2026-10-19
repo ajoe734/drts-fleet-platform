@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import type { CSSProperties, ReactNode } from "react";
@@ -1357,6 +1358,7 @@ async function createWebhookAction(formData: FormData) {
       )}`,
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     redirect(
       `/webhooks?mode=create&error=${encodeURIComponent(toErrorMessage(error, locale))}`,
     );
@@ -1434,6 +1436,7 @@ async function updateWebhookAction(formData: FormData) {
       )}`,
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     redirect(
       `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
         toErrorMessage(error, locale),
@@ -1467,6 +1470,7 @@ async function deleteWebhookAction(formData: FormData) {
       )}`,
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     redirect(
       `/webhooks?mode=edit&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
         toErrorMessage(error, locale),
@@ -1524,6 +1528,7 @@ async function rotateWebhookSecretAction(formData: FormData) {
       )}`,
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     redirect(
       `/webhooks?mode=rotate&webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
         toErrorMessage(error, locale),
@@ -1555,6 +1560,7 @@ async function sendTestWebhookAction(formData: FormData) {
       )}`,
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&error=${encodeURIComponent(
         toErrorMessage(error, locale),
@@ -1584,6 +1590,7 @@ async function retryFailedDeliveryAction(formData: FormData) {
       )}`,
     );
   } catch (error) {
+    if (isRedirectError(error)) throw error;
     redirect(
       `/webhooks?webhookId=${encodeURIComponent(webhookId)}&deliveryId=${encodeURIComponent(deliveryId)}&error=${encodeURIComponent(
         toErrorMessage(error, locale),

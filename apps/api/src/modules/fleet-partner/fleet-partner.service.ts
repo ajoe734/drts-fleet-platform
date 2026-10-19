@@ -185,6 +185,28 @@ export class FleetPartnerService implements OnModuleInit {
     return this.cloneFleetPartner(this.requireFleetPartner(fleetPartnerId));
   }
 
+  async findFleetPartnerForMultiTaxiOperator(operatorId: string) {
+    const partners = this.fleetPartnerRepository?.isEnabled()
+      ? await this.fleetPartnerRepository.findReceiptOperatorFleets(operatorId)
+      : this.fleetPartners.filter((partner) =>
+          partner.multiTaxiOperatorIds?.includes(operatorId),
+        );
+    if (partners.length > 1)
+      throw this.badRequest(
+        "AMBIGUOUS_OPERATOR_MAPPING",
+        "Multiple Fleet masters identify this operator.",
+      );
+    if (!partners[0]) return null;
+    const partner = this.cloneFleetPartner(partners[0]);
+    this.fleetPartners = [
+      partner,
+      ...this.fleetPartners.filter(
+        (p) => p.fleetPartnerId !== partner.fleetPartnerId,
+      ),
+    ];
+    return this.cloneFleetPartner(partner);
+  }
+
   async createFleetPartner(command: CreateFleetPartnerCommand) {
     this.assertNonBlank(command.legalName, "legalName");
     this.assertNonBlank(command.displayName, "displayName");
@@ -197,6 +219,13 @@ export class FleetPartnerService implements OnModuleInit {
 
     const partner: FleetPartnerRecord = {
       fleetPartnerId: `fleet-${randomUUID()}`,
+      ...(command.multiTaxiOperatorIds === undefined
+        ? {}
+        : {
+            multiTaxiOperatorIds: this.normalizeMultiTaxiOperatorIds(
+              command.multiTaxiOperatorIds,
+            ),
+          }),
       legalName: command.legalName.trim(),
       displayName: command.displayName.trim(),
       businessRegistrationNo: command.businessRegistrationNo.trim(),
@@ -250,6 +279,11 @@ export class FleetPartnerService implements OnModuleInit {
       }
       if (command.partnershipType !== undefined) {
         partner.partnershipType = command.partnershipType;
+      }
+      if (command.multiTaxiOperatorIds !== undefined) {
+        partner.multiTaxiOperatorIds = this.normalizeMultiTaxiOperatorIds(
+          command.multiTaxiOperatorIds,
+        );
       }
 
       await this.persistMasterDataChanges(
@@ -1300,8 +1334,25 @@ export class FleetPartnerService implements OnModuleInit {
     }
   }
 
+  private normalizeMultiTaxiOperatorIds(ids: string[]): string[] {
+    if (
+      !Array.isArray(ids) ||
+      ids.some((id) => typeof id !== "string" || !id.trim())
+    )
+      throw this.badRequest(
+        "INVALID_ARGUMENT",
+        "multiTaxiOperatorIds must contain nonempty operator IDs.",
+      );
+    return [...new Set(ids.map((id) => id.trim()))];
+  }
+
   private cloneFleetPartner(partner: FleetPartnerRecord): FleetPartnerRecord {
-    return { ...partner };
+    return {
+      ...partner,
+      ...(partner.multiTaxiOperatorIds === undefined
+        ? {}
+        : { multiTaxiOperatorIds: [...partner.multiTaxiOperatorIds] }),
+    };
   }
 
   private cloneAffiliation(

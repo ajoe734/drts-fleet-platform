@@ -1,3 +1,4 @@
+import { loadDriverOrderSummaries } from "@/lib/task-order-summaries";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -14,7 +15,7 @@ import { Redirect, useRouter } from "expo-router";
 import type {
   DriverTaskAction,
   DriverTaskRecord,
-  OwnedOrderRecord,
+  DriverTaskOrderSummary,
   UnifiedDriverTaskView,
 } from "@drts/contracts";
 
@@ -36,6 +37,8 @@ import {
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
+  initializeDriverIdentity,
+  isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
   registerProtectedCacheClearHandler,
   rejectForwardedDriverOffer,
@@ -604,7 +607,7 @@ function getDenseStatusColor(task: UnifiedDriverTaskView) {
   }
 }
 
-function buildTypeLabel(order: OwnedOrderRecord | null) {
+function buildTypeLabel(order: DriverTaskOrderSummary | null) {
   return formatDriverServiceProductLabel({
     serviceProductCode: readDriverServiceProductCode(order),
     serviceBucket: order?.serviceBucket ?? null,
@@ -918,7 +921,7 @@ function TaskCard({
   accepting,
 }: {
   task: UnifiedDriverTaskView;
-  order: OwnedOrderRecord | null;
+  order: DriverTaskOrderSummary | null;
   onOpen: () => void;
   onAccept: () => void;
   accepting: boolean;
@@ -1067,7 +1070,7 @@ function DenseTaskRow({
   onReject,
 }: {
   task: UnifiedDriverTaskView;
-  order: OwnedOrderRecord | null;
+  order: DriverTaskOrderSummary | null;
   busy: boolean;
   onOpen: () => void;
   onAccept: () => void;
@@ -1240,9 +1243,9 @@ function DenseTaskRow({
 
 export default function JobsScreen() {
   const [tasks, setTasks] = useState<UnifiedDriverTaskView[]>([]);
-  const [orderMap, setOrderMap] = useState<Record<string, OwnedOrderRecord>>(
-    {},
-  );
+  const [orderMap, setOrderMap] = useState<
+    Record<string, DriverTaskOrderSummary>
+  >({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1258,7 +1261,26 @@ export default function JobsScreen() {
   >(null);
   const router = useRouter();
 
-  const isProvisioned = isDriverIdentityProvisioned();
+  const [identityReady, setIdentityReady] = useState(isDriverIdentityHydrated);
+  const isProvisioned = identityReady && isDriverIdentityProvisioned();
+
+  useEffect(() => {
+    if (identityReady) return;
+    let cancelled = false;
+    // A document reload starts with empty module state even when this device
+    // has a stored session. Wait for the existing single-flight restore before
+    // deciding whether to redirect or loading protected tasks.
+    initializeDriverIdentity()
+      .catch((identityError: unknown) => {
+        if (!cancelled) setError(getErrorMessage(identityError));
+      })
+      .finally(() => {
+        if (!cancelled) setIdentityReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [identityReady]);
 
   useEffect(() => {
     const unregister = registerProtectedCacheClearHandler(() => {
@@ -1297,28 +1319,7 @@ export default function JobsScreen() {
       const pendingCompletion = await pendingCompletionPromise;
       setQueuedCompletionTaskId(pendingCompletion?.taskId ?? null);
 
-      const uniqueOrderIds = [
-        ...new Set(fetchedTasks.map((task) => task.orderId).filter(Boolean)),
-      ];
-      const orderResults = await Promise.all(
-        uniqueOrderIds.map(async (orderId) => {
-          try {
-            const order = (await client.getOrder(orderId)) as OwnedOrderRecord;
-            return { orderId, order };
-          } catch {
-            return { orderId, order: null };
-          }
-        }),
-      );
-
-      const nextOrderMap: Record<string, OwnedOrderRecord> = {};
-      orderResults.forEach(({ orderId, order }) => {
-        if (order) {
-          nextOrderMap[orderId] = order;
-        }
-      });
-
-      setOrderMap(nextOrderMap);
+      setOrderMap(await loadDriverOrderSummaries(client, fetchedTasks));
       setError(null);
       setLastSyncedAt(new Date().toISOString());
     } catch (nextError: unknown) {
@@ -1330,6 +1331,7 @@ export default function JobsScreen() {
   };
 
   useEffect(() => {
+    if (!identityReady) return;
     if (!isProvisioned) {
       setLoading(false);
       return;
@@ -1348,7 +1350,7 @@ export default function JobsScreen() {
       })
       .catch(() => loadTasks())
       .finally(() => setLoading(false));
-  }, [isProvisioned]);
+  }, [identityReady, isProvisioned]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -1495,7 +1497,7 @@ export default function JobsScreen() {
   }
 
   function renderContent() {
-    if (loading) {
+    if (!identityReady || loading) {
       return (
         <View style={styles.loadingState}>
           <ActivityIndicator size="large" color={THEME.accent} />
@@ -1626,7 +1628,7 @@ export default function JobsScreen() {
     );
   }
 
-  if (!isProvisioned) {
+  if (identityReady && !isProvisioned) {
     return <Redirect href="/onboarding" />;
   }
 

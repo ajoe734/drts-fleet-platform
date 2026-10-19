@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { createHash } from "node:crypto";
 import { buildOrderFixture } from "../integration/voice-order-fixture";
 
@@ -200,27 +201,9 @@ function createOwnedMobilityService(options?: {
       options.serviceProductOverrides as never,
     );
   }
-  const callcenterService = {
-    registerRecordingAttachmentListener: vi.fn(),
-    registerRecordingStateChangeListener: vi.fn(),
-    linkOrderToCallSession: vi.fn(
-      ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId,
-      }) => ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId: recordingId ?? null,
-      }),
-    ),
-  };
+  const callcenterService = new CallcenterService(
+    auditNotificationService as never,
+  );
   const taskEventsService = new OwnedMobilityTaskEventsService(
     new EventEmitter2(),
   );
@@ -239,7 +222,7 @@ function createOwnedMobilityService(options?: {
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
-    callcenterService as never,
+    callcenterService,
     taskEventsService,
     opsDispatchEventsService,
     options?.repository as never,

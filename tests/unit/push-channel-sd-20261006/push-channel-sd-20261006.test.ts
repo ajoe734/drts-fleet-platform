@@ -388,7 +388,10 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
         ...(content.launch_allocations || []),
         ...(content.partner_notification_allocations || []),
         ...(content.voice_application_allocations || []),
+        ...(content.voice_callback_allocations || []),
+        ...(content.sos_duty_allocations || []),
         ...(content.passenger_push_channel_allocations || []),
+        ...(content.complaint_command_allocations || []),
       ].map((a: any) => a.version);
       expect(new Set(allVersionsEverywhere).size).toBe(
         allVersionsEverywhere.length,

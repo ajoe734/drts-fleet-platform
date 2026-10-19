@@ -300,17 +300,17 @@ describe("SR-QA-TENANT-001 — cost centres directory (C027)", () => {
 });
 
 describe("SR-QA-TENANT-001 — approval rules directory (C028 用車規則)", () => {
-  it("creates an approval rule, reads it back, then reorders and disables it", () => {
+  it("creates an approval rule, reads it back, then reorders and disables it", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const ruleA = service.upsertApprovalRule(TENANT_ID, {
+    const ruleA = await service.upsertApprovalRule(TENANT_ID, {
       ruleName: "Rule A",
       priority: 10,
       conditions: [],
       action: "flag_manual_review",
       approvers: [],
     } as never);
-    const ruleB = service.upsertApprovalRule(TENANT_ID, {
+    const ruleB = await service.upsertApprovalRule(TENANT_ID, {
       ruleName: "Rule B",
       priority: 20,
       conditions: [],
@@ -324,7 +324,7 @@ describe("SR-QA-TENANT-001 — approval rules directory (C028 用車規則)", ()
     });
 
     // WRITE: reorder so B now sorts first.
-    const reordered = service.reorderApprovalRules(TENANT_ID, {
+    const reordered = await service.reorderApprovalRules(TENANT_ID, {
       orderedRuleIds: [ruleB.ruleId, ruleA.ruleId],
     } as never);
     expect(reordered.map((r) => r.ruleId)).toEqual([
@@ -336,7 +336,7 @@ describe("SR-QA-TENANT-001 — approval rules directory (C028 用車規則)", ()
     const rereadA = service.getApprovalRule(TENANT_ID, ruleA.ruleId);
     expect(rereadB.priority).toBeLessThan(rereadA.priority);
 
-    service.disableApprovalRule(TENANT_ID, ruleA.ruleId);
+    await service.disableApprovalRule(TENANT_ID, ruleA.ruleId);
     expect(service.getApprovalRule(TENANT_ID, ruleA.ruleId).activeFlag).toBe(
       false,
     );
@@ -348,9 +348,9 @@ describe("SR-QA-TENANT-001 — approval rules directory (C028 用車規則)", ()
     ).not.toContain(ruleA.ruleId);
   });
 
-  it("negative: reordering with an incomplete rule-id list is rejected instead of silently dropping rules", () => {
+  it("negative: reordering with an incomplete rule-id list is rejected instead of silently dropping rules", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    service.upsertApprovalRule(TENANT_ID, {
+    await service.upsertApprovalRule(TENANT_ID, {
       ruleName: "Only Rule",
       priority: 10,
       conditions: [],
@@ -375,7 +375,7 @@ describe("SR-QA-TENANT-001 — SLA profile (C028)", () => {
   // has never had one written — use a distinct id for that half of the test.
   const FRESH_TENANT_ID = "tenant-qa-sla-fresh-001";
 
-  it("starts unprovisioned for a tenant with no SLA history, then a write is visible through both the raw getter and the UI view read model", () => {
+  it("starts unprovisioned for a tenant with no SLA history, then a write is visible through both the raw getter and the UI view read model", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     const initialView = service.getSlaProfileView(FRESH_TENANT_ID);
@@ -383,7 +383,7 @@ describe("SR-QA-TENANT-001 — SLA profile (C028)", () => {
     expect(initialView.emptyState?.reason).toBe("not_provisioned");
 
     // WRITE
-    const receipt = service.updateSlaProfile(FRESH_TENANT_ID, {
+    const receipt = await service.updateSlaProfile(FRESH_TENANT_ID, {
       waitThresholdMin: 10,
       arrivalThresholdMin: 15,
       completionThresholdMin: 60,
@@ -418,9 +418,9 @@ describe("SR-QA-TENANT-001 — SLA profile (C028)", () => {
     );
   });
 
-  it("negative: recalculating SLA bookings without a reason is rejected (validation, not a silent no-op)", () => {
+  it("negative: recalculating SLA bookings without a reason is rejected (validation, not a silent no-op)", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    service.updateSlaProfile(TENANT_ID, {
+    await service.updateSlaProfile(TENANT_ID, {
       waitThresholdMin: 10,
       arrivalThresholdMin: 15,
       completionThresholdMin: 60,

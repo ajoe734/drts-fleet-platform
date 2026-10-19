@@ -1,20 +1,37 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type {
   AttendanceRecord,
   DriverRegistryRecord,
+  EmptyReason,
   ShiftRecord,
 } from "@drts/contracts";
-import { getServerOpsClient } from "@/lib/api-client.server";
-import { getServerLocale } from "@/lib/server-locale";
-import { t, type Locale } from "@/lib/translations";
+import {
+  OpsAttendanceExportButton,
+  OpsAttendanceFilterBar,
+} from "../../components/ops-attendance-filter-export";
+import { getServerOpsClient } from "../../lib/api-client.server";
+import { formatOpsCodeLabel } from "../../lib/localized-labels";
+import {
+  buildAttendanceCanonicalView,
+  buildAttendanceExportHref,
+  buildAttendanceHref,
+  resolveAttendanceFilters,
+  shiftIntersectsUtcRange,
+  type AttendanceView,
+} from "../../lib/ops-analytics";
+import { buildEmptyEnvelope, emptyStateCopy } from "../../lib/ops-empty-state";
+import { getServerLocale } from "../../lib/server-locale";
+import { t, type Locale } from "../../lib/translations";
 import {
   CanvasBanner as Banner,
-  CanvasBtn as Btn,
   CanvasCard as Card,
   CanvasKPI as KPI,
   CanvasPageHeader as PageHeader,
   CanvasPill as Pill,
+  CanvasTable as Table,
   buildCanvasTheme,
+  type CanvasTableColumn,
   type CanvasTheme,
   type CanvasTone,
 } from "@drts/ui-web";
@@ -23,11 +40,11 @@ type AttendancePageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type AttendanceView = "today" | "week" | "exceptions";
-
 type GanttRow = {
   shiftId: string;
+  driverId: string;
   driverLabel: string;
+  vehicleId: string | null;
   status: ShiftRecord["status"];
   segmentLeft: number;
   segmentWidth: number;
@@ -56,7 +73,7 @@ const kpiGridStyle = {
 
 const ganttGridStyle = {
   display: "grid",
-  gridTemplateColumns: "120px minmax(720px, 1fr)",
+  gridTemplateColumns: "150px minmax(720px, 1fr)",
   fontSize: 11,
   gap: "0 8px",
 };
@@ -90,37 +107,6 @@ const ganttSegmentBaseStyle = {
   whiteSpace: "nowrap" as const,
 };
 
-function firstParam(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function resolveView(value: string | undefined): AttendanceView {
-  if (value === "week" || value === "exceptions") {
-    return value;
-  }
-  return "today";
-}
-
-function startOfUtcDay(date: Date) {
-  return Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-}
-
-function endOfUtcDay(date: Date) {
-  return startOfUtcDay(date) + 24 * 60 * 60 * 1000;
-}
-
-function startOfTrailingWeek(date: Date) {
-  return startOfUtcDay(date) - 6 * 24 * 60 * 60 * 1000;
-}
-
 function asTime(value: string | null | undefined) {
   if (!value) {
     return null;
@@ -129,43 +115,24 @@ function asTime(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function intersectsRange(
-  start: string | null | undefined,
-  end: string | null | undefined,
-  rangeStart: number,
-  rangeEnd: number,
-) {
-  const startTime = asTime(start);
-  if (startTime === null) {
-    return false;
-  }
-  const endTime = asTime(end) ?? rangeEnd;
-  return startTime < rangeEnd && endTime >= rangeStart;
-}
-
-function isAttendanceInRange(
-  record: AttendanceRecord,
-  rangeStart: number,
-  rangeEnd: number,
-) {
-  const dateStart = Date.parse(`${record.date}T00:00:00.000Z`);
-  return Number.isFinite(dateStart)
-    ? dateStart >= rangeStart && dateStart < rangeEnd
-    : false;
-}
-
 function formatCanvasDateLabel(locale: Locale, value: Date) {
   const year = value.getUTCFullYear();
   const month = `${value.getUTCMonth() + 1}`.padStart(2, "0");
   const day = `${value.getUTCDate()}`.padStart(2, "0");
   const weekday = new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
-    weekday: locale === "zh" ? "short" : "short",
+    weekday: "short",
     timeZone: "UTC",
   }).format(value);
 
-  return locale === "zh"
-    ? `${year}-${month}-${day} (${weekday})`
-    : `${year}-${month}-${day} (${weekday})`;
+  return `${year}-${month}-${day} (${weekday})`;
+}
+
+function formatUtcTimestampShort(value: string | null | undefined): string {
+  if (!value) return "—";
+  const parsed = asTime(value);
+  if (parsed === null) return value;
+  const iso = new Date(parsed).toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 }
 
 function formatHourTick(hour: number) {
@@ -202,6 +169,55 @@ function shiftTone(status: ShiftRecord["status"]): CanvasTone {
   return "info";
 }
 
+function attendanceStatusTone(
+  status: AttendanceRecord["status"] | null,
+): CanvasTone {
+  if (status === "present") return "success";
+  if (status === "partial") return "warn";
+  if (status === "absent") return "danger";
+  return "neutral";
+}
+
+function emptyReasonTone(reason: EmptyReason): CanvasTone {
+  switch (reason) {
+    case "fetch_failed":
+    case "permission_denied":
+      return "danger";
+    case "not_provisioned":
+    case "external_unavailable":
+      return "warn";
+    case "filtered_empty":
+      return "info";
+    default:
+      return "neutral";
+  }
+}
+
+function classifyLoadErrorCode(error: unknown): string {
+  const message =
+    error instanceof Error && error.message ? error.message.toLowerCase() : "";
+  const statusProp =
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    typeof (error as { status?: unknown }).status === "number"
+      ? (error as { status: number }).status
+      : null;
+  if (
+    statusProp === 401 ||
+    statusProp === 403 ||
+    message.includes("401") ||
+    message.includes("403") ||
+    message.includes("forbidden") ||
+    message.includes("permission_denied") ||
+    message.includes("permission denied") ||
+    message.includes("unauthorized")
+  ) {
+    return "permission_denied";
+  }
+  return "fetch_failed";
+}
+
 function renderTabLink(
   href: string,
   label: string,
@@ -225,10 +241,6 @@ function renderTabLink(
   );
 }
 
-function buildDriverLookup(drivers: DriverRegistryRecord[]) {
-  return new Map(drivers.map((driver) => [driver.driverId, driver]));
-}
-
 function buildGanttRows(
   shifts: ShiftRecord[],
   driversById: Map<string, DriverRegistryRecord>,
@@ -238,7 +250,7 @@ function buildGanttRows(
 ): GanttRow[] {
   return shifts
     .filter((shift) =>
-      intersectsRange(
+      shiftIntersectsUtcRange(
         shift.clockedInAt,
         shift.clockedOutAt,
         rangeStart,
@@ -279,7 +291,9 @@ function buildGanttRows(
 
       return {
         shiftId: shift.shiftId,
+        driverId: shift.driverId,
         driverLabel: driver?.name ?? shift.driverId,
+        vehicleId: shift.vehicleId ?? null,
         status: shift.status,
         segmentLeft: (leftHours / 24) * 100,
         segmentWidth: (Math.min(widthHours, 24) / 24) * 100,
@@ -299,87 +313,87 @@ export default async function AttendancePage({
       Promise.resolve({} as Record<string, string | string[] | undefined>),
   ]);
 
-  const view = resolveView(firstParam(params.view));
   const nowDate = new Date();
   const now = nowDate.getTime();
-  const todayStart = startOfUtcDay(nowDate);
-  const todayEnd = endOfUtcDay(nowDate);
-  const weekStart = startOfTrailingWeek(nowDate);
-  const weekEnd = todayEnd;
+  const filters = resolveAttendanceFilters(params, nowDate);
+  const view: AttendanceView = filters.view;
+  const driverQuery = filters.driverId !== "all" ? filters.driverId : undefined;
 
   let shifts: ShiftRecord[] = [];
   let attendanceRecords: AttendanceRecord[] = [];
   let drivers: DriverRegistryRecord[] = [];
   let loadError: string | null = null;
+  let errorCode: string | null = null;
 
   try {
     [shifts, attendanceRecords, drivers] = await Promise.all([
-      client.listShifts(),
-      client.listAttendance(),
+      driverQuery ? client.listShifts(driverQuery) : client.listShifts(),
+      driverQuery
+        ? client.listAttendance(driverQuery)
+        : client.listAttendance(),
       client.listDrivers(),
     ]);
   } catch (error) {
     loadError =
       error instanceof Error ? error.message : t("common.unknown", locale);
+    errorCode = classifyLoadErrorCode(error);
   }
 
-  const driversById = buildDriverLookup(drivers);
-  const todayShifts = shifts.filter((shift) =>
-    intersectsRange(
-      shift.clockedInAt,
-      shift.clockedOutAt,
-      todayStart,
-      todayEnd,
-    ),
-  );
-  const weekShifts = shifts.filter((shift) =>
-    intersectsRange(shift.clockedInAt, shift.clockedOutAt, weekStart, weekEnd),
-  );
-  const todayAttendance = attendanceRecords.filter((record) =>
-    isAttendanceInRange(record, todayStart, todayEnd),
-  );
-  const weekAttendance = attendanceRecords.filter((record) =>
-    isAttendanceInRange(record, weekStart, weekEnd),
-  );
+  const canonicalView = buildAttendanceCanonicalView({
+    shifts,
+    attendanceRecords,
+    drivers,
+    filters,
+    reference: nowDate,
+    ok: loadError === null,
+    errorCode,
+  });
 
-  const scopeShifts = view === "week" ? weekShifts : todayShifts;
-  const scopeAttendance = view === "week" ? weekAttendance : todayAttendance;
-  const scheduledDrivers = new Set(scopeShifts.map((shift) => shift.driverId))
-    .size;
-  const activeShifts = scopeShifts.filter((shift) => shift.status === "active");
-  const completedShifts = scopeShifts.filter(
-    (shift) => shift.status === "completed",
-  );
-  const absentCount = scopeAttendance.filter(
-    (record) => record.status === "absent",
-  ).length;
-  const partialCount = scopeAttendance.filter(
-    (record) => record.status === "partial",
-  ).length;
-  const exceptionCount = absentCount + partialCount;
-  const ganttRows = buildGanttRows(
-    todayShifts,
+  const {
     driversById,
-    todayStart,
-    todayEnd,
+    todayShifts,
+    scopeShifts,
+    filteredRows,
+    scheduledDrivers,
+    activeShifts,
+    completedShifts,
+    absentCount,
+    partialCount,
+    exceptionCount,
+    dayStart,
+    dayEnd,
+    anchorDate,
+    emptyReason,
+  } = canonicalView;
+
+  const ganttSourceShifts =
+    view === "exceptions" && filters.anomaly === "all"
+      ? canonicalView.filteredShifts
+      : todayShifts;
+
+  const ganttRows = buildGanttRows(
+    ganttSourceShifts,
+    driversById,
+    dayStart,
+    dayEnd,
     now,
   );
 
-  const subtitle = formatCanvasDateLabel(locale, nowDate);
+  const subtitle = formatCanvasDateLabel(locale, anchorDate);
   const tabConfigs = [
     {
       key: "today" as const,
-      href: "/attendance",
+      href: buildAttendanceHref(filters, { view: "today" }),
       label: t("attendance.tab.today", locale),
     },
     {
       key: "week" as const,
-      href: "/attendance?view=week",
+      href: buildAttendanceHref(filters, { view: "week" }),
       label: t("attendance.tab.week", locale),
     },
     {
       key: "exceptions" as const,
-      href: "/attendance?view=exceptions",
+      href: buildAttendanceHref(filters, { view: "exceptions" }),
       label: t("attendance.tab.exceptions", locale),
     },
   ];
@@ -388,6 +402,111 @@ export default async function AttendancePage({
   );
   const activeTab = tabs[tabConfigs.findIndex((tab) => tab.key === view)];
   const lateCount = partialCount;
+  const exportHref = buildAttendanceExportHref(filters);
+
+  const recordColumns: CanvasTableColumn<Record<string, ReactNode>>[] = [
+    { h: t("attendance.col.shiftId", locale), k: "shiftId", mono: true },
+    {
+      h: t("attendance.col.attendanceId", locale),
+      k: "attendanceId",
+      mono: true,
+    },
+    { h: t("attendance.col.date", locale), k: "date", mono: true },
+    { h: t("attendance.col.driver", locale), k: "driver" },
+    { h: t("attendance.col.vehicle", locale), k: "vehicle", mono: true },
+    { h: t("attendance.col.status", locale), k: "status" },
+    { h: t("attendance.col.clockedIn", locale), k: "clockedIn", mono: true },
+    { h: t("attendance.col.clockedOut", locale), k: "clockedOut", mono: true },
+    {
+      h: t("attendance.col.hours", locale),
+      k: "hours",
+      mono: true,
+      align: "right",
+    },
+    { h: t("attendance.col.location", locale), k: "location" },
+  ];
+
+  const recordTableRows: Record<string, ReactNode>[] = filteredRows.map(
+    (row) => {
+      const locationText =
+        row.startLocation && row.endLocation
+          ? `${row.startLocation} → ${row.endLocation}`
+          : row.startLocation ?? row.endLocation ?? "—";
+
+      return {
+        shiftId: row.shiftId ?? "—",
+        attendanceId: row.attendanceId ?? "—",
+        date: row.date,
+        driver: (
+          <Link
+            href={`/drivers/${encodeURIComponent(row.driverId)}`}
+            data-testid={`attendance-driver-link-${row.rowKey}`}
+            style={{
+              color: theme.accent,
+              textDecoration: "none",
+              fontWeight: 600,
+            }}
+          >
+            {row.driverName}{" "}
+            <span
+              style={{
+                color: theme.textMuted,
+                fontFamily: theme.monoFamily,
+                fontSize: 11,
+                fontWeight: 400,
+              }}
+            >
+              ({row.driverId})
+            </span>
+          </Link>
+        ),
+        vehicle: row.vehicleId ? (
+          <Link
+            href={`/vehicles/${encodeURIComponent(row.vehicleId)}`}
+            data-testid={`attendance-vehicle-link-${row.rowKey}`}
+            style={{
+              color: theme.text,
+              textDecoration: "none",
+              fontFamily: theme.monoFamily,
+            }}
+          >
+            {row.vehicleId}
+          </Link>
+        ) : (
+          "—"
+        ),
+        status: (
+          <div style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+            {row.shiftStatus ? (
+              <Pill theme={theme} tone={shiftTone(row.shiftStatus)} dot>
+                {formatOpsCodeLabel(locale, row.shiftStatus)}
+              </Pill>
+            ) : null}
+            {row.attendanceStatus ? (
+              <Pill
+                theme={theme}
+                tone={attendanceStatusTone(row.attendanceStatus)}
+                dot
+              >
+                {formatOpsCodeLabel(locale, row.attendanceStatus)}
+              </Pill>
+            ) : null}
+          </div>
+        ),
+        clockedIn: formatUtcTimestampShort(row.clockedInAt),
+        clockedOut: formatUtcTimestampShort(row.clockedOutAt),
+        hours: `${row.totalHours} ${t("attendance.hours", locale)}`,
+        location: locationText,
+      };
+    },
+  );
+
+  const emptyEnvelope = emptyReason
+    ? buildEmptyEnvelope(emptyReason, "attendance")
+    : null;
+  const emptyCopy = emptyEnvelope
+    ? emptyStateCopy(emptyEnvelope, locale, "attendance")
+    : null;
 
   return (
     <div
@@ -404,13 +523,23 @@ export default async function AttendancePage({
         tabs={tabs}
         activeTab={activeTab}
         actions={
-          <Btn theme={theme} variant="primary" icon="ext">
-            {t("attendance.export", locale)}
-          </Btn>
+          <OpsAttendanceExportButton
+            exportHref={exportHref}
+            label={t("attendance.export", locale)}
+            disabled={loadError !== null}
+            disabledReason={loadError}
+          />
         }
       />
 
       <div style={pageBodyStyle}>
+        <OpsAttendanceFilterBar
+          filters={filters}
+          drivers={canonicalView.drivers}
+          locale={locale}
+          disabled={loadError !== null}
+        />
+
         {loadError ? (
           <Banner
             theme={theme}
@@ -533,9 +662,20 @@ export default async function AttendancePage({
                           fontSize: 12,
                           display: "flex",
                           alignItems: "center",
+                          gap: 6,
                         }}
                       >
-                        {row.driverLabel}
+                        <Link
+                          href={`/drivers/${encodeURIComponent(row.driverId)}`}
+                          data-testid={`gantt-driver-link-${row.shiftId}`}
+                          style={{
+                            color: theme.text,
+                            textDecoration: "none",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {row.driverLabel}
+                        </Link>
                       </div>
                       <div
                         style={{
@@ -587,7 +727,55 @@ export default async function AttendancePage({
             </div>
           )}
         </Card>
+
+        <Card
+          theme={theme}
+          title={t("attendance.attendanceRecords", locale)}
+          padding={filteredRows.length > 0 ? 0 : 16}
+        >
+          {filteredRows.length > 0 ? (
+            <Table
+              theme={theme}
+              columns={recordColumns}
+              rows={recordTableRows}
+            />
+          ) : (
+            <div
+              role="status"
+              data-empty-reason={emptyReason ?? "no_data"}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                color: theme.textMuted,
+                fontSize: 12.5,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span style={{ color: theme.text, fontWeight: 600 }}>
+                  {emptyCopy?.title ?? t("attendance.emptyAttendance", locale)}
+                </span>
+                {emptyReason ? (
+                  <Pill theme={theme} tone={emptyReasonTone(emptyReason)} dot>
+                    {emptyReason}
+                  </Pill>
+                ) : null}
+              </div>
+              <div>
+                {emptyCopy?.body ?? t("attendance.emptyAttendance", locale)}
+              </div>
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );
 }
+

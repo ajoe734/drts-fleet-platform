@@ -20,6 +20,8 @@ import type {
   ActualTripFareBreakdown,
   AddressPayload,
   ControlledDownloadRecord,
+  DriverLocationFreshness,
+  DriverLocationSnapshot,
   DriverDeclaredSurnameSnapshot,
   GeoRouteResponse,
   MoneyAmount,
@@ -541,6 +543,19 @@ export interface PassengerRideAccessGrant extends PassengerRideAccessToken {
   accessToken: string;
 }
 
+/** Live values are separate from the immutable assignment disclosure. */
+export interface PassengerRideTracking {
+  assignmentId: string;
+  driverId: string;
+  vehicleId: string;
+  locationFreshness: DriverLocationFreshness;
+  location: Pick<
+    DriverLocationSnapshot,
+    "lat" | "lng" | "accuracyM" | "recordedAt"
+  > | null;
+  pickupEta: { minutes: number; calculatedAt: string } | null;
+}
+
 export interface PassengerRideAuthorityView {
   order: {
     orderId: string;
@@ -555,6 +570,8 @@ export interface PassengerRideAuthorityView {
     completedAt: string | null;
   };
   assignment: PassengerDispatchDisclosureSnapshot | null;
+  /** Omitted by older producers; null means no current tracking is available. */
+  tracking?: PassengerRideTracking | null;
   bookingQuote?: PassengerBookingFareDisclosure;
   rating: PassengerTripRatingRecord | null;
   payment: {
@@ -1125,6 +1142,7 @@ export const DRIVER_SOS_URGENT_ALERT_OUTBOX_STATUSES = [
   "pending",
   "sending",
   "delivered",
+  "acknowledged",
   "failed",
 ] as const;
 export type DriverSosUrgentAlertOutboxStatus =

@@ -345,6 +345,19 @@ export class MultiTaxiRepository {
     };
   }
 
+  async findEffectiveAuthorizations(asOf: string) {
+    if (!this.isEnabled())
+      throw new Error("Persisted authorization lookup requires a database.");
+    const result = await this.databaseService!.query<AuthorizationRow>(
+      `SELECT * FROM reg.multi_taxi_operating_authorizations
+       WHERE status = 'approved' AND effective_from <= $1::timestamptz
+         AND (effective_until IS NULL OR effective_until > $1::timestamptz)
+       ORDER BY updated_at DESC`,
+      [asOf],
+    );
+    return result.rows.map((row) => this.mapAuthorization(row));
+  }
+
   async persistAuthorization(
     authorization: MultiTaxiOperatingAuthorizationRecord,
   ) {

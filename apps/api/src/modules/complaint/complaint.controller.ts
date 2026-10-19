@@ -6,10 +6,12 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Res,
 } from "@nestjs/common";
 
 import type {
+  ActionReceipt,
   AddComplaintCaseNoteCommand,
   AssignComplaintCaseCommand,
   CreateComplaintCaseCommand,
@@ -28,6 +30,19 @@ import type { PassthroughResponseLike } from "../../common/idempotency-http";
 import { applyIdempotentResponseHeaders } from "../../common/idempotency-http";
 import { IncidentService } from "../incident/incident.service";
 import { ComplaintService } from "./complaint.service";
+import { toActionReceipt } from "../../common/action-receipt";
+
+function toComplaintActionEnvelope<T>(
+  data: T,
+  actionReceipt: ActionReceipt,
+  requestId?: string,
+) {
+  const envelope = toApiSuccessEnvelope(
+    data,
+    requestId ?? actionReceipt.actionId,
+  );
+  return { ...envelope, meta: { ...envelope.meta, actionReceipt } };
+}
 
 @Controller("complaints")
 export class ComplaintController {
@@ -50,17 +65,45 @@ export class ComplaintController {
       requestPath: "complaints",
       payload: command,
       execute: async () => {
-        const data = this.complaintService.createComplaintCase(
+        await this.complaintService.refreshSettlementCases();
+        const created = await this.complaintService.createComplaintCase(
           command,
           requestId,
+          {
+            captureAudit: true,
+            commandIdentity: {
+              scope: "crm:complaint:case_create",
+              key: idempotencyKey!,
+            },
+          },
         );
+        const data = created.data;
         await this.complaintService.awaitSettlementPersistence(data.caseNo);
-        return { data, statusCode: HttpStatus.CREATED };
+        return {
+          data,
+          statusCode: HttpStatus.CREATED,
+          actionReceipt: toActionReceipt({
+            auditLog: created.auditLog,
+            message: "Complaint case created.",
+          }),
+        };
       },
     });
 
     applyIdempotentResponseHeaders(response, result);
-    return toApiSuccessEnvelope(result.data, requestId);
+    const actionReceipt =
+      result.actionReceipt ??
+      toActionReceipt({
+        auditLog: (
+          await this.complaintService.acknowledgeExistingCaseAction(
+            result.data,
+            "create_complaint_case",
+            requestId,
+          )
+        ).auditLog,
+        message: "Existing complaint case returned.",
+      });
+    return toComplaintActionEnvelope(result.data, actionReceipt, requestId);
   }
 
   @Get()
@@ -130,15 +173,34 @@ export class ComplaintController {
     @Param("caseNo") caseNo: string,
     @Body() command: AssignComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.assignComplaintCase(
+    const updated = await this.complaintService.assignComplaintCase(
       caseNo,
       command,
       requestId,
+      {
+        captureAudit: true,
+        ...(idempotencyKey?.trim()
+          ? {
+              commandIdentity: {
+                scope: `crm:complaint:${caseNo}:assignComplaintCase`,
+                key: idempotencyKey,
+              },
+            }
+          : {}),
+      },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Post(":caseNo/notes")
@@ -146,23 +208,58 @@ export class ComplaintController {
     @Param("caseNo") caseNo: string,
     @Body() command: AddComplaintCaseNoteCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.addComplaintCaseNote(
+    const updated = await this.complaintService.addComplaintCaseNote(
       caseNo,
       command,
       requestId,
+      {
+        captureAudit: true,
+        ...(idempotencyKey?.trim()
+          ? {
+              commandIdentity: {
+                scope: `crm:complaint:${caseNo}:addComplaintCaseNote`,
+                key: idempotencyKey,
+              },
+            }
+          : {}),
+      },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Get(":caseNo/export")
   async getComplaintExportView(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
+    @Query("action_receipt") captureReceipt?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
+    if (captureReceipt === "true") {
+      const result =
+        await this.complaintService.getComplaintExportViewWithReceipt(
+          caseNo,
+          requestId,
+        );
+      return toComplaintActionEnvelope(
+        result.data,
+        toActionReceipt({
+          auditLog: result.auditLog,
+          message: "Complaint export view prepared.",
+        }),
+        requestId,
+      );
+    }
     return toApiSuccessEnvelope(
       this.complaintService.getComplaintExportView(caseNo),
       requestId,
@@ -174,15 +271,34 @@ export class ComplaintController {
     @Param("caseNo") caseNo: string,
     @Body() command: ReopenComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.reopenComplaintCase(
+    const updated = await this.complaintService.reopenComplaintCase(
       caseNo,
       command,
       requestId,
+      {
+        captureAudit: true,
+        ...(idempotencyKey?.trim()
+          ? {
+              commandIdentity: {
+                scope: `crm:complaint:${caseNo}:reopenComplaintCase`,
+                key: idempotencyKey,
+              },
+            }
+          : {}),
+      },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Post(":caseNo/resolve")
@@ -190,15 +306,34 @@ export class ComplaintController {
     @Param("caseNo") caseNo: string,
     @Body() command: ResolveComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.resolveComplaintCase(
+    const updated = await this.complaintService.resolveComplaintCase(
       caseNo,
       command,
       requestId,
+      {
+        captureAudit: true,
+        ...(idempotencyKey?.trim()
+          ? {
+              commandIdentity: {
+                scope: `crm:complaint:${caseNo}:resolveComplaintCase`,
+                key: idempotencyKey,
+              },
+            }
+          : {}),
+      },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Post(":caseNo/close")
@@ -206,15 +341,34 @@ export class ComplaintController {
     @Param("caseNo") caseNo: string,
     @Body() command: ResolveComplaintCaseCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.closeComplaintCase(
+    const updated = await this.complaintService.closeComplaintCase(
       caseNo,
       command,
       requestId,
+      {
+        captureAudit: true,
+        ...(idempotencyKey?.trim()
+          ? {
+              commandIdentity: {
+                scope: `crm:complaint:${caseNo}:closeComplaintCase`,
+                key: idempotencyKey,
+              },
+            }
+          : {}),
+      },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 
   @Post(":caseNo/escalate-to-incident")
@@ -222,11 +376,29 @@ export class ComplaintController {
     @Param("caseNo") caseNo: string,
     @Body() command: EscalateComplaintToIncidentCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
+    const options = {
+      captureAudit: true as const,
+      ...(idempotencyKey?.trim()
+        ? {
+            commandIdentity: {
+              scope: `crm:complaint:${caseNo}:escalateToIncident`,
+              key: idempotencyKey,
+            },
+            commandPayload: command,
+          }
+        : {}),
+    };
     return this.complaintService.withIncidentLink(caseNo, async () => {
       await this.complaintService.refreshSettlementCases();
       const complaintCase = this.complaintService.getComplaintCase(caseNo);
-      if (complaintCase.relatedIncidentId) {
+      const originalIncidentId =
+        this.complaintService.getPreparedEscalationIncidentId(caseNo, options);
+      if (
+        complaintCase.relatedIncidentId &&
+        complaintCase.relatedIncidentId !== originalIncidentId
+      ) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
           "COMPLAINT_ALREADY_ESCALATED",
@@ -254,12 +426,17 @@ export class ComplaintController {
       }
       const preparedIncident =
         this.incidentService.prepareIncident(createIncidentInput);
+      if (originalIncidentId)
+        preparedIncident.incident.incidentId = originalIncidentId;
       return this.incidentService.withComplaintLink(
         preparedIncident.incident.incidentId,
         async () => {
           await this.complaintService.refreshSettlementCases();
           const currentCase = this.complaintService.getComplaintCase(caseNo);
-          if (currentCase.relatedIncidentId) {
+          if (
+            currentCase.relatedIncidentId &&
+            currentCase.relatedIncidentId !== originalIncidentId
+          ) {
             throw new ApiRequestError(
               HttpStatus.CONFLICT,
               "COMPLAINT_ALREADY_ESCALATED",
@@ -267,31 +444,54 @@ export class ComplaintController {
               { caseNo, existingIncidentId: currentCase.relatedIncidentId },
             );
           }
-          const updatedCase = this.complaintService.escalateToIncident(
+          const updatedCase = await this.complaintService.escalateToIncident(
             caseNo,
             preparedIncident.incident.incidentId,
             command.reason,
             requestId,
+            options,
           );
           await this.complaintService.awaitSettlementPersistence(caseNo);
-          const createdIncident = this.incidentService.publishPreparedIncident(
-            preparedIncident,
-            requestId,
-          );
-          const incident = currentCase.assigneeId
-            ? this.incidentService.updateIncident(
-                createdIncident.incidentId,
-                { assignedTo: currentCase.assigneeId },
-                requestId,
+          let existingIncident;
+          if (originalIncidentId) {
+            try {
+              existingIncident =
+                this.incidentService.getIncident(originalIncidentId);
+            } catch (error) {
+              if (
+                !(
+                  error instanceof ApiRequestError && error.code === "NOT_FOUND"
+                )
               )
-            : createdIncident;
+                throw error;
+            }
+          }
+          const createdIncident =
+            existingIncident ??
+            this.incidentService.publishPreparedIncident(
+              preparedIncident,
+              requestId,
+            );
+          const incident =
+            !existingIncident && currentCase.assigneeId
+              ? this.incidentService.updateIncident(
+                  createdIncident.incidentId,
+                  { assignedTo: currentCase.assigneeId },
+                  requestId,
+                )
+              : createdIncident;
           const linkedIncident = this.incidentService.linkComplaint(
             incident.incidentId,
             caseNo,
             requestId,
           );
-          return toApiSuccessEnvelope(
-            { complaintCase: updatedCase, incident: linkedIncident },
+          this.complaintService.completePreparedEscalation(caseNo);
+          return toComplaintActionEnvelope(
+            { complaintCase: updatedCase.data, incident: linkedIncident },
+            toActionReceipt({
+              auditLog: updatedCase.auditLog,
+              message: "Complaint escalated to incident.",
+            }),
             requestId,
           );
         },
@@ -304,6 +504,7 @@ export class ComplaintController {
     @Param("caseNo") caseNo: string,
     @Body() command: LinkComplaintToIncidentCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     return this.complaintService.withIncidentLink(caseNo, async () => {
       return this.incidentService.withComplaintLink(
@@ -342,10 +543,21 @@ export class ComplaintController {
               },
             );
           }
-          const updatedComplaintCase = this.complaintService.linkIncident(
+          const updatedComplaintCase = await this.complaintService.linkIncident(
             caseNo,
             command,
             requestId,
+            {
+              captureAudit: true,
+              ...(idempotencyKey?.trim()
+                ? {
+                    commandIdentity: {
+                      scope: `crm:complaint:${caseNo}:linkIncident`,
+                      key: idempotencyKey,
+                    },
+                  }
+                : {}),
+            },
           );
           await this.complaintService.awaitSettlementPersistence(caseNo);
           this.incidentService.linkComplaint(
@@ -353,7 +565,14 @@ export class ComplaintController {
             caseNo,
             requestId,
           );
-          return toApiSuccessEnvelope(updatedComplaintCase, requestId);
+          return toComplaintActionEnvelope(
+            updatedComplaintCase.data,
+            toActionReceipt({
+              auditLog: updatedComplaintCase.auditLog,
+              message: "Complaint linked to incident.",
+            }),
+            requestId,
+          );
         },
       );
     });
@@ -363,13 +582,32 @@ export class ComplaintController {
   async markComplaintSlaBreach(
     @Param("caseNo") caseNo: string,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     await this.complaintService.refreshSettlementCases();
-    const updated = this.complaintService.markComplaintSlaBreach(
+    const updated = await this.complaintService.markComplaintSlaBreach(
       caseNo,
       requestId,
+      {
+        captureAudit: true,
+        ...(idempotencyKey?.trim()
+          ? {
+              commandIdentity: {
+                scope: `crm:complaint:${caseNo}:markComplaintSlaBreach`,
+                key: idempotencyKey,
+              },
+            }
+          : {}),
+      },
     );
     await this.complaintService.awaitSettlementPersistence(caseNo);
-    return toApiSuccessEnvelope(updated, requestId);
+    return toComplaintActionEnvelope(
+      updated.data,
+      toActionReceipt({
+        auditLog: updated.auditLog,
+        message: "Complaint case updated.",
+      }),
+      requestId,
+    );
   }
 }

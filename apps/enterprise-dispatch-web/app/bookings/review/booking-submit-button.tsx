@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { EBtnContent, entBtnStyle } from "@/components/ent-kit";
+import { EBtnContent, entBtnStyle } from "../../../components/ent-kit";
 import {
   buildEnterpriseBookingCommand,
   buildEnterpriseBookingUpdateCommand,
@@ -10,21 +10,64 @@ import {
   validateReservationWindow,
   type EnterpriseBookingDraftForm,
   type Locale,
-} from "@/lib/enterprise-booking-draft";
-import { enterpriseTenant } from "@/lib/enterprise-fixtures";
-import { tenantEnterpriseTheme as theme } from "@/components/booking-form/theme";
-import { getEnterpriseDispatchTenantClient } from "@/lib/api-client";
+} from "../../../lib/enterprise-booking-draft";
+import { tenantEnterpriseTheme as theme } from "../../../components/booking-form/theme";
+import { getEnterpriseDispatchTenantClient } from "../../../lib/api-client";
 import { createIdempotencyKey } from "@drts/api-client";
-import { useTranslation } from "@/lib/i18n";
+import { useTranslation } from "../../../lib/i18n";
+
+export async function submitEnterpriseBookingDraft({
+  draft,
+  bookingId,
+  tenantId,
+  idempotencyKey,
+  clickNow = new Date(),
+  router,
+}: {
+  draft: EnterpriseBookingDraftForm;
+  bookingId?: string;
+  tenantId?: string;
+  idempotencyKey: string;
+  clickNow?: Date;
+  router: { push: (href: string) => void; refresh: () => void };
+}) {
+  const client = getEnterpriseDispatchTenantClient(tenantId?.trim() ?? "");
+  if (bookingId) {
+    const updateCmd = buildEnterpriseBookingUpdateCommand(draft, clickNow);
+    await client.updateBooking(bookingId, updateCmd);
+    router.push(`/bookings/${encodeURIComponent(bookingId)}`);
+    router.refresh();
+    return;
+  }
+
+  const createCmd = buildEnterpriseBookingCommand(draft, clickNow);
+  const result = await client.createBooking(createCmd, { idempotencyKey });
+
+  if (!result.bookingId || !result.orderId) {
+    throw new Error("Enterprise dispatch API did not return booking proof");
+  }
+
+  const params = new URLSearchParams({
+    bookingId: result.bookingId,
+    orderId: result.orderId,
+    status: result.status,
+    source: "enterprise-dispatch-web",
+  });
+
+  router.push(`/bookings/submitted?${params.toString()}`);
+  router.refresh();
+}
 
 export function BookingSubmitButton({
   draft,
   bookingId,
+  tenantId,
   locale = "zh",
   approvalRequired = false,
 }: {
   draft: EnterpriseBookingDraftForm;
   bookingId?: string;
+  tenantId?: string;
   locale?: Locale;
   approvalRequired?: boolean;
 }) {
@@ -89,31 +132,14 @@ export function BookingSubmitButton({
     setError(null);
 
     try {
-      const client = getEnterpriseDispatchTenantClient(enterpriseTenant.id);
-      if (bookingId) {
-        const updateCmd = buildEnterpriseBookingUpdateCommand(draft, clickNow);
-        await client.updateBooking(bookingId, updateCmd);
-        router.push(`/bookings/${encodeURIComponent(bookingId)}`);
-        router.refresh();
-        return;
-      }
-
-      const createCmd = buildEnterpriseBookingCommand(draft, clickNow);
-      const result = await client.createBooking(createCmd, { idempotencyKey });
-
-      if (!result.bookingId || !result.orderId) {
-        throw new Error("Enterprise dispatch API did not return booking proof");
-      }
-
-      const params = new URLSearchParams({
-        bookingId: result.bookingId,
-        orderId: result.orderId,
-        status: result.status,
-        source: "enterprise-dispatch-web",
+      await submitEnterpriseBookingDraft({
+        draft,
+        ...(bookingId ? { bookingId } : {}),
+        ...(tenantId ? { tenantId } : {}),
+        idempotencyKey,
+        clickNow,
+        router,
       });
-
-      router.push(`/bookings/submitted?${params.toString()}`);
-      router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setIsSubmitting(false);

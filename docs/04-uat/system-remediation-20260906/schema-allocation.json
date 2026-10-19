@@ -137,6 +137,30 @@
       "amended_at": "2026-10-06",
       "scope": "Appended `passenger_push_channel_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations and partner_notification_allocations entries above are unchanged",
       "reason": "PUSH-CHANNEL-SD-20261006 finalizes per-order passenger notification channel routing and a dormant first-party push receiver (docs/02-architecture/passenger-notification-channel-routing-20261006.md; docs/01-decisions/SD-DP-20261006-001-passenger-notification-channel-routing.md), and allocates migration numbers for its two new first-party push tables. At inspected base (origin/dev, fixed baseline 446228cbc771a4ced774126a7d4aaddea4db73e6) the highest migration registered in this ledger is V0106__voice_dialogue_snapshot.sql (voice_application_allocations, added by AUDIT-VOICE-APPLICATION-WIRING-20261003). V0107-V0108 below were unclaimed by any allocation entry in this file at allocation time. Per the SR-CONTRACT-001 / SR-RECOVERY-CONTRACTS-20260911 / SR-PARTNER-NOTIFY-CON-20260917 precedent, this task supplies typed contracts (packages/contracts/src/passenger-notification-channel.ts) and migration allocation only; it does not write the infra/migrations/*.sql files themselves, does not implement the channel router, the device registry service, or the FCM transport, and does not change DI wiring. The two tables are grouped into two migration files by which downstream backend task owns their write path: V0107 (first-party device registry + first-party order route) for PUSH-FIRST-PARTY-REGISTRY-20261006, and V0108 (first-party delivery context) for PUSH-FIRST-PARTY-FCM-20261006, mirroring how V0104-V0105 were grouped by consuming task."
+    },
+    {
+      "amended_by_task_id": "VOICE-CALLBACK-DB-OPERATIONS-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Appended voice_callback_allocations V0120 only; existing allocation entries remain unchanged",
+      "reason": "Registers the callback attempt-details migration at accepted parent f5baad9d641f2bbace6ae5376acd40d88fcc1254, whose existing reservation range ends at V0119. Existing collision, exact filename and highest-migration checks include this added group without changing their assertions."
+    },
+    {
+      "amended_by_task_id": "VOICE-CALLBACK-CREATE-RECEIPT-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Append V0121 to voice_callback_allocations; original allocation entries unchanged",
+      "reason": "Extends the callback functionality on exact parent48bf70e, whose highest reserved migration is V0120. Existing allocation collectors already include voice_callback_allocations; no guard or assertion is changed."
+    },
+    {
+      "amended_by_task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "amended_at": "2026-10-18",
+      "scope": "Appended `complaint_command_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations, voice_callback_allocations, passenger_push_channel_allocations, passenger_app_allocations, fleet_statement_decision_allocations and public_fare_management_allocations entries above are unchanged",
+      "reason": "Registers V0123 (Root allocation record: .local/passenger-bureau-gap-correction-20261018/Complaint-V0123-exact-root-allocation-20261018/result.json, V0122 reserved separately for Voice and not reused) for the original C045 restart/replica same-logical-command durable identity gap (docs/04-uat/COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015.md §10.4): a durable pending-commit table so an ordinary complaint mutation whose COMMIT outcome was left unknown keeps its allocated caseNo/entryId recoverable by a same-command retry even across an API process restart or a different replica, not only within the originating process's in-memory Map. This task writes both the migration file and the caller wiring (complaint.repository.ts/complaint.service.ts are already in its write_scopes); highest canonical migration at allocation time was V0121."
+    },
+    {
+      "amended_by_task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "amended_at": "2026-10-19",
+      "scope": "Append sos_duty_allocations V0124 only; all previous entries and V0122/V0123 reservations remain owned by their original tasks.",
+      "reason": "Complete the original S-3 §24 outbox acknowledged semantics after normal Root exact scope/number coordination. Existing migration collision collector includes this new group; no existing assertion is weakened."
     }
   ],
   "voice_application_allocations": [
@@ -162,6 +186,38 @@
       ],
       "description": "Versioned encrypted candidate-dialogue snapshots for trusted voice persistence/restoration, reserved by the original audit execution scope; no booking-draft or consent authority is introduced. V0106 also carries a bounded, non-content purge-receipt table so a governed purge cannot be mistaken for proof a write never landed, plus a session-level floor so that receipt's own governed metadata retention can age it out without either reopening its key for write reuse or being mistaken for proof the write never landed.",
       "downstream_tasks": ["AUDIT-SHARED-DEV-VERIFY-20261002"]
+    }
+  ],
+  "voice_callback_allocations": [
+    {
+      "task_id": "VOICE-CALLBACK-DB-OPERATIONS-20261018",
+      "version": "V0120",
+      "migration_filename": "V0120__voice_callback_attempt_details.sql",
+      "domain": "voice_callback_attempt_details",
+      "target_schema": "voice",
+      "primary_tables": ["voice.callback_attempt", "voice.callback_task"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "voice.callback_attempt retains dial_operation_key, dial_status, hangup_confirmed and notes on the same existing task/attempt rows.",
+        "Existing ended_at values backfill dial_status and hangup_confirmed; no task, attempt or customer data is deleted.",
+        "voice.callback_task retains cancellation_reason; existing task/session/order relationships and terminal states are preserved."
+      ],
+      "description": "Persist existing voice callback attempt details and cancellation reason for cold readers and the current runner; no additional telephone provider or consent claim."
+    },
+    {
+      "task_id": "VOICE-CALLBACK-CREATE-RECEIPT-20261018",
+      "version": "V0121",
+      "migration_filename": "V0121__voice_callback_create_receipt.sql",
+      "domain": "voice_callback_create_receipt",
+      "target_schema": "voice",
+      "primary_tables": ["voice.callback_task"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "The existing callback task row stores its create_command_id, create_action_key and create_payload_hash with the supplied consent_snapshot_hash in the same INSERT.",
+        "The existing one-active-task-per-session constraint remains; the create action key additionally identifies retries after task completion or cancellation.",
+        "Existing rows retain null create-receipt fields; no missing historical command or consent evidence is fabricated."
+      ],
+      "description": "Recover a committed callback create result after a lost response or closed call while retaining the original task and terminal state."
     }
   ],
   "additional_allocations": [
@@ -609,6 +665,41 @@
         "Schedule splits one covered published interval; historical published rows and immutable quote snapshots remain available.",
         "Tariff mutation, audit and command receipt commit or roll back together; receipt retry returns current row without replaying interval changes."
       ]
+    }
+  ],
+  "complaint_command_allocations": [
+    {
+      "task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "version": "V0123",
+      "migration_filename": "V0123__complaint_command_identity.sql",
+      "domain": "complaint_command_identity",
+      "target_schema": "crm",
+      "primary_tables": ["crm.phase1_complaint_pending_commits"],
+      "referenced_tables": [
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "Durable cross-process pending-commit identity for an ordinary (non-settlement) complaint mutation whose COMMIT outcome was left unknown, so a same-logical-command retry recovers the originally allocated caseNo/entryId after an API restart or on a different replica instead of only within the originating process's in-memory pendingUncertainCommits Map.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "crm.phase1_complaint_pending_commits: command_key varchar(64) PRIMARY KEY. Identified callers hash stableStringify([action, original caller scope, trimmed original key]); legacy unkeyed commands hash action + colon + caseNo + colon + stableStringify(matchCommand). The original payload is bound separately, so distinct keyed intents remain distinct and a changed payload under one key conflicts.",
+        "case_no varchar(100) NOT NULL, action varchar(100) NOT NULL, command_payload jsonb NOT NULL (the original matchCommand, re-hydrated into PendingUncertainComplaintCommit.matchCommand on recovery so the existing stableStringify comparison keeps working verbatim), case_snapshot jsonb NOT NULL, timeline_snapshot jsonb NOT NULL, previous_case_snapshot jsonb NULL (NULL for a create-type action; the update-type actions' pre-mutation snapshot otherwise, used to rebuild the existing in-memory revertComplaintCaseMutation rollback instead of a non-serializable closure).",
+        "status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','failed')), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now().",
+        "CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no) — reconcilePendingCase's existing durable-store sweep scans by case_no.",
+        "Write timing: mandatory durable PREPARED reservation is awaited before the ordinary business transaction can begin. The winning original caseNo, timeline entry IDs, caller identity and payload are preserved; reservation failure cannot acknowledge or issue a business COMMIT. The same transaction locks the prepared row and atomically confirms it with canonical case/timeline writes. Confirmed keyed results remain durable for original-result replay without another upsert; unknown outcomes preserve their original reservation. Only a definitely rejected new preparation or a reconciled legacy result is eligible for its own bounded cleanup; a missing or failed read cannot prove an unknown COMMIT rolled back."
+      ]
+    }
+  ],
+  "sos_duty_allocations": [
+    {
+      "task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "version": "V0124",
+      "migration_filename": "V0124__sos_urgent_outbox_acknowledged.sql",
+      "domain": "sos_duty_acknowledgment",
+      "target_schema": "safety",
+      "primary_tables": ["safety.driver_sos_urgent_alert_outbox"],
+      "referenced_tables": ["safety.driver_sos_events"],
+      "description": "Forward ALTER of the existing V0053 status check for the original S-3 §24 acknowledged state. No new tables/columns. Backfill only same-event non-null canonical duty actor/time; preserve delivery/render as distinct transitions. Root reserved V0124 after existing Voice V0122 and Complaint V0123 reservations."
     }
   ]
 }

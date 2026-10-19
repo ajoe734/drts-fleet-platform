@@ -20,7 +20,10 @@ import type {
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
-import { IncidentRepository } from "./incident.repository";
+import {
+  IncidentRepository,
+  type PersistIncidentOptions,
+} from "./incident.repository";
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 
 const DRIVER_MATCHING_SUPPRESSION_DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -425,6 +428,9 @@ export class IncidentService implements OnModuleInit {
         ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
       },
       "update_incident",
+      command.assignedTo !== undefined
+        ? { assignIntentIncidentIds: [incidentId] }
+        : undefined,
     );
     this.recordAudit(
       {
@@ -448,6 +454,638 @@ export class IncidentService implements OnModuleInit {
     this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
 
     return this.cloneIncident(decorated);
+  }
+
+  /** Authoritative HTTP read facades leave generic synchronous callers intact.
+   * Return durable snapshots, discovering only absent local rows. Never replace
+   * an existing cache entry with a read that may predate an in-flight mutation. */
+  listIncidentsForReadback(identity: BootstrapRequestIdentity | null = null) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.listIncidents(identity);
+    return this.incidentRepository
+      .loadIncidents()
+      .then((incidents) =>
+        incidents.map((incident) =>
+          this.discoverPersistedIncident(incident, identity),
+        ),
+      );
+  }
+
+  getIncidentForReadback(
+    incidentId: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.getIncident(incidentId, identity);
+    return this.incidentRepository.loadIncident(incidentId).then((incident) => {
+      if (!incident)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Incident not found.",
+          { incidentId },
+        );
+      return this.discoverPersistedIncident(incident, identity);
+    });
+  }
+
+  getTimelineForReadback(incidentId: string) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.getTimeline(incidentId);
+    const repository = this.incidentRepository;
+    return Promise.resolve(this.getIncidentForReadback(incidentId)).then(
+      async () => {
+        const entries = await repository.loadTimeline(incidentId);
+        // Merge only missing entry IDs; never replace pending local entries.
+        const local = this.timelines.get(incidentId) ?? [];
+        const seen = new Set(local.map((entry) => entry.entryId));
+        this.timelines.set(incidentId, [
+          ...local,
+          ...entries.filter((entry) => !seen.has(entry.entryId)),
+        ]);
+        return entries.map((entry) => ({ ...entry }));
+      },
+    );
+  }
+
+  private discoverPersistedIncident(
+    incident: IncidentRecord,
+    identity: BootstrapRequestIdentity | null,
+  ): IncidentRecord {
+    const suppression = incident.matchingSuppression;
+    // Same existing expiry rule, evaluated without mutating another command's
+    // suppression/recovery caches while an authoritative read is outstanding.
+    const matchingSuppression = suppression
+      ? {
+          ...suppression,
+          active:
+            suppression.active &&
+            suppression.liftedAt === null &&
+            new Date(suppression.expiresAt).getTime() > Date.now(),
+        }
+      : null;
+    const decorated = {
+      ...this.cloneIncident(incident),
+      matchingSuppression,
+      availableActions: this.buildAvailableActions(
+        matchingSuppression,
+        identity,
+      ),
+    };
+    if (
+      !this.incidents.some((item) => item.incidentId === incident.incidentId)
+    ) {
+      this.incidents = [decorated, ...this.incidents];
+      if (incident.matchingSuppression)
+        this.suppressions.set(incident.incidentId, {
+          ...incident.matchingSuppression,
+        });
+      this.recoveryActions.set(
+        incident.incidentId,
+        (incident.serviceRecoveryActions ?? []).map((action) => ({
+          ...action,
+        })),
+      );
+      this.incidentSequence = Math.max(
+        this.incidentSequence,
+        this.deriveNextSequence([incident]),
+      );
+    }
+    return this.cloneIncident(decorated);
+  }
+
+  /** Targeted authoritative SOS read, including rows created on another replica. */
+  async getIncidentForSosReadback(
+    incidentId: string,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<IncidentRecord> {
+    try {
+      return await this.getIncidentForReadback(incidentId, identity);
+    } catch (error) {
+      if (
+        this.incidentRepository?.isEnabled() &&
+        error instanceof ApiRequestError &&
+        error.code === "NOT_FOUND"
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "INCIDENT_HANDOVER_UNAVAILABLE",
+          "The canonical Incident is unavailable; retry.",
+          { incidentId },
+          true,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** Consume the repository's actual owner decision, preserving unrelated
+   * in-flight status/suppression mutations in this instance. */
+  private applyPersistedOwner(
+    incidentId: string,
+    persisted: { incidents: readonly IncidentRecord[] } | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): string | null {
+    const current = this.require(incidentId);
+    const authoritative = persisted?.incidents.find(
+      (item) => item.incidentId === incidentId,
+    );
+    const owner = authoritative ? authoritative.assignedTo : current.assignedTo;
+    if (current.assignedTo !== owner) {
+      this.replace(
+        this.decorateIncident({ ...current, assignedTo: owner }, identity),
+      );
+    }
+    return owner;
+  }
+
+  /** Narrow awaited SOS assignment facade. The synchronous local reservation
+   * rejects a competing direct mutation in this instance; the locked database
+   * row decides durable current ownership across instances. Only its returned
+   * owner can produce a successful handover. Generic Incident methods retain
+   * their existing synchronous interface. */
+  async assignIncidentOwnerDurable(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<{
+    accepted: boolean;
+    currentOwner: string | null;
+    wasNewClaim: boolean;
+  }> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo && incident.assignedTo !== owner) {
+      // The foreign value may itself be nothing more than an unconfirmed
+      // in-memory artifact of a concurrent fire-and-forget writer (e.g. the
+      // generic updateIncident path) whose own durable write is still
+      // pending or has already failed. Confirm it durably before reporting
+      // it as a real conflict -- otherwise this call (and the SOS
+      // acknowledgment it backs) would commit under an owner the database
+      // never actually accepted (F1 durability, foreign-owner branch).
+      // `currentOwner: null` reuses the same "unknown/unconfirmed, retry"
+      // signal the caller already treats as unavailable rather than a
+      // truthful conflict.
+      if (this.incidentRepository) {
+        try {
+          // No assignIntent here: this call only confirms whatever ownership
+          // is already durable, it never decides ownership itself, so a
+          // concurrent legitimate owner change must never be clobbered by
+          // this foreign-owner snapshot.
+          const durable = this.incidentRepository.isEnabled()
+            ? await this.incidentRepository.loadIncident(incidentId)
+            : incident;
+          if (!durable)
+            return { accepted: false, currentOwner: null, wasNewClaim: false };
+          const actualOwner = this.applyPersistedOwner(
+            incidentId,
+            { incidents: [durable] },
+            identity,
+          );
+          return {
+            accepted: false,
+            currentOwner: actualOwner,
+            wasNewClaim: false,
+          };
+        } catch (error) {
+          this.incidentRepository.reportPersistenceFailure(
+            error,
+            "assign_incident_owner_durable_confirm_foreign",
+          );
+          return { accepted: false, currentOwner: null, wasNewClaim: false };
+        }
+      }
+      return {
+        accepted: false,
+        currentOwner: incident.assignedTo,
+        wasNewClaim: false,
+      };
+    }
+    if (incident.assignedTo === owner) {
+      // This ownership may already be set only in memory by a
+      // fire-and-forget writer (e.g. the generic updateIncident path) whose
+      // own durable write is still pending or has already failed. Re-confirm
+      // durability here instead of trusting the in-memory value, so this
+      // call never reports a win the database did not actually accept (F1).
+      if (this.incidentRepository) {
+        try {
+          // This replay is itself the decision for `owner` on `incidentId`
+          // (an idempotent same-owner acknowledgment): carry assignIntent so
+          // a prior persist that never landed durably still gets confirmed.
+          const timeline = this.createTimelineEntry(
+            incidentId,
+            TIMELINE_ACTIONS.assigned,
+            `Assigned to ${owner}.`,
+            this.resolveActorId(identity, "ops_user"),
+            new Date().toISOString(),
+          );
+          const persisted = await this.incidentRepository.persistChanges(
+            {
+              incidents: [this.cloneIncident(incident)],
+              timelines: [timeline],
+            },
+            {
+              assignIntentIncidentIds: [incidentId],
+              assignmentOnlyIncidentIds: [incidentId],
+            },
+          );
+          const actualOwner = this.applyPersistedOwner(
+            incidentId,
+            persisted,
+            identity,
+          );
+          const wasNewClaim =
+            persisted?.newClaims?.includes(incidentId) ?? false;
+          if (wasNewClaim)
+            this.timelines.set(incidentId, [
+              ...(this.timelines.get(incidentId) ?? []),
+              timeline,
+            ]);
+          return {
+            accepted: actualOwner === owner,
+            currentOwner: actualOwner,
+            wasNewClaim,
+          };
+        } catch (error) {
+          this.incidentRepository.reportPersistenceFailure(
+            error,
+            "assign_incident_owner_durable_confirm",
+          );
+          return { accepted: false, currentOwner: owner, wasNewClaim: false };
+        }
+      }
+      return { accepted: true, currentOwner: owner, wasNewClaim: false };
+    }
+
+    const now = new Date().toISOString();
+    const updated: IncidentRecord = {
+      ...incident,
+      assignedTo: owner,
+      updatedAt: now,
+    };
+    const timelineEntry = this.createTimelineEntry(
+      incidentId,
+      TIMELINE_ACTIONS.assigned,
+      `Assigned to ${owner}.`,
+      this.resolveActorId(identity, "ops_user"),
+      now,
+    );
+    const decorated = this.decorateIncident(updated, identity);
+    let wasNewClaim = true;
+
+    // Reserve locally before awaiting. This is not durable ownership proof;
+    // the repository's actual returned row below decides acceptance.
+    this.replace(decorated);
+    this.timelines.set(incidentId, [
+      ...(this.timelines.get(incidentId) ?? []),
+      timelineEntry,
+    ]);
+
+    if (this.incidentRepository) {
+      try {
+        // This is the fresh-claim commit itself: assignIntent is required so
+        // the durable write actually lands the new owner.
+        const persisted = await this.incidentRepository.persistChanges(
+          {
+            incidents: [this.cloneIncident(decorated)],
+            timelines: [{ ...timelineEntry }],
+          },
+          {
+            assignIntentIncidentIds: [incidentId],
+            assignmentOnlyIncidentIds: [incidentId],
+          },
+        );
+        wasNewClaim = persisted?.newClaims?.includes(incidentId) ?? true;
+        const actualOwner = this.applyPersistedOwner(
+          incidentId,
+          persisted,
+          identity,
+        );
+        if (actualOwner !== owner) {
+          this.timelines.set(
+            incidentId,
+            (this.timelines.get(incidentId) ?? []).filter(
+              (entry) => entry.entryId !== timelineEntry.entryId,
+            ),
+          );
+          return {
+            accepted: false,
+            currentOwner: actualOwner,
+            wasNewClaim: false,
+          };
+        }
+        if (!wasNewClaim) {
+          this.timelines.set(
+            incidentId,
+            (this.timelines.get(incidentId) ?? []).filter(
+              (entry) => entry.entryId !== timelineEntry.entryId,
+            ),
+          );
+          return {
+            accepted: true,
+            currentOwner: actualOwner,
+            wasNewClaim: false,
+          };
+        }
+      } catch (error) {
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "assign_incident_owner_durable",
+        );
+        // Roll back only the assignedTo claim this call made. Re-read the
+        // current state first so an unrelated concurrent mutation (e.g. a
+        // status change landed by another caller while this write was in
+        // flight) is preserved rather than clobbered by restoring the
+        // entire pre-claim snapshot captured before this method's first
+        // await (F5).
+        const current = this.require(incidentId);
+        if (current.assignedTo === owner) {
+          const revertedAt = new Date().toISOString();
+          const reverted: IncidentRecord = {
+            ...current,
+            assignedTo: null,
+            updatedAt: revertedAt,
+          };
+          this.replace(this.decorateIncident(reverted, identity));
+          if (
+            this.incidentRepository &&
+            !(error as { incidentOwnerTransaction?: boolean })
+              .incidentOwnerTransaction
+          ) {
+            // The rejected claim may already have been carried into durable
+            // state by an unrelated concurrent writer that read this
+            // record's in-memory snapshot (with `owner` still set) and
+            // persisted its own full upsert before this rollback ran, or
+            // may do so *after* this rollback runs (a deferred writer that
+            // started before the rollback but finishes later). Reverting
+            // via a column-scoped CAS (not a full-record re-persist built
+            // from this call's own possibly-stale snapshot) means this
+            // write can never itself clobber a status/suppression change
+            // that concurrent writer legitimately made -- the prior full
+            // UPSERT compensation could overwrite that status via its own
+            // stale snapshot the instant it ran after such a write (F5
+            // compensation order).
+            try {
+              const reverted =
+                await this.incidentRepository.revertAssignedToIfStillOwner(
+                  incidentId,
+                  owner,
+                  null,
+                  revertedAt,
+                );
+              if (!reverted) {
+                const durable =
+                  await this.incidentRepository.loadIncident(incidentId);
+                if (durable) {
+                  this.applyPersistedOwner(
+                    incidentId,
+                    { incidents: [durable] },
+                    identity,
+                  );
+                }
+              }
+            } catch (compensationError) {
+              this.incidentRepository.reportPersistenceFailure(
+                compensationError,
+                "assign_incident_owner_durable_compensate",
+              );
+            }
+          }
+        }
+        this.timelines.set(
+          incidentId,
+          (this.timelines.get(incidentId) ?? []).filter(
+            (entry) => entry.entryId !== timelineEntry.entryId,
+          ),
+        );
+        if (
+          (error as { incidentOwnerTransaction?: boolean })
+            .incidentOwnerTransaction
+        ) {
+          try {
+            const durable =
+              await this.incidentRepository.loadIncident(incidentId);
+            if (durable)
+              this.applyPersistedOwner(
+                incidentId,
+                { incidents: [durable] },
+                identity,
+              );
+          } catch {
+            /* Keep the failure retryable; never invent a rollback/owner from a failed read. */
+          }
+        }
+        return { accepted: false, currentOwner: null, wasNewClaim: false };
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: this.resolveAuditActorType(identity, "ops_user"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "incident",
+        actionName: "assign_incident_owner_durable",
+        resourceType: "incident",
+        resourceId: incidentId,
+        newValuesSummary: { assignedTo: decorated.assignedTo },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
+
+    return { accepted: true, currentOwner: owner, wasNewClaim };
+  }
+
+  /**
+   * Reverts a fresh claim made by `assignIncidentOwnerDurable` (identified
+   * by `wasNewClaim: true`) when the caller's own subsequent write failed
+   * and the caller's contract (e.g. DriverSos duty acknowledgment) requires
+   * that a rejected write never leave the Incident mutated. Only reverts
+   * when the Incident is still assigned to exactly `owner` -- if anything
+   * else has since changed it, that is real state this rollback must not
+   * clobber.
+   */
+  async releaseIncidentOwnerClaim(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+    sosEventId?: string,
+  ): Promise<void> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo !== owner) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const reverted: IncidentRecord = {
+      ...incident,
+      assignedTo: null,
+      updatedAt: now,
+    };
+    const decorated = this.decorateIncident(reverted, identity);
+    this.replace(decorated);
+    if (this.incidentRepository) {
+      try {
+        // Column-scoped CAS, not a full-record re-persist of this call's
+        // own in-memory snapshot -- a concurrent status/suppression write
+        // legitimately landing before or after this release must survive
+        // it unclobbered (F5 compensation order), matching
+        // `assignIncidentOwnerDurable`'s own compensation write.
+        const reverted =
+          await this.incidentRepository.revertAssignedToIfStillOwner(
+            incidentId,
+            owner,
+            null,
+            now,
+            sosEventId,
+          );
+        if (!reverted) {
+          const durable =
+            await this.incidentRepository.loadIncident(incidentId);
+          if (durable)
+            this.applyPersistedOwner(
+              incidentId,
+              { incidents: [durable] },
+              identity,
+            );
+        }
+      } catch (error) {
+        // Best-effort durable compensation: the in-memory claim is already
+        // released, and the next handover attempt (fresh claim or repair)
+        // retries this write. Report it instead of silently fire-and-forget
+        // so a persistent failure here is visible, not just assumed (F1).
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "release_incident_owner_claim",
+        );
+      }
+    }
+  }
+
+  /**
+   * Force-converges the Incident's current owner to `owner`, bypassing the
+   * first-owner-wins arbitration in `assignIncidentOwnerDurable`. Used only
+   * by SOS's own repair path (`repairIncidentHandover`) once the SOS side
+   * has already durably decided `owner` as the real current truth -- an
+   * idempotent replay of an existing SOS acknowledgment, or the resolution
+   * of a cross-process SOS-side CAS race. In both cases the Incident is a
+   * mirror that must converge to that already-decided truth rather than
+   * re-arbitrate ownership a second time; `assignIncidentOwnerDurable`'s
+   * foreign-owner branch would otherwise durably confirm and then keep
+   * whatever unrelated owner the Incident currently holds forever, with no
+   * replay able to converge it (F1 competing-instance convergence).
+   *
+   * Throws instead of returning a false "accepted" so the existing
+   * best-effort call site (`repairIncidentHandover`) keeps its catch ->
+   * next-replay-retries semantics; it never silently discards a rejection.
+   */
+  async convergeIncidentOwnerDurable(
+    incidentId: string,
+    owner: string,
+    requestId: string | undefined,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<void> {
+    const incident = this.require(incidentId);
+    if (incident.assignedTo === owner) {
+      if (this.incidentRepository) {
+        // Confirming an already-converged owner is itself a forced
+        // convergence decision for this incidentId: carry assignIntent so a
+        // prior convergence that never landed durably still gets confirmed.
+        await this.incidentRepository.persistChanges(
+          { incidents: [this.cloneIncident(incident)] },
+          {
+            assignIntentIncidentIds: [incidentId],
+            forceAssignmentIncidentIds: [incidentId],
+            assignmentOnlyIncidentIds: [incidentId],
+          },
+        );
+      }
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updated: IncidentRecord = {
+      ...incident,
+      assignedTo: owner,
+      updatedAt: now,
+    };
+    const timelineEntry = this.createTimelineEntry(
+      incidentId,
+      TIMELINE_ACTIONS.assigned,
+      `Assigned to ${owner}.`,
+      this.resolveActorId(identity, "ops_user"),
+      now,
+    );
+    const decorated = this.decorateIncident(updated, identity);
+
+    this.replace(decorated);
+    this.timelines.set(incidentId, [
+      ...(this.timelines.get(incidentId) ?? []),
+      timelineEntry,
+    ]);
+
+    if (this.incidentRepository) {
+      try {
+        // This is the forced-convergence commit itself: assignIntent is
+        // required so the durable write actually lands the converged owner.
+        await this.incidentRepository.persistChanges(
+          {
+            incidents: [this.cloneIncident(decorated)],
+            timelines: [{ ...timelineEntry }],
+          },
+          {
+            assignIntentIncidentIds: [incidentId],
+            forceAssignmentIncidentIds: [incidentId],
+            assignmentOnlyIncidentIds: [incidentId],
+          },
+        );
+      } catch (error) {
+        // Roll back only the claim this call made, preserving any
+        // unrelated concurrent mutation the same way
+        // `assignIncidentOwnerDurable`'s own rollback does (F5).
+        const current = this.require(incidentId);
+        if (current.assignedTo === owner) {
+          this.replace(
+            this.decorateIncident(
+              {
+                ...current,
+                assignedTo: incident.assignedTo,
+                updatedAt: new Date().toISOString(),
+              },
+              identity,
+            ),
+          );
+        }
+        this.timelines.set(
+          incidentId,
+          (this.timelines.get(incidentId) ?? []).filter(
+            (entry) => entry.entryId !== timelineEntry.entryId,
+          ),
+        );
+        this.incidentRepository.reportPersistenceFailure(
+          error,
+          "converge_incident_owner_durable",
+        );
+        throw error;
+      }
+    }
+
+    this.recordAudit(
+      {
+        actorId: identity?.actorId ?? null,
+        actorType: this.resolveAuditActorType(identity, "ops_user"),
+        tenantId: identity?.tenantId ?? null,
+        moduleName: "incident",
+        actionName: "converge_incident_owner_durable",
+        resourceType: "incident",
+        resourceId: incidentId,
+        newValuesSummary: { assignedTo: decorated.assignedTo },
+      },
+      requestId,
+    );
+    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
   }
 
   /** Both controller entrances must validate, commit the complaint side and
@@ -1189,31 +1827,35 @@ export class IncidentService implements OnModuleInit {
       suppressions?: readonly PersistSuppressionRecord[];
     },
     context: string,
+    options?: PersistIncidentOptions,
   ) {
     if (!this.incidentRepository) return;
     void this.incidentRepository
-      .persistChanges({
-        ...(changes.incidents
-          ? {
-              incidents: changes.incidents.map((incident) =>
-                this.cloneIncident(incident),
-              ),
-            }
-          : {}),
-        ...(changes.timelines
-          ? {
-              timelines: changes.timelines.map((entry) => ({ ...entry })),
-            }
-          : {}),
-        ...(changes.suppressions
-          ? {
-              suppressions: changes.suppressions.map((entry) => ({
-                ...entry,
-                suppression: { ...entry.suppression },
-              })),
-            }
-          : {}),
-      })
+      .persistChanges(
+        {
+          ...(changes.incidents
+            ? {
+                incidents: changes.incidents.map((incident) =>
+                  this.cloneIncident(incident),
+                ),
+              }
+            : {}),
+          ...(changes.timelines
+            ? {
+                timelines: changes.timelines.map((entry) => ({ ...entry })),
+              }
+            : {}),
+          ...(changes.suppressions
+            ? {
+                suppressions: changes.suppressions.map((entry) => ({
+                  ...entry,
+                  suppression: { ...entry.suppression },
+                })),
+              }
+            : {}),
+        },
+        options,
+      )
       .catch((error: unknown) => {
         this.incidentRepository!.reportPersistenceFailure(error, context);
       });

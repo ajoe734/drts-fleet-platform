@@ -18,7 +18,7 @@ import { ComplaintService } from "../../apps/api/src/modules/complaint/complaint
 import { OwnedMobilityController } from "../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
 import type { OwnedMobilityService } from "../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
-import type { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 function fakeResponse() {
   const headers: Record<string, string> = {};
@@ -252,6 +252,8 @@ describe("CONF-IDEM-004: CRM & webhook command idempotency", () => {
         nextAttemptAt: null,
       }));
       const tenantPartnerService = {
+        assertTenantAccessScope:
+          TenantPartnerService.prototype.assertTenantAccessScope,
         sendTestWebhook,
       } as unknown as TenantPartnerService;
       const idempotencyService = new IdempotencyService(

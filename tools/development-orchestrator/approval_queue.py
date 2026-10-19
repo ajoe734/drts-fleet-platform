@@ -20,6 +20,7 @@ if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
 from common import load_config, new_runtime_id, utc_now, write_activity_log
+from control_plane.domain.worker_lifecycle import worker_supports_approval_resume
 from control_plane.infra.approval_repo import (
     approval_transaction,
     load_approval_state,
@@ -83,12 +84,12 @@ def _orphaned_worker_note(item: dict[str, Any], workers: dict[str, Any]) -> str 
     if worker is None:
         return "Auto-pruned orphaned approval after its worker state disappeared."
     if (
-        worker.get("provider") == "claude"
-        and worker.get("status") in {"waiting_approval", "suspended_approval"}
-        and (worker.get("session_id") or worker.get("resume_token"))
+        worker.get("status") in {"waiting_approval", "suspended_approval"}
+        and worker_supports_approval_resume(worker)
     ):
-        # Claude can resume from session state after approval even if the original
-        # worker process exited, so keep the approval entry live.
+        # Claude and its aliases (e.g. claude2) can resume from session state
+        # after approval even if the original worker process exited, so keep
+        # the approval entry live.
         return None
     if not _pid_is_alive(worker.get("pid")):
         return "Auto-pruned approval because the worker exited before approval could be applied."

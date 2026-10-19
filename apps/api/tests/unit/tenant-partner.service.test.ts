@@ -179,7 +179,7 @@ function createInMemoryTenantPartnerRepository(
 ) {
   let state = cloneState(initialState);
 
-  return {
+  const repository = {
     isEnabled: vi.fn(() => false),
     loadState: vi.fn(async () => cloneState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
@@ -386,6 +386,11 @@ function createInMemoryTenantPartnerRepository(
     reportPersistenceFailure: vi.fn(),
     getState: () => cloneState(state),
   };
+  return Object.assign(repository, {
+    persistConfigurationChanges: vi.fn((changes: PersistTenantPartnerChanges) =>
+      repository.persistChanges(changes),
+    ),
+  });
 }
 
 function createDatabaseQuotaRepository(options?: {
@@ -660,9 +665,13 @@ describe("TenantPartnerService sensitive-data governance", () => {
     persistedState.passengers = [
       localSeedService.listPassengers("tenant-demo-001")[0]!,
     ];
-    persistedState.addresses = [localSeedService.listAddresses("tenant-demo-001")[0]!];
-    persistedState.costCenters = localSeedService.listCostCenters("tenant-demo-001");
-    persistedState.userRoles = localSeedService.listTenantUsers("tenant-demo-001");
+    persistedState.addresses = [
+      localSeedService.listAddresses("tenant-demo-001")[0]!,
+    ];
+    persistedState.costCenters =
+      localSeedService.listCostCenters("tenant-demo-001");
+    persistedState.userRoles =
+      localSeedService.listTenantUsers("tenant-demo-001");
     persistedState.apiKeys = [
       localSeedService.listApiKeys("tenant-demo-001")[0] as never,
     ];
@@ -946,7 +955,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       "req-passenger-audit-001",
     );
 
-    const createdWebhook = service.createWebhookEndpoint(
+    const createdWebhook = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/dispatch",
@@ -1215,14 +1224,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
         },
         "req-partner-credential-auth-002",
       ),
-      ).toThrowError(
-        expect.objectContaining({
-          response: expect.objectContaining({
-            error: expect.objectContaining({
-              code: "PARTNER_API_KEY_REVOKED",
-            }),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "PARTNER_API_KEY_REVOKED",
           }),
         }),
+      }),
     );
 
     expect(auditNotificationService.listAuditLogs()).toEqual(
@@ -1262,7 +1271,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
 
       expect(issued.overlapEndsAt).toBe("2026-08-03T12:00:00.000Z");
       expect(
-        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+        service.listPlatformPartnerIngressCredentials(
+          "bank-demo-alpha-airport",
+        ),
       ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1326,7 +1337,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
       );
 
       expect(
-        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+        service.listPlatformPartnerIngressCredentials(
+          "bank-demo-alpha-airport",
+        ),
       ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -2077,11 +2090,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
   it("allows duplicate cost-center codes across different tenants", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const otherTenantCostCenter = await service.upsertCostCenter("tenant-demo-002", {
-      code: "cc-fin-04",
-      name: "Shared Finance Code",
-      description: "Scoped to a different tenant",
-    });
+    const otherTenantCostCenter = await service.upsertCostCenter(
+      "tenant-demo-002",
+      {
+        code: "cc-fin-04",
+        name: "Shared Finance Code",
+        description: "Scoped to a different tenant",
+      },
+    );
 
     expect(otherTenantCostCenter).toMatchObject({
       tenantId: "tenant-demo-002",
@@ -2403,7 +2419,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const created = service.createWebhookEndpoint(
+    const created = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/secret-hygiene",
@@ -2417,7 +2433,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       "req-webhook-secret-hygiene-001",
     );
 
-    service.rotateWebhookSecret(
+    await service.rotateWebhookSecret(
       "tenant-demo-001",
       {
         webhookId: created.webhookId,
@@ -2432,7 +2448,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
     for (const record of endpoint.secretHistory) {
       expect(record).not.toHaveProperty("secretValue");
     }
-    for (const record of endpoint.runtimeMetadata.secretRotation.history ?? []) {
+    for (const record of endpoint.runtimeMetadata.secretRotation.history ??
+      []) {
       expect(record).not.toHaveProperty("secretValue");
     }
 
@@ -2442,7 +2459,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     // The whole read surface must stay clean, not just the history arrays:
     // list reads, the update response, and the audit trail all serialize the
     // same webhook response shape.
-    const updated = service.updateWebhookEndpoint(
+    const updated = await service.updateWebhookEndpoint(
       "tenant-demo-001",
       created.webhookId,
       { events: ["booking.created", "booking.cancelled"] },
@@ -2555,7 +2572,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       .find((value) => value.webhookId === "wh_legacy_material_001");
     expect(listed).toBeDefined();
 
-    const updated = service.updateWebhookEndpoint(
+    const updated = await service.updateWebhookEndpoint(
       "tenant-demo-001",
       "wh_legacy_material_001",
       { events: ["booking.created", "booking.cancelled"] },
@@ -2989,11 +3006,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
         rotatable.apiKey.apiKeyId,
         { overlapDays: 2 },
       );
-      service.rotateApiKey(
-        "tenant-demo-001",
-        rotatedOnce.apiKey.apiKeyId,
-        { overlapDays: 2 },
-      );
+      service.rotateApiKey("tenant-demo-001", rotatedOnce.apiKey.apiKeyId, {
+        overlapDays: 2,
+      });
       vi.setSystemTime(new Date("2026-10-05T00:00:00.000Z"));
       expectAuthErrorCode(
         () => service.authenticateTenantApiKey(rotatedOnce.plaintextKey),
@@ -3528,7 +3543,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    const created = service.createWebhookEndpoint(
+    const created = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/failing",
@@ -3565,7 +3580,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       ]),
     );
 
-    service.rotateWebhookSecret(
+    await service.rotateWebhookSecret(
       "tenant-demo-001",
       {
         webhookId: created.webhookId,
@@ -3614,7 +3629,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
         ],
       } as const;
 
-      const created = service.createWebhookEndpoint(
+      const created = await service.createWebhookEndpoint(
         "tenant-demo-001",
         {
           url: "https://tenant.example/webhooks/overlap-secret",
@@ -3645,7 +3660,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       });
 
       vi.setSystemTime(new Date("2026-08-02T12:00:00.000Z"));
-      const rotated = service.rotateWebhookSecret(
+      const rotated = await service.rotateWebhookSecret(
         "tenant-demo-001",
         {
           webhookId: created.webhookId,
@@ -3751,7 +3766,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    const created = service.createWebhookEndpoint(
+    const created = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/retry-once",
@@ -3841,13 +3856,13 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    const created = service.createWebhookEndpoint("tenant-demo-001", {
+    const created = await service.createWebhookEndpoint("tenant-demo-001", {
       url: "https://tenant.example/webhooks/manual-disable",
       secret: "whsec_manual_disable",
       events: ["booking.created"],
     });
 
-    const updated = service.updateWebhookEndpoint(
+    const updated = await service.updateWebhookEndpoint(
       "tenant-demo-001",
       created.webhookId,
       {
@@ -3879,7 +3894,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    const webhook = service.createWebhookEndpoint(
+    const webhook = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/evidence",
@@ -4213,7 +4228,7 @@ describe("TenantPartnerService approval rules", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const created = service.upsertApprovalRule(
+    const created = await service.upsertApprovalRule(
       "tenant-demo-001",
       {
         ruleName: "High-value approval",
@@ -4231,7 +4246,7 @@ describe("TenantPartnerService approval rules", () => {
       "req-approval-rule-create-001",
     );
 
-    const second = service.upsertApprovalRule(
+    const second = await service.upsertApprovalRule(
       "tenant-demo-001",
       {
         ruleName: "Manual review passenger",
@@ -4249,7 +4264,7 @@ describe("TenantPartnerService approval rules", () => {
       "req-approval-rule-create-002",
     );
 
-    const reordered = service.reorderApprovalRules(
+    const reordered = await service.reorderApprovalRules(
       "tenant-demo-001",
       {
         orderedRuleIds: [second.ruleId, created.ruleId],
@@ -4257,7 +4272,7 @@ describe("TenantPartnerService approval rules", () => {
       "req-approval-rule-reorder-001",
     );
 
-    const disabled = service.disableApprovalRule(
+    const disabled = await service.disableApprovalRule(
       "tenant-demo-001",
       created.ruleId,
       "req-approval-rule-disable-001",
@@ -4325,13 +4340,13 @@ describe("TenantPartnerService approval rules", () => {
   it("rejects duplicate orderedRuleIds when reordering approval rules", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const first = service.upsertApprovalRule("tenant-demo-001", {
+    const first = await service.upsertApprovalRule("tenant-demo-001", {
       ruleName: "Rule one",
       priority: 10,
       conditions: [{ field: "booking.amount_minor", op: "gte", value: 1 }],
       action: "warn",
     });
-    const second = service.upsertApprovalRule("tenant-demo-001", {
+    const second = await service.upsertApprovalRule("tenant-demo-001", {
       ruleName: "Rule two",
       priority: 20,
       conditions: [{ field: "booking.amount_minor", op: "gte", value: 2 }],
@@ -4359,13 +4374,14 @@ describe("TenantPartnerService approval rules", () => {
 
   it("persists approval rule changes into the repository contract state", async () => {
     const repository = createInMemoryTenantPartnerRepository();
+    repository.isEnabled.mockReturnValue(true);
     const service = new TenantPartnerService(
       new AuditNotificationService(),
       repository as never,
     );
 
     await service.onModuleInit();
-    const created = service.upsertApprovalRule("tenant-demo-001", {
+    const created = await service.upsertApprovalRule("tenant-demo-001", {
       ruleName: "Persisted approval",
       priority: 10,
       conditions: [
@@ -4392,13 +4408,14 @@ describe("TenantPartnerService approval rules", () => {
 
   it("records tenant quota policies and previews cost-center impacts", async () => {
     const repository = createInMemoryTenantPartnerRepository();
+    repository.isEnabled.mockReturnValue(true);
     const service = new TenantPartnerService(
       new AuditNotificationService(),
       repository as never,
     );
 
     await service.onModuleInit();
-    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+    await service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
       limit: {
         bookingCountLimit: 2,
@@ -4493,7 +4510,7 @@ describe("TenantPartnerService approval rules", () => {
       }),
     ]);
 
-    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+    await service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
       limit: {
         bookingCountLimit: 5,
@@ -4551,7 +4568,7 @@ describe("TenantPartnerService approval rules", () => {
   it("throws QUOTA_INSUFFICIENT_AT_COMMIT when a hard-block reserve exceeds the limit", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+    await service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
       limit: {
         bookingCountLimit: 0,
@@ -4873,7 +4890,7 @@ describe("TenantPartnerService approval rules", () => {
   it("serializes concurrent reserve calls so only one claimant gets the last quota unit", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+    await service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
       limit: {
         bookingCountLimit: 1,
@@ -5162,16 +5179,20 @@ describe("TenantPartnerService approval rules", () => {
       identityRepository,
     );
     const jwtAuthService = new JwtAuthService(identityRepository, service);
-    const activeUser = service.listTenantUsers("tenant-demo-001").find(
-      (candidate) =>
-        candidate.status === "active" && candidate.roleCode !== "tenant_admin",
-    );
+    const activeUser = service
+      .listTenantUsers("tenant-demo-001")
+      .find(
+        (candidate) =>
+          candidate.status === "active" &&
+          candidate.roleCode !== "tenant_admin",
+      );
     expect(activeUser).toBeDefined();
     if (!activeUser) {
       throw new Error("expected a seeded active tenant user");
     }
 
-    const snapshot = await identityRepository.syncLegacyTenantUserRole(activeUser);
+    const snapshot =
+      await identityRepository.syncLegacyTenantUserRole(activeUser);
     const scopes = getTenantRoleScopes(activeUser.roleCode);
     expect(scopes).toBeDefined();
     if (!scopes) {
@@ -5194,7 +5215,9 @@ describe("TenantPartnerService approval rules", () => {
       requestId: "req-tenant-session-issue-001",
     });
 
-    await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.not.toBeNull();
+    await expect(
+      jwtAuthService.verifyAccessToken(issued.token),
+    ).resolves.not.toBeNull();
 
     const updated = await service.updateTenantUserRole(
       activeUser.tenantId,
@@ -5218,12 +5241,16 @@ describe("TenantPartnerService approval rules", () => {
     );
 
     expect(updated.status).toBe("suspended");
-    const revokedSession = await identityRepository.getSession(issued.sessionId);
+    const revokedSession = await identityRepository.getSession(
+      issued.sessionId,
+    );
     expect(revokedSession).toMatchObject({
       status: "revoked",
       revokeReason: "TENANT_ACCOUNT_STATUS_CHANGED",
     });
-    await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.toBeNull();
+    await expect(
+      jwtAuthService.verifyAccessToken(issued.token),
+    ).resolves.toBeNull();
   });
 
   it("ships a tenant governance dashboard with the required panels and metric bindings", async () => {

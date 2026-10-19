@@ -32,30 +32,32 @@ import {
   type CanvasTone,
 } from "@drts/ui-web";
 
-import { PublishAssistantScope } from "@/components/ops-assistant";
-import { RevenueAutoRefresh } from "@/components/revenue-auto-refresh";
-import { getServerOpsClient } from "@/lib/api-client.server";
-import { formatOpsCodeLabel } from "@/lib/localized-labels";
+import { PublishAssistantScope } from "../../components/ops-assistant";
+import { RevenueAutoRefresh } from "../../components/revenue-auto-refresh";
+import { getServerOpsClient } from "../../lib/api-client.server";
+import { formatOpsCodeLabel } from "../../lib/localized-labels";
 import {
   buildRevenueInsights,
   formatCompactNumber,
   formatMinorCurrency,
+  formatRevenueBilledLabel,
+  resolveRevenueFilters,
   type RevenueFilters,
   type RevenuePeriod,
-} from "@/lib/ops-analytics";
+} from "../../lib/ops-analytics";
 import {
   crossAppHref,
   platformAdminPaymentsLink,
   platformAdminReconciliationLink,
-} from "@/lib/ops-cross-app-links";
+} from "../../lib/ops-cross-app-links";
 import {
   buildEmptyEnvelope,
   emptyStateCopy,
   fetchListWithOutcome,
   resolveEmptyReason,
-} from "@/lib/ops-empty-state";
-import { getServerLocale } from "@/lib/server-locale";
-import { t, type Locale } from "@/lib/translations";
+} from "../../lib/ops-empty-state";
+import { getServerLocale } from "../../lib/server-locale";
+import { t, type Locale } from "../../lib/translations";
 
 // Refresh tier T3 per packet §5.11 — RefreshTier "medium" drives 15s polling.
 const REVENUE_REFRESH_TIER: RefreshTier = "medium";
@@ -132,22 +134,7 @@ const PERIOD_KEYS: readonly RevenuePeriod[] = [
 function resolveFilters(
   searchParams?: Record<string, string | string[] | undefined>,
 ): RevenueFilters {
-  const rawPeriod = firstParam(searchParams?.period);
-  const period: RevenuePeriod = (PERIOD_KEYS as readonly string[]).includes(
-    rawPeriod ?? "",
-  )
-    ? (rawPeriod as RevenuePeriod)
-    : "7d";
-  const serviceBucket = firstParam(searchParams?.serviceBucket) ?? "all";
-  const vehicleId = firstParam(searchParams?.vehicleId) ?? "all";
-  return {
-    period,
-    serviceBucket:
-      serviceBucket === "standard_taxi" || serviceBucket === "business_dispatch"
-        ? serviceBucket
-        : "all",
-    vehicleId,
-  };
+  return resolveRevenueFilters(searchParams);
 }
 
 function filtersAreDefault(filters: RevenueFilters): boolean {
@@ -214,13 +201,6 @@ function settlementMatrixKey(
   channelKey: string,
 ) {
   return `revenue.matrix.${category}.${channelKey}`;
-}
-
-function classifyOrderChannel(order: OwnedOrderRecord): string {
-  if (order.businessDispatchSubtype === "enterprise_dispatch") return "tenant";
-  if (order.partnerId) return "partner";
-  if (order.orderSource === "phone") return "phone";
-  return "platform";
 }
 
 function isoMinusMs(ms: number): string {
@@ -931,16 +911,16 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     ),
   ]);
 
+  const ordersAndTasksOk = ordersOutcome.ok && tasksOutcome.ok;
   const anyFailed =
-    !ordersOutcome.ok ||
-    !tasksOutcome.ok ||
+    !ordersAndTasksOk ||
     !matrixOutcome.ok ||
     !forwarderIssuesOutcome.ok ||
     !financeIssuesOutcome.ok;
 
   const refreshMetadata = buildRefreshMetadata(anyFailed);
   const healthEnvelope = buildHealthEnvelope({
-    ordersOk: ordersOutcome.ok,
+    ordersOk: ordersAndTasksOk,
     matrixOk: matrixOutcome.ok,
     forwardedOk:
       forwardedOutcome.ok &&
@@ -963,30 +943,8 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     .map((vehicle) => vehicle.vehicleId)
     .sort((left, right) => left.localeCompare(right));
 
-  const completedOrders = orders.filter(
-    (order) => order.status === "completed",
-  );
-  const periodOrders = completedOrders.filter((order) => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const startMs = start.getTime();
-    const endMs = startMs + 24 * 60 * 60 * 1000;
-    if (filters.period === "today") {
-      const ts = new Date(order.updatedAt).getTime();
-      return ts >= startMs && ts < endMs;
-    }
-    if (filters.period === "yesterday") {
-      const ts = new Date(order.updatedAt).getTime();
-      return ts >= startMs - 24 * 60 * 60 * 1000 && ts < startMs;
-    }
-    const days = filters.period === "7d" ? 6 : 29;
-    const lookback = new Date(start);
-    lookback.setDate(lookback.getDate() - days);
-    return new Date(order.updatedAt).getTime() >= lookback.getTime();
-  });
-
-  const ownedTrips = periodOrders.filter((order) => !order.partnerId).length;
-  const totalTrips = periodOrders.length;
+  const ownedTrips = insights.ownedTrips;
+  const totalTrips = insights.completedTrips;
   const forwardedSyncFailedCount = forwardedOrders.filter(
     (order) => order.status === "sync_failed",
   ).length;
@@ -1002,6 +960,10 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   ).length;
   const mismatchCount = forwarderIssues.length;
   const recognisedRevenueMinor = insights.totalRevenueMinor;
+  const billedKpiLabel = formatRevenueBilledLabel(
+    t("revenue.kpi.billed", locale),
+    t(`revenue.period.${filters.period}`, locale),
+  );
 
   const financeIssueByJobId = new Map(
     financeIssues
@@ -1026,29 +988,16 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         )
       : undefined;
 
-  const channelBuckets = (() => {
-    const counts = new Map<string, { trips: number; revenueMinor: number }>();
-    for (const order of periodOrders) {
-      const key = classifyOrderChannel(order);
-      const previous = counts.get(key) ?? { trips: 0, revenueMinor: 0 };
-      counts.set(key, {
-        trips: previous.trips + 1,
-        revenueMinor:
-          previous.revenueMinor + (order.quotedFare?.amountMinor ?? 0),
-      });
-    }
-    const totalRevenue = Array.from(counts.values()).reduce(
-      (sum, item) => sum + item.revenueMinor,
-      0,
-    );
-    return Array.from(counts.entries()).map(([key, value]) => ({
-      key,
-      label: t(`revenue.channelMix.channel.${key}`, locale),
-      trips: value.trips,
-      revenueMinor: value.revenueMinor,
-      shareLabel: pctLabel(value.revenueMinor, Math.max(totalRevenue, 1)),
-    }));
-  })();
+  const channelBuckets = insights.channels.map((row) => ({
+    key: row.key,
+    label: t(`revenue.channelMix.channel.${row.key}`, locale),
+    trips: row.trips,
+    revenueMinor: row.revenueMinor,
+    shareLabel: pctLabel(
+      row.revenueMinor,
+      Math.max(insights.totalRevenueMinor, 1),
+    ),
+  }));
 
   const tabs = TAB_KEYS.map((key) => {
     const isActive = key === tab;
@@ -1089,7 +1038,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
   // renderer below stays descriptor-driven. When the backend lights up
   // the descriptor, only this helper changes.
   const pageActions = buildRevenuePageAvailableActions({
-    ordersOk: ordersOutcome.ok,
+    ordersOk: ordersAndTasksOk,
     matrixOk: matrixOutcome.ok,
     forwarderIssuesOk: forwarderIssuesOutcome.ok,
     financeIssuesOk: financeIssuesOutcome.ok,
@@ -1205,7 +1154,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
         <div style={kpiGridStyle}>
           <KPI
             theme={theme}
-            label={t("revenue.kpi.billed", locale)}
+            label={billedKpiLabel}
             value={formatMinorCurrency(recognisedRevenueMinor)}
             sub={t("revenue.kpi.billedSub", locale)}
           />
@@ -1340,6 +1289,13 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
     const periodReason = filterPeriodDescriptor?.disabledReasonCode;
     const bucketReason = filterServiceBucketDescriptor?.disabledReasonCode;
     const vehicleReason = filterVehicleDescriptor?.disabledReasonCode;
+    const visibleVehicleOptions = vehicleOptions.slice(0, 8);
+    if (
+      filters.vehicleId !== "all" &&
+      !visibleVehicleOptions.includes(filters.vehicleId)
+    ) {
+      visibleVehicleOptions.push(filters.vehicleId);
+    }
     return (
       <div style={filterRowStyle}>
         <span
@@ -1386,7 +1342,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
             showDot: true,
           }),
         )}
-        {vehicleOptions.length > 0 ? (
+        {visibleVehicleOptions.length > 0 ? (
           <>
             <span
               style={{
@@ -1410,7 +1366,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
               selected: filters.vehicleId === "all",
               showDot: false,
             })}
-            {vehicleOptions.slice(0, 8).map((vid) =>
+            {visibleVehicleOptions.map((vid) =>
               renderFilterChip({
                 key: `vehicle-${vid}`,
                 enabled: vehicleActive,
@@ -1569,7 +1525,7 @@ export default async function RevenuePage({ searchParams }: RevenuePageProps) {
 
   function renderChannelMix() {
     const channelEmpty = resolveEmptyReason({
-      ok: ordersOutcome.ok,
+      ok: ordersAndTasksOk,
       itemCount: channelBuckets.length,
       filtersActive,
     });
