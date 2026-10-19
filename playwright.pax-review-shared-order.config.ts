@@ -122,6 +122,7 @@ export default defineConfig({
             ...apiEnvironment,
             // A second API instance must read the first one's committed audit.
             DRTS_API_URL: "http://127.0.0.1:3002",
+            DRTS_DEV_WORKFORCE_PRINCIPAL_ID: "principal_platform_admin_default",
             NEXT_PUBLIC_API_URL: "/control-plane-proxy",
             NEXT_PUBLIC_OPS_CONSOLE_ORIGIN: "http://127.0.0.1:3202",
           },

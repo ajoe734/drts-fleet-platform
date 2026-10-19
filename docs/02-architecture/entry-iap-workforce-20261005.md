@@ -455,4 +455,25 @@ plus the unchanged new dev suite passed **61 / 61, no skips** (13 legacy/cross-a
 cases and 48 canonical-session cases); the cross-app import guard also passed.
 These bounded checks do not replace the repaired immutable candidate's own full
 hosted CI or independent review. The failed candidate and all original CI results
-remain evidence; no failed run was cancelled or rerun to obtain a green result.
+remain evidence. No workflow was manually cancelled or rerun; normal repair
+pushes can automatically supersede unfinished same-PR runs under the existing
+workflow concurrency policy. Those automatic cancellations are recorded as such,
+not reported as natural terminal results or successful acceptance.
+
+The same candidate's integration job also failed those two legacy fixtures
+(**346 pass / 2 fail**). Its separate hosted shared-order UI failed at the actual
+Platform Admin audit destination: `visitActualAuditDestination` received HTTP
+401 instead of 200 after the completed ride and internal lost-item case flow.
+This was a distinct configuration gap: the hosted Admin server inherited the
+explicit waiver and signing key but omitted the required canonical-principal
+reference. Its own environment now explicitly references the existing
+`principal_platform_admin_default`, matching the shared dev server configuration;
+the waiver remains enabled and no account, membership or grant is created.
+Socket-free evaluation of the actual config export reproduced the missing
+pairing before the single-line correction and verified the complete pairing
+afterward. The other five hosted server configurations remain unchanged, and
+there is no new canonical Ops reference. The product and dedicated 48-case suite
+remain byte-identical to the version included in the 61-pass check above, so
+those unchanged tests were not repeated for this config-only correction. A fresh
+immutable candidate's hosted UI must still prove the actual audit destination
+read and the complete shared-order journey; this static check is not that result.
