@@ -371,3 +371,48 @@ its manifest in the same evidence directory. The original handoff,
 before/fixed results, assertions and failed hosted run remain historical
 evidence. A new exact-candidate hosted CI and independent review are still
 required; this test harness repair grants no deployed/provider credit.
+
+### Mandatory root TypeScript integration continuation (2026-10-19)
+
+The `bfab8b70f3e9913a36598db746bdec89d6393977` integration run
+`39213760022`, job `117935728701`, failed its actual root
+`tsc -p tsconfig.json --noEmit`. The job checked out PR merge
+`063cc24388d5a1ebc5003e512ee8e6d10c2f146d` with accepted parent
+`88bde9b6df9826d6a52b5297ebbc91b692ff112e`. Root TSC followed the new
+test's static Fleet UI imports without the Fleet app's own aliases, and
+three tests imported a workspace SDK package unavailable from the root
+project. The Vitest resolver does not configure TypeScript. A local target
+TSC pass therefore did not satisfy this mandatory check. This is one
+terminal failed job; the other old jobs were still running at diagnosis.
+
+Normal reviewer reopen preserves all four original clauses/keys and fifteen
+scopes. Only the existing test harness changes: the accepted
+`createUiModuleLoader` executes the actual Fleet UI and local dependencies
+using the app root, the same React/JSX runtime and real Canvas exports, plus
+the existing router seam. It does not replace forms, handlers, middleware,
+principal, guard, Controller or service commands. Exact public props match
+all four original production component signatures; the Fleet app TSC still
+checks the complete production component graph. The three SDK test imports
+now name the same real package Source by relative path. No product bytes,
+root TypeScript/Vitest configuration, type flags, includes, skips or
+assertions change. Original 289 assertions and all 35 caller assertions
+remain identical as expect/matcher AST nodes.
+
+`root-tsc-fixed-root-entry125` reruns the root-entry selection: 10 files,
+125 PASS, zero failures/skips, including all five real UI caller cases.
+`root-tsc-fixed-source-types`, `root-tsc-fixed-Fleet-app-types` and
+`root-tsc-fixed-tests-lint` pass. The separate five-case check overlaps the
+125 and is not added to it. The props and assertion preservation tools,
+raw commands, direct exits and full immutable handoff are recorded under
+the existing evidence directory with the `root-tsc-` prefix.
+
+The complete local root project compiler was also run before and after;
+both exited 2. The actual hosted job's fifteen Fleet diagnostics are absent
+after this fix. Other local preparation/version differences remain:
+missing per-app workspace dependencies/read paths and existing dependency
+links resolving packages from the Root checkout instead of this frozen
+candidate (including SDK visibility differences). No shared Root Source,
+package outputs or dependencies were changed to erase those diagnostics;
+no installation or large build was performed. Local full-root green is
+**not** claimed. New exact-candidate hosted typecheck/full CI and independent
+review remain required; neither old failed run is rerun or relabeled green.

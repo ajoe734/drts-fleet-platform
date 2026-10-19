@@ -2,7 +2,7 @@ import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { ApiClientError } from "@drts/api-client";
+import { ApiClientError } from "../../../packages/api-client/src";
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
 import { BootstrapAuthGuard } from "../../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";

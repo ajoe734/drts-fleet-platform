@@ -1,7 +1,10 @@
 import { createRequire } from "node:module";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { ApiClient, createFleetPartnerPortalClient } from "@drts/api-client";
+import {
+  ApiClient,
+  createFleetPartnerPortalClient,
+} from "../../../packages/api-client/src";
 import { getServerFleetPartnerClient } from "../../../apps/fleet-partner-portal-web/lib/api-client.server";
 import {
   GET,

@@ -62,7 +62,7 @@ import {
   loadFleetDriverQuizAttempt,
   loadFleetTraining,
 } from "../../../apps/fleet-partner-portal-web/lib/academy-data.server";
-import { createFleetPartnerPortalClient } from "@drts/api-client";
+import { createFleetPartnerPortalClient } from "../../../packages/api-client/src";
 
 const apiRequire = createRequire(
   new URL("../../../apps/api/package.json", import.meta.url),

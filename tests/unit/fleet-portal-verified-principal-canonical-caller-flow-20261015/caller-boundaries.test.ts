@@ -2,7 +2,8 @@
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { createElement } from "react";
+import React, { createElement, type ComponentType } from "react";
+import * as jsxRuntime from "react/jsx-runtime";
 import {
   cleanup,
   fireEvent,
@@ -19,13 +20,12 @@ import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.servi
 import { IdentityRepository } from "../../../apps/api/src/modules/identity/identity.repository";
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
 import type { SupplySubmissionDetail } from "../../../apps/fleet-partner-portal-web/lib/fleet-portal-supply";
-import {
-  NewDriverSubmissionForm,
-  NewVehicleSubmissionForm,
-  SupplySubmissionDetailView,
-} from "../../../apps/fleet-partner-portal-web/components/fleet-supply-workspace";
-import { CaseReplyComposer } from "../../../apps/fleet-partner-portal-web/app/cases/[caseId]/case-reply-composer";
-import type { FleetCaseItem } from "../../../apps/fleet-partner-portal-web/lib/fleet-portal-data.server";
+import type {
+  FleetCaseItem,
+  FleetCaseAttachmentRecord,
+} from "../../../apps/fleet-partner-portal-web/lib/fleet-portal-data.server";
+import * as canvas from "../../../packages/ui-web/src";
+import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
 import {
   fleetDocumentRequest,
   putFleetDocument,
@@ -41,6 +41,34 @@ const router = vi.hoisted(() => ({
   back: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+const appRoot = resolve(process.cwd(), "apps/fleet-partner-portal-web");
+// The existing loader executes the actual UI and its actual local dependencies
+// with the app's own aliases. The root compiler checks this typed test contract;
+// the Fleet app typecheck checks the complete production component graph.
+const loadFleetUi = createUiModuleLoader(appRoot, {
+  react: React,
+  "react/jsx-runtime": jsxRuntime,
+  "@drts/ui-web": canvas,
+  "next/navigation": { useRouter: () => router },
+});
+const {
+  NewDriverSubmissionForm,
+  NewVehicleSubmissionForm,
+  SupplySubmissionDetailView,
+} = loadFleetUi<{
+  NewDriverSubmissionForm: ComponentType<{ draftScope: string }>;
+  NewVehicleSubmissionForm: ComponentType<{ draftScope: string }>;
+  SupplySubmissionDetailView: ComponentType<{
+    initialDetail: SupplySubmissionDetail;
+    source: "live" | "fallback";
+  }>;
+}>(resolve(appRoot, "components/fleet-supply-workspace.tsx"));
+const { CaseReplyComposer } = loadFleetUi<{
+  CaseReplyComposer: ComponentType<{
+    caseDetail: FleetCaseItem;
+    initialAttachments: FleetCaseAttachmentRecord[];
+  }>;
+}>(resolve(appRoot, "app/cases/[caseId]/case-reply-composer.tsx"));
 const { Reflector } = createRequire(
   resolve(process.cwd(), "apps/api/package.json"),
 )("@nestjs/core");
