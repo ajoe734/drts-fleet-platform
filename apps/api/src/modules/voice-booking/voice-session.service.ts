@@ -962,7 +962,8 @@ export class VoiceSessionService {
         {
           dialogState: "closed",
           mediaState: "ended",
-          recordingState: "finalizing",
+          recordingState:
+            session.recordingState === "finalized" ? "finalized" : "finalizing",
           lastAppliedControlSequence: sequence,
         },
         tx,

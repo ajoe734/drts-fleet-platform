@@ -16,6 +16,10 @@
 export interface VoiceSessionBinding {
   readonly voiceSessionId: string;
   readonly resourceScopeId: string;
+  /** Canonical recording context from the API's session/resource-scope join;
+   * resourceScopeId is a distinct scope UUID, never a brand identifier. */
+  readonly brandId?: string;
+  readonly callId?: string;
   readonly routeProfileVersion: number;
   readonly leaseEpoch: number;
   sessionVersion: number;

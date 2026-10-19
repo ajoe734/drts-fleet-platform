@@ -72,6 +72,10 @@ jobs:
       MAP_PROVIDER_MODE: mock
       MAP_PROVIDER_BACKEND: mock
       MAP_PROVIDER_NAME: mock
+      # Explicit SIM key for this isolated hosted database's contact evidence.
+      # No deployed/provider/native-account credential is read or changed.
+      VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION: SIM-hosted-callback-contact
+      VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY: "ERERERERERERERERERERERERERERERERERERERERERE="
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

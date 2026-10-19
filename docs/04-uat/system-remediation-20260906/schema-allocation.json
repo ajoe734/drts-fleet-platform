@@ -151,6 +151,12 @@
       "reason": "Extends the callback functionality on exact parent48bf70e, whose highest reserved migration is V0120. Existing allocation collectors already include voice_callback_allocations; no guard or assertion is changed."
     },
     {
+      "amended_by_task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Append V0122 to voice_application_allocations; original V0106 entry and all other groups/amendments unchanged",
+      "reason": "Registers the durable contact-role revision ledger for VoiceContactService (SD §6.4), reserved by Root at exact parent 4db295df5129b57b66a27950348f6a1fbb2ae049 (.local/passenger-bureau-gap-correction-20261018/Voice-C-V0122-exact-root-allocation-20261018/result.json, sha256 b1c388065f8243ef63a4d65ee63031b3e768d9802f0c7799c12c8f0eeda9c86c). Existing allocation collectors already include voice_application_allocations; no guard or assertion beyond the group's own length is changed."
+    },
+    {
       "amended_by_task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
       "amended_at": "2026-10-18",
       "scope": "Appended `complaint_command_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations, voice_callback_allocations, passenger_push_channel_allocations, passenger_app_allocations, fleet_statement_decision_allocations and public_fare_management_allocations entries above are unchanged",
@@ -186,6 +192,43 @@
       ],
       "description": "Versioned encrypted candidate-dialogue snapshots for trusted voice persistence/restoration, reserved by the original audit execution scope; no booking-draft or consent authority is introduced. V0106 also carries a bounded, non-content purge-receipt table so a governed purge cannot be mistaken for proof a write never landed, plus a session-level floor so that receipt's own governed metadata retention can age it out without either reopening its key for write reuse or being mistaken for proof the write never landed.",
       "downstream_tasks": ["AUDIT-SHARED-DEV-VERIFY-20261002"]
+    },
+    {
+      "task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "version": "V0122",
+      "migration_filename": "V0122__voice_contact_role_revision.sql",
+      "domain": "voice_contact_role_revision",
+      "target_schema": "voice",
+      "primary_tables": [
+        "voice.contact_role_revision",
+        "voice.callback_task_contact_binding"
+      ],
+      "referenced_tables": ["voice.session", "voice.callback_task"],
+      "table_invariants": [
+        "revision_id uuid PRIMARY KEY DEFAULT gen_random_uuid(); voice_session_id uuid NOT NULL REFERENCES voice.session(voice_session_id); UNIQUE (voice_session_id, revision_number) -- revision_number is a single counter shared across every role for a session (matching VoiceContactService.updateContactRole's existing ++latestRevisionNumber contract), not re-scoped per role.",
+        "role text NOT NULL CHECK (role IN ('caller','booker','passenger','driverContact','callbackRecipient')); replaced_revision references the prior revision_number this row supersedes for the same role, or NULL for a role's first revision.",
+        "phone_key_version, phone_nonce, phone_ciphertext and phone_auth_tag store the phone number under the SAME AES-256-GCM envelope convention as voice.dialogue_snapshot.content_ciphertext (apps/api/src/modules/voice-booking/voice-dialogue-snapshot-crypto.ts), keyed server-side at apps/api only; consent_ref is nullable (an opaque reference into existing consent evidence, not a new consent record). Transactional append authority, cold reconstruction and selective confirmation-invalidation behavior remain application/schema verification obligations, not claims certified by this allocation entry.",
+        "Append-only (voice._make_append_only); corrections append and never update. Finite retention_expires_at follows the original session voice_booking_evidence window; V0093 governed deletion removes expired bindings/revisions only for closed, unheld sessions and records the existing retention execution log. Original tasks/receipts remain intact; expired sessions cannot reinitialize the ledger.",
+        "role_source is an explicit/default_pointer/selected_pointer discriminator; one immutable callback creation binding per task pins the exact revision; explicit cancelled-task replacements retain replaces_task_id history."
+      ],
+      "description": "Durable encrypted contact-role revisions and immutable callback creation bindings, preserving the original role/consent and controlled replacement contract.",
+      "downstream_tasks": []
+    },
+    {
+      "task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "version": "V0125",
+      "migration_filename": "V0125__voice_recording_continuation_event.sql",
+      "domain": "voice_recording_continuation",
+      "target_schema": "voice",
+      "primary_tables": ["voice.recording_continuation_event"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "Append-only recording/leg/event key metadata with real session FK; UNIQUE(session,recording,event_key).",
+        "Same payload replays the original event; a different payload at the same identity is rejected by the production repository under the original session lock.",
+        "No voice.session_event sequence or control watermark is consumed; sealed segment/checkpoint/authority closure/final manifest references retain immutable object versions and full coverage."
+      ],
+      "description": "Original Voice B durable continuation journal, allocated by Root 2026-10-19; external recording ingress/call authority remains explicit.",
+      "downstream_tasks": []
     }
   ],
   "voice_callback_allocations": [
@@ -667,6 +710,18 @@
       ]
     }
   ],
+  "sos_duty_allocations": [
+    {
+      "task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "version": "V0124",
+      "migration_filename": "V0124__sos_urgent_outbox_acknowledged.sql",
+      "domain": "sos_duty_acknowledgment",
+      "target_schema": "safety",
+      "primary_tables": ["safety.driver_sos_urgent_alert_outbox"],
+      "referenced_tables": ["safety.driver_sos_events"],
+      "description": "Forward ALTER of the existing V0053 status check for the original S-3 §24 acknowledged state. No new tables/columns. Backfill only same-event non-null canonical duty actor/time; preserve delivery/render as distinct transitions. Root reserved V0124 after existing Voice V0122 and Complaint V0123 reservations."
+    }
+  ],
   "complaint_command_allocations": [
     {
       "task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
@@ -688,18 +743,6 @@
         "CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no) — reconcilePendingCase's existing durable-store sweep scans by case_no.",
         "Write timing: mandatory durable PREPARED reservation is awaited before the ordinary business transaction can begin. The winning original caseNo, timeline entry IDs, caller identity and payload are preserved; reservation failure cannot acknowledge or issue a business COMMIT. The same transaction locks the prepared row and atomically confirms it with canonical case/timeline writes. Confirmed keyed results remain durable for original-result replay without another upsert; unknown outcomes preserve their original reservation. Only a definitely rejected new preparation or a reconciled legacy result is eligible for its own bounded cleanup; a missing or failed read cannot prove an unknown COMMIT rolled back."
       ]
-    }
-  ],
-  "sos_duty_allocations": [
-    {
-      "task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
-      "version": "V0124",
-      "migration_filename": "V0124__sos_urgent_outbox_acknowledged.sql",
-      "domain": "sos_duty_acknowledgment",
-      "target_schema": "safety",
-      "primary_tables": ["safety.driver_sos_urgent_alert_outbox"],
-      "referenced_tables": ["safety.driver_sos_events"],
-      "description": "Forward ALTER of the existing V0053 status check for the original S-3 §24 acknowledged state. No new tables/columns. Backfill only same-event non-null canonical duty actor/time; preserve delivery/render as distinct transitions. Root reserved V0124 after existing Voice V0122 and Complaint V0123 reservations."
     }
   ]
 }

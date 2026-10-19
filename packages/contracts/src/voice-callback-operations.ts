@@ -13,17 +13,51 @@ export const VoiceCallbackQueueFilterSchema = z.object({
   status: VoiceCallbackStatusSchema.optional(),
   voiceSessionId: z.string().uuid().optional(),
 });
+export const VoiceContactCorrectionSchema = z
+  .object({
+    role: z.enum(["booker", "passenger", "driverContact", "callbackRecipient"]),
+    phone: z.string().trim().min(1),
+    name: z.string().trim().min(1).optional(),
+    consentRef: z.string().trim().min(1).optional(),
+    reason: z.string().trim().min(1),
+  })
+  .strict();
 export const VoiceCallbackCreateRequestSchema = z
   .object({
-    contactPhoneEncrypted: z.string().min(1),
-    contactPhoneLookupToken: z.string().min(1),
-    consentSnapshotHash: z.string().min(1),
+    contactPhoneEncrypted: z.string().min(1).optional(),
+    contactPhoneLookupToken: z.string().min(1).optional(),
+    consentSnapshotHash: z.string().min(1).optional(),
+    contactRevisionNumber: z.number().int().positive().optional(),
+    consentRef: z.string().trim().min(1).optional(),
+    replacesTaskId: z.string().uuid().optional(),
     reason: z.string().optional(),
     priority: z.enum(["normal", "urgent", "emergency"]).optional(),
     scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
     dueAt: z.string().datetime({ offset: true }).nullable().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      (value.contactRevisionNumber !== undefined && !!value.consentRef) ||
+      (!!value.contactPhoneEncrypted &&
+        !!value.contactPhoneLookupToken &&
+        !!value.consentSnapshotHash),
+    {
+      message:
+        "An explicit revision/consent or complete legacy sealed snapshot is required.",
+    },
+  );
+export interface VoiceContactRolesView {
+  voiceSessionId: string;
+  callbackRecipient: { name: string; phone: string };
+  callbackRecipientRole: "booker" | "passenger" | "custom";
+  callbackRecipientConsentRef: string | null;
+  callbackRecipientRevisionNumber: number | null;
+  totalRevisions: number;
+}
+export type VoiceContactCorrection = z.infer<
+  typeof VoiceContactCorrectionSchema
+>;
 export const VoiceCallbackOperationRequestSchema = z
   .object({
     expectedVersion: z.number().int().positive(),
@@ -59,6 +93,37 @@ export interface VoiceCallbackTaskView {
   brandId: string;
   callId: string;
   linkedOrderId?: string | null;
+  /**
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018 Package C/D: the server-
+   * resolved, sealed callback recipient's name and the consent reference
+   * backing it (`VoiceContactService`/`voice.contact_role_revision`), NOT
+   * the caller-supplied create-request fields. Empty string when no
+   * durable contact state has ever been recorded for this session -- an
+   * honest "not yet known" value, never a fabricated placeholder.
+   */
+  contactName: string;
+  consentRef: string;
+  contactPhone?: string;
+  contactRole?:
+    | "caller"
+    | "booker"
+    | "passenger"
+    | "driverContact"
+    | "callbackRecipient";
+  contactRevisionNumber?: number | null;
+  contactRevisionBoundAt?: string | null;
+  replacesTaskId?: string | null;
+  replacementTaskId?: string | null;
+  contactHistory?: Array<{
+    taskId: string;
+    revisionNumber: number;
+    role: string;
+    name: string;
+    consentRef: string | null;
+    boundAt: string;
+    reason: string;
+    replacesTaskId: string | null;
+  }>;
   reason: string;
   priority: "normal" | "urgent" | "emergency";
   dueAt: string;
