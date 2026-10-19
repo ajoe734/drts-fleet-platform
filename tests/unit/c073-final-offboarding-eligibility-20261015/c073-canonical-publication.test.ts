@@ -1,3 +1,4 @@
+import { CommandSqlTransport } from "../registry-contract-insurance-exclusivity-canonical-ack-flow-20261015/sql-transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { VehicleRegistryRecord } from "../../../packages/contracts/src";
@@ -27,36 +28,38 @@ function deferred() {
 // Existing durable-registry fixture seam: production repository/SQL/readback;
 // only the external database transport is controlled. This is not PG evidence.
 async function setup() {
-  const tables = new Map<string, Map<string, unknown>>();
+  const transport = new CommandSqlTransport();
+  transport.enabled = true;
+  const tables = transport.tables;
   const events: VehicleRegistryRecord[] = [];
   let nextWrite: ReturnType<typeof deferred> | undefined;
   let entered = deferred();
   let writes = 0;
+  const observe = async (sql: string) => {
+    if (sql.includes("INSERT INTO reg.phase1_registry_vehicles")) {
+      writes++;
+      const wait = nextWrite;
+      nextWrite = undefined;
+      if (wait) {
+        entered.resolve();
+        await wait.promise;
+      }
+    }
+  };
   const repository = new RegulatoryRegistryRepository({
     isEnabled: () => true,
     query: async (sql: string, values: unknown[] = []) => {
-      const insert = sql.match(/INSERT INTO (reg\.phase1_registry_\w+)/);
-      if (insert) {
-        if (insert[1] === "reg.phase1_registry_vehicles") {
-          writes++;
-          const wait = nextWrite;
-          nextWrite = undefined;
-          if (wait) {
-            entered.resolve();
-            await wait.promise;
-          }
-        }
-        const rows = tables.get(insert[1]!) ?? new Map();
-        rows.set(String(values[0]), JSON.parse(String(values.at(-1))));
-        tables.set(insert[1]!, rows);
-      }
-      const table = sql.match(/FROM (reg\.phase1_registry_\w+)/)?.[1];
+      await observe(sql);
+      return transport.query(sql, values);
+    },
+    connect: async () => {
+      const client = await transport.connect();
       return {
-        rows: table
-          ? [...(tables.get(table)?.values() ?? [])].map((record) => ({
-              record: structuredClone(record),
-            }))
-          : [],
+        release: client.release,
+        query: async (sql: string, values: unknown[] = []) => {
+          await observe(sql);
+          return client.query(sql, values);
+        },
       };
     },
   } as never);
@@ -283,7 +286,7 @@ describe("C073 actual controller canonical publication", () => {
     expect(x.live().supplyLifecycle.dispatch.blockedReasons).toContain(
       "insurance_expired",
     );
-    const policy = x.service.createInsurancePolicy({
+    const policy = await x.service.createInsurancePolicy({
       vehicleId: VEHICLE,
       policyNo: "C073-RECOVERY",
       insuranceType: "commercial",
@@ -292,7 +295,7 @@ describe("C073 actual controller canonical publication", () => {
       startAt: "2020-01-01T00:00:00.000Z",
       endAt: "2099-01-01T00:00:00.000Z",
     });
-    x.service.activateInsurancePolicy(policy.policyId, {});
+    await x.service.activateInsurancePolicy(policy.policyId, {});
     expect(x.service.getVehicleDispatchability(VEHICLE)).toBe(true);
     expect(() =>
       x.eligibility.assertDispatchAssignmentEligible(ORDER, VEHICLE, DRIVER),
