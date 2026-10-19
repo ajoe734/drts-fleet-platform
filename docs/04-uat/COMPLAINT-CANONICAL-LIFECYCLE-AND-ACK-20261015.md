@@ -609,3 +609,13 @@ Root／owner 在 immutable `ed521f33622a35b235a36d339b69c3b8a733cd6c` 只讀核�
 這輪只執行原 Python gate unit、精確 HTTP consumer 的真 import noEmit／lint／format 及正常 hooks；實值另存本輪 source-checks，不重跑既有 501 或把原 43 PG skip 改稱通過。VM 不執行 mounted HTTP／PG、不偽設 `GITHUB_ACTIONS`。`ed521` 舊 checkpoint、歷史 R6 QA 147／148 證據及已發佈 migrations 原樣保留；新 checkpoint 仍須等 Journey 正常 accepted 後普通整合，再建立最後候選及 own mandatory CI／完整五條 Root review，不能借歷史數字或未接受 Source。
 
 R6 本輪既有 Python gate unit 實際 8 tests／exit 0；HTTP consumer ESLint exit 0，包含真 API／controller／repository imports 的 scoped noEmit exit 0。這些是 consumer 與 verifier 的靜態／工具測試，不是 17 個 mounted HTTP 或 43 個 native PG 通過。兩個原 HTTP 矩陣以外逐 byte 不變，gate 與獨立 fixture 除固定數、摘要及必要註解外逐 byte 不變；兩個 production Complaint 檔、V0126、E consumer 與原 `ed521` checkpoint 相同。
+
+### R7：正常整合 accepted Journey 與最後 Source 資格
+
+Journey 正常 protected merge `607cf709dabbd115df77b491419506de8cfd61d9` 已接受後，從本任務 `a2cc6d2d0c47d009a147d8ae5b7596a04df56480` 普通合併為 `4fd578c4a0530db5ed8aaef0a2577173704f3b34`，保留 `ed521`／`a2cc` 舊 refs 與原完整歷史。唯一人工衝突解法是 E step label 合併新建案語意與真 switch 描述；accepted switch `uncheck`／`not.toBeChecked` 與本任務唯一 case／timeline／真 409 後同案斷言同時保留。未覆寫整檔或搬入未接受 Source。
+
+正常 mandatory hooks 另將兩個 accepted peer 檔格式化。作者先凍結並披露，Root 獨立核實它們精確等於 installed Prettier **3.8.2** 對 accepted 原 bytes 的輸出，再正常 R7 精確加為 37 scopes：`jwt-auth.service.ts` 及 `tenant-grant-session-consumer.test.ts` 僅保留這兩份已核實的 formatter blobs，沒有 JWT／session／role／version 業務或 fixture／assertion／期限變更。作者早先訊息把版本寫成 3.6.2 有誤，原始 receipt 一直記錄正確的 3.8.2，此處更正。
+
+整合後 `4fd` 的 API 真 Source noEmit exit 0（20.6946 秒）、HTTP＋E actual-import noEmit exit 0（16.4117 秒），兩個 account／token 評分 wire suites 實際 131 PASS／0 FAIL／0 skip（9.4929 秒），均為本機 socket-free；未再重跑沒有新差異的原 501。其餘 7193 個 accepted peer entries 逐 blob 保留，原 12 個 own paths 除 E 精確 union 外其餘 11 個與 `a2cc` 相同。最後只追加此 UAT，編譯／測試輸入不變；raw logs／JSON／命令／退出碼／SHA 與完整五鍵矩陣由本輪 review packet 資格對照。
+
+最後候選自己的 hosted CI 尚待真終態，尤其 V0126 舊資料轉換／新 constraints、receipt PG 44（43 native＋1 adapter）、mounted HTTP 17 及 additional E 的真 case／timeline／409 readback。原 43 PG skip 仍是未執行，Python gate 8 PASS 或 Journey own CI 不能替代；不能將 Source 交審當完整五鍵已通過或本任務 DONE。全五條仍包括原 lifecycle／terminal Ops、PREPARED／durable ACK／多命令及 fresh recovery、實際 callers、settlement／PAX／Fleet／auth／noDB／SLA。正式 E04 issuer、PSP、真 SMS、實體裝置及其他外部條件仍屬原來的獨立驗收；未在 VM 啟動 HTTP／PG／browser／產品或 Compose，作者不自行 approve／merge／deploy。
