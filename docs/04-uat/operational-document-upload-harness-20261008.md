@@ -1,6 +1,6 @@
 # Operational Document Upload Harness 2026-10-08
 
-## Current continuation — 2026-10-19, Source-ready WIP pending product integration
+## Current continuation — 2026-10-19, accepted binding integrated; candidate CI pending
 
 The normal Supervisor continuation assigns the original task
 `SR-OPERATIONAL-DOCUMENT-UPLOAD-HARNESS-20261008` to available owner **Codex2**,
@@ -9,10 +9,21 @@ with independent reviewer **Codex**. Original Gemini2 authorship and accepted
 `03a1c98af9bddfacf3feb2b0b9b8bd00283717bf` evidence remain historical credit.
 The original seven scopes, three acceptance keys and all 16 operational cases
 are retained. The isolated source starts at accepted
-`4cf8eadadb4e74e736c1c5f88286645e0fa84aa0` and has no new committed candidate,
-review verdict, CI, merge or runtime acceptance. Root requested WIP until the
-separate `FLEET-PARTNER-ENTRY-CANONICAL-BINDING-20261019` product task is
-independently accepted and normally integrated before the final checkpoint.
+`4cf8eadadb4e74e736c1c5f88286645e0fa84aa0`; noncandidate WIP anchor
+`268875cda7335c07770d2863e253359776974764` was then normally merged with exact
+accepted binding release `e3b9544285257b13ead43c2b361c344aa42f2206` (parent
+`a9a43ce5bc9b18c5807be24e0a59a72dcc54d30b`, including accepted Guide194 and
+other peers), producing merge `45e833a37a92ee5237b3a8c2188f1414b0b1b7dc`.
+All peer blobs remain exact to that accepted release and the six harness code/data
+blobs remain exact to the anchor. After integration the affected 41 identity
+cases passed 41/41, exit0 (`accepted-B-final-identity-41-units.log`); the other 80
+cases and scoped compiler results retain their earlier source/version scope and
+were not rerun or represented as testing the changed API transitive modules.
+The pre-integration checks and pending-binding rows below remain historical
+checkpoint records: binding Source integration is now complete, while this
+candidate's own CI, Root exact-source review and runtime acceptance remain pending.
+Accepted binding Source does not establish a live issuer or override the actual
+deployment failure recorded below.
 
 Actual deployment **39229683109** completed 18 jobs successfully and failed its
 operational prerequisite: **12 operational cases passed, four Fleet/Admin setup
