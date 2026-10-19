@@ -321,3 +321,96 @@ unknown COMMIT只採原booking/receipt範圍，非全部audit／outbox／通知�
 本次仍需正常checkpoint／plainpush／完整literal candidate handoff、自身必需CI、Root獨立review及protected merge；Source驗證不錄runtime key，也不自行部署。
 
 最後純文案修正後，同一12DOM再實跑12PASS／0skip／0fail，scoped lint與i18n均exit0，記錄為`guide-current16-page-copy-final`、`guide-current16-eslint-copy-final`與`guide-current16-i18n-copy-final`。原28.21秒TSC不重跑；其後只有UC15一句回執數量說明字串變更，三個其他程式檔byte相同，未宣稱TSC讀過未來字串。
+
+## 2026-10-19 完整送審圖續作：接車時刻、行程路線與首頁費用入口
+
+此為原 `PAX-BUREAU-JOURNEY-COVERAGE-20261018` 的正常續作，原五組、兩個驗收及 UC01–16 完整條件均保留。基底為 accepted `ae8d42cba48500e3a93a3b790781641d06665645`；不改寫上列 2fd／4cf8 等各輪 Source、隔離 CI 或共享執行信用，也不將本輪單元測試充作新版本共享操作。
+
+完整圖的聯絡開關其實為「預設開」。Root 最初讀成「關」的錯誤前提已在正常後續修改中更正，沒有 reset、amend 或重寫 checkpoint `5218e22385d23331c0a9564c0e9d9d302b7a217c`。該 checkpoint 的 9 案 before／fixed、56 案及其後 109 案回歸原物保留為當時歷史，不能以其中預設關閉的正向當成本次正確規格信用。現行低分開關維持初始 true，使用可鍵盤操作、有名稱的原生 switch；帳戶及 token 提交皆只有明確關閉才傳 false，三至五星仍傳 false。使用者另已確認「兩星以下都建案，開關只決定聯絡」，由原客訴作者處理後端政策；本續作不自行聲稱已改建案政策，歷史「拒絕聯絡無案」紀錄也不代表新規格。
+
+接車頁同時顯示原「預計 N 分鐘抵達」、原更新時間及「約 HH:MM 抵達」。時刻由已接受的 `pickupEta.calculatedAt + minutes` 推算，固定 Asia/Taipei 的 24 小時表示法，跨午夜仍正確；不以瀏覽器現在時間或事件接收時間改寫估計基準。現行 tracking 為 missing／stale／low_accuracy、無有效估計或已到站／終態時，不復活舊接車 ETA。Web 也不以省略 tracking 當作復活指派舊估計的許可；omitted／null tracking 皆無 ETA。原 pickup ETA 正向 fixture 補入真 fresh tracking，原不可變 assignment 仍保留 missing，Web／Native 原斷言全保留。最後自查的 omitted/null before 真一失敗／一通過（其餘24案被名稱篩選而未執行，不當通過），證明舊 fallback 在 omitted 時確會復活30分鐘舊估計，已在正常後續提交移除。
+
+行程中的 `dropoffRoute` 是獨立、可為空的 live contract，不改不可變報價總距離。既有 `GeoService.route` 使用當前已指派司機／車輛／on-trip 任務的準確新鮮 GPS，路線終點為訂單的 canonical dropoff；回傳 provider、生成時間、GPS 觀測、指派版本、道路剩餘公尺及秒數。只有綁定一致且有效才顯示「約 HH:MM 抵達目的地」與「剩餘 X.X 公里」。沒有拿原報價總里程、已行駛里程或自行直線計算代替剩餘道路距離，也沒有新增供應商、憑證、端點或資料表。
+
+同一指派／任務／GPS／終點的既有三秒串流讀取共用請求，快取期限 30 秒、最多 128 筆；尚未完成的 provider 工作最多八筆，單次等候上限 2500 毫秒，provider 自身既有逾時保留。回應後重新讀實際訂單、指派、任務與定位；換派、換目的地、更新 GPS 或完程後的舊回應不能成為新估計。失敗、逾時、不準確、舊觀測及無定位都回空，不造備援數字。既有 SSE 的版本比較包含路線數值／生成／觀測，路線改變送出 eta_changed；真 mounted Passenger 頁面隨兩個觀測更新，拒絕同連線舊版本，斷線時不顯示舊 ETA；既有地圖的一秒本機觀測時鐘由地圖與 ETA 共用，沒有新 GPS 時也會在原 60 秒新鮮度界線移除估計，重連不復活過期資料。行程頁無可用估計時明示目前無法預估抵達時間與剩餘距離；沒有新 client poller、sleep 或 reload。
+
+首頁在載入、未登入、可預約、付款讀取失敗及首次費率確認狀態皆提供普通 `/fares` 費用與優惠入口。連結不寫費率 ACK、不送訂單、不繞過首次「我已閱讀並同意」或送出前費用確認。完整 E19a 正文與運送契約的逐字修正由 Root 的獨立精確文案層處理，本層保留原版本化確認與實際 booking/session 行為。
+
+### 原五組與完整案例的本輪界線
+
+| 原工作組                       | 完整案例   | 本輪新增 Source／本地查驗的範圍與仍待事項                                                                                                                                                 |
+| ------------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 首次登入、OTP、同意與回訪      | UC01–04    | 原真 301000ms／60 秒／15 分鐘等待及全部原案例不變；首頁費用入口與費率 ACK 門檻另以真元件驗證。本版本尚未取得新共享案例信用。                                                              |
+| 取消與各階段派遣               | UC05–07    | 原取消 disabled／409、原單／任務／指派／付款不變及正常完程斷言不減。新路線估計綁當前指派、任務、GPS與目的地；換派／完程遲到回應負向另驗。                                                 |
+| 產品適用與 60／90 秒           | UC06、UC16 | 不新增 instant 產品、不改任何業務期限；七產品、資格、福利與輪椅原對應及真供給缺項保留。                                                                                                   |
+| 揭露、圖資、定位、斷線與原請求 | UC07–10    | 新道路剩餘距離與時刻只採 provider live route；舊圖資故障、失去 ACK、跨瀏覽器／帳戶、67 秒斷線案例與全部原斷言保留。真 provider、實體 GNSS／裝置及道路導航仍待同版本實跑。                 |
+| 付款、文件、評價、申訴與福利   | UC11–16    | 只驗本次評價 switch／payload 與其他星等抑制；低分全部建案屬並行原作者政策修復。正式 E04／業者與付款來源、真 PSP、通知送達、真聯繫／失物交還及福利無障礙實車條件仍缺；不借舊結果代新版本。 |
+
+本輪證據存於 `.local/passenger-bureau-gap-correction-20261018/screenshot-submission-corrections-20261019/journey-codex2-source-20261019/`，每次保留實際 Source hash、command、exit 與 raw log。原第一次路線測試的產品 fixture 前提錯誤、TTL 測試準備時序錯誤、首次 true-imports 的三個自家 fixture 型別錯誤及未變舊 Ride 測試的 strict 錯誤均保留，沒有改 deadline 或壓低斷言湊綠。舊 Ride 檔已回到 accepted base 的相同 bytes，保留真 runtime 回歸；必要 true-imports 檢查只針對本輪實際變更檔及其真實匯入依賴，未放寬 strict flags。
+
+React checklist 已套用於兩個修改的 TSX 元件：hooks 無條件呼叫、狀態由既有控制項管理；原生 switch 有可讀名稱與 checked 狀態；費用入口為真 anchor；不新增 client 請求或額外計時器／重複 state 或樣式框架。新路線請求去重在既有 server producer，元件只顯示 authority 估計。
+
+本輪最終本地驗證依各次真執行分列，沒有偽造一輪全綠：
+
+- `final-clock-units.json` 原111案為110PASS／1FAIL／0skip；唯一失敗是新 pickup 測試把觀測放在假時鐘未前進的未來十秒，現行五秒未來觀測守衛正確拒絕。只把該單元的現在時間前進到觀測時間，沒有改期限或正式邏輯；`final-clock-fixed-units.json` 對應三個受影響 UI 檔實跑37PASS／0FAIL／0skip，涵蓋修後新 pickup 事件、default-on account/token true→明確 opt-out false、五星 false、午夜、路線變化、舊事件、斷線、60秒老化與終態。
+- 同一111案中的45個其他案例（pickup14、home6、live-authority13、live-presentation9、tracking-map3）當次均真PASS，之後其產品／測試 bytes未變；沒有為了改報告數字再重跑。producer 的29案另以故意不同的舊指派目的地及真正會被逐出的第一個 GPS key 加強 fixture，`final-route-fixture-controls.json` 實跑29PASS／0FAIL／0skip。這是跨真執行的111個相異案例範圍，不稱單輪111全綠。
+- `affected-native-api.json` 原生 API 的 OwnedMobility／MultiTaxi／Passenger authority 三檔159PASS／0FAIL／0skip，無 PG／HTTP／server。其後只有 UI 與測試 fixture 修改，沒有重跑或擴借信用。
+- `final-true-imports` noEmit／incrementalfalse exit0（26.79秒）；`final-passenger-noemit` 同參數完整 Passenger app exit0（15.96秒）。後續只加強 route unit 的 fixture 數值與同型別欄位，未改產品；不宣稱 compiler 讀過未來測試 bytes。scoped ESLint 及後續受影響 UI／tests ESLint 均exit0，正常 hooks仍必須執行。
+
+以上是 Source 與 socket-free 檢查，尚不是新 immutable 候選的自身 hosted CI 或 shared runtime。仍須正常 commit／plain push／新 PR、完整 handoff、自身必要 CI、Root獨立 review／protected merge，以及 Root 統一版本的實際操作。原正式來源、真車、真支付、福利無障礙與所有逐案缺項保留，不因本輪時刻／距離／入口／switch 改善而標為全16通過。
+
+最後逐字自查補上前述 omitted／null tracking 缺口後，`final-missing-tracking-units.json` 同九個受影響檔實際單輪113PASS／0FAIL／0skip（包含新增兩個 missing tracking 負向），不以之前跨次的111案組合冒充此結果。先前110／1、37／0與29／0原物仍保留。採 Root 正常更新的 R3 規格 `Journey-full-original-continuation-new-screenshot-ETA-rating-home.r3-defaultON.task-spec.json`（SHA256 `4c6d06ff707bce9d397d954c0436a210331286cfc317fdb3d9be849d57019d8f`），原36scopes、五群及兩keys未縮減。後續 compiler／hooks／候選與CI依各自精確Source hash另錄，不能把本地113案當共享旅程或全部16案例通過。
+
+## fb568 自身 CI 的 i18n 退修（原任務 R4）
+
+`fb568a3c9161f1781dfeb6cdc9006104f362820b` 的 integration run `39272198844`，job `118128472952` 原「Run pnpm run i18n:guard」失敗。作者交接前漏跑既有 guard；凍結 Source 上同原命令真 exit1，688檔／81原豁免，定位首頁 nav aria-label 及行程 ETA 暫無資料提示兩個 inline literal。原 workflow 尚進行時，GitHub job log collector 明確表示須等 workflow 完成，該失敗與原 annotations／local raw 均保留，沒有冒稱已下載該 CI 原 log。
+
+Root 正常 reopen 原任務並協調37scopes／原五群／兩keys及 R4（SHA256 `769fc53d06ff8eaabc3b494ee5a410470ab16f78728bf183fbf88cab2a518468`）。最小修正只把首頁 aria-label 改用既有 `BOOK_T.disclosure`，以及在 Ride translations 增加原句 `LiveRouteEstimateUnavailable` 供原 ETA 控制項取用；Receipt 作者同檔的分享 keys 保留獨立層。沒有更動 baseline、豁免、規則、狀態、路線、授權或任何期限，也沒有新增鏡像字串測試。
+
+修後同原 `pnpm run i18n:guard` 真 exit0（688檔／81原豁免），四個受影響既有 UI 檔45PASS／0FAIL／0skip；scoped lint另留實際 receipt。前述113單輪、API159及 coherent typecheck 只保留各自 hash／執行時點，純字串資源修正不重跑不相關大 API／compiler。舊fb568的60秒／decline兩專用run真SUCCESS保留窄信用，不能當新候選已通過；其他舊jobs依實際失敗、自然終態或正常新push觸發的自動supersede記錄，不手動取消、重跑或造未執行案例的結果。新 Source 仍須新不可變候選／gen、自身 CI、Root 獨立審查及後續同版本共享操作。
+
+## Passenger 下一階段：原 Journey 全範圍續作與 UC03 晚到設定
+
+第一階段的內嵌 Web Demo 流程交付完成後，Root 依原全目標正常續辦本任務；並非建立替代任務。原五組、完整 UC01–16、兩個 acceptance keys 與全部歷史／外部缺項保留。原候選 `44a6f77159d044767d1977f4e7d5273fd19de2ad`／gen `84265e6943b148869faa465d36f01c8a`／PR2842 及其失敗 CI 不改寫。正常新增 `review-context.tsx` 與兩個既有評價操作 caller 的精確 scopes，合計40；採用完整 r2 sidecar（SHA256 `a8e718d7a7f0e82efa13de50d15149f574e1d1d1366c598e6525770db519ec52`），仍承接原 MD 與 R4 全規格。
+
+新 native branch 從舊44a開始，以普通 merge 保留 accepted `b113049df738e353c7f002bdc05df5fed8399a0d` 的 Incident 等完整 Source，再普通 merge 已核 `f8455c3b1ef0be7849e97f30654fdb0219964533` 四個郵件投遞 peer 檔案；四個 Git blobs 均逐一讀回相等。沒有 reset、rebase、amend、force 或寫入其他作者的 worktree。原 ETA／真 GeoService 道路剩餘距離／rating defaultON／首頁費用13檔實作全部保留，不能把本輪只補 UC03 當成縮減原任務。
+
+### 真 UC03 before／fixed 與解析邊界
+
+Auth9be 的原 hosted bureau 為7PASS／1FAIL；失敗是 reload 後 fixed mode 與時間仍在、原上車 select 卻為空。原 ZIP 沒有 trace／HAR，不能由此斷言 Auth read-heavy 更動造成 UI 競速。本輪在普通 merge `89aeb630a50c507e7f3b44938b50d7f5d9277c36` 的未修產品，以真正 `ReviewDemoProvider`、`BookingScreen`／`BookingForm`、共用 `AddressMapPicker` 及 account-bound recovery，受控讓既有 config HTTP 邊界晚於帳戶草稿：同一測試真1FAIL（預期 `review-banqiao`、實際空字串），修後同一測試真1PASS。原測試 bytes 已另存 `.local`，SHA256 `4b5eee8f94c3bba375810dbaed10ec8a3a995dc52968d98163e407cba10c4eca`。這證明可達機制及修復，不冒稱原 hosted run 有未記錄的事件時序。
+
+修正讓 config 仍在解析時暫不掛載會更改地址的表單；帳戶、費率與設定讀取仍照原流程並行。成功解析後才以確定的模式恢復原地址與時間，不重新選址、不補造 `coordinateSource`，也不從存檔的 fixed 標記授權 review。HTTP／網路失敗沿原停用演練的普通選址語義；未完成回應有30秒技術等待上限，abort、卸載及晚到 ACK 不可重新啟用舊模式。既有 `/demo` 入口與本機示範不等待此後端設定。沒有變更 OTP／報價／派遣／業務期限、訂單、身分或支付契約。
+
+新增8個真 DOM 案例，最後 bytes 單輪8PASS／0FAIL／0skip，包括：保留兩個固定點與時間；原座標走真 client／BFF quote且費用確認仍未勾；明確停用、HTTP503、網路失敗後一般選址可恢復；29,999至30,000毫秒技術逾時與晚到 ACK；卸載／重掛；`/demo` 路由不等待 config。30秒僅是新增 config transport 的有界單元時鐘，沒有縮短任何原業務等待或 hosted deadline。
+
+### 原 caller 與相依政策
+
+原 core caller 保留低分要求聯絡 ON；additional caller 保留明確關閉聯絡 OFF。實際控制項是原生 `<input type="checkbox" role="switch">`，checked 是原生 property，沒有 `aria-checked` attribute；初版65659誤用 button／ARIA 假設，已由 Root 獨立退修。R3 以具名 switch locator 正常 `.check()`／`.uncheck()`，並用 `toBeChecked()`／`not.toBeChecked()` 確認原意，不改產品加多餘 ARIA、不改請求 body、業務讀回或 deadline。defaultON 的帳戶／token 提交與明確 opt-out 仍由原真 DOM 回歸覆蓋。
+
+使用者已確認兩星以下皆建案、開關僅決定是否聯絡；原客訴作者正在其正常任務處理 backend 及 additional E 段「無案」舊期待的精確 business hunk。本 checkpoint 只修改 switch 操作，原 `complaint_case_no=null`／Ops cases0 歷史及目前尚未合併的期待保留；不接受兩種狀態、不刪斷言、不 skip。本輪依 Root 的序列保留與目前 backend 相符的原 E 段 business 斷言，Journey 先完成自身 CI／獨立審查；後續由原客訴作者正常合併 accepted Journey，再在其精確 business hunk及自身完整 CI 驗證低分同案讀回，不等待或提前搬入其未接受 Source。本次 socket-free 結果不代表該新政策旅程已通過。
+
+### 本輪實際檢查與完整範圍
+
+| 原工作組                            | 本輪保留／新增的實證與界線                                                                                                                                              |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 首次 OTP、同意與回訪（UC01–04）     | 原真301000ms、60秒與15分鐘流程全保留；新增 UC03 晚到設定／同帳戶草稿／同座標重報價與費用再確認。沒有借舊版本當新首次身分、真簡訊或正式條款信用。                        |
+| 各階段取消與派遣（UC05–07）         | 原 disabled／同 session409／原單、任務、指派、付款不變及正常完程未改；路線、stale、終態和 tracker 原測試繼續跑過。                                                      |
+| 60／90秒與產品適用（UC06、UC16）    | 原期限、七產品／資格／福利／輪椅 mapping 與真供給缺項保留，不創造 instant 產品或把 seed 當可出車。                                                                      |
+| 圖資、定位、離線與原請求（UC07–10） | 真 picker 恢復、一般圖資選址、原 client／BFF 與 remount/replay 回歸；原67秒斷線、lostACK／原 key／UUID、跨帳戶與跨裝置 hosted 斷言保留。新版本尚未有 hosted／共享結果。 |
+| 付款、文件、評價與申訴（UC11–16）   | 原評價 defaultON、明確 OFF／高星 false、首頁 ACK、道路 ETA 等回歸保留；上述低分同案 peer 尚待整合。formal E04、真人聯繫、真 PSP／退款、真人真車與福利無障礙原缺項仍在。 |
+
+本輪17個受影響 suite 單輪244PASS／0FAIL／0skip，涵蓋完整原13檔相關 ETA／home／rating／producer／tracking，以及原 booking UI、client／BFF、時間、remount及草稿恢復；與新增8案是兩次真執行，不改報單輪252。原 i18n guard 真exit0（688檔／81原豁免），scoped ESLint與格式檢查exit0。第一次 true-imports exit2 僅是新單元兩處誤用 Playwright `exact` 選項，已移除該無效 option、保留相同字串精確匹配與原斷言；原失敗 JSON／log不刪。修後 noEmit／incrementalfalse真0，後續合併郵件 peer 因實際 `AuditNotificationModule` 依賴再作一次必要 true-imports真0；完整 Passenger app同參數真0。
+
+原失敗安裝 ENOSPC、Root lossless worktree 搬移／健康 local dependencies check0、普通 merge 首次 subject hook拒絕、checkpoint首次 subject格式錯誤及正常更正後 hooks0，都保留各自原始 receipt。沒有借 Root package links、繞 locality guard、清 Source／證據／DB或重試到綠。React checklist 已核：hooks無條件、technical request/timer有cleanup、設定與帳戶仍並行、沒有新輪詢／深拷貝或從不可信存檔導出 review；使用原可讀 loading copy與具名 switch，不新增 UI 框架。
+
+原物位於 `.local/passenger-bureau-gap-correction-20261018/passenger-phase2-resumption-20261019/`；每次 command／head／input hashes／exit／raw log依其執行時點分列，244在郵件 peer merge前、新最終 compiler在merge後，不混寫為同一 SHA 的全套執行。Source仍須新不可變候選、自己完整必要 CI、Root獨立全範圍 review／protected merge與統一同版共享操作；作者不 approve、merge、deploy或自錄兩keys，亦不稱全部16案例完整PASS。
+
+### 65659 自身 CI 與獨立 Source 退修後的 R3 精確消費端修正
+
+原候選 `65659c6e7eb4bf48aeaad02fe0bcb2ce604b553b`／gen `7a15316738f44610a3c6d3a7d29e99aa`／PR2848 的自身 main `39311977776` 真終態為14success／4skip／2failure；四個 skip 是三個 scope 條件及因 unit 失敗未執行的 Product smoke，不稱四個 scope skip。根因 job `118264050457` 的原 root shard2 artifact `12215943026` 是2776PASS／1FAIL／5pending；唯一失敗為既有 review-context local demo 退出案例的精確 fetch options 尚未包含新真 AbortSignal。原 local demo 不讀 API、退出後 true-mode 等行為已到達，並非 UC03 地址斷言再次失敗。原 ZIP CRC 正常，SHA256 `3ce1e7812a1ad6b1f975bb5235410f1dac8fb2b737f5910288cf6e2d7aa4cc77`；CLI原 log SHA256 `5c72a204bebcadabbf5178faf3d2d00f3b8b12c3e96089debd94063b9cec0ac3`。job 真 checkout `27194fbc484047e8520bbde5934f9e6477c73453` 是 accepted Shell17c與65659的正常 synthetic union：全部18 own blobs等於65659、其餘 entries等於17c，whole tree 不冒稱等於候選。
+
+另一項是 Root 獨立 Source review 發現的 `J-SWITCH-NATIVE-STATE`：前輪未核實實際 native input 而以不存在的 `aria-checked` 判斷，core 甚至會把 defaultON 點成 OFF。此確定 caller 缺陷與上述 root2 實敗分開記錄；不能把 Source finding 捏造成尚未讀到的 browser failure。原65659／全部五run、原sourcepacket9179db58與退修歷史保留；只停止本機 monitor，未手動取消或重跑 GitHub。停止時原 quote／integration 仍進行中，沒有虛構其全套結果。該輪60秒及decline兩專用 run各有原report1PASS／0skip／0retry與各自65659 checkout；僅保留其舊候選窄信用。
+
+Root 正常 reviewer reopen 原任務並協調唯一既有 `tests/unit/pax-review-shared-order-demo-20261015/review-context.test.tsx`，full41scopes／原兩keys／五群全保留。R3完整規格 SHA256 `26998977d2102eb7863d55fb498a3560f7f65fbaffce81e73bc76d99f1ca942a`。只更新兩個 native switch caller、該舊測試及本 UAT：原 exact options保留 `cache:no-store` 並增加 `signal:expect.any(AbortSignal)`，原三案例與 offline／無網路呼叫／退出／true-mode 斷言全部保留；在原退出案例還確認同一真 signal 未abort、unmount後確實abort及唯一呼叫。沒有移除產品 abort／逾時／晚到回應保護，亦沒有改 matcher 接受任意 options、跳過案例或放寬期限。
+
+修後原context3＋UC03原8單輪11PASS／0FAIL／0skip（原 default test deadline、maxWorkers1）；三個消費端與新UC03的精確 true-imports noEmit／incrementalfalse exit0，scoped lint及正常格式檢查exit0。產品 bytes完全未變，故保留244回歸與完整 Passenger／producer compiler各自原時點和 hash，不重跑或冒稱新執行。本輪仍須新不可變候選及自己完整必要CI；先前 main失敗、Source退修與仍未執行的共享／正式來源／真車／支付／福利等界線均未被局部11案取代。

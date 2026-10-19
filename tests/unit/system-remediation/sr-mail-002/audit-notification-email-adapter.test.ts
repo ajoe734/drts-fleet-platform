@@ -13,7 +13,9 @@ import { FileMailOutbox } from "../../../../apps/api/src/modules/notification-de
 import { NotificationDeliveryService } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
 import {
   DeliveryTransportError,
+  type MailOutbox,
   type MailTransport,
+  type OutboxState,
   type ProviderAcknowledgement,
   type TransportMessage,
 } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.types";
@@ -214,6 +216,95 @@ describe("SR-MAIL-002 approval-notification email delivery", () => {
     expect(record.sentAt).toBeNull();
     expect(record.errorCode).toMatch(/^[a-z][a-z0-9_]{0,99}$/i);
     expect(transport.send).not.toHaveBeenCalled();
+  });
+
+  it("preserves the real deliveryId when claim-storage rejects after a successful enqueue, before any provider call", async () => {
+    // Transaction #1 is enqueue (commits for real); transaction #2 is
+    // dispatch's claim phase, rejected here before the transport is ever
+    // invoked. The outbox already holds a durable, queryable record from
+    // enqueue -- the adapter must report that real identity, not a
+    // synthetic, never-queryable id, and must not claim the provider
+    // rejected anything it was never asked to send.
+    let transactionCount = 0;
+    const realOutbox = new FileMailOutbox(directory);
+    const flakyOutbox: MailOutbox = {
+      async transaction<T>(operation: (state: OutboxState) => T): Promise<T> {
+        transactionCount += 1;
+        if (transactionCount === 2) {
+          throw new Error("notification_outbox_claim_rejected");
+        }
+        return realOutbox.transaction(operation);
+      },
+    };
+    const transport = acceptingTransport();
+    const service = new NotificationDeliveryService(flakyOutbox, transport);
+    const adapter = new AuditNotificationEmailAdapter(service);
+    const input = message();
+
+    const record = await adapter.send(input);
+
+    expect(transactionCount).toBe(2);
+    expect(transport.send).not.toHaveBeenCalled();
+    expect(record.status).toBe("queued");
+    expect(record.errorCode).toBe("notification_outbox_claim_rejected");
+    expect(record.sentAt).toBeNull();
+    expect(record.providerMessageId).toBeNull();
+    expect(record.deliveryId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(record.deliveryId).not.toMatch(/^error-/);
+    expect(record.messageId).toMatch(/@notification\.drts\.invalid>$/);
+
+    const stored = await service.get(input.tenantId, record.deliveryId);
+    expect(stored).not.toBeNull();
+    expect(stored!.status).toBe("queued");
+    expect(stored!.attempts).toHaveLength(0);
+  });
+
+  it("preserves the real deliveryId and never fabricates sent/failed when ack-persistence rejects after a real provider accept", async () => {
+    // Transaction #1 (enqueue) and #2 (dispatch's claim) commit for real;
+    // transaction #3 -- dispatch's post-send ack-persistence commit -- is
+    // rejected after the provider already accepted the message. The
+    // adapter must keep the real deliveryId and the honest "queued"
+    // (unresolved) status rather than collapsing an ACK-unknown exception
+    // into a fabricated "sent" or "failed".
+    let transactionCount = 0;
+    const realOutbox = new FileMailOutbox(directory);
+    const flakyOutbox: MailOutbox = {
+      async transaction<T>(operation: (state: OutboxState) => T): Promise<T> {
+        transactionCount += 1;
+        if (transactionCount === 3) {
+          throw new Error("notification_outbox_ack_persist_rejected");
+        }
+        return realOutbox.transaction(operation);
+      },
+    };
+    const transport = acceptingTransport();
+    const service = new NotificationDeliveryService(flakyOutbox, transport);
+    const adapter = new AuditNotificationEmailAdapter(service);
+    const input = message();
+
+    const record = await adapter.send(input);
+
+    expect(transactionCount).toBe(3);
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    expect(record.status).toBe("queued");
+    expect(record.errorCode).toBe("notification_outbox_ack_persist_rejected");
+    expect(record.sentAt).toBeNull();
+    expect(record.providerMessageId).toBeNull();
+    expect(record.deliveryId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(record.deliveryId).not.toMatch(/^error-/);
+
+    const stored = await service.get(input.tenantId, record.deliveryId);
+    expect(stored).not.toBeNull();
+    expect(stored!.status).toBe("queued");
+    expect(stored!.attempts).toHaveLength(1);
+    expect(stored!.attempts[0]!.outcome).toBe("started");
+
+    // Same-key retry while the lease is still outstanding must resolve to
+    // the same identity and must never re-dispatch to the provider.
+    const retry = await adapter.send(input);
+    expect(retry.deliveryId).toBe(record.deliveryId);
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    expect(retry.status).toBe("queued");
   });
 
   it("keeps arbitrary exception content out of the returned delivery record on failure", async () => {

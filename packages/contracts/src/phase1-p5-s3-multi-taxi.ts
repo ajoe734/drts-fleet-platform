@@ -543,6 +543,23 @@ export interface PassengerRideAccessGrant extends PassengerRideAccessToken {
   accessToken: string;
 }
 
+/** An on-trip road route from a specific assigned Driver GPS observation.
+ * Never use the immutable booking quote as a substitute for this live leg. */
+export interface PassengerRideDropoffRouteEstimate {
+  leg: "dropoff";
+  source: "geo_route";
+  provider: string;
+  assignmentId: string;
+  assignmentVersion: number;
+  taskId: string;
+  origin: { lat: number; lng: number };
+  destination: { lat: number; lng: number };
+  locationRecordedAt: string;
+  generatedAt: string;
+  remainingDistanceMeters: number;
+  remainingDurationSeconds: number;
+}
+
 /** Live values are separate from the immutable assignment disclosure. */
 export interface PassengerRideTracking {
   assignmentId: string;
@@ -554,6 +571,8 @@ export interface PassengerRideTracking {
     "lat" | "lng" | "accuracyM" | "recordedAt"
   > | null;
   pickupEta: { minutes: number; calculatedAt: string } | null;
+  /** Omitted by older producers; null means no reliable current road route. */
+  dropoffRoute?: PassengerRideDropoffRouteEstimate | null;
 }
 
 export interface PassengerRideAuthorityView {

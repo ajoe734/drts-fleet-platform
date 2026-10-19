@@ -4,6 +4,7 @@ import {
 } from "../multi-taxi/masked-call.port";
 import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
+import { GeoModule } from "../geo/geo.module";
 import { DatabaseModule } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
 import { OpsDispatchEventsModule } from "../../common/ops-dispatch-events.module";
@@ -31,6 +32,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
 
 @Module({
   imports: [
+    GeoModule,
     DatabaseModule,
     IdempotencyModule,
     OpsDispatchEventsModule,
