@@ -455,9 +455,9 @@ export async function onTripCancellationRejectionJourney(
         const livePosition = pax.getByTestId("passenger-live-driver-position");
         await expect(livePosition).toHaveCount(0);
         await expect(driver).toHaveURL(/\/trip(?:[?#]|$)/);
-        const driverOrder = driver
-          .getByText(bookedOrderId, { exact: true })
-          .first();
+        const driverOrder = driver.getByText(`${taskId} · ${bookedOrderId}`, {
+          exact: true,
+        });
         const driverTask = driver.getByText(taskId, { exact: true }).first();
         await expect(driverOrder).toBeVisible();
         await expect(driverTask).toBeVisible();
@@ -485,7 +485,7 @@ export async function onTripCancellationRejectionJourney(
             passengerStatus: await passengerStatus.innerText(),
             liveDriverPositionCount: await livePosition.count(),
             driverUrl: driver.url(),
-            driverOrderId: await driverOrder.innerText(),
+            driverTaskOrderReference: await driverOrder.innerText(),
             driverTaskId: await driverTask.innerText(),
             driverTrackingStatus: await trackingStatus.innerText(),
             driverTrackingDetail: await trackingDetail.innerText(),

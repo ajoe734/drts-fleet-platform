@@ -189,6 +189,18 @@ Bureau 原 artifact `12169687003` ZIP SHA256=`90b75b6551c0f15db292e5c4b059a2b190
 
 兩項小修與真imports TypeScript／scoped ESLint均exit0；未變動47unit不重跑或改標新版本信用。五組、UC01–16、兩keys與正式E04／USER／真車供給／same-runtime shared條件全部保留。新immutable候選仍須自身完整CI與Root獨立review，不借faf的八案正向、PG窄成功或舊版檢查當新清理與終態畫面通過。
 
+## 第七輪 7bd8 的清理正向與 Driver reference consumer 退修
+
+候選 `7bd8df4fdb9852881a2877e6058c7ce8b5288101` 五 runs 全部自然終態，無手動取消。main `39216988970` 真success（17 success／3原scope skip）；quote `39216988764`、60秒 `39216989033`、decline `39216989469` 真success，各原log為1 pass／15.3分鐘、1.7分鐘、28.5秒，實際checkout均完整7bd。Integration `39216989113` failure（19 success／4原scope skip／3 failure，bureau及兩aggregates）；core／additional各成功。原log的synthetic checkout `8e49a0486b069737fcb934aef598dee708fb7fa5` 與7bd tree相同，各job的原git marker分別核對。完整封存 `source-checks/hosted-7bd8df-watch/final-enriched-evidence.json` SHA256=`e96bfc98623b89af668b7fee6c68296f32b078934a408bef3ce604a68d612df3`。
+
+新版C114在main與integration各自完整suite／job真success，六項native業務assert各6 pass／0 skip，原logs各2579 pass／19 skip、218 files pass／3 skip，無hook／unhandled／failed-suite錯誤；Root分別獨立核原ZIP／JSON／raw git marker。這次可採各lane的vi.waitFor真PG清理成功，前兩輪57P01及expect.poll錯誤仍保留。兩lane的booking native四案、receipt四案與on_trip control兩案亦各真pass／0 skip；這些不等於整體integration或shared成功。
+
+Bureau原artifact `12170654559` ZIP SHA256=`31dc0ba7d15e12762a579ff6fe8b8dfc781ca0f1fa0e75cd9fbe85debf97c7e3`，真 **7 pass／1 fail／0 skip／0 timeout／0 retry**，19份JSON facts／27張原PNG。ordinary90為111943ms、reliability63362ms、五OTP為752／57670／61453／301428／60455ms，原等待與政策不變。on_trip／同session API409／同單SQL不變量、65秒全角色斷線恢復與Driver正常完程均已走過；新終態step在Passenger原UUID頁精確完成可見／live marker消失之後，於Driver裸orderUUID的exact文字selector失敗（原30000ms）。後面的Driver task／追蹤／定位guard、terminal facts／三角色完程圖與aftercare雙申訴未執行；不能借faf雙類別成功當7bd成功，也不把整個新UIstep列通過。
+
+真正Driver頁首原本是單一 `${taskId} · ${orderId}` subtitle，另有exact taskId Pill；原readAssignedTripAndAccept使用 `/trip$` 無query及orderUUID substring。成功complete只重讀原任務，不會增加URL query或render裸orderUUID。Root正常reopen後，只把該錯誤consumer改為精確完整task／order pair，actual innerText欄名改為 `driverTaskOrderReference`；原orderId／taskId獨立facts欄、exact taskPill、authority綁定、Passenger及Driver所有正負guard／期限完整保留。不改產品、不加不存在的query、不reload或sleep。必要單檔lint與真imports TypeScript須各保留實際結果，新候選仍須自己的完整CI；未變動47unit／大型compiler不重跑。
+
+本輪Source仍完整39 paths／27 scopes、五組／UC01–16／兩keys及所有外部E04／USER／真車供給／same-runtime shared界線不變。7bd清理正向、七案正向及唯一consumer失敗各自保留；新reference selector與完整終態／雙申訴仍待新immutable hosted結果。
+
 ## 原兩個 acceptance keys
 
 - `pax-bureau-coverage_each-finding-real-evidence-and-applicability`
