@@ -438,3 +438,21 @@ the document. Local checks above ran before this accepted-peer integration;
 the final immutable union requires its own full hosted CI and independent review.
 This merge is Source integration, not a claim that this version is deployed or
 that the failed G operational run passed.
+
+The first hosted candidate `a2c7ff68a842e10455210c378c835acaf716460e`
+failed API unit shard 2 in run `39261517987`: **815 pass / 2 fail**. Its actual
+checkout was `b74d363f2d79259c75976e92eee9578d04fe03d4`, whose whole tree
+equals that candidate. Both failures were the existing cross-app bootstrap/JWT
+fixtures: they inherited the API CI step's explicit dev waiver without supplying
+the new canonical-principal server configuration, so the Admin BFF correctly
+rejected before upstream fetch. Only those two legacy fixture environments now
+explicitly set `DRTS_DEV_MFA_WAIVED=false`; their original Guard, controller and
+assertions remain intact. The product still rejects missing canonical references
+or signing keys, and the workflow's global test waiver is unchanged. Under the
+same inherited waiver, the original two cases reproduced **0 pass / 2 fail**,
+then the repaired cases passed **2 / 2**. The complete original consumer file
+plus the unchanged new dev suite passed **61 / 61, no skips** (13 legacy/cross-app
+cases and 48 canonical-session cases); the cross-app import guard also passed.
+These bounded checks do not replace the repaired immutable candidate's own full
+hosted CI or independent review. The failed candidate and all original CI results
+remain evidence; no failed run was cancelled or rerun to obtain a green result.

@@ -153,6 +153,7 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
   process.env = {
     ...originalEnv,
     NODE_ENV: "development",
+    DRTS_DEV_MFA_WAIVED: "false",
     DRTS_API_URL: "http://localhost:3001",
   };
 
@@ -237,6 +238,7 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
   process.env = {
     ...originalEnv,
     NODE_ENV: "development",
+    DRTS_DEV_MFA_WAIVED: "false",
     DRTS_API_URL: "http://localhost:3001",
     JWT_SECRET: "test-secret-123",
   };
