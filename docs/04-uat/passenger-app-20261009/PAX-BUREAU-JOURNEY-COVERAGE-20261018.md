@@ -149,6 +149,8 @@ Root 正常 reopen，並精確加配原 Web mapper path（26 scopes）：receipt
 
 草稿 consumer 仍沿原 `prepareBooking` 的 fixed UI；重載後驗兩個真 select 的原 `review-banqiao`／`review-city-hall` address IDs，並以第一筆真 quote POST 的兩端座標對照重載後真201 quote及合法午夜ISO。原 sessionStorage 保存／時間還原、未報價前無費用勾選、重新報價後未勾／確認 disabled等斷言全保留，不延原300秒 budget、不換訂單／授權假資料。全部五組、UC01–16、兩 keys及所有外部／shared條件仍保留；此修補須產生新 immutable candidate及自己的完整 CI。
 
+本輪普通合併 accepted dev `e4d962152e6b51ef72c2b5469d5e6dbdb38f347c`（含 accepted Complaint／public-info），無衝突；原 Journey程式／測試與合併前 repair逐byte相同，peer差異沒有被改寫。先前六個機械格式檔已屬 accepted ancestry，因此本輪完整差異是38 paths／原26 scopes。必要現值回歸在合併後實跑7 suites／47 tests全 pass、0 skip（含新增receipt四案及原ride／live presentation／role cases，原deadline、maxWorkers1）；Passenger app `tsc --noEmit`、三檔 scoped ESLint與正常hooks均exit0。新immutable候選仍須自己的完整hosted CI，沒有借4b16主CI或原PG／OTP／on_trip窄成功當新版通過。Root獨立literal review與兩keys仍循原流程。
+
 ## 原兩個 acceptance keys
 
 - `pax-bureau-coverage_each-finding-real-evidence-and-applicability`
