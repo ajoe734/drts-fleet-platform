@@ -6226,6 +6226,10 @@ export class OwnedMobilityService
               deliveredAt: null,
             };
           }
+          await this.regulatoryRegistryService.assertCurrentMatchingSuppressionClear(
+            driverId,
+            tx,
+          );
           await this.assertAssignmentEligibilityRecheck(
             bundle.order,
             dispatchJob.dispatchJobId,
@@ -6342,11 +6346,17 @@ export class OwnedMobilityService
     const eligibilityRecheckResult = this.afterMaybePromise(
       this.prepareDispatchEligibility(order, [vehicleId]),
       () =>
-        this.assertAssignmentEligibilityRecheck(
-          order,
-          dispatchJob.dispatchJobId,
-          vehicleId,
-          driverId,
+        this.afterMaybePromise(
+          this.regulatoryRegistryService.assertCurrentMatchingSuppressionClear(
+            driverId,
+          ),
+          () =>
+            this.assertAssignmentEligibilityRecheck(
+              order,
+              dispatchJob.dispatchJobId,
+              vehicleId,
+              driverId,
+            ),
         ),
     );
     return this.afterMaybePromise(eligibilityRecheckResult, () => {
@@ -11366,6 +11376,8 @@ export class OwnedMobilityService
     order: OwnedOrderRecord,
     vehicleIds?: string[],
   ): MaybePromise<void> {
+    const matchingSuppressions =
+      this.regulatoryRegistryService.prepareMatchingSuppressions();
     const capabilities =
       this.vehicleEligibilityService?.prepareVehicleCapabilities?.(
         vehicleIds ?? order.serviceBucket,
@@ -11377,8 +11389,10 @@ export class OwnedMobilityService
             order.serviceProductCode,
           )
         : undefined;
-    if (capabilities || product)
-      return Promise.all([capabilities, product]).then(() => undefined);
+    if (capabilities || product || matchingSuppressions)
+      return Promise.all([capabilities, product, matchingSuppressions]).then(
+        () => undefined,
+      );
   }
 
   private assertAssignmentEligibilityRecheck(

@@ -627,11 +627,11 @@ export class RocOperationsService {
     );
   }
 
-  openIncident(
+  async openIncident(
     alertId: string,
     command: OpenRocIncidentCommand,
     identity: BootstrapRequestIdentity | null,
-  ): ActionReceipt {
+  ): Promise<ActionReceipt> {
     const { derivedAlert, state } = this.requireAlertContext(alertId);
     this.assertAlertActionAllowed(
       identity,
@@ -656,7 +656,7 @@ export class RocOperationsService {
       );
     }
 
-    const incident = this.incidentService.createIncident(
+    const incident = await this.incidentService.createIncidentForCommit(
       this.buildIncidentCommand(derivedAlert, command, identity),
       undefined,
       identity,

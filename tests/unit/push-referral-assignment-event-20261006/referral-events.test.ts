@@ -161,6 +161,9 @@ function harness(routed = true) {
   const publishTaskAssigned = vi.fn();
   const service = new OwnedMobilityService(
     {
+      prepareMatchingSuppressions: () => undefined,
+      assertCurrentMatchingSuppressionClear: () => undefined,
+
       getVehicleDispatchability: () => true,
       getDriverAvailability: () => true,
     } as never,

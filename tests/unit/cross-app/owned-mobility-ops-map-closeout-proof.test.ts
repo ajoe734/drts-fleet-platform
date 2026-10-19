@@ -327,6 +327,8 @@ function createOwnedMobilityService() {
     },
   ];
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+
     getEligibleCandidates: vi.fn(() => regulatoryCandidates),
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),

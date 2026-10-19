@@ -169,6 +169,9 @@ function createRegistryStub() {
   ];
 
   return {
+    prepareMatchingSuppressions: () => undefined,
+    hasActiveMatchingSuppression: () => false,
+
     getEligibleCandidates: vi.fn(() => [
       {
         driverId: "drv-demo-001",
@@ -205,8 +208,8 @@ function createRegistryStub() {
     getDriverAvailability: vi.fn(() => true),
     getVehicleLicenseType: vi.fn(
       (vehicleId: string) =>
-        vehicles.find((vehicle) => vehicle.vehicleId === vehicleId)?.licenseType ??
-        null,
+        vehicles.find((vehicle) => vehicle.vehicleId === vehicleId)
+          ?.licenseType ?? null,
     ),
     listDrivers: vi.fn(() => drivers),
     listVehicles: vi.fn(() => vehicles),

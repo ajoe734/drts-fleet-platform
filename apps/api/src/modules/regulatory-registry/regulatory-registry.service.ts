@@ -893,9 +893,75 @@ export class RegulatoryRegistryService
     this.requireDriver(driverId);
   }
 
+  private matchingSuppressions = new Map<
+    string,
+    import("@drts/contracts").DriverMatchingSuppression[]
+  >();
+
+  prepareMatchingSuppressions(driverId?: string) {
+    if (!this.regulatoryRegistryRepository?.isEnabled()) return;
+    return this.regulatoryRegistryRepository
+      .loadDriverMatchingSuppressions(driverId)
+      .then((rows) => this.applyMatchingSuppressions(rows, driverId));
+  }
+
+  private applyMatchingSuppressions(
+    rows: {
+      driver_id: string;
+      record: import("@drts/contracts").DriverMatchingSuppression;
+    }[],
+    driverId?: string,
+  ) {
+    if (driverId) this.matchingSuppressions.delete(driverId);
+    else this.matchingSuppressions.clear();
+    for (const row of rows) {
+      const list = this.matchingSuppressions.get(row.driver_id) ?? [];
+      list.push({ ...row.record });
+      this.matchingSuppressions.set(row.driver_id, list);
+    }
+  }
+
+  hasActiveMatchingSuppression(driverId: string, at = Date.now()) {
+    return (this.matchingSuppressions.get(driverId) ?? []).some(
+      (hold) =>
+        hold.active &&
+        hold.liftedAt === null &&
+        Date.parse(hold.expiresAt) > at,
+    );
+  }
+
+  assertCurrentMatchingSuppressionClear(
+    driverId: string,
+    executor?: Pick<import("../../common/db").DatabaseService, "query">,
+  ) {
+    const assertClear = () => {
+      if (this.hasActiveMatchingSuppression(driverId))
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+          "Driver has an active incident matching suppression.",
+          { driverId, reasonCodes: ["INCIDENT_MATCHING_SUPPRESSION"] },
+        );
+    };
+    if (!this.regulatoryRegistryRepository?.isEnabled()) return assertClear();
+    const read = executor
+      ? this.regulatoryRegistryRepository.lockDriverMatchingAuthority(
+          driverId,
+          executor,
+        )
+      : this.regulatoryRegistryRepository.loadDriverMatchingSuppressions(
+          driverId,
+        );
+    return read.then((rows) => {
+      this.applyMatchingSuppressions(rows, driverId);
+      assertClear();
+    });
+  }
+
   async prepareDispatchSupply(serviceBucket: Phase1ServiceBucket) {
     const repository = this.regulatoryRegistryRepository;
     if (!repository?.isEnabled()) return;
+    await this.prepareMatchingSuppressions();
     await Promise.all(
       this.drivers
         .filter((d) => d.supportedServiceBuckets.includes(serviceBucket))
@@ -3397,6 +3463,8 @@ export class RegulatoryRegistryService
     };
     const eligibilityBlockedReasons =
       this.computeDriverEligibilityBlockedReasons(candidate);
+    if (this.hasActiveMatchingSuppression(driver.driverId, referenceDateMs))
+      eligibilityBlockedReasons.push("incident_matching_suppression");
 
     return {
       ...candidate,

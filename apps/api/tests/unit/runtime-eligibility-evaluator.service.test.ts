@@ -14,7 +14,8 @@ function createResolvedContext(
     serviceProductId: "svc-001",
     serviceProductCode: "enterprise_dispatch",
     sourcePlatform: null,
-    policyVersion: "service:svc-001@2026-06-20T00:00:00.000Z|capability:cap-001@2026-06-20T00:00:00.000Z",
+    policyVersion:
+      "service:svc-001@2026-06-20T00:00:00.000Z|capability:cap-001@2026-06-20T00:00:00.000Z",
     evaluatedAt: "2026-06-20T12:00:00.000Z",
     driver: {
       driverId: "drv-001",
@@ -155,10 +156,9 @@ function createResolvedContext(
   };
 }
 
-function createEvaluator(
-  resolvedContext: ResolvedRuntimeEligibilityContext,
-) {
+function createEvaluator(resolvedContext: ResolvedRuntimeEligibilityContext) {
   const eligibilityContextResolver = {
+    prepareMatchingSuppression: vi.fn(async () => false),
     resolve: vi.fn(() => resolvedContext),
   };
   const auditNotificationService = {

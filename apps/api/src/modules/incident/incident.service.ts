@@ -194,6 +194,42 @@ export class IncidentService implements OnModuleInit {
     requestId?: string,
     identity: BootstrapRequestIdentity | null = null,
   ) {
+    const plan = this.planPreparedIncident(prepared, requestId, identity);
+    this.persist(plan.changes, "create_incident");
+    return plan.publish();
+  }
+
+  createIncidentForCommit(
+    command: CreateIncidentCommand,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    return this.publishPreparedIncidentForCommit(
+      this.prepareIncident(command, identity),
+      requestId,
+      identity,
+    );
+  }
+
+  publishPreparedIncidentForCommit(
+    prepared: ReturnType<IncidentService["prepareIncident"]>,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.publishPreparedIncident(prepared, requestId, identity);
+    return this.incidentRepository.commitLifecycle(
+      null,
+      prepared.incident.relatedDriverId,
+      () => this.planPreparedIncident(prepared, requestId, identity),
+    );
+  }
+
+  private planPreparedIncident(
+    prepared: ReturnType<IncidentService["prepareIncident"]>,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
     const { incident, command } = prepared;
     const incidentId = incident.incidentId;
     const now = incident.createdAt;
@@ -221,41 +257,54 @@ export class IncidentService implements OnModuleInit {
     }
 
     const decorated = this.decorateIncident(incident, identity);
-    this.incidents = [decorated, ...this.incidents];
-    this.timelines.set(incidentId, timelineEntries);
-    this.persist(
-      {
-        incidents: [decorated],
-        timelines: timelineEntries,
-        ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
-      },
-      "create_incident",
-    );
-    this.recordAudit(
-      {
-        actorId: this.resolveActorId(identity, command.reportedBy),
-        actorType: this.resolveAuditActorType(identity, "system"),
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "incident",
-        actionName: "create_incident",
-        resourceType: "incident",
-        resourceId: incidentId,
-        newValuesSummary: {
-          category: command.category,
-          severity: command.severity,
-          status: decorated.status,
-          relatedOrderId: command.relatedOrderId,
-          relatedVehicleId: command.relatedVehicleId,
-          relatedDriverId: command.relatedDriverId,
-          matchingSuppression: suppressionWrite?.suppression ?? null,
-        },
-      },
-      requestId,
-    );
+    const changes = {
+      incidents: [decorated],
+      timelines: timelineEntries,
+      ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
+    };
+    return {
+      changes,
+      publish: (actual?: IncidentRecord) => {
+        const committed = actual ?? decorated;
+        this.incidents = [
+          committed,
+          ...this.incidents.filter((entry) => entry.incidentId !== incidentId),
+        ];
+        this.timelines.set(incidentId, timelineEntries);
+        if (suppressionWrite)
+          this.suppressions.set(incidentId, {
+            ...suppressionWrite.suppression,
+          });
+        this.recordAudit(
+          {
+            actorId: this.resolveActorId(identity, command.reportedBy),
+            actorType: this.resolveAuditActorType(identity, "system"),
+            tenantId: identity?.tenantId ?? null,
+            moduleName: "incident",
+            actionName: "create_incident",
+            resourceType: "incident",
+            resourceId: incidentId,
+            newValuesSummary: {
+              category: command.category,
+              severity: command.severity,
+              status: decorated.status,
+              relatedOrderId: command.relatedOrderId,
+              relatedVehicleId: command.relatedVehicleId,
+              relatedDriverId: command.relatedDriverId,
+              matchingSuppression: suppressionWrite?.suppression ?? null,
+            },
+          },
+          requestId,
+        );
 
-    this.opsDispatchEventsService?.publishIncidentCreated(decorated, requestId);
+        this.opsDispatchEventsService?.publishIncidentCreated(
+          committed,
+          requestId,
+        );
 
-    return this.cloneIncident(decorated);
+        return this.cloneIncident(committed);
+      },
+    };
   }
 
   listIncidents(identity: BootstrapRequestIdentity | null = null) {
@@ -279,7 +328,54 @@ export class IncidentService implements OnModuleInit {
     requestId?: string,
     identity: BootstrapRequestIdentity | null = null,
   ) {
-    const incident = this.require(incidentId);
+    const plan = this.planIncidentUpdate(
+      incidentId,
+      command,
+      requestId,
+      identity,
+    );
+    this.persist(plan.changes, "update_incident", plan.options);
+    return plan.publish();
+  }
+
+  updateIncidentForCommit(
+    incidentId: string,
+    command: UpdateIncidentCommand,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.updateIncident(incidentId, command, requestId, identity);
+    return this.incidentRepository.commitLifecycle(
+      incidentId,
+      null,
+      (current) => {
+        if (!current)
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            "Incident not found.",
+            { incidentId },
+          );
+        return this.planIncidentUpdate(
+          incidentId,
+          command,
+          requestId,
+          identity,
+          current,
+        );
+      },
+    );
+  }
+
+  private planIncidentUpdate(
+    incidentId: string,
+    command: UpdateIncidentCommand,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+    current?: IncidentRecord,
+  ) {
+    const incident = current ?? this.require(incidentId);
     const now = new Date().toISOString();
     const updated: IncidentRecord = { ...incident, updatedAt: now };
     const timelineEntries: IncidentTimelineEntry[] = [];
@@ -414,46 +510,59 @@ export class IncidentService implements OnModuleInit {
     }
 
     const decorated = this.decorateIncident(updated, identity);
-    this.replace(decorated);
-    if (timelineEntries.length > 0) {
-      this.timelines.set(incidentId, [
-        ...(this.timelines.get(incidentId) ?? []),
-        ...timelineEntries,
-      ]);
-    }
-    this.persist(
-      {
-        incidents: [decorated],
-        timelines: timelineEntries,
-        ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
-      },
-      "update_incident",
+    const changes = {
+      incidents: [decorated],
+      timelines: timelineEntries,
+      ...(suppressionWrite ? { suppressions: [suppressionWrite] } : {}),
+    };
+    const options =
       command.assignedTo !== undefined
         ? { assignIntentIncidentIds: [incidentId] }
-        : undefined,
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType: this.resolveAuditActorType(identity, "ops_user"),
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "incident",
-        actionName: "update_incident",
-        resourceType: "incident",
-        resourceId: incidentId,
-        newValuesSummary: {
-          status: decorated.status,
-          assignedTo: decorated.assignedTo,
-          resolutionNote: decorated.resolutionNote,
-          matchingSuppression: decorated.matchingSuppression,
-        },
+        : undefined;
+    return {
+      changes,
+      ...(options ? { options } : {}),
+      publish: (actual?: IncidentRecord) => {
+        const committed = actual ?? decorated;
+        this.incidents = [
+          committed,
+          ...this.incidents.filter((entry) => entry.incidentId !== incidentId),
+        ];
+        if (suppressionWrite)
+          this.suppressions.set(incidentId, {
+            ...suppressionWrite.suppression,
+          });
+        this.timelines.set(incidentId, [
+          ...(this.timelines.get(incidentId) ?? []),
+          ...timelineEntries,
+        ]);
+        this.recordAudit(
+          {
+            actorId: identity?.actorId ?? null,
+            actorType: this.resolveAuditActorType(identity, "ops_user"),
+            tenantId: identity?.tenantId ?? null,
+            moduleName: "incident",
+            actionName: "update_incident",
+            resourceType: "incident",
+            resourceId: incidentId,
+            newValuesSummary: {
+              status: decorated.status,
+              assignedTo: decorated.assignedTo,
+              resolutionNote: decorated.resolutionNote,
+              matchingSuppression: decorated.matchingSuppression,
+            },
+          },
+          requestId,
+        );
+
+        this.opsDispatchEventsService?.publishIncidentUpdated(
+          committed,
+          requestId,
+        );
+
+        return this.cloneIncident(committed);
       },
-      requestId,
-    );
-
-    this.opsDispatchEventsService?.publishIncidentUpdated(decorated, requestId);
-
-    return this.cloneIncident(decorated);
+    };
   }
 
   /** Authoritative HTTP read facades leave generic synchronous callers intact.
@@ -1117,9 +1226,61 @@ export class IncidentService implements OnModuleInit {
     requestId?: string,
     identity: BootstrapRequestIdentity | null = null,
   ) {
+    const plan = this.planComplaintLink(
+      incidentId,
+      complaintCaseNo,
+      requestId,
+      identity,
+    );
+    this.persist(plan.changes, "link_complaint");
+    return plan.publish();
+  }
+
+  linkComplaintForCommit(
+    incidentId: string,
+    complaintCaseNo: string,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+  ) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.linkComplaint(
+        incidentId,
+        complaintCaseNo,
+        requestId,
+        identity,
+      );
+    return this.incidentRepository.commitLifecycle(
+      incidentId,
+      null,
+      (current) => {
+        if (!current)
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            "Incident not found.",
+            { incidentId },
+          );
+        return this.planComplaintLink(
+          incidentId,
+          complaintCaseNo,
+          requestId,
+          identity,
+          current,
+        );
+      },
+    );
+  }
+
+  private planComplaintLink(
+    incidentId: string,
+    complaintCaseNo: string,
+    requestId?: string,
+    identity: BootstrapRequestIdentity | null = null,
+    current?: IncidentRecord,
+  ) {
     this.assertNonBlank(complaintCaseNo, "complaintCaseNo");
     const normalizedComplaintCaseNo = complaintCaseNo.trim();
-    const incident = this.require(incidentId);
+    const incident = current ?? this.require(incidentId);
     if (
       incident.relatedComplaintCaseNo &&
       incident.relatedComplaintCaseNo !== normalizedComplaintCaseNo
@@ -1136,7 +1297,11 @@ export class IncidentService implements OnModuleInit {
       );
     }
     if (incident.relatedComplaintCaseNo === normalizedComplaintCaseNo) {
-      return this.cloneIncident(this.decorateIncident(incident, identity));
+      return {
+        changes: {},
+        publish: () =>
+          this.cloneIncident(this.decorateIncident(incident, identity)),
+      };
     }
 
     const updated = this.decorateIncident(
@@ -1148,7 +1313,6 @@ export class IncidentService implements OnModuleInit {
       identity,
     );
 
-    this.replace(updated);
     const timelineEntry = this.createTimelineEntry(
       incidentId,
       TIMELINE_ACTIONS.complaintLinked,
@@ -1156,33 +1320,43 @@ export class IncidentService implements OnModuleInit {
       this.resolveActorId(identity, "ops_user"),
       updated.updatedAt,
     );
-    this.timelines.set(incidentId, [
-      ...(this.timelines.get(incidentId) ?? []),
-      timelineEntry,
-    ]);
-    this.persist(
-      { incidents: [updated], timelines: [timelineEntry] },
-      "link_complaint",
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType: this.resolveAuditActorType(identity, "ops_user"),
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "incident",
-        actionName: "link_complaint",
-        resourceType: "incident",
-        resourceId: incidentId,
-        newValuesSummary: {
-          relatedComplaintCaseNo: normalizedComplaintCaseNo,
-        },
+    const changes = { incidents: [updated], timelines: [timelineEntry] };
+    return {
+      changes,
+      publish: (actual?: IncidentRecord) => {
+        const committed = actual ?? updated;
+        this.incidents = [
+          committed,
+          ...this.incidents.filter((entry) => entry.incidentId !== incidentId),
+        ];
+        this.timelines.set(incidentId, [
+          ...(this.timelines.get(incidentId) ?? []),
+          timelineEntry,
+        ]);
+        this.recordAudit(
+          {
+            actorId: identity?.actorId ?? null,
+            actorType: this.resolveAuditActorType(identity, "ops_user"),
+            tenantId: identity?.tenantId ?? null,
+            moduleName: "incident",
+            actionName: "link_complaint",
+            resourceType: "incident",
+            resourceId: incidentId,
+            newValuesSummary: {
+              relatedComplaintCaseNo: normalizedComplaintCaseNo,
+            },
+          },
+          requestId,
+        );
+
+        this.opsDispatchEventsService?.publishIncidentUpdated(
+          committed,
+          requestId,
+        );
+
+        return this.cloneIncident(committed);
       },
-      requestId,
-    );
-
-    this.opsDispatchEventsService?.publishIncidentUpdated(updated, requestId);
-
-    return this.cloneIncident(updated);
+    };
   }
 
   getTimeline(incidentId: string) {
@@ -1368,10 +1542,62 @@ export class IncidentService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null = null,
     requestId?: string,
   ) {
+    const plan = this.planSuppressionExtension(
+      incidentId,
+      command,
+      identity,
+      requestId,
+    );
+    this.persist(plan.changes, "extend_matching_suppression");
+    return plan.publish();
+  }
+
+  extendMatchingSuppressionForCommit(
+    incidentId: string,
+    command: ExtendDriverMatchingSuppressionCommand,
+    identity: BootstrapRequestIdentity | null = null,
+    requestId?: string,
+  ) {
+    if (!this.incidentRepository?.isEnabled())
+      return this.extendMatchingSuppression(
+        incidentId,
+        command,
+        identity,
+        requestId,
+      );
+    return this.incidentRepository.commitLifecycle(
+      incidentId,
+      null,
+      (current) => {
+        if (!current)
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            "Incident not found.",
+            { incidentId },
+          );
+        return this.planSuppressionExtension(
+          incidentId,
+          command,
+          identity,
+          requestId,
+          current,
+        );
+      },
+    );
+  }
+
+  private planSuppressionExtension(
+    incidentId: string,
+    command: ExtendDriverMatchingSuppressionCommand,
+    identity: BootstrapRequestIdentity | null = null,
+    requestId?: string,
+    current?: IncidentRecord,
+  ) {
     this.requireOpsManager(identity);
     this.assertNonBlank(command.reason, "reason");
 
-    const incident = this.require(incidentId);
+    const incident = current ?? this.require(incidentId);
     const activeSuppression = incident.matchingSuppression;
     if (!incident.relatedDriverId || !activeSuppression?.active) {
       throw new ApiRequestError(
@@ -1392,7 +1618,6 @@ export class IncidentService implements OnModuleInit {
       expiresAt: nextExpiry,
     };
 
-    this.suppressions.set(incidentId, { ...updatedSuppression });
     const updated = this.decorateIncident(
       {
         ...incident,
@@ -1401,7 +1626,6 @@ export class IncidentService implements OnModuleInit {
       },
       identity,
     );
-    this.replace(updated);
 
     const timelineEntry = this.createTimelineEntry(
       incidentId,
@@ -1410,46 +1634,56 @@ export class IncidentService implements OnModuleInit {
       this.resolveActorId(identity, "ops_manager"),
       now,
     );
-    this.timelines.set(incidentId, [
-      ...(this.timelines.get(incidentId) ?? []),
-      timelineEntry,
-    ]);
-
-    this.persist(
-      {
-        incidents: [updated],
-        timelines: [timelineEntry],
-        suppressions: [
-          {
-            incidentId,
-            driverId: incident.relatedDriverId,
-            updatedAt: now,
-            suppression: updatedSuppression,
-          },
-        ],
-      },
-      "extend_matching_suppression",
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType: this.resolveAuditActorType(identity, "ops_user"),
-        tenantId: identity?.tenantId ?? null,
-        moduleName: "incident",
-        actionName: "extend_matching_suppression",
-        resourceType: "incident",
-        resourceId: incidentId,
-        newValuesSummary: {
-          expiresAt: nextExpiry,
-          reason: command.reason,
+    const changes = {
+      incidents: [updated],
+      timelines: [timelineEntry],
+      suppressions: [
+        {
+          incidentId,
+          driverId: incident.relatedDriverId,
+          updatedAt: now,
+          suppression: updatedSuppression,
         },
+      ],
+    };
+    return {
+      changes,
+      publish: (actual?: IncidentRecord) => {
+        const committed = actual ?? updated;
+        this.suppressions.set(incidentId, { ...updatedSuppression });
+        this.incidents = [
+          committed,
+          ...this.incidents.filter((entry) => entry.incidentId !== incidentId),
+        ];
+        this.timelines.set(incidentId, [
+          ...(this.timelines.get(incidentId) ?? []),
+          timelineEntry,
+        ]);
+        this.recordAudit(
+          {
+            actorId: identity?.actorId ?? null,
+            actorType: this.resolveAuditActorType(identity, "ops_user"),
+            tenantId: identity?.tenantId ?? null,
+            moduleName: "incident",
+            actionName: "extend_matching_suppression",
+            resourceType: "incident",
+            resourceId: incidentId,
+            newValuesSummary: {
+              expiresAt: nextExpiry,
+              reason: command.reason,
+            },
+          },
+          requestId,
+        );
+
+        this.opsDispatchEventsService?.publishIncidentUpdated(
+          committed,
+          requestId,
+        );
+
+        return this.cloneIncident(committed);
       },
-      requestId,
-    );
-
-    this.opsDispatchEventsService?.publishIncidentUpdated(updated, requestId);
-
-    return this.cloneIncident(updated);
+    };
   }
 
   getServiceRecoveryActions(incidentId: string) {
@@ -1661,7 +1895,6 @@ export class IncidentService implements OnModuleInit {
       suppression.liftedAt === null &&
       new Date(suppression.expiresAt).getTime() > Date.now();
     const next = { ...suppression, active };
-    this.suppressions.set(incident.incidentId, next);
     return next;
   }
 
@@ -1702,7 +1935,6 @@ export class IncidentService implements OnModuleInit {
       ).toISOString(),
       liftedAt: null,
     };
-    this.suppressions.set(incident.incidentId, { ...suppression });
     incident.matchingSuppression = { ...suppression };
     return {
       incidentId: incident.incidentId,
@@ -1724,7 +1956,6 @@ export class IncidentService implements OnModuleInit {
       active: false,
       liftedAt: nowIso,
     };
-    this.suppressions.set(incident.incidentId, { ...suppression });
     incident.matchingSuppression = { ...suppression };
     return {
       incidentId: incident.incidentId,

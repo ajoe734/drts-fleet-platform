@@ -33,6 +33,9 @@ export function buildOwnedMobilityServiceForTest(options?: {
   platformPresenceService?: PlatformPresenceService;
 }) {
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(
       (
         serviceBucket: string,
