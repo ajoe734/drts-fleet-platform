@@ -428,3 +428,13 @@ members preserve their AST, with only the new explicit-dev dispatch prepended
 to `issueToken` and optional dev ACK return typing; the remaining original token
 body is identical after ignoring formatting trivia/parentheses. Normal mandatory
 hooks and own full hosted CI still apply to the immutable candidate.
+
+The owner then normally merged the frozen accepted dev reference
+`72d88e2820bb0c5417051774fa25f5bab6ec79b2` (Registry and ReferralRate peer
+changes). Its 22 peer paths do not intersect these seven task paths; peer
+content is retained. The six own code/data files remain byte-identical to the
+locally checked version; only this integration qualification paragraph changes
+the document. Local checks above ran before this accepted-peer integration;
+the final immutable union requires its own full hosted CI and independent review.
+This merge is Source integration, not a claim that this version is deployed or
+that the failed G operational run passed.
