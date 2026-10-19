@@ -685,9 +685,23 @@ export class DriverSosService implements OnModuleInit {
           persistedObservation.opsAlertReceiptRecordedAt,
         alertToOpsLatencyMs: persistedObservation.alertToOpsLatencyMs,
       };
+      // A render begun before a duty ACK must not regress the outbox when
+      // its response arrives later. The event owner and live outbox are the
+      // current local authority; SQL applies the same monotonic distinction.
+      const liveOutbox = this.urgentAlertOutbox.get(outbox.sosEventId);
+      const acknowledged =
+        liveOutbox?.status === "acknowledged" ||
+        Boolean(
+          this.eventById.get(outbox.sosEventId)?.dutyAcknowledgement
+            .acknowledgedByActorId,
+        );
+      if (acknowledged) updatedOutbox.status = "acknowledged";
       if (!persistedObservation.duplicate) {
-        updatedOutbox.status =
-          updatedOutbox.status === "failed" ? updatedOutbox.status : "delivered";
+        updatedOutbox.status = ["failed", "acknowledged"].includes(
+          updatedOutbox.status,
+        )
+          ? updatedOutbox.status
+          : "delivered";
         updatedOutbox.deliveredAt = updatedOutbox.deliveredAt ?? renderedAt;
       }
       this.urgentAlertOutbox.set(outbox.sosEventId, updatedOutbox);
@@ -922,30 +936,39 @@ export class DriverSosService implements OnModuleInit {
 
       let persisted;
       try {
-        persisted = await this.verificationRepository?.persistDutyAcknowledgement(
-          updatedEvent,
-          timeline,
-        );
+        persisted =
+          await this.verificationRepository?.persistDutyAcknowledgement(
+            updatedEvent,
+            timeline,
+          );
       } catch (error) {
-        // The SOS event's own write never happened -- a claim this call
+        // A known rollback may release this call's fresh claim, while the
+        // locked SOS guard preserves another instance's committed ACK.
+        // Unknown COMMIT is not rollback evidence. A claim this call
         // freshly made on the Incident (previously unassigned) must not
         // outlive that rejected write, so the Incident is left exactly as
         // honest as the SOS event itself (both unassigned/unacknowledged).
         // A claim this call did NOT freshly make (already someone else's,
         // or already durably the same owner from a prior call) is not this
         // call's to undo.
-        if (claimedFreshIncidentOwnership && incidentId) {
+        if (
+          claimedFreshIncidentOwnership &&
+          incidentId &&
+          (error as { dutyCommitOutcome?: string })?.dutyCommitOutcome !==
+            "unknown"
+        ) {
           await this.incidentService.releaseIncidentOwnerClaim(
             incidentId,
             incidentOwner,
             requestId,
             identity,
+            sosEventId,
           );
         }
         throw error;
       }
       const accepted = persisted?.accepted ?? true;
-      const finalOwner = accepted ? incidentOwner : persisted!.acknowledgedByActorId;
+      const finalOwner = persisted?.acknowledgedByActorId ?? incidentOwner;
       const finalAcknowledgedAt = accepted ? now : persisted!.acknowledgedAt;
 
       // The Incident already durably has `incidentOwner` from the claim
@@ -966,6 +989,7 @@ export class DriverSosService implements OnModuleInit {
             incidentOwner,
             requestId,
             identity,
+            sosEventId,
           );
         }
         const converged = await this.repairIncidentHandover(
@@ -1004,9 +1028,8 @@ export class DriverSosService implements OnModuleInit {
       if (!accepted) {
         // Authoritative reload instead of trusting this process's stale
         // local timeline/outbox for the winner it did not itself persist.
-        const hydrated = await this.hydrateFromAuthoritativeStoreIfPending(
-          sosEventId,
-        );
+        const hydrated =
+          await this.hydrateFromAuthoritativeStoreIfPending(sosEventId);
         const lostEvent =
           hydrated.dutyAcknowledgement.acknowledgedByActorId === finalOwner
             ? hydrated
@@ -1036,20 +1059,29 @@ export class DriverSosService implements OnModuleInit {
       // claw the locally-cached status back down to what this call
       // computed before that write (F2 progression).
       const finalStatus = persisted?.status ?? nextStatus;
-      const committedEvent: DriverSosEventRecord =
-        finalStatus === updatedEvent.status
-          ? updatedEvent
-          : { ...updatedEvent, status: finalStatus };
+      const committedEvent: DriverSosEventRecord = {
+        ...updatedEvent,
+        status: finalStatus,
+        dutyAcknowledgement: {
+          acknowledgedAt: finalAcknowledgedAt,
+          acknowledgedByActorId: finalOwner,
+        },
+      };
+      const committedTimeline = {
+        ...timeline,
+        actorId: finalOwner,
+        payload: { ...timeline.payload, acknowledgedByActorId: finalOwner },
+      };
 
       this.replaceEvent(committedEvent);
-      this.appendTimeline(timeline);
-      this.markOutboxDelivered(sosEventId, now);
+      this.appendTimeline(committedTimeline);
+      this.markOutboxAcknowledged(sosEventId);
       this.recordMutationAudit(
         "acknowledge_duty",
         committedEvent,
         identity,
         requestId,
-        { acknowledgedByActorId: incidentOwner, incidentId: event.incidentId },
+        { acknowledgedByActorId: finalOwner, incidentId: event.incidentId },
       );
 
       return {
@@ -1059,11 +1091,11 @@ export class DriverSosService implements OnModuleInit {
         ),
         dutyAcknowledgement: {
           sosEventId,
-          acknowledgedByActorId: incidentOwner,
-          acknowledgedAt: now,
+          acknowledgedByActorId: finalOwner,
+          acknowledgedAt: finalAcknowledgedAt,
           note,
         },
-        wonAcknowledgement: incidentOwner === actorId,
+        wonAcknowledgement: finalOwner === actorId,
       };
     });
   }
@@ -1157,6 +1189,7 @@ export class DriverSosService implements OnModuleInit {
     owner: string,
     actorId: string,
   ): AcknowledgeDriverSosDutyResult {
+    this.markOutboxAcknowledged(sosEventId);
     const timeline = this.timelines.get(sosEventId) ?? [];
     const existingAck = [...timeline]
       .reverse()
@@ -1243,9 +1276,8 @@ export class DriverSosService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ): Promise<DriverSosEventRecord> {
     return this.withEventMutationLock(sosEventId, async () => {
-      const hydrated = await this.hydrateFromAuthoritativeStoreIfPending(
-        sosEventId,
-      );
+      const hydrated =
+        await this.hydrateFromAuthoritativeStoreIfPending(sosEventId);
       return this.reconcileWithIncidentLocked(hydrated.sosEventId, identity);
     });
   }
@@ -1339,24 +1371,17 @@ export class DriverSosService implements OnModuleInit {
     return authoritative;
   }
 
-  private markOutboxDelivered(sosEventId: string, deliveredAt: string) {
+  private markOutboxAcknowledged(sosEventId: string) {
     const outbox = this.urgentAlertOutbox.get(sosEventId);
-    if (!outbox || outbox.status === "delivered" || outbox.status === "failed") {
-      return;
-    }
-    this.urgentAlertOutbox.set(
-      sosEventId,
-      this.cloneOutbox({
-        ...outbox,
-        status: "delivered",
-        deliveredAt: outbox.deliveredAt ?? deliveredAt,
-      }),
-    );
+    if (!outbox || outbox.status === "acknowledged") return;
+    // ACK is distinct from the real render receipt. Do not manufacture
+    // deliveredAt / renderedAt when an operator claims before rendering.
+    this.urgentAlertOutbox.set(sosEventId, {
+      ...outbox,
+      status: "acknowledged",
+    });
   }
 
-  /** Ranks of the forward (non-false-alarm) S-3 progression; anything not
-   * listed (local_triggered, queued_offline, false_alarm_dismissed) is not
-   * part of this monotonic readback reconciliation. */
   private static readonly SOS_PROGRESS_RANK: Partial<
     Record<DriverSosStatus, number>
   > = {
@@ -1397,16 +1422,18 @@ export class DriverSosService implements OnModuleInit {
     identity: BootstrapRequestIdentity | null,
   ): Promise<DriverSosEventRecord> {
     const event = this.eventById.get(sosEventId);
-    if (!event || !event.incidentId || event.status === "false_alarm_dismissed") {
+    if (
+      !event ||
+      !event.incidentId ||
+      event.status === "false_alarm_dismissed"
+    ) {
       return event ?? this.requireEventForOps(sosEventId);
     }
 
-    let incident: IncidentRecord;
-    try {
-      incident = this.incidentService.getIncident(event.incidentId, identity);
-    } catch {
-      return event;
-    }
+    const incident = await this.incidentService.getIncidentForSosReadback(
+      event.incidentId,
+      identity,
+    );
 
     const targetStatus =
       DriverSosService.INCIDENT_TO_SOS_STATUS[incident.status];
@@ -1425,20 +1452,26 @@ export class DriverSosService implements OnModuleInit {
     }
 
     const now = new Date().toISOString();
-    const rankToStatus = Object.entries(DriverSosService.SOS_PROGRESS_RANK).reduce<
-      Record<number, DriverSosStatus>
-    >((acc, [status, rank]) => {
+    const rankToStatus = Object.entries(
+      DriverSosService.SOS_PROGRESS_RANK,
+    ).reduce<Record<number, DriverSosStatus>>((acc, [status, rank]) => {
       acc[rank as number] = status as DriverSosStatus;
       return acc;
     }, {});
     const timelineEntries: DriverSosTimelineEntry[] = [];
     for (let rank = currentRank + 1; rank <= targetRank; rank += 1) {
       const stepStatus = rankToStatus[rank];
-      if (stepStatus === "investigating" || stepStatus === "resolved" || stepStatus === "closed") {
+      if (
+        stepStatus === "investigating" ||
+        stepStatus === "resolved" ||
+        stepStatus === "closed"
+      ) {
         timelineEntries.push(
           this.buildVerificationTimeline(
             event.sosEventId,
-            stepStatus === "investigating" ? "investigation_started" : stepStatus,
+            stepStatus === "investigating"
+              ? "investigation_started"
+              : stepStatus,
             "system",
             "system.incident-sync",
             now,

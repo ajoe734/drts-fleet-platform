@@ -8,7 +8,9 @@ import type { DriverSosVerificationRepository } from "../../../apps/api/src/modu
 import { IncidentService } from "../../../apps/api/src/modules/incident/incident.service";
 import type { IncidentRepository } from "../../../apps/api/src/modules/incident/incident.repository";
 
-function buildDriverIdentity(driverId = "drv-race-01"): BootstrapRequestIdentity {
+function buildDriverIdentity(
+  driverId = "drv-race-01",
+): BootstrapRequestIdentity {
   return {
     authMode: "bootstrap_headers",
     actorType: "driver_user",
@@ -49,7 +51,9 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-function setupService(verificationRepository?: DriverSosVerificationRepository) {
+function setupService(
+  verificationRepository?: DriverSosVerificationRepository,
+) {
   const auditService = new AuditNotificationService();
   const incidentService = new IncidentService(auditService);
   const driverSosService = new DriverSosService(
@@ -65,7 +69,9 @@ async function submitSos(
   driverSosService: DriverSosService,
   clientEventId: string,
 ) {
-  const driverIdentity = buildDriverIdentity(`drv-${clientEventId.slice(0, 8)}`);
+  const driverIdentity = buildDriverIdentity(
+    `drv-${clientEventId.slice(0, 8)}`,
+  );
   return driverSosService.submitSosEvent(
     {
       clientEventId,
@@ -113,7 +119,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: genuinely concurrent dut
       first.timeline.filter((entry) => entry.eventType === "duty_acknowledged"),
     ).toHaveLength(1);
     expect(
-      second.timeline.filter((entry) => entry.eventType === "duty_acknowledged"),
+      second.timeline.filter(
+        (entry) => entry.eventType === "duty_acknowledged",
+      ),
     ).toHaveLength(1);
   });
 
@@ -126,7 +134,12 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: genuinely concurrent dut
     let callCount = 0;
     const mockVerificationRepository = {
       isEnabled: () => true,
-      persistDutyAcknowledgement: async (event: { dutyAcknowledgement: { acknowledgedByActorId: string | null; acknowledgedAt: string | null } }) => {
+      persistDutyAcknowledgement: async (event: {
+        dutyAcknowledgement: {
+          acknowledgedByActorId: string | null;
+          acknowledgedAt: string | null;
+        };
+      }) => {
         callCount += 1;
         // Only the first call is held open; this proves the second call
         // never even attempts its own persistence while the first is
@@ -136,7 +149,8 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: genuinely concurrent dut
         }
         return {
           accepted: true,
-          acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+          acknowledgedByActorId:
+            event.dutyAcknowledgement.acknowledgedByActorId!,
           acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
         };
       },
@@ -182,7 +196,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: genuinely concurrent dut
       actorA.actorId,
     );
     expect(
-      second.timeline.filter((entry) => entry.eventType === "duty_acknowledged"),
+      second.timeline.filter(
+        (entry) => entry.eventType === "duty_acknowledged",
+      ),
     ).toHaveLength(1);
   });
 
@@ -190,13 +206,19 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: genuinely concurrent dut
     let shouldFail = true;
     const mockVerificationRepository = {
       isEnabled: () => true,
-      persistDutyAcknowledgement: async (event: { dutyAcknowledgement: { acknowledgedByActorId: string | null; acknowledgedAt: string | null } }) => {
+      persistDutyAcknowledgement: async (event: {
+        dutyAcknowledgement: {
+          acknowledgedByActorId: string | null;
+          acknowledgedAt: string | null;
+        };
+      }) => {
         if (shouldFail) {
           throw new Error("simulated database failure");
         }
         return {
           accepted: true,
-          acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+          acknowledgedByActorId:
+            event.dutyAcknowledgement.acknowledgedByActorId!,
           acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
         };
       },
@@ -245,7 +267,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: genuinely concurrent dut
       opsIdentity.actorId,
     );
     expect(
-      retried.timeline.filter((entry) => entry.eventType === "duty_acknowledged"),
+      retried.timeline.filter(
+        (entry) => entry.eventType === "duty_acknowledged",
+      ),
     ).toHaveLength(1);
     const incidentAfterRetry = incidentService.getIncident(
       sos.receipt.incidentId,
@@ -262,7 +286,11 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: cross-app honest readbac
       "dddddddd-4444-4444-8444-444444444444",
     );
     const opsIdentity = buildOpsIdentity("ops-progress-01");
-    await driverSosService.acknowledgeDuty(sos.event.sosEventId, {}, opsIdentity);
+    await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
 
     incidentService.updateIncident(
       sos.receipt.incidentId,
@@ -428,7 +456,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R4 reopen: F1 Incident/SO
       existingOps.actorId,
     );
     expect(
-      readback.timeline.filter((entry) => entry.eventType === "duty_acknowledged"),
+      readback.timeline.filter(
+        (entry) => entry.eventType === "duty_acknowledged",
+      ),
     ).toHaveLength(1);
   });
 
@@ -468,7 +498,11 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R4 reopen: F2 concurrent 
       "22222222-8888-4888-8888-888888888888",
     );
     const opsIdentity = buildOpsIdentity("ops-concurrent-01");
-    await driverSosService.acknowledgeDuty(sos.event.sosEventId, {}, opsIdentity);
+    await driverSosService.acknowledgeDuty(
+      sos.event.sosEventId,
+      {},
+      opsIdentity,
+    );
 
     incidentService.updateIncident(
       sos.receipt.incidentId,
@@ -602,7 +636,8 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F1 Incident cl
       }) =>
         deferred.promise.then(() => ({
           accepted: true,
-          acknowledgedByActorId: event.dutyAcknowledgement.acknowledgedByActorId!,
+          acknowledgedByActorId:
+            event.dutyAcknowledgement.acknowledgedByActorId!,
           acknowledgedAt: event.dutyAcknowledgement.acknowledgedAt!,
         })),
     } as unknown as DriverSosVerificationRepository;
@@ -656,15 +691,16 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F1 Incident cl
     const ack = await ackCall;
 
     expect(ack.wonAcknowledgement).toBe(true);
-    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
-      opsAck.actorId,
-    );
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(opsAck.actorId);
     const incidentAfter = incidentService.getIncident(sos.receipt.incidentId);
     expect(incidentAfter.assignedTo).toBe(opsAck.actorId);
   });
 
   it("F1: a failed durable Incident handover write makes acknowledgeDuty fail honestly instead of reporting success", async () => {
+    let durableBaseline: ReturnType<IncidentService["getIncident"]> | null =
+      null;
     const mockIncidentRepository = {
+      loadIncident: async () => durableBaseline,
       isEnabled: () => true,
       persistChanges: async () => {
         throw new Error("simulated incident persistence failure");
@@ -677,11 +713,15 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F1 Incident cl
       auditService,
       mockIncidentRepository,
     );
-    const driverSosService = new DriverSosService(auditService, incidentService);
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+    );
     const sos = await submitSos(
       driverSosService,
       "55555555-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     );
+    durableBaseline = incidentService.getIncident(sos.receipt.incidentId);
     const opsIdentity = buildOpsIdentity("ops-incident-db-fail");
 
     let ackError: unknown;
@@ -823,9 +863,7 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F4 authoritati
     );
     expect(reloadCallCount).toBeGreaterThan(0);
     expect(readback.event.status).toBe("duty_alerted");
-    expect(
-      readback.event.dutyAcknowledgement.acknowledgedByActorId,
-    ).toBeNull();
+    expect(readback.event.dutyAcknowledgement.acknowledgedByActorId).toBeNull();
   });
 
   it("F4: an authoritative closed status propagates on readback even once this process already knows a duty owner", async () => {
@@ -897,7 +935,10 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R5 repair: F4 authoritati
 describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F1 durable confirmation of an already-equal owner", () => {
   it("F1: acknowledgeDuty fails honestly instead of claiming a win when the Incident's existing in-memory ownership was never durably confirmed", async () => {
     let persistCallCount = 0;
+    let durableBaseline: ReturnType<IncidentService["getIncident"]> | null =
+      null;
     const mockIncidentRepository = {
+      loadIncident: async () => durableBaseline,
       isEnabled: () => true,
       persistChanges: async () => {
         persistCallCount += 1;
@@ -911,11 +952,15 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F1 durable con
       auditService,
       mockIncidentRepository,
     );
-    const driverSosService = new DriverSosService(auditService, incidentService);
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+    );
     const sos = await submitSos(
       driverSosService,
       "99999999-ffff-4fff-8fff-ffffffffffff",
     );
+    durableBaseline = incidentService.getIncident(sos.receipt.incidentId);
     const opsDirect = buildOpsIdentity("ops-direct");
 
     // The real reachable generic caller: PATCH /api/incidents/:id ->
@@ -979,7 +1024,10 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F5 rejected cl
       auditService,
       mockIncidentRepository,
     );
-    const driverSosService = new DriverSosService(auditService, incidentService);
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+    );
     const sos = await submitSos(
       driverSosService,
       "aaaaaaaa-0000-4000-8000-000000000001",
@@ -1005,9 +1053,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F5 rejected cl
       undefined,
       opsIdentity,
     );
-    expect(
-      incidentService.getIncident(sos.receipt.incidentId).status,
-    ).toBe("investigating");
+    expect(incidentService.getIncident(sos.receipt.incidentId).status).toBe(
+      "investigating",
+    );
 
     persistDeferred.resolve();
     await expect(ackCall).rejects.toThrow();
@@ -1049,9 +1097,7 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F1 competing-i
     );
 
     expect(ack.wonAcknowledgement).toBe(false);
-    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
-      "ops-db-winner",
-    );
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe("ops-db-winner");
 
     // Before this fix, the just-created local claim ("ops-local-claim")
     // was never released, so repairIncidentHandover's attempt to assign
@@ -1210,7 +1256,10 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R6 repair: F2 progression
 describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 durable confirmation of a foreign (different-actor) owner", () => {
   it("F1: a different Ops actor's acknowledgeDuty fails honestly instead of winning under an unconfirmed foreign Incident owner, and the original actor's replay also fails until durability is confirmed", async () => {
     let persistCallCount = 0;
+    let durableBaseline: ReturnType<IncidentService["getIncident"]> | null =
+      null;
     const mockIncidentRepository = {
+      loadIncident: async () => durableBaseline,
       isEnabled: () => true,
       persistChanges: async () => {
         persistCallCount += 1;
@@ -1224,11 +1273,15 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 durable con
       auditService,
       mockIncidentRepository,
     );
-    const driverSosService = new DriverSosService(auditService, incidentService);
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+    );
     const sos = await submitSos(
       driverSosService,
       "eeeeeeee-0000-4000-8000-000000000005",
     );
+    durableBaseline = incidentService.getIncident(sos.receipt.incidentId);
     const opsUnconfirmed = buildOpsIdentity("ops-unconfirmed");
     const opsOther = buildOpsIdentity("ops-other");
 
@@ -1253,7 +1306,11 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 durable con
     // that unconfirmed actor.
     let firstError: unknown;
     try {
-      await driverSosService.acknowledgeDuty(sos.event.sosEventId, {}, opsOther);
+      await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        opsOther,
+      );
     } catch (error) {
       firstError = error;
     }
@@ -1298,8 +1355,11 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 durable con
     // succeeds and the SOS event honestly reflects the real confirmed
     // owner on authoritative readback.
     persistCallCount = 0;
-    (mockIncidentRepository as unknown as { persistChanges: () => Promise<void> }).persistChanges =
-      async () => undefined;
+    (
+      mockIncidentRepository as unknown as {
+        persistChanges: () => Promise<void>;
+      }
+    ).persistChanges = async () => undefined;
     const recovered = await driverSosService.acknowledgeDuty(
       sos.event.sosEventId,
       {},
@@ -1314,9 +1374,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 durable con
       sos.event.sosEventId,
       opsOther,
     );
-    expect(
-      afterRecovery.event.dutyAcknowledgement.acknowledgedByActorId,
-    ).toBe(opsUnconfirmed.actorId);
+    expect(afterRecovery.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+      opsUnconfirmed.actorId,
+    );
   });
 });
 
@@ -1351,9 +1411,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 competing-i
     );
     await Promise.resolve();
     await Promise.resolve();
-    expect(
-      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
-    ).toBe("ops-local-loser");
+    expect(incidentService.getIncident(sos.receipt.incidentId).assignedTo).toBe(
+      "ops-local-loser",
+    );
 
     const ack = await driverSosService.acknowledgeDuty(
       sos.event.sosEventId,
@@ -1362,9 +1422,7 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R7 repair: F1 competing-i
     );
 
     expect(ack.wonAcknowledgement).toBe(false);
-    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe(
-      "ops-db-winner",
-    );
+    expect(ack.dutyAcknowledgement.acknowledgedByActorId).toBe("ops-db-winner");
 
     // Before this fix, this call's Incident claim was NOT a fresh claim
     // (wasNewClaim: false, since the Incident was already durably assigned
@@ -1435,9 +1493,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R8 repair: F1 a failed In
     );
     await Promise.resolve();
     await Promise.resolve();
-    expect(
-      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
-    ).toBe("ops-local-loser");
+    expect(incidentService.getIncident(sos.receipt.incidentId).assignedTo).toBe(
+      "ops-local-loser",
+    );
 
     // This call loses the real SOS-side CAS to ops-db-winner. Its own
     // inline convergence repair attempt fails (DB unavailable), so the
@@ -1449,9 +1507,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R8 repair: F1 a failed In
       localLoser,
     );
     expect(ack.wonAcknowledgement).toBe(false);
-    expect(
-      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
-    ).toBe("ops-local-loser");
+    expect(incidentService.getIncident(sos.receipt.incidentId).assignedTo).toBe(
+      "ops-local-loser",
+    );
 
     // The real winner's own idempotent replay must fail honestly instead of
     // reporting wonAcknowledgement: true while the Incident durably still
@@ -1465,9 +1523,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R8 repair: F1 a failed In
     expect((replayError as { code?: string })?.code).toBe(
       "INCIDENT_HANDOVER_UNAVAILABLE",
     );
-    expect(
-      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
-    ).toBe("ops-local-loser");
+    expect(incidentService.getIncident(sos.receipt.incidentId).assignedTo).toBe(
+      "ops-local-loser",
+    );
 
     // Once the repair path durably succeeds, the same replay converges the
     // Incident onto the real SOS-side winner and reports success honestly.
@@ -1481,9 +1539,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R8 repair: F1 a failed In
     expect(recovered.dutyAcknowledgement.acknowledgedByActorId).toBe(
       "ops-db-winner",
     );
-    expect(
-      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
-    ).toBe("ops-db-winner");
+    expect(incidentService.getIncident(sos.receipt.incidentId).assignedTo).toBe(
+      "ops-db-winner",
+    );
   });
 });
 
@@ -1649,9 +1707,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R9 repair: F1 a CAS-loss 
     );
     await Promise.resolve();
     await Promise.resolve();
-    expect(
-      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
-    ).toBe("ops-foreign-owner");
+    expect(incidentService.getIncident(sos.receipt.incidentId).assignedTo).toBe(
+      "ops-foreign-owner",
+    );
 
     // The CAS winner's own stale instance calls acknowledgeDuty: it durably
     // confirms the foreign Incident owner (not a fresh claim) and then
@@ -1675,9 +1733,9 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R9 repair: F1 a CAS-loss 
     );
     // The Incident must not be left durably converged onto the CAS winner
     // while the convergence write actually failed.
-    expect(
-      incidentService.getIncident(sos.receipt.incidentId).assignedTo,
-    ).toBe("ops-foreign-owner");
+    expect(incidentService.getIncident(sos.receipt.incidentId).assignedTo).toBe(
+      "ops-foreign-owner",
+    );
   });
 });
 
@@ -1781,7 +1839,10 @@ describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015 R9 repair: F5 compensatio
       auditService,
       mockIncidentRepository,
     );
-    const driverSosService = new DriverSosService(auditService, incidentService);
+    const driverSosService = new DriverSosService(
+      auditService,
+      incidentService,
+    );
     const sos = await submitSos(
       driverSosService,
       "ffffffff-2222-4000-8000-000000000008",

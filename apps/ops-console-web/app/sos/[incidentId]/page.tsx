@@ -26,8 +26,9 @@ import {
   DEFAULT_OPS_ACTOR_ID,
   createOpsDispatchEventSource,
   getOpsClient,
-} from "@/lib/api-client";
+} from "../../../lib/api-client";
 import {
+  applyCanonicalSosDuty,
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
@@ -40,8 +41,8 @@ import {
   isSosIncident,
   unwrapListItems,
   type SosPillTone,
-} from "@/lib/sos-view-model";
-import { useTranslation } from "@/lib/i18n";
+} from "../../../lib/sos-view-model";
+import { useTranslation } from "../../../lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -127,7 +128,16 @@ export default function SosDetailPage() {
             .catch(() => null as IdentityContext | null),
         ]);
 
-      setIncident(incidentRes);
+      const canonical = isSosIncident(incidentRes)
+        ? await client.get<{ event: DriverSosEventRecord }>(
+            `/api/ops/driver-sos/by-incident/${encodeURIComponent(incidentId)}`,
+          )
+        : null;
+      setIncident(
+        canonical
+          ? applyCanonicalSosDuty(incidentRes, canonical.event)
+          : incidentRes,
+      );
       setTimeline(unwrapListItems<IncidentTimelineEntry>(timelineRes));
       setDrivers(unwrapListItems<DriverRegistryRecord>(driverRes));
       setVehicles(unwrapListItems<VehicleRegistryRecord>(vehicleRes));
@@ -381,7 +391,9 @@ export default function SosDetailPage() {
             </Pill>
             {incident.assignedTo ? (
               <Pill theme={theme} tone="success">
-                {t("sos.detail.ackBy", { actor: formatSosActorLabel(incident.assignedTo) })}
+                {t("sos.detail.ackBy", {
+                  actor: formatSosActorLabel(incident.assignedTo),
+                })}
               </Pill>
             ) : null}
           </div>
@@ -396,7 +408,7 @@ export default function SosDetailPage() {
             >
               {t("sos.detail.backToQueueShort")}
             </Btn>
-            {!isAcked && !isClosed ? (
+            {!isAcked ? (
               <Btn theme={theme} variant="primary" onClick={handleAcknowledge}>
                 {t("sos.action.acknowledge")}
               </Btn>

@@ -1,22 +1,8 @@
-// Minimal Postgres-semantics interpreter scoped to the exact two
-// `ops.phase1_incidents` statements IncidentRepository sends for ownership
-// persistence: the `persistChanges` full-record `INSERT ... ON CONFLICT ...
-// DO UPDATE` and `revertAssignedToIfStillOwner`'s `WITH current_row AS (...)
-// UPDATE ... RETURNING` compensation.
-//
-// This regex-parses the *real* SQL text the repository sends and evaluates
-// it against an in-memory row, including `to_jsonb`/`jsonb_set`'s real
-// strict-NULL-propagation semantics and `record`'s NOT NULL constraint. It
-// is not a mock of the repository's behaviour: if the production SQL
-// regresses (e.g. a bare `to_jsonb($3::text)` with no NULL guard, or the
-// `assigned_to`/`record` CASE guard is removed), this interpreter fails the
-// same way real Postgres would, because it evaluates the statement the
-// repository actually built rather than a hard-coded expectation.
-//
-// SQL NULL is represented as `undefined`; the JSON `null` literal stored
-// inside a jsonb column is represented as plain JS `null` -- the two are
-// kept distinct throughout, matching Postgres's own distinction between "no
-// value" and "a JSON null value".
+// Sequential SQL-expression model for narrow repository regression tests.
+// It receives the production SQL; it does not execute PostgreSQL, model MVCC,
+// row-lock waits, timestamp typing or prove concurrency. The separately hosted
+// official-schema tests cover those boundaries. SQL NULL is undefined here;
+// JSON null remains JavaScript null.
 
 export type FakeRow = Record<string, unknown>;
 
@@ -114,10 +100,14 @@ function evaluateExpr(expr: string, ctx: EvalCtx): unknown {
     }
     const keyMatch = pathLiteral!.trim().match(/^'\{(\w+)\}'$/);
     if (!keyMatch) {
-      throw new Error(`FakeIncidentPgClient: bad jsonb_set path "${pathLiteral}"`);
+      throw new Error(
+        `FakeIncidentPgClient: bad jsonb_set path "${pathLiteral}"`,
+      );
     }
     if (typeof target !== "object" || target === null) {
-      throw new Error("FakeIncidentPgClient: jsonb_set target is not an object");
+      throw new Error(
+        "FakeIncidentPgClient: jsonb_set target is not an object",
+      );
     }
     return { ...(target as FakeRow), [keyMatch[1]!]: value };
   }
@@ -145,7 +135,9 @@ function evaluateExpr(expr: string, ctx: EvalCtx): unknown {
 
   if (trimmed.startsWith("EXCLUDED.")) {
     if (!ctx.excluded) {
-      throw new Error("FakeIncidentPgClient: EXCLUDED referenced outside upsert");
+      throw new Error(
+        "FakeIncidentPgClient: EXCLUDED referenced outside upsert",
+      );
     }
     return ctx.excluded[trimmed.slice("EXCLUDED.".length)];
   }
@@ -168,7 +160,35 @@ function evaluateExpr(expr: string, ctx: EvalCtx): unknown {
 }
 
 function evaluateCondition(cond: string, ctx: EvalCtx): boolean {
-  const trimmed = cond.trim();
+  let trimmed = cond.trim();
+  if (trimmed.startsWith("(") && trimmed.endsWith(")"))
+    trimmed = trimmed.slice(1, -1).trim();
+  for (const operator of [" OR ", " AND "]) {
+    let depth = 0;
+    for (let i = 0; i <= trimmed.length - operator.length; i++) {
+      if (trimmed[i] === "(") depth++;
+      if (trimmed[i] === ")") depth--;
+      if (
+        !depth &&
+        trimmed.slice(i, i + operator.length).toUpperCase() === operator
+      ) {
+        const left = evaluateCondition(trimmed.slice(0, i), ctx);
+        const right = evaluateCondition(
+          trimmed.slice(i + operator.length),
+          ctx,
+        );
+        return operator === " OR " ? left || right : left && right;
+      }
+    }
+  }
+  if (/^NOT /i.test(trimmed)) return !evaluateCondition(trimmed.slice(4), ctx);
+  if (/^\$\d+::boolean$/i.test(trimmed))
+    return evaluateExpr(trimmed, ctx) === true;
+  const notNull = trimmed.match(/^([\s\S]+) IS NOT NULL$/i);
+  if (notNull) return evaluateExpr(notNull[1]!, ctx) !== undefined;
+  const distinct = trimmed.match(/^([\s\S]+) IS DISTINCT FROM ([\s\S]+)$/i);
+  if (distinct)
+    return evaluateExpr(distinct[1]!, ctx) !== evaluateExpr(distinct[2]!, ctx);
 
   const gt = splitAtTopLevelOperator(trimmed, ">");
   if (gt) {
@@ -191,7 +211,10 @@ function evaluateCondition(cond: string, ctx: EvalCtx): boolean {
 
 // Splits `text` on a top-level (paren-depth-0) occurrence of `op`, used only
 // for the simple `<expr> <op> <expr>` conditions this repository emits.
-function splitAtTopLevelOperator(text: string, op: string): [string, string] | null {
+function splitAtTopLevelOperator(
+  text: string,
+  op: string,
+): [string, string] | null {
   let depth = 0;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -217,7 +240,7 @@ export class FakeIncidentPgClient {
     rawParams: readonly unknown[] = [],
   ): Promise<{ rows: T[]; rowCount: number }> {
     const params = rawParams.map((p) => (p === null ? undefined : p));
-    const trimmedSql = sql.trim();
+    const trimmedSql = sql.trim().replace(/\s+RETURNING record$/i, "");
 
     const upsertMatch = trimmedSql.match(
       /^INSERT INTO ops\.phase1_incidents\s*\(([\s\S]*?)\)\s*VALUES\s*\(([\s\S]*?)\)\s*ON CONFLICT \(incident_id\) DO UPDATE SET([\s\S]+)$/i,
@@ -230,7 +253,7 @@ export class FakeIncidentPgClient {
     }
 
     const revertMatch = trimmedSql.match(
-      /^WITH (\w+) AS \(\s*SELECT ([\s\S]+?) FROM ops\.phase1_incidents\s+WHERE incident_id = \$(\d+)\s*\)\s*UPDATE ops\.phase1_incidents\s+SET([\s\S]+?)WHERE incident_id = \$(\d+)\s+RETURNING ([\s\S]+)$/i,
+      /^WITH (\w+) AS (?:MATERIALIZED )?\(\s*SELECT ([\s\S]+?) FROM ops\.phase1_incidents\s+WHERE incident_id = \$(\d+)\s*(?:FOR UPDATE\s*)?\)\s*UPDATE ops\.phase1_incidents\s+SET([\s\S]+?)WHERE incident_id = \$(\d+)\s+RETURNING ([\s\S]+)$/i,
     );
     if (revertMatch) {
       return this.handleConditionalRevert(revertMatch, params) as unknown as {
@@ -255,7 +278,9 @@ export class FakeIncidentPgClient {
       const column = columns[index]!;
       const m = placeholder.match(/^\$(\d+)/);
       if (!m) {
-        throw new Error(`FakeIncidentPgClient: bad placeholder "${placeholder}"`);
+        throw new Error(
+          `FakeIncidentPgClient: bad placeholder "${placeholder}"`,
+        );
       }
       const raw = params[Number(m[1]) - 1];
       excludedRow[column] =
@@ -271,10 +296,15 @@ export class FakeIncidentPgClient {
 
     if (!existingRow) {
       this.rows.set(incidentId, { ...excludedRow });
-      return { rows: [], rowCount: 1 };
+      return { rows: [{ record: excludedRow.record }], rowCount: 1 };
     }
 
-    const ctx: EvalCtx = { excluded: excludedRow, existing: existingRow, cte: {}, params };
+    const ctx: EvalCtx = {
+      excluded: excludedRow,
+      existing: existingRow,
+      cte: {},
+      params,
+    };
     const updates: FakeRow = {};
     for (const assignment of splitTopLevelCommas(setClauseRaw!)) {
       const eqIdx = assignment.indexOf("=");
@@ -288,15 +318,22 @@ export class FakeIncidentPgClient {
     }
 
     Object.assign(existingRow, updates);
-    return { rows: [], rowCount: 1 };
+    return { rows: [{ record: existingRow.record }], rowCount: 1 };
   }
 
   private handleConditionalRevert(
     match: RegExpMatchArray,
     params: unknown[],
   ): { rows: FakeRow[]; rowCount: number } {
-    const [, cteName, cteCols, cteWhereParamIdx, setClauseRaw, updateWhereParamIdx, returningRaw] =
-      match;
+    const [
+      ,
+      cteName,
+      cteCols,
+      cteWhereParamIdx,
+      setClauseRaw,
+      updateWhereParamIdx,
+      returningRaw,
+    ] = match;
 
     const cteIncidentId = params[Number(cteWhereParamIdx) - 1] as string;
     const updateIncidentId = params[Number(updateWhereParamIdx) - 1] as string;
@@ -311,7 +348,11 @@ export class FakeIncidentPgClient {
       cteRow[col] = existingRow[col];
     }
 
-    const ctx: EvalCtx = { existing: existingRow, cte: { [cteName!]: cteRow }, params };
+    const ctx: EvalCtx = {
+      existing: existingRow,
+      cte: { [cteName!]: cteRow },
+      params,
+    };
 
     const updates: FakeRow = {};
     for (const assignment of splitTopLevelCommas(setClauseRaw!)) {
@@ -325,9 +366,13 @@ export class FakeIncidentPgClient {
       throw new NotNullViolation("record");
     }
 
-    const returningMatch = returningRaw!.trim().match(/^\(([\s\S]+)\)\s+AS\s+(\w+)$/i);
+    const returningMatch = returningRaw!
+      .trim()
+      .match(/^\(([\s\S]+)\)\s+AS\s+(\w+)$/i);
     if (!returningMatch) {
-      throw new Error(`FakeIncidentPgClient: unsupported RETURNING "${returningRaw}"`);
+      throw new Error(
+        `FakeIncidentPgClient: unsupported RETURNING "${returningRaw}"`,
+      );
     }
     const [, returningExpr, alias] = returningMatch;
     // RETURNING reads the pre-update CTE snapshot, same as the SET clause.
@@ -346,7 +391,10 @@ export class FakeIncidentDatabaseService {
     return true;
   }
 
-  async query<T extends FakeRow = FakeRow>(sql: string, params?: readonly unknown[]) {
+  async query<T extends FakeRow = FakeRow>(
+    sql: string,
+    params?: readonly unknown[],
+  ) {
     return this.client.query<T>(sql, params ?? []);
   }
 }
