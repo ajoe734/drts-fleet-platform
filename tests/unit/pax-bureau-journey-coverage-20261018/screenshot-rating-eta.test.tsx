@@ -29,12 +29,14 @@ beforeEach(() => {
 });
 
 it.each(["id", "token"] as const)(
-  "%s low-score contact switch starts off and only explicit opt-in sends true",
+  "%s low-score contact switch starts on and only explicit opt-out sends false",
   async (authMode) => {
     const calls: Record<string, unknown>[] = [];
+    const urls: string[] = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_url, init) => {
+      vi.fn(async (url, init) => {
+        urls.push(String(url));
         calls.push(JSON.parse(String(init?.body)));
         return Response.json({ data: { score: 2 } });
       }),
@@ -50,10 +52,10 @@ it.each(["id", "token"] as const)(
     const contact = screen.getByRole("switch", {
       name: "需要客服與您聯繫嗎？",
     }) as HTMLInputElement;
-    expect(contact.checked).toBe(false);
+    expect(contact.checked).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "送出評價" }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]?.contactRequested).toBe(false);
+    expect(calls[0]?.contactRequested).toBe(true);
     first.unmount();
     render(
       <RatingCard fixture={fixture} token="owned-order" authMode={authMode} />,
@@ -64,11 +66,18 @@ it.each(["id", "token"] as const)(
     );
     fireEvent.click(screen.getByRole("button", { name: "送出評價" }));
     await waitFor(() => expect(calls).toHaveLength(2));
-    expect(calls[1]?.contactRequested).toBe(true);
+    expect(calls[1]?.contactRequested).toBe(false);
+    expect(urls).toEqual(
+      Array(2).fill(
+        authMode === "token"
+          ? "/api/passenger-rides/owned-order/ratings"
+          : "/api/passenger-app/rides/owned-order/ratings",
+      ),
+    );
   },
 );
 
-it("a higher score suppresses contact even after an explicit low-score opt-in", async () => {
+it("a higher score suppresses contact even when low-score contact defaults on", async () => {
   let payload: Record<string, unknown> | undefined;
   vi.stubGlobal(
     "fetch",
@@ -90,7 +99,13 @@ it("a higher score suppresses contact even after an explicit low-score opt-in", 
     />,
   );
   fireEvent.click(screen.getByLabelText("1 星"));
-  fireEvent.click(screen.getByRole("switch", { name: "需要客服與您聯繫嗎？" }));
+  expect(
+    (
+      screen.getByRole("switch", {
+        name: "需要客服與您聯繫嗎？",
+      }) as HTMLInputElement
+    ).checked,
+  ).toBe(true);
   fireEvent.click(screen.getByLabelText("5 星"));
   expect(screen.queryByRole("switch")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "送出評價" }));
@@ -187,6 +202,7 @@ it("the actual mounted stream updates the arrival clock and rejects an older rep
     minutes: 2,
     calculatedAt: new Date(TIME + 10_000).toISOString(),
   };
+  vi.setSystemTime(TIME + 10_000);
   await act(async () => Events.current.emit(next, 2));
   await screen.findByText(/約 00:00 抵達/);
   await act(async () => Events.current.emit(view(), 1));
@@ -298,10 +314,34 @@ it("the mounted on-trip page updates the clock and remaining road distance and s
   await act(async () => Events.current.onerror?.());
   expect(screen.queryByText("約 00:00 抵達目的地")).toBeNull();
   expect(screen.getByText("目前無法預估抵達時間與剩餘距離")).toBeTruthy();
-  await act(async () => Events.current.onopen?.());
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(61_000);
+    Events.current.onopen?.();
+  });
+  expect(screen.queryByText("約 00:00 抵達目的地")).toBeNull();
+  expect(screen.getByText("目前無法預估抵達時間與剩餘距離")).toBeTruthy();
   const completed = onTripView();
   completed.order.status = "completed";
   await act(async () => Events.current.emit(completed, 3));
   expect(screen.queryByText(/抵達目的地/)).toBeNull();
   expect(screen.queryByText(/剩餘 0.7 公里/)).toBeNull();
+});
+
+it("the shared observation clock expires an ETA even while SSE stays connected without new GPS", async () => {
+  vi.stubGlobal("EventSource", Events);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ data: onTripView() })),
+  );
+  render(
+    <PassengerRidePage token="owned-token" authMode="token" kind="ride" />,
+  );
+  await screen.findByText("約 00:01 抵達目的地");
+  await act(async () => Events.current.onopen?.());
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(61_000);
+  });
+  expect(screen.queryByText("約 00:01 抵達目的地")).toBeNull();
+  expect(screen.getByText("目前無法預估抵達時間與剩餘距離")).toBeTruthy();
+  expect(screen.getByText("司機位置更新稍有延遲")).toBeTruthy();
 });

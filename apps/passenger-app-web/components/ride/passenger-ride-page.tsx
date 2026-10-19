@@ -41,7 +41,34 @@ import { ComplaintForm } from "./complaint-form";
 const ConnectionContext = React.createContext<{
   connectionState: "connecting" | "connected" | "disconnected";
   lastEventTime: number;
+  now?: number;
 }>({ connectionState: "connected", lastEventTime: 0 });
+
+// Reuse the map's existing observation clock for both map and ETA expiry.
+// This is a local presentation clock, never another authority poller.
+function PassengerConnectionProvider({
+  connectionState,
+  lastEventTime,
+  mapState,
+  children,
+}: {
+  connectionState: "connecting" | "connected" | "disconnected";
+  lastEventTime: number;
+  mapState: PassengerRideFixture["mapState"];
+  children: ReactNode;
+}) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (mapState !== "fresh" && mapState !== "stale") return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [mapState]);
+  return (
+    <ConnectionContext.Provider value={{ connectionState, lastEventTime, now }}>
+      {children}
+    </ConnectionContext.Provider>
+  );
+}
 
 const monoFont = '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace';
 const shellInset = 14;
@@ -345,15 +372,12 @@ function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
 
 function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
   const positions = getPassengerTrackingMapPositions(fixture);
-  const { lastEventTime, connectionState } =
-    React.useContext(ConnectionContext);
-  const [now, setNow] = React.useState(Date.now());
-
-  React.useEffect(() => {
-    if (fixture.mapState !== "fresh" && fixture.mapState !== "stale") return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [fixture.mapState]);
+  const {
+    lastEventTime,
+    connectionState,
+    now: observationClock,
+  } = React.useContext(ConnectionContext);
+  const now = Math.max(observationClock ?? 0, Date.now());
 
   const elapsedSeconds =
     lastEventTime > 0
@@ -540,8 +564,19 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
 }
 
 function EtaBlock({ fixture }: { fixture: PassengerRideFixture }) {
-  const { connectionState } = React.useContext(ConnectionContext);
-  const unavailable = connectionState === "disconnected" || !fixture.etaMain;
+  const { connectionState, now } = React.useContext(ConnectionContext);
+  const location = fixture.tracking?.location;
+  const observationAge = location
+    ? Math.max(now ?? 0, Date.now()) - Date.parse(location.recordedAt)
+    : NaN;
+  const staleObservation =
+    fixture.tracking !== undefined &&
+    (fixture.tracking?.locationFreshness !== "fresh" ||
+      !Number.isFinite(observationAge) ||
+      observationAge < -5_000 ||
+      observationAge >= 60_000);
+  const unavailable =
+    connectionState === "disconnected" || staleObservation || !fixture.etaMain;
   if (unavailable) {
     return fixture.screenId === "P5-07" ? (
       <div role="status" style={{ margin: "0 14px 12px", textAlign: "center" }}>
@@ -1379,7 +1414,7 @@ function RatingCard({
   const [submitting, setSubmitting] = useState(false);
   const [submittedScore, setSubmittedScore] = useState<number | null>(null);
   const [comment, setComment] = useState("");
-  const [contactRequested, setContactRequested] = useState(false);
+  const [contactRequested, setContactRequested] = useState(true);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   if (!fixture.ratingSummary) return null;
   if (submittedScore !== null) {
@@ -2975,7 +3010,11 @@ export function PassengerRidePage({
 
   return (
     <Shell>
-      <ConnectionContext.Provider value={{ connectionState, lastEventTime }}>
+      <PassengerConnectionProvider
+        connectionState={connectionState}
+        lastEventTime={lastEventTime}
+        mapState={fixture.mapState}
+      >
         <PassengerScreen
           fixture={fixture}
           token={token}
@@ -2983,7 +3022,7 @@ export function PassengerRidePage({
           onCertificateUpdate={handleCertificateUpdate}
           onFixtureUpdate={handleFixtureUpdate}
         />
-      </ConnectionContext.Provider>
+      </PassengerConnectionProvider>
     </Shell>
   );
 }

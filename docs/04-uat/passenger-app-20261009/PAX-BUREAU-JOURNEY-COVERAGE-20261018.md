@@ -321,3 +321,40 @@ unknown COMMIT只採原booking/receipt範圍，非全部audit／outbox／通知�
 本次仍需正常checkpoint／plainpush／完整literal candidate handoff、自身必需CI、Root獨立review及protected merge；Source驗證不錄runtime key，也不自行部署。
 
 最後純文案修正後，同一12DOM再實跑12PASS／0skip／0fail，scoped lint與i18n均exit0，記錄為`guide-current16-page-copy-final`、`guide-current16-eslint-copy-final`與`guide-current16-i18n-copy-final`。原28.21秒TSC不重跑；其後只有UC15一句回執數量說明字串變更，三個其他程式檔byte相同，未宣稱TSC讀過未來字串。
+
+## 2026-10-19 完整送審圖續作：接車時刻、行程路線與首頁費用入口
+
+此為原 `PAX-BUREAU-JOURNEY-COVERAGE-20261018` 的正常續作，原五組、兩個驗收及 UC01–16 完整條件均保留。基底為 accepted `ae8d42cba48500e3a93a3b790781641d06665645`；不改寫上列 2fd／4cf8 等各輪 Source、隔離 CI 或共享執行信用，也不將本輪單元測試充作新版本共享操作。
+
+完整圖的聯絡開關其實為「預設開」。Root 最初讀成「關」的錯誤前提已在正常後續修改中更正，沒有 reset、amend 或重寫 checkpoint `5218e22385d23331c0a9564c0e9d9d302b7a217c`。該 checkpoint 的 9 案 before／fixed、56 案及其後 109 案回歸原物保留為當時歷史，不能以其中預設關閉的正向當成本次正確規格信用。現行低分開關維持初始 true，使用可鍵盤操作、有名稱的原生 switch；帳戶及 token 提交皆只有明確關閉才傳 false，三至五星仍傳 false。使用者另已確認「兩星以下都建案，開關只決定聯絡」，由原客訴作者處理後端政策；本續作不自行聲稱已改建案政策，歷史「拒絕聯絡無案」紀錄也不代表新規格。
+
+接車頁同時顯示原「預計 N 分鐘抵達」、原更新時間及「約 HH:MM 抵達」。時刻由已接受的 `pickupEta.calculatedAt + minutes` 推算，固定 Asia/Taipei 的 24 小時表示法，跨午夜仍正確；不以瀏覽器現在時間或事件接收時間改寫估計基準。現行 tracking 為 missing／stale／low_accuracy、無有效估計或已到站／終態時，不復活舊接車 ETA。舊 producer 省略 tracking 的相容分支只接受原 assignment 明確標示 fresh 的估計；原 pickup ETA 正向 fixture 因此前提由 missing 校正為 fresh，Web／Native 原斷言全保留，另以真 tracking 負向驗證拒絕舊估計。
+
+行程中的 `dropoffRoute` 是獨立、可為空的 live contract，不改不可變報價總距離。既有 `GeoService.route` 使用當前已指派司機／車輛／on-trip 任務的準確新鮮 GPS，路線終點為訂單的 canonical dropoff；回傳 provider、生成時間、GPS 觀測、指派版本、道路剩餘公尺及秒數。只有綁定一致且有效才顯示「約 HH:MM 抵達目的地」與「剩餘 X.X 公里」。沒有拿原報價總里程、已行駛里程或自行直線計算代替剩餘道路距離，也沒有新增供應商、憑證、端點或資料表。
+
+同一指派／任務／GPS／終點的既有三秒串流讀取共用請求，快取期限 30 秒、最多 128 筆；尚未完成的 provider 工作最多八筆，單次等候上限 2500 毫秒，provider 自身既有逾時保留。回應後重新讀實際訂單、指派、任務與定位；換派、換目的地、更新 GPS 或完程後的舊回應不能成為新估計。失敗、逾時、不準確、舊觀測及無定位都回空，不造備援數字。既有 SSE 的版本比較包含路線數值／生成／觀測，路線改變送出 eta_changed；真 mounted Passenger 頁面隨兩個觀測更新，拒絕同連線舊版本，斷線時不顯示舊 ETA；既有地圖的一秒本機觀測時鐘由地圖與 ETA 共用，沒有新 GPS 時也會在原 60 秒新鮮度界線移除估計，重連不復活過期資料。行程頁無可用估計時明示目前無法預估抵達時間與剩餘距離；沒有新 client poller、sleep 或 reload。
+
+首頁在載入、未登入、可預約、付款讀取失敗及首次費率確認狀態皆提供普通 `/fares` 費用與優惠入口。連結不寫費率 ACK、不送訂單、不繞過首次「我已閱讀並同意」或送出前費用確認。完整 E19a 正文與運送契約的逐字修正由 Root 的獨立精確文案層處理，本層保留原版本化確認與實際 booking/session 行為。
+
+### 原五組與完整案例的本輪界線
+
+| 原工作組                       | 完整案例   | 本輪新增 Source／本地查驗的範圍與仍待事項                                                                                                                                                 |
+| ------------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 首次登入、OTP、同意與回訪      | UC01–04    | 原真 301000ms／60 秒／15 分鐘等待及全部原案例不變；首頁費用入口與費率 ACK 門檻另以真元件驗證。本版本尚未取得新共享案例信用。                                                              |
+| 取消與各階段派遣               | UC05–07    | 原取消 disabled／409、原單／任務／指派／付款不變及正常完程斷言不減。新路線估計綁當前指派、任務、GPS與目的地；換派／完程遲到回應負向另驗。                                                 |
+| 產品適用與 60／90 秒           | UC06、UC16 | 不新增 instant 產品、不改任何業務期限；七產品、資格、福利與輪椅原對應及真供給缺項保留。                                                                                                   |
+| 揭露、圖資、定位、斷線與原請求 | UC07–10    | 新道路剩餘距離與時刻只採 provider live route；舊圖資故障、失去 ACK、跨瀏覽器／帳戶、67 秒斷線案例與全部原斷言保留。真 provider、實體 GNSS／裝置及道路導航仍待同版本實跑。                 |
+| 付款、文件、評價、申訴與福利   | UC11–16    | 只驗本次評價 switch／payload 與其他星等抑制；低分全部建案屬並行原作者政策修復。正式 E04／業者與付款來源、真 PSP、通知送達、真聯繫／失物交還及福利無障礙實車條件仍缺；不借舊結果代新版本。 |
+
+本輪證據存於 `.local/passenger-bureau-gap-correction-20261018/screenshot-submission-corrections-20261019/journey-codex2-source-20261019/`，每次保留實際 Source hash、command、exit 與 raw log。原第一次路線測試的產品 fixture 前提錯誤、TTL 測試準備時序錯誤、首次 true-imports 的三個自家 fixture 型別錯誤及未變舊 Ride 測試的 strict 錯誤均保留，沒有改 deadline 或壓低斷言湊綠。舊 Ride 檔已回到 accepted base 的相同 bytes，保留真 runtime 回歸；必要 true-imports 檢查只針對本輪實際變更檔及其真實匯入依賴，未放寬 strict flags。
+
+React checklist 已套用於兩個修改的 TSX 元件：hooks 無條件呼叫、狀態由既有控制項管理；原生 switch 有可讀名稱與 checked 狀態；費用入口為真 anchor；不新增 client 請求或額外計時器／重複 state 或樣式框架。新路線請求去重在既有 server producer，元件只顯示 authority 估計。
+
+本輪最終本地驗證依各次真執行分列，沒有偽造一輪全綠：
+
+- `final-clock-units.json` 原111案為110PASS／1FAIL／0skip；唯一失敗是新 pickup 測試把觀測放在假時鐘未前進的未來十秒，現行五秒未來觀測守衛正確拒絕。只把該單元的現在時間前進到觀測時間，沒有改期限或正式邏輯；`final-clock-fixed-units.json` 對應三個受影響 UI 檔實跑37PASS／0FAIL／0skip，涵蓋修後新 pickup 事件、default-on account/token true→明確 opt-out false、五星 false、午夜、路線變化、舊事件、斷線、60秒老化與終態。
+- 同一111案中的45個其他案例（pickup14、home6、live-authority13、live-presentation9、tracking-map3）當次均真PASS，之後其產品／測試 bytes未變；沒有為了改報告數字再重跑。producer 的29案另以故意不同的舊指派目的地及真正會被逐出的第一個 GPS key 加強 fixture，`final-route-fixture-controls.json` 實跑29PASS／0FAIL／0skip。這是跨真執行的111個相異案例範圍，不稱單輪111全綠。
+- `affected-native-api.json` 原生 API 的 OwnedMobility／MultiTaxi／Passenger authority 三檔159PASS／0FAIL／0skip，無 PG／HTTP／server。其後只有 UI 與測試 fixture 修改，沒有重跑或擴借信用。
+- `final-true-imports` noEmit／incrementalfalse exit0（26.79秒）；`final-passenger-noemit` 同參數完整 Passenger app exit0（15.96秒）。後續只加強 route unit 的 fixture 數值與同型別欄位，未改產品；不宣稱 compiler 讀過未來測試 bytes。scoped ESLint 及後續受影響 UI／tests ESLint 均exit0，正常 hooks仍必須執行。
+
+以上是 Source 與 socket-free 檢查，尚不是新 immutable 候選的自身 hosted CI 或 shared runtime。仍須正常 commit／plain push／新 PR、完整 handoff、自身必要 CI、Root獨立 review／protected merge，以及 Root 統一版本的實際操作。原正式來源、真車、真支付、福利無障礙與所有逐案缺項保留，不因本輪時刻／距離／入口／switch 改善而標為全16通過。

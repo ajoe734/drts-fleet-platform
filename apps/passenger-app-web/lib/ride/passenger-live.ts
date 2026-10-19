@@ -373,6 +373,10 @@ export function mapPassengerRideAuthorityToFixture(
     routeClock !== null &&
     view.tracking?.locationFreshness === "fresh" &&
     gps &&
+    Number.isFinite(gps.lat) &&
+    Math.abs(gps.lat) <= 90 &&
+    Number.isFinite(gps.lng) &&
+    Math.abs(gps.lng) <= 180 &&
     Number.isFinite(age) &&
     age >= -5_000 &&
     age < 60_000 &&
@@ -389,10 +393,10 @@ export function mapPassengerRideAuthorityToFixture(
     assignment?.driver?.driverId === view.tracking.driverId &&
     assignment?.vehicle?.vehicleId === view.tracking.vehicleId &&
     route.locationRecordedAt === gps.recordedAt &&
-    route.origin.lat === gps.lat &&
-    route.origin.lng === gps.lng &&
-    route.destination.lat === view.order.dropoff.lat &&
-    route.destination.lng === view.order.dropoff.lng &&
+    route.origin?.lat === gps.lat &&
+    route.origin?.lng === gps.lng &&
+    route.destination?.lat === view.order.dropoff.lat &&
+    route.destination?.lng === view.order.dropoff.lng &&
     Number.isFinite(route.remainingDistanceMeters) &&
     route.remainingDistanceMeters >= 0;
   const fareMinor = assignment?.routeFare?.estimatedFareMinor ?? null;

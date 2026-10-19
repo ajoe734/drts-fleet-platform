@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
@@ -26,6 +27,7 @@ afterEach(() => {
 });
 function mount() {
   const router = {
+    bfcacheId: "synthetic-home-test",
     push: vi.fn(),
     replace: vi.fn(),
     back: vi.fn(),
@@ -43,7 +45,7 @@ function mount() {
 function link() {
   expect(
     screen
-      .getByRole("link", { name: "查看完整費用與優惠說明", exact: true })
+      .getByRole("link", { name: "查看完整費用與優惠說明" })
       .getAttribute("href"),
   ).toBe("/fares");
 }
@@ -86,7 +88,7 @@ it.each(["loading", "unauthorized", "ready", "payment_failure"] as const)(
 );
 it("the ordinary link does not acknowledge a new fare version or bypass the real first-use gate", async () => {
   const f = bookingFixture();
-  f.account.feeAcknowledgementVersion = undefined;
+  delete f.account.feeAcknowledgementVersion;
   const original = globalThis.fetch;
   vi.stubGlobal(
     "fetch",
@@ -108,4 +110,50 @@ it("the ordinary link does not acknowledge a new fare version or bypass the real
   expect(f.calls.find((call) => call.method === "PATCH")?.body).toMatchObject({
     feeAcknowledgementVersion: f.fare.version,
   });
+});
+
+it("the real quoted booking sheet keeps its accessible fees link without creating or acknowledging a ride", async () => {
+  const f = bookingFixture();
+  const original = globalThis.fetch;
+  vi.stubGlobal(
+    "fetch",
+    async (url: string | URL | Request, init?: RequestInit) =>
+      String(url).endsWith("/payment-methods")
+        ? apiWireResponse({ methods: [] })
+        : original(url, init),
+  );
+  mount();
+  await screen.findByLabelText("預約時間");
+  for (const [index, name] of ["上車", "下車"].entries()) {
+    const input =
+      screen.getAllByPlaceholderText("請輸入街道、地點或地標")[index]!;
+    const picker = input.closest("[data-address-map-picker]") as HTMLElement;
+    fireEvent.change(input, { target: { value: name } });
+    fireEvent.click(within(picker).getByRole("button", { name: "搜尋" }));
+    fireEvent.click(
+      await within(picker).findByRole("button", { name: new RegExp(name) }),
+    );
+    await within(picker).findByRole("button", { name: "清除選點" });
+  }
+  fireEvent.change(screen.getByLabelText("預約時間"), {
+    target: { value: "2099-10-11T12:00" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "試算車資" }));
+  const sheet = await screen.findByRole("dialog", { name: "確認叫車" });
+  expect(
+    within(sheet)
+      .getByRole("link", { name: "查看完整費用與優惠說明" })
+      .getAttribute("href"),
+  ).toBe("/fares");
+  expect(
+    (within(sheet).getByLabelText("我已確認費用與優惠說明") as HTMLInputElement)
+      .checked,
+  ).toBe(false);
+  expect(
+    f.calls.some(
+      (call) =>
+        call.method === "PATCH" ||
+        (call.method === "POST" && call.path.endsWith("/rides")),
+    ),
+  ).toBe(false);
 });

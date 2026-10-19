@@ -116,6 +116,9 @@ function setup() {
 
 it("the real producer uses the assigned GPS to canonical dropoff road route, not the immutable quote", async () => {
   const f = setup();
+  // A retained assignment destination must not replace the actual order target.
+  f.assignment.routeFare.dropoff.lat = 24.9;
+  f.assignment.routeFare.dropoff.lng = 120.9;
   const original = structuredClone(f.assignment);
   const [first, second] = await Promise.all([f.read(), f.read()]);
   expect(f.route).toHaveBeenCalledTimes(1);
@@ -323,7 +326,7 @@ it("the actual account SSE emits new route metrics/generation even with unchange
 
 it("the bounded cache evicts older observations without reusing a foreign route", async () => {
   const f = setup();
-  const original = { ...f.position };
+  const original = { ...f.position, lat: 25 };
   for (let index = 0; index < 130; index++) {
     f.position.lat = 25 + index / 10000;
     f.position.recordedAt = new Date(NOW + index).toISOString();
