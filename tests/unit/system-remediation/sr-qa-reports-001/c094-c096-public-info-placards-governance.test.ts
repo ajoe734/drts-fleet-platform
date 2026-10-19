@@ -12,11 +12,11 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
 
   // ── C094: 乘客揭露／公開車資版本審核 ──────────────────────────────────────────
 
-  it("C094: P5 審查員審核並發布公開資訊版本，完成審計記錄與生效時間更新", () => {
+  it("C094: P5 審查員審核並發布公開資訊版本，完成審計記錄與生效時間更新", async () => {
     const service = createService();
 
     // 1. 建立草稿版本
-    const draft = service.createPublicInfoVersion(
+    const draft = await service.createPublicInfoVersion(
       {
         title: "2026 Q3 乘客權益與車資揭露修訂版",
         callPhone: "0800-111-222",
@@ -33,7 +33,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
     expect(draft.versionId).toMatch(/^public_info_/);
 
     // 2. 由 P5 審查員審核通過並發布
-    const published = service.publishPublicInfoVersion(
+    const published = await service.publishPublicInfoVersion(
       draft.versionId,
       {},
       "req-c094-publish",
@@ -50,7 +50,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
     expect(found?.status).toBe("published");
   });
 
-  it("C094: 負向防禦：未指派或無權角色不能直接竄改或重複發布同一版本 (409 PUBLIC_INFO_VERSION_NOT_DRAFT)", () => {
+  it("C094: 負向防禦：未指派或無權角色不能直接竄改或重複發布同一版本 (409 PUBLIC_INFO_VERSION_NOT_DRAFT)", async () => {
     const service = createService();
 
     // 既有已發布版本
@@ -58,7 +58,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
 
     // 嘗試對已發布版本再次發布 -> 拋出 409 Conflict (PUBLIC_INFO_VERSION_NOT_DRAFT)
     try {
-      service.publishPublicInfoVersion(
+      await service.publishPublicInfoVersion(
         seedVersionId,
         {},
         "req-c094-republish",
@@ -74,11 +74,11 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
 
   // ── C096: 公開電話、車資、版本與歷史治理 ────────────────────────────────────
 
-  it("C096: 公開資訊版本歷史完整治理：允許刪除草稿，嚴格禁止刪除已生效之發布版本 (409 PUBLIC_INFO_VERSION_NOT_DRAFT)", () => {
+  it("C096: 公開資訊版本歷史完整治理：允許刪除草稿，嚴格禁止刪除已生效之發布版本 (409 PUBLIC_INFO_VERSION_NOT_DRAFT)", async () => {
     const service = createService();
 
     // 1. 建立並刪除草稿 -> 正常成功
-    const draft = service.createPublicInfoVersion(
+    const draft = await service.createPublicInfoVersion(
       {
         title: "臨時測試草稿版",
         callPhone: "0800-999-999",
@@ -91,7 +91,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
       "req-c096-draft",
     );
 
-    const deleted = service.deleteDraftPublicInfoVersion(
+    const deleted = await service.deleteDraftPublicInfoVersion(
       draft.versionId,
       "req-c096-del-draft",
       "admin-01",
@@ -100,7 +100,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
 
     // 2. 嘗試刪除已發布版本 -> 拋出 409
     try {
-      service.deleteDraftPublicInfoVersion(
+      await service.deleteDraftPublicInfoVersion(
         "public-info-demo-001",
         "req-c096-del-published",
         "admin-01",
@@ -168,7 +168,7 @@ describe("C094 & C096: P5 審查員乘客揭露審核與公開資訊／牌貼版
 
   it("C096: 車內牌貼發布生命週期與重複發布阻斷 (409 PLACARD_VERSION_ALREADY_PUBLISHED)", async () => {
     const service = createService();
-    const draftPublicInfo = service.createPublicInfoVersion(
+    const draftPublicInfo = await service.createPublicInfoVersion(
       {
         title: "2026 Q4 專車公開資訊草稿",
         callPhone: "0800-777-777",
