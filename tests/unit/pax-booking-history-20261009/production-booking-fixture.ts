@@ -45,6 +45,16 @@ export function createProductionBookingFixture(
     history: null as unknown[] | null,
   };
   let pending: typeof state | null = null;
+  const bookingReceipts = new Map<
+    string,
+    {
+      actor_id: unknown;
+      payload_hash: unknown;
+      status: string;
+      response_body: unknown;
+    }
+  >();
+  let pendingReceipts: typeof bookingReceipts | null = null;
   const calls: {
     sql: string;
     values: readonly unknown[];
@@ -91,16 +101,25 @@ export function createProductionBookingFixture(
         ],
         rowCount: 1,
       };
-    if (text === "BEGIN") pending = structuredClone(state);
+    if (text === "BEGIN") {
+      pending = structuredClone(state);
+      pendingReceipts = structuredClone(bookingReceipts);
+    }
     if (text === "COMMIT") {
       if (faults.includes("commit")) throw new Error("injected commit failure");
       Object.assign(state, pending);
+      if (pendingReceipts) {
+        bookingReceipts.clear();
+        for (const [key, row] of pendingReceipts) bookingReceipts.set(key, row);
+      }
       pending = null;
+      pendingReceipts = null;
       if (faults.includes("lost_commit_reply"))
         throw new Error("injected lost commit reply");
     }
     if (text === "ROLLBACK") {
       pending = null;
+      pendingReceipts = null;
       if (faults.includes("rollback"))
         throw new Error("injected rollback failure");
     }
@@ -130,6 +149,35 @@ export function createProductionBookingFixture(
         rowCount: paymentPrerequisites.unpaidRows.length,
       };
     const target = transactional && pending ? pending : state;
+    if (text.includes("ops.idempotency_records")) {
+      const records =
+        transactional && pendingReceipts ? pendingReceipts : bookingReceipts;
+      const key = `${values[0]}|${values[1]}`;
+      if (text.startsWith("INSERT")) {
+        if (records.has(key)) return { rows: [], rowCount: 0 };
+        records.set(key, {
+          actor_id: values[2],
+          payload_hash: values[3],
+          status: "processing",
+          response_body: null,
+        });
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.startsWith("UPDATE")) {
+        const row = records.get(key);
+        if (!row) return { rows: [], rowCount: 0 };
+        records.set(key, {
+          ...row,
+          status: "completed",
+          response_body: JSON.parse(values[2] as string),
+        });
+        return { rows: [], rowCount: 1 };
+      }
+      return {
+        rows: records.has(key) ? [structuredClone(records.get(key))] : [],
+        rowCount: records.has(key) ? 1 : 0,
+      };
+    }
     if (text.startsWith("INSERT INTO ops.phase1_owned_orders")) {
       const order = JSON.parse(values[14] as string);
       if (
@@ -166,6 +214,14 @@ export function createProductionBookingFixture(
         rowCount: 1,
       };
     }
+    if (text.startsWith("SELECT record FROM ops.phase1_owned_orders"))
+      return {
+        rows:
+          state.order?.orderId === values[0]
+            ? [{ record: structuredClone(state.order) }]
+            : [],
+        rowCount: state.order?.orderId === values[0] ? 1 : 0,
+      };
     if (text.includes("SELECT count(*) FROM ops.phase1_dispatch_assignments"))
       return { rows: [{ count: "0" }], rowCount: 1 };
     if (text.includes("FROM passenger.fare_quote_snapshots"))
@@ -288,6 +344,7 @@ export function createProductionBookingFixture(
     accountRepository,
     snapshot,
     bookingRepository,
+    bookingReceipts: () => bookingReceipts,
     service,
     command,
     controller: new PassengerBookingController(service, multi),

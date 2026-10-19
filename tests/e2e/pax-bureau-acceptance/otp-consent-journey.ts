@@ -2,6 +2,7 @@ import { expect, type APIResponse, type Page } from "@playwright/test";
 
 export const PAX =
   process.env.PAX_REVIEW_PASSENGER_ORIGIN || "http://localhost:3319";
+const issuedAtByPhone = new Map<string, number>();
 
 export const camel = (value: any): any =>
   Array.isArray(value)
@@ -37,13 +38,23 @@ export async function issueSimulatedOtp(
   await trigger();
   const response = await requested;
   expect(response.ok(), `Rehearsal SMS HTTP${response.status()}`).toBe(true);
+  issuedAtByPhone.set(response.request().postDataJSON().target, Date.now());
   return camel(await response.json()).data;
 }
 
-export const requestSimulatedOtp = (page: Page) =>
-  issueSimulatedOtp(page, () =>
+export async function requestSimulatedOtp(page: Page) {
+  const phone = await page
+    .getByLabel("請輸入您的手機號碼", { exact: true })
+    .inputValue();
+  // Server target cooldown survives logout and applies to a second device too.
+  // Wait the unchanged real 60s window, rather than retrying a genuine 429.
+  const remaining =
+    (issuedAtByPhone.get(reviewPhoneTarget(phone)) ?? 0) + 60_000 - Date.now();
+  if (remaining > 0) await page.waitForTimeout(remaining);
+  return issueSimulatedOtp(page, () =>
     page.getByRole("button", { name: "取得驗證碼", exact: true }).click(),
   );
+}
 
 export const resendSimulatedOtp = (page: Page) =>
   issueSimulatedOtp(page, () =>
@@ -129,15 +140,26 @@ export async function logoutFromAccount(page: Page) {
 }
 
 /** An ordinary browser login, with an observed first-consent precondition. */
-export async function loginPassenger(page: Page, phone: string) {
+export async function loginPassenger(
+  page: Page,
+  phone: string,
+  firstConsent = true,
+) {
   await openPhoneLogin(page, phone);
   const { code } = await requestSimulatedOtp(page);
   await fillOtpCode(page, code);
   expect((await submitOtpVerify(page)).status()).toBe(201);
-  await expect(
-    page.getByText("歡迎加入，請同意服務條款", { exact: true }),
-  ).toBeVisible();
-  await acceptConsent(page);
+  if (firstConsent) {
+    await expect(
+      page.getByText("歡迎加入，請同意服務條款", { exact: true }),
+    ).toBeVisible();
+    await acceptConsent(page);
+  } else {
+    await page.waitForURL(`${PAX}/`);
+    await expect(
+      page.getByText("歡迎加入，請同意服務條款", { exact: true }),
+    ).not.toBeVisible();
+  }
   const response = await page.request.get(`${PAX}/api/passenger-app/me`);
   expect(response.status()).toBe(200);
   const account = camel(await response.json()).data.account;

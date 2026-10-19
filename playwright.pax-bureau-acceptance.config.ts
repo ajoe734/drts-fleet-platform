@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
 import base from "./playwright.pax-review-shared-order.config";
+import { resolve } from "node:path";
 
 // OTP/consent-gate branches only exercise the Passenger entry against the
 // original API; Ops and Driver are not involved there. The on_trip
@@ -17,6 +18,8 @@ export default defineConfig({
   testMatch: [
     /pax-bureau-acceptance\.spec\.ts$/,
     /pax-bureau-acceptance\/on-trip-cancellation\.spec\.ts$/,
+    /pax-bureau-acceptance\/reliability\.spec\.ts$/,
+    /pax-bureau-acceptance\/matching-timeout\.spec\.ts$/,
   ],
   timeout: 5 * 60_000,
   outputDir: ".artifacts/pax-bureau-acceptance/results",
@@ -25,6 +28,25 @@ export default defineConfig({
     ["json", { outputFile: ".artifacts/pax-bureau-acceptance/report.json" }],
   ],
   webServer: Array.isArray(base.webServer)
-    ? base.webServer.filter((_, index) => [0, 2, 4, 5].includes(index))
+    ? base.webServer.flatMap((server, index) => {
+        if (![0, 2, 4, 5].includes(index)) return [];
+        if (index !== 0) return [server];
+        return [
+          {
+            ...server,
+            env: {
+              ...server.env,
+              NODE_OPTIONS:
+                `${server.env?.NODE_OPTIONS || ""} --require=${resolve(__dirname, "tests/e2e/pax-bureau-acceptance/external-map-port.cjs")}`.trim(),
+              MAP_PROVIDER_MODE: "external",
+              MAP_PROVIDER_BACKEND: "google",
+              MAP_PROVIDER_NAME: "google",
+              GOOGLE_MAPS_GEOCODING_API_KEY:
+                "synthetic-hosted-external-map-port",
+              GOOGLE_MAPS_ROUTES_API_KEY: "synthetic-hosted-external-map-port",
+            },
+          },
+        ];
+      })
     : (base.webServer ?? []),
 });

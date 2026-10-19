@@ -15,6 +15,9 @@ import { driverOrigin } from "./review-runtime";
 test("the real UI disables cancellation once on_trip and the server independently rejects a direct cancel request", async ({
   browser,
 }, info) => {
+  // Includes the original scheduled pickup wait, normal Driver completion and
+  // two real CRM handling flows. Business/OTP/quote deadlines are unchanged.
+  test.setTimeout(8 * 60_000);
   const progress = createJourneyProgress(info.outputPath("safe-progress.json"));
   const step = progress.step;
   const contexts: BrowserContext[] = [];
@@ -28,10 +31,15 @@ test("the real UI disables cancellation once on_trip and the server independentl
     const driver = await step("Driver browser context", () =>
       roleBrowser(browser, "driver", contexts, progress),
     );
+    const replacementDriver = await step(
+      "Replacement Driver browser context",
+      () => roleBrowser(browser, "driver", contexts, progress),
+    );
     await onTripCancellationRejectionJourney(
       pax,
       ops,
       driver,
+      replacementDriver,
       driverOrigin(),
       step,
       info,

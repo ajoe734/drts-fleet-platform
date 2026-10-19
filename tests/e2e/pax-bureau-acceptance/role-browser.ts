@@ -7,10 +7,11 @@ export async function roleBrowser(
   role: ReviewRole,
   contexts: BrowserContext[],
   progress: ReturnType<typeof createJourneyProgress>,
+  timezoneId = "Asia/Taipei",
 ) {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
-    timezoneId: "Asia/Taipei",
+    timezoneId,
     extraHTTPHeaders: roleHeaders(role),
   });
   contexts.push(context);

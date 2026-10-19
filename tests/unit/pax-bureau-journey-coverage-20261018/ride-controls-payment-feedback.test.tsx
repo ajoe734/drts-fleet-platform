@@ -71,9 +71,7 @@ describe("ReviewRideControls retry-payment feedback", () => {
     );
     renderComponent(<ReviewRideControls orderId={orderId} />);
     fireEvent.click(screen.getByText("依既有政策重試演練付款"));
-    await waitFor(() =>
-      expect(retryMessageText()).toBe("款項待客服處理"),
-    );
+    await waitFor(() => expect(retryMessageText()).toBe("款項待客服處理"));
   });
 
   it("keeps the existing failure message when the retry call itself fails", async () => {
@@ -81,7 +79,9 @@ describe("ReviewRideControls retry-payment feedback", () => {
     renderComponent(<ReviewRideControls orderId={orderId} />);
     fireEvent.click(screen.getByText("依既有政策重試演練付款"));
     await waitFor(() =>
-      expect(retryMessageText()).toBe("補繳未完成，請確認登入與付款配置後重試。"),
+      expect(retryMessageText()).toBe(
+        "補繳未完成，請確認登入與付款配置後重試。",
+      ),
     );
   });
 });

@@ -36,11 +36,10 @@ export async function registerDriver(
   driver: Page,
   base: string,
   step: JourneyStep,
+  driverId = "pax-review-driver-a",
 ) {
   const code = await step("Ops invite driver device", async () => {
-    await ops
-      .getByLabel("演練司機", { exact: true })
-      .selectOption("pax-review-driver-a");
+    await ops.getByLabel("演練司機", { exact: true }).selectOption(driverId);
     const invitation = ops.waitForResponse(
       (r) =>
         r.url().endsWith("/auth/driver/device/invite") &&
@@ -92,10 +91,9 @@ export async function bind(page: Page, scenario: "success" | "retry_once") {
   return result.method.paymentMethodId as string;
 }
 
-export async function book(
+export async function prepareBooking(
   page: Page,
   paymentMethodId: string,
-  unpaidRejection = false,
   verifyPrerequisites = false,
   prerequisiteInfo?: TestInfo,
 ) {
@@ -105,9 +103,10 @@ export async function book(
   // AuthScreen's P5Header renders the title as text. Settings load separately;
   // wait for the actual disclosure or form before deciding whether to agree.
   await expect(
-    ack.or(page.getByLabel("示範上車地點", { exact: true })),
+    ack.or(page.getByLabel("演練選址方式", { exact: true })),
   ).toBeVisible();
   if (await ack.isVisible()) await ack.click();
+  await page.getByLabel("演練選址方式", { exact: true }).selectOption("fixed");
   await page
     .getByLabel("示範上車地點", { exact: true })
     .selectOption("review-banqiao");
@@ -163,6 +162,21 @@ export async function book(
     ).toBeDisabled();
   }
   await page.getByRole("checkbox", { name: "我已確認費用與優惠說明" }).check();
+}
+
+export async function book(
+  page: Page,
+  paymentMethodId: string,
+  unpaidRejection = false,
+  verifyPrerequisites = false,
+  prerequisiteInfo?: TestInfo,
+) {
+  await prepareBooking(
+    page,
+    paymentMethodId,
+    verifyPrerequisites,
+    prerequisiteInfo,
+  );
   const created = page.waitForResponse(
     (r) =>
       r.url().endsWith("/passenger-app/rides") &&

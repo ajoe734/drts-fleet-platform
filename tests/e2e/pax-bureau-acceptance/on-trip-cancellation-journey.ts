@@ -10,6 +10,7 @@ import {
   readAssignedTripAndAccept,
   completeStartedTrip,
   OPS,
+  opsRead,
   PAX,
   type JourneyStep,
 } from "../pax-review-shared-order/additional-journey";
@@ -17,6 +18,11 @@ import { recordOrderEvidence } from "../pax-review-shared-order/evidence";
 import { trackInterruptedRehearsal } from "../pax-review-shared-order/interrupted-rehearsal-finalizer";
 import { loginPassenger } from "./otp-consent-journey";
 import { bureauPhone } from "./review-runtime";
+import {
+  completedOrderAftercare,
+  pendingReceiptJourney,
+} from "./receipt-complaint-journey";
+import { incompleteDisclosureJourney } from "./supply-disclosure-journey";
 
 async function cancellationSnapshot(
   pax: Page,
@@ -99,6 +105,7 @@ async function cancellationSnapshot(
 export async function onTripCancellationRejectionJourney(
   pax: Page,
   ops: Page,
+  previousDriver: Page,
   driver: Page,
   driverBase: string,
   step: JourneyStep,
@@ -118,7 +125,8 @@ export async function onTripCancellationRejectionJourney(
       await ops.getByRole("button", { name: "準備虛構演練車司" }).click();
       expect((await preparing).ok()).toBe(true);
     });
-    await registerDriver(ops, driver, driverBase, step);
+    await registerDriver(ops, previousDriver, driverBase, step);
+    await registerDriver(ops, driver, driverBase, step, "pax-review-driver-b");
     await step("Passenger ordinary OTP login and persisted first consent", () =>
       loginPassenger(pax, bureauPhone("trip")),
     );
@@ -131,11 +139,66 @@ export async function onTripCancellationRejectionJourney(
       book(pax, paymentMethodId),
     );
     orderId = bookedOrderId;
-    const assigned = await step(
+    const firstAssigned = await step(
       "Ops dispatches and assigns the real driver",
       async () => {
         await createDispatch(ops, bookedOrderId);
+        await incompleteDisclosureJourney(pax, ops, bookedOrderId, info);
         return assign(ops);
+      },
+    );
+    await readAssignedTripAndAccept(
+      previousDriver,
+      driverBase,
+      bookedOrderId,
+      step,
+      firstAssigned.taskId,
+    );
+    const assigned = await step(
+      "UC07 actual reassignment shows Driver B's new task and closes Driver A's old task on the same order",
+      async () => {
+        const next = await assign(ops, "pax-review-driver-b", true);
+        expect(next.taskId).not.toBe(firstAssigned.taskId);
+        const oldTaskResponse = await ops.request.get(
+          `${OPS}/control-plane-proxy/driver/tasks/${firstAssigned.taskId}`,
+        );
+        expect(oldTaskResponse.status()).toBe(200);
+        expect(camel(await oldTaskResponse.json()).data).toMatchObject({
+          taskId: firstAssigned.taskId,
+          orderId: bookedOrderId,
+          status: "cancelled",
+        });
+        await expect(previousDriver.getByText(/已取消/).first()).toBeVisible();
+        for (const label of [
+          "前往接送點",
+          "抵達上車點",
+          "開始行程",
+          "完成行程",
+        ]) {
+          const control = previousDriver.getByRole("button", {
+            name: label,
+            exact: true,
+          });
+          if (await control.count()) await expect(control).toBeDisabled();
+        }
+        await readAssignedTripAndAccept(
+          driver,
+          driverBase,
+          bookedOrderId,
+          step,
+          next.taskId,
+        );
+        const ride = await authority(pax, bookedOrderId);
+        expect(ride.assignment.driver.driverId).toBe("pax-review-driver-b");
+        expect(ride.assignment.vehicle.vehicleId).toBe("pax-review-vehicle-b");
+        await expect(pax.getByText("SIM-2001", { exact: true })).toBeVisible();
+        await recordOrderEvidence(
+          bookedOrderId,
+          "UC07-real-Driver-B-same-order",
+          { pax, ops, driver, previousDriver },
+          info,
+        );
+        return next;
       },
     );
     const taskId = assigned.taskId as string;
@@ -143,13 +206,6 @@ export async function onTripCancellationRejectionJourney(
     await step(
       "Driver accepts, departs and arrives at the real pickup",
       async () => {
-        await readAssignedTripAndAccept(
-          driver,
-          driverBase,
-          bookedOrderId,
-          step,
-          taskId,
-        );
         for (const [label, action] of [
           ["前往接送點", "depart"],
           ["抵達上車點", "arrived_pickup"],
@@ -274,6 +330,92 @@ export async function onTripCancellationRejectionJourney(
         });
       },
     );
+    await pendingReceiptJourney(pax, bookedOrderId, step, info);
+    await step(
+      "UC10 all three roles lose real browser network access for sixty-five seconds, then recover the original active task without a replacement order",
+      async () => {
+        const before = await cancellationSnapshot(
+          pax,
+          ops,
+          bookedOrderId,
+          taskId,
+        );
+        const pages = [pax, ops, previousDriver, driver];
+        const startedAt = Date.now();
+        const failures: { role: string; networkRejected: boolean }[] = [];
+        try {
+          await Promise.all(
+            pages.map((page) => page.context().setOffline(true)),
+          );
+          for (const [role, page, url] of [
+            ["pax", pax, `${PAX}/api/passenger-app/rides/${bookedOrderId}`],
+            ["ops", ops, `${OPS}/control-plane-proxy/orders/${bookedOrderId}`],
+            ["driver", driver, driver.url()],
+          ] as const) {
+            const rejected = await page.evaluate(async (target) => {
+              try {
+                await fetch(target, { cache: "no-store" });
+                return false;
+              } catch (reason) {
+                return reason instanceof TypeError;
+              }
+            }, url);
+            expect(rejected).toBe(true);
+            failures.push({ role, networkRejected: rejected });
+          }
+          // A genuine outage longer than the existing sixty-second offer window;
+          // this task is already on_trip, so no offer deadline is modified.
+          await pax.waitForTimeout(65_000);
+          await info.attach("UC10-all-roles-offline-UI", {
+            body: await pax.screenshot({ fullPage: true }),
+            contentType: "image/png",
+          });
+        } finally {
+          await Promise.all(
+            pages.map((page) => page.context().setOffline(false)),
+          );
+        }
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(65_000);
+        await pax.reload();
+        await ops.reload();
+        await opsRead(ops, bookedOrderId);
+        await expect(
+          pax.getByRole("button", { name: "取消行程", exact: true }).first(),
+        ).toBeDisabled();
+        await expect(
+          driver.getByText(bookedOrderId, { exact: false }).first(),
+        ).toBeVisible();
+        await expect(
+          driver.getByRole("button", { name: "完成行程", exact: true }),
+        ).toBeVisible();
+        const after = await cancellationSnapshot(
+          pax,
+          ops,
+          bookedOrderId,
+          taskId,
+        );
+        expect(after).toEqual(before);
+        await recordOrderEvidence(
+          bookedOrderId,
+          "UC10-all-roles-recovered-original-task",
+          { pax, ops, driver, previousDriver },
+          info,
+        );
+        await info.attach("UC10-all-roles-offline-recovery-facts", {
+          body: JSON.stringify({
+            orderId: bookedOrderId,
+            taskId,
+            failures,
+            elapsedMs: Date.now() - startedAt,
+            sameOrderTaskAssignmentPaymentAndCharge: true,
+            internalServicesMocked: false,
+            limitation:
+              "Real browser-context offline/reconnect; not a physical OS kill or an hours-long outage",
+          }),
+          contentType: "application/json",
+        });
+      },
+    );
     await step("Driver completes this test's own started trip normally", () =>
       completeStartedTrip(driver, pax, bookedOrderId, ops, step),
     );
@@ -292,6 +434,7 @@ export async function onTripCancellationRejectionJourney(
       { pax, ops, driver },
       info,
     );
+    await completedOrderAftercare(pax, ops, bookedOrderId, step, info);
     return bookedOrderId;
   } finally {
     if (!handled) await finalizeInterrupted();

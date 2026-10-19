@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import { BOOKING_RECOVERY_KEY } from "../../../apps/passenger-app-web/components/booking/booking-draft-recovery";
 import { apiWireResponse } from "../pax-web-shell-20261009/api-wire-fixtures";
 import { NextRequest } from "next/server";
 import * as bff from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
@@ -26,6 +27,10 @@ export const selection = {
   label: "測試付款方式",
 };
 export function bookingFixture() {
+  // A new fixture is a new isolated account scenario; remounts using this
+  // same fixture deliberately retain the per-tab recovery record.
+  if (typeof sessionStorage !== "undefined")
+    sessionStorage.removeItem(BOOKING_RECOVERY_KEY);
   const f = {
     account: {
       drtsPassengerId: "synthetic-account-1",
