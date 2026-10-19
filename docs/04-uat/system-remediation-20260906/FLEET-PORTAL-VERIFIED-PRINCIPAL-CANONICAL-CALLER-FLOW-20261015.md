@@ -327,3 +327,47 @@ local 263 tests or this UAT document.
 The final JSON contains 263 executed test instances and 261 unique
 file/full-name pairs: two original parameterized scenarios share their
 display titles. These are not added to prior 37/45 passing subset totals.
+
+### Mandatory root CI resolver continuation (2026-10-19)
+
+Candidate `2f4588332655bf1df7610281dd34d29311a57930` exposed a test
+collection failure in its own Product run `39209864414`, job `117921733102`:
+root Vitest's jsdom import analysis could not resolve the `server-only`
+marker imported by the actual Fleet principal module. The earlier local
+task config had supplied this marker and Fleet app aliases; its passing
+263 tests did not establish compatibility with the mandatory root config.
+The hosted job's 3024 passing / 5 skipped tests do not cancel its one
+failed file, and the old run is not rerun or represented as green.
+
+Normal Supervisor coordination appends only `vitest.config.ts` to the
+original ordered fourteen scopes. Its added import and plugin registration
+use the task-owned `fleet-source-resolver.ts`. Only imports originating in
+the real Fleet app resolve the existing test-only server marker and Fleet
+`@/` paths. The resolver also handles paths already expanded by Vite's
+earlier alias plugin. Other app importers retain their original aliases;
+the global aliases, include list, default timeout, environments, skips,
+sharding, esbuild and oxc configuration remain unchanged. No product,
+principal, guard, business method or existing test assertion changed.
+
+`root-ci-before-collection` reproduces the same import-analysis failure
+with the unchanged root config (direct exit 1, zero collected tests).
+`root-ci-fixed-callers` runs the same `vitest run -c vitest.config.ts`
+entry point after the resolver change (direct exit 0, all original five
+actual caller cases pass). Additional root-entry existing-flow regression,
+source typecheck and lint receipts are stored beside those logs. The
+final root-entry selection passes 125 tests in 10 files with zero skips,
+including the original five callers, principal/mounted/retained Fleet
+cases, 25 Platform session cases and 33 Ops/supply-review locale cases.
+The separate five-case run is included in this selection, not added to it.
+Source typecheck, affected lint and formatting checks pass. Earlier missing
+sparse read paths and an absent existing Ops dependency link are retained
+as local preparation failures; only tracked Source materialization and an
+existing dependency symlink were needed to run the other-app controls.
+The original 59 product/test manifest paths remain byte-identical to 2f,
+including every existing test and all original 289 assertion nodes.
+The continuation's immutable identity, exact counts and full original
+four-key mapping are in `root-ci-continuation-delivery-result.json` and
+its manifest in the same evidence directory. The original handoff,
+before/fixed results, assertions and failed hosted run remain historical
+evidence. A new exact-candidate hosted CI and independent review are still
+required; this test harness repair grants no deployed/provider credit.
