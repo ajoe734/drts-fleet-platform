@@ -191,6 +191,7 @@ export default function DriverTripMap({
 }: DriverTripMapProps) {
   const model = buildDriverTripNavigationModel({ task, order });
   const fixState = getDriverLocationFixState({
+    task,
     location: driverLocation,
     now,
   });
@@ -289,8 +290,10 @@ export default function DriverTripMap({
             initialRegion={initialRegion}
             mapType="standard"
             provider={PROVIDER_GOOGLE}
-            showsMyLocationButton
-            showsUserLocation={fixState.state !== "missing"}
+            showsMyLocationButton={fixState.state !== "stopped"}
+            showsUserLocation={
+              fixState.state === "fresh" || fixState.state === "stale"
+            }
             style={styles.nativeMap}
           >
             {model.stops.pickup.coordinate ? (
@@ -339,7 +342,10 @@ export default function DriverTripMap({
         <Text style={styles.noticeBody}>{fixState.detail}</Text>
         {fixState.coordinateLabel ? (
           <Text style={styles.noticeMeta}>
-            Driver coordinate {fixState.coordinateLabel}
+            {fixState.state === "stopped"
+              ? "Last driver coordinate"
+              : "Driver coordinate"}{" "}
+            {fixState.coordinateLabel}
           </Text>
         ) : null}
       </View>
