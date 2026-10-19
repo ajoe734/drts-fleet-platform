@@ -48,6 +48,9 @@ function createHarness(tenantId: string) {
     auditNotificationService as never,
   );
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(() => [
       {
         driverId: "driver-release-001",

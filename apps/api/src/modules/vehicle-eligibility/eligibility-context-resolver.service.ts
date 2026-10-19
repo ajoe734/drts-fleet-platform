@@ -80,6 +80,13 @@ export class EligibilityContextResolver {
     private readonly vehicleEligibilityService: VehicleEligibilityService,
   ) {}
 
+  async prepareMatchingSuppression(driverId: string) {
+    await this.regulatoryRegistryService.prepareMatchingSuppressions(driverId);
+    return this.regulatoryRegistryService.hasActiveMatchingSuppression(
+      driverId,
+    );
+  }
+
   resolve(
     command: ResolveRuntimeEligibilityContextCommand,
   ): ResolvedRuntimeEligibilityContext {
@@ -174,6 +181,13 @@ export class EligibilityContextResolver {
         `capability:${vehicleCapability.capabilityId}@${vehicleCapability.updatedAt}`,
       ].join("|");
 
+    const suppressionActive =
+      this.regulatoryRegistryService.hasActiveMatchingSuppression(
+        command.driverId,
+        Date.parse(evaluatedAt),
+      );
+    const driverReadiness =
+      command.driverReadiness ?? this.resolveDriverReadiness(driver);
     return {
       orderId: command.orderId,
       dispatchJobId: command.dispatchJobId,
@@ -191,8 +205,15 @@ export class EligibilityContextResolver {
       serviceProduct,
       currentLocation,
       platformBindings,
-      driverReadiness:
-        command.driverReadiness ?? this.resolveDriverReadiness(driver),
+      driverReadiness: suppressionActive
+        ? {
+            ready: false,
+            reasonCodes: [
+              ...driverReadiness.reasonCodes,
+              "INCIDENT_MATCHING_SUPPRESSION",
+            ],
+          }
+        : driverReadiness,
       vehicleReadiness:
         command.vehicleReadiness ?? this.resolveVehicleReadiness(vehicle),
     };
@@ -207,7 +228,9 @@ export class EligibilityContextResolver {
         ? []
         : [
             ...new Set(
-              driver.eligibilityBlockedReasons.map((reason) => reason.toUpperCase()),
+              driver.eligibilityBlockedReasons.map((reason) =>
+                reason.toUpperCase(),
+              ),
             ),
           ],
     };
@@ -216,7 +239,8 @@ export class EligibilityContextResolver {
   private resolveVehicleReadiness(
     vehicle: VehicleRegistryRecord,
   ): ResolvedReadinessState {
-    const blockedReasons = vehicle.supplyLifecycle.dispatch.blockedReasons ?? [];
+    const blockedReasons =
+      vehicle.supplyLifecycle.dispatch.blockedReasons ?? [];
     const ready = vehicle.supplyLifecycle.dispatch.eligible;
 
     return {

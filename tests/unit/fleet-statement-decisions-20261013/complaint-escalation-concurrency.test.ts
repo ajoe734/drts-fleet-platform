@@ -133,6 +133,7 @@ function services(
     audit,
     observePublication
       ? ({
+          isEnabled: () => false,
           persistChanges: incidentPersistence,
           reportPersistenceFailure: vi.fn(),
         } as unknown as IncidentRepository)

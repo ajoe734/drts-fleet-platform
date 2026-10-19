@@ -334,7 +334,7 @@ export class CallcenterController {
   }
 
   @Post("sessions/:callId/transfer-to-incident")
-  transferCallToIncident(
+  async transferCallToIncident(
     @Param("callId") callId: string,
     @Body() command: TransferCallToIncidentCommand,
     @Headers("x-request-id") requestId?: string,
@@ -359,12 +359,12 @@ export class CallcenterController {
     if (command.relatedDriverId) {
       createIncidentInput.relatedDriverId = command.relatedDriverId;
     }
-    const createdIncident = this.incidentService.createIncident(
+    const createdIncident = await this.incidentService.createIncidentForCommit(
       createIncidentInput,
       requestId,
     );
     const incident = session.agentId
-      ? this.incidentService.updateIncident(
+      ? await this.incidentService.updateIncidentForCommit(
           createdIncident.incidentId,
           {
             assignedTo: session.agentId,

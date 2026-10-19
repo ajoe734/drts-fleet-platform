@@ -418,7 +418,7 @@ it.each([false, true])(
       new DriverProfileService(audit),
     );
     const controller = new RegulatoryRegistryController(registry);
-    const deps = harness({ snake, registry: controller.listDrivers() });
+    const deps = harness({ snake, registry: await controller.listDrivers() });
     await bootstrapMapSessions(env, deps);
     expect(deps.evidence.sessions).toMatchObject({
       driver_isolation: {
@@ -496,7 +496,10 @@ it("keeps a real lifecycle reactivation isolated until the existing work-state c
   await controller.updateDriverLifecycle(driverId, {
     lifecycleStatus: "active",
   });
-  const deps = harness({ snake: true, registry: controller.listDrivers() });
+  const deps = harness({
+    snake: true,
+    registry: await controller.listDrivers(),
+  });
   await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
     "workState=available",
   );
@@ -524,7 +527,10 @@ it("keeps a real lifecycle reactivation isolated until the existing work-state c
     workState: "offline",
     dispatchEligible: false,
   });
-  const isolated = harness({ snake: true, registry: controller.listDrivers() });
+  const isolated = harness({
+    snake: true,
+    registry: await controller.listDrivers(),
+  });
   await bootstrapMapSessions(env, isolated);
   expect(isolated.evidence.sessions).toMatchObject({
     driver_isolation: {

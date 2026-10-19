@@ -123,6 +123,10 @@ export class RuntimeEligibilityEvaluator {
   async evaluate(
     command: EvaluateRuntimeEligibilityCommand,
   ): Promise<EvaluateRuntimeEligibilityResult> {
+    const suppressionActive =
+      await this.eligibilityContextResolver.prepareMatchingSuppression(
+        command.driverId,
+      );
     const context =
       command.resolvedContext ??
       this.eligibilityContextResolver.resolve(command);
@@ -130,6 +134,8 @@ export class RuntimeEligibilityEvaluator {
       context.driverId,
     );
     const hardReasonCodes = this.collectHardReasonCodes(context);
+    if (suppressionActive)
+      hardReasonCodes.push("INCIDENT_MATCHING_SUPPRESSION");
     if (driverRequirements.onLeave) hardReasonCodes.push("DRIVER_ON_LEAVE");
     if (command.bookingRequirements)
       hardReasonCodes.push(

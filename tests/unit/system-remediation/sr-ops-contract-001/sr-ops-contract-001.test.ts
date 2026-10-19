@@ -96,16 +96,14 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
   }
 
   // Pure helper simulating buildHref on list page
-  function buildHref(
-    filters: {
-      tab: string;
-      q: string;
-      status: string;
-      type: string;
-      expiring: string;
-      emptyReason: string | null;
-    },
-  ): string {
+  function buildHref(filters: {
+    tab: string;
+    q: string;
+    status: string;
+    type: string;
+    expiring: string;
+    emptyReason: string | null;
+  }): string {
     const params = new URLSearchParams();
     if (filters.tab !== "all") params.set("tab", filters.tab);
     if (filters.q) params.set("q", filters.q);
@@ -118,7 +116,10 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
   }
 
   // Pure helper simulating list-to-detail link creation
-  function buildDetailHref(contractId: string, currentFilterUrl: string): string {
+  function buildDetailHref(
+    contractId: string,
+    currentFilterUrl: string,
+  ): string {
     return currentFilterUrl !== "/contracts"
       ? `/contracts/${encodeURIComponent(contractId)}?returnTo=${encodeURIComponent(currentFilterUrl)}`
       : `/contracts/${encodeURIComponent(contractId)}`;
@@ -197,7 +198,9 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
         emptyReason: null,
       };
       const filterUrlA = buildHref(filterA);
-      expect(filterUrlA).toBe("/contracts?tab=expiring&q=taichung&status=active&expiring=yes");
+      expect(filterUrlA).toBe(
+        "/contracts?tab=expiring&q=taichung&status=active&expiring=yes",
+      );
 
       for (const id of contractIds) {
         const detailHref = buildDetailHref(id, filterUrlA);
@@ -291,7 +294,9 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
 
       // 5. SLA Profile: available real values for taichung-port standard taxi
       expect(view.dataStatus.slaProfile).toBe("available");
-      expect(view.slaProfile?.profileId).toBe("sla_standard_taxi_taichung-port");
+      expect(view.slaProfile?.profileId).toBe(
+        "sla_standard_taxi_taichung-port",
+      );
       expect(view.slaProfile?.targetResponseMinutes).toBe(10);
       expect(view.slaProfile?.pickupWindowMinutes).toBe(15);
 
@@ -318,7 +323,9 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
       // 2. Proof Requirements: photo & booking confirmation, signature required
       expect(view.dataStatus.proofRequirements).toBe("available");
       expect(view.proofRequirements?.requiredDocuments).toContain("photo");
-      expect(view.proofRequirements?.requiredDocuments).toContain("booking_confirmation");
+      expect(view.proofRequirements?.requiredDocuments).toContain(
+        "booking_confirmation",
+      );
       expect(view.proofRequirements?.signatureRequired).toBe(true);
       expect(view.proofRequirements?.digitalProofAllowed).toBe(true);
 
@@ -353,8 +360,12 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
 
       // Proof Requirements: telemetry_log and camera_snapshot, NO signature needed for autonomous vehicle
       expect(view.dataStatus.proofRequirements).toBe("available");
-      expect(view.proofRequirements?.requiredDocuments).toContain("telemetry_log");
-      expect(view.proofRequirements?.requiredDocuments).toContain("camera_snapshot");
+      expect(view.proofRequirements?.requiredDocuments).toContain(
+        "telemetry_log",
+      );
+      expect(view.proofRequirements?.requiredDocuments).toContain(
+        "camera_snapshot",
+      );
       expect(view.proofRequirements?.signatureRequired).toBe(false);
 
       // Waiting & No-show
@@ -364,11 +375,11 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
       expect(view.noShowRule?.thresholdMinutes).toBe(15);
     });
 
-    it("links partner authority correctly when partner entry is configured with authMode", () => {
+    it("links partner authority correctly when partner entry is configured with authMode", async () => {
       const { regService, opViewService } = setupServices();
 
       // Seed a contract using existing vehicle veh-demo-001 linked to partner-bank-demo-001
-      const createdContract = regService.createContract({
+      const createdContract = await regService.createContract({
         vehicleId: "veh-demo-001",
         partnerId: "partner-bank-demo-001",
         partnerType: "bank_partner",
@@ -415,7 +426,9 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
         ] as any[],
       });
 
-      expect(partnerActions.some((a) => a.action === "open_partner_governance")).toBe(true);
+      expect(
+        partnerActions.some((a) => a.action === "open_partner_governance"),
+      ).toBe(true);
 
       // Vehicle contract cross app link
       const vehicleContract = {
@@ -438,7 +451,9 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
         ] as any[],
       });
 
-      expect(vehicleActions.some((a) => a.action === "open_fleet_governance")).toBe(true);
+      expect(
+        vehicleActions.some((a) => a.action === "open_fleet_governance"),
+      ).toBe(true);
     });
 
     it("verifies read-only boundary: no mutation actions or editable fields exist in ops scope", () => {
@@ -446,7 +461,9 @@ describe("SR-OPS-CONTRACT-001 — 合約清單接詳情並呈現可用條款", (
       const view = opViewService.getOperationalView("contract-demo-001");
 
       // Operational read model only exposes query/projection methods
-      expect(typeof (opViewService as any).updateOperationalTerms).toBe("undefined");
+      expect(typeof (opViewService as any).updateOperationalTerms).toBe(
+        "undefined",
+      );
       expect(typeof (opViewService as any).mutateContract).toBe("undefined");
       expect(view).toBeDefined();
     });

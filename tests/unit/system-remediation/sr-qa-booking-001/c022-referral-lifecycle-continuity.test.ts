@@ -17,6 +17,9 @@ function createReferralTestHarness() {
     auditNotificationService as never,
   );
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(() => [
       {
         driverId: "driver-referral-001",

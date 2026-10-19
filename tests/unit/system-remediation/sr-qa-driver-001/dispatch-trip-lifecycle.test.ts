@@ -29,6 +29,9 @@ const SAMPLE_PROOF_PHOTO = "cHJvb2YtcGhvdG8tMDAx";
 
 function createService() {
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(() => [
       {
         driverId: "drv-qa-001",

@@ -244,6 +244,9 @@ async function createHarness(tenantId: string) {
   await tenantPartnerService.onModuleInit();
 
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(() => [
       {
         driverId: "driver-001",

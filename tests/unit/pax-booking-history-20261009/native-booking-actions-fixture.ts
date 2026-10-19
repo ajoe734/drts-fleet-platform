@@ -84,6 +84,9 @@ export async function bookingActor(
   // External eligibility registry and delivery only. All lifecycle logic,
   // repositories, transaction queries, resource constraints and feed are real.
   const registry = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: () => [candidate],
     getVehicleDispatchability: () => true,
     getDriverAvailability: () => true,

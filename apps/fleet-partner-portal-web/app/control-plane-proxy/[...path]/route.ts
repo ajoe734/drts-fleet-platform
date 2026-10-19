@@ -27,6 +27,7 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-scopes",
   "x-serverless-authorization",
   "x-drts-authorization",
+  "x-drts-runtime-origin",
   "x-goog-iap-jwt-assertion",
   "x-goog-authenticated-user-email",
   "x-tenant-id",
@@ -96,7 +97,12 @@ async function forward(
   const headers = copyRequestHeaders(request);
   try {
     const origin = request.headers.get("origin");
-    if (origin && origin !== request.nextUrl.origin) {
+    // The public runtime strips and rebuilds this provenance from the ingress
+    // authority before forwarding to its loopback-only Next child. The child
+    // URL itself is HTTP loopback, not the browser's external HTTPS origin.
+    const expectedOrigin =
+      request.headers.get("x-drts-runtime-origin") ?? request.nextUrl.origin;
+    if (origin !== null && origin !== expectedOrigin) {
       return NextResponse.json(
         {
           error: {
