@@ -17,9 +17,12 @@ function createHarness() {
   const eventEmitter = new EventEmitter2();
   const auditNotificationService = new AuditNotificationService();
   const opsDispatchEventsService = new OpsDispatchEventsService(eventEmitter);
-  const driverProfileService = new DriverProfileService(auditNotificationService);
+  const driverProfileService = new DriverProfileService(
+    auditNotificationService,
+  );
   const regulatoryRegistryRepository = {
     isEnabled: () => true,
+    loadDriverMatchingSuppressions: async () => [],
     upsertDriverLocation: async () => true,
   };
   const regulatoryRegistryService = new RegulatoryRegistryService(
@@ -103,21 +106,24 @@ describe("INT-ELIG-002 assignment rechecks", () => {
       regulatoryRegistryService.getVehicleDispatchability.bind(
         regulatoryRegistryService,
       );
-    regulatoryRegistryService.getVehicleDispatchability = ((vehicleId, bucket) =>
+    regulatoryRegistryService.getVehicleDispatchability = ((
+      vehicleId,
+      bucket,
+    ) =>
       vehicleId === "veh-demo-001"
         ? false
         : originalDispatchability(vehicleId, bucket)) as never;
 
-    expect(() =>
+    await expect(
       ownedMobilityService.assignDispatch({
         dispatchJobId: dispatchResult.dispatchJobId,
         vehicleId: "veh-demo-001",
         driverId: "drv-demo-001",
       }),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     try {
-      ownedMobilityService.assignDispatch({
+      await ownedMobilityService.assignDispatch({
         dispatchJobId: dispatchResult.dispatchJobId,
         vehicleId: "veh-demo-001",
         driverId: "drv-demo-001",
@@ -137,14 +143,16 @@ describe("INT-ELIG-002 assignment rechecks", () => {
 
     regulatoryRegistryService.getVehicleDispatchability =
       originalDispatchability as never;
-    const assignment = ownedMobilityService.assignDispatch({
+    const assignment = await ownedMobilityService.assignDispatch({
       dispatchJobId: dispatchResult.dispatchJobId,
       vehicleId: "veh-demo-001",
       driverId: "drv-demo-001",
     });
-    expect(ownedMobilityService.getDriverTask(assignment.taskId)).toMatchObject({
-      taskId: assignment.taskId,
-      serviceProductCode: "credit_card_airport_transfer",
-    });
+    expect(ownedMobilityService.getDriverTask(assignment.taskId)).toMatchObject(
+      {
+        taskId: assignment.taskId,
+        serviceProductCode: "credit_card_airport_transfer",
+      },
+    );
   });
 });

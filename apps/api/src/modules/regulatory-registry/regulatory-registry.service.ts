@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
 import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import {
@@ -87,7 +88,11 @@ import { AcademyService } from "../driver-academy/academy.service";
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import {
   RegulatoryRegistryRepository,
+  RegulatoryCommandCommitUncertainError,
+  PREEXPIRY_CREDENTIAL_FIELDS,
+  parsePreexpiryCredentialFamily,
   type RegulatoryRegistryQueryExecutor,
+  type RegulatoryVehicleCommandState,
   type DriverHeartbeatEventSnapshot,
   type PersistRegulatoryRegistryChanges,
   type RegulatorySupplyPair,
@@ -137,6 +142,12 @@ export type ReconcileExpiryCommand = {
 };
 
 export type ReconcileExpiryResult = {
+  preexpiry?: {
+    eventsCreated: number;
+    intentsCreated: number;
+    recipientStatus: "configured" | "unavailable";
+    deliveryStatus: "available" | "unavailable";
+  };
   asOf: string;
   scope: string;
   scannedDrivers: number;
@@ -893,9 +904,75 @@ export class RegulatoryRegistryService
     this.requireDriver(driverId);
   }
 
+  private matchingSuppressions = new Map<
+    string,
+    import("@drts/contracts").DriverMatchingSuppression[]
+  >();
+
+  prepareMatchingSuppressions(driverId?: string) {
+    if (!this.regulatoryRegistryRepository?.isEnabled()) return;
+    return this.regulatoryRegistryRepository
+      .loadDriverMatchingSuppressions(driverId)
+      .then((rows) => this.applyMatchingSuppressions(rows, driverId));
+  }
+
+  private applyMatchingSuppressions(
+    rows: {
+      driver_id: string;
+      record: import("@drts/contracts").DriverMatchingSuppression;
+    }[],
+    driverId?: string,
+  ) {
+    if (driverId) this.matchingSuppressions.delete(driverId);
+    else this.matchingSuppressions.clear();
+    for (const row of rows) {
+      const list = this.matchingSuppressions.get(row.driver_id) ?? [];
+      list.push({ ...row.record });
+      this.matchingSuppressions.set(row.driver_id, list);
+    }
+  }
+
+  hasActiveMatchingSuppression(driverId: string, at = Date.now()) {
+    return (this.matchingSuppressions.get(driverId) ?? []).some(
+      (hold) =>
+        hold.active &&
+        hold.liftedAt === null &&
+        Date.parse(hold.expiresAt) > at,
+    );
+  }
+
+  assertCurrentMatchingSuppressionClear(
+    driverId: string,
+    executor?: Pick<import("../../common/db").DatabaseService, "query">,
+  ) {
+    const assertClear = () => {
+      if (this.hasActiveMatchingSuppression(driverId))
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ELIGIBILITY_CHANGED_BEFORE_ASSIGNMENT",
+          "Driver has an active incident matching suppression.",
+          { driverId, reasonCodes: ["INCIDENT_MATCHING_SUPPRESSION"] },
+        );
+    };
+    if (!this.regulatoryRegistryRepository?.isEnabled()) return assertClear();
+    const read = executor
+      ? this.regulatoryRegistryRepository.lockDriverMatchingAuthority(
+          driverId,
+          executor,
+        )
+      : this.regulatoryRegistryRepository.loadDriverMatchingSuppressions(
+          driverId,
+        );
+    return read.then((rows) => {
+      this.applyMatchingSuppressions(rows, driverId);
+      assertClear();
+    });
+  }
+
   async prepareDispatchSupply(serviceBucket: Phase1ServiceBucket) {
     const repository = this.regulatoryRegistryRepository;
     if (!repository?.isEnabled()) return;
+    await this.prepareMatchingSuppressions();
     await Promise.all(
       this.drivers
         .filter((d) => d.supportedServiceBuckets.includes(serviceBucket))
@@ -1471,7 +1548,17 @@ export class RegulatoryRegistryService
         );
 
         if (this.regulatoryRegistryRepository) {
-          void this.handleDriverLicenseRenewal(driverId, command);
+          // The master save above is already acknowledged. Renewal cleanup can
+          // still fail; retain its durable pending work for the existing rescan
+          // and observe the failure without claiming supersession or delivery.
+          void this.handleDriverLicenseRenewal(driverId, command).catch(
+            (error: unknown) => {
+              this.regulatoryRegistryRepository!.reportPersistenceFailure(
+                error,
+                "driver_license_renewal_reconciliation",
+              );
+            },
+          );
         }
 
         return this.cloneDriver(updated);
@@ -1859,88 +1946,44 @@ export class RegulatoryRegistryService
     );
   }
 
-  createContract(command: CreateVehicleContractCommand) {
+  async createContract(
+    command: CreateVehicleContractCommand,
+  ): Promise<VehicleContractRecord> {
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.partnerId, "partnerId");
     this.assertNonBlank(command.partnerType, "partnerType");
     this.assertNonBlank(command.contractType, "contractType");
     this.assertNonBlank(command.serviceScope, "serviceScope");
     this.assertTimeRange(command.startAt, command.endAt);
-    this.requireVehicle(command.vehicleId);
 
-    const now = new Date().toISOString();
-    const contract: VehicleContractRecord = {
-      contractId: `contract_${randomUUID()}`,
-      vehicleId: command.vehicleId.trim(),
-      partnerId: command.partnerId.trim(),
-      partnerType: command.partnerType.trim(),
-      contractType: command.contractType.trim(),
-      operatingAreaId: this.normalizeNullableText(command.operatingAreaId),
-      serviceScope: command.serviceScope.trim(),
-      startAt: command.startAt,
-      endAt: command.endAt,
-      status: "draft",
-      lifecycleStatus: "draft",
-      approvedBy: null,
-      approvedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    const nextContract = this.applyContractLifecycle(contract, now);
-    this.contracts = [this.cloneContract(nextContract), ...this.contracts];
-    const vehicle = this.reconcileVehicleLifecycle(nextContract.vehicleId, {
-      entityType: "contract",
-      message: "Vehicle contract created in draft state.",
-      occurredAt: now,
-      relatedEntityId: nextContract.contractId,
-      persistContext: null,
-      touchUpdatedAt: true,
-    });
-    this.persistChanges(
-      {
-        contracts: [this.cloneContract(nextContract)],
-        vehicles: [this.cloneVehicle(vehicle)],
-      },
+    return this.runVehicleSourceCommand(
+      command.vehicleId,
+      "contracts",
       "create_contract",
+      (state) => this.stageCreateContract(command, state),
     );
-
-    return this.cloneContract(nextContract);
   }
 
-  activateContract(
+  async activateContract(
     contractId: string,
     command: ActivateVehicleContractCommand,
-  ) {
-    const contract = this.requireContract(contractId);
-    const approvedAt = command.approvedAt ?? new Date().toISOString();
-    contract.status = "active";
-    contract.approvedBy = this.normalizeNullableText(command.approvedBy);
-    contract.approvedAt = approvedAt;
-    contract.updatedAt = approvedAt;
-    this.applyContractLifecycle(contract, approvedAt);
-
-    const vehicle = this.reconcileVehicleLifecycle(contract.vehicleId, {
-      entityType: "contract",
-      message:
-        contract.lifecycleStatus === "active"
-          ? "Vehicle contract activated."
-          : "Vehicle contract activation evaluated against its effective window.",
-      occurredAt: approvedAt,
-      relatedEntityId: contract.contractId,
-      persistContext: null,
-      touchUpdatedAt: true,
-    });
-
-    this.persistChanges(
-      {
-        contracts: [this.cloneContract(contract)],
-        vehicles: [this.cloneVehicle(vehicle)],
-      },
+  ): Promise<VehicleContractRecord> {
+    const existing = this.regulatoryRegistryRepository!.isEnabled()
+      ? await this.regulatoryRegistryRepository!.findCommandContract(contractId)
+      : this.requireContract(contractId);
+    if (!existing)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CONTRACT_NOT_FOUND",
+        "The canonical record could not be found.",
+        { contractId },
+      );
+    return this.runVehicleSourceCommand(
+      existing.vehicleId,
+      "contracts",
       "activate_contract",
+      (state) => this.stageActivateContract(contractId, command, state),
     );
-
-    return this.cloneContract(contract);
   }
 
   listPolicies() {
@@ -1987,13 +2030,183 @@ export class RegulatoryRegistryService
       .map((driver) => this.cloneDriver(driver));
   }
 
-  createInsurancePolicy(command: CreateInsurancePolicyCommand) {
+  async createInsurancePolicy(
+    command: CreateInsurancePolicyCommand,
+  ): Promise<InsurancePolicyRecord> {
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.policyNo, "policyNo");
     this.assertNonBlank(command.insuranceType, "insuranceType");
     this.assertNonBlank(command.insurerName, "insurerName");
     this.assertTimeRange(command.startAt, command.endAt);
-    this.requireVehicle(command.vehicleId);
+
+    return this.runVehicleSourceCommand(
+      command.vehicleId,
+      "policies",
+      "create_insurance_policy",
+      (state) => this.stageCreateInsurancePolicy(command, state),
+    );
+  }
+
+  async activateInsurancePolicy(
+    policyId: string,
+    command: ActivateInsurancePolicyCommand,
+  ): Promise<InsurancePolicyRecord> {
+    const existing = this.regulatoryRegistryRepository!.isEnabled()
+      ? await this.regulatoryRegistryRepository!.lockPolicy(policyId)
+      : this.requirePolicy(policyId);
+    if (!existing)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "POLICY_NOT_FOUND",
+        "The canonical record could not be found.",
+        { policyId },
+      );
+    return this.runVehicleSourceCommand(
+      existing.vehicleId,
+      "policies",
+      "activate_insurance_policy",
+      (state) => this.stageActivateInsurancePolicy(policyId, command, state),
+    );
+  }
+
+  listExclusivities() {
+    const evaluatedAt = new Date().toISOString();
+    return this.exclusivities.map((exclusivity) =>
+      this.cloneExclusivity(
+        this.applyExclusivityLifecycle(exclusivity, evaluatedAt),
+      ),
+    );
+  }
+
+  async submitExclusivityReview(
+    vehicleId: string,
+    command: SubmitExclusivityReviewCommand,
+  ): Promise<DispatchExclusivityRecord> {
+    return this.runVehicleSourceCommand(
+      vehicleId,
+      "exclusivities",
+      "submit_exclusivity_review",
+      (state) => this.stageSubmitExclusivityReview(vehicleId, command, state),
+    );
+  }
+
+  async approveExclusivity(
+    vehicleId: string,
+    command: ApproveExclusivityCommand,
+  ): Promise<DispatchExclusivityRecord> {
+    return this.runVehicleSourceCommand(
+      vehicleId,
+      "exclusivities",
+      "approve_exclusivity",
+      (state) => this.stageApproveExclusivity(vehicleId, command, state),
+    );
+  }
+
+  async rejectExclusivity(
+    vehicleId: string,
+    command: RejectExclusivityCommand,
+  ): Promise<DispatchExclusivityRecord> {
+    return this.runVehicleSourceCommand(
+      vehicleId,
+      "exclusivities",
+      "reject_exclusivity",
+      (state) => this.stageRejectExclusivity(vehicleId, command, state),
+    );
+  }
+
+  private stageCreateContract(
+    command: CreateVehicleContractCommand,
+    state: RegulatoryVehicleCommandState,
+  ): VehicleContractRecord {
+    this.assertNonBlank(command.vehicleId, "vehicleId");
+    this.assertNonBlank(command.partnerId, "partnerId");
+    this.assertNonBlank(command.partnerType, "partnerType");
+    this.assertNonBlank(command.contractType, "contractType");
+    this.assertNonBlank(command.serviceScope, "serviceScope");
+    this.assertTimeRange(command.startAt, command.endAt);
+
+    const now = new Date().toISOString();
+    const contract: VehicleContractRecord = {
+      contractId: `contract_${randomUUID()}`,
+      vehicleId: command.vehicleId.trim(),
+      partnerId: command.partnerId.trim(),
+      partnerType: command.partnerType.trim(),
+      contractType: command.contractType.trim(),
+      operatingAreaId: this.normalizeNullableText(command.operatingAreaId),
+      serviceScope: command.serviceScope.trim(),
+      startAt: command.startAt,
+      endAt: command.endAt,
+      status: "draft",
+      lifecycleStatus: "draft",
+      approvedBy: null,
+      approvedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const nextContract = this.applyContractLifecycle(contract, now);
+    state.contracts = [this.cloneContract(nextContract), ...state.contracts];
+    state.vehicle = this.reconcileVehicleLifecycle(
+      nextContract.vehicleId,
+      {
+        entityType: "contract",
+        message: "Vehicle contract created in draft state.",
+        occurredAt: now,
+        relatedEntityId: nextContract.contractId,
+        persistContext: null,
+        touchUpdatedAt: true,
+        emitEvent: false,
+      },
+      state.vehicle,
+      state,
+    );
+
+    return this.cloneContract(nextContract);
+  }
+
+  private stageActivateContract(
+    contractId: string,
+    command: ActivateVehicleContractCommand,
+    state: RegulatoryVehicleCommandState,
+  ): VehicleContractRecord {
+    const contract = this.requireContract(contractId, state.contracts);
+    const approvedAt = command.approvedAt ?? new Date().toISOString();
+    contract.status = "active";
+    contract.approvedBy = this.normalizeNullableText(command.approvedBy);
+    contract.approvedAt = approvedAt;
+    contract.updatedAt = approvedAt;
+    this.applyContractLifecycle(contract, approvedAt);
+
+    state.vehicle = this.reconcileVehicleLifecycle(
+      contract.vehicleId,
+      {
+        entityType: "contract",
+        message:
+          contract.lifecycleStatus === "active"
+            ? "Vehicle contract activated."
+            : "Vehicle contract activation evaluated against its effective window.",
+        occurredAt: approvedAt,
+        relatedEntityId: contract.contractId,
+        persistContext: null,
+        touchUpdatedAt: true,
+        emitEvent: false,
+      },
+      state.vehicle,
+      state,
+    );
+
+    return this.cloneContract(contract);
+  }
+
+  private stageCreateInsurancePolicy(
+    command: CreateInsurancePolicyCommand,
+    state: RegulatoryVehicleCommandState,
+  ): InsurancePolicyRecord {
+    this.assertNonBlank(command.vehicleId, "vehicleId");
+    this.assertNonBlank(command.policyNo, "policyNo");
+    this.assertNonBlank(command.insuranceType, "insuranceType");
+    this.assertNonBlank(command.insurerName, "insurerName");
+    this.assertTimeRange(command.startAt, command.endAt);
 
     const now = new Date().toISOString();
     const policy: InsurancePolicyRecord = {
@@ -2012,31 +2225,31 @@ export class RegulatoryRegistryService
     };
 
     const nextPolicy = this.applyPolicyLifecycle(policy, now);
-    this.policies = [this.clonePolicy(nextPolicy), ...this.policies];
-    const vehicle = this.reconcileVehicleLifecycle(nextPolicy.vehicleId, {
-      entityType: "insurance_policy",
-      message: "Insurance policy created and awaiting activation.",
-      occurredAt: now,
-      relatedEntityId: nextPolicy.policyId,
-      persistContext: null,
-      touchUpdatedAt: true,
-    });
-    this.persistChanges(
+    state.policies = [this.clonePolicy(nextPolicy), ...state.policies];
+    state.vehicle = this.reconcileVehicleLifecycle(
+      nextPolicy.vehicleId,
       {
-        policies: [this.clonePolicy(nextPolicy)],
-        vehicles: [this.cloneVehicle(vehicle)],
+        entityType: "insurance_policy",
+        message: "Insurance policy created and awaiting activation.",
+        occurredAt: now,
+        relatedEntityId: nextPolicy.policyId,
+        persistContext: null,
+        touchUpdatedAt: true,
+        emitEvent: false,
       },
-      "create_insurance_policy",
+      state.vehicle,
+      state,
     );
 
     return this.clonePolicy(nextPolicy);
   }
 
-  activateInsurancePolicy(
+  private stageActivateInsurancePolicy(
     policyId: string,
     command: ActivateInsurancePolicyCommand,
-  ) {
-    const policy = this.requirePolicy(policyId);
+    state: RegulatoryVehicleCommandState,
+  ): InsurancePolicyRecord {
+    const policy = this.requirePolicy(policyId, state.policies);
     const activatedAt = command.activatedAt ?? new Date().toISOString();
     policy.status =
       new Date(policy.endAt).getTime() < new Date(activatedAt).getTime()
@@ -2044,56 +2257,34 @@ export class RegulatoryRegistryService
         : "active";
     policy.updatedAt = activatedAt;
     this.applyPolicyLifecycle(policy, activatedAt);
-    const vehicle = this.reconcileVehicleLifecycle(policy.vehicleId, {
-      entityType: "insurance_policy",
-      message:
-        policy.lifecycleStatus === "active"
-          ? "Insurance policy activated."
-          : "Insurance policy is no longer valid for dispatch.",
-      occurredAt: activatedAt,
-      relatedEntityId: policy.policyId,
-      persistContext: null,
-      touchUpdatedAt: true,
-    });
-
-    this.persistChanges(
+    state.vehicle = this.reconcileVehicleLifecycle(
+      policy.vehicleId,
       {
-        policies: [this.clonePolicy(policy)],
-        vehicles: [this.cloneVehicle(vehicle)],
+        entityType: "insurance_policy",
+        message:
+          policy.lifecycleStatus === "active"
+            ? "Insurance policy activated."
+            : "Insurance policy is no longer valid for dispatch.",
+        occurredAt: activatedAt,
+        relatedEntityId: policy.policyId,
+        persistContext: null,
+        touchUpdatedAt: true,
+        emitEvent: false,
       },
-      "activate_insurance_policy",
+      state.vehicle,
+      state,
     );
-
-    if (
-      this.regulatoryRegistryRepository?.supersedeActiveExpiryEventsForEntity &&
-      policy.status === "active"
-    ) {
-      void this.regulatoryRegistryRepository.supersedeActiveExpiryEventsForEntity(
-        "policy",
-        policy.policyId,
-        "insurance_policy",
-      );
-    }
 
     return this.clonePolicy(policy);
   }
 
-  listExclusivities() {
-    const evaluatedAt = new Date().toISOString();
-    return this.exclusivities.map((exclusivity) =>
-      this.cloneExclusivity(
-        this.applyExclusivityLifecycle(exclusivity, evaluatedAt),
-      ),
-    );
-  }
-
-  submitExclusivityReview(
+  private stageSubmitExclusivityReview(
     vehicleId: string,
     command: SubmitExclusivityReviewCommand,
-  ) {
-    this.requireVehicle(vehicleId);
+    state: RegulatoryVehicleCommandState,
+  ): DispatchExclusivityRecord {
     const now = new Date().toISOString();
-    const existing = this.exclusivities.find(
+    const existing = state.exclusivities.find(
       (exclusivity) => exclusivity.vehicleId === vehicleId,
     );
     const exclusivity: DispatchExclusivityRecord = existing
@@ -2139,36 +2330,38 @@ export class RegulatoryRegistryService
         };
 
     this.applyExclusivityLifecycle(exclusivity, now);
-    this.exclusivities = [
+    state.exclusivities = [
       this.cloneExclusivity(exclusivity),
-      ...this.exclusivities.filter(
+      ...state.exclusivities.filter(
         (candidate) => candidate.vehicleId !== vehicleId,
       ),
     ];
-    const vehicle = this.reconcileVehicleLifecycle(vehicleId, {
-      entityType: "exclusivity",
-      message:
-        "Exclusivity review submitted and vehicle is held pending approval.",
-      occurredAt: now,
-      relatedEntityId: vehicleId,
-      persistContext: null,
-      touchUpdatedAt: true,
-    });
-    this.persistChanges(
+    state.vehicle = this.reconcileVehicleLifecycle(
+      vehicleId,
       {
-        exclusivities: [this.cloneExclusivity(exclusivity)],
-        vehicles: [this.cloneVehicle(vehicle)],
+        entityType: "exclusivity",
+        message:
+          "Exclusivity review submitted and vehicle is held pending approval.",
+        occurredAt: now,
+        relatedEntityId: vehicleId,
+        persistContext: null,
+        touchUpdatedAt: true,
+        emitEvent: false,
       },
-      "submit_exclusivity_review",
+      state.vehicle,
+      state,
     );
 
     return this.cloneExclusivity(exclusivity);
   }
 
-  approveExclusivity(vehicleId: string, command: ApproveExclusivityCommand) {
-    this.requireVehicle(vehicleId);
+  private stageApproveExclusivity(
+    vehicleId: string,
+    command: ApproveExclusivityCommand,
+    state: RegulatoryVehicleCommandState,
+  ): DispatchExclusivityRecord {
     const reviewedAt = command.reviewedAt ?? new Date().toISOString();
-    const exclusivity = this.exclusivities.find(
+    const exclusivity = state.exclusivities.find(
       (candidate) => candidate.vehicleId === vehicleId,
     ) ?? {
       vehicleId,
@@ -2192,38 +2385,40 @@ export class RegulatoryRegistryService
     exclusivity.updatedAt = reviewedAt;
     this.applyExclusivityLifecycle(exclusivity, reviewedAt);
 
-    this.exclusivities = [
+    state.exclusivities = [
       this.cloneExclusivity(exclusivity),
-      ...this.exclusivities.filter(
+      ...state.exclusivities.filter(
         (candidate) => candidate.vehicleId !== vehicleId,
       ),
     ];
-    const vehicle = this.reconcileVehicleLifecycle(vehicleId, {
-      entityType: "exclusivity",
-      message:
-        exclusivity.lifecycleStatus === "active"
-          ? "Exclusivity approved and supply may dispatch again."
-          : "Exclusivity approval recorded, but the effective window is not dispatchable.",
-      occurredAt: reviewedAt,
-      relatedEntityId: vehicleId,
-      persistContext: null,
-      touchUpdatedAt: true,
-    });
-    this.persistChanges(
+    state.vehicle = this.reconcileVehicleLifecycle(
+      vehicleId,
       {
-        exclusivities: [this.cloneExclusivity(exclusivity)],
-        vehicles: [this.cloneVehicle(vehicle)],
+        entityType: "exclusivity",
+        message:
+          exclusivity.lifecycleStatus === "active"
+            ? "Exclusivity approved and supply may dispatch again."
+            : "Exclusivity approval recorded, but the effective window is not dispatchable.",
+        occurredAt: reviewedAt,
+        relatedEntityId: vehicleId,
+        persistContext: null,
+        touchUpdatedAt: true,
+        emitEvent: false,
       },
-      "approve_exclusivity",
+      state.vehicle,
+      state,
     );
 
     return this.cloneExclusivity(exclusivity);
   }
 
-  rejectExclusivity(vehicleId: string, command: RejectExclusivityCommand) {
-    this.requireVehicle(vehicleId);
+  private stageRejectExclusivity(
+    vehicleId: string,
+    command: RejectExclusivityCommand,
+    state: RegulatoryVehicleCommandState,
+  ): DispatchExclusivityRecord {
     const reviewedAt = command.reviewedAt ?? new Date().toISOString();
-    const exclusivity = this.exclusivities.find(
+    const exclusivity = state.exclusivities.find(
       (candidate) => candidate.vehicleId === vehicleId,
     ) ?? {
       vehicleId,
@@ -2248,29 +2443,239 @@ export class RegulatoryRegistryService
     exclusivity.updatedAt = reviewedAt;
     this.applyExclusivityLifecycle(exclusivity, reviewedAt);
 
-    this.exclusivities = [
+    state.exclusivities = [
       this.cloneExclusivity(exclusivity),
-      ...this.exclusivities.filter(
+      ...state.exclusivities.filter(
         (candidate) => candidate.vehicleId !== vehicleId,
       ),
     ];
-    const vehicle = this.reconcileVehicleLifecycle(vehicleId, {
-      entityType: "exclusivity",
-      message: "Exclusivity was rejected and supply remains blocked.",
-      occurredAt: reviewedAt,
-      relatedEntityId: vehicleId,
-      persistContext: null,
-      touchUpdatedAt: true,
-    });
-    this.persistChanges(
+    state.vehicle = this.reconcileVehicleLifecycle(
+      vehicleId,
       {
-        exclusivities: [this.cloneExclusivity(exclusivity)],
-        vehicles: [this.cloneVehicle(vehicle)],
+        entityType: "exclusivity",
+        message: "Exclusivity was rejected and supply remains blocked.",
+        occurredAt: reviewedAt,
+        relatedEntityId: vehicleId,
+        persistContext: null,
+        touchUpdatedAt: true,
+        emitEvent: false,
       },
-      "reject_exclusivity",
+      state.vehicle,
+      state,
     );
 
     return this.cloneExclusivity(exclusivity);
+  }
+
+  /** Only ordinary C072 commands use this staged, acknowledged boundary. */
+  private async runVehicleSourceCommand<
+    T extends
+      | VehicleContractRecord
+      | InsurancePolicyRecord
+      | DispatchExclusivityRecord,
+  >(
+    vehicleId: string,
+    family: "contracts" | "policies" | "exclusivities",
+    context: string,
+    stage: (state: RegulatoryVehicleCommandState) => T,
+  ): Promise<T> {
+    return this.withFinalExitWrite(vehicleId, async () => {
+      const repository = this.regulatoryRegistryRepository!;
+      let prepared: RegulatoryVehicleCommandState | undefined;
+      let result: T | undefined;
+      const apply = (state: RegulatoryVehicleCommandState) => {
+        state.vehicle = this.hydrateVehicleRecord(state.vehicle);
+        state.contracts = state.contracts.map((record) =>
+          this.hydrateContract(record),
+        );
+        state.policies = state.policies.map((record) =>
+          this.hydratePolicy(record),
+        );
+        state.exclusivities = state.exclusivities.map((record) =>
+          this.hydrateExclusivity(record),
+        );
+        result = stage(state);
+        prepared = state;
+        return {
+          vehicles: [state.vehicle],
+          [family]: [result],
+        } as PersistRegulatoryRegistryChanges;
+      };
+      if (!repository.isEnabled()) {
+        const state = {
+          vehicle: this.cloneVehicle(this.requireVehicle(vehicleId)),
+          contracts: this.contracts.map((c) => this.cloneContract(c)),
+          policies: this.policies.map((p) => this.clonePolicy(p)),
+          exclusivities: this.exclusivities.map((e) =>
+            this.cloneExclusivity(e),
+          ),
+        };
+        const changes = apply(state);
+        if (
+          context === "activate_insurance_policy" &&
+          (result as InsurancePolicyRecord).status === "active"
+        )
+          await repository.supersedeActiveExpiryEventsForEntity?.(
+            "policy",
+            (result as InsurancePolicyRecord).policyId,
+            "insurance_policy",
+          );
+        this.publishVehicleSourceCommand(state, true);
+        this.persistChanges(changes, context);
+      } else {
+        try {
+          await repository.withVehicleCommandTransaction(async (client) => {
+            const state = await repository.readVehicleCommandState(
+              vehicleId,
+              client,
+            );
+            if (!state)
+              throw new ApiRequestError(
+                HttpStatus.NOT_FOUND,
+                "VEHICLE_NOT_FOUND",
+                "The canonical vehicle could not be found.",
+                { vehicleId },
+              );
+            await repository.persistChangesWithExecutor(client, apply(state));
+            // Preserve the original B4 family and late-receipt semantics, in
+            // the same transaction as the actual acknowledged policy renewal.
+            if (
+              context === "activate_insurance_policy" &&
+              (result as InsurancePolicyRecord).status === "active"
+            ) {
+              await repository.supersedeActiveExpiryEventsForEntity(
+                "policy",
+                (result as InsurancePolicyRecord).policyId,
+                "insurance_policy",
+                undefined,
+                client,
+              );
+            }
+          });
+        } catch (error) {
+          repository.reportPersistenceFailure(error, context);
+          // A rejected COMMIT is not proof of rollback. Read the exact prepared
+          // IDs and vehicle from a new coherent canonical snapshot, not cache.
+          let canonical: RegulatoryVehicleCommandState | null = null;
+          try {
+            canonical = await repository.withTransaction((client) =>
+              repository.readVehicleCommandState(vehicleId, client),
+            );
+          } catch {
+            /* unavailable remains an honest failed/unknown command */
+          }
+          const expected = prepared;
+          const matches =
+            error instanceof RegulatoryCommandCommitUncertainError &&
+            canonical &&
+            expected &&
+            isDeepStrictEqual(canonical.vehicle, expected.vehicle) &&
+            canonical[family].some((record) =>
+              isDeepStrictEqual(record, result),
+            );
+          if (canonical)
+            this.publishVehicleSourceCommand(canonical, Boolean(matches));
+          if (!matches) {
+            if (!prepared) throw error;
+            const record = result as VehicleContractRecord &
+              InsurancePolicyRecord;
+            throw new ApiRequestError(
+              HttpStatus.SERVICE_UNAVAILABLE,
+              "REGISTRY_COMMAND_NOT_ACKNOWLEDGED",
+              "The registry command was not acknowledged. Reload its canonical record before retrying.",
+              {
+                vehicleId,
+                context,
+                recordId: record.contractId ?? record.policyId ?? vehicleId,
+              },
+            );
+          }
+          return result!;
+        }
+        this.publishVehicleSourceCommand(prepared!, true);
+      }
+      return result!;
+    });
+  }
+
+  private publishVehicleSourceCommand(
+    state: RegulatoryVehicleCommandState,
+    emitEvent: boolean,
+  ) {
+    state.vehicle = this.hydrateVehicleRecord(state.vehicle);
+    const id = state.vehicle.vehicleId;
+    const previous = this.cloneSupplyLifecycle(
+      this.requireVehicle(id).supplyLifecycle,
+    );
+    const merge = <T extends { vehicleId: string }>(
+      current: T[],
+      saved: T[],
+      key: (record: T) => string,
+    ) => {
+      const own = saved.filter((record) => record.vehicleId === id);
+      const rows = new Map(own.map((record) => [key(record), record]));
+      const existing = new Set(current.map(key));
+      return [
+        ...own.filter((record) => !existing.has(key(record))),
+        ...current.flatMap((record) =>
+          record.vehicleId !== id
+            ? [record]
+            : rows.has(key(record))
+              ? [rows.get(key(record))!]
+              : [],
+        ),
+      ];
+    };
+    this.contracts = merge(
+      this.contracts,
+      state.contracts.map((c) => this.cloneContract(c)),
+      (c) => c.contractId,
+    );
+    this.policies = merge(
+      this.policies,
+      state.policies.map((p) => this.clonePolicy(p)),
+      (p) => p.policyId,
+    );
+    this.exclusivities = merge(
+      this.exclusivities,
+      state.exclusivities.map((e) => this.cloneExclusivity(e)),
+      (e) => e.vehicleId,
+    );
+    const current = this.requireVehicle(id);
+    // Preserve a legitimate in-process manual hold or terminal C073 change
+    // while this command awaited storage. Only compliance projection is ours.
+    const saved = this.cloneVehicle(state.vehicle);
+    if (current.supplyLifecycle.offboarding.status !== "none")
+      saved.supplyLifecycle.offboarding = this.normalizeOffboarding(
+        current.supplyLifecycle.offboarding,
+      );
+    const manualHold =
+      current.supplyLifecycle.dispatch.blockedReasons.includes("manual_hold") ||
+      saved.supplyLifecycle.dispatch.blockedReasons.includes("manual_hold");
+    const updated = this.reconcileVehicleLifecycle(
+      id,
+      {
+        emitEvent: false,
+        persistContext: null,
+        manualDispatchHold: manualHold,
+        occurredAt: state.vehicle.updatedAt,
+        ...(state.vehicle.supplyLifecycle.lastTrace
+          ? {
+              message: state.vehicle.supplyLifecycle.lastTrace.message,
+              entityType: state.vehicle.supplyLifecycle.lastTrace.entityType,
+              relatedEntityId:
+                state.vehicle.supplyLifecycle.lastTrace.relatedEntityId,
+            }
+          : {}),
+      },
+      saved,
+    );
+    Object.assign(current, updated);
+    updated.updatedAt = state.vehicle.updatedAt;
+    if (emitEvent && this.didLifecycleChange(previous, updated.supplyLifecycle))
+      this.opsDispatchEventsService.publishSupplyLifecycleUpdated(
+        this.cloneVehicle(updated),
+      );
   }
 
   async initiateVehicleOffboarding(
@@ -2927,6 +3332,7 @@ export class RegulatoryRegistryService
       manualDispatchHold?: boolean;
     },
     stagedVehicle?: VehicleRegistryRecord,
+    sources?: RegulatoryVehicleCommandState,
   ): VehicleRegistryRecord {
     const vehicle = stagedVehicle ?? this.requireVehicle(vehicleId);
     const occurredAt = options?.occurredAt ?? new Date().toISOString();
@@ -2949,6 +3355,7 @@ export class RegulatoryRegistryService
       vehicle,
       !manualDispatchHold,
       occurredAt,
+      sources,
     );
 
     const hasComplianceBlock = nextLifecycle.dispatch.blockedReasons.some(
@@ -3014,12 +3421,22 @@ export class RegulatoryRegistryService
     vehicle: VehicleRegistryRecord,
     dispatchableFlag = vehicle.dispatchableFlag,
     evaluatedAt = new Date().toISOString(),
+    sources?: RegulatoryVehicleCommandState,
   ): VehicleSupplyLifecycleRecord {
-    const contract = this.selectPrimaryContract(vehicle.vehicleId, evaluatedAt);
-    const policy = this.selectPrimaryPolicy(vehicle.vehicleId, evaluatedAt);
+    const contract = this.selectPrimaryContract(
+      vehicle.vehicleId,
+      evaluatedAt,
+      sources?.contracts,
+    );
+    const policy = this.selectPrimaryPolicy(
+      vehicle.vehicleId,
+      evaluatedAt,
+      sources?.policies,
+    );
     const exclusivity = this.selectPrimaryExclusivity(
       vehicle.vehicleId,
       evaluatedAt,
+      sources?.exclusivities,
     );
     const offboarding = this.normalizeOffboarding(
       vehicle.supplyLifecycle?.offboarding,
@@ -3135,6 +3552,7 @@ export class RegulatoryRegistryService
   private selectPrimaryContract(
     vehicleId: string,
     evaluatedAt: string,
+    records: VehicleContractRecord[] = this.contracts,
   ): VehicleContractRecord | null {
     const priority: Record<VehicleContractLifecycleStatus, number> = {
       missing: 0,
@@ -3144,7 +3562,7 @@ export class RegulatoryRegistryService
       active: 4,
     };
 
-    const candidates = this.contracts
+    const candidates = records
       .filter((contract) => contract.vehicleId === vehicleId)
       .map((contract) => this.applyContractLifecycle(contract, evaluatedAt))
       .sort((left, right) => {
@@ -3165,6 +3583,7 @@ export class RegulatoryRegistryService
   private selectPrimaryPolicy(
     vehicleId: string,
     evaluatedAt: string,
+    records: InsurancePolicyRecord[] = this.policies,
   ): InsurancePolicyRecord | null {
     const priority: Record<InsurancePolicyLifecycleStatus, number> = {
       missing: 0,
@@ -3174,7 +3593,7 @@ export class RegulatoryRegistryService
       active: 4,
     };
 
-    const candidates = this.policies
+    const candidates = records
       .filter((policy) => policy.vehicleId === vehicleId)
       .map((policy) => this.applyPolicyLifecycle(policy, evaluatedAt))
       .sort((left, right) => {
@@ -3195,6 +3614,7 @@ export class RegulatoryRegistryService
   private selectPrimaryExclusivity(
     vehicleId: string,
     evaluatedAt: string,
+    records: DispatchExclusivityRecord[] = this.exclusivities,
   ): DispatchExclusivityRecord | null {
     const priority: Record<DispatchExclusivityLifecycleStatus, number> = {
       missing: 0,
@@ -3205,7 +3625,7 @@ export class RegulatoryRegistryService
       active: 5,
     };
 
-    const candidates = this.exclusivities
+    const candidates = records
       .filter((exclusivity) => exclusivity.vehicleId === vehicleId)
       .map((exclusivity) =>
         this.applyExclusivityLifecycle(exclusivity, evaluatedAt),
@@ -3397,6 +3817,8 @@ export class RegulatoryRegistryService
     };
     const eligibilityBlockedReasons =
       this.computeDriverEligibilityBlockedReasons(candidate);
+    if (this.hasActiveMatchingSuppression(driver.driverId, referenceDateMs))
+      eligibilityBlockedReasons.push("incident_matching_suppression");
 
     return {
       ...candidate,
@@ -3880,8 +4302,11 @@ export class RegulatoryRegistryService
     return this.regulatoryRegistryRepository;
   }
 
-  private requireContract(contractId: string) {
-    const contract = this.contracts.find(
+  private requireContract(
+    contractId: string,
+    records: VehicleContractRecord[] = this.contracts,
+  ) {
+    const contract = records.find(
       (candidate) => candidate.contractId === contractId,
     );
     if (!contract) {
@@ -3897,10 +4322,11 @@ export class RegulatoryRegistryService
     return contract;
   }
 
-  private requirePolicy(policyId: string) {
-    const policy = this.policies.find(
-      (candidate) => candidate.policyId === policyId,
-    );
+  private requirePolicy(
+    policyId: string,
+    records: InsurancePolicyRecord[] = this.policies,
+  ) {
+    const policy = records.find((candidate) => candidate.policyId === policyId);
     if (!policy) {
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
@@ -4590,6 +5016,42 @@ export class RegulatoryRegistryService
         "taxi_driver_registration",
       );
     }
+    if (
+      command.licenseExpiry !== undefined ||
+      command.professionalDriverLicenseExpiry !== undefined ||
+      command.taxiDriverRegistrationExpiry !== undefined
+    ) {
+      const repository = this.regulatoryRegistryRepository;
+      await repository.withTransaction(async (client) => {
+        const driver = repository.isEnabled()
+          ? await repository.lockDriver(driverId, client)
+          : this.drivers.find((d) => d.driverId === driverId);
+        for (const [credential, field] of Object.entries(
+          PREEXPIRY_CREDENTIAL_FIELDS,
+        )) {
+          for (const days of [30, 7]) {
+            const previous = await repository.findActiveExpiryEventsForEntity(
+              "driver",
+              driverId,
+              `preexpiry:${credential}:${days}`,
+              client,
+            );
+            const changed = previous.filter((event) => {
+              const expiry =
+                event.source_expiry_at instanceof Date
+                  ? event.source_expiry_at.getTime()
+                  : Date.parse(event.source_expiry_at ?? "");
+              return !driver || expiry !== Date.parse(driver[field] ?? "");
+            });
+            await repository.supersedeExpiryEvents(
+              changed.map((e) => e.event_id),
+              undefined,
+              client,
+            );
+          }
+        }
+      });
+    }
   }
 
   async getExpiryBacklog(filter?: {
@@ -4616,6 +5078,172 @@ export class RegulatoryRegistryService
   ): Promise<RegistryExpiryEventWithIntent | null> {
     if (!this.regulatoryRegistryRepository?.getExpiryEventById) return null;
     return this.regulatoryRegistryRepository.getExpiryEventById(eventId);
+  }
+
+  /** Separate T30/T7 identities, using the existing event/immutable-intent tables.
+   * Never changes a license, expiry/B4 identity, dispatch flag, or mail drain. */
+  private async preparePreexpiryReminders(
+    asOf: string,
+    scope: string,
+    limit: number,
+  ) {
+    const repository = this.regulatoryRegistryRepository!;
+    const asOfMs = Date.parse(asOf);
+    const configured = process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim();
+    // Same address syntax as existing NotificationDeliveryService, before freezing an intent.
+    const recipient =
+      configured &&
+      configured.length <= 254 &&
+      /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(configured)
+        ? configured
+        : null;
+    const result: NonNullable<ReconcileExpiryResult["preexpiry"]> = {
+      eventsCreated: 0,
+      intentsCreated: 0,
+      recipientStatus: recipient ? "configured" : "unavailable",
+      deliveryStatus:
+        this.notificationDeliveryService?.availability() ?? "unavailable",
+    };
+    const memory = repository.isEnabled()
+      ? []
+      : [...this.drivers].sort((a, b) =>
+          a.driverId < b.driverId ? -1 : a.driverId > b.driverId ? 1 : 0,
+        );
+    const upper = repository.isEnabled()
+      ? (await repository.getExpiryScanUpperBounds()).driverId
+      : (memory.at(-1)?.driverId ?? null);
+    let afterId: string | undefined;
+    while (upper !== null) {
+      const page = repository.isEnabled()
+        ? await repository.scanPreexpiryDrivers(asOf, limit, {
+            ...(afterId ? { afterId } : {}),
+            throughId: upper,
+          })
+        : memory
+            .filter((d) => !afterId || d.driverId > afterId)
+            .slice(0, limit);
+      if (!page.length) break;
+      await repository.withTransaction(async (client) => {
+        for (const driverId of [
+          ...new Set(page.map((d) => d.driverId)),
+        ].sort()) {
+          const driver = repository.isEnabled()
+            ? await repository.lockDriver(driverId, client)
+            : this.drivers.find((d) => d.driverId === driverId);
+          if (!driver) continue;
+          for (const [credential, field] of Object.entries(
+            PREEXPIRY_CREDENTIAL_FIELDS,
+          )) {
+            const expiry = driver[field];
+            const expiryMs = Date.parse(expiry ?? "");
+            for (const days of [30, 7]) {
+              const family = `preexpiry:${credential}:${days}`;
+              const prior = await repository.findActiveExpiryEventsForEntity(
+                "driver",
+                driverId,
+                family,
+                client,
+              );
+              const obsolete = prior.filter((e) => {
+                const recorded =
+                  e.source_expiry_at instanceof Date
+                    ? e.source_expiry_at.getTime()
+                    : Date.parse(e.source_expiry_at ?? "");
+                return (
+                  recorded !== expiryMs ||
+                  driver.lifecycleStatus !== "active" ||
+                  (expiryMs <= asOfMs && e.status !== "completed")
+                );
+              });
+              await repository.supersedeExpiryEvents(
+                obsolete.map((e) => e.event_id),
+                undefined,
+                client,
+              );
+              if (
+                !expiry ||
+                !Number.isFinite(expiryMs) ||
+                driver.lifecycleStatus !== "active" ||
+                expiryMs <= asOfMs ||
+                expiryMs - days * 86400000 > asOfMs
+              )
+                continue;
+              const fingerprint = createHash("sha256")
+                .update(
+                  JSON.stringify([
+                    "credential-preexpiry/v1",
+                    scope,
+                    "driver",
+                    driverId,
+                    field,
+                    expiryMs,
+                    days,
+                  ]),
+                )
+                .digest("hex");
+              let event = await repository.findExpiryEventByFingerprint(
+                fingerprint,
+                client,
+              );
+              if (!event) {
+                const eventId = randomUUID();
+                event = await repository.insertExpiryEvent(
+                  {
+                    eventId,
+                    scope,
+                    entityType: "driver",
+                    entityId: driverId,
+                    credentialType: family,
+                    sourceFingerprint: fingerprint,
+                    sourceExpiryAt: expiry,
+                    status: "pending",
+                  },
+                  client,
+                );
+                if (event.event_id === eventId) result.eventsCreated++;
+              }
+              if (
+                event.status === "superseded" ||
+                !recipient ||
+                (await repository.getExpiryEventById(event.event_id, client))
+                  ?.intent
+              )
+                continue;
+              const intentId = randomUUID();
+              const intent = await repository.insertDeliveryIntent(
+                {
+                  intentId,
+                  eventId: event.event_id,
+                  scope,
+                  tenantId: scope,
+                  idempotencyKey:
+                    "credential-preexpiry-mail/v1:" +
+                    createHash("sha256")
+                      .update(
+                        JSON.stringify([scope, event.event_id, recipient]),
+                      )
+                      .digest("hex"),
+                  recipientEmail: recipient,
+                  fromEmail:
+                    process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+                    "noreply@fleet.drts.local",
+                  subject: `[DRTS Reminder] Credential T-${days}: ${credential} for driver ${driverId}`,
+                  body: `Driver ${driverId}; credential ${credential}; source expiry ${new Date(expiryMs).toISOString()}; milestone T-${days}.`,
+                },
+                client,
+              );
+              if (intent.intent_id === intentId) result.intentsCreated++;
+            }
+          }
+        }
+      });
+      const next = page.at(-1)!.driverId;
+      if (afterId !== undefined && next <= afterId)
+        throw new Error("registry_preexpiry_scan_did_not_advance");
+      afterId = next;
+      if (next === upper) break;
+    }
+    return result;
   }
 
   async reconcileExpiredCredentials(
@@ -5027,7 +5655,9 @@ export class RegulatoryRegistryService
       if (next === upper.policyId) break;
     }
 
-    // 3. Post-commit: delivery intent processing
+    const preexpiry = await this.preparePreexpiryReminders(asOf, scope, limit);
+
+    // 3. Post-commit: delivery intent processing (one existing sender/drain).
     const pendingIntents = await repository.findPendingDeliveryIntents(limit);
     for (const intent of pendingIntents) {
       // Pre-send source re-check: verify event hasn't been superseded
@@ -5042,6 +5672,13 @@ export class RegulatoryRegistryService
         continue;
       }
 
+      // The reminder's original source may have renewed since its intent commit.
+      if (parsePreexpiryCredentialFamily(eventWithIntent.credential_type)) {
+        const current = await repository.recordExpiryDeliveryOutcome(intent, {
+          deliveryStatus: "pending",
+        });
+        if (!current || current.delivery_status === "superseded") continue;
+      }
       if (this.notificationDeliveryService) {
         let outboxDeliveryId: string | undefined;
         try {
@@ -5136,6 +5773,7 @@ export class RegulatoryRegistryService
     const events = await repository.listExpiryEvents({ scope, limit });
 
     return {
+      preexpiry,
       asOf,
       scope,
       scannedDrivers,

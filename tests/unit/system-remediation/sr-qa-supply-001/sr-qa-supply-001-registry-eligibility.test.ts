@@ -184,7 +184,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     // Recovery path: activating a fresh, currently-valid policy for the same
     // vehicle clears the expired block (selectPrimaryPolicy picks the
     // highest-priority "active" lifecycle over the stale "expired" one).
-    regService.createInsurancePolicy({
+    await regService.createInsurancePolicy({
       vehicleId,
       policyNo: "QA-POL-NEW-1",
       insuranceType: "passenger_liability",
@@ -197,7 +197,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
       .listPolicies()
       .find((p) => p.policyNo === "QA-POL-NEW-1");
     expect(activated).toBeDefined();
-    regService.activateInsurancePolicy(activated!.policyId, {
+    await regService.activateInsurancePolicy(activated!.policyId, {
       activatedAt: "2026-01-03T00:00:00.000Z",
     });
 
@@ -226,7 +226,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     });
     const vehicleId = result.canonicalVehicleId as string;
 
-    regService.createContract({
+    await regService.createContract({
       vehicleId,
       partnerId: "partner-qa-001",
       partnerType: "fleet_partner",
@@ -239,7 +239,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
       .listContracts()
       .find((c) => c.vehicleId === vehicleId);
     expect(draftContract).toBeDefined();
-    regService.activateContract(draftContract!.contractId, {
+    await regService.activateContract(draftContract!.contractId, {
       approvedBy: "reviewer-qa",
       approvedAt: "2026-01-03T00:00:00.000Z",
     });
@@ -256,7 +256,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     // Recovery: a currently-valid contract restores dispatch eligibility for
     // the contract dimension specifically (insurance/exclusivity remain
     // separately gated — this isolates the contract check).
-    regService.createContract({
+    await regService.createContract({
       vehicleId,
       partnerId: "partner-qa-001",
       partnerType: "fleet_partner",
@@ -269,7 +269,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
       .listContracts()
       .filter((c) => c.vehicleId === vehicleId)
       .find((c) => c.endAt === "2099-01-01T00:00:00.000Z");
-    regService.activateContract(freshContract!.contractId, {
+    await regService.activateContract(freshContract!.contractId, {
       approvedBy: "reviewer-qa",
       approvedAt: "2026-01-04T00:00:00.000Z",
     });
@@ -294,13 +294,13 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     });
     const vehicleId = result.canonicalVehicleId as string;
 
-    regService.submitExclusivityReview(vehicleId, {
+    await regService.submitExclusivityReview(vehicleId, {
       declarationFileId: "decl-provider-a",
       exclusiveProviderName: "Provider A",
       effectiveStart: "2026-01-01T00:00:00.000Z",
       effectiveEnd: "2099-01-01T00:00:00.000Z",
     });
-    regService.approveExclusivity(vehicleId, {
+    await regService.approveExclusivity(vehicleId, {
       reviewerId: "reviewer-qa",
       reviewedAt: "2026-01-02T00:00:00.000Z",
     });
@@ -317,13 +317,13 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     ).toBe("Provider A");
 
     // Fleet partner re-declares exclusivity to a different provider.
-    regService.submitExclusivityReview(vehicleId, {
+    await regService.submitExclusivityReview(vehicleId, {
       declarationFileId: "decl-provider-b",
       exclusiveProviderName: "Provider B",
       effectiveStart: "2026-02-01T00:00:00.000Z",
       effectiveEnd: "2099-01-01T00:00:00.000Z",
     });
-    regService.approveExclusivity(vehicleId, {
+    await regService.approveExclusivity(vehicleId, {
       reviewerId: "reviewer-qa",
       reviewedAt: "2026-02-02T00:00:00.000Z",
     });
@@ -383,13 +383,13 @@ describe("SR-QA-SUPPLY-001 — C073 終止委託、下架與 debranding 閉環",
     });
     const vehicleId = result.canonicalVehicleId as string;
     // Exclusivity is still required for full dispatch eligibility.
-    regService.submitExclusivityReview(vehicleId, {
+    await regService.submitExclusivityReview(vehicleId, {
       declarationFileId: "decl-a",
       exclusiveProviderName: "Provider A",
       effectiveStart: "2026-01-01T00:00:00.000Z",
       effectiveEnd: "2099-01-01T00:00:00.000Z",
     });
-    regService.approveExclusivity(vehicleId, {
+    await regService.approveExclusivity(vehicleId, {
       reviewerId: "reviewer-qa",
       reviewedAt: "2026-01-02T00:00:00.000Z",
     });

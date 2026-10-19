@@ -49,10 +49,14 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      this.incidentService.createIncident(command, requestId, identity),
+    const result = this.incidentService.createIncidentForCommit(
+      command,
       requestId,
+      identity,
     );
+    return result instanceof Promise
+      ? result.then((item) => toApiSuccessEnvelope(item, requestId))
+      : toApiSuccessEnvelope(result, requestId);
   }
 
   @Get()
@@ -99,15 +103,15 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      this.incidentService.updateIncident(
-        incidentId,
-        command,
-        requestId,
-        identity,
-      ),
+    const result = this.incidentService.updateIncidentForCommit(
+      incidentId,
+      command,
       requestId,
+      identity,
     );
+    return result instanceof Promise
+      ? result.then((item) => toApiSuccessEnvelope(item, requestId))
+      : toApiSuccessEnvelope(result, requestId);
   }
 
   @Get(":incidentId/timeline")
@@ -169,15 +173,15 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      this.incidentService.extendMatchingSuppression(
-        incidentId,
-        command,
-        identity,
-        requestId,
-      ),
+    const result = this.incidentService.extendMatchingSuppressionForCommit(
+      incidentId,
+      command,
+      identity,
       requestId,
     );
+    return result instanceof Promise
+      ? result.then((item) => toApiSuccessEnvelope(item, requestId))
+      : toApiSuccessEnvelope(result, requestId);
   }
 
   @Get(":incidentId/service-recovery")
@@ -256,7 +260,7 @@ export class IncidentController {
           await this.complaintService.awaitSettlementPersistence(
             body.complaintCaseNo,
           );
-          const incident = this.incidentService.linkComplaint(
+          const incident = await this.incidentService.linkComplaintForCommit(
             incidentId,
             body.complaintCaseNo,
             requestId,

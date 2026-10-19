@@ -468,23 +468,24 @@ export class ComplaintController {
           }
           const createdIncident =
             existingIncident ??
-            this.incidentService.publishPreparedIncident(
+            (await this.incidentService.publishPreparedIncidentForCommit(
               preparedIncident,
               requestId,
-            );
+            ));
           const incident =
             !existingIncident && currentCase.assigneeId
-              ? this.incidentService.updateIncident(
+              ? await this.incidentService.updateIncidentForCommit(
                   createdIncident.incidentId,
                   { assignedTo: currentCase.assigneeId },
                   requestId,
                 )
               : createdIncident;
-          const linkedIncident = this.incidentService.linkComplaint(
-            incident.incidentId,
-            caseNo,
-            requestId,
-          );
+          const linkedIncident =
+            await this.incidentService.linkComplaintForCommit(
+              incident.incidentId,
+              caseNo,
+              requestId,
+            );
           this.complaintService.completePreparedEscalation(caseNo);
           return toComplaintActionEnvelope(
             { complaintCase: updatedCase.data, incident: linkedIncident },
@@ -560,7 +561,7 @@ export class ComplaintController {
             },
           );
           await this.complaintService.awaitSettlementPersistence(caseNo);
-          this.incidentService.linkComplaint(
+          await this.incidentService.linkComplaintForCommit(
             command.incidentId,
             caseNo,
             requestId,
