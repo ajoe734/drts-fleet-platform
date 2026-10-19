@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ServiceAreaGeoJsonGeometry } from "@drts/contracts";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { MapGeofenceObservabilityService } from "../../src/modules/operational-observability/map-geofence-observability.service";
@@ -1912,11 +1913,23 @@ describe("ServiceAreaService", () => {
 });
 
 /** Planar shoelace signed area over a closed `[lng, lat][]` GeoJSON ring. */
-function signedShoelaceArea(ring: [number, number][]): number {
+function signedShoelaceArea(
+  ring: ServiceAreaGeoJsonGeometry["coordinates"][number],
+): number {
   let area = 0;
   for (let index = 0; index < ring.length - 1; index += 1) {
     const [lngA, latA] = ring[index]!;
     const [lngB, latB] = ring[index + 1]!;
+    if (
+      lngA === undefined ||
+      latA === undefined ||
+      lngB === undefined ||
+      latB === undefined
+    ) {
+      throw new Error(
+        "A GeoJSON ring position must contain longitude and latitude.",
+      );
+    }
     area += lngA * latB - lngB * latA;
   }
   return area / 2;
