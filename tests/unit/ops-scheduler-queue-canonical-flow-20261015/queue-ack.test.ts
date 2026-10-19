@@ -424,6 +424,49 @@ describe("original OpsQueue canonical commands", () => {
     },
   );
 
+  it("refreshes the existing Registry read authority before selecting the current paired driver", async () => {
+    const presence = new PlatformPresenceService();
+    await presence.setBusy("driver-a", "uber");
+    const f = fixture(undefined, presence);
+    // Only this read dependency is controlled. Queue decisions and the actual
+    // PlatformPresenceService still execute; the old cached pair is driver-a.
+    const prepare = vi.fn(async () => {
+      f.regulatoryRegistryService.listSupplyPairs.mockReturnValue([
+        { vehicleId: "vehicle-a", driverId: "driver-b", etaMinutes: 5 },
+      ] as never);
+      f.regulatoryRegistryService.listDrivers.mockReturnValue([
+        { driverId: "driver-b", name: "Current Driver" },
+      ] as never);
+    });
+    Object.assign(f.regulatoryRegistryService, {
+      prepareDispatchSupply: prepare,
+    });
+    const entry = await f.service.queueCheckIn(command);
+    expect(prepare).toHaveBeenCalledWith("standard_taxi");
+    expect(await f.service.getQueueEntry(entry.queueEntryId)).toMatchObject({
+      driverId: "driver-b",
+      eligibility: { decision: "eligible" },
+    });
+    prepare.mockRejectedValueOnce(
+      new Error("controlled Registry read failure"),
+    );
+    expect(await f.service.getQueueEntry(entry.queueEntryId)).toMatchObject({
+      driverId: null,
+      eligibility: {
+        decision: "denied",
+        reasonCode: "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+      },
+    });
+    prepare.mockRejectedValueOnce(
+      new Error("controlled Registry read failure"),
+    );
+    await expect(
+      f.service.queueCheckIn({ ...command, siteId: "another-site" }),
+    ).rejects.toMatchObject({
+      code: "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+    });
+  });
+
   it("keeps legal noDB duplicate/check-out and original multi-taxi queue denial", async () => {
     const { service } = fixture();
     const [a, b] = await Promise.all([

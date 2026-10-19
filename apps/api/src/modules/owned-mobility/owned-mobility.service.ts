@@ -6882,7 +6882,7 @@ export class OwnedMobilityService
       const traces = await this.ownedMobilityRepository.loadQueueTraceLogs();
       this.queueEntries = this.rebuildQueueEntriesFromTraceLogs(traces);
     }
-    const registry = this.buildQueueRegistryProjection();
+    const registry = await this.prepareQueueRegistryProjection();
     return Promise.all(
       this.queueEntries.map(async (entry) => {
         const record = this.buildQueueEntryReadRecord(entry, registry);
@@ -6959,19 +6959,27 @@ export class OwnedMobilityService
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
     const repository = this.ownedMobilityRepository;
+    if (action === "check_in") {
+      this.assertQueuePolicy(context);
+      const registry = await this.prepareQueueRegistryProjection();
+      if (!registry.authorityAvailable)
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+          "Current queue supply authority is unavailable.",
+        );
+      this.assertQueueEligibility(command.vehicleId, context);
+      // Read the established dependency authorities before taking the queue
+      // transaction's connection/lock. They keep their own current-read scope;
+      // no additional connection is awaited while holding this queue transaction's lock.
+      await this.assertQueuePresence(command.vehicleId, registry);
+    }
     const execute = async (tx?: OwnedMobilityQueryExecutor) => {
       const entries = tx
         ? this.rebuildQueueEntriesFromTraceLogs(
             await repository!.loadQueueTraceLogs(tx, command.siteId),
           )
         : this.queueEntries;
-      if (action === "check_in") {
-        this.assertQueueEligibility(command.vehicleId, context);
-        await this.assertQueuePresence(
-          command.vehicleId,
-          this.buildQueueRegistryProjection(),
-        );
-      }
       const existing = entries.find(
         (entry) =>
           entry.vehicleId === command.vehicleId &&
@@ -7097,6 +7105,23 @@ export class OwnedMobilityService
     } finally {
       if (this.queueCommands.get(key) === pending)
         this.queueCommands.delete(key);
+    }
+  }
+
+  private async prepareQueueRegistryProjection(): Promise<QueueRegistryProjection> {
+    try {
+      await this.regulatoryRegistryService.prepareDispatchSupply?.(
+        "standard_taxi",
+      );
+      return this.buildQueueRegistryProjection();
+    } catch {
+      // A failed fresh read must not silently reuse the old cached pair.
+      return {
+        authorityAvailable: false,
+        vehiclesById: new Map(),
+        driversById: new Map(),
+        pairsByVehicleId: new Map(),
+      };
     }
   }
 
