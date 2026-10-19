@@ -572,3 +572,27 @@ The merged Incident controller is byte-identical to accepted dev: its ordinary C
 ### 部署順序限制
 
 V0126 先將歷史資料分類，再要求新 consent 明填 `case_required`。尚未更新的 API 若在 schema 更新後寫入 consent，會因缺少必填旗標誠實失敗，不能悄悄套用 legacy。使用原部署 workflow 的 migration→新 API 順序；此短暫不相容不可用 false default 隱藏。
+
+### 2026-10-19 Phase 2：完整原任務續作與驗證資格
+
+第一階段內嵌網頁 Demo 操作文件交付後，依原定順序續作本任務，並未另立或縮減五條驗收。Root 正常恢復原 owner Codex2／reviewer Codex。原八檔 WIP 共 430,957 bytes 及依賴原封搬至指定 native worktree；搬移前後 bytes、inode 與舊分支 ref 相同。原 `5cc2e03a4`、024569、各輪候選、退修、generation、失敗及 skip 均保留為歷史，不作本輪新政策或新候選的通過信用。
+
+正常 hooks checkpoint 為 `648c4ea1ddca7d3f0477870411872183b8d004c4`，普通合併 accepted dev `b113049df738e353c7f002bdc05df5fed8399a0d` 後為 `b16e1c45b5e82fa80ff1d8399166cd9597db0785`。原八檔在兩基底間沒有 peer 變更；另完整保留 accepted Callcenter／Complaint／Incident controllers 的 `*ForCommit` durable ACK 接線，以及原 auth policy／Driver SOS。唯一等價 lint 修正將 PG transition fixture 的兩個 literal 空白寫成 regex `{2}`，未改斷言或匹配規則。
+
+本輪原始命令、退出碼、Source SHA、JSON、log 與 hash 存於 `.local/passenger-bureau-gap-correction-20261018/complaint-phase2-lifecycle-20261019/source-checks/`：
+
+| 完整原驗收鍵                                                       | 本輪實際覆蓋與保留條件                                                                                                                                                                                                             |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `complaint_original_terminal_state_and_actual_Ops_actions`         | 原 terminal／close／same-case reopen／reason／SLA 與兩個實際 Ops 元件測試保留；Ops 2 PASS。                                                                                                                                        |
+| `complaint_ordinary_case_and_timeline_canonical_ACK`               | 原 command identity、PREPARED、confirmed replay、unknown／rejected／delayed ACK、late read、精確 cleanup 及多 command／fresh replica 控制均在原 23 套回歸內。                                                                      |
+| `complaint_actual_callers_readback_failure_and_same_case_recovery` | 同案 canonical case／timeline、實際 Ops／Callcenter／Fleet／Incident callers 及 accepted Incident ACK 接線保留；原 API taxonomy／escalation 24 PASS。                                                                              |
+| `complaint_preserved_settlement_PAX_fleet_auth_noDB_and_SLA`       | 原 settlement、PAX 授權／同單／immutable rating／legacy exact replay、Fleet、auth、noDB、SLA 與新 1／2 星 true／false／省略聯絡選擇都保留。Account／token 兩套 131 PASS 是下列 475 的子集，不能重複相加。                          |
+| `complaint_exact_candidate_validation`                             | b16 本機 root 23 suites 為 475 PASS／0 FAIL／43 hosted PG skip，加 API 24 與 Ops 2 共 501 PASS；API 真 Source noEmit 及 root／owned tests noEmit 各 exit 0。這是整合 checkpoint 的本機證據，尚非最後候選的完整 CI／review／merge。 |
+
+前述 immutable daeb 同四控制的真 4 semantic FAIL → 修復 4 PASS 原證據照存。本輪兩個 low-rating production 檔及兩個 wire suite 與原修復 WIP bytes 相同，重新執行所得 131 PASS 及完整回歸則另以 b16 標記，不把歷史 before 或任何舊 CI 改稱本輪新執行。
+
+V0126 的真資料庫轉換、原生 FK／unique／CHECK／NOT NULL、舊資料不回填及新 provenance 仍須既有 hosted PostgreSQL rail 執行。VM 的 43 個 PG skip 沒有獲得 migration／鎖／資料庫信用，也未啟動任何產品、HTTP、browser、PG 或 Compose 服務。
+
+另已定位原 `ci-integ.yml` 的 additional passenger rail 會執行 `tests/e2e/pax-review-additional-branches.spec.ts`。其 E 段首次及拒絕改分後原期待 low-score／false-contact 的 caseNo 為 null、Ops 案件數為零，與本次 USER 明答衝突。Root 正常 R5a 協調將原 31 scopes 精確加為 32，五鍵及全部原條件不變。本分支只修改這兩段業務 consumer：真實評分／付款／同意紀錄須連到唯一 canonical case，正常 Ops GET 須讀回同案及唯一 `case_created` timeline、明示不需聯繫；真實改分請求仍必須回 409，分數／聯絡旗標／ratingId 不變，且同一 caseNo／timeline entryId 不增加或替換。原 checkbox 操作完整保留給 Journey 的獨立 switch hunk，沒有搬入未 accepted Source、skip 案例或放寬期限。此 browser consumer 尚未在本 VM 執行；初步 Source checkpoint 不等於 hosted 通過，最終 own CI 將於正常整合 accepted Journey 的 UC03／switch 修復後執行。最後候選仍須自己的完整 hosted CI 與 Root 五條獨立 review／protected merge；E04 issuer、PSP、真 SMS 及其他外部條件不因此下修。
+
+R5a E 業務 hunk 的 ESLint 與包含實際 imported helpers 的 scoped noEmit 各 exit 0；沒有新增鏡像業務測試。該檔 E 段以外的 Source、原 checkbox 操作及原期限均與 b16 相同，精確 bytes／hash 證據另存本輪 source-checks。這些靜態檢查只證明 consumer 接線與型別，不取代 browser 操作、真 PG 或外聯結果。
