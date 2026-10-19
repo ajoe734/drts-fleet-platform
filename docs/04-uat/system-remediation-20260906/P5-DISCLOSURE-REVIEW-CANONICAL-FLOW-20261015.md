@@ -47,3 +47,7 @@ Earlier sparse-checkout dependency collection failures, DOM initialization mista
 ## Limits and normal next step
 
 No VM product/browser/HTTP/WS/PG/Docker server was started. No real issuer/provider, hosted browser, formal PG, shared Cloud Run, full-system capability or deployment claim follows from these socket-free checks. Own exact-candidate mandatory CI and Root's independent full-spec review, protected merge and all four original nonempty key records follow the normal lifecycle. The author cannot approve or mark the task done. External/live and original whole-goal requirements remain distinct and unchanged.
+
+## Commit provenance note
+
+The first normal hooked implementation commit `2f619c02140f3f6f01bbd92152c698c02db52fb3` inherited this repository's Git author/committer metadata `Gemini2 <gemini2@google.com>`. Its actual executor, Source writer, `AI_NAME` and `LLM-Agent` trailer were Codex2; the reviewer and task trailers are Codex and this original task. This metadata mismatch is recorded honestly and the commit is preserved without rewriting history. The following normal documentation commit explicitly uses Codex2 Git identity. Product/test bytes are unchanged after the first hook; `normal-hook-Source-semantic-parity.json` records exact byte and AST equality for all ten Source/test files.
