@@ -296,6 +296,13 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT],
   },
   {
+    scope: "billing:monthly:run",
+    allowedRealms: ["system"],
+    description:
+      "Run the scheduled monthly billing producer with durable per-target continuation.",
+    resourceConstraints: [ACTOR_CONSTRAINT],
+  },
+  {
     scope: "regulatory:read",
     allowedRealms: ["system", "platform", "ops"],
     description: "Read regulatory cases and filing state.",
@@ -598,6 +605,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "tenant:billing:write",
         "billing:read",
         "billing:write",
+        "billing:monthly:run",
         "regulatory:read",
         "regulatory:write",
         "callcenter:read",

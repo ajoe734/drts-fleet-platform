@@ -1988,6 +1988,95 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /internal/scheduled-tasks/billing-monthly/run:
+    post:
+      operationId: runMonthlyDriverBilling
+      summary: Resume canonical driver billing for a closed UTC month
+      description: >-
+        System-only verified workload route with billing:monthly:run scope.
+        Empty JSON selects the previous UTC month. Canonical completed task/order
+        sources determine targets; target proposals and committed financial IDs
+        survive retries/restarts. HTTP503 exposes resumable per-target failures.
+        Existing manual platform/ops generation and tenant invoice scope remain unchanged.
+      parameters:
+        - in: header
+          name: x-request-id
+          schema: { type: string }
+          description: Correlation for this HTTP attempt; operationId identifies the period operation.
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string }
+          description: Optional durable operation identity, taking precedence over body operationId. Reuse for another period returns409; partial target failures resume on retry.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                periodMonth:
+                  type: string
+                  pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+                  description: Closed UTC month; defaults to the previous calendar month.
+                operationId:
+                  type: string
+                  minLength: 1
+                  description: Defaults to billing-monthly:YYYY-MM. Repeating a period resumes its canonical targets.
+      responses:
+        "200":
+          description: Every canonical eligible target completed, including a genuinely empty month.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required:
+                      [
+                        periodMonth,
+                        operationId,
+                        requestId,
+                        status,
+                        eligibleDriverIds,
+                        targets,
+                      ]
+                    properties:
+                      periodMonth: { type: string }
+                      operationId: { type: string }
+                      requestId: { type: string }
+                      status: { type: string, enum: [completed] }
+                      eligibleDriverIds:
+                        type: array
+                        items: { type: string }
+                      targets:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            driverId: { type: string }
+                            status: { type: string, enum: [completed, failed] }
+                            statementIds:
+                              { type: array, items: { type: string } }
+                            reimbursementBatchIds:
+                              { type: array, items: { type: string } }
+                            errorCode: { type: string }
+        "400":
+          description: Invalid input or current/future period; no financial work performed.
+        "401":
+          description: Unregistered or unverifiable workload identity, using the existing auth path.
+        "403":
+          description: Wrong realm or missing billing:monthly:run/route scope.
+        "409":
+          description: operationId was already bound to a different period.
+        "503":
+          description: >-
+            Source unavailable or BILLING_MONTHLY_PARTIAL_FAILURE. Error details
+            carry periodMonth/operationId/requestId, eligibleDriverIds and target
+            receipts (completed IDs or failed errorCode). Retry the same period
+            to resume missing work; a failed call does not roll back independently committed rows.
+
 components:
   securitySchemes:
     BearerAuth:

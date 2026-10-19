@@ -1,3 +1,4 @@
+import { databaseSocket } from "../billing-monthly-batch-resumption-20261015/fixtures";
 import { describe, it, expect, vi } from "vitest";
 import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
@@ -102,64 +103,19 @@ async function createApprovedBatch(service: BillingSettlementService) {
  * boundary this task's acceptance requires.
  */
 function createFakeDatabase() {
-  const tables = new Map<string, Map<string, unknown>>();
-  const insertKeyField: Record<string, string> = {
-    "billing.phase1_tenant_billing_profiles": "tenantId",
-    "billing.phase1_tenant_invoices": "invoiceId",
-    "billing.phase1_driver_fee_plans": "feePlanId",
-    "billing.phase1_driver_statements": "statementId",
-    "billing.phase1_reimbursement_batches": "batchId",
-    "billing.phase1_reconciliation_issues": "issueId",
-  };
-
-  let failReimbursementBatchWrite: Error | null = null;
-
-  const query = vi.fn(async (sql: string, values: unknown[] = []) => {
-    const insertMatch = sql.match(/INSERT INTO (\S+)/);
-    if (insertMatch) {
-      const table = insertMatch[1]!;
-      if (
-        table === "billing.phase1_reimbursement_batches" &&
-        failReimbursementBatchWrite
-      ) {
-        throw failReimbursementBatchWrite;
-      }
-      const keyField = insertKeyField[table];
-      const record = JSON.parse(String(values[values.length - 1])) as Record<
-        string,
-        unknown
-      >;
-      const bucket = tables.get(table) ?? new Map<string, unknown>();
-      bucket.set(String(record[keyField!]), structuredClone(record));
-      tables.set(table, bucket);
-      return { rows: [], rowCount: 1 };
-    }
-
-    const selectMatch = sql.match(/FROM (\S+)/);
-    if (selectMatch) {
-      const bucket = tables.get(selectMatch[1]!);
-      const rows = bucket
-        ? [...bucket.values()].map((record) => ({
-            record: structuredClone(record),
-          }))
-        : [];
-      return { rows };
-    }
-
-    return { rows: [] };
-  });
-
-  const databaseService = {
+  const socket = databaseSocket();
+  const repository = new BillingSettlementRepository({
     isEnabled: () => true,
-    query,
-  } as unknown as DatabaseService;
-  const repository = new BillingSettlementRepository(databaseService);
-
+    query: socket.query,
+    connect: socket.connect,
+  } as unknown as DatabaseService);
   return {
     repository,
-    setFailReimbursementBatchWrite: (error: Error | null) => {
-      failReimbursementBatchWrite = error;
-    },
+    setFailReimbursementBatchWrite: (error: Error | null) =>
+      socket.reject(
+        error ? "billing.phase1_reimbursement_batches" : null,
+        error,
+      ),
   };
 }
 

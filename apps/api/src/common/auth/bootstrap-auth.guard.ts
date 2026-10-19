@@ -166,7 +166,7 @@ function isStrictAuthEnvironment(): boolean {
 // Cloud Scheduler (like the Cloud Run metadata server InternalKeyMiddleware
 // already tolerates) caches and reuses the identical OIDC ID token across
 // every trigger firing for most of its validity window, not just concurrent
-// requests on one firing. These two scheduled-task routes are safe to accept
+// requests on one firing. These scheduled-task routes are safe to accept
 // that same token repeatedly: both are idempotent sweeps with no side effect
 // tied to "this exact assertion has never been seen before", unlike
 // `POST /api/auth/token` (session issuance, must stay one-time-use) or the
@@ -176,6 +176,7 @@ function isStrictAuthEnvironment(): boolean {
 const REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS = new Set([
   "internal:scheduled-tasks:mail-outbox:drain",
   "internal:scheduled-tasks:approval-timeout-reminders:run",
+  "internal:scheduled-tasks:billing-monthly:run",
 ]);
 
 interface ResolvedBootstrapAuthPolicy {
