@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { PassengerPushDevicesService } from "../../../apps/api/src/modules/passenger-push-devices/passenger-push-devices.service";
 import { isDeepStrictEqual } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -217,6 +218,10 @@ async function fixture() {
                 request_hash: target.consent[4],
                 rating_id: target.consent[2],
                 complaint_case_no: target.consent[5],
+                contact_requested: target.consent[3],
+                case_required: target.consent[7],
+                record: target.complaintCase,
+                timeline: target.timeline,
               },
             ]
           : [],
@@ -438,7 +443,69 @@ async function fixture() {
   };
 }
 
+/** Captured pre-V0126 SQL rows, not produced by the current writer. */
+function legacyAccountRating(
+  f: Awaited<ReturnType<typeof fixture>>,
+  consent = true,
+) {
+  const at = new Date(NOW).toISOString();
+  f.state.rating = {
+    rating_id: "historical-account-rating",
+    order_id: f.orderId,
+    trip_id: "assignment-unit",
+    driver_id: "driver-unit",
+    passenger_subject_ref: PASSENGER,
+    score: 2,
+    tags: ["clean"],
+    comment: "請客服聯繫",
+    status: "active",
+    submitted_at: at,
+    updated_at: at,
+  };
+  if (consent)
+    f.state.consent = [
+      f.orderId,
+      PASSENGER,
+      "historical-account-rating",
+      false,
+      createHash("sha256")
+        .update(
+          JSON.stringify({
+            score: 2,
+            tags: ["clean"],
+            comment: "請客服聯繫",
+            contactRequested: false,
+          }),
+        )
+        .digest("hex"),
+      null,
+      at,
+      false,
+    ];
+}
+
 describe("actual account rating and explicit contact choice share the CRM transaction", () => {
+  it.each([1, 2] as const)(
+    "USER-ALL-LOW account score %s creates a canonical no-contact case",
+    async (rating) => {
+      const f = await fixture();
+      const notifications = vi.spyOn(f.audit, "recordNotification");
+      await f.submit({ ...f.command, rating, contactRequested: false });
+      expect(f.state.complaintCase).toBeDefined();
+      expect(f.state.timeline?.caseNo).toBe(f.state.complaintCase!.caseNo);
+      expect(f.state.intake?.[4]).toBe(false);
+      expect(f.state.consent?.[3]).toBe(false);
+      expect(f.state.consent?.[5]).toBe(f.state.complaintCase!.caseNo);
+      expect(f.state.consent?.[7]).toBe(true);
+      expect(f.state.complaintCase!.description).toContain("同意客服聯繫：否");
+      expect(f.state.complaintCase!.description).toContain("不需客服聯繫");
+      expect(notifications).not.toHaveBeenCalled();
+      const readback = await f.complaint.getComplaintCaseForOps(
+        f.state.complaintCase!.caseNo,
+      );
+      expect(readback.description).toBe(f.state.complaintCase!.description);
+    },
+  );
   it.each([1, 2] as const)(
     "score %s opt-in creates one canonical CRM case after commit",
     async (rating) => {
@@ -480,10 +547,12 @@ describe("actual account rating and explicit contact choice share the CRM transa
     },
   );
   it.each([
-    { rating: 2, contactRequested: false },
-    { rating: 2, contactRequested: undefined },
     { rating: 3, contactRequested: true },
+    { rating: 3, contactRequested: false },
+    { rating: 4, contactRequested: true },
+    { rating: 4, contactRequested: undefined },
     { rating: 5, contactRequested: true },
+    { rating: 5, contactRequested: false },
   ] as const)(
     "%j preserves the choice without creating a complaint",
     async (patch) => {
@@ -501,6 +570,119 @@ describe("actual account rating and explicit contact choice share the CRM transa
       expect(f.state.consent?.[5]).toBeNull();
     },
   );
+  it.each([1, 2] as const)(
+    "omitted contact score %s still creates a no-contact case and stable retry",
+    async (rating) => {
+      const f = await fixture();
+      const command = { ...f.command, rating };
+      delete command.contactRequested;
+      await f.submit(command);
+      const original = structuredClone(f.state);
+      await f.submit({ ...command, contactRequested: false });
+      expect(f.state).toEqual(original);
+      expect(f.state.consent?.[7]).toBe(true);
+      expect(f.state.complaintCase!.description).toContain("不需客服聯繫");
+      expect(f.state.timeline!.note).toContain("同意客服聯繫：否");
+    },
+  );
+  it.each([false, undefined])(
+    "migrated legacy low opt-out %s keeps the original no-case result",
+    async (contactRequested) => {
+      const f = await fixture();
+      legacyAccountRating(f);
+      const command = { ...f.command };
+      if (contactRequested === undefined) delete command.contactRequested;
+      else command.contactRequested = contactRequested;
+      const original = structuredClone(f.state);
+      await f.submit(command);
+      expect(f.state).toEqual(original);
+      expect(f.state.complaintCase).toBeUndefined();
+      expect(f.state.consent?.[5]).toBeNull();
+      await expect(f.submit()).rejects.toMatchObject({
+        code: "PASSENGER_RATING_ALREADY_SUBMITTED",
+      });
+      expect(f.state).toEqual(original);
+      expect(f.calls.some((c) => c.sql.startsWith("INSERT INTO crm."))).toBe(
+        false,
+      );
+    },
+  );
+  it.each([undefined, null, "false", 0])(
+    "missing or invalid account provenance %s fails closed, without backfill",
+    async (marker) => {
+      const f = await fixture();
+      legacyAccountRating(f);
+      f.state.consent = f.state.consent!.map((v, i) => (i === 7 ? marker : v));
+      const original = structuredClone(f.state);
+      await expect(
+        f.submit({ ...f.command, contactRequested: false }),
+      ).rejects.toMatchObject({
+        code: "PASSENGER_RATING_CONSENT_INCONSISTENT",
+      });
+      expect(f.state).toEqual(original);
+      expect(f.calls.some((c) => c.sql.startsWith("INSERT INTO crm."))).toBe(
+        false,
+      );
+    },
+  );
+  it.each(["caseNo", "case", "timeline"] as const)(
+    "new required account %s missing after unknown reply never becomes legacy",
+    async (missing) => {
+      const f = await fixture();
+      f.access.fault = "lost_commit_reply";
+      const command = { ...f.command, contactRequested: false };
+      await expect(f.submit(command)).rejects.toThrow("lost commit reply");
+      f.access.fault = undefined;
+      if (missing === "caseNo")
+        f.state.consent = f.state.consent!.map((v, i) => (i === 5 ? null : v));
+      if (missing === "case") delete f.state.complaintCase;
+      if (missing === "timeline") delete f.state.timeline;
+      const original = structuredClone(f.state);
+      await expect(f.submit(command)).rejects.toMatchObject({
+        code: "PASSENGER_RATING_CONSENT_INCONSISTENT",
+      });
+      expect(f.state).toEqual(original);
+    },
+  );
+  it.each(["audit", "commit", "lost_commit_reply"] as const)(
+    "no-contact account %s failure stays honest and exact retry keeps one case",
+    async (fault) => {
+      const f = await fixture();
+      const command = { ...f.command, contactRequested: false };
+      const notices = vi.spyOn(f.audit, "recordNotification");
+      f.access.fault = fault;
+      await expect(f.submit(command)).rejects.toThrow();
+      const original = structuredClone(f.state);
+      expect(f.complaint.listComplaintCases()).toEqual([]);
+      f.access.fault = undefined;
+      await f.submit(command);
+      if (fault !== "commit") {
+        expect(f.state.complaintCase).toEqual(original.complaintCase);
+        expect(f.state.timeline).toEqual(original.timeline);
+      }
+      expect(f.state.consent?.[7]).toBe(true);
+      expect(f.state.intake?.[4]).toBe(false);
+      expect(notices).not.toHaveBeenCalled();
+    },
+  );
+  it("no-contact account case/timeline remain unacknowledged until COMMIT", async () => {
+    const f = await fixture();
+    const gate = f.holdCommit();
+    let ack = false;
+    const request = f
+      .submit({ ...f.command, contactRequested: false })
+      .then(() => {
+        ack = true;
+      });
+    await gate.atCommit;
+    expect(ack).toBe(false);
+    expect(f.state).toEqual({});
+    expect(f.complaint.listComplaintCases()).toEqual([]);
+    gate.releaseCommit();
+    await request;
+    expect(f.state.complaintCase).toBeDefined();
+    expect(ack).toBe(true);
+  });
   it("does not publish rating, case, audit or response while commit is pending", async () => {
     const f = await fixture();
     const gate = f.holdCommit();
@@ -727,7 +909,7 @@ describe("actual account rating and explicit contact choice share the CRM transa
     await expect(f.submit()).rejects.toMatchObject({
       code: "PASSENGER_RATING_ALREADY_SUBMITTED",
     });
-    expect(f.state.complaintCase).toBeUndefined();
+    expect(f.state.complaintCase).toBeDefined();
     expect(f.state.consent?.[3]).toBe(false);
   });
   it("exactly 24 hours and 200 unicode characters are accepted; larger or malformed comments/contact are rejected", async () => {
@@ -753,8 +935,7 @@ describe("actual account rating and explicit contact choice share the CRM transa
   });
   it("does not infer mutable contact consent for a pre-existing legacy rating", async () => {
     const f = await fixture();
-    await f.submit({ ...f.command, contactRequested: false });
-    delete f.state.consent;
+    legacyAccountRating(f, false);
     await expect(
       f.submit({ ...f.command, contactRequested: false }),
     ).rejects.toMatchObject({ code: "PASSENGER_RATING_CONSENT_UNAVAILABLE" });

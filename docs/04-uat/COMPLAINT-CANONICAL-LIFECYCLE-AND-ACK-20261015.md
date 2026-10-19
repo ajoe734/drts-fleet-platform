@@ -551,3 +551,87 @@ The first clean `cf4fba9bfd70a724e6243239a7cc7d5f093ef7e8` full sweep honestly e
 Root normally reopened reviewed `062e028337a5b9eec8c4feaf3f3a8728b798e9ac` after accepted dev advanced to `2460749f9a0d097973c71d91bedcc481466486dc` and the protected PR acquired two real merge conflicts. The ordinary merge preserves the complete Complaint V0123 and accepted SOS V0124 allocation groups/amendments, plus both migration collectors in the partner-notification test. The push-channel and recovery collectors retain both groups through their automatic merge. All original assertions and both migrations remain unchanged.
 
 The merged Incident controller is byte-identical to accepted dev: its ordinary Complaint link still awaits the Complaint persistence boundary, while SOS list/detail/timeline use the accepted canonical readback methods. Complaint service/repository, the original fifteen controls and the final twenty-eight controls are unchanged from `062e`. Its 412 local passes, three compiler passes, scoped lint, independent Root review/controls and ongoing own CI remain historical evidence for that exact candidate. The integration candidate receives distinct allocation/caller regressions, affected API compilation, lint, source-equivalence evidence and its own hosted CI; results are recorded separately under `.local/complaint-codex2-repair-20261019/r3-accepted-dev-integration-*`. No prior green run is relabeled as the new candidate's check.
+
+## R3 — 2026-10-19 USER：1／2 星一律建案，開關僅決定聯絡
+
+此節依完整送審圖及 USER 明答「≤2 星都建案，開關只決定聯絡」續作原五項 Source 驗收。保留前述所有候選、失敗及歷史政策紀錄；它們不代表本次新政策已驗收。評分 UI 預設開啟與開關由原 Journey 作者負責，本變更不碰其顯示或原 E04 開立／付款條件。
+
+- 帳號評分與行程連結評分的正式 hooks 均對新 1／2 星建立 canonical 客訴與 `case_created` timeline，與原評分及同意紀錄使用同一 PoolClient／交易。3／4／5 星不因評分自動建立這種客訴。原分數、文字、標籤與聯絡選擇不可事後改寫。
+- `contact_requested=false`（或 API 原本省略後正規化 false）仍建立案件；帳號 intake 的 `contact_consent=false` 保留，兩條路的案件及 timeline 明示「同意客服聯繫：否」，案件補充「不需客服聯繫，僅供內部檢視」。原客服畫面直接呈現 canonical description。此流程只作內部 CRM／稽核，不新增乘客電話、SMS 或人員聯絡工作；內部 SLA 與 Ops notice 原則不變。
+- V0126 為正向 migration，不修改 V0114／V0119／V0123。既有 consent 按原 `complaint_case_no` 是否存在明存 `case_required`，不猜測聯絡同意、不回填客訴。新 consent 必須明傳此旗標（沒有 default），並受 case FK／unique／旗標與 case 存在一致的 CHECK 保護；token case-required 仍受低分 CHECK 約束。
+- 整筆 consent 尚未存在的歷史 token rating 另由既有 rating row 的內部 `low_rating_case_policy_v2=false` 證明。migration 僅將當時既有 ratings 標記 false；之後新 row 的 DB default 為 true 且不可 NULL。只有明確歷史 false 加 omitted-contact exact retry 保留原無 consent／不回填語意；新 true、NULL、缺 marker／缺 rating 都不能當作 legacy。新要求建案的 consent 缺 caseNo／case／timeline 也 fail closed，不建立第二案掩蓋異常。
+- 舊 low／false／null-case 的 exact replay 保留原結果及不能改成 opt-in 的限制。新低分的相同 payload 重試、延遲／失敗／未知 COMMIT、audit ACK 與 fresh Ops readback 則保留原 caseNo、timeline entryId；不以未知結果宣告已回滾或成功。
+
+### 可重跑驗證與證據資格
+
+- immutable 基底 `daebd72eeef12229cb59d3750b7a288b1dab7448` 上，同四個 `USER-ALL-LOW` actual account/token controls 真終態為 4 semantic FAIL（case undefined）；修復後同四案 4 PASS。過濾掉的其餘案例不計通過。原 ENOSPC／錯誤時序的初次輸出另存 `.local`，不採為 before 證據，且唯一受截斷檔已先逐 byte 恢復基底才執行此有效 before。
+- 兩組正式 controller／service／repository socket-free wire suites 驗分數、聯絡旗標、歷史 exact replay、新 marker 缺失、未知 COMMIT、no-contact 稽核與 ACK。SQL wire 是外部資料邊界，不是 PostgreSQL migration、鎖競爭或 browser 驗收。
+- 真 V0126 舊資料轉換／新 constraints 由既有 GitHub-hosted PostgreSQL suite 執行；本 VM 不啟動 PG／HTTP／browser／產品服務。實際尚未取得的 hosted 結果維持 pending，不引用舊 SHA 的 CI 作新政策信用。
+- 原 ordinary lifecycle／terminal Ops／caller／settlement／Fleet／auth／noDB／SLA 五項完整需求保持；完成受影響回歸、候選自己的必要 CI、Root 獨立 review 及 protected merge 後才關閉 Source。Source 不代表正式 E04 issuer、PSP、真 SMS 或其他外部驗收。
+
+### 部署順序限制
+
+V0126 先將歷史資料分類，再要求新 consent 明填 `case_required`。尚未更新的 API 若在 schema 更新後寫入 consent，會因缺少必填旗標誠實失敗，不能悄悄套用 legacy。使用原部署 workflow 的 migration→新 API 順序；此短暫不相容不可用 false default 隱藏。
+
+### 2026-10-19 Phase 2：完整原任務續作與驗證資格
+
+第一階段內嵌網頁 Demo 操作文件交付後，依原定順序續作本任務，並未另立或縮減五條驗收。Root 正常恢復原 owner Codex2／reviewer Codex。原八檔 WIP 共 430,957 bytes 及依賴原封搬至指定 native worktree；搬移前後 bytes、inode 與舊分支 ref 相同。原 `5cc2e03a4`、024569、各輪候選、退修、generation、失敗及 skip 均保留為歷史，不作本輪新政策或新候選的通過信用。
+
+正常 hooks checkpoint 為 `648c4ea1ddca7d3f0477870411872183b8d004c4`，普通合併 accepted dev `b113049df738e353c7f002bdc05df5fed8399a0d` 後為 `b16e1c45b5e82fa80ff1d8399166cd9597db0785`。原八檔在兩基底間沒有 peer 變更；另完整保留 accepted Callcenter／Complaint／Incident controllers 的 `*ForCommit` durable ACK 接線，以及原 auth policy／Driver SOS。唯一等價 lint 修正將 PG transition fixture 的兩個 literal 空白寫成 regex `{2}`，未改斷言或匹配規則。
+
+本輪原始命令、退出碼、Source SHA、JSON、log 與 hash 存於 `.local/passenger-bureau-gap-correction-20261018/complaint-phase2-lifecycle-20261019/source-checks/`：
+
+| 完整原驗收鍵                                                       | 本輪實際覆蓋與保留條件                                                                                                                                                                                                             |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `complaint_original_terminal_state_and_actual_Ops_actions`         | 原 terminal／close／same-case reopen／reason／SLA 與兩個實際 Ops 元件測試保留；Ops 2 PASS。                                                                                                                                        |
+| `complaint_ordinary_case_and_timeline_canonical_ACK`               | 原 command identity、PREPARED、confirmed replay、unknown／rejected／delayed ACK、late read、精確 cleanup 及多 command／fresh replica 控制均在原 23 套回歸內。                                                                      |
+| `complaint_actual_callers_readback_failure_and_same_case_recovery` | 同案 canonical case／timeline、實際 Ops／Callcenter／Fleet／Incident callers 及 accepted Incident ACK 接線保留；原 API taxonomy／escalation 24 PASS。                                                                              |
+| `complaint_preserved_settlement_PAX_fleet_auth_noDB_and_SLA`       | 原 settlement、PAX 授權／同單／immutable rating／legacy exact replay、Fleet、auth、noDB、SLA 與新 1／2 星 true／false／省略聯絡選擇都保留。Account／token 兩套 131 PASS 是下列 475 的子集，不能重複相加。                          |
+| `complaint_exact_candidate_validation`                             | b16 本機 root 23 suites 為 475 PASS／0 FAIL／43 hosted PG skip，加 API 24 與 Ops 2 共 501 PASS；API 真 Source noEmit 及 root／owned tests noEmit 各 exit 0。這是整合 checkpoint 的本機證據，尚非最後候選的完整 CI／review／merge。 |
+
+前述 immutable daeb 同四控制的真 4 semantic FAIL → 修復 4 PASS 原證據照存。本輪兩個 low-rating production 檔及兩個 wire suite 與原修復 WIP bytes 相同，重新執行所得 131 PASS 及完整回歸則另以 b16 標記，不把歷史 before 或任何舊 CI 改稱本輪新執行。
+
+V0126 的真資料庫轉換、原生 FK／unique／CHECK／NOT NULL、舊資料不回填及新 provenance 仍須既有 hosted PostgreSQL rail 執行。VM 的 43 個 PG skip 沒有獲得 migration／鎖／資料庫信用，也未啟動任何產品、HTTP、browser、PG 或 Compose 服務。
+
+另已定位原 `ci-integ.yml` 的 additional passenger rail 會執行 `tests/e2e/pax-review-additional-branches.spec.ts`。其 E 段首次及拒絕改分後原期待 low-score／false-contact 的 caseNo 為 null、Ops 案件數為零，與本次 USER 明答衝突。Root 正常 R5a 協調將原 31 scopes 精確加為 32，五鍵及全部原條件不變。本分支只修改這兩段業務 consumer：真實評分／付款／同意紀錄須連到唯一 canonical case，正常 Ops GET 須讀回同案及唯一 `case_created` timeline、明示不需聯繫；真實改分請求仍必須回 409，分數／聯絡旗標／ratingId 不變，且同一 caseNo／timeline entryId 不增加或替換。原 checkbox 操作完整保留給 Journey 的獨立 switch hunk，沒有搬入未 accepted Source、skip 案例或放寬期限。此 browser consumer 尚未在本 VM 執行；初步 Source checkpoint 不等於 hosted 通過，最終 own CI 將於正常整合 accepted Journey 的 UC03／switch 修復後執行。最後候選仍須自己的完整 hosted CI 與 Root 五條獨立 review／protected merge；E04 issuer、PSP、真 SMS 及其他外部條件不因此下修。
+
+R5a E 業務 hunk 的 ESLint 與包含實際 imported helpers 的 scoped noEmit 各 exit 0；沒有新增鏡像業務測試。該檔 E 段以外的 Source、原 checkbox 操作及原期限均與 b16 相同，精確 bytes／hash 證據另存本輪 source-checks。這些靜態檢查只證明 consumer 接線與型別，不取代 browser 操作、真 PG 或外聯結果。
+
+### R6：既有 mounted HTTP 與固定 PG inventory consumer 補齊
+
+Root／owner 在 immutable `ed521f33622a35b235a36d339b69c3b8a733cd6c` 只讀核對，發現兩個未同步的既有 consumer：mounted HTTP 的 token 2 星 false／省略及 account 1 星 false 仍期待無案；固定 PG inventory gate 及其獨立 unit fixture 仍期待 receipt PG 36 案。這是 Source 靜態矛盾，尚未啟動新 CI，也沒有捏造本輪 hosted 失敗結果。Root 正常 R6 協調僅加該 HTTP suite、原 gate 與原 gate unit 三個精確路徑為 35 scopes，原 32 scopes、五鍵、角色及全部條件保持。
+
+- HTTP 只更正原兩矩陣的業務期待，保留原請求資料、201、原高 5 星 no-case、原 harness／角色／授權／其他案例與原期限。低 false／省略須在實際 DB 保留 false 聯絡、`case_required=true`、原 rating 關聯、唯一 case／`case_created` timeline；正常 Ops detail／timeline HTTP 回應須讀回相同 caseNo／entryId 與不需聯繫說明。Account intake 保留 false；token 不創造 account consent／intake。兩個矩陣仍是 3＋2 案，加原 12 個直接案例，共 17，沒有用高分替換低分或刪除案例。
+- receipt PG 原報告實際已有 44 個 assertions（43 native PG skip＋1 server-free adapter），不是 44 PASS。相對舊 36 增 8：高 4 星 no-case 一案、1／2 星各 true／false／省略共六組雙入口案、exact V0126 舊資料轉換一案。
+- 九套固定 inventory 依序為 account-auth-fare HTTP 13、account-session PG 13、booking-history PG 5、fare-quote PG 15、OTP/OAuth PG 22、payment HTTP 8、payment PG 19、receipt HTTP 17、receipt PG 44。未來真執行應為 native PG 117＋HTTP 38＝155 business，另 adapter 1，共 156；此為 Source-derived inventory，尚非本輪已通過數。
+- 原 gate 與獨立 unit fixture 僅同步上述固定數及摘要。固定九套集合、每套唯一、精確案例數、全斷言 passed、零 failed／pending／skipped／todo、hook error、唯一具名 adapter 及全部原負向測試不變；獨立 fixture 不從 `gate.EXPECTED` 產生。
+
+這輪只執行原 Python gate unit、精確 HTTP consumer 的真 import noEmit／lint／format 及正常 hooks；實值另存本輪 source-checks，不重跑既有 501 或把原 43 PG skip 改稱通過。VM 不執行 mounted HTTP／PG、不偽設 `GITHUB_ACTIONS`。`ed521` 舊 checkpoint、歷史 R6 QA 147／148 證據及已發佈 migrations 原樣保留；新 checkpoint 仍須等 Journey 正常 accepted 後普通整合，再建立最後候選及 own mandatory CI／完整五條 Root review，不能借歷史數字或未接受 Source。
+
+R6 本輪既有 Python gate unit 實際 8 tests／exit 0；HTTP consumer ESLint exit 0，包含真 API／controller／repository imports 的 scoped noEmit exit 0。這些是 consumer 與 verifier 的靜態／工具測試，不是 17 個 mounted HTTP 或 43 個 native PG 通過。兩個原 HTTP 矩陣以外逐 byte 不變，gate 與獨立 fixture 除固定數、摘要及必要註解外逐 byte 不變；兩個 production Complaint 檔、V0126、E consumer 與原 `ed521` checkpoint 相同。
+
+### R7：正常整合 accepted Journey 與最後 Source 資格
+
+Journey 正常 protected merge `607cf709dabbd115df77b491419506de8cfd61d9` 已接受後，從本任務 `a2cc6d2d0c47d009a147d8ae5b7596a04df56480` 普通合併為 `4fd578c4a0530db5ed8aaef0a2577173704f3b34`，保留 `ed521`／`a2cc` 舊 refs 與原完整歷史。唯一人工衝突解法是 E step label 合併新建案語意與真 switch 描述；accepted switch `uncheck`／`not.toBeChecked` 與本任務唯一 case／timeline／真 409 後同案斷言同時保留。未覆寫整檔或搬入未接受 Source。
+
+正常 mandatory hooks 另將兩個 accepted peer 檔格式化。作者先凍結並披露，Root 獨立核實它們精確等於 installed Prettier **3.8.2** 對 accepted 原 bytes 的輸出，再正常 R7 精確加為 37 scopes：`jwt-auth.service.ts` 及 `tenant-grant-session-consumer.test.ts` 僅保留這兩份已核實的 formatter blobs，沒有 JWT／session／role／version 業務或 fixture／assertion／期限變更。作者早先訊息把版本寫成 3.6.2 有誤，原始 receipt 一直記錄正確的 3.8.2，此處更正。
+
+整合後 `4fd` 的 API 真 Source noEmit exit 0（20.6946 秒）、HTTP＋E actual-import noEmit exit 0（16.4117 秒），兩個 account／token 評分 wire suites 實際 131 PASS／0 FAIL／0 skip（9.4929 秒），均為本機 socket-free；未再重跑沒有新差異的原 501。其餘 7193 個 accepted peer entries 逐 blob 保留，原 12 個 own paths 除 E 精確 union 外其餘 11 個與 `a2cc` 相同。最後只追加此 UAT，編譯／測試輸入不變；raw logs／JSON／命令／退出碼／SHA 與完整五鍵矩陣由本輪 review packet 資格對照。
+
+最後候選自己的 hosted CI 尚待真終態，尤其 V0126 舊資料轉換／新 constraints、receipt PG 44（43 native＋1 adapter）、mounted HTTP 17 及 additional E 的真 case／timeline／409 readback。原 43 PG skip 仍是未執行，Python gate 8 PASS 或 Journey own CI 不能替代；不能將 Source 交審當完整五鍵已通過或本任務 DONE。全五條仍包括原 lifecycle／terminal Ops、PREPARED／durable ACK／多命令及 fresh recovery、實際 callers、settlement／PAX／Fleet／auth／noDB／SLA。正式 E04 issuer、PSP、真 SMS、實體裝置及其他外部條件仍屬原來的獨立驗收；未在 VM 啟動 HTTP／PG／browser／產品或 Compose，作者不自行 approve／merge／deploy。
+
+### 原生 PostgreSQL 實敗：歷史評分 seed 的 assignment 身份更正
+
+`71752c03f3ca21121cc2dc9d7b4c69dad0b29bd2` 自身 main CI `39321705385` 的 root shard 2／4 真正執行 receipt inventory 44 個 assertions，結果為 43 PASS／1 FAIL／0 skip；43 個通過包含一個 server-free adapter，並非 44 個原生 PG 通過。唯一失敗為 `V0126 exact transition preserves original low opt-outs, case IDs and constraints before new writes` 的舊 token 評分重送，原生 repository 回應 `PASSENGER_RATING_ASSIGNMENT_MISSING`。原始 ZIP、CRC、job log、報告及失敗全部保留；實際 checkout 為 `579d5206e66c1f2907c302d02bab51837dd84867`，其 parents 為 accepted `607cf709dabbd115df77b491419506de8cfd61d9` 與 `71752c03f3ca21121cc2dc9d7b4c69dad0b29bd2`，tree 與 717 相同，沒有把 synthetic SHA 冒稱候選 SHA。
+
+作者新加的 transition seed 將完成事件的 `tripId`（實際 DriverTask 的 `taskId`）誤填為 rating 的 `tripId`，但原 token writer 正確使用持久 disclosure 的 `assignmentId`。既有 production guard 對不同 assignment 拒絕 409 是正確行為。Root 正常退修後，僅更正原 PG test 的 seed：透過既有 `resolvePersistedPassengerAssignmentDisclosure(orderId)` 讀取真實已存在的 disclosure，明確要求非 null，再使用其 `assignmentId` 與 `driver.driverId` 建立兩筆歷史評分。沒有改 production、harness、V0126、guard、分數／聯絡選擇、原案例或斷言；既有 legacy false／省略、原 case／timeline IDs、缺整 consent 分支、新資料 fail-closed、原生 constraints 及全 44 inventory 保留。
+
+受影響 PG test 的 actual-import scoped noEmit exit 0（15.2958 秒）、ESLint exit 0、Prettier check exit 0；其餘原檔及全部斷言逐 byte 保留。沒有在 VM 啟動 PG 或重跑無變的 131／501。這些靜態檢查不是修復後原生 PG 通過；717 其餘 CI 自然收尾後，下一個候選仍須自己的完整 hosted CI、真 44／17／E 結果與 Root 原五條獨立 review，不借舊綠、不取消或重跑原失敗。
+
+### R8：真 Nest 評分 consumer 的單行政策同步
+
+同一 717 main CI 的 root shard 3／4 另有一個真失敗：原 `rating-injection.test.ts` wrapper 的七情境 probe 在 low-no-contact 情境已讀到 `consent=false`、`hasDraft=true`，但舊斷言仍期待 `low && contactRequested`，與 USER「1／2 星都建案，開關只決定聯絡」衝突。其餘六個情境沒有回報失敗；原始 job log、ZIP、CRC 及報告全部保留。這是既有 consumer 的舊政策期待，沒有理由改回正確的 production 行為。
+
+Root 正常 R8 僅新增這個既有 `rating-injection-probe.cjs` 精確路徑，使完整 scope 為 38，原五條／五鍵、角色、歷史與全部原 37 scopes 保留。唯一程式差異為 `hasDraft` 期待改成 `low`；前一行的 `consent === contactRequested`、其他全部 bytes、七種情境、真 AppModule／Nest injector／controller、錯誤／狀態／寫入次數及原 child 60 秒／wrapper 65 秒期限不變。
+
+修復後原既有 wrapper 實際 1 PASS／0 FAIL／0 skip（內含完整七情境，並非七個獨立 Vitest tests），耗時 14.0688 秒；CJS syntax 與 ESLint 各 exit 0。Probe 保留明確拒絕 `Server.listen` 的控制，沒有啟動 VM 服務或取得 PG／browser／runtime 信用。PG seed 修正普通 checkpoint `fb8805850fa119842ba3456ff2f8a3d868b20749` 與 717 全部失敗原物保留，待原 integration 自然終態才發佈新候選；新候選的原生 44／HTTP 17／E 與其餘 mandatory CI 仍須自行完成。
