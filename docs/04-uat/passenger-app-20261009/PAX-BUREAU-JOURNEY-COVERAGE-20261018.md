@@ -137,6 +137,8 @@ Root 正常 request_changes 後，沿原任務處理三個實證原因：
 
 safe-progress 的 `/rides` GET 亦可能是 review 導覽的 Next Link prefetch；未當成已證明的錯誤導航。新 Source 須重新產生完整 immutable candidate、自身 full CI、獨立 review 與正常 merge，舊 c338 的窄通過及真失敗各自保留，不借給新版本。全部五組、UC01–16 與下列兩 keys 的未解來源／shared 條件維持。
 
+凍結前普通合併最新 accepted dev `2460749f9a0d097973c71d91bedcc481466486dc`，peer Environment／SOS／Platform Source 保留原作者信用。第一次 merge commit 因 subject 漏 TASK-ID prefix，被正常 commit-msg hook 真拒絕（exit1，原記錄保留）；修正 subject 後正常 merge completion／hooks exit0，未 bypass／amend／rebase／force。原36個 Journey 路徑的程式保持 byte 相同，但正常 lint-staged 對43個 incoming accepted 檔案中的6檔產生精確 Prettier 重排；沒有宣稱43檔全 byte 相同。Root 獨立核6檔恰等於既有 installed formatter 輸出後，正常有限加配6個機械 hunk（25 scopes）；無 auth／SOS 語義修補或額外測試 gate。完整候選相對該 accepted base 是 **42 paths＝原36 Journey＋6機械格式**；格式中的兩處 JSX 只拆相鄰字串、可見文字相同。兩 keys／全部 acceptances／五組與 UC01–16 不變；accepted peer 祖先不列本 task 新功能信用。
+
 ## 原兩個 acceptance keys
 
 - `pax-bureau-coverage_each-finding-real-evidence-and-applicability`
