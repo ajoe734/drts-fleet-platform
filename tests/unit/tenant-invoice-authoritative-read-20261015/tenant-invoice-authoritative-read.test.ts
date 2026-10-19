@@ -1,3 +1,4 @@
+import { canonicalTargetPersistence } from "../billing-monthly-batch-resumption-20261015/fixtures";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -732,6 +733,10 @@ describe("TENANT-INVOICE-AUTHORITATIVE-READ-20261015: authoritative tenant invoi
         }),
         reportPersistenceFailure: vi.fn(),
       } as unknown as BillingSettlementRepository;
+
+      repository.withDriverStatementTarget = canonicalTargetPersistence(
+        repository.persistChanges.bind(repository),
+      );
 
       const service = new BillingSettlementService(
         new AuditNotificationService(),

@@ -82,6 +82,9 @@ import {
   type MultiTaxiPaymentExceptionRecord,
   type PaymentRecoveryState,
   type PersistBillingSettlementChanges,
+  type DriverStatementTargetProposal,
+  type DriverStatementTargetState,
+  type DriverStatementTargetPersistence,
 } from "./billing-settlement.repository";
 import {
   InjectPaymentRecoveryPort,
@@ -675,6 +678,13 @@ export class BillingSettlementService implements OnModuleInit {
   private driverStatements: DriverStatementRecord[] = [];
 
   private reimbursementBatches: ReimbursementBatchRecord[] = [];
+
+  private readonly driverTargetCommands = new Map<string, Promise<unknown>>();
+  private readonly driverTargetProposals = new Map<
+    string,
+    DriverStatementTargetProposal
+  >();
+  private readonly driverTargetFanouts = new Set<string>();
 
   private reconciliationIssues = PARTNER_SPONSOR_MISMATCH_SEED.map((issue) =>
     this.cloneReconciliationIssue(issue),
@@ -2051,6 +2061,7 @@ export class BillingSettlementService implements OnModuleInit {
   async generateDriverStatements(
     command: GenerateDriverStatementCommand,
     requestId?: string,
+    options: { authoritativeSource?: boolean } = {},
   ) {
     const driverId = command.driverId?.trim() || undefined;
     if (command.driverId !== undefined && !driverId) {
@@ -2058,223 +2069,505 @@ export class BillingSettlementService implements OnModuleInit {
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
         "driverId must not be blank.",
-        {
-          periodMonth: command.periodMonth,
-        },
+        { periodMonth: command.periodMonth },
       );
     }
-
+    this.getPeriodMonthRange(command.periodMonth);
     const activeFeePlan = this.driverFeePlans[0];
     if (!activeFeePlan) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
         "An active published driver fee plan is required.",
-        {
-          periodMonth: command.periodMonth,
-        },
+        { periodMonth: command.periodMonth },
       );
     }
-
-    const existingStatements = this.driverStatements.filter(
-      (statement) =>
-        statement.periodMonth === command.periodMonth &&
-        statement.feePlanVersion === activeFeePlan.version &&
-        (!driverId || statement.driverId === driverId),
-    );
-    if (existingStatements.length > 0) {
-      const reimbursementBatchIds = this.reimbursementBatches
-        .filter(
-          (batch) =>
-            batch.periodMonth === command.periodMonth &&
-            (!driverId || batch.driverId === driverId),
-        )
-        .map((batch) => batch.batchId);
-      return {
-        items: existingStatements.map((statement) =>
-          this.cloneStatement(statement),
-        ),
-        reimbursementBatchIds,
-      };
-    }
-
+    // Enumerate sources before any completion decision. One successful driver
+    // is never evidence that all eligible drivers in the period completed.
     const eligibleTrips = (
-      await this.listDriverStatementTripsInPeriod(command.periodMonth, driverId)
+      await this.driverStatementSourceTrips(
+        command.periodMonth,
+        driverId,
+        options.authoritativeSource ?? false,
+      )
     ).filter((trip) => trip.eligibleForDriverStatement);
     if (eligibleTrips.length === 0) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
         "No eligible trips found for the requested statement period.",
-        {
-          periodMonth: command.periodMonth,
-          ...(driverId ? { driverId } : {}),
-        },
+        { periodMonth: command.periodMonth, ...(driverId ? { driverId } : {}) },
       );
     }
-
-    const statementsByDriver = new Map<string, BillingSettlementTripRecord[]>();
-    for (const trip of eligibleTrips) {
-      const currentTrips = statementsByDriver.get(trip.driverId) ?? [];
-      statementsByDriver.set(trip.driverId, [...currentTrips, trip]);
-    }
-
-    const generatedStatements: DriverStatementRecord[] = [];
-    const generatedReimbursements: ReimbursementBatchRecord[] = [];
-
-    for (const [driverId, driverTrips] of statementsByDriver.entries()) {
-      const lines = driverTrips.map((trip) =>
-        this.createStatementLine(trip, activeFeePlan.serviceFeeBps),
-      );
-      const now = new Date().toISOString();
-      const statementId = `statement-${randomUUID()}`;
-      const statement: DriverStatementRecord = {
-        statementId,
-        driverId,
+    const byDriver = new Map<string, BillingSettlementTripRecord[]>();
+    for (const trip of eligibleTrips)
+      byDriver.set(trip.driverId, [
+        ...(byDriver.get(trip.driverId) ?? []),
+        trip,
+      ]);
+    const items: DriverStatementRecord[] = [];
+    const reimbursementBatchIds: string[] = [];
+    for (const [targetDriverId, trips] of byDriver) {
+      const identity = {
         periodMonth: command.periodMonth,
-        receiptNo: `DRV-${command.periodMonth.replace("-", "")}-${driverId.slice(-3)}`,
-        payoutStatus: "pending",
-        grossEarning: this.sumMoney(lines.map((line) => line.grossEarning)),
-        serviceFee: this.sumMoney(lines.map((line) => line.serviceFee)),
-        subsidy: this.sumMoney(lines.map((line) => line.subsidy)),
-        netAmount: this.sumMoney(lines.map((line) => line.netAmount)),
+        driverId: targetDriverId,
         feePlanVersion: activeFeePlan.version,
-        lines,
-        createdAt: now,
-        updatedAt: now,
       };
-
-      const artifactRecord = await this.documentArtifactStore.put({
-        kind: "report",
-        subjectId: statementId,
-        mimeType: "application/pdf",
-        bytes: await renderBillingDocumentPdf(
-          buildDriverStatementPdfRows(statement),
-        ),
-      });
-      const artifactDownloadMetadata = createControlledDownloadMetadata({
-        kind: "report",
-        subjectId: statementId,
-        manifestHash: artifactRecord.sha256,
-        createdAt: now,
-        host: this.downloadHost,
-        keyId: this.downloadSigningKeyId,
-        signingSecret: this.downloadSigningSecret,
-        ttlMinutes: this.downloadExpiryMinutes,
-        signatureVersion: this.downloadSignatureVersion,
-      });
-      statement.artifactUrl = artifactDownloadMetadata.downloadUrl;
-      statement.artifactDownloadMetadata = artifactDownloadMetadata;
-
-      generatedStatements.push(statement);
-      this.auditNotificationService.recordNotification({
-        tenantId: null,
-        channel: "driver_task",
-        title: "Driver statement generated",
-        message: `Statement ${statement.receiptNo} is ready for driver ${driverId}.`,
-        status: "unread",
-      });
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "system",
-          tenantId: null,
-          moduleName: "billing-settlement",
-          actionName: "generate_driver_statement",
-          resourceType: "driver_statement",
-          resourceId: statement.statementId,
-          newValuesSummary: {
-            driverId,
-            periodMonth: statement.periodMonth,
-            feePlanVersion: statement.feePlanVersion,
-          },
-        },
-        requestId,
-      );
-
-      const reimbursementItems = this.createReimbursementItems(
-        driverTrips,
-        activeFeePlan.reimbursementMode,
-      );
-      if (reimbursementItems.length > 0) {
-        const reimbursementBatch: ReimbursementBatchRecord = {
-          batchId: `reimbursement-${randomUUID()}`,
-          driverId,
-          statementId,
-          periodMonth: command.periodMonth,
-          status: "pending",
-          totalAmount: this.sumMoney(
-            reimbursementItems.map((item) => item.amount),
-          ),
-          remittanceProofId: null,
-          items: reimbursementItems,
-          approvedAt: null,
-          paidAt: null,
-          workflowState: "pending_approval",
-          exportedAt: null,
-          exportedByActorId: null,
-          exportReceiptId: null,
-          exportManifestHash: null,
-          exportDownloadMetadata: null,
-          reconciledAt: null,
-          reconciledByActorId: null,
-          reconciliationReason: null,
-          reconciliationEvidenceRef: null,
-          reconciliationReceiptId: null,
-        };
-        generatedReimbursements.push(reimbursementBatch);
-        this.auditNotificationService.recordNotification({
-          tenantId: null,
-          channel: "ops_notice",
-          title: "Driver reimbursement batch created",
-          message: `Reimbursement batch ${reimbursementBatch.batchId} was created for driver ${driverId}.`,
-          status: "unread",
-        });
-        this.recordAudit(
-          {
-            actorId: null,
-            actorType: "system",
-            tenantId: null,
-            moduleName: "billing-settlement",
-            actionName: "generate_reimbursement_batch",
-            resourceType: "driver_reimbursement_batch",
-            resourceId: reimbursementBatch.batchId,
-            newValuesSummary: {
-              driverId,
-              statementId,
-              totalAmountMinor: reimbursementBatch.totalAmount.amountMinor,
+      const key = JSON.stringify([
+        identity.periodMonth,
+        identity.driverId,
+        identity.feePlanVersion,
+      ]);
+      const prior = this.driverTargetCommands.get(key) ?? Promise.resolve();
+      const run = prior
+        .catch(() => undefined)
+        .then(async () => {
+          const execute = (target: DriverStatementTargetPersistence) =>
+            this.completeDriverStatementTarget(
+              identity,
+              activeFeePlan,
+              trips,
+              target,
+              requestId,
+            );
+          if (this.billingSettlementRepository?.isEnabled()) {
+            return this.billingSettlementRepository.withDriverStatementTarget(
+              identity,
+              execute,
+            );
+          }
+          return execute({
+            load: async () => ({
+              statements: this.driverStatements
+                .filter(
+                  (statement) =>
+                    statement.periodMonth === identity.periodMonth &&
+                    statement.driverId === identity.driverId &&
+                    statement.feePlanVersion === identity.feePlanVersion,
+                )
+                .map((statement) => this.cloneStatement(statement)),
+              reimbursements: this.reimbursementBatches
+                .filter(
+                  (batch) =>
+                    batch.periodMonth === identity.periodMonth &&
+                    batch.driverId === identity.driverId,
+                )
+                .map((batch) => this.cloneReimbursementBatch(batch)),
+            }),
+            reserve: async (create) => {
+              const proposal = this.driverTargetProposals.get(key) ?? create();
+              this.driverTargetProposals.set(key, structuredClone(proposal));
+              return structuredClone(proposal);
             },
-          },
-          requestId,
-        );
+            persist: (changes) =>
+              this.persistChanges(changes, "generate_driver_statements"),
+            claimSuccessEffects: async () => {
+              if (this.driverTargetFanouts.has(key)) return false;
+              this.driverTargetFanouts.add(key);
+              return true;
+            },
+          });
+        });
+      this.driverTargetCommands.set(key, run);
+      try {
+        const result = await run;
+        items.push(result.statement);
+        reimbursementBatchIds.push(...result.reimbursementBatchIds);
+      } finally {
+        if (this.driverTargetCommands.get(key) === run)
+          this.driverTargetCommands.delete(key);
       }
     }
+    return { items, reimbursementBatchIds };
+  }
 
-    this.driverStatements = [...generatedStatements, ...this.driverStatements];
-    this.reimbursementBatches = [
-      ...generatedReimbursements,
-      ...this.reimbursementBatches,
-    ];
-    await this.persistChanges(
-      {
-        driverStatements: generatedStatements.map((statement) =>
-          this.cloneStatement(statement),
+  async bindScheduledBillingOperation(
+    operationId: string,
+    periodMonth: string,
+  ) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "BILLING_MONTHLY_SOURCE_UNAVAILABLE",
+        "Scheduled billing requires canonical operation persistence.",
+        { periodMonth },
+        true,
+      );
+    }
+    let matches: boolean;
+    try {
+      matches =
+        await this.billingSettlementRepository.bindMonthlyBillingOperation(
+          operationId,
+          periodMonth,
+        );
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "scheduled_billing_operation",
+      );
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "BILLING_MONTHLY_OPERATION_UNAVAILABLE",
+        "Monthly operation binding could not be acknowledged.",
+        { periodMonth },
+        true,
+      );
+    }
+    if (!matches)
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "IDEMPOTENCY_KEY_REUSED",
+        "Monthly operationId is already bound to another period.",
+        { periodMonth },
+      );
+  }
+
+  /** Scheduled discovery is always canonical live data, with no seed fallback. */
+  async listScheduledDriverStatementTargets(periodMonth: string) {
+    return [
+      ...new Set(
+        (await this.driverStatementSourceTrips(periodMonth, undefined, true))
+          .filter((trip) => trip.eligibleForDriverStatement)
+          .map((trip) => trip.driverId),
+      ),
+    ].sort();
+  }
+
+  private async driverStatementSourceTrips(
+    periodMonth: string,
+    driverId: string | undefined,
+    authoritative: boolean,
+  ) {
+    if (!authoritative)
+      return this.listDriverStatementTripsInPeriod(periodMonth, driverId);
+    const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "BILLING_MONTHLY_SOURCE_UNAVAILABLE",
+        "Scheduled billing requires the canonical completed-trip source.",
+        { periodMonth },
+        true,
+      );
+    }
+    try {
+      const trips = driverId
+        ? await this.billingSettlementRepository.listLiveDriverTripsInPeriodForDriver(
+            driverId,
+            periodStart,
+            periodEnd,
+          )
+        : await this.billingSettlementRepository.listLiveDriverTripsInPeriod(
+            periodStart,
+            periodEnd,
+          );
+      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "scheduled_driver_statement_source",
+      );
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "BILLING_MONTHLY_SOURCE_UNAVAILABLE",
+        "Canonical completed-trip source could not be read.",
+        { periodMonth },
+        true,
+      );
+    }
+  }
+
+  private async completeDriverStatementTarget(
+    identity: { periodMonth: string; driverId: string; feePlanVersion: string },
+    feePlan: DriverFeePlanRecord,
+    trips: BillingSettlementTripRecord[],
+    target: DriverStatementTargetPersistence,
+    requestId?: string,
+  ) {
+    const syncCanonical = (state: DriverStatementTargetState) => {
+      this.driverStatements = [
+        ...state.statements.map((statement) => this.cloneStatement(statement)),
+        ...this.driverStatements.filter(
+          (statement) =>
+            !(
+              statement.periodMonth === identity.periodMonth &&
+              statement.driverId === identity.driverId &&
+              statement.feePlanVersion === identity.feePlanVersion
+            ),
         ),
-        reimbursementBatches: generatedReimbursements.map((batch) =>
+      ];
+      this.reimbursementBatches = [
+        ...state.reimbursements.map((batch) =>
           this.cloneReimbursementBatch(batch),
         ),
-      },
-      "generate_driver_statements",
-    );
-
-    return {
-      items: generatedStatements.map((statement) =>
-        this.cloneStatement(statement),
-      ),
-      reimbursementBatchIds: generatedReimbursements.map(
-        (batch) => batch.batchId,
-      ),
+        ...this.reimbursementBatches.filter(
+          (batch) =>
+            !(
+              batch.periodMonth === identity.periodMonth &&
+              batch.driverId === identity.driverId
+            ),
+        ),
+      ];
     };
+    try {
+      const canonical = await target.load();
+      const proposal = await target.reserve(() => {
+        const existing = canonical.statements[0];
+        const now = new Date().toISOString();
+        const lines =
+          existing?.lines ??
+          trips.map((trip) =>
+            this.createStatementLine(trip, feePlan.serviceFeeBps),
+          );
+        const statement: DriverStatementRecord = existing
+          ? this.cloneStatement(existing)
+          : {
+              statementId: `statement-${randomUUID()}`,
+              driverId: identity.driverId,
+              periodMonth: identity.periodMonth,
+              receiptNo: `DRV-${identity.periodMonth.replace("-", "")}-${identity.driverId.slice(-3)}`,
+              payoutStatus: "pending",
+              grossEarning: this.sumMoney(
+                lines.map((line) => line.grossEarning),
+              ),
+              serviceFee: this.sumMoney(lines.map((line) => line.serviceFee)),
+              subsidy: this.sumMoney(lines.map((line) => line.subsidy)),
+              netAmount: this.sumMoney(lines.map((line) => line.netAmount)),
+              feePlanVersion: feePlan.version,
+              lines,
+              createdAt: now,
+              updatedAt: now,
+            };
+        const oldBatch = canonical.reimbursements.find(
+          (batch) => batch.statementId === statement.statementId,
+        );
+        // A legacy independently committed statement owns its original lines.
+        // Repair only its missing relation, never include newly arrived orders.
+        const orderIds = new Set(statement.lines.map((line) => line.orderId));
+        const source = trips.filter((trip) => orderIds.has(trip.orderId));
+        if (
+          existing &&
+          !oldBatch &&
+          feePlan.reimbursementMode === "platform_funded" &&
+          statement.lines.some(
+            (line) =>
+              line.reimbursementRequired &&
+              !source.some((trip) => trip.orderId === line.orderId),
+          )
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "BILLING_TARGET_SOURCE_UNAVAILABLE",
+            "Original reimbursement source is unavailable for the committed statement.",
+            { statementId: statement.statementId },
+            true,
+          );
+        }
+        const reimbursementItems = this.createReimbursementItems(
+          source,
+          feePlan.reimbursementMode,
+        );
+        const reimbursement: ReimbursementBatchRecord | null = oldBatch
+          ? this.cloneReimbursementBatch(oldBatch)
+          : reimbursementItems.length
+            ? {
+                batchId: `reimbursement-${randomUUID()}`,
+                driverId: identity.driverId,
+                statementId: statement.statementId,
+                periodMonth: identity.periodMonth,
+                status: "pending",
+                totalAmount: this.sumMoney(
+                  reimbursementItems.map((item) => item.amount),
+                ),
+                remittanceProofId: null,
+                items: reimbursementItems,
+                approvedAt: null,
+                paidAt: null,
+                workflowState: "pending_approval",
+                exportedAt: null,
+                exportedByActorId: null,
+                exportReceiptId: null,
+                exportManifestHash: null,
+                exportDownloadMetadata: null,
+                reconciledAt: null,
+                reconciledByActorId: null,
+                reconciliationReason: null,
+                reconciliationEvidenceRef: null,
+                reconciliationReceiptId: null,
+              }
+            : null;
+        return {
+          statement,
+          reimbursement,
+          statementAlreadyExisted: Boolean(existing),
+          reimbursementAlreadyExisted: Boolean(oldBatch),
+        };
+      });
+      const statement =
+        canonical.statements.find(
+          (row) => row.statementId === proposal.statement.statementId,
+        ) ?? this.cloneStatement(proposal.statement);
+      const existingBatch = canonical.reimbursements.find(
+        (batch) => batch.statementId === statement.statementId,
+      );
+      const reimbursement =
+        existingBatch ??
+        (proposal.reimbursement
+          ? this.cloneReimbursementBatch(proposal.reimbursement)
+          : null);
+      const statementMissing = !canonical.statements.some(
+        (row) => row.statementId === statement.statementId,
+      );
+      if (statementMissing && !statement.artifactDownloadMetadata) {
+        const bytes = await renderBillingDocumentPdf(
+          buildDriverStatementPdfRows(statement),
+        );
+        const offeredHash = createHash("sha256").update(bytes).digest("hex");
+        const artifact = await this.documentArtifactStore.putIfAbsent({
+          kind: "report",
+          subjectId: statement.statementId,
+          mimeType: "application/pdf",
+          bytes,
+        });
+        if (artifact.record.sha256 !== offeredHash) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "BILLING_STATEMENT_ARTIFACT_MISMATCH",
+            "The reserved statement artifact differs from its immutable snapshot.",
+            { statementId: statement.statementId },
+          );
+        }
+        const metadata = createControlledDownloadMetadata({
+          kind: "report",
+          subjectId: statement.statementId,
+          manifestHash: artifact.record.sha256,
+          createdAt: statement.createdAt,
+          host: this.downloadHost,
+          keyId: this.downloadSigningKeyId,
+          signingSecret: this.downloadSigningSecret,
+          ttlMinutes: this.downloadExpiryMinutes,
+          signatureVersion: this.downloadSignatureVersion,
+        });
+        statement.artifactUrl = metadata.downloadUrl;
+        statement.artifactDownloadMetadata = metadata;
+      }
+      const changes: PersistBillingSettlementChanges = {
+        ...(statementMissing
+          ? { driverStatements: [this.cloneStatement(statement)] }
+          : {}),
+        ...(!existingBatch && reimbursement
+          ? {
+              reimbursementBatches: [
+                this.cloneReimbursementBatch(reimbursement),
+              ],
+            }
+          : {}),
+      };
+      // These writes may independently commit. Rejection is never a rollback
+      // claim; the durable proposal and next authoritative read repair the gap.
+      await target.persist(changes);
+      const finalState = this.billingSettlementRepository?.isEnabled()
+        ? await target.load()
+        : {
+            statements: [statement],
+            reimbursements: [
+              ...canonical.reimbursements,
+              ...(!existingBatch && reimbursement ? [reimbursement] : []),
+            ],
+          };
+      const committedStatement = finalState.statements.find(
+        (row) => row.statementId === statement.statementId,
+      );
+      const committedBatch = reimbursement
+        ? finalState.reimbursements.find(
+            (batch) =>
+              batch.batchId === reimbursement.batchId &&
+              batch.statementId === statement.statementId,
+          )
+        : null;
+      if (!committedStatement || (reimbursement && !committedBatch)) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "BILLING_TARGET_ACK_UNCONFIRMED",
+          "Target financial records are not confirmed by canonical readback.",
+          identity,
+          true,
+        );
+      }
+      syncCanonical(finalState);
+      if (
+        (!proposal.statementAlreadyExisted ||
+          (reimbursement && !proposal.reimbursementAlreadyExisted)) &&
+        (await target.claimSuccessEffects())
+      ) {
+        if (!proposal.statementAlreadyExisted) {
+          this.auditNotificationService.recordNotification({
+            tenantId: null,
+            channel: "driver_task",
+            title: "Driver statement generated",
+            message: `Statement ${statement.receiptNo} is ready for driver ${identity.driverId}.`,
+            status: "unread",
+          });
+          this.recordAudit(
+            {
+              actorId: null,
+              actorType: "system",
+              tenantId: null,
+              moduleName: "billing-settlement",
+              actionName: "generate_driver_statement",
+              resourceType: "driver_statement",
+              resourceId: statement.statementId,
+              newValuesSummary: {
+                driverId: identity.driverId,
+                periodMonth: statement.periodMonth,
+                feePlanVersion: statement.feePlanVersion,
+              },
+            },
+            requestId,
+          );
+        }
+        if (reimbursement && !proposal.reimbursementAlreadyExisted) {
+          this.auditNotificationService.recordNotification({
+            tenantId: null,
+            channel: "ops_notice",
+            title: "Driver reimbursement batch created",
+            message: `Reimbursement batch ${reimbursement.batchId} was created for driver ${identity.driverId}.`,
+            status: "unread",
+          });
+          this.recordAudit(
+            {
+              actorId: null,
+              actorType: "system",
+              tenantId: null,
+              moduleName: "billing-settlement",
+              actionName: "generate_reimbursement_batch",
+              resourceType: "driver_reimbursement_batch",
+              resourceId: reimbursement.batchId,
+              newValuesSummary: {
+                driverId: identity.driverId,
+                statementId: statement.statementId,
+                totalAmountMinor: reimbursement.totalAmount.amountMinor,
+              },
+            },
+            requestId,
+          );
+        }
+      }
+      return {
+        statement: this.cloneStatement(committedStatement),
+        reimbursementBatchIds: committedBatch ? [committedBatch.batchId] : [],
+      };
+    } catch (error) {
+      if (this.billingSettlementRepository?.isEnabled()) {
+        try {
+          syncCanonical(await target.load());
+        } catch {
+          /* No unacknowledged proposal was published to cache. */
+        }
+      }
+      throw error;
+    }
   }
 
   /**

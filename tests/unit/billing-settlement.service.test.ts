@@ -1,3 +1,4 @@
+import { canonicalTargetPersistence } from "./billing-monthly-batch-resumption-20261015/fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -71,6 +72,10 @@ describe("BillingSettlementService live driver statement ingestion", () => {
       reportPersistenceFailure: vi.fn(),
     } as unknown as BillingSettlementRepository;
 
+    repository.withDriverStatementTarget = canonicalTargetPersistence(
+      repository.persistChanges.bind(repository),
+    );
+
     const service = new BillingSettlementService(
       createAuditNotificationService(),
       repository,
@@ -119,6 +124,10 @@ describe("BillingSettlementService live driver statement ingestion", () => {
       }),
       reportPersistenceFailure: vi.fn(),
     } as unknown as BillingSettlementRepository;
+
+    repository.withDriverStatementTarget = canonicalTargetPersistence(
+      repository.persistChanges.bind(repository),
+    );
 
     const service = new BillingSettlementService(
       createAuditNotificationService(),
@@ -183,6 +192,10 @@ describe("BillingSettlementService live driver statement ingestion", () => {
       ]),
       reportPersistenceFailure: vi.fn(),
     } as unknown as BillingSettlementRepository;
+
+    repository.withDriverStatementTarget = canonicalTargetPersistence(
+      repository.persistChanges.bind(repository),
+    );
 
     const service = new BillingSettlementService(
       createAuditNotificationService(),

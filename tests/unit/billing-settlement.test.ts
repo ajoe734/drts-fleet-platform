@@ -1,3 +1,4 @@
+import { canonicalTargetPersistence } from "./billing-monthly-batch-resumption-20261015/fixtures";
 import { describe, expect, it, vi } from "vitest";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -429,6 +430,10 @@ describe("billing settlement service", () => {
       persistChanges,
       reportPersistenceFailure: vi.fn(),
     } as unknown as BillingSettlementRepository;
+
+    repository.withDriverStatementTarget = canonicalTargetPersistence(
+      repository.persistChanges.bind(repository),
+    );
 
     const billingSettlementService = new BillingSettlementService(
       auditService,

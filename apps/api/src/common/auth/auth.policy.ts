@@ -1111,6 +1111,19 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath === "internal/scheduled-tasks/billing-monthly/run" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "internal:scheduled-tasks:billing-monthly:run",
+      requiredScopes: ["billing:monthly:run"],
+      allowedRealms: ["system"],
+      description:
+        "Internal scheduler execution of resumable closed-month driver billing",
+    };
+  }
+
   if (routePath === "identity/step-up-proofs" && upperMethod === "POST") {
     return {
       routeKey: "identity:step-up-proofs:create",

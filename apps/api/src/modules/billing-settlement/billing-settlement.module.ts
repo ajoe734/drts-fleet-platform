@@ -12,6 +12,8 @@ import { createMailTransportFromEnv } from "../notification-delivery/smtp-mail.t
 import { BillingSettlementRepository } from "./billing-settlement.repository";
 import { BillingSettlementController } from "./billing-settlement.controller";
 import { BillingSettlementService } from "./billing-settlement.service";
+import { BillingMonthlyBatchService } from "./billing-monthly-batch.service";
+import { BillingMonthlyBatchController } from "./billing-monthly-batch.controller";
 import {
   PAYMENT_RECOVERY_PORT,
   PlatformManualPaymentRecoveryPort,
@@ -46,11 +48,13 @@ import {
   ],
   controllers: [
     BillingSettlementController,
+    BillingMonthlyBatchController,
     RemittanceProofDownloadController,
     InvoiceMailController,
   ],
   providers: [
     BillingSettlementService,
+    BillingMonthlyBatchService,
     BillingSettlementRepository,
     {
       provide: InvoiceMailService,

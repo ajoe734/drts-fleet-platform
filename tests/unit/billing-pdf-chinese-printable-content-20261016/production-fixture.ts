@@ -1,5 +1,5 @@
+import { databaseSocket } from "../billing-monthly-batch-resumption-20261015/fixtures";
 import { createHash } from "node:crypto";
-import { vi } from "vitest";
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth";
 import type { DatabaseService } from "../../../apps/api/src/common/db";
 import {
@@ -44,28 +44,17 @@ export function identity(
  * serialization/load/persistence and the production service owns all business
  * transitions. This does not claim PostgreSQL SQL/concurrency qualification. */
 export function canonicalDatabase() {
-  const tables = new Map<string, Map<string, unknown>>();
-  const query = vi.fn(async (sql: string, values: unknown[] = []) => {
-    const insert = sql.match(/INSERT INTO\s+(\S+)/i);
-    if (insert) {
-      const record = JSON.parse(String(values.at(-1)));
-      const bucket = tables.get(insert[1]!) ?? new Map();
-      bucket.set(String(values[0]), structuredClone(record));
-      tables.set(insert[1]!, bucket);
-      return { rows: [], rowCount: 1 };
-    }
-    const table = sql.match(/FROM\s+(\S+)/i)?.[1];
-    return {
-      rows: [...(tables.get(table ?? "")?.values() ?? [])].map((record) => ({
-        record: structuredClone(record),
-      })),
-    };
-  });
+  const socket = databaseSocket();
   const repository = new BillingSettlementRepository({
     isEnabled: () => true,
-    query,
+    query: socket.query,
+    connect: socket.connect,
   } as unknown as DatabaseService);
-  return { tables, query, repository };
+  return {
+    tables: socket.tables as Map<string, Map<string, unknown>>,
+    query: socket.query,
+    repository,
+  };
 }
 
 export function createRuntime(
