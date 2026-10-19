@@ -123,7 +123,7 @@ describe("SR-CREDENTIAL-EXPIRY-20260913: Credential Expiry Reconciliation & Rene
       const { service } = createService();
 
       // Create an expired policy
-      const policy = service.createInsurancePolicy({
+      const policy = await service.createInsurancePolicy({
         vehicleId: "veh-demo-001",
         policyNo: "POL-EXP-001",
         insuranceType: "commercial_liability",

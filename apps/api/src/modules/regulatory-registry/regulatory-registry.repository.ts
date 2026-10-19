@@ -53,6 +53,21 @@ export type RegulatoryRegistryState = {
   driverCredentials: DriverPublicRegistrationCredential[];
 };
 
+/** Only an actual COMMIT rejection after successful work may be reconciled
+ * as an uncertain command ACK. BEGIN/work/rollback/release failures stay errors. */
+export class RegulatoryCommandCommitUncertainError extends Error {
+  constructor(readonly cause: unknown) {
+    super("Registry command COMMIT acknowledgement is uncertain.");
+  }
+}
+
+export type RegulatoryVehicleCommandState = {
+  vehicle: VehicleRegistryRecord;
+  contracts: VehicleContractRecord[];
+  policies: InsurancePolicyRecord[];
+  exclusivities: DispatchExclusivityRecord[];
+};
+
 export type PersistRegulatoryRegistryChanges = {
   vehicles?: readonly VehicleRegistryRecord[];
   drivers?: readonly DriverRegistryRecord[];
@@ -150,6 +165,26 @@ type DriverPublicRegistrationCredentialRow = {
   version: number | string;
   updated_at: string | Date;
 };
+
+/** Original credential fields; reminder family stays within V0102's driver CHECK. */
+export const PREEXPIRY_CREDENTIAL_FIELDS = {
+  driver_license: "licenseExpiry",
+  professional_driver_license: "professionalDriverLicenseExpiry",
+  taxi_driver_registration: "taxiDriverRegistrationExpiry",
+} as const;
+export function parsePreexpiryCredentialFamily(family: string) {
+  const match =
+    /^preexpiry:(driver_license|professional_driver_license|taxi_driver_registration):(30|7)$/.exec(
+      family,
+    );
+  if (!match) return null;
+  const credential = match[1] as keyof typeof PREEXPIRY_CREDENTIAL_FIELDS;
+  return {
+    credential,
+    field: PREEXPIRY_CREDENTIAL_FIELDS[credential],
+    days: Number(match[2]),
+  };
+}
 
 export type ExpiryEntityType = "driver" | "policy";
 export type ExpiryEventStatus =
@@ -254,6 +289,31 @@ export class RegulatoryRegistryRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async loadDriverMatchingSuppressions(
+    driverId?: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
+  ) {
+    const result = await executor.query<{
+      driver_id: string;
+      record: import("@drts/contracts").DriverMatchingSuppression;
+    }>(
+      `SELECT driver_id, record FROM ops.phase1_driver_matching_suppressions${driverId ? " WHERE driver_id = $1" : ""}`,
+      driverId ? [driverId] : [],
+    );
+    return result.rows;
+  }
+
+  async lockDriverMatchingAuthority(
+    driverId: string,
+    executor: Pick<DatabaseService, "query">,
+  ) {
+    await executor.query(
+      "SELECT driver_id FROM reg.phase1_registry_drivers WHERE driver_id = $1 FOR UPDATE",
+      [driverId],
+    );
+    return this.loadDriverMatchingSuppressions(driverId, executor);
   }
 
   /** Narrow P5 reads never hydrate or replace another Registry writer's cache. */
@@ -1559,6 +1619,117 @@ export class RegulatoryRegistryRepository {
     }
   }
 
+  /** Dedicated transaction boundary for the seven C072 commands only. The
+   * generic detached writer and other Registry transactions are unchanged. */
+  async withVehicleCommandTransaction<T>(
+    work: (client: PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.databaseService!.connect();
+    let rollbackStarted = false;
+    let discard: Error | undefined;
+    const rollback = async () => {
+      rollbackStarted = true;
+      try {
+        await client.query("ROLLBACK");
+      } catch (error) {
+        discard = error instanceof Error ? error : new Error(String(error));
+        throw error;
+      }
+    };
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      try {
+        await client.query("COMMIT");
+      } catch (error) {
+        await rollback();
+        // PostgreSQL explicitly rejected these transactions; equal prior
+        // values do not acknowledge the failed retry. Connection/uncoded
+        // COMMIT failures still require exact canonical reconciliation.
+        const code = String((error as { code?: unknown })?.code ?? "");
+        if (
+          /^[0-9A-Z]{5}$/.test(code) &&
+          !code.startsWith("08") &&
+          code !== "40003" &&
+          !code.startsWith("57P")
+        )
+          throw error;
+        throw new RegulatoryCommandCommitUncertainError(error);
+      }
+      return result;
+    } catch (error) {
+      if (!rollbackStarted) await rollback();
+      throw error;
+    } finally {
+      client.release(discard);
+    }
+  }
+
+  /** Seven ordinary C072 commands serialize on the existing vehicle row and
+   * read only its source records through that same dedicated executor. */
+  async readVehicleCommandState(
+    vehicleId: string,
+    client: PoolClient,
+  ): Promise<RegulatoryVehicleCommandState | null> {
+    const executor = this.getExpiryExecutor(client);
+    const vehicles = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_vehicles WHERE vehicle_id = $1 FOR UPDATE",
+      [vehicleId],
+    );
+    if (!vehicles.rows[0]) return null;
+    const contracts = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_contracts WHERE vehicle_id = $1 ORDER BY contract_id",
+      [vehicleId],
+    );
+    const policies = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_policies WHERE vehicle_id = $1 ORDER BY policy_id",
+      [vehicleId],
+    );
+    const exclusivities = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_exclusivities WHERE vehicle_id = $1",
+      [vehicleId],
+    );
+    return {
+      vehicle: this.parseRecord<VehicleRegistryRecord>(
+        vehicles.rows[0].record,
+        "reg.phase1_registry_vehicles",
+      ),
+      contracts: contracts.rows.map((r) =>
+        this.parseRecord<VehicleContractRecord>(
+          r.record,
+          "reg.phase1_registry_contracts",
+        ),
+      ),
+      policies: policies.rows.map((r) =>
+        this.parseRecord<InsurancePolicyRecord>(
+          r.record,
+          "reg.phase1_registry_policies",
+        ),
+      ),
+      exclusivities: exclusivities.rows.map((r) =>
+        this.parseRecord<DispatchExclusivityRecord>(
+          r.record,
+          "reg.phase1_registry_exclusivities",
+        ),
+      ),
+    };
+  }
+
+  async findCommandContract(
+    contractId: string,
+  ): Promise<VehicleContractRecord | null> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_contracts WHERE contract_id = $1",
+      [contractId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<VehicleContractRecord>(
+          result.rows[0].record,
+          "reg.phase1_registry_contracts",
+        )
+      : null;
+  }
+
   async lockDriver(
     driverId: string,
     client?: PoolClient,
@@ -1605,6 +1776,33 @@ export class RegulatoryRegistryRepository {
       driverId: result.rows[0]?.driver_id ?? null,
       policyId: result.rows[0]?.policy_id ?? null,
     };
+  }
+
+  /** Future sources and already-recorded reminder sources, in the same bounded
+   * keyset interval. The locked source is re-evaluated by the real producer. */
+  async scanPreexpiryDrivers(
+    asOf: string,
+    limit: number,
+    range: { afterId?: string; throughId?: string },
+  ): Promise<DriverRegistryRecord[]> {
+    const cutoff = new Date(Date.parse(asOf) + 30 * 86400000).toISOString();
+    const result = await this.databaseService!.query<{
+      record: DriverRegistryRecord;
+    }>(
+      `/* preexpiry-source */ SELECT d.record FROM reg.phase1_registry_drivers d
+       WHERE (
+         ((d.record->>'licenseExpiry')::timestamptz > $1 AND (d.record->>'licenseExpiry')::timestamptz <= $5)
+         OR ((d.record->>'professionalDriverLicenseExpiry')::timestamptz > $1 AND (d.record->>'professionalDriverLicenseExpiry')::timestamptz <= $5)
+         OR ((d.record->>'taxiDriverRegistrationExpiry')::timestamptz > $1 AND (d.record->>'taxiDriverRegistrationExpiry')::timestamptz <= $5)
+         OR EXISTS (SELECT 1 FROM reg.phase1_registry_expiry_events e WHERE e.entity_type='driver'
+           AND e.entity_id=d.driver_id AND e.credential_type LIKE 'preexpiry:%'
+           AND e.status IN ('pending','leased','completed'))
+       ) AND ($3::varchar IS NULL OR d.driver_id > $3::varchar)
+         AND ($4::varchar IS NULL OR d.driver_id <= $4::varchar)
+       ORDER BY d.driver_id ASC LIMIT $2`,
+      [asOf, limit, range.afterId ?? null, range.throughId ?? null, cutoff],
+    );
+    return result.rows.map((r) => r.record);
   }
 
   async scanExpiredDrivers(
@@ -2050,21 +2248,30 @@ export class RegulatoryRegistryRepository {
         let changed = false;
         if (snapshot.entity_type === "driver") {
           const source = await this.lockDriver(snapshot.entity_id, client);
-          const field = (
-            {
-              driver_license: "licenseExpiry",
-              professional_driver_license: "professionalDriverLicenseExpiry",
-              taxi_driver_registration: "taxiDriverRegistrationExpiry",
-            } as const
-          )[
-            snapshot.credential_type as
-              | "driver_license"
-              | "professional_driver_license"
-              | "taxi_driver_registration"
-          ];
+          const reminder = parsePreexpiryCredentialFamily(
+            snapshot.credential_type,
+          );
+          const field =
+            reminder?.field ??
+            (
+              {
+                driver_license: "licenseExpiry",
+                professional_driver_license: "professionalDriverLicenseExpiry",
+                taxi_driver_registration: "taxiDriverRegistrationExpiry",
+              } as const
+            )[
+              snapshot.credential_type as
+                | "driver_license"
+                | "professional_driver_license"
+                | "taxi_driver_registration"
+            ];
           if (field)
             changed =
-              !source || Date.parse(source[field] ?? "") !== sourceExpiryMs;
+              !source ||
+              Date.parse(source[field] ?? "") !== sourceExpiryMs ||
+              (reminder !== null &&
+                (source.lifecycleStatus !== "active" ||
+                  sourceExpiryMs <= Date.now()));
         } else {
           const source = await this.lockPolicy(snapshot.entity_id, client);
           changed =

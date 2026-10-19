@@ -115,6 +115,9 @@ describe.skipIf(!databaseUrl)(
       await h.owned.persistChanges({ dispatchJobs: [job] });
       const service = new OwnedMobilityService(
         {
+          prepareMatchingSuppressions: () => undefined,
+          assertCurrentMatchingSuppressionClear: () => undefined,
+
           getVehicleDispatchability: () => true,
           getDriverAvailability: () => true,
         } as never,

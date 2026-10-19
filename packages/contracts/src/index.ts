@@ -4460,6 +4460,7 @@ export const DRIVER_ELIGIBILITY_BLOCK_REASONS = [
   "work_state_paused",
   "work_state_suspended",
   "work_state_incident_hold",
+  "incident_matching_suppression",
   "work_state_offline",
 ] as const;
 export type DriverEligibilityBlockReason =

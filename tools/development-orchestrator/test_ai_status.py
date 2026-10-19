@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
 import os
 import subprocess
 import pathlib
@@ -19,6 +20,413 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 ai_status = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ai_status)
+
+
+# Complete sealed C073 task, not a reduced invented lifecycle fixture.
+# Authority SHA256: 6d3dc0f114c637c44f38fcbe20d3f6e45ec6a0b19e8d115ba24f1c448aa8806b
+FROZEN_C073_TASK = json.loads(r'''
+{
+  "id": "C073-OFFBOARDING-FINAL-EXIT-FLOW-20261015",
+  "title": "原C073正式退場閉環綁定canonical資格並禁止已配對退場車回候選",
+  "summary_zh": "完成原終止委託／下架／debranding最終退場的真canonical ACK與讀回、候選／派送拒絕；保留暫時除標識恢復與既有terminated guards，不把所有completed永久retired。",
+  "phase": "remaining-original-functional-fixes-20261015",
+  "owner": "Claude",
+  "reviewer": "Claude2",
+  "status": "in_progress",
+  "depends_on": [
+    "SR-QA-SUPPLY-001"
+  ],
+  "artifacts": [],
+  "acceptance": [
+    "Complete the original final commission termination/offboarding/debranding flow through the actual existing handlers and canonical registry state. A final-exit success must await its required canonical write, propagate pending/rejected storage honestly, and return a record/envelope only after success. Retain work-order reference/completion evidence and authoritative readback; a log-only catch, optimistic cache or local receipt is insufficient. Bind final exit to existing lifecycle/contract eligibility without silently inventing new financial, identity or re-entry policy. Scope a throwing/awaited persistence path to the actual affected C073 mutations; do not alter unrelated shared writers.",
+    "Use an existing healthy vehicle with a real driver/vehicle supply pair, valid current commission/insurance/approved exclusivity and legitimate service/driver conditions. Demonstrate original-before failure and fixed-after that final exit remains excluded after pending→complete debranding and in the no-debranding final-exit branch. Exercise getVehicleDispatchability, actual getEligibleCandidates and real service-product/owned assignment/candidate consumers or their actual production guard entry points. A newly provisioned unpaired vehicle being absent proves nothing about retired candidate re-entry. Preserve final-exit state/evidence through existing persistence/readback, and test rejected/pending write behavior without starting a VM database/server.",
+    "Preserve legitimate temporary/nonretired debranding/compliance recovery and independently valid commission semantics; do not make every completed work-order permanently retired. Preserve actual contract_terminated rejection, manual hold, insurance/exclusivity, vehicle/driver/product/tenant/auth guards, duplicate/no-pending completion refusal, original noDB/controlled mode and report monthly-removal evidence. The old Source QA restoration assertion must be qualified explicitly against final-exit versus nonretired behavior using original C073/SA/PRD authority, not silently deleted, skipped or weakened. No USER technical-method decision or new standalone authority report is required merely to bind this original final-exit rule.",
+    "After normal shared-file serialization with the original Demo holder, adapt only the verified direct async callers in authorized hunks, add meaningful task-owned regressions using actual production methods/controllers and retain all original business/SQL/negative assertions. Run impacted repository unit/typecheck/lint and mandatory exact-candidate CI; record actual commands/exits, original-before/fixed-after, base/candidate, original assigned independent reviewer verdict and normal protected merge in task UAT and the four own Source keys. No VM product/dev/preview/HTTP/browser/E2E/PG/Docker server. Source DONE is scoped; original full C073 real-role/hosted and whole-goal/Final evidence is not inferred."
+  ],
+  "next": "CI unit job timed out at 20min amid heavy concurrent CI load, not a code failure. Reran failed job via gh run rerun --failed; monitoring for green.",
+  "last_update": "2026-10-16T01:23:36Z",
+  "candidate_lifecycle_version": 1,
+  "task_class": "implementation",
+  "mutates_canonical": true,
+  "external_gate": false,
+  "write_scopes": [
+    "apps/api/src/modules/regulatory-registry/regulatory-registry.service.ts",
+    "apps/api/src/modules/regulatory-registry/regulatory-registry.controller.ts",
+    "apps/api/tests/unit/regulatory-registry.service.test.ts",
+    "tests/unit/system-remediation/sr-qa-supply-001/sr-qa-supply-001-registry-eligibility.test.ts",
+    "tests/unit/reporting-filing.test.ts",
+    "tests/unit/c073-final-offboarding-eligibility-20261015/",
+    "docs/04-uat/system-remediation-20260906/C073-OFFBOARDING-FINAL-EXIT-FLOW-20261015.md"
+  ],
+  "required_acceptance": [
+    "c073-final-exit_canonical-ack-and-readback",
+    "c073-final-exit_paired-candidate-and-assignment-refusal",
+    "c073-final-exit_temporary-recovery-and-existing-guards-preserved",
+    "c073-final-exit_exact-candidate-validation"
+  ],
+  "priority": "P1",
+  "eligible_agents": {
+    "owner": [
+      "Claude"
+    ],
+    "reviewer": [
+      "Claude2"
+    ]
+  },
+  "registered_by": "Supervisor original C073/C097/C109 accepted Source gaps; no new product capability",
+  "read_dependencies": [
+    "/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1114-internal-functional-root/C073-current-accepted-offboarding-debranding-dataflow-readonly-audit.json",
+    "/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T1114-internal-functional-root/C073-OFFBOARDING-FINAL-EXIT-FLOW-20261015.task-spec.json",
+    "/home/lupin/workspace/drts-fleet-platform/docs/02-architecture/phase1-operational-complete-remediation-plan-20260430.md",
+    "/home/lupin/workspace/drts-fleet-platform/docs/01-product/platform-admin-ops-tenant-console-product-spec-20260508.md",
+    "/home/lupin/workspace/drts-fleet-platform/docs/04-uat/system-remediation-20260906/SR-QA-SUPPLY-001.md",
+    "/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T2159-original-remaining-work-and-safe-execution-root/ONE-current-original-remaining-frontier-and-writer-preflight.json",
+    "/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T2159-original-remaining-work-and-safe-execution-root/Demo-original-acceptance-worker-and-two-Source-hunk-holder-metadata-readonly-evidence.json",
+    "/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T2159-original-remaining-work-and-safe-execution-root/C073-OFFBOARDING-FINAL-EXIT-FLOW-20261015-R2.task-spec.json",
+    "/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T2159-original-remaining-work-and-safe-execution-root/TENANT-PRIVILEGED-GRANT-SESSION-CONSUMER-FLOW-20261015-R2.task-spec.json",
+    "/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/actual-E04-unstarted-R2-normal-source-capacity-assignment.json",
+    "/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/E04-unstarted-source-capacity-routing-readonly-audit-20261016.json"
+  ],
+  "task_spec_ref": "/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T2159-original-remaining-work-and-safe-execution-root/C073-OFFBOARDING-FINAL-EXIT-FLOW-20261015-R2.task-spec.json",
+  "task_spec_sha256": "d359621e4f3734f1fb02a1a95e0ffa3d1208ddbb2b7fac4674381ee1d8970190",
+  "source_commit": "8e56ea2db5435d57834899fca8018634b0a9fac0",
+  "branch": "claude/c073-offboarding-final-exit-flow-20261015",
+  "integration_notes": "Original requirement continuation only. Preserve accepted narrow Source/QA/live credit and original task objects, no reopened DONE or added product denominator. Shared-file dependencies serialize the existing Demo/adapter and the new placard/notice writers; they do not redefine full capability or create global Source gates. No VM product/runtime, cloud/Operator, Root WIP or other-worker control.",
+  "candidate_generation": "15e8a4dee19c4edba69678858407e8b4",
+  "candidate_sha": "f86d772bf7e4c4fcc1c1cf7ea813ad29c1be22e1",
+  "candidate_branch": "claude/c073-offboarding-final-exit-flow-20261015",
+  "worker_outcomes": {
+    "claude-20261015T233540Z-4e110351": {
+      "outcome": "advanced",
+      "command": "handoff",
+      "agent": "Claude",
+      "role": "owner",
+      "candidate_sha": "f86d772bf7e4c4fcc1c1cf7ea813ad29c1be22e1",
+      "candidate_generation": "15e8a4dee19c4edba69678858407e8b4",
+      "summary": "Fixed C073 final-exit eligibility bug (completed offboarding, both debranding-required and no-debranding branches, never blocked dispatch/candidates/real assignment guard once offboarding closed out; now permanent). Added throwing/awaited canonical persistence for initiate/completeVehicleDebranding. Flipped and annotated pre-existing tests that encoded the bug; added tests/unit/c073-final-offboarding-eligibility-20261015/ with real RegulatoryRegistryService+VehicleEligibilityService wiring against a paired seed vehicle, incl. a reversible manual-hold control case. UAT doc at docs/04-uat/system-remediation-20260906/C073-OFFBOARDING-FINAL-EXIT-FLOW-20261015.md, including explicit supersession note over SR-QA-SUPPLY-001's stale C073 claim. All targeted vitest suites green; tsc/eslint show only pre-existing unrelated repo drift, verified zero new errors in touched files. Pushed to origin.",
+      "at": "2026-10-16T00:02:16Z"
+    },
+    "claude-20261016T011916Z-9c7634f6": {
+      "outcome": "progress",
+      "command": "progress",
+      "agent": "Claude",
+      "role": "owner",
+      "candidate_sha": "f86d772bf7e4c4fcc1c1cf7ea813ad29c1be22e1",
+      "candidate_generation": "15e8a4dee19c4edba69678858407e8b4",
+      "summary": "CI unit job timed out at 20min amid heavy concurrent CI load, not a code failure. Reran failed job via gh run rerun --failed; monitoring for green.",
+      "at": "2026-10-16T01:23:36Z"
+    }
+  },
+  "pr_url": "https://github.com/ajoe734/drts-fleet-platform/pull/2713",
+  "ci_status": "failure",
+  "ci_sha": "f86d772bf7e4c4fcc1c1cf7ea813ad29c1be22e1",
+  "ci_run_url": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/38827374690/job/116737961705"
+}
+''')
+
+
+class CiRecoveryIndependentReviewTest(unittest.TestCase):
+    def setUp(self) -> None:
+        from control_plane.domain.dispatch_policy import ReadyDispatchPolicy, resolve_dispatch_target
+
+        self.policy = ReadyDispatchPolicy()
+        self.resolve = resolve_dispatch_target
+        self.log = mock.patch.object(ai_status, "append_log").start()
+        self.addCleanup(mock.patch.stopall)
+
+    def state(self) -> dict:
+        return {"tasks": [copy.deepcopy(FROZEN_C073_TASK)], "handoffs": [], "blockers": []}
+
+    def reconcile(self, state: dict, ci: str, **observation: str) -> None:
+        task = state["tasks"][0]
+        env = {"AI_NAME": "Supervisor", "CANDIDATE_HEAD_SHA": task["candidate_sha"],
+               "CANDIDATE_CI_STATUS": ci,
+               "CI_RUN_URL": "https://github.com/ajoe734/drts-fleet-platform/actions/runs/38827374483",
+               **observation}
+        with mock.patch.dict(os.environ, env, clear=True):
+            ai_status.command_reconcile_candidate(state, [task["id"]])
+
+    def decision(self, state: dict):
+        task = state["tasks"][0]
+        return self.resolve(task, {t["id"]: t for t in state["tasks"]}, self.policy)
+
+    def assert_review(self, state: dict) -> None:
+        task = state["tasks"][0]
+        self.assertEqual(task["status"], "review")
+        decision = self.decision(state)
+        self.assertIsNotNone(decision)
+        self.assertEqual((decision.target_agent, decision.reason.value), ("Claude2", "review_ready_dispatch"))
+        self.assertNotIn("reviewed_sha", task)
+        self.assertNotIn("merge_sha", task)
+        self.assertNotIn("acceptance_evidence", task)
+
+    def test_full_sealed_c073_each_ci_only_recovery_restores_original_reviewer(self) -> None:
+        for ci in ("queued", "running", "success"):
+            with self.subTest(ci=ci):
+                state = self.state()
+                before = copy.deepcopy(state["tasks"][0])
+                # Include already-completed handoff routing and unrelated failure
+                # evidence: recovery must neither clear nor fabricate them.
+                state["handoffs"] = [{"task_id": before["id"], "from": "Claude", "to": "Claude2", "status": "done"}]
+                state["blockers"] = [{"task_id": "OTHER", "status": "open"}]
+                routing = copy.deepcopy((state["handoffs"], state["blockers"]))
+                self.reconcile(state, ci)
+                self.assert_review(state)
+                task = state["tasks"][0]
+                allowed = {"status", "ci_status", "ci_sha", "ci_run_url", "last_update", "next"}
+                self.assertEqual({k: v for k, v in task.items() if k not in allowed},
+                                 {k: v for k, v in before.items() if k not in allowed})
+                self.assertEqual(task["ci_status"], ci)
+                self.assertEqual(task["ci_sha"], before["candidate_sha"])
+                self.assertEqual((state["handoffs"], state["blockers"]), routing)
+                self.assertFalse(any(c.args[0]["type"] == "candidate_approved" for c in self.log.call_args_list))
+
+    def handoff(self, state: dict) -> None:
+        task = state["tasks"][0]
+        with mock.patch.dict(os.environ, {"AI_NAME": "Claude", "CANDIDATE_SHA": FROZEN_C073_TASK["candidate_sha"],
+                                         "CANDIDATE_BRANCH": FROZEN_C073_TASK["candidate_branch"]}, clear=True), \
+                mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value):
+            ai_status.command_handoff(state, [task["id"], "Claude2", "Original owner handoff"])
+
+    def test_new_handoff_failure_then_ci_recovery_survives_receipt_pruning(self) -> None:
+        for ci in ("queued", "running", "success"):
+            state = self.state()
+            self.handoff(state)
+            task = state["tasks"][0]
+            identity = {k: task[k] for k in ("owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation")}
+            self.assertEqual(task["candidate_review_handoff"], identity)
+            task["worker_outcomes"] = {}
+            self.reconcile(state, "failure")
+            self.assertEqual(task["status"], "in_progress")
+            self.reconcile(state, ci)
+            self.assert_review(state)
+            self.assertEqual(task["candidate_review_handoff"], identity)
+
+    def test_review_phase_ci_updates_still_dispatch_reviewer(self) -> None:
+        for ci in ("queued", "running", "success"):
+            state = self.state()
+            state["tasks"][0]["status"] = "review"
+            state["tasks"][0].pop("worker_outcomes")
+            self.reconcile(state, ci)
+            self.assert_review(state)
+
+    def test_legacy_integrating_without_approval_regains_review(self) -> None:
+        state = self.state()
+        state["tasks"][0]["status"] = "integrating"
+        self.reconcile(state, "success")
+        self.assert_review(state)
+
+    def test_stale_or_foreign_handoff_requires_owner_continuation(self) -> None:
+        for change in ({"candidate_sha": "b" * 40}, {"candidate_generation": "old"},
+                       {"agent": "Codex"}, {"role": "reviewer"}, {"command": "progress"}, {"outcome": "progress"}):
+            for ci in ("queued", "running", "success"):
+                with self.subTest(change=change, ci=ci):
+                    state = self.state()
+                    receipt = next(iter(state["tasks"][0]["worker_outcomes"].values()))
+                    receipt.update(change)
+                    self.reconcile(state, ci)
+                    self.assertEqual(state["tasks"][0]["status"], "in_progress")
+                    self.assertEqual(self.decision(state).target_agent, "Claude")
+
+    def test_new_snapshot_identity_drift_never_falls_back_to_legacy_receipt(self) -> None:
+        for key in ("owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"):
+            state = self.state()
+            self.handoff(state)
+            task = state["tasks"][0]
+            task["status"] = "in_progress"
+            task["candidate_review_handoff"][key] = "stale"
+            self.reconcile(state, "success")
+            self.assertEqual(task["status"], "in_progress", key)
+
+    def test_explicit_owner_start_requires_rehandoff_even_with_old_receipt(self) -> None:
+        state = self.state()
+        task = state["tasks"][0]
+        with mock.patch.dict(os.environ, {"AI_NAME": "Claude"}, clear=True):
+            ai_status.command_start(state, [task["id"], "Repair source"])
+        self.reconcile(state, "success")
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(self.decision(state).target_agent, "Claude")
+        self.handoff(state)
+        self.reconcile(state, "success")
+        self.assert_review(state)
+
+    def test_real_reopen_and_changed_source_cannot_revive_review(self) -> None:
+        for action in ("reopen", "changed_head", "owner_progress"):
+            state = self.state()
+            self.handoff(state)
+            task = state["tasks"][0]
+            if action == "reopen":
+                with mock.patch.dict(os.environ, {"AI_NAME": "Claude2"}, clear=True):
+                    ai_status.command_reopen(state, [task["id"], "Actual repair required"])
+            elif action == "changed_head":
+                self.reconcile(state, "success", CANDIDATE_HEAD_SHA="b" * 40)
+            else:
+                task["status"] = "integrating"
+                with mock.patch.dict(os.environ, {"AI_NAME": "Claude"}, clear=True):
+                    ai_status.command_progress(state, [task["id"], "Owner repair"])
+            self.assertNotIn("candidate_review_handoff", task)
+            self.assertNotIn("candidate_sha", task)
+            with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor", "CANDIDATE_CI_STATUS": "success",
+                                             "CANDIDATE_HEAD_SHA": FROZEN_C073_TASK["candidate_sha"]}, clear=True):
+                ai_status.command_reconcile_candidate(state, [task["id"]])
+            self.assertEqual(task["status"], "in_progress")
+            self.assertEqual(self.decision(state).target_agent, "Claude")
+
+    def test_reviewed_same_sha_ci_paths_remain_integrating(self) -> None:
+        for status in ("in_progress", "integrating"):
+            for ci in ("queued", "running", "success"):
+                state = self.state()
+                task = state["tasks"][0]
+                task.update(status=status, reviewed_sha=task["candidate_sha"], review_file="original-review.md")
+                self.reconcile(state, ci)
+                self.assertEqual(task["status"], "integrating")
+                self.assertEqual(task["reviewed_sha"], task["candidate_sha"])
+                self.assertEqual(task["review_file"], "original-review.md")
+                self.assertIsNone(self.decision(state))
+
+    def test_mismatched_approval_is_never_treated_as_same_sha(self) -> None:
+        state = self.state()
+        task = state["tasks"][0]
+        task["reviewed_sha"] = "b" * 40
+        self.reconcile(state, "success")
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["reviewed_sha"], "b" * 40)
+
+    def test_failure_closed_and_conflict_keep_owner_guard(self) -> None:
+        for status in ("review", "integrating", "in_progress"):
+            for ci in ("failure", "closed", "merge_conflict"):
+                state = self.state()
+                task = state["tasks"][0]
+                task["status"] = status
+                self.reconcile(state, ci)
+                self.assertEqual(task["status"], "in_progress")
+                self.assertEqual(task["ci_status"], ci)
+                self.assertEqual(self.decision(state).target_agent, "Claude")
+
+    def test_reviewed_failures_preserve_original_approval_and_failure_guards(self) -> None:
+        for ci in ("failure", "closed", "merge_conflict"):
+            state = self.state()
+            task = state["tasks"][0]
+            task.update(status="integrating", reviewed_sha=task["candidate_sha"])
+            self.reconcile(state, ci)
+            self.assertEqual(task["status"], "in_progress")
+            self.assertEqual(task["reviewed_sha"], task["candidate_sha"])
+            self.assertEqual(task["ci_status"], ci)
+
+    def test_empty_observation_cannot_resurrect_failed_ci_review(self) -> None:
+        state = self.state()
+        self.reconcile(state, "")
+        task = state["tasks"][0]
+        self.assertEqual(task["status"], "in_progress")
+        self.assertEqual(task["ci_status"], "failure")
+
+    def test_reviewed_merge_still_rejects_pending_or_stale_ci(self) -> None:
+        for ci, previous_sha in (("queued", FROZEN_C073_TASK["candidate_sha"]),
+                                 ("running", FROZEN_C073_TASK["candidate_sha"]), ("", "b" * 40)):
+            state = self.state()
+            task = state["tasks"][0]
+            task.update(status="integrating", reviewed_sha=task["candidate_sha"], ci_status="success", ci_sha=previous_sha)
+            with self.assertRaisesRegex(SystemExit, "successful CI for the same candidate SHA"):
+                self.reconcile(state, ci, MERGE_SHA="c" * 40)
+            self.assertEqual(task["status"], "integrating")
+            self.assertNotIn("merge_sha", task)
+
+    def test_done_is_unchanged_and_blocked_is_not_resumed_by_positive_ci(self) -> None:
+        for status in ("done", "blocked"):
+            state = self.state()
+            task = state["tasks"][0]
+            task.update(status=status, waiting_for="Supervisor")
+            before = copy.deepcopy(task)
+            self.reconcile(state, "success", MERGE_SHA="c" * 40)
+            self.assertEqual(task["status"], status)
+            self.assertEqual(task["waiting_for"], "Supervisor")
+            self.assertIsNone(self.decision(state))
+            if status == "done":
+                self.assertEqual(task, before)
+
+    def test_closed_conflict_and_owner_repair_still_need_rehandoff_after_ci_or_merge(self) -> None:
+        for invalidation in ("closed", "merge_conflict", "start"):
+            for merge in ("", "c" * 40):
+                state = self.state()
+                task = state["tasks"][0]
+                if invalidation == "start":
+                    with mock.patch.dict(os.environ, {"AI_NAME": "Claude"}, clear=True):
+                        ai_status.command_start(state, [task["id"], "Owner repair"])
+                else:
+                    self.reconcile(state, invalidation)
+                self.reconcile(state, "success", MERGE_SHA=merge)
+                self.assertEqual(task["status"], "in_progress")
+                self.assertEqual(self.decision(state).target_agent, "Claude")
+                self.assertNotIn("reviewed_sha", task)
+                self.assertNotIn("merge_sha", task)
+
+    def test_branch_observation_cannot_overwrite_frozen_identity(self) -> None:
+        state = self.state()
+        with self.assertRaisesRegex(SystemExit, "frozen handoff branch"):
+            self.reconcile(state, "success", CANDIDATE_BRANCH="foreign/branch")
+        self.assertEqual(state["tasks"][0]["candidate_branch"], FROZEN_C073_TASK["candidate_branch"])
+
+    def test_actual_transaction_recovery_retains_original_reviewer_candidate_fence(self) -> None:
+        from control_plane.usecases.task_board_commands import TaskBoardCommandExecutor, TaskBoardCommandRuntime
+
+        state = self.state()
+        task = state["tasks"][0]
+        with tempfile.TemporaryDirectory() as temp:
+            executor = TaskBoardCommandExecutor(TaskBoardCommandRuntime(
+                status_file=Path(temp) / "ai-status.json", load_state=lambda: state,
+                save_state=lambda _: None, sync_all=lambda _: None, read_only_commands={},
+                mutation_commands={"handoff": ai_status.command_handoff, "approve": ai_status.command_approve,
+                                   "reconcile-candidate": ai_status.command_reconcile_candidate},
+            ))
+            owner_env = {"AI_NAME": "Claude", "ORCH_DISPATCH_AGENT": "Claude", "ORCH_DISPATCH_ROLE": "owner",
+                         "ORCH_DISPATCH_TASK_ID": task["id"], "ORCH_RUN_ID": "new-owner-handoff",
+                         "CANDIDATE_SHA": task["candidate_sha"], "CANDIDATE_BRANCH": task["candidate_branch"]}
+            with mock.patch.dict(os.environ, owner_env, clear=True), \
+                    mock.patch.object(ai_status, "resolve_full_commit_sha", side_effect=lambda value: value):
+                executor.execute("handoff", [task["id"], "Claude2", "Owner exact handoff"])
+            generation = task["candidate_generation"]
+            for ci in ("failure", "queued", "running", "success"):
+                with mock.patch.dict(os.environ, {"AI_NAME": "Supervisor", "CANDIDATE_HEAD_SHA": task["candidate_sha"],
+                                                 "CANDIDATE_CI_STATUS": ci}, clear=True):
+                    executor.execute("reconcile-candidate", [task["id"]])
+            self.assert_review(state)
+            reviewer_env = {"AI_NAME": "Claude2", "ORCH_DISPATCH_AGENT": "Claude2", "ORCH_DISPATCH_ROLE": "reviewer",
+                            "ORCH_DISPATCH_TASK_ID": task["id"], "ORCH_RUN_ID": "independent-review",
+                            "ORCH_DISPATCH_CANDIDATE_SHA": task["candidate_sha"],
+                            "ORCH_DISPATCH_CANDIDATE_GENERATION": generation, "REVIEWED_SHA": task["candidate_sha"]}
+            for key in ("ORCH_DISPATCH_CANDIDATE_SHA", "ORCH_DISPATCH_CANDIDATE_GENERATION"):
+                before = copy.deepcopy(state)
+                with mock.patch.dict(os.environ, {**reviewer_env, key: "stale"}, clear=True):
+                    with self.assertRaisesRegex(SystemExit, "Review candidate changed"):
+                        executor.execute("approve", [task["id"], "Stale request rejected"])
+                self.assertEqual(state, before)
+            with mock.patch.dict(os.environ, owner_env, clear=True):
+                with self.assertRaisesRegex(SystemExit, "Only the reviewer"):
+                    executor.execute("approve", [task["id"], "Owner cannot approve"])
+            with mock.patch.dict(os.environ, reviewer_env, clear=True), \
+                    mock.patch.object(ai_status, "git_commit_exists", return_value=True):
+                executor.execute("approve", [task["id"], "Original independent reviewer decision"])
+            self.assertEqual(task["status"], "integrating")
+            self.assertEqual(task["reviewed_sha"], task["candidate_sha"])
+            self.assertEqual(task["candidate_generation"], generation)
+            self.assertEqual(task["worker_outcomes"]["independent-review"]["command"], "approve")
+
+    def test_unapproved_merge_never_completes_but_review_ci_merge_acceptance_still_works(self) -> None:
+        state = self.state()
+        task = state["tasks"][0]
+        self.reconcile(state, "success", MERGE_SHA="c" * 40)
+        self.assert_review(state)
+        with mock.patch.dict(os.environ, {"AI_NAME": "Claude2", "REVIEWED_SHA": task["candidate_sha"]}, clear=True), \
+                mock.patch.object(ai_status, "git_commit_exists", return_value=True):
+            ai_status.command_approve(state, [task["id"], "Actual independent review test control"])
+        self.reconcile(state, "success", MERGE_SHA="c" * 40)
+        self.assertEqual(task["status"], "acceptance")
+        self.assertNotIn("acceptance_evidence", task)
+        evidence = {key: "isolated-test-evidence" for key in task["required_acceptance"]}
+        with mock.patch.dict(os.environ, {"AI_NAME": "Claude", "ACCEPTANCE_EVIDENCE_JSON": json.dumps(evidence)}, clear=True), \
+                mock.patch.object(ai_status, "merge_reachability", return_value="unknown"):
+            ai_status.command_record_acceptance(state, [task["id"], "All isolated acceptance controls"])
+        self.assertEqual(task["status"], "done")
 
 
 class StatusCliBoundaryTest(unittest.TestCase):

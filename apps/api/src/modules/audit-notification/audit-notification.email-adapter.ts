@@ -115,9 +115,10 @@ export class AuditNotificationEmailAdapter {
       };
     }
 
+    let queued: Awaited<ReturnType<NotificationDeliveryService["enqueue"]>>;
     try {
       const idempotencyKey = toApprovalNotificationIdempotencyKey(message);
-      const queued = await this.deliveryService.enqueue({
+      queued = await this.deliveryService.enqueue({
         tenantId: message.tenantId,
         idempotencyKey,
         recipientEmail: message.recipientEmail,
@@ -126,7 +127,25 @@ export class AuditNotificationEmailAdapter {
         subject: message.subject,
         body: message.body,
       });
+    } catch (error) {
+      // Nothing was durably recorded; the synthetic id is correct here --
+      // there is no outbox row for the readback endpoint to ever find.
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Approval notification email delivery failed for ${message.templateKey} approval request ${message.approvalRequestId}: ${detail}`,
+      );
+      return {
+        ...base,
+        deliveryId: `error-${toApprovalNotificationIdempotencyKey(message)}`,
+        messageId: null,
+        status: "failed",
+        sentAt: null,
+        providerMessageId: null,
+        errorCode: toSafeErrorCode(error),
+      };
+    }
 
+    try {
       // An already "sent" receipt (a same-key retry) must never be re-dispatched.
       const receipt =
         queued.status === "sent"
@@ -149,18 +168,24 @@ export class AuditNotificationEmailAdapter {
           receipt.status === "sent" ? null : (lastAttempt?.errorCode ?? null),
       };
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
+      // The enqueue above already created a durable, queryable outbox
+      // record -- a claim-storage or post-provider-ACK persistence
+      // rejection past that point must not discard it. Report the real
+      // deliveryId/messageId and the last status enqueue committed (never
+      // a guessed "sent"/provider acknowledgement) so the readback
+      // endpoint still resolves to whatever the outbox actually recorded.
+      const errorCode = toSafeErrorCode(error);
       this.logger.warn(
-        `Approval notification email delivery failed for ${message.templateKey} approval request ${message.approvalRequestId}: ${detail}`,
+        `Approval notification email dispatch did not complete for ${message.templateKey} approval request ${message.approvalRequestId} (deliveryId ${queued.deliveryId}): ${errorCode}`,
       );
       return {
         ...base,
-        deliveryId: `error-${toApprovalNotificationIdempotencyKey(message)}`,
-        messageId: null,
-        status: "failed",
-        sentAt: null,
+        deliveryId: queued.deliveryId,
+        messageId: queued.messageId,
+        status: queued.status,
+        sentAt: queued.sentAt,
         providerMessageId: null,
-        errorCode: toSafeErrorCode(error),
+        errorCode,
       };
     }
   }

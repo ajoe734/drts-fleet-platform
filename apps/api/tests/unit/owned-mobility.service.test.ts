@@ -134,6 +134,8 @@ function createOwnedMobilityService(options?: {
   };
 }) {
   const regulatoryRegistryService = {
+    assertCurrentMatchingSuppressionClear: vi.fn(() => undefined),
+    prepareMatchingSuppressions: vi.fn(() => undefined),
     getEligibleCandidates: vi.fn(
       (
         serviceBucket: string,

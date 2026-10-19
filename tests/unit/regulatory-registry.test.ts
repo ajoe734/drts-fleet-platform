@@ -1,3 +1,4 @@
+import { CommandSqlTransport } from "./registry-contract-insurance-exclusivity-canonical-ack-flow-20261015/sql-transport";
 import { enabledRegistryRepository } from "./registry-driver-master-durable-ack-20261014/storage-fixture";
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
@@ -35,26 +36,33 @@ function createRegulatoryRegistryService(
 
 describe("regulatory registry service", () => {
   it("creates regulatory source-of-truth records and updates vehicle eligibility from insurance and exclusivity", async () => {
-    const persistChanges = vi.fn(async () => undefined);
-    const repository = {
-      isEnabled: vi.fn(() => true),
-      loadState: vi.fn(async () => ({
-        vehicles: [],
-        drivers: [],
-        supplyPairs: [],
-        contracts: [],
-        policies: [],
-        exclusivities: [],
-      })),
-      persistChanges,
-      reportPersistenceFailure: vi.fn(),
-    } as unknown as RegulatoryRegistryRepository;
+    const persistChanges = vi.fn(async (_changes?: unknown) => {
+      void _changes;
+      return undefined;
+    });
+    const db = new CommandSqlTransport();
+    const repository = new RegulatoryRegistryRepository(db as never);
+    const write = repository.persistChangesWithExecutor.bind(repository);
+    repository.persistChangesWithExecutor = async (executor, changes) => {
+      await write(executor, changes);
+      // Observe the original persisted change payload without replacing SQL.
+      await persistChanges(changes);
+    };
     const regulatoryRegistryService =
       createRegulatoryRegistryService(repository);
+    db.seed({
+      vehicles: regulatoryRegistryService.listVehicles(),
+      drivers: regulatoryRegistryService.listDrivers(),
+      supplyPairs: regulatoryRegistryService.listSupplyPairs(),
+      contracts: regulatoryRegistryService.listContracts(),
+      policies: regulatoryRegistryService.listPolicies(),
+      exclusivities: regulatoryRegistryService.listExclusivities(),
+    });
+    db.enabled = true;
 
     await regulatoryRegistryService.onModuleInit();
 
-    const contract = regulatoryRegistryService.createContract({
+    const contract = await regulatoryRegistryService.createContract({
       vehicleId: "veh-demo-001",
       partnerId: "partner-demo-001",
       partnerType: "enterprise_partner",
@@ -63,13 +71,13 @@ describe("regulatory registry service", () => {
       startAt: "2026-05-01T00:00:00Z",
       endAt: "2026-12-31T23:59:59Z",
     });
-    const activatedContract = regulatoryRegistryService.activateContract(
+    const activatedContract = await regulatoryRegistryService.activateContract(
       contract.contractId,
       {
         approvedBy: "platform-admin-001",
       },
     );
-    const policy = regulatoryRegistryService.createInsurancePolicy({
+    const policy = await regulatoryRegistryService.createInsurancePolicy({
       vehicleId: "veh-demo-001",
       policyNo: "POL-NEW-0001",
       insuranceType: "passenger_liability",
@@ -79,7 +87,7 @@ describe("regulatory registry service", () => {
       endAt: "2026-12-31T23:59:59Z",
     });
 
-    regulatoryRegistryService.submitExclusivityReview("veh-demo-001", {
+    await regulatoryRegistryService.submitExclusivityReview("veh-demo-001", {
       declarationFileId: "file-exclusivity-001",
       exclusiveProviderName: "Acme Dispatch",
       effectiveStart: "2026-05-01T00:00:00Z",
@@ -92,16 +100,15 @@ describe("regulatory registry service", () => {
       ),
     ).toBe(false);
 
-    const activatedPolicy = regulatoryRegistryService.activateInsurancePolicy(
-      policy.policyId,
-      {},
-    );
-    const approvedExclusivity = regulatoryRegistryService.approveExclusivity(
-      "veh-demo-001",
-      {
+    const activatedPolicy =
+      await regulatoryRegistryService.activateInsurancePolicy(
+        policy.policyId,
+        {},
+      );
+    const approvedExclusivity =
+      await regulatoryRegistryService.approveExclusivity("veh-demo-001", {
         reviewerId: "platform-admin-001",
-      },
-    );
+      });
 
     await Promise.resolve();
 

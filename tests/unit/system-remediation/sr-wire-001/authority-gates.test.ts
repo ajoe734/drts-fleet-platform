@@ -29,7 +29,10 @@ function setup() {
   context.currentLocation!.recordedAt = NOW.toISOString();
   context.vehicleCapability.trainingRequired = true;
   const evaluator = new RuntimeEligibilityEvaluator(
-    { resolve: () => context } as never,
+    {
+      prepareMatchingSuppression: async () => false,
+      resolve: () => context,
+    } as never,
     undefined,
     undefined,
     academy,

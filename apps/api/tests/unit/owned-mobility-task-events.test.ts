@@ -17,6 +17,9 @@ function createOwnedMobilityService(options?: {
   }>;
 }) {
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(
       () =>
         options?.candidates ?? [
@@ -288,6 +291,8 @@ describe("owned mobility task events", () => {
 
   it("passes pickup coordinates into candidate lookup and stores the live ETA snapshot", async () => {
     const regulatoryRegistryService = {
+      prepareMatchingSuppressions: () => undefined,
+
       getEligibleCandidates: vi.fn(() => [
         {
           driverId: "driver-001",
