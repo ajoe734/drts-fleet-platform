@@ -179,12 +179,16 @@ export class RegulatoryRegistryController {
 
   @Get("drivers")
   listDrivers(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.regulatoryRegistryService.listDrivers(),
-      },
-      requestId,
-    );
+    const respond = () =>
+      toApiSuccessEnvelope(
+        {
+          items: this.regulatoryRegistryService.listDrivers(),
+        },
+        requestId,
+      );
+    const refresh =
+      this.regulatoryRegistryService.prepareMatchingSuppressions();
+    return refresh instanceof Promise ? refresh.then(respond) : respond();
   }
 
   @Get("driver-locations")

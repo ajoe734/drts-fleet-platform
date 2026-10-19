@@ -256,6 +256,31 @@ export class RegulatoryRegistryRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async loadDriverMatchingSuppressions(
+    driverId?: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
+  ) {
+    const result = await executor.query<{
+      driver_id: string;
+      record: import("@drts/contracts").DriverMatchingSuppression;
+    }>(
+      `SELECT driver_id, record FROM ops.phase1_driver_matching_suppressions${driverId ? " WHERE driver_id = $1" : ""}`,
+      driverId ? [driverId] : [],
+    );
+    return result.rows;
+  }
+
+  async lockDriverMatchingAuthority(
+    driverId: string,
+    executor: Pick<DatabaseService, "query">,
+  ) {
+    await executor.query(
+      "SELECT driver_id FROM reg.phase1_registry_drivers WHERE driver_id = $1 FOR UPDATE",
+      [driverId],
+    );
+    return this.loadDriverMatchingSuppressions(driverId, executor);
+  }
+
   /** Narrow P5 reads never hydrate or replace another Registry writer's cache. */
   async listDisclosureReviewRecords(): Promise<{
     profiles: VehiclePassengerDisclosureProfile[];

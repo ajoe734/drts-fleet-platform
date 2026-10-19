@@ -384,6 +384,14 @@ export class DriverSosRepository {
     submission: PersistDriverSosSubmission,
   ) {
     const { incident } = submission;
+    // Take the driver authority before the incident row, matching ordinary
+    // lifecycle changes and the final assignment current-authority check.
+    if (incident.relatedDriverId)
+      await executor.query(
+        "SELECT driver_id FROM reg.phase1_registry_drivers WHERE driver_id = $1 FOR UPDATE",
+        [incident.relatedDriverId],
+      );
+
     const closedAt =
       incident.status === "resolved" || incident.status === "closed"
         ? incident.updatedAt

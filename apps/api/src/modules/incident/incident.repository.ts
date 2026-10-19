@@ -25,7 +25,7 @@ type PersistIncidentSuppressionRecord = {
   suppression: DriverMatchingSuppression;
 };
 
-type PersistIncidentChanges = {
+export type PersistIncidentChanges = {
   incidents?: readonly IncidentRecord[];
   timelines?: readonly IncidentTimelineEntry[];
   suppressions?: readonly PersistIncidentSuppressionRecord[];
@@ -110,9 +110,76 @@ export class IncidentRepository {
     };
   }
 
+  /** Ordinary lifecycle commits share the driver lock with final assignment and
+   * atomic SOS. Never expose a staged incident/timeline/suppression before ACK. */
+  async commitLifecycle<T>(
+    incidentId: string | null,
+    driverId: string | null,
+    prepare: (current: IncidentRecord | null) => {
+      changes: PersistIncidentChanges;
+      options?: PersistIncidentOptions;
+      publish: (actual?: IncidentRecord) => T;
+    },
+  ): Promise<T> {
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const initialRows = incidentId
+        ? await client.query<JsonRecordRow>(
+            "SELECT record FROM ops.phase1_incidents WHERE incident_id = $1",
+            [incidentId],
+          )
+        : null;
+      const initial = initialRows?.rows[0]
+        ? this.parseRecord<IncidentRecord>(
+            initialRows.rows[0].record,
+            "ops.phase1_incidents",
+          )
+        : null;
+      const driver = initial?.relatedDriverId ?? driverId;
+      if (driver)
+        await client.query(
+          "SELECT driver_id FROM reg.phase1_registry_drivers WHERE driver_id = $1 FOR UPDATE",
+          [driver],
+        );
+      const result = incidentId
+        ? await client.query<JsonRecordRow>(
+            "SELECT record FROM ops.phase1_incidents WHERE incident_id = $1 FOR UPDATE",
+            [incidentId],
+          )
+        : null;
+      const current = result?.rows[0]
+        ? this.parseRecord<IncidentRecord>(
+            result.rows[0].record,
+            "ops.phase1_incidents",
+          )
+        : null;
+      if (current && current.relatedDriverId !== driver)
+        throw new Error("Incident driver changed during lifecycle commit.");
+      const plan = prepare(current);
+      const persisted = await this.persistChanges(
+        plan.changes,
+        plan.options,
+        client,
+      );
+      await client.query("COMMIT");
+      return plan.publish(persisted?.incidents[0]);
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* preserve original failure */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async persistChanges(
     changes: PersistIncidentChanges,
     options?: PersistIncidentOptions,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
   ): Promise<{ incidents: IncidentRecord[]; newClaims: string[] } | undefined> {
     if (!this.isEnabled()) {
       return {
@@ -176,7 +243,7 @@ export class IncidentRepository {
           ? incident.updatedAt
           : null;
       const preserveAssignment = !assignIntent.has(incident.incidentId);
-      const result = await this.databaseService!.query<JsonRecordRow>(
+      const result = await executor.query<JsonRecordRow>(
         `
             INSERT INTO ops.phase1_incidents (
               incident_id, incident_no, status, severity, category,
@@ -249,7 +316,7 @@ export class IncidentRepository {
     for (const timeline of changes.timelines ?? []) {
       if (assignmentOnly.has(timeline.incidentId)) continue;
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO ops.phase1_incident_timelines (
               entry_id, incident_id, action, actor_id, created_at, record
@@ -274,7 +341,7 @@ export class IncidentRepository {
 
     for (const entry of changes.suppressions ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO ops.phase1_driver_matching_suppressions (
               source_incident_id, driver_id, active, reason_code,
