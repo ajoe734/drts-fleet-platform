@@ -1,4 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
+import {
+  disclosureMissingFields,
+  publicDisclosureRecord,
+  type DisclosureSubjectType,
+  type DisclosureRecord,
+  type DisclosureReviewCommand,
+  type DisclosureReviewDecision,
+  type DisclosureReviewItem,
+} from "./disclosure-review.types";
 
 import {
   HttpStatus,
@@ -4033,6 +4043,375 @@ export class RegulatoryRegistryService
 
   private degreesToRadians(value: number): number {
     return (value * Math.PI) / 180;
+  }
+
+  private readonly disclosureReviewWrites = new Map<string, Promise<unknown>>();
+  private readonly disclosureReviewHistory: DisclosureReviewDecision[] = [];
+
+  private assertDisclosureIdentity(
+    identity: BootstrapRequestIdentity | null | undefined,
+    write = false,
+  ) {
+    // Same scopes issued by the existing IAM catalogue/control-plane principal
+    // and enforced by the original Registry route policy; reg.* UI labels are
+    // not issued permissions and cannot authorize a canonical command.
+    if (
+      !identity?.actorId?.trim() ||
+      !["platform", "ops"].includes(identity.realm ?? "") ||
+      !identity.scopes.includes(write ? "regulatory:write" : "regulatory:read")
+    ) {
+      throw new ApiRequestError(
+        403,
+        "P5_REVIEW_AUTHORITY_REQUIRED",
+        "Existing P5 reader/reviewer authority is required.",
+      );
+    }
+    return identity as BootstrapRequestIdentity & { actorId: string };
+  }
+
+  private disclosureItem(
+    type: DisclosureSubjectType,
+    id: string,
+    record: DisclosureRecord,
+    history: DisclosureReviewDecision[],
+    parent?: VehicleRegistryRecord | DriverRegistryRecord,
+  ): DisclosureReviewItem {
+    return {
+      subjectType: type,
+      subjectId: id,
+      label:
+        parent && "plateNo" in parent
+          ? parent.plateNo
+          : parent && "fullName" in parent
+            ? String(parent.fullName)
+            : id,
+      sourceSubmissionId: record.sourceSubmissionId,
+      version: record.version,
+      record: publicDisclosureRecord(record, true),
+      missingFieldCodes: disclosureMissingFields(record),
+      history: history.map((decision) => ({
+        ...structuredClone(decision),
+        record: publicDisclosureRecord(decision.record),
+      })),
+    };
+  }
+
+  async listDisclosureReviews(
+    identity: BootstrapRequestIdentity | null | undefined,
+  ) {
+    this.assertDisclosureIdentity(identity);
+    const repository = this.regulatoryRegistryRepository;
+    const records = repository?.isEnabled()
+      ? await repository.listDisclosureReviewRecords()
+      : {
+          profiles: this.disclosureProfiles,
+          credentials: this.driverCredentials,
+        };
+    const items: DisclosureReviewItem[] = [];
+    for (const record of [...records.profiles, ...records.credentials]) {
+      const type = "vehicleId" in record ? "vehicle" : "driver";
+      const id = "vehicleId" in record ? record.vehicleId : record.driverId;
+      items.push(await this.getDisclosureReview(type, id, identity));
+    }
+    return { items };
+  }
+
+  async getDisclosureReview(
+    type: DisclosureSubjectType,
+    id: string,
+    identity: BootstrapRequestIdentity | null | undefined,
+  ): Promise<DisclosureReviewItem> {
+    this.assertDisclosureIdentity(identity);
+    if (type !== "vehicle" && type !== "driver")
+      throw new ApiRequestError(
+        400,
+        "INVALID_DISCLOSURE_SUBJECT",
+        "Unknown review subject type.",
+      );
+    const repository = this.regulatoryRegistryRepository;
+    if (repository?.isEnabled()) {
+      const current = await repository.loadDisclosureReviewSubject(type, id);
+      if (!current)
+        throw new ApiRequestError(
+          404,
+          "DISCLOSURE_REVIEW_NOT_FOUND",
+          "Canonical disclosure subject not found.",
+        );
+      return this.disclosureItem(
+        type,
+        id,
+        current.record,
+        await repository.loadDisclosureReviewHistory(type, id),
+        current.parent,
+      );
+    }
+    const record =
+      type === "vehicle"
+        ? this.getVehiclePassengerDisclosureProfile(id)
+        : this.getDriverPublicRegistrationCredential(id);
+    if (!record)
+      throw new ApiRequestError(
+        404,
+        "DISCLOSURE_REVIEW_NOT_FOUND",
+        "Canonical disclosure subject not found.",
+      );
+    const parent =
+      type === "vehicle"
+        ? this.vehicles.find((row) => row.vehicleId === id)
+        : this.drivers.find((row) => row.driverId === id);
+    if (!parent)
+      throw new ApiRequestError(
+        404,
+        "DISCLOSURE_REVIEW_NOT_FOUND",
+        "Canonical subject not found.",
+      );
+    return this.disclosureItem(
+      type,
+      id,
+      record,
+      this.disclosureReviewHistory.filter(
+        (row) => row.subjectType === type && row.subjectId === id,
+      ),
+      parent,
+    );
+  }
+
+  async reviewDisclosure(
+    type: DisclosureSubjectType,
+    id: string,
+    command: DisclosureReviewCommand,
+    operationKey: string | undefined,
+    identity: BootstrapRequestIdentity | null | undefined,
+  ) {
+    const actor = this.assertDisclosureIdentity(identity, true);
+    if (type !== "vehicle" && type !== "driver")
+      throw new ApiRequestError(
+        400,
+        "INVALID_DISCLOSURE_SUBJECT",
+        "Unknown review subject type.",
+      );
+    if (
+      !operationKey?.trim() ||
+      !["approve", "return"].includes(command?.action) ||
+      !Number.isInteger(command.expectedVersion) ||
+      command.expectedVersion < 1 ||
+      !command.reason?.trim() ||
+      !(
+        command.sourceSubmissionId === null ||
+        typeof command.sourceSubmissionId === "string"
+      )
+    )
+      throw new ApiRequestError(
+        400,
+        "INVALID_DISCLOSURE_REVIEW",
+        "A command key, current version/submission, action and review reason are required.",
+      );
+    const payloadHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          type,
+          id,
+          actorId: actor.actorId,
+          action: command.action,
+          expectedVersion: command.expectedVersion,
+          sourceSubmissionId: command.sourceSubmissionId,
+          reason: command.reason.trim(),
+        }),
+      )
+      .digest("hex");
+    const subjectKey = `${type}:${id}`;
+    const previous =
+      this.disclosureReviewWrites.get(subjectKey) ?? Promise.resolve();
+    const work = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const repository = this.regulatoryRegistryRepository!;
+        const enabled = repository.isEnabled();
+        const apply = async (executor?: RegulatoryRegistryQueryExecutor) => {
+          const loaded = enabled
+            ? await repository.loadDisclosureReviewSubject(
+                type,
+                id,
+                executor,
+                true,
+              )
+            : null;
+          const current = enabled
+            ? loaded?.record
+            : type === "vehicle"
+              ? this.getVehiclePassengerDisclosureProfile(id)
+              : this.getDriverPublicRegistrationCredential(id);
+          const parent = enabled
+            ? loaded?.parent
+            : type === "vehicle"
+              ? this.vehicles.find((row) => row.vehicleId === id)
+              : this.drivers.find((row) => row.driverId === id);
+          if (!current || !parent)
+            throw new ApiRequestError(
+              404,
+              "DISCLOSURE_REVIEW_NOT_FOUND",
+              "Canonical subject and disclosure are required.",
+            );
+          const history = enabled
+            ? await repository.loadDisclosureReviewHistory(type, id, executor)
+            : this.disclosureReviewHistory.filter(
+                (row) => row.subjectType === type && row.subjectId === id,
+              );
+          const replay = history.find(
+            (row) => row.operationKey === operationKey,
+          );
+          if (replay) {
+            if (replay.payloadHash !== payloadHash)
+              throw new ApiRequestError(
+                409,
+                "IDEMPOTENCY_CONFLICT",
+                "Review key is bound to a different command.",
+              );
+            return { decision: replay, parent };
+          }
+          if (
+            current.version !== command.expectedVersion ||
+            current.sourceSubmissionId !== command.sourceSubmissionId
+          )
+            throw new ApiRequestError(
+              409,
+              "DISCLOSURE_VERSION_CONFLICT",
+              "The canonical submission/version changed; reload before reviewing.",
+            );
+          const missing = disclosureMissingFields(current);
+          if (
+            command.action === "approve" &&
+            (missing.length ||
+              ["suspended", "revoked"].includes(current.status))
+          )
+            throw new ApiRequestError(
+              409,
+              "DISCLOSURE_NOT_REVIEWABLE",
+              "Required fields, source and current validity must be resolved before approval.",
+              { missingFieldCodes: missing },
+            );
+          const now = new Date().toISOString();
+          const updated = {
+            ...structuredClone(current),
+            version: current.version + 1,
+            updatedAt: now,
+            verifiedAt: command.action === "approve" ? now : null,
+            verifiedByActorId:
+              command.action === "approve" ? actor.actorId : null,
+          } as DisclosureRecord;
+          if ("vehicleId" in updated)
+            updated.status =
+              command.action === "approve"
+                ? "complete"
+                : current.status === "suspended"
+                  ? "suspended"
+                  : "incomplete";
+          else
+            updated.status =
+              command.action === "approve"
+                ? "verified_active"
+                : ["revoked", "suspended", "expired"].includes(current.status)
+                  ? (current.status as DriverPublicRegistrationCredential["status"])
+                  : "unverified";
+          const decision: DisclosureReviewDecision = {
+            decisionId: randomUUID(),
+            operationKey,
+            payloadHash,
+            actorId: actor.actorId,
+            actorType:
+              actor.actorType === "driver_user" ? "system" : actor.actorType,
+            subjectType: type,
+            subjectId: id,
+            action: command.action,
+            reason: command.reason.trim(),
+            sourceSubmissionId: current.sourceSubmissionId,
+            fromVersion: current.version,
+            toVersion: updated.version,
+            decidedAt: now,
+            record: publicDisclosureRecord(updated),
+            previousRecord: publicDisclosureRecord(current),
+          };
+          if (enabled) {
+            const parentSnapshot = {
+              ...structuredClone(parent),
+              updatedAt: now,
+            };
+            await repository.persistChangesWithExecutor(
+              executor!,
+              type === "vehicle"
+                ? {
+                    disclosureProfiles: [
+                      updated as VehiclePassengerDisclosureProfile,
+                    ],
+                    vehicles: [parentSnapshot as VehicleRegistryRecord],
+                  }
+                : {
+                    driverCredentials: [
+                      updated as DriverPublicRegistrationCredential,
+                    ],
+                    drivers: [parentSnapshot as DriverRegistryRecord],
+                  },
+            );
+            await repository.appendDisclosureReview(executor!, decision);
+          }
+          return { decision, parent, updated };
+        };
+        const result = enabled
+          ? await repository.withTransaction((client) => apply(client))
+          : await apply();
+        // Only the acknowledged review delta is published; never replace Registry state.
+        if (result.updated) {
+          const currentParent =
+            type === "vehicle"
+              ? this.vehicles.find((row) => row.vehicleId === id)
+              : this.drivers.find((row) => row.driverId === id);
+          if (
+            currentParent &&
+            Date.parse(result.decision.decidedAt) >
+              Date.parse(currentParent.updatedAt)
+          )
+            currentParent.updatedAt = result.decision.decidedAt;
+          if ("vehicleId" in result.updated)
+            this.disclosureProfiles = [
+              ...this.disclosureProfiles.filter((row) => row.vehicleId !== id),
+              structuredClone(result.updated),
+            ];
+          else
+            this.driverCredentials = [
+              ...this.driverCredentials.filter((row) => row.driverId !== id),
+              structuredClone(result.updated),
+            ];
+          if (!enabled)
+            this.disclosureReviewHistory.push(structuredClone(result.decision));
+          this.auditNotificationService.recordAuditLog({
+            auditId: result.decision.decisionId,
+            actorId: actor.actorId,
+            actorType: result.decision.actorType,
+            tenantId: null,
+            moduleName: "regulatory-registry",
+            actionName: "p5_disclosure_review",
+            resourceType: `p5_disclosure_${type}`,
+            resourceId: id,
+            oldValuesSummary: { record: result.decision.previousRecord },
+            newValuesSummary: { p5Review: result.decision },
+            requestId: operationKey,
+          });
+        }
+        return {
+          decision: {
+            ...structuredClone(result.decision),
+            record: publicDisclosureRecord(result.decision.record),
+          },
+          subject: await this.getDisclosureReview(type, id, actor),
+        };
+      });
+    this.disclosureReviewWrites.set(subjectKey, work);
+    try {
+      return await work;
+    } finally {
+      if (this.disclosureReviewWrites.get(subjectKey) === work)
+        this.disclosureReviewWrites.delete(subjectKey);
+    }
   }
 
   getVehiclePassengerDisclosureProfile(
