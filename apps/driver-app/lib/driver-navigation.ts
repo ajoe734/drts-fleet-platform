@@ -1,7 +1,8 @@
-import type {
-  AddressPayload,
-  DriverTaskRecord,
-  OwnedOrderRecord,
+import {
+  DRIVER_TASK_TRANSITIONS,
+  type AddressPayload,
+  type DriverTaskRecord,
+  type OwnedOrderRecord,
 } from "@drts/contracts";
 
 export type DriverNavigationTarget = "pickup" | "dropoff";
@@ -83,7 +84,7 @@ export type DriverLocationFixInput = {
 } | null;
 
 export type DriverLocationFixState = {
-  state: "fresh" | "stale" | "missing";
+  state: "fresh" | "stale" | "missing" | "stopped";
   label: string;
   detail: string;
   coordinateLabel: string | null;
@@ -453,14 +454,31 @@ export function buildDriverTripNavigationModel({
 }
 
 export function getDriverLocationFixState({
+  task,
   location,
   now = Date.now(),
   staleAfterMs = DEFAULT_STALE_FIX_MS,
 }: {
+  task: DriverTaskRecord | null;
   location: DriverLocationFixInput;
   now?: number;
   staleAfterMs?: number;
 }): DriverLocationFixState {
+  if (task && DRIVER_TASK_TRANSITIONS[task.status].length === 0) {
+    const coordinateLabel =
+      location && isValidDriverCoordinate(location)
+        ? formatDriverCoordinate(location)
+        : null;
+    return {
+      state: "stopped",
+      label: "本任務定位已停止",
+      detail: coordinateLabel
+        ? "任務已結束；保留的最後已知座標僅供查閱，不代表目前位置。"
+        : "任務已結束，沒有可顯示的最後定位。",
+      coordinateLabel,
+    };
+  }
+
   if (!location || !isValidDriverCoordinate(location)) {
     return {
       state: "missing",
@@ -601,4 +619,3 @@ export function isDriverTabRoute(routeName: string): boolean {
   const cleanName = routeName.replace(/^\//, "");
   return DRIVER_TABS.some((tab) => tab.routeName === cleanName);
 }
-
