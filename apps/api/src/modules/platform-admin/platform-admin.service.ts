@@ -80,6 +80,8 @@ import {
   PlatformAdapterRevisionConflictError,
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
+  type PublicInfoVersionMutation,
+  type PublicInfoVersionMutationResult,
 } from "./platform-admin.repository";
 import { buildMinimalPdf, buildPlacardPdfRows } from "./placard-pdf.renderer";
 
@@ -574,12 +576,11 @@ export class PlatformAdminService implements OnModuleInit {
     );
   }
 
-  createPublicInfoVersion(
+  async createPublicInfoVersion(
     command: CreatePublicInfoVersionCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.title, "title");
-
+    this.assertNonBlank(command?.title, "title");
     const now = new Date().toISOString();
     const version: PublicInfoVersionRecord = {
       versionId: `public_info_${randomUUID()}`,
@@ -597,17 +598,10 @@ export class PlatformAdminService implements OnModuleInit {
       createdAt: now,
       updatedAt: now,
     };
-
-    this.publicInfoVersions = [
-      this.clonePublicInfoVersion(version),
-      ...this.publicInfoVersions,
-    ];
-    this.persistChanges(
-      {
-        publicInfoVersions: [this.clonePublicInfoVersion(version)],
-      },
-      "create_public_info_version",
-    );
+    const saved = await this.mutatePublicInfoVersions(() => ({
+      upsertedVersions: [version],
+      resultVersion: version,
+    }));
     this.recordAudit(
       {
         actorId: null,
@@ -616,131 +610,112 @@ export class PlatformAdminService implements OnModuleInit {
         moduleName: "platform-admin",
         actionName: "create_public_info_version",
         resourceType: "public_info_version",
-        resourceId: version.versionId,
-        newValuesSummary: {
-          ...this.clonePublicInfoVersion(version),
-        },
+        resourceId: saved.version.versionId,
+        newValuesSummary: { ...saved.version },
       },
       requestId,
     );
-
-    return this.clonePublicInfoVersion(version);
+    return this.clonePublicInfoVersion(saved.version);
   }
 
-  publishPublicInfoVersion(
+  async publishPublicInfoVersion(
     versionId: string,
     command: PublishPublicInfoVersionCommand,
     requestId?: string,
     publisherActorId?: string | null,
   ) {
-    const version = this.requirePublicInfoVersion(versionId);
-    if (version.status !== "draft") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PUBLIC_INFO_VERSION_NOT_DRAFT",
-        "Only draft public info versions can be published.",
-        {
-          versionId,
-          status: version.status,
-        },
+    const saved = await this.mutatePublicInfoVersions((current) => {
+      const version = this.clonePublicInfoVersion(
+        this.requirePublicInfoVersion(versionId, current),
       );
-    }
-    const publishedAt = new Date().toISOString();
-    const publishedBy = this.requirePlatformAdminActorId(
-      publisherActorId,
-      "publish public info versions",
-    );
-    const previousPublished = this.publicInfoVersions.find(
-      (candidate) =>
-        candidate.status === "published" &&
-        candidate.versionId !== version.versionId,
-    );
-
-    if (previousPublished) {
-      previousPublished.status = "retired";
-      previousPublished.effectiveTo = publishedAt;
-      previousPublished.updatedAt = publishedAt;
-    }
-
-    version.status = "published";
-    version.publishedBy = publishedBy;
-    version.publishedAt = publishedAt;
-    version.effectiveFrom =
-      this.normalizeNullableText(command.effectiveFrom) ??
-      version.effectiveFrom;
-    version.effectiveTo =
-      this.normalizeNullableText(command.effectiveTo) ?? version.effectiveTo;
-    version.updatedAt = publishedAt;
-
-    const changedVersions = previousPublished
-      ? [
-          this.clonePublicInfoVersion(previousPublished),
-          this.clonePublicInfoVersion(version),
-        ]
-      : [this.clonePublicInfoVersion(version)];
-    this.persistChanges(
-      {
-        publicInfoVersions: changedVersions,
-      },
-      "publish_public_info_version",
-    );
+      if (version.status !== "draft") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PUBLIC_INFO_VERSION_NOT_DRAFT",
+          "Only draft public info versions can be published.",
+          { versionId, status: version.status },
+        );
+      }
+      const publishedAt = new Date().toISOString();
+      const publishedBy = this.requirePlatformAdminActorId(
+        publisherActorId,
+        "publish public info versions",
+      );
+      const previousPublished = current.find(
+        (candidate) =>
+          candidate.status === "published" && candidate.versionId !== versionId,
+      );
+      const retired = previousPublished
+        ? {
+            ...previousPublished,
+            status: "retired" as const,
+            effectiveTo: publishedAt,
+            updatedAt: publishedAt,
+          }
+        : null;
+      version.status = "published";
+      version.publishedBy = publishedBy;
+      version.publishedAt = publishedAt;
+      version.effectiveFrom =
+        this.normalizeNullableText(command.effectiveFrom) ??
+        version.effectiveFrom;
+      version.effectiveTo =
+        this.normalizeNullableText(command.effectiveTo) ?? version.effectiveTo;
+      version.updatedAt = publishedAt;
+      return {
+        upsertedVersions: retired ? [retired, version] : [version],
+        resultVersion: version,
+        previousPublishedVersionId: previousPublished?.versionId ?? null,
+      };
+    });
     this.recordAudit(
       {
-        actorId: publishedBy,
+        actorId: saved.version.publishedBy,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
         actionName: "publish_public_info_version",
         resourceType: "public_info_version",
-        resourceId: version.versionId,
-        ...(previousPublished
+        resourceId: saved.version.versionId,
+        ...(saved.previousPublishedVersionId
           ? {
               oldValuesSummary: {
-                previousVersionId: previousPublished.versionId,
+                previousVersionId: saved.previousPublishedVersionId,
                 previousStatus: "published",
               },
             }
           : {}),
         newValuesSummary: {
-          previousVersionId: previousPublished?.versionId ?? null,
-          newVersionId: version.versionId,
-          publishedAt,
-          publishedBy,
+          previousVersionId: saved.previousPublishedVersionId,
+          newVersionId: saved.version.versionId,
+          publishedAt: saved.version.publishedAt,
+          publishedBy: saved.version.publishedBy,
         },
       },
       requestId,
     );
-
-    return this.clonePublicInfoVersion(version);
+    return this.clonePublicInfoVersion(saved.version);
   }
 
-  deleteDraftPublicInfoVersion(
+  async deleteDraftPublicInfoVersion(
     versionId: string,
     requestId?: string,
     deleteActorId?: string | null,
   ) {
-    const version = this.requirePublicInfoVersion(versionId);
-    if (version.status !== "draft") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PUBLIC_INFO_VERSION_NOT_DRAFT",
-        "Only draft public info versions can be deleted.",
-        {
-          versionId,
-          status: version.status,
-        },
+    const saved = await this.mutatePublicInfoVersions((current) => {
+      const version = this.clonePublicInfoVersion(
+        this.requirePublicInfoVersion(versionId, current),
       );
-    }
-
-    this.publicInfoVersions = this.publicInfoVersions.filter(
-      (candidate) => candidate.versionId !== versionId,
-    );
-    this.persistChanges(
-      {
-        deletedPublicInfoVersionIds: [versionId],
-      },
-      "delete_draft_public_info_version",
-    );
+      if (version.status !== "draft") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PUBLIC_INFO_VERSION_NOT_DRAFT",
+          "Only draft public info versions can be deleted.",
+          { versionId, status: version.status },
+        );
+      }
+      return { deletedVersionIds: [versionId], resultVersion: version };
+    });
     this.recordAudit(
       {
         actorId: this.normalizeNullableText(deleteActorId),
@@ -749,18 +724,56 @@ export class PlatformAdminService implements OnModuleInit {
         moduleName: "platform-admin",
         actionName: "delete_draft_public_info_version",
         resourceType: "public_info_version",
-        resourceId: versionId,
-        oldValuesSummary: {
-          ...this.clonePublicInfoVersion(version),
-        },
-        newValuesSummary: {
-          deleted: true,
-        },
+        resourceId: saved.version.versionId,
+        oldValuesSummary: { ...saved.version },
+        newValuesSummary: { deleted: true },
       },
       requestId,
     );
+    return this.clonePublicInfoVersion(saved.version);
+  }
 
-    return this.clonePublicInfoVersion(version);
+  private async mutatePublicInfoVersions(
+    stage: (
+      current: readonly PublicInfoVersionRecord[],
+    ) => PublicInfoVersionMutation,
+  ): Promise<PublicInfoVersionMutationResult> {
+    let saved: PublicInfoVersionMutationResult;
+    if (this.platformAdminRepository?.isEnabled()) {
+      saved =
+        await this.platformAdminRepository.mutatePublicInfoVersions(stage);
+    } else {
+      const current = this.publicInfoVersions.map((version) =>
+        this.clonePublicInfoVersion(version),
+      );
+      const mutation = stage(current);
+      const upserts = new Map(
+        (mutation.upsertedVersions ?? []).map((version) => [
+          version.versionId,
+          version,
+        ]),
+      );
+      const deleted = new Set(mutation.deletedVersionIds ?? []);
+      saved = {
+        version: mutation.resultVersion,
+        versions: [
+          ...(mutation.upsertedVersions ?? []).filter(
+            (version) =>
+              !current.some((row) => row.versionId === version.versionId),
+          ),
+          ...current
+            .filter((version) => !deleted.has(version.versionId))
+            .map((version) => upserts.get(version.versionId) ?? version),
+        ],
+        previousPublishedVersionId: mutation.previousPublishedVersionId ?? null,
+      };
+    }
+    // Enabled repositories return only after their COMMIT. A rejected command
+    // never exposes its staged cache or a successful publication audit.
+    this.publicInfoVersions = saved.versions.map((version) =>
+      this.clonePublicInfoVersion(version),
+    );
+    return saved;
   }
 
   async listPlacardVersions() {
@@ -2877,8 +2890,11 @@ export class PlatformAdminService implements OnModuleInit {
     return normalized;
   }
 
-  private requirePublicInfoVersion(versionId: string) {
-    const version = this.publicInfoVersions.find(
+  private requirePublicInfoVersion(
+    versionId: string,
+    versions: readonly PublicInfoVersionRecord[] = this.publicInfoVersions,
+  ) {
+    const version = versions.find(
       (candidate) => candidate.versionId === versionId,
     );
     if (!version) {

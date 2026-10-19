@@ -231,6 +231,7 @@ describe("complaint service", () => {
       })),
       persistChanges,
       reportPersistenceFailure: vi.fn(),
+      isEnabled: vi.fn(() => true),
     } as unknown as ComplaintRepository;
 
     const complaintService = new ComplaintService(auditService, repository);

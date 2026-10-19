@@ -9,11 +9,11 @@ import { PlatformAdminRepository } from "../../apps/api/src/modules/platform-adm
 import { PlatformAdminService } from "../../apps/api/src/modules/platform-admin/platform-admin.service";
 
 describe("platform admin service", () => {
-  it("publishes a public info version with immutable audit evidence", () => {
+  it("publishes a public info version with immutable audit evidence", async () => {
     const auditService = new AuditNotificationService();
     const platformAdminService = new PlatformAdminService(auditService);
 
-    const draftVersion = platformAdminService.createPublicInfoVersion(
+    const draftVersion = await platformAdminService.createPublicInfoVersion(
       {
         title: "2026 Q3 公開資訊版",
         callPhone: "0800-123-456",
@@ -21,15 +21,16 @@ describe("platform admin service", () => {
       },
       "public-info-create-request",
     );
-    const publishedVersion = platformAdminService.publishPublicInfoVersion(
-      draftVersion.versionId,
-      {
-        publishedBy: "platform-admin-001",
-        effectiveFrom: "2026-07-01T00:00:00Z",
-      },
-      "public-info-publish-request",
-      "platform-admin-jwt-001",
-    );
+    const publishedVersion =
+      await platformAdminService.publishPublicInfoVersion(
+        draftVersion.versionId,
+        {
+          publishedBy: "platform-admin-001",
+          effectiveFrom: "2026-07-01T00:00:00Z",
+        },
+        "public-info-publish-request",
+        "platform-admin-jwt-001",
+      );
 
     expect(publishedVersion.status).toBe("published");
     expect(
@@ -48,24 +49,25 @@ describe("platform admin service", () => {
     );
   });
 
-  it("prefers the verified publisher actorId over the request body when publishing", () => {
+  it("prefers the verified publisher actorId over the request body when publishing", async () => {
     const auditService = new AuditNotificationService();
     const platformAdminService = new PlatformAdminService(auditService);
 
-    const draftVersion = platformAdminService.createPublicInfoVersion(
+    const draftVersion = await platformAdminService.createPublicInfoVersion(
       {
         title: "2026 Q4 公開資訊版",
       },
       "public-info-create-request",
     );
-    const publishedVersion = platformAdminService.publishPublicInfoVersion(
-      draftVersion.versionId,
-      {
-        publishedBy: "forged-body-actor",
-      },
-      "public-info-publish-request",
-      "platform-admin-jwt-007",
-    );
+    const publishedVersion =
+      await platformAdminService.publishPublicInfoVersion(
+        draftVersion.versionId,
+        {
+          publishedBy: "forged-body-actor",
+        },
+        "public-info-publish-request",
+        "platform-admin-jwt-007",
+      );
 
     expect(publishedVersion.publishedBy).toBe("platform-admin-jwt-007");
     const auditLogsSnapshot = auditService.listAuditLogs();
@@ -82,11 +84,11 @@ describe("platform admin service", () => {
     );
   });
 
-  it("rejects public info publish when no verified identity actorId is provided", () => {
+  it("rejects public info publish when no verified identity actorId is provided", async () => {
     const auditService = new AuditNotificationService();
     const platformAdminService = new PlatformAdminService(auditService);
 
-    const draftVersion = platformAdminService.createPublicInfoVersion(
+    const draftVersion = await platformAdminService.createPublicInfoVersion(
       {
         title: "2026 Q4 公開資訊版 B",
       },
@@ -95,7 +97,7 @@ describe("platform admin service", () => {
 
     let thrown: unknown;
     try {
-      platformAdminService.publishPublicInfoVersion(
+      await platformAdminService.publishPublicInfoVersion(
         draftVersion.versionId,
         {
           publishedBy: "forged-body-actor",
@@ -131,7 +133,7 @@ describe("platform admin service", () => {
     ).toBe(true);
   });
 
-  it("controller forwards the verified identity actorId to publish public info", () => {
+  it("controller forwards the verified identity actorId to publish public info", async () => {
     const service = {
       publishPublicInfoVersion: vi.fn(() => ({
         versionId: "public-info-001",
@@ -151,7 +153,7 @@ describe("platform admin service", () => {
       requestId: "req-123",
     };
 
-    controller.publishPublicInfoVersion(
+    await controller.publishPublicInfoVersion(
       "public-info-001",
       { publishedBy: "body-actor" },
       identity,
@@ -166,7 +168,7 @@ describe("platform admin service", () => {
     );
   });
 
-  it("controller rejects public info publish when identity is missing", () => {
+  it("controller rejects public info publish when identity is missing", async () => {
     const service = {
       publishPublicInfoVersion: vi.fn(),
     } as unknown as PlatformAdminService;
@@ -174,7 +176,7 @@ describe("platform admin service", () => {
 
     let thrown: unknown;
     try {
-      controller.publishPublicInfoVersion(
+      await controller.publishPublicInfoVersion(
         "public-info-001",
         { publishedBy: "body-actor" },
         null,
@@ -200,7 +202,7 @@ describe("platform admin service", () => {
     expect(service.publishPublicInfoVersion).not.toHaveBeenCalled();
   });
 
-  it("controller forwards the verified identity actorId to delete draft public info", () => {
+  it("controller forwards the verified identity actorId to delete draft public info", async () => {
     const service = {
       deleteDraftPublicInfoVersion: vi.fn(() => ({
         versionId: "public-info-draft-001",
@@ -220,7 +222,7 @@ describe("platform admin service", () => {
       requestId: "req-789",
     };
 
-    controller.deleteDraftPublicInfoVersion(
+    await controller.deleteDraftPublicInfoVersion(
       "public-info-draft-001",
       identity,
       "req-789",

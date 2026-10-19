@@ -280,9 +280,15 @@ export class CallcenterController {
     @Param("callId") callId: string,
     @Body() command: TransferCallToComplaintCommand,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     const session = this.callcenterService.getCallSession(callId);
-    const complaintCase = this.complaintService.createComplaintCase(
+    // A real caller that resends the same transfer-to-complaint command
+    // (e.g. after a call timeout) must have its retry recognized across an
+    // API restart or a different replica, not only within this process's
+    // memory; see ComplaintService.refreshSettlementCases.
+    await this.complaintService.refreshSettlementCases();
+    const created = await this.complaintService.createComplaintCase(
       {
         caseSource: "phone",
         relatedOrderId: command.relatedOrderId ?? session.linkedOrderId,
@@ -292,7 +298,24 @@ export class CallcenterController {
         description: command.description,
       },
       requestId,
+      {
+        captureAudit: true,
+        commandIdentity: {
+          scope: `callcenter:${callId}:transfer-to-complaint`,
+          // The original caller has a stable call identity even without an
+          // explicit key. Different supplied keys are distinct transfer intents.
+          key:
+            idempotencyKey?.trim() ||
+            JSON.stringify([
+              command.category,
+              command.severity,
+              command.description,
+              command.relatedOrderId ?? session.linkedOrderId ?? null,
+            ]),
+        },
+      },
     );
+    const complaintCase = created.data;
     await this.complaintService.awaitSettlementPersistence(
       complaintCase.caseNo,
     );
