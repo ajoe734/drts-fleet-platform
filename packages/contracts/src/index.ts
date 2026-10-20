@@ -7430,6 +7430,7 @@ export type PlatformAdminUserStatus = "active" | "suspended" | "invited";
 
 export interface PlatformAdminUserRecord {
   userId: string;
+  readonly canonicalPrincipalId?: string;
   email: string;
   displayName: string;
   roleCode: PlatformAdminUserRole;

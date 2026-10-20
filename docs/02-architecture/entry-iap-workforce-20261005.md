@@ -611,3 +611,57 @@ merge, deployment, or new hosted operational success is claimed.
 正常 fixed 回歸移除 `NODE_PATH`：原 key-isolation 20 案與 module-wiring 1 案共 21 PASS／0 skip；與前輪未受此 loader 影響且已通過的 192 案合為 213 個不同 assertion，原 auth/session 19 案包含其中，不重複加總診斷或歷史結果。實際 wrapper 51／51 與既有 Fleet consumer 37／37 另列。當前 API production＋原 auth/session test 的真 Source import graph noEmit／incremental false 為 0（19.58 秒）；helper 後續僅做其實際 import graph 的窄 noEmit（1.48 秒），以及 scoped lint／format check，均為 0。未啟動 VM HTTP、產品／browser／PG／Compose 或其他服務。
 
 原五項 Source／安全條件及全部 read dependencies 持續適用。新 immutable candidate 的 full11／5 packet、原始 logs／reports 與後續 own CI 結果交獨立 reviewer；owner 不自行 approve、錄 keys、merge 或 deploy。舊共享 ee1c 的 operational 15／16、六條成功 PDF 鏈及剩餘義務仍各自保留，不能把本機回歸、已接受的 Journey CI 或尚未完成的新 own CI 寫成共享全流程成功。
+
+## 2026-10-20：正常啟用既有開發環境 Ops 帳戶
+
+`DEV-OPS-NORMAL-CANONICAL-ENABLEMENT-20261020` 接通既有人員管理與私人
+Ops 入口，不在啟動或登入時建立、啟用帳戶。原實測的
+`DEV_WORKFORCE_SESSION_EXCHANGE_DENIED` 只證明交換條件不成立，不能據此
+判定資料庫缺少哪一筆 principal、membership 或有效 binding。
+
+正常 `platform-admin/users` list／mutation ACK 的 `userId` 仍是 membership
+ID；新增的唯讀 `canonicalPrincipalId` 直接來自實際 persisted principal，
+HTTP wire 名稱為 `canonical_principal_id`。只能採這個實際讀回值，不能使用
+membership ID、email hash 或舊 `pa-operator-001` 名稱猜測 principal ID。
+公開角色 `operator` 在明確的正常 create／update 命令中對映為既有 canonical
+`ops_user`；原 startup seed 的 migration-pending／角色資料不會因此被遷移
+或自動啟用，未被明確操作的帳戶與其他角色也不受影響。
+
+獨立、明確啟用的 hosted dev setup 使用既有正常 WIF／Admin durable session：
+
+1. 讀取既有唯一的 `ops@platform.drts`／operator 人員與實際 canonical ID。
+   缺少、模糊、foreign 或 suspended 狀態均停止，不建立同 email 的平行帳戶。
+2. 對該實際 membership，以同一 Admin session 取得
+   `platform:users:role:update` 的精確 action proof，再透過正常
+   `POST /api/platform-admin/users/:userId/role` 明確送出
+   `operator`／`active`／稽核 reason。保留既有 audit 與 session invalidation；
+   取得 ACK 並讀回同一 membership、canonical principal、角色與 active 狀態後
+   才進行設定。這項操作不屬於乘車 consumer 的 session setup。
+3. 只把實際 canonical ID 設入私人 Ops server 的
+   `DRTS_DEV_WORKFORCE_PRINCIPAL_ID`，保留同 Source image 與其他設定，記錄
+   此次刻意產生的 Ops revision。Root 再將已確認的值保存為
+   `DEV_OPS_WORKFORCE_PRINCIPAL_ID` repository variable，供後續正常部署使用；
+   未確認前不填入猜測值。
+4. 使用正常 Ops `/control-plane-proxy/auth/token` 換取新的 session，驗明
+   canonical principal／membership／session ID、realm `ops`、actor
+   `ops_user` 與實際所需 scopes，再正常 self-revoke 自己的 Ops／Admin
+   sessions。安全 journal 僅保留限定 facts；失敗或未知 mutation ACK 保留原狀，
+   不自動重跑或換一個帳戶。
+
+既有 development Ops 部署已設定 `DRTS_DEV_MFA_WAIVED=true`。
+本次 workflow 保留既有開發模態及其他設定，只接入私人 canonical reference；
+共享環境是否生效仍須真部署及正常 session 驗證，production／staging 不會
+因此啟用 waiver。
+Ops server 只在原有程式的 nonstrict、explicit dev waiver、IAP disabled
+且沒有真 IAP assertion 的 default 分支讀私人設定；空值或缺少簽章 key
+會拒絕。
+HTTP header／body／query 不能選 principal。提供的 inner JWT 仍原樣交 API
+驗證，invalid token 不會換成 default。Strict／IAP 路徑忽略此引用，維持原
+subject 與驗證方式；API 仍精確查 signed principal，要求 active membership
+及有效 binding，以原 issuer 發真 durable session，`ensurePrincipal:false`。
+`dev_mfa_waived`／`aal1` 如實表示開發環境免第二因子，並非真 IAP／MFA 證據。
+
+本節是正常啟用契約與操作次序，不宣稱已部署、已啟用或取得 runtime PASS。
+沒有 IAM／registry／role catalog 變更、startup autoactivation 或新建帳戶，
+也不建立、推進、取消任何 business order。原 retained-order recovery、完整
+Web 旅程及 exact-owned cleanup 各自需要原本的實際證據。

@@ -78,6 +78,7 @@ env:
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
   DEV_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.DEV_GCP_PLATFORM_ADMIN_SERVICE }}
   DEV_GCP_OPS_CONSOLE_SERVICE: ${{ vars.DEV_GCP_OPS_CONSOLE_SERVICE }}
+  DEV_OPS_WORKFORCE_PRINCIPAL_ID: ${{ vars.DEV_OPS_WORKFORCE_PRINCIPAL_ID }}
   DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
   DEV_GCP_TENANT_CONSOLE_SERVICE: ${{ vars.DEV_GCP_TENANT_CONSOLE_SERVICE }}
   DEV_GCP_BANK_CONSOLE_SERVICE: ${{ vars.DEV_GCP_BANK_CONSOLE_SERVICE }}
@@ -229,6 +230,10 @@ jobs:
 
           project_id="${DEV_GCP_PROJECT_ID:-}"
           region="${DEV_GCP_REGION:-}"
+          if [[ -n "${DEV_OPS_WORKFORCE_PRINCIPAL_ID:-}" && ! "$DEV_OPS_WORKFORCE_PRINCIPAL_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$ ]]; then
+            echo "::error::Invalid private development Ops canonical reference." >&2
+            exit 1
+          fi
           cloudsql="${DEV_GCP_CLOUDSQL_INSTANCE:-}"
           runtime_sa="$(pick "${DEV_GCP_RUNTIME_SERVICE_ACCOUNT_VAR:-}" "${DEV_GCP_RUNTIME_SERVICE_ACCOUNT_SECRET:-}" "")"
           deployer_sa="$(pick "${DEV_WIF_SERVICE_ACCOUNT:-}" "${WIF_SERVICE_ACCOUNT:-}" "")"
@@ -1304,7 +1309,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false},PAX_PUBLIC_PASSENGER_ONLY=false" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,DRTS_DEV_WORKFORCE_PRINCIPAL_ID=${DEV_OPS_WORKFORCE_PRINCIPAL_ID:-},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false},PAX_PUBLIC_PASSENGER_ONLY=false" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
