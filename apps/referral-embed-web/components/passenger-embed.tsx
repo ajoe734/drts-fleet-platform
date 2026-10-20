@@ -1,5 +1,6 @@
 "use client";
 import { ReferralComplaintPanel } from "./referral-complaint-panel";
+import { ReferralReceiptDocumentActions } from "./referral-receipt-document-actions";
 import { useReferralLiveTrip } from "./use-referral-live-trip";
 import {
   ReferralLiveTrackingPanel,
@@ -2877,6 +2878,10 @@ function ReceiptScreen({
           </Banner>
         </div>
       </Card>
+      <ReferralReceiptDocumentActions
+        key={`referral-pdf:${receipt.orderId}`}
+        orderId={receipt.orderId}
+      />
       <ExternalPaymentSim
         key={receipt.orderId}
         orderId={receipt.orderId}

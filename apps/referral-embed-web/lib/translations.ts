@@ -3,6 +3,22 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "receiptDocument.section": "PDF trip details and sharing",
+  "receiptDocument.download": "Download PDF details",
+  "receiptDocument.prepare": "Prepare PDF sharing",
+  "receiptDocument.prepareAgain": "Prepare PDF sharing again",
+  "receiptDocument.share": "Share PDF details",
+  "receiptDocument.shareTitle": "Trip details (not a formal tax document)",
+  "receiptDocument.preparing": "Preparing PDF details…",
+  "receiptDocument.ready": "PDF is ready. Select Share.",
+  "receiptDocument.sharing": "Sharing…",
+  "receiptDocument.shared": "Share operation completed.",
+  "receiptDocument.cancelled":
+    "Sharing was cancelled. You can prepare it again.",
+  "receiptDocument.unsupported":
+    "This browser does not support file sharing. Download the PDF and share it instead.",
+  "receiptDocument.failed":
+    "Sharing is not completed. Try again or download the PDF.",
   "referralLive.section": "Live updates for this trip",
   "referralLive.title": "Trip tracking",
   "referralLive.error": "Unable to update temporarily. Showing the last data.",
@@ -877,6 +893,20 @@ const en = {
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
+  "receiptDocument.section": "PDF乘車明細與分享",
+  "receiptDocument.download": "下載 PDF 明細",
+  "receiptDocument.prepare": "準備分享 PDF",
+  "receiptDocument.prepareAgain": "重新準備分享 PDF",
+  "receiptDocument.share": "分享 PDF 明細",
+  "receiptDocument.shareTitle": "乘車明細（非正式稅務憑證）",
+  "receiptDocument.preparing": "正在準備 PDF 明細…",
+  "receiptDocument.ready": "PDF 已準備完成，請按分享。",
+  "receiptDocument.sharing": "正在分享…",
+  "receiptDocument.shared": "已完成分享操作。",
+  "receiptDocument.cancelled": "已取消分享，可重新準備。",
+  "receiptDocument.unsupported":
+    "此瀏覽器不支援檔案分享；您可以下載 PDF 後再分享。",
+  "receiptDocument.failed": "尚未完成分享，請重試或下載 PDF。",
   "referralLive.section": "同單行程即時更新",
   "referralLive.title": "行程追蹤",
   "referralLive.error": "暫時無法更新，顯示上次資料。",
