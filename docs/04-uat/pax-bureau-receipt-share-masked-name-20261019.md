@@ -174,8 +174,8 @@ lint 檢查，未啟動任何伺服器。
 
 | 來源                                                   | 案例                                                                                                                                                                               | 結果                   |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `apps/api/.../certificate-artifact.renderer.ts`        | 真實 `renderCertificateArtifact` 直接呼叫，`蔡→蔡○○`、`歐陽→歐陽○○`（複姓保留）、`蔡○○→蔡○○`／`蔡**→蔡**`／`蔡＊＊→蔡＊＊`（三種已遮名樣式皆不重複遮罩）、兩姓氏欄位皆缺時整列省略 | HTML／PDF 位元組皆通過 |
-| `packages/passenger-client/.../native-presentation.ts` | `mapNativePassengerCertificate` 同一矩陣（蔡/歐陽/蔡○○/蔡\*\*/蔡＊＊），另保留既有 `Captured surname○○` 精確列值與遮罩執登號不變斷言                                               | 通過                   |
+| `apps/api/src/modules/certificate-support/certificate-artifact.renderer.ts` | 真實 `renderCertificateArtifact` 直接呼叫，`蔡→蔡○○`、`歐陽→歐陽○○`（複姓保留）、`蔡○○→蔡○○`／`蔡**→蔡**`／`蔡＊＊→蔡＊＊`（三種已遮名樣式皆不重複遮罩）、兩姓氏欄位皆缺時整列省略 | HTML／PDF 位元組皆通過 |
+| `packages/passenger-client/src/ride/native-presentation.ts` | `mapNativePassengerCertificate` 同一矩陣（蔡/歐陽/蔡○○/蔡\*\*/蔡＊＊），另保留既有 `Captured surname○○` 精確列值與遮罩執登號不變斷言                                               | 通過                   |
 | `apps/passenger-app-web/lib/ride/passenger-live.ts`    | `mapPassengerCertificate`／`mapPassengerRideAuthorityToFixture` 經真實 Web mapper 得到 `駕駛: 蔡○○`，另以 `蔡**`／`蔡＊＊` 輸入核對不重複遮罩（於 `web-share.test.tsx` 內斷言）    | 通過                   |
 
 修正前基準：三個檔案改動前，上列欄位顯示未遮名原始姓氏（渲染器兩處、
