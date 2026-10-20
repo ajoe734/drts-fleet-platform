@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { buildEmbedTheme } from "../lib/embed-presentation";
+import { useTranslation } from "../lib/i18n";
 
 /** Optional presentation of an unavailable external step; no payment command. */
 export function ExternalPaymentSim({
@@ -16,6 +17,7 @@ export function ExternalPaymentSim({
   returnHref: string;
   accent: string;
 }) {
+  const { t } = useTranslation();
   const theme = buildEmbedTheme(accent);
   const [expanded, setExpanded] = useState(false);
   const amount =
@@ -23,7 +25,7 @@ export function ExternalPaymentSim({
     Number.isFinite(actualFare) &&
     actualFare >= 0
       ? `NT$ ${actualFare}`
-      : "實際車資待確認";
+      : t("embed.paymentSim.farePending");
   const buttonStyle = {
     border: `1px solid ${theme.primaryBd}`,
     borderRadius: theme.radiusSm,
@@ -36,7 +38,7 @@ export function ExternalPaymentSim({
 
   return (
     <section
-      aria-label="外部付款模擬示意"
+      aria-label={t("embed.paymentSim.regionLabel")}
       style={{
         background: theme.surface,
         border: `1px solid ${theme.line}`,
@@ -46,22 +48,22 @@ export function ExternalPaymentSim({
       }}
     >
       <h2 style={{ margin: "0 0 8px", fontSize: 16 }}>
-        外部付款模擬示意（SIM）
+        {t("embed.paymentSim.title")}
       </h2>
       <p style={{ color: theme.muted, fontSize: 12 }}>
-        SIM 示意流程，不實際扣款。
+        {t("embed.paymentSim.disclaimer")}
       </p>
       {expanded ? (
-        <div role="region" aria-label="付款示意內容">
+        <div role="region" aria-label={t("embed.paymentSim.contentLabel")}>
           <dl style={{ fontSize: 13, overflowWrap: "anywhere" }}>
-            <dt>本筆訂單 ID</dt>
+            <dt>{t("embed.paymentSim.orderLabel")}</dt>
             <dd style={{ margin: "4px 0 12px", fontFamily: theme.mono }}>
               {orderId}
             </dd>
-            <dt>已記錄實際車資</dt>
+            <dt>{t("embed.paymentSim.fareLabel")}</dt>
             <dd style={{ margin: "4px 0 12px" }}>{amount}</dd>
           </dl>
-          <p>SIM：略過外部付款步驟，繼續本筆行程與評價；不實際扣款。</p>
+          <p>{t("embed.paymentSim.skipDescription")}</p>
           <Link
             href={returnHref}
             prefetch={false}
@@ -71,14 +73,14 @@ export function ExternalPaymentSim({
               textDecoration: "none",
             }}
           >
-            返回本行程／評價（SIM）
+            {t("embed.paymentSim.returnLabel")}
           </Link>
           <button
             type="button"
             style={{ ...buttonStyle, marginTop: 8 }}
             onClick={() => setExpanded(false)}
           >
-            關閉示意
+            {t("embed.paymentSim.closeLabel")}
           </button>
         </div>
       ) : (
@@ -88,7 +90,7 @@ export function ExternalPaymentSim({
           aria-expanded={false}
           onClick={() => setExpanded(true)}
         >
-          開啟外部付款模擬示意（SIM）
+          {t("embed.paymentSim.openLabel")}
         </button>
       )}
     </section>
