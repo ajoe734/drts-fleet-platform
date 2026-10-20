@@ -752,6 +752,37 @@ describe("FleetPartnerController portal routes", () => {
         }),
       ]),
     );
+
+    // A structural match must come from these actual approval receipts, not
+    // from the unrelated default seed vehicle/driver supply pairs.
+    expect(
+      regulatoryRegistryService
+        .listSupplyPairs()
+        .filter(
+          (pair) =>
+            pair.vehicleId === canonicalVehicleId &&
+            pair.driverId === canonicalDriverId,
+        ),
+    ).toEqual([
+      expect.objectContaining({
+        vehicleId: canonicalVehicleId,
+        driverId: canonicalDriverId,
+        etaMinutes: null,
+      }),
+    ]);
+
+    // This original fixture has no actual GPS/destination observation and is
+    // not a completed enterprise qualification flow. A structural null-ETA
+    // pair must not become a dispatch candidate through a fabricated default.
+    expect(
+      regulatoryRegistryService
+        .getEligibleCandidates("standard_taxi")
+        .filter(
+          (candidate) =>
+            candidate.vehicleId === canonicalVehicleId &&
+            candidate.driverId === canonicalDriverId,
+        ),
+    ).toEqual([]);
   });
 
   it("supports document delete and submission withdraw endpoints", async () => {
