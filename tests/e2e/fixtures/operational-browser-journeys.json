@@ -11,8 +11,11 @@
       "id": "referral-create-read-cancel-receipt",
       "surface": "referral",
       "baseUrlEnv": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
-      "route": "/embed/yuhe-residence?state=consent&entryHost=app.yuhe-living.com.tw",
+      "route": "/embed/yuhe-residence?state=consent&entryHost={{referralEntryHost}}",
       "actorScope": "partner-scoped referral passenger",
+      "environmentVariables": {
+        "referralEntryHost": "DRTS_OPERATIONAL_REFERRAL_ENTRY_HOST"
+      },
       "setup": [
         {
           "path": "/api/referral/session",
@@ -20,7 +23,7 @@
           "body": {
             "action": "demo-bootstrap",
             "entrySlug": "yuhe-residence",
-            "entryHost": "app.yuhe-living.com.tw"
+            "entryHost": "{{referralEntryHost}}"
           }
         }
       ],
