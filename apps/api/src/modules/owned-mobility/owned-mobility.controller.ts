@@ -41,6 +41,7 @@ import type {
   UpdateTenantBookingCommand,
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
+  ReferralPassengerQuoteCommand,
   SubmitReferralPassengerRatingCommand,
   TenantBookingListQuery,
 } from "@drts/contracts";
@@ -399,6 +400,24 @@ export class OwnedMobilityController {
   ) {
     return toApiSuccessEnvelope(
       await this.ownedMobilityService.resolvePersistedOrder(orderId, identity),
+      requestId,
+    );
+  }
+
+  @Post("partner/referral/passenger/quote")
+  @RequireRealms("partner")
+  @RequireScopes("partner:book")
+  async quoteReferralPassengerFare(
+    @Body() command: ReferralPassengerQuoteCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.quoteReferralPassengerFare(
+        command,
+        identity,
+        requestId,
+      ),
       requestId,
     );
   }

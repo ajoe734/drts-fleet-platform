@@ -7,6 +7,7 @@ import {
   Delete,
   ExecutionContext,
   Get,
+  Header,
   Headers,
   HttpStatus,
   Inject,
@@ -577,9 +578,79 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(artifact, requestId);
   }
 
+  /** Exchange only the service-validated single-use handoff/consent result.
+   * A workload assertion transports the request; it is never the end-user.
+   */
+  private async issueReferralEmbedSession(
+    session: ReferralEmbedSession,
+    requestId?: string,
+  ) {
+    if (!session.identityActive) return session;
+    const entry = await this.tenantPartnerService.getPartnerEntry(
+      session.partnerEntrySlug,
+    );
+    const identity = session.identity;
+    const grantedAt = Date.parse(session.consent.grantedAt ?? "");
+    if (
+      entry.status !== "active" ||
+      entry.entryHost !== session.entryHost ||
+      identity.actorType !== "referral_passenger" ||
+      identity.realm !== "partner" ||
+      identity.actorId !== session.drtsPassengerId ||
+      identity.drtsPassengerId !== session.drtsPassengerId ||
+      identity.partnerEntrySlug !== entry.entrySlug ||
+      identity.tenantId !== entry.tenantId ||
+      identity.partnerId !== entry.partnerId ||
+      identity.partnerProgramId !== entry.programId ||
+      !identity.scopes.includes("partner:book") ||
+      !session.consent.bundleVersion ||
+      !Number.isFinite(grantedAt) ||
+      grantedAt > Date.now()
+    ) {
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_SESSION_SCOPE_MISMATCH",
+        "Validated referral consent and current entry scope are required.",
+      );
+    }
+    if (!this.identityRepository) {
+      throw new ApiRequestError(
+        503,
+        "IDENTITY_REPOSITORY_UNAVAILABLE",
+        "Referral session storage is unavailable.",
+      );
+    }
+    const issued = await this.issueJwtSession(
+      {
+        ...identity,
+        principalId: session.drtsPassengerId,
+        subject: session.drtsPassengerId,
+        requestId: requestId ?? null,
+      },
+      {
+        expiresIn: PARTNER_INGRESS_HANDOFF_EXPIRES_IN,
+        principalId: session.drtsPassengerId,
+        subject: session.drtsPassengerId,
+        ensurePrincipal: true,
+        authTime: session.consent.grantedAt!,
+        amr: ["referral_handoff", "referral_consent"],
+        acr: "aal1",
+        tokenVersion: Date.parse(entry.updatedAt),
+      },
+    );
+    return {
+      ...session,
+      accessToken: issued.token,
+      tokenType: "Bearer" as const,
+      expiresAt: issued.expiresAt,
+      sessionId: issued.sessionId,
+    };
+  }
+
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("partner/ingress/referral-embed-handoff/consume")
+  @Header("Cache-Control", "no-store, max-age=0")
   async consumeReferralEmbedHandoffArtifact(
     @Body()
     command: {
@@ -603,12 +674,16 @@ export class TenantPartnerController {
       await this.tenantPartnerService.consumeReferralEmbedHandoffArtifact(
         command,
       );
-    return toApiSuccessEnvelope(session, requestId);
+    return toApiSuccessEnvelope(
+      await this.issueReferralEmbedSession(session, requestId),
+      requestId,
+    );
   }
 
   @OpenRoute()
   @Throttle(OPEN_ROUTE_RATE_LIMIT)
   @Post("partner/ingress/referral-embed-handoff/consent")
+  @Header("Cache-Control", "no-store, max-age=0")
   async recordReferralEmbedConsent(
     @Body() command: RecordReferralEmbedConsentCommand,
     @Req()
@@ -623,7 +698,10 @@ export class TenantPartnerController {
     await this.requireReferralEmbedWorkloadIdentity(request);
     const session =
       await this.tenantPartnerService.recordReferralEmbedConsent(command);
-    return toApiSuccessEnvelope(session, requestId);
+    return toApiSuccessEnvelope(
+      await this.issueReferralEmbedSession(session, requestId),
+      requestId,
+    );
   }
 
   @Get("tenant/dashboard")

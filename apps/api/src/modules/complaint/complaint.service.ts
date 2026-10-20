@@ -998,6 +998,108 @@ export class ComplaintService implements OnModuleInit {
     };
   }
 
+  /** Referral ownership is checked under the owned-order lock by its canonical writer.
+   * This deliberately does not use passenger-account or ride-token intake/FKs. */
+  prepareReferralRatingHook(
+    scope: { orderId: string; passengerId: string; tenantId: string },
+    payload: {
+      score: number;
+      comment: string | null;
+      contactRequested: boolean;
+    },
+  ) {
+    if (!this.complaintRepository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Canonical complaint storage is unavailable.",
+      );
+    const draft =
+      payload.score <= 2
+        ? this.preparePassengerCase(
+            {
+              orderId: scope.orderId,
+              command: {
+                category: "service",
+                rideId: scope.orderId,
+                contactConsent: payload.contactRequested,
+                content: `轉介乘客評價 ${payload.score} 星；${payload.contactRequested ? "同意客服聯繫" : "不需客服聯繫，僅供內部檢視"}。${payload.comment ?? ""}`,
+              },
+            },
+            "轉介內嵌網頁",
+          )
+        : null;
+    return {
+      caseNo: draft?.complaintCase.caseNo ?? null,
+      createdTimelineId: draft?.timeline.entryId ?? null,
+      execute: async (client: PoolClient) => {
+        if (draft)
+          await this.complaintRepository!.persistChanges(
+            {
+              complaintCases: [draft.complaintCase],
+              complaintTimelines: [draft.timeline],
+            },
+            client,
+          );
+      },
+    };
+  }
+
+  async publishReferralRatingCase(scope: {
+    caseNo: string;
+    orderId: string;
+    passengerId: string;
+    tenantId: string;
+    createdTimelineId: string;
+  }) {
+    if (!this.complaintRepository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Canonical complaint readback is unavailable.",
+      );
+    const state = await this.complaintRepository.loadCaseState(scope.caseNo);
+    const current = state.complaintCases.find(
+      (c) => c.caseNo === scope.caseNo && c.relatedOrderId === scope.orderId,
+    );
+    if (
+      !current ||
+      !state.complaintTimelines.some(
+        (t) =>
+          t.entryId === scope.createdTimelineId && t.caseNo === scope.caseNo,
+      )
+    )
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Original rating case readback is incomplete.",
+      );
+    // Read current Ops state; a retry must never upsert the initial draft over it.
+    this.complaintCases = [
+      current,
+      ...this.complaintCases.filter((c) => c.caseNo !== scope.caseNo),
+    ];
+    this.complaintTimelines.set(scope.caseNo, state.complaintTimelines);
+    if (!this.auditedPassengerCases.has(scope.caseNo)) {
+      await this.auditNotificationService.recordAuditLogAsync({
+        actorId: scope.passengerId,
+        actorType: "referral_passenger",
+        tenantId: scope.tenantId,
+        moduleName: "complaint",
+        actionName: "create_referral_rating_case",
+        resourceType: "complaint_case",
+        resourceId: scope.caseNo,
+        requestId: `referral-rating:${scope.caseNo}`,
+        newValuesSummary: {
+          source: "referral_embed",
+          relatedOrderId: scope.orderId,
+          category: current.category,
+        },
+      });
+      this.auditedPassengerCases.add(scope.caseNo);
+    }
+  }
+
   /** The existing transaction seam, with verified token authority instead of account intake. */
   preparePassengerRideRatingHook(
     token: PassengerRideAccessToken,

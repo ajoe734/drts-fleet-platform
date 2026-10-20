@@ -1,5 +1,6 @@
+import { referralErrorResponse } from "../../../../../../lib/embed-booking-api";
 import { NextResponse } from "next/server";
-import { getReferralTripReceiptServer } from "@/lib/embed-booking-api";
+import { getReferralTripReceiptServer } from "../../../../../../lib/embed-booking-api";
 
 export async function GET(
   _request: Request,
@@ -11,7 +12,7 @@ export async function GET(
 
     const textContent = [
       "========================================",
-      "DRTS MOBILITY TRIP RECEIPT / 收據",
+      "DRTS MOBILITY TRIP RECORD / 乘車紀錄（非正式稅務憑證）",
       "========================================",
       `Order ID: ${receipt.orderId}`,
       `Order No: ${receipt.orderNo}`,
@@ -27,11 +28,18 @@ export async function GET(
       `Dropoff: ${receipt.dropoffAddress}`,
       "",
       "----------------------------------------",
-      `Base Fare: NT$ ${receipt.fareBase}`,
-      `Distance Fare: NT$ ${receipt.fareDistance}`,
-      `Time Fare: NT$ ${receipt.fareTime}`,
+      receipt.fareBase === null
+        ? "Base Fare: not provided by actual fare authority"
+        : `Base Fare: NT$ ${receipt.fareBase}`,
+      receipt.fareDistance === null
+        ? "Distance Fare: not provided by actual fare authority"
+        : `Distance Fare: NT$ ${receipt.fareDistance}`,
+      receipt.fareTime === null
+        ? "Time Fare: not provided by actual fare authority"
+        : `Time Fare: NT$ ${receipt.fareTime}`,
       `TOTAL FARE: ${receipt.formattedTotal}`,
       `Payment Channel: ${receipt.paymentChannel}`,
+      "客服：02-2944-0985；主管機關：1999",
       "========================================",
     ].join("\n");
 
@@ -39,15 +47,11 @@ export async function GET(
       status: 200,
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store, max-age=0",
         "Content-Disposition": `attachment; filename="receipt-${orderId}.txt"`,
       },
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Receipt download failed";
-    return NextResponse.json(
-      { ok: false, error: { message } },
-      { status: 400 },
-    );
+    return referralErrorResponse(error);
   }
 }

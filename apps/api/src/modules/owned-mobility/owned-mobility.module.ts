@@ -1,3 +1,5 @@
+import { PassengerFareRepository } from "../passenger-app/fare/passenger-fare.repository";
+import { ComplaintModule } from "../complaint/complaint.module";
 import {
   MASKED_CALL_PORT,
   UnavailableMaskedCallPort,
@@ -33,6 +35,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
 @Module({
   imports: [
     GeoModule,
+    ComplaintModule,
     DatabaseModule,
     IdempotencyModule,
     OpsDispatchEventsModule,
@@ -56,6 +59,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     FleetPartnerRepository,
     RegulatoryRegistryRepository,
     OwnedMobilityRepository,
+    PassengerFareRepository,
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
     ReferralBindingScaffoldService,

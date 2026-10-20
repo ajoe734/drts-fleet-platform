@@ -36,6 +36,8 @@ tags:
     description: 匯款證明上傳、掃描狀態、具時效授權讀回與冪等付款收據
   - name: PlatformAdapterRegistry
     description: Platform adapter 憑證到期告警 (唯讀；不含機密內容)
+  - name: ReferralPassenger
+    description: Canonical partner/referral passenger quote and same-order lifecycle.
 security:
   - BearerAuth: []
 paths:
@@ -2076,6 +2078,187 @@ paths:
             carry periodMonth/operationId/requestId, eligibleDriverIds and target
             receipts (completed IDs or failed errorCode). Retry the same period
             to resume missing work; a failed call does not roll back independently committed rows.
+
+  /api/partner/referral/passenger/quote:
+    post:
+      tags: [ReferralPassenger]
+      operationId: quoteReferralPassengerFare
+      summary: Issue an owned taxi estimate for a verified referral passenger
+      description: |
+        Requires the current canonical partner/referral_passenger bearer, partner:book,
+        active entry/link and explicit consent. Resolve both real addresses with GeoService,
+        enforce enterprise_dispatch service areas, and run the published Passenger taxi
+        tariff through the existing fare engine. This is not a PAX-account quote endpoint.
+        Snapshot ownership, full tariff/route/range/version and 15-minute expiry are durable;
+        public data excludes internal owner IDs and full tariff/area authority metadata.
+        No caller price, guaranteed price, fixed 290/1500 or invented fallback coordinates.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReferralQuoteCommand" }
+      responses:
+        "201":
+          description: Durable owned estimate, not an actual trip charge.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/ReferralFareQuote" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: SERVICE_AREA_NOT_SERVICEABLE or an invalid scheduled lead time; no quote created.
+        "503":
+          description: Missing/ambiguous tariff, Geo/DB failure, invalid metrics or unsafe money; no fabricated estimate.
+  /api/partner/referral/passenger/bookings:
+    post:
+      tags: [ReferralPassenger]
+      operationId: createReferralPassengerBooking
+      summary: Commit or recover the original owned quote and booking intent
+      description: |
+        Header Idempotency-Key takes precedence over the body key. Before expiry/lead checks,
+        recover the same five-owner/key/full-intent committed order or consumed-quote order.
+        Ownership is checked before key classification. A new command validates exact owned
+        route/time/product/vehicle preference, then locks the intent and quote, reads the DB
+        wall clock after the lock, and commits quote consumption, order, trace and referral
+        notification route in one existing transaction. Return the same durable order/quote/
+        confirmedAt after unknown COMMIT acknowledgement; never treat cache alone as authority.
+        Keep the original body/key after an unknown response, including expiry or reauthentication.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReferralBookingCommand" }
+      responses:
+        "201":
+          description: Same-order durable acknowledgement, including replayed/quote/confirmedAt.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Expired/mismatched/consumed quote or changed key payload; retry processing with the original intent.
+        "503":
+          description: Durable authority/readback unavailable. Preserve uncertain intent; do not create a replacement order.
+  /api/partner/referral/passenger/active:
+    get:
+      tags: [ReferralPassenger]
+      operationId: getReferralPassengerActiveTrip
+      summary: Read current scoped durable active trip
+      responses:
+        "200":
+          description: Successful active:false/trip:null is distinct from any upstream error.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503":
+          {
+            description: Scoped durable storage unavailable; never an empty successful result.,
+          }
+  /api/partner/referral/passenger/history:
+    get:
+      tags: [ReferralPassenger]
+      operationId: getReferralPassengerHistory
+      summary: Read only the current referral passenger's durable same-order history
+      responses:
+        "200":
+          description: Actual statuses, nullable actual fare/completion timestamp, immutable estimate and submitted rating.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503":
+          {
+            description: Scoped durable storage unavailable; never an empty successful result.,
+          }
+  /api/partner/referral/passenger/orders/{orderId}/cancel:
+    post:
+      tags: [ReferralPassenger]
+      operationId: cancelReferralPassengerTrip
+      summary: Cancel an owned order under the existing cancellation policy
+      parameters:
+        - { in: path, name: orderId, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "201":
+          {
+            description: Actual same-order cancelled state or identical replay.,
+          }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          {
+            description: Existing cancellation deadline/state denial; no synthetic cancelled state.,
+          }
+  /api/partner/referral/passenger/orders/{orderId}/rating:
+    post:
+      tags: [ReferralPassenger]
+      operationId: submitReferralPassengerRating
+      summary: Store one immutable completed-order rating and its canonical low-star CRM case
+      description: |
+        URL orderId is authoritative over body identity. A current owned completed order
+        is locked in the same transaction as the rating and generic CRM case/timeline writes.
+        Every new score <=2 creates one canonical case independently of contactRequested.
+        The UI contact switch defaults ON; explicit opt-out only suppresses contact consent.
+        Identical retries read the original result/case and current Ops state, never upsert
+        the original case over later Ops actions. Changed score/tags/comment/contact is 409.
+        Only the forward migration may mark preexisting ratings legacy; missing provenance
+        is an unavailable error, never inferred legacy/contact=false. No PAX-account intake.
+      parameters:
+        - { in: path, name: orderId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReferralRatingCommand" }
+      responses:
+        "201":
+          {
+            description: Same order/score/contact/case/submittedAt acknowledgement.,
+          }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          {
+            description: Trip incomplete or a different immutable rating already exists.,
+          }
+        "503":
+          {
+            description: Atomic CRM/rating storage or original result readback unavailable.,
+          }
+  /api/partner/referral/passenger/orders/{orderId}/receipt:
+    get:
+      tags: [ReferralPassenger]
+      operationId: getReferralPassengerReceipt
+      summary: Read a masked completed-order trip record with truthful nullable actual fare
+      description: |
+        An estimate never becomes an actual charge. Components are null unless a real
+        authority provides them; no 35/45/20 split, fake completion time or payment status.
+        The browser download is a trip record, not a formal tax certificate. Support is
+        02-2944-0985; competent authority is 1999. All BFF reads/mutations/downloads are
+        no-store and retain upstream status/safe code without tokens or raw messages.
+      parameters:
+        - { in: path, name: orderId, required: true, schema: { type: string } }
+      responses:
+        "200":
+          {
+            description: Masked owned trip record; missing actual fare and payment state remain explicitly unknown.,
+          }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: PASSENGER_RECEIPT_TRIP_NOT_COMPLETED. }
+        "503": { description: Canonical storage unavailable. }
 
 components:
   securitySchemes:
@@ -5942,3 +6125,103 @@ components:
           $ref: "#/components/schemas/AdapterCredentialExpiryWarning"
         meta:
           $ref: "#/components/schemas/ApiMeta"
+
+    ReferralQuoteCommand:
+      type: object
+      additionalProperties: false
+      required: [entrySlug, pickupAddress, dropoffAddress]
+      properties:
+        entrySlug: { type: string, maxLength: 150 }
+        pickupAddress: { type: string, maxLength: 500 }
+        dropoffAddress: { type: string, maxLength: 500 }
+        scheduledAt:
+          {
+            type: string,
+            format: date-time,
+            description: Omit for immediate pricing captured once by the server.,
+          }
+        vehicleType:
+          {
+            type: string,
+            maxLength: 50,
+            description: Preference; never changes the trusted entry product classification.,
+          }
+    ReferralBookingCommand:
+      type: object
+      additionalProperties: false
+      required: [entrySlug, quoteId, pickupAddress, dropoffAddress]
+      properties:
+        entrySlug: { type: string, maxLength: 150 }
+        quoteId: { type: string, maxLength: 100 }
+        pickupAddress: { type: string, maxLength: 500 }
+        dropoffAddress: { type: string, maxLength: 500 }
+        scheduledAt: { type: string, format: date-time }
+        vehicleType: { type: string, maxLength: 50 }
+        passengerName: { type: string, maxLength: 100 }
+        passengerPhone: { type: string, maxLength: 40 }
+        partnerUserRef:
+          {
+            type: string,
+            maxLength: 200,
+            description: Optional intent text; never identity or notification authority.,
+          }
+        idempotencyKey: { type: string, maxLength: 255 }
+    ReferralFareQuote:
+      type: object
+      required:
+        [
+          quoteId,
+          currency,
+          estimatedMin,
+          estimatedMax,
+          estimatedMinMinor,
+          estimatedMaxMinor,
+          fixedPrice,
+          isGuaranteed,
+          quotedFareRuleVersion,
+          createdAt,
+          expiresAt,
+        ]
+      properties:
+        quoteId: { type: string }
+        currency: { type: string, enum: [TWD] }
+        estimatedMin:
+          {
+            type: integer,
+            minimum: 0,
+            description: Whole TWD estimate,
+            not actual fare.,
+          }
+        estimatedMax:
+          {
+            type: integer,
+            minimum: 0,
+            description: Whole TWD conservative range,
+            not a guarantee.,
+          }
+        estimatedMinMinor: { type: integer, minimum: 0 }
+        estimatedMaxMinor: { type: integer, minimum: 0 }
+        fixedPrice: { type: boolean, enum: [false] }
+        isGuaranteed: { type: boolean, enum: [false] }
+        quotedFareRuleVersion: { type: string }
+        pricingAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        consumedByOrderId: { type: string, nullable: true }
+        consumedAt: { type: string, format: date-time, nullable: true }
+    ReferralRatingCommand:
+      type: object
+      additionalProperties: false
+      required: [orderId, score, contactRequested]
+      properties:
+        orderId: { type: string }
+        score: { type: integer, minimum: 1, maximum: 5 }
+        contactRequested:
+          {
+            type: boolean,
+            description: Explicit choice; high stars use false and all low stars create a case.,
+          }
+        comment: { type: string, maxLength: 2000 }
+        tags:
+          { type: array, maxItems: 10, items: { type: string, maxLength: 100 } }
+        idempotencyKey: { type: string, maxLength: 255 }

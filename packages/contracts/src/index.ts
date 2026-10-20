@@ -3648,6 +3648,9 @@ export interface OwnedOrderRecord {
   dispatchTimeout: DispatchTimeoutRecord | null;
   referralPassengerLifecycle?: {
     bookingIdempotencyKey?: string;
+    bookingIntent?: import("./referral-channel").ReferralBookingIntent;
+    quote?: import("./referral-channel").ReferralPassengerFareQuoteRecord;
+    confirmedAt?: string;
     rating?: {
       orderId: string;
       score: 1 | 2 | 3 | 4 | 5;
@@ -3655,6 +3658,10 @@ export interface OwnedOrderRecord {
       tags: string[];
       idempotencyKey?: string;
       submittedAt: string;
+      policyVersion?: "legacy" | "referral_rating_v1";
+      contactRequested?: boolean;
+      complaintCaseNo?: string | null;
+      createdTimelineId?: string | null;
     };
   } | null;
   createdAt: string;

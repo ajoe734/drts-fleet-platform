@@ -1,3 +1,6 @@
+import { PassengerFareRepository } from "../passenger-app/fare/passenger-fare.repository";
+import { estimateFare } from "../passenger-app/fare/fare.engine";
+import { ComplaintService } from "../complaint/complaint.service";
 import {
   InjectMaskedCallPort,
   type MaskedCallPort,
@@ -126,6 +129,11 @@ import type {
   RouteFareDisclosureSnapshot,
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
+  ReferralPassengerQuoteCommand,
+  ReferralPassengerFareQuoteRecord,
+  ReferralPassengerFareQuote,
+  ReferralBookingIntent,
+  ReferralPassengerRatingResult,
   ReferralPassengerActiveTripResult,
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
@@ -444,6 +452,16 @@ const BOOKING_RULES: Record<
   },
 };
 
+type ReferralBookingOptions = {
+  required?: boolean;
+  isImmediateReferral?: boolean;
+  writeReferralNotificationRoute?: boolean;
+  verifiedServerQuote?: ReferralPassengerFareQuoteRecord;
+  referralPassengerLifecyclePatch?: NonNullable<
+    OwnedOrderRecord["referralPassengerLifecycle"]
+  >;
+};
+
 const MAX_COMPLETION_PROOF_PHOTO_COUNT = 5;
 const MAX_COMPLETION_PROOF_PHOTO_BYTES = 600 * 1024;
 const BASE64_DATA_URL_PREFIX = /^data:[^;]+;base64,/i;
@@ -640,6 +658,9 @@ export class OwnedMobilityService
     // Appended LAST: preserve all existing positional constructor consumers.
     @Optional()
     private readonly passengerRouteGeoService?: GeoService,
+    @Optional()
+    private readonly referralFareRepository?: PassengerFareRepository,
+    @Optional() private readonly referralComplaintService?: ComplaintService,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -1772,11 +1793,7 @@ export class OwnedMobilityService
     requestId?: string,
     runtimeProfileCodeHeader?: string,
     idempotencyKeyHeader?: string,
-    options?: {
-      required?: boolean;
-      isImmediateReferral?: boolean;
-      writeReferralNotificationRoute?: boolean;
-    },
+    options?: ReferralBookingOptions,
   ): MaybePromise<TenantBookingResult> {
     const resolvedKey =
       idempotencyKeyHeader?.trim() ||
@@ -1812,11 +1829,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
-    options?: {
-      required?: boolean;
-      isImmediateReferral?: boolean;
-      writeReferralNotificationRoute?: boolean;
-    },
+    options?: ReferralBookingOptions,
   ): Promise<TenantBookingResult> {
     const scope = `tenant:${tenantId}:booking_create`;
     const idempotencyService = this.getIdempotencyService();
@@ -1867,11 +1880,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
-    options?: {
-      required?: boolean;
-      isImmediateReferral?: boolean;
-      writeReferralNotificationRoute?: boolean;
-    },
+    options?: ReferralBookingOptions,
   ): MaybePromise<TenantBookingResult> {
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
@@ -1999,30 +2008,51 @@ export class OwnedMobilityService
       updatedAt: now,
     };
 
+    if (options?.verifiedServerQuote) {
+      if (!this.ownedMobilityRepository?.isEnabled())
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Referral storage is unavailable.",
+        );
+      const quote = options.verifiedServerQuote;
+      order.fixedPrice = false;
+      order.quotedFare = {
+        currency: quote.currency,
+        amountMinor: quote.estimatedMinMinor,
+      };
+      order.quotedFareSource = quote.quotedFareSource;
+      order.quotedFareRuleVersion = quote.quotedFareRuleVersion;
+      order.referralPassengerLifecycle = {
+        ...options.referralPassengerLifecyclePatch,
+        quote,
+      };
+    }
+
     this.applyServiceAreaCreationPolicy(
       order,
       this.resolveBookingSpatialAuditContext(order, identity),
       requestId,
     );
-    const bookingTraceLog = this.appendTrace(
-      order.orderId,
-      "tenant.booking_created",
-      {
-        bookingId,
-        businessDispatchSubtype: order.businessDispatchSubtype,
-        dispatchSemantics: order.dispatchSemantics,
-      },
-    );
-    const holdTraceLog = this.appendTrace(
-      order.orderId,
-      "reservation.hold.created",
-      {
-        bookingId,
-        reservationHoldId,
-        holdState: order.reservationHoldStatus,
-        confirmationWindowMinutes: bookingWindow.confirmationWindowMinutes,
-      },
-    );
+    const bookingTraceLog = (
+      options?.verifiedServerQuote
+        ? this.buildTraceLog.bind(this)
+        : this.appendTrace.bind(this)
+    )(order.orderId, "tenant.booking_created", {
+      bookingId,
+      businessDispatchSubtype: order.businessDispatchSubtype,
+      dispatchSemantics: order.dispatchSemantics,
+    });
+    const holdTraceLog = (
+      options?.verifiedServerQuote
+        ? this.buildTraceLog.bind(this)
+        : this.appendTrace.bind(this)
+    )(order.orderId, "reservation.hold.created", {
+      bookingId,
+      reservationHoldId,
+      holdState: order.reservationHoldStatus,
+      confirmationWindowMinutes: bookingWindow.confirmationWindowMinutes,
+    });
     const finalizeCreation = (
       previousApprovalState: TenantBookingApprovalState,
       approvalRequest: TenantBookingApprovalRequestRecord | null,
@@ -2031,6 +2061,12 @@ export class OwnedMobilityService
       order.approvalRequestIds = approvalRequest
         ? [approvalRequest.approvalRequestId]
         : [];
+      if (options?.verifiedServerQuote)
+        this.dispatchTraceLogs = [
+          bookingTraceLog,
+          holdTraceLog,
+          ...this.dispatchTraceLogs,
+        ];
       this.orders = [this.stampServiceProductCode(order), ...this.orders];
       if (persistOrderWrite) {
         this.persistChanges(
@@ -2099,11 +2135,24 @@ export class OwnedMobilityService
         this.partnerUserIdentityLinkRepository,
         this.tenantPartnerService,
       );
-      if (route) {
-        await this.ownedMobilityRepository?.writeOrderPartnerNotificationRoute(
-          route,
-          tx,
+      if (!route && options?.verifiedServerQuote)
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Referral notification identity could not be resolved.",
         );
+      if (route) {
+        const stored =
+          await this.ownedMobilityRepository?.writeOrderPartnerNotificationRoute(
+            route,
+            tx,
+          );
+        if (options?.verifiedServerQuote && !stored)
+          throw new ApiRequestError(
+            503,
+            "FARE_QUOTE_UNAVAILABLE",
+            "Referral notification route could not be persisted.",
+          );
       }
     };
     const finalizeWithRoute = (
@@ -2142,13 +2191,55 @@ export class OwnedMobilityService
 
     if (
       this.ownedMobilityRepository?.isEnabled() &&
-      (this.tenantPartnerService?.isPersistenceEnabled() ||
+      (options?.verifiedServerQuote ||
+        this.tenantPartnerService?.isPersistenceEnabled() ||
         (options?.writeReferralNotificationRoute &&
           this.partnerUserIdentityLinkRepository))
     ) {
       return (
         this.ownedMobilityRepository
           .withTransaction(async (tx) => {
+            if (options?.verifiedServerQuote) {
+              const quote = options.verifiedServerQuote;
+              const key =
+                options.referralPassengerLifecyclePatch?.bookingIdempotencyKey;
+              if (key) {
+                await this.ownedMobilityRepository!.lockReferralBookingIntent(
+                  [
+                    quote.tenantId,
+                    quote.partnerId,
+                    quote.partnerProgramId,
+                    quote.entrySlug,
+                    quote.drtsPassengerId,
+                    key,
+                  ],
+                  tx,
+                );
+                if (
+                  await this.ownedMobilityRepository!.findReferralOrderByIdempotencyKey(
+                    quote,
+                    key,
+                    tx,
+                  )
+                )
+                  throw new ApiRequestError(
+                    409,
+                    "REFERRAL_BOOKING_COMMITTED",
+                    "A booking for this intent has committed.",
+                  );
+              }
+              const claimed =
+                await this.ownedMobilityRepository!.claimReferralFareQuoteSnapshot(
+                  quote,
+                  order.orderId,
+                  tx,
+                );
+              order.referralPassengerLifecycle = {
+                ...order.referralPassengerLifecycle,
+                quote: claimed,
+                confirmedAt: claimed.consumedAt!,
+              };
+            }
             await applyPassengerDisclosure();
             const approvalRequest = await applyGovernance(
               this.tenantPartnerService?.isPersistenceEnabled() ? tx : null,
@@ -15288,6 +15379,481 @@ export class OwnedMobilityService
     }
   }
 
+  private async referralAuthority(
+    identity: BootstrapRequestIdentity | null | undefined,
+    entrySlug?: string,
+  ) {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    )
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "An active referral passenger is required.",
+      );
+    if (
+      !this.tenantPartnerService ||
+      !this.ownedMobilityRepository?.isEnabled()
+    )
+      throw new ApiRequestError(
+        503,
+        "PARTNER_ENTRY_UNAVAILABLE",
+        "Referral authority/storage is unavailable.",
+      );
+    const slug = entrySlug ?? identity.partnerEntrySlug;
+    if (!slug || slug !== identity.partnerEntrySlug || !identity.tenantId)
+      throw new ApiRequestError(
+        403,
+        "PARTNER_SCOPE_MISMATCH",
+        "Referral entry does not match the current session.",
+      );
+    const entry = await this.tenantPartnerService.getPartnerEntry(slug);
+    if (
+      entry.status !== "active" ||
+      !entry.activeFlag ||
+      entry.revokedAt ||
+      entry.partnerType !== "referral_channel" ||
+      entry.businessDispatchSubtype !== "enterprise_dispatch" ||
+      entry.tenantId !== identity.tenantId ||
+      entry.partnerId !== identity.partnerId ||
+      entry.programId !== identity.partnerProgramId
+    )
+      throw new ApiRequestError(
+        403,
+        "PARTNER_SCOPE_MISMATCH",
+        "Current referral entry authority has changed.",
+      );
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+    if (!passengerId?.trim() || !identity.scopes?.includes("partner:book"))
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Referral booking scope is required.",
+      );
+    const link =
+      await this.partnerUserIdentityLinkRepository?.findByDrtsPassengerId(
+        slug,
+        passengerId,
+      );
+    if (!link || link.status !== "active")
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_HANDOFF_REVOKED",
+        "The referral identity link is no longer active.",
+      );
+    const consent =
+      await this.tenantPartnerService.getLatestReferralEmbedConsent(
+        slug,
+        passengerId,
+      );
+    if (!consent)
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_CONSENT_REQUIRED",
+        "Current referral consent is required.",
+      );
+    return {
+      entry,
+      owner: {
+        tenantId: entry.tenantId,
+        partnerId: entry.partnerId,
+        partnerProgramId: entry.programId,
+        entrySlug: slug,
+        drtsPassengerId: passengerId,
+      },
+    };
+  }
+
+  private referralInput(
+    command:
+      | ReferralPassengerQuoteCommand
+      | CreateReferralPassengerBookingCommand,
+    create: boolean,
+  ) {
+    const invalid = (): never => {
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Invalid referral quote or booking intent.",
+      );
+    };
+    const fields = [
+      "entrySlug",
+      "pickupAddress",
+      "dropoffAddress",
+      "scheduledAt",
+      "vehicleType",
+      ...(create
+        ? [
+            "quoteId",
+            "passengerName",
+            "passengerPhone",
+            "partnerUserRef",
+            "idempotencyKey",
+          ]
+        : []),
+    ];
+    if (!command || typeof command !== "object" || Array.isArray(command))
+      invalid();
+    if ("quotedFare" in command || "quotedFareRuleVersion" in command)
+      throw new ApiRequestError(
+        403,
+        "PRICING_AUTHORITY_FORBIDDEN",
+        "A referral caller cannot supply a price.",
+      );
+    if (Object.keys(command).some((k) => !fields.includes(k))) invalid();
+    const text = (v: unknown, required = false, max = 500) => {
+      if (v === undefined || v === null) {
+        if (required) invalid();
+        return "";
+      }
+      if (typeof v !== "string" || v.length > max) invalid();
+      const result = (v as string).trim().replace(/\s+/g, " ");
+      if (required && !result) invalid();
+      return result;
+    };
+    const rawTime = text(command.scheduledAt);
+    let requestedScheduledAt: string | null = null;
+    if (rawTime && rawTime !== "現在出發") {
+      const date =
+        /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.exec(
+          rawTime,
+        );
+      if (!date || !Number.isFinite(Date.parse(rawTime))) invalid();
+      const calendar = new Date(
+        Date.UTC(Number(date![1]), Number(date![2]) - 1, Number(date![3])),
+      );
+      if (
+        calendar.getUTCFullYear() !== Number(date![1]) ||
+        calendar.getUTCMonth() + 1 !== Number(date![2]) ||
+        calendar.getUTCDate() !== Number(date![3])
+      )
+        invalid();
+      requestedScheduledAt = new Date(rawTime).toISOString();
+    }
+    const c = command as CreateReferralPassengerBookingCommand;
+    if (create) text(c.idempotencyKey, false, 255);
+    return {
+      entrySlug: text(command.entrySlug, true, 150),
+      quoteId: create ? text(c.quoteId, true, 100) : "",
+      pickupAddress: text(command.pickupAddress, true),
+      dropoffAddress: text(command.dropoffAddress, true),
+      timingMode: requestedScheduledAt
+        ? ("scheduled" as const)
+        : ("immediate" as const),
+      requestedScheduledAt,
+      vehicleType: text(command.vehicleType, false, 50) || null,
+      passengerName: text(c.passengerName, false, 100),
+      passengerPhone: text(c.passengerPhone, false, 40).replace(/[^\d+]/g, ""),
+      partnerUserRef: text(c.partnerUserRef, false, 200) || null,
+    };
+  }
+
+  private assertReferralQuoteOwner(
+    quote: ReferralPassengerFareQuoteRecord,
+    owner: Pick<
+      ReferralPassengerFareQuoteRecord,
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "entrySlug"
+      | "drtsPassengerId"
+    >,
+  ) {
+    if (
+      [
+        "tenantId",
+        "partnerId",
+        "partnerProgramId",
+        "entrySlug",
+        "drtsPassengerId",
+      ].some(
+        (k) =>
+          quote[k as keyof typeof owner] !== owner[k as keyof typeof owner],
+      )
+    )
+      throw new ApiRequestError(
+        403,
+        "FARE_QUOTE_FORBIDDEN",
+        "The quote belongs to another referral scope.",
+      );
+    if (
+      quote.currency !== "TWD" ||
+      quote.fixedPrice !== false ||
+      quote.isGuaranteed !== false ||
+      typeof quote.quotedFareRuleVersion !== "string" ||
+      !quote.quotedFareRuleVersion.trim() ||
+      !Number.isSafeInteger(quote.estimatedMin) ||
+      !Number.isSafeInteger(quote.estimatedMax) ||
+      quote.estimatedMinMinor !== quote.estimatedMin * 100 ||
+      quote.estimatedMaxMinor !== quote.estimatedMax * 100 ||
+      !Number.isFinite(Date.parse(quote.createdAt)) ||
+      !Number.isFinite(Date.parse(quote.expiresAt)) ||
+      Date.parse(quote.expiresAt) <= Date.parse(quote.createdAt) ||
+      !Number.isSafeInteger(quote.estimatedMinMinor) ||
+      !Number.isSafeInteger(quote.estimatedMaxMinor) ||
+      quote.estimatedMinMinor < 0 ||
+      quote.estimatedMaxMinor < quote.estimatedMinMinor
+    )
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Stored quote money is invalid.",
+      );
+  }
+
+  private referralQuoteView(
+    quote: ReferralPassengerFareQuoteRecord | null | undefined,
+  ): ReferralPassengerFareQuote | null {
+    if (!quote) return null;
+    return {
+      quoteId: quote.quoteId,
+      businessDispatchSubtype: quote.businessDispatchSubtype,
+      serviceProductCode: quote.serviceProductCode,
+      timingMode: quote.timingMode,
+      requestedScheduledAt: quote.requestedScheduledAt,
+      pricingAt: quote.pricingAt,
+      pickupAddress: quote.pickupAddress,
+      dropoffAddress: quote.dropoffAddress,
+      pickup: quote.pickup,
+      dropoff: quote.dropoff,
+      vehicleType: quote.vehicleType,
+      currency: quote.currency,
+      estimatedMin: quote.estimatedMin,
+      estimatedMax: quote.estimatedMax,
+      estimatedMinMinor: quote.estimatedMinMinor,
+      estimatedMaxMinor: quote.estimatedMaxMinor,
+      fixedPrice: quote.fixedPrice,
+      isGuaranteed: quote.isGuaranteed,
+      quotedFareSource: quote.quotedFareSource,
+      quotedFareRuleVersion: quote.quotedFareRuleVersion,
+      createdAt: quote.createdAt,
+      expiresAt: quote.expiresAt,
+      consumedByOrderId: quote.consumedByOrderId,
+      consumedAt: quote.consumedAt,
+    };
+  }
+
+  async quoteReferralPassengerFare(
+    command: ReferralPassengerQuoteCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReferralPassengerFareQuote> {
+    const { entry, owner } = await this.referralAuthority(
+      identity,
+      command?.entrySlug,
+    );
+    const intent = this.referralInput(command, false);
+    if (
+      !this.referralFareRepository ||
+      !this.passengerRouteGeoService ||
+      !this.serviceAreaService
+    )
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Referral fare calculation is unavailable.",
+      );
+    const pricingAt = intent.requestedScheduledAt ?? new Date().toISOString();
+    if (intent.requestedScheduledAt)
+      this.assertBookingLeadTime(intent.requestedScheduledAt);
+    const [origin, destination] = await Promise.all([
+      this.passengerRouteGeoService.resolve(
+        {
+          addressText: intent.pickupAddress,
+          surface: "passenger_entry",
+          selectedByActorId: owner.drtsPassengerId,
+        },
+        requestId,
+      ),
+      this.passengerRouteGeoService.resolve(
+        {
+          addressText: intent.dropoffAddress,
+          surface: "passenger_entry",
+          selectedByActorId: owner.drtsPassengerId,
+        },
+        requestId,
+      ),
+    ]);
+    const pickup = origin.address,
+      dropoff = destination.address;
+    if (
+      ![pickup.lat, pickup.lng, dropoff.lat, dropoff.lng].every(
+        (n) => typeof n === "number" && Number.isFinite(n),
+      )
+    )
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Both actual route coordinates are required.",
+      );
+    const serviceAreaEvaluation = this.serviceAreaService.evaluate(
+      {
+        serviceProductType: entry.businessDispatchSubtype,
+        pickup,
+        dropoff,
+        requestedAt: pricingAt,
+      },
+      requestId,
+    );
+    if (
+      serviceAreaEvaluation.decision !== "serviceable" ||
+      serviceAreaEvaluation.stops.length !== 2 ||
+      serviceAreaEvaluation.stops.some(
+        (stop) => stop.serviceAreaCodes.length === 0,
+      )
+    )
+      throw new ApiRequestError(
+        409,
+        "SERVICE_AREA_NOT_SERVICEABLE",
+        "Both referral stops need effective service coverage.",
+      );
+    const tariff = await this.referralFareRepository.publishedTariff(pricingAt);
+    if (!tariff)
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "No published fare covers the pickup time.",
+      );
+    const route = await this.passengerRouteGeoService.route({
+      origin: pickup,
+      destination: dropoff,
+      travelMode: "drive",
+      requestedByActorId: owner.drtsPassengerId,
+    });
+    let estimate;
+    try {
+      estimate = estimateFare(tariff, { ...route, scheduledAt: pricingAt });
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Approved tariff or route metrics are unavailable.",
+      );
+    }
+    const minor = (v: number) => {
+      const n = BigInt(v) * 100n;
+      if (n > BigInt(Number.MAX_SAFE_INTEGER))
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Estimate exceeds monetary bounds.",
+        );
+      return Number(n);
+    };
+    const now = Date.now();
+    const quote: ReferralPassengerFareQuoteRecord = {
+      ...owner,
+      quoteId: randomUUID(),
+      businessDispatchSubtype: entry.businessDispatchSubtype,
+      serviceProductCode: entry.businessDispatchSubtype,
+      timingMode: intent.timingMode,
+      requestedScheduledAt: intent.requestedScheduledAt,
+      pricingAt,
+      pickupAddress: intent.pickupAddress,
+      dropoffAddress: intent.dropoffAddress,
+      pickup: { ...pickup },
+      dropoff: { ...dropoff },
+      vehicleType: intent.vehicleType,
+      currency: "TWD",
+      estimatedMin: estimate.estimatedMin,
+      estimatedMax: estimate.estimatedMax,
+      estimatedMinMinor: minor(estimate.estimatedMin),
+      estimatedMaxMinor: minor(estimate.estimatedMax),
+      fixedPrice: false,
+      isGuaranteed: false,
+      quotedFareSource: "platform_pricing_rule",
+      quotedFareRuleVersion: tariff.version,
+      tariffSnapshot: { ...tariff },
+      route: { ...route },
+      breakdown: { ...estimate.breakdown },
+      serviceAreaEvaluation: { ...serviceAreaEvaluation },
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 900000).toISOString(),
+      consumedByOrderId: null,
+      consumedAt: null,
+    };
+    await this.ownedMobilityRepository!.insertReferralFareQuoteSnapshot(quote);
+    return this.referralQuoteView(quote)!;
+  }
+
+  private referralBookingResult(order: OwnedOrderRecord, replayed: boolean) {
+    this.orders = [
+      order,
+      ...this.orders.filter((o) => o.orderId !== order.orderId),
+    ];
+    return {
+      orderId: order.orderId,
+      bookingId: order.bookingId ?? order.orderId,
+      serviceBucket: "business_dispatch" as const,
+      businessDispatchSubtype: order.businessDispatchSubtype!,
+      dispatchSemantics: "reservation" as const,
+      status: order.status,
+      replayed,
+      quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
+      confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+    };
+  }
+
+  private assertReferralOrderOwner(
+    order: OwnedOrderRecord,
+    owner: Pick<
+      ReferralPassengerFareQuoteRecord,
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "entrySlug"
+      | "drtsPassengerId"
+    >,
+  ) {
+    if (
+      order.tenantId !== owner.tenantId ||
+      order.partnerId !== owner.partnerId ||
+      order.partnerProgramId !== owner.partnerProgramId ||
+      order.partnerEntrySlug !== owner.entrySlug ||
+      order.passenger?.passengerId !== owner.drtsPassengerId
+    )
+      throw new ApiRequestError(
+        403,
+        "FARE_QUOTE_FORBIDDEN",
+        "Committed order belongs to another referral scope.",
+      );
+  }
+
+  private assertReferralCommittedIntent(
+    order: OwnedOrderRecord,
+    owner: Pick<
+      ReferralPassengerFareQuoteRecord,
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "entrySlug"
+      | "drtsPassengerId"
+    >,
+    intent: ReferralBookingIntent,
+    key: string,
+  ) {
+    this.assertReferralOrderOwner(order, owner);
+    const life = order.referralPassengerLifecycle;
+    if (
+      !life?.quote ||
+      life.bookingIdempotencyKey !== key ||
+      !life.bookingIntent ||
+      (Object.keys(intent) as Array<keyof ReferralBookingIntent>).some(
+        (k) => life.bookingIntent![k] !== intent[k],
+      )
+    )
+      throw new ApiRequestError(
+        409,
+        "IDEMPOTENCY_KEY_REUSED",
+        "This key belongs to a different original booking intent.",
+      );
+    this.assertReferralQuoteOwner(life.quote, owner);
+  }
+
   async createReferralPassengerBooking(
     command: CreateReferralPassengerBookingCommand,
     identity?: BootstrapRequestIdentity | null,
@@ -15295,236 +15861,223 @@ export class OwnedMobilityService
     runtimeProfileCodeHeader?: string,
     idempotencyKeyHeader?: string,
   ): Promise<TenantBookingResult> {
-    if (
-      !identity ||
-      identity.realm !== "partner" ||
-      identity.actorType !== "referral_passenger"
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
-        "Creating a referral passenger booking requires an active referral_passenger identity.",
-      );
-    }
-
-    if (identity.partnerEntrySlug !== command.entrySlug) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "PARTNER_SCOPE_MISMATCH",
-        "Referral passenger identity cannot book for a different entrySlug.",
-      );
-    }
-
-    const tenantId = identity.tenantId;
-    if (!tenantId) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "TENANT_ID_REQUIRED",
-        "Referral passenger identity missing tenantId.",
-      );
-    }
-
-    const passengerId =
-      identity.drtsPassengerId ?? identity.actorId ?? "pax-ref-anon";
-
-    if (!this.tenantPartnerService) {
-      throw new ApiRequestError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        "PARTNER_ENTRY_UNAVAILABLE",
-        "Partner entry services are unavailable for this booking flow.",
-        { tenantId, entrySlug: command.entrySlug },
-      );
-    }
-    const partnerEntry = this.tenantPartnerService.getPartnerEntry(
-      command.entrySlug,
+    const { entry, owner } = await this.referralAuthority(
+      identity,
+      command?.entrySlug,
     );
-
-    if (command.scheduledAt) {
-      this.assertBookingLeadTime(command.scheduledAt);
-    }
-
-    try {
-      this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
-    } catch {
-      await this.tenantPartnerService.upsertPassenger(tenantId, {
-        passengerId,
-        fullName: command.passengerName || "Referral Passenger",
-        mobile: command.passengerPhone || "0912345678",
-      });
-    }
-
-    // Reconcile header and body idempotency key with documented precedence:
-    // HTTP Header `Idempotency-Key` takes precedence over body field `idempotencyKey`.
-    const resolvedIdempotencyKey =
+    const intent = this.referralInput(command, true);
+    const key =
       idempotencyKeyHeader?.trim() ||
       command.idempotencyKey?.trim() ||
       undefined;
-
-    if (resolvedIdempotencyKey) {
-      const existing = Array.from(this.orders.values()).find(
-        (o) =>
-          o.tenantId === tenantId &&
-          o.partnerEntrySlug === identity.partnerEntrySlug &&
-          o.passenger?.passengerId === passengerId &&
-          this.getReferralLifecycle(o)?.bookingIdempotencyKey ===
-            resolvedIdempotencyKey,
+    if (key && key.length > 255)
+      throw new ApiRequestError(
+        400,
+        "IDEMPOTENCY_KEY_TOO_LONG",
+        "Booking key exceeds 255 characters.",
       );
-      if (existing) {
-        return {
-          orderId: existing.orderId,
-          bookingId: existing.bookingId ?? existing.orderId,
-          serviceBucket: "business_dispatch",
-          businessDispatchSubtype:
-            existing.businessDispatchSubtype ?? "enterprise_dispatch",
-          dispatchSemantics: "reservation",
-          status: existing.status,
-          replayed: true,
-        };
+    const repo = this.ownedMobilityRepository!;
+    const recover = async () => {
+      if (!key) return null;
+      const committed = await repo.findReferralOrderByIdempotencyKey(
+        owner,
+        key,
+      );
+      if (committed) {
+        this.assertReferralCommittedIntent(committed, owner, intent, key);
+        return this.referralBookingResult(committed, true);
       }
-
-      const scope = `tenant:${tenantId}:booking_create`;
-      const idempotencyService = this.getIdempotencyService();
-
-      const result = await idempotencyService.execute<TenantBookingResult>({
-        scope,
-        idempotencyKey: resolvedIdempotencyKey,
-        tenantId,
-        actorId: passengerId,
-        requestPath: "/partner/referral/passenger/bookings",
-        required: false,
-        payload: {
-          ...command,
-          ...(command.idempotencyKey
-            ? { idempotencyKey: resolvedIdempotencyKey }
-            : {}),
-        },
-        execute: async () => {
-          if (command.scheduledAt) {
-            this.assertBookingLeadTime(command.scheduledAt);
-          }
-          const isImmediateReferral = !command.scheduledAt;
-          const reservationWindowStart =
-            command.scheduledAt ?? new Date().toISOString();
-          const tenantBookingCommand: CreateTenantBookingCommand = {
-            businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
-            direction: "pickup",
-            pickup: {
-              address: command.pickupAddress,
-              lat: 25.033,
-              lng: 121.565,
-            },
-            dropoff: {
-              address: command.dropoffAddress,
-              lat: 25.048,
-              lng: 121.517,
-            },
-            reservationWindowStart,
-            reservationWindowEnd: new Date(
-              new Date(reservationWindowStart).getTime() + 3600000,
-            ).toISOString(),
-            passengerId,
-            passenger: {
-              passengerId,
-              name: command.passengerName || "Referral Passenger",
-              phone: command.passengerPhone || "0912345678",
-            },
-            ...(identity.partnerEntrySlug
-              ? { partnerEntrySlug: identity.partnerEntrySlug }
-              : {}),
-          };
-
-          const bookingResult = await this.createTenantBooking(
-            tenantBookingCommand,
-            tenantId,
-            identity,
-            requestId,
-            runtimeProfileCodeHeader,
-            undefined,
-            { isImmediateReferral, writeReferralNotificationRoute: true },
-          );
-
-          if (
-            typeof bookingResult === "object" &&
-            bookingResult &&
-            "orderId" in bookingResult
-          ) {
-            const order = this.orders.find(
-              (o) => o.orderId === bookingResult.orderId,
-            );
-            if (order) {
-              const nextOrder = this.updateReferralLifecycle(order, {
-                bookingIdempotencyKey: resolvedIdempotencyKey,
-              });
-              await this.persistChangesRequired(
-                { orders: [nextOrder] },
-                "referral.booking.idempotency",
-              );
-            }
-          }
-
-          return {
-            data: {
-              ...bookingResult,
-              replayed: false,
-            },
-            statusCode: 201,
-          };
-        },
-      });
-
-      return {
-        ...result.data,
-        replayed: result.isReplay,
-      };
-    }
-
-    if (command.scheduledAt) {
-      this.assertBookingLeadTime(command.scheduledAt);
-    }
-    const isImmediateReferral = !command.scheduledAt;
-    const reservationWindowStart =
-      command.scheduledAt ?? new Date().toISOString();
-    const tenantBookingCommand: CreateTenantBookingCommand = {
-      // The partner entry owns the service product. VehicleType is a passenger
-      // display preference, not an authorization to select a product.
-      businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
-      direction: "pickup",
-      pickup: {
-        address: command.pickupAddress,
-        lat: 25.033,
-        lng: 121.565,
-      },
-      dropoff: {
-        address: command.dropoffAddress,
-        lat: 25.048,
-        lng: 121.517,
-      },
-      reservationWindowStart,
-      reservationWindowEnd: new Date(
-        new Date(reservationWindowStart).getTime() + 3600000,
-      ).toISOString(),
-      passengerId,
-      passenger: {
-        passengerId,
-        name: command.passengerName || "Referral Passenger",
-        phone: command.passengerPhone || "0912345678",
-      },
-      ...(identity.partnerEntrySlug
-        ? { partnerEntrySlug: identity.partnerEntrySlug }
-        : {}),
+      const quote = await repo.findReferralFareQuoteSnapshotById(
+        intent.quoteId,
+      );
+      if (!quote) return null;
+      this.assertReferralQuoteOwner(quote, owner);
+      if (!quote.consumedByOrderId) return null;
+      const order = await repo.findOrderById(quote.consumedByOrderId);
+      if (!order)
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Consumed quote has no committed order.",
+        );
+      this.assertReferralOrderOwner(order, owner);
+      if (order.referralPassengerLifecycle?.bookingIdempotencyKey !== key)
+        throw new ApiRequestError(
+          409,
+          "FARE_QUOTE_ALREADY_CONSUMED",
+          "Quote was consumed by another intent.",
+        );
+      this.assertReferralCommittedIntent(order, owner, intent, key);
+      return this.referralBookingResult(order, true);
     };
-
-    const result = await this.createTenantBooking(
-      tenantBookingCommand,
-      tenantId,
-      identity,
-      requestId,
-      runtimeProfileCodeHeader,
-      undefined,
-      { isImmediateReferral, writeReferralNotificationRoute: true },
-    );
-
-    return result;
+    const prior = await recover();
+    if (prior) return prior;
+    const fresh = async () => {
+      const quote = await repo.findReferralFareQuoteSnapshotById(
+        intent.quoteId,
+      );
+      if (!quote)
+        throw new ApiRequestError(
+          404,
+          "FARE_QUOTE_NOT_FOUND",
+          "Quote not found.",
+        );
+      this.assertReferralQuoteOwner(quote, owner);
+      if (quote.consumedByOrderId) {
+        const existing = await recover();
+        if (existing) return existing;
+        throw new ApiRequestError(
+          409,
+          "FARE_QUOTE_ALREADY_CONSUMED",
+          "Quote has already been consumed.",
+        );
+      }
+      if (Date.parse(quote.expiresAt) <= Date.now())
+        throw new ApiRequestError(
+          409,
+          "FARE_QUOTE_EXPIRED",
+          "Refresh the expired estimate.",
+        );
+      if (
+        quote.businessDispatchSubtype !== entry.businessDispatchSubtype ||
+        quote.serviceProductCode !== entry.businessDispatchSubtype ||
+        [
+          "pickupAddress",
+          "dropoffAddress",
+          "timingMode",
+          "requestedScheduledAt",
+          "vehicleType",
+        ].some(
+          (k) =>
+            quote[k as keyof typeof quote] !== intent[k as keyof typeof intent],
+        )
+      )
+        throw new ApiRequestError(
+          409,
+          "FARE_QUOTE_MISMATCH",
+          "The quote does not match the current route/time/product intent.",
+        );
+      if (intent.requestedScheduledAt)
+        this.assertBookingLeadTime(intent.requestedScheduledAt);
+      // The normal passenger directory is real; no PAX account or fabricated quote owner is introduced.
+      try {
+        this.tenantPartnerService!.getPassengerMasterRecord(
+          owner.tenantId,
+          owner.drtsPassengerId,
+        );
+      } catch (error) {
+        if (
+          !(error instanceof ApiRequestError) ||
+          error.code !== "PASSENGER_NOT_FOUND"
+        )
+          throw error;
+        if (
+          !intent.passengerName ||
+          !/^\+?\d{8,15}$/.test(intent.passengerPhone)
+        )
+          throw new ApiRequestError(
+            400,
+            "VALIDATION_ERROR",
+            "A real passenger name and contact phone are required.",
+          );
+        await this.tenantPartnerService!.upsertPassenger(owner.tenantId, {
+          passengerId: owner.drtsPassengerId,
+          fullName: intent.passengerName,
+          mobile: intent.passengerPhone,
+        });
+      }
+      const start = intent.requestedScheduledAt ?? new Date().toISOString();
+      return await this.createTenantBooking(
+        {
+          businessDispatchSubtype: entry.businessDispatchSubtype,
+          direction: "pickup",
+          pickup: { ...quote.pickup, address: intent.pickupAddress },
+          dropoff: { ...quote.dropoff, address: intent.dropoffAddress },
+          reservationWindowStart: start,
+          reservationWindowEnd: new Date(
+            Date.parse(start) + 3600000,
+          ).toISOString(),
+          passengerId: owner.drtsPassengerId,
+          passenger: {
+            passengerId: owner.drtsPassengerId,
+            name: intent.passengerName,
+            phone: intent.passengerPhone,
+          },
+          ...(intent.vehicleType
+            ? { vehiclePreference: intent.vehicleType }
+            : {}),
+          partnerEntrySlug: owner.entrySlug,
+        },
+        owner.tenantId,
+        identity,
+        requestId,
+        runtimeProfileCodeHeader,
+        undefined,
+        {
+          isImmediateReferral: intent.timingMode === "immediate",
+          writeReferralNotificationRoute: true,
+          verifiedServerQuote: quote,
+          referralPassengerLifecyclePatch: {
+            ...(key ? { bookingIdempotencyKey: key } : {}),
+            bookingIntent: intent,
+          },
+        },
+      );
+    };
+    try {
+      if (!key) {
+        const created = await fresh();
+        const order = await repo.findOrderById(created.orderId);
+        if (!order)
+          throw new ApiRequestError(
+            503,
+            "FARE_QUOTE_UNAVAILABLE",
+            "Committed booking readback is unavailable.",
+          );
+        return this.referralBookingResult(order, false);
+      }
+      const result =
+        await this.getIdempotencyService().execute<TenantBookingResult>({
+          scope:
+            "referral_booking:v1:" +
+            createHash("sha256")
+              .update(JSON.stringify(Object.values(owner)))
+              .digest("hex"),
+          idempotencyKey: key,
+          tenantId: owner.tenantId,
+          actorId: owner.drtsPassengerId,
+          requestPath: "/partner/referral/passenger/bookings",
+          required: false,
+          payload: { ...owner, ...intent, key },
+          execute: async () => ({ data: await fresh(), statusCode: 201 }),
+        });
+      const order = await repo.findOrderById(result.data.orderId);
+      if (!order)
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Committed booking readback is unavailable.",
+        );
+      this.assertReferralCommittedIntent(order, owner, intent, key);
+      return this.referralBookingResult(
+        order,
+        result.isReplay || result.data.replayed === true,
+      );
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        (error.getStatus() === 403 ||
+          [
+            "IDEMPOTENCY_KEY_REUSED",
+            "VALIDATION_ERROR",
+            "PRICING_AUTHORITY_FORBIDDEN",
+          ].includes(error.code))
+      )
+        throw error;
+      const committed = await recover();
+      if (committed) return committed;
+      throw error;
+    }
   }
 
   private resolveReferralTripDetails(order: OwnedOrderRecord) {
@@ -15550,7 +16103,8 @@ export class OwnedMobilityService
 
     let driverName: string | null = candidate?.driverName ?? null;
     let plateNumber: string | null = candidate?.plateNumber ?? null;
-    let driverPhoneMasked: string | null = candidate?.driverPhoneMasked ?? null;
+    const driverPhoneMasked: string | null =
+      candidate?.driverPhoneMasked ?? null;
 
     const driverId = task?.driverId ?? assignment?.driverId;
     const vehicleId = task?.vehicleId ?? assignment?.vehicleId;
@@ -15573,24 +16127,13 @@ export class OwnedMobilityService
       }
     }
 
-    if (driverName && !driverPhoneMasked) {
-      driverPhoneMasked = "0912-***-888";
-    }
-
-    let fareTotal = 0;
+    let fareTotal: number | null = null;
     if (order.status !== "cancelled") {
       if (
         task?.fare?.amountMinor !== undefined &&
         task.fare.amountMinor !== null
       ) {
-        fareTotal = Math.round(task.fare.amountMinor / 100);
-      } else if (
-        order.quotedFare?.amountMinor !== undefined &&
-        order.quotedFare.amountMinor !== null
-      ) {
-        fareTotal = Math.round(order.quotedFare.amountMinor / 100);
-      } else {
-        fareTotal = 290;
+        fareTotal = task.fare.amountMinor / 100;
       }
     }
 
@@ -15619,10 +16162,11 @@ export class OwnedMobilityService
       );
     }
 
+    await this.referralAuthority(identity);
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
     let activeOrder: OwnedOrderRecord | undefined;
-    for (const o of this.orders.values()) {
+    for (const o of await this.ownedMobilityRepository!.listOrdersForRead()) {
       if (
         o.partnerEntrySlug === identity.partnerEntrySlug &&
         o.passenger?.passengerId === passengerId &&
@@ -15673,7 +16217,7 @@ export class OwnedMobilityService
         orderNo: activeOrder.orderNo,
         status: activeOrder.status,
         statusCode: activeOrder.status,
-        etaMin: activeOrder.etaSnapshot?.etaMinutes ?? 5,
+        etaMin: activeOrder.etaSnapshot?.etaMinutes ?? null,
         cancelWindowMin: 2,
         pickupAddress: activeOrder.pickup.address,
         dropoffAddress: activeOrder.dropoff.address,
@@ -15684,10 +16228,17 @@ export class OwnedMobilityService
           activeOrder.serviceProductCode ??
           activeOrder.businessDispatchSubtype ??
           "standard",
-        estimatedFare: details.fareTotal,
+        estimatedFare:
+          activeOrder.referralPassengerLifecycle?.quote?.estimatedMin ?? null,
         createdAt: activeOrder.createdAt ?? new Date().toISOString(),
         updatedAt: activeOrder.updatedAt ?? new Date().toISOString(),
         rated: isRated,
+        quote: this.referralQuoteView(
+          activeOrder.referralPassengerLifecycle?.quote,
+        ),
+        confirmedAt:
+          activeOrder.referralPassengerLifecycle?.confirmedAt ?? null,
+        rating: this.referralRatingResult(activeOrder),
       },
     };
   }
@@ -15707,12 +16258,15 @@ export class OwnedMobilityService
       );
     }
 
+    await this.referralAuthority(identity);
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
+    this.driverTasks =
+      await this.ownedMobilityRepository!.listDriverTasksForRead();
     const passengerOrders: OwnedOrderRecord[] = [];
-    for (const o of Array.from(this.orders.values()).sort((a, b) =>
-      (b.createdAt || "").localeCompare(a.createdAt || ""),
-    )) {
+    for (const o of (
+      await this.ownedMobilityRepository!.listOrdersForRead()
+    ).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))) {
       if (
         o.partnerEntrySlug !== identity.partnerEntrySlug ||
         o.passenger?.passengerId !== passengerId
@@ -15758,12 +16312,14 @@ export class OwnedMobilityService
           pickupAddress: o.pickup.address,
           dropoffAddress: o.dropoff.address,
           fareTotal: details.fareTotal,
-          formattedFare: `NT$ ${details.fareTotal}`,
-          completedAt:
-            completedAt ??
-            o.cancelledAt ??
-            o.createdAt ??
-            new Date().toISOString(),
+          formattedFare:
+            details.fareTotal === null
+              ? "實際車資待確認"
+              : `NT$ ${details.fareTotal}`,
+          quote: this.referralQuoteView(o.referralPassengerLifecycle?.quote),
+          confirmedAt: o.referralPassengerLifecycle?.confirmedAt ?? null,
+          rating: this.referralRatingResult(o),
+          completedAt: completedAt ?? details.task?.completedAt ?? null,
           createdAt: o.createdAt ?? new Date().toISOString(),
         };
       }),
@@ -15786,9 +16342,13 @@ export class OwnedMobilityService
       );
     }
 
+    await this.referralAuthority(identity);
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = await this.getOrderAsync(orderId, identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    await this.assertPartnerOrderIdentityAsync(identity, order);
 
     if (
       order.passenger?.passengerId &&
@@ -15801,30 +16361,40 @@ export class OwnedMobilityService
       );
     }
 
+    if (order.status !== "completed")
+      throw new ApiRequestError(
+        409,
+        "PASSENGER_RECEIPT_TRIP_NOT_COMPLETED",
+        "The owned trip is not completed.",
+      );
+    this.driverTasks =
+      await this.ownedMobilityRepository!.listDriverTasksForRead();
     const details = this.resolveReferralTripDetails(order);
 
     const maskName = (name?: string | null) => {
-      if (!name) return "L. Tsai";
+      if (!name) return "乘客";
       const parts = name.trim().split(/\s+/);
       if (parts.length > 1 && parts[0] && parts[parts.length - 1]) {
         return `${parts[0][0]}. ${parts[parts.length - 1]}`;
       }
-      return name.length > 0 ? `${name[0]}*` : "L. Tsai";
+      return name.length > 0 ? `${name[0]}*` : "乘客";
     };
 
     const maskPhone = (phone?: string | null) => {
-      if (!phone) return "0912-***-820";
+      if (!phone) return "未提供";
       const cleaned = phone.replace(/[^\d+]/g, "");
       if (cleaned.length >= 10) {
         return `${cleaned.slice(0, 4)}-***-${cleaned.slice(-3)}`;
       }
-      return "0912-***-820";
+      return "未提供";
     };
 
     const total = details.fareTotal;
-    const fareBase = total > 0 ? Math.round(total * 0.35) : 0;
-    const fareDistance = total > 0 ? Math.round(total * 0.45) : 0;
-    const fareTime = total > 0 ? total - fareBase - fareDistance : 0;
+    // No actual meter component authority exists in this referral DTO. Do not
+    // manufacture base/distance/time components from an estimate or a ratio.
+    const fareBase = null,
+      fareDistance = null,
+      fareTime = null;
     const completedAt = (order as unknown as Record<string, unknown>)
       .completedAt as string | undefined;
 
@@ -15832,11 +16402,7 @@ export class OwnedMobilityService
       orderId: order.orderId,
       orderNo: order.orderNo,
       status: order.status,
-      completedAt:
-        completedAt ??
-        order.cancelledAt ??
-        order.createdAt ??
-        new Date().toISOString(),
+      completedAt: completedAt ?? details.task?.completedAt ?? null,
       passengerNameMasked: maskName(order.passenger?.name),
       passengerPhoneMasked: maskPhone(order.passenger?.phone),
       driverName: details.driverName,
@@ -15849,8 +16415,10 @@ export class OwnedMobilityService
       fareDistance,
       fareTime,
       totalFare: total,
-      formattedTotal: `NT$ ${total}`,
-      paymentChannel: `${identity.partnerEntrySlug} (月結)`,
+      formattedTotal: total === null ? "實際車資待確認" : `NT$ ${total}`,
+      paymentChannel: "付款及結算狀態未提供",
+      quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
+      confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
       downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
     };
   }
@@ -15873,9 +16441,13 @@ export class OwnedMobilityService
       );
     }
 
+    await this.referralAuthority(identity);
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = await this.getOrderAsync(orderId, identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    await this.assertPartnerOrderIdentityAsync(identity, order);
 
     if (
       order.passenger?.passengerId &&
@@ -15891,7 +16463,7 @@ export class OwnedMobilityService
     if (order.status === "cancelled") {
       return order;
     }
-
+    this.orders = [order, ...this.orders.filter((o) => o.orderId !== orderId)];
     return await this.cancelOwnedOrder(
       orderId,
       {
@@ -15901,93 +16473,219 @@ export class OwnedMobilityService
     );
   }
 
+  private referralRatingResult(
+    order: OwnedOrderRecord,
+  ): ReferralPassengerRatingResult | null {
+    const rating = order.referralPassengerLifecycle?.rating;
+    if (!rating) return null;
+    if (
+      rating.policyVersion !== "legacy" &&
+      (rating.policyVersion !== "referral_rating_v1" ||
+        typeof rating.contactRequested !== "boolean" ||
+        (rating.score <= 2 &&
+          (!rating.complaintCaseNo || !rating.createdTimelineId)))
+    )
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Stored rating provenance is incomplete.",
+      );
+    return {
+      orderId: order.orderId,
+      score: rating.score,
+      tags: rating.tags,
+      comment: rating.comment ?? null,
+      contactRequested: rating.contactRequested ?? null,
+      complaintCaseNo: rating.complaintCaseNo ?? null,
+      submittedAt: rating.submittedAt,
+    };
+  }
+
   async submitReferralPassengerRating(
     orderId: string,
     command: SubmitReferralPassengerRatingCommand,
     identity?: BootstrapRequestIdentity | null,
   ) {
+    const { owner } = await this.referralAuthority(identity);
     if (
-      !identity ||
-      identity.realm !== "partner" ||
-      identity.actorType !== "referral_passenger"
-    ) {
+      !command ||
+      command.orderId !== orderId ||
+      !Number.isInteger(command.score) ||
+      command.score < 1 ||
+      command.score > 5 ||
+      (command.tags !== undefined &&
+        (!Array.isArray(command.tags) ||
+          command.tags.some((t) => typeof t !== "string" || t.length > 100))) ||
+      (command.comment !== undefined &&
+        (typeof command.comment !== "string" ||
+          command.comment.length > 2000)) ||
+      (command.contactRequested !== undefined &&
+        typeof command.contactRequested !== "boolean") ||
+      (command.idempotencyKey !== undefined &&
+        (typeof command.idempotencyKey !== "string" ||
+          !command.idempotencyKey.trim() ||
+          command.idempotencyKey.length > 255)) ||
+      Object.keys(command).some(
+        (k) =>
+          ![
+            "orderId",
+            "score",
+            "tags",
+            "comment",
+            "contactRequested",
+            "idempotencyKey",
+          ].includes(k),
+      )
+    )
       throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
-        "Rating a referral trip requires an active referral_passenger identity.",
+        400,
+        "VALIDATION_ERROR",
+        "Invalid referral rating.",
       );
-    }
-
-    const passengerId = identity.drtsPassengerId ?? identity.actorId;
-
-    const order = await this.getOrderAsync(orderId, identity);
-
-    if (
-      order.passenger?.passengerId &&
-      order.passenger.passengerId !== passengerId
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "PASSENGER_SCOPE_MISMATCH",
-        "Authenticated referral passenger cannot rate another passenger's trip.",
+    const tags = this.normalizeReferralRatingTags(command.tags),
+      comment = command.comment?.trim() || null;
+    const verify = (order: OwnedOrderRecord) => {
+      if (
+        order.tenantId !== owner.tenantId ||
+        order.partnerId !== owner.partnerId ||
+        order.partnerProgramId !== owner.partnerProgramId ||
+        order.partnerEntrySlug !== owner.entrySlug ||
+        order.passenger?.passengerId !== owner.drtsPassengerId
+      )
+        throw new ApiRequestError(
+          403,
+          "PARTNER_SCOPE_MISMATCH",
+          "Rating belongs to another referral passenger.",
+        );
+      if (order.status !== "completed")
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+          "Only a completed own trip can be rated.",
+        );
+    };
+    const match = (order: OwnedOrderRecord) => {
+      const existing = order.referralPassengerLifecycle?.rating;
+      if (!existing) return false;
+      this.assertIdempotentReferralRating(
+        existing,
+        command.score,
+        tags,
+        comment,
       );
-    }
-
-    if (order.status !== "completed") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PASSENGER_RATING_TRIP_NOT_COMPLETED",
-        "A passenger rating can only be submitted after trip completion.",
-        { orderId: order.orderId, status: order.status },
+      this.referralRatingResult(order);
+      if (
+        existing.policyVersion !== "legacy" &&
+        existing.contactRequested !== command.contactRequested
+      )
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_ALREADY_SUBMITTED",
+          "A different contact preference was already submitted.",
+        );
+      return true;
+    };
+    let committed: OwnedOrderRecord;
+    try {
+      committed = await this.ownedMobilityRepository!.withTransaction(
+        async (tx) => {
+          const current =
+            await this.ownedMobilityRepository!.findOrderForUpdate(tx, orderId);
+          if (!current)
+            throw new ApiRequestError(
+              404,
+              "ORDER_NOT_FOUND",
+              "Order not found.",
+            );
+          const order = current.order;
+          verify(order);
+          if (match(order)) return order;
+          if (typeof command.contactRequested !== "boolean")
+            throw new ApiRequestError(
+              400,
+              "VALIDATION_ERROR",
+              "Explicit contact preference is required.",
+            );
+          if (command.score <= 2 && !this.referralComplaintService)
+            throw new ApiRequestError(
+              503,
+              "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+              "Canonical complaint service is unavailable.",
+            );
+          const hook =
+            command.score <= 2
+              ? this.referralComplaintService!.prepareReferralRatingHook(
+                  {
+                    orderId,
+                    passengerId: owner.drtsPassengerId,
+                    tenantId: owner.tenantId,
+                  },
+                  {
+                    score: command.score,
+                    comment,
+                    contactRequested: command.contactRequested,
+                  },
+                )
+              : null;
+          const next: OwnedOrderRecord = {
+            ...order,
+            updatedAt: new Date().toISOString(),
+            referralPassengerLifecycle: {
+              ...order.referralPassengerLifecycle,
+              rating: {
+                orderId,
+                score: command.score,
+                tags,
+                ...(comment ? { comment } : {}),
+                ...(command.idempotencyKey
+                  ? { idempotencyKey: command.idempotencyKey }
+                  : {}),
+                submittedAt: new Date().toISOString(),
+                policyVersion: "referral_rating_v1",
+                contactRequested: command.contactRequested,
+                complaintCaseNo: hook?.caseNo ?? null,
+                createdTimelineId: hook?.createdTimelineId ?? null,
+              },
+            },
+          };
+          await hook?.execute(tx);
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            orders: [next],
+          });
+          return next;
+        },
       );
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.getStatus() < 500)
+        throw error;
+      const recovered =
+        await this.ownedMobilityRepository!.findOrderById(orderId);
+      if (!recovered) throw error;
+      verify(recovered);
+      if (!match(recovered)) throw error;
+      committed = recovered;
     }
-
-    const score = command.score;
-    const tags = this.normalizeReferralRatingTags(command.tags);
-    const comment = command.comment?.trim() || null;
-
-    const existing = this.getReferralLifecycle(order)?.rating;
-    if (existing) {
-      this.assertIdempotentReferralRating(existing, score, tags, comment);
-      return {
+    const rating = committed.referralPassengerLifecycle!.rating!;
+    if (rating.policyVersion === "referral_rating_v1" && rating.score <= 2) {
+      if (!this.referralComplaintService)
+        throw new ApiRequestError(
+          503,
+          "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+          "Case readback unavailable.",
+        );
+      await this.referralComplaintService.publishReferralRatingCase({
+        caseNo: rating.complaintCaseNo!,
+        createdTimelineId: rating.createdTimelineId!,
         orderId,
-        score: existing.score,
-        comment: existing.comment ?? null,
-        tags: existing.tags ?? [],
-        submittedAt: existing.submittedAt,
-      };
+        passengerId: owner.drtsPassengerId,
+        tenantId: owner.tenantId,
+      });
     }
-
-    const ratingRecord: NonNullable<
-      NonNullable<OwnedOrderRecord["referralPassengerLifecycle"]>["rating"]
-    > = {
-      orderId,
-      score,
-      tags,
-      submittedAt: new Date().toISOString(),
-    };
-    if (comment) {
-      ratingRecord.comment = comment;
-    }
-    if (command.idempotencyKey) {
-      ratingRecord.idempotencyKey = command.idempotencyKey;
-    }
-
-    const nextOrder = this.updateReferralLifecycle(order, {
-      rating: ratingRecord,
-    });
-    await this.persistChangesRequired(
-      { orders: [nextOrder] },
-      "referral.rating.idempotency",
-    );
-
-    return {
-      orderId,
-      score: ratingRecord.score,
-      comment: ratingRecord.comment ?? null,
-      tags: ratingRecord.tags,
-      submittedAt: ratingRecord.submittedAt,
-    };
+    this.orders = [
+      committed,
+      ...this.orders.filter((o) => o.orderId !== orderId),
+    ];
+    return this.referralRatingResult(committed)!;
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {

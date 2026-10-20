@@ -1,12 +1,12 @@
 import { notFound } from "next/navigation";
-import { PassengerEmbed } from "@/components/passenger-embed";
+import { PassengerEmbed } from "../../../components/passenger-embed";
 import {
   getReferralActiveTripServer,
   getReferralTripHistoryServer,
   getReferralTripReceiptServer,
-} from "@/lib/embed-booking-api";
-import { resolveEmbedContext } from "@/lib/embed-context";
-import { isPublicPartnerEntryNotFoundError } from "@/lib/embed-api";
+} from "../../../lib/embed-booking-api";
+import { resolveEmbedContext } from "../../../lib/embed-context";
+import { isPublicPartnerEntryNotFoundError } from "../../../lib/embed-api";
 
 export default async function PassengerEmbedPage({
   params,
@@ -43,7 +43,7 @@ export default async function PassengerEmbedPage({
 
   let liveData: Parameters<typeof PassengerEmbed>[0]["liveData"] = null;
 
-  if (context.state === "handoff") {
+  if (context.state === "handoff" && context.session?.identityActive) {
     const screen = typeof query.screen === "string" ? query.screen : "book";
     const shouldLoadActive =
       screen === "trip" ||
@@ -57,18 +57,34 @@ export default async function PassengerEmbedPage({
       screen === "cancelled";
 
     const activeTrip = shouldLoadActive
-      ? await getReferralActiveTripServer().catch(() => null)
+      ? await getReferralActiveTripServer()
       : null;
     const history = shouldLoadHistory
-      ? await getReferralTripHistoryServer().catch(() => null)
+      ? await getReferralTripHistoryServer()
       : null;
     const selectedOrderId =
       typeof query.orderId === "string" ? query.orderId : null;
+    if (
+      selectedOrderId &&
+      history &&
+      !history.items.some((trip) => trip.orderId === selectedOrderId) &&
+      activeTrip?.trip?.orderId !== selectedOrderId
+    ) {
+      throw Object.assign(
+        new Error(
+          "The selected referral order is not available in this session.",
+        ),
+        { status: 404, code: "REFERRAL_ORDER_NOT_FOUND" },
+      );
+    }
     const receiptOrderId =
-      selectedOrderId ?? activeTrip?.trip?.orderId ?? history?.items?.[0]?.orderId ?? null;
+      selectedOrderId ??
+      activeTrip?.trip?.orderId ??
+      history?.items?.[0]?.orderId ??
+      null;
     const receipt =
       screen === "receipt" && receiptOrderId
-        ? await getReferralTripReceiptServer(receiptOrderId).catch(() => null)
+        ? await getReferralTripReceiptServer(receiptOrderId)
         : null;
 
     liveData = { activeTrip, history, receipt, selectedOrderId };

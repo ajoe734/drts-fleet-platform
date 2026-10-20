@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
@@ -12,6 +12,11 @@ import {
 import * as sessionModule from "../../apps/referral-embed-web/lib/embed-partner-session";
 
 describe("referral embed passenger lifecycle API integration", () => {
+  beforeEach(() => {
+    vi.spyOn(sessionModule, "getReferralIdentityHeaders").mockResolvedValue({
+      Authorization: "Bearer controlled-canonical-session",
+    });
+  });
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -34,13 +39,14 @@ describe("referral embed passenger lifecycle API integration", () => {
   };
 
   it("throws error when session is inactive or missing", async () => {
-    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
-      null as never,
+    vi.spyOn(sessionModule, "readActiveReferralSession").mockRejectedValue(
+      new Error("UNAUTHORIZED"),
     );
 
     await expect(
       createReferralBookingServer({
         entrySlug: "referral-demo-community",
+        quoteId: "owned-quote-unit",
         pickupAddress: "A",
         dropoffAddress: "B",
       }),
@@ -48,11 +54,13 @@ describe("referral embed passenger lifecycle API integration", () => {
   });
 
   it("sends booking request to authority with session identity headers", async () => {
-    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
+    vi.spyOn(sessionModule, "readActiveReferralSession").mockResolvedValue(
       mockSession as never,
     );
 
-    const fetchSpy = vi.fn(
+    const fetchSpy = vi.fn<
+      (url: string, init: RequestInit) => Promise<Response>
+    >(
       async () =>
         new Response(
           JSON.stringify({
@@ -69,6 +77,7 @@ describe("referral embed passenger lifecycle API integration", () => {
 
     const result = await createReferralBookingServer({
       entrySlug: "referral-demo-community",
+      quoteId: "owned-quote-unit",
       pickupAddress: "Pickup Spot",
       dropoffAddress: "Dropoff Spot",
       idempotencyKey: "idemp-001",
@@ -80,25 +89,34 @@ describe("referral embed passenger lifecycle API integration", () => {
       status: "pending",
     });
 
+    expect(
+      Object.keys((fetchSpy.mock.calls[0]?.[1] as any).headers),
+    ).not.toEqual(
+      expect.arrayContaining([
+        "x-actor-type",
+        "x-drts-passenger-id",
+        "x-tenant-id",
+      ]),
+    );
     expect(fetchSpy).toHaveBeenCalledWith(
       expect.stringContaining("/partner/referral/passenger/bookings"),
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          "x-actor-type": "referral_passenger",
-          "x-drts-passenger-id": "pax-ref-001",
-          "x-tenant-id": "tenant-demo",
+          Authorization: "Bearer controlled-canonical-session",
         }),
       }),
     );
   });
 
   it("fetches active trip from authority", async () => {
-    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
+    vi.spyOn(sessionModule, "readActiveReferralSession").mockResolvedValue(
       mockSession as never,
     );
 
-    const fetchSpy = vi.fn(
+    const fetchSpy = vi.fn<
+      (url: string, init: RequestInit) => Promise<Response>
+    >(
       async () =>
         new Response(
           JSON.stringify({
@@ -121,11 +139,13 @@ describe("referral embed passenger lifecycle API integration", () => {
   });
 
   it("treats a successful null active-trip envelope as no active trip", async () => {
-    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
+    vi.spyOn(sessionModule, "readActiveReferralSession").mockResolvedValue(
       mockSession as never,
     );
 
-    const fetchSpy = vi.fn(
+    const fetchSpy = vi.fn<
+      (url: string, init: RequestInit) => Promise<Response>
+    >(
       async () =>
         new Response(JSON.stringify({ data: null }), {
           status: 200,
@@ -138,11 +158,13 @@ describe("referral embed passenger lifecycle API integration", () => {
   });
 
   it("fetches trip history from authority", async () => {
-    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
+    vi.spyOn(sessionModule, "readActiveReferralSession").mockResolvedValue(
       mockSession as never,
     );
 
-    const fetchSpy = vi.fn(
+    const fetchSpy = vi.fn<
+      (url: string, init: RequestInit) => Promise<Response>
+    >(
       async () =>
         new Response(
           JSON.stringify({
@@ -161,11 +183,13 @@ describe("referral embed passenger lifecycle API integration", () => {
   });
 
   it("fetches PII-masked trip receipt from authority", async () => {
-    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
+    vi.spyOn(sessionModule, "readActiveReferralSession").mockResolvedValue(
       mockSession as never,
     );
 
-    const fetchSpy = vi.fn(
+    const fetchSpy = vi.fn<
+      (url: string, init: RequestInit) => Promise<Response>
+    >(
       async () =>
         new Response(
           JSON.stringify({
@@ -187,11 +211,13 @@ describe("referral embed passenger lifecycle API integration", () => {
   });
 
   it("sends trip cancellation request to authority", async () => {
-    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
+    vi.spyOn(sessionModule, "readActiveReferralSession").mockResolvedValue(
       mockSession as never,
     );
 
-    const fetchSpy = vi.fn(
+    const fetchSpy = vi.fn<
+      (url: string, init: RequestInit) => Promise<Response>
+    >(
       async () =>
         new Response(
           JSON.stringify({
@@ -210,11 +236,13 @@ describe("referral embed passenger lifecycle API integration", () => {
   });
 
   it("sends rating submission to authority", async () => {
-    vi.spyOn(sessionModule, "getReferralEmbedSession").mockResolvedValue(
+    vi.spyOn(sessionModule, "readActiveReferralSession").mockResolvedValue(
       mockSession as never,
     );
 
-    const fetchSpy = vi.fn(
+    const fetchSpy = vi.fn<
+      (url: string, init: RequestInit) => Promise<Response>
+    >(
       async () =>
         new Response(
           JSON.stringify({
@@ -228,6 +256,7 @@ describe("referral embed passenger lifecycle API integration", () => {
     const result = await submitReferralTripRatingServer("order-123", {
       orderId: "order-123",
       score: 5,
+      contactRequested: false,
       comment: "Great",
       idempotencyKey: "rate-idemp-1",
     });

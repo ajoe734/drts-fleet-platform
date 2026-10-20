@@ -768,5 +768,26 @@
         "contact_requested remains the original immutable passenger choice. A false low-rating choice still has a canonical case and timeline with an explicit no-contact description; internal audit/SLA handling does not imply passenger contact."
       ]
     }
+  ],
+  "referral_passenger_journey_allocations": [
+    {
+      "task_id": "REFERRAL-EMBED-VERIFIED-SESSION-CANONICAL-JOURNEY-FLOW-20261015",
+      "version": "V0127",
+      "migration_filename": "V0127__referral_passenger_fare_quote_snapshots.sql",
+      "domain": "referral_passenger_quote_and_rating_provenance",
+      "target_schema": "ops",
+      "primary_tables": ["ops.phase1_referral_fare_quote_snapshots"],
+      "referenced_tables": [
+        "ops.phase1_owned_orders",
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "R6 normal reservation after V0126: immutable referral-owned taxi-policy estimates and atomic consumption; explicitly identify pre-existing referral ratings as legacy without creating cases or changing their contact choice.",
+      "table_invariants": [
+        "Quote ownership is the exact verified tenant/partner/program/entry/passenger tuple; no passenger.accounts FK or fabricated pre-order owned order.",
+        "Only consumed order/time can change. Quote consumption, original order/intent and notification route commit together.",
+        "New referral ratings require explicit policy provenance and score<=2 canonical case/timeline regardless of contact preference. Migration marks only pre-existing rating objects legacy; missing provenance is not legacy."
+      ]
+    }
   ]
 }

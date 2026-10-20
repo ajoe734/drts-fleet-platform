@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/embed-partner-session", () => ({
-  getReferralEmbedSession: vi.fn(),
+  readActiveReferralSession: vi.fn(),
+  getReferralIdentityHeaders: vi.fn(async () => ({
+    Authorization: "Bearer unit-canonical-session",
+  })),
 }));
 
 import { createReferralBookingServer } from "../../lib/embed-booking-api";
-import { getReferralEmbedSession } from "../../lib/embed-partner-session";
+import { readActiveReferralSession } from "../../lib/embed-partner-session";
 
 describe("referral booking authority adapter", () => {
   beforeEach(() => {
-    vi.mocked(getReferralEmbedSession).mockResolvedValue({
+    vi.mocked(readActiveReferralSession).mockResolvedValue({
       identityActive: true,
       partnerEntrySlug: "yuhe-residence",
       drtsPassengerId: "referral-demo-yuhe-residence",
@@ -46,6 +49,7 @@ describe("referral booking authority adapter", () => {
   it("uses the API-prefixed referral route and returns camel-case contract data", async () => {
     const result = await createReferralBookingServer({
       entrySlug: "yuhe-residence",
+      quoteId: "owned-quote-unit",
       pickupAddress: "台北車站",
       dropoffAddress: "桃園國際機場 T2",
     });

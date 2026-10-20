@@ -1,5 +1,5 @@
 import { persistOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
@@ -13,6 +13,7 @@ import type {
   DriverTaskRecord,
   ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
+  ReferralPassengerFareQuoteRecord,
   OrderPartnerNotificationRoute,
   PassengerDispatchDisclosureSnapshot,
   TenantBookingListQuery,
@@ -263,6 +264,159 @@ export class OwnedMobilityRepository {
           "ops.phase1_owned_orders",
         )
       : null;
+  }
+
+  private requireReferralStorage() {
+    if (!this.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Referral storage is unavailable.",
+      );
+  }
+
+  async insertReferralFareQuoteSnapshot(
+    quote: ReferralPassengerFareQuoteRecord,
+  ) {
+    this.requireReferralStorage();
+    await this.databaseService!.query(
+      `INSERT INTO ops.phase1_referral_fare_quote_snapshots
+       (quote_id,tenant_id,partner_id,partner_program_id,entry_slug,drts_passenger_id,created_at,expires_at,record)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
+      [
+        quote.quoteId,
+        quote.tenantId,
+        quote.partnerId,
+        quote.partnerProgramId,
+        quote.entrySlug,
+        quote.drtsPassengerId,
+        quote.createdAt,
+        quote.expiresAt,
+        JSON.stringify(quote),
+      ],
+    );
+  }
+
+  async findReferralFareQuoteSnapshotById(
+    quoteId: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ) {
+    this.requireReferralStorage();
+    const result = await executor.query<JsonRecordRow>(
+      "SELECT record FROM ops.phase1_referral_fare_quote_snapshots WHERE quote_id=$1",
+      [quoteId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<ReferralPassengerFareQuoteRecord>(
+          result.rows[0].record,
+          "referral quote",
+        )
+      : null;
+  }
+
+  async findReferralOrderByIdempotencyKey(
+    owner: Pick<
+      ReferralPassengerFareQuoteRecord,
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "entrySlug"
+      | "drtsPassengerId"
+    >,
+    key: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ) {
+    this.requireReferralStorage();
+    const result = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_owned_orders WHERE tenant_id=$1
+       AND record->>'partnerId'=$2 AND record->>'partnerProgramId'=$3
+       AND record->>'partnerEntrySlug'=$4 AND record->'passenger'->>'passengerId'=$5
+       AND record->'referralPassengerLifecycle'->>'bookingIdempotencyKey'=$6 LIMIT 2`,
+      [
+        owner.tenantId,
+        owner.partnerId,
+        owner.partnerProgramId,
+        owner.entrySlug,
+        owner.drtsPassengerId,
+        key,
+      ],
+    );
+    if (result.rows.length > 1)
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Ambiguous committed booking intent.",
+      );
+    return result.rows[0]
+      ? this.parseRecord<OwnedOrderRecord>(
+          result.rows[0].record,
+          "referral booking",
+        )
+      : null;
+  }
+
+  async lockReferralBookingIntent(
+    ownerAndKey: string[],
+    executor: OwnedMobilityQueryExecutor,
+  ) {
+    const hex = createHash("sha256")
+      .update(JSON.stringify(ownerAndKey))
+      .digest("hex")
+      .slice(0, 16);
+    await executor.query("SELECT pg_advisory_xact_lock($1::bigint)", [
+      BigInt.asIntN(64, BigInt("0x" + hex)).toString(),
+    ]);
+  }
+
+  async claimReferralFareQuoteSnapshot(
+    quote: ReferralPassengerFareQuoteRecord,
+    orderId: string,
+    executor: OwnedMobilityQueryExecutor,
+  ) {
+    this.requireReferralStorage();
+    await executor.query(
+      "SELECT quote_id FROM ops.phase1_referral_fare_quote_snapshots WHERE quote_id=$1 FOR UPDATE",
+      [quote.quoteId],
+    );
+    // Wall-clock time is captured AFTER the lock wait; transaction start is not expiry authority.
+    const clock = await executor.query<{ now: Date | string }>(
+      "SELECT clock_timestamp() AS now",
+    );
+    const now = new Date(clock.rows[0]!.now).toISOString();
+    const result = await executor.query<JsonRecordRow>(
+      `UPDATE ops.phase1_referral_fare_quote_snapshots SET consumed_by_order_id=$7,consumed_at=$8,
+       record=jsonb_set(jsonb_set(record,'{consumedByOrderId}',to_jsonb($7::text)),'{consumedAt}',to_jsonb($8::text))
+       WHERE quote_id=$1 AND tenant_id=$2 AND partner_id=$3 AND partner_program_id=$4
+       AND entry_slug=$5 AND drts_passenger_id=$6 AND consumed_by_order_id IS NULL AND expires_at>$8::timestamptz
+       RETURNING record`,
+      [
+        quote.quoteId,
+        quote.tenantId,
+        quote.partnerId,
+        quote.partnerProgramId,
+        quote.entrySlug,
+        quote.drtsPassengerId,
+        orderId,
+        now,
+      ],
+    );
+    if (!result.rows[0]) {
+      const current = await this.findReferralFareQuoteSnapshotById(
+        quote.quoteId,
+        executor,
+      );
+      throw new ApiRequestError(
+        409,
+        current?.consumedByOrderId
+          ? "FARE_QUOTE_ALREADY_CONSUMED"
+          : "FARE_QUOTE_EXPIRED",
+        "The quote can no longer be claimed.",
+      );
+    }
+    return this.parseRecord<ReferralPassengerFareQuoteRecord>(
+      result.rows[0].record,
+      "claimed referral quote",
+    );
   }
 
   async listOrdersForRead(

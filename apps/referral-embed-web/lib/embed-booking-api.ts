@@ -6,254 +6,165 @@ import type {
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
+  ReferralPassengerQuoteCommand,
+  ReferralPassengerFareQuote,
+  ReferralPassengerRatingResult,
 } from "@drts/contracts";
-import { getReferralEmbedSession } from "./embed-partner-session";
+import {
+  readActiveReferralSession,
+  getReferralIdentityHeaders,
+} from "./embed-partner-session";
 import { deepCamelize } from "./embed-api";
 import { getServerApiBaseUrl } from "./embed-runtime";
 
-const API_URL = getServerApiBaseUrl();
-
-type ReferralBookingResult = {
-  orderId: string;
-  bookingId?: string;
-  status: string;
-};
-
-type ReferralPassengerRatingResult = {
-  orderId: string;
-  score: number;
-  comment: string | null;
-  tags: string[];
-  submittedAt: string;
-};
-
-const METADATA_IDENTITY_TOKEN_URL =
-  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
-const RUN_APP_HOST_SUFFIX = ".a.run.app";
-
-async function mintMetadataIdentityToken(
-  audience: string,
-): Promise<string | null> {
-  const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
-  metadataUrl.searchParams.set("audience", audience);
-  metadataUrl.searchParams.set("format", "full");
+export class ReferralBookingApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+  ) {
+    super(code);
+    this.name = "ReferralBookingApiError";
+  }
+}
+export function referralErrorResponse(error: unknown) {
+  const e = error as { status?: unknown; code?: unknown };
+  const status =
+    Number.isInteger(e?.status) &&
+    Number(e.status) >= 400 &&
+    Number(e.status) <= 599
+      ? Number(e.status)
+      : 503;
+  const code =
+    typeof e?.code === "string" && /^[A-Za-z][A-Za-z0-9_]{0,99}$/.test(e.code)
+      ? e.code
+      : "REFERRAL_UPSTREAM_UNAVAILABLE";
+  return Response.json(
+    {
+      ok: false,
+      error: { code, message: "無法完成這項操作，請重試或重新驗證。" },
+    },
+    { status, headers: { "Cache-Control": "no-store, max-age=0" } },
+  );
+}
+export async function readReferralBody<T extends object>(
+  request: Request,
+): Promise<T> {
+  let body: unknown;
   try {
-    const response = await fetch(metadataUrl, {
-      cache: "no-store",
-      headers: { "Metadata-Flavor": "Google" },
-    });
-    return response.ok ? response.text() : null;
+    body = await request.json();
   } catch {
-    return null;
+    throw new ReferralBookingApiError(400, "VALIDATION_ERROR");
   }
+  if (!body || typeof body !== "object" || Array.isArray(body))
+    throw new ReferralBookingApiError(400, "VALIDATION_ERROR");
+  return body as T;
 }
-
-async function buildIdentityHeaders(
-  session: NonNullable<Awaited<ReturnType<typeof getReferralEmbedSession>>>,
+export function referralResult(data: unknown) {
+  return Response.json(
+    { ok: true, data },
+    { headers: { "Cache-Control": "no-store, max-age=0" } },
+  );
+}
+async function request<T>(
+  path: string,
+  method = "GET",
+  command?: unknown,
+  key?: string,
+  allowNull = false,
+): Promise<T> {
+  const session = await readActiveReferralSession();
+  const headers = await getReferralIdentityHeaders(session);
+  let response: Response;
+  try {
+    response = await fetch(
+      `${getServerApiBaseUrl()}/api/partner/referral/passenger/${path}`,
+      {
+        method,
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+          ...(key ? { "Idempotency-Key": key } : {}),
+        },
+        ...(command === undefined ? {} : { body: JSON.stringify(command) }),
+        cache: "no-store",
+        redirect: "manual",
+      },
+    );
+  } catch {
+    throw new ReferralBookingApiError(503, "REFERRAL_UPSTREAM_UNAVAILABLE");
+  }
+  const body = await response.json().catch(() => null);
+  if (!response.ok)
+    throw new ReferralBookingApiError(
+      response.status,
+      typeof body?.error?.code === "string"
+        ? body.error.code
+        : "REFERRAL_UPSTREAM_REQUEST_FAILED",
+    );
+  if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
+    !("data" in body) ||
+    (body.data === null && !allowNull)
+  )
+    throw new ReferralBookingApiError(
+      502,
+      "REFERRAL_UPSTREAM_INVALID_RESPONSE",
+    );
+  return deepCamelize(body.data) as T;
+}
+export function quoteReferralFareServer(
+  command: ReferralPassengerQuoteCommand,
 ) {
-  const id = session.identity;
-  const configuredAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
-  const targetUrl = new URL(API_URL);
-  const audience =
-    configuredAudience ||
-    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX) ? targetUrl.origin : null);
-  const identityToken = audience ? await mintMetadataIdentityToken(audience) : null;
-  return {
-    "x-actor-type": id.actorType || "referral_passenger",
-    "x-actor-id": id.drtsPassengerId || id.actorId,
-    "x-realm": id.realm || "partner",
-    "x-tenant-id": id.tenantId || "",
-    "x-partner-id": id.partnerId || "",
-    "x-partner-program-id": id.partnerProgramId || "",
-    "x-partner-entry-slug": id.partnerEntrySlug || session.partnerEntrySlug,
-    "x-drts-passenger-id": id.drtsPassengerId || session.drtsPassengerId,
-    ...(identityToken ? { "x-drts-google-id-token": identityToken } : {}),
-  };
+  return request<ReferralPassengerFareQuote>("quote", "POST", command);
 }
-
-export async function createReferralBookingServer(
+export function createReferralBookingServer(
   command: CreateReferralPassengerBookingCommand,
-): Promise<ReferralBookingResult> {
-  const session = await getReferralEmbedSession();
-  if (!session || !session.identityActive) {
-    throw new Error("UNAUTHORIZED: Active referral session required");
-  }
-
-  const response = await fetch(
-    `${API_URL}/api/partner/referral/passenger/bookings`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(await buildIdentityHeaders(session)),
-        ...(command.idempotencyKey
-          ? { "Idempotency-Key": command.idempotencyKey }
-          : {}),
-      },
-      body: JSON.stringify(command),
-      cache: "no-store",
-    },
-  );
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(
-      payload?.error?.message || `Booking failed with ${response.status}`,
-    );
-  }
-  return deepCamelize(payload.data) as ReferralBookingResult;
+) {
+  return request<{
+    orderId: string;
+    bookingId?: string;
+    status: string;
+    replayed: boolean;
+    quote: ReferralPassengerFareQuote;
+    confirmedAt: string;
+  }>("bookings", "POST", command, command.idempotencyKey);
 }
-
-export async function getReferralActiveTripServer(): Promise<ReferralPassengerActiveTripResult | null> {
-  const session = await getReferralEmbedSession();
-  if (!session || !session.identityActive) {
-    throw new Error("UNAUTHORIZED: Active referral session required");
-  }
-
-  const response = await fetch(
-    `${API_URL}/api/partner/referral/passenger/active`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(await buildIdentityHeaders(session)),
-      },
-      cache: "no-store",
-    },
+export function getReferralActiveTripServer() {
+  return request<ReferralPassengerActiveTripResult | null>(
+    "active",
+    "GET",
+    undefined,
+    undefined,
+    true,
   );
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(
-      payload?.error?.message ||
-        `Active trip lookup failed with ${response.status}`,
-    );
-  }
-  return deepCamelize(payload.data) as ReferralPassengerActiveTripResult | null;
 }
-
-export async function getReferralTripHistoryServer(): Promise<{
-  items: ReferralPassengerHistoryItem[];
-}> {
-  const session = await getReferralEmbedSession();
-  if (!session || !session.identityActive) {
-    throw new Error("UNAUTHORIZED: Active referral session required");
-  }
-
-  const response = await fetch(
-    `${API_URL}/api/partner/referral/passenger/history`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(await buildIdentityHeaders(session)),
-      },
-      cache: "no-store",
-    },
+export function getReferralTripHistoryServer() {
+  return request<{ items: ReferralPassengerHistoryItem[] }>("history");
+}
+export function getReferralTripReceiptServer(orderId: string) {
+  return request<ReferralPassengerReceipt>(
+    `orders/${encodeURIComponent(orderId)}/receipt`,
   );
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(
-      payload?.error?.message ||
-        `Trip history lookup failed with ${response.status}`,
-    );
-  }
-  return deepCamelize(payload.data) as {
-    items: ReferralPassengerHistoryItem[];
-  };
 }
-
-export async function getReferralTripReceiptServer(
-  orderId: string,
-): Promise<ReferralPassengerReceipt> {
-  const session = await getReferralEmbedSession();
-  if (!session || !session.identityActive) {
-    throw new Error("UNAUTHORIZED: Active referral session required");
-  }
-
-  const response = await fetch(
-    `${API_URL}/api/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/receipt`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(await buildIdentityHeaders(session)),
-      },
-      cache: "no-store",
-    },
-  );
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(
-      payload?.error?.message ||
-        `Receipt lookup failed with ${response.status}`,
-    );
-  }
-  return deepCamelize(payload.data) as ReferralPassengerReceipt;
-}
-
-export async function cancelReferralTripServer(
+export function cancelReferralTripServer(
   orderId: string,
   command: CancelReferralPassengerTripCommand,
-): Promise<OwnedOrderRecord> {
-  const session = await getReferralEmbedSession();
-  if (!session || !session.identityActive) {
-    throw new Error("UNAUTHORIZED: Active referral session required");
-  }
-
-  const response = await fetch(
-    `${API_URL}/api/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/cancel`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(await buildIdentityHeaders(session)),
-      },
-      body: JSON.stringify(command),
-      cache: "no-store",
-    },
+) {
+  return request<OwnedOrderRecord>(
+    `orders/${encodeURIComponent(orderId)}/cancel`,
+    "POST",
+    { ...command, orderId },
   );
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(
-      payload?.error?.message ||
-        `Trip cancellation failed with ${response.status}`,
-    );
-  }
-  return deepCamelize(payload.data) as OwnedOrderRecord;
 }
-
-export async function submitReferralTripRatingServer(
+export function submitReferralTripRatingServer(
   orderId: string,
   command: SubmitReferralPassengerRatingCommand,
-): Promise<ReferralPassengerRatingResult> {
-  const session = await getReferralEmbedSession();
-  if (!session || !session.identityActive) {
-    throw new Error("UNAUTHORIZED: Active referral session required");
-  }
-
-  const response = await fetch(
-    `${API_URL}/api/partner/referral/passenger/orders/${encodeURIComponent(orderId)}/rating`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(await buildIdentityHeaders(session)),
-      },
-      body: JSON.stringify(command),
-      cache: "no-store",
-    },
+) {
+  return request<ReferralPassengerRatingResult>(
+    `orders/${encodeURIComponent(orderId)}/rating`,
+    "POST",
+    { ...command, orderId },
   );
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(
-      payload?.error?.message ||
-        `Rating submission failed with ${response.status}`,
-    );
-  }
-  return deepCamelize(payload.data) as ReferralPassengerRatingResult;
 }
