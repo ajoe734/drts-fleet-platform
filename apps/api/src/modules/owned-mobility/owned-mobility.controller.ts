@@ -484,6 +484,22 @@ export class OwnedMobilityController {
     );
   }
 
+  @Get("partner/referral/passenger/orders/:orderId/receipt/pdf")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getReferralPassengerReceiptPdf(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getReferralPassengerReceiptPdf(
+        orderId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
   @Get("partner/referral/passenger/orders/:orderId/receipt/download")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   async downloadReferralPassengerReceipt(
