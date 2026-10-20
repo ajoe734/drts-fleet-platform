@@ -259,8 +259,18 @@ describe("WebhooksPage mounted server actions preserve Next redirect control flo
           status: "test_pending",
         });
       if (kind === "disable") expect(endpoint.status).toBe("disabled");
-      if (kind === "delete")
+      if (kind === "delete") {
+        expect(endpoint).toBeUndefined();
+        expect(state.webhookEndpoints).toHaveLength(0);
         expect(h.service.listWebhookEndpoints(tenantId)).toHaveLength(0);
+        const restarted = new TenantPartnerService(
+          new AuditNotificationService(),
+          h.persistence.repository,
+        );
+        services.push(restarted);
+        await restarted.onModuleInit();
+        expect(restarted.listWebhookEndpoints(tenantId)).toHaveLength(0);
+      }
       if (kind === "rotate") {
         expect(endpoint.secretVersion).toBe(2);
         expect(target.searchParams.get("revealSecret")).toBe("1");
@@ -308,32 +318,46 @@ describe("WebhooksPage mounted server actions preserve Next redirect control flo
     },
   );
 
-  it("does not redirect or revalidate a create before the real repository command ACK", async () => {
-    const h = await prepare("create", "Create endpoint", "create");
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    h.persistence.holdCommit(() => gate);
-    fireEvent.submit(h.form);
-    try {
-      await waitFor(() =>
-        expect(
-          h.persistence.query.mock.calls.some(([sql]) => sql === "COMMIT"),
-        ).toBe(true),
+  it.each([
+    ["create", "Create endpoint", "create", 0, 1],
+    ["delete", "Delete endpoint", "edit", 1, 0],
+  ] as const)(
+    "does not redirect or revalidate a %s before the real repository command ACK",
+    async (kind, label, mode, countBeforeAck, countAfterAck) => {
+      const h = await prepare(kind, label, mode);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      h.persistence.holdCommit(() => gate);
+      fireEvent.submit(h.form);
+      try {
+        await waitFor(() =>
+          expect(
+            h.persistence.query.mock.calls.some(([sql]) => sql === "COMMIT"),
+          ).toBe(true),
+        );
+        expect(h.caught).not.toHaveBeenCalled();
+        expect(mocks.revalidate).not.toHaveBeenCalled();
+        expect(h.service.listWebhookEndpoints(tenantId)).toHaveLength(
+          countBeforeAck,
+        );
+      } finally {
+        release();
+      }
+      await waitFor(() => expect(h.caught).toHaveBeenCalledOnce());
+      expect(h.service.listWebhookEndpoints(tenantId)).toHaveLength(
+        countAfterAck,
       );
-      expect(h.caught).not.toHaveBeenCalled();
-      expect(mocks.revalidate).not.toHaveBeenCalled();
-      expect(h.service.listWebhookEndpoints(tenantId)).toHaveLength(0);
-    } finally {
-      release();
-    }
-    await waitFor(() => expect(h.caught).toHaveBeenCalledOnce());
-    const target = new URL(
-      getURLFromRedirectError(h.caught.mock.calls[0]![0])!,
-      "https://tenant.example.test",
-    );
-    expect(target.searchParams.get("error")).toBeNull();
-    expect(target.searchParams.get("success")).toBeTruthy();
-  });
+      expect(
+        (await h.persistence.repository.loadState()).webhookEndpoints,
+      ).toHaveLength(countAfterAck);
+      const target = new URL(
+        getURLFromRedirectError(h.caught.mock.calls[0]![0])!,
+        "https://tenant.example.test",
+      );
+      expect(target.searchParams.get("error")).toBeNull();
+      expect(target.searchParams.get("success")).toBeTruthy();
+    },
+  );
 });

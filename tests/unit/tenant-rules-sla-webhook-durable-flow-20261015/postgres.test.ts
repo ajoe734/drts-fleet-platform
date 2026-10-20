@@ -4,6 +4,7 @@ import { DatabaseService } from "../../../apps/api/src/common/db";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { TenantPartnerRepository } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { WebhookDispatchService } from "../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
 // The existing mandatory unit CI job migrates the official schema and supplies
 // this disposable database. Never connect to PostgreSQL on the worker VM.
@@ -149,6 +150,227 @@ describe.skipIf(!hosted)(
       } finally {
         service.onModuleDestroy();
         await repository.persistChanges({ deletedTenantIds: [tenantId] });
+        await database.onModuleDestroy();
+        vi.restoreAllMocks();
+      }
+    });
+
+    it("durably deletes a webhook endpoint in PostgreSQL without restart or in-flight resurrection while preserving sibling/cross-tenant state and delivery history", async () => {
+      const tenantId = `tenant-webhook-delete-pg-${randomUUID()}`;
+      const otherTenantId = `tenant-webhook-delete-pg-other-${randomUUID()}`;
+      const database = new DatabaseService();
+      const repository = new TenantPartnerRepository(database);
+      const fetcherA = vi.fn(async () => ({ ok: true, status: 204 }));
+      const fetcherB = vi.fn(async () => ({ ok: true, status: 204 }));
+      const service = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository,
+        new WebhookDispatchService(fetcherA),
+        [],
+      );
+      const peerService = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository,
+        new WebhookDispatchService(fetcherB),
+        [],
+      );
+      const originalConnect = database.connect.bind(database);
+      let rejectDeleteSql = false;
+      vi.spyOn(database, "connect").mockImplementation(async () => {
+        const client = await originalConnect();
+        const query = client.query.bind(client);
+        return new Proxy(client, {
+          get(target, key) {
+            if (key === "query")
+              return async (sql: string, values?: unknown[]) => {
+                if (
+                  sql.includes(
+                    "DELETE FROM admin.phase1_tenant_webhook_endpoints",
+                  ) &&
+                  rejectDeleteSql
+                ) {
+                  rejectDeleteSql = false;
+                  throw new Error("injected webhook delete SQL rejection");
+                }
+                return query(sql, values);
+              };
+            const value = Reflect.get(target, key);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+      });
+
+      const scopedRepositoryFor = (tenants: readonly string[]) => {
+        const scoped = new TenantPartnerRepository(database);
+        const originalLoad = scoped.loadState.bind(scoped);
+        vi.spyOn(scoped, "loadState").mockImplementation(async () => {
+          const state = await originalLoad();
+          for (const key of Object.keys(state) as Array<keyof typeof state>) {
+            (state[key] as Array<{ tenantId?: string }>).splice(
+              0,
+              state[key].length,
+              ...(state[key] as Array<{ tenantId?: string }>).filter(
+                (item) => item.tenantId && tenants.includes(item.tenantId),
+              ),
+            );
+          }
+          return state;
+        });
+        return scoped;
+      };
+
+      try {
+        const target = await service.createWebhookEndpoint(tenantId, {
+          url: "https://receiver.example.test/pg-target",
+          secret: "pg-target-webhook-secret",
+          events: ["dispatch.assigned"],
+        });
+        const sibling = await service.createWebhookEndpoint(tenantId, {
+          url: "https://receiver.example.test/pg-sibling",
+          secret: "pg-sibling-webhook-secret",
+          events: ["dispatch.assigned"],
+        });
+        const other = await service.createWebhookEndpoint(otherTenantId, {
+          url: "https://receiver.example.test/pg-other",
+          secret: "pg-other-webhook-secret",
+          events: ["dispatch.assigned"],
+        });
+        await service.sendTestWebhook(tenantId, {
+          webhookId: target.webhookId,
+        });
+        await service.sendTestWebhook(tenantId, {
+          webhookId: sibling.webhookId,
+        });
+        await service.sendTestWebhook(otherTenantId, {
+          webhookId: other.webhookId,
+        });
+
+        // Create a retryable failure on target so a queued delivery with nextAttemptAt exists in PG.
+        fetcherA.mockImplementationOnce(async (url: string) =>
+          url === "https://receiver.example.test/pg-target"
+            ? { ok: false, status: 503 }
+            : { ok: true, status: 204 },
+        );
+        await service.publishWebhookEvent(tenantId, {
+          eventType: "dispatch.assigned",
+          data: { orderId: "pg-before-delete" },
+        });
+
+        // SQL rejection during DELETE rolls back and preserves the canonical row.
+        rejectDeleteSql = true;
+        await expect(
+          service.deleteWebhookEndpoint(tenantId, target.webhookId, {
+            reason: "rejected delete",
+          }),
+        ).rejects.toThrow("injected webhook delete SQL rejection");
+        expect(
+          service
+            .listWebhookEndpoints(tenantId)
+            .map((item) => item.webhookId)
+            .sort(),
+        ).toEqual([sibling.webhookId, target.webhookId].sort());
+
+        // Durable DELETE removes the row from admin.phase1_tenant_webhook_endpoints.
+        const deleted = await service.deleteWebhookEndpoint(
+          tenantId,
+          target.webhookId,
+          { reason: "durable pg delete" },
+        );
+        expect(deleted).toEqual({
+          status: "deleted",
+          webhookId: target.webhookId,
+        });
+
+        const countRow = async (webhookId: string) => {
+          const res = await database.query<{ count: number }>(
+            `SELECT count(*)::int AS count
+             FROM admin.phase1_tenant_webhook_endpoints
+             WHERE webhook_id = $1`,
+            [webhookId],
+          );
+          return res.rows[0]?.count ?? 0;
+        };
+        expect(await countRow(target.webhookId)).toBe(0);
+        expect(await countRow(sibling.webhookId)).toBe(1);
+        expect(await countRow(other.webhookId)).toBe(1);
+
+        // Historical deliveries for the deleted endpoint remain in PostgreSQL.
+        const historyRes = await database.query<{ count: number }>(
+          `SELECT count(*)::int AS count
+           FROM admin.phase1_tenant_webhook_deliveries
+           WHERE webhook_id = $1`,
+          [target.webhookId],
+        );
+        expect(historyRes.rows[0]?.count ?? 0).toBeGreaterThanOrEqual(2);
+
+        // Cross-instance in-flight HTTP delivery cannot reinsert a concurrently deleted endpoint.
+        const peerScopedRepo = scopedRepositoryFor([tenantId, otherTenantId]);
+        const peer = new TenantPartnerService(
+          new AuditNotificationService(),
+          peerScopedRepo,
+          new WebhookDispatchService(fetcherB),
+          [],
+        );
+        try {
+          await peer.onModuleInit();
+          let releasePeerHttp!: (result: {
+            ok: boolean;
+            status: number;
+          }) => void;
+          fetcherB.mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                releasePeerHttp = resolve;
+              }),
+          );
+          const inFlight = peer.publishWebhookEvent(tenantId, {
+            eventType: "dispatch.assigned",
+            data: { orderId: "pg-inflight-cross-instance" },
+          });
+          await new Promise((resolve) => setImmediate(resolve));
+          await service.deleteWebhookEndpoint(tenantId, sibling.webhookId, {
+            reason: "concurrent delete while peer HTTP in flight",
+          });
+          expect(await countRow(sibling.webhookId)).toBe(0);
+          releasePeerHttp({ ok: true, status: 204 });
+          await inFlight;
+          expect(await countRow(sibling.webhookId)).toBe(0);
+          expect(peer.listWebhookEndpoints(tenantId)).toEqual([]);
+        } finally {
+          peer.onModuleDestroy();
+        }
+
+        // Fresh service restart does not resurrect either deleted endpoint or resume retries.
+        const restartFetcher = vi.fn(async () => ({ ok: true, status: 204 }));
+        const restarted = new TenantPartnerService(
+          new AuditNotificationService(),
+          scopedRepositoryFor([tenantId, otherTenantId]),
+          new WebhookDispatchService(restartFetcher),
+          [],
+        );
+        try {
+          await restarted.onModuleInit();
+          expect(restarted.listWebhookEndpoints(tenantId)).toEqual([]);
+          expect(
+            restarted
+              .listWebhookEndpoints(otherTenantId)
+              .map((item) => item.webhookId),
+          ).toEqual([other.webhookId]);
+          expect(
+            restarted
+              .listWebhookDeliveries(tenantId)
+              .filter((item) => item.webhookId === target.webhookId),
+          ).toHaveLength(2);
+          expect(restartFetcher).not.toHaveBeenCalled();
+        } finally {
+          restarted.onModuleDestroy();
+        }
+      } finally {
+        service.onModuleDestroy();
+        peerService.onModuleDestroy();
+        await repository.persistChanges({
+          deletedTenantIds: [tenantId, otherTenantId],
+        });
         await database.onModuleDestroy();
         vi.restoreAllMocks();
       }
