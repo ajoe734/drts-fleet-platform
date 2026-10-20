@@ -39,6 +39,11 @@ on:
         required: false
         default: false
         type: boolean
+      owned_referral_recovery_only:
+        description: "Recover only the exact retained original Referral order; no new booking or full-journey PASS"
+        required: false
+        default: false
+        type: boolean
       shared_bureau:
         description: "Also run bureau journeys against the existing shared release; never deploys"
         required: false
@@ -176,6 +181,7 @@ jobs:
       - name: Execute one owned synthetic same-order business lifecycle
         env:
           OWNED_REFERRAL_HOSTED_OPT_IN: "true"
+          OWNED_REFERRAL_RECOVERY_ONLY: ${{ inputs.owned_referral_recovery_only }}
           OWNED_TEST_CODE_SHA: ${{ github.sha }}
           DRTS_CANDIDATE_SHA: ${{ inputs.expected_runtime_sha }}
           OWNED_REFERRAL_ORIGIN: ${{ steps.runtime_before.outputs.referral_origin }}

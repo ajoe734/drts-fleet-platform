@@ -328,6 +328,170 @@ export class BookingWriteJournal {
     this.snapshot = acknowledged;
   }
 }
+
+type BookingObservationPhase =
+  | "booking-ui-click"
+  | "booking-response-wait"
+  | "booking-response-request"
+  | "booking-response-json"
+  | "booking-ack-persist";
+
+function bookingObservationFailure(
+  phase: BookingObservationPhase,
+  error: unknown,
+): JourneyFailure {
+  if (error instanceof JourneyFailure) return error;
+  const name = error instanceof Error ? error.name : "";
+  const safeClass = [
+    "TimeoutError",
+    "SyntaxError",
+    "TypeError",
+    "Error",
+  ].includes(name)
+    ? name
+    : "UnknownError";
+  // Native messages/stacks can contain URLs, request bodies or authority.
+  return new JourneyFailure(`${phase}:${safeClass}`);
+}
+
+export type BookingAckResponse = {
+  url(): string;
+  status(): number;
+  headers(): Record<string, string>;
+  json(): Promise<unknown>;
+  request(): {
+    url(): string;
+    method(): string;
+    headers(): Record<string, string>;
+    postData(): string | null;
+  };
+};
+
+/** Attach before clicking; consume ACK bytes while the UI action can still run. */
+export async function observeOriginalBookingAck(
+  responsePromise: Promise<BookingAckResponse>,
+  frozen: () => {
+    url: string;
+    runtimeSha: string;
+    journal: BookingWriteJournal | undefined;
+    quote: ObjectData | undefined;
+  },
+  claim: (orderId: string) => void,
+  evidence: Evidence,
+): Promise<{ orderId: string; quoteId: string }> {
+  let phase: BookingObservationPhase = "booking-response-wait";
+  try {
+    const response = await responsePromise;
+    const status = response.status();
+    evidence.record({ stage: "booking-response-observed", status });
+    phase = "booking-response-request";
+    const current = frozen();
+    const journal = current.journal;
+    const quote = current.quote;
+    requireFact(
+      journal && quote,
+      "frozen current booking proposal required before ACK",
+    );
+    const pending = journal.current;
+    requireFact(
+      pending?.state === "ack_unknown",
+      "original pending booking journal required",
+    );
+    const request = response.request();
+    requireFact(
+      response.url() === current.url &&
+        request.url() === current.url &&
+        request.method() === "POST",
+      "booking ACK exact original endpoint",
+    );
+    requireFact(
+      response.headers()["x-drts-candidate-sha"] === current.runtimeSha,
+      "booking ACK exact served runtime",
+    );
+    requireFact(
+      current.runtimeSha === pending.runtimeSha,
+      "booking ACK original journal runtime binding",
+    );
+    const raw = text(
+      request.postData(),
+      "booking ACK original request body required",
+    );
+    requireFact(
+      raw === pending.body &&
+        hash(Buffer.from(raw, "utf8")) === pending.bodySha256 &&
+        request.headers()["idempotency-key"] === pending.idempotencyKey,
+      "booking ACK exact frozen bytes and header key",
+    );
+    const command = object(JSON.parse(raw));
+    requireFact(
+      command.quoteId === quote.quoteId &&
+        command.quoteId === pending.quoteId &&
+        command.idempotencyKey === pending.idempotencyKey,
+      "one actual UI quote/idempotency binding",
+    );
+    phase = "booking-response-json";
+    const payload = object(await response.json());
+    if (status < 200 || status >= 300 || payload.ok !== true) {
+      const error = payload.error;
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? error.code
+          : undefined;
+      throw new JourneyFailure(
+        "booking-response-http",
+        status,
+        typeof code === "string" && /^[A-Z0-9_]{1,100}$/.test(code)
+          ? code
+          : undefined,
+      );
+    }
+    const created = object(payload.data);
+    const orderId = text(created.orderId);
+    const quoteId = text(object(created.quote).quoteId);
+    requireFact(quoteId === pending.quoteId, "create consumed exact quote");
+    // Recognition follows all ownership bindings. Even a disk ACK failure leaves
+    // this known own ID available to the normal same-subject cleanup readback.
+    claim(orderId);
+    phase = "booking-ack-persist";
+    await journal.acknowledge(orderId, quoteId);
+    evidence.record({
+      stage: "booking-ack-durable",
+      status,
+      orderId,
+      quoteId,
+      result: "observed",
+    });
+    return { orderId, quoteId };
+  } catch (error) {
+    const failure = bookingObservationFailure(phase, error);
+    evidence.failure(failure);
+    throw failure;
+  }
+}
+
+/** A failed click stays failed; settle its one observer before owned cleanup. */
+export async function clickAndSettleOriginalBookingAck<T>(
+  click: () => Promise<void>,
+  observation: Promise<T>,
+): Promise<T> {
+  // Attach the rejection handler immediately, before waiting for the UI action.
+  // Keep the failure as data until this same observation is awaited below.
+  const settled = observation.then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  let clickFailure: JourneyFailure | undefined;
+  try {
+    await click();
+  } catch (error) {
+    clickFailure = bookingObservationFailure("booking-ui-click", error);
+  }
+  const result = await settled;
+  if (clickFailure) throw clickFailure;
+  if (!result.ok) throw result.error;
+  return result.value;
+}
+
 export type SafeEvent = {
   stage: string;
   status?: number;
@@ -549,6 +713,14 @@ export class NativeTransport {
         code && typeof code === "object"
           ? (code as ObjectData).code
           : undefined;
+      // Only this explicit application denial can authorize the retained-order
+      // recovery's next normal dispatch action. An edge/mixed-version response
+      // must never be interpreted as that application's cancellation decision.
+      if (value === "ORDER_NOT_CANCELABLE")
+        requireFact(
+          response.headers.get("x-drts-candidate-sha") === this.expectedRuntime,
+          `${role}:runtime SHA mismatch`,
+        );
       throw new JourneyFailure(
         `${role}:request`,
         response.status,
@@ -563,6 +735,7 @@ export class NativeTransport {
             "NOT_FOUND",
             "FORBIDDEN",
             "VALIDATION_ERROR",
+            "ORDER_NOT_CANCELABLE",
           ].includes(value)
           ? value
           : undefined,
