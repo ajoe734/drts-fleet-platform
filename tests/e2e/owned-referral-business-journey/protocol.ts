@@ -830,6 +830,33 @@ export class NativeTransport {
     };
   }
 }
+export function assertBusinessOrderProduct(
+  order: ObjectData,
+  expectedQuoteId: string,
+) {
+  // OwnedOrderRecord permits an absent/null precise code. Its existing
+  // compatibility contract derives that code from the bucket/subtype only.
+  // An explicit contradictory code must still fail, including falsy values.
+  requireFact(
+    order.serviceBucket === "business_dispatch" &&
+      order.businessDispatchSubtype === "enterprise_dispatch" &&
+      (order.serviceProductCode == null ||
+        order.serviceProductCode === "enterprise_dispatch"),
+    "actual business order qualification",
+  );
+  const quote = object(object(order.referralPassengerLifecycle).quote);
+  requireFact(
+    typeof expectedQuoteId === "string" &&
+      expectedQuoteId.trim().length > 0 &&
+      quote.quoteId === expectedQuoteId &&
+      quote.businessDispatchSubtype === "enterprise_dispatch" &&
+      quote.serviceProductCode === "enterprise_dispatch" &&
+      (order.serviceProductCode ?? order.businessDispatchSubtype) ===
+        quote.serviceProductCode,
+    "same committed business quote qualification",
+  );
+}
+
 export function assertOwnPair(
   candidate: ObjectData,
   own: { driverId: string; vehicleId: string },

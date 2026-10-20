@@ -3,6 +3,18 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "embed.paymentSim.regionLabel": "External payment simulation",
+  "embed.paymentSim.title": "External payment simulation (SIM)",
+  "embed.paymentSim.disclaimer": "SIM demonstration only. No actual charge.",
+  "embed.paymentSim.contentLabel": "Payment simulation details",
+  "embed.paymentSim.orderLabel": "This order ID",
+  "embed.paymentSim.fareLabel": "Recorded actual fare",
+  "embed.paymentSim.skipDescription":
+    "SIM: skip external payment and continue this trip and rating. No actual charge.",
+  "embed.paymentSim.returnLabel": "Return to this trip / rating (SIM)",
+  "embed.paymentSim.closeLabel": "Close simulation",
+  "embed.paymentSim.openLabel": "Open external payment simulation (SIM)",
+  "embed.paymentSim.farePending": "Actual fare pending confirmation",
   "app.title": "Referral Embed",
   "app.description":
     "Embedded DRTS ride-hailing surface for third-party referral channels (community / property-management apps): partner-scoped handoff, booking, trip status, and explicit unsupported states.",
@@ -792,6 +804,18 @@ const en = {
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
+  "embed.paymentSim.regionLabel": "外部付款模擬示意",
+  "embed.paymentSim.title": "外部付款模擬示意（SIM）",
+  "embed.paymentSim.disclaimer": "SIM 示意流程，不實際扣款。",
+  "embed.paymentSim.contentLabel": "付款示意內容",
+  "embed.paymentSim.orderLabel": "本筆訂單 ID",
+  "embed.paymentSim.fareLabel": "已記錄實際車資",
+  "embed.paymentSim.skipDescription":
+    "SIM：略過外部付款步驟，繼續本筆行程與評價；不實際扣款。",
+  "embed.paymentSim.returnLabel": "返回本行程／評價（SIM）",
+  "embed.paymentSim.closeLabel": "關閉示意",
+  "embed.paymentSim.openLabel": "開啟外部付款模擬示意（SIM）",
+  "embed.paymentSim.farePending": "實際車資待確認",
   "app.title": "轉介嵌入前台",
   "app.description":
     "供第三方轉介渠道（社區／物業管理 App）內嵌的 DRTS 叫車前台：渠道身分交接、下單、行程狀態與明確的不支援狀態。",
