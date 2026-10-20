@@ -143,6 +143,8 @@
 ### 5.2 實作與驗證對照表（依 `AI_COLLABORATION_GUIDE.md` §0.7）
 
 - **Design Anchor Commit**: `379a0a23943411ed41c53b38da2e03b47924b7eb` (`wip(BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020): anchor C013 large-corpus PG acceptance design`)
+- **Implementation Commit**: `460bd56633a41e83f971720c44d7514570add340` (`BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020: add C013 representative large-corpus PostgreSQL booking-query acceptance`)
+- **Pull Request**: `#2874` (`https://github.com/ajoe734/drts-fleet-platform/pull/2874`, `gemini/booking-query-large-pg-acceptance-20261020` → `dev`)
 
 | Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
 |---|---|---|---|---|
