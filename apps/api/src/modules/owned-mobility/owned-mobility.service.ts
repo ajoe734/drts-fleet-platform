@@ -188,6 +188,7 @@ import {
   type DriverCompletionOutboxRecord,
   type DriverTaskCompletionBundleRecord,
   type OwnedMobilityQueryExecutor,
+  type OwnedOrderActionContext,
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
@@ -16210,6 +16211,190 @@ export class OwnedMobilityService
     };
   }
 
+  private async resolveReferralPassengerLiveTracking(
+    order: OwnedOrderRecord,
+    context: OwnedOrderActionContext | null,
+  ): Promise<import("@drts/contracts").ReferralPassengerLiveTracking | null> {
+    const activeStatuses = [
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+    ];
+    if (!activeStatuses.includes(order.status) || !context) return null;
+    const assignment = context.dispatchAssignments.find(
+      (a) =>
+        a.orderId === order.orderId &&
+        ["assigned", "accepted"].includes(a.status),
+    );
+    const task =
+      assignment &&
+      context.driverTasks.find(
+        (t) =>
+          t.orderId === order.orderId &&
+          t.assignmentId === assignment.assignmentId &&
+          t.driverId === assignment.driverId &&
+          t.vehicleId === assignment.vehicleId &&
+          !["completed", "cancelled", "rejected"].includes(t.status),
+      );
+    if (!assignment || !task || !this.regulatoryRegistryService) return null;
+    if (order.status === "on_trip" && task.status !== "on_trip") return null;
+    const result: import("@drts/contracts").ReferralPassengerLiveTracking = {
+      assignmentId: assignment.assignmentId,
+      driverId: assignment.driverId,
+      vehicleId: assignment.vehicleId,
+      observedAt: new Date().toISOString(),
+      locationFreshness: "missing",
+      location: null,
+      pickupEta: null,
+      dropoffRoute: null,
+    };
+    try {
+      const current =
+        await this.regulatoryRegistryService.getDriverTrackingStatus(
+          assignment.driverId,
+        );
+      if (
+        !current ||
+        current.driverId !== assignment.driverId ||
+        current.currentVehicleId !== assignment.vehicleId ||
+        (current.currentTaskId && current.currentTaskId !== task.taskId)
+      )
+        return result;
+      const point = current.currentLocation;
+      result.locationFreshness = current.locationFreshness;
+      result.location = point
+        ? {
+            lat: point.lat,
+            lng: point.lng,
+            accuracyM: point.accuracyM,
+            recordedAt: point.recordedAt,
+          }
+        : null;
+      if (current.locationFreshness !== "fresh" || !point) return result;
+      if (
+        ["assigned", "driver_accepted", "enroute_pickup"].includes(
+          order.status,
+        ) &&
+        order.pickup.lat != null &&
+        order.pickup.lng != null
+      ) {
+        // The existing Driver ETA is a Haversine/average-speed estimate.
+        // Bind its actual producer inputs to this observed assignment/point,
+        // rather than relabeling another observation or destination.
+        const eta = await this.regulatoryRegistryService
+          .getDriverEta(assignment.driverId, order.pickup.lat, order.pickup.lng)
+          .catch(() => null);
+        if (
+          eta &&
+          eta.driverId === assignment.driverId &&
+          eta.driverLocation?.driverId === assignment.driverId &&
+          eta.driverLocation.lat === point.lat &&
+          eta.driverLocation.lng === point.lng &&
+          eta.driverLocation.accuracyM === point.accuracyM &&
+          eta.driverLocation.recordedAt === point.recordedAt &&
+          eta.driverLocation.updatedAt === point.updatedAt &&
+          eta.destination?.lat === order.pickup.lat &&
+          eta.destination.lng === order.pickup.lng &&
+          Number.isFinite(eta.etaMinutes) &&
+          eta.etaMinutes >= 0 &&
+          isIso8601InstantWithTimezone(eta.calculatedAt) &&
+          Date.now() - Date.parse(eta.calculatedAt) >= -5000 &&
+          Date.now() - Date.parse(eta.calculatedAt) < 60_000
+        ) {
+          result.pickupEta = {
+            minutes: eta.etaMinutes,
+            calculatedAt: eta.calculatedAt,
+            estimatedArrivalAt: new Date(
+              Date.parse(eta.calculatedAt) + eta.etaMinutes * 60_000,
+            ).toISOString(),
+          };
+        }
+      } else if (
+        order.status === "on_trip" &&
+        current.currentTaskId === task.taskId &&
+        this.passengerRouteGeoService &&
+        order.dropoff.lat != null &&
+        order.dropoff.lng != null
+      ) {
+        const route = await this.passengerRouteGeoService
+          .route({
+            origin: { lat: point.lat, lng: point.lng },
+            destination: { lat: order.dropoff.lat, lng: order.dropoff.lng },
+            travelMode: "drive",
+            locale: "zh-TW",
+          })
+          .catch(() => null);
+        if (
+          route &&
+          Number.isFinite(route.distanceMeters) &&
+          route.distanceMeters >= 0 &&
+          Number.isFinite(route.durationSeconds) &&
+          route.durationSeconds >= 0 &&
+          isIso8601InstantWithTimezone(route.generatedAt) &&
+          Date.now() - Date.parse(route.generatedAt) >= -5000 &&
+          Date.now() - Date.parse(route.generatedAt) < 60_000
+        ) {
+          result.dropoffRoute = {
+            remainingDistanceMeters: route.distanceMeters,
+            remainingDurationSeconds: route.durationSeconds,
+            generatedAt: route.generatedAt,
+            estimatedArrivalAt: new Date(
+              Date.parse(route.generatedAt) + route.durationSeconds * 1000,
+            ).toISOString(),
+            provider: route.provider,
+          };
+        }
+      }
+      // A newer assignment, completed task or newer GPS observation must not
+      // relabel an advisory response obtained while awaiting the route provider.
+      const latest = await this.ownedMobilityRepository!.loadOrderActionContext(
+        { orderId: order.orderId },
+      );
+      const latestOrder = latest?.orders.find(
+        (o) => o.orderId === order.orderId,
+      );
+      const sameAssignment = latest?.dispatchAssignments.some(
+        (a) =>
+          a.assignmentId === assignment.assignmentId &&
+          a.driverId === assignment.driverId &&
+          a.vehicleId === assignment.vehicleId &&
+          ["assigned", "accepted"].includes(a.status),
+      );
+      const sameTask = latest?.driverTasks.some(
+        (t) =>
+          t.taskId === task.taskId &&
+          t.orderId === order.orderId &&
+          t.assignmentId === assignment.assignmentId &&
+          t.driverId === assignment.driverId &&
+          t.vehicleId === assignment.vehicleId &&
+          !["completed", "cancelled", "rejected"].includes(t.status),
+      );
+      const latestCurrent =
+        await this.regulatoryRegistryService.getDriverTrackingStatus(
+          assignment.driverId,
+        );
+      if (
+        !latestOrder ||
+        latestOrder.status !== order.status ||
+        !sameAssignment ||
+        !sameTask ||
+        latestCurrent.currentVehicleId !== assignment.vehicleId ||
+        latestCurrent.currentTaskId !== current.currentTaskId ||
+        latestCurrent.locationFreshness !== "fresh" ||
+        latestCurrent.currentLocation?.recordedAt !== point.recordedAt ||
+        latestCurrent.currentLocation?.lat !== point.lat ||
+        latestCurrent.currentLocation?.lng !== point.lng
+      )
+        return null;
+      return result;
+    } catch {
+      // Tracking is advisory; the canonical same-order trip remains readable.
+      return { ...result, pickupEta: null, dropoffRoute: null };
+    }
+  }
+
   async getReferralPassengerActiveTrip(
     identity?: BootstrapRequestIdentity | null,
   ): Promise<ReferralPassengerActiveTripResult> {
@@ -16280,6 +16465,10 @@ export class OwnedMobilityService
       context?.dispatchAssignments ?? [],
     );
     const isRated = Boolean(this.getReferralLifecycle(activeOrder)?.rating);
+    const liveTracking = await this.resolveReferralPassengerLiveTracking(
+      activeOrder,
+      context,
+    );
     const cancellationWindow = this.referralCancellationWindow(activeOrder);
 
     return {
@@ -16289,7 +16478,8 @@ export class OwnedMobilityService
         orderNo: activeOrder.orderNo,
         status: activeOrder.status,
         statusCode: activeOrder.status,
-        etaMin: activeOrder.etaSnapshot?.etaMinutes ?? null,
+        etaMin: liveTracking?.pickupEta?.minutes ?? null,
+        liveTracking,
         cancelWindowMin:
           cancellationWindow.canCancel && cancellationWindow.cancelableUntil
             ? Math.max(

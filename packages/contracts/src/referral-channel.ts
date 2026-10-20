@@ -351,12 +351,39 @@ export interface ReferralPassengerCancellationWindow {
   asOf: string;
 }
 
+export interface ReferralPassengerLiveTracking {
+  assignmentId: string;
+  driverId: string;
+  vehicleId: string;
+  observedAt: string;
+  locationFreshness: "fresh" | "stale" | "low_accuracy" | "missing";
+  location: {
+    lat: number;
+    lng: number;
+    accuracyM: number | null;
+    recordedAt: string;
+  } | null;
+  pickupEta: {
+    minutes: number;
+    calculatedAt: string;
+    estimatedArrivalAt: string;
+  } | null;
+  dropoffRoute: {
+    remainingDistanceMeters: number;
+    remainingDurationSeconds: number;
+    generatedAt: string;
+    estimatedArrivalAt: string;
+    provider: string;
+  } | null;
+}
+
 export interface ReferralPassengerTripSnapshot {
   orderId: string;
   orderNo: string;
   status: string;
   statusCode: string;
   etaMin: number | null;
+  liveTracking?: ReferralPassengerLiveTracking | null;
   /** @deprecated Approximate remaining minutes; use cancellationWindow for policy. */
   cancelWindowMin: number;
   /** Optional during rolling releases. Absence never asserts permission/denial. */
