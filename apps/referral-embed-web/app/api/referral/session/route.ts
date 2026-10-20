@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveReferralRequestUrl } from "../../../../lib/embed-request-origin";
 
 import {
   consumeReferralEmbedHandoffArtifact,
@@ -46,7 +47,16 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function redirectResponse(request: Request, returnTo: string | undefined) {
-  const requestUrl = new URL(request.url);
+  const requestUrl = resolveReferralRequestUrl(
+    new URL(request.url),
+    request.headers,
+  );
+  if (!requestUrl) {
+    return jsonResponse(
+      { ok: false, message: "Cross-origin session request is not allowed." },
+      403,
+    );
+  }
   let targetUrl: URL;
   try {
     targetUrl = new URL(returnTo || "/", requestUrl);
@@ -148,7 +158,11 @@ async function buildDemoSession(
 export async function POST(request: Request) {
   try {
     const origin = request.headers.get("origin");
-    if (origin && origin !== new URL(request.url).origin)
+    const requestUrl = resolveReferralRequestUrl(
+      new URL(request.url),
+      request.headers,
+    );
+    if (!requestUrl || (origin && origin !== requestUrl.origin))
       return jsonResponse(
         { ok: false, message: "Cross-origin session request is not allowed." },
         403,
