@@ -49,14 +49,18 @@ native-presentation.ts`），不改動任何 Source／測試檔；與 `2479ad1e9
 2479ad1e9 HEAD -- <nine files>` 為空），僅本文件改動。此修復即
 `3f45fdeed`。
 
-**本輪（在 `3f45fdeed` 之後）實際環境缺口回報**：本 worktree
-`core.hooksPath` 為既有值 `.husky/_`（追蹤設定本身未變動），但該目錄
-是 husky v9 的既有 `.gitignore` 產物（`.husky/_/`，由既有 `package.json`
-`"prepare": "husky"` 腳本產生，非本任務新增或客製檔案），在這個
-rematerialize 後的 worktree 中缺漏，導致先前 `b3c76c192`／
-`70cc25778`／`2479ad1e9`／`3f45fdeed` 幾次 commit／push 實際上完全沒有
-觸發 `.husky/commit-msg`／`.husky/pre-commit`（git 在 hooksPath 目錄下找
-不到對應可執行檔，靜默略過，無錯誤、也無真實 hook 痕跡）。已以既有
+**本輪（在 `3f45fdeed` 之後）實際環境缺口回報**：開始本輪工作時，本
+worktree `core.hooksPath` 為既有值 `.husky/_`（追蹤設定本身未變動），
+但該目錄是 husky v9 的既有 `.gitignore` 產物（`.husky/_/`，由既有
+`package.json` `"prepare": "husky"` 腳本產生，非本任務新增或客製檔案），
+於此刻觀察到缺漏（git 在 hooksPath 目錄下找不到對應可執行檔會靜默
+略過，無錯誤、也無真實 hook 痕跡）。此為本輪開始時的單次觀察結果，
+無法回溯證明 `b3c76c192`／`70cc25778`／`2479ad1e9`／`3f45fdeed` 當時
+各自 commit／push 時是否已處於同一缺漏狀態（worktree 可能在其中某次
+commit 之後才被 rematerialize 而出現此缺口，那幾次 commit 當時很可能
+仍有正常觸發 Prettier／ESLint 既有 hooks）；因此不宣稱這幾次 commit
+當時未觸發 `.husky/commit-msg`／`.husky/pre-commit`，僅宣稱本輪發現
+缺漏並已修復。已以既有
 `node_modules/.bin/husky`（既有 husky 套件本身，未新增/更換套件、未
 改動 `.husky/commit-msg`／`.husky/pre-commit` 內容、`core.hooksPath`
 值不變）還原 `.husky/_`；還原後重新執行
@@ -75,9 +79,14 @@ origin/dev --head HEAD`，真實輸出：
 相對 `2479ad1e9` 仍逐位元組相同，故未重跑 unit／type 檢查（第四輪的
 171／22／193 通過數字、`tsc`/`eslint` 結果，以及第五輪 commit message
 中額外核對的 109/109（`web-share.test.tsx`／`receipt-download.test.ts`／
-`native-ride-presentation.test.ts` 三檔測試數加總）均維持原樣，非本輪
-重新產生）。本次 commit 經由還原後的 husky `commit-msg`／`pre-commit`
-正常觸發，非以 `--no-verify` 跳過。
+`native-ride-presentation.test.ts` 三檔測試數加總，本身只是對171/193
+既有數字的子集加總，非額外獨立驗證）均維持原樣，非本輪重新產生——
+這些數字本身源自第四輪執行時的終端輸出觀察，未如本輪
+canonical-consistency 檢查或第五輪 `tsc` 修正般另以落地檔案方式逐一
+核對真實 exit code；本輪未重跑，故不補強其驗證層級，僅原樣沿用。本
+文件中唯一有明確以落地檔案核對 `EXIT:0` 的數字是第三輪 23:37:46Z 的
+163（見下節）。本次 commit 經由還原後的 husky `commit-msg`／
+`pre-commit` 正常觸發，非以 `--no-verify` 跳過。
 
 ## 第四輪獨立審查退修：已遮名輸入的星號後綴雙重遮罩（已修復）
 
@@ -90,10 +99,19 @@ r2「已遮名公開呈現（如 蔡○○／既有遮罩樣式）維持不變�
 
 第二輪退修第 2 點曾以「系統中沒有任何既有路徑會讓 `driverSurname`
 欄位出現星號」為理由不採納星號偵測；該推論本身仍成立（目前程式碼
-確實不會生成星號遮名），但原 r2 條款保護的是**輸入端已經是遮名字串
-的情形**，不限定該字串必須由本系統既有邏輯產生——使用者截圖與未來
-上游（例如既有 `driver_profile_declared` 自填來源）都可能已經帶入
-星號遮名慣例。因此第二輪「不採納」的結論對本條款過窄，本輪修正之。
+確實不會*生成*星號遮名），但原 r2 條款保護的是**輸入端已經是遮名字串
+的情形**，不限定該字串必須由本系統既有邏輯產生。實際核對既有資料
+路徑：`driver-profile.service.ts` 的 `driverSurname` 僅要求非空字串
+（上限 40 字，無字元類別限制），經 `regulatory-registry.service.ts`
+（寫入時標記 `driverSurnameSource: "driver_profile_declared"`）存入既有
+registry，再由 `certificate-support.service.ts`／`certificate-artifact.
+renderer.ts` 讀出呈現——這是一條**既存、可寫入**的
+profile→registry→certificate 真實路徑，駕駛今天即可透過既有自填欄位
+直接輸入 `蔡**`／`蔡＊＊` 等已遮名慣例字串，並非僅憑使用者截圖推測、
+也非仰賴未來才存在的假設來源。因此第二輪「不採納」的結論對本條款
+過窄，本輪依既有真實輸入路徑修正之；本次不宣告任何新的 PII 遮罩
+政策或新增 live DB 星號資料來源，僅修正既有格式器對既有輸入路徑上
+既有遮名慣例的處理。
 
 修復：三個檔案（`passenger-live.ts`／`native-presentation.ts`／
 `certificate-artifact.renderer.ts`）內各自既有、刻意保持重複的
@@ -271,7 +289,14 @@ vitest run \
 ```
 
 Combined: 193 passed／0 failed／0 skipped across the eight regression files listed
-in the original r2 verification plan. `web-share.test.tsx` grew from the initial
+in the original r2 verification plan (171 + 22; the four-figure 109/109 subtotal
+in the fifth-round commit message is an arithmetic subset of this 171, not an
+additional independent run). These 171／22／193 figures are carried forward
+unchanged from the fourth round's terminal-output observation and have not been
+re-confirmed via a redirected-to-file exit code the way this doc's
+canonical-consistency check and the fifth round's `tsc` fix were; the only
+figure in this document backed by a file-captured `EXIT:0` is the third round's
+163 at 23:37:46Z noted above. `web-share.test.tsx` grew from the initial
 13 cases to 16 (origin-rejection, duplicate-share-disabled, stale-settlement-
 ignored) in the second round, to 19 (legitimate token-mode descriptor,
 wrong-order rejection, wrong-mode-shape rejection) in the third round, and to 21
