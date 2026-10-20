@@ -79,7 +79,7 @@ describe("E19 canonical fee agreement and real SQL wire", () => {
       new IdempotencyService(new IdempotencyRepository()),
     );
     f.db.clock = "2026-10-20T00:00:00.000Z";
-    const ack = await controller.acknowledgeReferralFees(agree, f.who);
+    const ack = await controller.recordReferralFeeAcknowledgement(agree, f.who);
     expect(ack.data).toMatchObject({
       acknowledgedAt: f.db.clock,
       contentHash: PASSENGER_FEE_CONTENT_HASH,

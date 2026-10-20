@@ -421,7 +421,7 @@ export class OwnedMobilityController {
   @Post("partner/referral/passenger/fees")
   @RequireRealms("partner")
   @RequireScopes("partner:book")
-  async acknowledgeReferralFees(
+  async recordReferralFeeAcknowledgement(
     @Body() command: AcknowledgeReferralFeesCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
   ) {
