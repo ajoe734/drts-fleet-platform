@@ -138,6 +138,27 @@ function statusTone(status: string): CanvasTone {
 
 // ── 1. User Detail & Session Inventory Drawer ─────────────────────────────────
 
+function isSessionAccessDenied(error: unknown): boolean {
+  if (typeof error === "object" && error !== null) {
+    if ("statusCode" in error && typeof error.statusCode === "number") {
+      return error.statusCode === 403;
+    }
+    if ("code" in error && typeof error.code === "string") {
+      return (
+        error.code === "AUTH_SCOPE_DENIED" || error.code === "AUTH_REALM_DENIED"
+      );
+    }
+  }
+  // Older callers can expose only a message. Match an explicit status/code
+  // prefix; UUIDs and other response-body text are not authorization evidence.
+  return (
+    error instanceof Error &&
+    /^(?:API error 403(?=:|$)|(?:HTTP )?403(?: Forbidden)?(?=[:\s]|$)|AUTH_(?:SCOPE|REALM)_DENIED(?=[:\s]|$))/.test(
+      error.message,
+    )
+  );
+}
+
 export function UserDetailDrawer({
   user,
   onClose,
@@ -168,16 +189,7 @@ export function UserDetailDrawer({
       });
       setSessions(result ?? []);
     } catch (e: unknown) {
-      const is403 =
-        (e instanceof ApiClientError && e.statusCode === 403) ||
-        (typeof e === "object" &&
-          e !== null &&
-          "statusCode" in e &&
-          (e as { statusCode?: number }).statusCode === 403) ||
-        (e instanceof Error &&
-          (e.message.includes("403") ||
-            e.message.includes("AUTH_SCOPE_DENIED") ||
-            e.message.includes("AUTH_REALM_DENIED")));
+      const is403 = isSessionAccessDenied(e);
       const message = is403
         ? copy.sessionsReadDenied
         : e instanceof Error
@@ -203,16 +215,7 @@ export function UserDetailDrawer({
       });
       await loadSessions();
     } catch (e: unknown) {
-      const is403 =
-        (e instanceof ApiClientError && e.statusCode === 403) ||
-        (typeof e === "object" &&
-          e !== null &&
-          "statusCode" in e &&
-          (e as { statusCode?: number }).statusCode === 403) ||
-        (e instanceof Error &&
-          (e.message.includes("403") ||
-            e.message.includes("AUTH_SCOPE_DENIED") ||
-            e.message.includes("AUTH_REALM_DENIED")));
+      const is403 = isSessionAccessDenied(e);
       const message = is403
         ? copy.sessionsWriteDenied
         : e instanceof Error
@@ -1795,7 +1798,11 @@ export function BreakGlassPanel() {
                 </CanvasBtn>
                 <button
                   type="submit"
-                  disabled={submitting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:request"}
+                  disabled={
+                    submitting ||
+                    stepUpState !== "VALID" ||
+                    stepUpAction !== "platform:break-glass:request"
+                  }
                   style={{
                     background: theme.danger,
                     color: "#fff",
@@ -2022,7 +2029,11 @@ export function BreakGlassPanel() {
                 <CanvasBtn
                   theme={theme}
                   variant="primary"
-                  disabled={acting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:approve"}
+                  disabled={
+                    acting ||
+                    stepUpState !== "VALID" ||
+                    stepUpAction !== "platform:break-glass:approve"
+                  }
                   onClick={() => void handleApproveGrant(selectedGrant)}
                 >
                   {acting ? "Approving…" : "Approve (2nd Person Sign-Off)"}
@@ -2032,7 +2043,11 @@ export function BreakGlassPanel() {
                   theme={theme}
                   variant="primary"
                   danger
-                  disabled={acting || stepUpState !== "VALID" || stepUpAction !== "platform:break-glass:activate"}
+                  disabled={
+                    acting ||
+                    stepUpState !== "VALID" ||
+                    stepUpAction !== "platform:break-glass:activate"
+                  }
                   onClick={() => void handleActivateGrant(selectedGrant)}
                 >
                   {acting ? "Activating…" : "Activate Emergency Session"}

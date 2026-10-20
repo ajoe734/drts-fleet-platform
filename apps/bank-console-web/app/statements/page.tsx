@@ -21,7 +21,10 @@ import {
   type BankConsoleRole,
 } from "@/lib/session";
 import { tenantDisplayText } from "@/lib/tenant-display";
-import { loadBankStatementsData } from "@/lib/bank-dev-read-models";
+import {
+  getTaipeiDateString as formatDate,
+  loadBankStatementsData,
+} from "@/lib/bank-dev-read-models";
 import { type StatementStatus } from "@/lib/statements";
 import { t, type Locale } from "@/lib/translations";
 
@@ -51,14 +54,6 @@ function one(value: string | string[] | undefined): string | undefined {
 
 function formatPeriod(period: string) {
   return `${period.slice(0, 4)} / ${period.slice(5, 7)}`;
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
 }
 
 function formatCurrency(amount: number, locale: Locale) {

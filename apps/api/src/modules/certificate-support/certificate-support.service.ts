@@ -23,6 +23,8 @@ import {
   type CertificateSupportRow,
   type CertificateSupportState,
   type CertificateSupportView,
+  type CertificateE04Snapshot,
+  type CertificateCapturedCompletionFacts,
 } from "./certificate-support.types";
 
 /**
@@ -80,6 +82,50 @@ export class CertificateSupportService {
       );
     }
     return renderCertificateArtifact(view, format);
+  }
+
+  async getPassengerView(
+    certificateId: string,
+    authorizedOrderId: string,
+  ): Promise<CertificateSupportView> {
+    this.assertRepositoryAvailable();
+    const row = await this.requireRow(certificateId);
+    if (row.orderId !== authorizedOrderId) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "CERTIFICATE_NOT_FOUND",
+        "Certificate not found for this ride.",
+      );
+    }
+    const view = this.toView(row);
+    const e04 = this.resolveE04Snapshot(row.record.e04Snapshot);
+    const blockers = [...view.artifactBlockers, ...e04.blockers];
+    if (view.consumerServicePhone !== "02-2944-0985") {
+      blockers.push({
+        code: "unexpected_service_phone",
+        field: "consumerServicePhone",
+      });
+    }
+    if (blockers.length) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "PASSENGER_E04_NOT_READY",
+        "The complete electronic ride certificate is not ready.",
+        { blockers },
+      );
+    }
+    return view;
+  }
+
+  async getPassengerArtifact(
+    certificateId: string,
+    authorizedOrderId: string,
+    format: "html" | "pdf",
+  ): Promise<CertificateArtifact> {
+    return renderCertificateArtifact(
+      await this.getPassengerView(certificateId, authorizedOrderId),
+      format,
+    );
   }
 
   async regenerate(
@@ -191,6 +237,15 @@ export class CertificateSupportService {
   async writeCompletedTrip(event: OwnedMobilityMultiTaxiTripCompletedEvent) {
     this.assertRepositoryAvailable();
     this.assertCompletionEvent(event);
+    const capturedE04 = this.resolveE04Snapshot(event.e04Snapshot);
+    if (event.e04Snapshot && capturedE04.blockers.length) {
+      throw new ApiRequestError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        "CERTIFICATE_E04_SNAPSHOT_INVALID",
+        "Captured E-04 facts are incomplete or unsafe.",
+        { blockers: capturedE04.blockers },
+      );
+    }
     const receiptId = `receipt-${event.orderId}`;
     const date = event.completedAt.slice(0, 10).replaceAll("-", "");
     const digest = createHash("sha256")
@@ -216,6 +271,8 @@ export class CertificateSupportService {
       pdfUrl: this.artifactUrl(receiptId, "pdf"),
       generatedFrom: "owned_mobility_completion",
       generatedAt: event.completedAt,
+      ...this.resolveCapturedCompletionFacts(event),
+      ...(capturedE04.snapshot ? { e04Snapshot: capturedE04.snapshot } : {}),
     };
     try {
       return await this.repository.persistInitial({
@@ -259,6 +316,7 @@ export class CertificateSupportService {
       state === "available" &&
       artifactsAvailable &&
       this.isWriterAvailable();
+    const e04Snapshot = this.resolveE04Snapshot(record.e04Snapshot).snapshot;
 
     return {
       certificateId: row.receiptId,
@@ -311,6 +369,8 @@ export class CertificateSupportService {
         : null,
       supersededByCertificateId,
       artifactBlockers,
+      ...this.resolveCapturedCompletionFacts(record),
+      ...(e04Snapshot ? { e04Snapshot } : {}),
       regeneration: {
         enabled: regenerationEnabled,
         reasonCode: regenerationEnabled
@@ -605,6 +665,130 @@ export class CertificateSupportService {
     }
 
     return blockers;
+  }
+
+  private resolveCapturedCompletionFacts(
+    value: unknown,
+  ): CertificateCapturedCompletionFacts {
+    const record =
+      value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+    const facts: CertificateCapturedCompletionFacts = {};
+    const raw = record.actualFareBreakdown;
+    if (raw && typeof raw === "object") {
+      const parts = raw as Record<string, unknown>;
+      const { startMinor, distanceMinor, delayMinor, nightMinor } = parts;
+      if (
+        typeof startMinor === "number" &&
+        Number.isSafeInteger(startMinor) &&
+        startMinor >= 0 &&
+        typeof distanceMinor === "number" &&
+        Number.isSafeInteger(distanceMinor) &&
+        distanceMinor >= 0 &&
+        typeof delayMinor === "number" &&
+        Number.isSafeInteger(delayMinor) &&
+        delayMinor >= 0 &&
+        typeof nightMinor === "number" &&
+        Number.isSafeInteger(nightMinor) &&
+        nightMinor >= 0
+      ) {
+        facts.actualFareBreakdown = {
+          startMinor,
+          distanceMinor,
+          delayMinor,
+          nightMinor,
+        };
+      }
+    }
+    // Keep the exact declaration and existing profile revision together. Never
+    // parse a display name, reread a current profile, or invent provenance.
+    if (
+      typeof record.driverSurname === "string" &&
+      record.driverSurname.trim() &&
+      record.driverSurnameSource === "driver_profile_declared" &&
+      typeof record.driverSurnameProfileUpdatedAt === "string" &&
+      Number.isFinite(Date.parse(record.driverSurnameProfileUpdatedAt))
+    ) {
+      facts.driverSurname = record.driverSurname;
+      facts.driverSurnameSource = record.driverSurnameSource;
+      facts.driverSurnameProfileUpdatedAt =
+        record.driverSurnameProfileUpdatedAt;
+    }
+    return facts;
+  }
+
+  private resolveE04Snapshot(value: unknown): {
+    snapshot?: CertificateE04Snapshot;
+    blockers: CertificateArtifactBlocker[];
+  } {
+    const record =
+      value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : {};
+    const blockers: CertificateArtifactBlocker[] = [];
+    const text = (field: string, max: number): string => {
+      const raw = record[field];
+      if (
+        typeof raw !== "string" ||
+        !raw.trim() ||
+        Array.from(raw.trim()).length > max
+      ) {
+        blockers.push({ code: "missing_field", field: `e04Snapshot.${field}` });
+        return "";
+      }
+      return raw.trim();
+    };
+    const fleetOperatorName = text("fleetOperatorName", 200);
+    const driverSurname = text("driverSurname", 40);
+    const driverRegistrationMasked = text("driverRegistrationMasked", 40);
+    const paymentMethodDisplay = text("paymentMethodDisplay", 100);
+    if (
+      driverRegistrationMasked &&
+      !/^[•*●Xx]{4,}[0-9]{1,4}$/.test(driverRegistrationMasked)
+    ) {
+      blockers.push({
+        code: "unmasked_credential",
+        field: "e04Snapshot.driverRegistrationMasked",
+      });
+    }
+    const breakdown =
+      record.fareBreakdown && typeof record.fareBreakdown === "object"
+        ? (record.fareBreakdown as Record<string, unknown>)
+        : {};
+    const minor = (field: string): number | null => {
+      const raw = breakdown[field];
+      if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) {
+        blockers.push({
+          code: "missing_field",
+          field: `e04Snapshot.fareBreakdown.${field}`,
+        });
+        return null;
+      }
+      return raw;
+    };
+    const startMinor = minor("startMinor");
+    const distanceMinor = minor("distanceMinor");
+    const delayMinor = minor("delayMinor");
+    const nightMinor = minor("nightMinor");
+    if (
+      blockers.length ||
+      startMinor === null ||
+      distanceMinor === null ||
+      delayMinor === null ||
+      nightMinor === null
+    )
+      return { blockers };
+    return {
+      blockers,
+      snapshot: {
+        fleetOperatorName,
+        driverSurname,
+        driverRegistrationMasked,
+        fareBreakdown: { startMinor, distanceMinor, delayMinor, nightMinor },
+        paymentMethodDisplay,
+      },
+    };
   }
 
   private stringValue(

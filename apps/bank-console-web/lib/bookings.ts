@@ -554,3 +554,52 @@ export function filterBookings(filters: BookingFilters) {
 export function getBookingDetail(orderId: string) {
   return bookingDetails.find((item) => item.orderId === orderId);
 }
+
+// Presentation sizes match the existing tenant booking list. They do not cap
+// the authoritative dataset: every filtered row remains reachable.
+export const BOOKING_PAGE_SIZES = [10, 25, 50] as const;
+export function paginateBookingItems<T>(
+  items: readonly T[],
+  pageValue?: string,
+  pageSizeValue?: string,
+) {
+  const requestedSize = Number(pageSizeValue);
+  const pageSize =
+    BOOKING_PAGE_SIZES.find((size) => size === requestedSize) ?? 25;
+  const total = items.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const requestedPage = Number(pageValue);
+  const page =
+    Number.isSafeInteger(requestedPage) && requestedPage > 0
+      ? Math.min(requestedPage, totalPages)
+      : 1;
+  const start = (page - 1) * pageSize;
+  return {
+    items: items.slice(start, start + pageSize),
+    total,
+    page,
+    pageSize,
+    totalPages,
+    from: total ? start + 1 : 0,
+    to: Math.min(start + pageSize, total),
+  };
+}
+
+export function bookingReturnFilters(
+  params: Record<string, string | string[] | undefined>,
+) {
+  return Object.fromEntries(
+    [
+      "program",
+      "direction",
+      "state",
+      "period",
+      "cardholder",
+      "page",
+      "pageSize",
+    ].map((key) => {
+      const value = params[key];
+      return [key, Array.isArray(value) ? value[0] : value];
+    }),
+  );
+}

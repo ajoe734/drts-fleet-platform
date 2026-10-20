@@ -313,7 +313,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     );
 
     // Seed cost center for primary tenant
-    tenantPartnerController.upsertCostCenter(
+    await tenantPartnerController.upsertCostCenter(
       {
         code: "CC-SEC-001",
         name: "Security Cost Center 1",
@@ -346,7 +346,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
     );
     seededOtherAdminUser = otherAdmin;
 
-    tenantPartnerController.upsertCostCenter(
+    await tenantPartnerController.upsertCostCenter(
       {
         code: "CC-SEC-OTHER-001",
         name: "Other Tenant Cost Center",
@@ -545,7 +545,7 @@ describe("IAM-OP-AUTH-E2E-001: Session Revocation, Downgrade, Suspension & Isola
               new TextDecoder().decode(init.body as ArrayBuffer),
             );
           }
-          const res = tenantPartnerController.upsertCostCenter(
+          const res = await tenantPartnerController.upsertCostCenter(
             bodyObj,
             effectiveTenantId,
             "req-post-cc",

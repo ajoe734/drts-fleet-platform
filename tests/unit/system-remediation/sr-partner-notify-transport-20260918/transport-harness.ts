@@ -3,6 +3,7 @@ import type {
   ConsumerNotificationOutboxRecord,
   OrderPartnerNotificationRoute,
   PartnerEntryNotificationBinding,
+  PartnerPassengerEventType,
 } from "@drts/contracts";
 import { PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME } from "@drts/contracts";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -22,9 +23,11 @@ import {
   type WebhookFetchResponse,
 } from "../../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 
-export function harness(productionHttps = false) {
+export async function harness(productionHttps = false) {
   const now = new Date().toISOString();
-  const row: ConsumerNotificationOutboxRecord = {
+  const row: ConsumerNotificationOutboxRecord & {
+    eventType: PartnerPassengerEventType;
+  } = {
     outboxId: "outbox-1",
     orderId: "order-1",
     passengerSubjectRef: "subject-1",
@@ -81,16 +84,39 @@ export function harness(productionHttps = false) {
   const tenant = new TenantPartnerService(
     new AuditNotificationService(),
     undefined,
-    new WebhookDispatchService(productionHttps ? undefined : fetch),
+    new WebhookDispatchService(
+      productionHttps
+        ? undefined
+        : (url, init) =>
+            (init?.headers as Record<string, string>)["x-drts-event-type"] ===
+            "tenant.webhook.test"
+              ? Promise.resolve({ ok: true, status: 204 })
+              : fetch(url, init),
+    ),
   );
-  const endpoint = tenant.createWebhookEndpoint(route.tenantId, {
+  const endpoint = await tenant.createWebhookEndpoint(route.tenantId, {
     url: "https://partner.example.test/notification",
     secret: "unit-test-secret",
     events: Object.values(PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME),
   });
-  tenant.updateWebhookEndpoint(route.tenantId, endpoint.webhookId, {
-    status: "active",
-  });
+  if (productionHttps) {
+    // Verification alone uses a controlled HTTP response. Subsequent partner
+    // dispatches keep the real production HTTPS adapter under test.
+    const verificationFetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue({ ok: true, status: 204 } as Response);
+    try {
+      await tenant.sendTestWebhook(route.tenantId, {
+        webhookId: endpoint.webhookId,
+      });
+    } finally {
+      verificationFetch.mockRestore();
+    }
+  } else {
+    await tenant.sendTestWebhook(route.tenantId, {
+      webhookId: endpoint.webhookId,
+    });
+  }
   const activeEndpoint = tenant.listWebhookEndpoints(route.tenantId)[0]!;
   const entry = {
     entrySlug: route.entrySlug,

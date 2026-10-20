@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { createHash } from "node:crypto";
 import { buildOrderFixture } from "../integration/voice-order-fixture";
 
@@ -133,6 +134,8 @@ function createOwnedMobilityService(options?: {
   };
 }) {
   const regulatoryRegistryService = {
+    assertCurrentMatchingSuppressionClear: vi.fn(() => undefined),
+    prepareMatchingSuppressions: vi.fn(() => undefined),
     getEligibleCandidates: vi.fn(
       (
         serviceBucket: string,
@@ -200,27 +203,9 @@ function createOwnedMobilityService(options?: {
       options.serviceProductOverrides as never,
     );
   }
-  const callcenterService = {
-    registerRecordingAttachmentListener: vi.fn(),
-    registerRecordingStateChangeListener: vi.fn(),
-    linkOrderToCallSession: vi.fn(
-      ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId,
-      }) => ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId: recordingId ?? null,
-      }),
-    ),
-  };
+  const callcenterService = new CallcenterService(
+    auditNotificationService as never,
+  );
   const taskEventsService = new OwnedMobilityTaskEventsService(
     new EventEmitter2(),
   );
@@ -239,7 +224,7 @@ function createOwnedMobilityService(options?: {
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
-    callcenterService as never,
+    callcenterService,
     taskEventsService,
     opsDispatchEventsService,
     options?.repository as never,
@@ -922,20 +907,20 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("enforces queue check-in eligibility and keeps stable queue positions", () => {
+  it("enforces queue check-in eligibility and keeps stable queue positions", async () => {
     const { service } = createOwnedMobilityService({
       vehicleDispatchable: true,
     });
 
-    const firstEntry = service.queueCheckIn({
+    const firstEntry = await service.queueCheckIn({
       vehicleId: "vehicle-001",
       siteId: "north-station",
     });
-    const duplicateEntry = service.queueCheckIn({
+    const duplicateEntry = await service.queueCheckIn({
       vehicleId: "vehicle-001",
       siteId: "north-station",
     });
-    const secondEntry = service.queueCheckIn({
+    const secondEntry = await service.queueCheckIn({
       vehicleId: "vehicle-002",
       siteId: "north-station",
     });
@@ -945,20 +930,22 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(secondEntry.position).toBe(2);
   });
 
-  it("rejects queue check-in when the vehicle is not dispatchable", () => {
+  it("rejects queue check-in when the vehicle is not dispatchable", async () => {
     const { service } = createOwnedMobilityService({
       vehicleDispatchable: false,
     });
 
-    expect(() =>
-      service.queueCheckIn({
-        vehicleId: "vehicle-blocked",
-        siteId: "north-station",
-      }),
-    ).toThrowError(ApiRequestError);
+    await expect(
+      Promise.resolve().then(() =>
+        service.queueCheckIn({
+          vehicleId: "vehicle-blocked",
+          siteId: "north-station",
+        }),
+      ),
+    ).rejects.toThrowError(ApiRequestError);
 
     try {
-      service.queueCheckIn({
+      await service.queueCheckIn({
         vehicleId: "vehicle-blocked",
         siteId: "north-station",
       });
@@ -971,18 +958,18 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("projects queue reads from registry authority and fails closed when eligibility changes", () => {
+  it("projects queue reads from registry authority and fails closed when eligibility changes", async () => {
     let vehicleDispatchable = true;
     const { service } = createOwnedMobilityService({
       getVehicleDispatchability: () => vehicleDispatchable,
     });
-    const checkedIn = service.queueCheckIn({
+    const checkedIn = await service.queueCheckIn({
       vehicleId: "veh-demo-001",
       siteId: "north-station",
       queueMode: "physical_rank",
     });
 
-    expect(service.listQueueEntries()).toEqual([
+    expect(await service.listQueueEntries()).toEqual([
       expect.objectContaining({
         queueEntryId: checkedIn.queueEntryId,
         runtimeProfileCode: "ordinary_taxi",
@@ -1003,7 +990,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ]);
 
     vehicleDispatchable = false;
-    expect(service.getQueueEntry(checkedIn.queueEntryId)).toMatchObject({
+    expect(await service.getQueueEntry(checkedIn.queueEntryId)).toMatchObject({
       eligibility: {
         decision: "denied",
         reasonCode: "VEHICLE_NOT_DISPATCHABLE",
@@ -1011,9 +998,9 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("fails queue reads closed when registry authority is unavailable", () => {
+  it("fails queue reads closed when registry authority is unavailable", async () => {
     const { service, regulatoryRegistryService } = createOwnedMobilityService();
-    const checkedIn = service.queueCheckIn({
+    const checkedIn = await service.queueCheckIn({
       vehicleId: "veh-demo-001",
       siteId: "north-station",
     });
@@ -1021,7 +1008,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       throw new Error("registry unavailable");
     });
 
-    expect(service.getQueueEntry(checkedIn.queueEntryId)).toMatchObject({
+    expect(await service.getQueueEntry(checkedIn.queueEntryId)).toMatchObject({
       driverId: null,
       vehiclePlateNo: null,
       serviceAreaCode: null,
@@ -1035,14 +1022,16 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     });
   });
 
-  it("returns a canonical not-found error for unknown queue entry details", () => {
+  it("returns a canonical not-found error for unknown queue entry details", async () => {
     const { service } = createOwnedMobilityService();
 
-    expect(() => service.getQueueEntry("queue-entry-missing")).toThrowError(
-      ApiRequestError,
-    );
+    await expect(
+      Promise.resolve().then(() =>
+        service.getQueueEntry("queue-entry-missing"),
+      ),
+    ).rejects.toThrowError(ApiRequestError);
     try {
-      service.getQueueEntry("queue-entry-missing");
+      await service.getQueueEntry("queue-entry-missing");
     } catch (error) {
       expect((error as ApiRequestError).getResponse()).toMatchObject({
         error: {
@@ -1643,14 +1632,17 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     const tenantPartnerService = new TenantPartnerService(
       new AuditNotificationService(),
     );
-    const passenger = tenantPartnerService.upsertPassenger("tenant-demo-001", {
-      passengerId: "passenger-master-001",
-      fullName: "王小美",
-      mobile: "0911222333",
-      roles: ["employee", "passenger"],
-      employeeNo: "EMP-001",
-    });
-    const pickupAddress = tenantPartnerService.upsertAddress(
+    const passenger = await tenantPartnerService.upsertPassenger(
+      "tenant-demo-001",
+      {
+        passengerId: "passenger-master-001",
+        fullName: "王小美",
+        mobile: "0911222333",
+        roles: ["employee", "passenger"],
+        employeeNo: "EMP-001",
+      },
+    );
+    const pickupAddress = await tenantPartnerService.upsertAddress(
       "tenant-demo-001",
       {
         addressId: "address-master-pickup-001",
@@ -1662,7 +1654,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         lng: 121.5637,
       },
     );
-    const dropoffAddress = tenantPartnerService.upsertAddress(
+    const dropoffAddress = await tenantPartnerService.upsertAddress(
       "tenant-demo-001",
       {
         addressId: "address-master-dropoff-001",
@@ -1722,7 +1714,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       maskedAddress: dropoffAddress.maskedAddressText,
     });
 
-    const updatedPassenger = tenantPartnerService.upsertPassenger(
+    const updatedPassenger = await tenantPartnerService.upsertPassenger(
       "tenant-demo-001",
       {
         passengerId: "passenger-master-002",
@@ -1936,7 +1928,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       });
     }
 
-    tenantPartnerService.disableCostCenter("tenant-demo-001", {
+    await tenantPartnerService.disableCostCenter("tenant-demo-001", {
       code: "CC-FIN-04",
       reason: "sunset",
     });
@@ -3995,7 +3987,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      const partnerBooking = service.createMultiTaxiRide(
+      const partnerBooking = await service.createMultiTaxiRide(
         {
           pickup: { address: "台北車站" },
           dropoff: { address: "松山機場" },
@@ -5986,7 +5978,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     }
   });
 
-  it("allows only virtual matching for multi-taxi queue entries", () => {
+  it("allows only virtual matching for multi-taxi queue entries", async () => {
     const { service } = createOwnedMobilityService();
     const authorization = {
       authorizationId: "auth-mtx-001",
@@ -6002,7 +5994,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
 
-    const virtualEntry = service.queueCheckInMultiTaxi(
+    const virtualEntry = await service.queueCheckInMultiTaxi(
       {
         vehicleId: "veh-demo-001",
         siteId: "virtual-tpe",
@@ -6016,19 +6008,21 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
       operatingAuthorizationId: "auth-mtx-001",
     });
 
-    expect(() =>
-      service.queueCheckInMultiTaxi(
-        {
-          vehicleId: "veh-demo-001",
-          siteId: "taxi-stand-tpe",
-          queueMode: "taxi_stand",
-        },
-        authorization,
+    await expect(
+      Promise.resolve().then(() =>
+        service.queueCheckInMultiTaxi(
+          {
+            vehicleId: "veh-demo-001",
+            siteId: "taxi-stand-tpe",
+            queueMode: "taxi_stand",
+          },
+          authorization,
+        ),
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
   });
 
-  it("enforces MTX-QUEUE-001 queue semantics and independent ordinary_taxi configuration", () => {
+  it("enforces MTX-QUEUE-001 queue semantics and independent ordinary_taxi configuration", async () => {
     const { service } = createOwnedMobilityService();
     const authorization = {
       authorizationId: "auth-mtx-002",
@@ -6045,7 +6039,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     };
 
     // 1. multi_taxi_direct + virtual_matching passes
-    const virtualCheckIn = service.queueCheckInMultiTaxi(
+    const virtualCheckIn = await service.queueCheckInMultiTaxi(
       {
         vehicleId: "veh-demo-001",
         siteId: "virtual-site-01",
@@ -6056,28 +6050,32 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(virtualCheckIn.queueMode).toBe("virtual_matching");
 
     // 2. multi_taxi_direct + physical_rank denied
-    expect(() =>
-      service.queueCheckInMultiTaxi(
-        {
-          vehicleId: "veh-demo-001",
-          siteId: "rank-site-01",
-          queueMode: "physical_rank",
-        },
-        authorization,
+    await expect(
+      Promise.resolve().then(() =>
+        service.queueCheckInMultiTaxi(
+          {
+            vehicleId: "veh-demo-001",
+            siteId: "rank-site-01",
+            queueMode: "physical_rank",
+          },
+          authorization,
+        ),
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     // 3. multi_taxi_direct + taxi_stand denied
-    expect(() =>
-      service.queueCheckInMultiTaxi(
-        {
-          vehicleId: "veh-demo-001",
-          siteId: "stand-site-01",
-          queueMode: "taxi_stand",
-        },
-        authorization,
+    await expect(
+      Promise.resolve().then(() =>
+        service.queueCheckInMultiTaxi(
+          {
+            vehicleId: "veh-demo-001",
+            siteId: "stand-site-01",
+            queueMode: "taxi_stand",
+          },
+          authorization,
+        ),
       ),
-    ).toThrowError(ApiRequestError);
+    ).rejects.toThrowError(ApiRequestError);
 
     // Cannot loosen multi_taxi_direct policy via setProfileQueuePolicy
     expect(() =>
@@ -6095,7 +6093,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ]);
 
     // Check-in ordinary_taxi under virtual_matching before policy change
-    const priorVirtualCheckIn = service.queueCheckIn({
+    const priorVirtualCheckIn = await service.queueCheckIn({
       vehicleId: "veh-demo-002",
       siteId: "virtual-site-02",
       queueMode: "virtual_matching",
@@ -6113,16 +6111,18 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     ]);
 
     // New check-in for ordinary_taxi with virtual_matching should now be denied
-    expect(() =>
-      service.queueCheckIn({
-        vehicleId: "veh-demo-001",
-        siteId: "virtual-site-01",
-        queueMode: "virtual_matching",
-      }),
-    ).toThrowError(ApiRequestError);
+    await expect(
+      Promise.resolve().then(() =>
+        service.queueCheckIn({
+          vehicleId: "veh-demo-001",
+          siteId: "virtual-site-01",
+          queueMode: "virtual_matching",
+        }),
+      ),
+    ).rejects.toThrowError(ApiRequestError);
 
     // Existing entry checked in under virtual_matching can still check out successfully
-    const virtualCheckOut = service.queueCheckOut({
+    const virtualCheckOut = await service.queueCheckOut({
       vehicleId: "veh-demo-002",
       siteId: "virtual-site-02",
       queueMode: "virtual_matching",
@@ -6130,7 +6130,7 @@ describe("OwnedMobilityService queue and reservation orchestration", () => {
     expect(virtualCheckOut.status).toBe("checked_out");
 
     // Check-in for ordinary_taxi with physical_rank should still work
-    const ordinaryCheckIn = service.queueCheckIn({
+    const ordinaryCheckIn = await service.queueCheckIn({
       vehicleId: "veh-demo-001",
       siteId: "rank-site-01",
       queueMode: "physical_rank",

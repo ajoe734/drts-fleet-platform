@@ -12,9 +12,12 @@ import { createMailTransportFromEnv } from "../notification-delivery/smtp-mail.t
 import { BillingSettlementRepository } from "./billing-settlement.repository";
 import { BillingSettlementController } from "./billing-settlement.controller";
 import { BillingSettlementService } from "./billing-settlement.service";
+import { BillingMonthlyBatchService } from "./billing-monthly-batch.service";
+import { BillingMonthlyBatchController } from "./billing-monthly-batch.controller";
 import {
   PAYMENT_RECOVERY_PORT,
   PlatformManualPaymentRecoveryPort,
+  PassengerCoreManualPaymentRecoveryPort,
 } from "./payment-recovery.port";
 import { ReferralSettlementScaffoldService } from "./referral-settlement.scaffold.service";
 import { RemittanceProofService } from "./remittance-proof.service";
@@ -45,11 +48,13 @@ import {
   ],
   controllers: [
     BillingSettlementController,
+    BillingMonthlyBatchController,
     RemittanceProofDownloadController,
     InvoiceMailController,
   ],
   providers: [
     BillingSettlementService,
+    BillingMonthlyBatchService,
     BillingSettlementRepository,
     {
       provide: InvoiceMailService,
@@ -81,11 +86,12 @@ import {
       },
     },
     PlatformManualPaymentRecoveryPort,
-    // retry_capture remains unavailable (no PSP/issuer is integrated); see
-    // PlatformManualPaymentRecoveryPort for the exact confirmed boundary.
+    PassengerCoreManualPaymentRecoveryPort,
+    // Automatic passenger capture/retry lives in its fenced worker. An Ops
+    // re-presentation command remains unavailable until its policy is approved.
     {
       provide: PAYMENT_RECOVERY_PORT,
-      useExisting: PlatformManualPaymentRecoveryPort,
+      useExisting: PassengerCoreManualPaymentRecoveryPort,
     },
     ReferralSettlementScaffoldService,
     RemittanceProofService,

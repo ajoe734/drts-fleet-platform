@@ -267,6 +267,9 @@ function createTestService(
   }>,
 ) {
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: () => candidates,
     getVehicleDispatchability: () => true,
     getDriverAvailability: () => true,
@@ -2164,10 +2167,29 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
         `UPDATE ops.phase1_dispatch_assignments SET record = jsonb_set(record, '{acceptanceDeadline}', to_jsonb('2000-01-01T00:00:00Z'::text)) WHERE assignment_id = $1`,
         [assignment.assignmentId],
       );
+      // PostgreSQL does not promise UNION ALL row order without ORDER BY; a
+      // physical reorder of otherwise-identical rows must not register as a
+      // snapshot mutation. Each branch is tagged with a stable source
+      // discriminator plus its own primary key so the final ordering is
+      // deterministic regardless of storage order, without discarding,
+      // collapsing, or reshaping any row's `record` payload.
       const readState = async () =>
         (
           await database.query(
-            `SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_jobs WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_driver_tasks WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_assignments WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_attempts WHERE order_id = $1 UNION ALL SELECT record FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1`,
+            `SELECT record FROM (
+              SELECT record, 0 AS source_order, order_id AS sort_key FROM ops.phase1_owned_orders WHERE order_id = $1
+              UNION ALL
+              SELECT record, 1, dispatch_job_id FROM ops.phase1_dispatch_jobs WHERE order_id = $1
+              UNION ALL
+              SELECT record, 2, task_id FROM ops.phase1_driver_tasks WHERE order_id = $1
+              UNION ALL
+              SELECT record, 3, assignment_id FROM ops.phase1_dispatch_assignments WHERE order_id = $1
+              UNION ALL
+              SELECT record, 4, attempt_id FROM ops.phase1_dispatch_attempts WHERE order_id = $1
+              UNION ALL
+              SELECT record, 5, trace_id FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1
+            ) AS snapshot
+            ORDER BY source_order, sort_key`,
             [order.orderId],
           )
         ).rows;
@@ -2481,9 +2503,26 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
       let result: Promise<unknown> | undefined;
       try {
         if (scenario === "token_failure") {
+          const authorizations = new Map<
+            string,
+            ReturnType<MultiTaxiService["createAuthorization"]>
+          >();
           const multiTaxi = new MultiTaxiService(service, {
             isEnabled: () => true,
-            persistAuthorization: async () => {},
+            persistAuthorization: async (
+              authorization: ReturnType<
+                MultiTaxiService["createAuthorization"]
+              >,
+            ) => {
+              authorizations.set(
+                authorization.authorizationId,
+                structuredClone(authorization),
+              );
+            },
+            findEffectiveAuthorizations: async () =>
+              [...authorizations.values()].map((authorization) =>
+                structuredClone(authorization),
+              ),
             persistRideAccessToken: async () => {
               throw new Error("injected token failure");
             },
@@ -2519,10 +2558,20 @@ describe("UV-EXEC-006 real service entry points (mixed-entry write path)", () =>
             .cancelOwnedOrder(orderId!, { reason: "passenger_requested" })
             .catch((error: unknown) => error);
         }
-        await vi.waitFor(() => expect(cancelSpy).toHaveBeenCalledOnce());
-        expect(writes.length).toBeGreaterThan(0);
-        expect(readSpy).not.toHaveBeenCalled();
-        release();
+        if (scenario === "token_failure") {
+          // Creation awaits the initial durable write before token persistence
+          // can fail and enter cancellation. Observe the pending gate first.
+          await vi.waitFor(() => expect(writes.length).toBeGreaterThan(0));
+          expect(cancelSpy).not.toHaveBeenCalled();
+          expect(readSpy).not.toHaveBeenCalled();
+          release();
+          await vi.waitFor(() => expect(cancelSpy).toHaveBeenCalledOnce());
+        } else {
+          await vi.waitFor(() => expect(cancelSpy).toHaveBeenCalledOnce());
+          expect(writes.length).toBeGreaterThan(0);
+          expect(readSpy).not.toHaveBeenCalled();
+          release();
+        }
         const outcome = await result;
         if (scenario === "token_failure") {
           expect(getErrorCode(outcome)).toBe(

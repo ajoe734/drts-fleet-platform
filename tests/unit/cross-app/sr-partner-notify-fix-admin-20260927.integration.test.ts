@@ -153,6 +153,7 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
   process.env = {
     ...originalEnv,
     NODE_ENV: "development",
+    DRTS_DEV_MFA_WAIVED: "false",
     DRTS_API_URL: "http://localhost:3001",
   };
 
@@ -205,7 +206,11 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
   expect(canActivate).toBe(true);
 
   // Assert controller consumes the emitted header correctly
-  const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
+  const mockService = {
+    assertTenantAccessScope:
+      TenantPartnerService.prototype.assertTenantAccessScope,
+    listWebhookEndpoints: vi.fn().mockReturnValue([]),
+  };
   const controller = new TenantPartnerController(
     mockService as any,
     {} as any,
@@ -233,6 +238,7 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
   process.env = {
     ...originalEnv,
     NODE_ENV: "development",
+    DRTS_DEV_MFA_WAIVED: "false",
     DRTS_API_URL: "http://localhost:3001",
     JWT_SECRET: "test-secret-123",
   };
@@ -297,7 +303,11 @@ test("Next GET -> issueControlPlaneRequestAuth -> BootstrapAuthGuard -> authorit
   expect(canActivate).toBe(true);
 
   // Assert controller consumes the emitted header correctly
-  const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
+  const mockService = {
+    assertTenantAccessScope:
+      TenantPartnerService.prototype.assertTenantAccessScope,
+    listWebhookEndpoints: vi.fn().mockReturnValue([]),
+  };
   const controller = new TenantPartnerController(
     mockService as any,
     {} as any,
@@ -512,7 +522,11 @@ test("Next GET valid signed IAP assertion -> Guard -> Controller delegates x-ten
   expect(mockRequest.identity.tenantId).toBeNull();
 
   // The controller must rely on the x-tenant-id header instead
-  const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
+  const mockService = {
+    assertTenantAccessScope:
+      TenantPartnerService.prototype.assertTenantAccessScope,
+    listWebhookEndpoints: vi.fn().mockReturnValue([]),
+  };
   const controller = new TenantPartnerController(
     mockService as any,
     {} as any,
@@ -730,7 +744,11 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
       getClass: () => TenantPartnerController,
     } as any;
 
-    const mockService = { createWebhookEndpoint: vi.fn().mockReturnValue({}) };
+    const mockService = {
+      assertTenantAccessScope:
+        TenantPartnerService.prototype.assertTenantAccessScope,
+      createWebhookEndpoint: vi.fn().mockReturnValue({}),
+    };
     const controller = new TenantPartnerController(
       mockService as any,
       {} as any,
@@ -744,7 +762,7 @@ test("Next POST valid IAP assertion -> Guard -> Controller mutation allowed with
     const canActivate = await guard.canActivate(mockContext);
     expect(canActivate).toBe(true);
 
-    controller.createWebhookEndpoint(
+    await controller.createWebhookEndpoint(
       mockRequest.body as any,
       mockRequest.headers["x-tenant-id"],
       "req-5",
@@ -871,7 +889,11 @@ test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller
       getClass: () => TenantPartnerController,
     } as any;
 
-    const mockService = { createWebhookEndpoint: vi.fn().mockReturnValue({}) };
+    const mockService = {
+      assertTenantAccessScope:
+        TenantPartnerService.prototype.assertTenantAccessScope,
+      createWebhookEndpoint: vi.fn().mockReturnValue({}),
+    };
     const controller = new TenantPartnerController(
       mockService as any,
       {} as any,
@@ -885,7 +907,7 @@ test("Next POST valid IAP assertion without step-up proof -> Guard -> Controller
     let err: any;
     try {
       if (await guard.canActivate(mockContext)) {
-        controller.createWebhookEndpoint(
+        await controller.createWebhookEndpoint(
           {
             url: "https://example.com/webhook",
             secret: "whsec_1",
@@ -1003,7 +1025,11 @@ test("Next GET missing tenant -> Guard -> Controller delegates missing tenant", 
     const canActivate = await guard.canActivate(mockContext);
     expect(canActivate).toBe(true);
 
-    const mockService = { listWebhookEndpoints: vi.fn().mockReturnValue([]) };
+    const mockService = {
+      assertTenantAccessScope:
+        TenantPartnerService.prototype.assertTenantAccessScope,
+      listWebhookEndpoints: vi.fn().mockReturnValue([]),
+    };
     const controller = new TenantPartnerController(
       mockService as any,
       {} as any,
@@ -1119,7 +1145,11 @@ test("Next GET forged headers and unauthorized identity -> Guard drops forged se
       getClass: () => TenantPartnerController,
     } as any;
 
-    const mockService = { listWebhookEndpoints: vi.fn() };
+    const mockService = {
+      assertTenantAccessScope:
+        TenantPartnerService.prototype.assertTenantAccessScope,
+      listWebhookEndpoints: vi.fn(),
+    };
     const controller = new TenantPartnerController(
       mockService as any,
       {} as any,
@@ -1251,7 +1281,7 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
       recordAuditLog: vi.fn(),
       recordSecurityEvent: vi.fn(),
     } as any);
-    realService.createWebhookEndpoint(
+    await realService.createWebhookEndpoint(
       "review-tenant-a",
       {
         url: "https://a.com/webhook",
@@ -1260,7 +1290,7 @@ test("Next GET cross-tenant selection boundary -> selecting A isolates from B", 
       },
       "req-1",
     );
-    realService.createWebhookEndpoint(
+    await realService.createWebhookEndpoint(
       "review-tenant-b",
       {
         url: "https://b.com/webhook",

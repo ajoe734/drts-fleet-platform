@@ -7,7 +7,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 THIS_DIR = Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
@@ -28,33 +28,67 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_message() -> dict[str, Any] | None:
-    headers: dict[str, str] = {}
-    while True:
-        line = sys.stdin.buffer.readline()
+class StdioCodec:
+    """Newline-delimited MCP, with session-local legacy header compatibility."""
+
+    MAX_MESSAGE_BYTES = 1024 * 1024
+    MAX_HEADER_BYTES = 8192
+
+    def __init__(self, reader: BinaryIO, writer: BinaryIO):
+        self.reader = reader
+        self.writer = writer
+        self.legacy: bool | None = None
+
+    def _line(self, limit: int) -> bytes:
+        line = self.reader.readline(limit + 1)
+        if len(line) > limit:
+            raise ValueError("frame limit exceeded")
+        if line and not line.endswith(b"\n"):
+            raise ValueError("unterminated line")
+        return line
+
+    def read_message(self) -> dict[str, Any] | None:
+        line = self._line(self.MAX_MESSAGE_BYTES)
         if not line:
             return None
-        if line in {b"\r\n", b"\n"}:
-            break
-        text = line.decode("utf-8").strip()
-        if ":" in text:
-            key, value = text.split(":", 1)
-            headers[key.strip().lower()] = value.strip()
-    length = int(headers.get("content-length", "0") or "0")
-    if length <= 0:
-        return None
-    payload = sys.stdin.buffer.read(length)
-    if not payload:
-        return None
-    return json.loads(payload.decode("utf-8"))
+        if self.legacy is None:
+            self.legacy = line.lower().startswith(b"content-length:")
+        if self.legacy:
+            headers: dict[bytes, bytes] = {}
+            header_bytes = 0
+            while line not in {b"\r\n", b"\n"}:
+                header_bytes += len(line)
+                if not line or header_bytes > self.MAX_HEADER_BYTES or b":" not in line:
+                    raise ValueError("invalid legacy header")
+                key, value = line.strip().split(b":", 1)
+                key = key.strip().lower()
+                if not key or key in headers:
+                    raise ValueError("invalid legacy header")
+                headers[key] = value.strip()
+                line = self._line(self.MAX_HEADER_BYTES - header_bytes)
+            raw_length = headers.get(b"content-length", b"")
+            if not raw_length.isdigit() or len(raw_length) > 10:
+                raise ValueError("invalid content length")
+            length = int(raw_length)
+            if not 0 < length <= self.MAX_MESSAGE_BYTES:
+                raise ValueError("invalid content length")
+            payload = self.reader.read(length)
+            if len(payload) != length:
+                raise ValueError("truncated body")
+        else:
+            payload = line
+        message = json.loads(payload.decode("utf-8"))
+        if not isinstance(message, dict):
+            raise ValueError("expected a JSON-RPC object")
+        return message
 
-
-def write_message(payload: dict[str, Any]) -> None:
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    header = f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
-    sys.stdout.buffer.write(header)
-    sys.stdout.buffer.write(body)
-    sys.stdout.buffer.flush()
+    def write_message(self, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        if self.legacy:
+            self.writer.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+        else:
+            self.writer.write(body + b"\n")
+        self.writer.flush()
 
 
 def text_result(payload: dict[str, Any]) -> dict[str, Any]:
@@ -143,13 +177,23 @@ def handle_tool_call(config: dict[str, Any], args: dict[str, Any]) -> dict[str, 
 def main() -> int:
     args = parse_args()
     config = load_config(args.config)
+    codec = StdioCodec(sys.stdin.buffer, sys.stdout.buffer)
     while True:
-        message = read_message()
+        try:
+            message = codec.read_message()
+        except (ValueError, UnicodeError, RecursionError):
+            # Do not echo potentially sensitive tool input or contaminate stdout.
+            print("Invalid MCP stdio input; closing transport.", file=sys.stderr)
+            return 1
         if message is None:
             return 0
         method = message.get("method")
+        if method == "exit":
+            return 0
+        if "id" not in message:
+            continue
         if method == "initialize":
-            write_message(
+            codec.write_message(
                 {
                     "jsonrpc": "2.0",
                     "id": message.get("id"),
@@ -164,10 +208,10 @@ def main() -> int:
         if method == "notifications/initialized":
             continue
         if method == "ping":
-            write_message({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})
+            codec.write_message({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})
             continue
         if method == "tools/list":
-            write_message(
+            codec.write_message(
                 {
                     "jsonrpc": "2.0",
                     "id": message.get("id"),
@@ -193,7 +237,7 @@ def main() -> int:
         if method == "tools/call":
             params = message.get("params", {})
             if params.get("name") != TOOL_NAME:
-                write_message(
+                codec.write_message(
                     {
                         "jsonrpc": "2.0",
                         "id": message.get("id"),
@@ -202,14 +246,12 @@ def main() -> int:
                 )
                 continue
             result = handle_tool_call(config, params.get("arguments", {}))
-            write_message({"jsonrpc": "2.0", "id": message.get("id"), "result": result})
+            codec.write_message({"jsonrpc": "2.0", "id": message.get("id"), "result": result})
             continue
         if method == "shutdown":
-            write_message({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})
+            codec.write_message({"jsonrpc": "2.0", "id": message.get("id"), "result": {}})
             continue
-        if method == "exit":
-            return 0
-        write_message(
+        codec.write_message(
             {
                 "jsonrpc": "2.0",
                 "id": message.get("id"),

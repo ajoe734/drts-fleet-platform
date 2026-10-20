@@ -172,6 +172,17 @@ type OwnedMobilityState = {
   consumerNotificationOutbox: ConsumerNotificationOutboxRecord[];
 };
 
+export type OwnedOrderActionContext = Pick<
+  OwnedMobilityState,
+  | "orders"
+  | "dispatchJobs"
+  | "dispatchAttempts"
+  | "dispatchAssignments"
+  | "driverTasks"
+  | "dispatchTraceLogs"
+  | "passengerDisclosureSnapshots"
+>;
+
 type PersistOwnedMobilityChanges = {
   orders?: readonly OwnedOrderRecord[];
   dispatchJobs?: readonly DispatchJobRecord[];
@@ -227,6 +238,10 @@ export class OwnedMobilityRepository {
     return this.isEnabled();
   }
 
+  findBookedPassengerQuote(order: OwnedOrderRecord) {
+    return this.multiTaxiRepository.findBookedPassengerQuote(order);
+  }
+
   async findOrderById(orderId: string): Promise<OwnedOrderRecord | null> {
     if (!this.isEnabled()) {
       return null;
@@ -246,6 +261,115 @@ export class OwnedMobilityRepository {
       ? this.parseRecord<OwnedOrderRecord>(
           row.record,
           "ops.phase1_owned_orders",
+        )
+      : null;
+  }
+
+  async listOrdersForRead(
+    orderIds?: readonly string[],
+  ): Promise<OwnedOrderRecord[]> {
+    if (!this.isEnabled() || orderIds?.length === 0) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_owned_orders
+       ${orderIds ? "WHERE order_id = ANY($1::varchar[])" : ""}
+       ORDER BY created_at DESC, order_id`,
+      orderIds ? [orderIds] : [],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<OwnedOrderRecord>(row.record, "ops.phase1_owned_orders"),
+    );
+  }
+
+  async listDriverTasksForRead(): Promise<DriverTaskRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_driver_tasks ORDER BY created_at DESC, task_id`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DriverTaskRecord>(row.record, "ops.phase1_driver_tasks"),
+    );
+  }
+
+  async findDriverTaskForRead(
+    taskId: string,
+  ): Promise<DriverTaskRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_driver_tasks WHERE task_id = $1 LIMIT 1`,
+      [taskId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<DriverTaskRecord>(
+          result.rows[0].record,
+          "ops.phase1_driver_tasks",
+        )
+      : null;
+  }
+
+  async listDispatchJobsForRead(): Promise<DispatchJobRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_jobs ORDER BY created_at DESC, dispatch_job_id`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DispatchJobRecord>(
+        row.record,
+        "ops.phase1_dispatch_jobs",
+      ),
+    );
+  }
+
+  /** One statement / MVCC snapshot, scoped to one aggregate. Native mutation
+   * transactions still acquire their original row/resource locks afterwards. */
+  async loadOrderActionContext(
+    key: { orderId: string } | { taskId: string } | { dispatchJobId: string },
+  ): Promise<OwnedOrderActionContext | null> {
+    if (!this.isEnabled()) return null;
+    const [predicate, value] =
+      "orderId" in key
+        ? ["o.order_id = $1", key.orderId]
+        : "taskId" in key
+          ? [
+              "o.order_id = (SELECT order_id FROM ops.phase1_driver_tasks WHERE task_id = $1)",
+              key.taskId,
+            ]
+          : [
+              "o.order_id = (SELECT order_id FROM ops.phase1_dispatch_jobs WHERE dispatch_job_id = $1)",
+              key.dispatchJobId,
+            ];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+      SELECT jsonb_build_object(
+        'orders', jsonb_build_array(o.record),
+        'dispatchJobs', (SELECT coalesce(jsonb_agg(record ORDER BY updated_at DESC, created_at DESC), '[]'::jsonb) FROM ops.phase1_dispatch_jobs WHERE order_id = o.order_id),
+        'dispatchAttempts', (SELECT coalesce(jsonb_agg(record ORDER BY sequence DESC, created_at DESC), '[]'::jsonb) FROM ops.phase1_dispatch_attempts WHERE order_id = o.order_id),
+        'dispatchAssignments', (SELECT coalesce(jsonb_agg(record ORDER BY updated_at DESC, created_at DESC), '[]'::jsonb) FROM ops.phase1_dispatch_assignments WHERE order_id = o.order_id),
+        'driverTasks', (SELECT coalesce(jsonb_agg(record ORDER BY updated_at DESC, created_at DESC), '[]'::jsonb) FROM ops.phase1_driver_tasks WHERE order_id = o.order_id),
+        'dispatchTraceLogs', (SELECT coalesce(jsonb_agg(record ORDER BY created_at DESC), '[]'::jsonb) FROM ops.phase1_dispatch_trace_logs WHERE order_id = o.order_id),
+        'passengerDisclosureSnapshots', (SELECT coalesce(jsonb_agg(record ORDER BY assignment_version DESC, created_at DESC), '[]'::jsonb) FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = o.order_id)
+      ) AS record FROM ops.phase1_owned_orders o WHERE ${predicate} LIMIT 1`,
+      [value],
+    );
+    return result.rows[0]
+      ? this.parseRecord<OwnedOrderActionContext>(
+          result.rows[0].record,
+          "owned_order_action_context",
+        )
+      : null;
+  }
+
+  async findCurrentPassengerAssignmentDisclosure(orderId: string) {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.passenger_dispatch_disclosure_snapshots
+       WHERE order_id = $1 AND superseded_at IS NULL
+       ORDER BY assignment_version DESC, created_at DESC LIMIT 1`,
+      [orderId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<PassengerDispatchDisclosureSnapshot>(
+          result.rows[0].record,
+          "ops.passenger_dispatch_disclosure_snapshots",
         )
       : null;
   }
@@ -732,6 +856,48 @@ export class OwnedMobilityRepository {
     changes: PersistOwnedMobilityChanges,
   ) {
     await this.persistChangesWithExecutor(executor, changes);
+  }
+
+  /** The original queue is a trace-log stream. Serialize only one queue
+   * context, then read its committed events inside that same transaction. */
+  async withQueueCommand<T>(
+    context: { siteId: string; runtimeProfileCode: string; queueMode: string },
+    work: (executor: OwnedMobilityQueryExecutor) => Promise<T>,
+  ): Promise<T> {
+    return this.withTransaction(async (executor) => {
+      await executor.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [
+          JSON.stringify([
+            "dispatch-queue",
+            context.siteId,
+            context.runtimeProfileCode,
+            context.queueMode,
+          ]),
+        ],
+      );
+      return work(executor);
+    });
+  }
+
+  async loadQueueTraceLogs(
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+    siteId?: string,
+  ): Promise<DispatchTraceLogRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_trace_logs
+       WHERE event_type IN ('queue.entry.created', 'queue.entry.closed')
+       ${siteId === undefined ? "" : "AND record->'details'->>'siteId' = $1"}
+       ORDER BY created_at, trace_id`,
+      siteId === undefined ? [] : [siteId],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DispatchTraceLogRecord>(
+        row.record,
+        "ops.phase1_dispatch_trace_logs",
+      ),
+    );
   }
 
   /**

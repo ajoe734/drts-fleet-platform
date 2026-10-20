@@ -1,3 +1,11 @@
+import {
+  PlatformNoticeLifecycle,
+  noticeTime,
+  type NoticeCommand,
+  type CanonicalNotice,
+  type NoticeAudience,
+} from "./platform-notice-lifecycle";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -25,7 +33,6 @@ import type {
   CanonicalIdentityRoleBindingRecord,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
-  CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   CredentialExpiryWarningState,
   GeneratePlacardVersionCommand,
@@ -73,7 +80,10 @@ import {
   PlatformAdapterRevisionConflictError,
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
+  type PublicInfoVersionMutation,
+  type PublicInfoVersionMutationResult,
 } from "./platform-admin.repository";
+import { buildMinimalPdf, buildPlacardPdfRows } from "./placard-pdf.renderer";
 
 /**
  * Warning window for adapter credential expiry (SR-ADMIN-ADAPTER-001):
@@ -91,123 +101,6 @@ const CREDENTIAL_EXPIRY_WARNING_WINDOW_DAYS = 14;
  * retry here is always safe.
  */
 const PLACARD_PUBLICATION_RESTORE_ATTEMPTS = 3;
-
-// ── Placard PDF rendering (SR-PLACARD-001) ──────────────────────────────────
-// Dependency-free, minimal PDF-1.4 writer for vehicle placards.
-// Matches the minimal PDF-1.4 writer used by billing settlement (SR-INVOICE-001).
-
-const PLACARD_PDF_LINES_PER_PAGE = 40;
-
-function toPdfAsciiText(value: string): string {
-  return value.replace(/[^\x20-\x7e]/g, "?");
-}
-
-function escapePdfLiteralText(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
-}
-
-function chunkPdfLines(lines: string[], size: number): string[][] {
-  const chunks: string[][] = [];
-  for (let index = 0; index < lines.length; index += size) {
-    chunks.push(lines.slice(index, index + size));
-  }
-  return chunks.length > 0 ? chunks : [[]];
-}
-
-function buildPdfPageContentStream(lines: string[]): string {
-  const operators: string[] = ["BT", "/F1 10 Tf", "40 760 Td"];
-  lines.forEach((line, index) => {
-    if (index > 0) {
-      operators.push("0 -16 Td");
-    }
-    operators.push(`(${escapePdfLiteralText(toPdfAsciiText(line))}) Tj`);
-  });
-  operators.push("ET");
-  return operators.join("\n");
-}
-
-function buildMinimalPdf(lines: string[]): Buffer {
-  const pages = chunkPdfLines(lines, PLACARD_PDF_LINES_PER_PAGE);
-  const pageCount = pages.length;
-  const fontId = 3 + pageCount * 2;
-  const totalObjects = fontId;
-  const objectBodies: string[] = new Array(totalObjects + 1).fill("");
-  const kids = Array.from(
-    { length: pageCount },
-    (_, index) => `${3 + index * 2} 0 R`,
-  ).join(" ");
-
-  objectBodies[1] = `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
-  objectBodies[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`;
-
-  pages.forEach((pageLines, index) => {
-    const pageId = 3 + index * 2;
-    const contentId = 4 + index * 2;
-    const content = buildPdfPageContentStream(pageLines);
-    const contentByteLength = Buffer.byteLength(content, "latin1");
-    objectBodies[pageId] =
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> /MediaBox [0 0 612 792] /Contents ${contentId} 0 R >>\nendobj\n`;
-    objectBodies[contentId] =
-      `${contentId} 0 obj\n<< /Length ${contentByteLength} >>\nstream\n${content}\nendstream\nendobj\n`;
-  });
-
-  objectBodies[fontId] =
-    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
-
-  const header = "%PDF-1.4\n";
-  const offsets: number[] = new Array(totalObjects + 1).fill(0);
-  let offset = Buffer.byteLength(header, "latin1");
-  let body = "";
-  for (let id = 1; id <= totalObjects; id += 1) {
-    offsets[id] = offset;
-    const objectBody = objectBodies[id]!;
-    body += objectBody;
-    offset += Buffer.byteLength(objectBody, "latin1");
-  }
-
-  const xrefOffset = offset;
-  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
-  for (let id = 1; id <= totalObjects; id += 1) {
-    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
-  }
-  const trailer = `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return Buffer.from(header + body + xref + trailer, "latin1");
-}
-
-function buildPlacardPdfRows(
-  placard: Pick<
-    PlacardVersionRecord,
-    | "placardVersionId"
-    | "versionCode"
-    | "templateName"
-    | "publishedAt"
-    | "createdAt"
-  >,
-  source: PublicInfoVersionRecord,
-): string[] {
-  return [
-    `Vehicle Service Placard`,
-    `========================================`,
-    `Version Code: ${placard.versionCode}`,
-    `Placard ID: ${placard.placardVersionId}`,
-    `Template: ${placard.templateName}`,
-    `Public Info Source: ${toPdfAsciiText(source.title)} (${source.versionId})`,
-    `Source Status: ${source.status}`,
-    `Booking / Dispatch Phone: ${toPdfAsciiText(source.callPhone ?? "N/A")}`,
-    `Customer Complaint Hotline: ${toPdfAsciiText(source.complaintPhone ?? "N/A")}`,
-    `Call Rate: ${toPdfAsciiText(source.callRateText ?? "N/A")}`,
-    `Fare Rule: ${toPdfAsciiText(source.fareText ?? "N/A")}`,
-    `Payment Methods: ${toPdfAsciiText(source.paymentMethodText ?? "N/A")}`,
-    `Effective Period: ${source.effectiveFrom ?? "N/A"} to ${source.effectiveTo ?? "indefinite"}`,
-    `Published At: ${placard.publishedAt ?? "Draft"}`,
-    `Generated At: ${placard.createdAt}`,
-    `========================================`,
-  ];
-}
 
 const PUBLIC_INFO_SEED: PublicInfoVersionRecord[] = [
   {
@@ -534,9 +427,7 @@ export class PlatformAdminService implements OnModuleInit {
     this.clonePlatformAdapter(adapter),
   );
 
-  private platformNotices: PlatformNoticeRecord[] = PLATFORM_NOTICES_SEED.map(
-    (n) => ({ ...n }),
-  );
+  private readonly noticeLifecycle: PlatformNoticeLifecycle;
 
   private maintenanceMode: PlatformMaintenanceModeRecord = {
     enabled: false,
@@ -575,6 +466,10 @@ export class PlatformAdminService implements OnModuleInit {
     @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
     documentArtifactRebuildRegistry?: DocumentArtifactRebuildRegistry,
   ) {
+    this.noticeLifecycle = new PlatformNoticeLifecycle(
+      this.auditNotificationService,
+      PLATFORM_NOTICES_SEED,
+    );
     // Materialising real PDF bytes requires awaiting `documentArtifactStore`,
     // which a constructor cannot do; seed placards start as plain clones here
     // and are actually rendered (via `clonePlacardVersion`) in `onModuleInit`,
@@ -681,12 +576,11 @@ export class PlatformAdminService implements OnModuleInit {
     );
   }
 
-  createPublicInfoVersion(
+  async createPublicInfoVersion(
     command: CreatePublicInfoVersionCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.title, "title");
-
+    this.assertNonBlank(command?.title, "title");
     const now = new Date().toISOString();
     const version: PublicInfoVersionRecord = {
       versionId: `public_info_${randomUUID()}`,
@@ -704,17 +598,10 @@ export class PlatformAdminService implements OnModuleInit {
       createdAt: now,
       updatedAt: now,
     };
-
-    this.publicInfoVersions = [
-      this.clonePublicInfoVersion(version),
-      ...this.publicInfoVersions,
-    ];
-    this.persistChanges(
-      {
-        publicInfoVersions: [this.clonePublicInfoVersion(version)],
-      },
-      "create_public_info_version",
-    );
+    const saved = await this.mutatePublicInfoVersions(() => ({
+      upsertedVersions: [version],
+      resultVersion: version,
+    }));
     this.recordAudit(
       {
         actorId: null,
@@ -723,131 +610,112 @@ export class PlatformAdminService implements OnModuleInit {
         moduleName: "platform-admin",
         actionName: "create_public_info_version",
         resourceType: "public_info_version",
-        resourceId: version.versionId,
-        newValuesSummary: {
-          ...this.clonePublicInfoVersion(version),
-        },
+        resourceId: saved.version.versionId,
+        newValuesSummary: { ...saved.version },
       },
       requestId,
     );
-
-    return this.clonePublicInfoVersion(version);
+    return this.clonePublicInfoVersion(saved.version);
   }
 
-  publishPublicInfoVersion(
+  async publishPublicInfoVersion(
     versionId: string,
     command: PublishPublicInfoVersionCommand,
     requestId?: string,
     publisherActorId?: string | null,
   ) {
-    const version = this.requirePublicInfoVersion(versionId);
-    if (version.status !== "draft") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PUBLIC_INFO_VERSION_NOT_DRAFT",
-        "Only draft public info versions can be published.",
-        {
-          versionId,
-          status: version.status,
-        },
+    const saved = await this.mutatePublicInfoVersions((current) => {
+      const version = this.clonePublicInfoVersion(
+        this.requirePublicInfoVersion(versionId, current),
       );
-    }
-    const publishedAt = new Date().toISOString();
-    const publishedBy = this.requirePlatformAdminActorId(
-      publisherActorId,
-      "publish public info versions",
-    );
-    const previousPublished = this.publicInfoVersions.find(
-      (candidate) =>
-        candidate.status === "published" &&
-        candidate.versionId !== version.versionId,
-    );
-
-    if (previousPublished) {
-      previousPublished.status = "retired";
-      previousPublished.effectiveTo = publishedAt;
-      previousPublished.updatedAt = publishedAt;
-    }
-
-    version.status = "published";
-    version.publishedBy = publishedBy;
-    version.publishedAt = publishedAt;
-    version.effectiveFrom =
-      this.normalizeNullableText(command.effectiveFrom) ??
-      version.effectiveFrom;
-    version.effectiveTo =
-      this.normalizeNullableText(command.effectiveTo) ?? version.effectiveTo;
-    version.updatedAt = publishedAt;
-
-    const changedVersions = previousPublished
-      ? [
-          this.clonePublicInfoVersion(previousPublished),
-          this.clonePublicInfoVersion(version),
-        ]
-      : [this.clonePublicInfoVersion(version)];
-    this.persistChanges(
-      {
-        publicInfoVersions: changedVersions,
-      },
-      "publish_public_info_version",
-    );
+      if (version.status !== "draft") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PUBLIC_INFO_VERSION_NOT_DRAFT",
+          "Only draft public info versions can be published.",
+          { versionId, status: version.status },
+        );
+      }
+      const publishedAt = new Date().toISOString();
+      const publishedBy = this.requirePlatformAdminActorId(
+        publisherActorId,
+        "publish public info versions",
+      );
+      const previousPublished = current.find(
+        (candidate) =>
+          candidate.status === "published" && candidate.versionId !== versionId,
+      );
+      const retired = previousPublished
+        ? {
+            ...previousPublished,
+            status: "retired" as const,
+            effectiveTo: publishedAt,
+            updatedAt: publishedAt,
+          }
+        : null;
+      version.status = "published";
+      version.publishedBy = publishedBy;
+      version.publishedAt = publishedAt;
+      version.effectiveFrom =
+        this.normalizeNullableText(command.effectiveFrom) ??
+        version.effectiveFrom;
+      version.effectiveTo =
+        this.normalizeNullableText(command.effectiveTo) ?? version.effectiveTo;
+      version.updatedAt = publishedAt;
+      return {
+        upsertedVersions: retired ? [retired, version] : [version],
+        resultVersion: version,
+        previousPublishedVersionId: previousPublished?.versionId ?? null,
+      };
+    });
     this.recordAudit(
       {
-        actorId: publishedBy,
+        actorId: saved.version.publishedBy,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
         actionName: "publish_public_info_version",
         resourceType: "public_info_version",
-        resourceId: version.versionId,
-        ...(previousPublished
+        resourceId: saved.version.versionId,
+        ...(saved.previousPublishedVersionId
           ? {
               oldValuesSummary: {
-                previousVersionId: previousPublished.versionId,
+                previousVersionId: saved.previousPublishedVersionId,
                 previousStatus: "published",
               },
             }
           : {}),
         newValuesSummary: {
-          previousVersionId: previousPublished?.versionId ?? null,
-          newVersionId: version.versionId,
-          publishedAt,
-          publishedBy,
+          previousVersionId: saved.previousPublishedVersionId,
+          newVersionId: saved.version.versionId,
+          publishedAt: saved.version.publishedAt,
+          publishedBy: saved.version.publishedBy,
         },
       },
       requestId,
     );
-
-    return this.clonePublicInfoVersion(version);
+    return this.clonePublicInfoVersion(saved.version);
   }
 
-  deleteDraftPublicInfoVersion(
+  async deleteDraftPublicInfoVersion(
     versionId: string,
     requestId?: string,
     deleteActorId?: string | null,
   ) {
-    const version = this.requirePublicInfoVersion(versionId);
-    if (version.status !== "draft") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PUBLIC_INFO_VERSION_NOT_DRAFT",
-        "Only draft public info versions can be deleted.",
-        {
-          versionId,
-          status: version.status,
-        },
+    const saved = await this.mutatePublicInfoVersions((current) => {
+      const version = this.clonePublicInfoVersion(
+        this.requirePublicInfoVersion(versionId, current),
       );
-    }
-
-    this.publicInfoVersions = this.publicInfoVersions.filter(
-      (candidate) => candidate.versionId !== versionId,
-    );
-    this.persistChanges(
-      {
-        deletedPublicInfoVersionIds: [versionId],
-      },
-      "delete_draft_public_info_version",
-    );
+      if (version.status !== "draft") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PUBLIC_INFO_VERSION_NOT_DRAFT",
+          "Only draft public info versions can be deleted.",
+          { versionId, status: version.status },
+        );
+      }
+      return { deletedVersionIds: [versionId], resultVersion: version };
+    });
     this.recordAudit(
       {
         actorId: this.normalizeNullableText(deleteActorId),
@@ -856,18 +724,56 @@ export class PlatformAdminService implements OnModuleInit {
         moduleName: "platform-admin",
         actionName: "delete_draft_public_info_version",
         resourceType: "public_info_version",
-        resourceId: versionId,
-        oldValuesSummary: {
-          ...this.clonePublicInfoVersion(version),
-        },
-        newValuesSummary: {
-          deleted: true,
-        },
+        resourceId: saved.version.versionId,
+        oldValuesSummary: { ...saved.version },
+        newValuesSummary: { deleted: true },
       },
       requestId,
     );
+    return this.clonePublicInfoVersion(saved.version);
+  }
 
-    return this.clonePublicInfoVersion(version);
+  private async mutatePublicInfoVersions(
+    stage: (
+      current: readonly PublicInfoVersionRecord[],
+    ) => PublicInfoVersionMutation,
+  ): Promise<PublicInfoVersionMutationResult> {
+    let saved: PublicInfoVersionMutationResult;
+    if (this.platformAdminRepository?.isEnabled()) {
+      saved =
+        await this.platformAdminRepository.mutatePublicInfoVersions(stage);
+    } else {
+      const current = this.publicInfoVersions.map((version) =>
+        this.clonePublicInfoVersion(version),
+      );
+      const mutation = stage(current);
+      const upserts = new Map(
+        (mutation.upsertedVersions ?? []).map((version) => [
+          version.versionId,
+          version,
+        ]),
+      );
+      const deleted = new Set(mutation.deletedVersionIds ?? []);
+      saved = {
+        version: mutation.resultVersion,
+        versions: [
+          ...(mutation.upsertedVersions ?? []).filter(
+            (version) =>
+              !current.some((row) => row.versionId === version.versionId),
+          ),
+          ...current
+            .filter((version) => !deleted.has(version.versionId))
+            .map((version) => upserts.get(version.versionId) ?? version),
+        ],
+        previousPublishedVersionId: mutation.previousPublishedVersionId ?? null,
+      };
+    }
+    // Enabled repositories return only after their COMMIT. A rejected command
+    // never exposes its staged cache or a successful publication audit.
+    this.publicInfoVersions = saved.versions.map((version) =>
+      this.clonePublicInfoVersion(version),
+    );
+    return saved;
   }
 
   async listPlacardVersions() {
@@ -1108,10 +1014,11 @@ export class PlatformAdminService implements OnModuleInit {
       // rather than reporting success for a record that does not actually
       // reflect it.
       if (this.platformAdminRepository) {
-        const finalized = await this.platformAdminRepository.finalizePlacardPublish(
-          stripClaimToken(wonClaim),
-          claimToken,
-        );
+        const finalized =
+          await this.platformAdminRepository.finalizePlacardPublish(
+            stripClaimToken(wonClaim),
+            claimToken,
+          );
         if (!finalized) {
           // (R10 byte-ownership compensation) The DB CAS above is the
           // actual source of truth on ownership and has just said this
@@ -1630,6 +1537,19 @@ export class PlatformAdminService implements OnModuleInit {
       );
     }
 
+    const mergedWebhookStatus =
+      current.webhookStatus || command.webhookStatus
+        ? {
+            url: null,
+            isEnabled: false,
+            lastEventTimestamp: null,
+            lastStatus: "UNKNOWN" as const,
+            ...current.webhookStatus,
+            ...command.webhookStatus,
+          }
+        : null;
+    this.validateUpdatePlatformAdapterCommand(command, mergedWebhookStatus);
+
     const previousRevision = current.revision ?? 1;
     const newRevision = previousRevision + 1;
     const now = new Date().toISOString();
@@ -1643,6 +1563,19 @@ export class PlatformAdminService implements OnModuleInit {
       occurredAt: now,
     };
 
+    const normalizedCredentialExpiry =
+      command.credentialExpiry !== undefined
+        ? command.credentialExpiry === null
+          ? null
+          : {
+              reference: command.credentialExpiry.reference!.trim(),
+              expiresAt:
+                this.normalizeNullableText(
+                  command.credentialExpiry.expiresAt,
+                ) ?? null,
+            }
+        : (current.credentialExpiry ?? null);
+
     const updated: PlatformAdapter = {
       ...current,
       config: command.config
@@ -1650,10 +1583,7 @@ export class PlatformAdminService implements OnModuleInit {
         : current.config,
       rolloutStatus: command.rolloutStatus ?? current.rolloutStatus,
       rolloutStage: command.rolloutStage ?? current.rolloutStage,
-      credentialExpiry:
-        command.credentialExpiry !== undefined
-          ? command.credentialExpiry
-          : (current.credentialExpiry ?? null),
+      credentialExpiry: normalizedCredentialExpiry,
       policies: command.policies
         ? {
             ...current.policies,
@@ -1666,24 +1596,20 @@ export class PlatformAdminService implements OnModuleInit {
       featureFlags: command.featureFlags
         ? { ...current.featureFlags, ...command.featureFlags }
         : current.featureFlags,
-      webhookStatus:
-        current.webhookStatus || command.webhookStatus
-          ? {
-              url: null,
-              isEnabled: false,
-              lastEventTimestamp: null,
-              lastStatus: "UNKNOWN",
-              ...current.webhookStatus,
-              ...command.webhookStatus,
-            }
-          : null,
+      webhookStatus: mergedWebhookStatus,
       revision: newRevision,
       lastMutationAudit: mutationAudit,
       updatedAt: now,
     };
 
-    this.adapters[index] = updated;
-
+    // Separate-commit boundary: `persistAdapterMutation` commits the guarded
+    // `platform_adapter` + `platform_adapter_mutation_audit` transaction via
+    // `PlatformAdminRepository`, while `recordAdapterAudit` separately commits
+    // the global `audit_logs` entry via `AuditNotificationService`. Neither
+    // `this.adapters` nor a 2xx ACK is published until both succeed; if
+    // `recordAdapterAudit` fails after `persistAdapterMutation` commits, the
+    // error propagates without mutating `this.adapters` and without claiming
+    // that the separately committed repository transaction was rolled back.
     await this.persistAdapterMutation(
       current.id,
       previousRevision,
@@ -1691,7 +1617,7 @@ export class PlatformAdminService implements OnModuleInit {
       mutationAudit,
     );
 
-    this.recordAudit(
+    await this.recordAdapterAudit(
       {
         actorId: mutationAudit.actorId,
         actorType: "platform_admin",
@@ -1717,44 +1643,271 @@ export class PlatformAdminService implements OnModuleInit {
       requestId,
     );
 
+    this.adapters[index] = updated;
+
     return this.attachCredentialExpiryWarning(
       this.clonePlatformAdapter(updated),
     );
   }
 
-  registerPlatformAdapter(adapter: PlatformAdapter): PlatformAdapter {
+  async registerPlatformAdapter(
+    adapter: PlatformAdapter,
+    requestId?: string,
+    actorId?: string | null,
+  ): Promise<PlatformAdapter> {
+    this.validateRegisterPlatformAdapterInput(adapter);
+
     const existingIndex = this.adapters.findIndex((a) => a.id === adapter.id);
     const now = new Date().toISOString();
+    const normalizedCredentialExpiry =
+      adapter.credentialExpiry !== undefined &&
+      adapter.credentialExpiry !== null
+        ? {
+            reference: adapter.credentialExpiry.reference!.trim(),
+            expiresAt:
+              this.normalizeNullableText(adapter.credentialExpiry.expiresAt) ??
+              null,
+          }
+        : null;
     const cloned = this.clonePlatformAdapter({
       ...adapter,
+      id: adapter.id.trim(),
+      platformCode:
+        adapter.platformCode.trim() as PlatformAdapter["platformCode"],
+      name: adapter.name.trim(),
+      description: adapter.description?.trim() ?? "",
+      version: adapter.version.trim(),
+      credentialExpiry: normalizedCredentialExpiry,
       revision: adapter.revision ?? 1,
       lastMutationAudit: adapter.lastMutationAudit ?? null,
       updatedAt: now,
     });
+
+    // Separate-commit boundary: `persistAdapterRegistration` commits the
+    // adapter record via `PlatformAdminRepository`, while `recordAdapterAudit`
+    // separately commits the global `audit_logs` entry. Neither `this.adapters`
+    // nor a 2xx ACK is published until both succeed; if `recordAdapterAudit`
+    // fails after `persistAdapterRegistration` commits, the error propagates
+    // without mutating `this.adapters` and without claiming rollback of the
+    // separately committed repository write.
+    await this.persistAdapterRegistration(cloned);
+
+    await this.recordAdapterAudit(
+      {
+        actorId: this.normalizeNullableText(actorId),
+        actorType: "platform_admin",
+        tenantId: null,
+        moduleName: "platform-admin",
+        actionName: "register_platform_adapter",
+        resourceType: "platform_adapter",
+        resourceId: cloned.id,
+        newValuesSummary: {
+          id: cloned.id,
+          platformCode: cloned.platformCode,
+          revision: cloned.revision ?? 1,
+          credentialExpiry: cloned.credentialExpiry ?? null,
+        },
+      },
+      requestId,
+    );
+
     if (existingIndex >= 0) {
       this.adapters[existingIndex] = cloned;
     } else {
       this.adapters.push(cloned);
     }
 
-    this.persistChanges(
-      { platformAdapters: [this.clonePlatformAdapter(cloned)] },
-      "register_platform_adapter",
-    );
-    this.recordAudit({
-      actorId: null,
-      actorType: "platform_admin",
-      tenantId: null,
-      moduleName: "platform-admin",
-      actionName: "register_platform_adapter",
-      resourceType: "platform_adapter",
-      resourceId: cloned.id,
-      newValuesSummary: { id: cloned.id, platformCode: cloned.platformCode },
-    });
-
     return this.attachCredentialExpiryWarning(
       this.clonePlatformAdapter(cloned),
     );
+  }
+
+  private validateRegisterPlatformAdapterInput(adapter: PlatformAdapter) {
+    this.assertNonBlank(adapter?.id, "id");
+    this.assertNonBlank(adapter?.platformCode, "platformCode");
+    this.assertNonBlank(adapter?.name, "name");
+    this.assertNonBlank(adapter?.version, "version");
+    this.assertValidEnum(
+      adapter?.environment,
+      Object.values(Environment),
+      "environment",
+    );
+    this.assertValidEnum(
+      adapter?.rolloutStage,
+      Object.values(Environment),
+      "rolloutStage",
+    );
+    const rawAdapterConfig = adapter?.config as unknown as
+      | Record<string, unknown>
+      | undefined;
+    if (rawAdapterConfig?.rolloutStage !== undefined) {
+      this.assertValidEnum(
+        rawAdapterConfig.rolloutStage,
+        Object.values(Environment),
+        "config.rolloutStage",
+      );
+    }
+    this.assertValidEnum(
+      adapter?.adapterType,
+      Object.values(AdapterType),
+      "adapterType",
+    );
+    this.assertValidEnum(
+      adapter?.rolloutStatus,
+      Object.values(RolloutStatus),
+      "rolloutStatus",
+    );
+    this.assertValidEnum(
+      adapter?.credentialStatus,
+      Object.values(CredentialStatus),
+      "credentialStatus",
+    );
+    if (adapter.credentialExpiry !== undefined) {
+      this.validateCredentialExpiryInput(adapter.credentialExpiry);
+    }
+    this.validateAdapterPoliciesInput(adapter.policies, true);
+    this.validateWebhookStatusInput(adapter.webhookStatus);
+  }
+
+  private validateUpdatePlatformAdapterCommand(
+    command: UpdatePlatformAdapterCommand,
+    mergedWebhookStatus: PlatformAdapter["webhookStatus"],
+  ) {
+    if (command.rolloutStatus !== undefined) {
+      this.assertValidEnum(
+        command.rolloutStatus,
+        Object.values(RolloutStatus),
+        "rolloutStatus",
+      );
+    }
+    if (command.rolloutStage !== undefined) {
+      this.assertValidEnum(
+        command.rolloutStage,
+        Object.values(Environment),
+        "rolloutStage",
+      );
+    }
+    const rawCommandConfig = command.config as unknown as
+      | Record<string, unknown>
+      | undefined;
+    if (rawCommandConfig?.rolloutStage !== undefined) {
+      this.assertValidEnum(
+        rawCommandConfig.rolloutStage,
+        Object.values(Environment),
+        "config.rolloutStage",
+      );
+    }
+    const rawCommand = command as unknown as Record<string, unknown>;
+    if (rawCommand.credentialStatus !== undefined) {
+      this.assertValidEnum(
+        rawCommand.credentialStatus,
+        Object.values(CredentialStatus),
+        "credentialStatus",
+      );
+    }
+    if (command.credentialExpiry !== undefined) {
+      this.validateCredentialExpiryInput(command.credentialExpiry);
+    }
+    if (command.policies !== undefined) {
+      this.validateAdapterPoliciesInput(command.policies, false);
+    }
+    if (command.webhookStatus !== undefined) {
+      this.validateWebhookStatusInput(mergedWebhookStatus);
+    }
+  }
+
+  private validateCredentialExpiryInput(
+    credentialExpiry: AdapterCredentialExpiry | null | undefined,
+  ) {
+    if (credentialExpiry === null || credentialExpiry === undefined) {
+      return;
+    }
+    this.assertNonBlank(
+      credentialExpiry.reference,
+      "credentialExpiry.reference",
+    );
+  }
+
+  private validateAdapterPoliciesInput(
+    policies: Partial<PlatformAdapter["policies"]> | undefined,
+    requireFinanceAuthorityMode = false,
+  ) {
+    if (!policies) {
+      return;
+    }
+    if (
+      requireFinanceAuthorityMode ||
+      policies.financeAuthorityMode !== undefined
+    ) {
+      this.assertValidEnum(
+        policies.financeAuthorityMode,
+        Object.values(FinanceAuthorityMode),
+        "policies.financeAuthorityMode",
+      );
+    }
+    const numericFields = [
+      ["policies.maxCandidates", policies.maxCandidates],
+      ["policies.acceptTimeoutSeconds", policies.acceptTimeoutSeconds],
+      [
+        "policies.manualFallbackThresholdSeconds",
+        policies.manualFallbackThresholdSeconds,
+      ],
+    ] as const;
+
+    for (const [field, value] of numericFields) {
+      if (
+        value !== undefined &&
+        (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          `${field} must be a positive finite number.`,
+          { field },
+        );
+      }
+    }
+  }
+
+  private assertValidEnum<T extends string>(
+    value: unknown,
+    allowedValues: readonly T[],
+    field: string,
+  ): asserts value is T {
+    if (typeof value !== "string" || !allowedValues.includes(value as T)) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        `${field} must be one of: ${allowedValues.join(", ")}.`,
+        { field, allowedValues },
+      );
+    }
+  }
+
+  private validateWebhookStatusInput(
+    webhookStatus: PlatformAdapter["webhookStatus"] | undefined,
+  ) {
+    if (webhookStatus?.isEnabled) {
+      this.assertNonBlank(webhookStatus.url, "webhookStatus.url");
+    }
+  }
+
+  private async persistAdapterRegistration(adapter: PlatformAdapter) {
+    if (!this.platformAdminRepository?.isEnabled()) {
+      return;
+    }
+
+    try {
+      await this.platformAdminRepository.persistChanges({
+        platformAdapters: [this.clonePlatformAdapter(adapter)],
+      });
+    } catch (error) {
+      this.platformAdminRepository.reportPersistenceFailure(
+        error,
+        "register_platform_adapter",
+      );
+      throw error;
+    }
   }
 
   private async persistAdapterMutation(
@@ -1781,24 +1934,50 @@ export class PlatformAdminService implements OnModuleInit {
       );
     } catch (error) {
       if (error instanceof PlatformAdapterRevisionConflictError) {
-        // The in-memory row above is this process's authority for the HTTP
-        // response already returned; a persisted-row mismatch here means the
-        // durable copy has not caught up (e.g. first mutation before the
-        // initial seed row landed) rather than a real concurrent writer in
-        // this single-instance service, so it is logged, not surfaced to the
-        // caller who already has a consistent in-memory result.
         this.platformAdminRepository.reportPersistenceFailure(
           error,
           "update_platform_adapter revision",
         );
-        return;
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PLATFORM_ADAPTER_REVISION_CONFLICT",
+          error.message,
+          {
+            id: error.adapterId,
+            expectedRevision: error.expectedRevision,
+          },
+        );
       }
 
       this.platformAdminRepository.reportPersistenceFailure(
         error,
         "update_platform_adapter",
       );
+      throw error;
     }
+  }
+
+  private async recordAdapterAudit(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId">,
+    requestId?: string,
+  ) {
+    const auditLogInput: Omit<
+      AuditLogRecord,
+      "auditId" | "createdAt" | "requestId"
+    > & {
+      requestId?: string;
+    } = {
+      ...input,
+    };
+    if (requestId) {
+      auditLogInput.requestId = requestId;
+    }
+    if (
+      typeof this.auditNotificationService.recordAuditLogAsync === "function"
+    ) {
+      return this.auditNotificationService.recordAuditLogAsync(auditLogInput);
+    }
+    return this.auditNotificationService.recordAuditLog(auditLogInput);
   }
 
   /**
@@ -1886,38 +2065,47 @@ export class PlatformAdminService implements OnModuleInit {
 
   // ── Platform Notices ──────────────────────────────────────────────────────
 
-  listPlatformNotices(): PlatformNoticeRecord[] {
-    return this.platformNotices.map((n) => ({ ...n }));
+  listPlatformNotices(): CanonicalNotice[] {
+    return this.noticeLifecycle.list();
+  }
+
+  listRecipientNotices(
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.forPrincipal(identity, audience);
+  }
+
+  listRecipientNoticeNotifications(
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.notificationFeed(identity, audience);
+  }
+
+  readRecipientNotice(
+    noticeId: string,
+    outcomeId: string,
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.read(noticeId, outcomeId, identity, audience);
   }
 
   createPlatformNotice(
-    command: CreatePlatformNoticeCommand,
+    command: NoticeCommand,
     requestId?: string,
-  ): PlatformNoticeRecord {
+  ): CanonicalNotice {
     return this.createPlatformNoticeWithAudit(command, requestId).data;
   }
 
   createPlatformNoticeWithAudit(
-    command: CreatePlatformNoticeCommand,
+    command: NoticeCommand,
     requestId?: string,
-  ): AuditedActionResult<PlatformNoticeRecord> {
+  ): AuditedActionResult<CanonicalNotice> {
     this.assertNonBlank(command.title, "title");
     this.assertNonBlank(command.body, "body");
-    const now = new Date().toISOString();
-    const notice: PlatformNoticeRecord = {
-      noticeId: `notice_${randomUUID()}`,
-      title: command.title.trim(),
-      body: command.body.trim(),
-      severity: command.severity,
-      status: command.scheduledAt ? "scheduled" : "active",
-      targetAudience: command.targetAudience,
-      scheduledAt: command.scheduledAt ?? null,
-      resolvedAt: null,
-      createdBy: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.platformNotices.unshift({ ...notice });
+    const notice = this.noticeLifecycle.create(command);
     const auditLog = this.recordAudit(
       {
         actorId: null,
@@ -1927,7 +2115,14 @@ export class PlatformAdminService implements OnModuleInit {
         actionName: "create_platform_notice",
         resourceType: "platform_notice",
         resourceId: notice.noticeId,
-        newValuesSummary: { title: notice.title, severity: notice.severity },
+        newValuesSummary: {
+          title: notice.title,
+          severity: notice.severity,
+          reason: notice.reason,
+          scheduledAt: notice.scheduledAt,
+          expiresAt: notice.expiresAt,
+          storageMode: notice.storageMode,
+        },
       },
       requestId,
     );
@@ -1937,19 +2132,8 @@ export class PlatformAdminService implements OnModuleInit {
     };
   }
 
-  resolveNotice(noticeId: string, requestId?: string): PlatformNoticeRecord {
-    const notice = this.platformNotices.find((n) => n.noticeId === noticeId);
-    if (!notice) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "NOTICE_NOT_FOUND",
-        "Platform notice not found.",
-        { noticeId },
-      );
-    }
-    notice.status = "resolved";
-    notice.resolvedAt = new Date().toISOString();
-    notice.updatedAt = notice.resolvedAt;
+  resolveNotice(noticeId: string, requestId?: string): CanonicalNotice {
+    const notice = this.noticeLifecycle.resolve(noticeId);
     this.recordAudit(
       {
         actorId: null,
@@ -1983,12 +2167,32 @@ export class PlatformAdminService implements OnModuleInit {
     command: SetPlatformMaintenanceModeCommand,
     requestId?: string,
   ): AuditedActionResult<PlatformMaintenanceModeRecord> {
+    this.assertNonBlank(command.reason ?? "", "reason");
+    if (typeof command.enabled !== "boolean")
+      throw new ApiRequestError(
+        400,
+        "MAINTENANCE_ENABLED_REQUIRED",
+        "enabled must be boolean.",
+      );
+    const scheduledStart = noticeTime(command.scheduledStart, "scheduledStart");
+    const scheduledEnd = noticeTime(command.scheduledEnd, "scheduledEnd");
+    if (
+      scheduledStart &&
+      scheduledEnd &&
+      Date.parse(scheduledEnd) <= Date.parse(scheduledStart)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "NOTICE_INVALID_WINDOW",
+        "Maintenance end must follow start.",
+      );
+    }
     const now = new Date().toISOString();
     this.maintenanceMode = {
       enabled: command.enabled,
       reason: command.reason ?? null,
-      scheduledStart: command.scheduledStart ?? null,
-      scheduledEnd: command.scheduledEnd ?? null,
+      scheduledStart,
+      scheduledEnd,
       updatedBy: null,
       updatedAt: now,
     };
@@ -2026,14 +2230,34 @@ export class PlatformAdminService implements OnModuleInit {
     command: CreatePlatformPricingRuleCommand,
     requestId?: string,
   ): PlatformPricingRuleRecord {
-    this.assertNonBlank(command.ruleName, "ruleName");
-    this.assertNonBlank(command.version, "version");
+    this.assertNonBlank(command?.ruleName, "ruleName");
+    this.assertNonBlank(command?.version, "version");
+    this.assertNonBlank(command?.applicableTo, "applicableTo");
+    if (
+      typeof command.serviceFeeBps !== "number" ||
+      !Number.isFinite(command.serviceFeeBps) ||
+      command.serviceFeeBps < 0 ||
+      command.serviceFeeBps > 10000
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "serviceFeeBps must be a finite number between 0 and 10000.",
+        {
+          field: "serviceFeeBps",
+        },
+      );
+    }
+
+    const normalizedRuleName = command.ruleName.trim();
+    const normalizedVersion = command.version.trim();
+    const normalizedApplicableTo = command.applicableTo.trim();
 
     const duplicate = this.pricingRules.find(
       (rule) =>
-        rule.ruleName === command.ruleName.trim() &&
-        rule.version === command.version.trim() &&
-        rule.applicableTo === command.applicableTo,
+        rule.ruleName === normalizedRuleName &&
+        rule.version === normalizedVersion &&
+        rule.applicableTo === normalizedApplicableTo,
     );
     if (duplicate) {
       throw new ApiRequestError(
@@ -2041,9 +2265,9 @@ export class PlatformAdminService implements OnModuleInit {
         "PRICING_RULE_VERSION_CONFLICT",
         "A pricing rule with this version already exists.",
         {
-          ruleName: command.ruleName,
-          version: command.version,
-          applicableTo: command.applicableTo,
+          ruleName: normalizedRuleName,
+          version: normalizedVersion,
+          applicableTo: normalizedApplicableTo,
         },
       );
     }
@@ -2051,16 +2275,17 @@ export class PlatformAdminService implements OnModuleInit {
     const now = new Date().toISOString();
     const rule: PlatformPricingRuleRecord = {
       ruleId: `rule_${randomUUID()}`,
-      ruleName: command.ruleName.trim(),
-      version: command.version.trim(),
+      ruleName: normalizedRuleName,
+      version: normalizedVersion,
       serviceFeeBps: command.serviceFeeBps,
       reimbursementMode: command.reimbursementMode,
-      applicableTo: command.applicableTo,
+      applicableTo: normalizedApplicableTo,
       status: "draft",
       effectiveFrom: this.normalizeNullableText(command.effectiveFrom) ?? now,
       effectiveTo: null,
       publishedBy: null,
       publishedAt: null,
+      publishReason: null,
       notes: this.normalizeNullableText(command.notes),
       createdAt: now,
       updatedAt: now,
@@ -2096,8 +2321,32 @@ export class PlatformAdminService implements OnModuleInit {
     ruleId: string,
     command: PublishPlatformPricingRuleCommand,
     requestId?: string,
+    actorId?: string | null,
   ): PlatformPricingRuleRecord {
     const rule = this.requirePricingRule(ruleId);
+    this.assertNonBlank(command?.reason, "reason");
+    const reason = command.reason.trim();
+    if (reason.length < 12) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Publish reason must be at least 12 characters after trimming.",
+        {
+          field: "reason",
+          minLength: 12,
+          actualLength: reason.length,
+        },
+      );
+    }
+
+    const candidateActor =
+      this.normalizeNullableText(actorId) ??
+      this.normalizeNullableText(command.publishedBy);
+    const publishedBy =
+      candidateActor && !/^platform_admin:(zh|en)$/i.test(candidateActor)
+        ? candidateActor
+        : null;
+
     const previousActive = this.pricingRules.find(
       (candidate) =>
         candidate.ruleId !== rule.ruleId &&
@@ -2115,8 +2364,9 @@ export class PlatformAdminService implements OnModuleInit {
     }
 
     rule.status = "active";
-    rule.publishedBy = this.normalizeNullableText(command.publishedBy);
+    rule.publishedBy = publishedBy;
     rule.publishedAt = publishedAt;
+    rule.publishReason = reason;
     rule.effectiveFrom =
       this.normalizeNullableText(command.effectiveFrom) ?? rule.effectiveFrom;
     rule.effectiveTo = this.normalizeNullableText(command.effectiveTo);
@@ -2124,7 +2374,7 @@ export class PlatformAdminService implements OnModuleInit {
 
     this.recordAudit(
       {
-        actorId: null,
+        actorId: publishedBy,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
@@ -2144,6 +2394,8 @@ export class PlatformAdminService implements OnModuleInit {
           ruleId: rule.ruleId,
           version: rule.version,
           publishedAt,
+          publishedBy,
+          reason,
           applicableTo: rule.applicableTo,
         },
       },
@@ -2638,8 +2890,11 @@ export class PlatformAdminService implements OnModuleInit {
     return normalized;
   }
 
-  private requirePublicInfoVersion(versionId: string) {
-    const version = this.publicInfoVersions.find(
+  private requirePublicInfoVersion(
+    versionId: string,
+    versions: readonly PublicInfoVersionRecord[] = this.publicInfoVersions,
+  ) {
+    const version = versions.find(
       (candidate) => candidate.versionId === versionId,
     );
     if (!version) {
@@ -2880,9 +3135,7 @@ export class PlatformAdminService implements OnModuleInit {
     };
 
     if (options.recover) {
-      const { record } = await this.documentArtifactStore.putIfAbsent(
-        command,
-      );
+      const { record } = await this.documentArtifactStore.putIfAbsent(command);
       return record;
     }
     if (options.fenceGeneration !== undefined) {
@@ -2956,9 +3209,10 @@ export class PlatformAdminService implements OnModuleInit {
 
     let authoritative: PlacardVersionRecord | null;
     try {
-      authoritative = await this.platformAdminRepository.getPlacardVersionRecord(
-        placardVersionId,
-      );
+      authoritative =
+        await this.platformAdminRepository.getPlacardVersionRecord(
+          placardVersionId,
+        );
     } catch {
       return;
     }
@@ -3367,8 +3621,8 @@ export class PlatformAdminService implements OnModuleInit {
     return normalized ? normalized : null;
   }
 
-  private assertNonBlank(value: string, fieldName: string) {
-    if (!value.trim()) {
+  private assertNonBlank(value: string | null | undefined, fieldName: string) {
+    if (typeof value !== "string" || !value.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "FIELD_REQUIRED",

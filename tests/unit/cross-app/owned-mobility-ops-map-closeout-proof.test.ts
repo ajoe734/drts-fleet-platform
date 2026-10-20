@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import { proofArtifactPath } from "./proof-artifacts";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
@@ -326,6 +327,8 @@ function createOwnedMobilityService() {
     },
   ];
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+
     getEligibleCandidates: vi.fn(() => regulatoryCandidates),
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
@@ -341,27 +344,9 @@ function createOwnedMobilityService() {
     withTransaction: async <T>(work: (tx: unknown) => Promise<T>) => work({}),
     reportPersistenceFailure: vi.fn(),
   };
-  const callcenterService = {
-    registerRecordingAttachmentListener: vi.fn(),
-    registerRecordingStateChangeListener: vi.fn(),
-    linkOrderToCallSession: vi.fn(
-      ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId,
-      }) => ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId: recordingId ?? null,
-      }),
-    ),
-  };
+  const callcenterService = new CallcenterService(
+    auditNotificationService as never,
+  );
   const serviceProductService = new ServiceProductService(
     auditNotificationService as never,
     undefined,
@@ -375,7 +360,7 @@ function createOwnedMobilityService() {
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
-    callcenterService as never,
+    callcenterService,
     taskEventsService,
     opsDispatchEventsService,
     repository as never,

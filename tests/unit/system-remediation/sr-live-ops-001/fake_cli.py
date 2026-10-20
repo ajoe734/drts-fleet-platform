@@ -88,7 +88,11 @@ elif kind == "gcloud":
         return next(a.split("=", 1)[1] for a in args if a.startswith("--" + name + "="))
 
     if args[:2] == ["projects", "get-ancestors"]:
-        emit([{"type": "project", "id": "drts-dev-devcc-20260825"}, {"type": "organization", "id": "123"}])
+        emit([{"type": "project", "id": "drts-dev-devcc-20260825"},
+              *([{"type": "folder", "id": "456"}] if scenario == "inherited_create_folder" else []),
+              {"type": "organization", "id": "123"}])
+    if (args[:3] == ["resource-manager", "folders", "get-iam-policy"] and scenario == "inherited_create_folder") or (args[:2] == ["organizations", "get-iam-policy"] and scenario == "inherited_create_org"):
+        emit({"bindings": [b for b in iam["project"]["bindings"] if b["role"].endswith("/drtsOpsDrillCloneCreate")]})
     if args[:2] == ["organizations", "get-iam-policy"]:
         if scenario == "ancestor_denied":
             fail()
@@ -114,23 +118,44 @@ elif kind == "gcloud":
         if (scenario == "other_secret_access" and args[2] == "other") or (scenario == "other_sa_access" and "other@project.iam.gserviceaccount.com" in args):
             emit({"bindings": [{"role": "roles/secretmanager.secretAccessor" if policy_key == "secret" else "roles/iam.serviceAccountTokenCreator", "members": ["serviceAccount:drts-dev-ops-drill@drts-dev-devcc-20260825.iam.gserviceaccount.com"]}]})
         emit(iam[policy_key])
-    if policy_key and "add-iam-policy-binding" in args:
+    if policy_key and any(action in args for action in ("add-iam-policy-binding", "remove-iam-policy-binding")):
         item = {"role": flag("role"), "members": [flag("member")]}
         condition = flag("condition")
         if condition != "None":
             title, expression = condition.split(",expression=", 1)
             item["condition"] = {"title": title.removeprefix("title="), "expression": expression}
-        iam[policy_key]["bindings"].append(item)
+        if "remove-iam-policy-binding" in args:
+            for entry in iam[policy_key]["bindings"][:]:
+                if entry["role"] == item["role"] and entry.get("condition", {}) == item.get("condition", {}) and flag("member") in entry["members"]:
+                    entry["members"].remove(flag("member"))
+                    if not entry["members"]:
+                        iam[policy_key]["bindings"].remove(entry)
+        else:
+            existing = next((entry for entry in iam[policy_key]["bindings"] if entry["role"] == item["role"] and entry.get("condition", {}) == item.get("condition", {})), None)
+            if existing:
+                if flag("member") not in existing["members"]:
+                    existing["members"].append(flag("member"))
+            else:
+                iam[policy_key]["bindings"].append(item)
         save({})
     if args[:3] == ["sql", "instances", "list"]:
         emit([{"name": "drts-dev-db"}] + ([{"name": "drts-dev-db-drill-999-1"}] if scenario == "leftover" else []))
     if args[:2] == ["logging", "read"]:
+        if (root / "audit.json").exists():
+            emit(json.loads((root / "audit.json").read_text()))
         if scenario == "audit_denied":
             fail()
         if scenario == "audit_empty":
             emit([])
         record = {"insertId": "audit-1", "timestamp": now.isoformat(),
                   "protoPayload": {"methodName": "cloudsql.instances.clone", "request": {"body": {"cloneContext": {"destinationInstanceName": "drts-dev-db-drill-123-1"}}}}}
+        if scenario in ("audit_create", "audit_create_foreign"):
+            record["protoPayload"] = {"methodName": "cloudsql.instances.create", "request": {"body": {"name": "drts-dev-db-drill-123-1"}}}
+            if scenario == "audit_create_foreign":
+                other = json.loads(json.dumps(record))
+                other["insertId"] = "audit-2"
+                other["protoPayload"]["request"]["body"]["name"] = "unexpected-extra-instance"
+                emit([record, other])
         if scenario == "audit_unknown":
             record["protoPayload"]["request"] = {}
         if scenario == "audit_foreign":

@@ -49,10 +49,14 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      this.incidentService.createIncident(command, requestId, identity),
+    const result = this.incidentService.createIncidentForCommit(
+      command,
       requestId,
+      identity,
     );
+    return result instanceof Promise
+      ? result.then((item) => toApiSuccessEnvelope(item, requestId))
+      : toApiSuccessEnvelope(result, requestId);
   }
 
   @Get()
@@ -60,13 +64,16 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      buildUiReadModelList(this.incidentService.listIncidents(identity), {
-        staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
-        emptyState: buildEmptyStateEnvelope("no_data", "incidents.empty"),
-      }),
-      requestId,
-    );
+    const respond = (items: ReturnType<IncidentService["listIncidents"]>) =>
+      toApiSuccessEnvelope(
+        buildUiReadModelList(items, {
+          staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+          emptyState: buildEmptyStateEnvelope("no_data", "incidents.empty"),
+        }),
+        requestId,
+      );
+    const items = this.incidentService.listIncidentsForReadback(identity);
+    return items instanceof Promise ? items.then(respond) : respond(items);
   }
 
   @Get(":incidentId")
@@ -75,15 +82,18 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      buildUiReadModelResource(
-        this.incidentService.getIncident(incidentId, identity),
-        {
+    const respond = (item: ReturnType<IncidentService["getIncident"]>) =>
+      toApiSuccessEnvelope(
+        buildUiReadModelResource(item, {
           staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
-        },
-      ),
-      requestId,
+        }),
+        requestId,
+      );
+    const item = this.incidentService.getIncidentForReadback(
+      incidentId,
+      identity,
     );
+    return item instanceof Promise ? item.then(respond) : respond(item);
   }
 
   @Patch(":incidentId")
@@ -93,15 +103,15 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      this.incidentService.updateIncident(
-        incidentId,
-        command,
-        requestId,
-        identity,
-      ),
+    const result = this.incidentService.updateIncidentForCommit(
+      incidentId,
+      command,
       requestId,
+      identity,
     );
+    return result instanceof Promise
+      ? result.then((item) => toApiSuccessEnvelope(item, requestId))
+      : toApiSuccessEnvelope(result, requestId);
   }
 
   @Get(":incidentId/timeline")
@@ -109,13 +119,19 @@ export class IncidentController {
     @Param("incidentId") incidentId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      buildUiReadModelList(this.incidentService.getTimeline(incidentId), {
-        staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
-        emptyState: buildEmptyStateEnvelope("no_data", "incidents.timeline.empty"),
-      }),
-      requestId,
-    );
+    const respond = (items: ReturnType<IncidentService["getTimeline"]>) =>
+      toApiSuccessEnvelope(
+        buildUiReadModelList(items, {
+          staleAfterMs: INCIDENT_REFRESH_STALE_AFTER_MS,
+          emptyState: buildEmptyStateEnvelope(
+            "no_data",
+            "incidents.timeline.empty",
+          ),
+        }),
+        requestId,
+      );
+    const items = this.incidentService.getTimelineForReadback(incidentId);
+    return items instanceof Promise ? items.then(respond) : respond(items);
   }
 
   @Post("from-dispatch-exception")
@@ -157,15 +173,15 @@ export class IncidentController {
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    return toApiSuccessEnvelope(
-      this.incidentService.extendMatchingSuppression(
-        incidentId,
-        command,
-        identity,
-        requestId,
-      ),
+    const result = this.incidentService.extendMatchingSuppressionForCommit(
+      incidentId,
+      command,
+      identity,
       requestId,
     );
+    return result instanceof Promise
+      ? result.then((item) => toApiSuccessEnvelope(item, requestId))
+      : toApiSuccessEnvelope(result, requestId);
   }
 
   @Get(":incidentId/service-recovery")
@@ -189,59 +205,70 @@ export class IncidentController {
   }
 
   @Post(":incidentId/link-complaint")
-  linkComplaint(
+  async linkComplaint(
     @Param("incidentId") incidentId: string,
     @Body() body: { complaintCaseNo: string },
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
-    const incidentRecord = this.incidentService.getIncident(incidentId);
-    const complaintCase = this.complaintService.getComplaintCase(
+    return this.complaintService.withIncidentLink(
       body.complaintCaseNo,
+      async () => {
+        return this.incidentService.withComplaintLink(incidentId, async () => {
+          await this.complaintService.refreshSettlementCases();
+          const incidentRecord = this.incidentService.getIncident(incidentId);
+          const complaintCase = this.complaintService.getComplaintCase(
+            body.complaintCaseNo,
+          );
+          if (
+            incidentRecord.relatedComplaintCaseNo &&
+            incidentRecord.relatedComplaintCaseNo !== complaintCase.caseNo
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "INCIDENT_COMPLAINT_LINK_CONFLICT",
+              "This incident is already linked to a different complaint case.",
+              {
+                incidentId,
+                existingComplaintCaseNo: incidentRecord.relatedComplaintCaseNo,
+                requestedComplaintCaseNo: complaintCase.caseNo,
+              },
+            );
+          }
+          if (
+            complaintCase.relatedIncidentId &&
+            complaintCase.relatedIncidentId !== incidentRecord.incidentId
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.CONFLICT,
+              "COMPLAINT_INCIDENT_LINK_CONFLICT",
+              "This complaint case is already linked to a different incident.",
+              {
+                caseNo: complaintCase.caseNo,
+                existingIncidentId: complaintCase.relatedIncidentId,
+                requestedIncidentId: incidentRecord.incidentId,
+              },
+            );
+          }
+          this.complaintService.linkIncident(
+            body.complaintCaseNo,
+            {
+              incidentId,
+            } satisfies LinkComplaintToIncidentCommand,
+            requestId,
+          );
+          await this.complaintService.awaitSettlementPersistence(
+            body.complaintCaseNo,
+          );
+          const incident = await this.incidentService.linkComplaintForCommit(
+            incidentId,
+            body.complaintCaseNo,
+            requestId,
+            identity,
+          );
+          return toApiSuccessEnvelope(incident, requestId);
+        });
+      },
     );
-    if (
-      incidentRecord.relatedComplaintCaseNo &&
-      incidentRecord.relatedComplaintCaseNo !== complaintCase.caseNo
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "INCIDENT_COMPLAINT_LINK_CONFLICT",
-        "This incident is already linked to a different complaint case.",
-        {
-          incidentId,
-          existingComplaintCaseNo: incidentRecord.relatedComplaintCaseNo,
-          requestedComplaintCaseNo: complaintCase.caseNo,
-        },
-      );
-    }
-    if (
-      complaintCase.relatedIncidentId &&
-      complaintCase.relatedIncidentId !== incidentRecord.incidentId
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "COMPLAINT_INCIDENT_LINK_CONFLICT",
-        "This complaint case is already linked to a different incident.",
-        {
-          caseNo: complaintCase.caseNo,
-          existingIncidentId: complaintCase.relatedIncidentId,
-          requestedIncidentId: incidentRecord.incidentId,
-        },
-      );
-    }
-    const incident = this.incidentService.linkComplaint(
-      incidentId,
-      body.complaintCaseNo,
-      requestId,
-      identity,
-    );
-    this.complaintService.linkIncident(
-      body.complaintCaseNo,
-      {
-        incidentId,
-      } satisfies LinkComplaintToIncidentCommand,
-      requestId,
-    );
-    return toApiSuccessEnvelope(incident, requestId);
   }
 }

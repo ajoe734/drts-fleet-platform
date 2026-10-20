@@ -62,8 +62,13 @@ def classify_paths(paths: Iterable[str], *, force_full: bool = False) -> dict[st
 def changed_paths(base_sha: str, head_sha: str) -> list[str]:
     if not base_sha or not head_sha:
         return []
+    # A PR owns changes since its common ancestor with the target branch.
+    # Comparing the two tips also counts unrelated changes that landed on dev
+    # while the candidate was under review, making a tool-only PR run product
+    # CI again. Disable rename detection so moving product code into docs/tools
+    # still includes the deleted product path and cannot skip its gates.
     result = subprocess.run(
-        ["git", "diff", "--name-only", "-z", base_sha, head_sha],
+        ["git", "diff", "--name-only", "--no-renames", "-z", f"{base_sha}...{head_sha}", "--"],
         check=True,
         capture_output=True,
     )

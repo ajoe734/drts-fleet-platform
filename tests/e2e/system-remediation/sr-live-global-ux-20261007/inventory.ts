@@ -21,6 +21,22 @@ export function inventoryAt(runtimeSha: string): Inventory {
   ].map((m) => m[1]!);
   if (tenantRoles.length < 4)
     throw new Error("tenant role source changed; review inventory parser");
+  const passengerSource = "packages/contracts/src/passenger-app.ts";
+  const passengerIdentity = sourceAt(runtimeSha, passengerSource);
+  const passengerRealm = /^export const PASSENGER_REALM = "([^"]+)";/m.exec(
+    passengerIdentity,
+  )?.[1];
+  const passengerActor =
+    /^export const FIRST_PARTY_PASSENGER_ACTOR_TYPE = "([^"]+)";/m.exec(
+      passengerIdentity,
+    )?.[1];
+  if (
+    passengerRealm !== "passenger" ||
+    passengerActor !== "first_party_passenger"
+  )
+    throw new Error(
+      "passenger identity source changed; review inventory parser",
+    );
   const surface = (
     app: string,
     roles: string[],
@@ -45,6 +61,9 @@ export function inventoryAt(runtimeSha: string): Inventory {
     surface("fleet-partner-portal-web", ["partner_api_key", "partner_user"]),
     surface("channel-partner-portal-web", ["partner_api_key"]),
     surface("referral-embed-web", ["referral_passenger"]),
+    // Harness roles are case/session labels. This actor is not a legacy IAM
+    // role or a JWT roles claim; passenger JWTs reject legacy roles/scopes.
+    surface("passenger-app-web", [passengerActor], passengerSource),
   ];
   const workflow = sourceAt(runtimeSha, ".github/workflows/deploy-dev.yml");
   const deployed = [
@@ -142,7 +161,7 @@ export function inventoryAt(runtimeSha: string): Inventory {
       "partner-booking-web":
         ".github/workflows/deploy-dev.yml: paused-partner-booking-cleanup",
       "passenger-web":
-        ".github/workflows/deploy-dev.yml: retired-service-cleanup; first-party passenger scope remains excluded",
+        ".github/workflows/deploy-dev.yml: retired-service-cleanup; legacy passenger-web remains retired",
       "concierge-portal-web":
         "docs/03-runbooks/smarttransport-tw-custom-domains.md: retired",
       "assisted-entry-web":

@@ -1,6 +1,9 @@
-import { execFileSync } from "node:child_process";
+import {
+  execFileSync,
+  type ExecFileSyncOptionsWithStringEncoding,
+} from "node:child_process";
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   automatedChecks,
   cases,
@@ -29,6 +32,33 @@ import {
   inventoryAt,
 } from "../../../e2e/system-remediation/sr-live-global-ux-20261007/inventory";
 import { scaffoldPlan } from "../../../e2e/system-remediation/sr-live-global-ux-20261007/runner";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFileSync: vi.fn(actual.execFileSync) };
+});
+const { execFileSync: realExecFileSync } =
+  await vi.importActual<typeof import("node:child_process")>(
+    "node:child_process",
+  );
+afterEach(() => vi.mocked(execFileSync).mockImplementation(realExecFileSync));
+
+// Only alter the external git source response; inventoryAt, page discovery,
+// source/blob binding, and exact service comparison execute unchanged.
+function alterSource(head: string, path: string, alter: (s: string) => string) {
+  vi.mocked(execFileSync).mockImplementation(((
+    command: string,
+    args: string[],
+    options: ExecFileSyncOptionsWithStringEncoding,
+  ) => {
+    const result = realExecFileSync(command, args, options);
+    return command === "git" &&
+      args[0] === "show" &&
+      args[1] === `${head}:${path}`
+      ? alter(result)
+      : result;
+  }) as typeof execFileSync);
+}
 
 const sha = "a".repeat(40);
 const inventory: Inventory = {
@@ -392,6 +422,15 @@ describe("locale intent and source mapping", () => {
       encoding: "utf8",
     }).trim();
     const manifest = inventoryAt(head);
+    expect(manifest.surfaces).toContainEqual({
+      app: "passenger-app-web",
+      service: "drts-dev-passenger-app-web",
+      roles: ["first_party_passenger"],
+      roleSource: "packages/contracts/src/passenger-app.ts",
+    });
+    expect(manifest.excluded).not.toHaveProperty("passenger-app-web");
+    for (const app of ["passenger-web", "partner-booking-web"])
+      expect(manifest.excluded).toHaveProperty(app);
     const plan = scaffoldPlan(manifest);
     expect(Object.keys(plan.recipes)).toHaveLength(4);
     expect(() => validatePlan(plan, manifest)).toThrow("missing/expired");
@@ -425,6 +464,22 @@ describe("locale intent and source mapping", () => {
     expect(
       manifest.screens.filter((s) => s.id.includes("?screen=")).length,
     ).toBe(14);
+    const passengerPages = pages.filter((file) =>
+      file.startsWith("apps/passenger-app-web/app/"),
+    );
+    const passengerScreens = manifest.screens.filter(
+      (screen) => screen.app === "passenger-app-web",
+    );
+    expect(passengerPages.length).toBeGreaterThan(0);
+    expect(passengerScreens.map((s) => s.source).sort()).toEqual(
+      passengerPages.sort(),
+    );
+    expect(
+      passengerScreens.every((s) => s.roles.join() === "first_party_passenger"),
+    ).toBe(true);
+    expect(
+      cases(manifest).filter((c) => c.screen.app === "passenger-app-web"),
+    ).toHaveLength(passengerPages.length * 8 * 2 * 3);
     expect(
       manifest.screens.every(
         (s) =>
@@ -433,7 +488,62 @@ describe("locale intent and source mapping", () => {
           s.design === "unverified",
       ),
     ).toBe(true);
+    // Full git page/blob discovery can exceed the default 5s on a busy VM.
+    // Keep all pages and checks; bound only this complete inventory probe.
+  }, 30_000);
+  it.each(["passenger-app-web", "tenant-console-web"])(
+    "rejects missing active surface %s without shrinking the page denominator",
+    (app) => {
+      const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      alterSource(head, ".github/workflows/deploy-dev.yml", (source) =>
+        source.replace(
+          new RegExp(`^.*assert_exact_active_service ${app} .*$`, "m"),
+          "",
+        ),
+      );
+      expect(() => inventoryAt(head)).toThrow(
+        "deployment active surface inventory changed",
+      );
+    },
+  );
+  it.each([
+    "rogue-web",
+    "passenger-web",
+    "partner-booking-web",
+    "passenger-app-web",
+  ])("rejects extra or duplicated active surface %s", (app) => {
+    const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    alterSource(
+      head,
+      ".github/workflows/deploy-dev.yml",
+      (source) =>
+        `${source}\nassert_exact_active_service ${app} "$target" "drts-dev-${app}"\n`,
+    );
+    expect(() => inventoryAt(head)).toThrow(
+      "deployment active surface inventory changed",
+    );
   });
+  it.each(["PASSENGER_REALM", "FIRST_PARTY_PASSENGER_ACTOR_TYPE"])(
+    "rejects drift in formal passenger identity %s",
+    (symbol) => {
+      const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).trim();
+      alterSource(head, "packages/contracts/src/passenger-app.ts", (source) =>
+        source.replace(
+          new RegExp(`export const ${symbol} = "[^"]+";`),
+          `export const ${symbol} = "legacy_passenger_role";`,
+        ),
+      );
+      expect(() => inventoryAt(head)).toThrow(
+        "passenger identity source changed",
+      );
+    },
+  );
   it("workflow never starts a local product server and keeps browser/manual gates distinct", () => {
     const workflow = readFileSync(
       ".github/workflows/live-global-ux-acceptance.yml",

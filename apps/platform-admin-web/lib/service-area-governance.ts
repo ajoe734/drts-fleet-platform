@@ -79,7 +79,10 @@ export function geometrySummary(geometry: ServiceAreaGeometry): string {
   if (geometry.type === "circle") {
     return `circle · r=${Math.round(geometry.radiusMeters)}m`;
   }
-  return `polygon · ${geometry.coordinates.length} pts`;
+  const holeCount = geometry.holes?.length ?? 0;
+  return holeCount > 0
+    ? `polygon · ${geometry.coordinates.length} pts (${holeCount} ${holeCount === 1 ? "hole" : "holes"})`
+    : `polygon · ${geometry.coordinates.length} pts`;
 }
 
 /** "YYYY-MM-DD" from an ISO string, or an open-ended marker. */

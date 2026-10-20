@@ -1,4 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { AuditLogRepository } from "../audit-notification/audit-log.repository";
+import type {
+  DisclosureSubjectType,
+  DisclosureRecord,
+  DisclosureReviewDecision,
+} from "./disclosure-review.types";
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient } from "pg";
 
@@ -45,6 +51,21 @@ export type RegulatoryRegistryState = {
   exclusivities: DispatchExclusivityRecord[];
   disclosureProfiles: VehiclePassengerDisclosureProfile[];
   driverCredentials: DriverPublicRegistrationCredential[];
+};
+
+/** Only an actual COMMIT rejection after successful work may be reconciled
+ * as an uncertain command ACK. BEGIN/work/rollback/release failures stay errors. */
+export class RegulatoryCommandCommitUncertainError extends Error {
+  constructor(readonly cause: unknown) {
+    super("Registry command COMMIT acknowledgement is uncertain.");
+  }
+}
+
+export type RegulatoryVehicleCommandState = {
+  vehicle: VehicleRegistryRecord;
+  contracts: VehicleContractRecord[];
+  policies: InsurancePolicyRecord[];
+  exclusivities: DispatchExclusivityRecord[];
 };
 
 export type PersistRegulatoryRegistryChanges = {
@@ -144,6 +165,26 @@ type DriverPublicRegistrationCredentialRow = {
   version: number | string;
   updated_at: string | Date;
 };
+
+/** Original credential fields; reminder family stays within V0102's driver CHECK. */
+export const PREEXPIRY_CREDENTIAL_FIELDS = {
+  driver_license: "licenseExpiry",
+  professional_driver_license: "professionalDriverLicenseExpiry",
+  taxi_driver_registration: "taxiDriverRegistrationExpiry",
+} as const;
+export function parsePreexpiryCredentialFamily(family: string) {
+  const match =
+    /^preexpiry:(driver_license|professional_driver_license|taxi_driver_registration):(30|7)$/.exec(
+      family,
+    );
+  if (!match) return null;
+  const credential = match[1] as keyof typeof PREEXPIRY_CREDENTIAL_FIELDS;
+  return {
+    credential,
+    field: PREEXPIRY_CREDENTIAL_FIELDS[credential],
+    days: Number(match[2]),
+  };
+}
 
 export type ExpiryEntityType = "driver" | "policy";
 export type ExpiryEventStatus =
@@ -248,6 +289,160 @@ export class RegulatoryRegistryRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async loadDriverMatchingSuppressions(
+    driverId?: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
+  ) {
+    const result = await executor.query<{
+      driver_id: string;
+      record: import("@drts/contracts").DriverMatchingSuppression;
+    }>(
+      `SELECT driver_id, record FROM ops.phase1_driver_matching_suppressions${driverId ? " WHERE driver_id = $1" : ""}`,
+      driverId ? [driverId] : [],
+    );
+    return result.rows;
+  }
+
+  async lockDriverMatchingAuthority(
+    driverId: string,
+    executor: Pick<DatabaseService, "query">,
+  ) {
+    await executor.query(
+      "SELECT driver_id FROM reg.phase1_registry_drivers WHERE driver_id = $1 FOR UPDATE",
+      [driverId],
+    );
+    return this.loadDriverMatchingSuppressions(driverId, executor);
+  }
+
+  /** Narrow P5 reads never hydrate or replace another Registry writer's cache. */
+  async listDisclosureReviewRecords(): Promise<{
+    profiles: VehiclePassengerDisclosureProfile[];
+    credentials: DriverPublicRegistrationCredential[];
+  }> {
+    const [profiles, credentials] = await Promise.all([
+      this.databaseService!.query<VehiclePassengerDisclosureProfileRow>(
+        "SELECT * FROM reg.vehicle_passenger_disclosure_profiles ORDER BY vehicle_id",
+      ),
+      this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
+        "SELECT * FROM reg.driver_public_registration_credentials ORDER BY driver_id",
+      ),
+    ]);
+    return {
+      profiles: profiles.rows.map((row) => this.mapDisclosureProfileRow(row)),
+      credentials: credentials.rows.map((row) =>
+        this.mapDriverCredentialRow(row),
+      ),
+    };
+  }
+
+  async loadDisclosureReviewSubject(
+    type: DisclosureSubjectType,
+    id: string,
+    executor: RegulatoryRegistryQueryExecutor = this.databaseService!,
+    lock = false,
+  ): Promise<{
+    record: DisclosureRecord;
+    parent: VehicleRegistryRecord | DriverRegistryRecord;
+  } | null> {
+    const vehicle = type === "vehicle";
+    // Fixed table choices only; lock the canonical parent before its review row.
+    const table = vehicle
+      ? "reg.phase1_registry_vehicles"
+      : "reg.phase1_registry_drivers";
+    const key = vehicle ? "vehicle_id" : "driver_id";
+    const parent = await executor.query<{
+      record: VehicleRegistryRecord | DriverRegistryRecord;
+    }>(
+      `SELECT record FROM ${table} WHERE ${key}=$1${lock ? " FOR UPDATE" : ""}`,
+      [id],
+    );
+    if (!parent.rows[0]) return null;
+    if (vehicle) {
+      const result = await executor.query<VehiclePassengerDisclosureProfileRow>(
+        `SELECT * FROM reg.vehicle_passenger_disclosure_profiles WHERE vehicle_id=$1${lock ? " FOR UPDATE" : ""}`,
+        [id],
+      );
+      return result.rows[0]
+        ? {
+            record: this.mapDisclosureProfileRow(result.rows[0]),
+            parent: parent.rows[0].record,
+          }
+        : null;
+    }
+    const result = await executor.query<DriverPublicRegistrationCredentialRow>(
+      `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1${lock ? " FOR UPDATE" : ""}`,
+      [id],
+    );
+    return result.rows[0]
+      ? {
+          record: this.mapDriverCredentialRow(result.rows[0]),
+          parent: parent.rows[0].record,
+        }
+      : null;
+  }
+
+  async loadDisclosureReviewHistory(
+    type: DisclosureSubjectType,
+    id: string,
+    executor: RegulatoryRegistryQueryExecutor = this.databaseService!,
+  ): Promise<DisclosureReviewDecision[]> {
+    const result = await executor.query<{
+      new_value: { p5Review: DisclosureReviewDecision };
+    }>(
+      "SELECT new_value FROM admin.audit_logs WHERE module_name='regulatory-registry' AND action_name='p5_disclosure_review' AND resource_type=$1 AND resource_id=$2 ORDER BY created_at, audit_id",
+      [`p5_disclosure_${type}`, id],
+    );
+    return result.rows.map((row) => row.new_value.p5Review);
+  }
+
+  async appendDisclosureReview(
+    executor: RegulatoryRegistryQueryExecutor,
+    decision: DisclosureReviewDecision,
+  ): Promise<void> {
+    // Reuse the original audit serializer and schema inside this exact transaction.
+    const repository = new AuditLogRepository({
+      isEnabled: () => true,
+      query: executor.query.bind(executor),
+    } as DatabaseService);
+    await repository.append({
+      auditId: decision.decisionId,
+      actorId: decision.actorId,
+      actorType: decision.actorType,
+      tenantId: null,
+      moduleName: "regulatory-registry",
+      actionName: "p5_disclosure_review",
+      resourceType: `p5_disclosure_${decision.subjectType}`,
+      resourceId: decision.subjectId,
+      oldValuesSummary: { record: decision.previousRecord },
+      newValuesSummary: { p5Review: decision },
+      requestId: decision.operationKey,
+      createdAt: decision.decidedAt,
+    });
+  }
+
+  async findDriverPublicRegistrationCredential(
+    driverId: string,
+  ): Promise<DriverPublicRegistrationCredential | null> {
+    if (!this.isEnabled()) return null;
+    const result =
+      await this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
+        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1`,
+        [driverId],
+      );
+    return result.rows[0] ? this.mapDriverCredentialRow(result.rows[0]) : null;
+  }
+
+  async findCompletionOperatorId(
+    authorizationId: string,
+  ): Promise<string | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{ operator_id: string }>(
+      `SELECT operator_id FROM reg.multi_taxi_operating_authorizations WHERE authorization_id=$1`,
+      [authorizationId],
+    );
+    return result.rows[0]?.operator_id ?? null;
   }
 
   async ensureLiveMapTestDriver() {
@@ -410,6 +605,99 @@ export class RegulatoryRegistryRepository {
       driverCredentials: driverCredentialsResult.rows.map((row) =>
         this.mapDriverCredentialRow(row),
       ),
+    };
+  }
+
+  /** One MVCC snapshot, restricted to supply for the requested service bucket.
+   * Include unavailable drivers as well, so stale availability cannot survive.
+   */
+  async findDispatchSupplyContext(serviceBucket: string) {
+    this.assertDatabaseEnabled("read dispatch supply authority");
+    const result = await this.databaseService!.query<{
+      vehicles: (JsonRecordRow & { license_class: string | null })[];
+      drivers: JsonRecordRow[];
+      pairs: JsonRecordRow[];
+      contracts: JsonRecordRow[];
+      policies: JsonRecordRow[];
+      exclusivities: JsonRecordRow[];
+      disclosures: VehiclePassengerDisclosureProfileRow[];
+      credentials: DriverPublicRegistrationCredentialRow[];
+      locations: DriverLocationRow[];
+    }>(
+      `WITH vehicles AS MATERIALIZED (
+         SELECT v.vehicle_id, v.record, c.license_class
+         FROM reg.phase1_registry_vehicles v
+         LEFT JOIN reg.vehicles c ON c.vehicle_id::text = v.vehicle_id
+         WHERE v.record->'supportedServiceBuckets' ? $1
+       ), pairs AS MATERIALIZED (
+         SELECT p.* FROM reg.phase1_registry_supply_pairs p
+         JOIN vehicles v USING (vehicle_id)
+       ), drivers AS MATERIALIZED (
+         SELECT d.* FROM reg.phase1_registry_drivers d
+         WHERE d.driver_id IN (SELECT driver_id FROM pairs)
+       )
+       SELECT
+         COALESCE((SELECT jsonb_agg(to_jsonb(v)) FROM vehicles v), '[]') AS vehicles,
+         COALESCE((SELECT jsonb_agg(to_jsonb(d)) FROM drivers d), '[]') AS drivers,
+         COALESCE((SELECT jsonb_agg(to_jsonb(p)) FROM pairs p), '[]') AS pairs,
+         COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM reg.phase1_registry_contracts c
+           WHERE c.vehicle_id IN (SELECT vehicle_id FROM vehicles)), '[]') AS contracts,
+         COALESCE((SELECT jsonb_agg(to_jsonb(p)) FROM reg.phase1_registry_policies p
+           WHERE p.vehicle_id IN (SELECT vehicle_id FROM vehicles)), '[]') AS policies,
+         COALESCE((SELECT jsonb_agg(to_jsonb(e)) FROM reg.phase1_registry_exclusivities e
+           WHERE e.vehicle_id IN (SELECT vehicle_id FROM vehicles)), '[]') AS exclusivities,
+         COALESCE((SELECT jsonb_agg(to_jsonb(p)) FROM reg.vehicle_passenger_disclosure_profiles p
+           WHERE p.vehicle_id IN (SELECT vehicle_id FROM vehicles)), '[]') AS disclosures,
+         COALESCE((SELECT jsonb_agg(to_jsonb(c)) FROM reg.driver_public_registration_credentials c
+           WHERE c.driver_id IN (SELECT driver_id FROM drivers)), '[]') AS credentials,
+         COALESCE((SELECT jsonb_agg(to_jsonb(l)) FROM ops.phase1_driver_locations l
+           WHERE l.driver_id IN (SELECT driver_id FROM drivers)), '[]') AS locations`,
+      [serviceBucket],
+    );
+    const row = result.rows[0]!;
+    const records = <T>(rows: JsonRecordRow[], table: string) =>
+      rows.map((r) => this.parseRecord<T>(r.record, table));
+    const state: RegulatoryRegistryState = {
+      vehicles: row.vehicles.map((r) => {
+        const record = this.parseRecord<VehicleRegistryRecord>(
+          r.record,
+          "reg.phase1_registry_vehicles",
+        );
+        const licenseType =
+          record.licenseType ??
+          (r.license_class
+            ? this.mapVehicleLicenseClass(r.license_class)
+            : null);
+        return licenseType ? { ...record, licenseType } : record;
+      }),
+      drivers: records(row.drivers, "reg.phase1_registry_drivers"),
+      supplyPairs: records(row.pairs, "reg.phase1_registry_supply_pairs"),
+      contracts: records(row.contracts, "reg.phase1_registry_contracts"),
+      policies: records(row.policies, "reg.phase1_registry_policies"),
+      exclusivities: records(
+        row.exclusivities,
+        "reg.phase1_registry_exclusivities",
+      ),
+      disclosureProfiles: row.disclosures.map((r) =>
+        this.mapDisclosureProfileRow(r),
+      ),
+      driverCredentials: row.credentials.map((r) =>
+        this.mapDriverCredentialRow(r),
+      ),
+    };
+    return {
+      state,
+      locations: row.locations.map((r) => ({
+        driverId: r.driver_id,
+        lat: this.parseNumericValue(r.lat, "lat"),
+        lng: this.parseNumericValue(r.lng, "lng"),
+        accuracyM:
+          r.accuracy_m === null
+            ? null
+            : this.parseNumericValue(r.accuracy_m, "accuracy_m"),
+        recordedAt: this.toIsoString(r.recorded_at),
+        updatedAt: this.toIsoString(r.updated_at),
+      })),
     };
   }
 
@@ -1331,6 +1619,117 @@ export class RegulatoryRegistryRepository {
     }
   }
 
+  /** Dedicated transaction boundary for the seven C072 commands only. The
+   * generic detached writer and other Registry transactions are unchanged. */
+  async withVehicleCommandTransaction<T>(
+    work: (client: PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.databaseService!.connect();
+    let rollbackStarted = false;
+    let discard: Error | undefined;
+    const rollback = async () => {
+      rollbackStarted = true;
+      try {
+        await client.query("ROLLBACK");
+      } catch (error) {
+        discard = error instanceof Error ? error : new Error(String(error));
+        throw error;
+      }
+    };
+    try {
+      await client.query("BEGIN");
+      const result = await work(client);
+      try {
+        await client.query("COMMIT");
+      } catch (error) {
+        await rollback();
+        // PostgreSQL explicitly rejected these transactions; equal prior
+        // values do not acknowledge the failed retry. Connection/uncoded
+        // COMMIT failures still require exact canonical reconciliation.
+        const code = String((error as { code?: unknown })?.code ?? "");
+        if (
+          /^[0-9A-Z]{5}$/.test(code) &&
+          !code.startsWith("08") &&
+          code !== "40003" &&
+          !code.startsWith("57P")
+        )
+          throw error;
+        throw new RegulatoryCommandCommitUncertainError(error);
+      }
+      return result;
+    } catch (error) {
+      if (!rollbackStarted) await rollback();
+      throw error;
+    } finally {
+      client.release(discard);
+    }
+  }
+
+  /** Seven ordinary C072 commands serialize on the existing vehicle row and
+   * read only its source records through that same dedicated executor. */
+  async readVehicleCommandState(
+    vehicleId: string,
+    client: PoolClient,
+  ): Promise<RegulatoryVehicleCommandState | null> {
+    const executor = this.getExpiryExecutor(client);
+    const vehicles = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_vehicles WHERE vehicle_id = $1 FOR UPDATE",
+      [vehicleId],
+    );
+    if (!vehicles.rows[0]) return null;
+    const contracts = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_contracts WHERE vehicle_id = $1 ORDER BY contract_id",
+      [vehicleId],
+    );
+    const policies = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_policies WHERE vehicle_id = $1 ORDER BY policy_id",
+      [vehicleId],
+    );
+    const exclusivities = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_exclusivities WHERE vehicle_id = $1",
+      [vehicleId],
+    );
+    return {
+      vehicle: this.parseRecord<VehicleRegistryRecord>(
+        vehicles.rows[0].record,
+        "reg.phase1_registry_vehicles",
+      ),
+      contracts: contracts.rows.map((r) =>
+        this.parseRecord<VehicleContractRecord>(
+          r.record,
+          "reg.phase1_registry_contracts",
+        ),
+      ),
+      policies: policies.rows.map((r) =>
+        this.parseRecord<InsurancePolicyRecord>(
+          r.record,
+          "reg.phase1_registry_policies",
+        ),
+      ),
+      exclusivities: exclusivities.rows.map((r) =>
+        this.parseRecord<DispatchExclusivityRecord>(
+          r.record,
+          "reg.phase1_registry_exclusivities",
+        ),
+      ),
+    };
+  }
+
+  async findCommandContract(
+    contractId: string,
+  ): Promise<VehicleContractRecord | null> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_contracts WHERE contract_id = $1",
+      [contractId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<VehicleContractRecord>(
+          result.rows[0].record,
+          "reg.phase1_registry_contracts",
+        )
+      : null;
+  }
+
   async lockDriver(
     driverId: string,
     client?: PoolClient,
@@ -1361,10 +1760,56 @@ export class RegulatoryRegistryRepository {
     return null;
   }
 
+  /** One finite keyset interval; no scheduler/checkpoint or source mutation. */
+  async getExpiryScanUpperBounds(): Promise<{
+    driverId: string | null;
+    policyId: string | null;
+  }> {
+    const result = await this.databaseService!.query<{
+      driver_id: string | null;
+      policy_id: string | null;
+    }>(
+      `SELECT (SELECT MAX(driver_id) FROM reg.phase1_registry_drivers) AS driver_id,
+              (SELECT MAX(policy_id) FROM reg.phase1_registry_policies) AS policy_id`,
+    );
+    return {
+      driverId: result.rows[0]?.driver_id ?? null,
+      policyId: result.rows[0]?.policy_id ?? null,
+    };
+  }
+
+  /** Future sources and already-recorded reminder sources, in the same bounded
+   * keyset interval. The locked source is re-evaluated by the real producer. */
+  async scanPreexpiryDrivers(
+    asOf: string,
+    limit: number,
+    range: { afterId?: string; throughId?: string },
+  ): Promise<DriverRegistryRecord[]> {
+    const cutoff = new Date(Date.parse(asOf) + 30 * 86400000).toISOString();
+    const result = await this.databaseService!.query<{
+      record: DriverRegistryRecord;
+    }>(
+      `/* preexpiry-source */ SELECT d.record FROM reg.phase1_registry_drivers d
+       WHERE (
+         ((d.record->>'licenseExpiry')::timestamptz > $1 AND (d.record->>'licenseExpiry')::timestamptz <= $5)
+         OR ((d.record->>'professionalDriverLicenseExpiry')::timestamptz > $1 AND (d.record->>'professionalDriverLicenseExpiry')::timestamptz <= $5)
+         OR ((d.record->>'taxiDriverRegistrationExpiry')::timestamptz > $1 AND (d.record->>'taxiDriverRegistrationExpiry')::timestamptz <= $5)
+         OR EXISTS (SELECT 1 FROM reg.phase1_registry_expiry_events e WHERE e.entity_type='driver'
+           AND e.entity_id=d.driver_id AND e.credential_type LIKE 'preexpiry:%'
+           AND e.status IN ('pending','leased','completed'))
+       ) AND ($3::varchar IS NULL OR d.driver_id > $3::varchar)
+         AND ($4::varchar IS NULL OR d.driver_id <= $4::varchar)
+       ORDER BY d.driver_id ASC LIMIT $2`,
+      [asOf, limit, range.afterId ?? null, range.throughId ?? null, cutoff],
+    );
+    return result.rows.map((r) => r.record);
+  }
+
   async scanExpiredDrivers(
     asOf: Date | string,
     limit: number = 100,
     client?: PoolClient,
+    range?: { afterId?: string | undefined; throughId?: string | undefined },
   ): Promise<DriverRegistryRecord[]> {
     const asOfIso =
       asOf instanceof Date ? asOf.toISOString() : new Date(asOf).toISOString();
@@ -1375,14 +1820,16 @@ export class RegulatoryRegistryRepository {
           SELECT d.record
           FROM reg.phase1_registry_drivers d
           LEFT JOIN reg.driver_reg_profiles dp ON d.driver_id = dp.driver_id
-          WHERE (d.record->>'licenseExpiry' IS NOT NULL AND (d.record->>'licenseExpiry')::timestamptz <= $1)
+          WHERE ((d.record->>'licenseExpiry' IS NOT NULL AND (d.record->>'licenseExpiry')::timestamptz <= $1)
              OR (d.record->>'professionalDriverLicenseExpiry' IS NOT NULL AND (d.record->>'professionalDriverLicenseExpiry')::timestamptz <= $1)
              OR (d.record->>'taxiDriverRegistrationExpiry' IS NOT NULL AND (d.record->>'taxiDriverRegistrationExpiry')::timestamptz <= $1)
-             OR (dp.training_status = 'expired')
+             OR (dp.training_status = 'expired'))
+            AND ($3::varchar IS NULL OR d.driver_id > $3::varchar)
+            AND ($4::varchar IS NULL OR d.driver_id <= $4::varchar)
           ORDER BY d.driver_id ASC
           LIMIT $2
         `,
-        [asOfIso, limit],
+        [asOfIso, limit, range?.afterId ?? null, range?.throughId ?? null],
       );
       return result.rows.map((r) => r.record);
     }
@@ -1393,6 +1840,7 @@ export class RegulatoryRegistryRepository {
     asOf: Date | string,
     limit: number = 100,
     client?: PoolClient,
+    range?: { afterId?: string | undefined; throughId?: string | undefined },
   ): Promise<InsurancePolicyRecord[]> {
     const asOfIso =
       asOf instanceof Date ? asOf.toISOString() : new Date(asOf).toISOString();
@@ -1405,10 +1853,12 @@ export class RegulatoryRegistryRepository {
           WHERE status != 'cancelled'
             AND (record->>'startAt' IS NULL OR (record->>'startAt')::timestamptz <= $1)
             AND (record->>'endAt' IS NOT NULL AND (record->>'endAt')::timestamptz < $1)
+            AND ($3::varchar IS NULL OR policy_id > $3::varchar)
+            AND ($4::varchar IS NULL OR policy_id <= $4::varchar)
           ORDER BY policy_id ASC
           LIMIT $2
         `,
-        [asOfIso, limit],
+        [asOfIso, limit, range?.afterId ?? null, range?.throughId ?? null],
       );
       return result.rows.map((r) => r.record);
     }
@@ -1491,6 +1941,11 @@ export class RegulatoryRegistryRepository {
       return result.rows[0]!;
     }
 
+    const existing = Array.from(this.inMemoryExpiryEvents.values()).find(
+      (event) => event.source_fingerprint === params.sourceFingerprint,
+    );
+    if (existing) return existing;
+
     const row: RegistryExpiryEventRow = {
       event_id: eventId,
       scope: params.scope,
@@ -1539,7 +1994,7 @@ export class RegulatoryRegistryRepository {
           UPDATE reg.phase1_registry_expiry_delivery_intents
           SET delivery_status = 'superseded',
               updated_at = now()
-          WHERE event_id = ANY($1::uuid[]) AND delivery_status = 'pending'
+          WHERE event_id = ANY($1::uuid[]) AND delivery_status <> 'superseded'
         `,
         [eventIds],
       );
@@ -1556,7 +2011,7 @@ export class RegulatoryRegistryRepository {
         evt.updated_at = nowIso;
       }
       for (const intent of this.inMemoryDeliveryIntents.values()) {
-        if (intent.event_id === id && intent.delivery_status === "pending") {
+        if (intent.event_id === id && intent.delivery_status !== "superseded") {
           intent.delivery_status = "superseded";
           intent.updated_at = nowIso;
         }
@@ -1589,7 +2044,7 @@ export class RegulatoryRegistryRepository {
         for (const intent of this.inMemoryDeliveryIntents.values()) {
           if (
             intent.event_id === evt.event_id &&
-            intent.delivery_status === "pending"
+            intent.delivery_status !== "superseded"
           ) {
             intent.delivery_status = "superseded";
             intent.updated_at = nowIso;
@@ -1627,16 +2082,17 @@ export class RegulatoryRegistryRepository {
       await executor.query(
         `
           UPDATE reg.phase1_registry_expiry_events
-          SET status = $1,
+          SET status = $1::varchar,
               updated_at = now()
-          WHERE event_id = $2
+          WHERE event_id = $2::uuid
+            AND (status <> 'superseded' OR $1::varchar = 'superseded')
         `,
         [status, eventId],
       );
       return;
     }
     const evt = this.inMemoryExpiryEvents.get(eventId);
-    if (evt) {
+    if (evt && (evt.status !== "superseded" || status === "superseded")) {
       evt.status = status;
       evt.updated_at = new Date().toISOString();
     }
@@ -1672,6 +2128,11 @@ export class RegulatoryRegistryRepository {
       );
       return result.rows[0]!;
     }
+
+    const existing = Array.from(this.inMemoryDeliveryIntents.values()).find(
+      (intent) => intent.idempotency_key === params.idempotencyKey,
+    );
+    if (existing) return existing;
 
     const row: RegistryExpiryDeliveryIntentRow = {
       intent_id: intentId,
@@ -1722,42 +2183,126 @@ export class RegulatoryRegistryRepository {
     client?: PoolClient,
   ): Promise<RegistryExpiryDeliveryIntentRow | null> {
     if (this.isEnabled()) {
-      const executor = this.getExpiryExecutor(client);
-      const result = await executor.query<RegistryExpiryDeliveryIntentRow>(
-        `
-          UPDATE reg.phase1_registry_expiry_delivery_intents
-          SET delivery_status = $1,
-              outbox_delivery_id = COALESCE($2, outbox_delivery_id),
-              last_error = $3,
-              enqueued_at = CASE WHEN $1 = 'enqueued' THEN now() ELSE enqueued_at END,
-              updated_at = now()
-          WHERE intent_id = $4
-          RETURNING *
-        `,
+      const result = await this.getExpiryExecutor(
+        client,
+      ).query<RegistryExpiryDeliveryIntentRow>(
+        `UPDATE reg.phase1_registry_expiry_delivery_intents AS intent
+         SET delivery_status = CASE WHEN intent.delivery_status = 'superseded' OR EXISTS (
+               SELECT 1 FROM reg.phase1_registry_expiry_events event
+               WHERE event.event_id = intent.event_id AND event.status = 'superseded'
+             ) THEN 'superseded' ELSE $1::varchar END,
+             outbox_delivery_id = COALESCE(intent.outbox_delivery_id, $2::text),
+             last_error = CASE WHEN $5::boolean THEN $3::text ELSE intent.last_error END,
+             enqueued_at = CASE WHEN $1::varchar = 'enqueued' THEN COALESCE(intent.enqueued_at, now()) ELSE intent.enqueued_at END,
+             updated_at = now()
+         WHERE intent.intent_id = $4::uuid
+           AND ($2::text IS NULL OR intent.outbox_delivery_id IS NULL OR intent.outbox_delivery_id = $2::text)
+         RETURNING *`,
         [
           params.deliveryStatus,
           params.outboxDeliveryId ?? null,
           params.lastError ?? null,
           params.intentId,
+          params.lastError !== undefined,
         ],
       );
+      if (!result.rows[0] && params.outboxDeliveryId)
+        throw new Error("registry_expiry_receipt_link_conflict");
       return result.rows[0] ?? null;
     }
-
     const intent = this.inMemoryDeliveryIntents.get(params.intentId);
     if (!intent) return null;
-    intent.delivery_status = params.deliveryStatus;
-    if (params.outboxDeliveryId !== undefined) {
-      intent.outbox_delivery_id = params.outboxDeliveryId;
-    }
-    if (params.lastError !== undefined) {
-      intent.last_error = params.lastError;
-    }
-    if (params.deliveryStatus === "enqueued") {
-      intent.enqueued_at = new Date().toISOString();
-    }
+    if (
+      params.outboxDeliveryId &&
+      intent.outbox_delivery_id &&
+      params.outboxDeliveryId !== intent.outbox_delivery_id
+    )
+      throw new Error("registry_expiry_receipt_link_conflict");
+    const event = this.inMemoryExpiryEvents.get(intent.event_id);
+    intent.delivery_status =
+      intent.delivery_status === "superseded" || event?.status === "superseded"
+        ? "superseded"
+        : params.deliveryStatus;
+    intent.outbox_delivery_id ??= params.outboxDeliveryId ?? null;
+    if (params.lastError !== undefined) intent.last_error = params.lastError;
+    if (params.deliveryStatus === "enqueued")
+      intent.enqueued_at ??= new Date().toISOString();
     intent.updated_at = new Date().toISOString();
     return intent;
+  }
+
+  /** Link actual acceptance/error facts with the same source-before-event lock
+   * order as renewal. Supersession is terminal; receipts are retained either way. */
+  async recordExpiryDeliveryOutcome(
+    intent: RegistryExpiryDeliveryIntentRow,
+    update: Omit<UpdateDeliveryIntentParams, "intentId">,
+  ): Promise<RegistryExpiryDeliveryIntentRow | null> {
+    return this.withTransaction(async (client) => {
+      const snapshot = await this.getExpiryEventById(intent.event_id, client);
+      if (!snapshot) return null;
+      const sourceExpiryMs =
+        snapshot.source_expiry_at instanceof Date
+          ? snapshot.source_expiry_at.getTime()
+          : Date.parse(snapshot.source_expiry_at ?? "");
+      if (this.isEnabled()) {
+        let changed = false;
+        if (snapshot.entity_type === "driver") {
+          const source = await this.lockDriver(snapshot.entity_id, client);
+          const reminder = parsePreexpiryCredentialFamily(
+            snapshot.credential_type,
+          );
+          const field =
+            reminder?.field ??
+            (
+              {
+                driver_license: "licenseExpiry",
+                professional_driver_license: "professionalDriverLicenseExpiry",
+                taxi_driver_registration: "taxiDriverRegistrationExpiry",
+              } as const
+            )[
+              snapshot.credential_type as
+                | "driver_license"
+                | "professional_driver_license"
+                | "taxi_driver_registration"
+            ];
+          if (field)
+            changed =
+              !source ||
+              Date.parse(source[field] ?? "") !== sourceExpiryMs ||
+              (reminder !== null &&
+                (source.lifecycleStatus !== "active" ||
+                  sourceExpiryMs <= Date.now()));
+        } else {
+          const source = await this.lockPolicy(snapshot.entity_id, client);
+          changed =
+            !source ||
+            source.status === "cancelled" ||
+            Date.parse(source.endAt) !== sourceExpiryMs;
+        }
+        await client.query(
+          "SELECT event_id FROM reg.phase1_registry_expiry_events WHERE event_id = $1::uuid FOR UPDATE",
+          [intent.event_id],
+        );
+        const current = await this.getExpiryEventById(intent.event_id, client);
+        if (changed && current?.status !== "superseded")
+          await this.supersedeExpiryEvents(
+            [intent.event_id],
+            undefined,
+            client,
+          );
+      }
+      const result = await this.updateDeliveryIntent(
+        { ...update, intentId: intent.intent_id },
+        client,
+      );
+      if (update.deliveryStatus === "enqueued")
+        await this.updateExpiryEventStatus(
+          intent.event_id,
+          "completed",
+          client,
+        );
+      return result;
+    });
   }
 
   async listExpiryEvents(

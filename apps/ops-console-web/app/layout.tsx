@@ -1,3 +1,4 @@
+import { PlatformNoticeBanner } from "../components/platform-notice-banner";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import type { IdentityContext } from "@drts/contracts";
@@ -76,6 +77,7 @@ export default async function RootLayout({
               versionLabel={t("app.versionLabel", locale)}
               env={envLabel}
             >
+              <PlatformNoticeBanner />
               {children}
             </OpsShell>
             <OpsAssistantWidget />

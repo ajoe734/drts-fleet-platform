@@ -84,8 +84,15 @@ function createMemoryTenantPartnerRepository(
 
   const repository: Pick<
     TenantPartnerRepository,
-    "loadState" | "persistChanges" | "reportPersistenceFailure"
+    | "loadState"
+    | "persistChanges"
+    | "persistConfigurationChanges"
+    | "isEnabled"
+    | "reportPersistenceFailure"
   > = {
+    isEnabled: () => true,
+    persistConfigurationChanges: (changes) =>
+      repository.persistChanges(changes),
     loadState: vi.fn(async () => clonePartnerState(state)),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       if (changes.notificationPreferences) {
@@ -460,7 +467,7 @@ describe("tenant partner foundation service", () => {
       new WebhookDispatchService(fetchMock),
     );
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -543,7 +550,7 @@ describe("tenant partner foundation service", () => {
         new WebhookDispatchService(fetchMock),
       );
 
-      const webhook = tenantPartnerService.createWebhookEndpoint(
+      const webhook = await tenantPartnerService.createWebhookEndpoint(
         TENANT_ID,
         {
           url: "https://tenant.example.com/webhooks/retry",
@@ -597,7 +604,7 @@ describe("tenant partner foundation service", () => {
       new WebhookDispatchService(fetchMock),
     );
 
-    const tenantWebhook = tenantPartnerService.createWebhookEndpoint(
+    const tenantWebhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/completed",
@@ -605,7 +612,7 @@ describe("tenant partner foundation service", () => {
         events: ["order.completed"],
       },
     );
-    const otherWebhook = tenantPartnerService.createWebhookEndpoint(
+    const otherWebhook = await tenantPartnerService.createWebhookEndpoint(
       OTHER_TENANT_ID,
       {
         url: "https://other.example.com/webhooks/orders",
@@ -669,11 +676,11 @@ describe("tenant partner foundation service", () => {
     expect(String(firstRequestInit?.body)).toContain("order.completed");
   });
 
-  it("rotates webhook secrets and records rotation history", () => {
+  it("rotates webhook secrets and records rotation history", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -683,7 +690,7 @@ describe("tenant partner foundation service", () => {
       "webhook-create-request",
     );
 
-    const rotated = tenantPartnerService.rotateWebhookSecret(
+    const rotated = await tenantPartnerService.rotateWebhookSecret(
       TENANT_ID,
       {
         webhookId: webhook.webhookId,
@@ -707,11 +714,11 @@ describe("tenant partner foundation service", () => {
     );
   });
 
-  it("updates webhook metadata through a first-class tenant command path", () => {
+  it("updates webhook metadata through a first-class tenant command path", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const webhook = tenantPartnerService.createWebhookEndpoint(
+    const webhook = await tenantPartnerService.createWebhookEndpoint(
       TENANT_ID,
       {
         url: "https://tenant.example.com/webhooks/drts",
@@ -721,7 +728,7 @@ describe("tenant partner foundation service", () => {
       "webhook-create-request",
     );
 
-    const updated = tenantPartnerService.updateWebhookEndpoint(
+    const updated = await tenantPartnerService.updateWebhookEndpoint(
       TENANT_ID,
       webhook.webhookId,
       {
@@ -750,7 +757,7 @@ describe("tenant partner foundation service", () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const passenger = tenantPartnerService.upsertPassenger(
+    const passenger = await tenantPartnerService.upsertPassenger(
       TENANT_ID,
       {
         fullName: "測試乘客",
@@ -761,7 +768,7 @@ describe("tenant partner foundation service", () => {
       },
       "passenger-upsert-request",
     );
-    const address = tenantPartnerService.upsertAddress(
+    const address = await tenantPartnerService.upsertAddress(
       TENANT_ID,
       {
         ownerPassengerId: passenger.passengerId,
@@ -844,13 +851,13 @@ describe("tenant partner foundation service", () => {
         },
       ],
     });
-    const otherPassenger = tenantPartnerService.upsertPassenger(
+    const otherPassenger = await tenantPartnerService.upsertPassenger(
       OTHER_TENANT_ID,
       {
         fullName: "Other Tenant Passenger",
       },
     );
-    const otherWebhook = tenantPartnerService.createWebhookEndpoint(
+    const otherWebhook = await tenantPartnerService.createWebhookEndpoint(
       OTHER_TENANT_ID,
       {
         url: "https://other.example.com/webhooks/drts",
@@ -1062,25 +1069,28 @@ describe("tenant partner foundation service", () => {
     ).toThrowError(ApiRequestError);
   });
 
-  it("rejects cross-tenant passenger and address upserts when ids belong to another tenant", () => {
+  it("rejects cross-tenant passenger and address upserts when ids belong to another tenant", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
-    const otherPassenger = tenantPartnerService.upsertPassenger(
+    const otherPassenger = await tenantPartnerService.upsertPassenger(
       OTHER_TENANT_ID,
       {
         fullName: "Other Tenant Passenger",
       },
     );
-    const otherAddress = tenantPartnerService.upsertAddress(OTHER_TENANT_ID, {
-      ownerPassengerId: otherPassenger.passengerId,
-      addressName: "Other Tenant HQ",
-      addressText: "台中市西屯區台灣大道 99 號",
-    });
+    const otherAddress = await tenantPartnerService.upsertAddress(
+      OTHER_TENANT_ID,
+      {
+        ownerPassengerId: otherPassenger.passengerId,
+        addressName: "Other Tenant HQ",
+        addressText: "台中市西屯區台灣大道 99 號",
+      },
+    );
 
     let passengerError: unknown;
     try {
-      tenantPartnerService.upsertPassenger(TENANT_ID, {
+      await tenantPartnerService.upsertPassenger(TENANT_ID, {
         passengerId: otherPassenger.passengerId,
         fullName: "Hijacked Passenger",
       });
@@ -1090,7 +1100,7 @@ describe("tenant partner foundation service", () => {
 
     let addressError: unknown;
     try {
-      tenantPartnerService.upsertAddress(TENANT_ID, {
+      await tenantPartnerService.upsertAddress(TENANT_ID, {
         addressId: otherAddress.addressId,
         addressName: "Hijacked Address",
         addressText: "台北市信義區松仁路 100 號",
@@ -1136,7 +1146,7 @@ describe("tenant partner foundation service", () => {
     ).toBe("Other Tenant HQ");
   });
 
-  it("rejects cross-tenant SLA update when identity tenant does not match target tenant", () => {
+  it("rejects cross-tenant SLA update when identity tenant does not match target tenant", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
@@ -1154,7 +1164,7 @@ describe("tenant partner foundation service", () => {
 
     let thrown: unknown;
     try {
-      tenantPartnerService.updateSlaProfile(
+      await tenantPartnerService.updateSlaProfile(
         OTHER_TENANT_ID,
         { waitThresholdMin: 15 },
         "admin-a",
@@ -1173,7 +1183,7 @@ describe("tenant partner foundation service", () => {
     ).toBe("TENANT_SCOPE_MISMATCH");
   });
 
-  it("rejects SLA update when threshold minutes are negative", () => {
+  it("rejects SLA update when threshold minutes are negative", async () => {
     const auditService = new AuditNotificationService();
     const tenantPartnerService = new TenantPartnerService(auditService);
 
@@ -1196,7 +1206,7 @@ describe("tenant partner foundation service", () => {
     ] as const) {
       let thrown: unknown;
       try {
-        tenantPartnerService.updateSlaProfile(
+        await tenantPartnerService.updateSlaProfile(
           TENANT_ID,
           { [field]: -1 },
           "admin-a",
@@ -1322,6 +1332,8 @@ describe("tenant partner foundation service", () => {
       keyHash: "sha256:persisted-key",
     };
     const repository = {
+      isEnabled: () => true,
+      persistConfigurationChanges: persistChanges,
       loadState: vi.fn(async () => ({
         notificationPreferences: [
           {
@@ -1431,10 +1443,10 @@ describe("tenant partner foundation service", () => {
       tenantPartnerService.listWebhookEndpoints(TENANT_ID)[0]?.webhookId,
     ).toBe("wh_persisted_001");
 
-    tenantPartnerService.updateSlaProfile(TENANT_ID, {
+    await tenantPartnerService.updateSlaProfile(TENANT_ID, {
       waitThresholdMin: 20,
     });
-    tenantPartnerService.upsertPassenger(TENANT_ID, {
+    await tenantPartnerService.upsertPassenger(TENANT_ID, {
       passengerId: "passenger-persisted-001",
       fullName: "Persisted Passenger Updated",
     });
@@ -1526,11 +1538,13 @@ describe("tenant partner foundation service", () => {
 });
 
 describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
-  it("lists seeded referral rates and filters by entrySlug", () => {
+  it("lists seeded referral rates and filters by entrySlug", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    const all = service.listReferralRevenueShareRules();
+    const all = await service.listReferralRevenueShareRules();
     expect(all.length).toBeGreaterThanOrEqual(2);
-    expect(service.listReferralRevenueShareRules("yuhe-residence")).toEqual([
+    expect(
+      await service.listReferralRevenueShareRules("yuhe-residence"),
+    ).toEqual([
       expect.objectContaining({
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
         partnerEntrySlug: "yuhe-residence",
@@ -1543,7 +1557,7 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
         channelKey: "partner_referral",
       }),
     ]);
-    const filtered = service.listReferralRevenueShareRules(
+    const filtered = await service.listReferralRevenueShareRules(
       "referral-demo-community",
     );
     expect(
@@ -1551,16 +1565,16 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     ).toBe(true);
   });
 
-  it("does not expose seeded referral rates in production", () => {
+  it("does not expose seeded referral rates in production", async () => {
     const originalAppEnv = process.env.APP_ENV;
 
     process.env.APP_ENV = "production";
     try {
       const service = new TenantPartnerService(new AuditNotificationService());
 
-      expect(service.listReferralRevenueShareRules()).toEqual([]);
+      expect(await service.listReferralRevenueShareRules()).toEqual([]);
       expect(
-        service.listReferralRevenueShareRules("referral-demo-community"),
+        await service.listReferralRevenueShareRules("referral-demo-community"),
       ).toEqual([]);
     } finally {
       if (originalAppEnv === undefined) {
@@ -1571,10 +1585,10 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     }
   });
 
-  it("upserts a referral rate and writes an audit log", () => {
+  it("upserts a referral rate and writes an audit log", async () => {
     const audit = new AuditNotificationService();
     const service = new TenantPartnerService(audit);
-    const rule = service.upsertReferralRevenueShareRule({
+    const rule = await service.upsertReferralRevenueShareRule({
       partnerEntrySlug: "referral-demo-community",
       rateType: "per_trip",
       value: 5000,
@@ -1590,21 +1604,21 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     expect(audits.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("rejects an invalid rateType or negative value", () => {
+  it("rejects an invalid rateType or negative value", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    expect(() =>
+    await expect(
       service.upsertReferralRevenueShareRule({
         partnerEntrySlug: "x",
         rateType: "bogus" as any,
         value: 1,
       }),
-    ).toThrow();
-    expect(() =>
+    ).rejects.toThrow();
+    await expect(
       service.upsertReferralRevenueShareRule({
         partnerEntrySlug: "x",
         rateType: "percent",
         value: -5,
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 });

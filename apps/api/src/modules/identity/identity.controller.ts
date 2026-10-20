@@ -164,7 +164,10 @@ export class IdentityController {
   @Get("sessions")
   async listAdminSessions(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
-    @Query() query: IamSessionInventoryQuery,
+    @Query()
+    query: Omit<IamSessionInventoryQuery, "includeRevoked"> & {
+      includeRevoked?: unknown;
+    },
     @Headers("x-request-id") requestId?: string,
   ) {
     if (!identity) {
@@ -177,7 +180,13 @@ export class IdentityController {
 
     this.assertAdminReadAuthority(identity);
 
-    const effectiveQuery: IamSessionInventoryQuery = { ...query };
+    // @Query() preserves HTTP strings; only the exact opt-in enables revoked
+    // rows. Repeated, malformed and other truthy values must stay excluded.
+    const effectiveQuery: IamSessionInventoryQuery = {
+      ...query,
+      includeRevoked:
+        query.includeRevoked === true || query.includeRevoked === "true",
+    };
 
     if (identity.realm === "tenant") {
       const requestedTenantId = query.tenantId?.trim();

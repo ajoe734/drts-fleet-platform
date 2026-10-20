@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Mapping
 
@@ -76,6 +79,45 @@ def _task(value: TaskRecord | Mapping[str, Any]) -> TaskRecord:
     return value if isinstance(value, TaskRecord) else TaskRecord.from_mapping(value)
 
 
+def acceptance_review_snapshot(task: Mapping[str, Any]) -> dict[str, str] | None:
+    """Only a frozen, same-SHA reviewed/green/merged source can be requested."""
+    if task.get("status") != "acceptance" or task.get("mutates_canonical") is False:
+        return None
+    fields = ("candidate_sha", "candidate_generation", "reviewed_sha", "merge_sha", "reviewer")
+    if any(not isinstance(task.get(key), str) or not task[key].strip() for key in ("id", *fields)):
+        return None
+    if not isinstance(task.get("owner"), str) or not task["owner"].strip() or task["owner"] == task["reviewer"]:
+        return None
+    if any(not re.fullmatch(r"[0-9a-f]{40}", task[key]) for key in ("candidate_sha", "merge_sha")):
+        return None
+    if task["reviewed_sha"] != task["candidate_sha"] or task.get("ci_sha") != task["candidate_sha"]:
+        return None
+    if task.get("ci_status") != "success":
+        return None
+    return {"task_id": task["id"], **{key: task[key] for key in fields}}
+
+
+def pending_acceptance_review(task: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Fail closed on incomplete, foreign or drifted request metadata."""
+    request = task.get("acceptance_review_request")
+    snapshot = acceptance_review_snapshot(task)
+    if not isinstance(request, Mapping) or request.get("state") != "pending" or snapshot is None:
+        return None
+    if any(request.get(key) != value for key, value in snapshot.items()):
+        return None
+    if any(not isinstance(request.get(key), str) or not request[key].strip()
+           for key in ("request_id", "requested_at", "reason", "evidence_ref")):
+        return None
+    if not isinstance(request.get("requested_by"), str) or request["requested_by"] not in {task["owner"], task["reviewer"], "Supervisor"}:
+        return None
+    try:
+        if datetime.fromisoformat(request["requested_at"].replace("Z", "+00:00")).tzinfo is None:
+            return None
+    except ValueError:
+        return None
+    return request
+
+
 def task_index(tasks: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...]) -> dict[str, TaskRecord]:
     """Create the shared read model used by dispatch and summary projections."""
     records = (_task(task) for task in tasks)
@@ -132,6 +174,17 @@ def resolve_dispatch_target(
     policy: ReadyDispatchPolicy,
 ) -> DispatchDecision | None:
     record = _task(task)
+    if record.status == "acceptance":
+        request = record.raw.get("acceptance_review_request")
+        if isinstance(request, Mapping) and request.get("state") == "pending":
+            if (pending_acceptance_review(record.raw) is None
+                    or record.raw.get("external_gate")
+                    or not dependencies_satisfied(record, tasks_by_id, policy.dependency_done_statuses)):
+                return None
+            return DispatchDecision(record.id, record.reviewer, DispatchReason.REVIEW_READY)
+        if request is not None and (not isinstance(request, Mapping)
+                                    or request.get("state") not in ("declined", "reopened")):
+            return None
     if record.status in policy.review_statuses and record.reviewer:
         return DispatchDecision(record.id, record.reviewer, DispatchReason.REVIEW_READY)
     if not dependencies_satisfied(record, tasks_by_id, policy.dependency_done_statuses):
@@ -163,7 +216,52 @@ def ready_dispatch_signature(
         "status": record.status,
         "task_id": record.id,
     }
+    if "acceptance_review_request" in record.raw:
+        payload.update({key: record.raw.get(key) for key in (
+            "acceptance_review_request", "candidate_generation", "reviewed_sha", "merge_sha"
+        )})
     return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
+def material_task_fingerprint(
+    task: TaskRecord | Mapping[str, Any],
+    tasks_by_id: Mapping[str, TaskRecord | Mapping[str, Any]],
+) -> str:
+    """Digest of what a dispatch is about, minus progress bookkeeping.
+
+    ready_dispatch_signature includes last_update, so every write re-arms a
+    dispatch. This leaves out last_update, next and worker_outcomes, the
+    fields an owner rewrites on every status report, so two progress attempts
+    that end with the same fingerprint changed nothing a later attempt could
+    act on: same status, candidate, ownership, gates, dependency states,
+    CI/merge/acceptance evidence and parent resolution.
+    """
+    record = _task(task)
+    raw = record.raw
+    evidence = raw.get("acceptance_evidence")
+    payload = {
+        "acceptance_evidence": sorted(evidence) if isinstance(evidence, Mapping) else None,
+        "candidate_generation": raw.get("candidate_generation"),
+        "candidate_sha": raw.get("candidate_sha"),
+        "ci_sha": raw.get("ci_sha"),
+        "ci_status": raw.get("ci_status"),
+        "dependency_signature": dependency_signature(record, tasks_by_id),
+        "external_gate": bool(raw.get("external_gate")),
+        "merge_sha": raw.get("merge_sha"),
+        "owner": record.owner or None,
+        "resolved_parent_next": raw.get("resolved_parent_next"),
+        "resolved_parent_status": raw.get("resolved_parent_status"),
+        "resolved_parent_waiting_for": raw.get("resolved_parent_waiting_for"),
+        "reviewed_sha": raw.get("reviewed_sha"),
+        "reviewer": record.reviewer or None,
+        "status": record.status,
+        "task_id": record.id,
+        "waiting_for": raw.get("waiting_for"),
+    }
+    if "acceptance_review_request" in raw:
+        payload["acceptance_review_request"] = raw["acceptance_review_request"]
+    encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
 
 
 def build_dispatch_event(
@@ -191,6 +289,9 @@ def build_dispatch_event(
         "execution_branch",
         "candidate_sha",
         "candidate_branch",
+        "reviewed_sha",
+        "merge_sha",
+        "acceptance_review_request",
     ):
         if key in record.raw:
             task_payload[key] = record.raw.get(key)

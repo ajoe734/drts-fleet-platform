@@ -95,20 +95,21 @@ function signReferralWifToken(overrides?: Record<string, unknown>): string {
 function mockReferralWifJwks() {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          keys: [
-            {
-              kty: referralWifJwk.kty,
-              kid: REFERRAL_WIF_KID,
-              n: referralWifJwk.n,
-              e: referralWifJwk.e,
-            },
-          ],
-        }),
-        { status: 200 },
-      ),
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            keys: [
+              {
+                kty: referralWifJwk.kty,
+                kid: REFERRAL_WIF_KID,
+                n: referralWifJwk.n,
+                e: referralWifJwk.e,
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
     ),
   );
 }
@@ -640,7 +641,9 @@ describe("tenant partner ingress handoff controller", () => {
           },
           "req-referral-handoff-no-adapter",
         ),
-      ).rejects.toMatchObject({ code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED" });
+      ).rejects.toMatchObject({
+        code: "WORKLOAD_IDENTITY_GOOGLE_NOT_CONFIGURED",
+      });
     });
   });
 
@@ -690,7 +693,7 @@ describe("tenant partner ingress handoff controller", () => {
       {} as never,
     );
 
-    const artifact = controller.getPartnerReferralStatementArtifact(
+    const artifact = await controller.getPartnerReferralStatementArtifact(
       null,
       statement.period,
       "req-referral-statement-artifact",
@@ -705,7 +708,7 @@ describe("tenant partner ingress handoff controller", () => {
     );
   });
 
-  it("rejects cross-tenant SLA update when identity tenant does not match x-tenant-id", () => {
+  it("rejects cross-tenant SLA update when identity tenant does not match x-tenant-id", async () => {
     const { controller } = createController();
     const identity: IdentityContext = {
       actorType: "tenant_admin",
@@ -719,7 +722,7 @@ describe("tenant partner ingress handoff controller", () => {
       supportedExecutionModes: ["supervisor_managed_execution"],
     };
 
-    expect(() =>
+    await expect(
       controller.updateSlaProfile(
         { waitThresholdMin: 15 },
         identity,
@@ -727,7 +730,7 @@ describe("tenant partner ingress handoff controller", () => {
         "admin-a",
         "req-cross-tenant-sla",
       ),
-    ).toThrowError(
+    ).rejects.toThrowError(
       expect.objectContaining({
         status: 403,
         code: "TENANT_SCOPE_MISMATCH",
@@ -735,7 +738,7 @@ describe("tenant partner ingress handoff controller", () => {
     );
   });
 
-  it("allows same-tenant SLA update with matching identity", () => {
+  it("allows same-tenant SLA update with matching identity", async () => {
     const { controller } = createController();
     const identity: IdentityContext = {
       actorType: "tenant_admin",
@@ -749,7 +752,7 @@ describe("tenant partner ingress handoff controller", () => {
       supportedExecutionModes: ["supervisor_managed_execution"],
     };
 
-    const response = controller.updateSlaProfile(
+    const response = await controller.updateSlaProfile(
       { waitThresholdMin: 15 },
       identity,
       "tenant-a",
@@ -764,7 +767,7 @@ describe("tenant partner ingress handoff controller", () => {
     });
   });
 
-  it("rejects SLA update with negative threshold minutes", () => {
+  it("rejects SLA update with negative threshold minutes", async () => {
     const { controller } = createController();
     const identity: IdentityContext = {
       actorType: "tenant_admin",
@@ -783,7 +786,7 @@ describe("tenant partner ingress handoff controller", () => {
       "arrivalThresholdMin",
       "completionThresholdMin",
     ] as const) {
-      expect(() =>
+      await expect(
         controller.updateSlaProfile(
           { [field]: -1 },
           identity,
@@ -791,7 +794,7 @@ describe("tenant partner ingress handoff controller", () => {
           "admin-a",
           "req-neg-sla",
         ),
-      ).toThrowError(
+      ).rejects.toThrowError(
         expect.objectContaining({
           status: 400,
           code: "INVALID_SLA_THRESHOLD",

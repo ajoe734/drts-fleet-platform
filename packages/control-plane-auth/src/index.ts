@@ -478,7 +478,17 @@ export function verifyIapJwtAssertion(
     const algorithms: jwt.Algorithm[] = looksLikePemKey(
       options.jwtSecretOrPublicKey,
     )
-      ? ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512"]
+      ? [
+          "RS256",
+          "RS384",
+          "RS512",
+          "ES256",
+          "ES384",
+          "ES512",
+          "PS256",
+          "PS384",
+          "PS512",
+        ]
       : ["HS256", "HS384", "HS512"];
     try {
       payload = jwt.verify(trimmed, options.jwtSecretOrPublicKey, {
@@ -613,6 +623,8 @@ export async function issueControlPlaneRequestAuth(options: {
   expectedIapAudience?: string | undefined;
   expectedIapIssuer?: string | undefined;
   assumeTenantId?: string | null;
+  /** Private dev server configuration, never an HTTP identity selector. */
+  devCanonicalPrincipalId?: string;
 }): Promise<ControlPlaneRequestAuth> {
   let verifiedSubject: string | null = null;
   let verifiedEmail: string | null = null;
@@ -713,12 +725,29 @@ export async function issueControlPlaneRequestAuth(options: {
     hasJwtSecret ? "jwt_bearer" : "bootstrap_headers",
     verifiedSubject,
     undefined,
-    options.assumeTenantId
+    options.assumeTenantId,
   );
 
   const rawAssertion = options.headers
     ? extractIapJwtAssertion(options.headers)
     : null;
+  if (
+    options.actorType === "platform_admin" &&
+    options.devCanonicalPrincipalId !== undefined &&
+    !options.strictIapMode &&
+    !options.iapEnabled &&
+    !rawAssertion &&
+    !isStrictControlPlaneIapEnvironment() &&
+    process.env.DRTS_DEV_MFA_WAIVED?.trim().toLowerCase() === "true"
+  ) {
+    const principalId = options.devCanonicalPrincipalId.trim();
+    if (!principalId || !hasJwtSecret) {
+      throw new Error(
+        "A configured dev workforce principal and signing key are required.",
+      );
+    }
+    identity.actorId = principalId;
+  }
 
   if (!hasJwtSecret) {
     const headers: Record<string, string> = {

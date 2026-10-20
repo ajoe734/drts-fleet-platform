@@ -14,9 +14,59 @@ import time
 import urllib.request
 import urllib.error
 
+import re
+
+def _sanitize_stderr(text):
+    if not text:
+        return text
+
+    # Extract only the explicit error cause from the first error line,
+    # ignoring incidental details, resource names, or request payloads.
+    for line in text.splitlines():
+        match = re.match(r"^\s*(?:ERROR|EXCEPTION):\s*(?:\([^)]+\)\s*)?(.*)", line, re.IGNORECASE)
+        if match:
+            cause_line = match.group(1).strip().upper()
+
+            http_match = re.match(r"^(?:HTTP|STATUS)(?:ERROR)?\s*:?\s*(\d{3})\b", cause_line)
+            if http_match:
+                code = http_match.group(1)
+                if code == "401": return "[redacted: UNAUTHENTICATED / 401]"
+                if code == "403": return "[redacted: PERMISSION_DENIED / 403]"
+                if code == "404": return "[redacted: NOT_FOUND / 404]"
+                if code == "504": return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
+
+            if cause_line.startswith("UNAUTHENTICATED") or cause_line.startswith("UNAUTHORIZED"):
+                return "[redacted: UNAUTHENTICATED / 401]"
+            if cause_line.startswith("PERMISSION_DENIED"):
+                return "[redacted: PERMISSION_DENIED / 403]"
+            if cause_line.startswith("NOT_FOUND"):
+                return "[redacted: NOT_FOUND / 404]"
+            if cause_line.startswith("DEADLINE_EXCEEDED") or cause_line.startswith("TIMEOUT"):
+                return "[redacted: DEADLINE_EXCEEDED / TIMEOUT]"
+
+            if cause_line.startswith("UNRECOGNIZED ARGUMENT") or cause_line.startswith("INVALID ARGUMENT") or cause_line.startswith("USAGE"):
+                return "[redacted: SDK / ARGUMENT_ISSUE]"
+
+            if cause_line.startswith("YOU DO NOT CURRENTLY HAVE AN ACTIVE ACCOUNT SELECTED") or cause_line.startswith("CREDENTIALS") or cause_line.startswith("REAUTH") or cause_line.startswith("ACTIVE ACCOUNT SELECTED"):
+                return "[redacted: AUTH / ACCOUNT_ISSUE]"
+
+            break
+
+    return "[redacted: UNKNOWN_ERROR_FORMAT]"
+
 def run(cmd, **kwargs):
     print(f"Running: {' '.join(cmd)}")
-    return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
+    try:
+        return subprocess.run(cmd, check=True, capture_output=True, text=True, **kwargs)
+    except subprocess.CalledProcessError as e:
+        if len(cmd) >= 3 and cmd[0] == "gcloud" and cmd[1] == "logging" and cmd[2] == "read":
+            if e.stderr:
+                sanitized = _sanitize_stderr(e.stderr).strip()
+                if len(sanitized) > 1024:
+                    sanitized = sanitized[:1024] + "... [TRUNCATED]"
+                print(f"Diagnostic (gcloud logging read failed): {sanitized}", file=sys.stderr)
+        raise
+
 
 def get_identity_token(audience):
     import os
@@ -30,7 +80,10 @@ def get_access_token():
     return result.stdout.strip()
 
 CLEAN = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << >> >>\nendobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n200\n%%EOF\n"
-EICAR = CLEAN + b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*\n"
+# Canonical 68-byte antivirus transport canary, not a structurally valid PDF.
+# Keep the EICAR string at byte zero, without a PDF prefix or trailing newline.
+# https://www.eicar.org/download-anti-malware-testfile/
+EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 OVERSIZED = CLEAN + b"0" * (11 * 1024 * 1024) # 11 MiB (max is 10 MiB)
 
 import zipfile, io
@@ -39,11 +92,78 @@ with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
     zf.writestr("large.txt", b"0" * (11 * 1024 * 1024))
 ENGINE_LIMIT_PAYLOAD = out.getvalue()
 
+SCANNER_INITIAL_READINESS_MAX_ATTEMPTS = int(os.environ.get("SCANNER_INITIAL_READINESS_MAX_ATTEMPTS", "30"))
+SCANNER_INITIAL_READINESS_DEADLINE_SECONDS = float(os.environ.get("SCANNER_INITIAL_READINESS_DEADLINE_SECONDS", "120"))
+SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS = float(os.environ.get("SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS", "2"))
+
+
+def wait_for_initial_clean_scan(scan_fn, content):
+    """Bounded retry around the very first clean-file scan.
+
+    A cold scanner revision can legitimately answer 503
+    scan_engine_not_ready while freshclam/clamd is still loading its
+    engine before this helper's first request ever lands -- retry THAT
+    exact condition only, up to a finite attempt count and total
+    deadline. Any other status/error (auth403, a non-readiness 503, a
+    malformed body) returns immediately for the caller to assert on; a
+    503 is never treated as success and no negative case is weakened.
+
+    The deadline is checked BEFORE every attempt, not only after a 503
+    comes back: checking it only on the trailing edge let an attempt that
+    started right at the deadline (its own 503 having landed just inside
+    it) still run and return a late, post-deadline clean receipt as a
+    pass. The remaining budget is also threaded into `scan_fn` as
+    `timeout=`, so a single slow request cannot itself run past the
+    deadline, and the poll sleep is capped to whatever budget is left.
+
+    The deadline is checked AGAIN immediately after `scan_fn` returns, for
+    the exact same reason a single attempt is given `remaining` instead of
+    an unbounded timeout: the `timeout=` passed to `scan_fn` only bounds
+    individual socket operations (connect/read), not the attempt's whole
+    wall-clock duration -- a response whose headers/body arrive just past
+    that per-socket-op budget can still complete and look like a perfectly
+    valid 200 receipt. Without this second check, that stale result would
+    be accepted as success even though it answered after the deadline had
+    already expired.
+    """
+    deadline = time.monotonic() + SCANNER_INITIAL_READINESS_DEADLINE_SECONDS
+    attempt = 0
+    last_status, last_body = None, None
+
+    def fail(reason):
+        raise AssertionError(
+            "Scanner did not become ready for the initial clean scan within "
+            f"{attempt} attempt(s) / {SCANNER_INITIAL_READINESS_DEADLINE_SECONDS}s deadline: {reason}"
+        )
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail(f"deadline expired before another attempt could start (last status={last_status}, body={last_body})")
+        attempt += 1
+        status, body = scan_fn(content, timeout=min(remaining, 30))
+        last_status, last_body = status, body
+        if time.monotonic() > deadline:
+            fail(
+                "attempt completed after the total deadline had already expired "
+                f"(status={status}, body={body}); the supplied timeout bounds a "
+                "single socket operation, not the whole call"
+            )
+        if status != 503 or not isinstance(body, dict) or body.get("error") != "scan_engine_not_ready":
+            return status, body
+        if attempt >= SCANNER_INITIAL_READINESS_MAX_ATTEMPTS:
+            fail(f"last status={status}, body={body}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            fail(f"last status={status}, body={body}")
+        time.sleep(min(SCANNER_INITIAL_READINESS_POLL_INTERVAL_SECONDS, remaining))
+
+
 def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
     print(f"Testing scanner at {scanner_url}")
     token = get_identity_token(scanner_url)
 
-    def scan(content, sha256_header=None):
+    def scan(content, sha256_header=None, timeout=30):
         req = urllib.request.Request(f"{scanner_url}/scan", data=content, method="POST")
         req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/pdf")
@@ -53,7 +173,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             req.add_header("X-Content-SHA256", hashlib.sha256(content).hexdigest())
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.status, json.loads(response.read().decode())
         except urllib.error.HTTPError as e:
             try:
@@ -72,7 +192,7 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
             assert body.get("error") == expected_error, f"Expected error {expected_error}, got {body.get('error')}"
 
     print("Test 1: Clean file")
-    status, body = scan(CLEAN)
+    status, body = wait_for_initial_clean_scan(scan, CLEAN)
     assert status == 200, f"Expected 200, got {status}: {body}"
     assert_receipt(body, CLEAN, expected_verdict="clean")
 
@@ -388,6 +508,72 @@ def test_scanner(scanner_url, scanner_service=None, project=None, region=None):
         return False
 
     return True
+def is_gcs_precondition_failed(e: subprocess.CalledProcessError) -> bool:
+    """Accept only a complete supported diagnostic cause, never resource text.
+
+    Unknown wrappers/leading payloads fail closed. Quoted Task resources must
+    be consumed in full before inspecting the cause; a word boundary alone
+    would also accept class-looking filenames such as "...Error.txt".
+    """
+    quoted = r"""(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")"""
+    diagnostic = None
+    for line in (e.stderr or "").splitlines():
+        line = line.strip()
+        # These are the progress lines in the actual hosted stderr. Skip
+        # complete known lines, never search their contents for an error.
+        if not line or re.fullmatch(
+            r"WARNING: This command is using service account impersonation\. "
+            r"All API calls will be executed as \[[^\]\r\n]+\]\.", line,
+        ) or re.fullmatch(r"Copying file://\S+ to gs://\S+", line):
+            continue
+        diagnostic = re.fullmatch(
+            r"(?:ERROR|EXCEPTION):\s*(?:\(gcloud\.storage\.cp\)\s*)?(.*)",
+            line,
+        )
+        # The first non-progress line is authoritative, even when unknown.
+        break
+    if not diagnostic:
+        return False
+    cause = diagnostic.group(1)
+    if cause.startswith("Task"):
+        task = re.fullmatch(r"Task(?:\s+" + quoted + r")?\s+failed:\s*(.*)", cause)
+        if not task:
+            return False
+        cause = task.group(1)
+    if re.fullmatch(r"GcsPreconditionFailedError(?:\(" + quoted + r"?\))?", cause):
+        return True
+    return re.fullmatch(
+        r"(?:HTTP(?:Error)?\s*:?\s*)?412(?:$|:\s*.*|\s+Precondition Failed(?:$|:.*))",
+        cause,
+    ) is not None
+
+
+class _RejectGcsRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Leave the 3xx as an HTTPError; no second endpoint may supply denial.
+        return None
+
+
+def assert_gcs_unauthenticated_denial(bucket_name, test_key):
+    """One credential-free request to the official endpoint, with no redirects."""
+    from urllib.parse import quote
+
+    url = ("https://storage.googleapis.com/storage/v1/b/"
+           + quote(bucket_name, safe="") + "/o/" + quote(test_key, safe=""))
+    req = urllib.request.Request(url)
+    # A fresh opener avoids global auth/cookie handlers and ambient proxy auth.
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}), _RejectGcsRedirects(),
+    )
+    try:
+        with opener.open(req, timeout=10.0):
+            raise AssertionError("Expected unauthenticated GCS request to fail")
+    except urllib.error.HTTPError as e:
+        with e:
+            assert e.geturl() == url, "Denial did not originate at the requested GCS URL"
+            assert e.code in (401, 403), f"Expected external denial (401/403), got HTTP {e.code}"
+
+
 def test_gcs(bucket_name, runtime_sa):
     print(f"Testing GCS bucket: {bucket_name}")
     import uuid
@@ -426,7 +612,8 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, "--if-generation-match=0"])
             assert False, "Expected upload to fail with mismatched generation"
         except subprocess.CalledProcessError as e:
-            assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
+            if not is_gcs_precondition_failed(e):
+                raise
 
         print("Test 5: Update with correct generation match")
         with open(temp_in, "w") as f:
@@ -456,7 +643,8 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, test_file, f"--if-generation-match={gen1}"])
             assert False, "Expected upload to fail with stale generation"
         except subprocess.CalledProcessError as e:
-            assert "Precondition" in e.stderr or "412" in e.stderr, f"Expected Precondition Failed, got: {e.stderr}"
+            if not is_gcs_precondition_failed(e):
+                raise
 
         print("Test 9: Verify winning generation remains unchanged")
         res = run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "objects", "describe", test_file, "--format=value(generation)"])
@@ -480,14 +668,11 @@ def test_gcs(bucket_name, runtime_sa):
             run(["gcloud", f"--impersonate-service-account={runtime_sa}", "storage", "cp", temp_in, absent_file, f"--if-generation-match={gen1}"])
             assert False, "Expected upload to absent path with generation match to fail"
         except subprocess.CalledProcessError as e:
-            assert "412" in e.stderr or "Precondition Failed" in e.stderr, f"Absent object with CAS should return 412 Precondition Failed, got: {e.stderr}"
+            if not is_gcs_precondition_failed(e):
+                raise
 
-        print("Test 12: Network fault / permission denial regressions")
-        try:
-            run(["gcloud", "storage", "cp", temp_in, test_file, "--if-generation-match=0", "--access-token-file=/dev/null"])
-            assert False, "Expected upload to fail with invalid token"
-        except subprocess.CalledProcessError as e:
-            assert "401" in e.stderr or "403" in e.stderr or "Unauthorized" in e.stderr or "Authentication required" in e.stderr, f"Expected external denial (401/403/Unauthorized), got: {e.stderr}"
+        print("Test 12: External unauthenticated GCS denial")
+        assert_gcs_unauthenticated_denial(bucket_name, test_key)
 
         print("Test 12b: Post-fault recovery readback")
         # Prove that we can still read normally and generation is intact

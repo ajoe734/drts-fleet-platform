@@ -14,6 +14,7 @@ const expectedServices = {
   "enterprise-dispatch-web": "drts-dev-enterprise-dispatch-web",
   "referral-embed-web": "drts-dev-referral-embed-web",
   "channel-partner-portal-web": "drts-channel-partner-portal-web",
+  "passenger-app-web": "drts-dev-passenger-app-web",
 } as const;
 
 function readRepoFile(relativePath: string): string {
@@ -45,6 +46,7 @@ describe("dev active surface contract", () => {
       "enterprise-dispatch-web": "DEV_GCP_ENTERPRISE_DISPATCH_SERVICE",
       "referral-embed-web": "DEV_GCP_REFERRAL_EMBED_SERVICE",
       "channel-partner-portal-web": "DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE",
+      "passenger-app-web": "DEV_GCP_PASSENGER_APP_SERVICE",
     } as const;
 
     for (const [surface, service] of Object.entries(expectedServices)) {
@@ -65,7 +67,7 @@ describe("dev active surface contract", () => {
         .filter((line) => line.includes("passenger-web"))
         .map((line) => line.trim()),
     ).toEqual([
-      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
       'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
       'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',
@@ -75,9 +77,10 @@ describe("dev active surface contract", () => {
     expect(source).toContain(
       'export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"',
     );
-    expect(source).not.toMatch(/Deploy — .*passenger/i);
-    expect(source).not.toMatch(/Build & push — .*passenger/i);
-    expect(source).not.toContain("DEV_GCP_PASSENGER");
+    expect(source).not.toMatch(/(?:Deploy|Build & push) — passenger-web\b/i);
+    expect(source).toContain("Deploy — passenger-app-web");
+    expect(source).toContain("Build & push — passenger-app-web");
+    expect(source).not.toContain("DEV_GCP_PASSENGER_SERVICE");
     expect(source).not.toContain("passenger_service");
     expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "paused"');
     expect(source).toContain(
@@ -128,6 +131,7 @@ describe("dev active surface contract", () => {
       "enterprise-dispatch-web": "DEV_GCP_ENTERPRISE_DISPATCH_SERVICE",
       "referral-embed-web": "DEV_GCP_REFERRAL_EMBED_SERVICE",
       "channel-partner-portal-web": "DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE",
+      "passenger-app-web": "DEV_GCP_PASSENGER_APP_SERVICE",
     });
 
     expect(source).toContain("uses: actions/checkout@v4");
@@ -141,7 +145,7 @@ describe("dev active surface contract", () => {
     expect(helperSource).toContain("describe_status=$?");
     expect(helperSource).toContain("grep -Eiq");
     expect(source).not.toContain("concierge.smarttransport.tw");
-    expect(source).not.toContain("ride.smarttransport.tw");
+    expect(source).toContain("map-domain-service.sh ride.smarttransport.tw");
     expect(source).toContain('DEV_PARTNER_BOOKING_STATE: "paused"');
     expect(source).not.toContain(
       "./operations/deployment/map-domain-service.sh book.smarttransport.tw",
@@ -149,10 +153,12 @@ describe("dev active surface contract", () => {
     expect(source).not.toContain("DEV_GCP_PARTNER_BOOKING_SERVICE");
   });
 
-  it("keeps the runtime matrix on the same nine-service inventory", () => {
+  it("preserves the existing runtime matrix pending PAX-QA passenger coverage", () => {
     const source = readRepoFile("tests/e2e/dev-runtime-matrix.spec.ts");
 
-    for (const service of Object.values(expectedServices)) {
+    // PAX-QA owns the passenger runtime matrix after BOOKING-UI merges.
+    for (const [surface, service] of Object.entries(expectedServices)) {
+      if (surface === "passenger-app-web") continue;
       expect(source).toContain(`"${service}"`);
     }
 

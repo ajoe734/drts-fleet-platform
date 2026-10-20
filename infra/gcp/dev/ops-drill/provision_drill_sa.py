@@ -1,4 +1,4 @@
-"""Operator-only additive IAM provisioning; default is a read-only plan.
+"""Operator-only IAM provisioning; default is a read-only plan.
 
 Supervisor decision 2026-10-03T02:20Z accepts the non-enforceable clone
 destination. Never broaden source clone or prefix delete on an API failure.
@@ -35,6 +35,11 @@ def role_specs():
         # uses instances.get above; no invented cloudsql.operations permission.
         {"id": "drtsOpsDrillInventory", "permissions": ["cloudsql.instances.list", "logging.logEntries.list"],
          "expression": None},
+        # Real create authorizationInfo (2026-10-13) evaluates the NEW
+        # resourceAttributes.name. Restrict create to the temporary prefix;
+        # this still cannot limit instance size, count or cost.
+        {"id": "drtsOpsDrillCloneCreate", "permissions": ["cloudsql.instances.create"],
+         "expression": sql + f"resource.name.startsWith('{source}-drill-')"},
     ]
 
 
@@ -43,6 +48,17 @@ def binding(spec):
     if spec["expression"]:
         result["condition"] = {"title": spec["id"], "expression": spec["expression"]}
     return result
+
+
+def legacy_create_binding():
+    """Exact obsolete binding, accepted only for operator replacement."""
+    return binding({"id": "drtsOpsDrillCloneCreate",
+                    "expression": f"resource.service == 'sqladmin.googleapis.com' && resource.name == 'projects/{PROJECT}'"})
+
+
+def obsolete_create_bindings():
+    """Exact historical grants, allowed only for pre-apply replacement."""
+    return [binding({"id": "drtsOpsDrillCloneCreate", "expression": None}), legacy_create_binding()]
 
 
 def plan():
@@ -63,7 +79,7 @@ def plan():
         "roles": role_specs(), "project_bindings": [binding(s) for s in role_specs()],
         "secret_binding": {"secret": SECRET, "role": "roles/secretmanager.secretAccessor"},
         "readiness_variable": READY_VAR,
-        "residual_risk": "Clone destination is NOT IAM-enforceable. A misused token can create extra clones costing money and copying dev data in this project. No SQL Admin API overwrite/update/restore or non-drill delete is granted. Existing DB credentials retain their database privileges; read-only SQL is a runner control, not a database authorization boundary.",
+        "residual_risk": "Create is restricted to sqladmin.googleapis.com and the dev project's drts-dev-db-drill- instance prefix, based on observed create resourceAttributes.name. The SA can create additional drill-prefixed instances and clones copying dev data; instance size, count and cost remain unbounded by IAM. Clone itself authorizes the source; the runner destination guard and post-run audit remain required. Impersonation is reachable only through the repository-only WIF trust, which is repository-wide, not workflow-specific. No SQL Admin API overwrite/update/restore or non-drill delete is granted. Existing DB credentials retain their database privileges; read-only SQL is a runner control, not a database authorization boundary.",
         "source_condition": "Source-only clone condition retained. If Cloud SQL rejects it, stop for operator/Supervisor evidence; no automatic unconditional fallback.",
     }
 
@@ -77,6 +93,8 @@ def audit_policy(policy, allowed, *, inherited=False):
 
     A conservative audit: it never assumes a group excludes the SA. Unknown
     grants require operator investigation, not automatic removal or acceptance.
+    Readiness accepts only the prefix-conditioned create role. Exact obsolete
+    create grants are allowlisted only by pre-apply inventory for replacement.
     """
     for entry in policy.get("bindings", []):
         members = entry.get("members", [])
@@ -103,7 +121,12 @@ def inventory(design, complete=False):
         require(kind in ("project", "folder", "organization"), "unknown_ancestor")
         prefix = ("projects",) if kind == "project" else ("resource-manager", "folders") if kind == "folder" else ("organizations",)
         policy = obj(gc(*prefix, "get-iam-policy", str(ancestor["id"])))
-        audit_policy(policy, design["project_bindings"], inherited=kind != "project")
+        allowed = design["project_bindings"]
+        if kind == "project" and not complete:
+            # Migration is not readiness. All other unknown grants still fail
+            # before any write, including altered versions of the old condition.
+            allowed = [*allowed, *obsolete_create_bindings()]
+        audit_policy(policy, allowed, inherited=kind != "project")
         policies.append(policy)
     project_policy = policies[next(i for i, a in enumerate(ancestors) if a["type"] == "project")]
     accounts = obj(gc("iam", "service-accounts", "list"))
@@ -156,6 +179,15 @@ def apply(design, state):
     for spec, wanted in zip(design["roles"], design["project_bindings"]):
         if spec["id"] not in state["roles"]:
             gc("iam", "roles", "create", spec["id"], "--title=" + spec["id"], "--stage=GA", "--permissions=" + ",".join(spec["permissions"]))
+        for legacy in obsolete_create_bindings():
+            if wanted["role"] == legacy["role"] and any(MEMBER in b.get("members", []) and same_binding(b, legacy) for b in state["project_policy"].get("bindings", [])):
+                # Remove only this member from exact obsolete grants, including
+                # the live unconditional binding. Failure stops before add;
+                # unrelated members and conditions survive unchanged.
+                condition = legacy.get("condition")
+                selector = "None" if condition is None else "title=" + condition["title"] + ",expression=" + condition["expression"]
+                gc("projects", "remove-iam-policy-binding", PROJECT, "--member=" + MEMBER,
+                   "--role=" + legacy["role"], "--condition=" + selector)
         if not any(MEMBER in b.get("members", []) and same_binding(b, wanted) for b in state["project_policy"].get("bindings", [])):
             condition = "None" if not spec["expression"] else "title=" + spec["id"] + ",expression=" + spec["expression"]
             gc("projects", "add-iam-policy-binding", PROJECT, "--member=" + MEMBER, "--role=" + wanted["role"], "--condition=" + condition)

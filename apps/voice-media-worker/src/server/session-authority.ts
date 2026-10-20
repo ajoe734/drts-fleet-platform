@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 
 import type { RecordingScope } from "../recording/sealed-recorder";
@@ -14,6 +14,7 @@ export class VoiceMediaSessionAuthorityError extends Error {
 }
 
 interface PendingGrant {
+  admissionId: string;
   token: string;
   epoch: number;
   principalId: string;
@@ -24,6 +25,7 @@ interface PendingGrant {
 }
 
 interface AttachedSession {
+  admissionId: string;
   epoch: number;
   principalId: string;
   scope: RecordingScope | undefined;
@@ -110,6 +112,7 @@ export class VoiceMediaSessionAuthority extends EventEmitter {
     }, this.grantTtlMs);
     expiryTimer.unref?.();
     this.pending.set(sessionId, {
+      admissionId: randomUUID(),
       token,
       epoch,
       principalId,
@@ -184,6 +187,7 @@ export class VoiceMediaSessionAuthority extends EventEmitter {
     record.consumed = true;
     clearTimeout(record.expiryTimer);
     this.attached.set(sessionId, {
+      admissionId: record.admissionId,
       epoch: record.epoch,
       principalId: record.principalId,
       scope: record.scope,
@@ -212,6 +216,58 @@ export class VoiceMediaSessionAuthority extends EventEmitter {
   getAuthoritativePrincipal(sessionId: string): string | undefined {
     return (this.attached.get(sessionId) ?? this.completed.get(sessionId))
       ?.principalId;
+  }
+
+  /** Noncredential identity of the actual issued/consumed grant. The pending
+   * record stays distinct from an attachment, including during cold recovery. */
+  getRecordingAdmission(sessionId: string):
+    | (AttachedSession & {
+        state: "pending" | "attached" | "completed";
+      })
+    | undefined {
+    const grant = this.pending.get(sessionId);
+    const pending = grant?.consumed ? undefined : grant;
+    const attached = this.attached.get(sessionId);
+    const completed = this.completed.get(sessionId);
+    const record = pending ?? attached ?? completed;
+    if (!record) return undefined;
+    return {
+      admissionId: record.admissionId,
+      principalId: record.principalId,
+      scope: record.scope ? Object.freeze({ ...record.scope }) : undefined,
+      epoch: record.epoch,
+      state: pending ? "pending" : attached ? "attached" : "completed",
+    };
+  }
+
+  /** Only the finalize handler calls this, after canonical consumed-attachment
+   * readback and current finalize-token verification. Never admits a session,
+   * issues/consumes a grant, or replaces any pending/different RAM authority. */
+  restoreAttachedRecordingAuthority(
+    sessionId: string,
+    durable: AttachedSession,
+  ): void {
+    const existing = this.getRecordingAdmission(sessionId);
+    if (
+      existing &&
+      (existing.state === "pending" ||
+        existing.epoch !== durable.epoch ||
+        existing.principalId !== durable.principalId ||
+        existing.admissionId !== durable.admissionId ||
+        !existing.scope ||
+        !durable.scope ||
+        !recordingScopesMatch(existing.scope, durable.scope))
+    ) {
+      throw new VoiceMediaSessionAuthorityError(
+        "VOICE_MEDIA_SESSION_EPOCH_STALE",
+        "Existing session authority cannot be replaced by recording restoration.",
+      );
+    }
+    if (!existing)
+      this.attached.set(sessionId, {
+        ...durable,
+        scope: durable.scope ? Object.freeze({ ...durable.scope }) : undefined,
+      });
   }
 
   /** Marks a successfully finalized session's epoch as completed instead of

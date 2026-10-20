@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { PlacardVersionRecord } from "@drts/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { parsePdf } from "./billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { createControlledDownloadMetadata } from "../../apps/api/src/common/controlled-download";
@@ -292,7 +293,7 @@ describe("document artifacts survive a restart / a sibling Cloud Run instance (A
       const bytes = await drain(file.getStream());
 
       expect(sha256(bytes)).toBe(originalHash);
-      const text = bytes.toString("latin1");
+      const text = (await parsePdf(bytes)).text;
       // The served bytes still show what was actually issued (P1), proving
       // they are the durably stored original bytes, not re-derived from the
       // now-current P2 profile.
@@ -353,7 +354,7 @@ describe("document artifacts survive a restart / a sibling Cloud Run instance (A
       const bytes = await drain(file.getStream());
 
       expect(sha256(bytes)).toBe(originalHash);
-      const text = bytes.toString("latin1");
+      const text = (await parsePdf(bytes)).text;
       expect(text).toContain("Payout Status: pending");
       expect(text).not.toContain("Payout Status: paid");
     });
@@ -572,6 +573,8 @@ function emptyPlatformAdminRepository(
   } = {},
 ): PlatformAdminRepository {
   return {
+    // This original single-instance snapshot fixture has no configured database.
+    isEnabled: () => false,
     loadState: vi.fn(async () => ({
       platformTenants: [],
       publicInfoVersions: [],
@@ -667,9 +670,7 @@ describe("R4: a placard's artifactManifestHash does not by itself certify the du
     const reloaded = await podBService.getPlacardVersion(
       draft.placardVersionId,
     );
-    expect(reloaded.artifactManifestHash).toBe(
-      published.artifactManifestHash,
-    );
+    expect(reloaded.artifactManifestHash).toBe(published.artifactManifestHash);
     expect(reloaded.artifactDownloadUrl).toBe(published.artifactDownloadUrl);
     // The durable store genuinely has nothing yet -- `getPlacardVersion`
     // trusting the persisted hash never checked, by design (see
@@ -754,9 +755,7 @@ describe("R4: a placard's artifactManifestHash does not by itself certify the du
     // only the signature/expiry window is reissued, to a genuinely future
     // expiry (not just a URL that happens to differ as a string).
     expect(reloaded.artifactManifestHash).toBe(draft.artifactManifestHash);
-    expect(Date.parse(reloaded.artifactExpiresAt!)).toBeGreaterThan(
-      Date.now(),
-    );
+    expect(Date.parse(reloaded.artifactExpiresAt!)).toBeGreaterThan(Date.now());
 
     const controller = new ControlledDownloadController(
       podBStore,
@@ -801,11 +800,11 @@ describe("R4-followthrough: a placard whose source has mutated since issuance mu
     // An ordinary content-management action: a successor public-info
     // version is published, which retires the one this placard was
     // generated from. Not a test-only mutation.
-    const successor = podAService.createPublicInfoVersion({
+    const successor = await podAService.createPublicInfoVersion({
       title: "R4-followthrough successor disclosure",
       callPhone: "0800-020-020",
     });
-    podAService.publishPublicInfoVersion(
+    await podAService.publishPublicInfoVersion(
       successor.versionId,
       {},
       "req",
@@ -891,7 +890,7 @@ describe("R4-followthrough: a placard whose source has mutated since issuance mu
     });
     const originalHash = draftPlacard.artifactManifestHash!;
 
-    podAService.publishPublicInfoVersion(
+    await podAService.publishPublicInfoVersion(
       draftSource.versionId,
       {},
       "req",
@@ -955,9 +954,7 @@ describe("R5: a transient durable-store failure during publish must not leave a 
     private readonly inner = new InMemoryDocumentArtifactStore();
     failNextPut = false;
 
-    put(
-      command: PutDocumentArtifactCommand,
-    ): Promise<DocumentArtifactRecord> {
+    put(command: PutDocumentArtifactCommand): Promise<DocumentArtifactRecord> {
       return this.inner.put(command);
     }
 
@@ -1087,7 +1084,12 @@ describe("R6: an existing-object hash mismatch must deny without invoking the re
     ).entries.size;
 
     await expect(
-      resolve(controller, "tenant-invoice", invoice.invoiceId, paramsOf(staleLink)),
+      resolve(
+        controller,
+        "tenant-invoice",
+        invoice.invoiceId,
+        paramsOf(staleLink),
+      ),
     ).rejects.toMatchObject({ code: "CONTROLLED_DOWNLOAD_CONTENT_MISMATCH" });
 
     // The real, existing object must be completely untouched: same entry
@@ -1109,7 +1111,7 @@ describe("R6: an existing-object hash mismatch must deny without invoking the re
     )) as unknown as StreamableFileLike;
     const bytes = await drain(file.getStream());
     expect(sha256(bytes)).toBe(originalHash);
-    const text = bytes.toString("latin1");
+    const text = (await parsePdf(bytes)).text;
     expect(text).toContain(DEMO_PROFILE_P1.invoiceTitle);
     expect(text).not.toContain(DEMO_PROFILE_P2.invoiceTitle);
   });
@@ -1415,9 +1417,7 @@ describe("R7: concurrent publishes for the same placard must not leave metadata 
   });
 
   it("reports a conflict instead of committing metadata when the durable store's read-back disagrees with what publish just wrote (a cross-instance clobber)", async () => {
-    class ClobberedReadbackDocumentArtifactStore
-      implements DocumentArtifactStore
-    {
+    class ClobberedReadbackDocumentArtifactStore implements DocumentArtifactStore {
       private readonly inner = new InMemoryDocumentArtifactStore();
 
       put(...args: Parameters<DocumentArtifactStore["put"]>) {
@@ -1434,16 +1434,17 @@ describe("R7: concurrent publishes for the same placard must not leave metadata 
         return this.inner.putIfUnchanged(...args);
       }
 
-      async get(kind: Parameters<DocumentArtifactStore["get"]>[0], subjectId: string) {
+      async get(
+        kind: Parameters<DocumentArtifactStore["get"]>[0],
+        subjectId: string,
+      ) {
         // Model a different instance's own publish landing between THIS
         // publish's put and its own read-back verification.
         await this.inner.put({
           kind,
           subjectId,
           mimeType: "application/pdf",
-          bytes: Buffer.from(
-            "%PDF-1.4 a different instance's publish\n%%EOF",
-          ),
+          bytes: Buffer.from("%PDF-1.4 a different instance's publish\n%%EOF"),
         });
         return this.inner.get(kind, subjectId);
       }
@@ -1501,11 +1502,13 @@ describe("R7-followthrough: two independent PlatformAdminService instances (two 
         placardVersions: [...rows.values()].map((row) => ({ ...row })),
         platformAdapters: [],
       })),
-      persistChanges: vi.fn(async (changes: { placardVersions?: readonly any[] }) => {
-        for (const placard of changes.placardVersions ?? []) {
-          rows.set(placard.placardVersionId, { ...placard });
-        }
-      }),
+      persistChanges: vi.fn(
+        async (changes: { placardVersions?: readonly any[] }) => {
+          for (const placard of changes.placardVersions ?? []) {
+            rows.set(placard.placardVersionId, { ...placard });
+          }
+        },
+      ),
       reportPersistenceFailure: vi.fn(),
       isEnabled: () => true,
       claimPlacardPublish: vi.fn(async (claim: any) => {
@@ -1825,6 +1828,14 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
 
     async function query(text: string, values: readonly unknown[] = []) {
       const q = text.replace(/\s+/g, " ").trim();
+      if (
+        q === "BEGIN" ||
+        q === "COMMIT" ||
+        q === "ROLLBACK" ||
+        q.startsWith("SET LOCAL") ||
+        q.startsWith("LOCK TABLE admin.phase1_public_info_versions")
+      )
+        return { rows: [] };
 
       if (
         q.startsWith("SELECT record") &&
@@ -1844,7 +1855,12 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         const id = values[0] as string;
         const proposed = JSON.parse(values[4] as string);
         publicInfoRows.set(id, proposed);
-        return { rows: [], rowCount: 1 };
+        return {
+          rows: q.includes("RETURNING record")
+            ? [{ record: structuredClone(proposed) }]
+            : [],
+          rowCount: 1,
+        };
       }
       if (
         q.startsWith("SELECT record") &&
@@ -1878,7 +1894,10 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
             const { error, commits } = armedInsertFailure;
             armedInsertFailure = null;
             if (commits) {
-              rows.set(id, { updatedAt: values[4] as string, record: proposed });
+              rows.set(id, {
+                updatedAt: values[4] as string,
+                record: proposed,
+              });
             }
             throw error;
           }
@@ -1897,7 +1916,8 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         // Generic `persistChanges` upsert: only applies when it is not older
         // than whatever is already persisted (R7-followthrough).
         const guardOk =
-          !current || Date.parse(current.updatedAt) <= Date.parse(values[4] as string);
+          !current ||
+          Date.parse(current.updatedAt) <= Date.parse(values[4] as string);
         if (guardOk) {
           rows.set(id, { updatedAt: values[4] as string, record: proposed });
         }
@@ -1938,12 +1958,16 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
     const databaseService = {
       isEnabled: () => true,
       query,
+      connect: async () => ({ query, release() {} }),
     } as unknown as DatabaseService;
 
     return {
       repository: new PlatformAdminRepository(databaseService),
       rows,
-      armNextClaimInsertFailure(error: Error, options: { commits: boolean } = { commits: true }) {
+      armNextClaimInsertFailure(
+        error: Error,
+        options: { commits: boolean } = { commits: true },
+      ) {
         armedInsertFailure = { error, commits: options.commits };
       },
     };
@@ -2019,10 +2043,9 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         updatedAt: "2026-04-05T00:00:00.000Z",
         __publishClaimToken: randomUUID(),
       });
-      armNextClaimInsertFailure(
-        new Error("connection reset before commit"),
-        { commits: false },
-      );
+      armNextClaimInsertFailure(new Error("connection reset before commit"), {
+        commits: false,
+      });
 
       await expect(repository.claimPlacardPublish(claim)).rejects.toThrow(
         /connection reset before commit/,
@@ -2672,7 +2695,9 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         draft.placardVersionId,
       );
       expect(published.publishedAt).toBeTruthy();
-      expect(rows.get(draft.placardVersionId)?.record.__publishClaimToken).toBeUndefined();
+      expect(
+        rows.get(draft.placardVersionId)?.record.__publishClaimToken,
+      ).toBeUndefined();
 
       // Only now does A's held write actually reach the store -- AFTER C
       // has already finalized. A's baseline (the plain draft's generation)
@@ -2718,9 +2743,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
       const freshFile = (await resolve(
         controller,
@@ -2987,9 +3010,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
       const freshFile = (await resolve(
         controller,
@@ -3180,9 +3201,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
       const freshFile = (await resolve(
         controller,
@@ -3351,7 +3370,9 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       releaseABaseline();
       await new Promise((r) => setTimeout(r, 10));
       const afterAWrite = await backing.get("placard", draft.placardVersionId);
-      expect(afterAWrite?.record.sha256).not.toBe(published.artifactManifestHash);
+      expect(afterAWrite?.record.sha256).not.toBe(
+        published.artifactManifestHash,
+      );
 
       // Release B's baseline: B reads A's (wrong) bytes as ITS baseline,
       // and its own fenced write legitimately lands on top of THAT
@@ -3363,7 +3384,9 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       releaseBBaseline();
       await new Promise((r) => setTimeout(r, 10));
       const afterBWrite = await backing.get("placard", draft.placardVersionId);
-      expect(afterBWrite?.record.sha256).not.toBe(published.artifactManifestHash);
+      expect(afterBWrite?.record.sha256).not.toBe(
+        published.artifactManifestHash,
+      );
       expect(afterBWrite?.record.sha256).not.toBe(afterAWrite?.record.sha256);
 
       // Deliver A's verification read-back, then B's: both discover they
@@ -3410,9 +3433,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
       const freshFile = (await resolve(
         controller,
@@ -3618,9 +3639,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(cHash);
       const freshFile = (await resolve(
         controller,
@@ -3733,16 +3752,15 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await podC.onModuleInit();
-      podC.publishPublicInfoVersion(
+      await podC.publishPublicInfoVersion(
         PUBLIC_INFO_R10D_DRAFT.versionId,
         {},
         "req-r10d",
         "platform-admin-r10d-actor",
       );
-      // `publishPublicInfoVersion`'s own `persistChanges` call is
-      // fire-and-forget; give its real (modeled) SQL write a tick to land
-      // before relying on it being durably visible.
-      await new Promise((r) => setTimeout(r, 10));
+      // The awaited public-info command now returns after canonical COMMIT;
+      // the original same-version readback and artifact assertions stay.
+
       const publishedSource = await repository.getPublicInfoVersionRecord(
         PUBLIC_INFO_R10D_DRAFT.versionId,
       );
@@ -3755,8 +3773,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       );
       expect(published.publishedAt).toBeTruthy();
       expect(
-        (await backing.get("placard", draft.placardVersionId))?.record
-          .sha256,
+        (await backing.get("placard", draft.placardVersionId))?.record.sha256,
       ).toBe(published.artifactManifestHash);
 
       // Release A's baseline: it reads C's current (published) state as
@@ -3806,9 +3823,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
       const freshFile = (await resolve(
         controller,
@@ -3927,8 +3942,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       );
       expect(published.publishedAt).toBeTruthy();
       expect(
-        (await backing.get("placard", draft.placardVersionId))?.record
-          .sha256,
+        (await backing.get("placard", draft.placardVersionId))?.record.sha256,
       ).toBe(published.artifactManifestHash);
 
       // A LEGITIMATE, separate action, strictly AFTER C's own successful
@@ -3937,7 +3951,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       // test-only mutation. This alone must not touch the artifact object;
       // C's original link keeps resolving right after it.
       const controller = new ControlledDownloadController(backing, registry);
-      const updated = podC.publishPublicInfoVersion(
+      const updated = await podC.publishPublicInfoVersion(
         PUBLIC_INFO_R10E_SOURCE_AFTER_WINNER.versionId,
         {},
         "req-r10e",
@@ -3946,9 +3960,11 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
       expect(updated.status).toBe("published");
       await new Promise((r) => setTimeout(r, 10));
       expect(
-        (await repository.getPublicInfoVersionRecord(
-          PUBLIC_INFO_R10E_SOURCE_AFTER_WINNER.versionId,
-        ))?.status,
+        (
+          await repository.getPublicInfoVersionRecord(
+            PUBLIC_INFO_R10E_SOURCE_AFTER_WINNER.versionId,
+          )
+        )?.status,
       ).toBe("published");
       const beforeAWinnerFile = (await resolve(
         controller,
@@ -4006,9 +4022,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
       const freshFile = (await resolve(
         controller,
@@ -4102,10 +4116,9 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         const ordinal = this.getCount;
         if (this.failAtOrdinal === ordinal) {
           this.failAtOrdinal = null;
-          throw Object.assign(
-            new Error("MODELED_S3_REPAIR_GET_FAILURE"),
-            { name: "ModeledTransportError" },
-          );
+          throw Object.assign(new Error("MODELED_S3_REPAIR_GET_FAILURE"), {
+            name: "ModeledTransportError",
+          });
         }
         const before = this.beforeGates.get(ordinal);
         if (before) await before;
@@ -4230,9 +4243,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(cHash);
       const freshFile = (await resolve(
         controller,
@@ -4286,10 +4297,9 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
           command.subjectId.includes("::publication-backup::")
         ) {
           this.failed = true;
-          throw Object.assign(
-            new Error("MODELED_ONE_BACKUP_PUT_FAILURE"),
-            { name: "ModeledTransportError" },
-          );
+          throw Object.assign(new Error("MODELED_ONE_BACKUP_PUT_FAILURE"), {
+            name: "ModeledTransportError",
+          });
         }
         return this.backing.putIfAbsent(...args);
       }
@@ -4403,9 +4413,7 @@ describe("R7-followthrough/R8/R9 (Codex REOPEN, generation 93a28b03b0574b038810c
         registry,
       );
       await freshReader.onModuleInit();
-      const fresh = await freshReader.getPlacardVersion(
-        draft.placardVersionId,
-      );
+      const fresh = await freshReader.getPlacardVersion(draft.placardVersionId);
       expect(fresh.artifactManifestHash).toBe(published.artifactManifestHash);
       const freshFile = (await resolve(
         controller,
@@ -4443,21 +4451,29 @@ describe("createDocumentArtifactStore provider resolution", () => {
   );
 
   const strictEnvironments = ["NODE_ENV", "APP_ENV", "DRTS_ENV"].flatMap(
-    (key) => ["production", "prod", "staging", "stage", " PRODUCTION ", " STAGING "].map(
-      (value) => ({ key, value }),
-    ),
+    (key) =>
+      [
+        "production",
+        "prod",
+        "staging",
+        "stage",
+        " PRODUCTION ",
+        " STAGING ",
+      ].map((value) => ({ key, value })),
   );
   it.each(strictEnvironments)(
     "rejects explicit memory for $key=$value even when other markers and CI claim fixture mode",
     ({ key, value }) => {
-      expect(() => createDocumentArtifactStore({
-        NODE_ENV: "test",
-        APP_ENV: "development",
-        DRTS_ENV: "test",
-        CI: "true",
-        [key]: value,
-        DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "memory",
-      })).toThrow(/forbidden in staging\/production/);
+      expect(() =>
+        createDocumentArtifactStore({
+          NODE_ENV: "test",
+          APP_ENV: "development",
+          DRTS_ENV: "test",
+          CI: "true",
+          [key]: value,
+          DOCUMENT_ARTIFACT_STORAGE_PROVIDER: "memory",
+        }),
+      ).toThrow(/forbidden in staging\/production/);
     },
   );
   it.each(strictEnvironments)(
@@ -4471,7 +4487,9 @@ describe("createDocumentArtifactStore provider resolution", () => {
         [key]: value,
       });
       expect(store).toBeInstanceOf(UnprovisionedDocumentArtifactStore);
-      await expect(store.get("tenant-invoice", "not-materialized")).rejects.toThrow(/not configured/);
+      await expect(
+        store.get("tenant-invoice", "not-materialized"),
+      ).rejects.toThrow(/not configured/);
     },
   );
 

@@ -145,6 +145,10 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       "V0092__voice_booking_command_proof.sql",
       "V0093__voice_retention_and_legal_hold.sql",
       "V0106__voice_dialogue_snapshot.sql",
+      "V0120__voice_callback_attempt_details.sql",
+      "V0121__voice_callback_create_receipt.sql",
+      "V0122__voice_contact_role_revision.sql",
+      "V0125__voice_recording_continuation_event.sql",
     ]) {
       await pool.query(migration(name));
     }
@@ -2357,8 +2361,10 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
     const originalEnv = { ...process.env };
     beforeAll(() => {
       process.env.VOICE_DIALOGUE_SNAPSHOT_KEY_VERSION = "v1";
-      process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY =
-        Buffer.alloc(32, 7).toString("base64");
+      process.env.VOICE_DIALOGUE_SNAPSHOT_ENCRYPTION_KEY = Buffer.alloc(
+        32,
+        7,
+      ).toString("base64");
     });
     afterAll(() => {
       process.env = { ...originalEnv };
@@ -2393,10 +2399,12 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [f.request.voiceSessionId],
       );
       expect(row.rows).toHaveLength(1);
-      expect(Buffer.from(row.rows[0].content_ciphertext).length).toBeGreaterThan(0);
-      expect(new Date(row.rows[0].retention_expires_at).getTime()).toBeGreaterThan(
-        Date.now(),
-      );
+      expect(
+        Buffer.from(row.rows[0].content_ciphertext).length,
+      ).toBeGreaterThan(0);
+      expect(
+        new Date(row.rows[0].retention_expires_at).getTime(),
+      ).toBeGreaterThan(Date.now());
     });
 
     it("is dedup-safe against the real unique index: a retried write for the same (session, version) is a safe no-op, not a duplicate row", async () => {
@@ -2539,7 +2547,9 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       const restoration = await service.getDialogueSnapshotRestoration(
         f.request.voiceSessionId,
       );
-      expect(restoration.snapshot?.sessionVersion).toBe(advanced!.sessionVersion);
+      expect(restoration.snapshot?.sessionVersion).toBe(
+        advanced!.sessionVersion,
+      );
       expect(restoration.snapshot?.content).toEqual(secondContent);
     });
 
@@ -2659,9 +2669,13 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
 
       let bDone = false;
       const bPromise = instB.sessionRepository
-        .casUpdateSessionControl(f.request.voiceSessionId, session!.sessionVersion, {
-          pendingInput: false,
-        })
+        .casUpdateSessionControl(
+          f.request.voiceSessionId,
+          session!.sessionVersion,
+          {
+            pendingInput: false,
+          },
+        )
         .then((result) => {
           bDone = true;
           return result;
@@ -2771,10 +2785,11 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         reasonCode: "regulatory_inquiry",
         placedBy: "ops-1",
       });
-      const heldPurge = await serviceWithRetention.purgeExpiredDialogueSnapshots(
-        "operator-1",
-        false,
-      );
+      const heldPurge =
+        await serviceWithRetention.purgeExpiredDialogueSnapshots(
+          "operator-1",
+          false,
+        );
       expect(heldPurge.report.skippedHeldCount).toBe(1);
       expect(heldPurge.deletedCount).toBe(0);
       const stillThere = await pool.query(
@@ -2788,10 +2803,11 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         releasedBy: "admin-1",
         releasedByRole: "platform_admin",
       });
-      const realPurge = await serviceWithRetention.purgeExpiredDialogueSnapshots(
-        "operator-1",
-        false,
-      );
+      const realPurge =
+        await serviceWithRetention.purgeExpiredDialogueSnapshots(
+          "operator-1",
+          false,
+        );
       expect(realPurge.report.purgedCount).toBe(1);
       expect(realPurge.deletedCount).toBe(1);
       const afterPurge = await pool.query(
@@ -2838,9 +2854,7 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         "SELECT dialogue_snapshot_fence_version FROM voice.session WHERE voice_session_id = $1",
         [f.request.voiceSessionId],
       );
-      expect(fencedAfterPurge.rows[0].dialogue_snapshot_fence_version).toBe(
-        0,
-      );
+      expect(fencedAfterPurge.rows[0].dialogue_snapshot_fence_version).toBe(0);
 
       // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention purged
       // revision reuse (Codex reopen, canonical 2026-10-04T02:13:45Z,
@@ -2960,8 +2974,11 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         receiptClient.release();
       }
 
-      const retirement = await serviceWithRetention
-        .purgeExpiredDialogueSnapshotPurgeReceipts("operator-1", false);
+      const retirement =
+        await serviceWithRetention.purgeExpiredDialogueSnapshotPurgeReceipts(
+          "operator-1",
+          false,
+        );
       expect(retirement.report.family).toBe("voice_booking_evidence");
       expect(retirement.deletedCount).toBe(1);
       const receiptAfterRetirement = await pool.query(
@@ -2974,7 +2991,8 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
         [f.request.voiceSessionId],
       );
       expect(
-        floorAfterRetirement.rows[0].dialogue_snapshot_history_unavailable_floor,
+        floorAfterRetirement.rows[0]
+          .dialogue_snapshot_history_unavailable_floor,
       ).toBe(session!.sessionVersion);
 
       // AUDIT-VOICE-APPLICATION-WIRING-20261003 R4-retention
@@ -3008,16 +3026,17 @@ describe("UV-EXEC-024 Real PostgreSQL Two-Instance Race & Fault Matrix", () => {
       // `accepted: "unknown"` -- never a confirmed non-acceptance, since
       // this version WAS historically accepted and only the governed
       // metadata proof has aged out.
-      const outcomeAfterRetirement = await service.resolveDialogueSnapshotOutcome({
-        voiceSessionId: f.request.voiceSessionId,
-        expectedSessionVersion: session!.sessionVersion,
-        expectedLeaseEpoch: session!.leaseEpoch,
-        expectedResourceScopeId: session!.resourceScopeId,
-        expectedRouteProfileVersion: session!.routeProfileVersion,
-        inputEpoch: session!.inputEpoch,
-        mediaEpoch: 0,
-        turnId: "turn-1",
-      });
+      const outcomeAfterRetirement =
+        await service.resolveDialogueSnapshotOutcome({
+          voiceSessionId: f.request.voiceSessionId,
+          expectedSessionVersion: session!.sessionVersion,
+          expectedLeaseEpoch: session!.leaseEpoch,
+          expectedResourceScopeId: session!.resourceScopeId,
+          expectedRouteProfileVersion: session!.routeProfileVersion,
+          inputEpoch: session!.inputEpoch,
+          mediaEpoch: 0,
+          turnId: "turn-1",
+        });
       expect(outcomeAfterRetirement).toMatchObject({
         accepted: "unknown",
         turnId: "turn-1",

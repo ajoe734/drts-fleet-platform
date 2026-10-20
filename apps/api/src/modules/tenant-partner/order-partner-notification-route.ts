@@ -75,6 +75,21 @@ export async function persistOrderPartnerNotificationRoute(
   executor: PartnerRouteQueryExecutor,
   route: OrderPartnerNotificationRoute,
 ): Promise<OrderPartnerNotificationRoute | null> {
+  // Serialize both channel writers on the same order lock used by
+  // PassengerPushDevicesRepository.writeFirstPartyRoute. A row lock alone
+  // cannot exclude concurrent first inserts into the two separate tables.
+  await executor.query(
+    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+    [`passenger-push-first-party-route:${route.orderId}`],
+  );
+  const firstPartyRoute = await executor.query(
+    `SELECT order_id FROM mobility.phase1_order_first_party_notification_routes WHERE order_id = $1`,
+    [route.orderId],
+  );
+  // Reject before either partner write, preserving the caller's transaction
+  // and non-blocking notification setup contract (including booking savepoints).
+  if (firstPartyRoute.rows[0]) return null;
+
   const insertResult = await executor.query<OrderPartnerNotificationRouteRow>(
     `
           INSERT INTO mobility.phase1_order_partner_notification_routes (

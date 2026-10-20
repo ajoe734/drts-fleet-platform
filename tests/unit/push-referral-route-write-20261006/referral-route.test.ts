@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import type {
   ConsumerNotificationOutboxRecord,
   DriverTaskRecord,
@@ -152,7 +153,7 @@ function harness() {
   const service = new OwnedMobilityService(
     {} as never,
     audit,
-    { linkOrderToCallSession: vi.fn(() => ({ recordingId: null })) } as never,
+    new CallcenterService(audit),
     { publishTaskUpdated: vi.fn() } as never,
     { publishOrderCreated: publish } as never,
     repository,
@@ -375,8 +376,34 @@ describe("referral route negative cases and replay", () => {
     ).toHaveLength(1);
   });
 
-  it.each(["route", "sequence"])(
-    "%s insert failure rolls back only notification setup and logs it",
+  it("commits the booking without partner rows when first-party routing already exists", async () => {
+    const h = harness();
+    const baseQuery = h.query.getMockImplementation()!;
+    h.query.mockImplementation(async (sql, values) => {
+      if (
+        sql.includes(
+          "FROM mobility.phase1_order_first_party_notification_routes",
+        )
+      )
+        return { rows: [{ order_id: values?.[0] }] };
+      return baseQuery(sql, values);
+    });
+    const booking = await h.service.createReferralPassengerBooking(
+      command,
+      identity,
+    );
+    expect(h.service.getOrder(booking.orderId).status).toBe("created");
+    expect(h.routes.size).toBe(0);
+    expect(h.sequences.size).toBe(0);
+    expect(h.statements).toContain(
+      "RELEASE SAVEPOINT partner_notification_route",
+    );
+    expect(h.statements).toContain("COMMIT");
+    expect(h.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["lock", "first-party-check", "route", "sequence"])(
+    "%s failure rolls back only notification setup and logs it",
     async (target) => {
       const h = harness();
       const baseQuery = h.query.getMockImplementation()!;
@@ -384,9 +411,15 @@ describe("referral route negative cases and replay", () => {
       h.query.mockImplementation(async (sql, values) => {
         if (
           sql.includes(
-            target === "route"
-              ? "INSERT INTO mobility.phase1_order_partner_notification_routes"
-              : "INSERT INTO mobility.phase1_partner_notification_sequences",
+            {
+              lock: "pg_advisory_xact_lock",
+              "first-party-check":
+                "FROM mobility.phase1_order_first_party_notification_routes",
+              route:
+                "INSERT INTO mobility.phase1_order_partner_notification_routes",
+              sequence:
+                "INSERT INTO mobility.phase1_partner_notification_sequences",
+            }[target]!,
           )
         )
           throw failure;
@@ -413,6 +446,7 @@ describe("referral route negative cases and replay", () => {
       expect(h.statements).toContain("COMMIT");
       expect(h.publish).toHaveBeenCalledTimes(1);
       expect(h.routes.size).toBe(0);
+      expect(h.sequences.size).toBe(0);
     },
   );
 
@@ -570,7 +604,7 @@ describe("referral booking to partner notification delivery", () => {
       payload: { eventSequence: 1 },
     });
     expect(h.sequences.get(booking.orderId)).toBe(2);
-    const delivery = transportHarness();
+    const delivery = await transportHarness();
     const route = (await h.allocator.findOrderPartnerNotificationRoute(
       booking.orderId,
     ))!;

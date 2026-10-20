@@ -1,7 +1,14 @@
 import type { ReactNode } from "react";
 import { resolveBankDemoTenant, resolveLocale } from "@/lib/demo-tenants";
-import { loadBankHomeSnapshot } from "@/lib/bank-dev-read-models";
-import { bankConsoleHref, getBankConsoleSession, toHomeRole } from "@/lib/session";
+import {
+  getTaipeiDateString,
+  loadBankHomeSnapshot,
+} from "@/lib/bank-dev-read-models";
+import {
+  bankConsoleHref,
+  getBankConsoleSession,
+  toHomeRole,
+} from "@/lib/session";
 import { tenantIssuerVars } from "@/lib/tenant-display";
 import { t, type Locale } from "@/lib/translations";
 import {
@@ -11,7 +18,10 @@ import {
   type ExceptionTone,
   type QuotaRow,
 } from "@/lib/home-data";
-import type { IssuerContractStatusRecord, TenantProgramUsageRecord } from "@drts/contracts";
+import type {
+  IssuerContractStatusRecord,
+  TenantProgramUsageRecord,
+} from "@drts/contracts";
 
 function Card({
   title,
@@ -110,9 +120,7 @@ function QuotaBar({
         />
       </div>
       <span className="quota-remaining">
-        {row.total > 0
-          ? t("home.quota.remaining", locale, { remaining })
-          : "—"}
+        {row.total > 0 ? t("home.quota.remaining", locale, { remaining }) : "—"}
       </span>
     </div>
   );
@@ -215,7 +223,8 @@ function buildHomeExceptions(contracts: IssuerContractStatusRecord[] = []) {
       .filter((item) => item.status === "open")
       .map((item) => {
         const kind = mapExceptionKind(item.reasonCode ?? "");
-        const entity = kind === "sla_breach" ? contract.contractId : item.orderId;
+        const entity =
+          kind === "sla_breach" ? contract.contractId : item.orderId;
         const href =
           kind === "sla_breach"
             ? `/contracts/${contract.contractId}`
@@ -257,10 +266,9 @@ function buildHomeExceptions(contracts: IssuerContractStatusRecord[] = []) {
 
 function buildQuotaRows(usage: TenantProgramUsageRecord[] = []): QuotaRow[] {
   return (usage ?? []).map((record) => ({
-    program:
-      record.programCode?.toLowerCase().includes("we")
-        ? "worldElite"
-        : "signature",
+    program: record.programCode?.toLowerCase().includes("we")
+      ? "worldElite"
+      : "signature",
     used: record.tripsConsumed ?? 0,
     total: record.quotaTotal ?? 0,
   }));
@@ -288,7 +296,8 @@ function buildSlaSummary(contracts: IssuerContractStatusRecord[] = []) {
   );
   const onTimeWeighted = attained.reduce(
     (sum, record) =>
-      sum + (record.pickupPunctualityPercent ?? 0) * (record.completedTrips ?? 0),
+      sum +
+      (record.pickupPunctualityPercent ?? 0) * (record.completedTrips ?? 0),
     0,
   );
   const completionWeighted = attained.reduce(
@@ -323,7 +332,9 @@ export default async function HomePage({
   const tenant = resolveBankDemoTenant(params.bank);
   const session = getBankConsoleSession(tenant, locale, params.role);
   const view = roleView(toHomeRole(session.role));
-  const bankQuery = bankConsoleHref("/", tenant, locale, session.role).split("?")[1];
+  const bankQuery = bankConsoleHref("/", tenant, locale, session.role).split(
+    "?",
+  )[1];
   const snapshot = await loadBankHomeSnapshot(tenant.tenantId, session.role);
   const quotaPrograms = buildQuotaRows(snapshot.data.usage);
   const quotaAll = buildOverallQuota(quotaPrograms);
@@ -423,7 +434,7 @@ export default async function HomePage({
                   delta: t("home.kpi.statement.delta", locale, {
                     period: currentStatement.period,
                     due: currentStatement.dueAt
-                      ? currentStatement.dueAt.slice(5, 10)
+                      ? getTaipeiDateString(currentStatement.dueAt).slice(5, 10)
                       : "—",
                   }),
                 }
@@ -477,7 +488,9 @@ export default async function HomePage({
                         <td>
                           <span
                             className={`pill tone-${
-                              order.direction === "outbound" ? "info" : "neutral"
+                              order.direction === "outbound"
+                                ? "info"
+                                : "neutral"
                             }`}
                           >
                             {t(`home.direction.${order.direction}`, locale)}
@@ -545,14 +558,17 @@ export default async function HomePage({
                   />
                   <DlItem
                     label={t("home.settlement.total", locale)}
-                    value={formatMoney(currentStatement.totalIssuerPayableAmount, locale)}
+                    value={formatMoney(
+                      currentStatement.totalIssuerPayableAmount,
+                      locale,
+                    )}
                     mono
                   />
                   <DlItem
                     label={t("home.settlement.issued", locale)}
                     value={
                       currentStatement.issuedAt
-                        ? currentStatement.issuedAt.slice(0, 10)
+                        ? getTaipeiDateString(currentStatement.issuedAt)
                         : "—"
                     }
                     mono
@@ -561,7 +577,7 @@ export default async function HomePage({
                     label={t("home.settlement.due", locale)}
                     value={
                       currentStatement.dueAt
-                        ? currentStatement.dueAt.slice(0, 10)
+                        ? getTaipeiDateString(currentStatement.dueAt)
                         : "—"
                     }
                     mono
@@ -710,7 +726,10 @@ export default async function HomePage({
                     label={t("home.settlement.due", locale)}
                     value={
                       currentStatement.dueAt
-                        ? currentStatement.dueAt.slice(5, 10)
+                        ? getTaipeiDateString(currentStatement.dueAt).slice(
+                            5,
+                            10,
+                          )
                         : "—"
                     }
                     mono

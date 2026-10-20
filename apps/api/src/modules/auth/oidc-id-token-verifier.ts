@@ -11,8 +11,28 @@ export const GOOGLE_OIDC_ENDPOINTS = {
   jwks: "https://www.googleapis.com/oauth2/v3/certs",
 } as const;
 
+export const LINE_OIDC_ISSUER = "https://access.line.me";
+export const LINE_OIDC_ENDPOINTS = {
+  authorization: "https://access.line.me/oauth2/v2.1/authorize",
+  token: "https://api.line.me/oauth2/v2.1/token",
+  jwks: "https://api.line.me/oauth2/v2.1/certs",
+} as const;
+
 export function isGoogleOidcIssuer(issuer: string): boolean {
   return issuer === GOOGLE_OIDC_ISSUER || issuer === "accounts.google.com";
+}
+
+/** Explicit per-caller overrides for callers outside the tenant/partner default chain
+ * (e.g. passenger OAuth, which has its own client ids and, for LINE, its own HS256
+ * channel-secret verification key). Any field left undefined keeps the existing
+ * tenant/legacy env-var resolution chain unchanged. */
+export interface OidcVerifyOverrides {
+  issuer?: string;
+  audience?: string;
+  jwksUri?: string;
+  /** HS256 verification key, valid in every environment (unlike the tenant/legacy
+   * OIDC_CLIENT_SECRET fallback below, which is a local/test-only convenience). */
+  hsSecret?: string;
 }
 
 interface SigningKey extends JsonWebKey {
@@ -38,14 +58,17 @@ export class OidcIdTokenVerifier {
     idToken: string,
     nonce?: string,
     tenantEndpoint = false,
+    overrides?: OidcVerifyOverrides,
   ): Promise<jwt.JwtPayload> {
     try {
       const issuer =
+        overrides?.issuer?.trim() ||
         (tenantEndpoint ? process.env.TENANT_OIDC_ISSUER : undefined)?.trim() ||
         process.env.OIDC_ISSUER?.trim() ||
         process.env.JWT_ISSUER?.trim() ||
         "https://auth.staging.drts.internal";
       const audience =
+        overrides?.audience?.trim() ||
         (tenantEndpoint
           ? process.env.TENANT_OIDC_AUDIENCE
           : undefined
@@ -64,7 +87,8 @@ export class OidcIdTokenVerifier {
           : undefined;
       const environment = detectAuthEnvironment();
       const staticSecret = !google
-        ? (tenantEndpoint
+        ? overrides?.hsSecret?.trim() ||
+          (tenantEndpoint
             ? process.env.TENANT_OIDC_JWT_SECRET?.trim()
             : undefined) ||
           (environment === "local" || environment === "test"
@@ -83,14 +107,18 @@ export class OidcIdTokenVerifier {
       if (!key) {
         if (!kid || typeof kid !== "string") throw new Error("Missing key id");
         const uri =
+          overrides?.jwksUri?.trim() ||
           process.env.OIDC_JWKS_URI?.trim() ||
           (google
             ? GOOGLE_OIDC_ENDPOINTS.jwks
             : `${issuer}/.well-known/jwks.json`);
         let keys: SigningKey[];
-        // Offline keys remain a non-Google provider fixture only. Google always
-        // uses its rotating endpoint, even if historical static env vars remain.
-        if (!google && process.env.OIDC_JWKS_JSON) {
+        // Offline keys remain a non-Google provider fixture only, and only for
+        // callers that didn't supply their own jwksUri: a caller with an
+        // explicit override (e.g. passenger OAuth) must never be redirected to
+        // an unrelated tenant/partner offline fixture. Google always uses its
+        // rotating endpoint, even if historical static env vars remain.
+        if (!google && !overrides?.jwksUri?.trim() && process.env.OIDC_JWKS_JSON) {
           keys = JSON.parse(process.env.OIDC_JWKS_JSON).keys;
         } else {
           const cached = await this.loadKeys(uri);

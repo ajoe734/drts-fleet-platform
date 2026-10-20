@@ -2,10 +2,12 @@
  * Hosted-only, real browser + full AppModule/PostgreSQL wiring acceptance.
  * Uses the product's explicitly configured development bootstrap for the
  * Driver/OPS browser surfaces; durable signed sessions are tested separately
- * by full-app.remote.test.ts. This is not physical-device provisioning proof.
+ * by full-app.remote.test.ts and forwarded by the Host browser cases below.
+ * This is not physical-device provisioning proof.
  * No route interception, fabricated API response, or local server startup.
  */
 import { test, expect, type Page, type Response } from "@playwright/test";
+import { readWireHostBrowserSessions } from "../../../integration/system-remediation/sr-wire-001/host-browser-sessions";
 import {
   HOST_A_PARTNER_ID,
   HOST_B_PARTNER_ID,
@@ -143,9 +145,18 @@ for (const identity of [
   }) => {
     const context = await browser.newContext({
       viewport: { width: 1440, height: 960 },
-      extraHTTPHeaders: { "x-host-partner-id": identity.partnerId },
     });
     try {
+      const sessions = readWireHostBrowserSessions();
+      await context.addCookies([
+        {
+          name: "drts_session",
+          value: identity.label === "A" ? sessions.hostA : sessions.hostB,
+          url: hostUrl,
+          httpOnly: true,
+          sameSite: "Lax",
+        },
+      ]);
       const page = await context.newPage();
       const errors = watchErrors(page);
       await page.goto(`${hostUrl}/host/vehicles`);
@@ -199,7 +210,11 @@ test("OPS navigation opens a real leave review queue including valid empty resul
   await expect(page).toHaveURL(/\/leave(?:[?#]|$)/);
   const items = await listItems(await response);
   await expect(
-    page.getByText("請假審核 · Leave Requests", { exact: true }),
+    page.getByRole("heading", {
+      name: "請假審核 · Leave Requests",
+      level: 1,
+      exact: true,
+    }),
   ).toBeVisible();
   const pending = items.filter((item) => item.status === "pending");
   if (pending.length === 0) {

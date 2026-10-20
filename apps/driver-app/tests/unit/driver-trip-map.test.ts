@@ -34,13 +34,15 @@ vi.mock("react-native", () => ({
 }));
 
 vi.mock("react-native-maps", () => ({
-  default: ({
-    children,
-    ...props
-  }: {
-    children?: React.ReactNode;
-    [key: string]: unknown;
-  }) => React.createElement("MapView", props, children),
+  default: vi.fn(
+    ({
+      children,
+      ...props
+    }: {
+      children?: React.ReactNode;
+      [key: string]: unknown;
+    }) => React.createElement("MapView", props, children),
+  ),
   Marker: (props: Record<string, unknown>) =>
     React.createElement("Marker", props),
   PROVIDER_GOOGLE: "google",
@@ -79,6 +81,8 @@ vi.mock("@/components/canvas-primitives", () => ({
 }));
 
 import DriverTripMap from "../../components/driver-trip-map";
+import DriverTripMapWeb from "../../components/driver-trip-map.web";
+import MapView from "react-native-maps";
 
 function buildTask(
   overrides: Partial<DriverTaskRecord> = {},
@@ -225,7 +229,60 @@ describe("DriverTripMap", () => {
     expect(text).toContain("松山機場");
     expect(text).toContain("25.069700, 121.552500");
     expect(text).toContain("GPS 即時回報");
+    expect(vi.mocked(MapView).mock.calls.at(-1)?.[0]).toMatchObject({
+      showsUserLocation: true,
+      showsMyLocationButton: true,
+    });
   });
+
+  it.each([
+    ["native", DriverTripMap],
+    ["web", DriverTripMapWeb],
+  ] as const)(
+    "shows terminal location history in the actual %s component",
+    (platform, Component) => {
+      for (const status of ["completed", "cancelled", "rejected"] as const) {
+        for (const driverLocation of [
+          null,
+          {
+            latitude: 25.05,
+            longitude: 121.52,
+            recordedAt: "2026-07-01T00:00:00.000Z",
+          },
+        ]) {
+          const text = collectText(
+            React.createElement(Component, {
+              task: buildTask({ status }),
+              order: buildOrder(),
+              driverLocation,
+              nativeMapAvailable: true,
+              now: Date.parse("2026-07-01T00:00:30.000Z"),
+            }),
+          ).join(" ");
+
+          expect(text).toContain("本任務定位已停止");
+          expect(text).not.toContain("heartbeat");
+          expect(text).not.toContain("GPS 即時回報");
+          expect(text).toContain("台北車站");
+          expect(text).toContain("松山機場");
+          if (driverLocation) {
+            expect(text).toContain("最後已知座標");
+            expect(text).toMatch(
+              /Last driver coordinate\s+25\.050000, 121\.520000/,
+            );
+          } else {
+            expect(text).toContain("沒有可顯示的最後定位");
+          }
+          if (platform === "native") {
+            expect(vi.mocked(MapView).mock.calls.at(-1)?.[0]).toMatchObject({
+              showsUserLocation: false,
+              showsMyLocationButton: false,
+            });
+          }
+        }
+      }
+    },
+  );
 
   it("shows forwarded authority, source offline fallback, and missing-coordinate degraded copy", () => {
     const text = renderDriverTripMapText({

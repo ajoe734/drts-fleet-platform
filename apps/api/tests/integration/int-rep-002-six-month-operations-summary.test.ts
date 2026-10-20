@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
+import type { DriverRegistryRecord } from "@drts/contracts";
 
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
@@ -10,6 +11,7 @@ import { DriverProfileService } from "../../src/modules/driver-profile/driver-pr
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
+import type { PersistRegulatoryRegistryChanges } from "../../src/modules/regulatory-registry/regulatory-registry.repository";
 import { ReportingService } from "../../src/modules/reporting/reporting.service";
 import { ReportingFilingService } from "../../src/modules/reporting-filing/reporting-filing.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
@@ -25,9 +27,18 @@ function createHarness() {
   const driverProfileService = new DriverProfileService(
     auditNotificationService,
   );
+  const driverRows = new Map<string, DriverRegistryRecord>();
   const regulatoryRegistryRepository = {
     isEnabled: () => true,
+    loadDriverMatchingSuppressions: async () => [],
     upsertDriverLocation: async () => true,
+    lockDriver: async (driverId: string) =>
+      structuredClone(driverRows.get(driverId) ?? null),
+    persistChanges: async (changes: PersistRegulatoryRegistryChanges) => {
+      for (const driver of changes.drivers ?? [])
+        driverRows.set(driver.driverId, structuredClone(driver));
+    },
+    reportPersistenceFailure: vi.fn(),
   };
   const regulatoryRegistryService = new RegulatoryRegistryService(
     opsDispatchEventsService,
@@ -35,6 +46,8 @@ function createHarness() {
     driverProfileService,
     regulatoryRegistryRepository as never,
   );
+  for (const driver of regulatoryRegistryService.listDrivers())
+    driverRows.set(driver.driverId, structuredClone(driver));
   const callcenterService = new CallcenterService(auditNotificationService);
   const ownedMobilityTaskEventsService = new OwnedMobilityTaskEventsService(
     eventEmitter,
@@ -123,7 +136,7 @@ describe("INT-REP-002 six-month summary aggregates snapshots", () => {
       { mode: "auto" },
       "req-int-rep-jan-dispatch-001",
     );
-    ownedMobilityService.assignDispatch(
+    await ownedMobilityService.assignDispatch(
       {
         dispatchJobId: januaryDispatch.dispatchJobId,
         vehicleId: "veh-demo-001",
@@ -211,7 +224,7 @@ describe("INT-REP-002 six-month summary aggregates snapshots", () => {
       { mode: "auto" },
       "req-int-rep-feb-dispatch-001",
     );
-    ownedMobilityService.assignDispatch(
+    await ownedMobilityService.assignDispatch(
       {
         dispatchJobId: februaryDispatch.dispatchJobId,
         vehicleId: "veh-demo-001",

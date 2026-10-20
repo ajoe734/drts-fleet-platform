@@ -15,7 +15,11 @@ import { IdentityRepository } from "../../modules/identity/identity.repository";
 import { RegulatoryRegistryService } from "../../modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../modules/tenant-partner/tenant-partner.service";
 import { ApiRequestError } from "../api-envelope";
-import { getTenantRoleScopes, AUTH_SCOPE_PRESETS, AUTH_TENANT_ROLE_SCOPE_PRESETS } from "./auth.constants";
+import {
+  getTenantRoleScopes,
+  AUTH_SCOPE_PRESETS,
+  AUTH_TENANT_ROLE_SCOPE_PRESETS,
+} from "./auth.constants";
 import {
   JwtKeyRetiredError,
   JwtUnknownKeyError,
@@ -28,8 +32,12 @@ import type {
   BootstrapRequestIdentity,
 } from "./auth.types";
 const ALL_CATALOG_SCOPES = new Set<string>();
-Object.values(AUTH_SCOPE_PRESETS).forEach(scopes => scopes.forEach(s => ALL_CATALOG_SCOPES.add(s)));
-Object.values(AUTH_TENANT_ROLE_SCOPE_PRESETS).forEach(scopes => scopes?.forEach(s => ALL_CATALOG_SCOPES.add(s)));
+Object.values(AUTH_SCOPE_PRESETS).forEach((scopes) =>
+  scopes.forEach((s) => ALL_CATALOG_SCOPES.add(s)),
+);
+Object.values(AUTH_TENANT_ROLE_SCOPE_PRESETS).forEach((scopes) =>
+  scopes?.forEach((s) => ALL_CATALOG_SCOPES.add(s)),
+);
 
 export interface JwtIdentityPayload {
   sub: string | null;
@@ -63,6 +71,7 @@ export interface JwtIdentityPayload {
   driverDeviceId?: string | null;
   driverProvisioningDriverId?: string | undefined;
   breakGlassGrantId?: string | undefined;
+  tenantPrivilegedGrantId?: string | undefined;
 }
 
 export interface IssuedJwtSessionToken {
@@ -139,6 +148,7 @@ type JwtSignIdentity = JwtSignIdentityBase & {
   driverDeviceId?: string | null;
   driverProvisioningDriverId?: string | undefined;
   breakGlassGrantId?: string | null;
+  tenantPrivilegedGrantId?: string | null;
 };
 
 export interface IssueSessionTokenOptions {
@@ -158,6 +168,7 @@ export interface IssueSessionTokenOptions {
   audience?: string[] | null;
   workloadExchangeNonceHash?: string | null;
   breakGlassGrantId?: string | null;
+  tenantPrivilegedGrantId?: string | null;
   // Already-fetched membership/role-binding updatedAt values for a workforce
   // (platform/ops) principal. When set, the signed tokenVersion is derived
   // from these plus the principal's actually-persisted updatedAt after
@@ -635,8 +646,7 @@ export class JwtAuthService {
     const amr = unique(
       options?.amr ?? identity.amr ?? this.resolveDefaultAmr(identity),
     );
-    const acr =
-      options?.acr ?? identity.acr ?? this.resolveDefaultAcr();
+    const acr = options?.acr ?? identity.acr ?? this.resolveDefaultAcr();
     const principalId =
       options?.principalId ?? identity.principalId ?? identity.actorId;
     const membershipId = options?.membershipId ?? identity.membershipId ?? null;
@@ -655,6 +665,10 @@ export class JwtAuthService {
       null;
     const breakGlassGrantId =
       options?.breakGlassGrantId ?? identity.breakGlassGrantId ?? null;
+    const tenantPrivilegedGrantId =
+      options?.tenantPrivilegedGrantId ??
+      identity.tenantPrivilegedGrantId ??
+      null;
     const subject =
       options?.subject ??
       identity.subject ??
@@ -671,14 +685,15 @@ export class JwtAuthService {
       principalId &&
       (options?.ensurePrincipal ?? !membershipId)
     ) {
-      const ensuredPrincipal = await this.identityRepository.ensurePrincipalRecord(
-        this.buildPrincipalRecord(
-          identity,
-          principalId,
-          subject ?? principalId,
-          issuedAt,
-        ),
-      );
+      const ensuredPrincipal =
+        await this.identityRepository.ensurePrincipalRecord(
+          this.buildPrincipalRecord(
+            identity,
+            principalId,
+            subject ?? principalId,
+            issuedAt,
+          ),
+        );
       if (options?.workforceVersionTimestamps) {
         // Sign the version that was actually persisted, not the timestamp
         // guessed before this write landed, so it matches what
@@ -730,6 +745,7 @@ export class JwtAuthService {
         },
         riskSummary: {
           ...(breakGlassGrantId ? { breakGlassGrantId } : {}),
+          ...(tenantPrivilegedGrantId ? { tenantPrivilegedGrantId } : {}),
           ...(workloadExchangeNonceHash
             ? {
                 workloadExchangeNonceHash,
@@ -761,6 +777,7 @@ export class JwtAuthService {
         expiresAt,
         workloadExchangeNonceHash,
         breakGlassGrantId,
+        tenantPrivilegedGrantId,
       },
       { expiresIn, jwtId: tokenId },
     );
@@ -828,7 +845,9 @@ export class JwtAuthService {
 
     const sessionActorId =
       session.principalId ||
-      ((session.deviceSummary as { bindingId?: string } | undefined)?.bindingId ?? null);
+      ((session.deviceSummary as { bindingId?: string } | undefined)
+        ?.bindingId ??
+        null);
 
     if (
       session.principalId !== callerPrincipalId &&
@@ -838,7 +857,11 @@ export class JwtAuthService {
         403,
         "SESSION_REVOCATION_FORBIDDEN",
         "Self-service session revocation endpoint cannot revoke another user's session.",
-        { sessionId, callerPrincipalId, sessionPrincipalId: session.principalId },
+        {
+          sessionId,
+          callerPrincipalId,
+          sessionPrincipalId: session.principalId,
+        },
       );
     }
 
@@ -880,6 +903,7 @@ export class JwtAuthService {
       workloadExchangeNonceHash:
         identity.workloadExchangeNonceHash ?? undefined,
       breakGlassGrantId: identity.breakGlassGrantId ?? undefined,
+      tenantPrivilegedGrantId: identity.tenantPrivilegedGrantId ?? undefined,
       drtsPassengerId: identity.drtsPassengerId ?? null,
       driverBindingId: identity.driverBindingId ?? null,
       driverDeviceId: identity.driverDeviceId ?? null,
@@ -942,6 +966,12 @@ export class JwtAuthService {
     if (!payload) {
       return null;
     }
+    // Passenger access tokens are verified exclusively by PassengerJwtService/session storage.
+    if (
+      (payload.realm as string) === "passenger" ||
+      (payload.actorType as string) === "first_party_passenger"
+    )
+      return null;
 
     const isControlPlaneProxyToken =
       options?.allowControlPlaneProxyToken === true &&
@@ -991,6 +1021,9 @@ export class JwtAuthService {
         return false;
       }
       try {
+        await this.regulatoryRegistryService?.prepareDriverAuthority?.(
+          payload.sub,
+        );
         this.regulatoryRegistryService?.assertDriverAuthEligible(payload.sub);
       } catch {
         return false;
@@ -1029,7 +1062,9 @@ export class JwtAuthService {
               tenantUserId,
             );
       if (!user && payload.sub) {
-        const bySubject = this.tenantPartnerService.findTenantUserBySubject(payload.sub);
+        const bySubject = this.tenantPartnerService.findTenantUserBySubject(
+          payload.sub,
+        );
         if (bySubject && bySubject.tenantId === payload.tenantId) {
           user = bySubject;
         }
@@ -1038,16 +1073,47 @@ export class JwtAuthService {
         return false;
       }
 
-      const currentScopes = getTenantRoleScopes(user.roleCode);
-      if (!currentScopes) {
+      if (Date.parse(user.updatedAt) !== payload.tokenVersion) {
         return false;
       }
 
-      return (
-        Date.parse(user.updatedAt) === payload.tokenVersion &&
-        payload.roles[0] === user.roleCode &&
-        arraysEqual(payload.scopes, currentScopes)
+      if (payload.roles[0] === user.roleCode) {
+        const currentScopes = getTenantRoleScopes(user.roleCode);
+        if (!currentScopes) {
+          return false;
+        }
+        return arraysEqual(payload.scopes, currentScopes);
+      }
+
+      // The session carries a role beyond the durable TenantUserRole. That is
+      // only legitimate when it is still backed, right now, by the exact
+      // active privileged-role grant that was projected at issuance -- not
+      // merely by some active grant with a matching role name.
+      if (!payload.tenantPrivilegedGrantId || !this.identityRepository) {
+        return false;
+      }
+      const membershipId =
+        await this.identityRepository.findMembershipIdForLegacyTenantUser(
+          tenantUserId,
+        );
+      if (!membershipId) {
+        return false;
+      }
+      const activeGrants =
+        await this.identityRepository.findActivePrivilegedGrantsForMembership(
+          membershipId,
+        );
+      const backingGrant = activeGrants.find(
+        (grant) => grant.grantId === payload.tenantPrivilegedGrantId,
       );
+      if (!backingGrant || backingGrant.roleCode !== payload.roles[0]) {
+        return false;
+      }
+      const elevatedScopes = getTenantRoleScopes(backingGrant.roleCode);
+      if (!elevatedScopes) {
+        return false;
+      }
+      return arraysEqual(payload.scopes, elevatedScopes);
     }
 
     if (payload.realm === "partner") {
@@ -1102,22 +1168,26 @@ export class JwtAuthService {
         ...roleBindings.map((binding) => binding.updatedAt),
       ];
 
-      if (this.computeWorkforceTokenVersion(timestamps) !== payload.tokenVersion) {
+      if (
+        this.computeWorkforceTokenVersion(timestamps) !== payload.tokenVersion
+      ) {
         return false;
       }
-      
+
       if (!payload.scopes || !Array.isArray(payload.scopes)) {
         return false;
       }
-      
+
       const allowedScopes = new Set<string>();
       for (const binding of roleBindings) {
-        const presets = AUTH_SCOPE_PRESETS[binding.roleCode as AuthActorType] || AUTH_TENANT_ROLE_SCOPE_PRESETS[binding.roleCode];
+        const presets =
+          AUTH_SCOPE_PRESETS[binding.roleCode as AuthActorType] ||
+          AUTH_TENANT_ROLE_SCOPE_PRESETS[binding.roleCode];
         if (presets) {
           presets.forEach((s) => allowedScopes.add(s));
         }
       }
-      
+
       for (const scope of payload.scopes) {
         if (ALL_CATALOG_SCOPES.has(scope) && !allowedScopes.has(scope)) {
           return false;

@@ -10,5 +10,6 @@ import { CertificateSupportService } from "./certificate-support.service";
   imports: [DatabaseModule, AuditNotificationModule],
   controllers: [CertificateSupportController],
   providers: [CertificateSupportRepository, CertificateSupportService],
+  exports: [CertificateSupportService],
 })
 export class CertificateSupportModule {}

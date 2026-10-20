@@ -18,6 +18,7 @@ import type {
 } from "./phase2-tesla-fsd-sandbox";
 import type { PartnerType } from "./referral-channel";
 import type {
+  ActionReceipt,
   CrossAppResourceLink,
   DriverMatchingSuppression,
   EmptyStateEnvelope,
@@ -353,6 +354,7 @@ export function hasAddressCoordinateProvenance(
 export type GeoPolygon = {
   type: "polygon";
   coordinates: GeoPoint[];
+  holes?: GeoPoint[][];
 };
 
 export type GeoCircle = {
@@ -739,6 +741,7 @@ export interface ApiSuccessEnvelope<T> {
   meta: {
     requestId: string;
     timestamp: string;
+    actionReceipt?: ActionReceipt;
   };
 }
 
@@ -1183,6 +1186,8 @@ export interface PartnerChannelEntryRecord {
 
 export interface CreatePartnerChannelEntryCommand {
   tenantId: string;
+  /** Optional existing active Fleet master reference for fleet_partner entries. */
+  fleetPartnerId?: string;
   partnerCode: string;
   partnerType: PartnerType;
   programId: string;
@@ -1341,7 +1346,8 @@ export interface AuditLogRecord {
     | "ops_observer"
     | "partner_api_key"
     | "partner_user"
-    | "referral_passenger";
+    | "referral_passenger"
+    | "first_party_passenger";
   tenantId: string | null;
   moduleName: string;
   actionName: string;
@@ -3517,11 +3523,29 @@ export interface DriverStartTaskCommand {
   startedAt: string;
 }
 
+/** Immutable self-declared profile-view facts, not verified/legal driver identity. */
+export interface DriverDeclaredSurnameSnapshot {
+  driverSurname: string;
+  driverSurnameSource: "driver_profile_declared";
+  /** Existing whole-profile revision time, not an invented surname-verification time. */
+  driverSurnameProfileUpdatedAt: string;
+}
+
+/** Actual driver-reported NTD fare components, never reconstructed from a quote. */
+export interface ActualTripFareBreakdown {
+  startMinor: number;
+  distanceMinor: number;
+  delayMinor: number;
+  nightMinor: number;
+}
+
 export interface DriverCompleteTaskCommand {
   completedAt: string;
   actualDistanceKm: number;
   actualDurationSec: number;
   fare?: MoneyAmount;
+  /** Optional for legacy callers; all four actual components are required when supplied. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   proof?: CompletionProofBundle;
 }
 
@@ -4023,7 +4047,7 @@ export interface WaypointRecord {
   departedAt: string | null;
 }
 
-export interface DriverTaskRecord {
+export interface DriverTaskRecord extends Partial<DriverDeclaredSurnameSnapshot> {
   bookingRequirements?: BookingRequirements;
   bookingQualification?: BookingQualification;
   taskId: string;
@@ -4045,6 +4069,8 @@ export interface DriverTaskRecord {
   actualDistanceKm: number | null;
   actualDurationSec: number | null;
   fare: MoneyAmount | null;
+  /** Immutable completion input; absence means actual components were not captured. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
   proof: CompletionProofBundle | null;
   complianceGates?: ComplianceGateRecord[];
   forwardedStatus?: string | null;
@@ -4093,6 +4119,17 @@ export const DRIVER_TASK_AUTHORITY_MODES = [
 export type DriverTaskAuthorityMode =
   (typeof DRIVER_TASK_AUTHORITY_MODES)[number];
 
+export type DriverTaskOrderSummary = Pick<
+  OwnedOrderRecord,
+  | "orderId"
+  | "serviceBucket"
+  | "serviceProductCode"
+  | "businessDispatchSubtype"
+  | "dispatchSemantics"
+  | "fixedPrice"
+  | "quotedFare"
+>;
+
 export interface UnifiedDriverTaskView {
   taskId: string;
   orderId: string;
@@ -4114,6 +4151,8 @@ export interface UnifiedDriverTaskView {
   blockingReason: string | null;
   pickupSummary: string | null;
   dropoffSummary: string | null;
+  /** Already batch-read display data; omitted by older task-view producers. */
+  orderSummary?: DriverTaskOrderSummary | null;
   deadlineAt: string | null;
   updatedAt: string;
 }
@@ -4421,6 +4460,7 @@ export const DRIVER_ELIGIBILITY_BLOCK_REASONS = [
   "work_state_paused",
   "work_state_suspended",
   "work_state_incident_hold",
+  "incident_matching_suppression",
   "work_state_offline",
 ] as const;
 export type DriverEligibilityBlockReason =
@@ -4668,7 +4708,14 @@ export type CallType = (typeof CALL_TYPES)[number];
 export const CALL_SESSION_STATUSES = ["active", "closed"] as const;
 export type CallSessionStatus = (typeof CALL_SESSION_STATUSES)[number];
 
-export const CALLBACK_TASK_STATUSES = ["pending", "completed"] as const;
+export const CALLBACK_TASK_STATUSES = [
+  "pending",
+  "claimed",
+  "in_progress",
+  "completed",
+  "cancelled",
+  "unreachable",
+] as const;
 export type CallbackTaskStatus = (typeof CALLBACK_TASK_STATUSES)[number];
 
 export interface OpenCallSessionCommand {
@@ -4727,6 +4774,18 @@ export interface CallbackTaskRecord {
   status: CallbackTaskStatus;
   createdAt: string;
   updatedAt: string;
+  version?: number;
+  assignedOperatorId?: string | null;
+  attemptCount?: number;
+  lastOutcome?: string | null;
+  attempts?: Array<{
+    attemptId: string;
+    operatorId: string;
+    outcome: string;
+    notes: string | null;
+    recordedAt: string;
+    hangupConfirmed: boolean;
+  }>;
 }
 
 export type CallRecordingState = "ready" | "pending" | "missing";
@@ -4749,6 +4808,7 @@ export interface CallSessionRecord {
   lastEtaQuotedMinutes: number | null;
   lastEtaQuotedAt: string | null;
   callbackTask: CallbackTaskRecord | null;
+  callbackTaskHistory?: CallbackTaskRecord[];
   recordingState: CallRecordingState;
   flags: string[];
 }
@@ -4760,6 +4820,7 @@ export const COMPLAINT_CATEGORIES = [
   "vehicle_condition",
   "route_issue",
   "fare_dispute",
+  "settlement_dispute",
   "safety_concern",
   "lost_and_found",
   "other",
@@ -4838,6 +4899,15 @@ export const COMPLAINT_CATEGORY_VALID_RESOLUTIONS: Record<
     "resolved_other",
   ],
   fare_dispute: [
+    "resolved_with_refund",
+    "resolved_with_credit",
+    "resolved_with_corrective_action",
+    "resolved_no_fault",
+    "resolved_duplicate",
+    "resolved_withdrawn",
+    "resolved_other",
+  ],
+  settlement_dispute: [
     "resolved_with_refund",
     "resolved_with_credit",
     "resolved_with_corrective_action",
@@ -4942,6 +5012,9 @@ export interface LinkComplaintToIncidentCommand {
 
 export interface ComplaintCaseRecord {
   caseNo: string;
+  /** Present on cases created from the fleet settlement workflow. */
+  fleetPartnerId?: string;
+  relatedStatementId?: string;
   caseSource: "phone" | "web" | "app" | "ops";
   relatedOrderId: string | null;
   relatedCallId: string | null;
@@ -5227,6 +5300,8 @@ export type FleetRevenueShareFormula =
 
 export interface FleetPartnerRecord {
   fleetPartnerId: string;
+  /** Explicit operating-authority operator IDs; never inferred from affiliation. */
+  multiTaxiOperatorIds?: string[];
   legalName: string;
   displayName: string;
   businessRegistrationNo: string;
@@ -5237,6 +5312,7 @@ export interface FleetPartnerRecord {
 }
 
 export interface CreateFleetPartnerCommand {
+  multiTaxiOperatorIds?: string[];
   legalName: string;
   displayName: string;
   businessRegistrationNo: string;
@@ -5247,6 +5323,7 @@ export interface CreateFleetPartnerCommand {
 }
 
 export interface UpdateFleetPartnerCommand {
+  multiTaxiOperatorIds?: string[];
   legalName?: string;
   displayName?: string;
   businessRegistrationNo?: string;
@@ -5343,8 +5420,29 @@ export interface FleetPartnerStatementLineRecord {
   };
 }
 
+export type FleetPartnerStatementDecisionStatus =
+  | "unreviewed"
+  | "confirmed"
+  | "disputed";
+
+export interface ConfirmFleetPartnerStatementCommand {
+  note?: string;
+}
+
+export interface DisputeFleetPartnerStatementCommand {
+  reason: string;
+}
+
 export interface FleetPartnerStatementRecord {
   statementId: string;
+  decisionStatus?: FleetPartnerStatementDecisionStatus;
+  confirmedAt?: string | null;
+  confirmedBy?: string | null;
+  confirmNote?: string | null;
+  disputedAt?: string | null;
+  disputedBy?: string | null;
+  disputeReason?: string | null;
+  disputeCaseId?: string | null;
   fleetPartnerId: string;
   periodMonth: string;
   payoutStatus: DriverPayoutStatus;
@@ -5512,6 +5610,17 @@ export interface ReimbursementItemRecord {
   channelKey?: string;
 }
 
+export const REIMBURSEMENT_BATCH_WORKFLOW_STATES = [
+  "draft",
+  "pending_approval",
+  "approved",
+  "exported",
+  "paid",
+  "reconciled",
+] as const;
+export type ReimbursementBatchWorkflowState =
+  (typeof REIMBURSEMENT_BATCH_WORKFLOW_STATES)[number];
+
 export interface ReimbursementBatchRecord {
   batchId: string;
   driverId: string;
@@ -5523,6 +5632,27 @@ export interface ReimbursementBatchRecord {
   items: ReimbursementItemRecord[];
   approvedAt: string | null;
   paidAt: string | null;
+  /**
+   * Authoritative Q-ADM12 six-state workflow position. Separate from
+   * `status` (which stays `pending|paid`, the shared `DriverPayoutStatus`
+   * union) on purpose -- see `phase1_service_contracts_v1.md` §3.11
+   * ("driver wallet 僅為讀模型，不作真值帳本") and the C080/C081 workflow
+   * locator: the queue/detail six-state machine is a Billing-owned view
+   * over this batch, never a rename of the shared driver payout status.
+   * Monotonic: a later mutation (e.g. re-export after paid) never regresses
+   * this backward.
+   */
+  workflowState?: ReimbursementBatchWorkflowState;
+  exportedAt?: string | null;
+  exportedByActorId?: string | null;
+  exportReceiptId?: string | null;
+  exportManifestHash?: string | null;
+  exportDownloadMetadata?: ControlledDownloadRecord | null;
+  reconciledAt?: string | null;
+  reconciledByActorId?: string | null;
+  reconciliationReason?: string | null;
+  reconciliationEvidenceRef?: string | null;
+  reconciliationReceiptId?: string | null;
 }
 
 export interface ApproveReimbursementBatchCommand {
@@ -7081,6 +7211,8 @@ export interface DriverProfileBankAccount {
 export interface DriverProfileRecord {
   driverId: string;
   name: string;
+  /** Explicitly supplied surname; absent on legacy profiles, never inferred from name. */
+  driverSurname?: string;
   phone: string | null;
   email: string | null;
   photoUrl: string | null;
@@ -7092,6 +7224,8 @@ export interface DriverProfileRecord {
 
 export interface CreateDriverProfileCommand {
   name: string;
+  /** Nonempty text, trimmed like name with no length cap; omission leaves surname absent. */
+  driverSurname?: string;
   phone?: string | null;
   email?: string | null;
   photoUrl?: string | null;
@@ -7101,6 +7235,8 @@ export interface CreateDriverProfileCommand {
 
 export interface UpdateDriverProfileCommand {
   name?: string;
+  /** Nonempty text, trimmed like name with no length cap; omission preserves surname. No clear/null. */
+  driverSurname?: string;
   phone?: string | null;
   email?: string | null;
   photoUrl?: string | null;
@@ -7591,6 +7727,7 @@ export interface PlatformPricingRuleRecord {
   effectiveTo: string | null;
   publishedBy: string | null;
   publishedAt: string | null;
+  publishReason?: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -7610,6 +7747,7 @@ export interface PublishPlatformPricingRuleCommand {
   effectiveFrom?: string | null;
   effectiveTo?: string | null;
   publishedBy?: string | null;
+  reason: string;
 }
 
 export interface SetTenantStatusCommand {
@@ -7645,8 +7783,11 @@ export * from "./phase1-p5-s3-multi-taxi";
 export * from "./p5-fare-anomaly-admin";
 export * from "./unattended-voice";
 export * from "./voice-dialogue";
+export * from "./voice-callback-operations";
 export * from "./system-remediation";
 export * from "./remittance-proof";
+export * from "./reimbursement-workflow";
 export * from "./passenger-push-delivery";
 export * from "./partner-passenger-notification";
 export * from "./passenger-notification-channel";
+export * from "./passenger-app";

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslation } from "../../../lib/i18n";
 import {
   CanvasBanner,
@@ -11,6 +12,7 @@ import {
 } from "@drts/ui-web";
 import {
   fleetDocumentRequest,
+  fleetMutationHeaders,
   fleetDocumentProxyPath,
   putFleetDocument,
   type FleetDocumentUploadIntent,
@@ -32,6 +34,7 @@ export function CaseReplyComposer({
   initialAttachments,
 }: CaseReplyComposerProps) {
   const theme = buildFleetTheme();
+  const router = useRouter();
   const { t } = useTranslation();
   const [content, setContent] = useState("");
   const [replyState, setReplyState] = useState<
@@ -48,6 +51,7 @@ export function CaseReplyComposer({
   const retryTarget = useRef<string | null>(null);
 
   const isClosed = caseDetail.status === "closed";
+  const responseUnavailable = caseDetail.actionDescriptor?.enabled === false;
   const isPlatform = caseDetail.responsibility === "platform";
 
   const handleDownload = async (attachment: FleetCaseAttachmentRecord) => {
@@ -122,6 +126,7 @@ export function CaseReplyComposer({
         ),
       );
       uploadFiles.current.delete(temporaryId);
+      router.refresh();
     } catch (error) {
       setAttachments((previous) =>
         previous.map((item) =>
@@ -158,11 +163,14 @@ export function CaseReplyComposer({
           `/control-plane-proxy/fleet-partner/cases/${caseDetail.id}/reply`,
           {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-fleet-partner-id": caseDetail.fleetPartnerId,
-              "idempotency-key": idempotencyKey,
-            },
+            headers: fleetMutationHeaders({
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-fleet-partner-id": caseDetail.fleetPartnerId,
+                "idempotency-key": idempotencyKey,
+              },
+            }),
             body: JSON.stringify({
               content: content.trim(),
               idempotencyKey,
@@ -181,6 +189,7 @@ export function CaseReplyComposer({
         }
 
         setReplyState("sent");
+        router.refresh();
       } catch (err) {
         setErrorMessage(
           err instanceof Error ? err.message : "網路錯誤，無法連線",
@@ -239,6 +248,13 @@ export function CaseReplyComposer({
             {"已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。"}
           </div>
         </div>
+      ) : responseUnavailable ? (
+        <CanvasBanner
+          theme={theme}
+          tone="info"
+          icon="lock"
+          body={t("actions.reason.caseUnavailable")}
+        />
       ) : replyState === "sent" ? (
         <div style={{ marginBottom: 12 }}>
           <CanvasBanner
@@ -317,6 +333,8 @@ export function CaseReplyComposer({
             hint="回覆將寫入案件歷程，Ops 可即時回讀。"
           >
             <textarea
+              id="case-reply-content"
+              aria-label={t("cases.replyContent")}
               disabled={replyState === "submitting" || isPending}
               value={content}
               onChange={(e) => setContent(e.target.value)}

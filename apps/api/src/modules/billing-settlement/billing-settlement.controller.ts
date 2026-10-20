@@ -20,6 +20,7 @@ import type {
   DriverStatementRecord,
   GenerateDriverStatementCommand,
   GenerateTenantInvoiceCommand,
+  MarkReimbursementBatchReconciledCommand,
   MarkReimbursementPaidCommand,
   MarkReimbursementPaidWithProofCommand,
   RequestRemittanceProofReadbackCommand,
@@ -428,6 +429,33 @@ export class BillingSettlementController {
     );
   }
 
+  @Get("driver/profile/statements")
+  @RequireRealms("driver")
+  listDriverOwnStatements(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Query("period") period?: string,
+    @Query("periodMonth") periodMonth?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return this.listDriverStatements(
+      identity,
+      period,
+      periodMonth,
+      undefined,
+      requestId,
+    );
+  }
+
+  @Get("driver/profile/statements/:statementId")
+  @RequireRealms("driver")
+  getDriverOwnStatement(
+    @Param("statementId") statementId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return this.getDriverStatement(statementId, identity, requestId);
+  }
+
   @Get("reimbursements")
   listReimbursementBatches(
     @Query("status") status?: "pending" | "paid",
@@ -689,6 +717,70 @@ export class BillingSettlementController {
     );
   }
 
+  /** C080 signed batch artifact export; not a remittance-proof readback or bank transfer. */
+  @Post("reimbursements/:batchId/export")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async exportReimbursementBatch(
+    @Param("batchId") batchId: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+  ) {
+    const scope = `billing:reimbursement_batch:${batchId}:export`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: { batchId },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.exportReimbursementBatch(
+            batchId,
+            identity ?? null,
+            requestId,
+          );
+        return { data, statusCode: 200 };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  /** C080 explicit manual paid -> reconciled transition (Q-ADM12). */
+  @Post("reimbursements/:batchId/reconcile")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async markReimbursementBatchReconciled(
+    @Param("batchId") batchId: string,
+    @Body() command: MarkReimbursementBatchReconciledCommand,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+  ) {
+    const scope = `billing:reimbursement_batch:${batchId}:reconcile`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: { batchId, reason: command?.reason },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.markReimbursementBatchReconciled(
+            batchId,
+            command,
+            identity ?? null,
+            requestId,
+          );
+        return { data, statusCode: 200 };
+      },
+    });
+
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
   // ── Remittance Proof (SR-PROOF-001) ──
 
   /**
@@ -875,5 +967,110 @@ export class BillingSettlementController {
         requestId,
       );
     return toApiSuccessEnvelope(data, requestId);
+  }
+
+  // ── Finance-only remittance proof upload (REMITTANCE-FINANCE-PROOF-UPLOAD-FLOW-20261015) ──
+  //
+  // Parallel to the driver-only staged-content/upload pair above, for a
+  // verified system/platform/ops caller with billing:write (the "出納"
+  // half of capabilities.json C081's cashier/reviewer role). See
+  // `.local/goal-continuation-20261015T0940-internal-frontier-root/REMITTANCE-PROOF-ACTOR-AUTHORITY-20261015.md`
+  // §3-5 for why this is a new parallel route rather than widening the
+  // driver-only route: `BootstrapAuthGuard.assertScopesAllowed` requires
+  // ALL of a route's `@RequireScopes(...)` regardless of realm, so one
+  // route cannot demand `driver:write` for a driver caller and
+  // `billing:write` for a finance caller. The driver route above, its RBAC
+  // and its existing tests are unchanged. `billingSettlementService`'s
+  // `uploadRemittanceProof` already denormalises `driverId` from the batch
+  // and records `uploadedByActorId` from `identity`, independent of realm;
+  // no service-layer change is needed for this caller to be attributed
+  // correctly.
+  @Post("reimbursements/proofs/finance-staged-content")
+  @HttpCode(HttpStatus.OK)
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async financeStageRemittanceProofContent(
+    @Body() body: { contentBase64?: string; contentType?: string },
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const contentType = body?.contentType?.trim();
+    if (!contentType) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "contentType is required.",
+      );
+    }
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(body?.contentBase64 ?? "", "base64");
+    } catch {
+      bytes = Buffer.alloc(0);
+    }
+    if (bytes.length === 0) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "contentBase64 must decode to non-empty bytes.",
+      );
+    }
+    const result = await this.idempotencyService.execute({
+      scope: "billing:remittance_proof:staged_content:finance_create",
+      idempotencyKey,
+      required: true,
+      payload: { contentType, contentBase64: body?.contentBase64 ?? "" },
+      execute: async () => {
+        const data =
+          await this.billingSettlementService.stageRemittanceProofContent(
+            bytes,
+            contentType,
+          );
+        return {
+          data,
+          statusCode: 200,
+        };
+      },
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Post("reimbursements/proofs/finance-upload")
+  @RequireRealms("system", "platform", "ops")
+  @RequireScopes("billing:write")
+  async financeUploadRemittanceProof(
+    @Body() command: UploadRemittanceProofCommand,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const scope = `billing:remittance_proof:${command.batchId}:finance_upload`;
+    const result = await this.idempotencyService.execute({
+      scope,
+      idempotencyKey,
+      required: true,
+      payload: {
+        batchId: command.batchId,
+        originalFilename: command.originalFilename,
+        stagedContentRef: command.stagedContentRef,
+      },
+      execute: async () => {
+        const uploaded =
+          await this.billingSettlementService.uploadRemittanceProof(
+            command,
+            identity ?? null,
+            requestId,
+          );
+        // Scan actual persisted bytes, same as the driver path above.
+        const data = await this.billingSettlementService.scanRemittanceProof(
+          uploaded.proofId,
+          identity ?? null,
+          requestId,
+          true,
+        );
+        return { data, statusCode: 200 };
+      },
+    });
+    return toApiSuccessEnvelope(result.data, requestId);
   }
 }

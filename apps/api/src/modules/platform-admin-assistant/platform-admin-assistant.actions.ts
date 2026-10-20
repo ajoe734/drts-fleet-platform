@@ -1,13 +1,15 @@
 import type {
-  CreatePlatformNoticeCommand,
   PlatformMaintenanceModeRecord,
-  PlatformNoticeRecord,
   ResourceActionDescriptor,
   SetPlatformMaintenanceModeCommand,
 } from "@drts/contracts";
 
 import type { AuditedActionResult } from "../../common/action-receipt";
 import type { PlatformAdminService } from "../platform-admin/platform-admin.service";
+import type {
+  CanonicalNotice,
+  NoticeCommand,
+} from "../platform-admin/platform-notice-lifecycle";
 import type {
   PlatformAdminAssistantActionCommand,
   PlatformAdminAssistantActionToolName,
@@ -28,7 +30,8 @@ export interface PlatformAdminAssistantResolvedAction {
   execute(
     service: PlatformAdminService,
     requestId?: string,
-  ): AuditedActionResult<PlatformNoticeRecord | PlatformMaintenanceModeRecord>;
+    reason?: string,
+  ): AuditedActionResult<CanonicalNotice | PlatformMaintenanceModeRecord>;
 }
 
 export function resolvePlatformAdminAssistantAction(
@@ -38,7 +41,7 @@ export function resolvePlatformAdminAssistantAction(
   switch (command.toolName) {
     case "action.create_platform_notice":
       return resolveCreatePlatformNoticeAction(
-        command.payload as CreatePlatformNoticeCommand,
+        command.payload as NoticeCommand,
       );
     case "action.set_maintenance_mode":
       return resolveSetMaintenanceModeAction(
@@ -51,15 +54,17 @@ export function resolvePlatformAdminAssistantAction(
 }
 
 function resolveCreatePlatformNoticeAction(
-  payload: CreatePlatformNoticeCommand,
+  payload: NoticeCommand,
 ): PlatformAdminAssistantResolvedAction {
+  const highRisk =
+    payload.severity === "critical" || payload.severity === "maintenance";
   return {
     toolName: "action.create_platform_notice",
     descriptor: {
       action: "create_platform_notice",
       enabled: true,
-      riskLevel: "medium",
-      requiresReason: false,
+      riskLevel: highRisk ? "high" : "medium",
+      requiresReason: highRisk,
     },
     successMessage: payload.scheduledAt
       ? "Platform notice scheduled."
@@ -73,12 +78,20 @@ function resolveCreatePlatformNoticeAction(
     resourceLabel: `${payload.title} · ${payload.severity} · ${payload.targetAudience}`,
     confirmLabel: payload.scheduledAt ? "Schedule notice" : "Create notice",
     cancelLabel: "Keep draft",
-    reasonLabel: "Operator note",
-    reasonPlaceholder: "Optional note for the audit trail.",
-    reasonHint:
-      "A note is optional for medium-risk notice creation and will be attached when supplied.",
-    execute(service, requestId) {
-      return service.createPlatformNoticeWithAudit(payload, requestId);
+    reasonLabel: highRisk ? "Execution reason" : "Operator note",
+    reasonPlaceholder: highRisk
+      ? "Describe why this notice must be published."
+      : "Optional note for the audit trail.",
+    reasonHint: highRisk
+      ? "A non-empty reason is required and will be written to the assistant and domain audit trail."
+      : "A note is optional for medium-risk notice creation and will be attached when supplied.",
+    execute(service, requestId, reason) {
+      // executeAction is the existing explicit-confirmation boundary. Its
+      // normalized operator reason must be carried by that caller.
+      return service.createPlatformNoticeWithAudit(
+        { ...payload, reason: reason ?? payload.reason ?? "", confirmed: true },
+        requestId,
+      );
     },
   };
 }
@@ -127,8 +140,11 @@ function resolveSetMaintenanceModeAction(
       : "Describe why maintenance mode can be disabled.",
     reasonHint:
       "A non-empty reason is required and will be written to the assistant and domain audit trail.",
-    execute(service, requestId) {
-      return service.setMaintenanceModeWithAudit(payload, requestId);
+    execute(service, requestId, reason) {
+      return service.setMaintenanceModeWithAudit(
+        { ...payload, reason: reason ?? payload.reason ?? "" },
+        requestId,
+      );
     },
   };
 }

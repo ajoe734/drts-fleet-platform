@@ -1,9 +1,9 @@
-import type { AuthRealm } from "./auth.types";
+import type { AuthRealm, RequestAuthRealm } from "./auth.types";
 import { AUTH_ROUTE_READ_METHODS } from "./auth.constants";
 
 export interface RouteAuthPolicy {
   requiredScopes: string[];
-  allowedRealms: AuthRealm[];
+  allowedRealms: RequestAuthRealm[];
   description: string;
 }
 
@@ -35,6 +35,100 @@ export function resolveRouteAuthPolicy(
 ): ResolvedRouteAuthPolicy | null {
   const routePath = normalizeRoutePath(url);
   const upperMethod = method.toUpperCase();
+
+  // Append the passenger realm only to address/routing utilities. Existing realm
+  // decorators are unioned by BootstrapAuthGuard; health/admin routes stay unchanged.
+  if (
+    (routePath === "geo/search" && upperMethod === "GET") ||
+    (["geo/resolve", "geo/reverse", "geo/route"].includes(routePath) &&
+      upperMethod === "POST")
+  ) {
+    return {
+      routeKey: `passenger-app:geo:${routePath.slice(4)}:${upperMethod}`,
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description:
+        "First-party passenger address and route utilities; existing decorators preserve other realms",
+    };
+  }
+
+  if (
+    (upperMethod === "POST" &&
+      [
+        "passenger-app/auth/otp/request",
+        "passenger-app/auth/otp/verify",
+      ].includes(routePath)) ||
+    (upperMethod === "GET" && routePath === "passenger-app/auth/providers")
+  ) {
+    return {
+      routeKey: "passenger-app:otp",
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description:
+        "OpenRoute BFF login; link/contact-phone require a live passenger session bound to the challenge",
+    };
+  }
+
+  if (routePath === "passenger-app" || routePath.startsWith("passenger-app/")) {
+    if (
+      (upperMethod === "POST" &&
+        routePath === "passenger-app/auth/facebook/data-deletion") ||
+      (upperMethod === "GET" &&
+        /^passenger-app\/auth\/facebook\/data-deletion\/status\/[^/]+$/.test(
+          routePath,
+        ))
+    ) {
+      return {
+        routeKey: "passenger-app:facebook:data-deletion",
+        requiredScopes: [],
+        allowedRealms: [],
+        description:
+          "Meta signed_request deletion webhook and signed anonymous completion receipt",
+      };
+    }
+    if (
+      upperMethod === "POST" &&
+      /^passenger-app\/platform\/rides\/[^/]+\/refund$/.test(routePath)
+    ) {
+      return {
+        routeKey: "passenger-app:platform:refund",
+        requiredScopes: ["billing:write"],
+        allowedRealms: ["platform"],
+        description: "Platform full passenger ride refund",
+      };
+    }
+    if (routePath.startsWith("passenger-app/platform/")) {
+      return {
+        routeKey: "passenger-app:platform",
+        requiredScopes: [],
+        allowedRealms: ["platform"],
+        description: "Passenger platform administration",
+      };
+    }
+    if (
+      routePath === "passenger-app/auth/providers" ||
+      /^passenger-app\/auth\/oauth\/[^/]+\/(start|callback)$/.test(routePath)
+    ) {
+      // Pre-login traffic carries a BFF metadata identity, not a passenger
+      // Bearer; the guard's activatePassenger() open-route branch (not this
+      // table) is what actually admits these two requests. A `purpose: "link"`
+      // call additionally requires a live passenger Bearer, enforced inside
+      // PassengerOAuthService, not by this route-level realm/scope gate.
+      return {
+        routeKey: `passenger-app:oauth:${routePath}`,
+        requiredScopes: [],
+        allowedRealms: ["passenger"],
+        description:
+          "Passenger OAuth/OIDC login provider discovery, start, and callback",
+      };
+    }
+    return {
+      routeKey: "passenger-app:self",
+      requiredScopes: [],
+      allowedRealms: ["passenger"],
+      description: "First-party passenger account and owned resources",
+    };
+  }
 
   if (routePath === "audit" && upperMethod === "GET") {
     return {
@@ -733,6 +827,16 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (/^driver\/sos-events\/[^/]+$/.test(routePath) && upperMethod === "GET") {
+    return {
+      routeKey: "driver:sos-events:get",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("driver"),
+      description:
+        "Driver own SOS event canonical readback (incident:write per IAM catalogue: driver realm has no incident:read grant)",
+    };
+  }
+
   if (routePath.startsWith("driver/sos-events/")) {
     return {
       routeKey: `driver:sos-attachments:${upperMethod}`,
@@ -755,6 +859,30 @@ export function resolveRouteAuthPolicy(
   }
 
   if (
+    /^ops\/driver-sos\/[^/]+\/duty-ack$/.test(routePath) &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "ops:driver-sos:duty-ack",
+      requiredScopes: ["incident:write"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops canonical SOS duty acknowledgment (first-writer-wins)",
+    };
+  }
+
+  if (
+    /^ops\/driver-sos\/by-incident\/[^/]+$/.test(routePath) &&
+    upperMethod === "GET"
+  ) {
+    return {
+      routeKey: "ops:driver-sos:get-by-incident",
+      requiredScopes: ["incident:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops canonical SOS event readback by incident id",
+    };
+  }
+
+  if (
     routePath === "ops/driver-sos/metrics/alert-latency" &&
     upperMethod === "GET"
   ) {
@@ -763,6 +891,15 @@ export function resolveRouteAuthPolicy(
       requiredScopes: ["incident:read"],
       allowedRealms: baseAllowedRealms("ops"),
       description: "Ops driver SOS alert latency metrics",
+    };
+  }
+
+  if (/^ops\/driver-sos\/[^/]+$/.test(routePath) && upperMethod === "GET") {
+    return {
+      routeKey: "ops:driver-sos:get",
+      requiredScopes: ["incident:read"],
+      allowedRealms: baseAllowedRealms("ops"),
+      description: "Ops canonical SOS event readback",
     };
   }
 
@@ -876,7 +1013,8 @@ export function resolveRouteAuthPolicy(
       routeKey: "billing:driver:proof:create",
       requiredScopes: ["driver:write"],
       allowedRealms: ["driver"],
-      description: "Driver proof staging and upload; batch ownership enforced by service",
+      description:
+        "Driver proof staging and upload; batch ownership enforced by service",
     };
   }
 
@@ -970,6 +1108,19 @@ export function resolveRouteAuthPolicy(
       allowedRealms: ["system"],
       description:
         "Internal scheduler execution of the approval-timeout reminder sweep",
+    };
+  }
+
+  if (
+    routePath === "internal/scheduled-tasks/billing-monthly/run" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "internal:scheduled-tasks:billing-monthly:run",
+      requiredScopes: ["billing:monthly:run"],
+      allowedRealms: ["system"],
+      description:
+        "Internal scheduler execution of resumable closed-month driver billing",
     };
   }
 

@@ -1,3 +1,5 @@
+import { CommandSqlTransport } from "../../registry-contract-insurance-exclusivity-canonical-ack-flow-20261015/sql-transport";
+import { RegulatoryRegistryRepository } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 // SR-QA-DRIVER-001 -- C061 (證照到期司機／主管: 到期提醒與禁止接單).
 //
 // This capability asks for two things: T-30/T-7/到期 reminder delivery, and
@@ -45,15 +47,26 @@ import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regu
 
 function setupRegistry() {
   const auditService = new AuditNotificationService();
-  return new RegulatoryRegistryService(
+  const db = new CommandSqlTransport();
+  const service = new RegulatoryRegistryService(
     {
       publishDriverLocationUpdated: () => undefined,
       publishSupplyLifecycleUpdated: () => undefined,
     } as never,
     auditService,
     new DriverProfileService(new AuditNotificationService()),
-    undefined,
+    new RegulatoryRegistryRepository(db as never),
   );
+  db.seed({
+    vehicles: service.listVehicles(),
+    drivers: service.listDrivers(),
+    supplyPairs: service.listSupplyPairs(),
+    contracts: service.listContracts(),
+    policies: service.listPolicies(),
+    exclusivities: service.listExclusivities(),
+  });
+  db.enabled = true;
+  return service;
 }
 
 describe("SR-QA-DRIVER-001 C061: vehicle insurance expiry -> dispatch block (positive regression)", () => {
@@ -69,9 +82,12 @@ describe("SR-QA-DRIVER-001 C061: vehicle insurance expiry -> dispatch block (pos
     // endAt "2026-12-31T23:59:59.000Z". Re-running activation with a
     // reference time after that endAt exercises the exact same expiry
     // transition a real end-of-coverage would trigger.
-    const activated = registry.activateInsurancePolicy("policy-demo-001", {
-      activatedAt: "2027-01-15T00:00:00.000Z",
-    });
+    const activated = await registry.activateInsurancePolicy(
+      "policy-demo-001",
+      {
+        activatedAt: "2027-01-15T00:00:00.000Z",
+      },
+    );
     expect(activated.status).toBe("expired");
     expect(activated.lifecycleStatus).toBe("expired");
 
@@ -92,7 +108,7 @@ describe("SR-QA-DRIVER-001 C061: vehicle insurance expiry -> dispatch block (pos
     const in90Days = new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString();
     const startAt = new Date(now - 1 * 24 * 60 * 60 * 1000).toISOString();
 
-    const soon = registry.createInsurancePolicy({
+    const soon = await registry.createInsurancePolicy({
       vehicleId: "veh-demo-002",
       policyNo: "SR-QA-DRIVER-001-POL-002",
       insuranceType: "third_party_liability",
@@ -101,11 +117,11 @@ describe("SR-QA-DRIVER-001 C061: vehicle insurance expiry -> dispatch block (pos
       startAt,
       endAt: in10Days,
     });
-    registry.activateInsurancePolicy(soon.policyId, {
+    await registry.activateInsurancePolicy(soon.policyId, {
       activatedAt: new Date(now).toISOString(),
     });
 
-    const farOut = registry.createInsurancePolicy({
+    const farOut = await registry.createInsurancePolicy({
       vehicleId: "veh-demo-003",
       policyNo: "SR-QA-DRIVER-001-POL-003",
       insuranceType: "third_party_liability",
@@ -114,7 +130,7 @@ describe("SR-QA-DRIVER-001 C061: vehicle insurance expiry -> dispatch block (pos
       startAt,
       endAt: in90Days,
     });
-    registry.activateInsurancePolicy(farOut.policyId, {
+    await registry.activateInsurancePolicy(farOut.policyId, {
       activatedAt: new Date(now).toISOString(),
     });
 
@@ -140,7 +156,7 @@ describe("SR-QA-DRIVER-001 C061: driver license/registration expiry (remediated 
 
     // Update driver license expiry date to the past
     const expiredAt = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    registry.updateDriverLicenses("drv-demo-001", {
+    await registry.updateDriverLicenses("drv-demo-001", {
       professionalDriverLicenseExpiry: expiredAt,
     });
 
@@ -167,10 +183,10 @@ describe("SR-QA-DRIVER-001 C061: driver license/registration expiry (remediated 
     const in10Days = new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString();
     const in90Days = new Date(now + 90 * 24 * 60 * 60 * 1000).toISOString();
 
-    registry.updateDriverLicenses("drv-demo-001", {
+    await registry.updateDriverLicenses("drv-demo-001", {
       professionalDriverLicenseExpiry: in10Days,
     });
-    registry.updateDriverLicenses("drv-demo-002", {
+    await registry.updateDriverLicenses("drv-demo-002", {
       professionalDriverLicenseExpiry: in90Days,
     });
 

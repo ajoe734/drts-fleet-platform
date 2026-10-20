@@ -57,10 +57,6 @@ const statementsTranslations: StatementsDict = {
     en: "No line items are recorded for this statement.",
     zh: "此對帳單目前沒有逐筆明細紀錄。",
   },
-  "statements.detail.confirmDisputeUnavailable": {
-    en: "Confirming or disputing this statement with a durable, readable-back record is not wired to a real backend endpoint yet. This is tracked as an open blocker on SR-FLEET-SETTLE-001, not a hidden failure.",
-    zh: "確認／爭議此對帳單並產生可回讀的正式紀錄尚未串接真實後端。此為 SR-FLEET-SETTLE-001 待補項目，非隱藏性失敗。",
-  },
   "statements.column.trips": {
     en: "Trips",
     zh: "趟次",

@@ -10,6 +10,12 @@ export type WorkloadRequestItem = {
   path: string;
   headers: Record<string, string>;
   body: unknown;
+  stageOrder?: {
+    method: string;
+    path: string;
+    headers: Record<string, string>;
+    body: unknown;
+  };
 };
 
 export type CapacityPlan = {
@@ -17,6 +23,8 @@ export type CapacityPlan = {
   durationSeconds: number;
   maxInFlight: number;
   isolatedResourceId: string;
+  profile: "uniform" | "concurrent" | "budgeted_dispatch_burst";
+  scheduleMs: Record<WorkloadFamily, number[]>;
   workloads: {
     booking: WorkloadRequestItem[];
     dispatch: WorkloadRequestItem[];
@@ -27,6 +35,19 @@ export type CapacityPlan = {
 export type WorkloadFamily = "booking" | "dispatch" | "report";
 
 export const BASELINE_PER_MINUTE: Record<WorkloadFamily, number>;
+export function minimumSpacingMs(
+  profile: CapacityPlan["profile"],
+  family: WorkloadFamily,
+): number;
+export function readBackBudgetedDispatchArrivals(records: unknown[]): {
+  profile: "budgeted_dispatch_burst";
+  finalArrivalMs: number;
+  stagedCreations: number;
+};
+export function buildWorkloadSchedule(
+  profile: CapacityPlan["profile"],
+  counts: Record<WorkloadFamily, number>,
+): CapacityPlan["scheduleMs"];
 
 export function countForFamily(
   family: WorkloadFamily,
@@ -45,6 +66,8 @@ export function buildDispatchItems(args: {
   orderIds: string[];
   dispatchJwt: string;
   runTag: string;
+  count?: number;
+  stagedDispatch?: boolean;
 }): WorkloadRequestItem[];
 
 export function buildReportItems(args: {
@@ -65,8 +88,39 @@ export function buildCapacityPlan(args: {
   orderIds: string[];
   runTag: string;
   windowStartMs?: number;
+  profile?: CapacityPlan["profile"];
+  stagedDispatch?: boolean;
 }): CapacityPlan;
 
 export function countsForDuration(
   durationSeconds: number,
 ): Record<WorkloadFamily, number>;
+
+export type CapacitySummary = {
+  preparationStartedAt?: string;
+  startedAt: string;
+  endedAt: string;
+  durationSeconds: number;
+  fullBurstSchedule: boolean;
+  elapsedMs: number;
+  maxInFlight: number;
+  profile: CapacityPlan["profile"];
+  workflows: Record<
+    WorkloadFamily,
+    {
+      requests: number;
+      errors: number;
+      p95Ms: number | null;
+      p99Ms: number | null;
+      arrivals: {
+        count: number;
+        firstMs: number | null;
+        lastMs: number | null;
+        early: number;
+        late: number;
+      };
+      latencyTargetsMet: boolean;
+    }
+  >;
+  result: "measurements_within_targets" | "failed";
+};

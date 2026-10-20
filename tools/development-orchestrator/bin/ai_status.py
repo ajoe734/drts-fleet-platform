@@ -36,6 +36,8 @@ from control_plane.usecases.task_board_commands import (  # noqa: E402
     TaskBoardCommandRuntime,
 )
 from control_plane.domain.task_records import validate_task_eligibility
+from control_plane.domain.handoff_context import validate_next_text
+from control_plane.domain.dispatch_policy import acceptance_review_snapshot, pending_acceptance_review
 from control_plane.domain.unblock_resolution import parent_resume_blocker  # noqa: E402
 
 
@@ -642,11 +644,50 @@ def candidate_is_locked(task: dict[str, Any]) -> bool:
     return bool(candidate_sha and (candidate_sha == "not_applicable" or git_commit_exists(candidate_sha)))
 
 
+def candidate_review_handoff_is_current(task: dict[str, Any]) -> bool:
+    """CI recovery may restore an owner handoff, never create one.
+
+    New handoffs retain their exact identity independently of bounded worker
+    receipts. Legacy candidates (including C073) already have transactional
+    owner handoff receipts; a CI failure only completed their routing entries,
+    not that same-generation source handoff. An explicit invalidation marker
+    must not fall back to those older receipts.
+    """
+    identity = {key: task.get(key) for key in (
+        "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"
+    )}
+    if any(not isinstance(value, str) or not value.strip() for value in identity.values()):
+        return False
+    if identity["owner"] == identity["reviewer"] or task.get("reviewed_sha"):
+        return False
+    if "candidate_review_handoff" in task:
+        return task["candidate_review_handoff"] == identity
+    receipts = task.get("worker_outcomes") or {}
+    if not isinstance(receipts, dict):
+        return False
+    return any(
+        isinstance(receipt, dict)
+        and receipt.get("command") == "handoff"
+        and receipt.get("outcome") == "advanced"
+        and receipt.get("role") == "owner"
+        and receipt.get("agent") == identity["owner"]
+        and receipt.get("candidate_sha") == identity["candidate_sha"]
+        and receipt.get("candidate_generation") == identity["candidate_generation"]
+        for receipt in receipts.values()
+    )
+
+
 def clear_candidate_evidence(task: dict[str, Any], *, preserve_failed_sha: bool = False) -> None:
+    request = task.get("acceptance_review_request")
+    if request is not None and (not isinstance(request, dict) or request.get("state") not in ("declined", "reopened")):
+        # A new candidate cannot inherit pending routing for invalidated source.
+        # The original request remains in the append-only activity log.
+        task.pop("acceptance_review_request", None)
     candidate_sha = task.get("candidate_sha") if preserve_failed_sha else None
     for key in (
         "candidate_sha",
         "candidate_branch",
+        "candidate_review_handoff",
         "reviewed_sha",
         "ci_sha",
         "ci_status",
@@ -661,6 +702,7 @@ def clear_candidate_evidence(task: dict[str, Any], *, preserve_failed_sha: bool 
 
 
 def transition_after_merge(state: dict[str, Any], task: dict[str, Any], *, message: str, timestamp: str) -> None:
+    validate_completion_handoffs(state, task, message)
     task["last_update"] = timestamp
     task["next"] = message
     task.pop("waiting_for", None)
@@ -1044,6 +1086,10 @@ def task_metadata_from_env() -> dict[str, Any]:
     if acceptance:
         metadata["required_acceptance"] = acceptance
 
+    for field in ("next", "resolved_parent_next"):
+        if field in metadata:
+            validate_next_text(metadata[field])
+
     return metadata
 
 
@@ -1094,14 +1140,12 @@ def ensure_owner_resume_handoff(
     )
 
 
-def apply_unblock_parent_resolution(
+def unblock_parent_resolution_fields(
     state: dict[str, Any],
     task: dict[str, Any],
-    *,
-    actor: str,
-    timestamp: str,
     message: str,
-) -> None:
+) -> tuple[dict[str, Any], str, str, str] | None:
+    """Resolve and validate only the parent fields this completion would write."""
     if str(task.get("task_class") or "").lower() != "unblock":
         return
     parent_id = str(task.get("helper_parent") or "").strip()
@@ -1122,6 +1166,7 @@ def apply_unblock_parent_resolution(
         or str(task.get("resolved_parent_next") or "").strip()
         or f"Unblock resolution complete via {task.get('id')}: {message}"
     )
+    validate_next_text(parent_message)
     parent_waiting_for_raw = (
         os.environ.get("PARENT_WAITING_FOR", "").strip()
         or str(task.get("resolved_parent_waiting_for") or "").strip()
@@ -1131,6 +1176,28 @@ def apply_unblock_parent_resolution(
         ensure_agent(parent_waiting_for)
     elif resume_status == "blocked":
         parent_waiting_for = canonical_agent_name(parent.get("waiting_for")) or canonical_agent_name(parent.get("owner"))
+    return parent, resume_status, parent_message, parent_waiting_for
+
+
+def validate_completion_handoffs(state: dict[str, Any], task: dict[str, Any], message: str) -> None:
+    validate_next_text(message)
+    if not required_acceptance(task) or acceptance_complete(task):
+        unblock_parent_resolution_fields(state, task, message)
+
+
+def apply_unblock_parent_resolution(
+    state: dict[str, Any],
+    task: dict[str, Any],
+    *,
+    actor: str,
+    timestamp: str,
+    message: str,
+) -> None:
+    fields = unblock_parent_resolution_fields(state, task, message)
+    if fields is None:
+        return
+    parent, resume_status, parent_message, parent_waiting_for = fields
+    parent_id = str(parent["id"])
 
     task["resolved_parent_status"] = resume_status
     task["resolved_parent_at"] = timestamp
@@ -1827,6 +1894,7 @@ def command_reassign(state: dict[str, Any], args: list[str]) -> None:
     owner = canonical_agent_name(args[1])
     reviewer = canonical_agent_name(args[2])
     message = args[3]
+    validate_next_text(message)
     actor = current_actor()
     if actor != "Supervisor":
         raise SystemExit("Only Supervisor can reassign a task")
@@ -1911,6 +1979,7 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 3:
         raise SystemExit("Usage: resume-blocked <task-id> <status> <message>")
     task_id, resume_status, message = args[0], str(args[1]).strip().lower(), args[2]
+    validate_next_text(message)
     actor = current_actor()
     if actor != "Supervisor":
         raise SystemExit("Only Supervisor can resume a blocked task")
@@ -1950,6 +2019,7 @@ def command_start(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: start <task-id> <message>")
     task_id, message = args[0], args[1]
+    validate_next_text(message)
     actor = current_actor()
     ensure_agent(actor)
     task = get_task(state, task_id)
@@ -1963,6 +2033,9 @@ def command_start(state: dict[str, Any], args: list[str]) -> None:
             "record-acceptance for evidence, or an explicit reviewer reopen for code changes"
         )
     timestamp = iso_now()
+    if task.get("candidate_sha"):
+        # Explicit owner work requires a fresh handoff, even at the same SHA.
+        task["candidate_review_handoff"] = None
     task["status"] = "in_progress"
     task["last_update"] = timestamp
     task["next"] = message
@@ -1975,6 +2048,7 @@ def command_progress(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: progress <task-id> <message>")
     task_id, message = args[0], args[1]
+    validate_next_text(message)
     actor = current_actor()
     task = get_task(state, task_id)
     if task is None:
@@ -2001,6 +2075,7 @@ def command_note(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: note <task-id> <message>")
     task_id, message = args[0], args[1]
+    validate_next_text(message)
     actor = current_actor()
     task = get_task(state, task_id)
     if task is None:
@@ -2011,10 +2086,74 @@ def command_note(state: dict[str, Any], args: list[str]) -> None:
     append_log({"ts": timestamp, "agent": actor, "type": "note", "task_id": task_id, "message": message})
 
 
+def _require_acceptance_review_snapshot(task: dict[str, Any]) -> dict[str, str]:
+    snapshot = acceptance_review_snapshot(task)
+    if snapshot is None:
+        raise SystemExit("Acceptance review requires a locked acceptance candidate with same-SHA review/CI and merge")
+    try:
+        supplied_snapshot = parse_json_env("ACCEPTANCE_REVIEW_SNAPSHOT_JSON")
+    except (ValueError, TypeError) as exc:
+        raise SystemExit(f"Invalid ACCEPTANCE_REVIEW_SNAPSHOT_JSON: {exc}") from exc
+    if supplied_snapshot != snapshot:
+        raise SystemExit("ACCEPTANCE_REVIEW_SNAPSHOT_JSON must exactly match the current original-task snapshot")
+    return snapshot
+
+
+def command_request_acceptance_review(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) != 3 or any(not value.strip() for value in args):
+        raise SystemExit("Usage: request-acceptance-review <task-id> <reason> <evidence-ref>")
+    task_id, reason, evidence_ref = args
+    task = get_task(state, task_id)
+    if task is None:
+        raise SystemExit(f"Unknown task: {task_id}")
+    actor = current_actor()
+    if actor not in {task.get("owner"), task.get("reviewer"), "Supervisor"}:
+        raise SystemExit("Only the owner, reviewer, or Supervisor can request acceptance review")
+    snapshot = _require_acceptance_review_snapshot(task)
+    if pending_acceptance_review(task):
+        raise SystemExit("An acceptance review request is already pending; await the assigned reviewer")
+    request = {
+        **snapshot, "request_id": uuid.uuid4().hex, "state": "pending",
+        "requested_by": actor, "requested_at": iso_now(), "reason": reason, "evidence_ref": evidence_ref,
+    }
+    task["acceptance_review_request"] = request
+    append_log({"ts": request["requested_at"], "agent": actor, "type": "acceptance_review_requested",
+                "task_id": task_id, "message": reason, "request": dict(request)})
+
+
+def _require_pending_acceptance_review(task: dict[str, Any], request_id: str) -> dict[str, Any]:
+    _require_acceptance_review_snapshot(task)
+    request = pending_acceptance_review(task)
+    if request is None or request_id != request["request_id"]:
+        raise SystemExit("Acceptance review request changed; discard stale decision")
+    return dict(request)
+
+
+def _resolve_acceptance_review(task: dict[str, Any], request: dict[str, Any], state: str, message: str) -> None:
+    resolved = {**request, "state": state, "resolved_by": current_actor(), "resolved_at": iso_now(),
+                "resolution": message}
+    task["acceptance_review_request"] = resolved
+    append_log({"ts": resolved["resolved_at"], "agent": current_actor(), "type": "acceptance_review_resolved",
+                "task_id": task["id"], "message": message, "request": dict(resolved)})
+
+
+def command_decline_acceptance_review(state: dict[str, Any], args: list[str]) -> None:
+    if len(args) != 3 or any(not value.strip() for value in args):
+        raise SystemExit("Usage: decline-acceptance-review <task-id> <request-id> <message>")
+    task = get_task(state, args[0])
+    if task is None:
+        raise SystemExit(f"Unknown task: {args[0]}")
+    if current_actor() != task.get("reviewer") or current_actor() == task.get("owner"):
+        raise SystemExit("Only the assigned reviewer can decline acceptance review")
+    request = _require_pending_acceptance_review(task, args[1])
+    _resolve_acceptance_review(task, request, "declined", args[2])
+
+
 def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: reopen <task-id> <message>")
     task_id, message = args[0], args[1]
+    validate_next_text(message)
     actor = current_actor()
     ensure_agent(actor)
     task = get_task(state, task_id)
@@ -2029,6 +2168,11 @@ def command_reopen(state: dict[str, Any], args: list[str]) -> None:
     reviewed_sha = os.environ.get("REVIEWED_SHA", "").strip()
     if reviewed_sha and reviewed_sha != str(task.get("candidate_sha") or ""):
         raise SystemExit("REVIEWED_SHA must match the candidate being reopened")
+    request = task.get("acceptance_review_request")
+    if task.get("status") == "acceptance" and request is not None:
+        if not isinstance(request, dict) or request.get("state") not in ("declined", "reopened"):
+            request = _require_pending_acceptance_review(task, os.environ.get("ACCEPTANCE_REVIEW_REQUEST_ID", ""))
+            _resolve_acceptance_review(task, request, "reopened", message)
     timestamp = iso_now()
     task["status"] = "in_progress"
     clear_candidate_evidence(task)
@@ -2056,6 +2200,7 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 3:
         raise SystemExit("Usage: handoff <task-id> <to-agent> <message>")
     task_id, to_agent, message = args[0], canonical_agent_name(args[1]), args[2]
+    validate_next_text(message)
     actor = current_actor()
     ensure_agent(actor)
     ensure_agent(to_agent)
@@ -2090,6 +2235,9 @@ def command_handoff(state: dict[str, Any], args: list[str]) -> None:
     task["candidate_generation"] = uuid.uuid4().hex
     task["candidate_sha"] = candidate_sha
     task["candidate_branch"] = candidate_branch
+    task["candidate_review_handoff"] = {key: task[key] for key in (
+        "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"
+    )}
     pr_url = os.environ.get("PR_URL", "").strip()
     if pr_url:
         task["pr_url"] = pr_url
@@ -2124,6 +2272,7 @@ def command_blocker(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 3:
         raise SystemExit("Usage: blocker <task-id> <message> <waiting-for>")
     task_id, message, waiting_for = args[0], args[1], canonical_agent_name(args[2])
+    validate_next_text(message)
     actor = current_actor()
     ensure_agent(actor)
     ensure_agent(waiting_for)
@@ -2155,6 +2304,7 @@ def command_system_block(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: system-block <task-id> <message>")
     task_id, message = args[0], args[1]
+    validate_next_text(message)
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
@@ -2191,6 +2341,7 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: approve <task-id> <message>")
     task_id, message = args[0], args[1]
+    validate_next_text(message)
     actor = current_actor()
     ensure_agent(actor)
     task = get_task(state, task_id)
@@ -2219,6 +2370,9 @@ def command_approve(state: dict[str, Any], args: list[str]) -> None:
         ):
             raise SystemExit("REVIEWED_SHA must exactly match CANDIDATE_SHA")
     reviewed_sha = candidate_sha
+
+    if not candidate_required(task):
+        validate_completion_handoffs(state, task, message)
 
     timestamp = iso_now()
     task["reviewed_sha"] = reviewed_sha
@@ -2257,6 +2411,8 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
     if not args:
         raise SystemExit("Usage: reconcile-candidate <task-id> [message]")
     task_id = args[0]
+    if len(args) > 1:
+        validate_next_text(args[1])
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
@@ -2292,6 +2448,26 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
         )
         return
 
+    observed_branch = os.environ.get("CANDIDATE_BRANCH", "").strip()
+    if observed_branch and task.get("candidate_branch") and task["candidate_branch"] != observed_branch:
+        raise SystemExit("CANDIDATE_BRANCH must match the frozen handoff branch")
+
+    # Validate completion before copying candidate metadata into the live task.
+    # Review/failure updates and incomplete acceptance do not resolve a parent.
+    if (
+        task.get("status") != "review"
+        and ci_status not in {"failure", "merge_conflict", "closed"}
+        and merge_sha
+        and task.get("reviewed_sha") == candidate_sha
+    ):
+        effective_ci_sha = candidate_sha if ci_status else task.get("ci_sha")
+        if effective_ci_sha != candidate_sha or (ci_status or task.get("ci_status")) != "success":
+            raise SystemExit("Cannot record merge without successful CI for the same candidate SHA")
+        validate_completion_handoffs(
+            state, task,
+            args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} merged as {merge_sha[:12]}.",
+        )
+
     for env_name, key in (("PR_URL", "pr_url"), ("CANDIDATE_BRANCH", "candidate_branch"), ("CI_RUN_URL", "ci_run_url")):
         value = os.environ.get(env_name, "").strip()
         if value:
@@ -2305,14 +2481,27 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
         task["next"] = args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} is ready for reviewer evidence."
     elif ci_status in {"failure", "merge_conflict", "closed"}:
         task["status"] = "in_progress"
+        if ci_status in {"merge_conflict", "closed"}:
+            # Unlike retryable CI, these observations require owner repair.
+            task["candidate_review_handoff"] = None
         task["last_update"] = timestamp
         task["next"] = args[1] if len(args) > 1 else f"Candidate CI {ci_status}; owner must repair and hand off a new candidate."
         mark_handoffs_done(state, task_id)
+    elif task.get("status") == "blocked":
+        # CI/merge observations cannot resume an explicitly blocked task.
+        pass
     elif merge_sha:
         if task.get("reviewed_sha") != candidate_sha:
-            task["status"] = "review"
+            owner_continuation = (
+                task.get("status") == "in_progress" or "candidate_review_handoff" in task
+            ) and not candidate_review_handoff_is_current(task)
+            task["status"] = "in_progress" if owner_continuation else "review"
             task["last_update"] = timestamp
-            task["next"] = f"Merged candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
+            task["next"] = (
+                f"Merged candidate {candidate_sha[:12]} requires owner continuation and a fresh review handoff."
+                if owner_continuation else
+                f"Merged candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
+            )
             append_log({"ts": timestamp, "agent": current_actor("Supervisor"),
                         "type": "candidate_review_required", "task_id": task_id,
                         "candidate_sha": candidate_sha, "message": task["next"]})
@@ -2326,7 +2515,20 @@ def command_reconcile_candidate(state: dict[str, Any], args: list[str]) -> None:
             message=args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} merged as {merge_sha[:12]}.",
             timestamp=timestamp,
         )
-    else:
+    elif task.get("status") in {"in_progress", "integrating"} and task.get("reviewed_sha") != candidate_sha:
+        # Positive CI is not approval. Restore the original review route only
+        # while its owner handoff still describes this exact generation.
+        task["status"] = "review" if (
+            task.get("ci_status") in {"queued", "running", "success"}
+            and candidate_review_handoff_is_current(task)
+        ) else "in_progress"
+        task["last_update"] = timestamp
+        task["next"] = (
+            f"Candidate {candidate_sha[:12]} still requires independent same-SHA reviewer approval."
+            if task["status"] == "review" else
+            f"Candidate {candidate_sha[:12]} requires owner continuation and a fresh review handoff."
+        )
+    elif task.get("status") in {"in_progress", "integrating"}:
         task["status"] = "integrating"
         task["last_update"] = timestamp
         task["next"] = args[1] if len(args) > 1 else f"Candidate {candidate_sha[:12]} is awaiting same-SHA CI/merge evidence."
@@ -2349,6 +2551,7 @@ def command_record_acceptance(state: dict[str, Any], args: list[str]) -> None:
     if len(args) < 2:
         raise SystemExit("Usage: record-acceptance <task-id> <message>")
     task_id, message = args[0], args[1]
+    validate_next_text(message)
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
@@ -2367,6 +2570,8 @@ def command_record_acceptance(state: dict[str, Any], args: list[str]) -> None:
     if not evidence:
         raise SystemExit("ACCEPTANCE_EVIDENCE_JSON must include at least one required evidence key")
     validate_acceptance_evidence(task, evidence)
+    projected = {**task, "acceptance_evidence": {**(task.get("acceptance_evidence") or {}), **evidence}}
+    validate_completion_handoffs(state, projected, message)
     task.setdefault("acceptance_evidence", {}).update(evidence)
     timestamp = iso_now()
     transition_after_merge(state, task, message=message, timestamp=timestamp)
@@ -2601,6 +2806,8 @@ def _command_runtime() -> TaskBoardCommandRuntime:
         "progress": command_progress,
         "note": command_note,
         "reopen": command_reopen,
+        "request-acceptance-review": command_request_acceptance_review,
+        "decline-acceptance-review": command_decline_acceptance_review,
         "handoff": command_handoff,
         "blocker": command_blocker,
         "system-block": command_system_block,

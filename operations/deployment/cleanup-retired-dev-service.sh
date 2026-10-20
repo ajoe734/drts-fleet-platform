@@ -34,6 +34,7 @@ intended_services=(
   "drts-dev-referral-embed-web"
   "drts-dev-enterprise-dispatch-web"
   "drts-channel-partner-portal-web"
+  "drts-dev-passenger-app-web"
 )
 optional_services=(
   "drts-dev-scanner"

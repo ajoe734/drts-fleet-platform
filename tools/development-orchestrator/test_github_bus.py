@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import copy
+import json
 import subprocess
 import tempfile
 import unittest
@@ -9,6 +11,188 @@ from unittest import mock
 
 import github_bus
 from github_command_parser import GitHubCommand
+
+
+class BoundCandidatePRReadinessTests(unittest.TestCase):
+    """Exercise real upsert/observation code; double only GitHub and log I/O."""
+
+    REPO = "ajoe734/drts-fleet-platform"
+    CASES = (
+        (
+            "PAX-FARE-COPY-20261015", 2724,
+            "a06e2010bbee0fda55f449250bb2159a8ab2b2de",
+            "codex/pax-fare-copy-20261015-delivery-r2-20261016",
+        ),
+        (
+            "TENANT-RULES-SLA-WEBHOOK-DURABLE-FLOW-20261015", 2708,
+            "3f4a0218380d5384611fd950b342f7c4798a5c33",
+            "codex/tenant-rules-sla-webhook-durable-flow-20261015-delivery-r4-20261015",
+        ),
+    )
+
+    def setUp(self) -> None:
+        self.config = {"github_bus": {"default_branch": "dev"}}
+        self.calls = []
+        self.failure = None
+        self.gh = self.enterContext(mock.patch.object(github_bus, "run_gh", side_effect=self.github))
+        self.enterContext(mock.patch.object(github_bus, "write_activity_log"))
+        self.metadata = self.enterContext(mock.patch.object(github_bus, "sync_optional_pr_metadata"))
+        self.board = self.enterContext(mock.patch.object(github_bus, "run_ai_status"))
+        self.configure_case(self.CASES[0])
+
+    def configure_case(self, case, cache="cold", draft=True) -> None:
+        task_id, self.number, sha, branch = case
+        self.task = {
+            "id": task_id, "title": "Original candidate", "status": "integrating",
+            "owner": "Codex", "reviewer": "Claude2", "mutates_canonical": True,
+            "candidate_sha": sha, "candidate_branch": branch,
+            "pr_url": f"https://github.com/{self.REPO}/pull/{self.number}",
+        }
+        self.bound = {
+            "number": self.number, "url": self.task["pr_url"],
+            "branch": branch, "head_sha": sha, "state": "bound",
+        }
+        self.observation = {
+            "url": self.task["pr_url"], "state": "OPEN", "isDraft": draft,
+            "headRefName": branch, "headRefOid": sha, "statusCheckRollup": [],
+        }
+        self.state = {"tasks": {}}
+        entry = github_bus.task_bus_entry(self.state, task_id)
+        if cache == "warm":
+            entry["review_pr"] = copy.deepcopy(self.bound)
+        elif cache == "stale":
+            entry["review_pr"] = {
+                "number": 1404, "url": f"https://github.com/{self.REPO}/pull/1404",
+                "branch": "codex/older-candidate", "head_sha": "b" * 40, "state": "open",
+            }
+            entry["last_review_hash"] = "preserved stale metadata"
+        self.calls.clear()
+
+    def github(self, args):
+        self.calls.append(args)
+        if args == self.view_argv():
+            if self.failure == "observe":
+                raise github_bus.GitHubBusOffline("observation unavailable")
+            return subprocess.CompletedProcess(["gh", *args], 0, json.dumps(self.observation), "")
+        if args == self.ready_argv():
+            if self.failure == "ready":
+                raise github_bus.GitHubBusError("ready failed")
+            self.observation["isDraft"] = False
+            return subprocess.CompletedProcess(["gh", *args], 0, "", "")
+        self.fail(f"Unexpected GitHub create/edit/search/alternate call: {args}")
+
+    def view_argv(self):
+        return [
+            "pr", "view", str(self.number), "--repo", self.REPO, "--json",
+            "url,state,isDraft,headRefName,headRefOid,mergeStateStatus,mergeCommit,statusCheckRollup",
+        ]
+
+    def ready_argv(self):
+        return ["pr", "ready", str(self.number), "--repo", self.REPO]
+
+    def upsert(self):
+        status = {"tasks": [self.task], "agents": [{"name": "Codex", "branch": "codex/stale"}]}
+        original = copy.deepcopy(status)
+        result = github_bus.upsert_review_pr(self.config, self.state, status, self.REPO, self.task)
+        self.assertEqual(status, original)
+        self.metadata.assert_not_called()
+        self.board.assert_not_called()
+        return result
+
+    def test_sealed_real_four_cases_observe_and_ready_bound_candidate(self) -> None:
+        # The two sealed identities, each with cold and actual identical bound cache.
+        for case in self.CASES:
+            for cache in ("cold", "warm"):
+                with self.subTest(task=case[0], cache=cache):
+                    self.configure_case(case, cache)
+                    self.assertTrue(self.upsert())
+                    self.assertEqual(self.calls, [self.view_argv(), self.ready_argv()])
+                    self.assertEqual(self.state["tasks"][case[0]]["review_pr"], self.bound)
+                    # A fresh observation on the next tick proves no redundant ready.
+                    self.assertFalse(self.upsert())
+                    self.assertEqual(self.calls, [self.view_argv(), self.ready_argv(), self.view_argv()])
+
+    def test_already_ready_is_observed_without_mutation_even_with_identical_cache(self) -> None:
+        for cache in ("cold", "warm"):
+            with self.subTest(cache=cache):
+                self.configure_case(self.CASES[0], cache, draft=False)
+                self.assertEqual(self.upsert(), cache == "cold")
+                self.assertFalse(self.upsert())
+                self.assertEqual(self.calls, [self.view_argv(), self.view_argv()])
+                self.assertEqual(self.state["tasks"][self.task["id"]]["review_pr"], self.bound)
+
+    def test_bound_handoff_wins_over_stale_cached_pr(self) -> None:
+        self.configure_case(self.CASES[0], "stale")
+        self.assertTrue(self.upsert())
+        self.assertEqual(self.calls, [self.view_argv(), self.ready_argv()])
+        entry = self.state["tasks"][self.task["id"]]
+        self.assertEqual(entry["review_pr"], self.bound)
+        self.assertEqual(entry["last_review_hash"], "preserved stale metadata")
+
+    def test_drift_closed_or_untrustworthy_observation_defers_and_preserves_cache(self) -> None:
+        overrides = (
+            {"headRefOid": "b" * 40}, {"headRefOid": ""},
+            {"headRefName": "codex/other"}, {"headRefName": ""},
+            {"state": "CLOSED"}, {"state": "MERGED"}, {"state": ""},
+            {"isDraft": "true"}, {"isDraft": None}, {"isDraft": 1},
+        )
+        for cache in ("cold", "warm", "stale"):
+            for override in overrides:
+                with self.subTest(cache=cache, override=override):
+                    self.configure_case(self.CASES[0], cache)
+                    self.observation.update(override)
+                    before = copy.deepcopy(self.state)
+                    self.assertFalse(self.upsert())
+                    self.assertEqual(self.calls, [self.view_argv()])
+                    self.assertEqual(self.state, before)
+
+    def test_missing_or_noncanonical_locked_candidate_never_falls_back_to_other_pr(self) -> None:
+        overrides = (
+            {"candidate_sha": None}, {"candidate_sha": ""},
+            {"candidate_sha": "not_applicable"}, {"candidate_sha": "abc123"},
+            {"candidate_sha": "z" * 40}, {"candidate_branch": None},
+            {"candidate_branch": ""}, {"candidate_branch": "not_applicable"},
+            {"mutates_canonical": False},
+        )
+        for cache in ("cold", "warm", "stale"):
+            for override in overrides:
+                with self.subTest(cache=cache, override=override):
+                    self.configure_case(self.CASES[0], cache)
+                    self.task.update(override)
+                    before = copy.deepcopy(self.state)
+                    self.assertFalse(self.upsert())
+                    self.assertEqual(self.calls, [])
+                    self.assertEqual(self.state, before)
+
+    def test_observation_and_ready_failures_preserve_metadata_and_retry_normally(self) -> None:
+        for cache in ("cold", "warm", "stale"):
+            for failure in ("observe", "ready", "bad_payload"):
+                with self.subTest(cache=cache, failure=failure):
+                    self.configure_case(self.CASES[0], cache)
+                    self.failure = failure
+                    if failure == "bad_payload":
+                        self.observation = []
+                    before = copy.deepcopy(self.state)
+                    original_task = copy.deepcopy(self.task)
+                    with self.assertRaises(github_bus.GitHubBusError):
+                        self.upsert()
+                    expected = [self.view_argv()]
+                    if failure == "ready":
+                        expected.append(self.ready_argv())
+                    self.assertEqual(self.calls, expected)
+                    self.assertEqual(self.state, before)
+                    self.assertEqual(self.task, original_task)
+                    self.board.assert_not_called()
+                    self.metadata.assert_not_called()
+                    # Failure is not cached as success; ordinary next call retries.
+                    self.failure = None
+                    self.observation = {
+                        "state": "OPEN", "isDraft": True,
+                        "headRefOid": self.task["candidate_sha"],
+                        "headRefName": self.task["candidate_branch"],
+                    }
+                    self.assertTrue(self.upsert())
+                    self.assertEqual(self.calls, expected + [self.view_argv(), self.ready_argv()])
 
 
 class GitHubBusCommandTests(unittest.TestCase):

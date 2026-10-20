@@ -161,6 +161,9 @@ function harness(routed = true) {
   const publishTaskAssigned = vi.fn();
   const service = new OwnedMobilityService(
     {
+      prepareMatchingSuppressions: () => undefined,
+      assertCurrentMatchingSuppressionClear: () => undefined,
+
       getVehicleDispatchability: () => true,
       getDriverAvailability: () => true,
     } as never,
@@ -332,7 +335,7 @@ describe("routed referral assignment and cancellation", () => {
       }),
     );
     expect(h.outboxes.get("delayed-eta")?.assignmentVersion).toBe(1);
-    const delivery = transportHarness();
+    const delivery = await transportHarness();
     Object.assign(delivery.row, structuredClone(eta));
     delivery.route.orderId = eta.orderId;
     delivery.route.passengerSubjectRef = eta.passengerSubjectRef;
@@ -390,7 +393,7 @@ describe("referral transport relevance", () => {
   ] as const)(
     "after cancellation, %s uses the existing obsolete exception",
     async (eventType) => {
-      const h = transportHarness();
+      const h = await transportHarness();
       h.row.eventType = eventType;
       h.row.payload = { eventSequence: 1 };
       h.relevance.status = "cancelled";
@@ -434,7 +437,7 @@ describe("referral transport relevance", () => {
     "assignment_replaced",
     "eta_changed",
   ] as const)("supersedes old %s after reassignment", async (eventType) => {
-    const h = transportHarness();
+    const h = await transportHarness();
     h.row.eventType = eventType;
     h.relevance.assignmentVersion = 2;
     const result = await h.service.deliverPassengerNotification(h.row);

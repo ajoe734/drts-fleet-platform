@@ -9,6 +9,7 @@ import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibility.module";
 import { FleetPartnerController } from "./fleet-partner.controller";
+import { FleetStatementDecisionRepository } from "./fleet-statement-decision.repository";
 import { FleetPartnerRepository } from "./fleet-partner.repository";
 import { FleetPartnerService } from "./fleet-partner.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
@@ -38,6 +39,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
     FleetPartnerService,
     FleetPartnerCaseService,
     FleetPartnerRepository,
+    FleetStatementDecisionRepository,
     SupplySubmissionRepository,
     SupplySubmissionService,
     SupplyReviewService,

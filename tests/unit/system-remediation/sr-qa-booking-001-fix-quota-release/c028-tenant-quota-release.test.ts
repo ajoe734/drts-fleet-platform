@@ -15,15 +15,21 @@ import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-pa
 // 2. 取消後可再次建單至原本額度上限（回歸驗證 SR-QA-BOOKING-001 的 gap-1/gap-2/gap-3 三個現況重現測試轉為正向通過）。
 // 3. 支援 cost center 階層配額釋放、冪等性，且不破壞既有 reserve/consume 行為。
 
-function createQuotaHarness(tenantId: string, options?: {
-  bookingCountLimit?: number;
-  amountMinorLimit?: number;
-}) {
+function createQuotaHarness(
+  tenantId: string,
+  options?: {
+    bookingCountLimit?: number;
+    amountMinorLimit?: number;
+  },
+) {
   const auditNotificationService = new AuditNotificationService();
   const tenantPartnerService = new TenantPartnerService(
     auditNotificationService as never,
   );
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(() => [
       {
         driverId: "driver-quota-001",
@@ -85,7 +91,8 @@ async function createBooking(
   return service.createTenantBooking(
     {
       businessDispatchSubtype: "enterprise_dispatch",
-      reservationWindowStart: options?.reservationWindowStart ?? RESERVATION_WINDOW_START,
+      reservationWindowStart:
+        options?.reservationWindowStart ?? RESERVATION_WINDOW_START,
       reservationWindowEnd: "2026-08-01T15:00:00.000Z",
       pickup: { address: "Pickup" },
       dropoff: { address: "Dropoff" },
@@ -147,7 +154,9 @@ describe("SR-QA-BOOKING-001-FIX-QUOTA-RELEASE: 租戶取消訂單配額釋放驗
       bookingId: created.bookingId,
     });
 
-    const releaseEntries = ledger.filter((entry) => entry.entryType === "release");
+    const releaseEntries = ledger.filter(
+      (entry) => entry.entryType === "release",
+    );
     expect(releaseEntries.length).toBeGreaterThanOrEqual(1);
 
     const bookingCountRelease = releaseEntries.find(
@@ -198,8 +207,12 @@ describe("SR-QA-BOOKING-001-FIX-QUOTA-RELEASE: 租戶取消訂單配額釋放驗
     });
 
     // 建立 2 筆訂單達上限
-    const first = await createBooking(service, { reservationWindowStart: "2026-08-01T14:00:00.000Z" });
-    const second = await createBooking(service, { reservationWindowStart: "2026-08-01T15:00:00.000Z" });
+    const first = await createBooking(service, {
+      reservationWindowStart: "2026-08-01T14:00:00.000Z",
+    });
+    const second = await createBooking(service, {
+      reservationWindowStart: "2026-08-01T15:00:00.000Z",
+    });
     expect(first.bookingId).toBeDefined();
     expect(second.bookingId).toBeDefined();
 
@@ -223,7 +236,9 @@ describe("SR-QA-BOOKING-001-FIX-QUOTA-RELEASE: 租戶取消訂單配額釋放驗
     expect(usageAfterCancel.pendingReservedBookingCount).toBe(1); // second 仍保留
 
     // 再次建單（第三筆），此時應成功建立，不再被 hard_block 拒絕
-    const third = await createBooking(service, { reservationWindowStart: "2026-08-01T16:00:00.000Z" });
+    const third = await createBooking(service, {
+      reservationWindowStart: "2026-08-01T16:00:00.000Z",
+    });
     expect(third.bookingId).toBeDefined();
     expect(third.status).toBe("created");
 
@@ -242,10 +257,9 @@ describe("SR-QA-BOOKING-001-FIX-QUOTA-RELEASE: 租戶取消訂單配額釋放驗
     const { service, tenantPartnerService } = createQuotaHarness(TENANT_ID);
     const created = await createBooking(service);
 
-    const cancelledOrder = await service.cancelOwnedOrder(
-      created.orderId,
-      { reason: "運營手動取消" },
-    );
+    const cancelledOrder = await service.cancelOwnedOrder(created.orderId, {
+      reason: "運營手動取消",
+    });
     expect(cancelledOrder.status).toBe("cancelled");
 
     const ledger = tenantPartnerService.listTenantQuotaLedger(TENANT_ID, {
@@ -266,7 +280,7 @@ describe("SR-QA-BOOKING-001-FIX-QUOTA-RELEASE: 租戶取消訂單配額釋放驗
     const { service, tenantPartnerService } = createQuotaHarness(TENANT_ID);
 
     // 為成本中心 CC-FIN 配置獨立 quota
-    tenantPartnerService.upsertCostCenter(TENANT_ID, {
+    await tenantPartnerService.upsertCostCenter(TENANT_ID, {
       code: "CC-FIN",
       name: "Finance Department",
     });
@@ -284,18 +298,28 @@ describe("SR-QA-BOOKING-001-FIX-QUOTA-RELEASE: 租戶取消訂單配額釋放驗
     const created = await createBooking(service, { costCenter: "CC-FIN" });
 
     // 驗證預留包含成本中心分錄
-    const initialLedger = tenantPartnerService.listTenantQuotaLedger(TENANT_ID, {
-      bookingId: created.bookingId,
-    });
-    expect(initialLedger.some((e) => e.costCenterCode === "CC-FIN" && e.entryType === "reserve")).toBe(true);
+    const initialLedger = tenantPartnerService.listTenantQuotaLedger(
+      TENANT_ID,
+      {
+        bookingId: created.bookingId,
+      },
+    );
+    expect(
+      initialLedger.some(
+        (e) => e.costCenterCode === "CC-FIN" && e.entryType === "reserve",
+      ),
+    ).toBe(true);
 
     await service.cancelTenantBooking(TENANT_ID, created.bookingId, {
       reason: "取消成本中心訂單",
     });
 
-    const cancelledLedger = tenantPartnerService.listTenantQuotaLedger(TENANT_ID, {
-      bookingId: created.bookingId,
-    });
+    const cancelledLedger = tenantPartnerService.listTenantQuotaLedger(
+      TENANT_ID,
+      {
+        bookingId: created.bookingId,
+      },
+    );
     const releaseCostCenterCount = cancelledLedger.find(
       (e) =>
         e.costCenterCode === "CC-FIN" &&

@@ -32,8 +32,10 @@ import type { ConsumerNotificationOutboxRecord } from "./phase1-p5-s3-multi-taxi
  * than redeclaring the union, so this module cannot silently drift from the
  * outbox contract it must not rename.
  */
-export type PartnerPassengerEventType =
-  ConsumerNotificationOutboxRecord["eventType"];
+export type PartnerPassengerEventType = Exclude<
+  ConsumerNotificationOutboxRecord["eventType"],
+  "payment_recovery_required"
+>;
 
 export const PARTNER_NOTIFICATION_SCHEMA_VERSION = "1.0" as const;
 export type PartnerNotificationSchemaVersion =

@@ -107,7 +107,22 @@ function transport() {
         const descriptor = JSON.parse(
           payload.subarray(descriptorStart, descriptorEnd).toString("utf8"),
         );
-        const dataStart = payload.indexOf("\r\n\r\n", descriptorEnd + 2) + 4;
+        const mediaHeaderStart = descriptorEnd + `\r\n--${boundary}\r\n`.length;
+        const mediaHeaderEnd = payload.indexOf("\r\n\r\n", mediaHeaderStart);
+        const mediaHeaders = payload
+          .subarray(mediaHeaderStart, mediaHeaderEnd)
+          .toString("utf8");
+        const mediaType = /^Content-Type: ([^\r\n]+)$/im.exec(
+          mediaHeaders,
+        )?.[1];
+        // The genuine GCS boundary returns400 for conflicting media/metadata
+        // MIME. Do not let the external transport mock hide this contract.
+        if (mediaType !== descriptor.contentType)
+          return json(
+            { error: { code: 400, errors: [{ reason: "invalid" }] } },
+            400,
+          );
+        const dataStart = mediaHeaderEnd + 4;
         const dataEnd = payload.lastIndexOf(`\r\n--${boundary}--\r\n`);
         const bytes = payload.subarray(dataStart, dataEnd);
         expect(descriptor.md5Hash).toBe(md5(bytes));
@@ -172,6 +187,38 @@ afterEach(() => {
 });
 
 describe("native GCS shared artifact storage", () => {
+  it.each([
+    ["fleet-upload-intent", "application/json"],
+    ["fleet-upload-scan", "application/json"],
+    ["fleet-case-attachments", "application/json"],
+    ["placard", "application/pdf"],
+    ["report", "text/csv; charset=utf-8"],
+    ["fleet-upload-content", "image/png"],
+    ["fleet-upload-content", "application/octet-stream"],
+  ] as const)(
+    "matches multipart media MIME for %s / %s",
+    async (kind, mimeType) => {
+      const io = transport();
+      const store = createDocumentArtifactStore(documentEnv);
+      const input = {
+        kind,
+        subjectId: "mime-boundary",
+        mimeType,
+        bytes: Buffer.from("harmless MIME boundary payload"),
+      };
+      const created = await store.putIfAbsent(input);
+      expect(created.created).toBe(true);
+      const readback = await createDocumentArtifactStore(documentEnv).get(
+        kind,
+        input.subjectId,
+      );
+      expect(readback?.bytes).toEqual(input.bytes);
+      expect(readback?.record.mimeType).toBe(mimeType);
+      expect(readback?.record.sha256).toBe(sha(input.bytes));
+      expect(io.live.size).toBe(1);
+    },
+  );
+
   it("reads exact bytes across configured sibling/restarted instances and preserves uint64 generations", async () => {
     const io = transport();
     const a = createDocumentArtifactStore(documentEnv);

@@ -96,7 +96,7 @@ describe("SR-QA-SUPPLY-001 — C063 總覽 KPI 與司機／車輛清單一致", 
     expect(dashboard.driverCount).toBe(String(driversView.rows.length));
   });
 
-  it("REGRESSION RISK (matches the 9/6 audit shape): when the dashboard aggregate endpoint is stale/wrong (reports 128) while the authoritative driver list endpoint correctly returns only 2 real drivers, loadDashboard's KPI currently trusts the aggregate over the list it just fetched — reproducing the exact 128 vs 2 mismatch", async () => {
+  it("uses the complete authoritative roster when a stale aggregate reports 128 instead of 2", async () => {
     const realDrivers = [driverRecord("d1"), driverRecord("d2")];
     mockClient.listFleetPortalDrivers.mockResolvedValue(realDrivers);
     mockClient.listFleetPortalDashboard.mockResolvedValue(
@@ -111,20 +111,12 @@ describe("SR-QA-SUPPLY-001 — C063 總覽 KPI 與司機／車輛清單一致", 
     expect(driversView.rows).toHaveLength(2);
     expect(driversView.source).toBe("live");
 
-    // Documented current behavior: fleet-portal-data.server.ts loadDashboard()
-    // (see the `driversError === null` branch around the `driverCount =`
-    // assignment) prefers `dashboardRecord.activeDriverCount` over the
-    // driversView.rows.length it already computed from the same live call in
-    // the same function. If the two backend endpoints (aggregate vs. list)
-    // ever disagree, the KPI card and the driver list page will disagree too
-    // — the exact defect shape from the 9/6 audit ("128／96 與真清單 2／1 不一致").
-    // This assertion intentionally documents the CURRENT (still-risky)
-    // behavior rather than asserting the desired fix, so a future regression
-    // fix will make this specific expectation fail and need updating —
-    // recorded as a residual gap in the evidence doc's finding, not silently
-    // passed off as "fixed".
-    expect(dashboard.driverCount).toBe("128");
-    expect(dashboard.driverCount).not.toBe(String(driversView.rows.length));
+    expect(dashboard.driverCount).toBe("2");
+    expect(dashboard.driverCount).toBe(String(driversView.rows.length));
+    expect(dashboard.driverStatusSummary).toEqual({
+      online: "2",
+      offline: "0",
+    });
   });
 
   it("when the driver list endpoint fails but the aggregate is reachable, the KPI falls back to the aggregate and does not crash (dashboardRecord fallback)", async () => {

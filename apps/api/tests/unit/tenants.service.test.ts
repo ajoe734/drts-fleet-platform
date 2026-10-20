@@ -3,9 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TenantsService } from "../../src/modules/platform-admin/tenants.service";
 import { ApiRequestError } from "../../src/common/api-envelope";
 
-function expectApiError(fn: () => unknown, errorCode: string) {
+async function expectApiError(
+  fn: () => Promise<unknown> | unknown,
+  errorCode: string,
+) {
   try {
-    fn();
+    await fn();
     throw new Error(`Expected ApiRequestError with code ${errorCode}`);
   } catch (e) {
     expect(e).toBeInstanceOf(ApiRequestError);
@@ -53,10 +56,10 @@ afterEach(() => {
 });
 
 describe("TenantsService", () => {
-  it("provisions bootstrap defaults and rollout state when creating a tenant", () => {
+  it("provisions bootstrap defaults and rollout state when creating a tenant", async () => {
     const { service, platformAdminRepository } = createService();
 
-    const created = service.create({
+    const created = await service.create({
       name: "Acme Mobility",
       code: "acme_mobility",
       integrationMode: "api_key_and_webhook",
@@ -93,14 +96,14 @@ describe("TenantsService", () => {
     });
   });
 
-  it("updates onboarding defaults without losing existing settings", () => {
+  it("updates onboarding defaults without losing existing settings", async () => {
     const { service } = createService();
-    const created = service.create({
+    const created = await service.create({
       name: "Beta Dispatch",
       code: "beta_dispatch",
     });
 
-    const updated = service.updateOnboarding(created.id, {
+    const updated = await service.updateOnboarding(created.id, {
       billingBaseline: {
         invoiceTitle: "Beta Dispatch Ltd.",
         contactName: "Beta Finance",
@@ -139,30 +142,30 @@ describe("TenantsService", () => {
     });
   });
 
-  it("promotes rollout stages and approves prior gates", () => {
+  it("promotes rollout stages and approves prior gates", async () => {
     const { service } = createService();
-    const created = service.create({
+    const created = await service.create({
       name: "Gamma Fleet",
       code: "gamma_fleet",
     });
 
     // approve sandbox gate before promoting to pilot
-    service.updateOnboarding(created.id, {
+    await service.updateOnboarding(created.id, {
       rollout: { sandboxStatus: "approved" },
     });
 
-    const pilot = service.setRolloutStage(created.id, {
+    const pilot = await service.setRolloutStage(created.id, {
       stage: "pilot",
     });
 
     // set production prerequisites before promoting
     for (const role of created.bootstrapDefaults.roleDefaults) {
       if (role.required) {
-        service.inviteRole(created.id, { roleCode: role.roleCode });
-        service.acknowledgeRole(created.id, { roleCode: role.roleCode });
+        await service.inviteRole(created.id, { roleCode: role.roleCode });
+        await service.acknowledgeRole(created.id, { roleCode: role.roleCode });
       }
     }
-    service.updateOnboarding(created.id, {
+    await service.updateOnboarding(created.id, {
       rollout: {
         cutoverOwner: "Launch Lead",
         rollbackOwner: "Ops Lead",
@@ -170,7 +173,7 @@ describe("TenantsService", () => {
       },
     });
 
-    const production = service.setRolloutStage(created.id, {
+    const production = await service.setRolloutStage(created.id, {
       stage: "production",
       notes: "Production cutover completed.",
     });
@@ -190,23 +193,29 @@ describe("TenantsService", () => {
     expect(production.rollout.lastPromotedAt).toEqual(expect.any(String));
   });
 
-  it("blocks promotion to pilot when sandbox is not approved", () => {
+  it("blocks promotion to pilot when sandbox is not approved", async () => {
     const { service } = createService();
-    const created = service.create({ name: "Sandbox Fail", code: "sbx_fail" });
+    const created = await service.create({
+      name: "Sandbox Fail",
+      code: "sbx_fail",
+    });
 
     // sandbox starts in "ready" state, not "approved"
-    expectApiError(
+    await expectApiError(
       () => service.setRolloutStage(created.id, { stage: "pilot" }),
       "TENANT_PROMOTION_GATE_BLOCKED",
     );
   });
 
-  it("blocks promotion to production when required roles are not acknowledged", () => {
+  it("blocks promotion to production when required roles are not acknowledged", async () => {
     const { service } = createService();
-    const created = service.create({ name: "Role Gate", code: "role_gate" });
+    const created = await service.create({
+      name: "Role Gate",
+      code: "role_gate",
+    });
 
     // prepare rollout prerequisites except role acknowledgment
-    service.updateOnboarding(created.id, {
+    await service.updateOnboarding(created.id, {
       rollout: {
         sandboxStatus: "approved",
         cutoverOwner: "Owner",
@@ -215,19 +224,22 @@ describe("TenantsService", () => {
       },
     });
     // promote to pilot first (sets pilot approved)
-    service.setRolloutStage(created.id, { stage: "pilot" });
+    await service.setRolloutStage(created.id, { stage: "pilot" });
 
-    expectApiError(
+    await expectApiError(
       () => service.setRolloutStage(created.id, { stage: "production" }),
       "TENANT_PROMOTION_GATE_BLOCKED",
     );
   });
 
-  it("blocks promotion to production when rollback is not prepared", () => {
+  it("blocks promotion to production when rollback is not prepared", async () => {
     const { service } = createService();
-    const created = service.create({ name: "Rollback Gate", code: "rb_gate" });
+    const created = await service.create({
+      name: "Rollback Gate",
+      code: "rb_gate",
+    });
 
-    service.updateOnboarding(created.id, {
+    await service.updateOnboarding(created.id, {
       rollout: {
         sandboxStatus: "approved",
         cutoverOwner: "Owner",
@@ -235,29 +247,32 @@ describe("TenantsService", () => {
         rollbackPrepared: false,
       },
     });
-    service.setRolloutStage(created.id, { stage: "pilot" });
+    await service.setRolloutStage(created.id, { stage: "pilot" });
 
     // acknowledge required roles
     for (const role of created.bootstrapDefaults.roleDefaults) {
       if (role.required) {
-        service.inviteRole(created.id, { roleCode: role.roleCode });
-        service.acknowledgeRole(created.id, { roleCode: role.roleCode });
+        await service.inviteRole(created.id, { roleCode: role.roleCode });
+        await service.acknowledgeRole(created.id, { roleCode: role.roleCode });
       }
     }
 
-    expectApiError(
+    await expectApiError(
       () => service.setRolloutStage(created.id, { stage: "production" }),
       "TENANT_PROMOTION_GATE_BLOCKED",
     );
   });
 
-  it("blocks promotion when tenant is in rollback_hold", () => {
+  it("blocks promotion when tenant is in rollback_hold", async () => {
     const { service } = createService();
-    const created = service.create({ name: "Hold Test", code: "hold_test" });
+    const created = await service.create({
+      name: "Hold Test",
+      code: "hold_test",
+    });
 
-    service.setRollbackHold(created.id);
+    await service.setRollbackHold(created.id);
 
-    expectApiError(
+    await expectApiError(
       () => service.setRolloutStage(created.id, { stage: "pilot" }),
       "TENANT_IN_ROLLBACK_HOLD",
     );
@@ -381,14 +396,14 @@ describe("TenantsService", () => {
     );
   });
 
-  it("invites a role and records invitedAt timestamp", () => {
+  it("invites a role and records invitedAt timestamp", async () => {
     const { service, auditNotificationService } = createService();
-    const created = service.create({
+    const created = await service.create({
       name: "Invite Test",
       code: "invite_test",
     });
 
-    const updated = service.inviteRole(created.id, {
+    const updated = await service.inviteRole(created.id, {
       roleCode: "tenant_admin",
       inviteeEmail: "admin@invite.example",
     });
@@ -403,22 +418,28 @@ describe("TenantsService", () => {
     );
   });
 
-  it("rejects invite for unknown role code", () => {
+  it("rejects invite for unknown role code", async () => {
     const { service } = createService();
-    const created = service.create({ name: "Bad Role", code: "bad_role" });
+    const created = await service.create({
+      name: "Bad Role",
+      code: "bad_role",
+    });
 
-    expectApiError(
+    await expectApiError(
       () => service.inviteRole(created.id, { roleCode: "nonexistent_role" }),
       "TENANT_ROLE_NOT_FOUND",
     );
   });
 
-  it("acknowledges a previously invited role", () => {
+  it("acknowledges a previously invited role", async () => {
     const { service, auditNotificationService } = createService();
-    const created = service.create({ name: "Ack Test", code: "ack_test" });
+    const created = await service.create({
+      name: "Ack Test",
+      code: "ack_test",
+    });
 
-    service.inviteRole(created.id, { roleCode: "tenant_admin" });
-    const updated = service.acknowledgeRole(created.id, {
+    await service.inviteRole(created.id, { roleCode: "tenant_admin" });
+    const updated = await service.acknowledgeRole(created.id, {
       roleCode: "tenant_admin",
     });
 
@@ -431,21 +452,27 @@ describe("TenantsService", () => {
     );
   });
 
-  it("rejects acknowledgment when role has not been invited", () => {
+  it("rejects acknowledgment when role has not been invited", async () => {
     const { service } = createService();
-    const created = service.create({ name: "No Invite", code: "no_invite" });
+    const created = await service.create({
+      name: "No Invite",
+      code: "no_invite",
+    });
 
-    expectApiError(
+    await expectApiError(
       () => service.acknowledgeRole(created.id, { roleCode: "tenant_admin" }),
       "TENANT_ROLE_NOT_INVITED",
     );
   });
 
-  it("sets rollback hold and blocks production status", () => {
+  it("sets rollback hold and blocks production status", async () => {
     const { service, auditNotificationService } = createService();
-    const created = service.create({ name: "Hold Corp", code: "hold_corp" });
+    const created = await service.create({
+      name: "Hold Corp",
+      code: "hold_corp",
+    });
 
-    const held = service.setRollbackHold(created.id);
+    const held = await service.setRollbackHold(created.id);
 
     expect(held.status).toBe("rollback_hold");
     expect(held.rollout.productionStatus).toBe("blocked");
@@ -454,31 +481,37 @@ describe("TenantsService", () => {
     );
   });
 
-  it("suspends and reactivates a tenant", () => {
+  it("suspends and reactivates a tenant", async () => {
     const { service } = createService();
-    const created = service.create({ name: "Toggle", code: "toggle_co" });
+    const created = await service.create({
+      name: "Toggle",
+      code: "toggle_co",
+    });
 
-    const paused = service.setStatus(created.id, "paused");
+    const paused = await service.setStatus(created.id, "paused");
     expect(paused.status).toBe("paused");
 
-    const active = service.setStatus(created.id, "active");
+    const active = await service.setStatus(created.id, "active");
     expect(active.status).toBe("active");
   });
 
-  it("allows production promotion when all gates are satisfied", () => {
+  it("allows production promotion when all gates are satisfied", async () => {
     const { service } = createService();
-    const created = service.create({ name: "Full Gate", code: "full_gate" });
+    const created = await service.create({
+      name: "Full Gate",
+      code: "full_gate",
+    });
 
     // invite and acknowledge all required roles
     for (const role of created.bootstrapDefaults.roleDefaults) {
       if (role.required) {
-        service.inviteRole(created.id, { roleCode: role.roleCode });
-        service.acknowledgeRole(created.id, { roleCode: role.roleCode });
+        await service.inviteRole(created.id, { roleCode: role.roleCode });
+        await service.acknowledgeRole(created.id, { roleCode: role.roleCode });
       }
     }
 
     // set rollout prerequisites
-    service.updateOnboarding(created.id, {
+    await service.updateOnboarding(created.id, {
       rollout: {
         sandboxStatus: "approved",
         cutoverOwner: "Launch Lead",
@@ -488,8 +521,8 @@ describe("TenantsService", () => {
     });
 
     // promote through stages
-    service.setRolloutStage(created.id, { stage: "pilot" });
-    const production = service.setRolloutStage(created.id, {
+    await service.setRolloutStage(created.id, { stage: "pilot" });
+    const production = await service.setRolloutStage(created.id, {
       stage: "production",
     });
 

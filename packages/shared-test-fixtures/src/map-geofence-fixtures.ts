@@ -265,14 +265,7 @@ const MAP_GEOFENCE_FIXTURE_DEFINITIONS: readonly MapGeofenceFixtureDefinition[] 
       ],
       addressText: "桃園市大園區航站南路9號",
       reverseProbeLocation: { lat: 25.0798, lng: 121.2341 },
-      keywords: [
-        "taoyuan",
-        "airport",
-        "terminal",
-        "桃園",
-        "機場",
-        "航站",
-      ],
+      keywords: ["taoyuan", "airport", "terminal", "桃園", "機場", "航站"],
       candidate: {
         candidateId: "mock-taoyuan-airport-t1",
         provider: PROVIDER_ID,
@@ -602,12 +595,9 @@ export function searchMapGeofenceCandidates(
 ): GeoSearchResponse {
   const query = command.q.trim();
   if (!query) {
-    throw validationError(
-      400,
-      "VALIDATION_ERROR",
-      "q is required.",
-      { field: "q" },
-    );
+    throw validationError(400, "VALIDATION_ERROR", "q is required.", {
+      field: "q",
+    });
   }
   if (isMapGeofenceProviderUnavailableValue(query)) {
     throw providerUnavailableError();
@@ -616,11 +606,7 @@ export function searchMapGeofenceCandidates(
   const normalizedQuery = normalizeText(query);
   const candidates = CANDIDATE_FIXTURES.map((fixture) => ({
     fixture,
-    score: scoreFixtureSearch(
-      fixture,
-      normalizedQuery,
-      command.near ?? null,
-    ),
+    score: scoreFixtureSearch(fixture, normalizedQuery, command.near ?? null),
   }))
     .filter((candidate) => candidate.score > 0)
     .sort((left, right) => right.score - left.score)
@@ -651,12 +637,9 @@ export function resolveMapGeofenceAddress(
     throw providerUnavailableError();
   }
   if (!command.addressText.trim()) {
-    throw validationError(
-      400,
-      "VALIDATION_ERROR",
-      "addressText is required.",
-      { field: "addressText" },
-    );
+    throw validationError(400, "VALIDATION_ERROR", "addressText is required.", {
+      field: "addressText",
+    });
   }
   if (command.selectedPoint) {
     return {
@@ -854,61 +837,61 @@ export function buildMapGeofenceServiceAreaDefinitionsEnvelope(
 
 export function buildMapGeofenceServiceAreaGeoJsonResponse(): ServiceAreaGeoJsonResponse {
   const serviceAreaFeatures =
-    MAP_GEOFENCE_SERVICE_AREA_SEEDS.map<ServiceAreaGeoJsonFeature>((record) => ({
-      type: "Feature",
-      id: record.serviceAreaId,
-      geometry: geometryToGeoJson(record.geometry),
-      properties: {
-        recordKind: "service_area",
-        serviceAreaId: record.serviceAreaId,
-        areaCode: record.areaCode,
-        displayName: record.displayName,
-        status: record.status,
-        sourceGeometry: cloneValue(record.geometry),
-        serviceProductTypes: [...record.serviceProductTypes],
-        effectiveFrom: record.effectiveFrom,
-        effectiveUntil: record.effectiveUntil,
-        version: record.version,
-        geometryVersionRef: geometryVersionRef(
-          "service_area",
-          record.areaCode,
-          record.version,
-        ),
-        metadata: cloneValue(record.metadata ?? {}),
-      },
-    }));
-
-  const stopPolicyFeatures =
-    MAP_GEOFENCE_STOP_POLICY_SEEDS.map<ServiceAreaGeoJsonFeature>(
+    MAP_GEOFENCE_SERVICE_AREA_SEEDS.map<ServiceAreaGeoJsonFeature>(
       (record) => ({
         type: "Feature",
-        id: record.stopPolicyId,
+        id: record.serviceAreaId,
         geometry: geometryToGeoJson(record.geometry),
         properties: {
-          recordKind: "stop_policy",
-          stopPolicyId: record.stopPolicyId,
-          policyCode: record.policyCode,
+          recordKind: "service_area",
+          serviceAreaId: record.serviceAreaId,
+          areaCode: record.areaCode,
           displayName: record.displayName,
           status: record.status,
-          direction: record.direction,
-          effect: record.effect,
           sourceGeometry: cloneValue(record.geometry),
-          serviceAreaCodes: [...record.serviceAreaCodes],
           serviceProductTypes: [...record.serviceProductTypes],
-          reasonCode: record.reasonCode,
-          reasonMessage: record.reasonMessage,
           effectiveFrom: record.effectiveFrom,
           effectiveUntil: record.effectiveUntil,
           version: record.version,
           geometryVersionRef: geometryVersionRef(
-            "stop_policy",
-            record.policyCode,
+            "service_area",
+            record.areaCode,
             record.version,
           ),
           metadata: cloneValue(record.metadata ?? {}),
         },
       }),
     );
+
+  const stopPolicyFeatures =
+    MAP_GEOFENCE_STOP_POLICY_SEEDS.map<ServiceAreaGeoJsonFeature>((record) => ({
+      type: "Feature",
+      id: record.stopPolicyId,
+      geometry: geometryToGeoJson(record.geometry),
+      properties: {
+        recordKind: "stop_policy",
+        stopPolicyId: record.stopPolicyId,
+        policyCode: record.policyCode,
+        displayName: record.displayName,
+        status: record.status,
+        direction: record.direction,
+        effect: record.effect,
+        sourceGeometry: cloneValue(record.geometry),
+        serviceAreaCodes: [...record.serviceAreaCodes],
+        serviceProductTypes: [...record.serviceProductTypes],
+        reasonCode: record.reasonCode,
+        reasonMessage: record.reasonMessage,
+        effectiveFrom: record.effectiveFrom,
+        effectiveUntil: record.effectiveUntil,
+        version: record.version,
+        geometryVersionRef: geometryVersionRef(
+          "stop_policy",
+          record.policyCode,
+          record.version,
+        ),
+        metadata: cloneValue(record.metadata ?? {}),
+      },
+    }));
 
   return {
     type: "FeatureCollection",
@@ -917,9 +900,7 @@ export function buildMapGeofenceServiceAreaGeoJsonResponse(): ServiceAreaGeoJson
   };
 }
 
-export function buildMapGeofenceServiceAreaGeoJsonEnvelope(
-  requestId?: string,
-) {
+export function buildMapGeofenceServiceAreaGeoJsonEnvelope(requestId?: string) {
   return buildSuccessEnvelope(
     buildMapGeofenceServiceAreaGeoJsonResponse(),
     requestId ?? requestIdFor("service-area-geojson"),
@@ -944,7 +925,9 @@ export function buildMapGeofenceErrorEnvelope(
   };
 }
 
-function cloneFixture(definition: MapGeofenceFixtureDefinition): MapGeofenceFixture {
+function cloneFixture(
+  definition: MapGeofenceFixtureDefinition,
+): MapGeofenceFixture {
   return cloneValue({
     key: definition.key,
     state: definition.state,
@@ -1197,12 +1180,9 @@ function nearestFixture(point: GeoPoint) {
 
 function normalizePoint(point: GeoPoint | null | undefined, field: string) {
   if (!point || typeof point !== "object") {
-    throw validationError(
-      400,
-      "VALIDATION_ERROR",
-      `${field} is required.`,
-      { field },
-    );
+    throw validationError(400, "VALIDATION_ERROR", `${field} is required.`, {
+      field,
+    });
   }
   const lat = Number(point.lat);
   const lng = Number(point.lng);
@@ -1355,20 +1335,28 @@ function geometryContainsPoint(geometry: ServiceAreaGeometry, point: GeoPoint) {
   if (geometry.type === "circle") {
     return distanceMeters(geometry.center, point) <= geometry.radiusMeters;
   }
-  return polygonContainsPoint(geometry.coordinates, point);
+  if (!polygonRingContainsPoint(geometry.coordinates, point)) {
+    return false;
+  }
+  for (const hole of geometry.holes ?? []) {
+    if (polygonRingContainsPointStrictlyInside(hole, point)) {
+      return false;
+    }
+  }
+  return true;
 }
 
-function polygonContainsPoint(points: GeoPoint[], point: GeoPoint) {
+function polygonRingContainsPoint(points: GeoPoint[], point: GeoPoint) {
   if (points.length < 3) {
     return false;
+  }
+  if (polygonRingBoundaryContainsPoint(points, point)) {
+    return true;
   }
   let inside = false;
   for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
     const current = points[i]!;
     const previous = points[j]!;
-    if (pointOnSegment(point, previous, current)) {
-      return true;
-    }
     const intersects =
       current.lng > point.lng !== previous.lng > point.lng &&
       point.lat <
@@ -1380,6 +1368,28 @@ function polygonContainsPoint(points: GeoPoint[], point: GeoPoint) {
     }
   }
   return inside;
+}
+
+function polygonRingContainsPointStrictlyInside(
+  points: GeoPoint[],
+  point: GeoPoint,
+) {
+  if (points.length < 3) {
+    return false;
+  }
+  if (polygonRingBoundaryContainsPoint(points, point)) {
+    return false;
+  }
+  return polygonRingContainsPoint(points, point);
+}
+
+function polygonRingBoundaryContainsPoint(points: GeoPoint[], point: GeoPoint) {
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    if (pointOnSegment(point, points[j]!, points[i]!)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function pointOnSegment(point: GeoPoint, start: GeoPoint, end: GeoPoint) {
@@ -1421,7 +1431,10 @@ function geometryToGeoJson(geometry: ServiceAreaGeometry) {
   if (geometry.type === "polygon") {
     return {
       type: "Polygon" as const,
-      coordinates: [closeGeoJsonRing(geometry.coordinates)],
+      coordinates: [
+        closeGeoJsonRing(geometry.coordinates, "ccw"),
+        ...(geometry.holes ?? []).map((hole) => closeGeoJsonRing(hole, "cw")),
+      ],
     };
   }
   return {
@@ -1430,14 +1443,34 @@ function geometryToGeoJson(geometry: ServiceAreaGeometry) {
   };
 }
 
-function closeGeoJsonRing(points: GeoPoint[]) {
-  const ring = points.map((point) => [point.lng, point.lat]);
+function closeGeoJsonRing(
+  points: GeoPoint[],
+  winding: "ccw" | "cw" = "ccw",
+): [number, number][] {
+  const ring: [number, number][] = points.map((point) => [
+    point.lng,
+    point.lat,
+  ]);
   const first = ring[0];
   const last = ring[ring.length - 1];
   if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
-    ring.push([...first]);
+    ring.push([first[0], first[1]]);
+  }
+  const area = signedRingArea(points);
+  if ((winding === "ccw" && area < 0) || (winding === "cw" && area > 0)) {
+    ring.reverse();
   }
   return ring;
+}
+
+function signedRingArea(points: GeoPoint[]) {
+  let area = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index]!;
+    const next = points[(index + 1) % points.length]!;
+    area += current.lng * next.lat - next.lng * current.lat;
+  }
+  return area / 2;
 }
 
 function circleToGeoJsonRing(center: GeoPoint, radiusMeters: number) {
@@ -1530,4 +1563,11 @@ export {
   MAP_GEOFENCE_STOP_POLICY_SEEDS,
   PROVIDER_ID as MAP_GEOFENCE_PROVIDER_ID,
   PROVIDER_UNAVAILABLE_SENTINEL as MAP_GEOFENCE_PROVIDER_UNAVAILABLE_SENTINEL,
+  // None of the fixed service-area seeds above declare a polygon hole, so
+  // the hole-aware branches of these two functions are otherwise only
+  // exercised indirectly (by inspection); exporting them lets polygon-hole
+  // behavior be unit-tested directly against ad-hoc geometry without
+  // mutating the shared seed fixtures.
+  geometryContainsPoint as mapGeofenceGeometryContainsPoint,
+  geometryToGeoJson as mapGeofenceGeometryToGeoJson,
 };

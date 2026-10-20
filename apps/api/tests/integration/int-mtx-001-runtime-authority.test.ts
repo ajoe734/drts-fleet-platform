@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
-import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { MultiTaxiService } from "../../src/modules/multi-taxi/multi-taxi.service";
@@ -52,6 +51,17 @@ function createHarness() {
   };
 
   const ownedRepository = {
+    isEnabled: () => true,
+    findOrderById: vi.fn(async (orderId: string) => {
+      const order = ownedState.orders.find((row) => row.orderId === orderId);
+      return order ? structuredClone(order) : null;
+    }),
+    findCurrentPassengerAssignmentDisclosure: vi.fn(async (orderId: string) => {
+      const snapshot = ownedState.passengerDisclosureSnapshots.find(
+        (row) => row.orderId === orderId && row.supersededAt === null,
+      );
+      return snapshot ? structuredClone(snapshot) : null;
+    }),
     loadState: vi.fn(async () => ({
       orders: ownedState.orders.map((order) => structuredClone(order)),
       dispatchJobs: ownedState.dispatchJobs.map((job) => structuredClone(job)),
@@ -97,21 +107,28 @@ function createHarness() {
   };
 
   const multiTaxiRepository = {
+    findEffectiveAuthorizations: vi.fn(async () =>
+      multiTaxiState.authorizations.map((record) => structuredClone(record)),
+    ),
     loadState: vi.fn(async () => ({
       authorizations: multiTaxiState.authorizations.map((record) =>
         structuredClone(record),
       ),
-      vehicles: multiTaxiState.vehicles.map((record) => structuredClone(record)),
+      vehicles: multiTaxiState.vehicles.map((record) =>
+        structuredClone(record),
+      ),
     })),
-    persistAuthorization: vi.fn(async (authorization: Record<string, unknown>) => {
-      multiTaxiState.authorizations = [
-        structuredClone(authorization),
-        ...multiTaxiState.authorizations.filter(
-          (existing) =>
-            existing.authorizationId !== authorization.authorizationId,
-        ),
-      ];
-    }),
+    persistAuthorization: vi.fn(
+      async (authorization: Record<string, unknown>) => {
+        multiTaxiState.authorizations = [
+          structuredClone(authorization),
+          ...multiTaxiState.authorizations.filter(
+            (existing) =>
+              existing.authorizationId !== authorization.authorizationId,
+          ),
+        ];
+      },
+    ),
     persistVehicle: vi.fn(async (vehicle: Record<string, unknown>) => {
       multiTaxiState.vehicles = [
         structuredClone(vehicle),
@@ -124,10 +141,13 @@ function createHarness() {
         ),
       ];
     }),
-    persistRideAccessToken: vi.fn(async (token: Record<string, unknown>, digest: string) => {
-      const { accessToken: _accessToken, ...persisted } = token;
-      accessTokensByDigest.set(digest, structuredClone(persisted));
-    }),
+    persistRideAccessToken: vi.fn(
+      async (token: Record<string, unknown>, digest: string) => {
+        const persisted = { ...token };
+        delete persisted.accessToken;
+        accessTokensByDigest.set(digest, structuredClone(persisted));
+      },
+    ),
     findRideAccessTokenByDigest: vi.fn(async (digest: string) => {
       const token = accessTokensByDigest.get(digest);
       return token ? structuredClone(token) : null;
@@ -146,8 +166,12 @@ function createHarness() {
     getVehicleLicenseType: vi.fn(() => "multi_purpose_taxi"),
     getVehiclePassengerDisclosureProfile: vi.fn(() => null),
     getDriverPublicRegistrationCredential: vi.fn(() => null),
-    listVehicles: vi.fn(() => [{ vehicleId: "veh-demo-001", plateNo: "TAXI-001" }]),
-    listDrivers: vi.fn(() => [{ driverId: "drv-demo-001", name: "Driver One" }]),
+    listVehicles: vi.fn(() => [
+      { vehicleId: "veh-demo-001", plateNo: "TAXI-001" },
+    ]),
+    listDrivers: vi.fn(() => [
+      { driverId: "drv-demo-001", name: "Driver One" },
+    ]),
   };
   const callcenterService = {
     registerRecordingAttachmentListener: vi.fn(),
@@ -186,6 +210,7 @@ function createHarness() {
 
   return {
     createServices,
+    ownedRepository,
     multiTaxiRepository,
   };
 }
@@ -280,6 +305,12 @@ describe("MTX-CORE-001 runtime authority integration", () => {
     expect(
       harness.multiTaxiRepository.findRideAccessTokenByDigest,
     ).toHaveBeenCalledTimes(1);
+    expect(harness.ownedRepository.findOrderById).toHaveBeenCalledWith(
+      onDemand.ride.orderId,
+    );
+    expect(
+      harness.ownedRepository.findCurrentPassengerAssignmentDisclosure,
+    ).toHaveBeenCalledWith(onDemand.ride.orderId);
   });
 
   it("denies spoofed street-hail and physical-rank multi-taxi attempts", async () => {
@@ -324,16 +355,18 @@ describe("MTX-CORE-001 runtime authority integration", () => {
       },
     });
 
-    expect(() =>
-      multiTaxiService.queueCheckIn({
-        vehicleId: "veh-demo-001",
-        siteId: "physical-rank-demo",
-        queueMode: "physical_rank",
-      }),
-    ).toThrowError(ApiRequestError);
+    await expect(
+      Promise.resolve().then(() =>
+        multiTaxiService.queueCheckIn({
+          vehicleId: "veh-demo-001",
+          siteId: "physical-rank-demo",
+          queueMode: "physical_rank",
+        }),
+      ),
+    ).rejects.toThrowError(ApiRequestError);
 
     try {
-      multiTaxiService.queueCheckIn({
+      await multiTaxiService.queueCheckIn({
         vehicleId: "veh-demo-001",
         siteId: "physical-rank-demo",
         queueMode: "physical_rank",

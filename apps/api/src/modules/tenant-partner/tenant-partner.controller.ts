@@ -337,7 +337,10 @@ export class TenantPartnerController {
     return toApiSuccessEnvelope(result, requestId);
   }
 
-  private requireTenantId(tenantId?: string) {
+  private requireTenantId(
+    tenantId?: string,
+    identity?: IdentityContext | null,
+  ) {
     const normalizedTenantId = tenantId?.trim();
     if (!normalizedTenantId) {
       throw new ApiRequestError(
@@ -347,6 +350,10 @@ export class TenantPartnerController {
       );
     }
 
+    this.tenantPartnerService.assertTenantAccessScope(
+      normalizedTenantId,
+      identity,
+    );
     return normalizedTenantId;
   }
 
@@ -476,7 +483,10 @@ export class TenantPartnerController {
         process.env.DRTS_INTERNAL_KEY,
         {
           ...(this.googleWorkloadIdentityAdapter
-            ? { googleWorkloadIdentityAdapter: this.googleWorkloadIdentityAdapter }
+            ? {
+                googleWorkloadIdentityAdapter:
+                  this.googleWorkloadIdentityAdapter,
+              }
             : {}),
           requireCredential: true,
         },
@@ -833,17 +843,18 @@ export class TenantPartnerController {
   @Get("partner/referral/statements/:period/artifact")
   @RequireRealms("partner")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerReferralStatementArtifact(
+  async getPartnerReferralStatementArtifact(
     @CurrentIdentity() identity: IdentityContext | null,
     @Param("period") period: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const statement = this.tenantPartnerService.getPartnerReferralStatement(
-      identity,
-      this.billingSettlementService,
-      period,
-      requestId,
-    );
+    const statement =
+      await this.tenantPartnerService.getPartnerReferralStatement(
+        identity,
+        this.billingSettlementService,
+        period,
+        requestId,
+      );
 
     return new StreamableFile(
       Buffer.from(this.renderReferralStatementArtifact(statement), "utf8"),
@@ -857,13 +868,13 @@ export class TenantPartnerController {
   @Get("partner/referral/statements/:period")
   @RequireRealms("partner")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getPartnerReferralStatement(
+  async getPartnerReferralStatement(
     @CurrentIdentity() identity: IdentityContext | null,
     @Param("period") period: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.getPartnerReferralStatement(
+      await this.tenantPartnerService.getPartnerReferralStatement(
         identity,
         this.billingSettlementService,
         period,
@@ -918,25 +929,27 @@ export class TenantPartnerController {
 
   @Get("platform-admin/referral-rates")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listReferralRevenueShareRules(
+  async listReferralRevenueShareRules(
     @Query("entrySlug") entrySlug?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
       toApiListData(
-        this.tenantPartnerService.listReferralRevenueShareRules(entrySlug),
+        await this.tenantPartnerService.listReferralRevenueShareRules(
+          entrySlug,
+        ),
       ),
       requestId,
     );
   }
 
   @Post("platform-admin/referral-rates")
-  upsertReferralRevenueShareRule(
+  async upsertReferralRevenueShareRule(
     @Body() command: UpsertReferralRevenueShareRuleCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertReferralRevenueShareRule(
+      await this.tenantPartnerService.upsertReferralRevenueShareRule(
         command,
         requestId,
       ),
@@ -1191,7 +1204,8 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.tenantPartnerService.approveOpsApprovalRequest(
+      await this.ownedMobilityService.executeOpsBookingApprovalCommand(
+        "approve",
         approvalRequestId,
         command,
         identity,
@@ -1210,7 +1224,8 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.tenantPartnerService.rejectOpsApprovalRequest(
+      await this.ownedMobilityService.executeOpsBookingApprovalCommand(
+        "reject",
         approvalRequestId,
         command,
         identity,
@@ -1229,7 +1244,8 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.tenantPartnerService.escalateOpsApprovalRequest(
+      await this.ownedMobilityService.executeOpsBookingApprovalCommand(
+        "escalate",
         approvalRequestId,
         command,
         identity,
@@ -1244,22 +1260,24 @@ export class TenantPartnerController {
   listPassengers(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const items = this.tenantPartnerService.listPassengers(
-      this.requireTenantId(tenantId),
+      this.requireTenantId(tenantId, identity),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
 
   @Post("tenant/passengers")
-  upsertPassenger(
+  async upsertPassenger(
     @Body() command: UpsertTenantPassengerCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertPassenger(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.upsertPassenger(
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       ),
@@ -1272,9 +1290,10 @@ export class TenantPartnerController {
   listAddresses(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const items = this.tenantPartnerService.listAddresses(
-      this.requireTenantId(tenantId),
+      this.requireTenantId(tenantId, identity),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -1287,6 +1306,7 @@ export class TenantPartnerController {
     @Query("search") search?: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const query: ListTenantCostCentersQuery = {};
     if (activeOnly === "true") {
@@ -1299,7 +1319,7 @@ export class TenantPartnerController {
       query.search = search;
     }
     const items = this.tenantPartnerService.listCostCenters(
-      this.requireTenantId(tenantId),
+      this.requireTenantId(tenantId, identity),
       query,
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
@@ -1335,14 +1355,15 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/cost-centers")
-  upsertCostCenter(
+  async upsertCostCenter(
     @Body() command: UpsertTenantCostCenterCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertCostCenter(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.upsertCostCenter(
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       ),
@@ -1351,13 +1372,13 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/cost-centers/disable")
-  disableCostCenter(
+  async disableCostCenter(
     @Body() command: DisableTenantCostCenterCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.disableCostCenter(
+      await this.tenantPartnerService.disableCostCenter(
         this.requireTenantId(tenantId),
         command,
         requestId,
@@ -1371,10 +1392,11 @@ export class TenantPartnerController {
   getTenantQuotaSummary(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const summary: TenantQuotaSummary =
       this.tenantPartnerService.getTenantQuotaSummary(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
       );
     return toApiSuccessEnvelope(summary, requestId);
   }
@@ -1398,24 +1420,26 @@ export class TenantPartnerController {
     @Param("code") code: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const summary: TenantCostCenterQuotaSummary =
       this.tenantPartnerService.getCostCenterQuotaSummary(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         code,
       );
     return toApiSuccessEnvelope(summary, requestId);
   }
 
   @Post("tenant/quotas/policies")
-  upsertTenantQuotaPolicy(
+  async upsertTenantQuotaPolicy(
     @Body() command: UpsertTenantQuotaPolicyCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertTenantQuotaPolicy(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.upsertTenantQuotaPolicy(
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       ),
@@ -1429,10 +1453,11 @@ export class TenantPartnerController {
     @Body() query: TenantBookingQuotaImpactQuery,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const preview: TenantBookingQuotaImpactPreview =
       this.tenantPartnerService.previewBookingQuotaImpact(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         query,
       );
     return toApiSuccessEnvelope(preview, requestId);
@@ -1446,10 +1471,11 @@ export class TenantPartnerController {
     @Query("bookingId") bookingId?: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const items: TenantQuotaLedgerEntry[] =
       this.tenantPartnerService.listTenantQuotaLedger(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         {
           ...(periodKey ? { periodKey } : {}),
           ...(costCenterCode ? { costCenterCode } : {}),
@@ -1465,10 +1491,11 @@ export class TenantPartnerController {
     @Query() query: ListTenantApprovalRulesQuery,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const items: TenantApprovalRuleRecord[] =
       this.tenantPartnerService.listApprovalRules(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         query,
       );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
@@ -1480,10 +1507,11 @@ export class TenantPartnerController {
     @Param("ruleId") ruleId: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.getApprovalRule(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         ruleId,
       ),
       requestId,
@@ -1491,14 +1519,15 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/approval-rules")
-  upsertApprovalRule(
+  async upsertApprovalRule(
     @Body() command: UpsertTenantApprovalRuleCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertApprovalRule(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.upsertApprovalRule(
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       ),
@@ -1507,15 +1536,16 @@ export class TenantPartnerController {
   }
 
   @Put("tenant/approval-rules/:ruleId")
-  updateApprovalRule(
+  async updateApprovalRule(
     @Param("ruleId") ruleId: string,
     @Body() command: UpsertTenantApprovalRuleCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertApprovalRule(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.upsertApprovalRule(
+        this.requireTenantId(tenantId, identity),
         { ...command, ruleId },
         requestId,
       ),
@@ -1524,14 +1554,15 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/approval-rules/:ruleId/disable")
-  disableApprovalRule(
+  async disableApprovalRule(
     @Param("ruleId") ruleId: string,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.disableApprovalRule(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.disableApprovalRule(
+        this.requireTenantId(tenantId, identity),
         ruleId,
         requestId,
       ),
@@ -1540,14 +1571,15 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/approval-rules/reorder")
-  reorderApprovalRules(
+  async reorderApprovalRules(
     @Body() command: ReorderTenantApprovalRulesCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.reorderApprovalRules(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.reorderApprovalRules(
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       ),
@@ -1560,10 +1592,11 @@ export class TenantPartnerController {
     @Body() command: EvaluateTenantApprovalRuleCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const evaluation: TenantApprovalEvaluationResult =
       this.tenantPartnerService.evaluateApprovalRules(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       );
@@ -1678,22 +1711,24 @@ export class TenantPartnerController {
   listAddressExportView(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const items: TenantAddressExportViewRecord[] =
       this.tenantPartnerService.listAddressExportView(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
       );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
   @Post("tenant/addresses")
-  upsertAddress(
+  async upsertAddress(
     @Body() command: UpsertTenantAddressCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.upsertAddress(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.upsertAddress(
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       ),
@@ -2131,10 +2166,11 @@ export class TenantPartnerController {
   getTenantNotifications(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.getNotificationPreferences(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
       ),
       requestId,
     );
@@ -2160,9 +2196,10 @@ export class TenantPartnerController {
   listTenantNotificationFeed(
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     const items = this.tenantPartnerService.listTenantNotifications(
-      this.requireTenantId(tenantId),
+      this.requireTenantId(tenantId, identity),
     );
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }
@@ -2172,10 +2209,11 @@ export class TenantPartnerController {
     @Body() command: UpdateTenantNotificationsCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.updateNotificationPreferences(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       ),
@@ -2197,14 +2235,15 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/webhooks")
-  createWebhookEndpoint(
+  async createWebhookEndpoint(
     @Body() command: CreateTenantWebhookEndpointCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.createWebhookEndpoint(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.createWebhookEndpoint(
+        this.requireTenantId(tenantId, identity),
         command,
         requestId,
       ),
@@ -2219,8 +2258,9 @@ export class TenantPartnerController {
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
-    const resolvedTenantId = this.requireTenantId(tenantId);
+    const resolvedTenantId = this.requireTenantId(tenantId, identity);
     const result = await this.idempotencyService.execute({
       scope: `tenant:${resolvedTenantId}:webhook_test_send`,
       idempotencyKey,
@@ -2245,15 +2285,16 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/webhooks/:webhookId")
-  updateWebhookEndpoint(
+  async updateWebhookEndpoint(
     @Param("webhookId") webhookId: string,
     @Body() command: UpdateTenantWebhookEndpointCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.updateWebhookEndpoint(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.updateWebhookEndpoint(
+        this.requireTenantId(tenantId, identity),
         webhookId,
         command,
         requestId,
@@ -2268,10 +2309,11 @@ export class TenantPartnerController {
     @Body() command: DeleteTenantWebhookEndpointCommand,
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
       this.tenantPartnerService.deleteWebhookEndpoint(
-        this.requireTenantId(tenantId),
+        this.requireTenantId(tenantId, identity),
         webhookId,
         command,
         requestId,
@@ -2283,7 +2325,7 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/webhooks/:webhookId/rotate-secret")
-  rotateWebhookSecret(
+  async rotateWebhookSecret(
     @Param("webhookId") webhookId: string,
     @Body()
     command: {
@@ -2292,9 +2334,10 @@ export class TenantPartnerController {
     },
     @Headers("x-tenant-id") tenantId?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: IdentityContext | null,
   ) {
-    const result = this.tenantPartnerService.rotateWebhookSecret(
-      this.requireTenantId(tenantId),
+    const result = await this.tenantPartnerService.rotateWebhookSecret(
+      this.requireTenantId(tenantId, identity),
       {
         webhookId,
         secret: command.secret,
@@ -2418,7 +2461,7 @@ export class TenantPartnerController {
   }
 
   @Post("tenant/sla")
-  updateSlaProfile(
+  async updateSlaProfile(
     @Body() command: UpdateTenantSlaProfileCommand,
     @CurrentIdentity() identity: IdentityContext | null,
     @Headers("x-tenant-id") tenantId?: string,
@@ -2426,8 +2469,8 @@ export class TenantPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.updateSlaProfile(
-        this.requireTenantId(tenantId),
+      await this.tenantPartnerService.updateSlaProfile(
+        this.requireTenantId(tenantId, identity),
         command,
         actorId,
         requestId,

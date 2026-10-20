@@ -388,7 +388,10 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
         ...(content.launch_allocations || []),
         ...(content.partner_notification_allocations || []),
         ...(content.voice_application_allocations || []),
+        ...(content.voice_callback_allocations || []),
+        ...(content.sos_duty_allocations || []),
         ...(content.passenger_push_channel_allocations || []),
+        ...(content.complaint_command_allocations || []),
       ].map((a: any) => a.version);
       expect(new Set(allVersionsEverywhere).size).toBe(
         allVersionsEverywhere.length,
@@ -409,7 +412,25 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
       expect(content.additional_allocations).toHaveLength(3);
       expect(content.launch_allocations).toHaveLength(3);
       expect(content.partner_notification_allocations).toHaveLength(2);
-      expect(content.voice_application_allocations).toHaveLength(1);
+      // AUDIT-VOICE-APPLICATION-REGRESSION-20261018 appended V0122 to this
+      // group under a separate Root reservation; the original V0106 entry
+      // below is preserved byte-for-byte, not replaced.
+      expect(content.voice_application_allocations).toHaveLength(3);
+      expect(content.voice_application_allocations[0].version).toBe("V0106");
+      expect(content.voice_application_allocations[0].migration_filename).toBe(
+        "V0106__voice_dialogue_snapshot.sql",
+      );
+      expect(content.voice_application_allocations[1].version).toBe("V0122");
+      expect(content.voice_application_allocations[1].migration_filename).toBe(
+        "V0122__voice_contact_role_revision.sql",
+      );
+      expect(content.voice_application_allocations[2].version).toBe("V0125");
+      expect(content.voice_application_allocations[2].migration_filename).toBe(
+        "V0125__voice_recording_continuation_event.sql",
+      );
+      expect(content.voice_application_allocations[1].primary_tables).toContain(
+        "voice.contact_role_revision",
+      );
     });
   });
 });

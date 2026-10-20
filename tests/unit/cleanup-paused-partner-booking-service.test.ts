@@ -41,6 +41,7 @@ const activeServices = [
   "drts-dev-referral-embed-web",
   "drts-dev-enterprise-dispatch-web",
   "drts-channel-partner-portal-web",
+  "drts-dev-passenger-app-web",
 ] as const;
 const pausedService = "drts-dev-partner-booking-web";
 const retiredService = "drts-passenger-web";
@@ -130,6 +131,7 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
       "referral-embed-web|drts-dev-referral-embed-web",
       "enterprise-dispatch-web|drts-dev-enterprise-dispatch-web",
       "channel-partner-portal-web|drts-channel-partner-portal-web",
+      "passenger-app-web|drts-dev-passenger-app-web",
     ]);
     expect(cleanupJob).toBeGreaterThan(-1);
     expect(healthJob).toBeGreaterThan(cleanupJob);
@@ -208,7 +210,10 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
     ["with no optional services", activeServices],
     ["with only the retired service", [...activeServices, retiredService]],
     ["with only the scanner", [...activeServices, scannerService]],
-    ["with both optional services", [...activeServices, retiredService, scannerService]],
+    [
+      "with both optional services",
+      [...activeServices, retiredService, scannerService],
+    ],
   ])("deletes only Partner Booking %s", (_label, baseInventory) => {
     const result = runCleanup([pausedService, ...[...baseInventory].reverse()]);
 
@@ -223,7 +228,10 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
     ["with no optional services", activeServices],
     ["with only the retired service", [...activeServices, retiredService]],
     ["with only the scanner", [...activeServices, scannerService]],
-    ["with both optional services", [...activeServices, retiredService, scannerService]],
+    [
+      "with both optional services",
+      [...activeServices, retiredService, scannerService],
+    ],
   ])("is idempotent when Partner Booking is absent %s", (_label, inventory) => {
     const result = runCleanup(inventory);
 
@@ -247,16 +255,19 @@ describe("paused Partner Booking Cloud Run cleanup", () => {
     },
   );
 
-  it("fails closed when an unknown service is present", () => {
-    const result = runCleanup([
-      ...activeServices,
-      pausedService,
-      "drts-concierge-portal-web",
-    ]);
+  it.each(["drts-concierge-portal-web", "drts-dev-passenger-app-rogue"])(
+    "fails closed when unknown service %s is present",
+    (unexpectedService) => {
+      const result = runCleanup([
+        ...activeServices,
+        pausedService,
+        unexpectedService,
+      ]);
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("Unexpected services:");
-    expect(result.stderr).toContain("drts-concierge-portal-web");
-    expect(result.commands).toHaveLength(1);
-  });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Unexpected services:");
+      expect(result.stderr).toContain(unexpectedService);
+      expect(result.commands).toHaveLength(1);
+    },
+  );
 });

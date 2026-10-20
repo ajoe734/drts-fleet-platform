@@ -37,6 +37,9 @@ async function createHarness() {
   } as never);
 
   const registry = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(() => [
       {
         driverId: "drv-demo-001",

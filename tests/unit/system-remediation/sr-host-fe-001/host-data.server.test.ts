@@ -172,6 +172,59 @@ describe("SR-HOST-FE-001: host-data.server loaders", () => {
         expect(result.accessState).toBe("forbidden");
       }
     });
+
+    // C012-F2-LONG-LIST-DETAIL-FALSE404 regression: the server's real
+    // per-page cap (`HostViewService.paginate`) is 100. A single
+    // page1/pageSize200 lookup silently truncates to the first 100 items, so
+    // an owner's 101st vehicle was never found. The fix walks every
+    // authoritative page `pageInfo.totalPages` reports.
+    it("walks every authoritative page to find a vehicle beyond the server's 100-item per-page cap (>100 owned vehicles)", async () => {
+      const vehicleOnPage2 = { ...VEHICLE_A, vehicleId: "veh_host_101" };
+      mockListHostVehicles
+        .mockResolvedValueOnce({
+          items: [VEHICLE_A],
+          pageInfo: { page: 1, pageSize: 100, totalItems: 101, totalPages: 2 },
+        })
+        .mockResolvedValueOnce({
+          items: [vehicleOnPage2],
+          pageInfo: { page: 2, pageSize: 100, totalItems: 101, totalPages: 2 },
+        });
+
+      const result = await loadHostVehicleDetail("veh_host_101");
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.vehicle.vehicleId).toBe("veh_host_101");
+      }
+      expect(mockListHostVehicles).toHaveBeenNthCalledWith(1, {
+        page: 1,
+        pageSize: 100,
+      });
+      expect(mockListHostVehicles).toHaveBeenNthCalledWith(2, {
+        page: 2,
+        pageSize: 100,
+      });
+    });
+
+    it("exhausts all authoritative pages before reporting vehicle_not_found, never stopping early on a guessed bound", async () => {
+      mockListHostVehicles
+        .mockResolvedValueOnce({
+          items: [VEHICLE_A],
+          pageInfo: { page: 1, pageSize: 100, totalItems: 101, totalPages: 2 },
+        })
+        .mockResolvedValueOnce({
+          items: [{ ...VEHICLE_A, vehicleId: "veh_host_101" }],
+          pageInfo: { page: 2, pageSize: 100, totalItems: 101, totalPages: 2 },
+        });
+
+      const result = await loadHostVehicleDetail("veh_does_not_exist");
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.accessState).toBe("vehicle_not_found");
+      }
+      expect(mockListHostVehicles).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("loadHostVehicleEarnings — three distinct states", () => {

@@ -27,11 +27,15 @@ const { Pool } = apiRequire("pg") as typeof import("pg");
 const repoRoot = path.resolve(__dirname, "../../../..");
 const driverId = "drv-demo-002";
 
-// Only the existing hosted CI unit job owns this PostgreSQL check. In that
-// job a missing connection/migration is a failure, never a skipped DB pass.
+// The existing hosted root-unit jobs own this PostgreSQL check. Both CI lanes
+// now execute tests in shards; the integration `unit` job only aggregates them.
+// A missing connection/migration in a test-running job is a failure, not a skip.
 // No VM PostgreSQL server, browser, or product process is started by this file.
 const hostedUnit =
-  process.env.GITHUB_ACTIONS === "true" && process.env.GITHUB_JOB === "unit";
+  process.env.GITHUB_ACTIONS === "true" &&
+  ["unit", "unit-shard", "product_root_unit"].includes(
+    process.env.GITHUB_JOB ?? "",
+  );
 describe.skipIf(!hostedUnit)(
   "C114 fixture on official PostgreSQL migrations",
   () => {
@@ -73,8 +77,22 @@ describe.skipIf(!hostedUnit)(
     afterAll(async () => {
       try {
         await database?.onModuleDestroy();
-        if (created)
-          await admin!.query(`DROP DATABASE "${dbName}" WITH (FORCE)`);
+        if (created) {
+          // pg-pool can resolve end() before an idle backend finishes closing.
+          // Observe only this suite's database, then use ordinary DROP so a
+          // remaining connection fails cleanup instead of receiving 57P01.
+          await vi.waitFor(
+            async () => {
+              const result = await admin!.query<{ connections: number }>(
+                "SELECT count(*)::integer AS connections FROM pg_stat_activity WHERE datname = $1",
+                [dbName],
+              );
+              expect(result.rows[0]!.connections).toBe(0);
+            },
+            { timeout: 20_000, interval: 50 },
+          );
+          await admin!.query(`DROP DATABASE "${dbName}"`);
+        }
       } finally {
         await admin?.end();
         vi.unstubAllEnvs();

@@ -18,7 +18,7 @@
   - `phase1_system_analysis_v1.md` passenger-entry wording
   - `PHASE1_OPEN_QUESTIONS.md` `Q-009`, `Q-010`
 - `superseding_decision`:
-  - Phase 1 removes first-party `Passenger App / Web` from the current completion bar.
+  - Phase 1 removes first-party `Passenger App / Web` from the current completion bar. **[2026-10-09 附註]** 此決定已被 `SD-DP-20261009-001` 推翻，正式開啟第一方乘客身分、登入、預約與收據。
   - Current Phase 1 demand entry is limited to third-party ride-hailing platforms, partner / tenant channels, and operator / backoffice manual entry.
   - Phase 1 does not ship a passenger receipt UI or passenger receipt delivery center.
   - Receipt ownership follows order source: third-party platforms own third-party receipts; partner / tenant channels own their customer-facing receipt delivery; DRTS keeps canonical finance, settlement, and audit records plus admin / tenant / backoffice retrieval.

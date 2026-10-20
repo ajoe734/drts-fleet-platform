@@ -447,12 +447,15 @@ describe("CONF-IDEM-005: Client Intent Idempotency Integration", () => {
 
   describe("Webhook test intent", () => {
     let mockTenantService: {
+      assertTenantAccessScope: TenantPartnerService["assertTenantAccessScope"];
       sendTestWebhook: ReturnType<typeof vi.fn>;
     };
     let controller: TenantPartnerController;
 
     beforeEach(() => {
       mockTenantService = {
+        assertTenantAccessScope:
+          TenantPartnerService.prototype.assertTenantAccessScope,
         sendTestWebhook: vi.fn(
           async (endpointId: string, eventType: string) => ({
             endpointId,

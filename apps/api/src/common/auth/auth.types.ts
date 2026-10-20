@@ -23,6 +23,14 @@ export const AUTH_REALMS = [
 
 export type AuthRealm = (typeof AUTH_REALMS)[number];
 
+// Passenger sessions do not participate in canonical IAM membership/session contracts.
+export const PASSENGER_AUTH_REALM = "passenger" as const;
+export const PASSENGER_AUTH_ACTOR_TYPE = "first_party_passenger" as const;
+export type RequestAuthRealm = AuthRealm | typeof PASSENGER_AUTH_REALM;
+export type RequestAuthActorType =
+  | AuthActorType
+  | typeof PASSENGER_AUTH_ACTOR_TYPE;
+
 export const AUTH_ROLE_FAMILIES = [
   "platform",
   "tenant",
@@ -77,6 +85,22 @@ export interface BootstrapRequestIdentity {
   requestId: string | null;
 }
 
+export interface PassengerRequestIdentity extends Omit<
+  BootstrapRequestIdentity,
+  "actorType" | "realm" | "drtsPassengerId" | "sessionId"
+> {
+  actorType: typeof PASSENGER_AUTH_ACTOR_TYPE;
+  tenantId: null;
+  actorId: string;
+  realm: typeof PASSENGER_AUTH_REALM;
+  drtsPassengerId: string;
+  sessionId: string;
+}
+
+export type RequestIdentity =
+  | BootstrapRequestIdentity
+  | PassengerRequestIdentity;
+
 export interface AuthBootstrapHeaders {
   authorization?: string;
   "x-drts-authorization"?: string;
@@ -100,5 +124,5 @@ export interface AuthenticatedRequestLike {
   method?: string;
   originalUrl?: string;
   url?: string;
-  identity?: BootstrapRequestIdentity;
+  identity?: RequestIdentity;
 }

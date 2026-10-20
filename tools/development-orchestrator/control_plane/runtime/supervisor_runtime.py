@@ -36,6 +36,8 @@ from control_plane.domain.dispatch_policy import (
     DispatchReason as DomainDispatchReason,
     ReadyDispatchPolicy,
     build_dispatch_event as build_domain_dispatch_event,
+    material_task_fingerprint,
+    pending_acceptance_review,
     ready_dispatch_signature as domain_ready_dispatch_signature,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
@@ -47,6 +49,7 @@ from control_plane.domain.worker_lifecycle import (
     worker_reported_outcome,
     worker_supports_approval_resume,
     ACTIVE_WORKER_STATUSES as ACTIVE_RUNTIME_STATUSES,
+    OCCUPIED_WORKER_STATUSES,
     consume_result as consume_worker_result,
     is_active_worker,
     is_terminal_worker,
@@ -1454,6 +1457,23 @@ def attach_workspace_metadata(
     status_cli = task_board_cli_path()
     task_payload = request.metadata.get("task")
     task_payload = task_payload if isinstance(task_payload, dict) else {}
+    review_request = task_payload.get("acceptance_review_request")
+    acceptance_review_notice = ""
+    if is_reviewer and isinstance(review_request, dict) and review_request.get("state") == "pending":
+        snapshot = {key: review_request[key] for key in (
+            "task_id", "candidate_sha", "candidate_generation", "reviewed_sha", "merge_sha", "reviewer"
+        )}
+        acceptance_review_notice = (
+            "\nAcceptance reviewer decision (original task only):\n"
+            f"- Request `{review_request['request_id']}`: {review_request['reason']}\n"
+            f"- Evidence: `{review_request['evidence_ref']}`. Review the frozen candidate read-only; "
+            "do not edit, commit, push, switch branches or approve it again.\n"
+            f"- Set `ACCEPTANCE_REVIEW_SNAPSHOT_JSON` to `{json.dumps(snapshot, sort_keys=True)}` "
+            f"and `ACCEPTANCE_REVIEW_REQUEST_ID` to `{review_request['request_id']}` for your decision.\n"
+            f"- If source repair is required, use existing `reopen {request.task_id} <findings>`; "
+            f"otherwise use `decline-acceptance-review {request.task_id} {review_request['request_id']} <reason>`. "
+            "Only the assigned reviewer decides; the request grants no acceptance credit.\n"
+        )
     if (
         request.task_id
         and is_reviewer
@@ -1562,7 +1582,7 @@ def attach_workspace_metadata(
     marker = "\n\nSupervisor-assigned workspace:"
     marker_index = request.message.find(marker)
     base_message = request.message[:marker_index] if marker_index != -1 else request.message
-    request.message = base_message.rstrip() + notice
+    request.message = base_message.rstrip() + notice + acceptance_review_notice
 
 
 def summarize_runtime(state: dict[str, Any], approval_state: dict[str, Any]) -> dict[str, Any]:
@@ -1719,7 +1739,7 @@ def update_supervisor_mode_metadata(
         snapshot = dict(worker.get("request_snapshot", {}) or {})
         bucket = runtime_mode_for_snapshot(snapshot.get("reason"), snapshot.get("metadata"))
         occupancy.setdefault(bucket, {"running": 0, "pending": 0, "queued": 0})
-        occupancy[bucket]["running"] += 1
+        occupancy[bucket]["pending" if worker_status == "suspended_approval" else "running"] += 1
 
     active_event_ids = active_worker_queue_event_ids(state, ACTIVE_RUNTIME_STATUSES)
     for event_id, record in state.get("queue", {}).get("events", {}).items():
@@ -2178,16 +2198,37 @@ def start_worker_for_request(
     agent = agent_config_for(config, request.agent_id)
     request_metadata = request.metadata if isinstance(request.metadata, dict) else {}
     role = task_role_for_dispatch_reason(request.reason)
+    acceptance_review_dispatch = False
     if request.task_id and role:
-        task = task_index_from_status(config, load_status(config)).get(request.task_id)
+        task_map = task_index_from_status(config, load_status(config))
+        task = task_map.get(request.task_id)
+        snapshot_task = request_metadata.get("task") or {}
+        if task is None and snapshot_task.get("acceptance_review_request") is not None:
+            return False, "dispatch_acceptance_review_changed", None
         if task is not None:
             target = display_name_for(config, agent["id"])
             if task.get(role) != target or not task_is_dispatch_eligible_for_agent(task, target, role):
                 return False, "dispatch_role_contract_changed", None
-            snapshot_task = request_metadata.get("task") or {}
             if role == "reviewer" and any(snapshot_task.get(key) != task.get(key)
                                           for key in ("candidate_sha", "candidate_generation")):
                 return False, "dispatch_candidate_changed", None
+            review_request = snapshot_task.get("acceptance_review_request")
+            if role == "owner" and request.reason == "acceptance_ready_dispatch" and task.get("acceptance_review_request") is not None:
+                decision = resolve_domain_dispatch_target(task, task_map, ReadyDispatchPolicy.from_config(config))
+                if decision is None or decision.reason.value != request.reason or decision.target_agent != target:
+                    return False, "dispatch_acceptance_review_changed", None
+            if role == "reviewer" and (task.get("status") == "acceptance" or (
+                    isinstance(review_request, dict) and review_request.get("state") == "pending")):
+                current_request = pending_acceptance_review(task)
+                decision = resolve_domain_dispatch_target(task, task_map,
+                                                          ReadyDispatchPolicy.from_config(config))
+                if (current_request is None or review_request != current_request or decision is None
+                        or decision.reason.value != request.reason or decision.target_agent != target):
+                    return False, "dispatch_acceptance_review_changed", None
+                if any(w.get("task_id") == request.task_id and is_active_worker(w)
+                       for w in (state.get("workers") or {}).values()):
+                    return False, "dispatch_original_task_active", None
+                acceptance_review_dispatch = True
             request.metadata.update({"dispatch_role": role, "dispatch_task_id": request.task_id,
                                      "dispatch_agent": target,
                                      "dispatch_candidate_sha": task.get("candidate_sha") or "",
@@ -2272,6 +2313,26 @@ def start_worker_for_request(
 
     task_payload = request_metadata.get("task")
     task_payload = task_payload if isinstance(task_payload, dict) else {}
+    if acceptance_review_dispatch and (
+            workspace_root == config_path(config, "status_file").parent.resolve()
+            or workspace_source not in {"existing_review_worktree", "created_review_worktree"}
+            or task_branch != task_payload.get("candidate_sha")):
+        return False, "reviewer_workspace_unavailable:acceptance_review_requires_pinned_workspace", None
+    if acceptance_review_dispatch:
+        # Provisioning can fetch/create a worktree. Revalidate immediately at
+        # delivery so a request resolved/reassigned during that I/O cannot run.
+        current_map = task_index_from_status(config, load_status(config))
+        current_task = current_map.get(request.task_id) or {}
+        current_request = pending_acceptance_review(current_task)
+        current_decision = resolve_domain_dispatch_target(current_task, current_map, ReadyDispatchPolicy.from_config(config))
+        if (current_request is None or current_request != task_payload.get("acceptance_review_request")
+                or current_decision is None or current_decision.reason.value != request.reason
+                or current_decision.target_agent != request.metadata["dispatch_agent"]
+                or not task_is_dispatch_eligible_for_agent(current_task, current_decision.target_agent, "reviewer")):
+            return False, "dispatch_acceptance_review_changed", None
+        if any(w.get("task_id") == request.task_id and is_active_worker(w)
+               for w in (state.get("workers") or {}).values()):
+            return False, "dispatch_original_task_active", None
     if (
         role == "reviewer"
         and workspace_source in ("unresolvable_pinned_candidate", "fallback_canonical")
@@ -2425,7 +2486,7 @@ def process_queue(config: dict[str, Any], state: dict[str, Any], provider_report
             None,
         )
         if active_worker:
-            desired_status = "manual_pending" if active_worker.get("status") in {"manual_pending", "waiting_approval"} else "started"
+            desired_status = "manual_pending" if active_worker.get("status") in {"manual_pending", "waiting_approval", "suspended_approval"} else "started"
             if record.get("status") != desired_status or record.get("run_id") != active_worker.get("run_id"):
                 record["status"] = desired_status
                 record["run_id"] = active_worker.get("run_id") or event_id
@@ -3331,6 +3392,10 @@ def lane_failure_autopause_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings = dict((config.get("ready_dispatcher", {}) or {}).get("lane_failure_autopause", {}) or {})
     settings.setdefault("enabled", True)
     settings.setdefault("threshold", 3)          # distinct-task terminal failures
+    # Total terminal failures, repeats included. Distinct tasks alone never
+    # tripped on 2026-10-06: a model the ChatGPT account rejects failed the
+    # Codex lane every ~3 s for 10 hours, but only ever on two tasks.
+    settings.setdefault("failure_threshold", 6)
     settings.setdefault("window_seconds", 900)   # rolling window
     settings.setdefault("reset_seconds", 1800)   # capacity pause auto-expiry (self-correcting)
     return settings
@@ -3346,8 +3411,8 @@ def record_lane_terminal_failure(
     agent_id: str,
     task_id: str | None,
 ) -> bool:
-    """Track per-lane distinct-task terminal failures in a rolling window.
-    Returns True when the lane crosses the auto-pause threshold."""
+    """Track per-lane terminal failures in a rolling window, both distinct
+    tasks and total attempts. Returns True when either crosses its threshold."""
     settings = lane_failure_autopause_settings(config)
     if not settings.get("enabled", True):
         return False
@@ -3368,9 +3433,12 @@ def record_lane_terminal_failure(
         # no task id — count as an anonymous distinct failure slot
         tasks.append(f"__anon_{len(tasks)}")
     entry["count"] = len(tasks)
+    entry["failures"] = int(entry.get("failures") or 0) + 1
     entry["last_failure_at"] = utc_now()
     registry[normalized] = entry
-    return entry["count"] >= int(settings.get("threshold", 3))
+    return entry["count"] >= int(settings.get("threshold", 3)) or entry["failures"] >= int(
+        settings.get("failure_threshold", 6)
+    )
 
 
 def clear_lane_failure(state: dict[str, Any], agent_id: str) -> None:
@@ -3386,9 +3454,9 @@ def maybe_autopause_unhealthy_lane(
     reason: str,
 ) -> None:
     """Lane-level safety net, independent of allow_provider_pause: if a lane racks
-    up enough distinct-task terminal (non-transient) failures, pause it so the
-    scheduler stops routing to a dead/broken lane (e.g. revoked auth token that
-    only 401s at worker runtime)."""
+    up enough terminal (non-transient) failures, across distinct tasks or in
+    total, pause it so the scheduler stops routing to a dead/broken lane (e.g.
+    revoked auth token that only 401s at worker runtime)."""
     settings = lane_failure_autopause_settings(config)
     if not settings.get("enabled", True):
         return
@@ -3404,15 +3472,16 @@ def maybe_autopause_unhealthy_lane(
     if failure.get("transient"):
         return  # transient (retryable) failures don't count toward lane health
     if record_lane_terminal_failure(config, state, normalized, worker.get("task_id")):
-        threshold = int(settings.get("threshold", 3))
+        entry = lane_failure_registry(state).get(normalized) or {}
         window = int(settings.get("window_seconds", 900))
         pause_provider(
             state,
             normalized,
             (
-                f"Auto-paused (lane health): {threshold}+ terminal worker failures across "
-                f"distinct tasks within {window}s — lane appears unhealthy (e.g. revoked auth "
-                f"that only 401s at runtime). Latest: {reason}"
+                f"Auto-paused (lane health): {entry.get('failures')} terminal worker failures "
+                f"across {entry.get('count')} distinct tasks within {window}s — lane appears "
+                f"unhealthy (e.g. revoked auth that only 401s at runtime, or a model the "
+                f"account rejects). Latest: {reason}"
             ),
             kind="capacity",
             reset_seconds=int(settings.get("reset_seconds", 1800)),
@@ -3527,17 +3596,6 @@ def repeated_failure_records(
     if not covered_task_ids:
         return records
     return [record for record in records if str(record.get("task_id") or "").strip() not in covered_task_ids]
-
-
-def failing_agents_in_reassignment_loops(
-    state: dict[str, Any],
-    status: dict[str, Any] | None = None,
-) -> set[str]:
-    return {
-        str(record.get("agent") or "").strip()
-        for record in repeated_failure_records(state, status)
-        if str(record.get("agent") or "").strip()
-    }
 
 
 def active_provider_pause_records(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -4022,6 +4080,8 @@ def proactive_claim_plan_for_idle_agent(
     state: dict[str, Any] | None = None,
 ) -> dict[str, str] | None:
     if not helper_settings.get("enabled", True):
+        return None
+    if task.get("status") == "acceptance" and task.get("acceptance_review_request") is not None:
         return None
 
     allowed_statuses = {str(value).lower() for value in helper_settings.get("task_statuses", ["backlog", "todo", "in_progress", "review"])}
@@ -4681,6 +4741,10 @@ def worker_expected_completion_statuses(
         statuses.update(review_statuses)
         return statuses
     if reason == "review_ready_dispatch":
+        snapshot_task = ((worker.get("request_snapshot") or {}).get("metadata") or {}).get("task") or {}
+        if (snapshot_task.get("acceptance_review_request") or {}).get("state") == "pending":
+            statuses.update({"acceptance", "in_progress"})
+            return statuses
         statuses.update(integrating_statuses)
         return statuses
     if reason == "acceptance_ready_dispatch":
@@ -4711,24 +4775,89 @@ def worker_progress_retry_seconds(config: dict[str, Any]) -> int:
     return max(0, int(settings.get("progress_retry_seconds", 120)))
 
 
+def worker_progress_retry_max_seconds(config: dict[str, Any]) -> int:
+    settings = config.get("supervisor") or {}
+    return max(worker_progress_retry_seconds(config), int(settings.get("progress_retry_max_seconds", 3600)))
+
+
+# A streak nobody has extended for this long belongs to a task that is no
+# longer being dispatched; dropping it keeps state.json from growing one entry
+# for every task that ever reported progress.
+PROGRESS_STREAK_RETENTION_SECONDS = 48 * 3600
+
+
+def record_progress_streak(
+    state: dict[str, Any],
+    worker: dict[str, Any],
+    fingerprint: str,
+    now: datetime,
+) -> int:
+    """Count consecutive progress attempts that left the task materially unchanged.
+
+    An owner waiting on something outside its control can only report "still
+    waiting", and that report rewrites last_update, which makes the task look
+    dispatchable again. With a flat progress_retry_seconds every such attempt
+    came back two minutes later, indefinitely: on 2026-10-03..07 three waiting
+    tasks took more than half of the Codex lane's tokens that way.
+    """
+    registry = state.setdefault("progress_streaks", {})
+    cutoff = now - timedelta(seconds=PROGRESS_STREAK_RETENTION_SECONDS)
+    for key in [
+        key
+        for key, entry in registry.items()
+        if not isinstance(entry, dict) or (parse_runtime_timestamp(entry.get("updated_at")) or cutoff) <= cutoff
+    ]:
+        registry.pop(key, None)
+    task_id = str(worker.get("task_id") or "").strip()
+    agent_id = normalize_agent_id(str(worker.get("agent_id") or worker.get("provider") or ""))
+    key = f"{task_id}:{agent_id}"
+    previous = registry.get(key)
+    count = int(previous.get("count") or 0) + 1 if previous and previous.get("fingerprint") == fingerprint else 1
+    registry[key] = {
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "fingerprint": fingerprint,
+        "count": count,
+        "updated_at": now.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    return count
+
+
 def consume_progress_outcome(
     config: dict[str, Any],
     worker: dict[str, Any],
     outcome: dict[str, Any],
     *,
     now: datetime | None = None,
+    state: dict[str, Any] | None = None,
+    task: dict[str, Any] | None = None,
+    task_map: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
-    """Persist one completed progress attempt and its immutable redispatch time."""
+    """Persist one completed progress attempt and its immutable redispatch time.
+
+    Given the runtime state and the task as the attempt left it, the wait
+    doubles for each consecutive attempt that changed nothing material, up to
+    progress_retry_max_seconds. Any material change starts over at
+    progress_retry_seconds.
+    """
     current = now or datetime.now(timezone.utc)
     completed_at = current.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    retry_after = current + timedelta(seconds=worker_progress_retry_seconds(config))
-    redispatch_after = retry_after.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    return consume_worker_result(
+    delay = worker_progress_retry_seconds(config)
+    retry_after = current + timedelta(seconds=delay)
+    consumed = consume_worker_result(
         worker,
         outcome,
         completed_at=completed_at,
-        redispatch_after=redispatch_after,
+        redispatch_after=retry_after.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     )
+    # Only a first consumption extends the streak; an exact replay must not.
+    if consumed and state is not None and task:
+        streak = record_progress_streak(state, worker, material_task_fingerprint(task, task_map or {}), current)
+        delay = min(worker_progress_retry_max_seconds(config), delay * 2 ** min(streak - 1, 16))
+        retry_after = current + timedelta(seconds=delay)
+        worker["progress_streak"] = streak
+        worker["redispatch_after"] = retry_after.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return consumed
 
 
 def apply_worker_reported_block(
@@ -4881,10 +5010,13 @@ def resume_claude_worker(
     cli = command_exists(runtime.get("cli") or "claude")
     if not cli:
         return None
+    resume_message = str(runtime.get("resume_continuation_message") or "Continue.")
     command = [
         runtime.get("cli") or cli,
         "--resume",
         str(session_id),
+        "-p",
+        resume_message,
         "--output-format",
         runtime.get("output_format", "stream-json"),
     ]
@@ -4910,6 +5042,9 @@ def resume_claude_worker(
     mcp_config = runtime.get("mcp_config")
     if mcp_config:
         command.extend(["--mcp-config", str(config_path(config, "claude_mcp_config"))])
+    permission_prompt_tool = runtime.get("permission_prompt_tool")
+    if permission_prompt_tool:
+        command.extend(["--permission-prompt-tool", str(permission_prompt_tool)])
     log_path = config_path(config, "state_file").parent / "logs" / f"{new_runtime_id(f'{provider_key}-resume')}.log"
     env = os.environ.copy()
     runtime_overrides = runtime_env_overrides(runtime)
@@ -5084,19 +5219,24 @@ def finalize_exited_worker(
     if is_terminal_worker(worker) or worker.get("status") == "manual_pending":
         return False
 
-    fresh_task = task_index_from_status(config, load_status(config)).get(worker.get("task_id")) or {}
+    fresh_tasks = task_index_from_status(config, load_status(config))
+    fresh_task = fresh_tasks.get(worker.get("task_id")) or {}
     requires_receipt = bool(((worker.get("request_snapshot") or {}).get("metadata") or {}).get("dispatch_role"))
     receipt = (fresh_task.get("worker_outcomes") or {}).get(worker.get("run_id"))
     if receipt and receipt.get("outcome") in {"advanced", "blocked", "progress"}:
         if receipt["outcome"] == "progress":
-            consume_progress_outcome(config, worker, receipt, now=now)
+            consume_progress_outcome(
+                config, worker, receipt, now=now, state=state, task=fresh_task, task_map=fresh_tasks
+            )
         else:
             consume_worker_result(worker, receipt, completed_at=utc_now())
         finalize_queue_event_record(config, state, worker, "completed")
         clear_lane_failure(state, worker.get("agent_id") or worker.get("provider"))
         write_activity_log(config, {"type": "worker_completed", "task_id": worker.get("task_id"),
                                    "worker_run_id": worker["run_id"],
-                                   "message": "Consumed committed attempt outcome: " + receipt["command"]})
+                                   "message": "Consumed committed attempt outcome: " + receipt["command"],
+                                   "redispatch_after": worker.get("redispatch_after"),
+                                   "progress_streak": worker.get("progress_streak")})
         return True
 
     if current_mode in {"planning", "coordination"}:
@@ -5159,7 +5299,9 @@ def finalize_exited_worker(
             return True
         if (outcome and outcome.get("outcome") in {"advanced", "progress"}
                 and not (worker.get("request_snapshot", {}).get("metadata") or {}).get("dispatch_role")):
-            if not consume_progress_outcome(config, worker, outcome, now=now):
+            if not consume_progress_outcome(
+                config, worker, outcome, now=now, state=state, task=fresh_task, task_map=fresh_tasks
+            ):
                 return False
             finalize_queue_event_record(config, state, worker, "completed")
             write_activity_log(
@@ -5171,6 +5313,8 @@ def finalize_exited_worker(
                     "message": "Worker reported progress; its completed attempt owns the redispatch cooldown.",
                     "worker_run_id": worker["run_id"],
                     "result_id": worker.get("consumed_result_id"),
+                    "redispatch_after": worker.get("redispatch_after"),
+                    "progress_streak": worker.get("progress_streak"),
                 },
             )
             return True
@@ -5285,6 +5429,29 @@ def handle_worker_approval_state(
     if worker.get("status") in {"waiting_approval", "suspended_approval"} and resolved:
         latest = resolved[-1]
         if latest.get("approval_id") != worker.get("last_approval_id"):
+            if latest.get("decision") == "allow" and not alive and worker_supports_approval_resume(worker):
+                # The suspended attempt released its slot. Other work may now
+                # occupy it, so do not consume this approval until a resumed
+                # process can be admitted. Its exact approval/task binding stays
+                # intact while it waits; this does not authorize another action.
+                admission_state = {
+                    **state,
+                    "workers": {run_id: item for run_id, item in state.get("workers", {}).items()
+                                if run_id != worker.get("run_id")},
+                }
+                snapshot = worker.get("request_snapshot") or {}
+                admission = resource_admission_decision(
+                    config, admission_state, snapshot.get("metadata") or worker.get("metadata"),
+                    agent_id=worker.get("agent_id") or worker.get("provider"),
+                )
+                lane_paused = is_agent_dispatch_paused(
+                    config, state, worker.get("agent_id") or worker.get("provider"),
+                    provider_report=provider_report or {"providers": {}},
+                )
+                if not admission.allowed or lane_paused:
+                    changed = worker.get("status") != "suspended_approval"
+                    worker["status"] = "suspended_approval"
+                    return True, changed
             worker["last_approval_id"] = latest.get("approval_id")
             # A live worker consumes the broker's approval itself. Launching a
             # second process can collide with its existing systemd unit and
@@ -6633,7 +6800,10 @@ def choose_chair_reviewer(
     active_agent_counts = active_worker_agent_counts(state, active_statuses)
     pending_agent_counts = outstanding_delivery_agent_counts(config, state)
     task_map = task_index_from_status(config, status)
-    failing_agents = failing_agents_in_reassignment_loops(state, status)
+    # Task-role failures still block redispatch of that assignment. They do not
+    # establish provider incapacity: failed lifecycle writes must not disqualify
+    # every lane capable of repairing them. Provider pauses/capability and lane
+    # admission below remain authoritative for chair availability.
     candidates: list[tuple[str, str]] = []
     primary_work_candidates: list[tuple[str, str]] = []
     active_recovery_candidates: list[tuple[str, str]] = []
@@ -6658,8 +6828,6 @@ def choose_chair_reviewer(
                 continue
             if not agent_supports_auto_delivery(config, provider_report, agent_id):
                 continue
-            if display_name in failing_agents:
-                continue
             lane_capacity = max_tasks_per_agent_for_lane(settings, normalized)
             lane_load = active_agent_counts.get(normalized, 0) + pending_agent_counts.get(normalized, 0)
             if lane_load < lane_capacity:
@@ -6668,8 +6836,6 @@ def choose_chair_reviewer(
         if is_agent_dispatch_paused(config, state, agent_id, provider_report=provider_report):
             continue
         if not agent_supports_auto_delivery(config, provider_report, agent_id):
-            continue
-        if display_name in failing_agents:
             continue
         if agent_has_dispatchable_primary_work(config, status, display_name, task_map):
             if allow_primary_work_fallback:
@@ -7849,6 +8015,8 @@ def apply_chair_task_action(
     _pending_agents, pending_task_agents, pending_event_keys = outstanding_delivery_indexes(config, state)
     if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
         return False
+    if pending_acceptance_review(task) and any(tid == task_id for tid, _ in active_task_agents | pending_task_agents):
+        return False
     if not task_is_dispatch_eligible_for_agent(task, target_agent):
         return False
 
@@ -8331,6 +8499,8 @@ def dispatch_ready_tasks(
 
                 if (task_id, agent_id) in active_task_agents or (task_id, agent_id) in pending_task_agents:
                     continue
+                if pending_acceptance_review(task) and (task_id in active_task_ids or task_id in pending_task_ids):
+                    continue
                 if not task_is_dispatch_eligible_for_agent(task, target_agent):
                     continue
 
@@ -8498,14 +8668,14 @@ def break_full_deadlock(
     state: dict[str, Any],
     status: dict[str, Any],
 ) -> bool:
-    """Last-resort recovery when the orchestrator is fully wedged, with zero active
-    workers, an empty queue, dispatchable backlog remains, and either
+    """Last-resort recovery when no worker occupies a slot and no runnable queue
+    event remains (suspended approval bindings are retained), backlog remains, and either
     - chairman review is blocked for lack of a dispatch-capable lane
     - provider pauses are present while no dispatch-capable lane is available.
 
-    Forces a fresh recovery probe and clears any paused lane the probe now
-    reports healthy (auth OR an indefinite quota hold whose underlying probe has
-    recovered). If nothing recovers, raises a loud operator-attention
+    Forces a fresh recovery probe and clears auth pauses the probe now reports
+    healthy. Login readiness does not establish quota recovery, so quota pauses
+    remain. If nothing recovers, raises a loud operator-attention
     escalation instead of sitting silently at zero workers. Rate-limited by a
     cooldown so genuinely dead lanes are not thrashed."""
     settings = config.get("supervisor", {})
@@ -8520,10 +8690,11 @@ def break_full_deadlock(
         })
         return True
     active_statuses = {str(v) for v in ready_dispatch_settings(config).get("active_worker_statuses", [])}
-    active_agents, _ = active_worker_indexes(state, active_statuses)
+    active_agents, _ = active_worker_indexes(state, active_statuses & OCCUPIED_WORKER_STATUSES)
     if active_agents:
         return False
-    if state.get("queue", {}).get("events", {}):
+    suspended_events = active_worker_queue_event_ids(state, {"suspended_approval"})
+    if any(event_id not in suspended_events for event_id in state.get("queue", {}).get("events", {})):
         return False
 
     chair_blocked = bool(state.get("chair_review", {}).get("blocked"))
@@ -8545,13 +8716,13 @@ def break_full_deadlock(
     rec["last_attempt_at"] = utc_now()
     if chair_blocked:
         console_log(
-            "FULL DEADLOCK detected (0 active workers, queue empty, chair review "
+            "FULL DEADLOCK detected (0 occupied worker slots, no runnable queue event, chair review "
             "blocked, backlog pending) - forcing recovery probe",
             quiet=False,
         )
     else:
         console_log(
-            "FULL DEADLOCK detected (0 active workers, queue empty, paused lanes present, "
+            "FULL DEADLOCK detected (0 occupied worker slots, no runnable queue event, paused lanes present, "
             "no chair review blocked marker, backlog pending) - forcing recovery probe",
             quiet=False,
         )

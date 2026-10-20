@@ -1,9 +1,12 @@
+import { createHash, randomUUID } from "node:crypto";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
   ActionReceipt,
+  PartnerChannelEntryRecord,
+  ReferralRevenueShareRule,
   FulfillmentSegmentRecord,
   DriverTaskRecord,
   DriverFeePlanRecord,
@@ -244,6 +247,27 @@ export type PersistBillingSettlementChanges = {
   sandboxBillingTreatments?: readonly SandboxBillingTreatmentRecord[];
 };
 
+export type DriverStatementTargetProposal = {
+  statement: DriverStatementRecord;
+  reimbursement: ReimbursementBatchRecord | null;
+  statementAlreadyExisted: boolean;
+  reimbursementAlreadyExisted: boolean;
+};
+
+export type DriverStatementTargetState = {
+  statements: DriverStatementRecord[];
+  reimbursements: ReimbursementBatchRecord[];
+};
+
+export type DriverStatementTargetPersistence = {
+  load: () => Promise<DriverStatementTargetState>;
+  reserve: (
+    create: () => DriverStatementTargetProposal,
+  ) => Promise<DriverStatementTargetProposal>;
+  persist: (changes: PersistBillingSettlementChanges) => Promise<void>;
+  claimSuccessEffects: () => Promise<boolean>;
+};
+
 const LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL = "tasks.record->>'completedAt'";
 const LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL = `
   COALESCE(${LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL}, '') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$'
@@ -274,6 +298,183 @@ export class BillingSettlementRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  /** Read the same entry JSONB history acknowledged by the configuration writer. */
+  async loadReferralRateEntry(entrySlug: string) {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      "SELECT record FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1",
+      [entrySlug],
+    );
+    return result.rows[0]
+      ? this.parseRecord<
+          PartnerChannelEntryRecord & {
+            referralRevenueShareRules?: ReferralRevenueShareRule[];
+          }
+        >(result.rows[0].record, "admin.phase1_partner_channel_entries")
+      : null;
+  }
+
+  async bindMonthlyBillingOperation(operationId: string, periodMonth: string) {
+    const scope = "billing:monthly:operation-period";
+    const key = createHash("sha256").update(operationId).digest("hex");
+    const payloadHash = createHash("sha256").update(periodMonth).digest("hex");
+    await this.databaseService!.query(
+      `INSERT INTO ops.idempotency_records
+        (scope, idempotency_key, payload_hash, status, status_code, response_body, created_at, updated_at)
+       VALUES ($1, $2, $3, 'completed', 200, $4::jsonb, now(), now())
+       ON CONFLICT (scope, idempotency_key) DO NOTHING`,
+      [scope, key, payloadHash, JSON.stringify({ periodMonth })],
+    );
+    const result = await this.databaseService!.query<{
+      response_body: { periodMonth: string };
+    }>(
+      "SELECT response_body FROM ops.idempotency_records WHERE scope = $1 AND idempotency_key = $2",
+      [scope, key],
+    );
+    if (!result.rows[0])
+      throw new Error("Monthly billing operation reservation is unconfirmed.");
+    return result.rows[0].response_body.periodMonth === periodMonth;
+  }
+
+  /** One session lock spans reservation, independent row ACKs and publication.
+   * All queries use that connection, including with DATABASE_POOL_MAX=1.
+   * Locks release on disconnect; durable proposals live in existing idempotency
+   * rails, so retries/restarts never invent new financial IDs or PDF issue time.
+   */
+  async withDriverStatementTarget<T>(
+    identity: { periodMonth: string; driverId: string; feePlanVersion: string },
+    execute: (target: DriverStatementTargetPersistence) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.databaseService!.connect();
+    const key = createHash("sha256")
+      .update(
+        JSON.stringify([
+          identity.periodMonth,
+          identity.driverId,
+          identity.feePlanVersion,
+        ]),
+      )
+      .digest("hex");
+    const scope = "billing:driver-statement:target-proposal";
+    const hash = createHash("sha256").update(key).digest("hex");
+    let locked = false;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        `${scope}:${key}`,
+      ]);
+      locked = true;
+      const readProposal = async () => {
+        const result = await client.query<{
+          response_body: DriverStatementTargetProposal;
+        }>(
+          "SELECT response_body FROM ops.idempotency_records WHERE scope = $1 AND idempotency_key = $2",
+          [scope, key],
+        );
+        return result.rows[0]?.response_body;
+      };
+      return await execute({
+        load: async () => {
+          const statements = await client.query<JsonRecordRow>(
+            `SELECT record FROM billing.phase1_driver_statements
+             WHERE period_month = $1 AND driver_id = $2 AND record->>'feePlanVersion' = $3
+             ORDER BY created_at`,
+            [identity.periodMonth, identity.driverId, identity.feePlanVersion],
+          );
+          const reimbursements = await client.query<JsonRecordRow>(
+            `SELECT record FROM billing.phase1_reimbursement_batches
+             WHERE period_month = $1 AND driver_id = $2 ORDER BY updated_at`,
+            [identity.periodMonth, identity.driverId],
+          );
+          return {
+            statements: statements.rows.map((row) =>
+              this.parseRecord<DriverStatementRecord>(
+                row.record,
+                "billing.phase1_driver_statements",
+              ),
+            ),
+            reimbursements: reimbursements.rows.map((row) =>
+              this.parseRecord<ReimbursementBatchRecord>(
+                row.record,
+                "billing.phase1_reimbursement_batches",
+              ),
+            ),
+          };
+        },
+        reserve: async (create) => {
+          const prior = await readProposal();
+          if (prior) return prior;
+          const proposal = create();
+          // Completion here acknowledges only the immutable reservation operation,
+          // not statement/reimbursement completion. No generic route replays it.
+          await client.query(
+            `INSERT INTO ops.idempotency_records
+              (scope, idempotency_key, payload_hash, status, status_code, response_body, created_at, updated_at)
+             VALUES ($1, $2, $3, 'completed', 200, $4::jsonb, now(), now())
+             ON CONFLICT (scope, idempotency_key) DO NOTHING`,
+            [scope, key, hash, JSON.stringify(proposal)],
+          );
+          const canonical = await readProposal();
+          if (!canonical)
+            throw new Error(
+              "Driver statement target reservation was not acknowledged.",
+            );
+          return canonical;
+        },
+        persist: (changes) => this.persistChanges(changes, client),
+        claimSuccessEffects: async () => {
+          // The fanout is claimed only after both financial rows have ACKed.
+          // Existing notification transport is process-local; this receipt is
+          // deduplication, never a claim of external delivery.
+          const fanoutScope = "billing:driver-statement:success-fanout";
+          const attempt = createHash("sha256")
+            .update(randomUUID())
+            .digest("hex");
+          try {
+            const result = await client.query(
+              `INSERT INTO ops.idempotency_records
+                (scope, idempotency_key, payload_hash, status, status_code, response_body, created_at, updated_at)
+               VALUES ($1, $2, $3, 'completed', 200, '{"claimed":true}'::jsonb, now(), now())
+               ON CONFLICT (scope, idempotency_key) DO NOTHING RETURNING record_id`,
+              [fanoutScope, key, attempt],
+            );
+            return result.rows.length === 1;
+          } catch (error) {
+            // A lost INSERT ACK is not a rejected insert. Only exact ownership
+            // readback lets this still-running attempt publish the fanout.
+            const readback = await client.query<{ payload_hash: string }>(
+              "SELECT payload_hash FROM ops.idempotency_records WHERE scope = $1 AND idempotency_key = $2",
+              [fanoutScope, key],
+            );
+            if (readback.rows[0]?.payload_hash === attempt) return true;
+            throw error;
+          }
+        },
+      });
+    } finally {
+      if (!locked) {
+        // The server may hold this session lock even if its ACK was lost.
+        // pg-pool plain release preserves session locks in the idle connection.
+        client.release(
+          new Error(
+            "Driver statement target lock acquisition was not acknowledged.",
+          ),
+        );
+      } else {
+        try {
+          await client.query(
+            "SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+            [`${scope}:${key}`],
+          );
+          client.release();
+        } catch (error) {
+          // Destroy an uncertain session instead of returning a held lock to pool.
+          client.release(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+      }
+    }
   }
 
   async findMultiTaxiPaymentException(
@@ -494,6 +695,7 @@ export class BillingSettlementRepository {
     action: PaymentRecoveryAction;
     state: "accepted" | "completed";
     receipt: ActionReceipt;
+    passengerLedgerManaged?: true;
   }) {
     if (!this.isEnabled()) {
       throw new Error("Payment recovery persistence is unavailable.");
@@ -502,6 +704,51 @@ export class BillingSettlementRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
+      const passengerCharge = await client.query(
+        "SELECT drts_passenger_id FROM passenger.payment_charge_records WHERE payment_id=$1",
+        [input.paymentId],
+      );
+      const owner = passengerCharge.rows[0]?.drts_passenger_id;
+      if (owner) {
+        if (!input.passengerLedgerManaged)
+          throw new Error("Passenger payment requires its core writer.");
+        await client.query(
+          "SELECT status FROM passenger.accounts WHERE drts_passenger_id=$1 FOR UPDATE",
+          [owner],
+        );
+        const authority = await client.query(
+          `SELECT c.status AS charge_status,p.status AS billing_status,
+                  c.attempt_count AS charge_attempts,p.attempt_count AS billing_attempts,
+                  c.amount_minor AS charge_amount,p.amount_minor AS billing_amount,
+                  c.currency AS charge_currency,p.currency AS billing_currency,
+                  c.provider_capture_ref,p.provider_payment_ref
+           FROM passenger.payment_charge_records c
+           JOIN billing.multi_taxi_passenger_payments p ON p.payment_id=c.payment_id AND p.order_id=c.order_id::text
+           WHERE c.payment_id=$1 FOR UPDATE OF c,p`,
+          [input.paymentId],
+        );
+        const row = authority.rows[0];
+        if (
+          !row ||
+          row.charge_status !== row.billing_status ||
+          row.charge_attempts !== row.billing_attempts ||
+          String(row.charge_amount) !== String(row.billing_amount) ||
+          row.charge_currency !== row.billing_currency ||
+          row.charge_currency !== "TWD" ||
+          (row.provider_capture_ref ?? null) !==
+            (row.provider_payment_ref ?? null) ||
+          (input.action === "begin_manual_recovery" &&
+            row.charge_status !== "manual_recovery") ||
+          (input.action === "retry_capture" &&
+            input.state === "completed" &&
+            !["captured", "refunded"].includes(row.charge_status))
+        ) {
+          throw new Error(
+            "Passenger payment receipt does not match its authority.",
+          );
+        }
+      } else if (input.passengerLedgerManaged)
+        throw new Error("Passenger payment authority is missing.");
       const commandUpdate = await client.query(
         `
           UPDATE billing.multi_taxi_payment_recovery_commands
@@ -518,8 +765,9 @@ export class BillingSettlementRepository {
         throw new Error("Payment recovery command is no longer processing.");
       }
 
-      await client.query(
-        `
+      if (!owner)
+        await client.query(
+          `
           UPDATE billing.multi_taxi_passenger_payments
           SET
             status = CASE
@@ -534,8 +782,8 @@ export class BillingSettlementRepository {
             updated_at = now()
           WHERE payment_id = $1
         `,
-        [input.paymentId, input.action, input.state],
-      );
+          [input.paymentId, input.action, input.state],
+        );
       await client.query("COMMIT");
     } catch (error) {
       await client.query("ROLLBACK");
@@ -845,6 +1093,23 @@ export class BillingSettlementRepository {
       .filter((value): value is string => Boolean(value));
   }
 
+  async listLiveReferralSettlementPeriods(
+    tenantId: string,
+    entrySlug: string,
+  ): Promise<string[]> {
+    const result = await this.databaseService!.query<{ period_month: string }>(
+      `SELECT DISTINCT substring(${LIVE_TASK_COMPLETED_AT_ISO_UTC_SQL} FROM 1 FOR 7) AS period_month
+       FROM ops.phase1_driver_tasks AS tasks
+       INNER JOIN ops.phase1_owned_orders AS orders ON orders.order_id = tasks.order_id
+       WHERE tasks.status = 'completed' AND ${LIVE_TASK_COMPLETED_AT_ISO_UTC_PREDICATE_SQL}
+         AND COALESCE(orders.record->>'tenantId', '') = $1
+         AND COALESCE(orders.record->>'partnerEntrySlug', '') = $2
+         AND COALESCE(orders.record->>'serviceBucket', '') = 'business_dispatch'`,
+      [tenantId, entrySlug],
+    );
+    return result.rows.map((row) => row.period_month);
+  }
+
   async listLiveDriverTripsInPeriod(
     periodStart: string,
     periodEnd: string,
@@ -906,7 +1171,10 @@ export class BillingSettlementRepository {
     return this.mapLiveSettlementTrips(result.rows);
   }
 
-  async persistChanges(changes: PersistBillingSettlementChanges) {
+  async persistChanges(
+    changes: PersistBillingSettlementChanges,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
+  ) {
     if (!this.isEnabled()) {
       return;
     }
@@ -915,7 +1183,7 @@ export class BillingSettlementRepository {
 
     for (const profile of changes.tenantBillingProfiles ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO billing.phase1_tenant_billing_profiles (
               tenant_id,
@@ -935,7 +1203,7 @@ export class BillingSettlementRepository {
 
     for (const invoice of changes.tenantInvoices ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO billing.phase1_tenant_invoices (
               invoice_id,
@@ -974,7 +1242,7 @@ export class BillingSettlementRepository {
 
     for (const feePlan of changes.driverFeePlans ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO billing.phase1_driver_fee_plans (
               fee_plan_id,
@@ -1007,7 +1275,7 @@ export class BillingSettlementRepository {
 
     for (const statement of changes.driverStatements ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO billing.phase1_driver_statements (
               statement_id,
@@ -1043,7 +1311,7 @@ export class BillingSettlementRepository {
 
     for (const batch of changes.reimbursementBatches ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO billing.phase1_reimbursement_batches (
               batch_id,
@@ -1079,7 +1347,7 @@ export class BillingSettlementRepository {
 
     for (const issue of changes.reconciliationIssues ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO billing.phase1_reconciliation_issues (
               issue_id,
@@ -1118,7 +1386,7 @@ export class BillingSettlementRepository {
 
     for (const segment of changes.fulfillmentSegments ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO av_sandbox.fulfillment_segments (
               fulfillment_segment_id,
@@ -1191,7 +1459,7 @@ export class BillingSettlementRepository {
 
     for (const treatment of changes.sandboxBillingTreatments ?? []) {
       writes.push(
-        this.databaseService!.query(
+        executor.query(
           `
             INSERT INTO av_sandbox.sandbox_billing_treatments (
               sandbox_billing_treatment_id,

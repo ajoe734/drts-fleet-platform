@@ -19,6 +19,31 @@ on:
         description: "Branch or commit SHA to run against"
         required: false
         default: "dev"
+      readonly_dev_metadata:
+        description: "Also collect fixed-inventory read-only dev cloud metadata; full CI remains mandatory"
+        required: false
+        default: false
+        type: boolean
+      expected_runtime_sha:
+        description: "For metadata/shared bureau: full expected currently deployed release SHA"
+        required: false
+        default: ""
+        type: string
+      failed_api_revision:
+        description: "Read-only startup log readback for one fixed failed API revision (drts-dev-api-00092-9j6)"
+        required: false
+        default: ""
+        type: string
+      shared_bureau:
+        description: "Also run bureau journeys against the existing shared release; never deploys"
+        required: false
+        default: false
+        type: boolean
+      bureau_phones:
+        description: "JSON: eight distinct allocated fresh synthetic identities, consent/wrong/resend/expiry/returning/trip/reliability/matching"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -39,6 +64,216 @@ env:
 # hang is capped in minutes rather than hours.
 
 jobs:
+  shared-bureau-acceptance:
+    if: github.event_name == 'workflow_dispatch' && inputs.shared_bureau == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      group: shared-dev-pax-bureau-acceptance
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+      PAX_BUREAU_PHONES: ${{ inputs.bureau_phones }}
+    steps:
+      - name: Validate fixed target and immutable definition before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual checkout
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing shared acceptance identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Bind all three live revisions before any journey
+        id: runtime_before
+        run: python3 tests/e2e/pax-bureau-acceptance/shared-runtime-check.py --phase before
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium in the hosted runner
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Mint the existing private Ops and Driver audience credential
+        id: ops_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.ops_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Verify the served Passenger, Ops and private Driver SHA
+        env:
+          PAX_ORIGIN: ${{ steps.runtime_before.outputs.pax_origin }}
+          OPS_ORIGIN: ${{ steps.runtime_before.outputs.ops_origin }}
+          OPS_ID_TOKEN: ${{ steps.ops_token.outputs.id_token }}
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          (async () => {
+            const checks = [];
+            for (const [role, url, privateService] of [
+              ['pax', `${process.env.PAX_ORIGIN}/login`, false],
+              ['ops', `${process.env.OPS_ORIGIN}/review`, true],
+              ['driver', `${process.env.OPS_ORIGIN}/review-driver`, true],
+            ]) {
+              const headers = privateService
+                ? {'X-Serverless-Authorization': `Bearer ${process.env.OPS_ID_TOKEN}`}
+                : {};
+              const response = await fetch(url, {headers, redirect: 'manual', signal: AbortSignal.timeout(60000)});
+              assert.equal(response.status, 200, `${role}: served entry unavailable`);
+              const sha = response.headers.get('x-drts-candidate-sha');
+              assert.equal(sha, process.env.EXPECTED_RUNTIME_SHA, `${role}: served SHA differs`);
+              checks.push({role, url, status: response.status, sha, cloudCredentialAttached: privateService});
+            }
+            fs.writeFileSync('.artifacts/pax-bureau-acceptance/shared-served-entries.json', JSON.stringify(checks, null, 2));
+          })().catch(error => { console.error(error.message); process.exitCode = 1; });
+          NODE
+      - name: Execute bureau journeys against the unchanged shared release
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: "true"
+          PAX_BUREAU_MATCHING_TIMEOUT_MS: ${{ steps.runtime_before.outputs.matching_timeout_ms }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ steps.runtime_before.outputs.pax_origin }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ steps.runtime_before.outputs.ops_origin }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ steps.runtime_before.outputs.ops_origin }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.ops_token.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.ops_token.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-bureau-acceptance.config.ts
+      - name: Verify the runtime stayed on the same three revisions
+        if: always() && steps.runtime_before.outcome == 'success'
+        run: python3 tests/e2e/pax-bureau-acceptance/shared-runtime-check.py --phase after
+      - name: Preserve shared bureau results and explicit unexecuted branches
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-pax-bureau-${{ inputs.expected_runtime_sha }}-${{ github.run_id }}
+          path: .artifacts/pax-bureau-acceptance
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
+  readonly-dev-metadata:
+    if: github.event_name == 'workflow_dispatch' && inputs.readonly_dev_metadata == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable definition and target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual checkout before authentication
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only metadata
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Collect fixed-inventory control-plane metadata only
+        run: >-
+          python3 operations/verification/read-dev-cloud-metadata.py
+          --expected-runtime-sha "$EXPECTED_RUNTIME_SHA"
+          --definition-sha "$EXPECTED_DEFINITION_SHA"
+          --output .artifacts/dev-readonly-metadata/snapshot.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dev-readonly-metadata-${{ github.run_id }}
+          path: .artifacts/dev-readonly-metadata/snapshot.json
+          if-no-files-found: error
+          retention-days: 30
+
+  readonly-api-startup-readback:
+    if: github.event_name == 'workflow_dispatch' && inputs.failed_api_revision == 'drts-dev-api-00092-9j6'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable definition and target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual checkout before authentication
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only startup readback
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read failed API revision startup diagnostics
+        run: >-
+          python3 operations/verification/read-dev-api-startup-log.py
+          --output .artifacts/dev-api-startup-readback/snapshot.json
+      - name: Preserve startup readback or concrete query failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-api-startup-readback-${{ github.run_id }}
+          path: .artifacts/dev-api-startup-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
+
   # Owner checkpoints are intentionally cheap. A review candidate is the first
   # immutable SHA that may start the full integration gate.
   candidate:
@@ -82,8 +317,12 @@ jobs:
           python3 -m unittest tools/ci/test_check_commit_trailers.py
           python3 -m unittest tools/ci/test_check_test_coverage.py
           python3 -m unittest tools/ci/test_workflow_timeouts.py
+          python3 -m unittest tools/ci/test_workflow_unit_partitioning.py
+          python3 -m unittest tools/ci/test_delivery_workflow_contract.py
+          python3 -m unittest tools/ci/test_unit_partition_coverage.py
           python3 -m unittest tools/ci/test_dependency_security.py
           python3 -m unittest tools/ci/test_dev_artifact_providers.py
+          python3 -m unittest tools/ci/test_dev_cloud_metadata_preflight.py
           python3 -m unittest tools/ci/test_tenant_binding_acceptance_workflow.py
           python3 -m unittest tools/ci/test_academy_acceptance_workflow.py
           python3 -m unittest tools/ci/test_leave_acceptance_workflow.py
@@ -97,6 +336,8 @@ jobs:
           python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v
       - name: Verify live mail Python unit tests
         run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v
+      - name: Verify live invoice mail Python unit tests
+        run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-invoice-mail-20261007 -p 'test_*.py' -v
       - name: Verify every test file is on a path CI runs
         run: python3 tools/ci/check_test_coverage.py
       - id: filter
@@ -152,11 +393,52 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
 
-  unit:
+  # CI-BUDGET-F1: the API image build (measured 224-283s) and `pnpm run
+  # test:unit` (measured running 849-944s and still not finished) used to
+  # compete inside one 20-minute "unit" job, so the job was repeatedly
+  # cancelled mid-suite rather than ever failing on a real assertion. The
+  # image now builds once here and is loaded from a saved tarball by each
+  # shard below; `unit` is now a cheap coverage+merge aggregate rather than
+  # the job that runs tests, keeping that required check's name stable.
+  unit-image:
+    name: Unit test API image
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # The default docker driver cannot export a cache; the container driver can.
+      - uses: docker/setup-buildx-action@v3
+      - name: Build API image for the control-plane resolution test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          tags: drts-api:test
+          push: false
+          load: true
+          cache-from: type=gha,scope=api-test-image
+          cache-to: type=gha,scope=api-test-image,mode=max
+      - name: Save the built image so every unit shard can load it without rebuilding
+        run: docker save drts-api:test -o drts-api-test-image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: drts-api-test-image-${{ github.run_id }}
+          path: drts-api-test-image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  unit-shard:
+    name: Unit tests (shard ${{ matrix.shard }}/4)
+    needs: [candidate, changes, unit-image]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -188,30 +470,78 @@ jobs:
             cache-dependency-path: pnpm-lock.yaml,
           }
       - run: pnpm install --frozen-lockfile
-      # Built here rather than inside the test: a cold image build is minutes of
-      # work, and paying for it inside a vitest budget made the suite fail with
-      # "Test timed out" on branches that never touched it. Buildx cache keeps
-      # this near-free on repeat runs, and the failure now names the real cause.
-      # The default docker driver cannot export a cache; the container driver can.
-      - uses: docker/setup-buildx-action@v3
-      - name: Build API image for the control-plane resolution test
-        uses: docker/build-push-action@v5
+      - uses: actions/download-artifact@v4
         with:
-          context: .
-          file: apps/api/Dockerfile
-          tags: drts-api:test
-          push: false
-          load: true
-          cache-from: type=gha,scope=api-test-image
-          cache-to: type=gha,scope=api-test-image,mode=max
-      - name: Run unit tests
-        # Only this job builds drts-api:test, so only here is a missing image a
-        # failure. Smoke acceptance runs the same suite without one.
+          name: drts-api-test-image-${{ github.run_id }}
+      - name: Load the API image this shard's control-plane resolution test requires
+        run: docker load -i drts-api-test-image.tar
+      - name: Run unit tests (shard ${{ matrix.shard }}/4)
+        # Only unit-image builds drts-api:test; this shard only loads it, but
+        # a missing image is still a failure here. Smoke acceptance runs the
+        # same suite without one.
         env:
           DRTS_REQUIRE_API_TEST_IMAGE: "1"
         run: |
           pnpm db:migrate
-          pnpm run test:unit
+          pnpm exec vitest run \
+            --exclude tests/integration/unattended-voice-postgres.integration.test.ts \
+            --exclude "tests/integration/system-remediation/sr-leave-be-001/**" \
+            --exclude tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts \
+            --shard=${{ matrix.shard }}/4 \
+            --reporter=default --reporter=json \
+            --outputFile.json=ci-integ-unit-shard-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-integ-unit-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: ci-integ-unit-shard-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  # Verifies the 4 shards above covered the exact file set `pnpm run
+  # test:unit` would discover unsharded -- no gaps, no duplicates -- then
+  # merges their reports into the same single-report shape the rest of this
+  # file's tooling already expects.
+  unit:
+    name: Unit tests
+    needs: [candidate, changes, unit-shard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Not applicable for this scope/checkpoint
+        if: needs.candidate.outputs.run_full_ci != 'true' || needs.changes.outputs.product != 'true'
+        run: echo "Unit tests are not applicable to this scope/checkpoint; shard job was skipped."
+      - uses: actions/download-artifact@v4
+        if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
+        with:
+          pattern: ci-integ-unit-shard-*-${{ github.run_id }}
+          path: ci-integ-unit-shards
+          merge-multiple: true
+      - name: Verify shard partition coverage and merge reports
+        if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.product == 'true'
+        run: |
+          [ '${{ needs.unit-shard.result }}' = 'success' ] || { echo "A unit test shard failed, was cancelled or was skipped: ${{ needs.unit-shard.result }}"; exit 1; }
+          python3 tools/ci/verify_unit_partition_coverage.py \
+            --root . \
+            --include "tests/contract/**/*.test.ts" \
+            --include "tests/integ/**/*.test.ts" \
+            --include "tests/unit/**/*.test.ts" \
+            --include "tests/unit/**/*.test.tsx" \
+            --include "tests/integration/**/*.test.ts" \
+            --include "tests/security/**/*.test.ts" \
+            --include "tests/load/**/*.test.ts" \
+            --include "tests/e2e/**/*.test.ts" \
+            --exclude tests/integration/unattended-voice-postgres.integration.test.ts \
+            --exclude "tests/integration/system-remediation/sr-leave-be-001/**" \
+            --exclude tests/e2e/system-remediation/sr-host-fe-001/host-api-sql-acceptance.test.ts \
+            --shard-report ci-integ-unit-shards/ci-integ-unit-shard-1.json \
+            --shard-report ci-integ-unit-shards/ci-integ-unit-shard-2.json \
+            --shard-report ci-integ-unit-shards/ci-integ-unit-shard-3.json \
+            --shard-report ci-integ-unit-shards/ci-integ-unit-shard-4.json
 
   integration:
     needs: [candidate, changes]
@@ -598,9 +928,200 @@ jobs:
           pnpm exec playwright test -c playwright.tenant-map-booking.config.ts
           pnpm exec playwright test -c playwright.partner-booking-surfaces.config.ts
           pnpm exec playwright test -c playwright.concierge-map-booking.config.ts
+          pnpm --filter @drts/passenger-app-web... build
+          pnpm exec playwright test -c playwright.passenger-demo.config.ts
+      - name: Upload passenger demonstration browser results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: passenger-demo-browser-${{ github.run_id }}
+          path: |
+            .artifacts/passenger-demo-e2e
+            .artifacts/passenger-demo-report
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The real scheduled journeys need their own existing 25-minute envelope;
+  # the legacy route suites consumed half of it before this case could start.
+  # Both jobs remain required by the original E2E aggregate below.
+  ui-shared-order-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_route_suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      - name: Build API
+        run: pnpm --filter @drts/api build
+      - name: Run the real three-role shared-order journeys
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_route_suite;' \
+            -c 'CREATE DATABASE drts_route_suite;'
+          pnpm db:migrate
+          pnpm db:seed
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+          # Build the exact production Driver mount plus the existing standalone
+          # Driver Web surface. Neither export starts a dev server on this VM.
+          EXPO_PUBLIC_API_URL=/api/review-driver-api \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH=/review-driver \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          mkdir -p apps/passenger-app-web/public/review-driver
+          cp -R apps/driver-app/dist/. apps/passenger-app-web/public/review-driver/
+          pnpm --filter @drts/passenger-app-web... build
+          EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+          pnpm exec tsc -p tests/unit/pax-review-shared-order-demo-20261015/tsconfig.driver-tests.json --noEmit
+          pnpm exec vitest run --config tests/unit/pax-review-shared-order-demo-20261015/driver-vitest.config.ts
+          pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
+      - name: Run additional real booking, accepted-cancellation and no-contact rating branches
+        run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
+      - name: Upload additional passenger branch evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-review-additional-branches-${{ github.run_id }}
+          path: .artifacts/pax-review-additional-branches
+          include-hidden-files: true
+          if-no-files-found: ignore
+      - name: Upload new shared-order rehearsal evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-review-shared-order-${{ github.run_id }}
+          path: .artifacts/pax-review-shared-order
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  # OTP/consent-gate branches (wrong code, lockout, real sixty-second resend,
+  # the real five-minute code expiry, and a returning session's
+  # consent-already-current skip) only need the API and Passenger web, not
+  # Ops/Driver/Platform Admin; the UC05 on_trip cancellation-rejection branch
+  # added alongside them does need a real Ops dispatch/assignment and a real
+  # Driver trip through to on_trip, so this job also builds the standalone
+  # Driver Web export (same step ui-shared-order-e2e uses) and boots Ops.
+  # This still runs as its own job instead of growing ui-shared-order-e2e's
+  # already-tight 25-minute envelope. The real five-minute OTP expiry wait
+  # alone needs over five minutes inside this job, on top of
+  # install/build/browser-install, the Driver export and the other serial
+  # cases; timeout-minutes is raised 25->40 to fit the added Driver export
+  # build and the real scheduled-pickup/trip-duration waits the on_trip case
+  # needs, pending the first hosted run's actual step times.
+  ui-bureau-acceptance-e2e:
+    needs: [candidate, changes]
+    if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_DB: drts_fleet_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_bureau_acceptance
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify shared release binding and private-role failure cases without sockets
+        run: python3 -B -m unittest discover -s tests/unit/pax-bureau-journey-coverage-20261018 -p test_shared_runtime_check.py
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          {
+            node-version: 22,
+            cache: pnpm,
+            cache-dependency-path: pnpm-lock.yaml,
+          }
+      - run: pnpm install --frozen-lockfile
+      - name: Migrate and seed the disposable hosted database
+        run: |
+          PGPASSWORD=postgres psql \
+            postgresql://postgres:postgres@localhost:5432/postgres \
+            -v ON_ERROR_STOP=1 \
+            -c 'DROP DATABASE IF EXISTS drts_bureau_acceptance;' \
+            -c 'CREATE DATABASE drts_bureau_acceptance;'
+          pnpm db:migrate
+          pnpm db:seed
+      - name: Build the original API and Passenger application
+        run: |
+          pnpm --filter @drts/api build
+          pnpm --filter @drts/passenger-app-web... build
+      - name: Build the Driver Web standalone export
+        run: |
+          EXPO_PUBLIC_API_URL=http://127.0.0.1:3001 \
+            EXPO_PUBLIC_REVIEW_DEMO=true EXPO_PUBLIC_REVIEW_BASE_PATH= \
+            pnpm --filter @drts/driver-app exec expo export -p web --output-dir dist
+      - name: Install Chromium in the hosted runner
+        run: |
+          sudo find /etc/apt/sources.list.d -maxdepth 1 -type f \
+            \( -iname "*google*" -o -iname "*chrome*" \) \
+            -exec mv "{}" "{}.disabled" \; || true
+          pnpm exec playwright install --with-deps chromium
+      - name: Run OTP, cancellation, reliability, aftercare and matching bureau branches
+        run: pnpm exec playwright test -c playwright.pax-bureau-acceptance.config.ts
+      - name: Upload bureau acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pax-bureau-acceptance-${{ github.run_id }}
+          path: .artifacts/pax-bureau-acceptance
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
 
   e2e:
-    needs: [candidate, changes, cross-surface-e2e, ui-route-e2e]
+    needs:
+      [
+        candidate,
+        changes,
+        cross-surface-e2e,
+        ui-route-e2e,
+        ui-shared-order-e2e,
+        ui-bureau-acceptance-e2e,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: always()
@@ -612,7 +1133,7 @@ jobs:
             exit 0
           fi
           [ '${{ needs.changes.result }}' = 'success' ] || { echo "changes gate failed"; exit 1; }
-          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}'; do
+          for result in '${{ needs.cross-surface-e2e.result }}' '${{ needs.ui-route-e2e.result }}' '${{ needs.ui-shared-order-e2e.result }}' '${{ needs.ui-bureau-acceptance-e2e.result }}'; do
             case "$result" in
               success) ;;
               skipped) echo "E2E skipped: no changed path can exercise it." ;;

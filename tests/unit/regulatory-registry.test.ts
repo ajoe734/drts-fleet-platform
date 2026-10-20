@@ -1,3 +1,5 @@
+import { CommandSqlTransport } from "./registry-contract-insurance-exclusivity-canonical-ack-flow-20261015/sql-transport";
+import { enabledRegistryRepository } from "./registry-driver-master-durable-ack-20261014/storage-fixture";
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
 
@@ -13,36 +15,54 @@ function createRegulatoryRegistryService(
   repository?: RegulatoryRegistryRepository,
 ) {
   const auditService = new AuditNotificationService();
-  return new RegulatoryRegistryService(
+  const service = new RegulatoryRegistryService(
     new OpsDispatchEventsService(new EventEmitter() as never),
     auditService,
     new DriverProfileService(auditService),
     repository,
   );
+  // Existing heartbeat fixtures model the external repository. Keep their
+  // initialized master rows available to the new targeted reader as well.
+  if (repository && typeof repository.lockDriver !== "function") {
+    const rows = service.listDrivers();
+    repository.lockDriver = vi.fn(async (driverId) =>
+      structuredClone(
+        rows.find((driver) => driver.driverId === driverId) ?? null,
+      ),
+    );
+  }
+  return service;
 }
 
 describe("regulatory registry service", () => {
   it("creates regulatory source-of-truth records and updates vehicle eligibility from insurance and exclusivity", async () => {
-    const persistChanges = vi.fn(async () => undefined);
-    const repository = {
-      isEnabled: vi.fn(() => true),
-      loadState: vi.fn(async () => ({
-        vehicles: [],
-        drivers: [],
-        supplyPairs: [],
-        contracts: [],
-        policies: [],
-        exclusivities: [],
-      })),
-      persistChanges,
-      reportPersistenceFailure: vi.fn(),
-    } as unknown as RegulatoryRegistryRepository;
+    const persistChanges = vi.fn(async (_changes?: unknown) => {
+      void _changes;
+      return undefined;
+    });
+    const db = new CommandSqlTransport();
+    const repository = new RegulatoryRegistryRepository(db as never);
+    const write = repository.persistChangesWithExecutor.bind(repository);
+    repository.persistChangesWithExecutor = async (executor, changes) => {
+      await write(executor, changes);
+      // Observe the original persisted change payload without replacing SQL.
+      await persistChanges(changes);
+    };
     const regulatoryRegistryService =
       createRegulatoryRegistryService(repository);
+    db.seed({
+      vehicles: regulatoryRegistryService.listVehicles(),
+      drivers: regulatoryRegistryService.listDrivers(),
+      supplyPairs: regulatoryRegistryService.listSupplyPairs(),
+      contracts: regulatoryRegistryService.listContracts(),
+      policies: regulatoryRegistryService.listPolicies(),
+      exclusivities: regulatoryRegistryService.listExclusivities(),
+    });
+    db.enabled = true;
 
     await regulatoryRegistryService.onModuleInit();
 
-    const contract = regulatoryRegistryService.createContract({
+    const contract = await regulatoryRegistryService.createContract({
       vehicleId: "veh-demo-001",
       partnerId: "partner-demo-001",
       partnerType: "enterprise_partner",
@@ -51,13 +71,13 @@ describe("regulatory registry service", () => {
       startAt: "2026-05-01T00:00:00Z",
       endAt: "2026-12-31T23:59:59Z",
     });
-    const activatedContract = regulatoryRegistryService.activateContract(
+    const activatedContract = await regulatoryRegistryService.activateContract(
       contract.contractId,
       {
         approvedBy: "platform-admin-001",
       },
     );
-    const policy = regulatoryRegistryService.createInsurancePolicy({
+    const policy = await regulatoryRegistryService.createInsurancePolicy({
       vehicleId: "veh-demo-001",
       policyNo: "POL-NEW-0001",
       insuranceType: "passenger_liability",
@@ -67,7 +87,7 @@ describe("regulatory registry service", () => {
       endAt: "2026-12-31T23:59:59Z",
     });
 
-    regulatoryRegistryService.submitExclusivityReview("veh-demo-001", {
+    await regulatoryRegistryService.submitExclusivityReview("veh-demo-001", {
       declarationFileId: "file-exclusivity-001",
       exclusiveProviderName: "Acme Dispatch",
       effectiveStart: "2026-05-01T00:00:00Z",
@@ -80,16 +100,15 @@ describe("regulatory registry service", () => {
       ),
     ).toBe(false);
 
-    const activatedPolicy = regulatoryRegistryService.activateInsurancePolicy(
-      policy.policyId,
-      {},
-    );
-    const approvedExclusivity = regulatoryRegistryService.approveExclusivity(
-      "veh-demo-001",
-      {
+    const activatedPolicy =
+      await regulatoryRegistryService.activateInsurancePolicy(
+        policy.policyId,
+        {},
+      );
+    const approvedExclusivity =
+      await regulatoryRegistryService.approveExclusivity("veh-demo-001", {
         reviewerId: "platform-admin-001",
-      },
-    );
+      });
 
     await Promise.resolve();
 
@@ -843,14 +862,16 @@ describe("driver service buckets after registration", () => {
     return service.listDrivers()[0]!.driverId;
   }
 
-  it("lets the platform change which dispatch types a driver may take", () => {
+  it("lets the platform change which dispatch types a driver may take", async () => {
     // SD-DP-20260817-010 (PRD 11.4) makes this the platform's decision, and it
     // could only be made at registration -- the one moment the platform knows
     // least about the driver.
-    const service = createRegulatoryRegistryService();
+    const service = createRegulatoryRegistryService(
+      enabledRegistryRepository(),
+    );
     const driverId = firstDriverId(service);
 
-    const updated = service.updateDriverServiceBuckets(driverId, {
+    const updated = await service.updateDriverServiceBuckets(driverId, {
       supportedServiceBuckets: ["business_dispatch"],
       reason: "moved to the corporate fleet",
     });
@@ -862,19 +883,20 @@ describe("driver service buckets after registration", () => {
     ).toEqual(["business_dispatch"]);
   });
 
-  it("records what the buckets were before, not only what they became", () => {
+  it("records what the buckets were before, not only what they became", async () => {
     const auditService = new AuditNotificationService();
     const service = new RegulatoryRegistryService(
       new OpsDispatchEventsService(new EventEmitter() as never),
       auditService,
       new DriverProfileService(auditService),
+      enabledRegistryRepository(),
     );
     const driverId = firstDriverId(service);
     const before = service
       .listDrivers()
       .find((d) => d.driverId === driverId)!.supportedServiceBuckets;
 
-    service.updateDriverServiceBuckets(driverId, {
+    await service.updateDriverServiceBuckets(driverId, {
       supportedServiceBuckets: ["standard_taxi"],
     });
 
@@ -889,13 +911,15 @@ describe("driver service buckets after registration", () => {
     });
   });
 
-  it("refuses to leave a driver with no bucket at all", () => {
-    const service = createRegulatoryRegistryService();
+  it("refuses to leave a driver with no bucket at all", async () => {
+    const service = createRegulatoryRegistryService(
+      enabledRegistryRepository(),
+    );
 
     // A driver with no bucket can never be dispatched, which is a suspension
     // by accident rather than a dispatch setting.
     try {
-      service.updateDriverServiceBuckets(firstDriverId(service), {
+      await service.updateDriverServiceBuckets(firstDriverId(service), {
         supportedServiceBuckets: [],
       });
       throw new Error("expected the call to throw");
@@ -904,11 +928,13 @@ describe("driver service buckets after registration", () => {
     }
   });
 
-  it("refuses a bucket Phase 1 does not have", () => {
-    const service = createRegulatoryRegistryService();
+  it("refuses a bucket Phase 1 does not have", async () => {
+    const service = createRegulatoryRegistryService(
+      enabledRegistryRepository(),
+    );
 
     try {
-      service.updateDriverServiceBuckets(firstDriverId(service), {
+      await service.updateDriverServiceBuckets(firstDriverId(service), {
         supportedServiceBuckets: ["av_pilot"] as never,
       });
       throw new Error("expected the call to throw");
@@ -917,12 +943,17 @@ describe("driver service buckets after registration", () => {
     }
   });
 
-  it("does not let a duplicate silently double a bucket", () => {
-    const service = createRegulatoryRegistryService();
+  it("does not let a duplicate silently double a bucket", async () => {
+    const service = createRegulatoryRegistryService(
+      enabledRegistryRepository(),
+    );
 
-    const updated = service.updateDriverServiceBuckets(firstDriverId(service), {
-      supportedServiceBuckets: ["standard_taxi", "standard_taxi"],
-    });
+    const updated = await service.updateDriverServiceBuckets(
+      firstDriverId(service),
+      {
+        supportedServiceBuckets: ["standard_taxi", "standard_taxi"],
+      },
+    );
 
     expect(updated.supportedServiceBuckets).toEqual(["standard_taxi"]);
   });

@@ -138,6 +138,10 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         if mcp_config:
             command.extend(["--mcp-config", str(config_path(self.config, "claude_mcp_config"))])
 
+        permission_prompt_tool = runtime.get("permission_prompt_tool")
+        if permission_prompt_tool:
+            command.extend(["--permission-prompt-tool", str(permission_prompt_tool)])
+
         run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
         workspace_root = delivery_workspace_root(self.config, request.metadata)

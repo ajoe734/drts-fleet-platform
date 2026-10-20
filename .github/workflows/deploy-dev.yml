@@ -29,7 +29,7 @@ on:
         options:
           - "current"
       retired_service_cleanup:
-        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."
+        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."
         required: false
         default: "none"
         type: choice
@@ -65,6 +65,14 @@ env:
   DEV_ARTIFACT_REPOSITORY: ${{ vars.DEV_ARTIFACT_REPOSITORY }}
   DEV_SECRET_PREFIX: ${{ vars.DEV_SECRET_PREFIX }}
   DEV_MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.DEV_MAP_PROVIDER_ALLOWED_ORIGINS }}
+  # Explicit shared rehearsal selection. No public access or role policy change.
+  DEV_PAX_REVIEW_DEMO_ENABLED: ${{ vars.DEV_PAX_REVIEW_DEMO_ENABLED }}
+  # Hostname of the Cloud IAP public front door provisioned by
+  # operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh
+  # (see domain-mappings-dev.yml). Empty until that workflow has been run for
+  # this project; passenger-app-web itself stays --no-allow-unauthenticated
+  # either way (see "Grant Cloud IAP service agent run.invoker" below).
+  DEV_PAX_BUREAU_ENTRY_HOST: ${{ vars.DEV_PAX_BUREAU_ENTRY_HOST }}
   DEV_JWT_ISSUER: ${{ vars.DEV_JWT_ISSUER }}
   DEV_JWT_AUDIENCE: ${{ vars.DEV_JWT_AUDIENCE }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
@@ -77,6 +85,7 @@ env:
   DEV_REFERRAL_EMBED_ENTRY_SLUG: ${{ vars.DEV_REFERRAL_EMBED_ENTRY_SLUG }}
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
+  DEV_GCP_PASSENGER_APP_SERVICE: ${{ vars.DEV_GCP_PASSENGER_APP_SERVICE }}
   DEV_GCP_MIGRATION_JOB: ${{ vars.DEV_GCP_MIGRATION_JOB }}
   DEV_API_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_API_ALLOW_UNAUTHENTICATED }}
   DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
@@ -86,6 +95,7 @@ env:
   DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED }}
   DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED }}
   DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED }}
+  DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED }}
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
   DEV_WORKLOAD_IDENTITY_ISSUER: ${{ vars.DEV_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
   DEV_WORKLOAD_IDENTITY_AUDIENCE: ${{ vars.DEV_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
@@ -142,6 +152,7 @@ jobs:
       referral_embed_entry_slug: ${{ steps.resolve.outputs.referral_embed_entry_slug }}
       enterprise_dispatch_service: ${{ steps.resolve.outputs.enterprise_dispatch_service }}
       channel_partner_portal_service: ${{ steps.resolve.outputs.channel_partner_portal_service }}
+      passenger_app_service: ${{ steps.resolve.outputs.passenger_app_service }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
       api_exposure_flag: ${{ steps.resolve.outputs.api_exposure_flag }}
       platform_admin_exposure_flag: ${{ steps.resolve.outputs.platform_admin_exposure_flag }}
@@ -151,6 +162,7 @@ jobs:
       bank_console_exposure_flag: ${{ steps.resolve.outputs.bank_console_exposure_flag }}
       enterprise_dispatch_exposure_flag: ${{ steps.resolve.outputs.enterprise_dispatch_exposure_flag }}
       channel_partner_portal_exposure_flag: ${{ steps.resolve.outputs.channel_partner_portal_exposure_flag }}
+      passenger_app_exposure_flag: ${{ steps.resolve.outputs.passenger_app_exposure_flag }}
       api_origin: ${{ steps.resolve.outputs.api_origin }}
       platform_admin_origin: ${{ steps.resolve.outputs.platform_admin_origin }}
       ops_console_origin: ${{ steps.resolve.outputs.ops_console_origin }}
@@ -235,6 +247,7 @@ jobs:
           referral_embed_entry_slug="$(pick "${DEV_REFERRAL_EMBED_ENTRY_SLUG:-}" "" "yuhe-residence")"
           enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-dev-enterprise-dispatch-web")"
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
+          passenger_app_service="$(pick "${DEV_GCP_PASSENGER_APP_SERVICE:-}" "" "drts-dev-passenger-app-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
 
           assert_exact_active_service() {
@@ -256,6 +269,7 @@ jobs:
           assert_exact_active_service referral-embed-web "$referral_embed_service" "drts-dev-referral-embed-web"
           assert_exact_active_service enterprise-dispatch-web "$enterprise_dispatch_service" "drts-dev-enterprise-dispatch-web"
           assert_exact_active_service channel-partner-portal-web "$channel_partner_portal_service" "drts-channel-partner-portal-web"
+          assert_exact_active_service passenger-app-web "$passenger_app_service" "drts-dev-passenger-app-web"
 
           api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" false)"
           platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)"
@@ -265,6 +279,7 @@ jobs:
           bank_console_exposure_flag="$(exposure_flag "${DEV_BANK_CONSOLE_ALLOW_UNAUTHENTICATED:-}" false)"
           enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" false)"
           channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
+          passenger_app_exposure_flag="$(exposure_flag "${DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED:-}" false)"
           api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
           platform_admin_origin="${DEV_PLATFORM_ADMIN_ORIGIN:-}"
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
@@ -353,6 +368,7 @@ jobs:
           emit referral_embed_entry_slug "$referral_embed_entry_slug"
           emit enterprise_dispatch_service "$enterprise_dispatch_service"
           emit channel_partner_portal_service "$channel_partner_portal_service"
+          emit passenger_app_service "$passenger_app_service"
           emit migration_job "$migration_job"
           emit api_exposure_flag "$api_exposure_flag"
           emit platform_admin_exposure_flag "$platform_admin_exposure_flag"
@@ -362,6 +378,7 @@ jobs:
           emit bank_console_exposure_flag "$bank_console_exposure_flag"
           emit enterprise_dispatch_exposure_flag "$enterprise_dispatch_exposure_flag"
           emit channel_partner_portal_exposure_flag "$channel_partner_portal_exposure_flag"
+          emit passenger_app_exposure_flag "$passenger_app_exposure_flag"
           emit api_origin "$api_origin"
           emit platform_admin_origin "$platform_admin_origin"
           emit ops_console_origin "$ops_console_origin"
@@ -374,6 +391,28 @@ jobs:
     name: Build & push images
     runs-on: ubuntu-latest
     needs: prepare
+    # Independent images share the same immutable source and cache scopes.
+    # Limit runner demand; migration still waits for every image to succeed.
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        image:
+          [
+            api,
+            migrate,
+            platform-admin-web,
+            ops-console-web,
+            fleet-partner-portal-web,
+            tenant-console-web,
+            bank-console-web,
+            referral-embed-web,
+            enterprise-dispatch-web,
+            channel-partner-portal-web,
+            passenger-app-web,
+          ]
+    # These outputs are identical for every matrix entry: all check out the
+    # same immutable source. No per-image value is exposed as a shared output.
     outputs:
       image_tag: ${{ steps.tag.outputs.tag }}
       candidate_sha: ${{ steps.tag.outputs.candidate_sha }}
@@ -410,31 +449,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Check which images the registry already has
+      - name: Check whether the registry already has this image
         id: existing
+        env:
+          IMAGE: ${{ matrix.image }}
+          REGISTRY: ${{ needs.prepare.outputs.registry }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-
-          # Under tag immutability a candidate tag can be written once and never
-          # again, so re-running a deploy for a source ref that was already built
-          # fails on the push -- the deploy is not idempotent without this. The
-          # tag is the source SHA, so an image that is already there was built
-          # from exactly this commit and is the image we would have produced.
-          # Skip those and build only what is genuinely missing.
-          for image in api migrate platform-admin-web ops-console-web fleet-partner-portal-web tenant-console-web bank-console-web referral-embed-web enterprise-dispatch-web channel-partner-portal-web;
-          do
-            reference="${{ needs.prepare.outputs.registry }}/${image}:${{ steps.tag.outputs.tag }}"
-            if gcloud container images describe "$reference" >/dev/null 2>&1; then
-              echo "${image}=true" >> "$GITHUB_OUTPUT"
-              echo "already published: ${reference}"
-            else
-              echo "${image}=false" >> "$GITHUB_OUTPUT"
-              echo "needs build: ${reference}"
-            fi
-          done
+          # Immutable candidate tags are never overwritten on a retry.
+          reference="${REGISTRY}/${IMAGE}:${IMAGE_TAG}"
+          if gcloud container images describe "$reference" >/dev/null 2>&1; then
+            echo "${IMAGE}=true" >> "$GITHUB_OUTPUT"
+            echo "already published: ${reference}"
+          else
+            echo "${IMAGE}=false" >> "$GITHUB_OUTPUT"
+            echo "needs build: ${reference}"
+          fi
 
       - name: Build & push — api
-        if: steps.existing.outputs.api != 'true'
+        if: matrix.image == 'api' && steps.existing.outputs.api != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -446,7 +480,7 @@ jobs:
           cache-to: type=gha,scope=api,mode=min
 
       - name: Build & push — migrate
-        if: steps.existing.outputs.migrate != 'true'
+        if: matrix.image == 'migrate' && steps.existing.outputs.migrate != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -458,7 +492,7 @@ jobs:
           cache-to: type=gha,scope=migrate,mode=min
 
       - name: Build & push — platform-admin-web
-        if: steps.existing.outputs.platform-admin-web != 'true'
+        if: matrix.image == 'platform-admin-web' && steps.existing.outputs.platform-admin-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -471,7 +505,7 @@ jobs:
           cache-to: type=gha,scope=platform-admin-web,mode=min
 
       - name: Build & push — ops-console-web
-        if: steps.existing.outputs.ops-console-web != 'true'
+        if: matrix.image == 'ops-console-web' && steps.existing.outputs.ops-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -484,7 +518,7 @@ jobs:
           cache-to: type=gha,scope=ops-console-web,mode=min
 
       - name: Build & push — fleet-partner-portal-web
-        if: steps.existing.outputs.fleet-partner-portal-web != 'true'
+        if: matrix.image == 'fleet-partner-portal-web' && steps.existing.outputs.fleet-partner-portal-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -497,7 +531,7 @@ jobs:
           cache-to: type=gha,scope=fleet-partner-portal-web,mode=min
 
       - name: Build & push — tenant-console-web
-        if: steps.existing.outputs.tenant-console-web != 'true'
+        if: matrix.image == 'tenant-console-web' && steps.existing.outputs.tenant-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -510,7 +544,7 @@ jobs:
           cache-to: type=gha,scope=tenant-console-web,mode=min
 
       - name: Build & push — bank-console-web
-        if: steps.existing.outputs.bank-console-web != 'true'
+        if: matrix.image == 'bank-console-web' && steps.existing.outputs.bank-console-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -523,7 +557,7 @@ jobs:
           cache-to: type=gha,scope=bank-console-web,mode=min
 
       - name: Build & push — referral-embed-web
-        if: steps.existing.outputs.referral-embed-web != 'true'
+        if: matrix.image == 'referral-embed-web' && steps.existing.outputs.referral-embed-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -536,7 +570,7 @@ jobs:
           cache-to: type=gha,scope=referral-embed-web,mode=min
 
       - name: Build & push — enterprise-dispatch-web
-        if: steps.existing.outputs.enterprise-dispatch-web != 'true'
+        if: matrix.image == 'enterprise-dispatch-web' && steps.existing.outputs.enterprise-dispatch-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -549,7 +583,7 @@ jobs:
           cache-to: type=gha,scope=enterprise-dispatch-web,mode=min
 
       - name: Build & push — channel-partner-portal-web
-        if: steps.existing.outputs.channel-partner-portal-web != 'true'
+        if: matrix.image == 'channel-partner-portal-web' && steps.existing.outputs.channel-partner-portal-web != 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -560,6 +594,19 @@ jobs:
             ${{ needs.prepare.outputs.registry }}/channel-partner-portal-web:${{ steps.tag.outputs.tag }}
           cache-from: type=gha,scope=channel-partner-portal-web
           cache-to: type=gha,scope=channel-partner-portal-web,mode=min
+
+      - name: Build & push — passenger-app-web
+        if: matrix.image == 'passenger-app-web' && steps.existing.outputs.passenger-app-web != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/passenger-app-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=passenger-app-web
+          cache-to: type=gha,scope=passenger-app-web,mode=min
 
   migrate:
     name: DB migration
@@ -626,6 +673,8 @@ jobs:
     needs: [prepare, build-push, migrate]
     if: ${{ always() && needs.build-push.result == 'success' && (needs.migrate.result == 'success' || needs.migrate.result == 'skipped') }}
     environment: dev
+    outputs:
+      candidate_sha: ${{ needs.build-push.outputs.candidate_sha }}
 
     steps:
       - name: Checkout deploy source
@@ -897,6 +946,54 @@ jobs:
           echo "openclaw_auth_provider=${openclaw_auth_provider}" >> "$GITHUB_OUTPUT"
           echo "openclaw_home=${openclaw_home}" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve passenger app optional secret mounts
+        id: passenger_secrets
+        env:
+          SECRET_PREFIX: ${{ needs.prepare.outputs.secret_prefix }}
+          PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          api_mounts=""
+
+          # Probe metadata only. Do not access values or create secrets. Each
+          # group either mounts all references or none, including partial sets.
+          # --set-secrets replaces old references, so removing one credential
+          # also disables an already-configured provider on the next rollout.
+          optional_group() {
+            local group="$1"
+            shift
+            local setting suffix secret mounts="" complete=true
+            for setting in "$@"; do
+              suffix="$(printf '%s' "$setting" | tr '[:upper:]_' '[:lower:]-')"
+              secret="${SECRET_PREFIX}-${suffix}"
+              if gcloud secrets describe "$secret" --project "$PROJECT_ID" >/dev/null 2>&1; then
+                mounts="${mounts:+${mounts},}${setting}=${secret}:latest"
+              else
+                complete=false
+              fi
+            done
+            if [[ "$complete" == true ]]; then
+              api_mounts="${api_mounts:+${api_mounts},}${mounts}"
+            else
+              echo "::notice::Passenger ${group} configuration is absent or partial; no credentials from this group are mounted."
+            fi
+            # Metadata completeness is not provider availability. SMS/PSP
+            # adapters remain external gates even when references are complete.
+            echo "${group}_mounts_complete=${complete}" >> "$GITHUB_OUTPUT"
+          }
+
+          optional_group google GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET
+          optional_group line LINE_CHANNEL_ID LINE_CHANNEL_SECRET
+          optional_group facebook FACEBOOK_APP_ID FACEBOOK_APP_SECRET
+          optional_group otp PASSENGER_OTP_PEPPER
+          optional_group sms SMS_PROVIDER_API_KEY SMS_PROVIDER_SENDER_ID PASSENGER_OTP_PEPPER
+          optional_group payment PSP_MERCHANT_ID PSP_API_KEY PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
+          # The current BFF does not consume a cookie encryption/signing key.
+          # Do not declare a secret until its reader and contract exist.
+          # OTP pepper is shared by email and SMS. Keep one reference per slot.
+          api_mounts="$(printf '%s' "$api_mounts" | tr ',' '\n' | awk 'NF && !seen[$0]++' | paste -sd, -)"
+          echo "api=${api_mounts}" >> "$GITHUB_OUTPUT"
+
       - name: Verify live Google Maps provider
         if: ${{ steps.api_secrets.outputs.map_provider_mode == 'external' }}
         run: |
@@ -935,6 +1032,22 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)' 2>/dev/null || true)"
+          passenger_app_cloud_run_origin="$(gcloud run services describe "${{ needs.prepare.outputs.passenger_app_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)' 2>/dev/null || true)"
+          oauth_redirect_allowlist=""
+          for origin in https://ride.smarttransport.tw "$passenger_app_cloud_run_origin"; do
+            [[ -n "$origin" ]] || continue
+            if [[ ! "$origin" =~ ^https://[a-z0-9.-]+$ ]]; then
+              echo "::error::Passenger callback origin must be a bare HTTPS origin."
+              exit 1
+            fi
+            for provider in google facebook line; do
+              callback="${origin}/auth/callback/${provider}"
+              oauth_redirect_allowlist="${oauth_redirect_allowlist:+${oauth_redirect_allowlist},}${callback}"
+            done
+          done
           auth_allowed_origins=""
           for origin in "${{ needs.prepare.outputs.tenant_console_origin }}" "$tenant_console_cloud_run_origin" "${{ needs.prepare.outputs.enterprise_dispatch_origin }}" "$enterprise_dispatch_cloud_run_origin"; do
             [[ -n "$origin" ]] || continue
@@ -960,7 +1073,32 @@ jobs:
           # keep startup and acceptance traffic moving; one API instance keeps
           # rollout demand below the 25-connection dev database limit.
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
-          env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
+          # Existing 2026-10-05 dev workforce policy is independent of tenant OIDC.
+          env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}@DRTS_DEV_MFA_WAIVED=true"
+          env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
+          env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
+          if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
+            env_vars="${env_vars}@VOICE_BOOKING_RESULT_DELIVERY=simulation"
+            # Existing complete groups keep their references. Absent groups
+            # receive the explicit PUBLIC synthetic profile; never generate a
+            # new key at boot or require a real SMS/financial account. The
+            # original OTP/provider/cipher readers validate these env values.
+            review_simulation_env="$(python3 - '${{ steps.passenger_secrets.outputs.otp_mounts_complete }}' '${{ steps.passenger_secrets.outputs.payment_mounts_complete }}' <<'PY_REVIEW'
+          import json
+          import sys
+          from pathlib import Path
+          profile = json.loads(Path('apps/api/src/modules/passenger-app/review-demo/simulation-profile.json').read_text())
+          values = {}
+          for group, complete in zip(('otp', 'payment'), sys.argv[1:]):
+              if complete != 'true':
+                  values.update(profile[group])
+          print(''.join('@' + key + '=' + (value if isinstance(value, str) else json.dumps(value, separators=(',', ':'))) for key, value in values.items()))
+          PY_REVIEW
+          )"
+            env_vars="${env_vars}${review_simulation_env}"
+            env_vars="${env_vars}@PSP_PROVIDER=fake@PAX_PAYMENT_CAPTURE_ENABLED=true@PAX_PAYMENT_CAPTURE_POLICY={\"retryDelaysMs\":[60000],\"retryDefinitiveDeclines\":false,\"unknownReadbackDelaysMs\":[1000,3000]}@MULTI_TAXI_DEFAULT_AUTHORIZATION_ID=bc39e4f3-72d8-4383-bdc1-2426c1330dfa@PAX_REVIEW_OPS_URL=${{ needs.prepare.outputs.ops_console_origin }}/review@SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES=1"
+          fi
           if [[ "${{ steps.api_secrets.outputs.oidc_enabled }}" == "true" ]]; then
             tenant_login_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
             tenant_login_origin="${tenant_login_origin:-$tenant_console_cloud_run_origin}"
@@ -970,7 +1108,7 @@ jobs:
               echo "::error::Google OIDC needs both tenant and dispatch HTTPS origins before it can be enabled."
               exit 1
             fi
-            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@DRTS_DEV_MFA_WAIVED=true@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
+            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
           fi
           # Dev API only: seed the fixed live-map-observer principal and its
           # read-only ops_observer membership. Never enable in staging/prod
@@ -1007,8 +1145,15 @@ jobs:
           echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
+        env:
+          API_ENV_VARS: ${{ steps.api_env.outputs.vars }}
         run: |
           IMAGE="${{ needs.prepare.outputs.registry }}/api:${{ needs.build-push.outputs.image_tag }}"
+          api_secrets="${{ steps.api_secrets.outputs.api }}"
+          passenger_secrets="${{ steps.passenger_secrets.outputs.api }}"
+          if [[ -n "$passenger_secrets" ]]; then
+            api_secrets="${api_secrets},${passenger_secrets}"
+          fi
 
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.api_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
@@ -1017,10 +1162,11 @@ jobs:
             --ingress all \
             --set-cloudsql-instances "${{ needs.prepare.outputs.cloudsql }}" \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
-            --set-secrets "${{ steps.api_secrets.outputs.api }}" \
-            --set-env-vars "${{ steps.api_env.outputs.vars }}" \
+            --set-secrets "$api_secrets" \
+            --set-env-vars "$API_ENV_VARS" \
             ${{ needs.prepare.outputs.api_exposure_flag }} \
-            --min-instances 0 \
+            --min-instances 1 \
+            --no-cpu-throttling \
             --max-instances 1 \
             --project "${{ needs.prepare.outputs.project_id }}"
 
@@ -1093,7 +1239,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,DRTS_DEV_WORKFORCE_PRINCIPAL_ID=principal_platform_admin_default,NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1132,7 +1278,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false},PAX_PUBLIC_PASSENGER_ONLY=false" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1292,6 +1438,57 @@ jobs:
             "${{ needs.prepare.outputs.region }}" \
             "${{ needs.prepare.outputs.project_id }}"
 
+      - name: Deploy — passenger-app-web
+        run: |
+          set -euo pipefail
+          IMAGE="${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ needs.build-push.outputs.image_tag }}"
+          # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
+          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
+          env_vars="${env_vars},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          passenger_public_only=false
+          if [[ "${{ needs.prepare.outputs.passenger_app_exposure_flag }}" == "--allow-unauthenticated" ]]; then
+            passenger_public_only=true
+          fi
+          env_vars="${env_vars},PAX_PUBLIC_PASSENGER_ONLY=${passenger_public_only}"
+          env_vars="${env_vars},PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3009 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --clear-secrets \
+            --set-env-vars "$env_vars" \
+            ${{ needs.prepare.outputs.passenger_app_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
+            --min-instances 0 \
+            --max-instances 1 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Enforce no public access — passenger-app-web
+        if: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--no-allow-unauthenticated' }}
+        run: |
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.passenger_app_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
+      # Additive only: grants run.invoker solely to the Cloud IAP service
+      # agent (see grant-passenger-app-iap-invoker.sh), never to allUsers or
+      # allAuthenticatedUsers. Gated on DEV_PAX_BUREAU_ENTRY_HOST so dev
+      # environments that have not run domain-mappings-dev.yml's bureau
+      # public-entry provisioning step are unaffected.
+      - name: Grant Cloud IAP service agent run.invoker — passenger-app-web
+        if: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--no-allow-unauthenticated' && env.DEV_PAX_BUREAU_ENTRY_HOST != '' }}
+        run: |
+          ./operations/deployment/passenger-bureau-entry/grant-passenger-app-iap-invoker.sh \
+            "${{ needs.prepare.outputs.passenger_app_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
   paused-partner-booking-cleanup:
     name: Enforce Partner Booking paused state
     runs-on: ubuntu-latest
@@ -1338,6 +1535,7 @@ jobs:
       enterprise_dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
+      passenger_app: ${{ steps.urls.outputs.passenger_app }}
 
     steps:
       - name: Authenticate to GCP
@@ -1365,7 +1563,8 @@ jobs:
             "${{ needs.prepare.outputs.bank_console_service }}" \
             "${{ needs.prepare.outputs.referral_embed_service }}" \
             "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
-            "${{ needs.prepare.outputs.channel_partner_portal_service }}"; do
+            "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
+            "${{ needs.prepare.outputs.passenger_app_service }}"; do
             echo "Waiting for ${svc} ..."
             service_ready=false
             for i in $(seq 1 24); do
@@ -1429,6 +1628,10 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
+          passenger_app_url="$(gcloud run services describe "${{ needs.prepare.outputs.passenger_app_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
 
           echo "api=${api_url}" >> "$GITHUB_OUTPUT"
           echo "platform_admin=${platform_admin_url}" >> "$GITHUB_OUTPUT"
@@ -1439,6 +1642,7 @@ jobs:
           echo "referral_embed=${referral_embed_url}" >> "$GITHUB_OUTPUT"
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
+          echo "passenger_app=${passenger_app_url}" >> "$GITHUB_OUTPUT"
 
       # gcloud auth print-identity-token, and IAM credentials API generateIdToken
       # called with an *already-impersonated* SA access token (self-impersonation),
@@ -1525,6 +1729,40 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ steps.urls.outputs.channel_partner_portal }}
           id_token_include_email: true
+
+      - name: Mint identity token — passenger app
+        id: id_token_passenger_app
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.passenger_app }}
+          id_token_include_email: true
+
+      - name: Verify passenger app endpoints
+        env:
+          PASSENGER_APP_ID_TOKEN: ${{ steps.id_token_passenger_app.outputs.id_token }}
+          PASSENGER_APP_URL: ${{ steps.urls.outputs.passenger_app }}
+          CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PASSENGER_APP_ID_TOKEN" ]]
+          echo "::add-mask::${PASSENGER_APP_ID_TOKEN}"
+          # PAX-QA adds /fares after PAX-WEB-BOOKING-UI provides that page.
+          for path in / /login; do
+            headers="$(mktemp)"
+            status="$(curl --silent --show-error --fail \
+              --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
+              --header "Authorization: Bearer ${PASSENGER_APP_ID_TOKEN}" \
+              --dump-header "$headers" --output /dev/null --write-out '%{http_code}' \
+              "${PASSENGER_APP_URL}${path}")"
+            [[ "$status" == 200 ]]
+            served_sha="$(awk 'tolower($1) == "x-drts-candidate-sha:" {gsub("\\r", "", $2); print $2}' "$headers")"
+            rm -f "$headers"
+            [[ "$served_sha" == "$CANDIDATE_SHA" ]]
+          done
 
       - name: Verify dev endpoints
         env:
@@ -1776,6 +2014,10 @@ jobs:
           echo "  partner-booking: PAUSED (service removed; code preserved)"
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
+          echo "  passenger-app: ${{ steps.urls.outputs.passenger_app }} (/ and /login; candidate SHA checked)"
+          for provider in google facebook line; do
+            echo "  passenger default callback: ${{ steps.urls.outputs.passenger_app }}/auth/callback/${provider}"
+          done
 
   retired-service-cleanup:
     name: Fail-closed retired service cleanup
@@ -2183,6 +2425,127 @@ jobs:
           name: operational-browser-evidence-${{ needs.build-push.outputs.candidate_sha }}
           path: test-results/
           if-no-files-found: warn
+      - name: Mint identity token — passenger rehearsal (same deployed candidate)
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        id: id_token_passenger_review
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.passenger_app }}
+          id_token_include_email: true
+      - name: Exercise three new shared-dev review orders
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PLATFORM_ADMIN_ORIGIN: ${{ needs.health-check.outputs.platform_admin }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
+      - name: Exercise additional real shared-dev passenger branches
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
+      - name: Upload additional shared-dev passenger branch evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-additional-branches-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-review-additional-branches
+          include-hidden-files: true
+          if-no-files-found: ignore
+      - name: Upload shared-dev rehearsal evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-review-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-review-shared-order
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Exercise real shared-dev quote expiry and recovery
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
+          PAX_QUOTE_EXPIRY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-real-quote-expiry.config.ts
+      - name: Upload shared-dev real quote expiry evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-real-quote-expiry-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-real-quote-expiry
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Exercise real shared-dev reservation offer timeout and same-order recovery
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
+          PAX_DISPATCH_TIMEOUT_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-real-dispatch-timeout.config.ts
+      - name: Upload shared-dev reservation offer timeout evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-real-dispatch-timeout-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-real-dispatch-timeout
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Exercise real shared-dev Ops declined-command recovery
+        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
+          OPS_REVIEW_RECOVERY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.ops-review-recovery.config.ts
+      - name: Upload shared-dev Ops declined-command recovery evidence
+        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-ops-review-recovery-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/ops-review-recovery
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
 
   # A red run used to mean two very different things that looked identical in the
   # run list: images never reached Artifact Registry and nothing was deployed, or

@@ -87,6 +87,13 @@ export interface FirstPartyPushDeviceTarget {
   deviceId: string;
   token: string;
 }
+/** Server-owned check of the captured context/recipient after credential IO.
+ * false skips only this device; domain and persistence failures retain identity.
+ * This is never populated from a client payload or serialized into the context.
+ */
+export type FirstPartyPushLateValidation = (
+  signal: AbortSignal,
+) => Promise<boolean>;
 export type FirstPartyPushProviderResult =
   | { kind: "accepted"; messageId: string }
   | { kind: "invalid"; errorCode?: string }
@@ -94,6 +101,7 @@ export type FirstPartyPushProviderResult =
   | { kind: "credential_rejected"; errorCode?: string }
   | { kind: "configuration_blocked"; errorCode?: string }
   | { kind: "internal_error" }
+  | { kind: "ineligible" }
   | { kind: "expired" };
 export const FIRST_PARTY_PUSH_PROVIDER = Symbol("FIRST_PARTY_PUSH_PROVIDER");
 export interface FirstPartyPushProvider {
@@ -101,6 +109,7 @@ export interface FirstPartyPushProvider {
   send(
     message: FirstPartyPushMessage,
     target: FirstPartyPushDeviceTarget,
+    validateBeforeSend: FirstPartyPushLateValidation,
   ): Promise<FirstPartyPushProviderResult>;
 }
 
@@ -142,7 +151,23 @@ export class FirstPartyNotificationTransport {
       message.orderId,
     );
     if (!relevance) throw firstPartyFailure("route_missing", context);
-    if (
+    if (message.eventType === "payment_recovery_required") {
+      if (
+        !(await this.repository.isPaymentRecoveryNoticeRelevant(
+          message.orderId,
+          message.passengerSubjectRef,
+        ))
+      )
+        throw firstPartyFailure("notification_obsolete", context);
+      let expiresAt: string;
+      try {
+        expiresAt = notificationExpiresAt(message);
+      } catch {
+        throw firstPartyFailure("notification_expired", context);
+      }
+      if (context && context.expiresAt !== expiresAt)
+        throw firstPartyFailure("notification_expired", context);
+    } else if (
       message.eventType !== "receipt_ready" &&
       message.eventType !== "trip_cancelled"
     ) {
@@ -185,9 +210,14 @@ export class FirstPartyNotificationTransport {
       );
     let context = loaded?.context ?? null;
     const route = await this.checkRelevance(request, context);
+    if (route.tenantId === null)
+      throw firstPartyFailure("configuration_blocked", context);
     if (!context) {
       const eventSequence = message.payload.eventSequence;
-      const event = PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[message.eventType];
+      const event =
+        message.eventType === "payment_recovery_required"
+          ? "passenger.payment_recovery_required.v1"
+          : PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME[message.eventType];
       if (
         typeof eventSequence !== "number" ||
         !Number.isSafeInteger(eventSequence) ||
@@ -200,7 +230,10 @@ export class FirstPartyNotificationTransport {
       );
       const expiresAt = notificationExpiresAt(message);
       const wireMessage: FirstPartyPushMessage = {
-        notification: { title: "乘車通知", body: "請查看最新乘車資訊" },
+        notification:
+          message.eventType === "payment_recovery_required"
+            ? { title: "付款通知", body: "此行程付款需要處理，請查看行程" }
+            : { title: "乘車通知", body: "請查看最新乘車資訊" },
         data: {
           notification_id: message.outboxId,
           event,
@@ -254,8 +287,8 @@ export class FirstPartyNotificationTransport {
         )
       )
         continue;
-      // Relevance and active captured identity are checked just before each IO,
-      // including retries and later devices in a slow multi-device attempt.
+      // Early checks avoid credential IO for known-ineligible work. The provider
+      // must repeat these after metadata IO using the same captured identities.
       try {
         await this.checkRelevance(request, context);
       } catch (error) {
@@ -268,10 +301,33 @@ export class FirstPartyNotificationTransport {
         fenceContext.fenceToken,
       );
       if (!token) continue;
-      const result = await this.provider.send(context.wireMessage, {
-        deviceId: target.deviceId,
-        token,
-      });
+      const capturedContext = context;
+      let result: FirstPartyPushProviderResult;
+      try {
+        result = await this.provider.send(
+          capturedContext.wireMessage,
+          { deviceId: target.deviceId, token },
+          async (signal) => {
+            signal.throwIfAborted();
+            await this.checkRelevance(request, capturedContext);
+            signal.throwIfAborted();
+            const currentToken =
+              await this.repository.findFirstPartyNotificationDeviceToken(
+                capturedContext,
+                target,
+                fenceContext.fenceToken!,
+              );
+            // Never replace the captured token or select a new recipient.
+            return currentToken === token;
+          },
+        );
+      } catch (error) {
+        // Preserve already accepted device evidence, but never hide a lost
+        // persistence fence as a successful or retryable provider outcome.
+        if (firstReceiptId && error instanceof FirstPartyPushFailure) break;
+        throw error;
+      }
+      if (result.kind === "ineligible") continue;
       outcomes.set(target.deviceId, {
         deviceId: target.deviceId,
         kind: result.kind,

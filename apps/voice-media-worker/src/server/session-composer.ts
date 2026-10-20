@@ -1,3 +1,5 @@
+import type { RecordingContinuation } from "../recording/recording-continuation";
+import type { RecordingScope } from "../recording/sealed-recorder";
 import { EventEmitter } from "node:events";
 import type { WebSocketServerChannel } from "./websocket-channel";
 import {
@@ -29,6 +31,7 @@ interface ComposedSession {
   channel: WebSocketServerChannel;
   turnAttachment: VoiceCallAttachment | undefined;
   closing?: Promise<void>;
+  recordingSubscription?: { close(): void } | undefined;
   /** Aborted exactly once, from `beginClose` (Codex reopen round 4, R1
    * finding 4): the raw `tts.synthesize` control frame has no turn/signal
    * of its own to fence it (unlike the turn-coordinator-driven `speak`
@@ -91,6 +94,7 @@ export class VoiceSessionComposer extends EventEmitter {
      * ASR/TTS/control-frame mechanics (no dialogue turn at all) can omit
      * it. */
     private readonly turnCoordinator?: VoiceCallTurnCoordinator,
+    private readonly recordingContinuation?: RecordingContinuation,
   ) {
     super();
   }
@@ -111,6 +115,7 @@ export class VoiceSessionComposer extends EventEmitter {
     sessionId: string,
     channel: WebSocketServerChannel,
     binding?: VoiceSessionBinding,
+    recordingScope?: RecordingScope,
   ): void {
     const { asrAdapter, ttsAdapter } =
       this.providerFactory.createAdapters(sessionId);
@@ -131,7 +136,13 @@ export class VoiceSessionComposer extends EventEmitter {
         this.sendEvent(channel, event);
         if (turnAttachment) {
           this.turnCoordinator?.handle(turnAttachment, event, {
-            speak: async (text, languageCode, signal, mediaEpoch) => {
+            speak: async (
+              text,
+              languageCode,
+              signal,
+              mediaEpoch,
+              controlledPlaybackId,
+            ) => {
               // Passed into `startPlayback` itself (Codex reopen round 3,
               // R1), not just re-checked here after it returns:
               // `startPlayback`'s own `synthesize` call is exactly the
@@ -159,6 +170,7 @@ export class VoiceSessionComposer extends EventEmitter {
                 new Date().toISOString(),
                 () => !signal.aborted && session.getMediaEpoch() === mediaEpoch,
                 signal,
+                controlledPlaybackId,
               );
               // Re-checked again here, immediately before publishing any
               // audio (Codex reopen round 4, R1 finding 5): registration
@@ -202,6 +214,13 @@ export class VoiceSessionComposer extends EventEmitter {
       channel,
       turnAttachment,
       closeAbort: new AbortController(),
+      recordingSubscription:
+        binding && recordingScope
+          ? this.recordingContinuation?.attach(
+              binding.voiceSessionId,
+              recordingScope,
+            )
+          : undefined,
     };
     this.sessions.set(sessionId, composed);
 
@@ -214,6 +233,7 @@ export class VoiceSessionComposer extends EventEmitter {
       // own single-emission guarantee (see `./websocket-channel`).
       if (this.sessions.get(sessionId) !== composed) return;
       this.sessions.delete(sessionId);
+      composed.recordingSubscription?.close();
       // The ASR provider's connection/waiters/billing resource must not
       // outlive this session -- this fires on every close path (normal
       // close, drain, idle timeout, a frame-limit/failure-driven close),

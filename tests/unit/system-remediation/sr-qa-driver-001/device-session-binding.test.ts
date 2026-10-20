@@ -34,8 +34,8 @@ import { AuditNotificationService } from "../../../../apps/api/src/modules/audit
 import { DriverDeviceSessionRepository } from "../../../../apps/api/src/modules/auth/driver-device-session.repository";
 import { DriverDeviceSessionService } from "../../../../apps/api/src/modules/auth/driver-device-session.service";
 import { DriverProfileService } from "../../../../apps/api/src/modules/driver-profile/driver-profile.service";
-import { RegulatoryRegistryRepository } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { RegulatoryRegistryService } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { RegulatoryRegistryRepository } from "../../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { SecurityEventsRepository } from "../../../../apps/api/src/modules/security-events/security-events.repository";
 import { SecurityEventsService } from "../../../../apps/api/src/modules/security-events/security-events.service";
 
@@ -52,12 +52,30 @@ function setupServices() {
   const securityEventsService = new SecurityEventsService(
     new SecurityEventsRepository(),
   );
+  const driverRows = new Map<string, unknown>();
+  const regulatoryRepository = new RegulatoryRegistryRepository({
+    isEnabled: () => true,
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes("INSERT INTO reg.phase1_registry_drivers"))
+        driverRows.set(values[0] as string, JSON.parse(values[5] as string));
+      const driver = driverRows.get(values[0] as string);
+      return {
+        rows:
+          sql.includes("SELECT record FROM reg.phase1_registry_drivers") &&
+          driver
+            ? [{ record: structuredClone(driver) }]
+            : [],
+      };
+    },
+  } as never);
   const regulatoryService = new RegulatoryRegistryService(
     opsDispatchEventsService,
     auditService,
     driverProfileService,
-    new RegulatoryRegistryRepository(),
+    regulatoryRepository,
   );
+  for (const driver of regulatoryService.listDrivers())
+    driverRows.set(driver.driverId, structuredClone(driver));
   const sessionService = new DriverDeviceSessionService(
     jwtAuthService,
     driverProfileService,
@@ -266,7 +284,7 @@ describe("SR-QA-DRIVER-001 C050: device binding lifecycle", () => {
     const { sessionService, regulatoryService } = setupServices();
     await sessionService.onModuleInit();
 
-    regulatoryService.updateDriverLifecycle("drv-demo-002", {
+    await regulatoryService.updateDriverLifecycle("drv-demo-002", {
       lifecycleStatus: "suspended",
     });
 

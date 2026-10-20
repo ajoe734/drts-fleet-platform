@@ -1,11 +1,18 @@
+import {
+  MASKED_CALL_PORT,
+  UnavailableMaskedCallPort,
+} from "../multi-taxi/masked-call.port";
 import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
+import { GeoModule } from "../geo/geo.module";
 import { DatabaseModule } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
 import { OpsDispatchEventsModule } from "../../common/ops-dispatch-events.module";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
 import { MultiTaxiRepository } from "../multi-taxi/multi-taxi.repository";
+import { FleetPartnerRepository } from "../fleet-partner/fleet-partner.repository";
+import { RegulatoryRegistryRepository } from "../regulatory-registry/regulatory-registry.repository";
 import { ProductRuleModule } from "../product-rule/product-rule.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
 import { SandboxDispatchGateModule } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.module";
@@ -25,6 +32,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
 
 @Module({
   imports: [
+    GeoModule,
     DatabaseModule,
     IdempotencyModule,
     OpsDispatchEventsModule,
@@ -35,15 +43,18 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     AuditNotificationModule,
     CallcenterModule,
     ProductRuleModule,
-    VoiceBookingModule,
+    forwardRef(() => VoiceBookingModule),
     forwardRef(() => SandboxDispatchGateModule),
     forwardRef(() => TenantPartnerModule),
     forwardRef(() => PlatformPresenceModule),
   ],
   controllers: [OwnedMobilityController],
   providers: [
+    { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
     // Stateless DB adapter only; importing MultiTaxiModule would add a cycle.
     MultiTaxiRepository,
+    FleetPartnerRepository,
+    RegulatoryRegistryRepository,
     OwnedMobilityRepository,
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,

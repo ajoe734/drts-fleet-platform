@@ -1,4 +1,5 @@
 import ast
+from unittest.mock import patch, MagicMock
 import functools
 import hashlib
 import http.server
@@ -22,21 +23,28 @@ def run_cmd(cmd, timeout=10):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
 
 def wait_for_log(container_name, pattern, timeout=60, stream="both", since=None):
-    start = time.time()
-    while time.time() - start < timeout:
+    deadline = time.monotonic() + timeout
+    while True:
+        remain = deadline - time.monotonic()
+        if remain <= 0:
+            break
         cmd = ["docker", "logs"]
         if since:
             cmd.extend(["--since", since])
         cmd.append(container_name)
-        res = run_cmd(cmd, timeout=10)
-        logs = ""
-        if stream in ["stderr", "both"]:
-            logs += res.stderr
-        if stream in ["stdout", "both"]:
-            logs += res.stdout
-        if pattern in logs:
-            return True
-        time.sleep(2)
+        try:
+            res = run_cmd(cmd, timeout=remain)
+            logs = ""
+            if stream in ["stderr", "both"]:
+                logs += res.stderr
+            if stream in ["stdout", "both"]:
+                logs += res.stdout
+            if pattern in logs:
+                if time.monotonic() <= deadline:
+                    return True
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
     return False
 
 def instream_payload(data: bytes) -> bytes:
@@ -94,22 +102,32 @@ def wait_for_ping(container_name, timeout=60):
     """Polls clamd's own real zPING idle command (not a log line, which can
     print before clamd is actually accepting connections) until it answers
     PONG, or the bound expires."""
-    start = time.time()
-    while time.time() - start < timeout:
-        res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zPING\\0' | nc 127.0.0.1 3310"])
-        if res.returncode == 0 and "PONG" in res.stdout:
-            return True
-        time.sleep(1)
+    deadline = time.monotonic() + timeout
+    while True:
+        remain = deadline - time.monotonic()
+        if remain <= 0:
+            break
+        try:
+            res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zPING\\0' | nc 127.0.0.1 3310"], timeout=remain)
+            if res.returncode == 0 and "PONG" in res.stdout:
+                if time.monotonic() <= deadline:
+                    return True
+        except subprocess.TimeoutExpired:
+            pass
+        time.sleep(max(0, min(1, deadline - time.monotonic())))
     return False
 
-def query_loaded_version(container_name):
+def query_loaded_version(container_name, timeout=10.0):
     """Real, null-terminated zVERSION query -- the same live proof
     readiness.ts#createIsReady itself requires, not a parsed log line."""
-    res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
-    if res.returncode != 0:
+    try:
+        res = run_cmd(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"], timeout=timeout)
+        if res.returncode != 0:
+            return None
+        match = re.search(r'ClamAV [^/]+/([^/]+)/', res.stdout.strip())
+        return match.group(1) if match else None
+    except subprocess.TimeoutExpired:
         return None
-    match = re.search(r'ClamAV [^/]+/([^/]+)/', res.stdout.strip())
-    return match.group(1) if match else None
 
 def file_exists(container_name, path):
     return run_cmd(["docker", "exec", container_name, "test", "-f", path]).returncode == 0
@@ -127,16 +145,19 @@ def container_logs_since(container_name, since):
     res = run_cmd(["docker", "logs", "--since", since, container_name], timeout=15)
     return (res.stdout or "") + (res.stderr or "")
 
-def container_published_port(container_name, container_port):
+def container_published_port(container_name, container_port, timeout=10.0):
     """Reads back the host port Docker actually published for
     `container_port` on `container_name` (set via `-p 0:<container_port>` at
     creation) -- the same readback a real caller would use, not a value
     this harness invents."""
-    res = run_cmd(["docker", "port", container_name, str(container_port)])
-    if res.returncode != 0 or not res.stdout.strip():
+    try:
+        res = run_cmd(["docker", "port", container_name, str(container_port)], timeout=timeout)
+        if res.returncode != 0 or not res.stdout.strip():
+            return None
+        line = res.stdout.strip().splitlines()[0]
+        return int(line.rsplit(":", 1)[1])
+    except subprocess.TimeoutExpired:
         return None
-    line = res.stdout.strip().splitlines()[0]
-    return int(line.rsplit(":", 1)[1])
 
 def start_gateway_sidecar(gateway_image, gateway_container_name, clamd_container_name, ready_host_dir, clamd_port=3310):
     """Starts the real gateway image (operations/artifact-scanner/gateway,
@@ -177,15 +198,18 @@ def gateway_scan(host_port, data, content_type="application/pdf", timeout=10):
         headers={"Content-Type": content_type, "X-Content-SHA256": digest},
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read()
-            return resp.status, (json.loads(body) if body else None)
-    except urllib.error.HTTPError as exc:
-        body = exc.read()
         try:
-            return exc.code, (json.loads(body) if body else None)
-        except (ValueError, TypeError):
-            return exc.code, None
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = resp.read()
+                return resp.status, (json.loads(body) if body else None)
+        except urllib.error.HTTPError as exc:
+            body = exc.read()
+            try:
+                return exc.code, (json.loads(body) if body else None)
+            except (ValueError, TypeError):
+                return exc.code, None
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+        return None, str(exc)
 
 # Mirrors clamd-entrypoint.sh#daily_reference_file's tie-break: equal
 # versions -> .cld (incremental patch) wins; otherwise the strictly
@@ -198,6 +222,274 @@ def expected_reference_file(cvd_ver, cld_ver):
     if cvd_ver is not None:
         return "daily.cvd"
     return None
+
+def poll_genuine_readiness_handshake(container_name, db_dir, timeout_s=60, expected_version=None):
+    """
+    Polls complete real readiness/selected-header/marker/zVERSION observations within the bound.
+    Raises TimeoutError with last-observation diagnostics on expiry.
+    """
+    deadline = time.monotonic() + timeout_s
+    last_diag = "No observations made"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Readiness handshake incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+
+        try:
+            res = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            if res.returncode != 0:
+                last_diag = f"ready.version missing or unreadable: {res.stderr.strip()}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+
+            marker_version = res.stdout.strip()
+            if not marker_version.isdigit():
+                last_diag = f"ready.version not numeric: {marker_version}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+
+            if expected_version is not None and marker_version != expected_version:
+                last_diag = f"ready.version {marker_version} != expected {expected_version}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+
+            # check reference file
+            def bounded_cvd_version(path):
+                res_hdr = bounded_run(["docker", "exec", container_name, "sh", "-c", f"head -c 512 {path} 2>/dev/null | cat -v"])
+                if res_hdr.returncode != 0:
+                    return None
+                header = res_hdr.stdout
+                if not header.startswith("ClamAV-VDB:"):
+                    return None
+                fields = header.split(":")
+                if len(fields) < 3 or not fields[2].isdigit():
+                    return None
+                return fields[2]
+
+            cvd_ver = bounded_cvd_version(f"{db_dir}/daily.cvd")
+            cld_ver = bounded_cvd_version(f"{db_dir}/daily.cld")
+
+            if cvd_ver is None and cld_ver is None:
+                last_diag = "Neither daily.cvd nor daily.cld has a readable ClamAV-VDB header"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+
+            expected_ref = expected_reference_file(cvd_ver, cld_ver)
+            expected_ref_version = cvd_ver if expected_ref == "daily.cvd" else cld_ver
+
+            if marker_version != expected_ref_version:
+                last_diag = f"marker version {marker_version} != on-disk header {expected_ref_version} for {expected_ref}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+
+            res_daily_mtime = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", f"{db_dir}/{expected_ref}"])
+            if res_daily_mtime.returncode != 0:
+                last_diag = f"Could not stat selected reference file {expected_ref}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+            daily_mtime = res_daily_mtime.stdout.strip()
+
+            # stat ready marker
+            res_ready = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
+            if res_ready.returncode != 0:
+                last_diag = f"ready marker missing or not stat-able: {res_ready.stderr.strip()}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+            marker_mtime = res_ready.stdout.strip()
+
+            # zVERSION query
+            res_zver = bounded_run(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
+            if res_zver.returncode != 0:
+                last_diag = f"zVERSION query failed: {res_zver.stderr.strip()}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+
+            match = re.search(r'ClamAV [^/]+/([^/]+)/', res_zver.stdout.strip())
+            if not match:
+                last_diag = f"Could not parse version from zVERSION reply: {res_zver.stdout.strip()}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+
+            loaded = match.group(1)
+            if loaded != marker_version:
+                last_diag = f"zVERSION loaded {loaded} != marker {marker_version}"
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
+                continue
+
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Readiness handshake incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+
+            return {
+                "marker_version": marker_version,
+                "expected_ref": expected_ref,
+                "expected_ref_version": expected_ref_version,
+                "daily_mtime": daily_mtime,
+                "marker_mtime": marker_mtime
+            }
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"subprocess timeout: {e.cmd}"
+            continue
+
+
+def poll_genuine_watchdog_renewal(container_name, expected_ref, expected_ref_version, marker_mtime_1, unchanged_time, expected_pattern, db_dir, timeout_s=30):
+    import time
+    import subprocess
+    deadline = time.monotonic() + timeout_s
+    marker_mtime_after_unchanged = None
+    watchdog_output = ""
+    last_diag = "No renewal observed"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Renewal loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+
+        try:
+            res = bounded_run(["docker", "exec", container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
+            if res.returncode == 0:
+                current_marker_mtime = res.stdout.strip()
+                if current_marker_mtime.isdigit() and int(current_marker_mtime) > int(marker_mtime_1):
+                    res_logs = bounded_run(["docker", "logs", "--since", unchanged_time, container_name])
+                    logs = res_logs.stdout + res_logs.stderr
+                    if expected_pattern.search(logs):
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"Renewal loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+                        marker_mtime_after_unchanged = current_marker_mtime
+                        watchdog_output = logs
+                        break
+                    else:
+                        last_diag = f"Marker advanced to {current_marker_mtime} but expected log pattern missing"
+                else:
+                    last_diag = f"Marker mtime {current_marker_mtime} <= {marker_mtime_1}"
+            else:
+                last_diag = f"Marker stat failed: {res.stderr}"
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"Command timed out: {e.cmd}"
+
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+
+    return marker_mtime_after_unchanged, watchdog_output
+
+def poll_genuine_marker_removal(container_name, timeout_s=30):
+    import time
+    import subprocess
+    deadline = time.monotonic() + timeout_s
+    removed = False
+    last_diag = "No removal observed"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Removal loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+
+        try:
+            res1 = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready"])
+            res2 = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            if res1.returncode != 0 and res2.returncode != 0:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Removal loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+                removed = True
+                break
+            else:
+                last_diag = f"ready={res1.returncode}, ready.version={res2.returncode}"
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"Command timed out: {e.cmd}"
+
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+
+    return removed
+
+def poll_genuine_activation(container_name, new_expected_version, timeout_s=30):
+    import time
+    import subprocess
+    import re
+    deadline = time.monotonic() + timeout_s
+    activated_loaded = None
+    last_diag = "No activation observed"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Activation loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+
+        try:
+            res = bounded_run(["docker", "exec", container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
+            if res.returncode == 0:
+                match = re.search(r'ClamAV [^/]+/([^/]+)/', res.stdout.strip())
+                if match:
+                    activated_loaded = match.group(1)
+                    if activated_loaded == new_expected_version:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(f"Activation loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+                        break
+                    else:
+                        last_diag = f"loaded version {activated_loaded} != expected {new_expected_version}"
+                else:
+                    last_diag = f"Could not parse zVERSION reply: {res.stdout.strip()}"
+            else:
+                last_diag = f"zVERSION query failed: {res.stderr}"
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"Command timed out: {e.cmd}"
+
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+
+    return activated_loaded
+
+def poll_genuine_pending_version(container_name, seed_version, timeout_s=60):
+    import time
+    import subprocess
+    new_expected_version = None
+    deadline = time.monotonic() + timeout_s
+    last_diag = "No version advance observed"
+
+    def bounded_run(cmd, cmd_timeout=2.0):
+        rem = deadline - time.monotonic()
+        if rem <= 0:
+            raise subprocess.TimeoutExpired(cmd, rem)
+        return run_cmd(cmd, timeout=min(rem, cmd_timeout))
+
+    while True:
+        if time.monotonic() >= deadline:
+            break
+
+        try:
+            res = bounded_run(["docker", "exec", container_name, "cat", "/var/run/clamav-ready/ready.version"])
+            if res.returncode == 0 and res.stdout.strip() and res.stdout.strip() != seed_version:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Pending loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+                new_expected_version = res.stdout.strip()
+                break
+            else:
+                last_diag = f"Version file: rc={res.returncode}, out={res.stdout.strip()}"
+        except subprocess.TimeoutExpired as e:
+            last_diag = f"Command timed out: {e.cmd}"
+
+        time.sleep(max(0, min(2, deadline - time.monotonic())))
+
+    if new_expected_version is None:
+        raise TimeoutError(f"Pending loop incomplete within {timeout_s}s bound. Last diag: {last_diag}")
+    return new_expected_version
 
 class TestGenuineClamdLifecycle(unittest.TestCase):
     def setUp(self):
@@ -231,41 +523,17 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         if not success:
             self.fail("Failed to observe initial freshclam update log")
 
-        time.sleep(5)
+        # Wait for complete real readiness handshake using bounded monotonic polling (up to 60s)
+        try:
+            readiness = poll_genuine_readiness_handshake(self.container_name, self.db_dir, timeout_s=60)
+        except TimeoutError as e:
+            self.fail(str(e))
 
-        # Verify readiness marker and version file
-        res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-        self.assertEqual(res.returncode, 0, f"Failed to read readiness version marker: {res.stderr}")
-        marker_version = res.stdout.strip()
-        self.assertTrue(marker_version.isdigit(), f"Marker version is not numeric: {marker_version}")
-
-        # Cross-check against the real on-disk daily.cvd/.cld header(s), using
-        # the SAME selection rule clamd-entrypoint.sh#daily_reference_file
-        # applies, instead of trusting the marker file's own claim in isolation.
-        cvd_ver, cld_ver = self._reference_file_state()
-        self.assertTrue(cvd_ver is not None or cld_ver is not None,
-                         "Neither daily.cvd nor daily.cld carries a readable ClamAV-VDB header")
-        expected_ref = expected_reference_file(cvd_ver, cld_ver)
-        expected_ref_version = cvd_ver if expected_ref == "daily.cvd" else cld_ver
-        self.assertEqual(marker_version, expected_ref_version,
-                          f"Readiness marker version {marker_version} does not match the "
-                          f"selected reference file {expected_ref}'s own header version {expected_ref_version}")
-        daily_file_mtime_1 = stat_mtime(self.container_name, f"{self.db_dir}/{expected_ref}")
-        self.assertIsNotNone(daily_file_mtime_1, f"Could not stat selected reference file {expected_ref}")
-
-        # Record the marker mtime
-        res = run_cmd(["docker", "exec", self.container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
-        self.assertEqual(res.returncode, 0)
-        marker_mtime_1 = res.stdout.strip()
-
-        # Verify loaded version matches marker via a real, null-terminated zVERSION query
-        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
-        self.assertEqual(res.returncode, 0, f"Failed to ping clamd: {res.stderr}")
-        loaded_reply = res.stdout.strip()
-        match = re.search(r'ClamAV [^/]+/([^/]+)/', loaded_reply)
-        self.assertIsNotNone(match, "Could not parse version from ClamAV reply")
-        loaded = match.group(1)
-        self.assertEqual(loaded, marker_version, f"Loaded version {loaded} does not precisely match marker {marker_version}")
+        marker_version = readiness["marker_version"]
+        expected_ref = readiness["expected_ref"]
+        expected_ref_version = readiness["expected_ref_version"]
+        daily_file_mtime_1 = readiness["daily_mtime"]
+        marker_mtime_1 = readiness["marker_mtime"]
 
         # Verify unchanged renewal: trigger a second freshclam pass
         # deterministically (rather than passively waiting on the interval
@@ -292,13 +560,14 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # start). Sleeping past that interval lets the watchdog's own pass
         # observe the same still-unchanged on-disk database and republish
         # the marker; this does not depend on the manual call's output.
-        time.sleep(7)
+        marker_mtime_after_unchanged, watchdog_output = poll_genuine_watchdog_renewal(
+            self.container_name, expected_ref, expected_ref_version, marker_mtime_1, unchanged_time, expected_pattern, self.db_dir, timeout_s=30
+        )
+
+        self.assertIsNotNone(marker_mtime_after_unchanged, "Marker mtime did not advance within 30s")
         daily_file_mtime_after_unchanged = stat_mtime(self.container_name, f"{self.db_dir}/{expected_ref}")
         self.assertEqual(daily_file_mtime_after_unchanged, daily_file_mtime_1,
                           "An 'up-to-date' freshclam pass must never rewrite the on-disk database file")
-        res = run_cmd(["docker", "exec", self.container_name, "stat", "-c", "%Y", "/var/run/clamav-ready/ready"])
-        self.assertEqual(res.returncode, 0)
-        marker_mtime_after_unchanged = res.stdout.strip()
         self.assertGreater(
             int(marker_mtime_after_unchanged), int(marker_mtime_1),
             "A confirmed-but-unchanged freshclam pass must still renew the readiness marker's "
@@ -315,7 +584,6 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # loop itself printed since `unchanged_time` is -- uniquely --
         # the watchdog's own invocation, not the manual call already
         # checked above.
-        watchdog_output = container_logs_since(self.container_name, unchanged_time)
         self.assertTrue(
             expected_pattern.search(watchdog_output) is not None,
             f"Watchdog's own periodic freshclam pass did not itself confirm '{expected_ref}' "
@@ -381,10 +649,9 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         # After failure, clamd-entrypoint.sh#refresh_daily_readiness removes
         # BOTH the marker and its sibling version file in the same call --
         # a pending/failed reload must leave neither artifact behind.
-        res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready"])
-        self.assertNotEqual(res.returncode, 0, "Readiness marker should be deleted after failure")
-        res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-        self.assertNotEqual(res.returncode, 0, "Readiness version file should be deleted after failure")
+        removed = poll_genuine_marker_removal(self.container_name, timeout_s=30)
+
+        self.assertTrue(removed, "Readiness marker and version file should be deleted after failure within bound")
 
         print("Injecting recovery...")
         recover_time = run_cmd(["date", "-Iseconds"]).stdout.strip()
@@ -392,27 +659,15 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
         res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "echo 'DatabaseMirror database.clamav.net' > /etc/clamav/freshclam.conf"])
         self.assertEqual(res.returncode, 0, f"Failed to restore conf: {res.stderr}")
 
-        # Wait for recovery (must use cursor to avoid matching startup log)
-        success = wait_for_log(self.container_name, "database is up-to-date", 60, "stdout", since=recover_time) or \
-                  wait_for_log(self.container_name, "updated (version:", 60, "stdout", since=recover_time)
-        if not success:
-            self.fail("Failed to observe recovery")
+        # Wait for complete real readiness handshake using bounded monotonic polling (up to 60s)
+        try:
+            readiness_2 = poll_genuine_readiness_handshake(self.container_name, self.db_dir, timeout_s=60)
+        except TimeoutError as e:
+            self.fail(f"Failed to observe complete recovery readiness: {e}")
 
-        # Verify markers are back
-        res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-        self.assertEqual(res.returncode, 0, "Readiness version marker should be restored")
-        recovered_version = res.stdout.strip()
-
-        # Cross-check the recovered marker against the real on-disk file
-        # again, the same way the initial-startup check did, so a pending
-        # reload that merely wrote a marker without clamd truly reloading
-        # cannot pass as "activated".
-        cvd_ver_2, cld_ver_2 = self._reference_file_state()
-        expected_ref_2 = expected_reference_file(cvd_ver_2, cld_ver_2)
-        expected_ref_version_2 = cvd_ver_2 if expected_ref_2 == "daily.cvd" else cld_ver_2
-        self.assertEqual(recovered_version, expected_ref_version_2,
-                          f"Recovered marker version {recovered_version} does not match on-disk "
-                          f"{expected_ref_2}'s header version {expected_ref_version_2}")
+        recovered_version = readiness_2["marker_version"]
+        expected_ref_2 = readiness_2["expected_ref"]
+        expected_ref_version_2 = readiness_2["expected_ref_version"]
 
         # The generic `wait_for_log` above only proves SOME "up-to-date"/
         # "updated" line appeared since `recover_time`; a message naming a
@@ -449,12 +704,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
                             "recovery is confirmed, proving the failed/pending window actually ended in a "
                             "fresh republish rather than a marker that merely survived untouched")
 
-        # Verify equality
-        res = run_cmd(["docker", "exec", self.container_name, "sh", "-c", "printf 'zVERSION\\0' | nc 127.0.0.1 3310"])
-        loaded_reply_2 = res.stdout.strip()
-        match = re.search(r'ClamAV [^/]+/([^/]+)/', loaded_reply_2)
-        loaded_2 = match.group(1)
-        self.assertEqual(loaded_2, recovered_version, f"Recovered loaded version {loaded_2} does not match marker {recovered_version}")
+
 
         # Verify clean/EICAR after recovery, via both clamdscan and the raw
         # gateway-facing INSTREAM protocol.
@@ -494,24 +744,21 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
 # forged header would not be real engine behavior); the only legitimate
 # source of a genuinely-signed OLDER daily database is a real file that
 # Cisco Talos actually published and that still exists somewhere on disk.
-# `clamav/clamav:1.3` is exactly that: this project's own
-# Dockerfile.clamd already documents it as EOL ("database-download support
-# ended 2026-02-07") and explicitly rejected for THIS task's own runtime
-# image -- which also means that tag's own image layers are frozen and no
-# longer rebuilt with a fresh database, so whatever daily.cvd/.cld it
-# baked at its own last build is a real, authentically-signed snapshot
-# that must be older than whatever today's live mirror serves. This never
-# starts or runs freshclam inside that EOL image (whose client-side
-# database-download protocol is itself the rejected/unsupported part) --
-# only `docker cp`s the static file off its layers, matching this
+# `clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23`
+# is exactly that: a factual immutable-index provenance of historical seed content.
+# By pinning the immutable digest, its OCI index is frozen and no longer changes
+# with fresh databases, so whatever daily.cvd/.cld it baked at its own last build
+# is a real, authentically-signed historical seed that must be older than whatever
+# today's live mirror serves. This never starts or runs freshclam inside that
+# historical image -- only `docker cp`s the static file off its layers, matching
 # harness's own write-scope boundary (gateway/runtime sources, including
 # clamd-entrypoint.sh and clamd.conf, stay untouched; every write below is
 # runtime `docker create`/`docker cp`/`docker exec` orchestration, like
 # the rest of this file).
 #
 # Known precondition this Docker-less VM cannot verify locally (documented
-# per Guide 0.7 rather than assumed silently): that `clamav/clamav:1.3`
-# actually ships a readable daily.cvd/.cld in its image layers, and that
+# per Guide 0.7 rather than assumed silently): that the historical image
+# actually ships a readable daily.cvd/.cld in its content, and that
 # the copied file's ownership/permissions remain usable by the target
 # container's freshclam/clamd processes. If either does not hold, the
 # assertions below fail with a specific, attributable message identifying
@@ -527,7 +774,7 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
 # write_scopes and stays untouched). Instead, this test runs its own local
 # HTTP static-file server (`_start_local_mirror`, this test process only --
 # no gateway/runtime source touched) that serves the EXACT same
-# main/daily/bytecode CVD bytes just extracted from `clamav/clamav:1.3`,
+# main/daily/bytecode CVD bytes just extracted from the historical image,
 # and points the seeded container's `freshclam.conf` at it via
 # `PrivateMirror` (a real, documented freshclam directive that skips the
 # DNS TXT version check and fetches directly from the given URL). Because
@@ -545,7 +792,10 @@ class TestGenuineClamdLifecycle(unittest.TestCase):
 # PrivateMirror; if that combination does not hold, the assertions below
 # fail with a specific, attributable message (e.g. the initial-load
 # precondition assertion), not a false pass.
-SEED_IMAGE = "clamav/clamav:1.3"
+# Use a verified immutable digest for the seed image to ensure predictable extraction
+# of historical vendor-signed database bytes. This digest corresponds to a factual
+# immutable-index provenance, with pending content validation.
+SEED_IMAGE = "clamav/clamav@sha256:57deb108fc4c72778aa83eafbca7bb7153e28c3f57c005afd38d31f16da86f23"
 SEED_DB_FILES = (
     "main.cvd", "main.cld", "daily.cvd", "daily.cld", "bytecode.cvd", "bytecode.cld",
 )
@@ -689,19 +939,17 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
                 self.assertEqual(start.returncode, 0, f"Failed to start seeded container: {start.stderr}")
 
                 self.assertTrue(wait_for_ping(self.container_name, 60), "clamd never answered a live PING after seeded startup")
-                time.sleep(2)
 
-                initial_loaded = query_loaded_version(self.container_name)
-                self.assertIsNotNone(initial_loaded, "Could not parse initial loaded version")
+                try:
+                    seeded_readiness = poll_genuine_readiness_handshake(self.container_name, self.db_dir, timeout_s=60, expected_version=seed_version)
+                except TimeoutError as e:
+                    self.fail(f"Precondition not met or readiness not observed after seeded startup: {e}")
+
+                initial_loaded = seeded_readiness["marker_version"]
                 self.assertEqual(
                     initial_loaded, seed_version,
-                    "Precondition not met: clamd did not load the seeded stale version at startup "
-                    "(the local-mirror precondition for observing a genuine old->new transition "
-                    "was not satisfied) -- this is a missing condition, not a fabricated pass.",
+                    "Precondition not met: clamd did not load the seeded stale version at startup"
                 )
-                res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-                self.assertEqual(res.returncode, 0, "Readiness version marker missing after seeded startup")
-                self.assertEqual(res.stdout.strip(), seed_version, "Readiness marker did not publish the seeded stale version")
 
                 # Start the REAL gateway image (operations/artifact-scanner/
                 # gateway, unmodified), joined to this container's own
@@ -715,12 +963,16 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
                 )
                 self.assertEqual(gw.returncode, 0, f"Failed to start gateway sidecar: {gw.stderr}")
                 gateway_port = None
-                port_deadline = time.time() + 30
-                while time.time() < port_deadline:
-                    gateway_port = container_published_port(self.container_name, 8080)
+                port_deadline = time.monotonic() + 30
+                while True:
+                    remain = port_deadline - time.monotonic()
+                    if remain <= 0: break
+                    gateway_port = container_published_port(self.container_name, 8080, timeout=min(2.0, remain))
                     if gateway_port:
+                        if time.monotonic() >= port_deadline:
+                            gateway_port = None
                         break
-                    time.sleep(1)
+                    time.sleep(max(0, min(1, port_deadline - time.monotonic())))
                 self.assertIsNotNone(gateway_port, "Gateway's published port 8080 never became available")
 
                 # Restore real connectivity, but leave freshclam's own
@@ -746,14 +998,10 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             # from whatever is genuinely on disk afterward -- the same
             # mechanism the sibling test above already relies on for its
             # "unchanged" assertion, not a new invented path.
-            new_expected_version = None
-            deadline = time.time() + 60
-            while time.time() < deadline:
-                res = run_cmd(["docker", "exec", self.container_name, "cat", "/var/run/clamav-ready/ready.version"])
-                if res.returncode == 0 and res.stdout.strip() and res.stdout.strip() != seed_version:
-                    new_expected_version = res.stdout.strip()
-                    break
-                time.sleep(2)
+            try:
+                new_expected_version = poll_genuine_pending_version(self.container_name, seed_version, timeout_s=60)
+            except TimeoutError:
+                new_expected_version = None
             self.assertIsNotNone(
                 new_expected_version,
                 "Readiness marker never advanced past the seeded stale version -- no genuine "
@@ -806,9 +1054,8 @@ class TestGenuineClamdVersionTransition(unittest.TestCase):
             res = run_cmd(["docker", "exec", self.container_name, "sh", "-c",
                             "printf 'zRELOAD\\0' | nc -w 3 127.0.0.1 3310"])
             self.assertEqual(res.returncode, 0, f"Failed to issue RELOAD: {res.stderr}")
-            time.sleep(3)
+            activated_loaded = poll_genuine_activation(self.container_name, new_expected_version, timeout_s=30)
 
-            activated_loaded = query_loaded_version(self.container_name)
             self.assertEqual(
                 activated_loaded, new_expected_version,
                 "clamd did not activate the newer on-disk version after a real RELOAD command",
@@ -1057,7 +1304,11 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             success = wait_for_log(self.clamd_container_name, "updated (version:", 60, "stdout")
             if not success:
                 self.fail("Failed to observe initial freshclam update log")
-            time.sleep(5)
+            # Wait for complete real readiness handshake using bounded monotonic polling
+            try:
+                poll_genuine_readiness_handshake(self.clamd_container_name, "/var/lib/clamav", timeout_s=60)
+            except TimeoutError as e:
+                self.fail(f"Failed to read complete readiness handshake within bound: {e}")
             self.assertTrue(wait_for_ping(self.clamd_container_name, 60), "clamd never answered a live PING after startup")
 
             print("Starting protocol-aware relay sharing clamd's network namespace...")
@@ -1069,16 +1320,24 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             # gateway is pointed at it -- poll its own passthrough path
             # (zPING) directly rather than assuming a fixed startup delay.
             relay_ready = False
-            deadline = time.time() + 30
-            while time.time() < deadline:
-                res = run_cmd([
-                    "docker", "exec", self.clamd_container_name, "sh", "-c",
-                    f"printf 'zPING\\0' | nc -w 3 127.0.0.1 {RELAY_LISTEN_PORT}",
-                ])
-                if res.returncode == 0 and "PONG" in res.stdout:
-                    relay_ready = True
-                    break
-                time.sleep(1)
+            deadline = time.monotonic() + 30
+            while True:
+                remain = deadline - time.monotonic()
+                if remain <= 0: break
+                try:
+                    res = run_cmd([
+                        "docker", "exec", self.clamd_container_name, "sh", "-c",
+                        f"printf 'zPING\\0' | nc -w 3 127.0.0.1 {RELAY_LISTEN_PORT}",
+                    ], timeout=min(4.0, remain))
+                    if res.returncode == 0 and "PONG" in res.stdout:
+                        if time.monotonic() >= deadline:
+                            relay_ready = False
+                        else:
+                            relay_ready = True
+                        break
+                except subprocess.TimeoutExpired:
+                    pass
+                time.sleep(max(0, min(1, deadline - time.monotonic())))
             self.assertTrue(relay_ready, "Relay never answered a passthrough PING via the real clamd")
 
             print("Starting real gateway pointed at the relay instead of clamd directly...")
@@ -1090,12 +1349,16 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             self.assertEqual(res.returncode, 0, f"Failed to start gateway sidecar: {res.stderr}")
 
             gateway_port = None
-            deadline = time.time() + 30
-            while time.time() < deadline:
-                gateway_port = container_published_port(self.clamd_container_name, 8080)
+            deadline = time.monotonic() + 30
+            while True:
+                remain = deadline - time.monotonic()
+                if remain <= 0: break
+                gateway_port = container_published_port(self.clamd_container_name, 8080, timeout=min(2.0, remain))
                 if gateway_port:
+                    if time.monotonic() >= deadline:
+                        gateway_port = None
                     break
-                time.sleep(1)
+                time.sleep(max(0, min(1, deadline - time.monotonic())))
             self.assertIsNotNone(gateway_port, "Gateway's published port 8080 never became available")
 
             # Readiness-success half: through the relay's VERSION/PING
@@ -1105,12 +1368,16 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             # relay merely broke everything indiscriminately.
             print("Verifying the real gateway scans successfully through the relay's passthrough path...")
             ok_status, ok_body = None, None
-            deadline = time.time() + 30
-            while time.time() < deadline:
-                ok_status, ok_body = gateway_scan(gateway_port, b"clean data")
+            deadline = time.monotonic() + 30
+            while True:
+                remain = deadline - time.monotonic()
+                if remain <= 0: break
+                ok_status, ok_body = gateway_scan(gateway_port, b"clean data", timeout=min(2.0, remain))
                 if ok_status == 200:
+                    if time.monotonic() >= deadline:
+                        ok_status = None
                     break
-                time.sleep(2)
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
             self.assertEqual(
                 ok_status, 200,
                 f"Expected the real gateway to scan successfully through the relay's VERSION/INSTREAM "
@@ -1174,12 +1441,16 @@ class TestGenuineGatewayTransportFault(unittest.TestCase):
             self.assertFalse(os.path.exists(fault_flag), "Failed to remove the relay's fault flag file")
 
             recovered_status, recovered_body = None, None
-            deadline = time.time() + 30
-            while time.time() < deadline:
-                recovered_status, recovered_body = gateway_scan(gateway_port, b"clean data")
+            deadline = time.monotonic() + 30
+            while True:
+                remain = deadline - time.monotonic()
+                if remain <= 0: break
+                recovered_status, recovered_body = gateway_scan(gateway_port, b"clean data", timeout=min(2.0, remain))
                 if recovered_status == 200:
+                    if time.monotonic() >= deadline:
+                        recovered_status = None
                     break
-                time.sleep(2)
+                time.sleep(max(0, min(2, deadline - time.monotonic())))
             self.assertEqual(
                 recovered_status, 200,
                 f"Expected the real gateway to resume scanning successfully through the relay "
@@ -1349,6 +1620,38 @@ class TestRelayScriptInstreamFraming(unittest.TestCase):
         namespace = self._load_relay_namespace()
         conn, dials = self._run_handle(namespace, [b"zVERSION\0"], fault_present=True)
         self.assertEqual(len(dials), 1, "VERSION must stay live even while the INSTREAM fault is engaged")
+
+
+class TestGatewayScanBoundary(unittest.TestCase):
+    @patch("urllib.request.urlopen")
+    def test_gateway_scan_503_body_read_timeout(self, mock_urlopen):
+        import urllib.error
+
+        # Mock HTTPError response whose read() raises TimeoutError
+        exc_response = urllib.error.HTTPError("url", 503, "Service Unavailable", {}, None)
+        exc_response.read = MagicMock(side_effect=TimeoutError("timeout during body read"))
+
+        mock_urlopen.side_effect = exc_response
+
+        # It should catch TimeoutError and return (None, error_str)
+        status, body = gateway_scan(8080, b"dummy", timeout=1)
+        self.assertIsNone(status)
+        self.assertIn("timeout during body read", body)
+
+    @patch("urllib.request.urlopen")
+    def test_gateway_scan_503_body_read_connection_reset(self, mock_urlopen):
+        import urllib.error
+
+        # Mock HTTPError response whose read() raises ConnectionResetError
+        exc_response = urllib.error.HTTPError("url", 503, "Service Unavailable", {}, None)
+        exc_response.read = MagicMock(side_effect=ConnectionResetError("connection reset during body read"))
+
+        mock_urlopen.side_effect = exc_response
+        
+        # ConnectionResetError is a subclass of ConnectionError
+        status, body = gateway_scan(8080, b"dummy", timeout=1)
+        self.assertIsNone(status)
+        self.assertIn("connection reset during body read", body)
 
 
 if __name__ == "__main__":

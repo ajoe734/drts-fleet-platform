@@ -3,6 +3,7 @@ import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
 import type {
   PartnerChannelEntryRecord,
+  ReferralRevenueShareRule,
   PartnerEligibilityVerificationRecord,
   PartnerIngressCredentialRecord,
   TenantAddressRecord,
@@ -28,6 +29,11 @@ import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
   record: unknown;
+};
+
+/** Storage-only extension of the existing partner entry JSONB record. */
+export type StoredReferralRateEntry = PartnerChannelEntryRecord & {
+  referralRevenueShareRules?: ReferralRevenueShareRule[];
 };
 
 export type TenantPartnerQueryExecutor = {
@@ -91,6 +97,7 @@ type WebhookRuntimeMetadata = {
 };
 
 export type StoredWebhookEndpointRecord = TenantWebhookEndpoint & {
+  verificationNonce?: string | undefined;
   secretValue: string;
   secretCredentials?: StoredWebhookSecretRecord[];
   retryPolicy: WebhookRetryPolicy;
@@ -99,6 +106,8 @@ export type StoredWebhookEndpointRecord = TenantWebhookEndpoint & {
 };
 
 export type StoredWebhookDeliveryRecord = WebhookDeliveryRecord & {
+  verificationNonce?: string | undefined;
+  verificationFingerprint?: string | undefined;
   attemptedAt: string;
   nextAttemptAt: string | null;
   signatureHeader: string;
@@ -202,6 +211,50 @@ export class TenantPartnerRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async loadReferralRateEntries(
+    entrySlug?: string,
+  ): Promise<StoredReferralRateEntry[]> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_partner_channel_entries${entrySlug ? " WHERE entry_slug = $1" : ""}`,
+      entrySlug ? [entrySlug] : [],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<StoredReferralRateEntry>(
+        row.record,
+        "admin.phase1_partner_channel_entries",
+      ),
+    );
+  }
+
+  /** Patch only rate history on the locked canonical entry; never publish before COMMIT. */
+  async updateReferralRevenueShareRules(
+    entrySlug: string,
+    update: (
+      entry: StoredReferralRateEntry | null,
+    ) => ReferralRevenueShareRule[],
+  ) {
+    return this.withTransaction(async (executor) => {
+      const result = await executor.query<JsonRecordRow>(
+        "SELECT record FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1 FOR UPDATE",
+        [entrySlug],
+      );
+      const entry = result.rows[0]
+        ? this.parseRecord<StoredReferralRateEntry>(
+            result.rows[0].record,
+            "admin.phase1_partner_channel_entries",
+          )
+        : null;
+      const rules = update(entry);
+      await executor.query(
+        `UPDATE admin.phase1_partner_channel_entries
+         SET record = jsonb_set(record, '{referralRevenueShareRules}', $2::jsonb)
+         WHERE entry_slug = $1`,
+        [entrySlug, JSON.stringify(rules)],
+      );
+      return rules;
+    });
   }
 
   /** Notification dispatch must observe governance committed by other instances. */
@@ -672,100 +725,112 @@ export class TenantPartnerRepository {
     };
   }
 
-  async persistChanges(changes: PersistTenantPartnerChanges) {
+  /** One configuration command is one commit, including a full rule reorder. */
+  async persistConfigurationChanges(changes: PersistTenantPartnerChanges) {
+    if (!this.isEnabled()) return;
+    await this.withTransaction((executor) =>
+      this.persistChanges(changes, executor),
+    );
+  }
+
+  async persistChanges(
+    changes: PersistTenantPartnerChanges,
+    executor?: TenantPartnerQueryExecutor,
+  ) {
     if (!this.isEnabled()) {
       return;
     }
 
+    const target = executor ?? this.databaseService!;
     const writes: Promise<unknown>[] = [];
 
     for (const tenantId of changes.deletedTenantIds ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_tenant_notification_preferences WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_tenant_sla_profiles WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_partner_channel_entries WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_partner_eligibility_verifications WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_approval_rules WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_tenant_webhook_endpoints WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_tenant_webhook_deliveries WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_passengers WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_addresses WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_cost_centers WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_quota_policies WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_quota_ledger WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_quota_monthly_snapshots WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_tenant_user_roles WHERE tenant_id = $1`,
           [tenantId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_tenant_api_keys WHERE tenant_id = $1`,
           [tenantId],
         ),
@@ -774,7 +839,7 @@ export class TenantPartnerRepository {
 
     for (const entrySlug of changes.deletedPartnerEntrySlugs ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_partner_ingress_credentials WHERE entry_slug = $1`,
           [entrySlug],
         ),
@@ -783,7 +848,7 @@ export class TenantPartnerRepository {
 
     for (const keyId of changes.deletedPartnerIngressCredentialIds ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM admin.phase1_partner_ingress_credentials WHERE key_id = $1`,
           [keyId],
         ),
@@ -792,13 +857,13 @@ export class TenantPartnerRepository {
 
     for (const approvalRequestId of changes.deletedApprovalRequestIds ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_approval_decisions WHERE approval_request_id = $1`,
           [approvalRequestId],
         ),
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_approval_requests WHERE approval_request_id = $1`,
           [approvalRequestId],
         ),
@@ -807,7 +872,7 @@ export class TenantPartnerRepository {
 
     for (const decisionId of changes.deletedApprovalDecisionIds ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `DELETE FROM core.phase1_tenant_approval_decisions WHERE decision_id = $1`,
           [decisionId],
         ),
@@ -816,7 +881,7 @@ export class TenantPartnerRepository {
 
     for (const preferences of changes.notificationPreferences ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO admin.phase1_tenant_notification_preferences (
               tenant_id,
@@ -840,7 +905,7 @@ export class TenantPartnerRepository {
 
     for (const slaProfile of changes.slaProfiles ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO admin.phase1_tenant_sla_profiles (
               tenant_id,
@@ -864,7 +929,7 @@ export class TenantPartnerRepository {
 
     for (const entry of changes.partnerEntries ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO admin.phase1_partner_channel_entries (
               entry_slug,
@@ -887,7 +952,11 @@ export class TenantPartnerRepository {
               status = EXCLUDED.status,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
-              record = EXCLUDED.record
+              record = CASE
+                WHEN admin.phase1_partner_channel_entries.record ? 'referralRevenueShareRules'
+                THEN jsonb_set(EXCLUDED.record, '{referralRevenueShareRules}',
+                  admin.phase1_partner_channel_entries.record->'referralRevenueShareRules')
+                ELSE EXCLUDED.record END
           `,
           [
             entry.entrySlug,
@@ -907,7 +976,7 @@ export class TenantPartnerRepository {
     if ((changes.partnerIngressCredentials?.length ?? 0) > 0) {
       writes.push(
         this.persistPartnerIngressCredentialsWithExecutor(
-          this.databaseService!,
+          target,
           changes.partnerIngressCredentials ?? [],
         ),
       );
@@ -915,7 +984,7 @@ export class TenantPartnerRepository {
 
     for (const verification of changes.partnerEligibilityVerifications ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO admin.phase1_partner_eligibility_verifications (
               eligibility_verification_id,
@@ -960,7 +1029,7 @@ export class TenantPartnerRepository {
 
     for (const rule of changes.approvalRules ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_approval_rules (
               rule_id,
@@ -993,7 +1062,7 @@ export class TenantPartnerRepository {
 
     for (const request of changes.approvalRequests ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_approval_requests (
               approval_request_id,
@@ -1041,7 +1110,7 @@ export class TenantPartnerRepository {
 
     for (const decision of changes.approvalDecisions ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_approval_decisions (
               decision_id,
@@ -1078,7 +1147,7 @@ export class TenantPartnerRepository {
     if ((changes.webhookEndpoints?.length ?? 0) > 0) {
       writes.push(
         this.persistWebhookEndpointsWithExecutor(
-          this.databaseService!,
+          target,
           changes.webhookEndpoints ?? [],
         ),
       );
@@ -1087,7 +1156,7 @@ export class TenantPartnerRepository {
     if ((changes.webhookDeliveries?.length ?? 0) > 0) {
       writes.push(
         this.persistWebhookDeliveriesWithExecutor(
-          this.databaseService!,
+          target,
           changes.webhookDeliveries ?? [],
         ),
       );
@@ -1095,7 +1164,7 @@ export class TenantPartnerRepository {
 
     for (const passenger of changes.passengers ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_passengers (
               passenger_id,
@@ -1128,7 +1197,7 @@ export class TenantPartnerRepository {
 
     for (const address of changes.addresses ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_addresses (
               address_id,
@@ -1161,7 +1230,7 @@ export class TenantPartnerRepository {
 
     for (const costCenter of changes.costCenters ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_cost_centers (
               tenant_id,
@@ -1196,7 +1265,7 @@ export class TenantPartnerRepository {
         policy.costCenterCode,
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_quota_policies (
               tenant_id,
@@ -1227,7 +1296,7 @@ export class TenantPartnerRepository {
 
     for (const entry of changes.quotaLedger ?? []) {
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_quota_ledger (
               ledger_entry_id,
@@ -1275,7 +1344,7 @@ export class TenantPartnerRepository {
         snapshot.costCenterCode,
       );
       writes.push(
-        this.databaseService!.query(
+        target.query(
           `
             INSERT INTO core.phase1_tenant_quota_monthly_snapshots (
               tenant_id,
@@ -1306,7 +1375,7 @@ export class TenantPartnerRepository {
     if ((changes.userRoles?.length ?? 0) > 0) {
       writes.push(
         this.persistTenantUserRolesWithExecutor(
-          this.databaseService!,
+          target,
           changes.userRoles ?? [],
         ),
       );
@@ -1314,10 +1383,7 @@ export class TenantPartnerRepository {
 
     if ((changes.apiKeys?.length ?? 0) > 0) {
       writes.push(
-        this.persistTenantApiKeysWithExecutor(
-          this.databaseService!,
-          changes.apiKeys ?? [],
-        ),
+        this.persistTenantApiKeysWithExecutor(target, changes.apiKeys ?? []),
       );
     }
 
@@ -1580,6 +1646,32 @@ export class TenantPartnerRepository {
         changes.quotaMonthlySnapshots ?? [],
       ),
     ]);
+  }
+
+  /** Current request authority for lifecycle commands. Discovery is unlocked;
+   * callers that mutate lock the order first, then read this row on that tx.
+   * Decisions are embedded in the same canonical record by the existing writer.
+   */
+  async findApprovalRequest(
+    tenantId: string | null,
+    approvalRequestId: string,
+    executor?: TenantPartnerQueryExecutor,
+  ): Promise<TenantBookingApprovalRequestRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await (
+      executor ?? this.databaseService!
+    ).query<JsonRecordRow>(
+      `SELECT record FROM core.phase1_tenant_approval_requests
+       WHERE ${tenantId === null ? "approval_request_id = $1" : "tenant_id = $1 AND approval_request_id = $2"}
+       ${executor ? "FOR UPDATE" : ""}`,
+      tenantId === null ? [approvalRequestId] : [tenantId, approvalRequestId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<TenantBookingApprovalRequestRecord>(
+          result.rows[0].record,
+          "core.phase1_tenant_approval_requests",
+        )
+      : null;
   }
 
   async persistApprovalWorkflow(

@@ -154,8 +154,9 @@ describe("createRequestHandler: POST /scan input validation", () => {
     expect(JSON.parse(res.body)).toEqual({ error: "content_sha256_mismatch" });
   });
 
-  it("rejects and destroys the connection once the body exceeds the 10 MiB bound", async () => {
-    const handler = createRequestHandler(baseConfig());
+  it("rejects with a usable 413 without destroying the request once the body exceeds the 10 MiB bound", async () => {
+    const config = baseConfig();
+    const handler = createRequestHandler(config);
     const req = new FakeRequest("POST", "/scan", {
       "content-type": "application/pdf",
       "x-content-sha256": "a".repeat(64),
@@ -168,7 +169,11 @@ describe("createRequestHandler: POST /scan input validation", () => {
     }
     await pending;
     expect(res.statusCode).toBe(413);
-    expect(req.destroyed).toBe(true);
+    expect(JSON.parse(res.body)).toEqual({ error: "payload_too_large" });
+    expect(req.destroyed).toBe(false);
+    expect(config.isReady).not.toHaveBeenCalled();
+    expect(config.exchange).not.toHaveBeenCalled();
+    expect(config.log).not.toHaveBeenCalled();
   });
 });
 
