@@ -30,11 +30,97 @@ export class JourneyFailure extends Error {
     public readonly stage: string,
     public readonly status?: number,
     public readonly code?: string,
+    public readonly transportFacts?: NativeTransportFailureFacts,
   ) {
     super(
       `${stage}${status ? `: HTTP ${status}` : ""}${code ? ` ${code}` : ""}`,
     );
   }
+}
+
+type NativeTransportFailureFacts = {
+  nativeFailureClass: string;
+  nativeCauseCode: string;
+  requestAborted: boolean;
+  requestDurationMs: number;
+  requestMethod: string;
+  requestRoute: "/" | "OTHER";
+};
+
+function nativeTransportFailureFacts(
+  error: unknown,
+  signal: AbortSignal,
+  startedAt: number,
+  method: string,
+  path: string,
+): NativeTransportFailureFacts {
+  let nativeFailureClass = "UNKNOWN";
+  let nativeCauseCode = "UNKNOWN";
+  // Fetch errors can retain credentials in their message, URL, stack or cause.
+  // Read only standard names/codes; even an accessor throwing is just unknown.
+  try {
+    const name = (error as { name?: unknown } | null)?.name;
+    if (
+      typeof name === "string" &&
+      [
+        "Error",
+        "TypeError",
+        "RangeError",
+        "SyntaxError",
+        "AbortError",
+        "TimeoutError",
+        "AggregateError",
+      ].includes(name)
+    )
+      nativeFailureClass = name;
+  } catch {
+    /* unknown native class */
+  }
+  try {
+    const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+    if (
+      typeof code === "string" &&
+      [
+        "ECONNRESET",
+        "ECONNREFUSED",
+        "ETIMEDOUT",
+        "ENOTFOUND",
+        "EAI_AGAIN",
+        "UND_ERR_CONNECT_TIMEOUT",
+        "UND_ERR_HEADERS_TIMEOUT",
+        "UND_ERR_BODY_TIMEOUT",
+        "UND_ERR_SOCKET",
+        "CERT_HAS_EXPIRED",
+        "ERR_TLS_CERT_ALTNAME_INVALID",
+        "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+      ].includes(code)
+    )
+      nativeCauseCode = code;
+  } catch {
+    /* unknown native cause */
+  }
+  const elapsed = performance.now() - startedAt;
+  return {
+    nativeFailureClass,
+    nativeCauseCode,
+    requestAborted: signal.aborted,
+    requestDurationMs:
+      Number.isFinite(elapsed) && elapsed >= 0
+        ? Math.min(Math.floor(elapsed), 86_400_000)
+        : 0,
+    requestMethod: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "HEAD",
+      "OPTIONS",
+    ].includes(method)
+      ? method
+      : "OTHER",
+    requestRoute: path === "/" ? "/" : "OTHER",
+  };
 }
 export function requireFact(value: unknown, stage: string): asserts value {
   if (!value) throw new JourneyFailure(stage);
@@ -569,6 +655,12 @@ export type SafeEvent = {
   quoteId?: string;
   estimatedMinMinor?: number;
   estimatedMaxMinor?: number;
+  nativeFailureClass?: string;
+  nativeCauseCode?: string;
+  requestAborted?: boolean;
+  requestDurationMs?: number;
+  requestMethod?: string;
+  requestRoute?: "/" | "OTHER";
   result?: "observed" | "retained" | "unexecuted" | "failed" | "cleaned";
 };
 const eventFields = new Set([
@@ -592,6 +684,12 @@ const eventFields = new Set([
   "quoteId",
   "estimatedMinMinor",
   "estimatedMaxMinor",
+  "nativeFailureClass",
+  "nativeCauseCode",
+  "requestAborted",
+  "requestDurationMs",
+  "requestMethod",
+  "requestRoute",
   "result",
 ]);
 export class Evidence {
@@ -614,6 +712,7 @@ export class Evidence {
             stage: error.stage.replace(/[^a-z0-9_.:-]/gi, "-").slice(0, 100),
             ...(error.status === undefined ? {} : { status: error.status }),
             ...(error.code === undefined ? {} : { code: error.code }),
+            ...error.transportFacts,
             result: "failed",
           }
         : { stage: "unexpected-consumer-failure", result: "failed" },
@@ -714,12 +813,14 @@ export class NativeTransport {
       !Object.keys(extra).some((key) => key.toLowerCase() === "origin"),
       "caller cannot replace browser origin",
     );
+    const requestSignal = AbortSignal.timeout(15_000);
+    const requestStartedAt = performance.now();
     let response: Response;
     try {
       response = await this.fetcher(url, {
         method: options.method ?? "GET",
         redirect: "manual",
-        signal: AbortSignal.timeout(15_000),
+        signal: requestSignal,
         headers: {
           "Content-Type": "application/json",
           ...credentials,
@@ -730,8 +831,19 @@ export class NativeTransport {
           ? {}
           : { body: JSON.stringify(options.body) }),
       });
-    } catch {
-      throw new JourneyFailure(`${role}:transport`);
+    } catch (error) {
+      throw new JourneyFailure(
+        `${role}:transport`,
+        undefined,
+        undefined,
+        nativeTransportFailureFacts(
+          error,
+          requestSignal,
+          requestStartedAt,
+          options.method ?? "GET",
+          path,
+        ),
+      );
     }
     const reader = response.body?.getReader();
     const chunks: Uint8Array[] = [];

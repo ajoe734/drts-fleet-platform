@@ -618,3 +618,200 @@ describe("owned identity and actual evidence invariants", () => {
     expect(() => origin("https://api.example.test/path")).toThrow();
   });
 });
+
+describe("native fetch failure diagnostics", () => {
+  it("retains a native connect code and root context without exposing authority or retrying", async () => {
+    const { tx, fetcher } = setup();
+    const privateValue = "synthetic-private-url-body-header";
+    fetcher.mockRejectedValueOnce(
+      new TypeError(privateValue, {
+        cause: { code: "UND_ERR_CONNECT_TIMEOUT", message: privateValue },
+      }),
+    );
+    const failure = await tx
+      .call("fleet", "/", { raw: true })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(JourneyFailure);
+    const evidence = new Evidence();
+    evidence.failure(failure);
+    expect(evidence.events).toEqual([
+      expect.objectContaining({
+        stage: "fleet:transport",
+        result: "failed",
+        nativeFailureClass: "TypeError",
+        nativeCauseCode: "UND_ERR_CONNECT_TIMEOUT",
+        requestAborted: false,
+        requestMethod: "GET",
+        requestRoute: "/",
+      }),
+    ]);
+    const event = at(evidence.events, 0);
+    expect(event.requestDurationMs).toBeGreaterThanOrEqual(0);
+    expect(event.status).toBeUndefined();
+    expect(event.code).toBeUndefined();
+    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
+    expect(JSON.stringify(failure)).not.toContain(privateValue);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(at(fetcher.mock.calls, 0)[1]).toMatchObject({
+      method: "GET",
+      redirect: "manual",
+    });
+    expect(
+      new Headers(at(fetcher.mock.calls, 0)[1]?.headers).get(
+        "x-drts-authorization",
+      ),
+    ).toBe("Bearer genuine-fleet");
+  });
+
+  it.each(["AbortError", "TimeoutError"])(
+    "keeps observed %s and the original 15s signal without inferring an HTTP status",
+    async (name) => {
+      const { tx, fetcher } = setup();
+      const controller = new AbortController();
+      const timeout = vi
+        .spyOn(AbortSignal, "timeout")
+        .mockReturnValueOnce(controller.signal);
+      try {
+        fetcher.mockImplementationOnce(async (_url, options) => {
+          expect(options?.signal).toBe(controller.signal);
+          controller.abort(
+            new DOMException("synthetic-sensitive-reason", name),
+          );
+          throw new DOMException("synthetic-sensitive-message", name);
+        });
+        const failure = await tx
+          .call("fleet", "/")
+          .catch((error: unknown) => error);
+        const evidence = new Evidence();
+        evidence.failure(failure);
+        expect(evidence.events).toEqual([
+          expect.objectContaining({
+            stage: "fleet:transport",
+            nativeFailureClass: name,
+            nativeCauseCode: "UNKNOWN",
+            requestAborted: true,
+            requestMethod: "GET",
+            requestRoute: "/",
+            result: "failed",
+          }),
+        ]);
+        expect(timeout).toHaveBeenCalledExactlyOnceWith(15_000);
+        expect(at(evidence.events, 0).status).toBeUndefined();
+        expect(JSON.stringify(evidence.events)).not.toContain(
+          "synthetic-sensitive",
+        );
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
+  it("keeps unknown class/code and nonroot path private while preserving the original POST body", async () => {
+    const { tx, fetcher } = setup();
+    const privateValue = "synthetic-secret-payload-and-path";
+    const error = Object.assign(new Error(privateValue), {
+      name: privateValue,
+      cause: { code: privateValue },
+    });
+    fetcher.mockRejectedValueOnce(error);
+    const body = { originalIntent: privateValue };
+    const failure = await tx
+      .call("fleet", `/private/${privateValue}?key=${privateValue}`, {
+        method: "POST",
+        body,
+      })
+      .catch((error: unknown) => error);
+    const evidence = new Evidence();
+    evidence.failure(failure);
+    expect(evidence.events).toEqual([
+      expect.objectContaining({
+        stage: "fleet:transport",
+        nativeFailureClass: "UNKNOWN",
+        nativeCauseCode: "UNKNOWN",
+        requestMethod: "POST",
+        requestRoute: "OTHER",
+        requestAborted: false,
+      }),
+    ]);
+    expect(at(fetcher.mock.calls, 0)[1]?.body).toBe(JSON.stringify(body));
+    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replace the original transport failure when native metadata accessors throw", async () => {
+    const { tx, fetcher } = setup();
+    const native = Object.defineProperties(
+      {},
+      {
+        name: {
+          get() {
+            throw new Error("synthetic-private-name-getter");
+          },
+        },
+        cause: {
+          get() {
+            throw new Error("synthetic-private-cause-getter");
+          },
+        },
+      },
+    );
+    fetcher.mockRejectedValueOnce(native);
+    const failure = await tx
+      .call("fleet", "/")
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(JourneyFailure);
+    const evidence = new Evidence();
+    evidence.failure(failure);
+    expect(evidence.events).toEqual([
+      expect.objectContaining({
+        stage: "fleet:transport",
+        result: "failed",
+        nativeFailureClass: "UNKNOWN",
+        nativeCauseCode: "UNKNOWN",
+      }),
+    ]);
+    expect(JSON.stringify(evidence.events)).not.toContain("synthetic-private");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses elapsed monotonic time and leaves HTTP response failures on their original rail", async () => {
+    const { tx, fetcher } = setup();
+    const clock = vi
+      .spyOn(performance, "now")
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(137.9);
+    try {
+      fetcher.mockRejectedValueOnce(
+        new TypeError("synthetic-sensitive-message", {
+          cause: { code: "ECONNRESET" },
+        }),
+      );
+      const evidence = new Evidence();
+      evidence.failure(
+        await tx.call("fleet", "/").catch((error: unknown) => error),
+      );
+      expect(at(evidence.events, 0)).toMatchObject({
+        requestDurationMs: 37,
+        nativeCauseCode: "ECONNRESET",
+      });
+    } finally {
+      clock.mockRestore();
+    }
+    fetcher.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: "SERVICE_UNAVAILABLE" } }), {
+        status: 503,
+      }),
+    );
+    const failure = await tx
+      .call("fleet", "/")
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      stage: "fleet:request",
+      status: 503,
+      code: undefined,
+    });
+    expect((failure as JourneyFailure).transportFacts).toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});
