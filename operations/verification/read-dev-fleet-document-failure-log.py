@@ -287,12 +287,193 @@ def collect(environ, runner=subprocess.run):
     return document
 
 
+# This is a separate historical profile. None of the Fleet V2 constants or
+# default collector above are widened to include this later request.
+ADMIN_PROFILE = "admin-root-87ea-b1b"
+ADMIN_SOURCE_SHA = "b1bfc05f064663cef01baf3272e6898e04b34549"
+ADMIN_SERVICE = "drts-dev-platform-admin-web"
+ADMIN_REVISION = "drts-dev-platform-admin-web-00129-8x4"
+ADMIN_START = "2026-10-20T20:08:30Z"
+ADMIN_END = "2026-10-20T20:08:50Z"
+ADMIN_REQUEST_LOG = f"projects/{PROJECT}/logs/run.googleapis.com%2Frequests"
+ADMIN_STDERR_LOG = f"projects/{PROJECT}/logs/run.googleapis.com%2Fstderr"
+# Exact Error lines from this historical Source only; never copy their text or
+# a dynamic verifier suffix into evidence. An unrecognized Next log is unknown.
+ADMIN_SIGNATURE_SOURCE = (
+    ADMIN_SOURCE_SHA + ":packages/control-plane-auth/src/index.ts"
+)
+ADMIN_EXCEPTION_SIGNATURES = {
+    "Control-plane strict IAP mode requires a valid x-goog-iap-jwt-assertion header.":
+        "CONTROL_PLANE_ASSERTION_REQUIRED",
+    "Control-plane strict IAP mode requires a verified user email in assertion.":
+        "CONTROL_PLANE_VERIFIED_EMAIL_REQUIRED",
+    "Control-plane IAP is enabled; a verified x-goog-iap-jwt-assertion is required and no default identity is applied.":
+        "CONTROL_PLANE_VERIFIED_ASSERTION_REQUIRED",
+    "Control-plane authenticated user email is unavailable.":
+        "CONTROL_PLANE_EMAIL_UNAVAILABLE",
+}
+
+
+def admin_scope_query():
+    return (
+        'resource.type="cloud_run_revision" '
+        f'AND resource.labels.project_id="{PROJECT}" '
+        f'AND resource.labels.location="{REGION}" '
+        f'AND resource.labels.service_name="{ADMIN_SERVICE}" '
+        f'AND resource.labels.revision_name="{ADMIN_REVISION}" '
+        f'AND timestamp>="{ADMIN_START}" AND timestamp<="{ADMIN_END}"'
+    )
+
+
+def admin_request_query():
+    return (
+        admin_scope_query() + f" AND logName={json.dumps(ADMIN_REQUEST_LOG)} "
+        'AND httpRequest.requestMethod="GET" AND httpRequest.status=500 '
+        'AND httpRequest.requestUrl=~"^https?://[^/?#]+/($|\\\\?)"'
+    )
+
+
+def check_admin_row(row, log_name):
+    require(isinstance(row, dict), "INVALID_LOG_ROW")
+    resource = row.get("resource")
+    require(isinstance(resource, dict), "INVALID_LOG_RESOURCE")
+    labels = resource.get("labels")
+    require(
+        resource.get("type") == "cloud_run_revision"
+        and isinstance(labels, dict)
+        and labels.get("project_id") == PROJECT
+        and labels.get("location") == REGION
+        and labels.get("service_name") == ADMIN_SERVICE
+        and labels.get("revision_name") == ADMIN_REVISION,
+        "LOG_OUTSIDE_FIXED_RESOURCE",
+    )
+    timestamp = row.get("timestamp")
+    require(instant(ADMIN_START) <= instant(timestamp) <= instant(ADMIN_END),
+            "LOG_OUTSIDE_FIXED_WINDOW")
+    require(row.get("logName") == log_name, "LOG_OUTSIDE_FIXED_STREAM")
+    trace = row.get("trace")
+    require(trace is None or (isinstance(trace, str) and TRACE.fullmatch(trace)),
+            "INVALID_LOG_TRACE")
+    severity = row.get("severity")
+    return {
+        "serviceRole": "admin-web", "timestamp": timestamp,
+        "severity": severity if isinstance(severity, str) and severity in SEVERITIES else "UNOBSERVED",
+        "traceFingerprint": hashlib.sha256(trace.encode()).hexdigest() if trace else None,
+    }, trace
+
+
+def project_admin_request(row):
+    safe, trace = check_admin_row(row, ADMIN_REQUEST_LOG)
+    request = row.get("httpRequest")
+    require(isinstance(request, dict), "MISSING_REQUEST_METADATA")
+    require(isinstance(request.get("requestUrl"), str), "INVALID_REQUEST_URL")
+    try:
+        url = urlsplit(request["requestUrl"])
+        require(url.scheme in {"http", "https"} and bool(url.hostname)
+                and url.username is None and url.password is None
+                and not url.fragment, "INVALID_REQUEST_URL")
+    except (TypeError, ValueError):
+        raise DiagnosticFailure("INVALID_REQUEST_URL") from None
+    require(request.get("requestMethod") == "GET" and url.path == "/"
+            and type(request.get("status")) is int and request["status"] == 500,
+            "REQUEST_OUTSIDE_FIXED_FAILURES")
+    latency = request.get("latency")
+    safe.update({
+        "route": "admin-root", "phase": "initial-admin-document",
+        "method": "GET", "status": 500,
+        "latency": latency if isinstance(latency, str) and re.fullmatch(
+            r"\d{1,4}(?:\.\d{1,9})?s", latency) else None,
+    })
+    return safe, trace
+
+
+def admin_error_facts(row):
+    safe = safe_error_facts(row)
+    text = row.get("textPayload")
+    first_line = text.strip().splitlines()[0] if isinstance(text, str) and text.strip() else ""
+    # Only the first exact exception line, not a code-like string in a body,
+    # stack or arbitrary message. Next may prefix its Error line with this mark.
+    signature = None
+    for prefix in ("Error: ", "⨯ Error: "):
+        if first_line.startswith(prefix):
+            signature = ADMIN_EXCEPTION_SIGNATURES.get(first_line[len(prefix):])
+            break
+    safe["exceptionSignatures"] = [signature] if signature else []
+    return safe
+
+
+def collect_admin_root(environ, runner=subprocess.run):
+    document = {
+        "schema": "dev-admin-root-failure-readback-v1",
+        "profile": ADMIN_PROFILE,
+        "observedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "failedSourceSha": ADMIN_SOURCE_SHA, "project": PROJECT, "region": REGION,
+        "service": ADMIN_SERVICE, "revision": ADMIN_REVISION,
+        "start": ADMIN_START, "end": ADMIN_END,
+        "exceptionSignatureSource": ADMIN_SIGNATURE_SOURCE,
+        "definitionSha": None, "readStatus": "unobserved", "readFailureCode": None,
+        "requests": [], "correlatedApplication": [], "queryCount": 0,
+        "correlationStatus": "unobserved", "exceptionEvidenceStatus": "unobserved",
+        "qualification": (
+            "Historical Admin GET / HTTP500 only. The fixed window surrounds "
+            "original step/report bounds, not a known exact request start. "
+            "Trace association does not prove this caller or a unique root cause. "
+            "Missing traces or unclassified stderr remain UNKNOWN. No product "
+            "replay, repair, authority change or full-journey PASS is implied."
+        ),
+    }
+    try:
+        definition = environ.get("EXPECTED_DEFINITION_SHA", "")
+        require(re.fullmatch(r"[a-f0-9]{40}", definition)
+                and definition == environ.get("GITHUB_SHA"),
+                "IMMUTABLE_DEFINITION_MISMATCH")
+        require(environ.get("DEV_GCP_PROJECT_ID") == PROJECT
+                and environ.get("DEV_GCP_REGION") == REGION, "DEV_TARGET_MISMATCH")
+        document["definitionSha"] = definition
+        document["queryCount"] += 1
+        requests = query_rows(admin_request_query(), REQUEST_LIMIT, runner)
+        traces = set()
+        for row in requests:
+            safe, trace = project_admin_request(row)
+            document["requests"].append(safe)
+            if trace:
+                traces.add(trace)
+        if traces:
+            trace_filter = " OR ".join(f'trace="{trace}"' for trace in sorted(traces))
+            document["queryCount"] += 1
+            correlated = query_rows(
+                admin_scope_query() + f" AND logName={json.dumps(ADMIN_STDERR_LOG)} "
+                + f"AND ({trace_filter})", CORRELATED_LIMIT, runner,
+            )
+            for row in correlated:
+                safe, trace = check_admin_row(row, ADMIN_STDERR_LOG)
+                require(trace in traces, "LOG_OUTSIDE_OBSERVED_REQUEST_TRACES")
+                safe.update(admin_error_facts(row))
+                safe["phase"] = "observed-trace-admin-stderr"
+                document["correlatedApplication"].append(safe)
+            document["correlationStatus"] = (
+                "observed-trace-stderr" if correlated else "no-matching-stderr"
+            )
+            if any(row["errorClasses"] or row["errorCodes"] or row["exceptionSignatures"]
+                   for row in document["correlatedApplication"]):
+                document["exceptionEvidenceStatus"] = "closed-classification-observed"
+        document["readStatus"] = (
+            "request-metadata-observed" if requests else "no-matching-request-logs"
+        )
+    except DiagnosticFailure as error:
+        document["readFailureCode"] = str(error)
+    return document
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--profile", choices=("fleet-original-v2", ADMIN_PROFILE),
+                        default="fleet-original-v2")
     args = parser.parse_args()
     os.umask(0o077)
-    document = collect(os.environ)
+    document = (collect_admin_root(os.environ) if args.profile == ADMIN_PROFILE
+                else collect(os.environ))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     temporary = args.output.with_suffix(".tmp")
     temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n")
