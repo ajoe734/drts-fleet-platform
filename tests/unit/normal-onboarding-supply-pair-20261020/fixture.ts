@@ -114,7 +114,7 @@ export class OnboardingSqlPort {
         !(values[16] as string[]).includes(row.status)
       )
         return result();
-      const next = {
+      const next: Row = {
         ...row,
         status: values[3],
         revision_no: row.revision_no + 1,
