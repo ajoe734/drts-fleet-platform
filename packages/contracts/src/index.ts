@@ -33,6 +33,7 @@ import type {
 } from "./phase2-tesla-fsd-sandbox";
 
 export * from "./referral-channel";
+export * from "./passenger-fee-disclosure";
 export type {
   RequestSandboxRegulatorCaseExportCommand,
   SandboxFulfillmentProjectionView,
@@ -3651,6 +3652,7 @@ export interface OwnedOrderRecord {
     bookingIntent?: import("./referral-channel").ReferralBookingIntent;
     quote?: import("./referral-channel").ReferralPassengerFareQuoteRecord;
     confirmedAt?: string;
+    feeConfirmation?: import("./referral-channel").ReferralOrderFeeConfirmation;
     complaints?: import("./referral-channel").ReferralPassengerComplaintSubmission[];
     rating?: {
       orderId: string;

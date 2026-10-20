@@ -1,4 +1,8 @@
 import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
+import {
   BookingWriteJournal,
   JourneyFailure,
   assertBusinessOrderProduct,
@@ -268,6 +272,15 @@ export async function runFourStageOwnedCancellations(
         { method: "POST", body: { workState: "available" } },
       );
       await p.heartbeat(null, "available");
+      // The main browser already explicitly agreed; these API cases must not invent first consent.
+      const fees = object((await p.referral("/api/referral/fees")).data);
+      requireFact(
+        fees.disclosureVersion === PASSENGER_FEE_DISCLOSURE_VERSION &&
+          fees.contentHash === PASSENGER_FEE_CONTENT_HASH &&
+          typeof fees.acknowledgedAt === "string" &&
+          Number.isFinite(Date.parse(fees.acknowledgedAt)),
+        "same subject canonical first fee acknowledgement required",
+      );
       const quote = object(
         (
           await p.referral("/api/referral/quote", {
@@ -282,7 +295,9 @@ export async function runFourStageOwnedCancellations(
         ).data,
       );
       requireFact(
-        quote.fixedPrice === false &&
+        quote.feeDisclosureVersion === fees.disclosureVersion &&
+          quote.feeContentHash === fees.contentHash &&
+          quote.fixedPrice === false &&
           quote.isGuaranteed === false &&
           quote.timingMode === "immediate" &&
           quote.requestedScheduledAt === null &&
@@ -295,6 +310,8 @@ export async function runFourStageOwnedCancellations(
       const command = {
         entrySlug: p.entrySlug,
         quoteId: frozenQuoteId,
+        feeDisclosureVersion: text(quote.feeDisclosureVersion),
+        feeConfirmed: true,
         pickupAddress: p.pickupAddress,
         dropoffAddress: p.dropoffAddress,
         vehicleType: "standard",
@@ -310,6 +327,7 @@ export async function runFourStageOwnedCancellations(
           entrySlug: p.entrySlug,
           partnerUserRef: p.partnerUserRef,
           quoteId: frozenQuoteId,
+          feeDisclosureVersion: text(quote.feeDisclosureVersion),
           pickupAddress: p.pickupAddress,
           dropoffAddress: p.dropoffAddress,
           passengerName: p.passengerName,
@@ -336,6 +354,16 @@ export async function runFourStageOwnedCancellations(
       requireFact(
         object(ack.quote).quoteId === quote.quoteId,
         "case consumes its own current quote",
+      );
+      const feeConfirmation = object(ack.feeConfirmation);
+      requireFact(
+        feeConfirmation.quoteId === frozenQuoteId &&
+          feeConfirmation.orderId === ack.orderId &&
+          feeConfirmation.disclosureVersion === command.feeDisclosureVersion &&
+          feeConfirmation.contentHash === fees.contentHash &&
+          typeof feeConfirmation.feeConfirmedAt === "string" &&
+          Number.isFinite(Date.parse(feeConfirmation.feeConfirmedAt)),
+        "cancellation case real server fee confirmation",
       );
       // An actually received ACK identifies the owned order even if the local
       // durable acknowledgement write then fails. Preserve that failure/journal.

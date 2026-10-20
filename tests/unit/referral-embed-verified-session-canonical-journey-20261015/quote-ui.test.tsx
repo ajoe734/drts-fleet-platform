@@ -1,4 +1,8 @@
 // @vitest-environment jsdom
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -67,6 +71,8 @@ function quote(
 ) {
   return {
     quoteId,
+    feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+    feeContentHash: PASSENGER_FEE_CONTENT_HASH,
     fixedPrice: false,
     isGuaranteed: false,
     estimatedMin: 265,
@@ -95,7 +101,7 @@ function navigationPort() {
 }
 
 it("keeps the mounted booking disabled while its authorized quote has not arrived", async () => {
-  vi.stubGlobal(
+  stubFeeAwareFetch(
     "fetch",
     vi.fn(() => new Promise(() => {})),
   );
@@ -128,7 +134,7 @@ it("retains disabled booking controls in the actual SSR output", () => {
 
 it("ignores a late quote for the old route and only enables the matching current quote", async () => {
   const requests: Array<{ body: any; finish: (r: Response) => void }> = [];
-  vi.stubGlobal(
+  stubFeeAwareFetch(
     "fetch",
     vi.fn(
       (_url, init) =>
@@ -147,6 +153,7 @@ it("ignores a late quote for the old route and only enables the matching current
   await Promise.resolve();
   expect(submit(host).disabled).toBe(true);
   requests[1]!.finish(ok(quote("current-route")));
+  await confirmCurrentOrder(host);
   await waitFor(() => expect(submit(host).disabled).toBe(false));
   expect(requests[1]!.body.pickupAddress).toBe("changed real pickup");
 });
@@ -154,7 +161,7 @@ it("ignores a late quote for the old route and only enables the matching current
 it("preserves exact original key/body over a lost booking ACK, reload and original quote expiry", async () => {
   const commands: any[] = [],
     assign = navigationPort();
-  vi.stubGlobal(
+  stubFeeAwareFetch(
     "fetch",
     vi.fn(async (url, init) => {
       if (url === "/api/referral/quote") return ok(quote());
@@ -163,12 +170,24 @@ it("preserves exact original key/body over a lost booking ACK, reload and origin
         throw new Error("controlled ACK lost after commit");
       return ok({
         orderId: "same-order-a",
-        quote: { quoteId: commands[0].body.quoteId },
+        quote: {
+          quoteId: commands[0].body.quoteId,
+          feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          feeContentHash: PASSENGER_FEE_CONTENT_HASH,
+        },
         confirmedAt: "2026-10-20T02:00:00Z",
+        feeConfirmation: {
+          orderId: "same-order-a",
+          quoteId: commands[0].body.quoteId,
+          disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          contentHash: PASSENGER_FEE_CONTENT_HASH,
+          feeConfirmedAt: "2026-10-20T02:00:01Z",
+        },
       });
     }),
   );
   let host = mount(<BookScreen context={context as never} />);
+  await confirmCurrentOrder(host);
   await waitFor(() => expect(submit(host).disabled).toBe(false));
   fireEvent.click(submit(host));
   await waitFor(() => expect(host.textContent).toContain("重送原叫車要求"));
@@ -208,12 +227,13 @@ it("never sends another account's pending command and rejects malformed local re
   const fetch = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(
     async () => ok(quote()),
   );
-  vi.stubGlobal("fetch", fetch);
+  stubFeeAwareFetch("fetch", fetch);
   const b = {
     ...context,
     session: { ...context.session, recoveryScope: "opaque-scope-b" },
   };
   const host = mount(<BookScreen context={b as never} />);
+  await confirmCurrentOrder(host);
   await waitFor(() => expect(submit(host).disabled).toBe(false));
   expect(host.textContent).not.toContain("重送原叫車要求");
   expect(fetch.mock.calls.every(([url]) => url === "/api/referral/quote")).toBe(
@@ -222,7 +242,7 @@ it("never sends another account's pending command and rejects malformed local re
 });
 
 it("shows a recoverable Chinese error and keeps submit disabled when quote storage is unavailable", async () => {
-  vi.stubGlobal(
+  stubFeeAwareFetch(
     "fetch",
     vi.fn(async () =>
       Response.json(
@@ -251,7 +271,7 @@ it.each(["account-switch", "unmount"])(
     let finish!: (r: Response) => void;
     const assign = navigationPort(),
       calls: any[] = [];
-    vi.stubGlobal(
+    stubFeeAwareFetch(
       "fetch",
       vi.fn(async (url, init) => {
         if (url === "/api/referral/quote") return ok(quote());
@@ -262,6 +282,7 @@ it.each(["account-switch", "unmount"])(
       }),
     );
     const host = mount(<BookScreen context={context as never} />);
+    await confirmCurrentOrder(host);
     await waitFor(() => expect(submit(host).disabled).toBe(false));
     fireEvent.click(submit(host));
     await waitFor(() => expect(calls).toHaveLength(1));
@@ -302,6 +323,7 @@ it.each(["account-switch", "unmount"])(
     ).toEqual(calls[0]);
     if (mode === "account-switch") {
       expect(host.textContent).not.toContain("old-scope-order");
+      await confirmCurrentOrder(host);
       await waitFor(() => expect(submit(host).disabled).toBe(false));
     }
   },
@@ -338,7 +360,7 @@ it("uses a default-ON native low-rating switch, explicit opt-out and same-order 
       submittedAt: "2026-10-20T02:00:00Z",
     });
   });
-  vi.stubGlobal("fetch", fetch);
+  stubFeeAwareFetch("fetch", fetch);
   const host = mount(
     <PassengerEmbed
       context={{ ...context, screen: "completed" } as never}
@@ -369,7 +391,7 @@ it("uses a default-ON native low-rating switch, explicit opt-out and same-order 
 });
 it("keeps an uncertain rating's original payload/key across remount and disables changing its contact choice", async () => {
   const calls: any[] = [];
-  vi.stubGlobal(
+  stubFeeAwareFetch(
     "fetch",
     vi.fn(async (_url, init) => {
       const c = JSON.parse(init.body);
@@ -438,7 +460,7 @@ it.each(["changed-scope", "unmounted"])(
         });
       return ok(quote("current-scope-quote"));
     });
-    vi.stubGlobal("fetch", fetch);
+    stubFeeAwareFetch("fetch", fetch);
     const host = mount(
       <BookScreen
         context={
@@ -466,6 +488,7 @@ it.each(["changed-scope", "unmounted"])(
           />,
         ),
       );
+      await confirmCurrentOrder(host);
       await waitFor(() => expect(submit(host).disabled).toBe(false));
     } else {
       flushSync(() => root!.unmount());
@@ -476,7 +499,10 @@ it.each(["changed-scope", "unmounted"])(
     );
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(assign).not.toHaveBeenCalled();
-    if (mode === "changed-scope") expect(submit(host).disabled).toBe(false);
+    if (mode === "changed-scope") {
+      await confirmCurrentOrder(host);
+      expect(submit(host).disabled).toBe(false);
+    }
   },
 );
 
@@ -499,11 +525,22 @@ it("reloads returning bootstrap into its canonical public scope before any quote
       throw new Error("controlled committed reply loss");
     return ok({
       orderId: "original-returning-order",
-      quote: { quoteId: command.quoteId },
+      quote: {
+        quoteId: command.quoteId,
+        feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        feeContentHash: PASSENGER_FEE_CONTENT_HASH,
+      },
       confirmedAt: "2026-10-20T02:00:00Z",
+      feeConfirmation: {
+        orderId: "original-returning-order",
+        quoteId: command.quoteId,
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        contentHash: PASSENGER_FEE_CONTENT_HASH,
+        feeConfirmedAt: "2026-10-20T02:00:01Z",
+      },
     });
   });
-  vi.stubGlobal("fetch", fetch);
+  stubFeeAwareFetch("fetch", fetch);
   let host = mount(
     <BookScreen context={{ ...context, session: null } as never} />,
   );
@@ -523,6 +560,7 @@ it("reloads returning bootstrap into its canonical public scope before any quote
   root = undefined;
   host.remove();
   host = mount(<BookScreen context={context as never} />);
+  await confirmCurrentOrder(host);
   await waitFor(() => expect(submit(host).disabled).toBe(false));
   flushSync(() => fireEvent.click(submit(host)));
   await waitFor(() => expect(host.textContent).toContain("重送原叫車要求"));
@@ -535,6 +573,7 @@ it("reloads returning bootstrap into its canonical public scope before any quote
   root = undefined;
   host.remove();
   host = mount(<BookScreen context={context as never} />);
+  await confirmCurrentOrder(host);
   await waitFor(() => expect(submit(host).disabled).toBe(false));
   flushSync(() => fireEvent.click(submit(host)));
   await waitFor(() => expect(commands).toHaveLength(2));
@@ -543,7 +582,7 @@ it("reloads returning bootstrap into its canonical public scope before any quote
 
 it("preserves the original command and asks for revalidation when the actual session-required code returns", async () => {
   navigationPort();
-  vi.stubGlobal(
+  stubFeeAwareFetch(
     "fetch",
     vi.fn(async (url: string) =>
       url === "/api/referral/quote"
@@ -555,6 +594,7 @@ it("preserves the original command and asks for revalidation when the actual ses
     ),
   );
   const host = mount(<BookScreen context={context as never} />);
+  await confirmCurrentOrder(host);
   await waitFor(() => expect(submit(host).disabled).toBe(false));
   flushSync(() => fireEvent.click(submit(host)));
   await waitFor(() =>
@@ -601,3 +641,36 @@ it.each([
     ).toBeNull();
   },
 );
+
+function stubFeeAwareFetch(_name: "fetch", port: unknown) {
+  if (typeof port !== "function")
+    throw new Error("controlled original transport required");
+  vi.stubGlobal(
+    "fetch",
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/referral/fees")
+        return Response.json({
+          ok: true,
+          data: {
+            disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+            contentHash: PASSENGER_FEE_CONTENT_HASH,
+            acknowledgedAt: "2026-10-20T00:00:00Z",
+          },
+        });
+      return Reflect.apply(port, undefined, [input, init]);
+    },
+  );
+}
+async function confirmCurrentOrder(host: HTMLElement) {
+  await waitFor(() => {
+    if (host.textContent?.includes("重送原叫車要求")) return;
+    const checkbox = getByRole(host, "checkbox", {
+      name: "我已確認費用與優惠說明",
+    }) as HTMLInputElement;
+    expect(checkbox.disabled).toBe(false);
+  });
+  const checkbox = host.querySelector<HTMLInputElement>(
+    '[data-drt-operation="referral-fee-confirm"]',
+  );
+  if (checkbox && !checkbox.checked) fireEvent.click(checkbox);
+}
