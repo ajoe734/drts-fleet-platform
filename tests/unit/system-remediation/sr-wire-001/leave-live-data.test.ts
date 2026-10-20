@@ -793,4 +793,268 @@ describe("SR-WIRE-001 / C052 / N01: real DriverLeaveScreen -> real ApiClient cre
     );
     expect(h.postCalls()).toHaveLength(9);
   });
+
+  it("deduplicates visible leave rows when same mounted intent is invoked twice before completion and both replies return 201 with the same authoritative leaveId (idempotent replay)", async () => {
+    const h = createRealDriverLeaveClientHarness();
+    await h.provisionSession({
+      driverId: "drv_replay_dedup",
+      accessToken: "tok_replay_dedup",
+    });
+
+    h.render();
+    const list = node(await h.flush(), "DriverLeaveList");
+    (list.props.onCreatePress as () => void)();
+    const form = node(h.render(), "DriverLeaveForm");
+    const submitFn = form.props.onSubmit as (
+      cmd: CreateDriverLeaveCommand,
+    ) => Promise<void>;
+
+    let resolveFirst!: (res: Response) => void;
+    let resolveSecond!: (res: Response) => void;
+    const firstPending = new Promise<Response>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const secondPending = new Promise<Response>((resolve) => {
+      resolveSecond = resolve;
+    });
+
+    h.postQueue.push(
+      () => firstPending,
+      () => secondPending,
+    );
+
+    // Invoke same mounted intent twice before either request completes
+    const p1 = submitFn(baseCommand);
+    const p2 = submitFn(baseCommand);
+
+    // Wait for both outbound POSTs to reach fetch boundary
+    await Promise.resolve();
+    await Promise.resolve();
+    const posts = h.postCalls();
+    expect(posts).toHaveLength(2);
+    const key1 = posts[0]!.headers.get("Idempotency-Key");
+    const key2 = posts[1]!.headers.get("Idempotency-Key");
+    expect(key1).toMatch(/^driver-leave-create-/);
+    expect(key2).toBe(key1);
+
+    const makeReplay201Response = () =>
+      new Response(
+        JSON.stringify({
+          data: {
+            ...sample,
+            leaveId: "one-logical-leave",
+            driverId: "drv_replay_dedup",
+            ...baseCommand,
+          },
+        }),
+        {
+          status: 201,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Idempotent-Replay": "true",
+          },
+        },
+      );
+
+    resolveFirst(makeReplay201Response());
+    resolveSecond(makeReplay201Response());
+    await Promise.all([p1, p2]);
+
+    const detail = node(h.render(), "DriverLeaveDetail");
+    expect((detail.props.leave as Leave).leaveId).toBe("one-logical-leave");
+    expect(detail.props.isWithdrawing).toBe(false);
+
+    (detail.props.onBack as () => void)();
+    const listAfterReplay = node(h.render(), "DriverLeaveList");
+    const visibleLeaves = listAfterReplay.props.leaves as Leave[];
+    const visibleLeaveIds = visibleLeaves.map((item) => item.leaveId);
+    expect(visibleLeaveIds).toEqual(["one-logical-leave"]);
+    expect(new Set(visibleLeaveIds).size).toBe(1);
+  });
+
+  it("isolates active driver state and newer/canceled intents when actual getDriverId() switches from controlled_driver_A to controlled_driver_B while A's POST is pending", async () => {
+    const h = createRealDriverLeaveClientHarness();
+    await h.provisionSession({
+      driverId: "controlled_driver_A",
+      accessToken: "tok_driver_A",
+    });
+
+    h.render();
+    let list = node(await h.flush(), "DriverLeaveList");
+    (list.props.onCreatePress as () => void)();
+    let form = node(h.render(), "DriverLeaveForm");
+
+    // Case 1: Start onSubmit as controlled_driver_A, switch to controlled_driver_B while pending, then resolve A's 201 response
+    let resolveDriverA1!: (res: Response) => void;
+    h.postQueue.push(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveDriverA1 = resolve;
+        }),
+    );
+
+    const pendingSubmitA1 = (
+      form.props.onSubmit as (cmd: CreateDriverLeaveCommand) => Promise<void>
+    )(baseCommand);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h.postCalls()).toHaveLength(1);
+    const keyDriverA1 = h.postCalls()[0]!.headers.get("Idempotency-Key");
+    expect(keyDriverA1).toMatch(/^driver-leave-create-/);
+
+    // Switch active driver identity to controlled_driver_B while A's POST is still in flight
+    await h.provisionSession({
+      driverId: "controlled_driver_B",
+      accessToken: "tok_driver_B",
+    });
+    expect(h.driverApi.getDriverId()).toBe("controlled_driver_B");
+
+    resolveDriverA1(
+      new Response(
+        JSON.stringify({
+          data: {
+            ...sample,
+            leaveId: "lv_stale_driver_A",
+            driverId: "controlled_driver_A",
+            ...baseCommand,
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await pendingSubmitA1;
+
+    // UI must NOT render DriverLeaveDetail for controlled_driver_A or prepend A's leave in B's context
+    const nodesAfterStaleA = h.render();
+    expect(
+      nodesAfterStaleA.some((item) => item.type === "DriverLeaveDetail"),
+    ).toBe(false);
+    form = node(nodesAfterStaleA, "DriverLeaveForm");
+    expect(form.props.existingLeaves).toEqual([]);
+    expect(form.props.isSubmitting).toBe(false);
+    expect(form.props.serverError).toBeNull();
+
+    // Case 2: Start A pending, switch to B and start B pending; late A error/success must not clobber B's in-flight intent or isSubmitting
+    await h.provisionSession({
+      driverId: "controlled_driver_A",
+      accessToken: "tok_driver_A2",
+    });
+    let rejectDriverA2!: (err: Error) => void;
+    let resolveDriverB!: (res: Response) => void;
+    h.postQueue.push(
+      () =>
+        new Promise<Response>((_resolve, reject) => {
+          rejectDriverA2 = reject;
+        }),
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveDriverB = resolve;
+        }),
+    );
+
+    const pendingSubmitA2 = (
+      form.props.onSubmit as (cmd: CreateDriverLeaveCommand) => Promise<void>
+    )(baseCommand);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await h.provisionSession({
+      driverId: "controlled_driver_B",
+      accessToken: "tok_driver_B2",
+    });
+    form = node(h.render(), "DriverLeaveForm");
+    const pendingSubmitB = (
+      form.props.onSubmit as (cmd: CreateDriverLeaveCommand) => Promise<void>
+    )(baseCommand);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(h.postCalls()).toHaveLength(3);
+    const keyDriverA2 = h.postCalls()[1]!.headers.get("Idempotency-Key");
+    const keyDriverB = h.postCalls()[2]!.headers.get("Idempotency-Key");
+    expect(keyDriverB).toMatch(/^driver-leave-create-/);
+    expect(keyDriverB).not.toBe(keyDriverA2);
+    expect(keyDriverB).not.toBe(keyDriverA1);
+
+    // Late rejection from obsolete Driver A attempt while Driver B attempt is still pending
+    rejectDriverA2(new Error("Stale driver A failure"));
+    await pendingSubmitA2;
+
+    form = node(h.render(), "DriverLeaveForm");
+    expect(form.props.isSubmitting).toBe(true);
+    expect(form.props.serverError).toBeNull();
+
+    // Resolve Driver B's active attempt
+    resolveDriverB(
+      new Response(
+        JSON.stringify({
+          data: {
+            ...sample,
+            leaveId: "lv_active_driver_B",
+            driverId: "controlled_driver_B",
+            ...baseCommand,
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await pendingSubmitB;
+
+    const detailB = node(h.render(), "DriverLeaveDetail");
+    const displayedLeave = detailB.props.leave as Leave;
+    expect(displayedLeave.leaveId).toBe("lv_active_driver_B");
+    expect(displayedLeave.driverId).toBe("controlled_driver_B");
+    expect(detailB.props.isWithdrawing).toBe(false);
+
+    (detailB.props.onBack as () => void)();
+    list = node(h.render(), "DriverLeaveList");
+    expect((list.props.leaves as Leave[]).map((item) => item.leaveId)).toEqual([
+      "lv_active_driver_B",
+    ]);
+
+    // Case 3: Start submit, cancel back to list while pending, then resolve canceled attempt -> must not navigate to detail or prepend canceled leave
+    (list.props.onCreatePress as () => void)();
+    form = node(h.render(), "DriverLeaveForm");
+    let resolveCanceled!: (res: Response) => void;
+    h.postQueue.push(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveCanceled = resolve;
+        }),
+    );
+    const pendingCanceled = (
+      form.props.onSubmit as (cmd: CreateDriverLeaveCommand) => Promise<void>
+    )(baseCommand);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    (form.props.onCancel as () => void)();
+    list = node(h.render(), "DriverLeaveList");
+
+    resolveCanceled(
+      new Response(
+        JSON.stringify({
+          data: {
+            ...sample,
+            leaveId: "lv_canceled_attempt",
+            driverId: "controlled_driver_B",
+            ...baseCommand,
+          },
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await pendingCanceled;
+
+    const nodesAfterCanceledResolve = h.render();
+    expect(
+      nodesAfterCanceledResolve.some(
+        (item) => item.type === "DriverLeaveDetail",
+      ),
+    ).toBe(false);
+    list = node(nodesAfterCanceledResolve, "DriverLeaveList");
+    expect((list.props.leaves as Leave[]).map((item) => item.leaveId)).toEqual([
+      "lv_active_driver_B",
+    ]);
+  });
 });
