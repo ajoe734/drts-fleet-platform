@@ -107,3 +107,35 @@
 - [x] **Remote Acceptance Workflow**:
   - 建立 `.github/workflows/booking-search-acceptance.yml`，具備 PostGIS 容器、db:migrate、零略過檢查與 run-status 記錄。
   - 經由 `tools/ci/test_booking_search_acceptance_workflow.py` 嚴格測試驗證。
+
+---
+
+## 5. BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020 — C013 代表性大量資料 PostgreSQL 分頁與跨租戶／第二實例驗收補強
+
+- **Continuation Task ID**: `BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020`
+- **Parent Task ID**: `SR-BOOKING-VERIFY`（維持原 `done` 狀態與既有 keys 不變）
+- **Source Requirement ID**: `C013`（補查詢條件與大量資料分頁；未等同建立到結算完成）
+- **Owner**: `Gemini`
+- **Reviewer**: `Gemini2`
+- **Branch**: `gemini/booking-query-large-pg-acceptance-20261020`
+- **Base Commit**: `28ba56f7abb0292c4560d87c2c76bde5676984f7` (`origin/dev`)
+- **Write Scopes**:
+  - `tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts`
+  - `docs/04-uat/system-remediation-20260906/SR-BOOKING-VERIFY.md`
+
+### 5.1 設計錨點（Design Anchor）
+
+1. **問題背景與覆蓋缺口**：
+   - 既有 `SR-BOOKING-VERIFY` 已透過真實 PostgreSQL 驗證 3 筆自有租戶訂單＋1 筆他租戶訂單之篩選、排序、`100%` 萬用字元轉義、分頁（`pageSize=2`, `page=1/2/99`）與第二實例 SQL 異動觀察；而 `booking-query.test.ts` 中之 125 筆分頁測試為 API client `fetch` 替身。
+   - 為完整覆蓋 `C013` 原驗收「代表性大量資料分頁」要求，於既有 `tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts` 之 `Real PostgreSQL Acceptance Matrix` 新增代表性大量資料案例，完全沿用既有正式 `OwnedMobilityController` / `OwnedMobilityService` / `OwnedMobilityRepository` / `DatabaseService` 與 `ops.phase1_owned_orders` 遷移 schema，不新增任何產品路徑、helper、workflow 或替代資料表。
+2. **代表性語料與獨立已知 Cohort 設計（1,003 筆自有 ＋ 251 筆外租戶）**：
+   - **自有租戶（`tenant-integ-large-alpha`）**：固定建立 `1,003` 筆訂單（`integ-lrg-own-0001` .. `integ-lrg-own-1003`，對應 `bk-lrg-own-0001` .. `bk-lrg-own-1003`）。
+   - **外租戶（`tenant-integ-large-beta`）**：固定建立 `251` 筆訂單（`integ-lrg-foreign-0001` .. `integ-lrg-foreign-0251`，對應 `bk-lrg-foreign-0001` .. `bk-lrg-foreign-0251`），並故意配置重疊之時間區間、狀態與搜尋關鍵字作為跨租戶隔離誘餌。
+   - **穩定排序與同時間戳平手（Tie-Breaking）設計**：
+     - 每 3 筆連續訂單共用同一 `reservationWindowStart` 與 `createdAt` 時間戳（`slot = Math.floor(i / 3)`，由 `2026-09-20T00:00:00.000Z` 依 slot 每小時遞減），寫入資料庫時於每個 3 筆同時間戳群組內故意打亂插入順序（如 `3, 1, 2`），驗證正式 SQL `ORDER BY ... DESC NULLS LAST, booking_id ASC` 能於頁內與跨頁邊界（例如 `pageSize=100` 時第 100 筆與第 101、102 筆同屬 `slot=33`）維持嚴格 `bk-lrg-own-0001` .. `bk-lrg-own-1003` 排序。
+   - **已知篩選 Cohort**：
+     - 狀態 Cohort：`0001..0200`（200 筆）為 `completed`；`0201..0350`（150 筆）為 `cancelled`；`0351..1003`（653 筆）為 `dispatched`（對應 bookingStatus `active`）。
+     - 搜尋與萬用字元轉義 Cohort：`0001..0065`（65 筆）含字面 `CohortVIP_100%`；`0001..0012`（12 筆）具 `passengerId = "pax-lrg-key-cohort"`。
+     - 日期開閉區間 Cohort：`[2026-09-18T15:00:00.000Z, 2026-09-20T00:00:00.000Z)` 精準涵蓋 `slot = 1..33` 共 `99` 筆（`bk-lrg-own-0004` .. `bk-lrg-own-0102`），排除邊界 `slot = 0`（3 筆）與 `slot >= 34`。
+   - **第二實例重水合（Rehydration）與持久化異動驗證**：
+     - 實例化獨立之第二組 `DatabaseService` / `OwnedMobilityRepository` / `OwnedMobilityService` / `OwnedMobilityController`，將原本位於最末頁（第 11 頁第 3 筆、`status = "dispatched"`）之 `integ-lrg-own-1003` 直接以 SQL 更新為 `status = "completed"` 且 `reservationWindowStart = "2026-09-21T00:00:00.000Z"`，驗證第二實例立即觀察到其躍升至第 1 頁第 1 筆、`completed` 總筆數由 `200` 增至 `201`（總頁數由 `2` 增至 `3`）、`active` 總筆數由 `653` 減至 `652`。
