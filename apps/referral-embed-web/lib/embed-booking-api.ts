@@ -170,6 +170,11 @@ export function getReferralActiveTripServer() {
 export function getReferralTripHistoryServer() {
   return request<{ items: ReferralPassengerHistoryItem[] }>("history");
 }
+export function getReferralTripReceiptPdfServer(orderId: string) {
+  return request<import("@drts/contracts").ReferralPassengerReceiptPdfDocument>(
+    `orders/${encodeURIComponent(orderId)}/receipt/pdf`,
+  );
+}
 export function getReferralTripReceiptServer(orderId: string) {
   return request<ReferralPassengerReceipt>(
     `orders/${encodeURIComponent(orderId)}/receipt`,
