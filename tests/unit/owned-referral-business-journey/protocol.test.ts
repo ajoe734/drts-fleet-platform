@@ -303,6 +303,43 @@ describe("owned hosted journey transport", () => {
     ).toBe(409);
   });
 
+  it.each([SHA, "b".repeat(40), undefined])(
+    "trusts the cancellation denial for recovery only from its exact served runtime (%s)",
+    async (served) => {
+      const { tx, fetcher } = setup();
+      fetcher.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code: "ORDER_NOT_CANCELABLE", message: "private detail" },
+          }),
+          {
+            status: 409,
+            headers: served ? { "x-drts-candidate-sha": served } : {},
+          },
+        ),
+      );
+      const failure = await tx
+        .call("api", "/api/passenger/orders/own/cancel", {
+          method: "POST",
+          body: { reason: "synthetic own cleanup" },
+        })
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(JourneyFailure);
+      if (served === SHA)
+        expect(failure).toMatchObject({
+          status: 409,
+          code: "ORDER_NOT_CANCELABLE",
+        });
+      else
+        expect(failure).toMatchObject({
+          stage: "api:runtime SHA mismatch",
+          code: undefined,
+        });
+      expect(String(failure)).not.toContain("private detail");
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
   it("rejects redirects and oversized responses without retrying", async () => {
     const { tx, fetcher } = setup();
     fetcher.mockResolvedValueOnce(
