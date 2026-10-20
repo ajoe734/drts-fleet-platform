@@ -34,6 +34,11 @@ on:
         required: false
         default: ""
         type: string
+      readonly_fleet_failure:
+        description: "Read only the two fixed original Fleet failure requests; never reruns them"
+        required: false
+        default: false
+        type: boolean
       owned_referral_business:
         description: "Opt in to one owned synthetic business ride on the existing shared Referral Demo; never deploys"
         required: false
@@ -531,6 +536,52 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  readonly-fleet-document-failure-readback:
+    if: github.event_name == 'workflow_dispatch' && inputs.readonly_fleet_failure == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable diagnostic definition and dev target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual diagnostic checkout
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only request diagnostics
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read only the fixed failure window without invoking the product
+        run: >-
+          python3 operations/verification/read-dev-fleet-document-failure-log.py
+          --output .artifacts/dev-fleet-document-failure-readback/snapshot.json
+      - name: Preserve only the safe diagnostic projection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-fleet-document-failure-readback-${{ github.run_id }}
+          path: .artifacts/dev-fleet-document-failure-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
+
   # Owner checkpoints are intentionally cheap. A review candidate is the first
   # immutable SHA that may start the full integration gate.
   candidate:
@@ -591,6 +642,8 @@ jobs:
           python3 -m unittest tools/ci/test_ops_proof_acceptance_workflow.py
           python3 -m unittest tools/ci/test_tenant_uat_acceptance_workflow.py
           python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v
+      - name: Verify fixed Fleet read-only diagnostic contracts
+        run: python3 -m unittest tools/ci/test_read_dev_fleet_document_failure_log.py
       - name: Verify live mail Python unit tests
         run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v
       - name: Verify live invoice mail Python unit tests
