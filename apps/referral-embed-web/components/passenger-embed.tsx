@@ -10,6 +10,12 @@ import {
   type ReferralFeeStatus,
 } from "@drts/contracts";
 import { ReferralComplaintPanel } from "./referral-complaint-panel";
+import { useReferralLiveTrip } from "./use-referral-live-trip";
+import {
+  ReferralLiveTrackingPanel,
+  referralLiveArrival,
+  referralLiveMinutes,
+} from "./referral-live-tracking";
 
 import Link from "next/link";
 import { ExternalPaymentSim } from "./external-payment-sim";
@@ -31,6 +37,7 @@ import type {
   SubmitReferralPassengerRatingCommand,
 } from "@drts/contracts";
 import type { EmbedContext } from "../lib/embed-context";
+import { useTranslation } from "../lib/i18n";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
   EMBED_TRIP_FALLBACK_SCREENS,
@@ -42,7 +49,6 @@ import {
   type EmbedTripFallbackScreen,
 } from "../lib/embed-fixtures";
 import { buildEmbedTheme, getEntryHost } from "../lib/embed-presentation";
-import { useTranslation } from "../lib/i18n";
 
 export type PassengerEmbedLiveData = {
   activeTrip: ReferralPassengerActiveTripResult | null;
@@ -2376,18 +2382,20 @@ function TripScreen({
   context: EmbedContext;
   liveData: PassengerEmbedLiveData;
 }) {
+  const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const requestedOrderId = liveData?.selectedOrderId;
-  const activeTrip = liveData?.activeTrip?.trip;
+  const live = useReferralLiveTrip(
+    liveData?.activeTrip?.trip,
+    context.session?.recoveryScope ?? context.entry.entrySlug,
+  );
+  const activeTrip = live.trip;
   const isRequestedTripActive =
     !requestedOrderId || activeTrip?.orderId === requestedOrderId;
   const cancellation = activeTrip?.cancellationWindow;
-  const asOf =
-    typeof cancellation?.asOf === "string"
-      ? Date.parse(cancellation.asOf)
-      : Number.NaN;
+  const asOf = live.cancellationServerNow;
   const deadline =
     typeof cancellation?.cancelableUntil === "string"
       ? Date.parse(cancellation.cancelableUntil)
@@ -2442,7 +2450,7 @@ function TripScreen({
         })
       : null;
 
-  if (requestedOrderId && !isRequestedTripActive) {
+  if (live.ended || (requestedOrderId && !isRequestedTripActive)) {
     return (
       <AppShell context={context} badgeTone="neutral">
         <div style={{ padding: 32, textAlign: "center", color: theme.ink }}>
@@ -2469,12 +2477,12 @@ function TripScreen({
         state: normalizeTripState(activeTrip.statusCode || activeTrip.status),
         from: activeTrip.pickupAddress,
         to: activeTrip.dropoffAddress,
-        win: formatShortDateTime(activeTrip.createdAt),
+        win: referralLiveArrival(activeTrip, t("referralLive.pending")),
         vehicle: activeTrip.vehicleType,
         driver: activeTrip.driverName || "媒合中",
         plate: activeTrip.plateNumber || "待更新",
         rating: 0,
-        etaMin: activeTrip.etaMin,
+        etaMin: referralLiveMinutes(activeTrip),
         cancellationWindow: activeTrip.cancellationWindow,
         driverPhoneMasked: activeTrip.driverPhoneMasked,
         estimatedFare: activeTrip.estimatedFare,
@@ -2674,7 +2682,7 @@ function TripScreen({
           <div>
             查詢時間：
             <time dateTime={cancellation!.asOf}>
-              {new Date(asOf).toLocaleString("zh-TW", {
+              {new Date(cancellation!.asOf).toLocaleString("zh-TW", {
                 timeZone: "Asia/Taipei",
                 hour12: false,
               })}
@@ -2683,6 +2691,12 @@ function TripScreen({
           </div>
         ) : null}
       </div>
+
+      <ReferralLiveTrackingPanel
+        trip={activeTrip!}
+        error={live.error}
+        refresh={live.refresh}
+      />
 
       {error ? (
         <Banner theme={theme} tone="danger" icon="alert">
@@ -2742,7 +2756,7 @@ function TripScreen({
         >
           <DetailRow
             theme={theme}
-            label="預計上車"
+            label={trip.state === "inprogress" ? "預計抵達" : "預計上車"}
             value={trip.win}
             mono
             last
