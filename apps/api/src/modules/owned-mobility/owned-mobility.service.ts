@@ -135,6 +135,7 @@ import type {
   ReferralBookingIntent,
   ReferralPassengerRatingResult,
   ReferralPassengerActiveTripResult,
+  ReferralPassengerCancellationWindow,
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
@@ -16157,6 +16158,54 @@ export class OwnedMobilityService
     };
   }
 
+  private referralCancellationWindow(
+    order: OwnedOrderRecord,
+  ): ReferralPassengerCancellationWindow {
+    // The command remains the authority. Do not duplicate its status allowlist
+    // or turn unrelated errors into a fabricated cancellation decision.
+    let canCancel = true;
+    try {
+      this.assertOrderCancelable(order);
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.getStatus() === HttpStatus.CONFLICT &&
+        error.code === "ORDER_NOT_CANCELABLE"
+      ) {
+        canCancel = false;
+      } else {
+        throw error;
+      }
+    }
+    let deadline: number | null = null;
+    if (order.dispatchSemantics === "reservation") {
+      const cutoff = order.cancelableUntil
+        ? Date.parse(order.cancelableUntil)
+        : Number.NaN;
+      // Missing/invalid cutoffs do not close the original reservation command.
+      // A finite grace date alone cannot invent an expiry for that branch.
+      if (Number.isFinite(cutoff)) {
+        deadline = cutoff;
+        const created = Date.parse(order.createdAt);
+        const grace = created + REFERRAL_PASSENGER_CANCEL_WINDOW_MS;
+        if (
+          order.partnerEntrySlug &&
+          order.status === "created" &&
+          Number.isFinite(created) &&
+          Number.isFinite(new Date(grace).getTime())
+        ) {
+          deadline = Math.max(deadline, grace);
+        }
+      }
+    }
+    return {
+      canCancel,
+      cancelableUntil:
+        deadline === null ? null : new Date(deadline).toISOString(),
+      asOf: new Date().toISOString(),
+    };
+  }
+
   async getReferralPassengerActiveTrip(
     identity?: BootstrapRequestIdentity | null,
   ): Promise<ReferralPassengerActiveTripResult> {
@@ -16227,6 +16276,7 @@ export class OwnedMobilityService
       context?.dispatchAssignments ?? [],
     );
     const isRated = Boolean(this.getReferralLifecycle(activeOrder)?.rating);
+    const cancellationWindow = this.referralCancellationWindow(activeOrder);
 
     return {
       active: true,
@@ -16236,7 +16286,18 @@ export class OwnedMobilityService
         status: activeOrder.status,
         statusCode: activeOrder.status,
         etaMin: activeOrder.etaSnapshot?.etaMinutes ?? null,
-        cancelWindowMin: 2,
+        cancelWindowMin:
+          cancellationWindow.canCancel && cancellationWindow.cancelableUntil
+            ? Math.max(
+                0,
+                Math.ceil(
+                  (Date.parse(cancellationWindow.cancelableUntil) -
+                    Date.parse(cancellationWindow.asOf)) /
+                    60_000,
+                ),
+              )
+            : 0,
+        cancellationWindow,
         pickupAddress: activeOrder.pickup.address,
         dropoffAddress: activeOrder.dropoff.address,
         driverName: details.driverName,
