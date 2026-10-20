@@ -10,9 +10,9 @@ import type { PartnerIngressHandoffSession } from "@drts/contracts";
 import type {
   CreateReferralEmbedHandoffArtifactCommand,
   ReferralEmbedHandoffArtifact,
-  ReferralEmbedSession,
 } from "@drts/contracts";
 import { getServerApiBaseUrl } from "./embed-runtime";
+import type { ServerReferralEmbedSession } from "./embed-partner-session";
 
 const API_URL = getServerApiBaseUrl();
 
@@ -85,7 +85,7 @@ async function mintMetadataIdentityToken(
   }
 }
 
-async function getGoogleWorkloadIdentityHeader(): Promise<
+export async function getGoogleWorkloadIdentityHeader(): Promise<
   Record<string, string>
 > {
   // SEC-INTERNAL-KEY-EXCP-001-WIF-MIGRATION-20261002: hosted CI harnesses
@@ -104,7 +104,9 @@ async function getGoogleWorkloadIdentityHeader(): Promise<
   const targetUrl = new URL(API_URL);
   const audience =
     configuredAudience ||
-    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX) ? targetUrl.origin : null);
+    (targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX)
+      ? targetUrl.origin
+      : null);
   if (!audience) {
     return {};
   }
@@ -206,7 +208,7 @@ export async function issueReferralEmbedHandoffArtifact(
 export async function consumeReferralEmbedHandoffArtifact(
   command: ConsumeReferralEmbedHandoffArtifactCommand,
 ) {
-  return requestAuthority<ReferralEmbedSession>(
+  return requestAuthority<ServerReferralEmbedSession>(
     "/api/partner/ingress/referral-embed-handoff/consume",
     {
       method: "POST",
@@ -218,7 +220,7 @@ export async function consumeReferralEmbedHandoffArtifact(
 export async function recordReferralEmbedConsent(
   command: RecordReferralEmbedConsentCommand,
 ) {
-  return requestAuthority<ReferralEmbedSession>(
+  return requestAuthority<ServerReferralEmbedSession>(
     "/api/partner/ingress/referral-embed-handoff/consent",
     {
       method: "POST",

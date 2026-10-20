@@ -76,6 +76,9 @@ async function harness(
     writeDenied?: boolean;
     proofDenied?: boolean;
     repositoryFailure?: boolean;
+    listRepositoryFailure?: boolean;
+    failureTraceId?: string;
+    differentUiErrorClass?: boolean;
   } = {},
 ) {
   const repository = new IdentityRepository();
@@ -189,14 +192,21 @@ async function harness(
     identity?: BootstrapRequestIdentity;
   }[] = [];
   const revoke = vi.spyOn(repository, "revokeSession");
-  if (options.repositoryFailure)
-    revoke.mockRejectedValue(
-      new ApiRequestError(
-        503,
-        "TEST_STORAGE_UNAVAILABLE",
-        "Controlled storage failure",
-      ),
+  const list = vi.spyOn(repository, "listSessions");
+  if (options.repositoryFailure || options.listRepositoryFailure) {
+    const failure = new ApiRequestError(
+      503,
+      "TEST_STORAGE_UNAVAILABLE",
+      "Controlled storage failure",
     );
+    // Keep the real producer/error envelope. Only its normally random trace
+    // fixture is controlled, so unrelated UUID text deterministically has 403.
+    const body = failure.getResponse() as { error: { traceId: string } };
+    body.error.traceId =
+      options.failureTraceId ?? "11111111-1111-1111-1111-111111111111";
+    if (options.repositoryFailure) revoke.mockRejectedValue(failure);
+    if (options.listRepositoryFailure) list.mockRejectedValue(failure);
+  }
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(
@@ -288,7 +298,14 @@ async function harness(
     react: React,
     "react/jsx-runtime": jsxRuntime,
     "@drts/ui-web": canvas,
-    "@drts/api-client": { ApiClient, ApiClientError },
+    "@drts/api-client": {
+      ApiClient,
+      // A distinct constructor models another loaded SDK module; the thrown
+      // production SDK error still has its actual authoritative statusCode.
+      ApiClientError: options.differentUiErrorClass
+        ? class OtherModuleApiClientError extends ApiClientError {}
+        : ApiClientError,
+    },
     "@/lib/admin-client": {
       usePlatformAdminClient: () => rawClient,
       formatDateTime: (v: string) => v,
@@ -308,7 +325,15 @@ async function harness(
       onClose: () => void;
     }>;
   }>(resolve(appRoot, "app/users/users-governance-components.tsx"));
-  return { repository, calls, upstream, revoke, rawClient, UserDetailDrawer };
+  return {
+    repository,
+    calls,
+    upstream,
+    revoke,
+    list,
+    rawClient,
+    UserDetailDrawer,
+  };
 }
 
 it("mounted drawer acquires proof, revokes its selected real repository session and reads the same session back", async () => {
@@ -406,5 +431,146 @@ it.each(["writeDenied", "proofDenied", "repositoryFailure"] as const)(
     expect(h.calls.filter((c) => c.method === "POST")).toHaveLength(
       failure === "proofDenied" ? 0 : 1,
     );
+  },
+);
+
+it.each(
+  (["read", "revoke"] as const).flatMap((operation) =>
+    [false, true].flatMap((differentUiErrorClass) =>
+      [
+        "11111111-1111-1111-1111-111111111111",
+        "11111403-1111-1111-1111-111111111111",
+      ].map((traceId) => ({ operation, differentUiErrorClass, traceId })),
+    ),
+  ),
+)(
+  "mounted $operation keeps the actual 503 for trace $traceId (other SDK constructor=$differentUiErrorClass)",
+  async ({ operation, differentUiErrorClass, traceId }) => {
+    const h = await harness({
+      repositoryFailure: operation === "revoke",
+      listRepositoryFailure: operation === "read",
+      failureTraceId: traceId,
+      differentUiErrorClass,
+    });
+    const view = render(
+      React.createElement(h.UserDetailDrawer, { user, onClose: () => {} }),
+    );
+    if (operation === "revoke") {
+      const row = await screen.findByText("test-own-session");
+      fireEvent.click(
+        within(row.closest("tr")!).getByRole("button", { name: "Revoke" }),
+      );
+    }
+    await screen.findAllByText(/API error 503:.*Controlled storage failure/);
+    expect(screen.queryByText(/Access Denied/)).toBeNull();
+    expect(
+      screen.getAllByText((text) => text.includes(traceId)).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/Loading|Revoking…/)).toBeNull();
+    const calls = h.calls.length;
+    view.rerender(
+      React.createElement(h.UserDetailDrawer, { user, onClose: () => {} }),
+    );
+    expect(h.calls).toHaveLength(calls);
+    expect(h.calls.filter((c) => c.method === "POST")).toHaveLength(
+      operation === "revoke" ? 1 : 0,
+    );
+    expect(h.list).toHaveBeenCalledTimes(1);
+    expect(await h.repository.getSession("test-own-session")).toMatchObject({
+      status: "active",
+    });
+    expect(
+      await h.repository.getSession("test-unselected-session"),
+    ).toMatchObject({ status: "active" });
+    h.list.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByText("test-own-session");
+    expect(h.calls.filter((c) => c.method === "POST")).toHaveLength(
+      operation === "revoke" ? 1 : 0,
+    );
+  },
+);
+
+it.each(
+  (["read", "revoke"] as const).flatMap((operation) => [
+    {
+      operation,
+      label: "typed 503 overrides denial-like message and code",
+      error: Object.assign(new Error("HTTP 403 Forbidden: AUTH_SCOPE_DENIED"), {
+        statusCode: 503,
+        code: "AUTH_SCOPE_DENIED",
+      }),
+      denied: false,
+    },
+    {
+      operation,
+      label: "typed 403 from another module",
+      error: Object.assign(new Error("Controlled permission denial"), {
+        statusCode: 403,
+      }),
+      denied: true,
+    },
+    {
+      operation,
+      label: "explicit code without typed status",
+      error: Object.assign(new Error("Controlled permission denial"), {
+        code: "AUTH_REALM_DENIED",
+      }),
+      denied: true,
+    },
+    {
+      operation,
+      label: "legacy explicit HTTP status",
+      error: new Error("HTTP 403 Forbidden: insufficient session authority"),
+      denied: true,
+    },
+    {
+      operation,
+      label: "legacy explicit denial code",
+      error: new Error("AUTH_SCOPE_DENIED: insufficient session authority"),
+      denied: true,
+    },
+    {
+      operation,
+      label: "unrelated legacy trace text",
+      error: new Error(
+        "Connection failed; trace 11111403-1111-1111-1111-111111111111",
+      ),
+      denied: false,
+    },
+  ]),
+)(
+  "mounted $operation preserves $label compatibility",
+  async ({ operation, error, denied }) => {
+    const h = await harness();
+    // These compatibility-only inputs replace the SDK method's rejected value;
+    // production render/handlers and IAM wrapper still execute unchanged.
+    if (operation === "read")
+      vi.spyOn(h.rawClient, "get").mockRejectedValueOnce(error);
+    const view = render(
+      React.createElement(h.UserDetailDrawer, { user, onClose: () => {} }),
+    );
+    if (operation === "revoke") {
+      const row = await screen.findByText("test-own-session");
+      vi.spyOn(h.rawClient, "post").mockRejectedValueOnce(error);
+      fireEvent.click(
+        within(row.closest("tr")!).getByRole("button", { name: "Revoke" }),
+      );
+    }
+    if (denied) await screen.findAllByText(/Access Denied.*403/);
+    else {
+      await screen.findAllByText(error.message);
+      expect(screen.queryByText(/Access Denied/)).toBeNull();
+    }
+    const calls = h.calls.length;
+    view.rerender(
+      React.createElement(h.UserDetailDrawer, { user, onClose: () => {} }),
+    );
+    expect(h.calls).toHaveLength(calls);
+    expect(screen.queryByText(/Loading|Revoking…/)).toBeNull();
+    expect(h.revoke).not.toHaveBeenCalled();
+    expect(await h.repository.getSession("test-own-session")).toMatchObject({
+      status: "active",
+    });
   },
 );

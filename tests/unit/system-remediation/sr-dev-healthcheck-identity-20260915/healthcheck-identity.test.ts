@@ -132,24 +132,47 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     // enforce-no-public-access.sh, which checks the policy first; that
     // script's own present/absent/failure behavior is covered by
     // tests/unit/enforce-no-public-access.test.ts.
-    expect(workflowContent).not.toContain("remove-iam-policy-binding is idempotent");
+    expect(workflowContent).not.toContain(
+      "remove-iam-policy-binding is idempotent",
+    );
     for (const [service, output, flagOutput] of [
-      ["platform-admin-web", "platform_admin_service", "platform_admin_exposure_flag"],
+      [
+        "platform-admin-web",
+        "platform_admin_service",
+        "platform_admin_exposure_flag",
+      ],
       ["ops-console-web", "ops_console_service", "ops_console_exposure_flag"],
-      ["fleet-partner-portal-web", "fleet_partner_portal_service", "fleet_partner_portal_exposure_flag"],
-      ["channel-partner-portal-web", "channel_partner_portal_service", "channel_partner_portal_exposure_flag"],
+      [
+        "fleet-partner-portal-web",
+        "fleet_partner_portal_service",
+        "fleet_partner_portal_exposure_flag",
+      ],
+      [
+        "channel-partner-portal-web",
+        "channel_partner_portal_service",
+        "channel_partner_portal_exposure_flag",
+      ],
     ] as const) {
-      expect(workflowContent).toContain(`Enforce no public access — ${service}`);
+      expect(workflowContent).toContain(
+        `Enforce no public access — ${service}`,
+      );
       expect(workflowContent).toContain(
         `if: \${{ needs.prepare.outputs.${flagOutput} == '--no-allow-unauthenticated' }}`,
       );
-      const stepIndex = workflowContent.indexOf(`Enforce no public access — ${service}`);
-      const nextStepIndex = workflowContent.indexOf("\n      - name:", stepIndex + 1);
+      const stepIndex = workflowContent.indexOf(
+        `Enforce no public access — ${service}`,
+      );
+      const nextStepIndex = workflowContent.indexOf(
+        "\n      - name:",
+        stepIndex + 1,
+      );
       const stepBody = workflowContent.slice(
         stepIndex,
         nextStepIndex === -1 ? undefined : nextStepIndex,
       );
-      expect(stepBody).toContain("./operations/deployment/enforce-no-public-access.sh");
+      expect(stepBody).toContain(
+        "./operations/deployment/enforce-no-public-access.sh",
+      );
       expect(stepBody).toContain(`needs.prepare.outputs.${output}`);
     }
   });
@@ -331,21 +354,47 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
       'headers["Authorization"] = `Bearer ${setupIdToken}`;',
     );
 
-    // Browser context extraHTTPHeaders for journeys and routes in the spec delegating to the helper
-    expect(specContent).toContain("getIdentityToken");
-    expect(specContent).toMatch(/import\s+\{[\s\S]*getIdentityToken[\s\S]*\}\s+from\s+["']\.\/operational-document-upload["']/);
-    expect(specContent).toMatch(/import\s+\{[\s\S]*runSetup[\s\S]*\}\s+from\s+["']\.\/operational-document-upload["']/);
+    // Both modes use the actual imported browser helper; Fleet proof is scoped
+    // per origin while other private surfaces retain their existing invocation headers.
+    expect(specContent).toMatch(
+      /import\s+\{[\s\S]*installOperationalBrowserHeaders[\s\S]*\}\s+from\s+["']\.\/operational-document-upload["']/,
+    );
+    expect(specContent).toMatch(
+      /import\s+\{[\s\S]*runSetup[\s\S]*\}\s+from\s+["']\.\/operational-document-upload["']/,
+    );
 
     // Assert BOTH spec delegations to the helper (one in regular execution, one in route checking)
     const runSetupCalls = specContent.match(/await\s+runSetup\(/g);
     expect(runSetupCalls?.length).toBeGreaterThanOrEqual(2);
 
-    expect(specContent).toContain("await page.context().setExtraHTTPHeaders({");
-    expect(specContent).toContain("Authorization: `Bearer ${idToken}`");
+    expect(
+      specContent.match(
+        /await\s+installOperationalBrowserHeaders\(page, journey.baseUrlEnv\)/g,
+      ),
+    ).toHaveLength(2);
+    expect(helperContent).toMatch(
+      /await\s+page\s*\.context\(\)\s*\.setExtraHTTPHeaders\(\{/,
+    );
+    expect(helperContent).toContain("Authorization: `Bearer ${idToken}`");
+    expect(helperContent).toContain("DRTS_OPERATIONAL_FLEET_SESSION_TOKEN");
+    expect(helperContent).toContain(
+      'headers["x-drts-authorization"] = applicationProof',
+    );
+    expect(helperContent).toContain("maxRedirects: 0");
+    expect(specContent).toMatch(
+      /await\s+prepareOperationalFleetSession\(\s*manifest\.fleetApplicationSetup,?\s*\)/,
+    );
+    expect(specContent).toContain("await fleetSession?.cleanup()");
+    expect(specContent).toMatch(
+      /fetchOperationalSurface\(\s*page\.context\(\)\.request,\s*journey\.baseUrlEnv,\s*downloadUrl,/,
+    );
 
-    // Readback requests carry Authorization header for private services in the spec
-    expect(specContent).toContain(
-      'readbackHeaders["Authorization"] = `Bearer ${idToken}`;',
+    // Both explicit consumers use the same origin-bound invocation/application proof.
+    expect(specContent).toMatch(
+      /const\s+readbackHeaders\s*=\s*operationalRequestHeaders\(\s*journey\.baseUrlEnv,\s*readbackUrl,?\s*\)/,
+    );
+    expect(specContent).toMatch(
+      /const\s+downloadHeaders\s*=\s*operationalRequestHeaders\(\s*journey\.baseUrlEnv,\s*downloadUrl,?\s*\)/,
     );
 
     // Download verification checks download artifact and candidate revision
@@ -355,20 +404,23 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
   });
 
   it("allows matching_timeout on created orders with DB repository enabled so operational journey setup succeeds", async () => {
-    const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } = await import(
-      "../sr-qa-dispatch-001/test-support"
-    );
+    const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } =
+      await import("../sr-qa-dispatch-001/test-support");
     const { vi } = await import("vitest");
 
     const mockRepo = {
       isEnabled: vi.fn(() => true),
-      withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
-      loadOrderCancellationForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
-        order: testService.requireOrder(orderId),
-        assignment: null,
-        task: null,
-        dispatchJobs: [],
-      })),
+      withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
+        cb({}),
+      ),
+      loadOrderCancellationForUpdate: vi.fn(
+        async (_tx: unknown, orderId: string) => ({
+          order: testService.requireOrder(orderId),
+          assignment: null,
+          task: null,
+          dispatchJobs: [],
+        }),
+      ),
       persistChanges: vi.fn(async () => undefined),
       persistOrderWorkflow: vi.fn(async () => undefined),
       reportPersistenceFailure: vi.fn(),
@@ -408,20 +460,23 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
   ] as const)(
     "fences stale matching_timeout on %s orders as superseded (DB repo enabled)",
     async (nonTimeoutableStatus) => {
-      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } = await import(
-        "../sr-qa-dispatch-001/test-support"
-      );
+      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } =
+        await import("../sr-qa-dispatch-001/test-support");
       const { vi } = await import("vitest");
 
       const mockRepo = {
         isEnabled: vi.fn(() => true),
-        withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
-        loadOrderCancellationForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
-          order: testService.requireOrder(orderId),
-          assignment: null,
-          task: null,
-          dispatchJobs: [],
-        })),
+        withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({}),
+        ),
+        loadOrderCancellationForUpdate: vi.fn(
+          async (_tx: unknown, orderId: string) => ({
+            order: testService.requireOrder(orderId),
+            assignment: null,
+            task: null,
+            dispatchJobs: [],
+          }),
+        ),
         persistChanges: vi.fn(async () => undefined),
         persistOrderWorkflow: vi.fn(async () => undefined),
         reportPersistenceFailure: vi.fn(),
@@ -432,7 +487,9 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
 
       const order = createTestPassengerOrder(testService);
       testService.requireOrder(order.orderId).status = nonTimeoutableStatus;
-      const initialAttemptCount = testService.requireOrder(order.orderId).dispatchAttemptCount;
+      const initialAttemptCount = testService.requireOrder(
+        order.orderId,
+      ).dispatchAttemptCount;
 
       const result = await testService.handleDispatchTimeout(
         order.orderId,
@@ -441,8 +498,12 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
 
       expect(result.status).toBe(nonTimeoutableStatus);
       expect(result.escalationAction).toBe("superseded");
-      expect(testService.getOrder(order.orderId).status).toBe(nonTimeoutableStatus);
-      expect(testService.getOrder(order.orderId).dispatchAttemptCount).toBe(initialAttemptCount);
+      expect(testService.getOrder(order.orderId).status).toBe(
+        nonTimeoutableStatus,
+      );
+      expect(testService.getOrder(order.orderId).dispatchAttemptCount).toBe(
+        initialAttemptCount,
+      );
     },
   );
 
@@ -462,14 +523,15 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
   ] as const)(
     "fences stale matching_timeout on %s orders as superseded (in-memory mode)",
     async (nonTimeoutableStatus) => {
-      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } = await import(
-        "../sr-qa-dispatch-001/test-support"
-      );
+      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } =
+        await import("../sr-qa-dispatch-001/test-support");
 
       const { service: testService } = buildOwnedMobilityServiceForTest();
       const order = createTestPassengerOrder(testService);
       testService.requireOrder(order.orderId).status = nonTimeoutableStatus;
-      const initialAttemptCount = testService.requireOrder(order.orderId).dispatchAttemptCount;
+      const initialAttemptCount = testService.requireOrder(
+        order.orderId,
+      ).dispatchAttemptCount;
 
       const result = await testService.handleDispatchTimeout(
         order.orderId,
@@ -478,8 +540,12 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
 
       expect(result.status).toBe(nonTimeoutableStatus);
       expect(result.escalationAction).toBe("superseded");
-      expect(testService.getOrder(order.orderId).status).toBe(nonTimeoutableStatus);
-      expect(testService.getOrder(order.orderId).dispatchAttemptCount).toBe(initialAttemptCount);
+      expect(testService.getOrder(order.orderId).status).toBe(
+        nonTimeoutableStatus,
+      );
+      expect(testService.getOrder(order.orderId).dispatchAttemptCount).toBe(
+        initialAttemptCount,
+      );
     },
   );
 
@@ -492,20 +558,23 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
   ] as const)(
     "allows matching_timeout on %s orders without assignment",
     async (timeoutableStatus) => {
-      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } = await import(
-        "../sr-qa-dispatch-001/test-support"
-      );
+      const { buildOwnedMobilityServiceForTest, createTestPassengerOrder } =
+        await import("../sr-qa-dispatch-001/test-support");
       const { vi } = await import("vitest");
 
       const mockRepo = {
         isEnabled: vi.fn(() => true),
-        withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({})),
-        loadOrderCancellationForUpdate: vi.fn(async (_tx: unknown, orderId: string) => ({
-          order: testService.requireOrder(orderId),
-          assignment: null,
-          task: null,
-          dispatchJobs: [],
-        })),
+        withTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
+          cb({}),
+        ),
+        loadOrderCancellationForUpdate: vi.fn(
+          async (_tx: unknown, orderId: string) => ({
+            order: testService.requireOrder(orderId),
+            assignment: null,
+            task: null,
+            dispatchJobs: [],
+          }),
+        ),
         persistChanges: vi.fn(async () => undefined),
         persistOrderWorkflow: vi.fn(async () => undefined),
         reportPersistenceFailure: vi.fn(),
@@ -524,8 +593,9 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
 
       expect(result.status).toBe("dispatch_timeout");
       expect(result.escalationAction).not.toBe("superseded");
-      expect(testService.getOrder(order.orderId).status).toBe("dispatch_timeout");
+      expect(testService.getOrder(order.orderId).status).toBe(
+        "dispatch_timeout",
+      );
     },
   );
 });
-

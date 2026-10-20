@@ -8,10 +8,22 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
-import { VoiceCapabilityScopeSchema, type VoiceCapabilityScope } from "@drts/contracts";
+import {
+  VoiceCapabilityScopeSchema,
+  VoiceContactCorrectionSchema,
+  type VoiceCapabilityScope,
+} from "@drts/contracts";
 
-import { ApiRequestError, toApiSuccessEnvelope } from "../../common/api-envelope";
-import { OpenRoute, RequireRealms, RequireScopes, CurrentIdentity } from "../../common/auth";
+import {
+  ApiRequestError,
+  toApiSuccessEnvelope,
+} from "../../common/api-envelope";
+import {
+  OpenRoute,
+  RequireRealms,
+  RequireScopes,
+  CurrentIdentity,
+} from "../../common/auth";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import { IdempotencyService } from "../../common/idempotency";
 import {
@@ -19,19 +31,32 @@ import {
   assertVoiceCapabilityScope,
 } from "../../common/auth/voice-capability.service";
 import { VoiceCapabilityGuard } from "../../common/auth/voice-capability.guard";
-import { VoiceBookingMetricsService, type CohortEvaluationFilter } from "../../observability/voice-booking-metrics.service";
+import {
+  VoiceBookingMetricsService,
+  type CohortEvaluationFilter,
+} from "../../observability/voice-booking-metrics.service";
 import {
   VoiceUsageService,
   type ProviderInvoiceLineItem,
   type VoiceUsageServiceType,
 } from "./voice-usage.service";
 import { VoiceCommandRunnerService } from "./voice-command-runner.service";
-import { VoiceSessionService, type InputResolution } from "./voice-session.service";
+import {
+  VoiceSessionService,
+  type InputResolution,
+} from "./voice-session.service";
 import { VoiceBookingRepository } from "./voice-booking.repository";
 import { VoiceBookingAuthorizationService } from "./voice-booking-authorization.service";
 import { VoiceHandoffService } from "./voice-handoff.service";
 import { VoiceToolGatewayService } from "./voice-tool-gateway.service";
 import { VoiceHandoffOnlyToolPorts } from "./voice-handoff-tool-ports";
+import { VoiceBookingDraftService } from "./voice-booking-draft.service";
+import { VoiceConfirmationService } from "./voice-confirmation.service";
+import { VoiceContactService } from "./voice-contact.service";
+import { VoiceSessionRepository } from "./voice-session.repository";
+import { VoiceDomainToolPorts } from "./voice-domain-tool-ports";
+import { GeoService } from "../geo/geo.service";
+import { VoiceDispatchProjectionService } from "./voice-dispatch-projection.service";
 
 const DEFAULT_TOOL_TURN_TIMEOUT_MS = 8_000;
 const MAX_TOOL_TURN_TIMEOUT_MS = 30_000;
@@ -57,6 +82,17 @@ export class VoiceBookingController {
     private readonly voiceHandoffService?: VoiceHandoffService,
     @Optional()
     private readonly idempotencyService?: IdempotencyService,
+    @Optional()
+    private readonly geoService?: GeoService,
+    @Optional()
+    private readonly voiceDispatchProjectionService?: VoiceDispatchProjectionService,
+    @Optional() private readonly voiceContactService?: VoiceContactService,
+    @Optional()
+    private readonly voiceSessionRepository?: VoiceSessionRepository,
+    @Optional()
+    private readonly voiceBookingDraftService?: VoiceBookingDraftService,
+    @Optional()
+    private readonly voiceConfirmationService?: VoiceConfirmationService,
   ) {}
 
   /**
@@ -102,14 +138,19 @@ export class VoiceBookingController {
       windowEnd: windowEnd ?? new Date().toISOString(),
       observationWindowClosed: observationWindowClosed !== "false",
       language,
-      routeProfileVersion: routeProfileVersion ? Number(routeProfileVersion) : undefined,
+      routeProfileVersion: routeProfileVersion
+        ? Number(routeProfileVersion)
+        : undefined,
       provider,
       brandId,
       bookingRole,
       lineBindingId,
     };
 
-    const report = await this.voiceBookingMetricsService.deriveCohortFromDurableEvidence(filter);
+    const report =
+      await this.voiceBookingMetricsService.deriveCohortFromDurableEvidence(
+        filter,
+      );
 
     return toApiSuccessEnvelope(report, requestId);
   }
@@ -247,7 +288,9 @@ export class VoiceBookingController {
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const scopes = body.scopes.map((scope) => VoiceCapabilityScopeSchema.parse(scope));
+    const scopes = body.scopes.map((scope) =>
+      VoiceCapabilityScopeSchema.parse(scope),
+    );
     const voiceCapabilityService = this.requireVoiceApplicationDependency(
       this.voiceCapabilityService,
       "voiceCapabilityService",
@@ -309,7 +352,131 @@ export class VoiceBookingController {
       "voiceSessionService",
     );
     const session = await voiceSessionService.getSession(sessionId);
-    return toApiSuccessEnvelope({ session }, requestId);
+    if (this.voiceContactService && this.voiceSessionRepository) {
+      const callerPhone =
+        await this.voiceSessionRepository.findAssertedCallerPhone(sessionId);
+      if (callerPhone)
+        await this.voiceContactService.initializeContacts({
+          voiceSessionId: sessionId,
+          callerPhone,
+        });
+    }
+    const resourceScope = this.voiceBookingRepository
+      ? await this.voiceBookingRepository.findResourceScopeById(
+          session.resourceScopeId,
+        )
+      : undefined;
+    return toApiSuccessEnvelope(
+      {
+        session,
+        ...(resourceScope?.brandId
+          ? {
+              recordingContext: {
+                brandId: resourceScope.brandId,
+                callId: session.callId,
+              },
+            }
+          : {}),
+      },
+      requestId,
+    );
+  }
+
+  @Post("sessions/:sessionId/recording-events")
+  @RequireRealms("system")
+  @RequireScopes("voice:capability:issue")
+  async recordRecordingEvent(
+    @Param("sessionId") sessionId: string,
+    @Body() body: unknown,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const repository = this.requireVoiceApplicationDependency(
+      this.voiceBookingRepository,
+      "voiceBookingRepository",
+    );
+    return toApiSuccessEnvelope(
+      { event: await repository.appendRecordingContinuation(sessionId, body) },
+      requestId,
+    );
+  }
+  @Get("sessions/:sessionId/recording-events")
+  @RequireRealms("system")
+  @RequireScopes("voice:capability:issue")
+  async getRecordingEvents(
+    @Param("sessionId") sessionId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const repository = this.requireVoiceApplicationDependency(
+      this.voiceBookingRepository,
+      "voiceBookingRepository",
+    );
+    return toApiSuccessEnvelope(
+      { events: await repository.readRecordingContinuation(sessionId) },
+      requestId,
+    );
+  }
+
+  @Get("sessions/:sessionId/contacts")
+  @RequireRealms("ops", "platform")
+  async getContacts(
+    @Param("sessionId") sessionId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const contacts = this.requireVoiceApplicationDependency(
+      this.voiceContactService,
+      "voiceContactService",
+    );
+    return toApiSuccessEnvelope(
+      { contacts: await contacts.getEffectiveContactsDurable(sessionId) },
+      requestId,
+    );
+  }
+
+  @Post("sessions/:sessionId/contacts")
+  @RequireRealms("ops", "platform")
+  async writeContacts(
+    @Param("sessionId") sessionId: string,
+    @Body() body: unknown,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const parsed = VoiceContactCorrectionSchema.safeParse(body);
+    if (!parsed.success)
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Contact correction is invalid.",
+      );
+    const contacts = this.requireVoiceApplicationDependency(
+      this.voiceContactService,
+      "voiceContactService",
+    );
+    const sessions = this.requireVoiceApplicationDependency(
+      this.voiceSessionRepository,
+      "voiceSessionRepository",
+    );
+    const callerPhone = await sessions.findAssertedCallerPhone(sessionId);
+    if (!callerPhone)
+      throw new ApiRequestError(
+        409,
+        "VOICE_ASSERTED_CALLER_UNAVAILABLE",
+        "The original admitted caller is unavailable.",
+      );
+    await contacts.initializeContacts({
+      voiceSessionId: sessionId,
+      callerPhone,
+    });
+    const result = await contacts.updateContactRole({
+      voiceSessionId: sessionId,
+      ...parsed.data,
+    });
+    return toApiSuccessEnvelope(
+      {
+        revision: result.newRevision,
+        confirmationInvalidated: result.confirmationInvalidated,
+        contacts: await contacts.getEffectiveContactsDurable(sessionId),
+      },
+      requestId,
+    );
   }
 
   /**
@@ -443,9 +610,11 @@ export class VoiceBookingController {
 
   /**
    * Backs `VoiceCallTurnCoordinator.executeTools`'s (apps/voice-media-worker)
-   * only real tool outcome, `request_handoff`, through the actual
-   * `VoiceToolGatewayService.execute` repair anchor (Codex reopen round
-   * 5/6, R4) instead of leaving it an unconsumed interface. `headers` is
+   * real tool outcomes through the actual `VoiceToolGatewayService.execute`
+   * repair anchor (Codex reopen round 5/6, R4; generalized beyond
+   * `request_handoff` to `resolve_location`/`get_bound_booking_status` by
+   * AUDIT-VOICE-APPLICATION-REGRESSION-20261018's `VoiceDomainToolPorts`)
+   * instead of leaving it an unconsumed interface. `headers` is
    * forwarded as-is to the gateway, which re-authenticates the capability
    * itself (`this.guard.authenticate`) on every proposal, immediately
    * before and after calling the domain port -- this route performs no
@@ -475,10 +644,11 @@ export class VoiceBookingController {
       this.voiceBookingRepository,
       "voiceBookingRepository",
     );
-    const voiceBookingAuthorizationService = this.requireVoiceApplicationDependency(
-      this.voiceBookingAuthorizationService,
-      "voiceBookingAuthorizationService",
-    );
+    const voiceBookingAuthorizationService =
+      this.requireVoiceApplicationDependency(
+        this.voiceBookingAuthorizationService,
+        "voiceBookingAuthorizationService",
+      );
     const voiceHandoffService = this.requireVoiceApplicationDependency(
       this.voiceHandoffService,
       "voiceHandoffService",
@@ -500,9 +670,26 @@ export class VoiceBookingController {
       voiceCapabilityGuard,
       voiceBookingRepository,
       voiceBookingAuthorizationService,
-      new VoiceHandoffOnlyToolPorts(
-        voiceBookingRepository,
-        voiceHandoffService,
+      new VoiceDomainToolPorts(
+        new VoiceHandoffOnlyToolPorts(
+          voiceBookingRepository,
+          voiceHandoffService,
+        ),
+        this.geoService,
+        this.voiceDispatchProjectionService,
+        this.voiceSessionService &&
+          this.voiceContactService &&
+          this.voiceBookingDraftService &&
+          this.voiceConfirmationService
+          ? {
+              sessions: this.voiceSessionService,
+              contacts: this.voiceContactService,
+              repository: voiceBookingRepository,
+              drafts: this.voiceBookingDraftService,
+              confirmation: this.voiceConfirmationService,
+              credential: String(headers.authorization ?? ""),
+            }
+          : undefined,
       ),
       {
         headers,

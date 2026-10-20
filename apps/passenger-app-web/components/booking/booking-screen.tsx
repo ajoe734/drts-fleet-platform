@@ -3,7 +3,6 @@ import { passengerFetch } from "../../lib/runtime-fetch";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type {
-  CreatePassengerRideCommand,
   FareQuoteResponse,
   FareVersion,
   PassengerAccount,
@@ -25,7 +24,16 @@ import { BookingForm, type BookingDraft } from "./booking-form";
 import { FeeDisclosure } from "./disclosure";
 import { BookingConfirmationSheet } from "./confirmation-sheet";
 import { BOOK_T as T } from "../../lib/booking/translations";
-import { useReviewDemo } from "../review-demo/review-context";
+import {
+  useReviewDemo,
+  useReviewDemoPending,
+} from "../review-demo/review-context";
+import {
+  clearBookingRecovery,
+  readBookingRecovery,
+  saveBookingRecovery,
+  type PendingBooking,
+} from "./booking-draft-recovery";
 
 type ServiceableQuote = Extract<
   FareQuoteResponse,
@@ -60,6 +68,7 @@ export function BookingScreen({
 }: BookingScreenProps) {
   const router = useRouter();
   const review = useReviewDemo();
+  const reviewPending = useReviewDemoPending();
   const [client] = useState(() => supplied ?? createBookingClient());
   const [account, setAccount] = useState<PassengerAccount>();
   const [fare, setFare] = useState<FareVersion>();
@@ -76,12 +85,8 @@ export function BookingScreen({
   const submitted = useRef(false);
   const mounted = useRef(true);
   // Unknown create acknowledgement retries retain the identical request key AND body.
-  const pending = useRef<{
-    command: CreatePassengerRideCommand;
-    requestId: string;
-    paymentLabel: string;
-    outcomeUnknown: boolean;
-  } | null>(null);
+  const pending = useRef<PendingBooking | null>(null);
+  const recoveryAccount = useRef<string | undefined>(undefined);
   function report(reason: unknown, fallback: string) {
     if (reason instanceof PassengerApiError && reason.status === 401)
       router.push("/login");
@@ -109,6 +114,20 @@ export function BookingScreen({
       setAccount(me.account);
       setFare(fares.currentVersion);
       setSettings(configuration);
+      const restored =
+        recoveryAccount.current !== me.account.drtsPassengerId
+          ? readBookingRecovery(me.account.drtsPassengerId)
+          : null;
+      recoveryAccount.current = me.account.drtsPassengerId;
+      if (restored) {
+        pending.current = restored.pending;
+        setDraft(restored.draft);
+        setQuote(restored.quote);
+        setChecked(!!restored.pending);
+        setMode(restored.pending ? "unavailable" : "form");
+        if (restored.pending) setError(T.unknownCreate);
+        return;
+      }
       setDraft((current) => ({
         ...current,
         localTime: current.localTime || earliestBookingTime(configuration),
@@ -128,6 +147,19 @@ export function BookingScreen({
       mounted.current = false;
     };
   }, [client]);
+
+  useEffect(() => {
+    if (
+      account &&
+      account.drtsPassengerId === recoveryAccount.current &&
+      !submitted.current
+    )
+      saveBookingRecovery(account.drtsPassengerId, {
+        draft,
+        pending: pending.current,
+        quote,
+      });
+  }, [account, draft, quote]);
 
   useEffect(() => {
     if (mode !== "confirm" || !quote || pending.current) return;
@@ -157,6 +189,8 @@ export function BookingScreen({
       me.account.drtsPassengerId !== account?.drtsPassengerId
     ) {
       pending.current = null;
+      recoveryAccount.current = undefined;
+      clearBookingRecovery();
       setQuote(undefined);
       setChecked(false);
       setDraft(emptyDraft);
@@ -326,6 +360,13 @@ export function BookingScreen({
           },
         };
       }
+      // Persist before the network send, including the original quote and key.
+      // Re-mounting must recover this command rather than create a second one.
+      saveBookingRecovery(account!.drtsPassengerId, {
+        draft,
+        pending: pending.current,
+        quote,
+      });
       const result = await client.createRide(
         pending.current.command,
         pending.current.requestId,
@@ -334,6 +375,7 @@ export function BookingScreen({
         throw new Error("unknown_create_acknowledgement");
       submitted.current = true;
       pending.current = null;
+      clearBookingRecovery();
       router.push(
         review
           ? `/rides/${encodeURIComponent(result.ride.order.orderId)}`
@@ -347,7 +389,13 @@ export function BookingScreen({
             ? reason.message
             : "unavailable";
       if (reason instanceof PassengerApiError && reason.status === 401) {
+        // Expiry only means this request is unauthenticated. An earlier
+        // unknown acknowledgement may already have committed. Keep its
+        // account-bound record until real login confirms the same/different
+        // account; never replay it under an unverified identity.
+        if (!pending.current?.outcomeUnknown) clearBookingRecovery();
         pending.current = null;
+        recoveryAccount.current = undefined;
         setQuote(undefined);
         setChecked(false);
         setDraft(emptyDraft);
@@ -395,6 +443,16 @@ export function BookingScreen({
       }
     } finally {
       lock.current = false;
+      if (
+        !submitted.current &&
+        account &&
+        account.drtsPassengerId === recoveryAccount.current
+      )
+        saveBookingRecovery(account.drtsPassengerId, {
+          draft,
+          pending: pending.current,
+          quote,
+        });
       setBusy(false);
     }
   }
@@ -411,7 +469,9 @@ export function BookingScreen({
       {error && (mode !== "confirm" || !quote) && (
         <AuthAlert>{error}</AuthAlert>
       )}
-      {!account || !fare || !settings ? (
+      {reviewPending ? (
+        <p>{T.loadingSettings}</p>
+      ) : !account || !fare || !settings ? (
         <>
           <p>{busy ? T.loadingSettings : T.missingSettings}</p>
           <P5Btn disabled={busy} onClick={() => void load()}>

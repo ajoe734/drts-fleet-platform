@@ -44,6 +44,7 @@ const { AppRouterContext } = appRequire(
 ) as typeof import("next/dist/shared/lib/app-router-context.shared-runtime");
 const push = vi.fn();
 const router = {
+  bfcacheId: "synthetic-booking-test-route",
   push,
   replace: vi.fn(),
   back: vi.fn(),
@@ -590,7 +591,9 @@ describe("real passenger B01-B09/E19 page → portable client → actual BFF (HT
         .fn()
         .mockResolvedValue({ expiresAt: f.quoteExpires });
       const producer = new PassengerBookingService(
-        {} as PassengerBookingRepository,
+        {
+          findCompletedBooking: vi.fn().mockResolvedValue(null),
+        } as unknown as PassengerBookingRepository,
         {
           createTrustedPassengerRide: trustedCreate,
         } as unknown as MultiTaxiService,
@@ -886,5 +889,144 @@ describe("real public fare component", () => {
     f.errors.clear();
     click("重試公開費率");
     await screen.findByText("起程 1.25 公里：NT$ 85");
+  });
+});
+
+describe("USER copy through the original mounted booking and public fare flows", () => {
+  it("USER copy: first-use E19a displays exactly the eight supplied clauses before durable acknowledgement", async () => {
+    delete f.account.feeAcknowledgementVersion;
+    render(<BookingScreen />);
+    await screen.findByRole("button", { name: "我已閱讀並同意" });
+    const card = screen.getByText("費用與優惠說明").closest("section")!;
+    expect(
+      within(card)
+        .getAllByText(/.+/, { selector: "strong" })
+        .map((label) => label.parentElement?.textContent),
+    ).toEqual([
+      "車資依核定運價含延滯計時",
+      "預約費不另收",
+      "取消費不收",
+      "等待費不另收",
+      "遺失物補償金不收",
+      "汙損清潔費實支實付",
+      "國道通行費經同意後實收",
+      "優惠活動目前無",
+    ]);
+    expect(screen.queryByLabelText("預約時間")).toBeNull();
+    expect(calls("/quotes")).toHaveLength(0);
+    click("我已閱讀並同意");
+    await form();
+    expect(calls("/me").find((call) => call.method === "PATCH")?.body).toEqual({
+      feeAcknowledgementVersion: f.fare.version,
+    });
+  });
+
+  it("USER copy: E19b retains four rules without the obsolete pre-assignment limit and stays natively unchecked", async () => {
+    render(<BookingScreen paymentSelection={selection} />);
+    await quote();
+    const dialog = screen.getByRole("dialog");
+    const rules = within(dialog).getByText("費用規則").closest("section")!;
+    expect(
+      within(rules)
+        .getAllByText(/.+/, { selector: "p" })
+        .slice(0, 4)
+        .map((row) => row.textContent),
+    ).toEqual([
+      "車資依核定運價計費（含延滯計時）",
+      "預約費、取消費、等待費：不另收",
+      "國道通行費經您同意行駛後實收",
+      "車內汙損清潔費實支實付",
+    ]);
+    expect(within(rules).queryByText(/指派前/)).toBeNull();
+    expect(
+      within(rules).getByText(/任何允許取消的時間均不收取消費/),
+    ).toBeTruthy();
+    const checkbox = within(dialog).getByLabelText(
+      "我已確認費用與優惠說明",
+    ) as HTMLInputElement;
+    const submit = within(dialog).getByRole("button", {
+      name: "確認叫車",
+    }) as HTMLButtonElement;
+    expect(checkbox.checked).toBe(false);
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(submit);
+    expect(calls("/rides")).toHaveLength(0);
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+    expect(submit.disabled).toBe(false);
+  });
+
+  it("USER copy: standalone fares show the exact footer and the actual API announcement date", async () => {
+    render(<FaresPage />);
+    await screen.findByText("本頁依主管機關公告之現行運價揭露");
+    const stamp = screen.getByText(/版本 synthetic-fare-v1/);
+    expect(stamp.textContent).toContain(
+      "依臺北市政府公告計程車運價（112/04/01起實施）",
+    );
+    expect(stamp.textContent).toContain(f.fare.effectiveAt);
+    expect(calls("/fares")).toHaveLength(1);
+    expect(calls("/me")).toHaveLength(0);
+  });
+
+  it.each([
+    ["2023-04-01", "112/04/01"],
+    ["2024-02-29", "113/02/29"],
+  ])(
+    "USER copy: valid date-only API value %s retains its real calendar day",
+    async (effectiveAt, expectedDay) => {
+      f.fare.effectiveAt = effectiveAt;
+      render(<FaresPage />);
+      const stamp = await screen.findByText(/版本 synthetic-fare-v1/);
+      expect(stamp.textContent).toContain(
+        `依臺北市政府公告計程車運價（${expectedDay}起實施）`,
+      );
+      expect(stamp.textContent).toContain(effectiveAt);
+      expect(calls("/fares")).toHaveLength(1);
+    },
+  );
+
+  it("USER copy: a serialized UTC effective date remains the Taipei announcement day", async () => {
+    f.fare.effectiveAt = "2023-03-31T16:00:00.000Z";
+    render(<FaresPage />);
+    const stamp = await screen.findByText(/版本 synthetic-fare-v1/);
+    expect(stamp.textContent).toContain(
+      "依臺北市政府公告計程車運價（112/04/01起實施）",
+    );
+    expect(stamp.textContent).toContain("2023-03-31T16:00:00.000Z");
+    expect(screen.queryByText(/112\/03\/31/)).toBeNull();
+  });
+
+  it("USER copy: a future API version is never labelled with the old 112 effective date", async () => {
+    f.fare.version = "synthetic-future-20300401";
+    f.fare.effectiveAt = "2030-04-01T00:00:00+08:00";
+    render(<FaresPage />);
+    const stamp = await screen.findByText(/版本 synthetic-future-20300401/);
+    expect(stamp.textContent).toContain(
+      "依臺北市政府公告計程車運價（119/04/01起實施）",
+    );
+    expect(stamp.textContent).toContain(f.fare.effectiveAt);
+    expect(screen.queryByText(/112\/04\/01/)).toBeNull();
+  });
+
+  it.each([null, 0, "0", "2023-02-29", "2024-02-30T00:00:00+08:00"])(
+    "USER copy: invalid or non-ISO API effective date (%j) cannot acquire an invented announcement day",
+    async (effectiveAt) => {
+      Object.assign(f.fare, { effectiveAt });
+      render(<FaresPage />);
+      const stamp = await screen.findByText(/版本 synthetic-fare-v1/);
+      expect(stamp.textContent).not.toContain("依臺北市政府公告計程車運價（");
+      expect(screen.getByText("本頁依主管機關公告之現行運價揭露")).toBeTruthy();
+      expect(calls("/fares")).toHaveLength(1);
+    },
+  );
+
+  it("USER copy: malformed API date cannot invent a valid announcement day or crash the existing display", async () => {
+    f.fare.effectiveAt = "synthetic-invalid-date";
+    render(<FaresPage />);
+    const stamp = await screen.findByText(/版本 synthetic-fare-v1/);
+    expect(stamp.textContent).toContain("synthetic-invalid-date");
+    expect(stamp.textContent).not.toContain("依臺北市政府公告計程車運價（");
+    expect(screen.queryByText(/112\/04\/01/)).toBeNull();
+    expect(calls("/fares")).toHaveLength(1);
   });
 });

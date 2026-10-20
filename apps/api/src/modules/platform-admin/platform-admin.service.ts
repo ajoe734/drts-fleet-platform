@@ -1,3 +1,11 @@
+import {
+  PlatformNoticeLifecycle,
+  noticeTime,
+  type NoticeCommand,
+  type CanonicalNotice,
+  type NoticeAudience,
+} from "./platform-notice-lifecycle";
+import type { BootstrapRequestIdentity } from "../../common/auth";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -25,7 +33,6 @@ import type {
   CanonicalIdentityRoleBindingRecord,
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
-  CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   CredentialExpiryWarningState,
   GeneratePlacardVersionCommand,
@@ -73,6 +80,8 @@ import {
   PlatformAdapterRevisionConflictError,
   PlatformAdminRepository,
   type PersistPlatformAdminChanges,
+  type PublicInfoVersionMutation,
+  type PublicInfoVersionMutationResult,
 } from "./platform-admin.repository";
 import { buildMinimalPdf, buildPlacardPdfRows } from "./placard-pdf.renderer";
 
@@ -418,9 +427,7 @@ export class PlatformAdminService implements OnModuleInit {
     this.clonePlatformAdapter(adapter),
   );
 
-  private platformNotices: PlatformNoticeRecord[] = PLATFORM_NOTICES_SEED.map(
-    (n) => ({ ...n }),
-  );
+  private readonly noticeLifecycle: PlatformNoticeLifecycle;
 
   private maintenanceMode: PlatformMaintenanceModeRecord = {
     enabled: false,
@@ -459,6 +466,10 @@ export class PlatformAdminService implements OnModuleInit {
     @Inject(DOCUMENT_ARTIFACT_REBUILD_REGISTRY)
     documentArtifactRebuildRegistry?: DocumentArtifactRebuildRegistry,
   ) {
+    this.noticeLifecycle = new PlatformNoticeLifecycle(
+      this.auditNotificationService,
+      PLATFORM_NOTICES_SEED,
+    );
     // Materialising real PDF bytes requires awaiting `documentArtifactStore`,
     // which a constructor cannot do; seed placards start as plain clones here
     // and are actually rendered (via `clonePlacardVersion`) in `onModuleInit`,
@@ -565,12 +576,11 @@ export class PlatformAdminService implements OnModuleInit {
     );
   }
 
-  createPublicInfoVersion(
+  async createPublicInfoVersion(
     command: CreatePublicInfoVersionCommand,
     requestId?: string,
   ) {
-    this.assertNonBlank(command.title, "title");
-
+    this.assertNonBlank(command?.title, "title");
     const now = new Date().toISOString();
     const version: PublicInfoVersionRecord = {
       versionId: `public_info_${randomUUID()}`,
@@ -588,17 +598,10 @@ export class PlatformAdminService implements OnModuleInit {
       createdAt: now,
       updatedAt: now,
     };
-
-    this.publicInfoVersions = [
-      this.clonePublicInfoVersion(version),
-      ...this.publicInfoVersions,
-    ];
-    this.persistChanges(
-      {
-        publicInfoVersions: [this.clonePublicInfoVersion(version)],
-      },
-      "create_public_info_version",
-    );
+    const saved = await this.mutatePublicInfoVersions(() => ({
+      upsertedVersions: [version],
+      resultVersion: version,
+    }));
     this.recordAudit(
       {
         actorId: null,
@@ -607,131 +610,112 @@ export class PlatformAdminService implements OnModuleInit {
         moduleName: "platform-admin",
         actionName: "create_public_info_version",
         resourceType: "public_info_version",
-        resourceId: version.versionId,
-        newValuesSummary: {
-          ...this.clonePublicInfoVersion(version),
-        },
+        resourceId: saved.version.versionId,
+        newValuesSummary: { ...saved.version },
       },
       requestId,
     );
-
-    return this.clonePublicInfoVersion(version);
+    return this.clonePublicInfoVersion(saved.version);
   }
 
-  publishPublicInfoVersion(
+  async publishPublicInfoVersion(
     versionId: string,
     command: PublishPublicInfoVersionCommand,
     requestId?: string,
     publisherActorId?: string | null,
   ) {
-    const version = this.requirePublicInfoVersion(versionId);
-    if (version.status !== "draft") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PUBLIC_INFO_VERSION_NOT_DRAFT",
-        "Only draft public info versions can be published.",
-        {
-          versionId,
-          status: version.status,
-        },
+    const saved = await this.mutatePublicInfoVersions((current) => {
+      const version = this.clonePublicInfoVersion(
+        this.requirePublicInfoVersion(versionId, current),
       );
-    }
-    const publishedAt = new Date().toISOString();
-    const publishedBy = this.requirePlatformAdminActorId(
-      publisherActorId,
-      "publish public info versions",
-    );
-    const previousPublished = this.publicInfoVersions.find(
-      (candidate) =>
-        candidate.status === "published" &&
-        candidate.versionId !== version.versionId,
-    );
-
-    if (previousPublished) {
-      previousPublished.status = "retired";
-      previousPublished.effectiveTo = publishedAt;
-      previousPublished.updatedAt = publishedAt;
-    }
-
-    version.status = "published";
-    version.publishedBy = publishedBy;
-    version.publishedAt = publishedAt;
-    version.effectiveFrom =
-      this.normalizeNullableText(command.effectiveFrom) ??
-      version.effectiveFrom;
-    version.effectiveTo =
-      this.normalizeNullableText(command.effectiveTo) ?? version.effectiveTo;
-    version.updatedAt = publishedAt;
-
-    const changedVersions = previousPublished
-      ? [
-          this.clonePublicInfoVersion(previousPublished),
-          this.clonePublicInfoVersion(version),
-        ]
-      : [this.clonePublicInfoVersion(version)];
-    this.persistChanges(
-      {
-        publicInfoVersions: changedVersions,
-      },
-      "publish_public_info_version",
-    );
+      if (version.status !== "draft") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PUBLIC_INFO_VERSION_NOT_DRAFT",
+          "Only draft public info versions can be published.",
+          { versionId, status: version.status },
+        );
+      }
+      const publishedAt = new Date().toISOString();
+      const publishedBy = this.requirePlatformAdminActorId(
+        publisherActorId,
+        "publish public info versions",
+      );
+      const previousPublished = current.find(
+        (candidate) =>
+          candidate.status === "published" && candidate.versionId !== versionId,
+      );
+      const retired = previousPublished
+        ? {
+            ...previousPublished,
+            status: "retired" as const,
+            effectiveTo: publishedAt,
+            updatedAt: publishedAt,
+          }
+        : null;
+      version.status = "published";
+      version.publishedBy = publishedBy;
+      version.publishedAt = publishedAt;
+      version.effectiveFrom =
+        this.normalizeNullableText(command.effectiveFrom) ??
+        version.effectiveFrom;
+      version.effectiveTo =
+        this.normalizeNullableText(command.effectiveTo) ?? version.effectiveTo;
+      version.updatedAt = publishedAt;
+      return {
+        upsertedVersions: retired ? [retired, version] : [version],
+        resultVersion: version,
+        previousPublishedVersionId: previousPublished?.versionId ?? null,
+      };
+    });
     this.recordAudit(
       {
-        actorId: publishedBy,
+        actorId: saved.version.publishedBy,
         actorType: "platform_admin",
         tenantId: null,
         moduleName: "platform-admin",
         actionName: "publish_public_info_version",
         resourceType: "public_info_version",
-        resourceId: version.versionId,
-        ...(previousPublished
+        resourceId: saved.version.versionId,
+        ...(saved.previousPublishedVersionId
           ? {
               oldValuesSummary: {
-                previousVersionId: previousPublished.versionId,
+                previousVersionId: saved.previousPublishedVersionId,
                 previousStatus: "published",
               },
             }
           : {}),
         newValuesSummary: {
-          previousVersionId: previousPublished?.versionId ?? null,
-          newVersionId: version.versionId,
-          publishedAt,
-          publishedBy,
+          previousVersionId: saved.previousPublishedVersionId,
+          newVersionId: saved.version.versionId,
+          publishedAt: saved.version.publishedAt,
+          publishedBy: saved.version.publishedBy,
         },
       },
       requestId,
     );
-
-    return this.clonePublicInfoVersion(version);
+    return this.clonePublicInfoVersion(saved.version);
   }
 
-  deleteDraftPublicInfoVersion(
+  async deleteDraftPublicInfoVersion(
     versionId: string,
     requestId?: string,
     deleteActorId?: string | null,
   ) {
-    const version = this.requirePublicInfoVersion(versionId);
-    if (version.status !== "draft") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PUBLIC_INFO_VERSION_NOT_DRAFT",
-        "Only draft public info versions can be deleted.",
-        {
-          versionId,
-          status: version.status,
-        },
+    const saved = await this.mutatePublicInfoVersions((current) => {
+      const version = this.clonePublicInfoVersion(
+        this.requirePublicInfoVersion(versionId, current),
       );
-    }
-
-    this.publicInfoVersions = this.publicInfoVersions.filter(
-      (candidate) => candidate.versionId !== versionId,
-    );
-    this.persistChanges(
-      {
-        deletedPublicInfoVersionIds: [versionId],
-      },
-      "delete_draft_public_info_version",
-    );
+      if (version.status !== "draft") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "PUBLIC_INFO_VERSION_NOT_DRAFT",
+          "Only draft public info versions can be deleted.",
+          { versionId, status: version.status },
+        );
+      }
+      return { deletedVersionIds: [versionId], resultVersion: version };
+    });
     this.recordAudit(
       {
         actorId: this.normalizeNullableText(deleteActorId),
@@ -740,18 +724,56 @@ export class PlatformAdminService implements OnModuleInit {
         moduleName: "platform-admin",
         actionName: "delete_draft_public_info_version",
         resourceType: "public_info_version",
-        resourceId: versionId,
-        oldValuesSummary: {
-          ...this.clonePublicInfoVersion(version),
-        },
-        newValuesSummary: {
-          deleted: true,
-        },
+        resourceId: saved.version.versionId,
+        oldValuesSummary: { ...saved.version },
+        newValuesSummary: { deleted: true },
       },
       requestId,
     );
+    return this.clonePublicInfoVersion(saved.version);
+  }
 
-    return this.clonePublicInfoVersion(version);
+  private async mutatePublicInfoVersions(
+    stage: (
+      current: readonly PublicInfoVersionRecord[],
+    ) => PublicInfoVersionMutation,
+  ): Promise<PublicInfoVersionMutationResult> {
+    let saved: PublicInfoVersionMutationResult;
+    if (this.platformAdminRepository?.isEnabled()) {
+      saved =
+        await this.platformAdminRepository.mutatePublicInfoVersions(stage);
+    } else {
+      const current = this.publicInfoVersions.map((version) =>
+        this.clonePublicInfoVersion(version),
+      );
+      const mutation = stage(current);
+      const upserts = new Map(
+        (mutation.upsertedVersions ?? []).map((version) => [
+          version.versionId,
+          version,
+        ]),
+      );
+      const deleted = new Set(mutation.deletedVersionIds ?? []);
+      saved = {
+        version: mutation.resultVersion,
+        versions: [
+          ...(mutation.upsertedVersions ?? []).filter(
+            (version) =>
+              !current.some((row) => row.versionId === version.versionId),
+          ),
+          ...current
+            .filter((version) => !deleted.has(version.versionId))
+            .map((version) => upserts.get(version.versionId) ?? version),
+        ],
+        previousPublishedVersionId: mutation.previousPublishedVersionId ?? null,
+      };
+    }
+    // Enabled repositories return only after their COMMIT. A rejected command
+    // never exposes its staged cache or a successful publication audit.
+    this.publicInfoVersions = saved.versions.map((version) =>
+      this.clonePublicInfoVersion(version),
+    );
+    return saved;
   }
 
   async listPlacardVersions() {
@@ -1548,8 +1570,9 @@ export class PlatformAdminService implements OnModuleInit {
           : {
               reference: command.credentialExpiry.reference!.trim(),
               expiresAt:
-                this.normalizeNullableText(command.credentialExpiry.expiresAt) ??
-                null,
+                this.normalizeNullableText(
+                  command.credentialExpiry.expiresAt,
+                ) ?? null,
             }
         : (current.credentialExpiry ?? null);
 
@@ -1649,7 +1672,8 @@ export class PlatformAdminService implements OnModuleInit {
     const cloned = this.clonePlatformAdapter({
       ...adapter,
       id: adapter.id.trim(),
-      platformCode: adapter.platformCode.trim() as PlatformAdapter["platformCode"],
+      platformCode:
+        adapter.platformCode.trim() as PlatformAdapter["platformCode"],
       name: adapter.name.trim(),
       description: adapter.description?.trim() ?? "",
       version: adapter.version.trim(),
@@ -2041,38 +2065,47 @@ export class PlatformAdminService implements OnModuleInit {
 
   // ── Platform Notices ──────────────────────────────────────────────────────
 
-  listPlatformNotices(): PlatformNoticeRecord[] {
-    return this.platformNotices.map((n) => ({ ...n }));
+  listPlatformNotices(): CanonicalNotice[] {
+    return this.noticeLifecycle.list();
+  }
+
+  listRecipientNotices(
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.forPrincipal(identity, audience);
+  }
+
+  listRecipientNoticeNotifications(
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.notificationFeed(identity, audience);
+  }
+
+  readRecipientNotice(
+    noticeId: string,
+    outcomeId: string,
+    identity: BootstrapRequestIdentity | null,
+    audience: NoticeAudience,
+  ) {
+    return this.noticeLifecycle.read(noticeId, outcomeId, identity, audience);
   }
 
   createPlatformNotice(
-    command: CreatePlatformNoticeCommand,
+    command: NoticeCommand,
     requestId?: string,
-  ): PlatformNoticeRecord {
+  ): CanonicalNotice {
     return this.createPlatformNoticeWithAudit(command, requestId).data;
   }
 
   createPlatformNoticeWithAudit(
-    command: CreatePlatformNoticeCommand,
+    command: NoticeCommand,
     requestId?: string,
-  ): AuditedActionResult<PlatformNoticeRecord> {
+  ): AuditedActionResult<CanonicalNotice> {
     this.assertNonBlank(command.title, "title");
     this.assertNonBlank(command.body, "body");
-    const now = new Date().toISOString();
-    const notice: PlatformNoticeRecord = {
-      noticeId: `notice_${randomUUID()}`,
-      title: command.title.trim(),
-      body: command.body.trim(),
-      severity: command.severity,
-      status: command.scheduledAt ? "scheduled" : "active",
-      targetAudience: command.targetAudience,
-      scheduledAt: command.scheduledAt ?? null,
-      resolvedAt: null,
-      createdBy: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    this.platformNotices.unshift({ ...notice });
+    const notice = this.noticeLifecycle.create(command);
     const auditLog = this.recordAudit(
       {
         actorId: null,
@@ -2082,7 +2115,14 @@ export class PlatformAdminService implements OnModuleInit {
         actionName: "create_platform_notice",
         resourceType: "platform_notice",
         resourceId: notice.noticeId,
-        newValuesSummary: { title: notice.title, severity: notice.severity },
+        newValuesSummary: {
+          title: notice.title,
+          severity: notice.severity,
+          reason: notice.reason,
+          scheduledAt: notice.scheduledAt,
+          expiresAt: notice.expiresAt,
+          storageMode: notice.storageMode,
+        },
       },
       requestId,
     );
@@ -2092,19 +2132,8 @@ export class PlatformAdminService implements OnModuleInit {
     };
   }
 
-  resolveNotice(noticeId: string, requestId?: string): PlatformNoticeRecord {
-    const notice = this.platformNotices.find((n) => n.noticeId === noticeId);
-    if (!notice) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "NOTICE_NOT_FOUND",
-        "Platform notice not found.",
-        { noticeId },
-      );
-    }
-    notice.status = "resolved";
-    notice.resolvedAt = new Date().toISOString();
-    notice.updatedAt = notice.resolvedAt;
+  resolveNotice(noticeId: string, requestId?: string): CanonicalNotice {
+    const notice = this.noticeLifecycle.resolve(noticeId);
     this.recordAudit(
       {
         actorId: null,
@@ -2138,12 +2167,32 @@ export class PlatformAdminService implements OnModuleInit {
     command: SetPlatformMaintenanceModeCommand,
     requestId?: string,
   ): AuditedActionResult<PlatformMaintenanceModeRecord> {
+    this.assertNonBlank(command.reason ?? "", "reason");
+    if (typeof command.enabled !== "boolean")
+      throw new ApiRequestError(
+        400,
+        "MAINTENANCE_ENABLED_REQUIRED",
+        "enabled must be boolean.",
+      );
+    const scheduledStart = noticeTime(command.scheduledStart, "scheduledStart");
+    const scheduledEnd = noticeTime(command.scheduledEnd, "scheduledEnd");
+    if (
+      scheduledStart &&
+      scheduledEnd &&
+      Date.parse(scheduledEnd) <= Date.parse(scheduledStart)
+    ) {
+      throw new ApiRequestError(
+        400,
+        "NOTICE_INVALID_WINDOW",
+        "Maintenance end must follow start.",
+      );
+    }
     const now = new Date().toISOString();
     this.maintenanceMode = {
       enabled: command.enabled,
       reason: command.reason ?? null,
-      scheduledStart: command.scheduledStart ?? null,
-      scheduledEnd: command.scheduledEnd ?? null,
+      scheduledStart,
+      scheduledEnd,
       updatedBy: null,
       updatedAt: now,
     };
@@ -2841,8 +2890,11 @@ export class PlatformAdminService implements OnModuleInit {
     return normalized;
   }
 
-  private requirePublicInfoVersion(versionId: string) {
-    const version = this.publicInfoVersions.find(
+  private requirePublicInfoVersion(
+    versionId: string,
+    versions: readonly PublicInfoVersionRecord[] = this.publicInfoVersions,
+  ) {
+    const version = versions.find(
       (candidate) => candidate.versionId === versionId,
     );
     if (!version) {

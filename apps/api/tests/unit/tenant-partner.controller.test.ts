@@ -11,12 +11,17 @@ import type { BillingSettlementService } from "../../src/modules/billing-settlem
 import type { ReferralStatementRecord } from "../../src/modules/billing-settlement/referral-statement.types";
 import { IdentityRepository } from "../../src/modules/identity/identity.repository";
 import type { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
-import type { IdentityContext } from "@drts/contracts";
+import type {
+  IdentityContext,
+  RecordReferralEmbedConsentCommand,
+} from "@drts/contracts";
 import {
   TenantApiKeyAuthGuard,
   TenantPartnerController,
 } from "../../src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
+import { PartnerUserIdentityLinkRepository } from "../../src/modules/tenant-partner/partner-user-identity-link.repository";
+import { ReferralEmbedHandoffRepository } from "../../src/modules/tenant-partner/referral-embed-handoff.repository";
 
 function createController(
   jwtAuthService = new JwtAuthService(),
@@ -693,7 +698,7 @@ describe("tenant partner ingress handoff controller", () => {
       {} as never,
     );
 
-    const artifact = controller.getPartnerReferralStatementArtifact(
+    const artifact = await controller.getPartnerReferralStatementArtifact(
       null,
       statement.period,
       "req-referral-statement-artifact",
@@ -978,49 +983,77 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
     mockReferralWifJwks();
     configureReferralWifRegistry();
 
-    const { controller, tenantPartnerService } = createController(undefined, {
-      googleWorkloadIdentityAdapter: new GoogleWorkloadIdentityAdapter(
-        new IdentityRepository(),
-      ),
+    const handoffs = new ReferralEmbedHandoffRepository();
+    const links = new PartnerUserIdentityLinkRepository();
+    const tenantPartnerService = new TenantPartnerService(
+      new AuditNotificationService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      links,
+      handoffs,
+    );
+    const entry = tenantPartnerService.getPartnerEntry("yuhe-residence");
+    const link = await links.resolveOrCreate({
+      entrySlug: entry.entrySlug,
+      partnerUserRef: "consent-wif-controller-unit",
     });
-
-    // Mock the service method
-    const mockRecord = vi.fn().mockResolvedValue({
-      handoffId: "handoff-123",
-      partnerEntrySlug: "demo-slug",
-      entryHost: "demo-host",
-      drtsPassengerId: "pass-123",
-      identityActive: true,
-      consent: {
-        requiredScopes: [],
-        bundleVersion: "v1",
-        grantedAt: new Date().toISOString(),
-      },
-      identity: {
-        actorType: "referral_passenger",
-        actorId: "pass-123",
-        realm: "partner",
-        authMode: "jwt_bearer",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        tenantId: null,
-        partnerId: null,
-        partnerProgramId: null,
-        partnerEntrySlug: "demo-slug",
-        drtsPassengerId: "pass-123",
-      },
+    const now = new Date().toISOString();
+    const artifact = "consent-wif-controller-handoff";
+    await handoffs.issue({
+      artifact,
+      entrySlug: entry.entrySlug,
+      entryHost: entry.entryHost!,
+      partnerUserRef: link.partnerUserRef,
+      drtsPassengerId: link.drtsPassengerId,
+      tenantId: entry.tenantId!,
+      partnerId: entry.partnerId,
+      partnerProgramId: entry.programId,
+      consentRequired: true,
+      consentBundleVersion: null,
+      consentGrantedAt: null,
+      issuedAt: now,
+      expiresAt: new Date(Date.now() + 120_000).toISOString(),
     });
-    tenantPartnerService.recordReferralEmbedConsent = mockRecord;
+    const pending =
+      await tenantPartnerService.consumeReferralEmbedHandoffArtifact({
+        artifact,
+        entrySlug: entry.entrySlug,
+        entryHost: entry.entryHost!,
+      });
+    expect(pending.identityActive).toBe(false);
 
-    const command = {
-      handoffId: "handoff-123",
-      entrySlug: "demo-slug",
-      entryHost: "demo-host",
+    const identities = new IdentityRepository();
+    await identities.onModuleInit();
+    const jwtAuthService = new JwtAuthService(identities, tenantPartnerService);
+    const controller = new TenantPartnerController(
+      tenantPartnerService,
+      {} as BillingSettlementService,
+      {} as OwnedMobilityService,
+      jwtAuthService,
+      {} as never,
+      identities,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new GoogleWorkloadIdentityAdapter(identities),
+    );
+    const recordConsent = vi.spyOn(
+      tenantPartnerService,
+      "recordReferralEmbedConsent",
+    );
+    const command: RecordReferralEmbedConsentCommand = {
+      handoffId: pending.handoffId,
+      entrySlug: entry.entrySlug,
+      entryHost: entry.entryHost!,
+      currentDrtsPassengerId: link.drtsPassengerId,
+      currentPartnerEntrySlug: entry.entrySlug,
       consentBundle: {
         bundleVersion: "v1",
-        grantedScopes: ["trip.manage", "pii.trip", "identity.bind"] as any,
-        grantedAt: new Date().toISOString(),
+        grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+        grantedAt: now,
         actorIp: "127.0.0.1",
         userAgent: "test-agent",
       },
@@ -1032,12 +1065,51 @@ describe("tenant API key authoritative consumer and usage tracking", () => {
         headers: wifHeaders(signReferralWifToken()),
         method: "POST",
         originalUrl: "/api/partner/ingress/referral-embed-handoff/consent",
-      } as any,
+      },
       "req-record-consent",
     );
 
-    expect(response.data.handoffId).toBe("handoff-123");
-    expect(mockRecord).toHaveBeenCalledWith(command);
+    expect(response.data.handoffId).toBe(pending.handoffId);
+    expect(recordConsent).toHaveBeenCalledWith(command);
+    expect(response.data).toMatchObject({
+      identityActive: true,
+      identity: {
+        tenantId: entry.tenantId,
+        partnerId: entry.partnerId,
+        partnerProgramId: entry.programId,
+        partnerEntrySlug: entry.entrySlug,
+        drtsPassengerId: link.drtsPassengerId,
+        scopes: expect.arrayContaining(["partner:book"]),
+      },
+    });
+    const issued = response.data;
+    if (
+      !("accessToken" in issued) ||
+      typeof issued.accessToken !== "string" ||
+      !("sessionId" in issued) ||
+      typeof issued.sessionId !== "string"
+    ) {
+      throw new Error(
+        "Confirmed consent must issue a canonical bearer session.",
+      );
+    }
+    expect(jwtAuthService.verify(issued.accessToken)).toMatchObject({
+      sid: issued.sessionId,
+      actorType: "referral_passenger",
+      realm: "partner",
+      tenantId: entry.tenantId,
+      partnerId: entry.partnerId,
+      partnerProgramId: entry.programId,
+      partnerEntrySlug: entry.entrySlug,
+      drtsPassengerId: link.drtsPassengerId,
+      scopes: expect.arrayContaining(["partner:book"]),
+    });
+    expect(await identities.getSession(issued.sessionId)).toMatchObject({
+      principalId: link.drtsPassengerId,
+      actorId: link.drtsPassengerId,
+      realm: "partner",
+      status: "active",
+    });
   });
 
   it("rejects referral embed consent when no workload identity assertion is presented", async () => {

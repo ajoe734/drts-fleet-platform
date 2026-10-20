@@ -130,10 +130,14 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.partner_notification_allocations || []),
         ...(content.voice_application_allocations || []),
         ...(content.voice_callback_allocations || []),
+        ...(content.sos_duty_allocations || []),
         ...(content.passenger_push_channel_allocations || []),
         ...(content.passenger_app_allocations || []),
         ...(content.fleet_statement_decision_allocations || []),
         ...(content.public_fare_management_allocations || []),
+        ...(content.complaint_command_allocations || []),
+        ...(content.referral_passenger_journey_allocations || []),
+        ...(content.normal_onboarding_supply_pair_allocations || []),
       ];
 
       // No duplicate versions across all allocations
@@ -165,10 +169,14 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.partner_notification_allocations || []),
         ...(content.voice_application_allocations || []),
         ...(content.voice_callback_allocations || []),
+        ...(content.sos_duty_allocations || []),
         ...(content.passenger_push_channel_allocations || []),
         ...(content.passenger_app_allocations || []),
         ...(content.fleet_statement_decision_allocations || []),
         ...(content.public_fare_management_allocations || []),
+        ...(content.complaint_command_allocations || []),
+        ...(content.referral_passenger_journey_allocations || []),
+        ...(content.normal_onboarding_supply_pair_allocations || []),
       ];
       const diskFiles = fs.existsSync(migrationsDir)
         ? fs.readdirSync(migrationsDir)
@@ -201,10 +209,14 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.partner_notification_allocations || []),
         ...(content.voice_application_allocations || []),
         ...(content.voice_callback_allocations || []),
+        ...(content.sos_duty_allocations || []),
         ...(content.passenger_push_channel_allocations || []),
         ...(content.passenger_app_allocations || []),
         ...(content.fleet_statement_decision_allocations || []),
         ...(content.public_fare_management_allocations || []),
+        ...(content.complaint_command_allocations || []),
+        ...(content.referral_passenger_journey_allocations || []),
+        ...(content.normal_onboarding_supply_pair_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,

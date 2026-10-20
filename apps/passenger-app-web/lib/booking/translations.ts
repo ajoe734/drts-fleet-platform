@@ -52,6 +52,7 @@ export const BOOK_T = {
   unknownCreate: "尚未確認叫車結果；重試會使用同一筆請求，請勿另建行程。",
   publicFares: "公開計費說明",
   tariffAuthority: "依臺北市政府公告計程車運價",
+  currentRegulation: "本頁依主管機關公告之現行運價揭露",
   publicError: "目前無法取得公開費率，請稍後重試。",
   publicRetry: "重試公開費率",
   publicLoading: "正在取得公開費率...",
@@ -63,8 +64,33 @@ export const BOOK_T = {
   quoteVersion: (version: string, expiry: string) =>
     `費率版本 ${version} · 試算有效至 ${expiry}`,
   timeValue: (value: string) => `預約時間 ${value.replace("T", " ")}`,
-  fareStamp: (version: string, effective: string) =>
-    `版本 ${version} · 生效日 ${effective} · 依主管機關核定運價及備查優惠辦理`,
+  fareStamp: (version: string, effective: string) => {
+    const versionStamp = `版本 ${version} · 生效日 ${effective}`;
+    if (
+      typeof effective !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}(?:T.+)?$/.test(effective)
+    )
+      return versionStamp;
+    const instant = new Date(effective);
+    const calendarDate = new Date(`${effective.slice(0, 10)}T00:00:00Z`);
+    // Date parsing normalizes invalid days; those cannot become an announcement.
+    if (
+      !Number.isFinite(instant.getTime()) ||
+      !Number.isFinite(calendarDate.getTime()) ||
+      calendarDate.toISOString().slice(0, 10) !== effective.slice(0, 10)
+    )
+      return versionStamp;
+    const parts = new Intl.DateTimeFormat("zh-TW-u-ca-roc", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(instant);
+    const date = ["year", "month", "day"]
+      .map((type) => parts.find((part) => part.type === type)?.value)
+      .join("/");
+    return `依臺北市政府公告計程車運價（${date}起實施） · ${versionStamp}`;
+  },
   supportPhone: (phone: string) => `客服 ${phone}`,
   base: (fare: FareVersion) =>
     `起程 ${fare.baseDistanceMeters / 1000} 公里：NT$ ${fare.baseFare}`,

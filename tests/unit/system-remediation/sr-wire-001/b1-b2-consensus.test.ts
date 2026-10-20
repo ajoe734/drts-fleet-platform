@@ -269,7 +269,10 @@ describe("SR-WIRE-001 Consensus B2: Academy qualification single operation, waiv
     context.currentLocation!.recordedAt = "2026-09-13T10:00:00Z";
 
     const evaluator = new RuntimeEligibilityEvaluator(
-      { resolve: () => context } as never,
+      {
+        prepareMatchingSuppression: async () => false,
+        resolve: () => context,
+      } as never,
       undefined,
       undefined,
       academy,
@@ -306,7 +309,10 @@ describe("SR-WIRE-001 Consensus B2: Academy qualification single operation, waiv
     context.currentLocation!.recordedAt = "2026-09-13T10:00:00Z";
 
     const evaluator = new RuntimeEligibilityEvaluator(
-      { resolve: () => context } as never,
+      {
+        prepareMatchingSuppression: async () => false,
+        resolve: () => context,
+      } as never,
       undefined,
       undefined,
       academy,

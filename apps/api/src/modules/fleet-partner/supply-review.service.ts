@@ -16,6 +16,7 @@ import { ApiRequestError } from "../../common/api-envelope";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import {
   type SubmissionApprovalArtifacts,
+  type SupplySubmissionQueryExecutor,
   SupplySubmissionRepository,
   type SupplyReviewEventRecord,
 } from "./supply-submission.repository";
@@ -835,8 +836,12 @@ export class SupplyReviewService implements OnModuleInit {
           return {
             updated,
             vehicleAffiliation: canonical?.vehicleAffiliation ?? null,
+            supplyPair: canonical?.supplyPair ?? null,
           };
         },
+      );
+      this.regulatoryRegistryService?.publishCommittedSupplyPair(
+        result.supplyPair,
       );
       if (result.vehicleAffiliation) {
         this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
@@ -933,6 +938,9 @@ export class SupplyReviewService implements OnModuleInit {
           ? { vehicleAffiliations: [canonical.vehicleAffiliation] }
           : {}),
       });
+      this.regulatoryRegistryService?.publishCommittedSupplyPair(
+        canonical?.supplyPair ?? null,
+      );
       if (canonical?.vehicleAffiliation) {
         this.regulatoryRegistryService?.recordVehicleFleetAffiliationCreated(
           canonical.vehicleAffiliation,
@@ -1029,6 +1037,10 @@ export class SupplyReviewService implements OnModuleInit {
       );
     }
 
+    this.regulatoryRegistryService?.publishCommittedSupplyPair(
+      canonical?.supplyPair ?? null,
+    );
+
     return { ...updated };
   }
 
@@ -1081,9 +1093,7 @@ export class SupplyReviewService implements OnModuleInit {
   }
 
   private async provisionCanonicalRecords(
-    executor: {
-      query<T>(text: string, values?: readonly unknown[]): Promise<T>;
-    } | null,
+    executor: SupplySubmissionQueryExecutor | null,
     submission: SupplySubmissionRecord,
     artifacts: SubmissionApprovalArtifacts | null,
     reviewerId: string,
@@ -1092,17 +1102,32 @@ export class SupplyReviewService implements OnModuleInit {
       return null;
     }
 
-    return this.regulatoryRegistryService.provisionFromSubmission(
-      executor as never,
-      {
-        submission,
-        driverDraft: artifacts.driverDraft,
-        vehicleDraft: artifacts.vehicleDraft,
-        documents: artifacts.documents,
-        approvedAt: new Date().toISOString(),
-        reviewerId,
-      },
-    );
+    const reference = artifacts.vehicleDraft?.currentDriverSubmissionId;
+    let referencedDriverSubmission: SupplySubmissionRecord | null = null;
+    if (reference) {
+      if (executor && this.supplySubmissionRepository?.isEnabled()) {
+        this.assertDbSubmissionIdFormat(reference);
+        referencedDriverSubmission =
+          await this.supplySubmissionRepository.loadFleetScopedSubmission(
+            executor,
+            reference,
+            submission.fleetPartnerId,
+            { forUpdate: true },
+          );
+      } else {
+        referencedDriverSubmission = await this.findSubmission(reference);
+      }
+    }
+
+    return this.regulatoryRegistryService.provisionFromSubmission(executor, {
+      submission,
+      referencedDriverSubmission,
+      driverDraft: artifacts.driverDraft,
+      vehicleDraft: artifacts.vehicleDraft,
+      documents: artifacts.documents,
+      approvedAt: new Date().toISOString(),
+      reviewerId,
+    });
   }
 
   private assertDbSubmissionIdFormat(submissionId: string) {

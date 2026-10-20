@@ -58,7 +58,7 @@ it("keeps the original local demo entry and its terms free of API calls", async 
 it("keeps an active local journey offline on reload and loads shared configuration after exit", async () => {
   startDemo();
   navigation.pathname = "/rides";
-  renderProvider();
+  const view = renderProvider();
   await act(async () => {});
   expect(fetchConfig).not.toHaveBeenCalled();
   expect(screen.getByTestId("mode").textContent).toBe("false");
@@ -68,8 +68,13 @@ it("keeps an active local journey offline on reload and loads shared configurati
   );
   expect(fetchConfig).toHaveBeenCalledWith(
     "/api/passenger-app/review-demo/config",
-    { cache: "no-store" },
+    { cache: "no-store", signal: expect.any(AbortSignal) },
   );
+  expect(fetchConfig).toHaveBeenCalledOnce();
+  const signal = (fetchConfig.mock.calls[0]![1] as RequestInit).signal;
+  expect(signal?.aborted).toBe(false);
+  view.unmount();
+  expect(signal?.aborted).toBe(true);
 });
 
 it("still enables the shared review entry from its real runtime configuration", async () => {

@@ -14,7 +14,10 @@ import { describe, expect, it } from "vitest";
 // unmodified. This is what caught F4 (the workflow expected 200 and would
 // reject every real successful issuance) and locks in F1's pre/post-rollout
 // branching.
-const workflow = readFileSync(resolve(".github/workflows/deploy-dev.yml"), "utf8");
+const workflow = readFileSync(
+  resolve(".github/workflows/deploy-dev.yml"),
+  "utf8",
+);
 const stepStart = workflow.indexOf(
   "- name: Verify referral handoff session lifecycle",
 );
@@ -58,7 +61,7 @@ curl() {
       issue_count=$(( $(cat "$ISSUE_COUNTER" 2>/dev/null || echo 0) + 1 ))
       echo "$issue_count" > "$ISSUE_COUNTER"
       if [[ "$FIXTURE_ROLLOUT_APPLIED" != "true" ]]; then
-        printf '{"error":{"code":"WORKLOAD_ROUTE_SCOPE_DENIED","message":"denied"}}' > "$output_file"
+        printf '{"error":{"code":"%s","message":"denied"}}' "$FIXTURE_PENDING_CODE" > "$output_file"
         echo "403"
       elif [[ "$issue_count" == "1" ]]; then
         printf '{"data":{"artifact":"probe-artifact-main"}}' > "$output_file"
@@ -74,19 +77,23 @@ curl() {
       echo "$exch_count" > "$EXCH_COUNTER"
       case "$exch_count" in
         1)
-          printf '{"ok":true}' > "$output_file"
-          printf 'HTTP/1.1 200 OK\\r\\nSet-Cookie: drts_referral_embed_session=abc\\r\\n\\r\\n' > "$dump_header_file"
+          printf '{"ok":%s}' "$FIXTURE_CONSUME_OK" > "$output_file"
+          if [[ "$FIXTURE_SIGNED_COOKIE" == "true" ]]; then
+            printf 'HTTP/1.1 200 OK\\r\\nSet-Cookie: drts_referral_embed_session=abc\\r\\n\\r\\n' > "$dump_header_file"
+          else
+            printf 'HTTP/1.1 200 OK\\r\\n\\r\\n' > "$dump_header_file"
+          fi
           echo "200"
           ;;
         2)
-          printf '{"ok":false,"message":"The referral handoff artifact has already been consumed."}' > "$output_file"
-          printf 'HTTP/1.1 400 Bad Request\\r\\n\\r\\n' > "$dump_header_file"
-          echo "400"
+          printf '{"ok":false,"code":"%s","message":"The referral handoff artifact has already been consumed."}' "$FIXTURE_REPLAY_CODE" > "$output_file"
+          printf 'HTTP/1.1 409 Conflict\\r\\n\\r\\n' > "$dump_header_file"
+          echo "$FIXTURE_REPLAY_STATUS"
           ;;
         *)
-          printf '{"ok":false,"message":"The referral handoff artifact is not valid for this entry host."}' > "$output_file"
-          printf 'HTTP/1.1 400 Bad Request\\r\\n\\r\\n' > "$dump_header_file"
-          echo "400"
+          printf '{"ok":false,"code":"%s","message":"The referral handoff artifact is not valid for this entry host."}' "$FIXTURE_HOST_CODE" > "$output_file"
+          printf 'HTTP/1.1 403 Forbidden\\r\\n\\r\\n' > "$dump_header_file"
+          echo "$FIXTURE_HOST_STATUS"
           ;;
       esac
       ;;
@@ -111,9 +118,20 @@ jq() {
 }
 `;
 
+type FixtureOptions = {
+  slowJq?: boolean;
+  replayStatus?: string;
+  replayCode?: string;
+  wrongHostStatus?: string;
+  wrongHostCode?: string;
+  pendingCode?: string;
+  consumeOk?: boolean;
+  signedCookie?: boolean;
+};
+
 function runBlock(
   rolloutApplied: "true" | "false",
-  options: { slowJq?: boolean } = {},
+  options: FixtureOptions = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "deploy-dev-referral-"));
   try {
@@ -144,13 +162,26 @@ function runBlock(
           REFERRAL_HANDOFF_ID_TOKEN: "test-id-token",
           GITHUB_RUN_ID: "123",
           GITHUB_RUN_ATTEMPT: "1",
+          FIXTURE_REPLAY_STATUS: options.replayStatus ?? "409",
+          FIXTURE_REPLAY_CODE:
+            options.replayCode ?? "REFERRAL_HANDOFF_REPLAYED",
+          FIXTURE_HOST_STATUS: options.wrongHostStatus ?? "403",
+          FIXTURE_HOST_CODE:
+            options.wrongHostCode ?? "REFERRAL_HANDOFF_HOST_MISMATCH",
+          FIXTURE_PENDING_CODE:
+            options.pendingCode ?? "WORKLOAD_ROUTE_SCOPE_DENIED",
+          FIXTURE_CONSUME_OK: String(options.consumeOk ?? true),
+          FIXTURE_SIGNED_COOKIE: String(options.signedCookie ?? true),
         },
       },
     );
     const callLogPath = join(directory, "calls.log");
     let calls: string[] = [];
     try {
-      calls = readFileSync(callLogPath, "utf8").trim().split("\n").filter(Boolean);
+      calls = readFileSync(callLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean);
     } catch {
       calls = [];
     }
@@ -165,8 +196,14 @@ describe("deploy-dev referral handoff session lifecycle smoke test", () => {
     const { result, calls } = runBlock("true");
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
-    expect(calls.filter((u) => u.endsWith("/api/partner/ingress/referral-embed-handoff")).length).toBe(2);
-    expect(calls.filter((u) => u.endsWith("/api/referral/session")).length).toBe(3);
+    expect(
+      calls.filter((u) =>
+        u.endsWith("/api/partner/ingress/referral-embed-handoff"),
+      ).length,
+    ).toBe(2);
+    expect(
+      calls.filter((u) => u.endsWith("/api/referral/session")).length,
+    ).toBe(3);
   });
 
   it("still makes the real issuance call and asserts the documented fail-closed 403 before the registry rollout, without touching the consume/exchange routes", () => {
@@ -176,7 +213,11 @@ describe("deploy-dev referral handoff session lifecycle smoke test", () => {
     expect(result.stdout).toContain(
       "referral embed handoff WIF registry rollout",
     );
-    expect(calls.some((u) => u.endsWith("/api/partner/ingress/referral-embed-handoff"))).toBe(true);
+    expect(
+      calls.some((u) =>
+        u.endsWith("/api/partner/ingress/referral-embed-handoff"),
+      ),
+    ).toBe(true);
     expect(calls.some((u) => u.endsWith("/api/referral/session"))).toBe(false);
   });
 
@@ -202,7 +243,9 @@ describe("deploy-dev referral handoff session lifecycle smoke test", () => {
   });
 
   it("fails closed if issuance ever returns something other than the real 201 success status", () => {
-    const directory = mkdtempSync(join(tmpdir(), "deploy-dev-referral-regression-"));
+    const directory = mkdtempSync(
+      join(tmpdir(), "deploy-dev-referral-regression-"),
+    );
     try {
       const result = spawnSync(
         "bash",
@@ -257,5 +300,75 @@ describe("deploy-dev referral handoff session lifecycle smoke test", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    ["replay status", { replayStatus: "400" }, "replay", "400"],
+    [
+      "replay code",
+      { replayCode: "REFERRAL_HANDOFF_HOST_MISMATCH" },
+      "replay",
+      "409",
+    ],
+    ["host status", { wrongHostStatus: "400" }, "wrong-host", "400"],
+    [
+      "host code",
+      { wrongHostCode: "REFERRAL_HANDOFF_REPLAYED" },
+      "wrong-host",
+      "403",
+    ],
+  ] satisfies [string, FixtureOptions, string, string][])(
+    "rejects a wrong canonical %s at the actual branch",
+    (_name, options, phase, status) => {
+      const { result, calls } = runBlock("true", options);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`phase=${phase}`);
+      expect(result.stderr).toContain(`HTTP ${status}`);
+      expect(
+        calls.filter((u) => u.endsWith("/api/referral/session")),
+      ).toHaveLength(phase === "replay" ? 2 : 3);
+    },
+  );
+
+  it("does not print unknown response codes, artifacts, cookies or tokens in failure diagnostics", () => {
+    const { result } = runBlock("true", {
+      replayCode: "secret-error-code-canary",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("phase=replay");
+    expect(result.stderr).toContain("code=unavailable");
+    for (const secret of [
+      "secret-error-code-canary",
+      "probe-artifact",
+      "drts_referral_embed_session=abc",
+      "test-id-token",
+    ])
+      expect(result.stderr).not.toContain(secret);
+  });
+
+  it.each([
+    [{ consumeOk: false }, "consume-payload"],
+    [{ signedCookie: false }, "consume-cookie"],
+  ] satisfies [FixtureOptions, string][])(
+    "retains the positive %j guard with safe diagnostics",
+    (options, phase) => {
+      const { result, calls } = runBlock("true", options);
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(`phase=${phase}`);
+      expect(result.stderr).toContain("HTTP 200");
+      expect(
+        calls.filter((u) => u.endsWith("/api/referral/session")),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("rejects a different pending-rollout denial without printing its response code", () => {
+    const { result, calls } = runBlock("false", {
+      pendingCode: "secret-denial-canary",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("phase=pending-rollout");
+    expect(result.stderr).not.toContain("secret-denial-canary");
+    expect(calls.some((u) => u.endsWith("/api/referral/session"))).toBe(false);
   });
 });

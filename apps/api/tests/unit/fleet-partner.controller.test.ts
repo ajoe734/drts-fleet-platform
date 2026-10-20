@@ -165,7 +165,7 @@ async function uploadDocument(
       contentType: "application/pdf",
     },
     `req-upload-${documentType}`,
-    fleetIdentity,
+    { ...fleetIdentity, actorId: "fleet-user-1" },
   );
 
   const fill = [
@@ -183,7 +183,7 @@ async function uploadDocument(
     submissionId,
     uploadUrl.data.objectKey,
     request as IncomingMessage,
-    fleetIdentity,
+    { ...fleetIdentity, actorId: "fleet-user-1" },
   );
 
   return controller.confirmSupplyDocumentUpload(
@@ -202,7 +202,7 @@ async function uploadDocument(
       effectiveUntil: "2027-12-31",
     },
     `req-confirm-${documentType}`,
-    fleetIdentity,
+    { ...fleetIdentity, actorId: "fleet-user-1" },
   );
 }
 
@@ -355,6 +355,7 @@ describe("FleetPartnerController portal routes", () => {
         preferredVehicleSubmissionId: null,
       },
       "req-supply-create-driver",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     const driverSubmissionId = driverCreated.data.submission.submissionId;
 
@@ -375,6 +376,7 @@ describe("FleetPartnerController portal routes", () => {
         preferredVehicleSubmissionId: null,
       },
       "req-supply-update-driver",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     expect(driverUpdated.data.submission.revisionNo).toBe(2);
 
@@ -401,6 +403,7 @@ describe("FleetPartnerController portal routes", () => {
       driverSubmissionId,
       { expectedRevisionNo: 4 },
       "req-supply-submit-driver",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     expect(submittedDriver.data.submission.status).toBe("submitted");
 
@@ -482,6 +485,7 @@ describe("FleetPartnerController portal routes", () => {
         preferredVehicleSubmissionId: null,
       },
       "req-supply-update-driver-after-revision",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     expect(revisedDriver.data.submission).toMatchObject({
       status: "needs_revision",
@@ -494,6 +498,7 @@ describe("FleetPartnerController portal routes", () => {
       driverSubmissionId,
       { expectedRevisionNo: 8 },
       "req-supply-resubmit-driver",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     expect(resubmittedDriver.data.submission.status).toBe("submitted");
 
@@ -556,6 +561,7 @@ describe("FleetPartnerController portal routes", () => {
         color: "yellow",
       },
       "req-supply-create-vehicle",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     const vehicleSubmissionId = vehicleCreated.data.submission.submissionId;
 
@@ -581,6 +587,7 @@ describe("FleetPartnerController portal routes", () => {
         color: "yellow",
       },
       "req-supply-update-vehicle",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     expect(vehicleUpdated.data.submission.revisionNo).toBe(2);
 
@@ -626,6 +633,7 @@ describe("FleetPartnerController portal routes", () => {
       vehicleSubmissionId,
       { expectedRevisionNo: 5 },
       "req-supply-submit-vehicle",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     expect(submittedVehicle.data.submission.status).toBe("submitted");
 
@@ -744,6 +752,37 @@ describe("FleetPartnerController portal routes", () => {
         }),
       ]),
     );
+
+    // A structural match must come from these actual approval receipts, not
+    // from the unrelated default seed vehicle/driver supply pairs.
+    expect(
+      regulatoryRegistryService
+        .listSupplyPairs()
+        .filter(
+          (pair) =>
+            pair.vehicleId === canonicalVehicleId &&
+            pair.driverId === canonicalDriverId,
+        ),
+    ).toEqual([
+      expect.objectContaining({
+        vehicleId: canonicalVehicleId,
+        driverId: canonicalDriverId,
+        etaMinutes: null,
+      }),
+    ]);
+
+    // This original fixture has no actual GPS/destination observation and is
+    // not a completed enterprise qualification flow. A structural null-ETA
+    // pair must not become a dispatch candidate through a fabricated default.
+    expect(
+      regulatoryRegistryService
+        .getEligibleCandidates("standard_taxi")
+        .filter(
+          (candidate) =>
+            candidate.vehicleId === canonicalVehicleId &&
+            candidate.driverId === canonicalDriverId,
+        ),
+    ).toEqual([]);
   });
 
   it("supports document delete and submission withdraw endpoints", async () => {
@@ -764,6 +803,7 @@ describe("FleetPartnerController portal routes", () => {
         preferredVehicleSubmissionId: null,
       },
       "req-supply-create-withdraw",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     const submissionId = created.data.submission.submissionId;
 
@@ -842,6 +882,7 @@ describe("FleetPartnerController portal routes", () => {
       submissionId,
       { expectedRevisionNo: 5 },
       "req-submit-withdraw",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     expect(submitted.data.submission.status).toBe("submitted");
 
@@ -851,6 +892,7 @@ describe("FleetPartnerController portal routes", () => {
       submissionId,
       { expectedRevisionNo: 6 },
       "req-withdraw-submission",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     expect(withdrawn.data.submission.status).toBe("withdrawn");
 
@@ -883,6 +925,7 @@ describe("FleetPartnerController portal routes", () => {
         preferredVehicleSubmissionId: null,
       },
       "req-supply-create-driver-expired",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     const submissionId = created.data.submission.submissionId;
 
@@ -963,6 +1006,7 @@ describe("FleetPartnerController portal routes", () => {
         preferredVehicleSubmissionId: null,
       },
       "req-supply-create-driver-mismatch",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     const submissionId = created.data.submission.submissionId;
 
@@ -1032,6 +1076,7 @@ describe("FleetPartnerController portal routes", () => {
         preferredVehicleSubmissionId: null,
       },
       "req-supply-create-driver-trimmed-key",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     const submissionId = created.data.submission.submissionId;
 
@@ -1098,6 +1143,7 @@ describe("FleetPartnerController portal routes", () => {
         preferredVehicleSubmissionId: null,
       },
       "req-supply-create-driver-invalid-metadata",
+      { ...fleetIdentity, actorId: "fleet-user-1" },
     );
     const submissionId = created.data.submission.submissionId;
 

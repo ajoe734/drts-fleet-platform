@@ -138,19 +138,29 @@ beforeEach(() => {
         const objectKey = `${input.Bucket}/${input.Key}`;
         const existing = objects.get(objectKey);
         if (input.IfNoneMatch === "*" && existing) {
-          throw Object.assign(new Error("At least one of the pre-conditions you specified did not hold."), {
-            name: "PreconditionFailed",
-            $metadata: { httpStatusCode: 412 },
-          });
+          throw Object.assign(
+            new Error(
+              "At least one of the pre-conditions you specified did not hold.",
+            ),
+            {
+              name: "PreconditionFailed",
+              $metadata: { httpStatusCode: 412 },
+            },
+          );
         }
         if (
           input.IfMatch !== undefined &&
           input.IfMatch !== (existing?.ETag ?? null)
         ) {
-          throw Object.assign(new Error("At least one of the pre-conditions you specified did not hold."), {
-            name: "PreconditionFailed",
-            $metadata: { httpStatusCode: 412 },
-          });
+          throw Object.assign(
+            new Error(
+              "At least one of the pre-conditions you specified did not hold.",
+            ),
+            {
+              name: "PreconditionFailed",
+              $metadata: { httpStatusCode: 412 },
+            },
+          );
         }
         const ETag = nextETag();
         objects.set(objectKey, {
@@ -234,7 +244,7 @@ describe("configured durable document path with SDK transport boundary only", ()
       undefined,
       producer,
     );
-    const info = service.createPublicInfoVersion({
+    const info = await service.createPublicInfoVersion({
       title: "Offline durable disclosure",
       callPhone: "0800-000-000",
     });
@@ -438,9 +448,7 @@ describe("configured durable document path with SDK transport boundary only", ()
     });
     expect(lost.created).toBe(false);
     expect(lost.record.sha256).toBe(hash(firstBytes));
-    expect(objects.get(key("report", "race-s3-1"))!.bytes).toEqual(
-      firstBytes,
-    );
+    expect(objects.get(key("report", "race-s3-1"))!.bytes).toEqual(firstBytes);
     // The attempted (failed) PutObject still counted as a transport call,
     // but no NEW object content landed because of it.
     expect(
@@ -457,7 +465,12 @@ describe("configured durable document path with SDK transport boundary only", ()
     // the real transport's own atomic create-if-absent check applies.
     const firstBytes = Buffer.from("%PDF-1.4 baseline writer\n%%EOF");
     const created = await store.putIfUnchanged(
-      { kind: "report", subjectId: "fence-s3-1", mimeType: "application/pdf", bytes: firstBytes },
+      {
+        kind: "report",
+        subjectId: "fence-s3-1",
+        mimeType: "application/pdf",
+        bytes: firstBytes,
+      },
       null,
     );
     expect(created.applied).toBe(true);
@@ -474,7 +487,12 @@ describe("configured durable document path with SDK transport boundary only", ()
       "%PDF-1.4 a stale writer's bytes\n%%EOF",
     );
     const staleAttempt = await store.putIfUnchanged(
-      { kind: "report", subjectId: "fence-s3-1", mimeType: "application/pdf", bytes: staleWriterBytes },
+      {
+        kind: "report",
+        subjectId: "fence-s3-1",
+        mimeType: "application/pdf",
+        bytes: staleWriterBytes,
+      },
       null,
     );
     expect(staleAttempt.applied).toBe(false);
@@ -485,7 +503,12 @@ describe("configured durable document path with SDK transport boundary only", ()
     // baseline succeeds, sending a real IfMatch against that exact ETag.
     const secondBytes = Buffer.from("%PDF-1.4 legitimate republish\n%%EOF");
     const legitimate = await store.putIfUnchanged(
-      { kind: "report", subjectId: "fence-s3-1", mimeType: "application/pdf", bytes: secondBytes },
+      {
+        kind: "report",
+        subjectId: "fence-s3-1",
+        mimeType: "application/pdf",
+        bytes: secondBytes,
+      },
       firstGeneration,
     );
     expect(legitimate.applied).toBe(true);
@@ -494,18 +517,27 @@ describe("configured durable document path with SDK transport boundary only", ()
       (sends.mock.calls.at(-1)![0] as InstanceType<typeof PutObjectCommand>)
         .input.IfMatch,
     ).toBe(firstGeneration);
-    expect(objects.get(key("report", "fence-s3-1"))!.bytes).toEqual(secondBytes);
+    expect(objects.get(key("report", "fence-s3-1"))!.bytes).toEqual(
+      secondBytes,
+    );
 
     // The exact R7/R8 shape: a write whose baseline is now stale (someone
     // else already moved the object past it) must be rejected and must
     // report the CURRENT winner, not silently replace its bytes.
     const lateStaleWrite = await store.putIfUnchanged(
-      { kind: "report", subjectId: "fence-s3-1", mimeType: "application/pdf", bytes: staleWriterBytes },
+      {
+        kind: "report",
+        subjectId: "fence-s3-1",
+        mimeType: "application/pdf",
+        bytes: staleWriterBytes,
+      },
       firstGeneration,
     );
     expect(lateStaleWrite.applied).toBe(false);
     expect(lateStaleWrite.record!.sha256).toBe(hash(secondBytes));
-    expect(objects.get(key("report", "fence-s3-1"))!.bytes).toEqual(secondBytes);
+    expect(objects.get(key("report", "fence-s3-1"))!.bytes).toEqual(
+      secondBytes,
+    );
   });
 
   it("rejects oversize uploads before any transport and fails configured-module reads closed when unprovisioned", async () => {

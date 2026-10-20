@@ -57,6 +57,23 @@ export class FleetPartnerRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async findActiveFleetPartnerById(
+    fleetPartnerId: string,
+  ): Promise<FleetPartnerRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_fleet_partners
+       WHERE fleet_partner_id = $1 AND active = true`,
+      [fleetPartnerId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<FleetPartnerRecord>(
+          result.rows[0].record,
+          "admin.phase1_fleet_partners",
+        )
+      : null;
+  }
+
   /** An absent or ambiguous explicit mapping cannot identify a receipt issuer. */
   async findReceiptOperatorName(operatorId: string): Promise<string | null> {
     const partners = await this.findReceiptOperatorFleets(operatorId);

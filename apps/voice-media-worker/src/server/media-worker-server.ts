@@ -1,3 +1,5 @@
+import type { RecordingContinuation } from "../recording/recording-continuation";
+import type { VoiceRecordingAdmission } from "@drts/contracts";
 import {
   createServer,
   type IncomingMessage,
@@ -46,6 +48,7 @@ export interface MediaWorkerServerConfig {
   drainTimeoutMs?: number | undefined;
   serviceVersion?: string | undefined;
   recordingAdapter?: MediaRecordingAdapter | undefined;
+  recordingContinuation?: RecordingContinuation | undefined;
   /** Shared secret callers must present via the `x-drts-internal-key` header
    * to reach `/drain`, `/sessions`, `/recording/finalize`, or open a
    * WebSocket session. Defaults to `VOICE_MEDIA_INTERNAL_KEY`. */
@@ -131,6 +134,7 @@ export class MediaWorkerServer extends EventEmitter {
   private totalAdmitted = 0;
   private isRunning = false;
   private recordingAdapter?: MediaRecordingAdapter | undefined;
+  private readonly recordingContinuation?: RecordingContinuation | undefined;
   private readonly callAuthorityVerifier:
     | VoiceCallAuthorityVerifier
     | undefined;
@@ -142,6 +146,7 @@ export class MediaWorkerServer extends EventEmitter {
   constructor(config?: MediaWorkerServerConfig) {
     super();
     this.recordingAdapter = config?.recordingAdapter;
+    this.recordingContinuation = config?.recordingContinuation;
     this.callAuthorityVerifier = config?.callAuthorityVerifier;
     this.sessionComposer = config?.sessionComposer;
     this.sessionBindingResolver = config?.sessionBindingResolver;
@@ -228,9 +233,9 @@ export class MediaWorkerServer extends EventEmitter {
     };
 
     this.server = createServer((req, res) => this.handleHttpRequest(req, res));
-    this.server.on("upgrade", (req: IncomingMessage, socket: Duplex) =>
-      this.handleUpgrade(req, socket),
-    );
+    this.server.on("upgrade", (req: IncomingMessage, socket: Duplex) => {
+      void this.handleUpgrade(req, socket).catch(() => socket.destroy());
+    });
   }
 
   get port(): number {
@@ -456,10 +461,7 @@ export class MediaWorkerServer extends EventEmitter {
     // keeps running harmlessly in the background -- never awaited again,
     // never allowed to mutate anything after this point.
     const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(),
-      this.sessionGrantTtlMs,
-    );
+    const timer = setTimeout(() => controller.abort(), this.sessionGrantTtlMs);
     let onAbort: () => void = () => {};
     try {
       return await new Promise<VoiceSessionBinding | undefined>(
@@ -827,11 +829,42 @@ export class MediaWorkerServer extends EventEmitter {
               if (
                 binding &&
                 claims.scope &&
-                binding.resourceScopeId !== claims.scope.brandId
+                (binding.brandId !== claims.scope.brandId ||
+                  binding.callId !== claims.scope.callId)
               ) {
                 throw new Error(
-                  `resolved VoiceSessionBinding.resourceScopeId '${binding.resourceScopeId}' does not match the authority-admitted scope '${claims.scope.brandId}'`,
+                  `resolved VoiceSessionBinding brand/call '${binding.brandId}/${binding.callId}' does not match the authority-admitted recording context '${claims.scope.brandId}/${claims.scope.callId}'`,
                 );
+              }
+              if (this.recordingContinuation && claims.scope) {
+                const issued = this.sessionAuthority.getRecordingAdmission(
+                  claims.sessionId,
+                );
+                if (!issued || issued.state !== "pending")
+                  throw new Error(
+                    "voice_recording_pending_admission_unavailable",
+                  );
+                await this.recordingContinuation.recordAdmission(
+                  claims.sessionId,
+                  claims.scope,
+                  {
+                    admissionId: issued.admissionId,
+                    principalId: issued.principalId,
+                    epoch: issued.epoch,
+                  },
+                  "admission",
+                );
+                const current = this.sessionAuthority.getRecordingAdmission(
+                  claims.sessionId,
+                );
+                if (
+                  !current ||
+                  current.state !== "pending" ||
+                  current.admissionId !== issued.admissionId
+                )
+                  throw new Error(
+                    "voice_recording_admission_expired_or_superseded",
+                  );
               }
             } catch (err) {
               // R12 (Codex reopen, canonical 2026-10-03T17:41:28Z): only
@@ -942,7 +975,7 @@ export class MediaWorkerServer extends EventEmitter {
       this.readBoundedBody(req, this.config.maxHttpBodyBytes)
         .then(async (body) => {
           try {
-            if (!this.recordingAdapter) {
+            if (!this.recordingAdapter && !this.recordingContinuation) {
               res.statusCode = 503;
               res.end(
                 JSON.stringify({
@@ -1024,6 +1057,39 @@ export class MediaWorkerServer extends EventEmitter {
               return;
             }
 
+            let durableAdmission: VoiceRecordingAdmission | undefined;
+            if (this.recordingContinuation && claims.scope) {
+              try {
+                durableAdmission =
+                  await this.recordingContinuation.readAttachedAdmission(
+                    sessionId,
+                    claims.scope,
+                  );
+                if (
+                  durableAdmission.principalId !== claims.principalId ||
+                  durableAdmission.epoch !== claims.epoch
+                )
+                  throw new Error("voice_recording_authority_mismatch");
+                this.sessionAuthority.restoreAttachedRecordingAuthority(
+                  sessionId,
+                  {
+                    ...durableAdmission,
+                    scope: claims.scope,
+                  },
+                );
+              } catch {
+                res.statusCode = 403;
+                res.end(
+                  JSON.stringify({
+                    error:
+                      "No canonical consumed recording authority for this session id",
+                    code: "VOICE_MEDIA_SESSION_SCOPE_UNKNOWN",
+                  }),
+                );
+                return;
+              }
+            }
+
             // The authoritative scope bound at POST /sessions time -- never
             // the caller's own `scope`/`closure`/`credential` claims in this
             // request body. A caller cannot finalize a recording for a
@@ -1072,10 +1138,16 @@ export class MediaWorkerServer extends EventEmitter {
             const segments = Array.isArray(parsed.segments)
               ? parsed.segments
               : [];
-            const result = await this.recordingAdapter.sealFinalRecording({
-              scope,
-              segments,
-            });
+            const result = this.recordingContinuation
+              ? await this.recordingContinuation.finalize(
+                  sessionId,
+                  scope,
+                  durableAdmission,
+                )
+              : await this.recordingAdapter!.sealFinalRecording({
+                  scope,
+                  segments,
+                });
             // Completed, not released: an authorized retry (lost response,
             // retried request) for this exact session/epoch must still
             // resolve this scope and reach the adapter's own reentrant
@@ -1110,7 +1182,10 @@ export class MediaWorkerServer extends EventEmitter {
     res.end(JSON.stringify({ error: "Not Found", path: pathname }));
   }
 
-  private handleUpgrade(req: IncomingMessage, socket: Duplex): void {
+  private async handleUpgrade(
+    req: IncomingMessage,
+    socket: Duplex,
+  ): Promise<void> {
     try {
       this.authenticateCaller(req.headers);
     } catch (err) {
@@ -1201,6 +1276,51 @@ export class MediaWorkerServer extends EventEmitter {
       return;
     }
 
+    if (this.recordingContinuation) {
+      const consumed = this.sessionAuthority.getRecordingAdmission(sessionId);
+      if (consumed?.scope) {
+        try {
+          await this.recordingContinuation.recordAdmission(
+            sessionId,
+            consumed.scope,
+            {
+              admissionId: consumed.admissionId,
+              principalId: consumed.principalId,
+              epoch: consumed.epoch,
+            },
+            "attachment",
+          );
+          const current =
+            this.sessionAuthority.getRecordingAdmission(sessionId);
+          if (
+            socket.destroyed ||
+            this.activeSessions.get(sessionId) !== session ||
+            !current ||
+            current.state !== "attached" ||
+            current.admissionId !== consumed.admissionId
+          )
+            throw new Error("voice_recording_attachment_superseded");
+        } catch (error) {
+          // Clean up only this exact consumed attempt; a newer admission owns
+          // a different reservation/identity and must survive an old ACK failure.
+          if (
+            this.activeSessions.get(sessionId) === session &&
+            this.sessionAuthority.getRecordingAdmission(sessionId)
+              ?.admissionId === consumed.admissionId
+          ) {
+            this.activeSessions.delete(sessionId);
+            this.sessionAuthority.release(sessionId);
+          }
+          if (!socket.destroyed)
+            socket.write(
+              `HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\n${error instanceof Error ? error.message : String(error)}\r\n`,
+            );
+          socket.destroy();
+          return;
+        }
+      }
+    }
+
     const channel = completeWebSocketHandshake(secKey, socket, {
       timeoutMs: this.config.wsTimeoutMs,
       maxPayloadBytes: this.config.maxWsFrameBytes,
@@ -1232,7 +1352,12 @@ export class MediaWorkerServer extends EventEmitter {
     // reporting not-ready) -- that must close the channel, never crash the
     // worker or leave the socket silently unattended.
     try {
-      this.sessionComposer?.attach(sessionId, channel, session.binding);
+      this.sessionComposer?.attach(
+        sessionId,
+        channel,
+        session.binding,
+        this.sessionAuthority.getAuthoritativeScope(sessionId),
+      );
     } catch (err) {
       // The channel's own "close" listener (registered above) performs the
       // actual activeSessions/session.closed cleanup once this reaches the

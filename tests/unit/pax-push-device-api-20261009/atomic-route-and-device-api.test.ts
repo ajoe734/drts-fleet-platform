@@ -50,6 +50,14 @@ function database(
   } = {},
 ) {
   const statements: Array<{ sql: string; values?: unknown[] }> = [];
+  let bookingReceipt:
+    | {
+        actor_id: unknown;
+        payload_hash: unknown;
+        status: string;
+        response_body: unknown;
+      }
+    | undefined;
   const client = {
     query: vi.fn(async (sql: string, values?: unknown[]) => {
       statements.push({ sql, ...(values ? { values } : {}) });
@@ -57,6 +65,26 @@ function database(
         throw Object.assign(new Error("simulated lost COMMIT reply"), {
           code: "08006",
         });
+      if (sql.includes("INSERT INTO ops.idempotency_records")) {
+        bookingReceipt = {
+          actor_id: values?.[2],
+          payload_hash: values?.[3],
+          status: "processing",
+          response_body: null,
+        };
+        return { rows: [], rowCount: 1 };
+      }
+      if (sql.includes("FROM ops.idempotency_records"))
+        return { rows: bookingReceipt ? [bookingReceipt] : [] };
+      if (sql.includes("UPDATE ops.idempotency_records")) {
+        if (bookingReceipt)
+          bookingReceipt = {
+            ...bookingReceipt,
+            status: "completed",
+            response_body: JSON.parse(values?.[2] as string),
+          };
+        return { rows: [], rowCount: 1 };
+      }
       if (sql.includes("SELECT status FROM passenger.accounts"))
         return { rows: [{ status: "active" }] };
       if (sql.includes("SELECT payment_method_id FROM passenger.psp_tokens"))
@@ -88,7 +116,7 @@ function database(
   const db = {
     isEnabled: () => true,
     connect: vi.fn(async () => client),
-    query: vi.fn(),
+    query: vi.fn(async () => ({ rows: [] })),
   };
   return {
     client: client as unknown as PoolClient,

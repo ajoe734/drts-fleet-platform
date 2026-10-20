@@ -31,6 +31,8 @@ function createService(options?: {
       }
     : undefined;
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: vi.fn(() => undefined),
+    assertCurrentMatchingSuppressionClear: vi.fn(() => undefined),
     getEligibleCandidates: vi.fn(() => [
       {
         vehicleId: "vehicle-001",

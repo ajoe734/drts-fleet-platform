@@ -1,6 +1,10 @@
 export type Locale = "en" | "zh";
 
 const en = {
+  "platformNotice.section": "Platform notices",
+  "platformNotice.read": "Read",
+  "platformNotice.markRead": "Mark as read",
+  "platformNotice.readNotAcknowledged": "Read was not acknowledged",
   // ── App ──
   "app.name": "DRTS Fleet",
   "app.sub": "Ops Console",
@@ -24,7 +28,8 @@ const en = {
   "opsShell.health.degraded": "API degraded",
   "opsShell.health.down": "API down",
   "opsShell.health.unknown": "API unknown",
-  "opsShell.health.lastChecked": "checked",
+  "opsShell.health.lastChecked": "Source time",
+  "opsShell.health.sourceTimeUnknown": "unavailable",
   "opsShell.locale.ariaZh": "Switch to Chinese",
   "opsShell.locale.ariaEn": "Switch to English",
   "opsShell.locale.zh": "中文",
@@ -4652,6 +4657,10 @@ const en = {
 };
 
 const zh: Record<keyof typeof en, string> = {
+  "platformNotice.section": "平台公告",
+  "platformNotice.read": "已讀",
+  "platformNotice.markRead": "標示已讀",
+  "platformNotice.readNotAcknowledged": "讀取未獲確認",
   // ── App ──
   "app.name": "DRTS 車隊",
   "app.sub": "營運控制台",
@@ -4675,7 +4684,8 @@ const zh: Record<keyof typeof en, string> = {
   "opsShell.health.degraded": "API 降級",
   "opsShell.health.down": "API 失聯",
   "opsShell.health.unknown": "API 未知",
-  "opsShell.health.lastChecked": "最後檢查",
+  "opsShell.health.lastChecked": "來源時間",
+  "opsShell.health.sourceTimeUnknown": "未知",
   "opsShell.locale.ariaZh": "切換為中文",
   "opsShell.locale.ariaEn": "切換為英文",
   "opsShell.locale.zh": "中文",

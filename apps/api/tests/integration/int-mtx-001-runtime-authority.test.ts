@@ -355,16 +355,18 @@ describe("MTX-CORE-001 runtime authority integration", () => {
       },
     });
 
-    expect(() =>
-      multiTaxiService.queueCheckIn({
-        vehicleId: "veh-demo-001",
-        siteId: "physical-rank-demo",
-        queueMode: "physical_rank",
-      }),
-    ).toThrowError(ApiRequestError);
+    await expect(
+      Promise.resolve().then(() =>
+        multiTaxiService.queueCheckIn({
+          vehicleId: "veh-demo-001",
+          siteId: "physical-rank-demo",
+          queueMode: "physical_rank",
+        }),
+      ),
+    ).rejects.toThrowError(ApiRequestError);
 
     try {
-      multiTaxiService.queueCheckIn({
+      await multiTaxiService.queueCheckIn({
         vehicleId: "veh-demo-001",
         siteId: "physical-rank-demo",
         queueMode: "physical_rank",

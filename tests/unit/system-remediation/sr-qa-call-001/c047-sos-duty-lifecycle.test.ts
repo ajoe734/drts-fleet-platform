@@ -10,7 +10,9 @@ import type {
 import { DriverSosService } from "../../../../apps/api/src/modules/driver-sos/driver-sos.service";
 import { IncidentService } from "../../../../apps/api/src/modules/incident/incident.service";
 
-function buildDriverIdentity(driverId = "drv-qa-c047-01"): BootstrapRequestIdentity {
+function buildDriverIdentity(
+  driverId = "drv-qa-c047-01",
+): BootstrapRequestIdentity {
   return {
     authMode: "bootstrap_headers",
     actorType: "driver_user",
@@ -24,17 +26,17 @@ function buildDriverIdentity(driverId = "drv-qa-c047-01"): BootstrapRequestIdent
   };
 }
 
-function buildOpsIdentity(): BootstrapRequestIdentity {
+function buildOpsIdentity(actorId = "ops-duty-01"): BootstrapRequestIdentity {
   return {
     authMode: "bootstrap_headers",
     actorType: "ops_user",
-    actorId: "ops-duty-01",
+    actorId,
     realm: "ops",
     tenantId: null,
     roleFamilies: ["ops"],
     roles: ["ops_dispatcher"],
     scopes: ["incident:read", "incident:write"],
-    requestId: "req-ops-duty-01",
+    requestId: `req-${actorId}`,
   };
 }
 
@@ -47,14 +49,19 @@ function createMockStorage(): DriverSosAttachmentStorageProvider {
       method: "PUT",
       headers: { "Content-Type": "image/jpeg" },
     }),
-    inspectUploadedObject: vi.fn().mockImplementation((objectKey: string): Promise<DriverSosUploadedObjectMetadata> => {
-      return Promise.resolve({
-        objectKey,
-        contentType: "image/jpeg",
-        fileSize: 1024 * 150, // 150 KB
-        checksumSha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      });
-    }),
+    inspectUploadedObject: vi
+      .fn()
+      .mockImplementation(
+        (objectKey: string): Promise<DriverSosUploadedObjectMetadata> => {
+          return Promise.resolve({
+            objectKey,
+            contentType: "image/jpeg",
+            fileSize: 1024 * 150, // 150 KB
+            checksumSha256:
+              "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          });
+        },
+      ),
   };
 }
 
@@ -86,7 +93,8 @@ describe("C047: SOS Duty Lifecycle, Deduplication, Alert Receipt & Latency Metri
           orderId: "ord-sos-active-01",
           eventType: "traffic_accident",
           severity: "major",
-          description: "Collision at intersection with private vehicle, driver and passenger conscious",
+          description:
+            "Collision at intersection with private vehicle, driver and passenger conscious",
           location: {
             lat: 25.033,
             lng: 121.5654,
@@ -154,7 +162,9 @@ describe("C047: SOS Duty Lifecycle, Deduplication, Alert Receipt & Latency Metri
       expect(replay.receipt.duplicate).toBe(true);
       expect(replay.event.sosEventId).toBe(first.event.sosEventId);
       expect(replay.receipt.incidentId).toBe(first.receipt.incidentId);
-      expect(replay.event.description).toBe("Unruly passenger threatening driver");
+      expect(replay.event.description).toBe(
+        "Unruly passenger threatening driver",
+      );
       expect(replay.event.eventType).toBe("security_incident");
     });
 
@@ -168,7 +178,8 @@ describe("C047: SOS Duty Lifecycle, Deduplication, Alert Receipt & Latency Metri
           clientEventId: "c3d4e5f6-a7b8-4c9d-8e1f-2a3b4c5d6e7f",
           eventType: "passenger_medical",
           severity: "major",
-          description: "Passenger experiencing acute shortness of breath in tunnel with no cell signal",
+          description:
+            "Passenger experiencing acute shortness of breath in tunnel with no cell signal",
           originalTriggeredAt: pastTriggerTime,
           offlineAtTrigger: true,
         },
@@ -181,7 +192,9 @@ describe("C047: SOS Duty Lifecycle, Deduplication, Alert Receipt & Latency Metri
       expect(offlineResult.event.serverReceivedAt).toBeDefined();
 
       const triggeredMs = new Date(pastTriggerTime).getTime();
-      const serverReceivedMs = new Date(offlineResult.event.serverReceivedAt!).getTime();
+      const serverReceivedMs = new Date(
+        offlineResult.event.serverReceivedAt!,
+      ).getTime();
       expect(serverReceivedMs).toBeGreaterThanOrEqual(triggeredMs);
     });
 
@@ -230,7 +243,10 @@ describe("C047: SOS Duty Lifecycle, Deduplication, Alert Receipt & Latency Metri
       expect(dupRender.observations[0]?.duplicate).toBe(true);
 
       // Query latency metrics summary
-      const summary = await driverSosService.getOpsAlertLatencySummary({}, opsIdentity);
+      const summary = await driverSosService.getOpsAlertLatencySummary(
+        {},
+        opsIdentity,
+      );
       expect(summary.sampleCount).toBeGreaterThanOrEqual(1);
       expect(summary.targetLatencyMs).toBe(5000);
       expect(summary.withinTargetCount).toBeGreaterThanOrEqual(1);
@@ -281,7 +297,9 @@ describe("C047: SOS Duty Lifecycle, Deduplication, Alert Receipt & Latency Metri
         );
         expect(confirmResult.state).toBe("confirmed");
         if (confirmResult.state === "confirmed") {
-          expect(confirmResult.attachment.objectKey).toBe(intentResult.objectKey);
+          expect(confirmResult.attachment.objectKey).toBe(
+            intentResult.objectKey,
+          );
           expect(confirmResult.attachment.checksumSha256).toBe(
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
           );
@@ -294,6 +312,205 @@ describe("C047: SOS Duty Lifecycle, Deduplication, Alert Receipt & Latency Metri
           expect(list).toHaveLength(1);
           expect(list[0]?.originalFileName).toBe("scene-accident-front.jpg");
         }
+      }
+    });
+  });
+
+  describe("SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015: canonical first-ack-wins duty acknowledgment and honest readback", () => {
+    async function submitAndAlert(
+      driverSosService: ReturnType<typeof setupService>["driverSosService"],
+    ) {
+      const driverIdentity = buildDriverIdentity("drv-duty-ack-01");
+      const sos = await driverSosService.submitSosEvent(
+        {
+          clientEventId: "11112222-3333-4444-8555-666677778888",
+          eventType: "traffic_accident",
+          severity: "major",
+          originalTriggeredAt: new Date().toISOString(),
+          offlineAtTrigger: false,
+        },
+        driverIdentity,
+      );
+      return { driverIdentity, sos };
+    }
+
+    it("acknowledges duty, hands over the canonical Incident assignment, and records exactly one duty_acknowledged timeline entry", async () => {
+      const { driverSosService, incidentService } = setupService();
+      const { sos } = await submitAndAlert(driverSosService);
+      const opsIdentity = buildOpsIdentity("ops-first-01");
+
+      const result = await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        opsIdentity,
+        "req-duty-ack-01",
+      );
+
+      expect(result.wonAcknowledgement).toBe(true);
+      expect(result.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-first-01",
+      );
+      expect(result.event.status).toBe("acknowledged");
+      expect(result.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-first-01",
+      );
+      expect(
+        result.timeline.filter(
+          (entry) => entry.eventType === "duty_acknowledged",
+        ),
+      ).toHaveLength(1);
+
+      // Not merely a local Incident.assignedTo projection: the handover is
+      // the same canonical Incident record used by the rest of the system.
+      const incident = incidentService.getIncident(sos.receipt.incidentId);
+      expect(incident.assignedTo).toBe("ops-first-01");
+    });
+
+    it("is idempotent for repeated acknowledgment by the same Ops actor (no duplicate timeline)", async () => {
+      const { driverSosService } = setupService();
+      const { sos } = await submitAndAlert(driverSosService);
+      const opsIdentity = buildOpsIdentity("ops-repeat-01");
+
+      await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        opsIdentity,
+      );
+      const second = await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        opsIdentity,
+      );
+
+      expect(second.wonAcknowledgement).toBe(true);
+      expect(second.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-repeat-01",
+      );
+      expect(
+        second.timeline.filter(
+          (entry) => entry.eventType === "duty_acknowledged",
+        ),
+      ).toHaveLength(1);
+    });
+
+    it("lets a competing Ops actor lose the race and receive the actual current owner instead of an error", async () => {
+      const { driverSosService } = setupService();
+      const { sos } = await submitAndAlert(driverSosService);
+      const firstActor = buildOpsIdentity("ops-winner-01");
+      const secondActor = buildOpsIdentity("ops-loser-01");
+
+      const first = await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        firstActor,
+      );
+      const second = await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        secondActor,
+      );
+
+      expect(first.wonAcknowledgement).toBe(true);
+      expect(second.wonAcknowledgement).toBe(false);
+      expect(second.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-winner-01",
+      );
+      expect(second.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-winner-01",
+      );
+      // The losing call must not fabricate a second duty_acknowledged entry.
+      expect(
+        second.timeline.filter(
+          (entry) => entry.eventType === "duty_acknowledged",
+        ),
+      ).toHaveLength(1);
+    });
+
+    it("exposes the canonical dutyAcknowledgement/status plus timeline to both Ops and the driver on authoritative readback", async () => {
+      const { driverSosService } = setupService();
+      const { sos, driverIdentity } = await submitAndAlert(driverSosService);
+      const opsIdentity = buildOpsIdentity("ops-readback-01");
+
+      // Before acknowledgment: honestly pending, not pre-claimed.
+      const before = await driverSosService.getOwnEventForDriver(
+        sos.event.sosEventId,
+        driverIdentity,
+      );
+      expect(before.event.dutyAcknowledgement.acknowledgedByActorId).toBeNull();
+      expect(before.event.status).not.toBe("acknowledged");
+
+      await driverSosService.acknowledgeDuty(
+        sos.event.sosEventId,
+        {},
+        opsIdentity,
+      );
+
+      const opsReadback = await driverSosService.getEventForOps(
+        sos.event.sosEventId,
+        opsIdentity,
+      );
+      expect(opsReadback.event.status).toBe("acknowledged");
+      expect(opsReadback.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-readback-01",
+      );
+
+      const driverReadback = await driverSosService.getOwnEventForDriver(
+        sos.event.sosEventId,
+        driverIdentity,
+      );
+      expect(
+        driverReadback.event.dutyAcknowledgement.acknowledgedByActorId,
+      ).toBe("ops-readback-01");
+      expect(
+        driverReadback.timeline.filter(
+          (entry) => entry.eventType === "duty_acknowledged",
+        ),
+      ).toHaveLength(1);
+
+      // Ops consoles only hold the Incident id; the by-incident lookup must
+      // resolve to the same canonical SOS event and acknowledgment.
+      const byIncident = await driverSosService.getEventByIncidentIdForOps(
+        sos.receipt.incidentId,
+        opsIdentity,
+      );
+      expect(byIncident.event.sosEventId).toBe(sos.event.sosEventId);
+      expect(byIncident.event.dutyAcknowledgement.acknowledgedByActorId).toBe(
+        "ops-readback-01",
+      );
+    });
+
+    it("rejects duty acknowledgment from a non-ops realm with 403", async () => {
+      const { driverSosService } = setupService();
+      const { sos, driverIdentity } = await submitAndAlert(driverSosService);
+
+      try {
+        await driverSosService.acknowledgeDuty(
+          sos.event.sosEventId,
+          {},
+          driverIdentity,
+        );
+        throw new Error("expected acknowledgeDuty to reject a driver identity");
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(ApiRequestError);
+        expect(err.getStatus()).toBe(403);
+      }
+    });
+
+    it("rejects duty acknowledgment and ops readback for an unknown sosEventId with 404", async () => {
+      const { driverSosService } = setupService();
+      const opsIdentity = buildOpsIdentity();
+
+      try {
+        await driverSosService.acknowledgeDuty(
+          "sos-event-does-not-exist",
+          {},
+          opsIdentity,
+        );
+        throw new Error("expected acknowledgeDuty to reject an unknown event");
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(ApiRequestError);
+        expect(err.getStatus()).toBe(404);
+        expect(err.code).toBe("DRIVER_SOS_EVENT_NOT_FOUND");
       }
     });
   });

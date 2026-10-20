@@ -6,6 +6,7 @@ import {
 import type {
   AssignDispatchCommand,
   BookingRecord,
+  PassengerRideContactOption,
   CancelOwnedOrderCommand,
   CreateTenantBookingCommand,
   CrossAppResourceLink,
@@ -47,6 +48,12 @@ export type EnterpriseDispatchBookingSubmitResult = {
   status: string;
 };
 
+export type TenantBookingDriverContactOption = PassengerRideContactOption & {
+  bookingId: string;
+  orderId: string;
+  assignmentId: string;
+};
+
 export class EnterpriseDispatchTenantClient {
   constructor(private readonly client: ApiClient) {}
 
@@ -68,6 +75,14 @@ export class EnterpriseDispatchTenantClient {
 
   async getBooking(bookingId: string): Promise<BookingRecord> {
     return this.client.getTenantBooking(bookingId) as Promise<BookingRecord>;
+  }
+
+  async getDriverContact(
+    bookingId: string,
+  ): Promise<TenantBookingDriverContactOption> {
+    return this.client.get<TenantBookingDriverContactOption>(
+      `/api/tenant/bookings/${encodeURIComponent(bookingId)}/driver-contact`,
+    );
   }
 
   async getDashboardSummary(): Promise<TenantDashboardSummary> {

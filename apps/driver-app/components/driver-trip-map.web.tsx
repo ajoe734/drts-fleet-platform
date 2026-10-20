@@ -1,5 +1,13 @@
 import React from "react";
-import { Alert, Linking, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  Alert,
+  Linking,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import type { DriverTaskRecord, OwnedOrderRecord } from "@drts/contracts";
 
 import { driverCanvasTheme } from "@/components/canvas-primitives";
@@ -157,6 +165,7 @@ export default function DriverTripMap({
 }: DriverTripMapProps) {
   const model = buildDriverTripNavigationModel({ task, order });
   const fixState = getDriverLocationFixState({
+    task,
     location: driverLocation,
     now,
   });
@@ -265,7 +274,10 @@ export default function DriverTripMap({
         <Text style={styles.noticeBody}>{fixState.detail}</Text>
         {fixState.coordinateLabel ? (
           <Text style={styles.noticeMeta}>
-            Driver coordinate {fixState.coordinateLabel}
+            {fixState.state === "stopped"
+              ? "Last driver coordinate"
+              : "Driver coordinate"}{" "}
+            {fixState.coordinateLabel}
           </Text>
         ) : null}
       </View>

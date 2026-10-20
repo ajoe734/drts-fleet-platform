@@ -82,6 +82,9 @@ import {
   type MultiTaxiPaymentExceptionRecord,
   type PaymentRecoveryState,
   type PersistBillingSettlementChanges,
+  type DriverStatementTargetProposal,
+  type DriverStatementTargetState,
+  type DriverStatementTargetPersistence,
 } from "./billing-settlement.repository";
 import {
   InjectPaymentRecoveryPort,
@@ -91,6 +94,7 @@ import {
   UnavailablePaymentRecoveryPort,
 } from "./payment-recovery.port";
 import { RemittanceProofService } from "./remittance-proof.service";
+import { renderBillingDocumentPdf } from "./billing-document-pdf.renderer";
 import {
   DEFAULT_CONTROLLED_DOWNLOAD_HOST,
   DEFAULT_CONTROLLED_DOWNLOAD_KEY_ID,
@@ -527,29 +531,10 @@ function createInitialReferralRevenueShareRules(): ReferralRevenueShareRule[] {
   return isStrictAuthEnvironment() ? [] : cloneReferralRevenueShareRuleSeed();
 }
 
-// ── Tenant invoice PDF rendering (SR-INVOICE-001) ───────────────────────────
-// A dependency-free, hand-rolled minimal PDF writer. `pdfkit` resolves from
-// this workspace's node_modules but is absent from pnpm-lock.yaml -- a clean
-// `pnpm install` in CI would not produce it, so depending on it here would be
-// a phantom dependency that only happens to work in this checkout. Adding a
-// real dependency is also out of this task's write_scopes (`package.json` /
-// the lockfile belong to SR-DEPS-001). The tradeoff is base-14 Helvetica only
-// supports Latin-1: any non-ASCII byte in tenant-supplied text (a CJK
-// invoice title, say) is rendered as `?` rather than dropped or corrupting
-// the byte stream -- every order id, amount, date and channel key on the
-// statement itself is ASCII, so the audited line items are unaffected.
-
-const TENANT_INVOICE_PDF_LINES_PER_PAGE = 48;
-
-function toPdfAsciiText(value?: string | null): string {
-  return String(value ?? "").replace(/[^\x20-\x7e]/g, "?");
-}
-
-function escapePdfLiteralText(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
+// Finance document rows preserve the producer's original Unicode text. The
+// shared renderer embeds the already packaged CJK font and wraps complete rows.
+function toPdfText(value?: string | null): string {
+  return String(value ?? "");
 }
 
 function formatMoneyForPdf(amount: MoneyAmount): string {
@@ -558,81 +543,6 @@ function formatMoneyForPdf(amount: MoneyAmount): string {
   const whole = Math.floor(absMinor / 100);
   const cents = String(absMinor % 100).padStart(2, "0");
   return `${sign}${amount.currency} ${whole}.${cents}`;
-}
-
-function chunkPdfLines(lines: string[], size: number): string[][] {
-  const chunks: string[][] = [];
-  for (let index = 0; index < lines.length; index += size) {
-    chunks.push(lines.slice(index, index + size));
-  }
-  return chunks.length > 0 ? chunks : [[]];
-}
-
-function buildPdfPageContentStream(lines: string[]): string {
-  const operators: string[] = ["BT", "/F1 10 Tf", "40 760 Td"];
-  lines.forEach((line, index) => {
-    if (index > 0) {
-      operators.push("0 -14 Td");
-    }
-    operators.push(`(${escapePdfLiteralText(toPdfAsciiText(line))}) Tj`);
-  });
-  operators.push("ET");
-  return operators.join("\n");
-}
-
-/**
- * Builds a minimal, valid, byte-real PDF (1.4, uncompressed, one Type1
- * Helvetica text object per page) out of plain text rows. It is real bytes a
- * PDF reader can open and a text-extraction tool can parse back into these
- * same rows -- not a fixture standing in for a renderer.
- */
-function buildMinimalPdf(lines: string[]): Buffer {
-  const pages = chunkPdfLines(lines, TENANT_INVOICE_PDF_LINES_PER_PAGE);
-  const pageCount = pages.length;
-  const fontId = 3 + pageCount * 2;
-  const totalObjects = fontId;
-  const objectBodies: string[] = new Array(totalObjects + 1).fill("");
-  const kids = Array.from(
-    { length: pageCount },
-    (_, index) => `${3 + index * 2} 0 R`,
-  ).join(" ");
-
-  objectBodies[1] = `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`;
-  objectBodies[2] = `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pageCount} >>\nendobj\n`;
-
-  pages.forEach((pageLines, index) => {
-    const pageId = 3 + index * 2;
-    const contentId = 4 + index * 2;
-    const content = buildPdfPageContentStream(pageLines);
-    const contentByteLength = Buffer.byteLength(content, "latin1");
-    objectBodies[pageId] =
-      `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> /MediaBox [0 0 612 792] /Contents ${contentId} 0 R >>\nendobj\n`;
-    objectBodies[contentId] =
-      `${contentId} 0 obj\n<< /Length ${contentByteLength} >>\nstream\n${content}\nendstream\nendobj\n`;
-  });
-
-  objectBodies[fontId] =
-    `${fontId} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`;
-
-  const header = "%PDF-1.4\n";
-  const offsets: number[] = new Array(totalObjects + 1).fill(0);
-  let offset = Buffer.byteLength(header, "latin1");
-  let body = "";
-  for (let id = 1; id <= totalObjects; id += 1) {
-    offsets[id] = offset;
-    const objectBody = objectBodies[id]!;
-    body += objectBody;
-    offset += Buffer.byteLength(objectBody, "latin1");
-  }
-
-  let xref = `xref\n0 ${totalObjects + 1}\n0000000000 65535 f \n`;
-  const xrefOffset = offset;
-  for (let id = 1; id <= totalObjects; id += 1) {
-    xref += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
-  }
-  const trailer = `trailer\n<< /Size ${totalObjects + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
-
-  return Buffer.from(header + body + xref + trailer, "latin1");
 }
 
 function buildTenantInvoicePdfRows(input: {
@@ -647,12 +557,12 @@ function buildTenantInvoicePdfRows(input: {
 }): string[] {
   return [
     `Tenant Invoice ${input.invoiceId}`,
-    `Bill To: ${toPdfAsciiText(input.billingProfile.invoiceTitle)} (${input.tenantId})`,
+    `Bill To: ${toPdfText(input.billingProfile.invoiceTitle)} (${input.tenantId})`,
     ...(input.billingProfile.taxId
-      ? [`Tax ID: ${toPdfAsciiText(input.billingProfile.taxId)}`]
+      ? [`Tax ID: ${toPdfText(input.billingProfile.taxId)}`]
       : []),
     ...(input.billingProfile.address
-      ? [`Address: ${toPdfAsciiText(input.billingProfile.address)}`]
+      ? [`Address: ${toPdfText(input.billingProfile.address)}`]
       : []),
     `Billing Period: ${input.periodStart} to ${input.periodEnd}`,
     `Generated At: ${input.generatedAt}`,
@@ -661,7 +571,7 @@ function buildTenantInvoicePdfRows(input: {
     "----------------------------------------------------------------",
     ...input.lines.map(
       (line) =>
-        `${line.orderId} | ${toPdfAsciiText(line.description)} | ${
+        `${line.orderId} | ${toPdfText(line.description)} | ${
           line.channelKey ?? "-"
         } | ${formatMoneyForPdf(line.amount)}`,
     ),
@@ -691,7 +601,7 @@ function buildDriverStatementPdfRows(
     "----------------------------------------------------------------",
     ...statement.lines.map(
       (line) =>
-        `${line.orderId} | ${toPdfAsciiText(line.channelKey ?? "-")} | ${formatMoneyForPdf(line.netAmount)} | ${line.reimbursementRequired ? "yes" : "no"}`,
+        `${line.orderId} | ${toPdfText(line.channelKey ?? "-")} | ${formatMoneyForPdf(line.netAmount)} | ${line.reimbursementRequired ? "yes" : "no"}`,
     ),
     "----------------------------------------------------------------",
     `Total Lines: ${statement.lines.length}`,
@@ -722,7 +632,7 @@ function buildReimbursementBatchExportPdfRows(
     "----------------------------------------------------------------",
     ...batch.items.map(
       (item) =>
-        `${item.orderId} | ${toPdfAsciiText(item.channelKey ?? "-")} | ${formatMoneyForPdf(item.amount)} | ${toPdfAsciiText(item.reason)}`,
+        `${item.orderId} | ${toPdfText(item.channelKey ?? "-")} | ${formatMoneyForPdf(item.amount)} | ${toPdfText(item.reason)}`,
     ),
     "----------------------------------------------------------------",
     `Total (${batch.items.length} line${batch.items.length === 1 ? "" : "s"}): ${formatMoneyForPdf(batch.totalAmount)}`,
@@ -769,9 +679,21 @@ export class BillingSettlementService implements OnModuleInit {
 
   private reimbursementBatches: ReimbursementBatchRecord[] = [];
 
+  private readonly driverTargetCommands = new Map<string, Promise<unknown>>();
+  private readonly driverTargetProposals = new Map<
+    string,
+    DriverStatementTargetProposal
+  >();
+  private readonly driverTargetFanouts = new Set<string>();
+
   private reconciliationIssues = PARTNER_SPONSOR_MISMATCH_SEED.map((issue) =>
     this.cloneReconciliationIssue(issue),
   );
+
+  private readonly reconciliationIssueUpdates = new Map<
+    string,
+    Promise<void>
+  >();
 
   private readonly downloadHost = DEFAULT_CONTROLLED_DOWNLOAD_HOST;
 
@@ -1465,7 +1387,7 @@ export class BillingSettlementService implements OnModuleInit {
       kind: "tenant-invoice",
       subjectId: invoiceId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf(
+      bytes: await renderBillingDocumentPdf(
         buildTenantInvoicePdfRows({
           invoiceId,
           tenantId: command.tenantId,
@@ -1777,7 +1699,7 @@ export class BillingSettlementService implements OnModuleInit {
       kind: "tenant-invoice",
       subjectId: invoice.invoiceId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf(
+      bytes: await renderBillingDocumentPdf(
         buildTenantInvoicePdfRows({
           invoiceId: invoice.invoiceId,
           tenantId: invoice.tenantId,
@@ -2139,6 +2061,7 @@ export class BillingSettlementService implements OnModuleInit {
   async generateDriverStatements(
     command: GenerateDriverStatementCommand,
     requestId?: string,
+    options: { authoritativeSource?: boolean } = {},
   ) {
     const driverId = command.driverId?.trim() || undefined;
     if (command.driverId !== undefined && !driverId) {
@@ -2146,221 +2069,505 @@ export class BillingSettlementService implements OnModuleInit {
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
         "driverId must not be blank.",
-        {
-          periodMonth: command.periodMonth,
-        },
+        { periodMonth: command.periodMonth },
       );
     }
-
+    this.getPeriodMonthRange(command.periodMonth);
     const activeFeePlan = this.driverFeePlans[0];
     if (!activeFeePlan) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
         "An active published driver fee plan is required.",
-        {
-          periodMonth: command.periodMonth,
-        },
+        { periodMonth: command.periodMonth },
       );
     }
-
-    const existingStatements = this.driverStatements.filter(
-      (statement) =>
-        statement.periodMonth === command.periodMonth &&
-        statement.feePlanVersion === activeFeePlan.version &&
-        (!driverId || statement.driverId === driverId),
-    );
-    if (existingStatements.length > 0) {
-      const reimbursementBatchIds = this.reimbursementBatches
-        .filter(
-          (batch) =>
-            batch.periodMonth === command.periodMonth &&
-            (!driverId || batch.driverId === driverId),
-        )
-        .map((batch) => batch.batchId);
-      return {
-        items: existingStatements.map((statement) =>
-          this.cloneStatement(statement),
-        ),
-        reimbursementBatchIds,
-      };
-    }
-
+    // Enumerate sources before any completion decision. One successful driver
+    // is never evidence that all eligible drivers in the period completed.
     const eligibleTrips = (
-      await this.listDriverStatementTripsInPeriod(command.periodMonth, driverId)
+      await this.driverStatementSourceTrips(
+        command.periodMonth,
+        driverId,
+        options.authoritativeSource ?? false,
+      )
     ).filter((trip) => trip.eligibleForDriverStatement);
     if (eligibleTrips.length === 0) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
         "No eligible trips found for the requested statement period.",
-        {
-          periodMonth: command.periodMonth,
-          ...(driverId ? { driverId } : {}),
-        },
+        { periodMonth: command.periodMonth, ...(driverId ? { driverId } : {}) },
       );
     }
-
-    const statementsByDriver = new Map<string, BillingSettlementTripRecord[]>();
-    for (const trip of eligibleTrips) {
-      const currentTrips = statementsByDriver.get(trip.driverId) ?? [];
-      statementsByDriver.set(trip.driverId, [...currentTrips, trip]);
-    }
-
-    const generatedStatements: DriverStatementRecord[] = [];
-    const generatedReimbursements: ReimbursementBatchRecord[] = [];
-
-    for (const [driverId, driverTrips] of statementsByDriver.entries()) {
-      const lines = driverTrips.map((trip) =>
-        this.createStatementLine(trip, activeFeePlan.serviceFeeBps),
-      );
-      const now = new Date().toISOString();
-      const statementId = `statement-${randomUUID()}`;
-      const statement: DriverStatementRecord = {
-        statementId,
-        driverId,
+    const byDriver = new Map<string, BillingSettlementTripRecord[]>();
+    for (const trip of eligibleTrips)
+      byDriver.set(trip.driverId, [
+        ...(byDriver.get(trip.driverId) ?? []),
+        trip,
+      ]);
+    const items: DriverStatementRecord[] = [];
+    const reimbursementBatchIds: string[] = [];
+    for (const [targetDriverId, trips] of byDriver) {
+      const identity = {
         periodMonth: command.periodMonth,
-        receiptNo: `DRV-${command.periodMonth.replace("-", "")}-${driverId.slice(-3)}`,
-        payoutStatus: "pending",
-        grossEarning: this.sumMoney(lines.map((line) => line.grossEarning)),
-        serviceFee: this.sumMoney(lines.map((line) => line.serviceFee)),
-        subsidy: this.sumMoney(lines.map((line) => line.subsidy)),
-        netAmount: this.sumMoney(lines.map((line) => line.netAmount)),
+        driverId: targetDriverId,
         feePlanVersion: activeFeePlan.version,
-        lines,
-        createdAt: now,
-        updatedAt: now,
       };
-
-      const artifactRecord = await this.documentArtifactStore.put({
-        kind: "report",
-        subjectId: statementId,
-        mimeType: "application/pdf",
-        bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
-      });
-      const artifactDownloadMetadata = createControlledDownloadMetadata({
-        kind: "report",
-        subjectId: statementId,
-        manifestHash: artifactRecord.sha256,
-        createdAt: now,
-        host: this.downloadHost,
-        keyId: this.downloadSigningKeyId,
-        signingSecret: this.downloadSigningSecret,
-        ttlMinutes: this.downloadExpiryMinutes,
-        signatureVersion: this.downloadSignatureVersion,
-      });
-      statement.artifactUrl = artifactDownloadMetadata.downloadUrl;
-      statement.artifactDownloadMetadata = artifactDownloadMetadata;
-
-      generatedStatements.push(statement);
-      this.auditNotificationService.recordNotification({
-        tenantId: null,
-        channel: "driver_task",
-        title: "Driver statement generated",
-        message: `Statement ${statement.receiptNo} is ready for driver ${driverId}.`,
-        status: "unread",
-      });
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "system",
-          tenantId: null,
-          moduleName: "billing-settlement",
-          actionName: "generate_driver_statement",
-          resourceType: "driver_statement",
-          resourceId: statement.statementId,
-          newValuesSummary: {
-            driverId,
-            periodMonth: statement.periodMonth,
-            feePlanVersion: statement.feePlanVersion,
-          },
-        },
-        requestId,
-      );
-
-      const reimbursementItems = this.createReimbursementItems(
-        driverTrips,
-        activeFeePlan.reimbursementMode,
-      );
-      if (reimbursementItems.length > 0) {
-        const reimbursementBatch: ReimbursementBatchRecord = {
-          batchId: `reimbursement-${randomUUID()}`,
-          driverId,
-          statementId,
-          periodMonth: command.periodMonth,
-          status: "pending",
-          totalAmount: this.sumMoney(
-            reimbursementItems.map((item) => item.amount),
-          ),
-          remittanceProofId: null,
-          items: reimbursementItems,
-          approvedAt: null,
-          paidAt: null,
-          workflowState: "pending_approval",
-          exportedAt: null,
-          exportedByActorId: null,
-          exportReceiptId: null,
-          exportManifestHash: null,
-          exportDownloadMetadata: null,
-          reconciledAt: null,
-          reconciledByActorId: null,
-          reconciliationReason: null,
-          reconciliationEvidenceRef: null,
-          reconciliationReceiptId: null,
-        };
-        generatedReimbursements.push(reimbursementBatch);
-        this.auditNotificationService.recordNotification({
-          tenantId: null,
-          channel: "ops_notice",
-          title: "Driver reimbursement batch created",
-          message: `Reimbursement batch ${reimbursementBatch.batchId} was created for driver ${driverId}.`,
-          status: "unread",
-        });
-        this.recordAudit(
-          {
-            actorId: null,
-            actorType: "system",
-            tenantId: null,
-            moduleName: "billing-settlement",
-            actionName: "generate_reimbursement_batch",
-            resourceType: "driver_reimbursement_batch",
-            resourceId: reimbursementBatch.batchId,
-            newValuesSummary: {
-              driverId,
-              statementId,
-              totalAmountMinor: reimbursementBatch.totalAmount.amountMinor,
+      const key = JSON.stringify([
+        identity.periodMonth,
+        identity.driverId,
+        identity.feePlanVersion,
+      ]);
+      const prior = this.driverTargetCommands.get(key) ?? Promise.resolve();
+      const run = prior
+        .catch(() => undefined)
+        .then(async () => {
+          const execute = (target: DriverStatementTargetPersistence) =>
+            this.completeDriverStatementTarget(
+              identity,
+              activeFeePlan,
+              trips,
+              target,
+              requestId,
+            );
+          if (this.billingSettlementRepository?.isEnabled()) {
+            return this.billingSettlementRepository.withDriverStatementTarget(
+              identity,
+              execute,
+            );
+          }
+          return execute({
+            load: async () => ({
+              statements: this.driverStatements
+                .filter(
+                  (statement) =>
+                    statement.periodMonth === identity.periodMonth &&
+                    statement.driverId === identity.driverId &&
+                    statement.feePlanVersion === identity.feePlanVersion,
+                )
+                .map((statement) => this.cloneStatement(statement)),
+              reimbursements: this.reimbursementBatches
+                .filter(
+                  (batch) =>
+                    batch.periodMonth === identity.periodMonth &&
+                    batch.driverId === identity.driverId,
+                )
+                .map((batch) => this.cloneReimbursementBatch(batch)),
+            }),
+            reserve: async (create) => {
+              const proposal = this.driverTargetProposals.get(key) ?? create();
+              this.driverTargetProposals.set(key, structuredClone(proposal));
+              return structuredClone(proposal);
             },
-          },
-          requestId,
-        );
+            persist: (changes) =>
+              this.persistChanges(changes, "generate_driver_statements"),
+            claimSuccessEffects: async () => {
+              if (this.driverTargetFanouts.has(key)) return false;
+              this.driverTargetFanouts.add(key);
+              return true;
+            },
+          });
+        });
+      this.driverTargetCommands.set(key, run);
+      try {
+        const result = await run;
+        items.push(result.statement);
+        reimbursementBatchIds.push(...result.reimbursementBatchIds);
+      } finally {
+        if (this.driverTargetCommands.get(key) === run)
+          this.driverTargetCommands.delete(key);
       }
     }
+    return { items, reimbursementBatchIds };
+  }
 
-    this.driverStatements = [...generatedStatements, ...this.driverStatements];
-    this.reimbursementBatches = [
-      ...generatedReimbursements,
-      ...this.reimbursementBatches,
-    ];
-    await this.persistChanges(
-      {
-        driverStatements: generatedStatements.map((statement) =>
-          this.cloneStatement(statement),
+  async bindScheduledBillingOperation(
+    operationId: string,
+    periodMonth: string,
+  ) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "BILLING_MONTHLY_SOURCE_UNAVAILABLE",
+        "Scheduled billing requires canonical operation persistence.",
+        { periodMonth },
+        true,
+      );
+    }
+    let matches: boolean;
+    try {
+      matches =
+        await this.billingSettlementRepository.bindMonthlyBillingOperation(
+          operationId,
+          periodMonth,
+        );
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "scheduled_billing_operation",
+      );
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "BILLING_MONTHLY_OPERATION_UNAVAILABLE",
+        "Monthly operation binding could not be acknowledged.",
+        { periodMonth },
+        true,
+      );
+    }
+    if (!matches)
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "IDEMPOTENCY_KEY_REUSED",
+        "Monthly operationId is already bound to another period.",
+        { periodMonth },
+      );
+  }
+
+  /** Scheduled discovery is always canonical live data, with no seed fallback. */
+  async listScheduledDriverStatementTargets(periodMonth: string) {
+    return [
+      ...new Set(
+        (await this.driverStatementSourceTrips(periodMonth, undefined, true))
+          .filter((trip) => trip.eligibleForDriverStatement)
+          .map((trip) => trip.driverId),
+      ),
+    ].sort();
+  }
+
+  private async driverStatementSourceTrips(
+    periodMonth: string,
+    driverId: string | undefined,
+    authoritative: boolean,
+  ) {
+    if (!authoritative)
+      return this.listDriverStatementTripsInPeriod(periodMonth, driverId);
+    const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "BILLING_MONTHLY_SOURCE_UNAVAILABLE",
+        "Scheduled billing requires the canonical completed-trip source.",
+        { periodMonth },
+        true,
+      );
+    }
+    try {
+      const trips = driverId
+        ? await this.billingSettlementRepository.listLiveDriverTripsInPeriodForDriver(
+            driverId,
+            periodStart,
+            periodEnd,
+          )
+        : await this.billingSettlementRepository.listLiveDriverTripsInPeriod(
+            periodStart,
+            periodEnd,
+          );
+      return trips.map((trip) => this.mapLiveTripToSettlementSnapshot(trip));
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "scheduled_driver_statement_source",
+      );
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "BILLING_MONTHLY_SOURCE_UNAVAILABLE",
+        "Canonical completed-trip source could not be read.",
+        { periodMonth },
+        true,
+      );
+    }
+  }
+
+  private async completeDriverStatementTarget(
+    identity: { periodMonth: string; driverId: string; feePlanVersion: string },
+    feePlan: DriverFeePlanRecord,
+    trips: BillingSettlementTripRecord[],
+    target: DriverStatementTargetPersistence,
+    requestId?: string,
+  ) {
+    const syncCanonical = (state: DriverStatementTargetState) => {
+      this.driverStatements = [
+        ...state.statements.map((statement) => this.cloneStatement(statement)),
+        ...this.driverStatements.filter(
+          (statement) =>
+            !(
+              statement.periodMonth === identity.periodMonth &&
+              statement.driverId === identity.driverId &&
+              statement.feePlanVersion === identity.feePlanVersion
+            ),
         ),
-        reimbursementBatches: generatedReimbursements.map((batch) =>
+      ];
+      this.reimbursementBatches = [
+        ...state.reimbursements.map((batch) =>
           this.cloneReimbursementBatch(batch),
         ),
-      },
-      "generate_driver_statements",
-    );
-
-    return {
-      items: generatedStatements.map((statement) =>
-        this.cloneStatement(statement),
-      ),
-      reimbursementBatchIds: generatedReimbursements.map(
-        (batch) => batch.batchId,
-      ),
+        ...this.reimbursementBatches.filter(
+          (batch) =>
+            !(
+              batch.periodMonth === identity.periodMonth &&
+              batch.driverId === identity.driverId
+            ),
+        ),
+      ];
     };
+    try {
+      const canonical = await target.load();
+      const proposal = await target.reserve(() => {
+        const existing = canonical.statements[0];
+        const now = new Date().toISOString();
+        const lines =
+          existing?.lines ??
+          trips.map((trip) =>
+            this.createStatementLine(trip, feePlan.serviceFeeBps),
+          );
+        const statement: DriverStatementRecord = existing
+          ? this.cloneStatement(existing)
+          : {
+              statementId: `statement-${randomUUID()}`,
+              driverId: identity.driverId,
+              periodMonth: identity.periodMonth,
+              receiptNo: `DRV-${identity.periodMonth.replace("-", "")}-${identity.driverId.slice(-3)}`,
+              payoutStatus: "pending",
+              grossEarning: this.sumMoney(
+                lines.map((line) => line.grossEarning),
+              ),
+              serviceFee: this.sumMoney(lines.map((line) => line.serviceFee)),
+              subsidy: this.sumMoney(lines.map((line) => line.subsidy)),
+              netAmount: this.sumMoney(lines.map((line) => line.netAmount)),
+              feePlanVersion: feePlan.version,
+              lines,
+              createdAt: now,
+              updatedAt: now,
+            };
+        const oldBatch = canonical.reimbursements.find(
+          (batch) => batch.statementId === statement.statementId,
+        );
+        // A legacy independently committed statement owns its original lines.
+        // Repair only its missing relation, never include newly arrived orders.
+        const orderIds = new Set(statement.lines.map((line) => line.orderId));
+        const source = trips.filter((trip) => orderIds.has(trip.orderId));
+        if (
+          existing &&
+          !oldBatch &&
+          feePlan.reimbursementMode === "platform_funded" &&
+          statement.lines.some(
+            (line) =>
+              line.reimbursementRequired &&
+              !source.some((trip) => trip.orderId === line.orderId),
+          )
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "BILLING_TARGET_SOURCE_UNAVAILABLE",
+            "Original reimbursement source is unavailable for the committed statement.",
+            { statementId: statement.statementId },
+            true,
+          );
+        }
+        const reimbursementItems = this.createReimbursementItems(
+          source,
+          feePlan.reimbursementMode,
+        );
+        const reimbursement: ReimbursementBatchRecord | null = oldBatch
+          ? this.cloneReimbursementBatch(oldBatch)
+          : reimbursementItems.length
+            ? {
+                batchId: `reimbursement-${randomUUID()}`,
+                driverId: identity.driverId,
+                statementId: statement.statementId,
+                periodMonth: identity.periodMonth,
+                status: "pending",
+                totalAmount: this.sumMoney(
+                  reimbursementItems.map((item) => item.amount),
+                ),
+                remittanceProofId: null,
+                items: reimbursementItems,
+                approvedAt: null,
+                paidAt: null,
+                workflowState: "pending_approval",
+                exportedAt: null,
+                exportedByActorId: null,
+                exportReceiptId: null,
+                exportManifestHash: null,
+                exportDownloadMetadata: null,
+                reconciledAt: null,
+                reconciledByActorId: null,
+                reconciliationReason: null,
+                reconciliationEvidenceRef: null,
+                reconciliationReceiptId: null,
+              }
+            : null;
+        return {
+          statement,
+          reimbursement,
+          statementAlreadyExisted: Boolean(existing),
+          reimbursementAlreadyExisted: Boolean(oldBatch),
+        };
+      });
+      const statement =
+        canonical.statements.find(
+          (row) => row.statementId === proposal.statement.statementId,
+        ) ?? this.cloneStatement(proposal.statement);
+      const existingBatch = canonical.reimbursements.find(
+        (batch) => batch.statementId === statement.statementId,
+      );
+      const reimbursement =
+        existingBatch ??
+        (proposal.reimbursement
+          ? this.cloneReimbursementBatch(proposal.reimbursement)
+          : null);
+      const statementMissing = !canonical.statements.some(
+        (row) => row.statementId === statement.statementId,
+      );
+      if (statementMissing && !statement.artifactDownloadMetadata) {
+        const bytes = await renderBillingDocumentPdf(
+          buildDriverStatementPdfRows(statement),
+        );
+        const offeredHash = createHash("sha256").update(bytes).digest("hex");
+        const artifact = await this.documentArtifactStore.putIfAbsent({
+          kind: "report",
+          subjectId: statement.statementId,
+          mimeType: "application/pdf",
+          bytes,
+        });
+        if (artifact.record.sha256 !== offeredHash) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "BILLING_STATEMENT_ARTIFACT_MISMATCH",
+            "The reserved statement artifact differs from its immutable snapshot.",
+            { statementId: statement.statementId },
+          );
+        }
+        const metadata = createControlledDownloadMetadata({
+          kind: "report",
+          subjectId: statement.statementId,
+          manifestHash: artifact.record.sha256,
+          createdAt: statement.createdAt,
+          host: this.downloadHost,
+          keyId: this.downloadSigningKeyId,
+          signingSecret: this.downloadSigningSecret,
+          ttlMinutes: this.downloadExpiryMinutes,
+          signatureVersion: this.downloadSignatureVersion,
+        });
+        statement.artifactUrl = metadata.downloadUrl;
+        statement.artifactDownloadMetadata = metadata;
+      }
+      const changes: PersistBillingSettlementChanges = {
+        ...(statementMissing
+          ? { driverStatements: [this.cloneStatement(statement)] }
+          : {}),
+        ...(!existingBatch && reimbursement
+          ? {
+              reimbursementBatches: [
+                this.cloneReimbursementBatch(reimbursement),
+              ],
+            }
+          : {}),
+      };
+      // These writes may independently commit. Rejection is never a rollback
+      // claim; the durable proposal and next authoritative read repair the gap.
+      await target.persist(changes);
+      const finalState = this.billingSettlementRepository?.isEnabled()
+        ? await target.load()
+        : {
+            statements: [statement],
+            reimbursements: [
+              ...canonical.reimbursements,
+              ...(!existingBatch && reimbursement ? [reimbursement] : []),
+            ],
+          };
+      const committedStatement = finalState.statements.find(
+        (row) => row.statementId === statement.statementId,
+      );
+      const committedBatch = reimbursement
+        ? finalState.reimbursements.find(
+            (batch) =>
+              batch.batchId === reimbursement.batchId &&
+              batch.statementId === statement.statementId,
+          )
+        : null;
+      if (!committedStatement || (reimbursement && !committedBatch)) {
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "BILLING_TARGET_ACK_UNCONFIRMED",
+          "Target financial records are not confirmed by canonical readback.",
+          identity,
+          true,
+        );
+      }
+      syncCanonical(finalState);
+      if (
+        (!proposal.statementAlreadyExisted ||
+          (reimbursement && !proposal.reimbursementAlreadyExisted)) &&
+        (await target.claimSuccessEffects())
+      ) {
+        if (!proposal.statementAlreadyExisted) {
+          this.auditNotificationService.recordNotification({
+            tenantId: null,
+            channel: "driver_task",
+            title: "Driver statement generated",
+            message: `Statement ${statement.receiptNo} is ready for driver ${identity.driverId}.`,
+            status: "unread",
+          });
+          this.recordAudit(
+            {
+              actorId: null,
+              actorType: "system",
+              tenantId: null,
+              moduleName: "billing-settlement",
+              actionName: "generate_driver_statement",
+              resourceType: "driver_statement",
+              resourceId: statement.statementId,
+              newValuesSummary: {
+                driverId: identity.driverId,
+                periodMonth: statement.periodMonth,
+                feePlanVersion: statement.feePlanVersion,
+              },
+            },
+            requestId,
+          );
+        }
+        if (reimbursement && !proposal.reimbursementAlreadyExisted) {
+          this.auditNotificationService.recordNotification({
+            tenantId: null,
+            channel: "ops_notice",
+            title: "Driver reimbursement batch created",
+            message: `Reimbursement batch ${reimbursement.batchId} was created for driver ${identity.driverId}.`,
+            status: "unread",
+          });
+          this.recordAudit(
+            {
+              actorId: null,
+              actorType: "system",
+              tenantId: null,
+              moduleName: "billing-settlement",
+              actionName: "generate_reimbursement_batch",
+              resourceType: "driver_reimbursement_batch",
+              resourceId: reimbursement.batchId,
+              newValuesSummary: {
+                driverId: identity.driverId,
+                statementId: statement.statementId,
+                totalAmountMinor: reimbursement.totalAmount.amountMinor,
+              },
+            },
+            requestId,
+          );
+        }
+      }
+      return {
+        statement: this.cloneStatement(committedStatement),
+        reimbursementBatchIds: committedBatch ? [committedBatch.batchId] : [],
+      };
+    } catch (error) {
+      if (this.billingSettlementRepository?.isEnabled()) {
+        try {
+          syncCanonical(await target.load());
+        } catch {
+          /* No unacknowledged proposal was published to cache. */
+        }
+      }
+      throw error;
+    }
   }
 
   /**
@@ -2425,7 +2632,9 @@ export class BillingSettlementService implements OnModuleInit {
       kind: "report",
       subjectId: statement.statementId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf(buildDriverStatementPdfRows(statement)),
+      bytes: await renderBillingDocumentPdf(
+        buildDriverStatementPdfRows(statement),
+      ),
     });
     return record;
   }
@@ -2616,16 +2825,13 @@ export class BillingSettlementService implements OnModuleInit {
       updatedAt: now,
     };
 
-    this.reconciliationIssues = [
-      this.cloneReconciliationIssue(issue),
-      ...this.reconciliationIssues,
-    ];
     await this.persistChanges(
       {
         reconciliationIssues: [this.cloneReconciliationIssue(issue)],
       },
       "create_reconciliation_issue",
     );
+    this.publishReconciliationIssue(issue);
     this.recordAudit(
       {
         actorId: command.openedBy.trim(),
@@ -2656,52 +2862,56 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.assigneeId, "assigneeId");
     this.assertNonBlank(command.actorId, "actorId");
 
-    const issue = this.requireReconciliationIssue(issueId);
-    if (issue.status === "resolved") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "RECONCILIATION_ISSUE_RESOLVED",
-        "Resolved reconciliation issues must be reopened before reassignment.",
-        { issueId },
-      );
-    }
+    return this.serializeReconciliationIssueUpdate(issueId, async () => {
+      const issue = this.requireReconciliationIssue(issueId);
+      if (issue.status === "resolved") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "RECONCILIATION_ISSUE_RESOLVED",
+          "Resolved reconciliation issues must be reopened before reassignment.",
+          { issueId },
+        );
+      }
 
-    const now = new Date().toISOString();
-    issue.ownerId = command.assigneeId.trim();
-    issue.status = "assigned";
-    issue.updatedAt = now;
+      const now = new Date().toISOString();
+      const draft = this.cloneReconciliationIssue(issue);
+      draft.ownerId = command.assigneeId.trim();
+      draft.status = "assigned";
+      draft.updatedAt = now;
 
-    const note = command.note?.trim();
-    if (note) {
-      issue.comments.push(
-        this.createIssueComment(command.actorId.trim(), note, [], now),
-      );
-    }
+      const note = command.note?.trim();
+      if (note) {
+        draft.comments.push(
+          this.createIssueComment(command.actorId.trim(), note, [], now),
+        );
+      }
 
-    await this.persistChanges(
-      {
-        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
-      },
-      "assign_reconciliation_issue",
-    );
-    this.recordAudit(
-      {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
-        tenantId: issue.tenantId,
-        moduleName: "billing-settlement",
-        actionName: "assign_reconciliation_issue",
-        resourceType: "reconciliation_issue",
-        resourceId: issue.issueId,
-        newValuesSummary: {
-          ownerId: issue.ownerId,
-          status: issue.status,
+      await this.persistChanges(
+        {
+          reconciliationIssues: [this.cloneReconciliationIssue(draft)],
         },
-      },
-      requestId,
-    );
+        "assign_reconciliation_issue",
+      );
+      const published = this.publishReconciliationIssue(draft);
+      this.recordAudit(
+        {
+          actorId: command.actorId.trim(),
+          actorType: "platform_admin",
+          tenantId: published.tenantId,
+          moduleName: "billing-settlement",
+          actionName: "assign_reconciliation_issue",
+          resourceType: "reconciliation_issue",
+          resourceId: published.issueId,
+          newValuesSummary: {
+            ownerId: published.ownerId,
+            status: published.status,
+          },
+        },
+        requestId,
+      );
 
-    return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(published);
+    });
   }
 
   async addReconciliationIssueComment(
@@ -2712,46 +2922,50 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.message, "message");
 
-    const issue = this.requireReconciliationIssue(issueId);
-    const now = new Date().toISOString();
-    issue.comments.push(
-      this.createIssueComment(
-        command.actorId.trim(),
-        command.message.trim(),
+    return this.serializeReconciliationIssueUpdate(issueId, async () => {
+      const issue = this.requireReconciliationIssue(issueId);
+      const now = new Date().toISOString();
+      const draft = this.cloneReconciliationIssue(issue);
+      draft.comments.push(
+        this.createIssueComment(
+          command.actorId.trim(),
+          command.message.trim(),
+          command.artifactIds,
+          now,
+        ),
+      );
+      draft.evidenceArtifactIds = this.mergeArtifactIds(
+        draft.evidenceArtifactIds,
         command.artifactIds,
-        now,
-      ),
-    );
-    issue.evidenceArtifactIds = this.mergeArtifactIds(
-      issue.evidenceArtifactIds,
-      command.artifactIds,
-    );
-    issue.updatedAt = now;
+      );
+      draft.updatedAt = now;
 
-    await this.persistChanges(
-      {
-        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
-      },
-      "add_reconciliation_issue_comment",
-    );
-    this.recordAudit(
-      {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
-        tenantId: issue.tenantId,
-        moduleName: "billing-settlement",
-        actionName: "add_reconciliation_issue_comment",
-        resourceType: "reconciliation_issue",
-        resourceId: issue.issueId,
-        newValuesSummary: {
-          commentCount: issue.comments.length,
-          evidenceArtifactIds: issue.evidenceArtifactIds,
+      await this.persistChanges(
+        {
+          reconciliationIssues: [this.cloneReconciliationIssue(draft)],
         },
-      },
-      requestId,
-    );
+        "add_reconciliation_issue_comment",
+      );
+      const published = this.publishReconciliationIssue(draft);
+      this.recordAudit(
+        {
+          actorId: command.actorId.trim(),
+          actorType: "platform_admin",
+          tenantId: published.tenantId,
+          moduleName: "billing-settlement",
+          actionName: "add_reconciliation_issue_comment",
+          resourceType: "reconciliation_issue",
+          resourceId: published.issueId,
+          newValuesSummary: {
+            commentCount: published.comments.length,
+            evidenceArtifactIds: published.evidenceArtifactIds,
+          },
+        },
+        requestId,
+      );
 
-    return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(published);
+    });
   }
 
   async resolveReconciliationIssue(
@@ -2762,51 +2976,55 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.resolutionSummary, "resolutionSummary");
 
-    const issue = this.requireReconciliationIssue(issueId);
-    const now = new Date().toISOString();
-    issue.status = "resolved";
-    issue.resolutionCode = command.resolutionCode;
-    issue.resolutionSummary = command.resolutionSummary.trim();
-    issue.resolvedAt = now;
-    issue.updatedAt = now;
-    issue.comments.push(
-      this.createIssueComment(
-        command.actorId.trim(),
-        command.resolutionSummary.trim(),
+    return this.serializeReconciliationIssueUpdate(issueId, async () => {
+      const issue = this.requireReconciliationIssue(issueId);
+      const now = new Date().toISOString();
+      const draft = this.cloneReconciliationIssue(issue);
+      draft.status = "resolved";
+      draft.resolutionCode = command.resolutionCode;
+      draft.resolutionSummary = command.resolutionSummary.trim();
+      draft.resolvedAt = now;
+      draft.updatedAt = now;
+      draft.comments.push(
+        this.createIssueComment(
+          command.actorId.trim(),
+          command.resolutionSummary.trim(),
+          command.artifactIds,
+          now,
+        ),
+      );
+      draft.evidenceArtifactIds = this.mergeArtifactIds(
+        draft.evidenceArtifactIds,
         command.artifactIds,
-        now,
-      ),
-    );
-    issue.evidenceArtifactIds = this.mergeArtifactIds(
-      issue.evidenceArtifactIds,
-      command.artifactIds,
-    );
+      );
 
-    await this.persistChanges(
-      {
-        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
-      },
-      "resolve_reconciliation_issue",
-    );
-    this.recordAudit(
-      {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
-        tenantId: issue.tenantId,
-        moduleName: "billing-settlement",
-        actionName: "resolve_reconciliation_issue",
-        resourceType: "reconciliation_issue",
-        resourceId: issue.issueId,
-        newValuesSummary: {
-          status: issue.status,
-          resolutionCode: issue.resolutionCode,
-          resolvedAt: issue.resolvedAt,
+      await this.persistChanges(
+        {
+          reconciliationIssues: [this.cloneReconciliationIssue(draft)],
         },
-      },
-      requestId,
-    );
+        "resolve_reconciliation_issue",
+      );
+      const published = this.publishReconciliationIssue(draft);
+      this.recordAudit(
+        {
+          actorId: command.actorId.trim(),
+          actorType: "platform_admin",
+          tenantId: published.tenantId,
+          moduleName: "billing-settlement",
+          actionName: "resolve_reconciliation_issue",
+          resourceType: "reconciliation_issue",
+          resourceId: published.issueId,
+          newValuesSummary: {
+            status: published.status,
+            resolutionCode: published.resolutionCode,
+            resolvedAt: published.resolvedAt,
+          },
+        },
+        requestId,
+      );
 
-    return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(published);
+    });
   }
 
   async reopenReconciliationIssue(
@@ -2817,60 +3035,64 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.actorId, "actorId");
     this.assertNonBlank(command.reason, "reason");
 
-    const issue = this.requireReconciliationIssue(issueId);
-    if (issue.status !== "resolved") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "RECONCILIATION_ISSUE_NOT_RESOLVED",
-        "Only resolved reconciliation issues can be reopened.",
-        { issueId },
+    return this.serializeReconciliationIssueUpdate(issueId, async () => {
+      const issue = this.requireReconciliationIssue(issueId);
+      if (issue.status !== "resolved") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "RECONCILIATION_ISSUE_NOT_RESOLVED",
+          "Only resolved reconciliation issues can be reopened.",
+          { issueId },
+        );
+      }
+
+      const now = new Date().toISOString();
+      const draft = this.cloneReconciliationIssue(issue);
+      draft.status = "reopened";
+      draft.resolutionCode = null;
+      draft.resolutionSummary = null;
+      draft.resolvedAt = null;
+      draft.reopenCount += 1;
+      draft.updatedAt = now;
+      draft.comments.push(
+        this.createIssueComment(
+          command.actorId.trim(),
+          command.reason.trim(),
+          command.artifactIds,
+          now,
+        ),
       );
-    }
-
-    const now = new Date().toISOString();
-    issue.status = "reopened";
-    issue.resolutionCode = null;
-    issue.resolutionSummary = null;
-    issue.resolvedAt = null;
-    issue.reopenCount += 1;
-    issue.updatedAt = now;
-    issue.comments.push(
-      this.createIssueComment(
-        command.actorId.trim(),
-        command.reason.trim(),
+      draft.evidenceArtifactIds = this.mergeArtifactIds(
+        draft.evidenceArtifactIds,
         command.artifactIds,
-        now,
-      ),
-    );
-    issue.evidenceArtifactIds = this.mergeArtifactIds(
-      issue.evidenceArtifactIds,
-      command.artifactIds,
-    );
+      );
 
-    await this.persistChanges(
-      {
-        reconciliationIssues: [this.cloneReconciliationIssue(issue)],
-      },
-      "reopen_reconciliation_issue",
-    );
-    this.recordAudit(
-      {
-        actorId: command.actorId.trim(),
-        actorType: "platform_admin",
-        tenantId: issue.tenantId,
-        moduleName: "billing-settlement",
-        actionName: "reopen_reconciliation_issue",
-        resourceType: "reconciliation_issue",
-        resourceId: issue.issueId,
-        newValuesSummary: {
-          status: issue.status,
-          reopenCount: issue.reopenCount,
+      await this.persistChanges(
+        {
+          reconciliationIssues: [this.cloneReconciliationIssue(draft)],
         },
-      },
-      requestId,
-    );
+        "reopen_reconciliation_issue",
+      );
+      const published = this.publishReconciliationIssue(draft);
+      this.recordAudit(
+        {
+          actorId: command.actorId.trim(),
+          actorType: "platform_admin",
+          tenantId: published.tenantId,
+          moduleName: "billing-settlement",
+          actionName: "reopen_reconciliation_issue",
+          resourceType: "reconciliation_issue",
+          resourceId: published.issueId,
+          newValuesSummary: {
+            status: published.status,
+            reopenCount: published.reopenCount,
+          },
+        },
+        requestId,
+      );
 
-    return this.cloneReconciliationIssue(issue);
+      return this.cloneReconciliationIssue(published);
+    });
   }
 
   async approveReimbursementBatch(
@@ -3313,7 +3535,7 @@ export class BillingSettlementService implements OnModuleInit {
       kind: "report",
       subjectId: batch.batchId,
       mimeType: "application/pdf",
-      bytes: buildMinimalPdf(
+      bytes: await renderBillingDocumentPdf(
         buildReimbursementBatchExportPdfRows(
           batch,
           relatedStatement?.feePlanVersion ?? null,
@@ -3537,7 +3759,7 @@ export class BillingSettlementService implements OnModuleInit {
         kind: "report",
         subjectId: batch.batchId,
         mimeType: "application/pdf",
-        bytes: buildMinimalPdf(
+        bytes: await renderBillingDocumentPdf(
           buildReimbursementBatchExportPdfRows(
             batch,
             relatedStatement?.feePlanVersion ?? null,
@@ -3735,14 +3957,53 @@ export class BillingSettlementService implements OnModuleInit {
   private referralRevenueShareRules: ReferralRevenueShareRule[] =
     createInitialReferralRevenueShareRules();
 
-  /** Active referral revenue-share rule for an entry at a given completion time. */
-  resolveReferralRevenueShareRule(
+  private async loadReferralRateContext(partnerEntrySlug: string) {
+    if (!this.billingSettlementRepository?.isEnabled()) {
+      return {
+        entry: null,
+        rules: this.referralRevenueShareRules.filter(
+          (rule) => rule.partnerEntrySlug === partnerEntrySlug,
+        ),
+      };
+    }
+    const entry =
+      await this.billingSettlementRepository.loadReferralRateEntry(
+        partnerEntrySlug,
+      );
+    if (
+      !entry ||
+      entry.entrySlug !== partnerEntrySlug ||
+      entry.partnerType !== "referral_channel" ||
+      !entry.activeFlag ||
+      entry.status !== "active"
+    ) {
+      return { entry: null, rules: [] as ReferralRevenueShareRule[] };
+    }
+    return {
+      entry,
+      rules: (entry.referralRevenueShareRules ?? []).filter(
+        (rule) =>
+          rule.partnerEntrySlug === entry.entrySlug &&
+          rule.partnerId === entry.partnerId,
+      ),
+    };
+  }
+
+  /** Active rule at completion time, selected from one committed history read. */
+  async resolveReferralRevenueShareRule(
     partnerEntrySlug: string,
+    atIso: string,
+  ): Promise<ReferralRevenueShareRule | null> {
+    const { rules } = await this.loadReferralRateContext(partnerEntrySlug);
+    return this.selectReferralRevenueShareRule(rules, atIso);
+  }
+
+  private selectReferralRevenueShareRule(
+    rules: readonly ReferralRevenueShareRule[],
     atIso: string,
   ): ReferralRevenueShareRule | null {
     const at = new Date(atIso).getTime();
-    const candidates = this.referralRevenueShareRules
-      .filter((rule) => rule.partnerEntrySlug === partnerEntrySlug)
+    const candidates = rules
       .filter((rule) => {
         const from = new Date(rule.effectiveFrom).getTime();
         const until = rule.effectiveUntil
@@ -3755,17 +4016,48 @@ export class BillingSettlementService implements OnModuleInit {
           new Date(right.effectiveFrom).getTime() -
           new Date(left.effectiveFrom).getTime(),
       );
-    return candidates[0] ?? null;
+    return candidates[0] ? { ...candidates[0] } : null;
   }
 
-  private isReferralSettlementTrip(trip: BillingSettlementTripRecord): boolean {
-    return (
-      Boolean(trip.partnerEntrySlug) &&
-      this.resolveReferralRevenueShareRule(
-        trip.partnerEntrySlug as string,
-        trip.completedAt,
-      ) !== null
-    );
+  private async listReferralTrips(
+    partnerEntrySlug: string,
+    context: Awaited<
+      ReturnType<BillingSettlementService["loadReferralRateContext"]>
+    >,
+    periodMonth?: string,
+  ) {
+    const trips = new Map<string, BillingSettlementTripRecord>();
+    const matches = (trip: BillingSettlementTripRecord) =>
+      trip.partnerEntrySlug === partnerEntrySlug &&
+      (!context.entry ||
+        (trip.tenantId === context.entry.tenantId &&
+          trip.partnerId === context.entry.partnerId)) &&
+      this.selectReferralRevenueShareRule(context.rules, trip.completedAt) !==
+        null;
+    if (!isStrictAuthEnvironment()) {
+      for (const trip of this.settlementTrips)
+        if (matches(trip)) trips.set(trip.orderId, trip);
+    }
+    for (const trip of this.liveSettlementTrips.values()) {
+      const snapshot = this.mapLiveTripToSettlementSnapshot(trip);
+      if (matches(snapshot)) trips.set(snapshot.orderId, snapshot);
+    }
+    if (
+      context.entry &&
+      periodMonth &&
+      this.billingSettlementRepository?.isEnabled()
+    ) {
+      const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
+      for (const trip of await this.billingSettlementRepository.listLiveCompletedTenantTrips(
+        context.entry.tenantId,
+        periodStart,
+        periodEnd,
+      )) {
+        const snapshot = this.mapLiveTripToSettlementSnapshot(trip);
+        if (matches(snapshot)) trips.set(snapshot.orderId, snapshot);
+      }
+    }
+    return [...trips.values()];
   }
 
   private computeReferralShareMinor(
@@ -3779,65 +4071,94 @@ export class BillingSettlementService implements OnModuleInit {
     return Math.max(0, Math.round((fareMinor * rule.value) / 100));
   }
 
-  /** Referral statements for a channel across all periods with attributed rides. */
+  /** Referral statements use one canonical history for every line in the read. */
   async listReferralStatements(
     partnerEntrySlug: string,
   ): Promise<ReferralStatementRecord[]> {
     this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
-    const months = new Set<string>();
-    for (const trip of this.settlementTrips) {
-      if (
-        trip.partnerEntrySlug === partnerEntrySlug &&
-        this.isReferralSettlementTrip(trip)
-      ) {
-        months.add(this.toPeriodMonth(trip.completedAt));
-      }
+    const context = await this.loadReferralRateContext(partnerEntrySlug);
+    const months = new Set(
+      (await this.listReferralTrips(partnerEntrySlug, context)).map((trip) =>
+        this.toPeriodMonth(trip.completedAt),
+      ),
+    );
+    if (context.entry && this.billingSettlementRepository?.isEnabled()) {
+      for (const period of await this.billingSettlementRepository.listLiveReferralSettlementPeriods(
+        context.entry.tenantId,
+        partnerEntrySlug,
+      ))
+        months.add(period);
     }
-    const periods = [...months].sort((left, right) =>
+    const statements: ReferralStatementRecord[] = [];
+    for (const period of [...months].sort((left, right) =>
       right.localeCompare(left),
-    );
-    return periods.map((period) =>
-      this.buildReferralStatement(partnerEntrySlug, period),
-    );
+    )) {
+      const trips = await this.listReferralTrips(
+        partnerEntrySlug,
+        context,
+        period,
+      );
+      const statement = this.buildReferralStatement(
+        partnerEntrySlug,
+        period,
+        context.rules,
+        trips,
+      );
+      if (statement.lines.length) statements.push(statement);
+    }
+    return statements;
   }
 
-  /** Referral statement for a single channel + `YYYY-MM` period. */
-  getReferralStatement(
+  async getReferralStatement(
     partnerEntrySlug: string,
     periodMonth: string,
-  ): ReferralStatementRecord {
+  ): Promise<ReferralStatementRecord> {
     this.assertNonBlank(partnerEntrySlug, "partnerEntrySlug");
     const normalizedPeriod = periodMonth?.trim();
-    if (!normalizedPeriod) {
+    if (!normalizedPeriod)
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
         "VALIDATION_ERROR",
         "period must be in YYYY-MM format.",
         { period: periodMonth },
       );
-    }
     this.getPeriodMonthRange(normalizedPeriod);
-    return this.buildReferralStatement(partnerEntrySlug, normalizedPeriod);
+    const context = await this.loadReferralRateContext(partnerEntrySlug);
+    const trips = await this.listReferralTrips(
+      partnerEntrySlug,
+      context,
+      normalizedPeriod,
+    );
+    return this.buildReferralStatement(
+      partnerEntrySlug,
+      normalizedPeriod,
+      context.rules,
+      trips,
+    );
   }
 
   private buildReferralStatement(
     partnerEntrySlug: string,
     periodMonth: string,
+    rules: readonly ReferralRevenueShareRule[],
+    attributedTrips: readonly BillingSettlementTripRecord[],
   ): ReferralStatementRecord {
     const { periodStart, periodEnd } = this.getPeriodMonthRange(periodMonth);
     const start = new Date(periodStart).getTime();
     const end = new Date(periodEnd).getTime();
-    const trips = this.settlementTrips.filter((trip) => {
+    const trips = attributedTrips.filter((trip) => {
       const completedAt = new Date(trip.completedAt).getTime();
       return (
         trip.partnerEntrySlug === partnerEntrySlug &&
-        this.isReferralSettlementTrip(trip) &&
+        this.selectReferralRevenueShareRule(rules, trip.completedAt) !== null &&
         completedAt >= start &&
         completedAt <= end
       );
     });
 
-    const lines = trips.map((trip) => this.createReferralStatementLine(trip));
+    const lines = trips.map((trip) =>
+      this.createReferralStatementLine(trip, rules),
+    );
     const gmv = this.sumMoney(lines.map((line) => line.fare));
     const shareTotal = this.sumMoney(lines.map((line) => line.shareAmount));
     const activeRiderCount = new Set(
@@ -3878,11 +4199,12 @@ export class BillingSettlementService implements OnModuleInit {
 
   private createReferralStatementLine(
     trip: BillingSettlementTripRecord,
+    rules: readonly ReferralRevenueShareRule[],
   ): ReferralStatementLine {
     const fare = { ...trip.grossEarning };
-    // Guaranteed present by isReferralSettlementTrip filter.
-    const rule = this.resolveReferralRevenueShareRule(
-      trip.partnerEntrySlug as string,
+    // Guaranteed present by the completion-time filter above.
+    const rule = this.selectReferralRevenueShareRule(
+      rules,
       trip.completedAt,
     ) as ReferralRevenueShareRule;
     const shareMinor = this.computeReferralShareMinor(fare.amountMinor, rule);
@@ -4348,6 +4670,43 @@ export class BillingSettlementService implements OnModuleInit {
     return batch;
   }
 
+  // Serialize only edits of the same reconciliation issue, so a queued
+  // partial edit starts from the last acknowledged state instead of a
+  // stale pre-write snapshot. A failed edit releases the queue immediately.
+  private async serializeReconciliationIssueUpdate<T>(
+    issueId: string,
+    update: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.reconciliationIssueUpdates.get(issueId);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.reconciliationIssueUpdates.set(issueId, current);
+    try {
+      if (previous) await previous;
+      return await update();
+    } finally {
+      if (this.reconciliationIssueUpdates.get(issueId) === current) {
+        this.reconciliationIssueUpdates.delete(issueId);
+      }
+      release();
+    }
+  }
+
+  private publishReconciliationIssue(issue: ReconciliationIssueRecord) {
+    // A synchronous Forwarder refresh can replace the collection while SQL is
+    // pending. Publish the acknowledged row by identity in the current collection,
+    // rather than mutate a reference captured before that await.
+    const published = this.cloneReconciliationIssue(issue);
+    const index = this.reconciliationIssues.findIndex(
+      (current) => current.issueId === published.issueId,
+    );
+    if (index >= 0) this.reconciliationIssues[index] = published;
+    else this.reconciliationIssues.unshift(published);
+    return published;
+  }
+
   private requireReconciliationIssue(issueId: string) {
     this.syncDerivedForwarderIssues();
     const issue = this.reconciliationIssues.find(
@@ -4708,7 +5067,7 @@ export class BillingSettlementService implements OnModuleInit {
 
     const forwarderIssues = this.forwarderService.listReconciliationIssues();
     const nextIssues = [...this.reconciliationIssues];
-    let changed = false;
+    const changedIssues: ReconciliationIssueRecord[] = [];
 
     for (const forwarderIssue of forwarderIssues) {
       const existingIndex = nextIssues.findIndex(
@@ -4801,30 +5160,40 @@ export class BillingSettlementService implements OnModuleInit {
         const current = nextIssues[existingIndex]!;
         if (JSON.stringify(current) !== JSON.stringify(baseIssue)) {
           nextIssues[existingIndex] = baseIssue;
-          changed = true;
+          changedIssues.push(baseIssue);
         }
         continue;
       }
 
       nextIssues.unshift(baseIssue);
-      changed = true;
+      changedIssues.push(baseIssue);
     }
 
-    if (!changed) {
+    if (!changedIssues.length) {
       return;
     }
 
     this.reconciliationIssues = nextIssues.map((issue) =>
       this.cloneReconciliationIssue(issue),
     );
-    this.persistChanges(
-      {
-        reconciliationIssues: nextIssues.map((issue) =>
-          this.cloneReconciliationIssue(issue),
-        ),
-      },
-      "sync_forwarder_reconciliation_issues",
-    );
+    for (const changedIssue of changedIssues) {
+      // Never upsert unchanged manual rows from a pre-ACK snapshot. A derived
+      // write shares the existing per-issue queue with commands, and reads the
+      // current row when its turn begins so a delayed refresh cannot undo an ACK.
+      void this.serializeReconciliationIssueUpdate(
+        changedIssue.issueId,
+        async () => {
+          const current =
+            this.reconciliationIssues.find(
+              (issue) => issue.issueId === changedIssue.issueId,
+            ) ?? changedIssue;
+          await this.persistChanges(
+            { reconciliationIssues: [this.cloneReconciliationIssue(current)] },
+            "sync_forwarder_reconciliation_issues",
+          );
+        },
+      );
+    }
   }
 
   private cloneIssueComment(

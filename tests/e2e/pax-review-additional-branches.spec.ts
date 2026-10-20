@@ -23,6 +23,14 @@ import {
   assertCompletedFacts,
 } from "./pax-review-shared-order/additional-journey";
 
+const publicPassenger = process.env.PAX_REVIEW_PUBLIC_PASSENGER === "true";
+const privateDriverOrigin = process.env.PAX_REVIEW_DRIVER_ORIGIN?.replace(
+  /\/$/,
+  "",
+);
+if (sharedDev && !privateDriverOrigin)
+  throw new Error("Missing configured private Driver origin");
+
 test("additional real orders cover booking prerequisites, contact fallback, accepted and arrived cancellation, rating, standard geolocation and owned Driver rejection", async ({
   browser,
 }, info) => {
@@ -33,8 +41,12 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
     const token =
       name === "ops"
         ? process.env.PAX_REVIEW_OPS_ID_TOKEN
-        : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
-    if (sharedDev && !token)
+        : name === "driver" && sharedDev
+          ? process.env.PAX_REVIEW_DRIVER_ID_TOKEN
+          : name === "pax" && publicPassenger
+            ? undefined
+            : process.env.PAX_REVIEW_PASSENGER_ID_TOKEN;
+    if (sharedDev && !(name === "pax" && publicPassenger) && !token)
       throw new Error(
         `Missing existing private-service credential for ${name}`,
       );
@@ -64,7 +76,7 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
   const pax = await step("Additional Passenger context", () => role("pax"));
   const ops = await step("Additional Ops context", () => role("ops"));
   const driver = await step("Additional Driver context", () => role("driver"));
-  const driverBase = `${PAX}/review-driver`;
+  const driverBase = `${sharedDev ? privateDriverOrigin : PAX}/review-driver`;
   const finalizeInterruptedOrders = trackInterruptedRehearsal(pax, info, PAX);
   let interrupted = false;
   try {
@@ -310,17 +322,21 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
       false,
       completedAssignment.taskId,
     );
+    let noContactCaseNo = "";
+    let noContactTimelineEntryIds: string[] = [];
     await step(
-      "E low rating with actual contact checkbox unchecked",
+      "E low rating creates one canonical case with actual contact switch explicitly turned off",
       async () => {
         await readCompletedByOps(ops, completed);
         await expect
           .poll(async () => (await authority(pax, completed)).payment?.status)
           .toBe("captured");
         await pax.getByRole("button", { name: "2 星", exact: true }).click();
-        await pax
-          .getByRole("checkbox", { name: "需要客服與您聯繫嗎？" })
-          .uncheck();
+        const contactSwitch = pax.getByRole("switch", {
+          name: "需要客服與您聯繫嗎？",
+        });
+        await contactSwitch.uncheck();
+        await expect(contactSwitch).not.toBeChecked();
         const [response] = await Promise.all([
           pax.waitForResponse(
             (r) =>
@@ -346,7 +362,7 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
           expect(row.rating_id).toBeTruthy();
           expect(row.score).toBe(2);
           expect(row.contact_requested).toBe(false);
-          expect(row.complaint_case_no).toBeNull();
+          expect(row.complaint_case_no).toBeTruthy();
         }
         const read = await ops.request.get(
           `${OPS}/control-plane-proxy/complaints`,
@@ -356,13 +372,38 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
           (item: { relatedOrderId: string }) =>
             item.relatedOrderId === completed,
         );
-        expect(cases).toHaveLength(0);
-        await info.attach("E-no-contact-no-case-facts", {
+        expect(cases).toHaveLength(1);
+        noContactCaseNo = cases[0].caseNo;
+        expect(noContactCaseNo).toMatch(/^PAX-/);
+        expect(cases[0].description).toContain("同意客服聯繫：否");
+        expect(cases[0].description).toContain("不需客服聯繫");
+        for (const row of rows) {
+          expect(row.complaint_case_no).toBe(noContactCaseNo);
+        }
+        const timelineRead = await ops.request.get(
+          `${OPS}/control-plane-proxy/complaints/${encodeURIComponent(noContactCaseNo)}/timeline`,
+        );
+        expect(timelineRead.status()).toBe(200);
+        const timeline = camel(await timelineRead.json()).data.items;
+        expect(timeline).toHaveLength(1);
+        expect(timeline[0]).toMatchObject({
+          caseNo: noContactCaseNo,
+          action: "case_created",
+        });
+        expect(timeline[0].entryId).toBeTruthy();
+        expect(timeline[0].note).toContain("同意客服聯繫：否");
+        noContactTimelineEntryIds = timeline.map(
+          (entry: { entryId: string }) => entry.entryId,
+        );
+        await info.attach("E-no-contact-canonical-case-facts", {
           body: JSON.stringify({
             orderId: completed,
             contactRequested: false,
+            canonicalCaseNo: noContactCaseNo,
+            timelineEntryIds: noContactTimelineEntryIds,
             actualRelatedCaseCount: cases.length,
             actualOpsAPIRead: true,
+            actualOpsTimelineRead: true,
           }),
           contentType: "application/json",
         });
@@ -407,8 +448,41 @@ test("additional real orders cover booking prerequisites, contact fallback, acce
         for (const row of rows) {
           expect(row.score).toBe(2);
           expect(row.contact_requested).toBe(false);
-          expect(row.complaint_case_no).toBeNull();
+          expect(row.complaint_case_no).toBe(noContactCaseNo);
         }
+        const read = await ops.request.get(
+          `${OPS}/control-plane-proxy/complaints`,
+        );
+        expect(read.status()).toBe(200);
+        const cases = camel(await read.json()).data.items.filter(
+          (item: { relatedOrderId: string }) =>
+            item.relatedOrderId === completed,
+        );
+        expect(cases).toHaveLength(1);
+        expect(cases[0].caseNo).toBe(noContactCaseNo);
+        expect(cases[0].description).toContain("同意客服聯繫：否");
+        const timelineRead = await ops.request.get(
+          `${OPS}/control-plane-proxy/complaints/${encodeURIComponent(noContactCaseNo)}/timeline`,
+        );
+        expect(timelineRead.status()).toBe(200);
+        const timeline = camel(await timelineRead.json()).data.items;
+        expect(
+          timeline.map((entry: { entryId: string }) => entry.entryId),
+        ).toEqual(noContactTimelineEntryIds);
+        await info.attach("E-same-no-contact-case-after-change-refusal-facts", {
+          body: JSON.stringify({
+            orderId: completed,
+            ratingId: after.ratingId,
+            contactRequested: false,
+            canonicalCaseNo: noContactCaseNo,
+            timelineEntryIds: noContactTimelineEntryIds,
+            actualRelatedCaseCount: cases.length,
+            actualChangeResponseStatus: duplicate.status(),
+            actualOpsAPIRead: true,
+            actualOpsTimelineRead: true,
+          }),
+          contentType: "application/json",
+        });
       },
     );
     const standardCancelled = await standardAddressJourney(

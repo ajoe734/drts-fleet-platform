@@ -41,6 +41,7 @@ import type {
   UpdateTenantBookingCommand,
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
+  ReferralPassengerQuoteCommand,
   SubmitReferralPassengerRatingCommand,
   TenantBookingListQuery,
 } from "@drts/contracts";
@@ -403,6 +404,26 @@ export class OwnedMobilityController {
     );
   }
 
+  @Post("partner/referral/passenger/quote")
+  @RequireRealms("partner")
+  @RequireScopes("partner:book")
+  // Estimate calculation with an expiring owned evidence snapshot. Repeated
+  // calculations may create distinct snapshots; this is not booking or payment.
+  async estimateReferralPassengerFare(
+    @Body() command: ReferralPassengerQuoteCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.quoteReferralPassengerFare(
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Post("partner/referral/passenger/bookings")
   async createReferralPassengerBooking(
     @Body() command: CreateReferralPassengerBookingCommand,
@@ -485,13 +506,18 @@ export class OwnedMobilityController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const order = await this.ownedMobilityService.cancelReferralPassengerTrip(
+      orderId,
+      command,
+      identity,
+      requestId,
+    );
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.cancelReferralPassengerTrip(
-        orderId,
-        command,
-        identity,
-        requestId,
-      ),
+      {
+        orderId: order.orderId,
+        status: order.status,
+        cancelledAt: order.cancelledAt,
+      },
       requestId,
     );
   }
@@ -553,6 +579,27 @@ export class OwnedMobilityController {
       this.ownedMobilityService.getTenantBooking(
         this.requireTenantId(tenantId),
         bookingId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("tenant/bookings/:bookingId/driver-contact")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getTenantBookingDriverContact(
+    @Param("bookingId") bookingId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-tenant-id") tenantId?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolvedTenantId = this.requireTenantId(tenantId);
+    this.assertTenantAccessScope(resolvedTenantId, identity);
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getTenantBookingDriverContact(
+        resolvedTenantId,
+        bookingId,
+        identity,
+        requestId,
       ),
       requestId,
     );
@@ -859,9 +906,9 @@ export class OwnedMobilityController {
   @Get("dispatch/queue")
   @RequireRealms("ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listQueueEntries(@Headers("x-request-id") requestId?: string) {
+  async listQueueEntries(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      toApiListData(this.ownedMobilityService.listQueueEntries()),
+      toApiListData(await this.ownedMobilityService.listQueueEntries()),
       requestId,
     );
   }
@@ -869,34 +916,34 @@ export class OwnedMobilityController {
   @Get("dispatch/queue/:queueEntryId")
   @RequireRealms("ops")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  getQueueEntry(
+  async getQueueEntry(
     @Param("queueEntryId") queueEntryId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.getQueueEntry(queueEntryId),
+      await this.ownedMobilityService.getQueueEntry(queueEntryId),
       requestId,
     );
   }
 
   @Post("dispatch/queue/check-in")
-  queueCheckIn(
+  async queueCheckIn(
     @Body() command: QueueCheckInCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.queueCheckIn(command, requestId),
+      await this.ownedMobilityService.queueCheckIn(command, requestId),
       requestId,
     );
   }
 
   @Post("dispatch/queue/check-out")
-  queueCheckOut(
+  async queueCheckOut(
     @Body() command: QueueCheckOutCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.ownedMobilityService.queueCheckOut(command, requestId),
+      await this.ownedMobilityService.queueCheckOut(command, requestId),
       requestId,
     );
   }

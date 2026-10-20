@@ -1,3 +1,4 @@
+import { parsePdf } from "../../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
@@ -295,7 +296,7 @@ describe("SR-INVOICE-001: tenant invoice download lifecycle", () => {
       paramsOf(healed.artifactUrl!),
     )) as StreamableFileLike;
     const bytes = await drain(file.getStream());
-    expect(bytes.toString("latin1")).toContain(
+    expect((await parsePdf(bytes)).text).toContain(
       `Tenant Invoice ${invoice.invoiceId}`,
     );
   });

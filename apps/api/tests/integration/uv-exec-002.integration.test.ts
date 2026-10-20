@@ -65,17 +65,19 @@ async function seedSessionChain(
     [
       orderId,
       `ON-${orderId}`,
-      JSON.stringify(buildOrderFixture({
-        orderId,
-        status: "ready_for_dispatch",
-        callId,
-        voiceIntentId: intentId,
-        bookingActor: {
-          type: "voice_agent",
-          voiceSessionId,
-          principalId: "svc-uvexec002",
-        },
-      })),
+      JSON.stringify(
+        buildOrderFixture({
+          orderId,
+          status: "ready_for_dispatch",
+          callId,
+          voiceIntentId: intentId,
+          bookingActor: {
+            type: "voice_agent",
+            voiceSessionId,
+            principalId: "svc-uvexec002",
+          },
+        }),
+      ),
     ],
   );
 
@@ -258,8 +260,10 @@ describe("UV-EXEC-002 voice-booking runtime schema", () => {
       "call_leg",
       "callback_attempt",
       "callback_task",
+      "callback_task_contact_binding",
       "command_receipt",
       "confirmation",
+      "contact_role_revision",
       "dialogue_snapshot",
       "dialogue_snapshot_purge_receipt",
       "dialogue_snapshot_purge_receipt_scan_cursor",
@@ -273,6 +277,7 @@ describe("UV-EXEC-002 voice-booking runtime schema", () => {
       "phase1_work_item_repair_audits",
       "rate_card",
       "recording_checkpoint",
+      "recording_continuation_event",
       "resource_scope",
       "retention_execution_log",
       "route_profile",

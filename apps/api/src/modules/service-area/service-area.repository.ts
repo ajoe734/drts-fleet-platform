@@ -237,7 +237,10 @@ export class ServiceAreaRepository {
     if (geometry.type === "polygon") {
       return {
         type: "Polygon",
-        coordinates: [this.closeRing(geometry.coordinates)],
+        coordinates: [
+          this.closeRing(geometry.coordinates, "ccw"),
+          ...(geometry.holes ?? []).map((hole) => this.closeRing(hole, "cw")),
+        ],
       };
     }
 
@@ -247,14 +250,31 @@ export class ServiceAreaRepository {
     };
   }
 
-  private closeRing(points: GeoPoint[]) {
+  private closeRing(points: GeoPoint[], winding: "ccw" | "cw" = "ccw") {
     const ring = points.map((point) => [point.lng, point.lat]);
     const first = ring[0];
     const last = ring[ring.length - 1];
     if (first && last && (first[0] !== last[0] || first[1] !== last[1])) {
       ring.push([...first]);
     }
+    const area = this.signedRingArea(points);
+    if ((winding === "ccw" && area < 0) || (winding === "cw" && area > 0)) {
+      ring.reverse();
+    }
     return ring;
+  }
+
+  private signedRingArea(points: GeoPoint[]) {
+    let area = 0;
+    for (let index = 0; index < points.length; index += 1) {
+      const current = points[index];
+      const next = points[(index + 1) % points.length];
+      if (!current || !next) {
+        continue;
+      }
+      area += current.lng * next.lat - next.lng * current.lat;
+    }
+    return area / 2;
   }
 
   private circleToRing(center: GeoPoint, radiusMeters: number) {

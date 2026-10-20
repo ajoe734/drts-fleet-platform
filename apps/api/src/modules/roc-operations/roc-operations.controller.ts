@@ -1,11 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  Param,
-  Post,
-} from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 
 import type {
   AssignRocAlertCommand,
@@ -174,7 +167,11 @@ export class RocOperationsController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.rocOperationsService.startOperationalHold(alertId, command, identity),
+      this.rocOperationsService.startOperationalHold(
+        alertId,
+        command,
+        identity,
+      ),
       requestId,
     );
   }
@@ -197,14 +194,14 @@ export class RocOperationsController {
   }
 
   @Post("alerts/:alertId/open-incident")
-  openIncident(
+  async openIncident(
     @Param("alertId") alertId: string,
     @Body() command: OpenRocIncidentCommand,
     @Headers("x-request-id") requestId?: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.rocOperationsService.openIncident(alertId, command, identity),
+      await this.rocOperationsService.openIncident(alertId, command, identity),
       requestId,
     );
   }
@@ -217,11 +214,7 @@ export class RocOperationsController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
   ) {
     return toApiSuccessEnvelope(
-      this.rocOperationsService.startEvidenceFreeze(
-        alertId,
-        command,
-        identity,
-      ),
+      this.rocOperationsService.startEvidenceFreeze(alertId, command, identity),
       requestId,
     );
   }

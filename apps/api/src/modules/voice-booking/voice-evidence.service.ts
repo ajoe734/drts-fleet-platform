@@ -1,3 +1,5 @@
+import type { VoiceRecordingFinalization } from "@drts/contracts";
+import { validateFinalRecordingResult } from "./voice-media-recording.adapter";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { isDeepStrictEqual } from "node:util";
 import { VoiceBookingRepository } from "./voice-booking.repository";
@@ -44,18 +46,9 @@ export interface FinalizeRecordingParams {
   linkedOrderId?: string | null | undefined;
 }
 
-export interface FinalizeRecordingResult {
-  manifestRef: {
-    objectKey: string;
-    objectVersion: string;
-    checksum: string;
-    byteLength: number;
-    durableAt: string;
-  };
-  recordingId: string;
+export interface FinalizeRecordingResult extends VoiceRecordingFinalization {
   recordingUrl?: string | null;
   durationMs?: number;
-  verifiedAt: string;
 }
 
 export interface VoiceMediaRecordingAdapter {
@@ -122,7 +115,11 @@ export class VoiceEvidenceService {
         "Media recording adapter unavailable for finalize recording",
       );
     }
-    return this.mediaAdapter.finalizeRecording(params);
+    const result = await this.mediaAdapter.finalizeRecording(params);
+    return validateFinalRecordingResult(
+      result,
+      params.scope.recordingId ? params.scope : undefined,
+    );
   }
 
   async checkpoint(

@@ -518,6 +518,7 @@ describe("PlatformAdminAssistantService", () => {
           severity: "critical",
           targetAudience: "ops",
         },
+        reason: "Confirmed adapter incident notification",
       },
       "req-execute-001",
     );

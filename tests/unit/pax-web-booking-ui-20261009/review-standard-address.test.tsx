@@ -24,6 +24,7 @@ const { PathnameContext } = appRequire(
   "next/dist/shared/lib/hooks-client-context.shared-runtime",
 ) as typeof import("next/dist/shared/lib/hooks-client-context.shared-runtime");
 const router = {
+  bfcacheId: "synthetic-booking-test-route",
   push: vi.fn(),
   replace: vi.fn(),
   back: vi.fn(),
@@ -85,17 +86,15 @@ function changeMode(value: "fixed" | "standard") {
   });
 }
 function click(name: string) {
-  fireEvent.click(screen.getByRole("button", { name, exact: true }));
+  fireEvent.click(screen.getByRole("button", { name }));
 }
 async function selectDestination(query = "下車") {
   const input = screen.getAllByPlaceholderText("請輸入街道、地點或地標")[1]!;
   const picker = input.closest("[data-address-map-picker]") as HTMLElement;
   fireEvent.change(input, { target: { value: query } });
-  fireEvent.click(
-    within(picker).getByRole("button", { name: "搜尋", exact: true }),
-  );
+  fireEvent.click(within(picker).getByRole("button", { name: "搜尋" }));
   fireEvent.click(await within(picker).findByRole("button", { name: /下車/ }));
-  await within(picker).findByRole("button", { name: "清除選點", exact: true });
+  await within(picker).findByRole("button", { name: "清除選點" });
 }
 
 it("clears a controlled destination before showing replacement search results and requoting", async () => {
@@ -115,12 +114,8 @@ it("clears a controlled destination before showing replacement search results an
   });
   const input = screen.getAllByPlaceholderText("請輸入街道、地點或地標")[1]!;
   const picker = input.closest("[data-address-map-picker]") as HTMLElement;
-  fireEvent.click(
-    within(picker).getByRole("button", { name: "清除選點", exact: true }),
-  );
-  expect(
-    within(picker).queryByRole("button", { name: "清除選點", exact: true }),
-  ).toBeNull();
+  fireEvent.click(within(picker).getByRole("button", { name: "清除選點" }));
+  expect(within(picker).queryByRole("button", { name: "清除選點" })).toBeNull();
   expect(
     (screen.getByRole("button", { name: "試算車資" }) as HTMLButtonElement)
       .disabled,

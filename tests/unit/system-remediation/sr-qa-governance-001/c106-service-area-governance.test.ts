@@ -102,11 +102,18 @@ describe("C106: 服務區域草稿、審核、發布、停用、停靠規則與�
 
     // active 狀態不可提交 review
     await expect(
-      service.submitServiceAreaForReview(activeArea.serviceAreaId, defaultContext),
+      service.submitServiceAreaForReview(
+        activeArea.serviceAreaId,
+        defaultContext,
+      ),
     ).rejects.toThrowError(ApiRequestError);
 
     // 停用
-    await service.retireServiceArea(activeArea.serviceAreaId, {}, defaultContext);
+    await service.retireServiceArea(
+      activeArea.serviceAreaId,
+      {},
+      defaultContext,
+    );
 
     // 已 retired 不可再次 retire
     await expect(
@@ -132,6 +139,50 @@ describe("C106: 服務區域草稿、審核、發布、停用、停靠規則與�
       ],
     });
     expect(polySummary).toBe("polygon · 4 pts");
+
+    const polyWithOneHoleSummary = geometrySummary({
+      type: "polygon",
+      coordinates: [
+        { lat: 25.0, lng: 121.5 },
+        { lat: 25.1, lng: 121.5 },
+        { lat: 25.1, lng: 121.6 },
+        { lat: 25.0, lng: 121.6 },
+      ],
+      holes: [
+        [
+          { lat: 25.02, lng: 121.52 },
+          { lat: 25.08, lng: 121.52 },
+          { lat: 25.08, lng: 121.58 },
+          { lat: 25.02, lng: 121.58 },
+        ],
+      ],
+    });
+    expect(polyWithOneHoleSummary).toBe("polygon · 4 pts (1 hole)");
+
+    const polyWithTwoHolesSummary = geometrySummary({
+      type: "polygon",
+      coordinates: [
+        { lat: 25.0, lng: 121.5 },
+        { lat: 25.1, lng: 121.5 },
+        { lat: 25.1, lng: 121.6 },
+        { lat: 25.0, lng: 121.6 },
+      ],
+      holes: [
+        [
+          { lat: 25.01, lng: 121.51 },
+          { lat: 25.02, lng: 121.51 },
+          { lat: 25.02, lng: 121.52 },
+          { lat: 25.01, lng: 121.52 },
+        ],
+        [
+          { lat: 25.05, lng: 121.55 },
+          { lat: 25.06, lng: 121.55 },
+          { lat: 25.06, lng: 121.56 },
+          { lat: 25.05, lng: 121.56 },
+        ],
+      ],
+    });
+    expect(polyWithTwoHolesSummary).toBe("polygon · 4 pts (2 holes)");
   });
 
   it("停靠政策 (StopPolicy) 生命週期與效果：支援 allow / deny / manual_review", async () => {
@@ -236,7 +287,11 @@ describe("C106: 服務區域草稿、審核、發布、停用、停靠規則與�
       },
       defaultContext,
     );
-    await service.publishStopPolicy(denyPolicy.record.stopPolicyId, {}, defaultContext);
+    await service.publishStopPolicy(
+      denyPolicy.record.stopPolicyId,
+      {},
+      defaultContext,
+    );
 
     const denyResult = service.evaluate({
       serviceProductType: "travel_agency_transfer",

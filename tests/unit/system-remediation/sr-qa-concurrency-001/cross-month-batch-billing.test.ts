@@ -249,4 +249,25 @@ describe("SR-QA-CONCURRENCY-001: C089 Cross-Month Batch Billing, Rerun & Reconci
       sumStatementFareMinor,
     );
   });
+  it("Case 6 (Leap Month): preserves exact 29-day UTC partition and next-year rollover", () => {
+    const { service } = setupService();
+    const range = (
+      service as unknown as {
+        getPeriodMonthRange(period: string): {
+          periodStart: string;
+          periodEnd: string;
+        };
+      }
+    ).getPeriodMonthRange.bind(service);
+    const feb = range("2028-02"),
+      mar = range("2028-03"),
+      dec = range("2027-12"),
+      jan = range("2028-01");
+    expect(feb).toEqual({
+      periodStart: "2028-02-01T00:00:00.000Z",
+      periodEnd: "2028-02-29T23:59:59.999Z",
+    });
+    expect(Date.parse(feb.periodEnd) + 1).toBe(Date.parse(mar.periodStart));
+    expect(Date.parse(dec.periodEnd) + 1).toBe(Date.parse(jan.periodStart));
+  });
 });

@@ -34,6 +34,9 @@ function createQuotaHarness(tenantId: string) {
     auditNotificationService as never,
   );
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+    assertCurrentMatchingSuppressionClear: () => undefined,
+
     getEligibleCandidates: vi.fn(() => [
       {
         driverId: "driver-quota-001",
@@ -225,7 +228,9 @@ describe("SR-QA-BOOKING-001 / C028 [回歸驗證，原產品缺口已修復]: �
     // 經 SR-QA-BOOKING-001-FIX-QUOTA-RELEASE 修復後，cancelTenantBooking / cancelOwnedOrder
     // 會在取消時呼叫 tenantPartnerService 並透過 buildQuotaLifecycleEntrySpecs
     // 寫入 release 分錄。此處更新為正確行為的回歸斷言：
-    const releaseEntries = ledger.filter((entry) => entry.entryType === "release");
+    const releaseEntries = ledger.filter(
+      (entry) => entry.entryType === "release",
+    );
     expect(releaseEntries.length).toBeGreaterThanOrEqual(1);
 
     const bookingCountRelease = releaseEntries.find(
