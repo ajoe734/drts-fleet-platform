@@ -113,6 +113,7 @@ test(journeyName, async ({ browser, request }) => {
   );
   let fleet: PreparedOperationalFleetSession | undefined;
   let adminSessionId: string | undefined;
+  let opsSessionId: string | undefined;
   let driverId: string | undefined;
   let vehicleId: string | undefined;
   let deviceId: string | undefined;
@@ -140,7 +141,7 @@ test(journeyName, async ({ browser, request }) => {
         }
       | undefined;
   } = { current: undefined };
-  let controlRole: "api" | "ops" = "api";
+  let opsControlRole: "opsApi" | "ops" = "opsApi";
   let mainError: unknown;
   const bookingState: {
     journal: BookingWriteJournal | undefined;
@@ -151,10 +152,12 @@ test(journeyName, async ({ browser, request }) => {
 
   const call = async (role: Role, path: string, options: CallOptions = {}) =>
     object((await tx.call(role, path, options)).data);
-  const control = (path: string, options: CallOptions = {}) =>
+  const adminControl = (path: string, options: CallOptions = {}) =>
+    call("api", `/api${path}`, options);
+  const opsControl = (path: string, options: CallOptions = {}) =>
     call(
-      controlRole,
-      `${controlRole === "ops" ? "/control-plane-proxy" : "/api"}${path}`,
+      opsControlRole,
+      `${opsControlRole === "ops" ? "/control-plane-proxy" : "/api"}${path}`,
       options,
     );
   const referral = async (path: string, options: CallOptions = {}) =>
@@ -165,12 +168,24 @@ test(journeyName, async ({ browser, request }) => {
         Cookie: await cookieHeader(context, origins.referral),
       },
     });
+  const cancelReferralOrder = async (ownOrderId: string, reason: string) =>
+    object(
+      (
+        await referral(
+          `/api/referral/cancel/${encodeURIComponent(ownOrderId)}`,
+          {
+            method: "POST",
+            body: { orderId: ownOrderId, reason },
+          },
+        )
+      ).data,
+    );
   const getOrder = async () => {
     requireFact(
       orderId && passengerId,
       "own order ACK required before order access",
     );
-    const order = await control(`/orders/${encodeURIComponent(orderId)}`);
+    const order = await opsControl(`/orders/${encodeURIComponent(orderId)}`);
     requireFact(
       order.orderId === orderId &&
         order.partnerEntrySlug === ENTRY &&
@@ -251,7 +266,6 @@ test(journeyName, async ({ browser, request }) => {
     const principalId = text(ack.principalId);
     tx.setSession("admin", adminToken);
     tx.setSession("api", adminToken);
-    tx.setSession("ops", adminToken);
     const verified = await call("api", "/api/auth/session");
     const identity = object(verified.identity);
     requireFact(
@@ -264,34 +278,89 @@ test(journeyName, async ({ browser, request }) => {
         typeof identity.membershipId === "string",
       "canonical Admin session readback",
     );
-    // The existing Ops proxy preserves a supplied canonical JWT in the dev
-    // branch. Test that actual surface first; if it denies this platform realm,
-    // keep its denial and select the original direct API transport, same JWT.
-    try {
-      const opsSession = await call("ops", "/control-plane-proxy/auth/session");
-      requireFact(
-        opsSession.active === true &&
-          object(opsSession.identity).sessionId === adminSessionId &&
-          object(opsSession.identity).realm === "platform",
-        "Ops BFF preserves genuine platform session",
-      );
-      controlRole = "ops";
-    } catch (error) {
-      if (!(error instanceof JourneyFailure) || error.status !== 403)
-        throw error;
-      evidence.failure(error);
-      controlRole = "api";
-      evidence.record({
-        stage: "normal-direct-api-platform-transport-selected",
-        result: "observed",
-      });
-    }
     evidence.record({
       stage: "canonical-platform-authority-verified",
       principalId,
       membershipId: text(identity.membershipId),
       realm: "platform",
       actorType: "platform_admin",
+      result: "observed",
+    });
+
+    // With no supplied inner JWT, the existing Ops BFF issues its own signed
+    // proxy proof. The API exchanges it only for an existing active canonical
+    // Ops principal, membership and binding; no Admin authority is reused.
+    const opsAck = await call("ops", "/control-plane-proxy/auth/token", {
+      method: "POST",
+      body: {},
+    });
+    const opsToken = text(opsAck.token);
+    mask(opsToken);
+    opsSessionId = text(opsAck.sessionId);
+    mask(opsSessionId);
+    tx.setSession("ops", opsToken);
+    tx.setSession("opsApi", opsToken);
+    const opsPrincipalId = text(opsAck.principalId);
+    requireFact(
+      opsAck.realm === "ops" && opsAck.actorType === "ops_user",
+      "normal Ops issuance ACK realm and actor",
+    );
+    const verifiedOps = await call("opsApi", "/api/auth/session");
+    const opsIdentity = object(verifiedOps.identity);
+    const opsMembershipId = text(opsIdentity.membershipId);
+    const requiredOpsScopes = [
+      "owned:read",
+      "owned:write",
+      "dispatch:read",
+      "dispatch:write",
+      "complaints:read",
+    ];
+    const opsScopes = opsIdentity.scopes;
+    requireFact(
+      verifiedOps.active === true &&
+        opsIdentity.realm === "ops" &&
+        opsIdentity.actorType === "ops_user" &&
+        opsIdentity.authMode === "jwt_bearer" &&
+        opsIdentity.sessionId === opsSessionId &&
+        opsIdentity.principalId === opsPrincipalId &&
+        opsIdentity.actorId === opsPrincipalId &&
+        Array.isArray(opsScopes) &&
+        requiredOpsScopes.every((scope) => opsScopes.includes(scope)),
+      "canonical Ops session and existing business scopes readback",
+    );
+    // Probe the BFF with that same Ops JWT before any business command. A
+    // denied read can select direct API transport with the same Ops session;
+    // it cannot authorize an Admin fallback or replay an unknown mutation.
+    try {
+      const opsSession = await call("ops", "/control-plane-proxy/auth/session");
+      const proxyIdentity = object(opsSession.identity);
+      requireFact(
+        opsSession.active === true &&
+          proxyIdentity.sessionId === opsSessionId &&
+          proxyIdentity.principalId === opsPrincipalId &&
+          proxyIdentity.membershipId === opsMembershipId &&
+          proxyIdentity.realm === "ops" &&
+          proxyIdentity.actorType === "ops_user" &&
+          proxyIdentity.authMode === "jwt_bearer",
+        "Ops BFF preserves genuine canonical Ops session",
+      );
+      opsControlRole = "ops";
+    } catch (error) {
+      if (!(error instanceof JourneyFailure) || error.status !== 403)
+        throw error;
+      evidence.failure(error);
+      opsControlRole = "opsApi";
+      evidence.record({
+        stage: "normal-direct-api-ops-transport-selected",
+        result: "observed",
+      });
+    }
+    evidence.record({
+      stage: "canonical-ops-authority-verified",
+      principalId: opsPrincipalId,
+      membershipId: opsMembershipId,
+      realm: "ops",
+      actorType: "ops_user",
       result: "observed",
     });
 
@@ -343,21 +412,16 @@ test(journeyName, async ({ browser, request }) => {
           ).data,
         readActive: async () => (await referral("/api/referral/active")).data,
         readOwn: () =>
-          control(
+          opsControl(
             `/orders/${encodeURIComponent(RETAINED_REFERRAL_ORDER.orderId)}`,
           ),
         cancel: () =>
-          control(
-            `/passenger/orders/${encodeURIComponent(RETAINED_REFERRAL_ORDER.orderId)}/cancel`,
-            {
-              method: "POST",
-              body: {
-                reason: "Own retained synthetic Referral order normal recovery",
-              },
-            },
+          cancelReferralOrder(
+            RETAINED_REFERRAL_ORDER.orderId,
+            "Own retained synthetic Referral order normal recovery",
           ),
         dispatch: () =>
-          control(
+          opsControl(
             `/orders/${encodeURIComponent(RETAINED_REFERRAL_ORDER.orderId)}/dispatch`,
             {
               method: "POST",
@@ -368,7 +432,7 @@ test(journeyName, async ({ browser, request }) => {
             },
           ),
         resolve: () =>
-          control(
+          opsControl(
             `/orders/${encodeURIComponent(RETAINED_REFERRAL_ORDER.orderId)}/resolve-exception-hold`,
             {
               method: "POST",
@@ -583,7 +647,7 @@ test(journeyName, async ({ browser, request }) => {
       text(approvedVehicle.canonicalContractId);
       text(approvedVehicle.canonicalPolicyId);
       const exclusion = `/regulatory-registry/exclusivities/${encodeURIComponent(vehicleId)}`;
-      await control(`${exclusion}/submit-review`, {
+      await adminControl(`${exclusion}/submit-review`, {
         method: "POST",
         body: {
           exclusiveProviderName: "合成開發示範車隊（非正式營運聲明）",
@@ -595,12 +659,12 @@ test(journeyName, async ({ browser, request }) => {
         `/api${exclusion}/approve`,
         "platform:regulatory-exclusivities:approve",
       );
-      await control(`${exclusion}/approve`, {
+      await adminControl(`${exclusion}/approve`, {
         method: "POST",
         body: {},
         headers: { "x-drts-step-up-reference": proof },
       });
-      await control(
+      await adminControl(
         `/regulatory-registry/drivers/${encodeURIComponent(driverId)}/work-state`,
         { method: "POST", body: { workState: "available" } },
       );
@@ -880,7 +944,7 @@ test(journeyName, async ({ browser, request }) => {
           order.serviceProductCode === "enterprise_dispatch",
         "actual business order qualification",
       );
-      const dispatched = await control(
+      const dispatched = await opsControl(
         `/orders/${encodeURIComponent(orderId)}/dispatch`,
         {
           method: "POST",
@@ -889,7 +953,7 @@ test(journeyName, async ({ browser, request }) => {
         },
       );
       const dispatchJobId = text(dispatched.dispatchJobId);
-      const candidates = await control(
+      const candidates = await opsControl(
         `/dispatch/tasks/${encodeURIComponent(dispatchJobId)}/candidates?includeIneligible=true`,
       );
       const own = records(candidates.items).find(
@@ -901,7 +965,7 @@ test(journeyName, async ({ browser, request }) => {
         "approved durable own pair missing from normal candidates",
       );
       assertOwnPair(own, { driverId, vehicleId });
-      await control("/dispatch/assign", {
+      await opsControl("/dispatch/assign", {
         method: "POST",
         body: { dispatchJobId, driverId, vehicleId },
         headers: { "Idempotency-Key": `${nonce}-assign` },
@@ -1239,7 +1303,7 @@ test(journeyName, async ({ browser, request }) => {
         object(persistedHistory.rating).score === 2,
         "canonical history retains original browser score2",
       );
-      const complaint = await control(
+      const complaint = await opsControl(
         `/complaints/${encodeURIComponent(caseNo)}`,
       );
       requireFact(
@@ -1251,7 +1315,7 @@ test(journeyName, async ({ browser, request }) => {
           complaint.description.includes("同意客服聯繫：否"),
         "canonical CRM retains contactfalse",
       );
-      const timeline = await control(
+      const timeline = await opsControl(
         `/complaints/${encodeURIComponent(caseNo)}/timeline`,
       );
       requireFact(
@@ -1476,7 +1540,7 @@ test(journeyName, async ({ browser, request }) => {
       await cleanup("own-order-normal-terminalization", async () => {
         await terminalizeOwnOrder(orderId!, getOrder, async (action) => {
           if (action === "resolve-exception-hold")
-            return control(
+            return opsControl(
               `/orders/${encodeURIComponent(orderId!)}/resolve-exception-hold`,
               {
                 method: "POST",
@@ -1488,19 +1552,16 @@ test(journeyName, async ({ browser, request }) => {
                 },
               },
             );
-          return control(
-            `/passenger/orders/${encodeURIComponent(orderId!)}/cancel`,
-            {
-              method: "POST",
-              body: { reason: "Own synthetic consumer cleanup" },
-            },
+          return cancelReferralOrder(
+            orderId!,
+            "Own synthetic consumer cleanup",
           );
         });
       });
     const ownDriverForCleanup = driverId;
     if (ownDriverForCleanup)
       await cleanup("own-synthetic-driver-offline", () =>
-        control(
+        adminControl(
           `/regulatory-registry/drivers/${encodeURIComponent(ownDriverForCleanup)}/work-state`,
           { method: "POST", body: { workState: "offline" } },
         ),
@@ -1535,6 +1596,21 @@ test(journeyName, async ({ browser, request }) => {
         requireFact(
           inactive.status === 401 || object(inactive.data).active === false,
           "own Referral session inactive after self-revocation",
+        );
+      });
+    const ownOpsSessionForCleanup = opsSessionId;
+    if (ownOpsSessionForCleanup)
+      await cleanup("own-Ops-session-self-revoked", async () => {
+        await call("opsApi", "/api/auth/sessions/revoke", {
+          method: "POST",
+          body: { sessionId: ownOpsSessionForCleanup },
+        });
+        const inactive = await tx.call("opsApi", "/api/auth/session", {
+          expected: [200, 401],
+        });
+        requireFact(
+          inactive.status === 401 || object(inactive.data).active === false,
+          "own Ops session inactive after self-revocation",
         );
       });
     if (adminSessionId)

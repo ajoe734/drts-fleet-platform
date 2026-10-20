@@ -55,42 +55,103 @@ function setup() {
 }
 
 describe("owned hosted journey transport", () => {
-  it("accepts the real top-level Admin auth ACK only at the exact POST exchange", async () => {
+  it.each(["admin", "ops"] as const)(
+    "accepts the real top-level %s auth ACK only at the exact POST exchange",
+    async (role) => {
+      const { tx, fetcher } = setup();
+      const ack = {
+        token: "synthetic-platform",
+        sessionId: "synthetic-sid",
+        expiresIn: 300,
+      };
+      const topLevel = () =>
+        new Response(JSON.stringify(ack), {
+          headers: { "x-drts-candidate-sha": SHA },
+        });
+      fetcher.mockImplementation(async () => topLevel());
+      expect(
+        (
+          await tx.call(role, "/control-plane-proxy/auth/token", {
+            method: "POST",
+            body: {},
+          })
+        ).data,
+      ).toEqual(ack);
+      for (const [invalidRole, path, method] of [
+        ["api", "/control-plane-proxy/auth/token", "POST"],
+        ["opsApi", "/control-plane-proxy/auth/token", "POST"],
+        [role, "/control-plane-proxy/other", "POST"],
+        [role, "/control-plane-proxy/auth/token", "GET"],
+      ] as const)
+        await expect(tx.call(invalidRole, path, { method })).rejects.toThrow(
+          "response envelope",
+        );
+      fetcher.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...ack, sessionId: "" }), {
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+      );
+      await expect(
+        tx.call(role, "/control-plane-proxy/auth/token", { method: "POST" }),
+      ).rejects.toThrow("response envelope");
+    },
+  );
+
+  it("keeps distinct Ops and Admin sessions with the API invocation proof", async () => {
     const { tx, fetcher } = setup();
-    const ack = {
-      token: "synthetic-platform",
-      sessionId: "synthetic-sid",
-      expiresIn: 300,
-    };
-    const topLevel = () =>
+    tx.setSession("api", "synthetic-admin");
+    tx.setSession("opsApi", "synthetic-ops");
+    tx.setSession("ops", "synthetic-ops");
+    await tx.call("api", "/api/auth/session");
+    await tx.call("opsApi", "/api/auth/session");
+    await tx.call("ops", "/control-plane-proxy/auth/session");
+    const headers = fetcher.mock.calls.map(
+      ([, options]) => new Headers(options?.headers),
+    );
+    expect(at(headers, 0).get("authorization")).toBe("Bearer synthetic-admin");
+    expect(at(headers, 1).get("authorization")).toBe("Bearer synthetic-ops");
+    expect(at(headers, 0).get("x-serverless-authorization")).toBe(
+      "Bearer cloud-api",
+    );
+    expect(at(headers, 1).get("x-serverless-authorization")).toBe(
+      "Bearer cloud-api",
+    );
+    expect(at(headers, 1).has("x-drts-authorization")).toBe(false);
+    expect(at(headers, 2).get("x-drts-authorization")).toBe(
+      "Bearer synthetic-ops",
+    );
+    expect(at(headers, 2).get("x-serverless-authorization")).toBe(
+      "Bearer cloud-ops",
+    );
+    expect(() => tx.headers("opsApi", `${origins.ops}/api/orders/own`)).toThrow(
+      "role origin isolation",
+    );
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("starts a fresh Ops exchange without carrying a supplied Admin identity", async () => {
+    const { tx, fetcher } = setup();
+    tx.setSession("api", "synthetic-admin");
+    tx.setSession("admin", "synthetic-admin");
+    const ack = { token: "synthetic-ops", sessionId: "synthetic-ops-sid" };
+    fetcher.mockResolvedValueOnce(
       new Response(JSON.stringify(ack), {
         headers: { "x-drts-candidate-sha": SHA },
-      });
-    fetcher.mockImplementation(async () => topLevel());
+      }),
+    );
     expect(
       (
-        await tx.call("admin", "/control-plane-proxy/auth/token", {
+        await tx.call("ops", "/control-plane-proxy/auth/token", {
           method: "POST",
           body: {},
         })
       ).data,
     ).toEqual(ack);
-    for (const [role, path, method] of [
-      ["api", "/control-plane-proxy/auth/token", "POST"],
-      ["admin", "/control-plane-proxy/other", "POST"],
-      ["admin", "/control-plane-proxy/auth/token", "GET"],
-    ] as const)
-      await expect(tx.call(role, path, { method })).rejects.toThrow(
-        "response envelope",
-      );
-    fetcher.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ...ack, sessionId: "" }), {
-        headers: { "x-drts-candidate-sha": SHA },
-      }),
-    );
-    await expect(
-      tx.call("admin", "/control-plane-proxy/auth/token", { method: "POST" }),
-    ).rejects.toThrow("response envelope");
+    const headers = new Headers(at(fetcher.mock.calls, 0)[1]?.headers);
+    expect(headers.has("x-drts-authorization")).toBe(false);
+    expect(headers.has("authorization")).toBe(false);
+    expect(headers.get("x-serverless-authorization")).toBe("Bearer cloud-ops");
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the own Partner bearer on canonical API without borrowing Admin or public authority", async () => {
@@ -260,25 +321,33 @@ describe("owned hosted journey transport", () => {
     ).toBe("Bearer genuine-fleet");
   });
 
-  it("preserves a genuine denial status and safe code without exporting secret response bodies", async () => {
-    const { tx, fetcher } = setup();
-    fetcher.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          error: { code: "SCOPE_REQUIRED", message: "secret_token" },
-        }),
-        { status: 403 },
-      ),
-    );
-    const failure = await tx
-      .call("ops", "/control-plane-proxy/dispatch/assign")
-      .catch((error) => error);
-    expect(failure).toBeInstanceOf(JourneyFailure);
-    expect(failure.status).toBe(403);
-    expect(failure.code).toBe("SCOPE_REQUIRED");
-    expect(String(failure)).not.toContain("secret_token");
-    expect(fetcher).toHaveBeenCalledTimes(1);
-  });
+  it.each([
+    "SCOPE_REQUIRED",
+    "AUTH_REALM_DENIED",
+    "AUTH_SCOPE_DENIED",
+    "DEV_WORKFORCE_SESSION_EXCHANGE_DENIED",
+  ])(
+    "preserves genuine denial %s without exporting secret response bodies",
+    async (code) => {
+      const { tx, fetcher } = setup();
+      fetcher.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code, message: "secret_token" },
+          }),
+          { status: 403 },
+        ),
+      );
+      const failure = await tx
+        .call("ops", "/control-plane-proxy/dispatch/assign")
+        .catch((error) => error);
+      expect(failure).toBeInstanceOf(JourneyFailure);
+      expect(failure.status).toBe(403);
+      expect(failure.code).toBe(code);
+      expect(String(failure)).not.toContain("secret_token");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("requires the served runtime SHA even on explicitly expected conflicts", async () => {
     const { tx, fetcher } = setup();

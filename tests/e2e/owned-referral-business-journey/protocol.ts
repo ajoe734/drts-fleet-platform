@@ -7,6 +7,7 @@ export type Role =
   | "api"
   | "publicApi"
   | "referralApi"
+  | "opsApi"
   | "admin"
   | "ops"
   | "fleet"
@@ -17,7 +18,10 @@ export type Origins = Record<
   string
 >;
 const originRole = (role: Role) =>
-  role === "driver" || role === "publicApi" || role === "referralApi"
+  role === "driver" ||
+  role === "publicApi" ||
+  role === "referralApi" ||
+  role === "opsApi"
     ? "api"
     : role;
 
@@ -736,6 +740,9 @@ export class NativeTransport {
             "FORBIDDEN",
             "VALIDATION_ERROR",
             "ORDER_NOT_CANCELABLE",
+            "AUTH_REALM_DENIED",
+            "AUTH_SCOPE_DENIED",
+            "DEV_WORKFORCE_SESSION_EXCHANGE_DENIED",
           ].includes(value)
           ? value
           : undefined,
@@ -754,7 +761,7 @@ export class NativeTransport {
       requireFact(
         data !== undefined ||
           object(payload).ok !== undefined ||
-          (role === "admin" &&
+          ((role === "admin" || role === "ops") &&
             new URL(url).pathname === "/control-plane-proxy/auth/token" &&
             options.method?.toUpperCase() === "POST" &&
             typeof object(payload).token === "string" &&
