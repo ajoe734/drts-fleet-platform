@@ -3714,7 +3714,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         request,
         params.requestId ? { requestId: params.requestId } : undefined,
       );
-      void this.pollPendingApprovalTimeoutNotifications();
+      this.pollPendingApprovalTimeoutNotifications().catch((error) => {
+        const message =
+          error instanceof Error ? error.message : "unknown polling failure";
+        this.logger.error(
+          `Background approval timeout notification poll failed: ${message}`,
+        );
+      });
       return this.cloneApprovalRequest(request);
     };
 
