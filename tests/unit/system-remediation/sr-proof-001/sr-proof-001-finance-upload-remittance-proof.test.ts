@@ -632,8 +632,11 @@ describe("SR-PROOF-001 finance upload: unchanged scan lifecycle and pay-with-pro
 describe("finance proof actual mounted caller command identity", () => {
   let dom: JSDOM | undefined;
 
-  afterEach(() => {
-    cleanup();
+  afterEach(async () => {
+    await React.act(async () => {
+      cleanup();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     dom?.window.close();

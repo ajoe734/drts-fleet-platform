@@ -675,6 +675,7 @@ jobs:
     environment: dev
     outputs:
       candidate_sha: ${{ needs.build-push.outputs.candidate_sha }}
+      referral_entry_host: ${{ steps.referral_entry_host.outputs.host }}
 
     steps:
       - name: Checkout deploy source
@@ -1179,6 +1180,31 @@ jobs:
             --format='value(status.url)')"
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
 
+      - name: Mint identity token — canonical Referral entry API invocation
+        id: referral_entry_host_proof
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.api_url.outputs.url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Resolve canonical Referral entry host
+        id: referral_entry_host
+        env:
+          DRTS_DEV_API_BASE_URL: ${{ steps.api_url.outputs.url }}
+          DRTS_REFERRAL_ENTRY_SLUG: ${{ needs.prepare.outputs.referral_embed_entry_slug }}
+          DRTS_REFERRAL_HOST_API_ID_TOKEN: ${{ steps.referral_entry_host_proof.outputs.id_token }}
+          DRTS_CANDIDATE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          entry_host="$(operations/verification/run-operational-browser-acceptance.sh --resolve-referral-entry-host)"
+          printf 'host=%s\n' "$entry_host" >> "$GITHUB_OUTPUT"
+
       - name: Build shared web env vars
         id: web_env
         run: |
@@ -1378,7 +1404,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.referral_embed }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.fabrikam-living.example app-stg.fabrikam-living.example,REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.fabrikam-living.example app-stg.fabrikam-living.example ${{ steps.referral_entry_host.outputs.host }},REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
             --allow-unauthenticated \
             --cpu 1 \
             --concurrency 80 \
@@ -1536,6 +1562,7 @@ jobs:
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
       passenger_app: ${{ steps.urls.outputs.passenger_app }}
+      referral_entry_host: ${{ needs.deploy.outputs.referral_entry_host }}
 
     steps:
       - name: Authenticate to GCP
@@ -2409,6 +2436,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Execute candidate-bound operational journeys
         env:
+          DRTS_OPERATIONAL_REFERRAL_ENTRY_HOST: ${{ needs.health-check.outputs.referral_entry_host }}
           DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
           DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
           DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
