@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read two original failed requests, without replaying either request.
+"""Read the original failure's fixed responding layers, without replaying.
 
 The fixed diagnostic source is distinct from the failed product source. Raw
 Logging responses stay in memory. The artifact contains only a closed projection;
@@ -19,6 +19,12 @@ PROJECT = "drts-dev-devcc-20260825"
 REGION = "us-central1"
 SERVICE = "drts-dev-api"
 REVISION = "drts-dev-api-00134-mkr"
+FLEET_SERVICE = "drts-dev-fleet-partner-portal-web"
+FLEET_REVISION = "drts-dev-fleet-partner-portal-web-00128-v9z"
+RESOURCES = {
+    "api": (SERVICE, REVISION),
+    "fleet-web": (FLEET_SERVICE, FLEET_REVISION),
+}
 FAILED_SOURCE_SHA = "109f0f8ee19f2811897843a0420f4f92f2a03882"
 START = "2026-10-20T14:40:00Z"
 END = "2026-10-20T14:40:20Z"
@@ -27,6 +33,21 @@ DOCUMENT_PATH = (
     "f6d03058-661a-44c9-b4f1-a32749e40a44/documents/content"
 )
 REVOKE_PATH = "/api/auth/sessions/revoke"
+SESSION_PATH = "/api/auth/session"
+FLEET_DOCUMENT_PATH = DOCUMENT_PATH.replace("/api/", "/control-plane-proxy/", 1)
+# A row must match one complete resource/method/path/status branch. In
+# particular a Fleet error does not establish an API document error, and a
+# successful same-window session read does not establish the failed caller.
+REQUEST_BRANCHES = (
+    ("fleet-web", "PUT", FLEET_DOCUMENT_PATH, (500, 503),
+     "fleet-document-content", "fleet-bff-document-content"),
+    ("api", "GET", SESSION_PATH, (200, 500, 503),
+     "api-session-read", "api-session-read"),
+    ("api", "PUT", DOCUMENT_PATH, (200, 201, 500, 503),
+     "fleet-document-content", "api-document-content"),
+    ("api", "POST", REVOKE_PATH, (500,),
+     "own-partner-session-revoke", "own-partner-session-revoke"),
+)
 REQUEST_LIMIT = 40
 CORRELATED_LIMIT = 100
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
@@ -73,27 +94,35 @@ def instant(value):
         raise DiagnosticFailure("INVALID_LOG_TIMESTAMP") from None
 
 
+def resource_query(role):
+    service, revision = RESOURCES[role]
+    return (f'resource.labels.service_name="{service}" '
+            f'AND resource.labels.revision_name="{revision}"')
+
+
 def scope_query():
+    resources = " OR ".join(f"({resource_query(role)})" for role in RESOURCES)
     return (
         'resource.type="cloud_run_revision" '
         f'AND resource.labels.project_id="{PROJECT}" '
         f'AND resource.labels.location="{REGION}" '
-        f'AND resource.labels.service_name="{SERVICE}" '
-        f'AND resource.labels.revision_name="{REVISION}" '
+        f'AND ({resources}) '
         f'AND timestamp>="{START}" AND timestamp<="{END}"'
     )
 
 
 def request_query():
     # The host is not an authority selector: the exact resource/revision is.
-    # Both paths are anchored; the file objectKey query is never projected.
-    document = "^https?://[^/]+" + DOCUMENT_PATH + r"(\?|$)"
-    revoke = "^https?://[^/]+" + REVOKE_PATH + r"(\?|$)"
-    return (
-        scope_query() + " AND httpRequest.status=500 AND "
-        f'((httpRequest.requestMethod="PUT" AND httpRequest.requestUrl=~{json.dumps(document)}) '
-        f'OR (httpRequest.requestMethod="POST" AND httpRequest.requestUrl=~{json.dumps(revoke)}))'
-    )
+    # Every path is anchored; the file objectKey query is never projected.
+    branches = []
+    for role, method, path, statuses, _route, _phase in REQUEST_BRANCHES:
+        pattern = "^https?://[^/]+" + re.escape(path) + r"(\?|$)"
+        status = " OR ".join(f"httpRequest.status={value}" for value in statuses)
+        branches.append(
+            f'({resource_query(role)} AND httpRequest.requestMethod="{method}" '
+            f'AND httpRequest.requestUrl=~{json.dumps(pattern)} AND ({status}))'
+        )
+    return scope_query() + " AND (" + " OR ".join(branches) + ")"
 
 
 def query_rows(query, limit, runner):
@@ -127,13 +156,16 @@ def check_row(row):
     resource = row.get("resource")
     require(isinstance(resource, dict), "INVALID_LOG_RESOURCE")
     labels = resource.get("labels")
+    role = next((name for name, (service, revision) in RESOURCES.items()
+                 if isinstance(labels, dict)
+                 and labels.get("service_name") == service
+                 and labels.get("revision_name") == revision), None)
     require(
         resource.get("type") == "cloud_run_revision"
         and isinstance(labels, dict)
         and labels.get("project_id") == PROJECT
         and labels.get("location") == REGION
-        and labels.get("service_name") == SERVICE
-        and labels.get("revision_name") == REVISION,
+        and role is not None,
         "LOG_OUTSIDE_FIXED_RESOURCE",
     )
     timestamp = row.get("timestamp")
@@ -144,6 +176,7 @@ def check_row(row):
             "INVALID_LOG_TRACE")
     severity = row.get("severity")
     return {
+        "serviceRole": role,
         "timestamp": timestamp,
         "severity": severity if isinstance(severity, str) and severity in SEVERITIES else "UNOBSERVED",
         "traceFingerprint": hashlib.sha256(trace.encode()).hexdigest() if trace else None,
@@ -183,13 +216,13 @@ def project_request(row):
                 and not url.fragment, "INVALID_REQUEST_URL")
     except (TypeError, ValueError):
         raise DiagnosticFailure("INVALID_REQUEST_URL") from None
-    route = {
-        ("PUT", DOCUMENT_PATH): "fleet-document-content",
-        ("POST", REVOKE_PATH): "own-partner-session-revoke",
-    }.get((request.get("requestMethod"), url.path))
-    require(route is not None and type(request.get("status")) is int
-            and request["status"] == 500, "REQUEST_OUTSIDE_FIXED_FAILURES")
-    safe.update({"route": route, "method": request["requestMethod"], "status": 500})
+    branch = next((item for item in REQUEST_BRANCHES
+                   if item[0] == safe["serviceRole"]
+                   and item[1] == request["requestMethod"] and item[2] == url.path), None)
+    require(branch is not None and type(request.get("status")) is int
+            and request["status"] in branch[3], "REQUEST_OUTSIDE_FIXED_FAILURES")
+    safe.update({"route": branch[4], "phase": branch[5],
+                 "method": request["requestMethod"], "status": request["status"]})
     latency = request.get("latency")
     safe["latency"] = latency if isinstance(latency, str) and re.fullmatch(
         r"\d{1,4}(?:\.\d{1,9})?s", latency) else None
@@ -199,15 +232,19 @@ def project_request(row):
 
 def collect(environ, runner=subprocess.run):
     document = {
-        "schema": "dev-fleet-document-failure-readback-v1",
+        "schema": "dev-fleet-document-failure-readback-v2",
         "observedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "failedSourceSha": FAILED_SOURCE_SHA, "project": PROJECT, "region": REGION,
-        "service": SERVICE, "revision": REVISION, "start": START, "end": END,
+        "resources": [{"serviceRole": role, "service": service, "revision": revision}
+                      for role, (service, revision) in RESOURCES.items()],
+        "start": START, "end": END,
         "definitionSha": None, "readStatus": "unobserved", "readFailureCode": None,
         "requests": [], "correlatedApplication": [], "queryCount": 0,
         "qualification": (
             "Fixed original failure logs only. No replay, product mutation, "
-            "deployment, repair, or full-journey success is implied."
+            "deployment, repair, or full-journey success is implied. "
+            "HTTP 200/201 and same-window session reads do not establish the "
+            "failed caller. Missing traces leave request association unobserved."
         ),
     }
     try:
@@ -240,6 +277,7 @@ def collect(environ, runner=subprocess.run):
                     project_request(row)
                     continue
                 safe.update(safe_error_facts(row))
+                safe["phase"] = "observed-trace-application"
                 document["correlatedApplication"].append(safe)
         document["readStatus"] = (
             "request-metadata-observed" if requests else "no-matching-request-logs"
