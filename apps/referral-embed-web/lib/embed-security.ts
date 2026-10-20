@@ -1,3 +1,5 @@
+import { resolveReferralRequestUrl } from "./embed-request-origin";
+
 export type EmbedSecurityDecision = {
   allowedEntryHosts: string[];
   allowedPostMessageOrigins: string[];
@@ -106,7 +108,7 @@ export function buildEmbedSecurityDecision(input: {
     input.headers,
   );
   const sourceOrigin = extractSourceOrigin(input.headers);
-  const requestOrigin = input.requestUrl.origin.toLowerCase();
+  const requestUrl = resolveReferralRequestUrl(input.requestUrl, input.headers);
   const scopedEntryHosts = requestedEntryHost
     ? [requestedEntryHost]
     : allowedEntryHosts;
@@ -133,9 +135,10 @@ export function buildEmbedSecurityDecision(input: {
   }
 
   if (
-    sourceOrigin &&
-    sourceOrigin !== requestOrigin &&
-    !allowedPostMessageOrigins.includes(sourceOrigin)
+    !requestUrl ||
+    (sourceOrigin &&
+      sourceOrigin !== requestUrl.origin.toLowerCase() &&
+      !allowedPostMessageOrigins.includes(sourceOrigin))
   ) {
     return buildBlockedDecision({
       allowedEntryHosts,

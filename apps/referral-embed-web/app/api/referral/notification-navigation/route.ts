@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveReferralRequestUrl } from "../../../../lib/embed-request-origin";
 import {
   consumeReferralEmbedHandoffArtifact,
   getPartnerEntry,
@@ -20,6 +21,8 @@ export async function GET(request: Request) {
   }
 
   try {
+    const publicRequestUrl = resolveReferralRequestUrl(url, request.headers);
+    if (!publicRequestUrl) throw new Error("Invalid request authority.");
     const partnerEntry = await getPartnerEntry(entrySlug);
     const entryHost = partnerEntry.entryHost;
     if (!entryHost) {
@@ -44,7 +47,7 @@ export async function GET(request: Request) {
 
     const redirectUrl = new URL(
       `/embed/${encodeURIComponent(entrySlug)}`,
-      request.url,
+      publicRequestUrl,
     );
     if (session.navigationContext) {
       redirectUrl.searchParams.set("screen", session.navigationContext.screen);
