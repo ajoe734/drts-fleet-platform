@@ -789,5 +789,28 @@
         "New referral ratings require explicit policy provenance and score<=2 canonical case/timeline regardless of contact preference. Migration marks only pre-existing rating objects legacy; missing provenance is not legacy."
       ]
     }
+  ],
+  "normal_onboarding_supply_pair_allocations": [
+    {
+      "task_id": "NORMAL-ONBOARDING-APPROVED-VEHICLE-DRIVER-PAIR-20261020",
+      "version": "V0128",
+      "migration_filename": "V0128__registry_supply_pair_unknown_eta.sql",
+      "domain": "normal_onboarding_supply_pair",
+      "target_schema": "reg",
+      "primary_tables": ["reg.phase1_registry_supply_pairs"],
+      "referenced_tables": [
+        "fleet.supply_submissions",
+        "reg.phase1_registry_drivers",
+        "reg.phase1_registry_vehicles"
+      ],
+      "description": "Normal approval of an explicit same-fleet approved driver reference creates the structural vehicle-driver pair. Unknown onboarding ETA is NULL, never a fabricated zero/five-minute measurement; only the existing ETA column nullability changes.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Only eta_minutes nullability changes; all existing rows, pair keys and other columns remain unchanged.",
+        "Pair, canonical vehicle and submission approval/document/event writes use the existing single transaction. Publish the new local pair only after successful COMMIT.",
+        "Existing numeric legacy ETA values preserve their behavior; a new NULL estimate without driver observation/destination does not create a zero-minute candidate.",
+        "All license, contract, insurance, exclusivity, workstate, product and location checks remain unchanged."
+      ]
+    }
   ]
 }
