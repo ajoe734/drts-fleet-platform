@@ -213,7 +213,7 @@ test("owned synthetic business ride uses the public Demo identity through comple
     for (const [role, path] of [
       ["api", "/health"],
       ["admin", "/"],
-      ["ops", "/"],
+      ["ops", "/dashboard"],
       ["referral", `/embed/${ENTRY}`],
     ] as const) {
       await tx.call(role, path, { raw: true, expected: [200] });
