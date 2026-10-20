@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { createIdempotencyKey } from "@drts/api-client";
 import type {
   CreateDriverLeaveCommand,
   DriverLeaveRecord,
@@ -23,6 +24,22 @@ import { PageHeader, driverCanvasTheme } from "@/components/canvas-primitives";
 
 type ActiveView = "list" | "create" | "detail" | "shift_impact" | "conflict";
 
+type CreateIntentState = {
+  driverId: string;
+  payloadSignature: string;
+  idempotencyKey: string;
+  inFlightCount: number;
+  completed: boolean;
+};
+
+function readCurrentDriverId(): string | null {
+  try {
+    return getDriverId();
+  } catch {
+    return null;
+  }
+}
+
 export default function DriverLeaveScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -43,20 +60,38 @@ export default function DriverLeaveScreen() {
   const [error, setError] = useState<string | null>(null);
   const [conflictVariant, setConflictVariant] =
     useState<DriverConflictVariant>("withdraw_conflict");
+  const createIntentRef = useRef<CreateIntentState | null>(null);
+
+  const resetCreateIntent = useCallback(() => {
+    createIntentRef.current = null;
+    setIsSubmitting(false);
+    setError(null);
+  }, []);
 
   // Fetch leaves from API
   const fetchLeaves = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    let requestDriverId: string | null = null;
     try {
       const client = getDriverClient();
       const driverId = getDriverId();
+      requestDriverId = driverId;
       const res = await client.listDriverLeaves({ driverId });
+      if (readCurrentDriverId() !== driverId) {
+        return;
+      }
       if (!res || !Array.isArray(res.items)) {
         throw new Error("Invalid leave response");
       }
       setLeaves(res.items);
     } catch (err) {
+      if (
+        requestDriverId !== null &&
+        readCurrentDriverId() !== requestDriverId
+      ) {
+        return;
+      }
       setLeaves([]);
       const message = formatDriverError(err, "無法取得請假資料");
       setError(message);
@@ -100,13 +135,84 @@ export default function DriverLeaveScreen() {
   const handleCreateSubmit = async (command: CreateDriverLeaveCommand) => {
     setIsSubmitting(true);
     setError(null);
+    let attemptIntent: CreateIntentState | null = null;
+    let attemptDriverId: string | null = null;
     try {
       const client = getDriverClient();
-      const newLeave = await client.createDriverLeave(command);
-      setLeaves((prev) => [newLeave, ...prev]);
+      const driverId = getDriverId();
+      attemptDriverId = driverId;
+      const payloadSignature = JSON.stringify({
+        leaveType: command.leaveType,
+        startTime: command.startTime,
+        endTime: command.endTime,
+        reason: command.reason,
+      });
+      const currentIntent = createIntentRef.current;
+      const intent: CreateIntentState =
+        currentIntent &&
+        !currentIntent.completed &&
+        currentIntent.driverId === driverId &&
+        currentIntent.payloadSignature === payloadSignature
+          ? currentIntent
+          : {
+              driverId,
+              payloadSignature,
+              idempotencyKey: createIdempotencyKey("driver-leave-create"),
+              inFlightCount: 0,
+              completed: false,
+            };
+      intent.inFlightCount += 1;
+      createIntentRef.current = intent;
+      attemptIntent = intent;
+
+      const newLeave = await client.createDriverLeave(command, {
+        idempotencyKey: intent.idempotencyKey,
+      });
+
+      const activeDriverId = readCurrentDriverId();
+      if (activeDriverId !== driverId) {
+        if (createIntentRef.current === intent) {
+          createIntentRef.current = null;
+        }
+        return;
+      }
+      if (createIntentRef.current !== intent || intent.completed) {
+        return;
+      }
+
+      intent.completed = true;
+      createIntentRef.current = null;
+      setError(null);
+      setLeaves((prev) => [
+        newLeave,
+        ...prev.filter((item) => item.leaveId !== newLeave.leaveId),
+      ]);
       setSelectedLeave(newLeave);
       setActiveView("detail");
     } catch (err) {
+      const activeDriverId = readCurrentDriverId();
+      if (attemptIntent !== null) {
+        if (activeDriverId !== attemptDriverId) {
+          if (createIntentRef.current === attemptIntent) {
+            createIntentRef.current = null;
+          }
+          return;
+        }
+        if (
+          createIntentRef.current !== attemptIntent ||
+          attemptIntent.completed ||
+          attemptIntent.inFlightCount > 1
+        ) {
+          return;
+        }
+      } else if (
+        createIntentRef.current !== null &&
+        createIntentRef.current.inFlightCount > 0 &&
+        activeDriverId === createIntentRef.current.driverId
+      ) {
+        return;
+      }
+
       const errStr = String(err);
       if (errStr.includes("LEAVE_OVERLAPPING_REQUEST")) {
         setError("409 · LEAVE_OVERLAPPING_REQUEST");
@@ -116,7 +222,23 @@ export default function DriverLeaveScreen() {
         setError(formatDriverError(err, "申請請假失敗"));
       }
     } finally {
-      setIsSubmitting(false);
+      if (attemptIntent !== null) {
+        attemptIntent.inFlightCount = Math.max(
+          0,
+          attemptIntent.inFlightCount - 1,
+        );
+      }
+      const activeIntent = createIntentRef.current;
+      const activeDriverId = readCurrentDriverId();
+      const hasActiveInFlightForCurrentDriver =
+        activeIntent !== null &&
+        !activeIntent.completed &&
+        activeIntent.inFlightCount > 0 &&
+        activeDriverId !== null &&
+        activeIntent.driverId === activeDriverId;
+      if (!hasActiveInFlightForCurrentDriver) {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -154,8 +276,8 @@ export default function DriverLeaveScreen() {
             onPress={
               activeView !== "list"
                 ? () => {
+                    resetCreateIntent();
                     setActiveView("list");
-                    setError(null);
                   }
                 : () => router.back()
             }
@@ -178,7 +300,10 @@ export default function DriverLeaveScreen() {
           error={error}
           isLoading={isLoading}
           leaves={leaves}
-          onCreatePress={() => setActiveView("create")}
+          onCreatePress={() => {
+            resetCreateIntent();
+            setActiveView("create");
+          }}
           onRefresh={fetchLeaves}
           onSelectLeave={(lv) => {
             setSelectedLeave(lv);
@@ -192,7 +317,10 @@ export default function DriverLeaveScreen() {
         <DriverLeaveForm
           existingLeaves={leaves}
           isSubmitting={isSubmitting}
-          onCancel={() => setActiveView("list")}
+          onCancel={() => {
+            resetCreateIntent();
+            setActiveView("list");
+          }}
           onSubmit={handleCreateSubmit}
           serverError={error}
           theme={driverCanvasTheme}

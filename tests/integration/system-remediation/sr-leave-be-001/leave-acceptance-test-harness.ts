@@ -70,6 +70,9 @@ export interface MintTokenOptions {
   scopes: string[];
 }
 
+// Controlled test-signed JWT claim/scope fixtures for exercising
+// BootstrapAuthGuard and DriverLeaveController route guards. These are
+// isolated test fixtures and do not represent real user login or shared runtime IAM.
 export function driverIdentity(actorId: string): MintTokenOptions {
   return {
     actorType: "driver_user",
@@ -88,7 +91,7 @@ export function opsReviewerIdentity(actorId: string): MintTokenOptions {
     realm: "ops",
     roleFamilies: ["ops"],
     roles: ["ops_manager"],
-    scopes: ["dispatch:read", "dispatch:write"],
+    scopes: ["driver:read", "dispatch:read", "dispatch:write"],
   };
 }
 
@@ -128,26 +131,44 @@ export async function mintAccessToken(
 export interface ApiResponse<T = unknown> {
   status: number;
   body: T;
+  headers: Record<string, string>;
+}
+
+export interface ApiRequestOptions {
+  token?: string;
+  body?: unknown;
+  idempotencyKey?: string;
+  headers?: Record<string, string>;
 }
 
 export async function apiRequest<T = unknown>(
   baseUrl: string,
   method: string,
   path: string,
-  options: { token?: string; body?: unknown } = {},
+  options: ApiRequestOptions = {},
 ): Promise<ApiResponse<T>> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...(options.headers ?? {}),
+  };
   if (options.token) {
     headers.authorization = `Bearer ${options.token}`;
+  }
+  if (options.idempotencyKey !== undefined) {
+    headers["idempotency-key"] = options.idempotencyKey;
   }
   const init: RequestInit = { method, headers };
   if (options.body !== undefined) {
     init.body = JSON.stringify(options.body);
   }
   const res = await fetch(`${baseUrl}${path}`, init);
+  const responseHeaders: Record<string, string> = {};
+  res.headers.forEach((value, key) => {
+    responseHeaders[key.toLowerCase()] = value;
+  });
   const text = await res.text();
   const body = text.length > 0 ? JSON.parse(text) : undefined;
-  return { status: res.status, body: body as T };
+  return { status: res.status, body: body as T, headers: responseHeaders };
 }
 
 export function futureIso(offsetMs: number): string {
