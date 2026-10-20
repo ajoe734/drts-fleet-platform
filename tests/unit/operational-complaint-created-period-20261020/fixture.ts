@@ -12,6 +12,7 @@ import { ReportingFilingService } from "../../../apps/api/src/modules/reporting-
 import { ReportingFilingModule } from "../../../apps/api/src/modules/reporting-filing/reporting-filing.module";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { scenario } from "../referral-manual-complaints-canonical-20261020/scenario";
+import { transactionalMonthlyPort } from "./transaction-port";
 
 type Data = Record<string, unknown>;
 
@@ -63,7 +64,11 @@ export async function reportFixture(
   const calls: Array<{ sql: string; values: readonly unknown[] }> = [];
   // Transport/storage port only. The whole real ReportingRepository executes
   // its SQL, binds all columns and maps the readback; no aggregate is mocked.
-  const query = vi.fn(async (sql: string, values: readonly unknown[] = []) => {
+  const runQuery = async (
+    sql: string,
+    values: readonly unknown[] = [],
+    target = monthly,
+  ) => {
     calls.push({ sql, values: structuredClone(values) });
     const insert =
       /INSERT INTO reporting\.monthly_operations_summaries\s*\(([^)]+)\)/.exec(
@@ -79,7 +84,7 @@ export async function reportFixture(
             : structuredClone(values[i]),
         ]),
       );
-      monthly.set(
+      target.set(
         `${row.period_month}:${row.business_area}:${row.service_product_code}`,
         row,
       );
@@ -92,7 +97,7 @@ export async function reportFixture(
           /(period_month|business_area|service_product_code)\s*(>=|<=|=)\s*\$(\d+)/g,
         ),
       ];
-      const rows = [...monthly.values()].filter((row) =>
+      const rows = [...target.values()].filter((row) =>
         predicates.every(([, key, operator, index]) => {
           const compared = String(row[key!]).localeCompare(
             String(values[Number(index) - 1]),
@@ -124,20 +129,24 @@ export async function reportFixture(
       return { rows, rowCount: rows.length };
     }
     throw new Error("Unexpected reporting SQL port");
-  });
+  };
+  const query = vi.fn((sql: string, values: readonly unknown[] = []) =>
+    runQuery(sql, values, monthly),
+  );
+  const transactions = transactionalMonthlyPort(monthly, runQuery);
   const database = {
     isEnabled: () => true,
     query,
+    connect: transactions.connect,
   } as unknown as DatabaseService;
-  const registry = {
-    listVehicles: () => [
-      {
-        vehicleId: "controlled-report-vehicle",
-        operatingArea: "NTP",
-        plateNo: "TEST-001",
-      },
-    ],
-  };
+  const vehicles = [
+    {
+      vehicleId: "controlled-report-vehicle",
+      operatingArea: "NTP",
+      plateNo: "TEST-001",
+    },
+  ];
+  const registry = { listVehicles: () => structuredClone(vehicles) };
   const fallback = {
     listComplaintCases: () => {
       throw new Error(
@@ -197,6 +206,10 @@ export async function reportFixture(
     controller,
     makeService,
     monthly,
+    database,
+    registry,
+    vehicles,
+    transactions,
     snapshotRows,
     calls,
     filing,
