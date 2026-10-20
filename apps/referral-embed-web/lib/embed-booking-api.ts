@@ -1,4 +1,8 @@
 import type {
+  SubmitReferralPassengerComplaintCommand,
+  ReferralPassengerComplaintRecord,
+} from "@drts/contracts";
+import type {
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
   OwnedOrderRecord,
@@ -114,6 +118,29 @@ async function request<T>(
     );
   return deepCamelize(body.data) as T;
 }
+export function submitReferralComplaintServer(
+  orderId: string,
+  command: SubmitReferralPassengerComplaintCommand,
+) {
+  return request<ReferralPassengerComplaintRecord>(
+    `orders/${encodeURIComponent(orderId)}/complaints`,
+    "POST",
+    { ...command, orderId },
+    command.idempotencyKey,
+  );
+}
+export function listReferralComplaintsServer(orderId: string) {
+  return request<{
+    orderId: string;
+    items: ReferralPassengerComplaintRecord[];
+  }>(`orders/${encodeURIComponent(orderId)}/complaints`);
+}
+export function getReferralComplaintServer(orderId: string, caseNo: string) {
+  return request<ReferralPassengerComplaintRecord>(
+    `orders/${encodeURIComponent(orderId)}/complaints/${encodeURIComponent(caseNo)}`,
+  );
+}
+
 export function quoteReferralFareServer(
   command: ReferralPassengerQuoteCommand,
 ) {

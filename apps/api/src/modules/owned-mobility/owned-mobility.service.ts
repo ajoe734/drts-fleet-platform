@@ -1,3 +1,7 @@
+import type {
+  SubmitReferralPassengerComplaintCommand,
+  ReferralPassengerComplaintSubmission,
+} from "@drts/contracts";
 import { PassengerFareRepository } from "../passenger-app/fare/passenger-fare.repository";
 import { estimateFare } from "../passenger-app/fare/fare.engine";
 import { ComplaintService } from "../complaint/complaint.service";
@@ -16777,6 +16781,204 @@ export class OwnedMobilityService
       ...this.orders.filter((o) => o.orderId !== orderId),
     ];
     return this.referralRatingResult(committed)!;
+  }
+
+  private normalizeReferralComplaint(
+    orderId: string,
+    command: SubmitReferralPassengerComplaintCommand,
+  ): SubmitReferralPassengerComplaintCommand {
+    const validText = (value: unknown, max: number): value is string =>
+      typeof value === "string" &&
+      Boolean(value.trim()) &&
+      Array.from(value.trim()).length <= max;
+    if (
+      !command ||
+      command.orderId !== orderId ||
+      !["service", "fare", "lost_item"].includes(command.category) ||
+      !validText(command.content, 2000) ||
+      typeof command.contactRequested !== "boolean" ||
+      !validText(command.idempotencyKey, 255) ||
+      (command.category === "lost_item"
+        ? !validText(command.lostItemDescription, 1000)
+        : command.lostItemDescription !== undefined) ||
+      Object.keys(command).some(
+        (k) =>
+          ![
+            "orderId",
+            "category",
+            "content",
+            "lostItemDescription",
+            "contactRequested",
+            "idempotencyKey",
+          ].includes(k),
+      )
+    ) {
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Invalid referral complaint.",
+      );
+    }
+    return {
+      orderId,
+      category: command.category,
+      content: command.content.trim(),
+      contactRequested: command.contactRequested,
+      idempotencyKey: command.idempotencyKey.trim(),
+      ...(command.lostItemDescription === undefined
+        ? {}
+        : { lostItemDescription: command.lostItemDescription.trim() }),
+    };
+  }
+
+  private assertReferralComplaintOwner(
+    order: OwnedOrderRecord,
+    owner: {
+      tenantId: string;
+      partnerId: string;
+      partnerProgramId: string;
+      entrySlug: string;
+      drtsPassengerId: string;
+    },
+  ) {
+    if (
+      order.tenantId !== owner.tenantId ||
+      order.partnerId !== owner.partnerId ||
+      order.partnerProgramId !== owner.partnerProgramId ||
+      order.partnerEntrySlug !== owner.entrySlug ||
+      order.passenger?.passengerId !== owner.drtsPassengerId
+    ) {
+      throw new ApiRequestError(
+        403,
+        "PARTNER_SCOPE_MISMATCH",
+        "Complaint belongs to another referral passenger.",
+      );
+    }
+  }
+
+  async submitReferralPassengerComplaint(
+    orderId: string,
+    input: SubmitReferralPassengerComplaintCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { owner } = await this.referralAuthority(identity);
+    const command = this.normalizeReferralComplaint(orderId, input);
+    if (!this.referralComplaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Complaint service is unavailable.",
+      );
+    // No optimistic accepted state or catch-and-success: a failed/unknown ACK
+    // retains the caller command. A later identical retry reads committed linkage.
+    const submitted = await this.ownedMobilityRepository!.withTransaction(
+      async (tx) => {
+        const current = await this.ownedMobilityRepository!.findOrderForUpdate(
+          tx,
+          orderId,
+        );
+        if (!current)
+          throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+        const order = current.order;
+        this.assertReferralComplaintOwner(order, owner);
+        const previous = order.referralPassengerLifecycle?.complaints ?? [];
+        const same = previous.find(
+          (item) => item.command.idempotencyKey === command.idempotencyKey,
+        );
+        if (same) {
+          if (JSON.stringify(same.command) !== JSON.stringify(command))
+            throw new ApiRequestError(
+              409,
+              "IDEMPOTENCY_PAYLOAD_MISMATCH",
+              "The original complaint command has different content.",
+            );
+          return same;
+        }
+        const hook =
+          this.referralComplaintService!.prepareReferralComplaintHook(
+            orderId,
+            command,
+          );
+        const record: ReferralPassengerComplaintSubmission = {
+          caseNo: hook.caseNo,
+          createdTimelineId: hook.createdTimelineId,
+          command,
+          submittedAt: new Date().toISOString(),
+        };
+        const next: OwnedOrderRecord = {
+          ...order,
+          referralPassengerLifecycle: {
+            ...order.referralPassengerLifecycle,
+            complaints: [...previous, record],
+          },
+        };
+        await hook.execute(tx);
+        await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+          orders: [next],
+        });
+        return record;
+      },
+    );
+    return this.referralComplaintService.publishReferralComplaintCase(
+      {
+        orderId,
+        passengerId: owner.drtsPassengerId,
+        tenantId: owner.tenantId,
+      },
+      submitted,
+    );
+  }
+
+  async listReferralPassengerComplaints(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { owner } = await this.referralAuthority(identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    this.assertReferralComplaintOwner(order, owner);
+    if (!this.referralComplaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Complaint service is unavailable.",
+      );
+    const items = await Promise.all(
+      (order.referralPassengerLifecycle?.complaints ?? []).map((record) =>
+        this.referralComplaintService!.readReferralComplaintCase(
+          orderId,
+          record,
+        ),
+      ),
+    );
+    return {
+      orderId,
+      items: items.sort(
+        (a, b) =>
+          b.submittedAt.localeCompare(a.submittedAt) ||
+          a.caseNo.localeCompare(b.caseNo),
+      ),
+    };
+  }
+
+  async getReferralPassengerComplaint(
+    orderId: string,
+    caseNo: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { items } = await this.listReferralPassengerComplaints(
+      orderId,
+      identity,
+    );
+    const found = items.find((item) => item.caseNo === caseNo);
+    if (!found)
+      throw new ApiRequestError(
+        404,
+        "COMPLAINT_NOT_FOUND",
+        "Complaint not found for this order.",
+      );
+    return found;
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {

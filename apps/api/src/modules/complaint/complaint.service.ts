@@ -1,3 +1,8 @@
+import type {
+  SubmitReferralPassengerComplaintCommand,
+  ReferralPassengerComplaintSubmission,
+  ReferralPassengerComplaintRecord,
+} from "@drts/contracts";
 import { createHash, randomUUID } from "node:crypto";
 
 import { HttpStatus, Injectable, OnModuleInit, Optional } from "@nestjs/common";
@@ -1043,6 +1048,120 @@ export class ComplaintService implements OnModuleInit {
           );
       },
     };
+  }
+
+  prepareReferralComplaintHook(
+    orderId: string,
+    command: SubmitReferralPassengerComplaintCommand,
+  ) {
+    if (!this.complaintRepository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Canonical complaint storage is unavailable.",
+      );
+    const draft = this.preparePassengerCase(
+      {
+        orderId,
+        command: {
+          rideId: orderId,
+          category: command.category,
+          content: command.content,
+          contactConsent: command.contactRequested,
+          ...(command.lostItemDescription === undefined
+            ? {}
+            : { lostItemDescription: command.lostItemDescription }),
+        },
+      },
+      "轉介內嵌網頁",
+    );
+    return {
+      caseNo: draft.complaintCase.caseNo,
+      createdTimelineId: draft.timeline.entryId,
+      execute: async (client: PoolClient) => {
+        await this.complaintRepository!.persistChanges(
+          {
+            complaintCases: [draft.complaintCase],
+            complaintTimelines: [draft.timeline],
+          },
+          client,
+        );
+      },
+    };
+  }
+
+  async readReferralComplaintCase(
+    orderId: string,
+    submitted: ReferralPassengerComplaintSubmission,
+  ): Promise<ReferralPassengerComplaintRecord> {
+    if (!this.complaintRepository?.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Canonical complaint storage is unavailable.",
+      );
+    const state = await this.complaintRepository.loadCaseState(
+      submitted.caseNo,
+    );
+    const current = state.complaintCases.find(
+      (c) => c.caseNo === submitted.caseNo && c.relatedOrderId === orderId,
+    );
+    if (
+      !current ||
+      submitted.command.orderId !== orderId ||
+      !state.complaintTimelines.some(
+        (t) =>
+          t.entryId === submitted.createdTimelineId &&
+          t.caseNo === submitted.caseNo,
+      )
+    )
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Original complaint readback is incomplete.",
+      );
+    return {
+      orderId,
+      caseNo: current.caseNo,
+      category: submitted.command.category,
+      content: submitted.command.content,
+      lostItemDescription: submitted.command.lostItemDescription ?? null,
+      contactRequested: submitted.command.contactRequested,
+      idempotencyKey: submitted.command.idempotencyKey,
+      submittedAt: submitted.submittedAt,
+      status: current.status,
+      updatedAt: current.updatedAt,
+      slaDueAt: current.slaDueAt,
+    };
+  }
+
+  async publishReferralComplaintCase(
+    scope: { orderId: string; passengerId: string; tenantId: string },
+    submitted: ReferralPassengerComplaintSubmission,
+  ) {
+    const result = await this.readReferralComplaintCase(
+      scope.orderId,
+      submitted,
+    );
+    if (!this.auditedPassengerCases.has(result.caseNo)) {
+      await this.auditNotificationService.recordAuditLogAsync({
+        actorId: scope.passengerId,
+        actorType: "referral_passenger",
+        tenantId: scope.tenantId,
+        moduleName: "complaint",
+        actionName: "create_referral_manual_complaint",
+        resourceType: "complaint_case",
+        resourceId: result.caseNo,
+        requestId: `referral-complaint:${result.caseNo}`,
+        newValuesSummary: {
+          source: "referral_embed",
+          relatedOrderId: scope.orderId,
+          category: result.category,
+        },
+      });
+      this.auditedPassengerCases.add(result.caseNo);
+    }
+    return result;
   }
 
   async publishReferralRatingCase(scope: {

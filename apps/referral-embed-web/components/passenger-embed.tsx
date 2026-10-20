@@ -1,4 +1,5 @@
 "use client";
+import { ReferralComplaintPanel } from "./referral-complaint-panel";
 
 import Link from "next/link";
 import { ExternalPaymentSim } from "./external-payment-sim";
@@ -3319,6 +3320,17 @@ function OutcomeScreen({
             </Banner>
           ) : null}
         </Card>
+      ) : null}
+      {completed && trip ? (
+        <ReferralComplaintPanel
+          orderId={trip.orderId}
+          recoveryScope={
+            context.session?.recoveryScope ??
+            context.session?.handoffId ??
+            "unverified"
+          }
+          accent={context.accent}
+        />
       ) : null}
       {!completed ? (
         <Card theme={theme}>
