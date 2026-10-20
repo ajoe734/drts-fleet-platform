@@ -14,6 +14,7 @@ import {
 } from "../pax-qa-20261009/payment-postgres-harness";
 import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { PassengerFareRepository } from "../../../apps/api/src/modules/passenger-app/fare/passenger-fare.repository";
+import { TenantPartnerRepository } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { domainFixture } from "./domain-fixture";
 
 // Uses the existing GitHub-hosted disposable DB/migration harness. Never opens
@@ -32,6 +33,11 @@ describe.skipIf(!hostedPaymentEnabled)(
       const f = await domainFixture();
       const database = h.peerDatabase();
       const repo = new OwnedMobilityRepository(database);
+      // The route's real FK must reference the same entry used by the normal
+      // handoff/consent fixture. A memory-only entry cannot satisfy native SQL.
+      await new TenantPartnerRepository(database).persistChanges({
+        partnerEntries: [f.entry],
+      });
       Reflect.set(f.service, "ownedMobilityRepository", repo);
       Reflect.set(
         f.service,

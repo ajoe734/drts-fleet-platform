@@ -252,6 +252,32 @@ export class ReferralSqlPort {
       });
       return result(changed);
     }
+    if (
+      sql.startsWith("SELECT jsonb_build_object(") &&
+      sql.includes("AS record FROM ops.phase1_owned_orders o WHERE")
+    ) {
+      const order = this.table("ops.phase1_owned_orders").get(String(v[0]));
+      if (!order) return result();
+      const sameOrder = (table: string) =>
+        [...this.table(table).values()].filter(
+          (r) => r.orderId === order.orderId,
+        );
+      return result([
+        {
+          record: {
+            orders: [order],
+            dispatchJobs: sameOrder("ops.phase1_dispatch_jobs"),
+            dispatchAttempts: sameOrder("ops.phase1_dispatch_attempts"),
+            dispatchAssignments: sameOrder("ops.phase1_dispatch_assignments"),
+            driverTasks: sameOrder("ops.phase1_driver_tasks"),
+            dispatchTraceLogs: sameOrder("ops.phase1_dispatch_trace_logs"),
+            passengerDisclosureSnapshots: sameOrder(
+              "ops.passenger_dispatch_disclosure_snapshots",
+            ),
+          },
+        },
+      ]);
+    }
     if (sql.includes("FROM ops.phase1_owned_orders")) {
       let rows = [
         ...this.table("ops.phase1_owned_orders").values(),

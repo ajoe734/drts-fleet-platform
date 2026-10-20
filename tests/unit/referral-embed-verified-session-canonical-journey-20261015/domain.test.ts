@@ -1,6 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { domainFixture } from "./domain-fixture";
 import { OwnedMobilityController } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
+import type { DispatchAssignmentRecord } from "@drts/contracts";
+
+function currentAssignment(orderId: string): DispatchAssignmentRecord {
+  const now = new Date().toISOString();
+  return {
+    assignmentId: "unit-current-assignment",
+    dispatchJobId: "unit-current-job",
+    orderId,
+    taskId: "unit-current-task",
+    driverId: "unit-current-driver",
+    vehicleId: "unit-current-vehicle",
+    assignmentType: "metered",
+    status: "assigned",
+    acceptedAt: null,
+    rejectedAt: null,
+    rejectReasonCode: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -215,6 +235,114 @@ describe("real referral quote/repository/create continuity over controlled stora
       f.service.getReferralPassengerActiveTrip(who),
     ).rejects.toMatchObject({ code: "REFERRAL_HANDOFF_REVOKED" });
   });
+  it.each(["cold", "previous", "current"])(
+    "reads current persisted assignment with an independent %s task cache",
+    async (cache) => {
+      const f = await domainFixture(),
+        who = await f.identity(),
+        command = await f.command(who),
+        created = await f.service.createReferralPassengerBooking(command, who);
+      const order = f.db.table("ops.phase1_owned_orders").get(created.orderId);
+      order.status = "assigned";
+      const reader = f.newService();
+      const suffix = cache === "current" ? "current" : "previous";
+      // Independent process snapshots: only the fields read by the old resolver
+      // are material here; all order/identity/quote reads use the real domain.
+      const localAssignment = {
+        orderId: created.orderId,
+        driverId: `unit-${suffix}-driver`,
+        vehicleId: `unit-${suffix}-vehicle`,
+        status: "assigned",
+      };
+      Reflect.set(
+        reader,
+        "driverTasks",
+        cache === "cold" ? [] : [localAssignment],
+      );
+      Reflect.set(
+        reader,
+        "dispatchAssignments",
+        cache === "cold" ? [] : [localAssignment],
+      );
+      const registry = Reflect.get(reader, "regulatoryRegistryService");
+      vi.spyOn(registry, "listDrivers").mockReturnValue([
+        { driverId: "unit-previous-driver", name: "Previous driver" },
+        { driverId: "unit-current-driver", name: "Current driver" },
+      ]);
+      vi.spyOn(registry, "listVehicles").mockReturnValue([
+        { vehicleId: "unit-previous-vehicle", plateNo: "UNIT-PREVIOUS" },
+        { vehicleId: "unit-current-vehicle", plateNo: "UNIT-CURRENT" },
+      ]);
+      await f.repository.persistChanges({
+        dispatchAssignments: [currentAssignment(created.orderId)],
+      });
+      const readsBefore = f.db.calls.length;
+      const result = await reader.getReferralPassengerActiveTrip(who);
+      expect(result).toMatchObject({
+        active: true,
+        trip: {
+          orderId: created.orderId,
+          status: "assigned",
+          driverName: "Current driver",
+          plateNumber: "UNIT-CURRENT",
+          driverPhoneMasked: null,
+        },
+      });
+      expect(
+        f.db.calls
+          .slice(readsBefore)
+          .filter((call) =>
+            call.sql.includes("AS record FROM ops.phase1_owned_orders o WHERE"),
+          )
+          .map((call) => call.values),
+      ).toEqual([[created.orderId]]);
+      expect(registry.listDrivers).toHaveBeenCalledOnce();
+      expect(registry.listVehicles).toHaveBeenCalledOnce();
+      expect(f.db.table("ops.phase1_owned_orders").size).toBe(1);
+    },
+  );
+  it.each(["absent", "unavailable"])(
+    "does not fall back to stale task/assignment/candidate when current persisted assignment is %s",
+    async (state) => {
+      const f = await domainFixture(),
+        who = await f.identity(),
+        command = await f.command(who),
+        created = await f.service.createReferralPassengerBooking(command, who);
+      const order = f.db.table("ops.phase1_owned_orders").get(created.orderId);
+      order.status = "assigned";
+      order.dispatchCandidate = {
+        driverName: "Stale candidate",
+        plateNumber: "UNIT-STALE",
+        driverPhoneMasked: "09**-stale",
+      };
+      const reader = f.newService();
+      const stale = {
+        orderId: created.orderId,
+        driverId: "unit-previous-driver",
+        vehicleId: "unit-previous-vehicle",
+        status: "assigned",
+      };
+      Reflect.set(reader, "driverTasks", [stale]);
+      Reflect.set(reader, "dispatchAssignments", [stale]);
+      if (state === "unavailable")
+        f.db.failSql = /^SELECT jsonb_build_object\(/;
+      const reading = reader.getReferralPassengerActiveTrip(who);
+      if (state === "unavailable")
+        await expect(reading).rejects.toThrow(
+          "controlled storage write failure",
+        );
+      else
+        expect(await reading).toMatchObject({
+          active: true,
+          trip: {
+            orderId: created.orderId,
+            driverName: null,
+            plateNumber: null,
+            driverPhoneMasked: null,
+          },
+        });
+    },
+  );
   it.each(["0", "2027-02-30T12:00:00Z", "2026-01-01T12:00:00Z"])(
     "rejects invalid/past scheduling %s without minting an estimate",
     async (scheduledAt) => {

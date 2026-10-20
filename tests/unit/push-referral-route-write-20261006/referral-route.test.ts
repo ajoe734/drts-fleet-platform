@@ -337,44 +337,41 @@ describe("referral route negative cases and replay", () => {
       const failure = new Error("injected notification write failure");
       const report = vi.spyOn(h.repository, "reportPersistenceFailure");
       h.query.mockImplementation(async (sql, values, execute) => {
-        if (
-          sql.includes(
-            {
-              lock: "pg_advisory_xact_lock",
-              "first-party-check":
-                "FROM mobility.phase1_order_first_party_notification_routes",
-              route:
-                "INSERT INTO mobility.phase1_order_partner_notification_routes",
-              sequence:
-                "INSERT INTO mobility.phase1_partner_notification_sequences",
-            }[target]!,
-          )
-        )
-          throw failure;
+        const isTarget =
+          target === "lock"
+            ? sql.replace(/\s+/g, " ").trim() ===
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))" &&
+              typeof values?.[0] === "string" &&
+              values[0].startsWith("passenger-push-first-party-route:")
+            : sql.includes(
+                {
+                  "first-party-check":
+                    "FROM mobility.phase1_order_first_party_notification_routes",
+                  route:
+                    "INSERT INTO mobility.phase1_order_partner_notification_routes",
+                  sequence:
+                    "INSERT INTO mobility.phase1_partner_notification_sequences",
+                }[target]!,
+              );
+        if (isTarget) throw failure;
         return baseQuery(sql, values, execute);
       });
-      if (target === "lock")
-        await expect(
-          h.service.createReferralPassengerBooking(h.command, h.identity),
-        ).rejects.toBe(failure);
-      else {
-        await expect(
-          h.service.createReferralPassengerBooking(h.command, h.identity),
-        ).rejects.toMatchObject({
-          status: 503,
-          code: "FARE_QUOTE_UNAVAILABLE",
-        });
-        expect(report).toHaveBeenCalledWith(
-          failure,
-          "write order partner notification route",
-        );
-        expect(h.statements).toContain(
-          "ROLLBACK TO SAVEPOINT partner_notification_route",
-        );
-        expect(h.statements).toContain(
-          "RELEASE SAVEPOINT partner_notification_route",
-        );
-      }
+      await expect(
+        h.service.createReferralPassengerBooking(h.command, h.identity),
+      ).rejects.toMatchObject({
+        status: 503,
+        code: "FARE_QUOTE_UNAVAILABLE",
+      });
+      expect(report).toHaveBeenCalledWith(
+        failure,
+        "write order partner notification route",
+      );
+      expect(h.statements).toContain(
+        "ROLLBACK TO SAVEPOINT partner_notification_route",
+      );
+      expect(h.statements).toContain(
+        "RELEASE SAVEPOINT partner_notification_route",
+      );
       expect(h.db.table("ops.phase1_owned_orders").size).toBe(0);
       expect(
         h.db

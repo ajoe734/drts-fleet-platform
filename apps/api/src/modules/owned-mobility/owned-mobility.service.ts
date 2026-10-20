@@ -16080,20 +16080,28 @@ export class OwnedMobilityService
     }
   }
 
-  private resolveReferralTripDetails(order: OwnedOrderRecord) {
-    const assignment = this.dispatchAssignments.find(
+  private resolveReferralTripDetails(
+    order: OwnedOrderRecord,
+    currentAssignments?: readonly DispatchAssignmentRecord[],
+  ) {
+    const assignment = (currentAssignments ?? this.dispatchAssignments).find(
       (a) =>
         a.orderId === order.orderId &&
         ["assigned", "accepted"].includes(a.status),
     );
-    const task = this.driverTasks.find(
-      (t) =>
-        t.orderId === order.orderId &&
-        !["cancelled", "rejected"].includes(t.status),
-    );
+    const task = currentAssignments
+      ? undefined
+      : this.driverTasks.find(
+          (t) =>
+            t.orderId === order.orderId &&
+            !["cancelled", "rejected"].includes(t.status),
+        );
 
-    const candidate = (order as unknown as Record<string, unknown>)
-      .dispatchCandidate as
+    const candidate = (
+      currentAssignments
+        ? undefined
+        : (order as unknown as Record<string, unknown>).dispatchCandidate
+    ) as
       | {
           driverName?: string;
           plateNumber?: string;
@@ -16209,7 +16217,15 @@ export class OwnedMobilityService
       return { active: false, trip: null };
     }
 
-    const details = this.resolveReferralTripDetails(activeOrder);
+    // Enterprise assignments do not have multi_taxi_direct disclosures. Read
+    // their current same-order aggregate, never an old reader's task/candidate.
+    const context = await this.ownedMobilityRepository!.loadOrderActionContext({
+      orderId: activeOrder.orderId,
+    });
+    const details = this.resolveReferralTripDetails(
+      activeOrder,
+      context?.dispatchAssignments ?? [],
+    );
     const isRated = Boolean(this.getReferralLifecycle(activeOrder)?.rating);
 
     return {
