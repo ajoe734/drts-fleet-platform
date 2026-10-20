@@ -26,6 +26,7 @@ import {
   mask,
   hash,
   origin,
+  assertBusinessOrderProduct,
   assertOwnPair,
   assertTask,
   assertRatingReplay,
@@ -1036,11 +1037,7 @@ test(journeyName, async ({ browser, request }) => {
         vehicleId,
       });
       const order = await getOrder();
-      requireFact(
-        order.serviceBucket === "business_dispatch" &&
-          order.serviceProductCode === "enterprise_dispatch",
-        "actual business order qualification",
-      );
+      assertBusinessOrderProduct(order, text(bookingState.quote.quoteId));
       const dispatched = await opsControl(
         `/orders/${encodeURIComponent(orderId)}/dispatch`,
         {
