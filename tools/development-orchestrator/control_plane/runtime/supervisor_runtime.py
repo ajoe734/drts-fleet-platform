@@ -1293,6 +1293,7 @@ def ensure_coordination_workspace(
     workspace_key = _coordination_workspace_key(request)
     destination = _candidate_coordination_worktree_path(base, request.agent_id, workspace_key)
     if _is_git_worktree(destination):
+        _provision_worktree_node_modules(repo_root, destination)
         return destination.resolve(), None, base_branch, "existing_coordination_worktree"
 
     base_ref = f"origin/{base_branch}" if _remote_branch_exists(repo_root, base_branch) else base_branch
@@ -1315,6 +1316,7 @@ def ensure_coordination_workspace(
             },
         )
         return repo_root, None, base_branch, "fallback_canonical"
+    _provision_worktree_node_modules(repo_root, destination)
     return destination.resolve(), None, base_branch, "created_coordination_worktree"
 
 
@@ -1366,7 +1368,9 @@ def ensure_execution_workspace(
     if not _worker_worktrees_enabled(config):
         return repo_root, None, None, None
     if mode == "coordination":
-        return ensure_coordination_workspace(config, request)
+        workspace, branch, base_branch, source = ensure_coordination_workspace(config, request)
+        _provision_worktree_node_modules(repo_root, workspace)
+        return workspace, branch, base_branch, source
     if not request.task_id or mode == "planning":
         return repo_root, None, None, None
 
