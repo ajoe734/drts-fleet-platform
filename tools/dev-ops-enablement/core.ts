@@ -176,7 +176,7 @@ export function validateConfigurationChange(
   }
 }
 
-function verifySession(
+export function verifySession(
   value: unknown,
   sid: string,
   actor: "platform_admin" | "ops_user",
@@ -212,7 +212,7 @@ function verifySession(
   );
   return identity;
 }
-function safeFailure(error: unknown): NonNullable<Journal["failure"]> {
+export function safeFailure(error: unknown): NonNullable<Journal["failure"]> {
   if (error instanceof JourneyFailure)
     return {
       stage: error.stage.replace(/[^A-Za-z0-9_.:-]/g, "-").slice(0, 100),
@@ -220,6 +220,90 @@ function safeFailure(error: unknown): NonNullable<Journal["failure"]> {
       ...(error.code === undefined ? {} : { code: error.code }),
     };
   return { stage: "unexpected-enablement-failure" };
+}
+
+export type DataCall = (
+  ...args: Parameters<SetupPorts["call"]>
+) => Promise<unknown>;
+export type ActivationHooks = {
+  selected(user: ReturnType<typeof existingOperator>): void;
+  beforeWrite(): Promise<void>;
+  acknowledged(): Promise<void>;
+};
+
+/** One normal existing-member action, shared by cloud setup and hosted fixtures. */
+export async function activateExistingOperator(
+  call: DataCall,
+  hooks: ActivationHooks,
+) {
+  const user = existingOperator(
+    object(await call("api", "/api/platform-admin/users")).items,
+  );
+  hooks.selected(user);
+  const path = `/api/platform-admin/users/${encodeURIComponent(user.membershipId)}/role`;
+  const proof = object(
+    await call("admin", "/control-plane-proxy/identity/step-up-proofs", {
+      method: "POST",
+      body: { method: "POST", path },
+    }),
+  );
+  const reference = text(proof.stepUpReference);
+  mask(reference);
+  requireFact(
+    proof.required === true && proof.actionId === ROLE_ACTION,
+    "exact same-Admin activation proof required",
+  );
+  await hooks.beforeWrite();
+  const ack = object(
+    await call("api", path, {
+      method: "POST",
+      body: {
+        roleCode: "operator",
+        status: "active",
+        reason:
+          "Explicit development Ops enablement for the embedded Referral Demo",
+      },
+      headers: { "x-drts-step-up-reference": reference },
+    }),
+  );
+  requireFact(ack.status === "active", "normal activation ACK required");
+  const acknowledged = existingOperator([ack]);
+  requireFact(
+    acknowledged.membershipId === user.membershipId &&
+      acknowledged.principalId === user.principalId,
+    "same existing canonical activation ACK required",
+  );
+  await hooks.acknowledged();
+  const readback = existingOperator(
+    object(await call("api", "/api/platform-admin/users")).items,
+  );
+  requireFact(
+    readback.status === "active" &&
+      readback.membershipId === user.membershipId &&
+      readback.principalId === user.principalId,
+    "normal activation current readback required",
+  );
+  return readback;
+}
+
+/** Same acknowledged own session; unchanged native route and status proof. */
+export async function revokeOwnSession(
+  call: SetupPorts["call"],
+  api: "api" | "opsApi",
+  sid: string,
+) {
+  await call(api, "/api/auth/sessions/revoke", {
+    method: "POST",
+    body: { sessionId: sid },
+  });
+  const inactive = await call(api, "/api/auth/session", {
+    expected: [200, 401],
+  });
+  requireFact(
+    inactive.status === 401 ||
+      (inactive.status === 200 && object(inactive.data).active === false),
+    "own setup session must be inactive",
+  );
 }
 
 /** No product orders, account creation, role catalog or direct DB operations. */
@@ -281,57 +365,21 @@ export async function enableExistingDevOps(
       adminSid,
       "platform_admin",
     );
-    const user = existingOperator(
-      object(await call("api", "/api/platform-admin/users")).items,
-    );
-    journal.canonicalPrincipalId = user.principalId;
-    journal.membershipId = user.membershipId;
-    const path = `/api/platform-admin/users/${encodeURIComponent(user.membershipId)}/role`;
-    const proof = object(
-      await call("admin", "/control-plane-proxy/identity/step-up-proofs", {
-        method: "POST",
-        body: { method: "POST", path },
-      }),
-    );
-    const reference = text(proof.stepUpReference);
-    mask(reference);
-    requireFact(
-      proof.required === true && proof.actionId === ROLE_ACTION,
-      "exact same-Admin activation proof required",
-    );
-    journal.activation = "ack-unknown";
-    await ports.persist(journal);
-    const ack = object(
-      await call("api", path, {
-        method: "POST",
-        body: {
-          roleCode: "operator",
-          status: "active",
-          reason:
-            "Explicit development Ops enablement for the embedded Referral Demo",
-        },
-        headers: { "x-drts-step-up-reference": reference },
-      }),
-    );
-    requireFact(ack.status === "active", "normal activation ACK required");
-    const acknowledged = existingOperator([ack]);
-    requireFact(
-      acknowledged.membershipId === user.membershipId &&
-        acknowledged.principalId === user.principalId,
-      "same existing canonical activation ACK required",
-    );
-    journal.activation = "acknowledged";
-    await ports.persist(journal);
-    const readback = existingOperator(
-      object(await call("api", "/api/platform-admin/users")).items,
-    );
-    requireFact(
-      readback.status === "active" &&
-        readback.membershipId === user.membershipId &&
-        readback.principalId === user.principalId,
-      "normal activation current readback required",
-    );
-    journal.actualCanonicalRealm = readback.canonicalRealm;
+    const user = await activateExistingOperator(call, {
+      selected: (selected) => {
+        journal.canonicalPrincipalId = selected.principalId;
+        journal.membershipId = selected.membershipId;
+      },
+      beforeWrite: async () => {
+        journal.activation = "ack-unknown";
+        await ports.persist(journal);
+      },
+      acknowledged: async () => {
+        journal.activation = "acknowledged";
+        await ports.persist(journal);
+      },
+    });
+    journal.actualCanonicalRealm = user.canonicalRealm;
     const current = await ports.readRuntime();
     requireFact(same(current, before), "runtime changed before private config");
     journal.configuration = "ack-unknown";
@@ -374,18 +422,7 @@ export async function enableExistingDevOps(
       if (!sid) continue;
       const api = role === "ops" ? "opsApi" : "api";
       try {
-        await call(api, "/api/auth/sessions/revoke", {
-          method: "POST",
-          body: { sessionId: sid },
-        });
-        const inactive = await ports.call(api, "/api/auth/session", {
-          expected: [200, 401],
-        });
-        requireFact(
-          inactive.status === 401 ||
-            (inactive.status === 200 && object(inactive.data).active === false),
-          "own setup session must be inactive",
-        );
+        await revokeOwnSession(ports.call, api, sid);
         journal.cleaned.push(role);
       } catch {
         journal.cleanupErrors.push(role);

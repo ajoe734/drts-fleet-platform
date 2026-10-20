@@ -1319,6 +1319,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_bureau_acceptance
+      PAX_REVIEW_OPS_FIXTURE_EVIDENCE_DIR: .artifacts/pax-bureau-acceptance
     steps:
       - uses: actions/checkout@v4
       - name: Verify shared release binding and private-role failure cases without sockets

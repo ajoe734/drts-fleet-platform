@@ -103,11 +103,11 @@ export default defineConfig({
           timeout: 180_000,
         },
         {
-          command:
-            "pnpm --filter @drts/ops-console-web exec next dev --webpack --hostname 127.0.0.1 --port 3202",
+          command: "pnpm exec tsx tools/dev-ops-enablement/start-hosted-ops.ts",
           env: {
             ...apiEnvironment,
             DRTS_API_URL: apiOrigin,
+            DRTS_HOSTED_OPS_FIXTURE_SETUP: "true",
             NEXT_PUBLIC_API_URL: "/control-plane-proxy",
             NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN: "http://127.0.0.1:3204",
           },
