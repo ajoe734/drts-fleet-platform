@@ -329,6 +329,22 @@ describe("actual Referral handlers behind Cloud Run HTTPS termination", () => {
     expect(response.status).toBe(200);
   });
 
+  it("rejects duplicate Host header values before issuing a session", async () => {
+    const incoming = request({ origin: null });
+    incoming.headers.append("host", "foreign.example");
+    expect((await POST(incoming)).status).toBe(403);
+    expect(ports.entry).not.toHaveBeenCalled();
+    expect(ports.jar.size).toBe(0);
+  });
+
+  it("preserves an absolute same-public-origin consent return", async () => {
+    await writeReferralEmbedSession(pending);
+    const target = `${publicOrigin}${embedPath}&screen=book`;
+    const response = await POST(request({ form: consentForm(target) }));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(target);
+  });
+
   it("retains authorized parent navigation and rejects foreign parent or entry", () => {
     expect(navigation({ referer: `https://${entryHost}/app` }).status).toBe(
       200,
