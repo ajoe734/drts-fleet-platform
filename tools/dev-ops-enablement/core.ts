@@ -127,7 +127,8 @@ export function existingOperator(value: unknown) {
   );
   const row = matches[0]!;
   requireFact(
-    row.roleCode === "operator" &&
+    row.canonicalRealm === "ops" &&
+      row.roleCode === "operator" &&
       (row.status === "invited" || row.status === "active"),
     "existing nonsuspended Ops operator required",
   );

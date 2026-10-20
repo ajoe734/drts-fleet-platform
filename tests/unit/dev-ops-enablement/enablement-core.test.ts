@@ -27,6 +27,7 @@ const membershipId = "membership_existing_ops";
 const user = {
   userId: membershipId,
   canonicalPrincipalId: principalId,
+  canonicalRealm: "ops",
   email: OPS_EMAIL,
   roleCode: "operator",
   status: "invited",
@@ -260,6 +261,8 @@ describe("normal existing development Ops enablement", () => {
     ["absent", []],
     ["ambiguous", [{ ...user }, { ...user }]],
     ["suspended", [{ ...user, status: "suspended" }]],
+    ["foreign realm", [{ ...user, canonicalRealm: "platform" }]],
+    ["missing realm proof", [{ ...user, canonicalRealm: undefined }]],
     ["wrong role", [{ ...user, roleCode: "admin" }]],
     ["no canonical readback", [{ ...user, canonicalPrincipalId: undefined }]],
     [

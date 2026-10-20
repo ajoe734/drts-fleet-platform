@@ -621,7 +621,9 @@ Ops 入口，不在啟動或登入時建立、啟用帳戶。原實測的
 
 正常 `platform-admin/users` list／mutation ACK 的 `userId` 仍是 membership
 ID；新增的唯讀 `canonicalPrincipalId` 直接來自實際 persisted principal，
-HTTP wire 名稱為 `canonical_principal_id`。只能採這個實際讀回值，不能使用
+HTTP wire 名稱為 `canonical_principal_id`。`canonicalRealm`（wire 名稱
+`canonical_realm`）取實際 membership；啟用前須確認是 `ops`。
+只能採這個實際讀回值，不能使用
 membership ID、email hash 或舊 `pa-operator-001` 名稱猜測 principal ID。
 公開角色 `operator` 在明確的正常 create／update 命令中對映為既有 canonical
 `ops_user`；原 startup seed 的 migration-pending／角色資料不會因此被遷移

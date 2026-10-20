@@ -78,6 +78,8 @@ describe("normal personnel canonical Ops enablement", () => {
     const membership = await f.repository.findMembershipById(f.user.userId);
     expect(membership).toBeTruthy();
     expect(f.user.canonicalPrincipalId).toBe(membership!.principalId);
+    expect(f.user.canonicalRealm).toBe(membership!.realm);
+    expect(f.user.canonicalRealm).toBe("ops");
     expect(f.user.userId).toBe(membership!.membershipId);
     expect(f.user.canonicalPrincipalId).not.toBe(f.user.userId);
     expect(f.user.canonicalPrincipalId).not.toBe("pa-operator-001");
