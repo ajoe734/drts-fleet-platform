@@ -298,6 +298,40 @@ export type ReferralPassengerFareQuote = Pick<
   | "consumedAt"
 >;
 
+/** Ordinary, voluntary complaints; distinct from immutable trip ratings. */
+export type ReferralPassengerComplaintCategory =
+  | "service"
+  | "fare"
+  | "lost_item";
+export interface SubmitReferralPassengerComplaintCommand {
+  orderId: string;
+  category: ReferralPassengerComplaintCategory;
+  content: string;
+  lostItemDescription?: string;
+  contactRequested: boolean;
+  idempotencyKey: string;
+}
+/** Canonical linkage stored with the same owned order/CRM transaction. */
+export interface ReferralPassengerComplaintSubmission {
+  caseNo: string;
+  createdTimelineId: string;
+  command: SubmitReferralPassengerComplaintCommand;
+  submittedAt: string;
+}
+export interface ReferralPassengerComplaintRecord {
+  orderId: string;
+  caseNo: string;
+  category: ReferralPassengerComplaintCategory;
+  content: string;
+  lostItemDescription: string | null;
+  contactRequested: boolean;
+  idempotencyKey: string;
+  submittedAt: string;
+  status: string;
+  updatedAt: string;
+  slaDueAt: string;
+}
+
 export interface ReferralPassengerRatingResult {
   orderId: string;
   score: number;

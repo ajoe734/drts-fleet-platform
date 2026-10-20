@@ -1,3 +1,4 @@
+import type { SubmitReferralPassengerComplaintCommand } from "@drts/contracts";
 import {
   Body,
   Controller,
@@ -533,6 +534,64 @@ export class OwnedMobilityController {
       await this.ownedMobilityService.submitReferralPassengerRating(
         orderId,
         command,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("partner/referral/passenger/orders/:orderId/complaints")
+  async submitReferralPassengerComplaint(
+    @Param("orderId") orderId: string,
+    @Body() command: SubmitReferralPassengerComplaintCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    if (idempotencyKey && idempotencyKey !== command?.idempotencyKey)
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "The complaint command key does not match its header.",
+      );
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.submitReferralPassengerComplaint(
+        orderId,
+        command,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/passenger/orders/:orderId/complaints")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async listReferralPassengerComplaints(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.listReferralPassengerComplaints(
+        orderId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/passenger/orders/:orderId/complaints/:caseNo")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getReferralPassengerComplaint(
+    @Param("orderId") orderId: string,
+    @Param("caseNo") caseNo: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getReferralPassengerComplaint(
+        orderId,
+        caseNo,
         identity,
       ),
       requestId,

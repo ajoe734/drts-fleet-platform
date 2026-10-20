@@ -3651,6 +3651,7 @@ export interface OwnedOrderRecord {
     bookingIntent?: import("./referral-channel").ReferralBookingIntent;
     quote?: import("./referral-channel").ReferralPassengerFareQuoteRecord;
     confirmedAt?: string;
+    complaints?: import("./referral-channel").ReferralPassengerComplaintSubmission[];
     rating?: {
       orderId: string;
       score: 1 | 2 | 3 | 4 | 5;
