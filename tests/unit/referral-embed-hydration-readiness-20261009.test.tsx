@@ -237,7 +237,11 @@ describe("referral embed booking hydration readiness", () => {
               orderId: "ord-returned-001",
               orderNo: "DRTS-20261009-001",
               status: "pending",
-              quote: { quoteId: "owned-hydration-quote" },
+              quote: {
+                quoteId: "owned-hydration-quote",
+                feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+                feeContentHash: PASSENGER_FEE_CONTENT_HASH,
+              },
               confirmedAt: "2026-10-20T02:00:00Z",
               feeConfirmation: {
                 orderId: "ord-returned-001",
@@ -365,7 +369,7 @@ async function confirmCurrentOrder(host: HTMLElement) {
   await waitFor(() => {
     if (host.textContent?.includes("重送原叫車要求")) return;
     const checkbox = getByRole(host, "checkbox", {
-      name: "我已確認本次行程與費用規則",
+      name: "我已確認費用與優惠說明",
     }) as HTMLInputElement;
     expect(checkbox.disabled).toBe(false);
   });
