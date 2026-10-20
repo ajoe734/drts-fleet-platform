@@ -1,12 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import {
-  Client,
-  type PoolClient,
-  type QueryResult,
-  type QueryResultRow,
-} from "pg";
+import { type PoolClient, type QueryResult, type QueryResultRow } from "pg";
 
 import type {
   DriverDeviceBindingRecord,
@@ -14,7 +9,7 @@ import type {
   DriverRefreshFamilyRecord,
 } from "@drts/contracts";
 
-import { DatabaseService, resolveDatabasePoolMax } from "../../common/db";
+import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
   record: unknown;
@@ -26,7 +21,7 @@ type TransactionQueryClient = Pick<PoolClient, "query">;
 export class DriverDeviceSessionRepository {
   private readonly logger = new Logger(DriverDeviceSessionRepository.name);
 
-  private readonly transactionClientStorage =
+  private readonly fallbackTransactionClientStorage =
     new AsyncLocalStorage<TransactionQueryClient>();
 
   private inMemoryLockChain: Promise<void> = Promise.resolve();
@@ -53,54 +48,49 @@ export class DriverDeviceSessionRepository {
   }
 
   private get activeTransactionClient(): TransactionQueryClient | undefined {
-    return this.transactionClientStorage.getStore();
+    return (
+      this.databaseService?.getActiveTransactionClient?.() ??
+      this.fallbackTransactionClientStorage.getStore()
+    );
   }
 
   private canUseTransactionalAdvisoryLock(): boolean {
     return this.isEnabled();
   }
 
-  private async acquireTransactionClient(): Promise<{
-    client: TransactionQueryClient;
-    release: () => Promise<void>;
-  }> {
-    const connectionString = process.env.DATABASE_URL?.trim();
-    if (
-      resolveDatabasePoolMax(process.env.DATABASE_POOL_MAX) === 1 &&
-      this.databaseService instanceof DatabaseService &&
-      Boolean(connectionString)
-    ) {
-      // Callbacks inside withRegistrationLock / withDeviceDriverLock invoke
-      // DriverProfileService and JwtAuthService, which query DatabaseService's
-      // pool directly. When DATABASE_POOL_MAX=1, borrowing the sole pooled
-      // connection for the outer transaction would starve those inner queries;
-      // use a dedicated connection on the existing DATABASE_URL so cross-instance
-      // SQL advisory/row locks remain active without pool-size-1 self-deadlock.
-      const dedicatedClient = new Client({ connectionString });
-      dedicatedClient.on("error", (error: Error) => {
-        this.reportPersistenceFailure(error, "dedicatedTransactionClient");
-      });
-      try {
-        await dedicatedClient.connect();
-      } catch (error) {
-        await dedicatedClient.end().catch(() => undefined);
-        throw error;
-      }
-      return {
-        client: dedicatedClient,
-        release: async () => {
-          await dedicatedClient.end().catch(() => undefined);
-        },
-      };
+  private async runWithTransaction<T>(
+    callback: (client: TransactionQueryClient) => Promise<T>,
+  ): Promise<T> {
+    const existingClient = this.activeTransactionClient;
+    if (existingClient) {
+      return callback(existingClient);
+    }
+
+    if (typeof this.databaseService?.withTransaction === "function") {
+      return this.databaseService.withTransaction(async (client) =>
+        callback(client),
+      );
     }
 
     const pooledClient = await this.databaseService!.connect();
-    return {
-      client: pooledClient,
-      release: async () => {
-        pooledClient.release();
-      },
-    };
+    try {
+      await pooledClient.query("BEGIN");
+      const result = await this.fallbackTransactionClientStorage.run(
+        pooledClient,
+        () => callback(pooledClient),
+      );
+      await pooledClient.query("COMMIT");
+      return result;
+    } catch (error) {
+      try {
+        await pooledClient.query("ROLLBACK");
+      } catch {
+        // Ignore rollback error and surface original failure
+      }
+      throw error;
+    } finally {
+      pooledClient.release();
+    }
   }
 
   private async runWithInMemoryLock<T>(callback: () => Promise<T>): Promise<T> {
@@ -136,47 +126,66 @@ export class DriverDeviceSessionRepository {
     }
   }
 
+  private async runWithFallbackRollbackGuard<T>(
+    callback: () => Promise<T>,
+  ): Promise<T> {
+    const invitationsSnapshot = new Map(
+      Array.from(this.fallbackInvitations.entries(), ([key, value]) => [
+        key,
+        { ...value },
+      ]),
+    );
+    const bindingsSnapshot = new Map(
+      Array.from(this.fallbackBindings.entries(), ([key, value]) => [
+        key,
+        { ...value },
+      ]),
+    );
+    const familiesSnapshot = new Map(
+      Array.from(this.fallbackRefreshFamilies.entries(), ([key, value]) => [
+        key,
+        {
+          ...value,
+          previousTokenHashes: [...value.previousTokenHashes],
+        },
+      ]),
+    );
+
+    try {
+      return await callback();
+    } catch (error) {
+      this.fallbackInvitations.clear();
+      for (const [key, value] of invitationsSnapshot.entries()) {
+        this.fallbackInvitations.set(key, value);
+      }
+      this.fallbackBindings.clear();
+      for (const [key, value] of bindingsSnapshot.entries()) {
+        this.fallbackBindings.set(key, value);
+      }
+      this.fallbackRefreshFamilies.clear();
+      for (const [key, value] of familiesSnapshot.entries()) {
+        this.fallbackRefreshFamilies.set(key, value);
+      }
+      throw error;
+    }
+  }
+
   async withRegistrationLock<T>(
     scope: { regCodeHash: string; deviceId: string },
     callback: () => Promise<T>,
   ): Promise<T> {
     return this.runWithInMemoryLock(async () => {
       if (!this.canUseTransactionalAdvisoryLock()) {
-        return callback();
+        return this.runWithFallbackRollbackGuard(callback);
       }
 
-      const existingClient = this.activeTransactionClient;
-      if (existingClient) {
-        await this.acquireAdvisoryXactLocks(existingClient, [
-          `iam.driver_device_session:1:device:${scope.deviceId}`,
-          `iam.driver_device_session:1:invite:${scope.regCodeHash}`,
-        ]);
-        return callback();
-      }
-
-      const { client, release } = await this.acquireTransactionClient();
-      try {
-        await client.query("BEGIN");
+      return this.runWithTransaction(async (client) => {
         await this.acquireAdvisoryXactLocks(client, [
           `iam.driver_device_session:1:device:${scope.deviceId}`,
           `iam.driver_device_session:1:invite:${scope.regCodeHash}`,
         ]);
-        const result = await this.transactionClientStorage.run(
-          client,
-          callback,
-        );
-        await client.query("COMMIT");
-        return result;
-      } catch (error) {
-        try {
-          await client.query("ROLLBACK");
-        } catch {
-          // Ignore rollback error and surface original failure
-        }
-        throw error;
-      } finally {
-        await release();
-      }
+        return callback();
+      });
     });
   }
 
@@ -202,45 +211,18 @@ export class DriverDeviceSessionRepository {
   ): Promise<T> {
     return this.runWithInMemoryLock(async () => {
       if (!this.canUseTransactionalAdvisoryLock()) {
-        return callback();
+        return this.runWithFallbackRollbackGuard(callback);
       }
 
-      const existingClient = this.activeTransactionClient;
-      if (existingClient) {
-        await this.acquireAdvisoryXactLocks(existingClient, [
-          `iam.driver_device_session:1:device:${scope.deviceId}`,
-        ]);
-        await this.acquireAdvisoryXactLocks(existingClient, [
-          `iam.driver_device_session:2:driver:${scope.driverId}`,
-        ]);
-        return callback();
-      }
-
-      const { client, release } = await this.acquireTransactionClient();
-      try {
-        await client.query("BEGIN");
+      return this.runWithTransaction(async (client) => {
         await this.acquireAdvisoryXactLocks(client, [
           `iam.driver_device_session:1:device:${scope.deviceId}`,
         ]);
         await this.acquireAdvisoryXactLocks(client, [
           `iam.driver_device_session:2:driver:${scope.driverId}`,
         ]);
-        const result = await this.transactionClientStorage.run(
-          client,
-          callback,
-        );
-        await client.query("COMMIT");
-        return result;
-      } catch (error) {
-        try {
-          await client.query("ROLLBACK");
-        } catch {
-          // Ignore rollback error and surface original failure
-        }
-        throw error;
-      } finally {
-        await release();
-      }
+        return callback();
+      });
     });
   }
 

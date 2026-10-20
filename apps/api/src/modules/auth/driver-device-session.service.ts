@@ -830,24 +830,93 @@ export class DriverDeviceSessionService implements OnModuleInit {
     }
   }
 
+  private async runWithInMemoryRollbackGuard<T>(
+    callback: () => Promise<T>,
+  ): Promise<T> {
+    const invitationsSnapshot = new Map(
+      Array.from(this.invitationsByHash.entries(), ([key, value]) => [
+        key,
+        { ...value },
+      ]),
+    );
+    const bindingsSnapshot = new Map(
+      Array.from(this.bindingsById.entries(), ([key, value]) => [
+        key,
+        { ...value },
+      ]),
+    );
+    const activeByDeviceSnapshot = new Map(this.activeBindingIdsByDeviceId);
+    const activeByDriverSnapshot = new Map(this.activeBindingIdsByDriverId);
+    const familiesByBindingSnapshot = new Map(
+      Array.from(this.refreshFamiliesByBindingId.entries(), ([key, value]) => [
+        key,
+        {
+          ...value,
+          previousTokenHashes: [...value.previousTokenHashes],
+        },
+      ]),
+    );
+    const familiesByHashSnapshot = new Map(
+      Array.from(this.refreshFamiliesByTokenHash.entries(), ([key, value]) => [
+        key,
+        {
+          ...value,
+          previousTokenHashes: [...value.previousTokenHashes],
+        },
+      ]),
+    );
+
+    try {
+      return await callback();
+    } catch (error) {
+      this.invitationsByHash.clear();
+      for (const [key, value] of invitationsSnapshot.entries()) {
+        this.invitationsByHash.set(key, value);
+      }
+      this.bindingsById.clear();
+      for (const [key, value] of bindingsSnapshot.entries()) {
+        this.bindingsById.set(key, value);
+      }
+      this.activeBindingIdsByDeviceId.clear();
+      for (const [key, value] of activeByDeviceSnapshot.entries()) {
+        this.activeBindingIdsByDeviceId.set(key, value);
+      }
+      this.activeBindingIdsByDriverId.clear();
+      for (const [key, value] of activeByDriverSnapshot.entries()) {
+        this.activeBindingIdsByDriverId.set(key, value);
+      }
+      this.refreshFamiliesByBindingId.clear();
+      for (const [key, value] of familiesByBindingSnapshot.entries()) {
+        this.refreshFamiliesByBindingId.set(key, value);
+      }
+      this.refreshFamiliesByTokenHash.clear();
+      for (const [key, value] of familiesByHashSnapshot.entries()) {
+        this.refreshFamiliesByTokenHash.set(key, value);
+      }
+      throw error;
+    }
+  }
+
   private async runWithRegistrationLock<T>(
     scope: { regCodeHash: string; deviceId: string },
     callback: () => Promise<T>,
   ): Promise<T> {
+    const guardedCallback = () => this.runWithInMemoryRollbackGuard(callback);
     if (this.repository?.withRegistrationLock) {
-      return this.repository.withRegistrationLock(scope, callback);
+      return this.repository.withRegistrationLock(scope, guardedCallback);
     }
-    return this.runWithLocalLock(callback);
+    return this.runWithLocalLock(guardedCallback);
   }
 
   private async runWithDeviceDriverLock<T>(
     scope: { deviceId: string; driverId: string },
     callback: () => Promise<T>,
   ): Promise<T> {
+    const guardedCallback = () => this.runWithInMemoryRollbackGuard(callback);
     if (this.repository?.withDeviceDriverLock) {
-      return this.repository.withDeviceDriverLock(scope, callback);
+      return this.repository.withDeviceDriverLock(scope, guardedCallback);
     }
-    return this.runWithLocalLock(callback);
+    return this.runWithLocalLock(guardedCallback);
   }
 
   private async loadPersistedState() {

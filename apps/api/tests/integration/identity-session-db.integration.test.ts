@@ -793,10 +793,11 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
       );
       await profileB.onModuleInit();
 
+      const repoA = new DriverDeviceSessionRepository(dbA);
       const serviceA = new DriverDeviceSessionService(
         new JwtAuthService(new IdentityRepository(dbA)),
         profileA,
-        new DriverDeviceSessionRepository(dbA),
+        repoA,
       );
       const serviceB = new DriverDeviceSessionService(
         new JwtAuthService(new IdentityRepository(dbB)),
@@ -874,6 +875,48 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
           driverId,
         ),
       ).toBe(false);
+
+      // Verify single-client atomic rollback when replacement registration fails after nested revokeSession
+      const inviteRollback = await serviceA.issueRegistrationInvitation({
+        driverId,
+      });
+      const originalSaveRefreshFamily = repoA.saveRefreshFamily.bind(repoA);
+      repoA.saveRefreshFamily = async (record) => {
+        if (record.bindingId !== winner.bindingId) {
+          throw new Error("simulated pool1 refresh family failure");
+        }
+        return originalSaveRefreshFamily(record);
+      };
+
+      await expect(
+        serviceA.register({
+          registrationCode: inviteRollback.registrationCode,
+          deviceId: `pg-pool1-device-rollback-${randomUUID()}`,
+        }),
+      ).rejects.toThrow("simulated pool1 refresh family failure");
+      repoA.saveRefreshFamily = originalSaveRefreshFamily;
+
+      const postRollbackSessionRows = await dbA.query<{
+        session_id: string;
+      }>(
+        `
+          SELECT session_id
+          FROM iam.identity_sessions
+          WHERE principal_id = $1 AND status = 'active'
+        `,
+        [driverId],
+      );
+      expect(postRollbackSessionRows.rows).toHaveLength(1);
+      expect(postRollbackSessionRows.rows[0]?.session_id).toBe(
+        winner.bindingId,
+      );
+      expect(
+        await serviceA.isBindingActive(
+          winner.bindingId,
+          winner.deviceId,
+          driverId,
+        ),
+      ).toBe(true);
     } finally {
       if (previousPoolMax === undefined) {
         delete process.env.DATABASE_POOL_MAX;

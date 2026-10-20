@@ -1,7 +1,9 @@
+import type { Pool, PoolClient, QueryResult } from "pg";
 import { describe, expect, it } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { DatabaseService } from "../../apps/api/src/common/db/database.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
@@ -493,33 +495,126 @@ describe("DriverDeviceSessionService (IAM-DRV-001)", () => {
     });
   });
 
-  it("executes SQL transactional advisory and FOR UPDATE locks even when DATABASE_POOL_MAX=1", async () => {
+  it("executes SQL transactional advisory, FOR UPDATE, and nested IdentityRepository savepoints on one pooled client via DatabaseService.withTransaction when DATABASE_POOL_MAX=1", async () => {
     const previousPoolMax = process.env.DATABASE_POOL_MAX;
     process.env.DATABASE_POOL_MAX = "1";
     try {
       const executedStatements: string[] = [];
+      let tracking = false;
+      let activeCheckouts = 0;
+      let totalCheckouts = 0;
       let released = false;
-      const repository = new DriverDeviceSessionRepository({
-        isEnabled: () => true,
-        connect: async () => ({
-          query: async (sql: string) => {
-            executedStatements.push(sql.trim());
-            return { rows: [] };
-          },
-          release: () => {
-            released = true;
-          },
-        }),
-      } as never);
+
+      const fakePool: Pick<Pool, "query" | "connect" | "end"> = {
+        query: async () => {
+          if (tracking) {
+            throw new Error(
+              "pool.query must not bypass ambient transaction client",
+            );
+          }
+          return { rows: [] } as unknown as QueryResult;
+        },
+        connect: async () => {
+          if (tracking) {
+            if (activeCheckouts >= 1) {
+              throw new Error(
+                "Second connection checkout violates DATABASE_POOL_MAX=1 single-client transaction authority",
+              );
+            }
+            activeCheckouts += 1;
+            totalCheckouts += 1;
+          }
+          return {
+            query: async (sql: string) => {
+              const trimmed = sql.trim();
+              if (tracking) {
+                executedStatements.push(trimmed);
+              }
+              if (trimmed.startsWith("UPDATE iam.identity_sessions")) {
+                return {
+                  command: "UPDATE",
+                  rowCount: 1,
+                  oid: 0,
+                  fields: [],
+                  rows: [
+                    {
+                      session_id: "drvbind-old-a",
+                      source_ref: "driver_device:drvbind-old-a",
+                      principal_id: "drv-demo-001",
+                      membership_id: "drv_mem_drv-demo-001",
+                      realm: "driver",
+                      status: "revoked",
+                      auth_time: "2026-10-20T00:00:00.000Z",
+                      auth_methods: ["driver_device_registration"],
+                      token_version: 1,
+                      idle_expires_at: "2026-10-21T00:00:00.000Z",
+                      absolute_expires_at: "2026-11-20T00:00:00.000Z",
+                      revoked_at: "2026-10-20T01:00:00.000Z",
+                      revoked_by_principal_id: null,
+                      revoke_reason: "DEVICE_REBOUND",
+                      device_summary: {},
+                      risk_summary: {},
+                      created_at: "2026-10-20T00:00:00.000Z",
+                      updated_at: "2026-10-20T01:00:00.000Z",
+                      record: {
+                        sessionId: "drvbind-old-a",
+                        sourceRef: "driver_device:drvbind-old-a",
+                        principalId: "drv-demo-001",
+                        membershipId: "drv_mem_drv-demo-001",
+                        realm: "driver",
+                        status: "revoked",
+                        authTime: "2026-10-20T00:00:00.000Z",
+                        authMethods: ["driver_device_registration"],
+                        tokenVersion: 1,
+                        idleExpiresAt: "2026-10-21T00:00:00.000Z",
+                        absoluteExpiresAt: "2026-11-20T00:00:00.000Z",
+                        revokedAt: "2026-10-20T01:00:00.000Z",
+                        revokedByPrincipalId: null,
+                        revokeReason: "DEVICE_REBOUND",
+                        createdAt: "2026-10-20T00:00:00.000Z",
+                        updatedAt: "2026-10-20T01:00:00.000Z",
+                      },
+                    },
+                  ],
+                } as unknown as QueryResult;
+              }
+              return {
+                command: "SELECT",
+                rowCount: 0,
+                oid: 0,
+                fields: [],
+                rows: [],
+              } as unknown as QueryResult;
+            },
+            release: () => {
+              if (tracking) {
+                activeCheckouts -= 1;
+                released = true;
+              }
+            },
+          } as unknown as PoolClient;
+        },
+        end: async () => undefined,
+      };
+
+      const db = new DatabaseService(fakePool as Pool);
+      const repository = new DriverDeviceSessionRepository(db);
+      const identityRepo = new IdentityRepository(db);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      tracking = true;
 
       await repository.withRegistrationLock(
         { regCodeHash: "hash-pool1", deviceId: "device-pool1" },
         async () => {
           await repository.lockDriverRegistrationScope("drv-demo-001");
           await repository.findActiveBindingsByDriverId("drv-demo-001");
+          await identityRepo.revokeSession("drvbind-old-a", "DEVICE_REBOUND");
         },
       );
 
+      expect(totalCheckouts).toBe(1);
+      expect(activeCheckouts).toBe(0);
+      expect(released).toBe(true);
       expect(executedStatements[0]).toBe("BEGIN");
       expect(
         executedStatements.some((sql) =>
@@ -533,8 +628,9 @@ describe("DriverDeviceSessionService (IAM-DRV-001)", () => {
             sql.includes("FOR UPDATE"),
         ),
       ).toBe(true);
+      expect(executedStatements).toContain("SAVEPOINT sp_1");
+      expect(executedStatements).toContain("RELEASE SAVEPOINT sp_1");
       expect(executedStatements.at(-1)).toBe("COMMIT");
-      expect(released).toBe(true);
     } finally {
       if (previousPoolMax === undefined) {
         delete process.env.DATABASE_POOL_MAX;
@@ -542,5 +638,150 @@ describe("DriverDeviceSessionService (IAM-DRV-001)", () => {
         process.env.DATABASE_POOL_MAX = previousPoolMax;
       }
     }
+  });
+
+  it("rolls back both SQL transaction (including nested IdentityRepository.revokeSession savepoint) and in-memory state if registration fails after revoking prior device", async () => {
+    const {
+      sessionService,
+      sessionRepository,
+      jwtAuthService,
+      identityRepository,
+    } = setupServices();
+    await sessionService.onModuleInit();
+
+    const inviteA = await sessionService.issueRegistrationInvitation({
+      driverId: "drv-demo-001",
+    });
+    const sessionA = await sessionService.register({
+      registrationCode: inviteA.registrationCode,
+      deviceId: "device-rollback-old-a",
+      deviceLabel: "Old Phone A",
+    });
+
+    const inviteB = await sessionService.issueRegistrationInvitation({
+      driverId: "drv-demo-001",
+    });
+
+    const originalSaveRefreshFamily =
+      sessionRepository.saveRefreshFamily.bind(sessionRepository);
+    let failNextNewFamily = false;
+    sessionRepository.saveRefreshFamily = async (record) => {
+      if (failNextNewFamily && record.bindingId !== sessionA.bindingId) {
+        throw new Error("simulated refresh family persistence failure");
+      }
+      return originalSaveRefreshFamily(record);
+    };
+    failNextNewFamily = true;
+
+    await expect(
+      sessionService.register({
+        registrationCode: inviteB.registrationCode,
+        deviceId: "device-rollback-new-b",
+        deviceLabel: "New Phone B",
+      }),
+    ).rejects.toThrow("simulated refresh family persistence failure");
+
+    failNextNewFamily = false;
+    sessionRepository.saveRefreshFamily = originalSaveRefreshFamily;
+
+    // In-memory state for device A is restored on rollback
+    expect(
+      await sessionService.isBindingActive(
+        sessionA.bindingId,
+        sessionA.deviceId,
+        sessionA.driverId,
+      ),
+    ).toBe(true);
+    expect(
+      (
+        await sessionRepository.findActiveBindingsByDriverId("drv-demo-001")
+      ).map((b) => b.bindingId),
+    ).toContain(sessionA.bindingId);
+
+    // Also verify SQL-level rollback on a single pooled connection when nested revokeSession savepoint already ran
+    const executedStatements: string[] = [];
+    const fakePool: Pick<Pool, "query" | "connect" | "end"> = {
+      query: async () => ({ rows: [] }) as unknown as QueryResult,
+      connect: async () =>
+        ({
+          query: async (sql: string) => {
+            const trimmed = sql.trim();
+            executedStatements.push(trimmed);
+            if (trimmed.startsWith("UPDATE iam.identity_sessions")) {
+              return {
+                rows: [
+                  {
+                    session_id: sessionA.bindingId,
+                    source_ref: `driver_device:${sessionA.bindingId}`,
+                    principal_id: "drv-demo-001",
+                    membership_id: "drv_mem_drv-demo-001",
+                    realm: "driver",
+                    status: "revoked",
+                    auth_time: "2026-10-20T00:00:00.000Z",
+                    auth_methods: ["driver_device_registration"],
+                    token_version: 1,
+                    idle_expires_at: "2026-10-21T00:00:00.000Z",
+                    absolute_expires_at: "2026-11-20T00:00:00.000Z",
+                    revoked_at: "2026-10-20T01:00:00.000Z",
+                    revoked_by_principal_id: null,
+                    revoke_reason: "DEVICE_REBOUND",
+                    device_summary: {},
+                    risk_summary: {},
+                    created_at: "2026-10-20T00:00:00.000Z",
+                    updated_at: "2026-10-20T01:00:00.000Z",
+                    record: {
+                      sessionId: sessionA.bindingId,
+                      sourceRef: `driver_device:${sessionA.bindingId}`,
+                      principalId: "drv-demo-001",
+                      membershipId: "drv_mem_drv-demo-001",
+                      realm: "driver",
+                      status: "revoked",
+                      authTime: "2026-10-20T00:00:00.000Z",
+                      authMethods: ["driver_device_registration"],
+                      tokenVersion: 1,
+                      idleExpiresAt: "2026-10-21T00:00:00.000Z",
+                      absoluteExpiresAt: "2026-11-20T00:00:00.000Z",
+                      revokedAt: "2026-10-20T01:00:00.000Z",
+                      revokedByPrincipalId: null,
+                      revokeReason: "DEVICE_REBOUND",
+                      createdAt: "2026-10-20T00:00:00.000Z",
+                      updatedAt: "2026-10-20T01:00:00.000Z",
+                    },
+                  },
+                ],
+              } as unknown as QueryResult;
+            }
+            return { rows: [] } as unknown as QueryResult;
+          },
+          release: () => undefined,
+        }) as unknown as PoolClient,
+      end: async () => undefined,
+    };
+
+    const db = new DatabaseService(fakePool as Pool);
+    const sqlAuthRepo = new DriverDeviceSessionRepository(db);
+    const sqlIdentityRepo = new IdentityRepository(db);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    executedStatements.length = 0;
+
+    await expect(
+      sqlAuthRepo.withRegistrationLock(
+        { regCodeHash: "hash-rollback", deviceId: "device-rollback-new-b" },
+        async () => {
+          await sqlIdentityRepo.revokeSession(
+            sessionA.bindingId,
+            "DEVICE_REBOUND",
+          );
+          throw new Error("downstream registration failure");
+        },
+      ),
+    ).rejects.toThrow("downstream registration failure");
+
+    expect(executedStatements[0]).toBe("BEGIN");
+    expect(executedStatements).toContain("SAVEPOINT sp_1");
+    expect(executedStatements).toContain("RELEASE SAVEPOINT sp_1");
+    expect(executedStatements.at(-1)).toBe("ROLLBACK");
+    expect(jwtAuthService).toBeDefined();
+    expect(identityRepository).toBeDefined();
   });
 });
