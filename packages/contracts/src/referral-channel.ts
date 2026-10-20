@@ -365,6 +365,7 @@ export interface ReferralPassengerReceipt {
   fareBase: number | null;
   fareDistance: number | null;
   fareTime: number | null;
+  fareNight?: number | null;
   totalFare: number | null;
   formattedTotal: string;
   paymentChannel: string;

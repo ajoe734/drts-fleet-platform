@@ -61,6 +61,7 @@ function referralUiMessage(code: unknown, booking = false) {
     [
       "UNAUTHORIZED",
       "REFERRAL_SESSION_INVALID",
+      "REFERRAL_SESSION_REQUIRED",
       "REFERRAL_SESSION_EXPIRED",
       "REFERRAL_HANDOFF_REVOKED",
       "REFERRAL_CONSENT_REQUIRED",
@@ -1074,40 +1075,44 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
           為您準備叫車
         </div>
         <Pill theme={theme} tone="success" dot>
-          handoff · 已交接
+          {context.session?.identityActive
+            ? "工作階段已驗證"
+            : "請建立叫車工作階段"}
         </Pill>
       </div>
 
       <Card
         theme={theme}
-        title="身分由社區 App 帶入"
-        subtitle="signed hand-off token"
+        title="合作入口與叫車身分"
+        subtitle="身分以目前已驗證工作階段為準"
       >
         <TokenRow
           theme={theme}
-          ok
-          label="社區簽章有效"
-          code="partner_signature"
-          value="valid"
+          ok={Boolean(context.session?.identityActive)}
+          label="叫車身分"
+          code="partner_session"
+          value={
+            context.session?.identityActive ? "已驗證" : "待建立或重新驗證"
+          }
         />
         <TokenRow
           theme={theme}
           ok
-          label="住戶身分已解析"
-          code="resident_resolved"
-          value={embedResident.name}
+          label="合作入口"
+          code="partner_entry"
+          value={context.strings.displayName}
         />
         <TokenRow
           theme={theme}
           ok
-          label="社區 / 戶別"
-          code="community_unit"
-          value={embedResident.unit}
+          label="入口宿主"
+          code="entry_host"
+          value={getEntryHost(context.entry)}
         />
         <DetailRow
           theme={theme}
           label="參照"
-          value={embedResident.ref}
+          value={context.session?.handoffId ?? "尚未建立"}
           mono
           strong
           last
@@ -1115,8 +1120,8 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
       </Card>
 
       <Banner theme={theme} tone="primary" icon="bolt">
-        免再登入 · 由 {context.strings.appName}{" "}
-        安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
+        由 {context.strings.appName}{" "}
+        安全帶入叫車身分；首次使用仍須確認同意事項。內嵌頁不會要求輸入帳號密碼。
       </Banner>
     </AppShell>
   );
@@ -1462,18 +1467,17 @@ async function bootstrapDemoSession(context: EmbedContext) {
   });
 
   const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.ok) {
-    throw new Error(
-      payload?.message ||
-        payload?.error?.message ||
-        "Demo session bootstrap failed",
-    );
-  }
-  if (typeof payload.nextPath === "string") {
-    window.location.assign(payload.nextPath);
-    return false;
-  }
-  return payload.session?.identityActive === true;
+  if (
+    !response.ok ||
+    !payload?.ok ||
+    (payload.session?.identityActive !== true &&
+      typeof payload.nextPath !== "string")
+  )
+    throw new Error("無法建立安全叫車工作階段，請重新從合作入口進入。");
+  return {
+    nextPath: typeof payload.nextPath === "string" ? payload.nextPath : null,
+    ready: payload.session?.identityActive === true,
+  };
 }
 
 export function BookScreen({ context }: { context: EmbedContext }) {
@@ -1566,10 +1570,17 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     if (bootstrapped) return;
     let active = true;
     void bootstrapDemoSession(context)
-      .then((ready) => {
-        if (active && ready) {
-          setReadyScope(scope);
-          setBootstrapError(null);
+      .then((result) => {
+        if (!active) return;
+        if (result.nextPath) {
+          window.location.assign(result.nextPath);
+        } else if (result.ready) {
+          // A new server cookie is not this form's canonical public context.
+          // Re-read SSR before quote/create so an unknown ACK is always stored
+          // under the authenticated recovery scope, never unverified:entry.
+          window.location.assign(
+            buildHref(context, { screen: "book", state: "handoff" }),
+          );
         }
       })
       .catch((cause) => {
@@ -2420,6 +2431,13 @@ function TripScreen({
   );
 }
 
+const NON_COMPLETED_TERMINAL_STATUSES = [
+  "cancelled",
+  "dispatch_failed",
+  "dispatch_timeout",
+  "no_supply",
+];
+
 function TripsScreen({
   context,
   liveData,
@@ -2449,7 +2467,7 @@ function TripsScreen({
       >
         <div style={{ fontSize: 17, fontWeight: 800 }}>我的行程</div>
         <Pill theme={theme} tone="neutral">
-          綁定 {embedResident.name}
+          本工作階段行程
         </Pill>
       </div>
       <div
@@ -2486,7 +2504,12 @@ function TripsScreen({
         return (
           <Link
             href={buildHref(context, {
-              screen: trip.state === "completed" ? "completed" : "cancelled",
+              screen:
+                trip.state === "completed"
+                  ? "completed"
+                  : NON_COMPLETED_TERMINAL_STATUSES.includes(trip.state)
+                    ? "cancelled"
+                    : "trip",
               state: "handoff",
               orderId: trip.orderId,
             })}
@@ -2595,6 +2618,7 @@ function ReceiptScreen({
           fareBase: formatFare(liveData.receipt.fareBase),
           fareDistance: formatFare(liveData.receipt.fareDistance),
           fareTime: formatFare(liveData.receipt.fareTime),
+          fareNight: formatFare(liveData.receipt.fareNight),
           total: liveData.receipt.formattedTotal,
           payment: liveData.receipt.paymentChannel,
           channel: context.strings.appName,
@@ -2697,7 +2721,14 @@ function ReceiptScreen({
           value={REFERRAL_AUTHORITY_PHONE}
         />
       </Card>
-      <Card theme={theme} title="費用明細" subtitle="fare breakdown">
+      <Banner theme={theme} tone="neutral" icon="info">
+        本頁為乘車紀錄，非正式稅務憑證；付款及結算狀態以實際通知為準。
+      </Banner>
+      <Card
+        theme={theme}
+        title="已記錄費用分項"
+        subtitle="未提供的分項不以估算補齊，合計依實際車資"
+      >
         <DetailRow theme={theme} label="起步價" value={receipt.fareBase} mono />
         <DetailRow
           theme={theme}
@@ -2706,6 +2737,12 @@ function ReceiptScreen({
           mono
         />
         <DetailRow theme={theme} label="時間" value={receipt.fareTime} mono />
+        <DetailRow
+          theme={theme}
+          label="夜間費"
+          value={receipt.fareNight}
+          mono
+        />
         <DetailRow
           theme={theme}
           label="合計"
@@ -2751,12 +2788,6 @@ function OutcomeScreen({
     useState<SubmitReferralPassengerRatingCommand | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const NON_COMPLETED_TERMINAL_STATUSES = [
-    "cancelled",
-    "dispatch_failed",
-    "dispatch_timeout",
-    "no_supply",
-  ];
   const trip = liveData?.history?.items.find(
     (item) =>
       (!liveData.selectedOrderId ||

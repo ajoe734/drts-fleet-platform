@@ -152,7 +152,7 @@ export function cancelReferralTripServer(
   orderId: string,
   command: CancelReferralPassengerTripCommand,
 ) {
-  return request<OwnedOrderRecord>(
+  return request<Pick<OwnedOrderRecord, "orderId" | "status" | "cancelledAt">>(
     `orders/${encodeURIComponent(orderId)}/cancel`,
     "POST",
     { ...command, orderId },

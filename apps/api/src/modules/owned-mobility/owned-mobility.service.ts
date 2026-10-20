@@ -15617,8 +15617,8 @@ export class OwnedMobilityService
       pricingAt: quote.pricingAt,
       pickupAddress: quote.pickupAddress,
       dropoffAddress: quote.dropoffAddress,
-      pickup: quote.pickup,
-      dropoff: quote.dropoff,
+      pickup: { lat: quote.pickup.lat, lng: quote.pickup.lng },
+      dropoff: { lat: quote.dropoff.lat, lng: quote.dropoff.lng },
       vehicleType: quote.vehicleType,
       currency: quote.currency,
       estimatedMin: quote.estimatedMin,
@@ -16128,10 +16128,12 @@ export class OwnedMobilityService
     }
 
     let fareTotal: number | null = null;
-    if (order.status !== "cancelled") {
+    if (order.status === "completed" && task?.status === "completed") {
       if (
-        task?.fare?.amountMinor !== undefined &&
-        task.fare.amountMinor !== null
+        task.fare &&
+        ["NTD", "TWD"].includes(task.fare.currency) &&
+        Number.isSafeInteger(task.fare.amountMinor) &&
+        task.fare.amountMinor >= 0
       ) {
         fareTotal = task.fare.amountMinor / 100;
       }
@@ -16390,11 +16392,22 @@ export class OwnedMobilityService
     };
 
     const total = details.fareTotal;
-    // No actual meter component authority exists in this referral DTO. Do not
-    // manufacture base/distance/time components from an estimate or a ratio.
-    const fareBase = null,
-      fareDistance = null,
-      fareTime = null;
+    const captured = details.task?.actualFareBreakdown;
+    const hasComponents =
+      total !== null &&
+      captured &&
+      [
+        captured.startMinor,
+        captured.distanceMinor,
+        captured.delayMinor,
+        captured.nightMinor,
+      ].every((n) => Number.isSafeInteger(n) && n >= 0);
+    // Actual completion facts only. Never derive components or an actual total
+    // from a quote, percentages or an assumed toll/total convention.
+    const fareBase = hasComponents ? captured.startMinor / 100 : null;
+    const fareDistance = hasComponents ? captured.distanceMinor / 100 : null;
+    const fareTime = hasComponents ? captured.delayMinor / 100 : null;
+    const fareNight = hasComponents ? captured.nightMinor / 100 : null;
     const completedAt = (order as unknown as Record<string, unknown>)
       .completedAt as string | undefined;
 
@@ -16414,6 +16427,7 @@ export class OwnedMobilityService
       fareBase,
       fareDistance,
       fareTime,
+      fareNight,
       totalFare: total,
       formattedTotal: total === null ? "實際車資待確認" : `NT$ ${total}`,
       paymentChannel: "付款及結算狀態未提供",

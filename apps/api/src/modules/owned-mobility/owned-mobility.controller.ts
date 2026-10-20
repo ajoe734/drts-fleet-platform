@@ -504,13 +504,18 @@ export class OwnedMobilityController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const order = await this.ownedMobilityService.cancelReferralPassengerTrip(
+      orderId,
+      command,
+      identity,
+      requestId,
+    );
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.cancelReferralPassengerTrip(
-        orderId,
-        command,
-        identity,
-        requestId,
-      ),
+      {
+        orderId: order.orderId,
+        status: order.status,
+        cancelledAt: order.cancelledAt,
+      },
       requestId,
     );
   }

@@ -37,6 +37,9 @@ export async function GET(
       receipt.fareTime === null
         ? "Time Fare: not provided by actual fare authority"
         : `Time Fare: NT$ ${receipt.fareTime}`,
+      receipt.fareNight === null || receipt.fareNight === undefined
+        ? "Night Fare: not provided by actual fare authority"
+        : `Night Fare: NT$ ${receipt.fareNight}`,
       `TOTAL FARE: ${receipt.formattedTotal}`,
       `Payment Channel: ${receipt.paymentChannel}`,
       "客服：02-2944-0985；主管機關：1999",

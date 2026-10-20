@@ -1,3 +1,4 @@
+import { domainFixture } from "../../../../tests/unit/referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { createHash } from "node:crypto";
 import { buildOrderFixture } from "../integration/voice-order-fixture";
@@ -6789,80 +6790,50 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
   });
 
   it("derives referral booking subtype from the verified partner entry", async () => {
-    const tenantPartnerService = new TenantPartnerService(
-      new AuditNotificationService(),
-    );
-    const { service } = createOwnedMobilityService({
-      tenantPartnerService,
-    });
-
-    const booking = await service.createReferralPassengerBooking(
+    const f = await domainFixture(),
+      who = await f.identity();
+    const input = { ...f.route, vehicleType: "comfort" };
+    const quote = await f.service.quoteReferralPassengerFare(input, who);
+    const booking = await f.service.createReferralPassengerBooking(
       {
-        entrySlug: "yuhe-residence",
-        pickupAddress: "Taipei Main Station",
-        dropoffAddress: "Taoyuan Airport T2",
-        // This is the UI's vehicle label and must never be treated as a
-        // backend service-product identifier.
-        vehicleType: "comfort",
+        ...input,
+        quoteId: quote.quoteId,
+        passengerName: "Synthetic rider",
+        passengerPhone: "0912345678",
       },
-      {
-        actorType: "referral_passenger",
-        actorId: "referral-passenger-001",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "referral-passenger-001",
-      } as never,
+      who,
     );
-
     expect(booking.businessDispatchSubtype).toBe("enterprise_dispatch");
-    expect(service.getOrder(booking.orderId).businessDispatchSubtype).toBe(
+    expect(f.service.getOrder(booking.orderId).businessDispatchSubtype).toBe(
       "enterprise_dispatch",
     );
-    const cancelled = await service.cancelReferralPassengerTrip(
+    expect(f.service.getOrder(booking.orderId).vehiclePreference).toBe(
+      "comfort",
+    );
+    const cancelled = await f.service.cancelReferralPassengerTrip(
       booking.orderId,
       { orderId: booking.orderId, reason: "Passenger changed plans" },
-      {
-        actorType: "referral_passenger",
-        actorId: "referral-passenger-001",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "referral-passenger-001",
-      } as never,
+      who,
     );
     expect(cancelled.status).toBe("cancelled");
   });
 
   it("uses the requested referral schedule for the reservation window", async () => {
-    const tenantPartnerService = new TenantPartnerService(
-      new AuditNotificationService(),
-    );
-    const { service } = createOwnedMobilityService({ tenantPartnerService });
+    const f = await domainFixture(),
+      who = await f.identity("scheduled");
     const scheduledAt = new Date(Date.now() + 4 * 60 * 60_000).toISOString();
-    const booking = await service.createReferralPassengerBooking(
+    const input = { ...f.route, scheduledAt };
+    const quote = await f.service.quoteReferralPassengerFare(input, who);
+    const booking = await f.service.createReferralPassengerBooking(
       {
-        entrySlug: "yuhe-residence",
-        pickupAddress: "Taipei Main Station",
-        dropoffAddress: "Taoyuan Airport T2",
-        scheduledAt,
+        ...input,
+        quoteId: quote.quoteId,
+        passengerName: "Synthetic rider",
+        passengerPhone: "0912345678",
       },
-      {
-        actorType: "referral_passenger",
-        actorId: "referral-passenger-002",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "referral-passenger-002",
-      } as never,
+      who,
     );
-    expect(service.getOrder(booking.orderId).reservationWindowStart).toBe(
+    expect(f.service.getOrder(booking.orderId).reservationWindowStart).toBe(
       scheduledAt,
     );
   });

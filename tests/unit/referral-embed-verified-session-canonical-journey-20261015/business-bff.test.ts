@@ -158,7 +158,7 @@ describe("actual referral BFF handlers and canonical business transport", () => 
       expect(String(fetch.mock.calls[0]![0])).toContain(
         "/orders/url-owned-order/",
       );
-      expect(JSON.parse(fetch.mock.calls[0]![1].body).orderId).toBe(
+      expect(JSON.parse(String(fetch.mock.calls[0]![1].body)).orderId).toBe(
         "url-owned-order",
       );
     },

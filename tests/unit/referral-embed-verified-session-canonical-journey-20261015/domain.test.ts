@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { domainFixture } from "./domain-fixture";
+import { OwnedMobilityController } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -264,6 +265,55 @@ describe("real referral quote/repository/create continuity over controlled stora
     ).rejects.toMatchObject({ code: "FARE_QUOTE_UNAVAILABLE" });
     expect(f.db.table("ops.phase1_owned_orders").size).toBe(0);
   });
+  it("checks the consumed order owner before classifying its different idempotency key", async () => {
+    const f = await domainFixture(),
+      who = await f.identity(),
+      other = await f.identity("other-subject");
+    const ownCommand = await f.command(who),
+      foreignCommand = await f.command(other);
+    const foreign = await f.service.createReferralPassengerBooking(
+      foreignCommand,
+      other,
+    );
+    const snapshot = f.db
+      .table("ops.phase1_referral_fare_quote_snapshots")
+      .get(ownCommand.quoteId);
+    snapshot.consumedByOrderId = foreign.orderId;
+    snapshot.consumedAt = new Date().toISOString();
+    await expect(
+      f.service.createReferralPassengerBooking(ownCommand, who),
+    ).rejects.toMatchObject({ code: "FARE_QUOTE_FORBIDDEN", status: 403 });
+    expect(f.db.table("ops.phase1_owned_orders").size).toBe(1);
+  });
+  it("returns only the same-order cancellation acknowledgement, never the internal owned order or subject", async () => {
+    const f = await domainFixture(),
+      who = await f.identity(),
+      command = await f.command(who);
+    const booking = await f.service.createReferralPassengerBooking(
+      command,
+      who,
+    );
+    const controller = new OwnedMobilityController(
+      f.service,
+      f.service.getIdempotencyService(),
+      f.partner,
+    );
+    const result = await controller.cancelReferralPassengerTrip(
+      booking.orderId,
+      { orderId: booking.orderId, reason: "Unit cancellation" },
+      who,
+    );
+    expect(Object.keys(result.data).sort()).toEqual([
+      "cancelledAt",
+      "orderId",
+      "status",
+    ]);
+    expect(result.data).toMatchObject({
+      orderId: booking.orderId,
+      status: "cancelled",
+    });
+    expect(JSON.stringify(result.data)).not.toContain(who.drtsPassengerId);
+  });
 });
 
 describe("referral rating and canonical CRM share the owned-order transaction", () => {
@@ -429,4 +479,56 @@ describe("referral rating and canonical CRM share the owned-order transaction", 
     });
     expect(receipt.quote?.estimatedMin).toBe(265);
   });
+  it("maps only actual completed-task minor-unit amounts/components, preserving fractional TWD and unknown settlement", async () => {
+    const f = await completed();
+    f.db.table("ops.phase1_driver_tasks").set("actual-task", {
+      taskId: "actual-task",
+      orderId: f.order.orderId,
+      status: "completed",
+      completedAt: "2026-10-20T02:00:00Z",
+      fare: { currency: "NTD", amountMinor: 28650 },
+      actualFareBreakdown: {
+        startMinor: 8500,
+        distanceMinor: 18050,
+        delayMinor: 0,
+        nightMinor: 2000,
+      },
+    });
+    const receipt = await f.service.getReferralPassengerReceipt(
+      f.order.orderId,
+      f.who,
+    );
+    expect(receipt).toMatchObject({
+      totalFare: 286.5,
+      fareBase: 85,
+      fareDistance: 180.5,
+      fareTime: 0,
+      fareNight: 20,
+      completedAt: "2026-10-20T02:00:00Z",
+      paymentChannel: "付款及結算狀態未提供",
+    });
+    expect(receipt.totalFare).not.toBe(receipt.quote?.estimatedMin);
+    expect(receipt.passengerPhoneMasked).not.toContain("0912345678");
+  });
+  it.each([
+    { currency: "USD", amountMinor: 28650 },
+    { currency: "NTD", amountMinor: NaN },
+  ])(
+    "does not label invalid or foreign task money as actual TWD: %j",
+    async (fare) => {
+      const f = await completed();
+      f.db.table("ops.phase1_driver_tasks").set("actual-task", {
+        taskId: "actual-task",
+        orderId: f.order.orderId,
+        status: "completed",
+        fare,
+      });
+      const receipt = await f.service.getReferralPassengerReceipt(
+        f.order.orderId,
+        f.who,
+      );
+      expect(receipt.totalFare).toBeNull();
+      expect(receipt.formattedTotal).toBe("實際車資待確認");
+    },
+  );
 });

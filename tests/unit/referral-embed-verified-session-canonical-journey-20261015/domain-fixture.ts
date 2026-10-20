@@ -205,7 +205,9 @@ export class ReferralSqlPort {
           ? v[Number(n[1]) - 1]
           : /^'/.test(params[i] ?? "")
             ? params[i]!.split("'")[1]
-            : null;
+            : /^-?\d+$/.test(params[i] ?? "")
+              ? Number(params[i])
+              : null;
       });
       if (table === "ops.dispatch_resource_reservations")
         Object.assign(row, {
@@ -216,14 +218,14 @@ export class ReferralSqlPort {
         });
       const record =
         typeof row.record === "string" ? JSON.parse(row.record) : row;
-      this.table(table!).set(
-        String(
-          table === "ops.dispatch_resource_reservations"
-            ? row.reservation_id
-            : row[columns[0]!],
-        ),
-        record,
+      const key = String(
+        table === "ops.dispatch_resource_reservations"
+          ? row.reservation_id
+          : row[columns[0]!],
       );
+      if (this.table(table!).has(key) && /ON CONFLICT.*DO NOTHING/.test(sql))
+        return result();
+      this.table(table!).set(key, record);
       return result(
         sql.includes("RETURNING")
           ? [{ ...row, aggregate_version: record.aggregateVersion ?? 1 }]
@@ -440,15 +442,24 @@ export async function domainFixture() {
   } as never);
   await area.onModuleInit();
   const geo = {
-    resolve: vi.fn(async ({ addressText }: { addressText: string }) => ({
-      address: {
-        address: addressText,
-        lat: addressText.includes("Airport") ? 25.08 : 25.06,
-        lng: addressText.includes("Airport") ? 121.24 : 121.52,
-        coordinateSource: "google_geocoding",
-        resolvedAt: new Date().toISOString(),
-      },
-    })),
+    resolve: vi.fn(
+      async ({
+        addressText,
+        selectedByActorId,
+      }: {
+        addressText: string;
+        selectedByActorId?: string;
+      }) => ({
+        address: {
+          address: addressText,
+          lat: addressText.includes("Airport") ? 25.08 : 25.06,
+          lng: addressText.includes("Airport") ? 121.24 : 121.52,
+          coordinateSource: "google_geocoding",
+          selectedByActorId,
+          resolvedAt: new Date().toISOString(),
+        },
+      }),
+    ),
     route: vi.fn(async () => ({
       distanceMeters: 8400,
       durationSeconds: 900,
@@ -476,6 +487,18 @@ export async function domainFixture() {
     25: new PassengerFareRepository(db as never),
     26: complaints,
   });
+  function newService() {
+    const instanceArgs = [...args];
+    instanceArgs[5] = new OwnedMobilityRepository(db as never);
+    instanceArgs[26] = new ComplaintService(
+      audit,
+      new ComplaintRepository(db as never),
+    );
+    return Reflect.construct(
+      OwnedMobilityService,
+      instanceArgs,
+    ) as OwnedMobilityService;
+  }
   const service = Reflect.construct(
     OwnedMobilityService,
     args,
@@ -503,6 +526,7 @@ export async function domainFixture() {
   return {
     db,
     service,
+    newService,
     repository,
     partner,
     links,

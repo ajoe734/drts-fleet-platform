@@ -425,3 +425,179 @@ it("does not enable rating or fabricate a completed trip from a completed screen
   expect(host.querySelector('[data-drt-operation="referral-rate"]')).toBeNull();
   expect(host.textContent).not.toContain("為這趟行程評分");
 });
+
+it.each(["changed-scope", "unmounted"])(
+  "ignores a late consent bootstrap navigation for an obsolete form: %s",
+  async (mode) => {
+    let finish!: (r: Response) => void;
+    const assign = navigationPort();
+    const fetch = vi.fn(async (url: string) => {
+      if (url === "/api/referral/session")
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return ok(quote("current-scope-quote"));
+    });
+    vi.stubGlobal("fetch", fetch);
+    const host = mount(
+      <BookScreen
+        context={
+          {
+            ...context,
+            session: { ...context.session, identityActive: false },
+          } as never
+        }
+      />,
+    );
+    await waitFor(() => expect(finish).toBeTypeOf("function"));
+    if (mode === "changed-scope") {
+      flushSync(() =>
+        root!.render(
+          <BookScreen
+            context={
+              {
+                ...context,
+                session: {
+                  ...context.session,
+                  recoveryScope: "new-authorized-owner",
+                },
+              } as never
+            }
+          />,
+        ),
+      );
+      await waitFor(() => expect(submit(host).disabled).toBe(false));
+    } else {
+      flushSync(() => root!.unmount());
+      root = undefined;
+    }
+    finish(
+      Response.json({ ok: true, nextPath: "/embed/old-entry?state=consent" }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(assign).not.toHaveBeenCalled();
+    if (mode === "changed-scope") expect(submit(host).disabled).toBe(false);
+  },
+);
+
+it("reloads returning bootstrap into its canonical public scope before any quote and recovers its original lost-ACK command", async () => {
+  const assign = navigationPort();
+  const commands: any[] = [];
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/referral/session")
+      return Response.json({
+        ok: true,
+        session: {
+          identityActive: true,
+          recoveryScope: context.session.recoveryScope,
+        },
+      });
+    if (url === "/api/referral/quote") return ok(quote());
+    const command = JSON.parse(String(init?.body));
+    commands.push(command);
+    if (commands.length === 1)
+      throw new Error("controlled committed reply loss");
+    return ok({
+      orderId: "original-returning-order",
+      quote: { quoteId: command.quoteId },
+      confirmedAt: "2026-10-20T02:00:00Z",
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  let host = mount(
+    <BookScreen context={{ ...context, session: null } as never} />,
+  );
+  await waitFor(() => expect(fetch).toHaveBeenCalled());
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(assign).toHaveBeenCalledTimes(1);
+  expect(
+    fetch.mock.calls.every(([url]) => url === "/api/referral/session"),
+  ).toBe(true);
+  expect(submit(host).disabled).toBe(true);
+  expect(
+    sessionStorage.getItem(
+      "referral.booking.recovery.v1:unverified:quote-entry",
+    ),
+  ).toBeNull();
+  flushSync(() => root!.unmount());
+  root = undefined;
+  host.remove();
+  host = mount(<BookScreen context={context as never} />);
+  await waitFor(() => expect(submit(host).disabled).toBe(false));
+  flushSync(() => fireEvent.click(submit(host)));
+  await waitFor(() => expect(host.textContent).toContain("重送原叫車要求"));
+  expect(
+    sessionStorage.getItem(
+      `referral.booking.recovery.v1:${context.session.recoveryScope}`,
+    ),
+  ).not.toBeNull();
+  flushSync(() => root!.unmount());
+  root = undefined;
+  host.remove();
+  host = mount(<BookScreen context={context as never} />);
+  await waitFor(() => expect(submit(host).disabled).toBe(false));
+  flushSync(() => fireEvent.click(submit(host)));
+  await waitFor(() => expect(commands).toHaveLength(2));
+  expect(commands[1]).toEqual(commands[0]);
+});
+
+it("preserves the original command and asks for revalidation when the actual session-required code returns", async () => {
+  navigationPort();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url === "/api/referral/quote"
+        ? ok(quote())
+        : Response.json(
+            { ok: false, error: { code: "REFERRAL_SESSION_REQUIRED" } },
+            { status: 401 },
+          ),
+    ),
+  );
+  const host = mount(<BookScreen context={context as never} />);
+  await waitFor(() => expect(submit(host).disabled).toBe(false));
+  flushSync(() => fireEvent.click(submit(host)));
+  await waitFor(() =>
+    expect(host.textContent).toContain("請重新驗證身分，再重送原叫車要求"),
+  );
+  expect(
+    sessionStorage.getItem(
+      `referral.booking.recovery.v1:${context.session.recoveryScope}`,
+    ),
+  ).not.toBeNull();
+});
+
+it.each([
+  ["created", "trip"],
+  ["assigned", "trip"],
+  ["on_trip", "trip"],
+  ["completed", "completed"],
+  ["cancelled", "cancelled"],
+  ["dispatch_failed", "cancelled"],
+  ["dispatch_timeout", "cancelled"],
+  ["no_supply", "cancelled"],
+])(
+  "resumes the actual %s history card through its correct owned-order screen",
+  (status, screen) => {
+    const host = mount(
+      <PassengerEmbed
+        context={{ ...context, screen: "trips" } as never}
+        liveData={completedData(status) as never}
+      />,
+    );
+    const card = [...host.querySelectorAll<HTMLAnchorElement>("a[href]")].find(
+      (a) => new URL(a.href).searchParams.get("orderId") === "owned-order",
+    )!;
+    let clicked: URL | undefined;
+    card.addEventListener("click", (event) => {
+      event.preventDefault();
+      clicked = new URL(card.href);
+    });
+    fireEvent.click(card);
+    expect(clicked?.searchParams.get("orderId")).toBe("owned-order");
+    expect(clicked?.searchParams.get("screen")).toBe(screen);
+    expect(
+      host.querySelector('[data-drt-operation="referral-rate"]'),
+    ).toBeNull();
+  },
+);
