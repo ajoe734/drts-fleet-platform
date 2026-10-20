@@ -6,6 +6,7 @@ import {
   type ReactNode,
   useEffect,
   useState,
+  useRef,
   useTransition,
 } from "react";
 import type {
@@ -13,6 +14,9 @@ import type {
   ReferralPassengerActiveTripResult,
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
+  ReferralPassengerFareQuote,
+  ReferralPassengerRatingResult,
+  SubmitReferralPassengerRatingCommand,
 } from "@drts/contracts";
 import type { EmbedContext } from "../lib/embed-context";
 import {
@@ -43,14 +47,100 @@ type BookingFormState = {
   vehicleType: string;
 };
 
+const REFERRAL_SUPPORT_PHONE = "02-2944-0985";
+const REFERRAL_AUTHORITY_PHONE = "1999";
 const DEMO_PASSENGER_PHONE = "0912345820";
+
+class ReferralUiError extends Error {}
+function referralUiMessage(code: unknown, booking = false) {
+  if (["FARE_QUOTE_EXPIRED", "FARE_QUOTE_NOT_FOUND"].includes(String(code)))
+    return "原車資試算已失效，請重新試算後確認叫車。";
+  if (code === "FARE_QUOTE_MISMATCH")
+    return "行程內容已變更，請重新試算後確認叫車。";
+  if (
+    [
+      "UNAUTHORIZED",
+      "REFERRAL_SESSION_INVALID",
+      "REFERRAL_SESSION_REQUIRED",
+      "REFERRAL_SESSION_EXPIRED",
+      "REFERRAL_HANDOFF_REVOKED",
+      "REFERRAL_CONSENT_REQUIRED",
+    ].includes(String(code))
+  )
+    return booking
+      ? "請重新驗證身分，再重送原叫車要求；原要求已保留。"
+      : "請重新驗證身分及同意事項後再試算。";
+  if (code === "SERVICE_AREA_NOT_SERVICEABLE")
+    return "目前無法提供這段路線的服務，請調整上下車地點後重新試算。";
+  if (code === "VALIDATION_ERROR")
+    return "請檢查行程、用車時間與聯絡資料後再試一次。";
+  return booking
+    ? "尚未確認叫車結果，請重送原叫車要求；系統會保留原要求以避免重複叫車。"
+    : "目前無法試算車資，請稍後點選重新試算。";
+}
+function validRecovery(saved: any, scope: string, entrySlug: string) {
+  const fields = [
+    "passengerName",
+    "passengerPhone",
+    "pickupAddress",
+    "dropoffAddress",
+    "scheduledAt",
+    "vehicleType",
+  ];
+  const command = saved?.command;
+  return (
+    saved?.scope === scope &&
+    saved?.form &&
+    fields.every(
+      (k) => typeof saved.form[k] === "string" && saved.form[k].length <= 500,
+    ) &&
+    command?.entrySlug === entrySlug &&
+    typeof command.quoteId === "string" &&
+    command.quoteId.length > 0 &&
+    command.quoteId.length <= 100 &&
+    typeof command.idempotencyKey === "string" &&
+    command.idempotencyKey.trim().length > 0 &&
+    command.idempotencyKey.length <= 255 &&
+    ["pickupAddress", "dropoffAddress"].every(
+      (k) =>
+        typeof command[k] === "string" &&
+        command[k].trim().length > 0 &&
+        command[k].length <= 500,
+    ) &&
+    [
+      "vehicleType",
+      "scheduledAt",
+      "passengerName",
+      "passengerPhone",
+      "partnerUserRef",
+    ].every(
+      (k) =>
+        command[k] === undefined ||
+        (typeof command[k] === "string" && command[k].length <= 500),
+    ) &&
+    Object.keys(command).every((k) =>
+      [
+        "entrySlug",
+        "quoteId",
+        "idempotencyKey",
+        "pickupAddress",
+        "dropoffAddress",
+        "vehicleType",
+        "scheduledAt",
+        "passengerName",
+        "passengerPhone",
+        "partnerUserRef",
+      ].includes(k),
+    )
+  );
+}
 
 function createInitialBookingForm(): BookingFormState {
   return {
     passengerName: embedResident.name,
     passengerPhone: DEMO_PASSENGER_PHONE,
-    pickupAddress: embedTrip.from,
-    dropoffAddress: embedTrip.to,
+    pickupAddress: "新北市板橋區縣民大道二段7號",
+    dropoffAddress: "臺北市信義區市府路1號",
     scheduledAt: "現在出發",
     vehicleType: embedVehicles[1]?.code ?? embedVehicles[0]?.code ?? "standard",
   };
@@ -90,9 +180,9 @@ function buildBookingCommand(
   context: EmbedContext,
   form: BookingFormState,
   bookingIntentKey?: string,
-): CreateReferralPassengerBookingCommand {
+): Omit<CreateReferralPassengerBookingCommand, "quoteId"> {
   const sanitizedPhone = form.passengerPhone.replace(/[^\d+]/g, "");
-  const command: CreateReferralPassengerBookingCommand = {
+  const command: Omit<CreateReferralPassengerBookingCommand, "quoteId"> = {
     entrySlug: context.entry.entrySlug,
     pickupAddress: form.pickupAddress.trim(),
     dropoffAddress: form.dropoffAddress.trim(),
@@ -985,40 +1075,44 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
           為您準備叫車
         </div>
         <Pill theme={theme} tone="success" dot>
-          handoff · 已交接
+          {context.session?.identityActive
+            ? "工作階段已驗證"
+            : "請建立叫車工作階段"}
         </Pill>
       </div>
 
       <Card
         theme={theme}
-        title="身分由社區 App 帶入"
-        subtitle="signed hand-off token"
+        title="合作入口與叫車身分"
+        subtitle="身分以目前已驗證工作階段為準"
       >
         <TokenRow
           theme={theme}
-          ok
-          label="社區簽章有效"
-          code="partner_signature"
-          value="valid"
+          ok={Boolean(context.session?.identityActive)}
+          label="叫車身分"
+          code="partner_session"
+          value={
+            context.session?.identityActive ? "已驗證" : "待建立或重新驗證"
+          }
         />
         <TokenRow
           theme={theme}
           ok
-          label="住戶身分已解析"
-          code="resident_resolved"
-          value={embedResident.name}
+          label="合作入口"
+          code="partner_entry"
+          value={context.strings.displayName}
         />
         <TokenRow
           theme={theme}
           ok
-          label="社區 / 戶別"
-          code="community_unit"
-          value={embedResident.unit}
+          label="入口宿主"
+          code="entry_host"
+          value={getEntryHost(context.entry)}
         />
         <DetailRow
           theme={theme}
           label="參照"
-          value={embedResident.ref}
+          value={context.session?.handoffId ?? "尚未建立"}
           mono
           strong
           last
@@ -1026,8 +1120,8 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
       </Card>
 
       <Banner theme={theme} tone="primary" icon="bolt">
-        免再登入 · 由 {context.strings.appName}{" "}
-        安全帶入住戶身分，直接開始叫車。內嵌頁不會要求輸入帳號密碼。
+        由 {context.strings.appName}{" "}
+        安全帶入叫車身分；首次使用仍須確認同意事項。內嵌頁不會要求輸入帳號密碼。
       </Banner>
     </AppShell>
   );
@@ -1349,7 +1443,7 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
         <DetailRow
           theme={theme}
           label="客服專線"
-          value={context.strings.supportPhone}
+          value={REFERRAL_SUPPORT_PHONE}
           mono
           last
         />
@@ -1373,100 +1467,302 @@ async function bootstrapDemoSession(context: EmbedContext) {
   });
 
   const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.ok) {
-    throw new Error(
-      payload?.message ||
-        payload?.error?.message ||
-        "Demo session bootstrap failed",
-    );
-  }
+  if (
+    !response.ok ||
+    !payload?.ok ||
+    (payload.session?.identityActive !== true &&
+      typeof payload.nextPath !== "string")
+  )
+    throw new Error("無法建立安全叫車工作階段，請重新從合作入口進入。");
+  return {
+    nextPath: typeof payload.nextPath === "string" ? payload.nextPath : null,
+    ready: payload.session?.identityActive === true,
+  };
 }
 
 export function BookScreen({ context }: { context: EmbedContext }) {
+  const scope =
+    context.session?.recoveryScope ??
+    context.session?.handoffId ??
+    `unverified:${context.entry.entrySlug}`;
+  return <ReferralBookingForm key={scope} context={context} />;
+}
+
+function ReferralBookingForm({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
-  const [form, setForm] = useState<BookingFormState>(createInitialBookingForm);
-  const [error, setError] = useState<string | null>(null);
-  const [bootstrapped, setBootstrapped] = useState(Boolean(context.session));
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
-  const [bookingIntentKey] = useState(() =>
-    createIdempotencyKey("referral-booking"),
+  const scope =
+    context.session?.recoveryScope ??
+    context.session?.handoffId ??
+    `unverified:${context.entry.entrySlug}`;
+  const [storedForm, setForm] = useState<BookingFormState>(
+    createInitialBookingForm,
   );
+  const [formScope, setFormScope] = useState(scope);
+  const form = formScope === scope ? storedForm : createInitialBookingForm();
+  const [error, setError] = useState<string | null>(null);
+  const [readyScope, setReadyScope] = useState(
+    context.session?.identityActive ? scope : null,
+  );
+  const bootstrapped = readyScope === scope;
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const inFlightForScope = useRef(false);
+  const mountedUi = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [recoveryReady, setRecoveryReady] = useState(false);
+  const [quote, setQuote] = useState<ReferralPassengerFareQuote | null>(null);
+  const [quoteState, setQuoteState] = useState<
+    "idle" | "loading" | "quoted" | "expired" | "error"
+  >("idle");
+  const [refreshQuote, setRefreshQuote] = useState(0);
+  const [recovery, setRecovery] = useState<{
+    scope: string;
+    command: CreateReferralPassengerBookingCommand;
+    form: BookingFormState;
+  } | null>(null);
+  const intentKey = useRef(createIdempotencyKey("referral-booking")),
+    quotedIntent = useRef(""),
+    quotedScope = useRef("");
+  const storageKey = `referral.booking.recovery.v1:${scope}`;
+  const pendingCommand = recovery?.scope === scope ? recovery.command : null;
+  const normalizedScheduledAt = parseScheduledAt(form.scheduledAt);
+  const validTime =
+    !normalizedScheduledAt ||
+    Number.isFinite(Date.parse(normalizedScheduledAt));
+  const quoteIntent = JSON.stringify([
+    context.entry.entrySlug,
+    form.pickupAddress.trim(),
+    form.dropoffAddress.trim(),
+    normalizedScheduledAt ?? null,
+    form.vehicleType,
+  ]);
 
   useEffect(() => {
+    mountedUi.current = true;
     setIsMounted(true);
+    return () => {
+      mountedUi.current = false;
+    };
   }, []);
-
   useEffect(() => {
-    if (context.session || bootstrapped) {
+    try {
+      const raw = sessionStorage.getItem(storageKey);
+      const saved = raw ? JSON.parse(raw) : null;
+      if (validRecovery(saved, scope, context.entry.entrySlug)) {
+        setRecovery(saved);
+        setForm(saved.form);
+      } else {
+        setRecovery(null);
+        setForm(createInitialBookingForm());
+      }
+    } catch {
+      setRecovery(null);
+      setForm(createInitialBookingForm());
+    }
+    setFormScope(scope);
+    setRecoveryReady(true);
+  }, [storageKey, scope, context.entry.entrySlug]);
+  useEffect(() => {
+    if (context.session?.identityActive) {
+      setReadyScope(scope);
       return;
     }
-
+    if (bootstrapped) return;
     let active = true;
     void bootstrapDemoSession(context)
-      .then(() => {
+      .then((result) => {
         if (!active) return;
-        setBootstrapped(true);
-        setBootstrapError(null);
+        if (result.nextPath) {
+          window.location.assign(result.nextPath);
+        } else if (result.ready) {
+          // A new server cookie is not this form's canonical public context.
+          // Re-read SSR before quote/create so an unknown ACK is always stored
+          // under the authenticated recovery scope, never unverified:entry.
+          window.location.assign(
+            buildHref(context, { screen: "book", state: "handoff" }),
+          );
+        }
       })
       .catch((cause) => {
-        if (!active) return;
-        setBootstrapError(
-          cause instanceof Error ? cause.message : "無法建立 demo 工作階段",
-        );
+        if (active)
+          setBootstrapError(
+            cause instanceof Error ? cause.message : "無法建立工作階段",
+          );
       });
-
     return () => {
       active = false;
     };
-  }, [bootstrapped, context]);
+  }, [bootstrapped, context, scope]);
+  useEffect(() => {
+    setQuote(null);
+    if (
+      !bootstrapped ||
+      !recoveryReady ||
+      pendingCommand ||
+      !validTime ||
+      !form.pickupAddress.trim() ||
+      !form.dropoffAddress.trim()
+    ) {
+      setQuoteState("idle");
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+    setQuoteState("loading");
+    void fetch("/api/referral/quote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        entrySlug: context.entry.entrySlug,
+        pickupAddress: form.pickupAddress.trim(),
+        dropoffAddress: form.dropoffAddress.trim(),
+        vehicleType: form.vehicleType,
+        ...(normalizedScheduledAt
+          ? { scheduledAt: normalizedScheduledAt }
+          : {}),
+      }),
+    })
+      .then(async (response) => {
+        const body = await response.json();
+        if (!response.ok || !body?.ok)
+          throw new Error(
+            String(body?.error?.code || "FARE_QUOTE_UNAVAILABLE"),
+          );
+        return body.data as ReferralPassengerFareQuote;
+      })
+      .then((result) => {
+        if (!active) return;
+        if (
+          !result?.quoteId ||
+          result.fixedPrice !== false ||
+          result.isGuaranteed !== false ||
+          !Number.isSafeInteger(result.estimatedMin) ||
+          !Number.isSafeInteger(result.estimatedMax) ||
+          result.estimatedMin < 0 ||
+          result.estimatedMax < result.estimatedMin ||
+          !Number.isFinite(Date.parse(result.expiresAt))
+        )
+          throw new Error("FARE_QUOTE_UNAVAILABLE");
+        quotedIntent.current = quoteIntent;
+        quotedScope.current = scope;
+        setQuote(result);
+        setQuoteState(
+          Date.parse(result.expiresAt) > Date.now() ? "quoted" : "expired",
+        );
+        intentKey.current = createIdempotencyKey("referral-booking");
+        setError(null);
+      })
+      .catch((cause) => {
+        if (active) {
+          setQuoteState("error");
+          setError(
+            referralUiMessage(cause instanceof Error ? cause.message : null),
+          );
+        }
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [
+    quoteIntent,
+    scope,
+    bootstrapped,
+    recoveryReady,
+    pendingCommand,
+    refreshQuote,
+  ]);
+  useEffect(() => {
+    if (!quote || quoteState !== "quoted") return;
+    const timer = setTimeout(
+      () => setQuoteState("expired"),
+      Math.max(0, Date.parse(quote.expiresAt) - Date.now()),
+    );
+    return () => clearTimeout(timer);
+  }, [quote, quoteState]);
 
   function updateField(event: ChangeEvent<HTMLInputElement>) {
     const { name, value } = event.currentTarget;
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  }
-
-  function handleSubmit() {
-    if (!isMounted) {
-      return;
+    if (["pickupAddress", "dropoffAddress", "scheduledAt"].includes(name)) {
+      setQuote(null);
+      setQuoteState("idle");
     }
-
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+  function handleSubmit() {
+    if (
+      !isMounted ||
+      !recoveryReady ||
+      inFlightForScope.current ||
+      (!pendingCommand &&
+        (!quote ||
+          quoteState !== "quoted" ||
+          quotedIntent.current !== quoteIntent ||
+          quotedScope.current !== scope ||
+          Date.parse(quote.expiresAt) <= Date.now()))
+    )
+      return;
+    const command = pendingCommand ?? {
+      ...buildBookingCommand(context, form, intentKey.current),
+      quoteId: quote!.quoteId,
+    };
+    const saved = { scope, command, form };
+    setRecovery(saved);
+    try {
+      sessionStorage.setItem(storageKey, JSON.stringify(saved));
+    } catch {
+      /* Keep this exact intent in memory if storage is unavailable. */
+    }
+    // A new account/entry gets a keyed form instance; late replies belong only
+    // to this mounted original instance and cannot settle a later screen.
+    const ownsCurrentUi = () => mountedUi.current;
+    inFlightForScope.current = true;
     startTransition(async () => {
       try {
         setError(null);
-
-        if (!form.pickupAddress.trim() || !form.dropoffAddress.trim()) {
-          setError("請先填寫上下車地點。");
-          return;
-        }
-
-        if (!context.session && !bootstrapped) {
-          await bootstrapDemoSession(context);
-          setBootstrapped(true);
-        }
-
-        const command = buildBookingCommand(context, form, bookingIntentKey);
         const response = await fetch("/api/referral/booking", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(command.idempotencyKey
-              ? { "Idempotency-Key": command.idempotencyKey }
-              : {}),
+            "Idempotency-Key": command.idempotencyKey!,
           },
           body: JSON.stringify(command),
         });
         const payload = await response.json().catch(() => null);
+        if (!ownsCurrentUi()) return; // Keep original stored intent for its original owner; never redirect a new screen.
         if (!response.ok || !payload?.ok) {
-          throw new Error(
-            payload?.error?.message || payload?.message || "建立叫車失敗",
-          );
+          const code = payload?.error?.code;
+          // Only definite pre-commit input/quote rejection permits a new intent.
+          if (
+            [
+              "FARE_QUOTE_EXPIRED",
+              "FARE_QUOTE_MISMATCH",
+              "VALIDATION_ERROR",
+            ].includes(code)
+          ) {
+            try {
+              sessionStorage.removeItem(storageKey);
+            } catch {
+              /* Retain the in-memory result when per-tab storage is unavailable. */
+            }
+            setRecovery(null);
+            setQuote(null);
+            setQuoteState("expired");
+          }
+          throw new ReferralUiError(referralUiMessage(code, true));
         }
-
+        if (
+          typeof payload.data?.orderId !== "string" ||
+          payload.data?.quote?.quoteId !== command.quoteId ||
+          !payload.data.confirmedAt
+        )
+          throw new ReferralUiError(referralUiMessage(null, true));
+        try {
+          sessionStorage.removeItem(storageKey);
+        } catch {
+          /* Retain the in-memory result when per-tab storage is unavailable. */
+        }
         window.location.assign(
           buildHref(context, {
             screen: "trip",
@@ -1475,13 +1771,37 @@ export function BookScreen({ context }: { context: EmbedContext }) {
           }),
         );
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "建立叫車失敗");
+        if (!ownsCurrentUi()) return;
+        setError(
+          cause instanceof ReferralUiError
+            ? cause.message
+            : referralUiMessage(null, true),
+        );
+      } finally {
+        if (ownsCurrentUi()) {
+          inFlightForScope.current = false;
+        }
       }
     });
   }
-
-  const bookingControlsDisabled = !isMounted || isPending;
-
+  const bookingControlsDisabled =
+    !isMounted || isPending || Boolean(pendingCommand);
+  const bookingSubmitDisabled =
+    !isMounted ||
+    !recoveryReady ||
+    isPending ||
+    (!pendingCommand &&
+      (quoteState !== "quoted" ||
+        quotedIntent.current !== quoteIntent ||
+        quotedScope.current !== scope));
+  const estimateLabel =
+    quote && quoteState === "quoted"
+      ? `約 NT$ ${quote.estimatedMin}–${quote.estimatedMax}（試算，非保證價）`
+      : quoteState === "loading"
+        ? "車資試算中"
+        : quoteState === "expired"
+          ? "試算已過期，請重新試算"
+          : "車資尚未確認";
   return (
     <AppShell
       context={context}
@@ -1505,16 +1825,35 @@ export function BookScreen({ context }: { context: EmbedContext }) {
                 fontFamily: theme.mono,
               }}
             >
-              約 NT$ 290
+              {estimateLabel}
             </span>
           </div>
+          {!pendingCommand &&
+          (quoteState === "error" || quoteState === "expired") ? (
+            <ActionButton
+              label="重新試算"
+              theme={theme}
+              onClick={() => setRefreshQuote((n) => n + 1)}
+            />
+          ) : null}
+          {pendingCommand ? (
+            <p role="status">
+              尚未確認叫車結果；重送將保留原要求，避免重複叫車。
+            </p>
+          ) : null}
           <ActionButton
-            label={isPending ? "送出中…" : "確認叫車"}
+            label={
+              isPending
+                ? "送出中…"
+                : pendingCommand
+                  ? "重送原叫車要求"
+                  : "確認叫車"
+            }
             theme={theme}
             variant="primary"
             iconRight="arrow"
             onClick={handleSubmit}
-            disabled={bookingControlsDisabled}
+            disabled={bookingSubmitDisabled}
             dataDrtOperation="referral-create"
           />
         </>
@@ -1537,15 +1876,13 @@ export function BookScreen({ context }: { context: EmbedContext }) {
           size={34}
         />
         <div style={{ flex: 1, lineHeight: 1.25 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700 }}>
-            {embedResident.name} · {embedResident.unit}
-          </div>
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>乘客資料</div>
           <div style={{ fontSize: 11, color: theme.muted }}>
             {context.strings.displayName}
           </div>
         </div>
-        <Pill theme={theme} tone="success" dot>
-          已驗證
+        <Pill theme={theme} tone={bootstrapped ? "success" : "neutral"} dot>
+          {bootstrapped ? "已驗證" : "待驗證"}
         </Pill>
       </div>
 
@@ -1589,6 +1926,15 @@ export function BookScreen({ context }: { context: EmbedContext }) {
               icon="clock"
               name="scheduledAt"
               value={form.scheduledAt}
+              onChange={updateField}
+              disabled={bookingControlsDisabled}
+            />
+            <EditableField
+              theme={theme}
+              label="乘客姓名"
+              icon="user"
+              name="passengerName"
+              value={form.passengerName}
               onChange={updateField}
               disabled={bookingControlsDisabled}
             />
@@ -1752,7 +2098,7 @@ function NegativeScreen({
             theme={theme}
           />
           <ActionButton
-            href={toPhoneHref(context.strings.supportPhone)}
+            href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
             label={screen.secondary}
             theme={theme}
             variant="ghost"
@@ -1783,7 +2129,7 @@ function NegativeScreen({
         }}
       >
         <Icon name="phone" size={13} />
-        社區叫車客服 {context.strings.supportPhone}
+        社區叫車客服 {REFERRAL_SUPPORT_PHONE}
       </div>
     </AppShell>
   );
@@ -1847,8 +2193,8 @@ function TripScreen({
         vehicle: activeTrip.vehicleType,
         driver: activeTrip.driverName || "媒合中",
         plate: activeTrip.plateNumber || "待更新",
-        rating: activeTrip.driverName ? 4.9 : 0,
-        etaMin: activeTrip.etaMin ?? 5,
+        rating: 0,
+        etaMin: activeTrip.etaMin,
         cancelWindowMin: activeTrip.cancelWindowMin,
         driverPhoneMasked: activeTrip.driverPhoneMasked,
         estimatedFare: activeTrip.estimatedFare,
@@ -1901,8 +2247,8 @@ function TripScreen({
       footer={
         <>
           <ActionButton
-            href={toPhoneHref(context.strings.supportPhone)}
-            label="聯絡司機"
+            href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
+            label="客服協助聯絡司機"
             theme={theme}
             variant="default"
             icon="phone"
@@ -1996,7 +2342,7 @@ function TripScreen({
                 lineHeight: 1,
               }}
             >
-              {trip.etaMin}
+              {trip.etaMin ?? "待更新"}
             </div>
             <div style={{ fontSize: 10, color: theme.muted, marginTop: 3 }}>
               分鐘 · 估計
@@ -2085,6 +2431,13 @@ function TripScreen({
   );
 }
 
+const NON_COMPLETED_TERMINAL_STATUSES = [
+  "cancelled",
+  "dispatch_failed",
+  "dispatch_timeout",
+  "no_supply",
+];
+
 function TripsScreen({
   context,
   liveData,
@@ -2114,7 +2467,7 @@ function TripsScreen({
       >
         <div style={{ fontSize: 17, fontWeight: 800 }}>我的行程</div>
         <Pill theme={theme} tone="neutral">
-          綁定 {embedResident.name}
+          本工作階段行程
         </Pill>
       </div>
       <div
@@ -2151,7 +2504,12 @@ function TripsScreen({
         return (
           <Link
             href={buildHref(context, {
-              screen: trip.state === "completed" ? "completed" : "cancelled",
+              screen:
+                trip.state === "completed"
+                  ? "completed"
+                  : NON_COMPLETED_TERMINAL_STATUSES.includes(trip.state)
+                    ? "cancelled"
+                    : "trip",
               state: "handoff",
               orderId: trip.orderId,
             })}
@@ -2244,29 +2602,29 @@ function ReceiptScreen({
   // API returns whatever the order's current status is, and this screen must
   // not relabel a cancelled/no-supply/dispatch-failed order as completed just
   // because a receipt object came back.
-  const receipt = liveData?.receipt && liveData.receipt.status === "completed"
-    ? {
-        id: liveData.receipt.orderNo,
-        orderId: liveData.receipt.orderId,
-        date: formatShortDateTime(
-          liveData.receipt.completedAt || liveData.activeTrip?.trip?.createdAt,
-        ),
-        from: liveData.receipt.pickupAddress,
-        to: liveData.receipt.dropoffAddress,
-        vehicle: liveData.receipt.vehicleType,
-        driver: liveData.receipt.driverName || "媒合中",
-        plate: liveData.receipt.plateNumber || "待更新",
-        passenger: liveData.receipt.passengerNameMasked,
-        maskedPhone: liveData.receipt.passengerPhoneMasked,
-        fareBase: formatFare(liveData.receipt.fareBase),
-        fareDistance: formatFare(liveData.receipt.fareDistance),
-        fareTime: formatFare(liveData.receipt.fareTime),
-        total: liveData.receipt.formattedTotal,
-        payment: "社區月結 · 綁定住戶帳號",
-        channel: context.strings.appName,
-        downloadUrl: liveData.receipt.downloadUrl,
-      }
-    : null;
+  const receipt =
+    liveData?.receipt && liveData.receipt.status === "completed"
+      ? {
+          id: liveData.receipt.orderNo,
+          orderId: liveData.receipt.orderId,
+          date: formatShortDateTime(liveData.receipt.completedAt),
+          from: liveData.receipt.pickupAddress,
+          to: liveData.receipt.dropoffAddress,
+          vehicle: liveData.receipt.vehicleType,
+          driver: liveData.receipt.driverName || "資料未提供",
+          plate: liveData.receipt.plateNumber || "待更新",
+          passenger: liveData.receipt.passengerNameMasked,
+          maskedPhone: liveData.receipt.passengerPhoneMasked,
+          fareBase: formatFare(liveData.receipt.fareBase),
+          fareDistance: formatFare(liveData.receipt.fareDistance),
+          fareTime: formatFare(liveData.receipt.fareTime),
+          fareNight: formatFare(liveData.receipt.fareNight),
+          total: liveData.receipt.formattedTotal,
+          payment: liveData.receipt.paymentChannel,
+          channel: context.strings.appName,
+          downloadUrl: liveData.receipt.downloadUrl,
+        }
+      : null;
   if (!receipt) {
     return <TripsScreen context={context} liveData={liveData} />;
   }
@@ -2356,8 +2714,21 @@ function ReceiptScreen({
           value={`${receipt.driver} · ${receipt.plate}`}
         />
         <DetailRow theme={theme} label="車種" value={receipt.vehicle} last />
+        <DetailRow theme={theme} label="客服" value={REFERRAL_SUPPORT_PHONE} />
+        <DetailRow
+          theme={theme}
+          label="主管機關"
+          value={REFERRAL_AUTHORITY_PHONE}
+        />
       </Card>
-      <Card theme={theme} title="費用明細" subtitle="fare breakdown">
+      <Banner theme={theme} tone="neutral" icon="info">
+        本頁為乘車紀錄，非正式稅務憑證；付款及結算狀態以實際通知為準。
+      </Banner>
+      <Card
+        theme={theme}
+        title="已記錄費用分項"
+        subtitle="未提供的分項不以估算補齊，合計依實際車資"
+      >
         <DetailRow theme={theme} label="起步價" value={receipt.fareBase} mono />
         <DetailRow
           theme={theme}
@@ -2366,6 +2737,12 @@ function ReceiptScreen({
           mono
         />
         <DetailRow theme={theme} label="時間" value={receipt.fareTime} mono />
+        <DetailRow
+          theme={theme}
+          label="夜間費"
+          value={receipt.fareNight}
+          mono
+        />
         <DetailRow
           theme={theme}
           label="合計"
@@ -2393,33 +2770,93 @@ function OutcomeScreen({
   kind: "completed" | "cancelled";
   liveData: PassengerEmbedLiveData;
 }) {
+  const mountedRatingUi = useRef(false);
+  useEffect(() => {
+    mountedRatingUi.current = true;
+    return () => {
+      mountedRatingUi.current = false;
+    };
+  }, []);
   const theme = buildEmbedTheme(context.accent);
   const completed = kind === "completed";
   const [score, setScore] = useState<number | null>(null);
   const [ratingMessage, setRatingMessage] = useState<string | null>(null);
+  const [contactRequested, setContactRequested] = useState(true);
+  const [ratingReceipt, setRatingReceipt] =
+    useState<ReferralPassengerRatingResult | null>(null);
+  const [pendingRating, setPendingRating] =
+    useState<SubmitReferralPassengerRatingCommand | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const NON_COMPLETED_TERMINAL_STATUSES = [
-    "cancelled",
-    "dispatch_failed",
-    "dispatch_timeout",
-    "no_supply",
-  ];
-  const trip =
-    liveData?.history?.items.find(
-      (item) =>
-        (!liveData.selectedOrderId ||
-          item.orderId === liveData.selectedOrderId) &&
-        (completed
-          ? item.status === "completed"
-          : NON_COMPLETED_TERMINAL_STATUSES.includes(item.status)),
-    ) ??
-    (liveData?.selectedOrderId
-      ? ({ orderId: liveData.selectedOrderId } as any)
-      : undefined);
+  const trip = liveData?.history?.items.find(
+    (item) =>
+      (!liveData.selectedOrderId ||
+        item.orderId === liveData.selectedOrderId) &&
+      (completed
+        ? item.status === "completed"
+        : NON_COMPLETED_TERMINAL_STATUSES.includes(item.status)),
+  );
+
+  const submitted =
+    trip?.rating ??
+    (ratingReceipt?.orderId === trip?.orderId ? ratingReceipt : null);
+  const ratingStorageKey = `referral.rating.recovery.v1:${context.session?.recoveryScope ?? context.session?.handoffId ?? "unverified"}:${trip?.orderId ?? "none"}`;
+  const originalRating =
+    pendingRating?.orderId === trip?.orderId ? pendingRating : null;
+  useEffect(() => {
+    setScore(null);
+    setContactRequested(true);
+    setRatingReceipt(null);
+    setRatingMessage(null);
+    setError(null);
+    setPendingRating(null);
+    if (!trip) return;
+    try {
+      if (trip.rating) {
+        sessionStorage.removeItem(ratingStorageKey);
+        return;
+      }
+      const saved = JSON.parse(
+        sessionStorage.getItem(ratingStorageKey) ?? "null",
+      );
+      if (
+        saved?.orderId === trip.orderId &&
+        Number.isInteger(saved.score) &&
+        saved.score >= 1 &&
+        saved.score <= 5 &&
+        typeof saved.contactRequested === "boolean" &&
+        typeof saved.idempotencyKey === "string" &&
+        saved.idempotencyKey.length <= 255 &&
+        Object.keys(saved).every((k) =>
+          ["orderId", "score", "contactRequested", "idempotencyKey"].includes(
+            k,
+          ),
+        )
+      ) {
+        setPendingRating(saved);
+        setScore(saved.score);
+        setContactRequested(saved.contactRequested);
+      }
+    } catch {
+      /* An invalid local draft grants no identity or rating authority. */
+    }
+  }, [trip?.orderId, trip?.rating, ratingStorageKey]);
+  if (!trip) return <TripsScreen context={context} liveData={liveData} />;
 
   function submitRating(nextScore: number) {
-    if (!trip) return;
+    if (!trip || submitted || isPending) return;
+    const command = originalRating ?? {
+      orderId: trip.orderId,
+      score: nextScore as 1 | 2 | 3 | 4 | 5,
+      contactRequested: nextScore <= 2 ? contactRequested : false,
+      idempotencyKey: createIdempotencyKey("referral-rating"),
+    };
+    setPendingRating(command);
+    try {
+      sessionStorage.setItem(ratingStorageKey, JSON.stringify(command));
+    } catch {
+      /* Original command remains in memory. */
+    }
     startTransition(async () => {
       try {
         setError(null);
@@ -2428,20 +2865,41 @@ function OutcomeScreen({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              score: nextScore,
-              idempotencyKey: createIdempotencyKey("referral-rating"),
-            }),
+            body: JSON.stringify(command),
           },
         );
         const payload = await response.json().catch(() => null);
+        if (!mountedRatingUi.current) return;
         if (!response.ok || !payload?.ok) {
-          throw new Error(payload?.error?.message || "送出評分失敗");
+          throw new ReferralUiError(
+            payload?.error?.code === "PASSENGER_RATING_ALREADY_SUBMITTED"
+              ? "本行程已有評分，請重新讀取本行程確認原評分。"
+              : "尚未確認評分結果，請重送原評分或重新讀取本行程。",
+          );
         }
-        setScore(nextScore);
+        if (
+          payload.data?.orderId !== trip.orderId ||
+          payload.data?.score !== command.score ||
+          payload.data?.contactRequested !== command.contactRequested ||
+          (command.score <= 2 && !payload.data.complaintCaseNo)
+        )
+          throw new ReferralUiError("評分尚未取得同單回執，請重送原評分。");
+        setRatingReceipt(payload.data);
+        setScore(command.score);
+        setPendingRating(null);
+        try {
+          sessionStorage.removeItem(ratingStorageKey);
+        } catch {
+          /* Retain the in-memory result when per-tab storage is unavailable. */
+        }
         setRatingMessage("已收到您的評分。感謝回饋！");
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "送出評分失敗");
+        if (!mountedRatingUi.current) return;
+        setError(
+          cause instanceof ReferralUiError
+            ? cause.message
+            : "尚未確認評分結果，請重送原評分或重新讀取本行程。",
+        );
       }
     });
   }
@@ -2505,7 +2963,12 @@ function OutcomeScreen({
           value={trip?.formattedFare ?? "—"}
           strong
         />
-        <DetailRow theme={theme} label="付款" value="社區月結" last />
+        <DetailRow
+          theme={theme}
+          label="付款"
+          value="付款及結算狀態未提供"
+          last
+        />
       </Card>
       {completed ? (
         <Card theme={theme} title="為這趟行程評分">
@@ -2522,17 +2985,28 @@ function OutcomeScreen({
                 key={n}
                 type="button"
                 data-drt-operation="referral-rate"
-                onClick={() => submitRating(n)}
-                disabled={!trip || isPending || score !== null}
+                onClick={() => setScore(n)}
+                disabled={
+                  !trip ||
+                  isPending ||
+                  Boolean(submitted) ||
+                  Boolean(originalRating)
+                }
                 aria-label={`評分 ${n} 星`}
                 style={{
                   border: 0,
                   padding: 0,
                   background: "transparent",
                   color:
-                    score !== null && n > score ? theme.line : theme.warnFg,
+                    (submitted?.score ?? score) !== null &&
+                    n > (submitted?.score ?? score ?? 0)
+                      ? theme.line
+                      : theme.warnFg,
                   cursor:
-                    !trip || isPending || score !== null
+                    !trip ||
+                    isPending ||
+                    Boolean(submitted) ||
+                    Boolean(originalRating)
                       ? "default"
                       : "pointer",
                 }}
@@ -2541,6 +3015,64 @@ function OutcomeScreen({
               </button>
             ))}
           </div>
+          {(submitted?.score ?? score ?? 5) <= 2 ? (
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {submitted?.contactRequested === null ? (
+                <span>原評分未記錄聯絡偏好</span>
+              ) : (
+                <>
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-label="需要客服聯絡"
+                    checked={submitted?.contactRequested ?? contactRequested}
+                    disabled={
+                      isPending || Boolean(submitted) || Boolean(originalRating)
+                    }
+                    onChange={(event) =>
+                      setContactRequested(event.currentTarget.checked)
+                    }
+                  />
+                  需要客服聯絡
+                </>
+              )}
+            </label>
+          ) : null}
+          <ActionButton
+            label={
+              isPending
+                ? "送出中…"
+                : submitted
+                  ? "評分已送出"
+                  : originalRating
+                    ? "重送原評分"
+                    : "送出評分"
+            }
+            theme={theme}
+            onClick={() => {
+              if (score !== null) submitRating(score);
+            }}
+            disabled={score === null || isPending || Boolean(submitted)}
+          />
+          {error ? (
+            <ActionButton
+              label="重新讀取本行程"
+              theme={theme}
+              href={buildHref(context, {
+                screen: "completed",
+                state: "handoff",
+                orderId: trip.orderId,
+              })}
+            />
+          ) : null}
+          {submitted?.complaintCaseNo ? (
+            <p role="status">
+              客訴案件：{submitted.complaintCaseNo}；
+              {submitted.contactRequested
+                ? "同意客服聯絡"
+                : "不需客服聯絡，僅供內部檢視"}
+            </p>
+          ) : null}
           {ratingMessage ? (
             <Banner theme={theme} tone="success" icon="check">
               {ratingMessage}
@@ -2743,7 +3275,7 @@ function FallbackTripScreen({
   const footer =
     screen === "vehicle_change_in_progress" ? (
       <ActionButton
-        href={toPhoneHref(context.strings.supportPhone)}
+        href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
         label="聯絡客服"
         theme={theme}
         variant="default"
@@ -2758,8 +3290,8 @@ function FallbackTripScreen({
           icon="car"
         />
         <ActionButton
-          href={toPhoneHref(context.strings.supportPhone)}
-          label="聯絡司機"
+          href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
+          label="客服協助聯絡司機"
           theme={theme}
           variant="default"
           icon="phone"
@@ -2973,11 +3505,21 @@ export function PassengerEmbed({
       return <ReceiptScreen context={context} liveData={liveData} />;
     case "completed":
       return (
-        <OutcomeScreen context={context} kind="completed" liveData={liveData} />
+        <OutcomeScreen
+          key={`${context.session?.recoveryScope ?? context.session?.handoffId ?? context.entry.entrySlug}:completed:${liveData?.selectedOrderId ?? liveData?.history?.items[0]?.orderId ?? "none"}`}
+          context={context}
+          kind="completed"
+          liveData={liveData}
+        />
       );
     case "cancelled":
       return (
-        <OutcomeScreen context={context} kind="cancelled" liveData={liveData} />
+        <OutcomeScreen
+          key={`${context.session?.recoveryScope ?? context.session?.handoffId ?? context.entry.entrySlug}:cancelled:${liveData?.selectedOrderId ?? liveData?.history?.items[0]?.orderId ?? "none"}`}
+          context={context}
+          kind="cancelled"
+          liveData={liveData}
+        />
       );
     case "nosupply":
     case "ineligible":

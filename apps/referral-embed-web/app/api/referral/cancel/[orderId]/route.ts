@@ -1,5 +1,10 @@
+import type { CancelReferralPassengerTripCommand } from "@drts/contracts";
+import {
+  referralErrorResponse,
+  readReferralBody,
+} from "../../../../../lib/embed-booking-api";
 import { NextResponse } from "next/server";
-import { cancelReferralTripServer } from "@/lib/embed-booking-api";
+import { cancelReferralTripServer } from "../../../../../lib/embed-booking-api";
 
 export async function POST(
   request: Request,
@@ -7,15 +12,14 @@ export async function POST(
 ) {
   try {
     const { orderId } = await params;
-    const body = await request.json().catch(() => ({}));
-    const data = await cancelReferralTripServer(orderId, { orderId, ...body });
-    return NextResponse.json({ ok: true, data });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Cancel trip failed";
+    const body =
+      await readReferralBody<CancelReferralPassengerTripCommand>(request);
+    const data = await cancelReferralTripServer(orderId, { ...body, orderId });
     return NextResponse.json(
-      { ok: false, error: { message } },
-      { status: 400 },
+      { ok: true, data },
+      { headers: { "Cache-Control": "no-store, max-age=0" } },
     );
+  } catch (error) {
+    return referralErrorResponse(error);
   }
 }

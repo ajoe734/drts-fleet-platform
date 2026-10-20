@@ -41,6 +41,7 @@ import type {
   UpdateTenantBookingCommand,
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
+  ReferralPassengerQuoteCommand,
   SubmitReferralPassengerRatingCommand,
   TenantBookingListQuery,
 } from "@drts/contracts";
@@ -403,6 +404,26 @@ export class OwnedMobilityController {
     );
   }
 
+  @Post("partner/referral/passenger/quote")
+  @RequireRealms("partner")
+  @RequireScopes("partner:book")
+  // Estimate calculation with an expiring owned evidence snapshot. Repeated
+  // calculations may create distinct snapshots; this is not booking or payment.
+  async estimateReferralPassengerFare(
+    @Body() command: ReferralPassengerQuoteCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.quoteReferralPassengerFare(
+        command,
+        identity,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
   @Post("partner/referral/passenger/bookings")
   async createReferralPassengerBooking(
     @Body() command: CreateReferralPassengerBookingCommand,
@@ -485,13 +506,18 @@ export class OwnedMobilityController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const order = await this.ownedMobilityService.cancelReferralPassengerTrip(
+      orderId,
+      command,
+      identity,
+      requestId,
+    );
     return toApiSuccessEnvelope(
-      await this.ownedMobilityService.cancelReferralPassengerTrip(
-        orderId,
-        command,
-        identity,
-        requestId,
-      ),
+      {
+        orderId: order.orderId,
+        status: order.status,
+        cancelledAt: order.cancelledAt,
+      },
       requestId,
     );
   }
