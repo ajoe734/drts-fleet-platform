@@ -114,6 +114,20 @@ test("owned synthetic business ride uses the public Demo identity through comple
   let passengerId: string | undefined;
   let referralSessionId: string | undefined;
   let completed = false;
+  const browserRatingState: {
+    current:
+      | {
+          state: "ack_unknown" | "acknowledged";
+          orderId: string;
+          body: Readonly<ObjectData>;
+          bodySha256: string;
+          idempotencyKey: string;
+          responseStatus?: number;
+          caseNo?: string;
+          recovery: string;
+        }
+      | undefined;
+  } = { current: undefined };
   let controlRole: "api" | "ops" = "api";
   let mainError: unknown;
   const bookingState: {
@@ -867,6 +881,7 @@ test("owned synthetic business ride uses the public Demo identity through comple
       "canonical same-order completed readback",
     );
     completed = true;
+    const completedOrderId = text(orderId);
     const history = object(
       (await referral(`/api/referral/history/${encodeURIComponent(orderId)}`))
         .data,
@@ -897,32 +912,192 @@ test("owned synthetic business ride uses the public Demo identity through comple
       "actual nonformal TXT bytes",
     );
     assertCompletedFare(completion, completedTask, history, receipt, txt);
-    await mkdir(DIRECTORY, { recursive: true });
-    await writeFile(`${DIRECTORY}/own-receipt.txt`, download.bytes, {
-      mode: 0o600,
-    });
     evidence.record({
-      stage: "same-order-nonformal-TXT",
+      stage: "api-same-order-nonformal-TXT",
       orderId,
       bytes: download.bytes.length,
       sha256: hash(download.bytes),
     });
-    const ratingBody = {
-      orderId,
-      score: 2,
-      contactRequested: false,
-      comment: "明示合成開發測試，毋須聯絡",
-      tags: [],
-      idempotencyKey: `${nonce}-rating`,
+
+    const completedUrl = `${origins.referral}/embed/${ENTRY}?state=handoff&screen=completed&entryHost=${encodeURIComponent(host)}&orderId=${encodeURIComponent(completedOrderId)}`;
+    const ratingUrl = `${origins.referral}/api/referral/rating/${encodeURIComponent(completedOrderId)}`;
+    const isOwnRatingPost = (request: PlaywrightRequest) =>
+      request.url() === ratingUrl && request.method() === "POST";
+    const browserRatingRequests: PlaywrightRequest[] = [];
+    page.on("request", (request) => {
+      if (isOwnRatingPost(request)) browserRatingRequests.push(request);
+    });
+    const assertCompletedBrowserUrl = (value: URL) =>
+      value.origin === origins.referral &&
+      value.pathname === `/embed/${ENTRY}` &&
+      value.searchParams.get("screen") === "completed" &&
+      value.searchParams.get("orderId") === completedOrderId;
+    // OutcomeScreen renders its selected score through the five star colors;
+    // the buttons have stable accessible names, but no invented aria-pressed.
+    const assertBrowserTwoStarSelection = async () => {
+      const stars = page.getByRole("button", { name: /^評分 [1-5] 星$/ });
+      await expect(stars).toHaveCount(5);
+      const colors = await stars.evaluateAll((buttons) =>
+        buttons.map((button) => window.getComputedStyle(button).color),
+      );
+      const [one, two, three, four, five] = colors;
+      requireFact(
+        one &&
+          two &&
+          three &&
+          four &&
+          five &&
+          one === two &&
+          two !== three &&
+          three === four &&
+          four === five,
+        "browser shows exactly the original two selected stars",
+      );
+      return colors;
     };
-    const first = object(
-      (
-        await referral(`/api/referral/rating/${encodeURIComponent(orderId)}`, {
-          method: "POST",
-          body: ratingBody,
-        })
-      ).data,
+    await page.goto(completedUrl);
+    await expect(page).toHaveURL(assertCompletedBrowserUrl);
+    await expect(page.getByText("行程已完成", { exact: true })).toBeVisible();
+    const submitRating = page.getByRole("button", {
+      name: "送出評分",
+      exact: true,
+    });
+    await expect(submitRating).toBeDisabled();
+    await expect(
+      page.getByRole("switch", { name: "需要客服聯絡", exact: true }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "評分 2 星", exact: true }).click();
+    const contactSwitch = page.getByRole("switch", {
+      name: "需要客服聯絡",
+      exact: true,
+    });
+    await expect(contactSwitch).toBeChecked();
+    await expect(submitRating).toBeEnabled();
+    const originalTwoStarColors = await assertBrowserTwoStarSelection();
+    await expect(
+      browserRatingRequests,
+      "selecting stars must not submit a rating",
+    ).toHaveLength(0);
+    evidence.record({
+      stage: "browser-two-star-selection-without-submission",
+      orderId: completedOrderId,
+      result: "observed",
+    });
+    await contactSwitch.click();
+    await expect(contactSwitch).not.toBeChecked();
+    await expect(
+      browserRatingRequests,
+      "contact switch must not submit a rating",
+    ).toHaveLength(0);
+    evidence.record({
+      stage: "browser-contact-default-on-then-explicit-off",
+      orderId: completedOrderId,
+      result: "observed",
+    });
+
+    // Capture only the real UI's four business fields, before awaiting its ACK.
+    // A missing response retains this command/key; no replacement is created.
+    const capturedRatingRequest = page
+      .waitForRequest(isOwnRatingPost)
+      .then((request) => {
+        const rawBody = text(
+          request.postData(),
+          "actual browser rating body required",
+        );
+        const body = Object.freeze(object(request.postDataJSON()));
+        requireFact(
+          Object.keys(body).sort().join(",") ===
+            "contactRequested,idempotencyKey,orderId,score" &&
+            body.orderId === completedOrderId &&
+            body.score === 2 &&
+            body.contactRequested === false,
+          "actual UI same-order score2 contactfalse command",
+        );
+        const key = text(
+          body.idempotencyKey,
+          "original browser rating key required",
+        );
+        requireFact(
+          JSON.stringify(body) === rawBody,
+          "exact browser rating JSON retained for API replay",
+        );
+        browserRatingState.current = {
+          state: "ack_unknown",
+          orderId: completedOrderId,
+          body,
+          bodySha256: hash(Buffer.from(rawBody, "utf8")),
+          idempotencyKey: key,
+          recovery:
+            "Preserve this original UI body/key. Read the same order and replay only this command after normal same-subject authentication; do not create another rating key or order.",
+        };
+        return { request, body };
+      });
+    const ratingResponsePromise = page.waitForResponse((response) =>
+      isOwnRatingPost(response.request()),
     );
+    // These still reject when awaited; avoid an unhandled rejection if the
+    // click itself fails and the normal finally closes the browser context.
+    void capturedRatingRequest.catch(() => undefined);
+    void ratingResponsePromise.catch(() => undefined);
+    await submitRating.click();
+    const capturedRating = await capturedRatingRequest;
+    const ratingBody = capturedRating.body;
+    const ratingResponse = await ratingResponsePromise;
+    requireFact(
+      browserRatingState.current,
+      "captured browser rating command required",
+    );
+    browserRatingState.current = {
+      ...browserRatingState.current,
+      responseStatus: ratingResponse.status(),
+    };
+    requireFact(
+      browserRatingRequests.length === 1 &&
+        browserRatingRequests[0] === capturedRating.request &&
+        ratingResponse.request() === capturedRating.request,
+      "one explicit browser rating POST and its original response",
+    );
+    if (!ratingResponse.ok())
+      throw new JourneyFailure(
+        "browser-rating:request",
+        ratingResponse.status(),
+      );
+    requireFact(
+      ratingResponse.headers()["x-drts-candidate-sha"] === runtime,
+      "browser rating runtime SHA",
+    );
+    const ratingPayload = object(await ratingResponse.json());
+    requireFact(
+      ratingPayload.ok === true,
+      "browser rating successful envelope",
+    );
+    const first = object(ratingPayload.data);
+    requireFact(first.score === 2, "browser rating original score ACK");
+    assertRatingReplay(first, first, completedOrderId);
+    const caseNo = text(first.complaintCaseNo);
+    browserRatingState.current = {
+      ...browserRatingState.current,
+      state: "acknowledged",
+      caseNo,
+    };
+    await expect(
+      page.getByRole("button", { name: "評分已送出", exact: true }),
+    ).toBeDisabled();
+    const firstCaseStatus = page
+      .getByRole("status")
+      .filter({ hasText: caseNo });
+    await expect(firstCaseStatus).toContainText("不需客服聯絡，僅供內部檢視");
+    evidence.record({
+      stage: "browser-two-contactfalse-rating-acknowledged",
+      orderId: completedOrderId,
+      caseNo,
+      status: ratingResponse.status(),
+      sha256: browserRatingState.current.bodySha256,
+      result: "observed",
+    });
+
+    // The following original API checks replay the captured browser body/key.
+    // No comment/tags or new rating command are manufactured for the fixture.
     const replay = object(
       (
         await referral(`/api/referral/rating/${encodeURIComponent(orderId)}`, {
@@ -955,7 +1130,10 @@ test("owned synthetic business ride uses the public Demo identity through comple
       { ...object(persistedHistory.rating), orderId: persistedHistory.orderId },
       orderId,
     );
-    const caseNo = text(first.complaintCaseNo);
+    requireFact(
+      object(persistedHistory.rating).score === 2,
+      "canonical history retains original browser score2",
+    );
     const complaint = await control(
       `/complaints/${encodeURIComponent(caseNo)}`,
     );
@@ -982,21 +1160,192 @@ test("owned synthetic business ride uses the public Demo identity through comple
       "canonical CRM creation timeline",
     );
     evidence.record({
-      stage: "low-two-contactfalse-same-case-replay-and-conflict409",
+      stage: "api-low-two-contactfalse-same-case-replay-and-conflict409",
       orderId,
       caseNo,
       result: "retained",
     });
+
+    // Re-enter through the actual history card, not an API read standing in
+    // for UI navigation. TripsScreen links include the exact canonical ID.
     await page.goto(
-      `${origins.referral}/embed/${ENTRY}?state=handoff&screen=completed&orderId=${encodeURIComponent(orderId)}`,
+      `${origins.referral}/embed/${ENTRY}?state=handoff&screen=trips&entryHost=${encodeURIComponent(host)}`,
     );
+    await expect(page.getByText("我的行程", { exact: true })).toBeVisible();
+    const ownHistoryCard = page.getByRole("link").filter({
+      hasText: text(history.orderNo, "canonical history order number required"),
+    });
+    await expect(ownHistoryCard).toHaveCount(1);
+    const historyHref = new URL(
+      text(await ownHistoryCard.getAttribute("href")),
+      origins.referral,
+    );
+    requireFact(
+      assertCompletedBrowserUrl(historyHref),
+      "history card retains exact completed orderId",
+    );
+    await ownHistoryCard.click();
+    await expect(page).toHaveURL(assertCompletedBrowserUrl);
+    await expect(page.getByText("行程已完成", { exact: true })).toBeVisible();
+    for (const n of [1, 2, 3, 4, 5])
+      await expect(
+        page.getByRole("button", { name: `評分 ${n} 星`, exact: true }),
+      ).toBeDisabled();
+    const restoredTwoStarColors = await assertBrowserTwoStarSelection();
+    requireFact(
+      restoredTwoStarColors.every(
+        (color, index) => color === originalTwoStarColors[index],
+      ),
+      "history restores the original selected-two browser color distribution",
+    );
+    const restoredContact = page.getByRole("switch", {
+      name: "需要客服聯絡",
+      exact: true,
+    });
+    await expect(restoredContact).not.toBeChecked();
+    await expect(restoredContact).toBeDisabled();
     await expect(
-      page.getByText("行程已完成", { exact: false }).first(),
+      page.getByRole("button", { name: "評分已送出", exact: true }),
+    ).toBeDisabled();
+    await expect(
+      page.getByRole("status").filter({ hasText: caseNo }),
+    ).toContainText("不需客服聯絡，僅供內部檢視");
+    requireFact(
+      browserRatingRequests.length === 1,
+      "history return must not resubmit rating",
+    );
+    evidence.record({
+      stage: "browser-history-card-restores-locked-two-contactfalse-case",
+      orderId: completedOrderId,
+      caseNo,
+      result: "observed",
+    });
+
+    const receiptLink = page.getByRole("link", {
+      name: "查看收據",
+      exact: true,
+    });
+    const receiptHref = new URL(
+      text(await receiptLink.getAttribute("href")),
+      origins.referral,
+    );
+    requireFact(
+      receiptHref.origin === origins.referral &&
+        receiptHref.pathname === `/embed/${ENTRY}` &&
+        receiptHref.searchParams.get("screen") === "receipt" &&
+        receiptHref.searchParams.get("orderId") === completedOrderId,
+      "browser receipt link retains original completed order",
+    );
+    await receiptLink.click();
+    await expect(page).toHaveURL((url) => url.href === receiptHref.href);
+    await expect(
+      page.getByText(`${text(receipt.orderNo)} · ${completedOrderId}`, {
+        exact: true,
+      }),
     ).toBeVisible();
+    await expect(
+      page.getByText(
+        "本頁為乘車紀錄，非正式稅務憑證；付款及結算狀態以實際通知為準。",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    const assertReceiptRow = async (label: string, value: string) => {
+      // Actual DetailRow is one div containing label/value sibling spans.
+      const spans = page
+        .getByText(label, { exact: true })
+        .locator("..")
+        .locator(":scope > span");
+      await expect(spans).toHaveCount(2);
+      await expect(spans.nth(1)).toHaveText(value);
+    };
+    const fareRows: ReadonlyArray<readonly [string, number]> = [
+      ["起步價", completion.actualFareBreakdown.startMinor],
+      ["里程", completion.actualFareBreakdown.distanceMinor],
+      ["時間", completion.actualFareBreakdown.delayMinor],
+      ["夜間費", completion.actualFareBreakdown.nightMinor],
+      ["合計", completion.fare.amountMinor],
+    ];
+    for (const [label, amountMinor] of fareRows)
+      await assertReceiptRow(label, `NT$ ${amountMinor / 100}`);
+    await assertReceiptRow("客服", "02-2944-0985");
+    await assertReceiptRow("主管機關", "1999");
+    await expect(
+      page.getByText("付款及結算狀態未提供 · 經", { exact: false }),
+    ).toBeVisible();
+    evidence.record({
+      stage: "browser-receipt-actualfare-nonformal-paymentunknown",
+      orderId: completedOrderId,
+      result: "observed",
+    });
+    const downloadLink = page.getByRole("link", {
+      name: "下載收據",
+      exact: true,
+    });
+    const downloadHref = new URL(
+      text(await downloadLink.getAttribute("href")),
+      origins.referral,
+    );
+    requireFact(
+      downloadHref.origin === origins.referral &&
+        downloadHref.pathname ===
+          `/api/referral/receipt/${encodeURIComponent(completedOrderId)}/download`,
+      "browser download link has exact same-order receipt endpoint",
+    );
+    const browserDownloadPromise = page.waitForEvent("download");
+    void browserDownloadPromise.catch(() => undefined);
+    await downloadLink.click();
+    const browserDownload = await browserDownloadPromise;
+    requireFact(
+      browserDownload.url() === downloadHref.href &&
+        browserDownload.suggestedFilename() ===
+          `receipt-${completedOrderId}.txt` &&
+        (await browserDownload.failure()) === null,
+      "actual browser same-order TXT download",
+    );
+    const browserDownloadPath = text(
+      await browserDownload.path(),
+      "browser download file required",
+    );
+    const browserBytes = await readFile(browserDownloadPath);
+    const browserTxt = browserBytes.toString("utf8");
+    requireFact(
+      browserTxt.includes(completedOrderId) &&
+        browserTxt.includes("非正式稅務憑證"),
+      "browser TXT same-order nonformal bytes",
+    );
+    assertCompletedFare(
+      completion,
+      completedTask,
+      history,
+      receipt,
+      browserTxt,
+    );
+    await mkdir(DIRECTORY, { recursive: true });
+    await writeFile(`${DIRECTORY}/own-receipt.txt`, browserBytes, {
+      mode: 0o600,
+    });
+    evidence.record({
+      stage: "browser-same-order-nonformal-TXT",
+      orderId: completedOrderId,
+      bytes: browserBytes.length,
+      sha256: hash(browserBytes),
+      result: "observed",
+    });
   } catch (error) {
     mainError = bookingState.routeError ?? error;
     evidence.failure(mainError);
   } finally {
+    if (browserRatingState.current?.state === "ack_unknown") {
+      cleanupErrors.push(
+        "browser-rating-ACK-unknown-original-command-retained",
+      );
+      evidence.record({
+        stage: "browser-rating-ACK-unknown-original-command-retained",
+        orderId: browserRatingState.current.orderId,
+        sha256: browserRatingState.current.bodySha256,
+        result: "retained",
+      });
+    }
     if (bookingState.journal?.current?.state === "ack_unknown") {
       cleanupErrors.push("booking-ACK-unknown-possible-write");
       evidence.record({
@@ -1099,6 +1448,7 @@ test("owned synthetic business ride uses the public Demo identity through comple
                 recovery: bookingState.journal.current.recovery,
               }
             : null,
+          browserRatingWrite: browserRatingState.current ?? null,
           events: evidence.events,
           simulation:
             "Synthetic dev driver/vehicle/documents/GPS/project PNG and Driver-declared fare; no physical ride, legal approval, PSP debit, E04 or formal PDF claim.",
