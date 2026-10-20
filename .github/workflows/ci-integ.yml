@@ -34,6 +34,11 @@ on:
         required: false
         default: ""
         type: string
+      owned_referral_business:
+        description: "Opt in to one owned synthetic business ride on the existing shared Referral Demo; never deploys"
+        required: false
+        default: false
+        type: boolean
       shared_bureau:
         description: "Also run bureau journeys against the existing shared release; never deploys"
         required: false
@@ -64,6 +69,140 @@ env:
 # hang is capped in minutes rather than hours.
 
 jobs:
+  owned-referral-business-journey:
+    if: github.event_name == 'workflow_dispatch' && inputs.owned_referral_business == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: shared-dev-owned-referral-business-journey
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable definition and existing dev target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual consumer checkout
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing hosted verification identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Bind the five existing live services before any data operation
+        id: runtime_before
+        run: python3 tests/e2e/owned-referral-business-journey/runtime-check.py --phase before
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium only in the hosted runner
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Mint existing API audience proof for normal Referral handoff
+        id: api_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.api_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Mint existing private Admin audience proof
+        id: admin_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.admin_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Mint existing private Ops audience proof
+        id: ops_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.ops_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Mint existing private Fleet audience proof
+        id: fleet_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.fleet_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Execute one owned synthetic same-order business lifecycle
+        env:
+          OWNED_REFERRAL_HOSTED_OPT_IN: "true"
+          OWNED_TEST_CODE_SHA: ${{ github.sha }}
+          DRTS_CANDIDATE_SHA: ${{ inputs.expected_runtime_sha }}
+          OWNED_REFERRAL_ORIGIN: ${{ steps.runtime_before.outputs.referral_origin }}
+          OWNED_OPS_ORIGIN: ${{ steps.runtime_before.outputs.ops_origin }}
+          OWNED_API_ID_TOKEN: ${{ steps.api_token.outputs.id_token }}
+          OWNED_OPS_ID_TOKEN: ${{ steps.ops_token.outputs.id_token }}
+          DRTS_OPERATIONAL_API_URL: ${{ steps.runtime_before.outputs.api_origin }}
+          DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ${{ steps.runtime_before.outputs.admin_origin }}
+          DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.admin_token.outputs.id_token }}
+          DRTS_DEV_PLATFORM_ADMIN_BASE_URL: ${{ steps.runtime_before.outputs.admin_origin }}
+          DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.admin_token.outputs.id_token }}
+          DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL: ${{ steps.runtime_before.outputs.fleet_origin }}
+          DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN: ${{ steps.fleet_token.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.owned-referral-business-journey.config.ts
+      - name: Verify all five runtime revisions stayed unchanged
+        if: always() && steps.runtime_before.outcome == 'success'
+        run: python3 tests/e2e/owned-referral-business-journey/runtime-check.py --phase after
+      - name: Preserve only this consumer's allowlisted evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owned-referral-business-${{ inputs.expected_runtime_sha }}-${{ github.run_id }}
+          path: |
+            .artifacts/owned-referral-business-journey/runtime-before.json
+            .artifacts/owned-referral-business-journey/runtime-after.json
+            .artifacts/owned-referral-business-journey/journey-evidence.json
+            .artifacts/owned-referral-business-journey/booking-write-journal.json
+            .artifacts/owned-referral-business-journey/own-receipt.txt
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
   shared-bureau-acceptance:
     if: github.event_name == 'workflow_dispatch' && inputs.shared_bureau == true
     runs-on: ubuntu-latest
