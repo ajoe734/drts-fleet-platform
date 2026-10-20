@@ -9,6 +9,7 @@ import {
   type APIRequestContext,
   type Request as PlaywrightRequest,
   type Response as PlaywrightResponse,
+  type Route,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -817,7 +818,9 @@ test(journeyName, async ({ browser, request }) => {
         "canonical first fee acknowledgement readback",
       );
       evidence.record({
-        stage: "browser-first-fee-acknowledgement",
+        stage: currentFees.acknowledgedAt
+          ? "canonical-existing-fee-acknowledgement-readback"
+          : "browser-first-fee-acknowledgement",
         result: "observed",
       });
 
@@ -1665,6 +1668,209 @@ test(journeyName, async ({ browser, request }) => {
         bytes: browserBytes.length,
         sha256: hash(browserBytes),
         result: "observed",
+      });
+
+      const pdfRegion = page.getByRole("region", {
+        name: "PDF乘車明細與分享",
+        exact: true,
+      });
+      await expect(pdfRegion).toBeVisible();
+      const pdfUrl = `${origins.referral}/api/referral/receipt/${encodeURIComponent(completedOrderId)}/pdf`;
+      const pdfFilename = `receipt-${completedOrderId}.pdf`;
+      const { parsePdf } =
+        await import("../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser");
+      const observePdfAction = async (action: () => Promise<void>) => {
+        let resolveResponse!: (bytes: Buffer) => void;
+        let rejectResponse!: (error: unknown) => void;
+        const responseObserved = new Promise<Buffer>((resolve, reject) => {
+          resolveResponse = resolve;
+          rejectResponse = reject;
+        });
+        void responseObserved.catch(() => undefined);
+        const observe = async (route: Route) => {
+          try {
+            // Fetch this browser request once and release the original server
+            // bytes unchanged. Attachment downloads do not reliably expose a
+            // readable Playwright Response after the browser consumes them.
+            const response = await route.fetch({ maxRedirects: 0 });
+            const bytes = await response.body();
+            const headers = response.headers();
+            await route.fulfill({ response, body: bytes });
+            requireFact(
+              route.request().method() === "GET" &&
+                route.request().url() === pdfUrl &&
+                response.url() === pdfUrl &&
+                response.status() === 200 &&
+                headers["x-drts-candidate-sha"] === runtime,
+              "browser same-order PDF response and runtime",
+            );
+            requireFact(
+              headers["content-type"]?.split(";")[0]?.trim() ===
+                "application/pdf" &&
+                headers["content-disposition"] ===
+                  `attachment; filename="${pdfFilename}"` &&
+                /(?:^|,)\s*no-store\s*(?:,|$)/i.test(
+                  headers["cache-control"] ?? "",
+                ) &&
+                bytes.length > 0 &&
+                bytes.subarray(0, 5).toString("ascii") === "%PDF-",
+              "actual nonformal PDF headers and bytes",
+            );
+            const declaredLength = headers["content-length"];
+            if (declaredLength !== undefined)
+              requireFact(
+                /^[0-9]+$/.test(declaredLength) &&
+                  Number(declaredLength) === bytes.length,
+                "actual PDF declared byte length",
+              );
+            const parsed = await parsePdf(bytes);
+            const compact = (value: string) => value.replace(/\s+/g, "");
+            const pdfText = compact(parsed.text);
+            for (const expectedText of [
+              "乘車明細（非正式稅務憑證）",
+              `行程 ID：${completedOrderId}`,
+              `訂單編號：${text(receipt.orderNo)}`,
+              pickupAddress,
+              dropoffAddress,
+              `實際車資合計：${text(receipt.formattedTotal)}`,
+              `起步價：NT$ ${completion.actualFareBreakdown.startMinor / 100}`,
+              `里程費：NT$ ${completion.actualFareBreakdown.distanceMinor / 100}`,
+              `時間費：NT$ ${completion.actualFareBreakdown.delayMinor / 100}`,
+              `夜間費：NT$ ${completion.actualFareBreakdown.nightMinor / 100}`,
+              "付款及結算狀態未提供",
+              "02-2944-0985",
+              "1999",
+            ])
+              requireFact(
+                pdfText.includes(compact(expectedText)),
+                "PDF contains the same completed order and actual recorded fare",
+              );
+            resolveResponse(bytes);
+          } catch (error) {
+            rejectResponse(error);
+            await route.abort("failed").catch(() => undefined);
+          }
+        };
+        await page.route(pdfUrl, observe, { times: 1 });
+        let responseDeadline: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await action();
+          // Match the hosted action timeout; a successful click without its GET
+          // must reach owned cleanup instead of waiting for the whole journey.
+          responseDeadline = setTimeout(
+            () =>
+              rejectResponse(
+                new JourneyFailure("browser-pdf-response-timeout"),
+              ),
+            15_000,
+          );
+          return await responseObserved;
+        } finally {
+          clearTimeout(responseDeadline);
+          await page.unroute(pdfUrl, observe);
+        }
+      };
+      const pdfLink = pdfRegion.getByRole("link", {
+        name: "下載 PDF 明細",
+        exact: true,
+      });
+      requireFact(
+        new URL(text(await pdfLink.getAttribute("href")), origins.referral)
+          .href === pdfUrl &&
+          (await pdfLink.getAttribute("download")) === pdfFilename,
+        "mounted PDF link retains the exact completed order",
+      );
+      const pdfDownloadPromise = page.waitForEvent("download");
+      void pdfDownloadPromise.catch(() => undefined);
+      const downloadedResponse = await observePdfAction(() => pdfLink.click());
+      const pdfDownload = await pdfDownloadPromise;
+      requireFact(
+        pdfDownload.url() === pdfUrl &&
+          pdfDownload.suggestedFilename() === pdfFilename &&
+          (await pdfDownload.failure()) === null,
+        "actual browser same-order PDF download",
+      );
+      const pdfDownloadBytes = await readFile(
+        text(await pdfDownload.path(), "browser PDF download file required"),
+      );
+      requireFact(
+        pdfDownloadBytes.length === downloadedResponse.length &&
+          hash(pdfDownloadBytes) === hash(downloadedResponse),
+        "downloaded file equals its original BFF PDF response",
+      );
+      evidence.record({
+        stage: "browser-same-order-nonformal-PDF-download",
+        orderId: completedOrderId,
+        bytes: pdfDownloadBytes.length,
+        sha256: hash(pdfDownloadBytes),
+        result: "observed",
+      });
+
+      const preparedResponse = await observePdfAction(() =>
+        pdfRegion
+          .getByRole("button", { name: "準備分享 PDF", exact: true })
+          .click(),
+      );
+      // Capability uses the actual prepared response bytes and browser APIs,
+      // without replacing navigator.share/canShare or creating a fake success.
+      const canSharePdf = await page.evaluate(
+        ({ bytes, filename }) => {
+          const file = new File([Uint8Array.from(bytes)], filename, {
+            type: "application/pdf",
+          });
+          return (
+            typeof navigator.share === "function" &&
+            typeof navigator.canShare === "function" &&
+            navigator.canShare({ files: [file] })
+          );
+        },
+        { bytes: Array.from(preparedResponse), filename: pdfFilename },
+      );
+      const pdfStatus = pdfRegion.getByRole("status");
+      if (canSharePdf) {
+        await expect(pdfStatus).toHaveText("PDF 已準備完成，請按分享。");
+        await pdfRegion
+          .getByRole("button", { name: "分享 PDF 明細", exact: true })
+          .click();
+        await expect(pdfStatus).toHaveText(
+          /^(已完成分享操作。|已取消分享，可重新準備。|尚未完成分享，請重試或下載 PDF。)$/,
+        );
+        const status = await pdfStatus.textContent();
+        evidence.record({
+          stage:
+            status === "已完成分享操作。"
+              ? "browser-pdf-native-share-resolved"
+              : status === "已取消分享，可重新準備。"
+                ? "browser-pdf-native-share-cancelled"
+                : "browser-pdf-native-share-refused",
+          orderId: completedOrderId,
+          result: "observed",
+        });
+      } else {
+        await expect(pdfStatus).toHaveText(
+          "此瀏覽器不支援檔案分享；您可以下載 PDF 後再分享。",
+        );
+        await expect(pdfLink).toBeVisible();
+        await expect(
+          pdfRegion.getByRole("button", { name: "分享 PDF 明細", exact: true }),
+        ).toHaveCount(0);
+        evidence.record({
+          stage: "browser-pdf-native-share-unsupported",
+          orderId: completedOrderId,
+          result: "observed",
+        });
+      }
+      evidence.record({
+        stage: "browser-same-order-nonformal-PDF-prepared-response",
+        orderId: completedOrderId,
+        bytes: preparedResponse.length,
+        sha256: hash(preparedResponse),
+        result: "observed",
+      });
+      evidence.record({
+        stage: "physical-OS-PDF-delivery-unverified",
+        orderId: completedOrderId,
+        result: "unexecuted",
       });
       // Preserve the minimum main journey above, then observe four independent
       // owned orders. Immediate quote timing still creates reservation semantics.
