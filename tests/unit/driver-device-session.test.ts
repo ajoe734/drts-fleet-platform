@@ -4,6 +4,7 @@ import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../apps/api/src/modules/driver-profile/driver-profile.service";
+import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { RegulatoryRegistryRepository } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { SecurityEventsRepository } from "../../apps/api/src/modules/security-events/security-events.repository";
@@ -18,7 +19,7 @@ process.env.JWT_SECRET =
 function setupServices() {
   const auditService = new AuditNotificationService();
   const driverProfileService = new DriverProfileService(auditService);
-  const jwtAuthService = new JwtAuthService();
+  const identityRepository = new IdentityRepository();
   const opsDispatchEventsService = new OpsDispatchEventsService({
     emit: () => {},
   } as any);
@@ -52,6 +53,11 @@ function setupServices() {
   );
   for (const driver of regulatoryService.listDrivers())
     driverRows.set(driver.driverId, structuredClone(driver));
+  const jwtAuthService = new JwtAuthService(
+    identityRepository,
+    undefined,
+    regulatoryService,
+  );
   const sessionRepository = new DriverDeviceSessionRepository();
   const sessionService = new DriverDeviceSessionService(
     jwtAuthService,
@@ -63,6 +69,7 @@ function setupServices() {
 
   return {
     jwtAuthService,
+    identityRepository,
     driverProfileService,
     regulatoryService,
     securityEventsService,
@@ -315,5 +322,174 @@ describe("DriverDeviceSessionService (IAM-DRV-001)", () => {
         "/driver/profile",
       ),
     ).rejects.toThrowError(ApiRequestError);
+  });
+
+  it("revokes prior active device binding, refresh family, and canonical JWT session when replacing with a different device for the same driver", async () => {
+    const {
+      sessionService,
+      sessionRepository,
+      jwtAuthService,
+      identityRepository,
+      driverProfileService,
+      regulatoryService,
+      securityEventsService,
+    } = setupServices();
+    await sessionService.onModuleInit();
+
+    const inviteA = await sessionService.issueRegistrationInvitation({
+      driverId: "drv-demo-001",
+    });
+    const sessionA = await sessionService.register({
+      registrationCode: inviteA.registrationCode,
+      deviceId: "device-replace-old-a",
+      deviceLabel: "Old Phone A",
+    });
+
+    const inviteB = await sessionService.issueRegistrationInvitation({
+      driverId: "drv-demo-001",
+    });
+    const sessionB = await sessionService.register({
+      registrationCode: inviteB.registrationCode,
+      deviceId: "device-replace-new-b",
+      deviceLabel: "New Phone B",
+    });
+
+    expect(
+      await sessionService.isBindingActive(
+        sessionA.bindingId,
+        sessionA.deviceId,
+        sessionA.driverId,
+      ),
+    ).toBe(false);
+    expect(
+      await sessionService.isBindingActive(
+        sessionB.bindingId,
+        sessionB.deviceId,
+        sessionB.driverId,
+      ),
+    ).toBe(true);
+
+    // Prior refresh token and access token for device A must be rejected
+    await expect(
+      sessionService.refresh({
+        deviceId: sessionA.deviceId,
+        refreshToken: sessionA.refreshToken,
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_DEVICE_REFRESH_INVALID" });
+
+    expect(
+      await jwtAuthService.verifyAccessToken(sessionA.accessToken),
+    ).toBeNull();
+    expect(
+      (await identityRepository.getSession(sessionA.bindingId))?.status,
+    ).toBe("revoked");
+
+    // Replacement device B remains active across simulated restart
+    const restartedService = new DriverDeviceSessionService(
+      jwtAuthService,
+      driverProfileService,
+      sessionRepository,
+      regulatoryService,
+      securityEventsService,
+    );
+    await restartedService.onModuleInit();
+
+    expect(
+      await restartedService.isBindingActive(
+        sessionA.bindingId,
+        sessionA.deviceId,
+        sessionA.driverId,
+      ),
+    ).toBe(false);
+    expect(
+      await restartedService.isBindingActive(
+        sessionB.bindingId,
+        sessionB.deviceId,
+        sessionB.driverId,
+      ),
+    ).toBe(true);
+
+    const refreshedB = await restartedService.refresh({
+      deviceId: sessionB.deviceId,
+      refreshToken: sessionB.refreshToken,
+    });
+    expect(refreshedB.bindingId).toBe(sessionB.bindingId);
+    expect(
+      await jwtAuthService.verifyAccessToken(refreshedB.accessToken),
+    ).toMatchObject({
+      sub: "drv-demo-001",
+      sid: sessionB.bindingId,
+      driverDeviceId: "device-replace-new-b",
+    });
+  });
+
+  it("serializes concurrent replacement device registrations for the same driver so only one binding, refresh family, and canonical session remain active", async () => {
+    const {
+      sessionService,
+      sessionRepository,
+      jwtAuthService,
+      identityRepository,
+    } = setupServices();
+    await sessionService.onModuleInit();
+
+    const [invite1, invite2] = await Promise.all([
+      sessionService.issueRegistrationInvitation({ driverId: "drv-demo-001" }),
+      sessionService.issueRegistrationInvitation({ driverId: "drv-demo-001" }),
+    ]);
+
+    const [reg1, reg2] = await Promise.all([
+      sessionService.register({
+        registrationCode: invite1.registrationCode,
+        deviceId: "device-concurrent-a",
+      }),
+      sessionService.register({
+        registrationCode: invite2.registrationCode,
+        deviceId: "device-concurrent-b",
+      }),
+    ]);
+
+    const activeBindings =
+      await sessionRepository.findActiveBindingsByDriverId("drv-demo-001");
+    expect(activeBindings).toHaveLength(1);
+
+    const winner =
+      activeBindings[0]?.bindingId === reg1.bindingId ? reg1 : reg2;
+    const superseded = winner.bindingId === reg1.bindingId ? reg2 : reg1;
+
+    expect(
+      await sessionService.isBindingActive(
+        winner.bindingId,
+        winner.deviceId,
+        winner.driverId,
+      ),
+    ).toBe(true);
+    expect(
+      await sessionService.isBindingActive(
+        superseded.bindingId,
+        superseded.deviceId,
+        superseded.driverId,
+      ),
+    ).toBe(false);
+
+    await expect(
+      sessionService.refresh({
+        deviceId: superseded.deviceId,
+        refreshToken: superseded.refreshToken,
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_DEVICE_REFRESH_INVALID" });
+
+    expect(
+      await jwtAuthService.verifyAccessToken(superseded.accessToken),
+    ).toBeNull();
+    expect(
+      (await identityRepository.getSession(superseded.bindingId))?.status,
+    ).toBe("revoked");
+
+    expect(
+      await jwtAuthService.verifyAccessToken(winner.accessToken),
+    ).toMatchObject({
+      sub: "drv-demo-001",
+      sid: winner.bindingId,
+    });
   });
 });

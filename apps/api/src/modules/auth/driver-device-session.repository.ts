@@ -1,4 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+
 import { Injectable, Logger, Optional } from "@nestjs/common";
+import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
 import type {
   DriverDeviceBindingRecord,
@@ -6,7 +9,7 @@ import type {
   DriverRefreshFamilyRecord,
 } from "@drts/contracts";
 
-import { DatabaseService } from "../../common/db";
+import { DatabaseService, resolveDatabasePoolMax } from "../../common/db";
 
 type JsonRecordRow = {
   record: unknown;
@@ -15,6 +18,11 @@ type JsonRecordRow = {
 @Injectable()
 export class DriverDeviceSessionRepository {
   private readonly logger = new Logger(DriverDeviceSessionRepository.name);
+
+  private readonly transactionClientStorage =
+    new AsyncLocalStorage<PoolClient>();
+
+  private inMemoryLockChain: Promise<void> = Promise.resolve();
 
   private readonly fallbackInvitations = new Map<
     string,
@@ -37,6 +45,169 @@ export class DriverDeviceSessionRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  private get activeTransactionClient(): PoolClient | undefined {
+    return this.transactionClientStorage.getStore();
+  }
+
+  private canUseTransactionalAdvisoryLock(): boolean {
+    return (
+      this.isEnabled() &&
+      resolveDatabasePoolMax(process.env.DATABASE_POOL_MAX) !== 1
+    );
+  }
+
+  private async runWithInMemoryLock<T>(callback: () => Promise<T>): Promise<T> {
+    if (this.activeTransactionClient) {
+      return callback();
+    }
+
+    const previous = this.inMemoryLockChain;
+    let release!: () => void;
+    this.inMemoryLockChain = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await callback();
+    } finally {
+      release();
+    }
+  }
+
+  private async acquireAdvisoryXactLocks(
+    client: PoolClient,
+    lockKeys: readonly string[],
+  ): Promise<void> {
+    const sortedUniqueKeys = [
+      ...new Set(lockKeys.map((key) => key.trim()).filter(Boolean)),
+    ].sort();
+    for (const key of sortedUniqueKeys) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [key],
+      );
+    }
+  }
+
+  async withRegistrationLock<T>(
+    scope: { regCodeHash: string; deviceId: string },
+    callback: () => Promise<T>,
+  ): Promise<T> {
+    return this.runWithInMemoryLock(async () => {
+      if (!this.canUseTransactionalAdvisoryLock()) {
+        return callback();
+      }
+
+      const existingClient = this.activeTransactionClient;
+      if (existingClient) {
+        await this.acquireAdvisoryXactLocks(existingClient, [
+          `iam.driver_device_session:1:device:${scope.deviceId}`,
+          `iam.driver_device_session:1:invite:${scope.regCodeHash}`,
+        ]);
+        return callback();
+      }
+
+      const client = await this.databaseService!.connect();
+      try {
+        await client.query("BEGIN");
+        await this.acquireAdvisoryXactLocks(client, [
+          `iam.driver_device_session:1:device:${scope.deviceId}`,
+          `iam.driver_device_session:1:invite:${scope.regCodeHash}`,
+        ]);
+        const result = await this.transactionClientStorage.run(
+          client,
+          callback,
+        );
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          // Ignore rollback error and surface original failure
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    });
+  }
+
+  async lockDriverRegistrationScope(driverId: string): Promise<void> {
+    const normalizedDriverId = driverId.trim();
+    if (!normalizedDriverId) {
+      return;
+    }
+
+    const client = this.activeTransactionClient;
+    if (!client) {
+      return;
+    }
+
+    await this.acquireAdvisoryXactLocks(client, [
+      `iam.driver_device_session:2:driver:${normalizedDriverId}`,
+    ]);
+  }
+
+  async withDeviceDriverLock<T>(
+    scope: { deviceId: string; driverId: string },
+    callback: () => Promise<T>,
+  ): Promise<T> {
+    return this.runWithInMemoryLock(async () => {
+      if (!this.canUseTransactionalAdvisoryLock()) {
+        return callback();
+      }
+
+      const existingClient = this.activeTransactionClient;
+      if (existingClient) {
+        await this.acquireAdvisoryXactLocks(existingClient, [
+          `iam.driver_device_session:1:device:${scope.deviceId}`,
+        ]);
+        await this.acquireAdvisoryXactLocks(existingClient, [
+          `iam.driver_device_session:2:driver:${scope.driverId}`,
+        ]);
+        return callback();
+      }
+
+      const client = await this.databaseService!.connect();
+      try {
+        await client.query("BEGIN");
+        await this.acquireAdvisoryXactLocks(client, [
+          `iam.driver_device_session:1:device:${scope.deviceId}`,
+        ]);
+        await this.acquireAdvisoryXactLocks(client, [
+          `iam.driver_device_session:2:driver:${scope.driverId}`,
+        ]);
+        const result = await this.transactionClientStorage.run(
+          client,
+          callback,
+        );
+        await client.query("COMMIT");
+        return result;
+      } catch (error) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          // Ignore rollback error and surface original failure
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+    });
+  }
+
+  private async executeQuery<T extends QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<QueryResult<T>> {
+    const txClient = this.activeTransactionClient;
+    if (txClient) {
+      return txClient.query<T>(text, values as unknown[]);
+    }
+    return this.databaseService!.query<T>(text, values);
+  }
+
   async saveInvitation(
     record: DriverDeviceInvitationRecord,
   ): Promise<DriverDeviceInvitationRecord> {
@@ -45,7 +216,8 @@ export class DriverDeviceSessionRepository {
       return { ...record };
     }
 
-    const client = await this.databaseService!.connect();
+    const txClient = this.activeTransactionClient;
+    const client = txClient ?? (await this.databaseService!.connect());
     try {
       const result = await client.query<JsonRecordRow>(
         `
@@ -89,11 +261,16 @@ export class DriverDeviceSessionRepository {
         "iam.driver_device_invitations",
       );
     } catch (error) {
+      if (txClient) {
+        throw error;
+      }
       this.reportPersistenceFailure(error, "saveInvitation");
       this.fallbackInvitations.set(record.invitationId, { ...record });
       return { ...record };
     } finally {
-      client.release();
+      if (!txClient) {
+        client.release();
+      }
     }
   }
 
@@ -109,13 +286,16 @@ export class DriverDeviceSessionRepository {
       return null;
     }
 
+    const txClient = this.activeTransactionClient;
+    const lockClause = txClient ? "FOR UPDATE" : "";
     try {
-      const result = await this.databaseService!.query<JsonRecordRow>(
+      const result = await this.executeQuery<JsonRecordRow>(
         `
           SELECT record
           FROM iam.driver_device_invitations
           WHERE registration_code_hash = $1
           LIMIT 1
+          ${lockClause}
         `,
         [hash],
       );
@@ -127,6 +307,9 @@ export class DriverDeviceSessionRepository {
         "iam.driver_device_invitations",
       );
     } catch (error) {
+      if (txClient) {
+        throw error;
+      }
       this.reportPersistenceFailure(error, "findInvitationByCodeHash");
       for (const inv of this.fallbackInvitations.values()) {
         if (inv.registrationCodeHash === hash) {
@@ -145,7 +328,8 @@ export class DriverDeviceSessionRepository {
       return { ...record };
     }
 
-    const client = await this.databaseService!.connect();
+    const txClient = this.activeTransactionClient;
+    const client = txClient ?? (await this.databaseService!.connect());
     try {
       const result = await client.query<JsonRecordRow>(
         `
@@ -194,11 +378,16 @@ export class DriverDeviceSessionRepository {
         "iam.driver_device_bindings",
       );
     } catch (error) {
+      if (txClient) {
+        throw error;
+      }
       this.reportPersistenceFailure(error, "saveBinding");
       this.fallbackBindings.set(record.bindingId, { ...record });
       return { ...record };
     } finally {
-      client.release();
+      if (!txClient) {
+        client.release();
+      }
     }
   }
 
@@ -210,13 +399,16 @@ export class DriverDeviceSessionRepository {
       return existing ? { ...existing } : null;
     }
 
+    const txClient = this.activeTransactionClient;
+    const lockClause = txClient ? "FOR UPDATE" : "";
     try {
-      const result = await this.databaseService!.query<JsonRecordRow>(
+      const result = await this.executeQuery<JsonRecordRow>(
         `
           SELECT record
           FROM iam.driver_device_bindings
           WHERE binding_id = $1
           LIMIT 1
+          ${lockClause}
         `,
         [bindingId],
       );
@@ -228,6 +420,9 @@ export class DriverDeviceSessionRepository {
         "iam.driver_device_bindings",
       );
     } catch (error) {
+      if (txClient) {
+        throw error;
+      }
       this.reportPersistenceFailure(error, "findBindingById");
       const existing = this.fallbackBindings.get(bindingId);
       return existing ? { ...existing } : null;
@@ -237,41 +432,97 @@ export class DriverDeviceSessionRepository {
   async findActiveBindingByDeviceId(
     deviceId: string,
   ): Promise<DriverDeviceBindingRecord | null> {
+    const activeBindings = await this.findActiveBindingsByDeviceId(deviceId);
+    return activeBindings[0] ?? null;
+  }
+
+  async findActiveBindingsByDeviceId(
+    deviceId: string,
+  ): Promise<DriverDeviceBindingRecord[]> {
     if (!this.isEnabled()) {
-      for (const binding of this.fallbackBindings.values()) {
-        if (binding.deviceId === deviceId && binding.status === "active") {
-          return { ...binding };
-        }
-      }
-      return null;
+      return Array.from(this.fallbackBindings.values())
+        .filter(
+          (binding) =>
+            binding.deviceId === deviceId && binding.status === "active",
+        )
+        .map((binding) => ({ ...binding }));
     }
 
+    const txClient = this.activeTransactionClient;
+    const lockClause = txClient ? "FOR UPDATE" : "";
     try {
-      const result = await this.databaseService!.query<JsonRecordRow>(
+      const result = await this.executeQuery<JsonRecordRow>(
         `
           SELECT record
           FROM iam.driver_device_bindings
           WHERE device_id = $1 AND status = 'active'
-          ORDER BY updated_at DESC
-          LIMIT 1
+          ORDER BY updated_at DESC, created_at DESC, binding_id DESC
+          ${lockClause}
         `,
         [deviceId],
       );
-      if (result.rows.length === 0) {
-        return null;
-      }
-      return this.parseRecord<DriverDeviceBindingRecord>(
-        result.rows[0]?.record,
-        "iam.driver_device_bindings",
+      return result.rows.map((row) =>
+        this.parseRecord<DriverDeviceBindingRecord>(
+          row.record,
+          "iam.driver_device_bindings",
+        ),
       );
     } catch (error) {
-      this.reportPersistenceFailure(error, "findActiveBindingByDeviceId");
-      for (const binding of this.fallbackBindings.values()) {
-        if (binding.deviceId === deviceId && binding.status === "active") {
-          return { ...binding };
-        }
+      if (txClient) {
+        throw error;
       }
-      return null;
+      this.reportPersistenceFailure(error, "findActiveBindingsByDeviceId");
+      return Array.from(this.fallbackBindings.values())
+        .filter(
+          (binding) =>
+            binding.deviceId === deviceId && binding.status === "active",
+        )
+        .map((binding) => ({ ...binding }));
+    }
+  }
+
+  async findActiveBindingsByDriverId(
+    driverId: string,
+  ): Promise<DriverDeviceBindingRecord[]> {
+    if (!this.isEnabled()) {
+      return Array.from(this.fallbackBindings.values())
+        .filter(
+          (binding) =>
+            binding.driverId === driverId && binding.status === "active",
+        )
+        .map((binding) => ({ ...binding }));
+    }
+
+    const txClient = this.activeTransactionClient;
+    const lockClause = txClient ? "FOR UPDATE" : "";
+    try {
+      const result = await this.executeQuery<JsonRecordRow>(
+        `
+          SELECT record
+          FROM iam.driver_device_bindings
+          WHERE driver_id = $1 AND status = 'active'
+          ORDER BY updated_at DESC, created_at DESC, binding_id DESC
+          ${lockClause}
+        `,
+        [driverId],
+      );
+      return result.rows.map((row) =>
+        this.parseRecord<DriverDeviceBindingRecord>(
+          row.record,
+          "iam.driver_device_bindings",
+        ),
+      );
+    } catch (error) {
+      if (txClient) {
+        throw error;
+      }
+      this.reportPersistenceFailure(error, "findActiveBindingsByDriverId");
+      return Array.from(this.fallbackBindings.values())
+        .filter(
+          (binding) =>
+            binding.driverId === driverId && binding.status === "active",
+        )
+        .map((binding) => ({ ...binding }));
     }
   }
 
@@ -284,13 +535,16 @@ export class DriverDeviceSessionRepository {
         .map((b) => ({ ...b }));
     }
 
+    const txClient = this.activeTransactionClient;
+    const lockClause = txClient ? "FOR UPDATE" : "";
     try {
-      const result = await this.databaseService!.query<JsonRecordRow>(
+      const result = await this.executeQuery<JsonRecordRow>(
         `
           SELECT record
           FROM iam.driver_device_bindings
           WHERE driver_id = $1
           ORDER BY updated_at DESC
+          ${lockClause}
         `,
         [driverId],
       );
@@ -301,6 +555,9 @@ export class DriverDeviceSessionRepository {
         ),
       );
     } catch (error) {
+      if (txClient) {
+        throw error;
+      }
       this.reportPersistenceFailure(error, "findBindingsForDriver");
       return Array.from(this.fallbackBindings.values())
         .filter((b) => b.driverId === driverId)
@@ -316,7 +573,8 @@ export class DriverDeviceSessionRepository {
       return { ...record };
     }
 
-    const client = await this.databaseService!.connect();
+    const txClient = this.activeTransactionClient;
+    const client = txClient ?? (await this.databaseService!.connect());
     try {
       const result = await client.query<JsonRecordRow>(
         `
@@ -370,11 +628,16 @@ export class DriverDeviceSessionRepository {
         "iam.driver_refresh_families",
       );
     } catch (error) {
+      if (txClient) {
+        throw error;
+      }
       this.reportPersistenceFailure(error, "saveRefreshFamily");
       this.fallbackRefreshFamilies.set(record.familyId, { ...record });
       return { ...record };
     } finally {
-      client.release();
+      if (!txClient) {
+        client.release();
+      }
     }
   }
 
@@ -393,8 +656,10 @@ export class DriverDeviceSessionRepository {
       return null;
     }
 
+    const txClient = this.activeTransactionClient;
+    const lockClause = txClient ? "FOR UPDATE" : "";
     try {
-      const result = await this.databaseService!.query<
+      const result = await this.executeQuery<
         JsonRecordRow & { is_reused: boolean }
       >(
         `
@@ -402,6 +667,7 @@ export class DriverDeviceSessionRepository {
           FROM iam.driver_refresh_families
           WHERE current_token_hash = $1 OR $1 = ANY(previous_token_hashes)
           LIMIT 1
+          ${lockClause}
         `,
         [tokenHash],
       );
@@ -414,6 +680,9 @@ export class DriverDeviceSessionRepository {
       );
       return { family, isReused: Boolean(result.rows[0]?.is_reused) };
     } catch (error) {
+      if (txClient) {
+        throw error;
+      }
       this.reportPersistenceFailure(error, "findRefreshFamilyByTokenHash");
       for (const fam of this.fallbackRefreshFamilies.values()) {
         if (fam.currentTokenHash === tokenHash) {
@@ -430,44 +699,49 @@ export class DriverDeviceSessionRepository {
   async findActiveRefreshFamilyByBindingId(
     bindingId: string,
   ): Promise<DriverRefreshFamilyRecord | null> {
+    const families = await this.findActiveRefreshFamiliesByBindingId(bindingId);
+    return families[0] ?? null;
+  }
+
+  async findActiveRefreshFamiliesByBindingId(
+    bindingId: string,
+  ): Promise<DriverRefreshFamilyRecord[]> {
     if (!this.isEnabled()) {
-      for (const fam of this.fallbackRefreshFamilies.values()) {
-        if (fam.bindingId === bindingId && fam.status === "active") {
-          return { ...fam };
-        }
-      }
-      return null;
+      return Array.from(this.fallbackRefreshFamilies.values())
+        .filter((fam) => fam.bindingId === bindingId && fam.status === "active")
+        .map((fam) => ({ ...fam }));
     }
 
+    const txClient = this.activeTransactionClient;
+    const lockClause = txClient ? "FOR UPDATE" : "";
     try {
-      const result = await this.databaseService!.query<JsonRecordRow>(
+      const result = await this.executeQuery<JsonRecordRow>(
         `
           SELECT record
           FROM iam.driver_refresh_families
           WHERE binding_id = $1 AND status = 'active'
-          ORDER BY updated_at DESC
-          LIMIT 1
+          ORDER BY updated_at DESC, created_at DESC, family_id DESC
+          ${lockClause}
         `,
         [bindingId],
       );
-      if (result.rows.length === 0) {
-        return null;
-      }
-      return this.parseRecord<DriverRefreshFamilyRecord>(
-        result.rows[0]?.record,
-        "iam.driver_refresh_families",
+      return result.rows.map((row) =>
+        this.parseRecord<DriverRefreshFamilyRecord>(
+          row.record,
+          "iam.driver_refresh_families",
+        ),
       );
     } catch (error) {
+      if (txClient) {
+        throw error;
+      }
       this.reportPersistenceFailure(
         error,
-        "findActiveRefreshFamilyByBindingId",
+        "findActiveRefreshFamiliesByBindingId",
       );
-      for (const fam of this.fallbackRefreshFamilies.values()) {
-        if (fam.bindingId === bindingId && fam.status === "active") {
-          return { ...fam };
-        }
-      }
-      return null;
+      return Array.from(this.fallbackRefreshFamilies.values())
+        .filter((fam) => fam.bindingId === bindingId && fam.status === "active")
+        .map((fam) => ({ ...fam }));
     }
   }
 
@@ -477,7 +751,7 @@ export class DriverDeviceSessionRepository {
     }
 
     try {
-      const result = await this.databaseService!.query<JsonRecordRow>(
+      const result = await this.executeQuery<JsonRecordRow>(
         `SELECT record FROM iam.driver_device_bindings ORDER BY updated_at DESC`,
       );
       return result.rows.map((row) =>

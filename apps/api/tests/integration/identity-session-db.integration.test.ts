@@ -7,19 +7,45 @@ import type {
   CanonicalRefreshFamilyRecord,
 } from "@drts/contracts";
 
+import { JwtAuthService } from "../../src/common/auth/jwt-auth.service";
 import { DatabaseService } from "../../src/common/db";
+import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { DriverDeviceSessionRepository } from "../../src/modules/auth/driver-device-session.repository";
+import { DriverDeviceSessionService } from "../../src/modules/auth/driver-device-session.service";
+import { DriverProfileRepository } from "../../src/modules/driver-profile/driver-profile.repository";
+import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import {
   hashIdentitySecret,
   IdentityRepository,
 } from "../../src/modules/identity/identity.repository";
 
 const DATABASE_URL = process.env.DATABASE_URL;
+process.env.JWT_SECRET ??= "pg_integration_jwt_secret_key_32chars_minimum_len!";
 
 async function deleteSessionTestData(
   database: DatabaseService,
   sessionIds: string[],
   principalIds: string[],
+  driverIds: string[],
 ) {
+  if (driverIds.length > 0) {
+    await database.query(
+      `DELETE FROM iam.driver_refresh_families WHERE driver_id = ANY($1::text[])`,
+      [driverIds],
+    );
+    await database.query(
+      `DELETE FROM iam.driver_device_bindings WHERE driver_id = ANY($1::text[])`,
+      [driverIds],
+    );
+    await database.query(
+      `DELETE FROM iam.driver_device_invitations WHERE driver_id = ANY($1::text[])`,
+      [driverIds],
+    );
+    await database.query(
+      `DELETE FROM ops.phase1_driver_profiles WHERE driver_id = ANY($1::text[])`,
+      [driverIds],
+    );
+  }
   if (sessionIds.length > 0) {
     await database.query(
       `DELETE FROM iam.identity_refresh_families WHERE session_id = ANY($1::text[])`,
@@ -30,10 +56,24 @@ async function deleteSessionTestData(
       [sessionIds],
     );
   }
-  if (principalIds.length > 0) {
+  const allPrincipalIds = Array.from(new Set([...principalIds, ...driverIds]));
+  if (allPrincipalIds.length > 0) {
+    await database.query(
+      `
+        DELETE FROM iam.identity_refresh_families
+        WHERE session_id IN (
+          SELECT session_id FROM iam.identity_sessions WHERE principal_id = ANY($1::text[])
+        )
+      `,
+      [allPrincipalIds],
+    );
+    await database.query(
+      `DELETE FROM iam.identity_sessions WHERE principal_id = ANY($1::text[])`,
+      [allPrincipalIds],
+    );
     await database.query(
       `DELETE FROM iam.identity_principals WHERE principal_id = ANY($1::text[])`,
-      [principalIds],
+      [allPrincipalIds],
     );
   }
 }
@@ -42,11 +82,14 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
   const databases: DatabaseService[] = [];
   const createdSessionIds = new Set<string>();
   const createdPrincipalIds = new Set<string>();
+  const createdDriverIds = new Set<string>();
 
   afterEach(async () => {
     if (
       DATABASE_URL &&
-      (createdSessionIds.size > 0 || createdPrincipalIds.size > 0)
+      (createdSessionIds.size > 0 ||
+        createdPrincipalIds.size > 0 ||
+        createdDriverIds.size > 0)
     ) {
       const cleanupDb = new DatabaseService();
       try {
@@ -54,10 +97,12 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
           cleanupDb,
           Array.from(createdSessionIds),
           Array.from(createdPrincipalIds),
+          Array.from(createdDriverIds),
         );
       } finally {
         createdSessionIds.clear();
         createdPrincipalIds.clear();
+        createdDriverIds.clear();
         await cleanupDb.onModuleDestroy();
       }
     }
@@ -412,5 +457,306 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
     expect(updatedSession?.status).toBe("compromised");
     expect(updatedSession?.revokeReason).toBe("REFRESH_TOKEN_REUSE_DETECTED");
     expect(updatedFamily?.status).toBe("compromised");
+  });
+
+  it("revokes prior driver device binding, refresh family, and canonical JWT session in PostgreSQL when replacing with a new handset, surviving restart", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const db = new DatabaseService();
+    databases.push(db);
+
+    const driverId = `drv_pg_replace_${randomUUID()}`;
+    createdDriverIds.add(driverId);
+
+    const auditService = new AuditNotificationService();
+    const profileService = new DriverProfileService(
+      auditService,
+      new DriverProfileRepository(db),
+    );
+    await profileService.onModuleInit();
+    profileService.createProfile({
+      driverId,
+      name: "Postgres Replacement Driver",
+      phone: "+886-912-555-001",
+    });
+
+    const identityRepo = new IdentityRepository(db);
+    const jwtAuth = new JwtAuthService(identityRepo);
+    const deviceRepo = new DriverDeviceSessionRepository(db);
+    const deviceService = new DriverDeviceSessionService(
+      jwtAuth,
+      profileService,
+      deviceRepo,
+    );
+    await deviceService.onModuleInit();
+
+    const inviteA = await deviceService.issueRegistrationInvitation({
+      driverId,
+    });
+    const sessionA = await deviceService.register({
+      registrationCode: inviteA.registrationCode,
+      deviceId: `pg-device-a-${randomUUID()}`,
+      deviceLabel: "Primary Handset A",
+    });
+    createdSessionIds.add(sessionA.bindingId);
+
+    expect(
+      await deviceService.isBindingActive(
+        sessionA.bindingId,
+        sessionA.deviceId,
+        driverId,
+      ),
+    ).toBe(true);
+    expect(await jwtAuth.verifyAccessToken(sessionA.accessToken)).toMatchObject(
+      {
+        sub: driverId,
+        sid: sessionA.bindingId,
+        driverBindingId: sessionA.bindingId,
+        driverDeviceId: sessionA.deviceId,
+      },
+    );
+
+    const inviteB = await deviceService.issueRegistrationInvitation({
+      driverId,
+    });
+    const sessionB = await deviceService.register({
+      registrationCode: inviteB.registrationCode,
+      deviceId: `pg-device-b-${randomUUID()}`,
+      deviceLabel: "Replacement Handset B",
+    });
+    createdSessionIds.add(sessionB.bindingId);
+
+    // Verify PostgreSQL tables directly for binding, refresh family, and canonical session
+    const bindingRows = await db.query<{
+      binding_id: string;
+      status: string;
+      rebound_from_binding_id: string | null;
+    }>(
+      `
+        SELECT binding_id, status, rebound_from_binding_id
+        FROM iam.driver_device_bindings
+        WHERE driver_id = $1
+      `,
+      [driverId],
+    );
+    const rowA = bindingRows.rows.find(
+      (r) => r.binding_id === sessionA.bindingId,
+    );
+    const rowB = bindingRows.rows.find(
+      (r) => r.binding_id === sessionB.bindingId,
+    );
+    expect(rowA?.status).toBe("revoked");
+    expect(rowB?.status).toBe("active");
+    expect(rowB?.rebound_from_binding_id).toBe(sessionA.bindingId);
+
+    const familyRows = await db.query<{
+      binding_id: string;
+      status: string;
+    }>(
+      `
+        SELECT binding_id, status
+        FROM iam.driver_refresh_families
+        WHERE driver_id = $1
+      `,
+      [driverId],
+    );
+    expect(
+      familyRows.rows.find((r) => r.binding_id === sessionA.bindingId)?.status,
+    ).toBe("revoked");
+    expect(
+      familyRows.rows.find((r) => r.binding_id === sessionB.bindingId)?.status,
+    ).toBe("active");
+
+    const canonicalSessionA = await identityRepo.getSession(sessionA.bindingId);
+    const canonicalSessionB = await identityRepo.getSession(sessionB.bindingId);
+    expect(canonicalSessionA?.status).toBe("revoked");
+    expect(canonicalSessionA?.revokeReason).toBe("DEVICE_REBOUND");
+    expect(canonicalSessionB?.status).toBe("active");
+
+    // Simulate process restart on a fresh DatabaseService connection pool
+    const dbRestart = new DatabaseService();
+    databases.push(dbRestart);
+    const identityRepoRestart = new IdentityRepository(dbRestart);
+    const jwtRestart = new JwtAuthService(identityRepoRestart);
+    const profileRestart = new DriverProfileService(
+      new AuditNotificationService(),
+      new DriverProfileRepository(dbRestart),
+    );
+    await profileRestart.onModuleInit();
+    const deviceRepoRestart = new DriverDeviceSessionRepository(dbRestart);
+    const deviceServiceRestart = new DriverDeviceSessionService(
+      jwtRestart,
+      profileRestart,
+      deviceRepoRestart,
+    );
+    await deviceServiceRestart.onModuleInit();
+
+    expect(
+      await deviceServiceRestart.isBindingActive(
+        sessionA.bindingId,
+        sessionA.deviceId,
+        driverId,
+      ),
+    ).toBe(false);
+    expect(
+      await deviceServiceRestart.isBindingActive(
+        sessionB.bindingId,
+        sessionB.deviceId,
+        driverId,
+      ),
+    ).toBe(true);
+
+    await expect(
+      deviceServiceRestart.refresh({
+        deviceId: sessionA.deviceId,
+        refreshToken: sessionA.refreshToken,
+      }),
+    ).rejects.toMatchObject({ code: "DRIVER_DEVICE_REFRESH_INVALID" });
+    expect(await jwtRestart.verifyAccessToken(sessionA.accessToken)).toBeNull();
+
+    const refreshedB = await deviceServiceRestart.refresh({
+      deviceId: sessionB.deviceId,
+      refreshToken: sessionB.refreshToken,
+    });
+    expect(refreshedB.bindingId).toBe(sessionB.bindingId);
+    expect(
+      await jwtRestart.verifyAccessToken(refreshedB.accessToken),
+    ).toMatchObject({
+      sub: driverId,
+      sid: sessionB.bindingId,
+      driverDeviceId: sessionB.deviceId,
+    });
+  });
+
+  it("enforces single-active-device-per-driver across concurrent multi-instance PostgreSQL registrations", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const dbA = new DatabaseService();
+    const dbB = new DatabaseService();
+    databases.push(dbA, dbB);
+
+    const driverId = `drv_pg_conc_${randomUUID()}`;
+    createdDriverIds.add(driverId);
+
+    const profileA = new DriverProfileService(
+      new AuditNotificationService(),
+      new DriverProfileRepository(dbA),
+    );
+    await profileA.onModuleInit();
+    profileA.createProfile({
+      driverId,
+      name: "Concurrent Replacement Driver",
+    });
+
+    const profileB = new DriverProfileService(
+      new AuditNotificationService(),
+      new DriverProfileRepository(dbB),
+    );
+    await profileB.onModuleInit();
+
+    const serviceA = new DriverDeviceSessionService(
+      new JwtAuthService(new IdentityRepository(dbA)),
+      profileA,
+      new DriverDeviceSessionRepository(dbA),
+    );
+    const serviceB = new DriverDeviceSessionService(
+      new JwtAuthService(new IdentityRepository(dbB)),
+      profileB,
+      new DriverDeviceSessionRepository(dbB),
+    );
+    await Promise.all([serviceA.onModuleInit(), serviceB.onModuleInit()]);
+
+    const [inviteA, inviteB] = await Promise.all([
+      serviceA.issueRegistrationInvitation({ driverId }),
+      serviceB.issueRegistrationInvitation({ driverId }),
+    ]);
+
+    const [regA, regB] = await Promise.all([
+      serviceA.register({
+        registrationCode: inviteA.registrationCode,
+        deviceId: `pg-conc-device-a-${randomUUID()}`,
+      }),
+      serviceB.register({
+        registrationCode: inviteB.registrationCode,
+        deviceId: `pg-conc-device-b-${randomUUID()}`,
+      }),
+    ]);
+    createdSessionIds.add(regA.bindingId);
+    createdSessionIds.add(regB.bindingId);
+
+    const activeBindingRows = await dbA.query<{ binding_id: string }>(
+      `
+        SELECT binding_id
+        FROM iam.driver_device_bindings
+        WHERE driver_id = $1 AND status = 'active'
+      `,
+      [driverId],
+    );
+    expect(activeBindingRows.rows).toHaveLength(1);
+
+    const winner =
+      activeBindingRows.rows[0]?.binding_id === regA.bindingId ? regA : regB;
+    const superseded = winner.bindingId === regA.bindingId ? regB : regA;
+
+    const activeFamilyRows = await dbA.query<{ binding_id: string }>(
+      `
+        SELECT binding_id
+        FROM iam.driver_refresh_families
+        WHERE driver_id = $1 AND status = 'active'
+      `,
+      [driverId],
+    );
+    expect(activeFamilyRows.rows).toHaveLength(1);
+    expect(activeFamilyRows.rows[0]?.binding_id).toBe(winner.bindingId);
+
+    const activeCanonicalSessionRows = await dbA.query<{ session_id: string }>(
+      `
+        SELECT session_id
+        FROM iam.identity_sessions
+        WHERE principal_id = $1 AND status = 'active'
+      `,
+      [driverId],
+    );
+    expect(activeCanonicalSessionRows.rows).toHaveLength(1);
+    expect(activeCanonicalSessionRows.rows[0]?.session_id).toBe(
+      winner.bindingId,
+    );
+
+    const dbVerify = new DatabaseService();
+    databases.push(dbVerify);
+    const jwtVerify = new JwtAuthService(new IdentityRepository(dbVerify));
+    const serviceVerify = new DriverDeviceSessionService(
+      jwtVerify,
+      new DriverProfileService(
+        new AuditNotificationService(),
+        new DriverProfileRepository(dbVerify),
+      ),
+      new DriverDeviceSessionRepository(dbVerify),
+    );
+    await serviceVerify.onModuleInit();
+
+    expect(
+      await serviceVerify.isBindingActive(
+        superseded.bindingId,
+        superseded.deviceId,
+        driverId,
+      ),
+    ).toBe(false);
+    expect(
+      await serviceVerify.isBindingActive(
+        winner.bindingId,
+        winner.deviceId,
+        driverId,
+      ),
+    ).toBe(true);
+    expect(
+      await jwtVerify.verifyAccessToken(superseded.accessToken),
+    ).toBeNull();
+    expect(await jwtVerify.verifyAccessToken(winner.accessToken)).toMatchObject(
+      {
+        sub: driverId,
+        sid: winner.bindingId,
+      },
+    );
   });
 });
