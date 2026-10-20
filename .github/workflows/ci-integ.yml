@@ -331,6 +331,10 @@ jobs:
             .artifacts/owned-referral-business-journey/journey-evidence.json
             .artifacts/owned-referral-business-journey/booking-write-journal.json
             .artifacts/owned-referral-business-journey/own-receipt.txt
+            .artifacts/owned-referral-business-journey/cancellations/*-facts.json
+            .artifacts/owned-referral-business-journey/cancellations/*-booking-write-journal.json
+            .artifacts/owned-referral-business-journey/cancellations/results.json
+            .artifacts/owned-referral-business-journey/cancellations/*.png
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
