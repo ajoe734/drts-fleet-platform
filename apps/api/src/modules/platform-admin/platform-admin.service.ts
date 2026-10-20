@@ -2592,6 +2592,7 @@ export class PlatformAdminService implements OnModuleInit {
     return {
       userId: snapshot.membership.membershipId,
       canonicalPrincipalId: snapshot.principal.principalId,
+      canonicalRealm: snapshot.membership.realm,
       email:
         snapshot.principal.email?.trim().toLowerCase() ??
         snapshot.principal.subject,
