@@ -117,6 +117,8 @@ type DriverHeartbeatContext = DriverHeartbeatEventSnapshot;
 
 type ProvisionFromSubmissionCommand = {
   submission: SupplySubmissionRecord;
+  /** Resolved by the normal reviewer from the same fleet, never a client ID. */
+  referencedDriverSubmission?: SupplySubmissionRecord | null;
   driverDraft: DriverSupplyDraft | null;
   vehicleDraft: VehicleSupplyDraft | null;
   documents: SupplyDocumentRecord[];
@@ -133,6 +135,7 @@ export type ProvisionedCanonicalRecordIds = {
 
 export type SubmissionProvisioningResult = ProvisionedCanonicalRecordIds & {
   vehicleAffiliation: VehicleFleetAffiliationRecord | null;
+  supplyPair: RegulatorySupplyPair | null;
 };
 
 export type ReconcileExpiryCommand = {
@@ -1052,18 +1055,31 @@ export class RegulatoryRegistryService
     command: ProvisionFromSubmissionCommand,
   ): Promise<SubmissionProvisioningResult> {
     const current = command.submission;
+    const pairedDriverId = await this.resolveApprovedSubmissionDriver(
+      executor,
+      command,
+    );
     if (
       current.canonicalDriverId ||
       current.canonicalVehicleId ||
       current.canonicalContractId ||
       current.canonicalPolicyId
     ) {
+      const supplyPair = await this.provisionApprovedSupplyPair(
+        executor,
+        current.canonicalVehicleId,
+        pairedDriverId,
+      );
+      if (supplyPair) {
+        await this.persistProvisionedSupplyPair(executor, supplyPair);
+      }
       return {
         canonicalDriverId: current.canonicalDriverId,
         canonicalVehicleId: current.canonicalVehicleId,
         canonicalContractId: current.canonicalContractId,
         canonicalPolicyId: current.canonicalPolicyId,
         vehicleAffiliation: null,
+        supplyPair,
       };
     }
 
@@ -1108,6 +1124,12 @@ export class RegulatoryRegistryService
       canonicalDriver?.driverId ?? current.subjectDriverId ?? null;
     const resolvedCanonicalVehicleId =
       canonicalVehicle?.vehicleId ?? current.subjectVehicleId ?? null;
+    const supplyPair = await this.provisionApprovedSupplyPair(
+      executor,
+      resolvedCanonicalVehicleId,
+      pairedDriverId,
+    );
+    if (supplyPair) changes.supplyPairs = [supplyPair];
 
     let disclosureProfile: VehiclePassengerDisclosureProfile | null = null;
     if (command.vehicleDraft && resolvedCanonicalVehicleId) {
@@ -1228,7 +1250,97 @@ export class RegulatoryRegistryService
       canonicalContractId: contract?.contractId ?? null,
       canonicalPolicyId: policy?.policyId ?? null,
       vehicleAffiliation,
+      supplyPair,
     };
+  }
+
+  private async resolveApprovedSubmissionDriver(
+    executor: RegulatoryRegistryQueryExecutor | null,
+    command: ProvisionFromSubmissionCommand,
+  ): Promise<string | null> {
+    const reference = command.vehicleDraft?.currentDriverSubmissionId;
+    if (!reference) return null;
+    const driverSubmission = command.referencedDriverSubmission;
+    const invalid = () =>
+      new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "APPROVED_DRIVER_REFERENCE_INVALID",
+        "The vehicle requires an approved driver submission in the same fleet.",
+      );
+    if (
+      !driverSubmission ||
+      driverSubmission.submissionId !== reference ||
+      driverSubmission.fleetPartnerId !== command.submission.fleetPartnerId ||
+      driverSubmission.submissionType !== "driver_onboarding" ||
+      driverSubmission.status !== "approved" ||
+      !driverSubmission.canonicalDriverId
+    )
+      throw invalid();
+    const driverId = driverSubmission.canonicalDriverId;
+    if (this.regulatoryRegistryRepository?.isEnabled() && !executor) {
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "SUPPLY_APPROVAL_TRANSACTION_REQUIRED",
+        "A persisted driver reference requires the approval transaction.",
+      );
+    }
+    const driver = this.regulatoryRegistryRepository?.isEnabled()
+      ? await this.regulatoryRegistryRepository.lockDriverForApproval(
+          driverId,
+          executor!,
+        )
+      : this.drivers.find((row) => row.driverId === driverId);
+    if (!driver) throw invalid();
+    return driverId;
+  }
+
+  private async provisionApprovedSupplyPair(
+    executor: RegulatoryRegistryQueryExecutor | null,
+    vehicleId: string | null,
+    driverId: string | null,
+  ): Promise<RegulatorySupplyPair | null> {
+    if (!vehicleId || !driverId) return null;
+    const existing =
+      executor && this.regulatoryRegistryRepository?.isEnabled()
+        ? await this.regulatoryRegistryRepository.findSupplyPairWithExecutor(
+            executor,
+            vehicleId,
+            driverId,
+          )
+        : this.supplyPairs.find(
+            (pair) =>
+              pair.vehicleId === vehicleId && pair.driverId === driverId,
+          );
+    return existing
+      ? { ...existing }
+      : { vehicleId, driverId, etaMinutes: null };
+  }
+
+  private async persistProvisionedSupplyPair(
+    executor: RegulatoryRegistryQueryExecutor | null,
+    pair: RegulatorySupplyPair,
+  ) {
+    if (executor && this.regulatoryRegistryRepository?.isEnabled()) {
+      await this.regulatoryRegistryRepository.persistChangesWithExecutor(
+        executor,
+        { supplyPairs: [pair] },
+      );
+    } else {
+      this.persistChanges({ supplyPairs: [pair] }, "provision_supply_pair");
+    }
+  }
+
+  /** The review caller invokes this only after its approval commit succeeds. */
+  publishCommittedSupplyPair(pair: RegulatorySupplyPair | null) {
+    if (!pair) return;
+    this.supplyPairs = [
+      { ...pair },
+      ...this.supplyPairs.filter(
+        (current) =>
+          current.vehicleId !== pair.vehicleId ||
+          current.driverId !== pair.driverId,
+      ),
+    ];
   }
 
   recordVehicleFleetAffiliationCreated(

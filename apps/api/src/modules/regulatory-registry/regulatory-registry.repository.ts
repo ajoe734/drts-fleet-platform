@@ -39,7 +39,7 @@ export type RegulatoryRegistryQueryExecutor = {
 export type RegulatorySupplyPair = {
   vehicleId: string;
   driverId: string;
-  etaMinutes: number;
+  etaMinutes: number | null;
 };
 
 export type RegulatoryRegistryState = {
@@ -1347,6 +1347,23 @@ export class RegulatoryRegistryRepository {
     return `${pair.vehicleId}::${pair.driverId}`;
   }
 
+  async findSupplyPairWithExecutor(
+    executor: RegulatoryRegistryQueryExecutor,
+    vehicleId: string,
+    driverId: string,
+  ): Promise<RegulatorySupplyPair | null> {
+    const result = await executor.query<JsonRecordRow>(
+      "SELECT record FROM reg.phase1_registry_supply_pairs WHERE pair_id = $1 FOR UPDATE",
+      [`${vehicleId}::${driverId}`],
+    );
+    return result.rows[0]
+      ? this.parseRecord<RegulatorySupplyPair>(
+          result.rows[0].record,
+          "reg.phase1_registry_supply_pairs",
+        )
+      : null;
+  }
+
   private parseRecord<T>(record: unknown, source: string): T {
     if (!record || typeof record !== "object") {
       throw new Error(`Invalid persisted record loaded from ${source}`);
@@ -1734,15 +1751,31 @@ export class RegulatoryRegistryRepository {
     driverId: string,
     client?: PoolClient,
   ): Promise<DriverRegistryRecord | null> {
-    if (this.isEnabled()) {
-      const executor = this.getExpiryExecutor(client);
-      const result = await executor.query<{ record: DriverRegistryRecord }>(
-        `SELECT record FROM reg.phase1_registry_drivers WHERE driver_id = $1 ${client ? "FOR UPDATE" : ""}`,
-        [driverId],
-      );
-      return result.rows[0]?.record ?? null;
-    }
-    return null;
+    return this.readDriverWithExecutor(
+      driverId,
+      this.getExpiryExecutor(client),
+      Boolean(client),
+    );
+  }
+
+  async lockDriverForApproval(
+    driverId: string,
+    executor: RegulatoryRegistryQueryExecutor,
+  ): Promise<DriverRegistryRecord | null> {
+    return this.readDriverWithExecutor(driverId, executor, true);
+  }
+
+  private async readDriverWithExecutor(
+    driverId: string,
+    executor: RegulatoryRegistryQueryExecutor,
+    lock: boolean,
+  ): Promise<DriverRegistryRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await executor.query<{ record: DriverRegistryRecord }>(
+      `SELECT record FROM reg.phase1_registry_drivers WHERE driver_id = $1 ${lock ? "FOR UPDATE" : ""}`,
+      [driverId],
+    );
+    return result.rows[0]?.record ?? null;
   }
 
   async lockPolicy(
