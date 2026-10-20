@@ -1554,6 +1554,7 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
         await ops.getByRole("button", { name: "依原流程重新派遣" }).click();
         const cancelledAssignment = await assign(ops);
         activeDriver = { page: driver, base: DRIVER };
+        await registerDriver(ops, driver, DRIVER, step);
         await driver.goto(`${DRIVER}/jobs`);
         await driver
           .getByRole("button")
