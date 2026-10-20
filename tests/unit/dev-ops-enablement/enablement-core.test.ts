@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth";
+import type { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
+import { AuthController } from "../../../apps/api/src/modules/auth/auth.controller";
+import { PlatformAdminController } from "../../../apps/api/src/modules/platform-admin/platform-admin.controller";
+import type { PlatformAdminService } from "../../../apps/api/src/modules/platform-admin/platform-admin.service";
 
 import { JourneyFailure } from "../../../tests/e2e/owned-referral-business-journey/protocol";
 import {
@@ -71,7 +76,9 @@ function harness() {
     proofAction: ROLE_ACTION,
     opsPrincipal: principalId,
   };
-  const ports: SetupPorts = {
+  const dataPorts: Omit<SetupPorts, "call"> & {
+    call(...args: Parameters<SetupPorts["call"]>): Promise<unknown>;
+  } = {
     readRuntime: async () => structuredClone(state.runtime),
     acceptSession: (role, token) => state.accepted.set(role, token),
     configureOpsReference: async (id) => {
@@ -92,7 +99,11 @@ function harness() {
           token: `${role}-SECRET-token`,
           sessionId: `${role}-SECRET-sid`,
         };
-      if (path.endsWith("/revoke")) {
+      if (path === "/api/auth/sessions/revoke") {
+        expect(options?.method).toBe("POST");
+        expect(options?.body).toEqual({
+          sessionId: `${role === "opsApi" ? "ops" : "admin"}-SECRET-sid`,
+        });
         state.revoked.add(role);
         return { revoked: true };
       }
@@ -122,10 +133,12 @@ function harness() {
         };
       }
       if (path === "/api/platform-admin/users")
-        return state.users.map((row) => ({
-          ...row,
-          status: state.activated ? "active" : row.status,
-        }));
+        return {
+          items: state.users.map((row) => ({
+            ...row,
+            status: state.activated ? "active" : row.status,
+          })),
+        };
       if (path === "/control-plane-proxy/identity/step-up-proofs")
         return {
           required: true,
@@ -139,10 +152,139 @@ function harness() {
       throw new Error("Unexpected fake adapter call");
     },
   };
+  const ports: SetupPorts = {
+    ...dataPorts,
+    call: async (...args) => ({
+      status: 200,
+      data: await dataPorts.call(...args),
+    }),
+  };
   return { state, calls, saved, ports };
 }
 
 describe("normal existing development Ops enablement", () => {
+  it("review regression: consumes the actual PlatformAdmin controller list envelope", async () => {
+    const h = harness();
+    const original = h.ports.call;
+    const controller = new PlatformAdminController({
+      listPlatformAdminUsers: async () =>
+        (
+          (await original("api", "/api/platform-admin/users")).data as {
+            items: unknown[];
+          }
+        ).items,
+    } as unknown as PlatformAdminService);
+    h.ports.call = async (role, path, options) =>
+      path === "/api/platform-admin/users"
+        ? {
+            status: 200,
+            data: (await controller.listPlatformAdminUsers()).data,
+          }
+        : original(role, path, options);
+    const result = await enableExistingDevOps(context, h.ports);
+    expect(result.completed).toBe(true);
+    expect(result.activation).toBe("acknowledged");
+    expect(result.cleaned).toEqual(["ops", "admin"]);
+  });
+
+  it("review regression: cleans through the actual normal native self-revoke controller", async () => {
+    const h = harness();
+    const original = h.ports.call;
+    h.ports.call = async (role, path, options) => {
+      if (!path.startsWith("/api/auth/sessions/"))
+        return original(role, path, options);
+      const ops = role === "opsApi";
+      const sid = `${ops ? "ops" : "admin"}-SECRET-sid`;
+      const identity = {
+        actorId: "own-principal",
+        principalId: "own-principal",
+      } as BootstrapRequestIdentity;
+      const controller = new AuthController(
+        {
+          revokeSessionSelf: async (actualSid: string, principal: string) => {
+            expect(actualSid).toBe(sid);
+            expect(principal).toBe("own-principal");
+            h.state.revoked.add(role);
+            return { revoked: true, sessionId: sid, status: "revoked" };
+          },
+        } as unknown as JwtAuthService,
+        {} as never,
+        {} as never,
+      );
+      if (path === "/api/auth/sessions/revoke") {
+        expect(options?.method).toBe("POST");
+        expect(options?.body).toEqual({ sessionId: sid });
+        return {
+          status: 200,
+          data: (
+            await controller.revokeSessionSelf(
+              identity,
+              options?.body as { sessionId: string },
+            )
+          ).data,
+        };
+      }
+      return {
+        status: 200,
+        data: (
+          await controller.revokeSelfSession(
+            identity,
+            sid,
+            options?.body as never,
+            { headers: {} } as never,
+          )
+        ).data,
+      };
+    };
+    const result = await enableExistingDevOps(context, h.ports);
+    expect(result.completed).toBe(true);
+    expect(result.cleaned).toEqual(["ops", "admin"]);
+    expect(result.cleanupErrors).toEqual([]);
+  });
+
+  it("review regression: rejects a 200 inactive probe without explicit active false", async () => {
+    const h = harness();
+    const original = h.ports.call;
+    h.ports.call = async (role, path, options) =>
+      path === "/api/auth/session" && h.state.revoked.has(role)
+        ? { status: 200, data: {} }
+        : original(role, path, options);
+    const result = await enableExistingDevOps(context, h.ports);
+    expect(result.completed).toBe(false);
+    expect(result.cleaned).toEqual([]);
+    expect(result.cleanupErrors).toEqual(["ops", "admin"]);
+  });
+
+  it("accepts the actual native 401 status as own-session invalidation proof", async () => {
+    const h = harness();
+    const original = h.ports.call;
+    h.ports.call = async (role, path, options) =>
+      path === "/api/auth/session" && h.state.revoked.has(role)
+        ? { status: 401, data: { error: { code: "SESSION_REVOKED" } } }
+        : original(role, path, options);
+    const result = await enableExistingDevOps(context, h.ports);
+    expect(result.completed).toBe(true);
+    expect(result.cleaned).toEqual(["ops", "admin"]);
+  });
+
+  it.each([{}, { items: null }, { items: {} }])(
+    "rejects a malformed actual list envelope before activation: %j",
+    async (data) => {
+      const h = harness();
+      const original = h.ports.call;
+      h.ports.call = async (role, path, options) =>
+        path === "/api/platform-admin/users"
+          ? { status: 200, data }
+          : original(role, path, options);
+      const result = await enableExistingDevOps(context, h.ports);
+      expect(result.activation).toBe("not-attempted");
+      expect(result.completed).toBe(false);
+      expect(result.cleaned).toEqual(["admin"]);
+      expect(h.state.activated).toBe(false);
+      expect(h.state.configured).toEqual([]);
+    },
+  );
+
   it("activates the exact existing member, configures its actual principal and cleans both real-session adapters", async () => {
     const h = harness();
     const result = await enableExistingDevOps(context, h.ports);
@@ -152,6 +294,7 @@ describe("normal existing development Ops enablement", () => {
     expect(result.finalRuntimeVerified).toBe(true);
     expect(result.canonicalPrincipalId).toBe(principalId);
     expect(result.membershipId).toBe(membershipId);
+    expect(result.actualCanonicalRealm).toBe("ops");
     expect(h.state.configured).toEqual([principalId]);
     const activation = h.calls.filter((c) =>
       c.path.endsWith(`/${membershipId}/role`),
@@ -314,9 +457,12 @@ describe("normal existing development Ops enablement", () => {
     h.ports.call = async (role, path, options) =>
       path.endsWith(`/${membershipId}/role`)
         ? {
-            ...user,
-            status: "active",
-            canonicalPrincipalId: "foreign_principal",
+            status: 200,
+            data: {
+              ...user,
+              status: "active",
+              canonicalPrincipalId: "foreign_principal",
+            },
           }
         : original(role, path, options);
     const result = await enableExistingDevOps(context, h.ports);
@@ -439,6 +585,23 @@ function cloudService() {
   };
 }
 describe("normal setup runtime projection and bounded configuration", () => {
+  it("review regression: ignores an inactive tagged traffic row with omitted percent", () => {
+    const service = cloudService();
+    const value = {
+      ...service,
+      status: {
+        ...service.status,
+        traffic: [
+          ...service.status.traffic,
+          { revisionName: "old-tagged", tag: "old" },
+        ],
+      },
+    };
+    expect(projectRuntime("ops", value).activeTraffic).toEqual([
+      { revision: "ops-before", percent: 100 },
+    ]);
+  });
+
   it("keeps raw config out of evidence and ignores only the intentional Ops reference and CLI bookkeeping", () => {
     const a = cloudService();
     const before = projectRuntime("ops", a);
@@ -510,6 +673,7 @@ describe("normal setup runtime projection and bounded configuration", () => {
     expect(existingOperator([user])).toEqual({
       membershipId,
       principalId,
+      canonicalRealm: "ops",
       status: "invited",
     });
     expect(() =>

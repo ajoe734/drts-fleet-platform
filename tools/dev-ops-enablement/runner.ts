@@ -103,7 +103,7 @@ export async function runFromEnvironment() {
     },
     call: async (role, path, options) => {
       requireFact(transport, "bound hosted transport required");
-      return (await transport.call(role, path, options)).data;
+      return transport.call(role, path, options);
     },
     acceptSession: (role, token) => {
       requireFact(transport, "bound hosted transport required");

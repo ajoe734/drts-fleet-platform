@@ -83,7 +83,7 @@ export function projectRuntime(role: RuntimeRole, value: unknown): RuntimeRow {
       .update(JSON.stringify(sorted(material)))
       .digest("hex"),
     activeTraffic: records(status.traffic)
-      .filter((traffic) => traffic.percent !== 0)
+      .filter((traffic) => (traffic.percent ?? 0) !== 0)
       .map((traffic) => ({
         revision: text(traffic.revisionName),
         percent:

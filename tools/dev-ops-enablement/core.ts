@@ -5,6 +5,7 @@ import {
   records,
   requireFact,
   text,
+  type CallResult,
   type CallOptions,
   type Role,
 } from "../../tests/e2e/owned-referral-business-journey/protocol";
@@ -51,6 +52,7 @@ export type Journal = {
   configuration: "not-attempted" | "ack-unknown" | "acknowledged";
   canonicalPrincipalId: string | null;
   membershipId: string | null;
+  actualCanonicalRealm: "ops" | null;
   before: Runtime | null;
   after: Runtime | null;
   adminSessionAcknowledged: boolean;
@@ -63,7 +65,11 @@ export type Journal = {
 };
 export type SetupPorts = {
   readRuntime(): Promise<Runtime>;
-  call(role: Role, path: string, options?: CallOptions): Promise<unknown>;
+  call(
+    role: Role,
+    path: string,
+    options?: CallOptions,
+  ): Promise<Pick<CallResult, "status" | "data">>;
   acceptSession(role: "admin" | "ops", token: string): void;
   configureOpsReference(canonicalPrincipalId: string): Promise<void>;
   persist(journal: Journal): Promise<void>;
@@ -140,6 +146,7 @@ export function existingOperator(value: unknown) {
   return {
     membershipId: text(row.userId),
     principalId,
+    canonicalRealm: row.canonicalRealm as "ops",
     status: row.status,
   };
 }
@@ -229,6 +236,7 @@ export async function enableExistingDevOps(
     configuration: "not-attempted",
     canonicalPrincipalId: null,
     membershipId: null,
+    actualCanonicalRealm: null,
     before: null,
     after: null,
     adminSessionAcknowledged: false,
@@ -240,6 +248,8 @@ export async function enableExistingDevOps(
     failure: null,
   };
   const sessions: Partial<Record<"admin" | "ops", string>> = {};
+  const call = async (...args: Parameters<SetupPorts["call"]>) =>
+    (await ports.call(...args)).data;
   let configuredRuntime: Runtime | undefined;
   const accept = (role: "admin" | "ops", value: unknown) => {
     const ack = object(value);
@@ -261,31 +271,27 @@ export async function enableExistingDevOps(
     journal.before = before;
     const adminSid = accept(
       "admin",
-      await ports.call("admin", "/control-plane-proxy/auth/token", {
+      await call("admin", "/control-plane-proxy/auth/token", {
         method: "POST",
         body: {},
       }),
     );
     verifySession(
-      await ports.call("api", "/api/auth/session"),
+      await call("api", "/api/auth/session"),
       adminSid,
       "platform_admin",
     );
     const user = existingOperator(
-      await ports.call("api", "/api/platform-admin/users"),
+      object(await call("api", "/api/platform-admin/users")).items,
     );
     journal.canonicalPrincipalId = user.principalId;
     journal.membershipId = user.membershipId;
     const path = `/api/platform-admin/users/${encodeURIComponent(user.membershipId)}/role`;
     const proof = object(
-      await ports.call(
-        "admin",
-        "/control-plane-proxy/identity/step-up-proofs",
-        {
-          method: "POST",
-          body: { method: "POST", path },
-        },
-      ),
+      await call("admin", "/control-plane-proxy/identity/step-up-proofs", {
+        method: "POST",
+        body: { method: "POST", path },
+      }),
     );
     const reference = text(proof.stepUpReference);
     mask(reference);
@@ -296,7 +302,7 @@ export async function enableExistingDevOps(
     journal.activation = "ack-unknown";
     await ports.persist(journal);
     const ack = object(
-      await ports.call("api", path, {
+      await call("api", path, {
         method: "POST",
         body: {
           roleCode: "operator",
@@ -317,7 +323,7 @@ export async function enableExistingDevOps(
     journal.activation = "acknowledged";
     await ports.persist(journal);
     const readback = existingOperator(
-      await ports.call("api", "/api/platform-admin/users"),
+      object(await call("api", "/api/platform-admin/users")).items,
     );
     requireFact(
       readback.status === "active" &&
@@ -325,6 +331,7 @@ export async function enableExistingDevOps(
         readback.principalId === user.principalId,
       "normal activation current readback required",
     );
+    journal.actualCanonicalRealm = readback.canonicalRealm;
     const current = await ports.readRuntime();
     requireFact(same(current, before), "runtime changed before private config");
     journal.configuration = "ack-unknown";
@@ -343,13 +350,13 @@ export async function enableExistingDevOps(
     await ports.persist(journal);
     const opsSid = accept(
       "ops",
-      await ports.call("ops", "/control-plane-proxy/auth/token", {
+      await call("ops", "/control-plane-proxy/auth/token", {
         method: "POST",
         body: {},
       }),
     );
     const identity = verifySession(
-      await ports.call("opsApi", "/api/auth/session"),
+      await call("opsApi", "/api/auth/session"),
       opsSid,
       "ops_user",
       user.principalId,
@@ -367,21 +374,16 @@ export async function enableExistingDevOps(
       if (!sid) continue;
       const api = role === "ops" ? "opsApi" : "api";
       try {
-        await ports.call(
-          api,
-          `/api/auth/sessions/${encodeURIComponent(sid)}/revoke`,
-          {
-            method: "POST",
-            body: {
-              reason: "Normal development Ops setup own session cleanup",
-            },
-          },
-        );
-        const inactive = object(
-          await ports.call(api, "/api/auth/session", { expected: [200, 401] }),
-        );
+        await call(api, "/api/auth/sessions/revoke", {
+          method: "POST",
+          body: { sessionId: sid },
+        });
+        const inactive = await ports.call(api, "/api/auth/session", {
+          expected: [200, 401],
+        });
         requireFact(
-          inactive.active !== true,
+          inactive.status === 401 ||
+            (inactive.status === 200 && object(inactive.data).active === false),
           "own setup session must be inactive",
         );
         journal.cleaned.push(role);
