@@ -48,6 +48,10 @@ import {
   type CallOptions,
 } from "./protocol";
 import {
+  cancellationResults,
+  runFourStageOwnedCancellations,
+} from "./four-stage-cancellations";
+import {
   RETAINED_REFERRAL_ORDER,
   recoverRetainedReferralOrder,
 } from "./retained-order-recovery";
@@ -79,6 +83,24 @@ async function cookieHeader(
   return (await context.cookies(target))
     .map((cookie) => `${cookie.name}=${cookie.value}`)
     .join("; ");
+}
+
+function readCancellationWindowSnapshot(value: unknown): ObjectData | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const snapshot = value as ObjectData;
+  if (
+    typeof snapshot.canCancel !== "boolean" ||
+    typeof snapshot.asOf !== "string" ||
+    !Number.isFinite(Date.parse(snapshot.asOf))
+  )
+    return null;
+  if (
+    snapshot.cancelableUntil !== null &&
+    (typeof snapshot.cancelableUntil !== "string" ||
+      !Number.isFinite(Date.parse(snapshot.cancelableUntil)))
+  )
+    return null;
+  return snapshot;
 }
 
 const journeyName = RECOVERY_ONLY
@@ -165,6 +187,7 @@ test(journeyName, async ({ browser, request }) => {
     quote: ObjectData | undefined;
   } = { journal: undefined, routeError: undefined, quote: undefined };
   const cleanupErrors: string[] = [];
+  const cancellations = cancellationResults();
 
   const call = async (role: Role, path: string, options: CallOptions = {}) =>
     object((await tx.call(role, path, options)).data);
@@ -1597,6 +1620,241 @@ test(journeyName, async ({ browser, request }) => {
         sha256: hash(browserBytes),
         result: "observed",
       });
+      // Preserve the minimum main journey above, then observe four independent
+      // owned orders. Immediate quote timing still creates reservation semantics.
+      let cancellationSequence = 5; // Same real bound device, after main heartbeat 5.
+      await runFourStageOwnedCancellations(
+        {
+          definitionSha: definition,
+          runtimeSha: runtime,
+          directory: DIRECTORY,
+          nonce,
+          entrySlug: ENTRY,
+          partnerUserRef: SUBJECT,
+          passengerId: text(
+            passengerId,
+            "canonical completed main passenger required",
+          ),
+          completedMainOrderId: orderId,
+          driverId,
+          vehicleId,
+          pickupAddress,
+          dropoffAddress,
+          pickup,
+          passengerName,
+          passengerPhone: phone,
+          photoDataUrl: `data:image/png;base64,${png.toString("base64")}`,
+          evidence,
+          referral,
+          opsControl,
+          adminControl,
+          driver: (path, options) => call("driver", path, options),
+          heartbeat: (id, state) =>
+            heartbeat(id, state, ++cancellationSequence),
+          cancelFromActualUI: async (id, expectedRefusal) => {
+            // Observe the actual cancellation-window UI. A disabled button is
+            // not an attempted UI cancellation; API refusal keeps separate provenance.
+            const button = page.locator(
+              '[data-drt-operation="referral-cancel"]',
+            );
+            await expect(
+              page.getByText(id, { exact: false }).first(),
+            ).toBeVisible();
+            const active = object(
+              (await referral("/api/referral/active")).data,
+            );
+            const current = object(active.trip);
+            requireFact(
+              current.orderId === id,
+              "current UI cancellation exact order",
+            );
+            const window = readCancellationWindowSnapshot(
+              current.cancellationWindow,
+            );
+            if (window?.canCancel === false) {
+              requireFact(
+                expectedRefusal,
+                "fresh created-window cancellation unexpectedly closed",
+              );
+              await expect(button).toBeDisabled();
+              // The real UI correctly prevents this action. Observe its actual
+              // disabled state, then verify refusal through the same normal
+              // passenger BFF/identity. This is NOT a successful/attempted UI cancel.
+              const command = {
+                idempotencyKey: `${nonce}-cancel-policy-probe-${id}`,
+              };
+              const probe = await referral(
+                `/api/referral/cancel/${encodeURIComponent(id)}`,
+                {
+                  method: "POST",
+                  body: command,
+                  expected: [200, 409],
+                },
+              );
+              await expect(button).toBeDisabled();
+              requireFact(
+                new URL(page.url()).searchParams.get("orderId") === id &&
+                  new URL(page.url()).searchParams.get("screen") === "trip",
+                "closed UI stays on the selected trip during normal API policy probe",
+              );
+              return {
+                ...probe,
+                command,
+                requestSource: "passenger-api-policy-probe" as const,
+                uiDisabled: true,
+              };
+            }
+            // Unknown legacy metadata does not fabricate a window or add a new
+            // cancellation gate; the original active button and POST still apply.
+            await expect(button).toBeEnabled();
+            // Start reading this original response as soon as it arrives;
+            // the successful UI is allowed to navigate while click completes.
+            const waiting = page
+              .waitForResponse(
+                (response) =>
+                  response.request().method() === "POST" &&
+                  response.url() ===
+                    `${origins.referral}/api/referral/cancel/${encodeURIComponent(id)}`,
+              )
+              .then(async (response) => ({
+                response,
+                bytes: await response.body(),
+              }));
+            void waiting.catch(() => undefined);
+            await button.click();
+            const { response, bytes } = await waiting;
+            requireFact(
+              (await response.headerValue("x-drts-candidate-sha")) === runtime,
+              "actual UI cancellation response runtime binding",
+            );
+            requireFact(
+              bytes.length <= 1024 * 1024,
+              "bounded actual UI cancellation response",
+            );
+            const payload = object(JSON.parse(bytes.toString("utf8")));
+            const command = object(response.request().postDataJSON());
+            requireFact(
+              typeof command.idempotencyKey === "string",
+              "actual UI cancellation command key",
+            );
+            if (response.status() === 200) {
+              requireFact(
+                payload.ok === true,
+                "actual UI cancellation success envelope",
+              );
+              await page.waitForURL(
+                (url) =>
+                  url.searchParams.get("screen") === "cancelled" &&
+                  url.searchParams.get("orderId") === id,
+              );
+            } else {
+              requireFact(payload.ok === false, "actual UI denial envelope");
+              const afterDenial = object(
+                (await referral("/api/referral/active")).data,
+              );
+              const deniedTrip = object(afterDenial.trip);
+              requireFact(
+                deniedTrip.orderId === id,
+                "UI denial retains exact active order",
+              );
+              const deniedWindow = readCancellationWindowSnapshot(
+                deniedTrip.cancellationWindow,
+              );
+              const hasWindowUI =
+                (await page
+                  .locator(
+                    '[data-drt-operation="referral-cancellation-window"]',
+                  )
+                  .count()) === 1;
+              const rejectedByPolicy =
+                payload.error &&
+                object(payload.error).code === "ORDER_NOT_CANCELABLE";
+              // The window-aware UI closes this same snapshot after its real 409,
+              // including an originally unknown/rolling snapshot. Legacy UI keeps
+              // its original error Banner and enabled retry behavior.
+              if (
+                (hasWindowUI && rejectedByPolicy) ||
+                deniedWindow?.canCancel === false
+              )
+                await expect(button).toBeDisabled();
+              else await expect(button).toBeEnabled();
+              await expect(
+                page.getByText(text(object(payload.error).message), {
+                  exact: true,
+                }),
+              ).toBeVisible();
+              requireFact(
+                new URL(page.url()).searchParams.get("orderId") === id &&
+                  new URL(page.url()).searchParams.get("screen") === "trip",
+                "denial retains selected trip URL",
+              );
+            }
+            return {
+              status: response.status(),
+              data: response.status() >= 400 ? payload : payload.data,
+              headers: new Headers(await response.allHeaders()),
+              bytes,
+              command,
+              requestSource: "actual-ui" as const,
+              uiDisabled:
+                response.status() === 200 ? false : await button.isDisabled(),
+            };
+          },
+          capture: async (name, id, screen) => {
+            // Keep the denied page intact: navigating would clear its real error Banner.
+            if (!name.endsWith("-denied"))
+              await page.goto(
+                `${origins.referral}/embed/${ENTRY}?state=handoff&screen=${screen}&orderId=${encodeURIComponent(id)}`,
+              );
+            if (screen === "trip") {
+              await expect(
+                page.getByText(id, { exact: false }).first(),
+              ).toBeVisible();
+              const active = object(
+                (await referral("/api/referral/active")).data,
+              );
+              const current = object(active.trip);
+              requireFact(current.orderId === id, "capture exact active order");
+              const window = readCancellationWindowSnapshot(
+                current.cancellationWindow,
+              );
+              const button = page.locator(
+                '[data-drt-operation="referral-cancel"]',
+              );
+              const hasWindowUI =
+                (await page
+                  .locator(
+                    '[data-drt-operation="referral-cancellation-window"]',
+                  )
+                  .count()) === 1;
+              if (
+                window?.canCancel === false ||
+                (name.endsWith("-denied") && hasWindowUI)
+              )
+                await expect(button).toBeDisabled();
+              else await expect(button).toBeEnabled();
+            } else {
+              await expect(
+                page
+                  .getByText(
+                    screen === "cancelled" ? "行程已取消" : "行程已完成",
+                    { exact: false },
+                  )
+                  .first(),
+              ).toBeVisible();
+            }
+            requireFact(
+              new URL(page.url()).searchParams.get("orderId") === id,
+              "actual selected-order screenshot binding",
+            );
+            await mkdir(`${DIRECTORY}/cancellations`, { recursive: true });
+            const file = `${DIRECTORY}/cancellations/${name}.png`;
+            const bytes = await page.screenshot({ path: file, fullPage: true });
+            return { file, bytes: bytes.length, sha256: hash(bytes) };
+          },
+        },
+        cancellations,
+      );
     }
   } catch (error) {
     mainError = bookingState.routeError ?? error;
@@ -1764,18 +2022,20 @@ test(journeyName, async ({ browser, request }) => {
           retained: RECOVERY_ONLY
             ? "Only this run's own new Admin/Referral sessions are revoked. Original approved supply/documents and fixed Demo identity remain; unresolved own order is preserved, never broad-cleaned. No H3 or full-journey claim."
             : "Approved own supply/documents, completed order/CRM and fixed Demo identity remain. No inherited H3 cleanup claim.",
-          cancellations: [
-            "unassigned",
-            "assigned-not-arrived",
-            "arrived-not-started",
-            "on-trip",
-          ].map((stage) => ({
-            stage,
-            result: "unexecuted",
-            reason: RECOVERY_ONLY
-              ? "Retained-order cleanup only; no staged passenger-cancellation scenario PASS."
-              : "Minimum same-order completion scenario; no cancellation pass borrowed.",
-          })),
+          cancellations: RECOVERY_ONLY
+            ? [
+                "unassigned",
+                "assigned-not-arrived",
+                "arrived-not-started",
+                "on-trip",
+              ].map((stage) => ({
+                stage,
+                result: "unexecuted",
+                reason: RECOVERY_ONLY
+                  ? "Retained-order cleanup only; no staged passenger-cancellation scenario PASS."
+                  : "Minimum same-order completion scenario; no cancellation pass borrowed.",
+              }))
+            : cancellations,
         },
         null,
         2,
