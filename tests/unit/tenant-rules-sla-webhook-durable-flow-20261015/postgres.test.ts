@@ -185,12 +185,6 @@ describe.skipIf(!hosted)(
         new WebhookDispatchService(fetcherA),
         [],
       );
-      const peerService = new TenantPartnerService(
-        new AuditNotificationService(),
-        repository,
-        new WebhookDispatchService(fetcherB),
-        [],
-      );
       const originalConnect = database.connect.bind(database);
       let rejectDeleteSql = false;
       let loseDeleteCommitAck = false;
@@ -314,7 +308,12 @@ describe.skipIf(!hosted)(
           await service.deleteWebhookEndpoint(tenantId, target.webhookId, {
             reason: "repeated pg delete",
           }),
-        ).toEqual({ status: "not_found" });
+        ).toBeNull();
+        expect(
+          await service.deleteWebhookEndpoint(tenantId, other.webhookId, {
+            reason: "cross-tenant pg delete",
+          }),
+        ).toBeNull();
 
         const countRow = async (webhookId: string) => {
           const res = await database.query<{ count: number }>(
@@ -364,6 +363,12 @@ describe.skipIf(!hosted)(
 
         // Cross-instance in-flight HTTP delivery cannot reinsert a concurrently deleted endpoint.
         const peerScopedRepo = scopedRepositoryFor([tenantId, otherTenantId]);
+        const staleSiblingSnapshot =
+          await peerScopedRepo.findNotificationWebhookEndpoint(
+            tenantId,
+            sibling.webhookId,
+          );
+        expect(staleSiblingSnapshot?.webhookId).toBe(sibling.webhookId);
         const peer = new TenantPartnerService(
           new AuditNotificationService(),
           peerScopedRepo,
@@ -376,17 +381,20 @@ describe.skipIf(!hosted)(
             ok: boolean;
             status: number;
           }) => void;
-          fetcherB.mockImplementationOnce(
-            () =>
-              new Promise((resolve) => {
-                releasePeerHttp = resolve;
-              }),
-          );
+          const peerHttpEntered = new Promise<void>((resolveEnter) => {
+            fetcherB.mockImplementationOnce(
+              () =>
+                new Promise((resolveHttp) => {
+                  releasePeerHttp = resolveHttp;
+                  resolveEnter();
+                }),
+            );
+          });
           const inFlight = peer.publishWebhookEvent(tenantId, {
             eventType: "dispatch.assigned",
             data: { orderId: "pg-inflight-cross-instance" },
           });
-          await new Promise((resolve) => setImmediate(resolve));
+          await peerHttpEntered;
           await service.deleteWebhookEndpoint(tenantId, sibling.webhookId, {
             reason: "concurrent delete while peer HTTP in flight",
           });
@@ -395,12 +403,22 @@ describe.skipIf(!hosted)(
           await inFlight;
           expect(await countRow(sibling.webhookId)).toBe(0);
           expect(peer.listWebhookEndpoints(tenantId)).toEqual([]);
+          await peerScopedRepo.persistChanges({
+            webhookEndpoints: [staleSiblingSnapshot!],
+            requireExistingWebhookEndpoints: true,
+          });
+          expect(await countRow(sibling.webhookId)).toBe(0);
         } finally {
           peer.onModuleDestroy();
         }
 
         // Fresh service restart does not resurrect either deleted endpoint or resume retries.
-        const restartFetcher = vi.fn(async () => ({ ok: true, status: 204 }));
+        const restartFetcher = vi.fn<
+          (
+            url: string,
+            init?: RequestInit,
+          ) => Promise<{ ok: boolean; status: number }>
+        >(async () => ({ ok: true, status: 204 }));
         const restarted = new TenantPartnerService(
           new AuditNotificationService(),
           scopedRepositoryFor([tenantId, otherTenantId]),
@@ -420,13 +438,20 @@ describe.skipIf(!hosted)(
               .listWebhookDeliveries(tenantId)
               .filter((item) => item.webhookId === target.webhookId),
           ).toHaveLength(2);
+          const publishedAfterDelete = await restarted.publishWebhookEvent(
+            tenantId,
+            {
+              eventType: "dispatch.assigned",
+              data: { orderId: "pg-after-delete" },
+            },
+          );
+          expect(publishedAfterDelete).toEqual([]);
           expect(restartFetcher).not.toHaveBeenCalled();
         } finally {
           restarted.onModuleDestroy();
         }
       } finally {
         service.onModuleDestroy();
-        peerService.onModuleDestroy();
         await repository.persistChanges({
           deletedTenantIds: [tenantId, otherTenantId],
         });
