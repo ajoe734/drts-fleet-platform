@@ -35,6 +35,50 @@ cannot start a duplicate share` 與
    `ignores a late share settlement after the receipt identity has already
 changed` 兩項測試。
 
+## 第五輪：canonical-consistency CI 路徑修復與 hooks bootstrap 真實性回報（本輪，無新 Source 變更）
+
+獨立 reviewer 已核准 `2479ad1e9`（第四輪內容，見下節）；該候選被
+`tools/ci/git/check_canonical_consistency.py` 的 `cited-paths` 檢查擋下：
+本文件先前以縮寫形式引用兩個路徑（以「…」省略中段目錄的
+certificate-artifact.renderer.ts 與 native-presentation.ts 完整路徑），
+該檢查逐字解析反引號內的引用路徑、不展開省略號，判定找不到檔案。修復：僅將這
+兩處展開為完整真實路徑（`apps/api/src/modules/certificate-support/
+certificate-artifact.renderer.ts`、`packages/passenger-client/src/ride/
+native-presentation.ts`），不改動任何 Source／測試檔；與 `2479ad1e9`
+相比，九個既有 write-scope 原始碼／測試檔案逐位元組相同（`git diff
+2479ad1e9 HEAD -- <nine files>` 為空），僅本文件改動。此修復即
+`3f45fdeed`。
+
+**本輪（在 `3f45fdeed` 之後）實際環境缺口回報**：本 worktree
+`core.hooksPath` 為既有值 `.husky/_`（追蹤設定本身未變動），但該目錄
+是 husky v9 的既有 `.gitignore` 產物（`.husky/_/`，由既有 `package.json`
+`"prepare": "husky"` 腳本產生，非本任務新增或客製檔案），在這個
+rematerialize 後的 worktree 中缺漏，導致先前 `b3c76c192`／
+`70cc25778`／`2479ad1e9`／`3f45fdeed` 幾次 commit／push 實際上完全沒有
+觸發 `.husky/commit-msg`／`.husky/pre-commit`（git 在 hooksPath 目錄下找
+不到對應可執行檔，靜默略過，無錯誤、也無真實 hook 痕跡）。已以既有
+`node_modules/.bin/husky`（既有 husky 套件本身，未新增/更換套件、未
+改動 `.husky/commit-msg`／`.husky/pre-commit` 內容、`core.hooksPath`
+值不變）還原 `.husky/_`；還原後重新執行
+`python3 tools/ci/git/check_canonical_consistency.py --ci --base
+origin/dev --head HEAD`，真實輸出：
+
+```
+[consistency] l1-edit-authority: 0 finding(s)
+[consistency] cited-paths: 0 finding(s)
+[consistency] cited-decisions: 0 finding(s)
+[consistency] task-claims: 0 finding(s)
+[consistency] OK
+```
+
+本輪僅改動本文件一處章節新增；九個既有 write-scope 原始碼／測試檔案
+相對 `2479ad1e9` 仍逐位元組相同，故未重跑 unit／type 檢查（第四輪的
+171／22／193 通過數字、`tsc`/`eslint` 結果，以及第五輪 commit message
+中額外核對的 109/109（`web-share.test.tsx`／`receipt-download.test.ts`／
+`native-ride-presentation.test.ts` 三檔測試數加總）均維持原樣，非本輪
+重新產生）。本次 commit 經由還原後的 husky `commit-msg`／`pre-commit`
+正常觸發，非以 `--no-verify` 跳過。
+
 ## 第四輪獨立審查退修：已遮名輸入的星號後綴雙重遮罩（已修復）
 
 獨立 reviewer 以實際 production 公開呼叫路徑（Web mapper／native
@@ -172,11 +216,11 @@ lint 檢查，未啟動任何伺服器。
 
 ### 遮名一致性（PAX-BUREAU-RECEIPT-MASKED-NAME-CONSISTENCY-SOURCE）
 
-| 來源                                                   | 案例                                                                                                                                                                               | 結果                   |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| 來源                                                                        | 案例                                                                                                                                                                               | 結果                   |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | `apps/api/src/modules/certificate-support/certificate-artifact.renderer.ts` | 真實 `renderCertificateArtifact` 直接呼叫，`蔡→蔡○○`、`歐陽→歐陽○○`（複姓保留）、`蔡○○→蔡○○`／`蔡**→蔡**`／`蔡＊＊→蔡＊＊`（三種已遮名樣式皆不重複遮罩）、兩姓氏欄位皆缺時整列省略 | HTML／PDF 位元組皆通過 |
-| `packages/passenger-client/src/ride/native-presentation.ts` | `mapNativePassengerCertificate` 同一矩陣（蔡/歐陽/蔡○○/蔡\*\*/蔡＊＊），另保留既有 `Captured surname○○` 精確列值與遮罩執登號不變斷言                                               | 通過                   |
-| `apps/passenger-app-web/lib/ride/passenger-live.ts`    | `mapPassengerCertificate`／`mapPassengerRideAuthorityToFixture` 經真實 Web mapper 得到 `駕駛: 蔡○○`，另以 `蔡**`／`蔡＊＊` 輸入核對不重複遮罩（於 `web-share.test.tsx` 內斷言）    | 通過                   |
+| `packages/passenger-client/src/ride/native-presentation.ts`                 | `mapNativePassengerCertificate` 同一矩陣（蔡/歐陽/蔡○○/蔡\*\*/蔡＊＊），另保留既有 `Captured surname○○` 精確列值與遮罩執登號不變斷言                                               | 通過                   |
+| `apps/passenger-app-web/lib/ride/passenger-live.ts`                         | `mapPassengerCertificate`／`mapPassengerRideAuthorityToFixture` 經真實 Web mapper 得到 `駕駛: 蔡○○`，另以 `蔡**`／`蔡＊＊` 輸入核對不重複遮罩（於 `web-share.test.tsx` 內斷言）    | 通過                   |
 
 修正前基準：三個檔案改動前，上列欄位顯示未遮名原始姓氏（渲染器兩處、
 Web／native 各一處），已於 `tests/unit/pax-receipt-complaint-20261009/
