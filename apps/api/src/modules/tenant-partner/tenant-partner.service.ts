@@ -8615,56 +8615,95 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private clearWebhookRetriesForEndpoint(tenantId: string, webhookId: string) {
+    for (const delivery of this.webhookDeliveries) {
+      if (delivery.tenantId === tenantId && delivery.webhookId === webhookId) {
+        this.clearWebhookRetry(delivery.deliveryId);
+      }
+    }
+  }
+
+  private resolveLiveWebhookEndpoint(
+    tenantId: string,
+    webhookId: string,
+  ): MaybePromise<StoredWebhookEndpoint | null> {
+    const inMemory = this.webhookEndpoints.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.webhookId === webhookId,
+    );
+    const repository = this.tenantPartnerRepository;
+    if (
+      !repository?.isEnabled() ||
+      typeof repository.findNotificationWebhookEndpoint !== "function"
+    ) {
+      if (!inMemory) {
+        this.clearWebhookRetriesForEndpoint(tenantId, webhookId);
+        return null;
+      }
+      return this.cloneStoredWebhookEndpoint(inMemory);
+    }
+    return repository
+      .findNotificationWebhookEndpoint(tenantId, webhookId)
+      .then((persisted) => {
+        if (!persisted) {
+          this.clearWebhookRetriesForEndpoint(tenantId, webhookId);
+          this.webhookEndpoints = this.webhookEndpoints.filter(
+            (candidate) => candidate.webhookId !== webhookId,
+          );
+          return null;
+        }
+        return this.cloneStoredWebhookEndpoint(inMemory ?? persisted);
+      });
+  }
+
   deleteWebhookEndpoint(
     tenantId: string,
     webhookId: string,
     command?: DeleteTenantWebhookEndpointCommand,
     requestId?: string,
   ) {
-    const removed = this.webhookEndpoints.find(
-      (endpoint) =>
-        endpoint.tenantId === tenantId && endpoint.webhookId === webhookId,
-    );
-    if (!removed) {
-      return null;
-    }
-
-    for (const delivery of this.webhookDeliveries) {
-      if (
-        delivery.tenantId === tenantId &&
-        delivery.webhookId === removed.webhookId
-      ) {
-        this.clearWebhookRetry(delivery.deliveryId);
+    return this.runConfigurationCommand(tenantId, () => {
+      const removed = this.webhookEndpoints.find(
+        (endpoint) =>
+          endpoint.tenantId === tenantId && endpoint.webhookId === webhookId,
+      );
+      if (!removed) {
+        return null;
       }
-    }
 
-    this.webhookEndpoints = this.webhookEndpoints.filter(
-      (endpoint) => endpoint.webhookId !== removed.webhookId,
-    );
-    this.persistChanges(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(removed)],
-      },
-      "delete_webhook_endpoint",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "delete_webhook_endpoint",
-        resourceType: "webhook_endpoint",
-        resourceId: removed.webhookId,
-        oldValuesSummary: this.toWebhookResponse(removed),
-        newValuesSummary: {
-          deleted: true,
-          reason: command?.reason?.trim() || null,
+      const snapshot = this.cloneStoredWebhookEndpoint(removed);
+      const persisted = this.persistConfigurationChanges(
+        {
+          deletedWebhookEndpointIds: [removed.webhookId],
         },
-      },
-      requestId,
-    );
-    return { status: "deleted", webhookId };
+        "delete_webhook_endpoint",
+        tenantId,
+      );
+      return this.afterPersistence(persisted, () => {
+        this.clearWebhookRetriesForEndpoint(tenantId, removed.webhookId);
+        this.webhookEndpoints = this.webhookEndpoints.filter(
+          (endpoint) => endpoint.webhookId !== removed.webhookId,
+        );
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "delete_webhook_endpoint",
+            resourceType: "webhook_endpoint",
+            resourceId: snapshot.webhookId,
+            oldValuesSummary: this.toWebhookResponse(snapshot),
+            newValuesSummary: {
+              deleted: true,
+              reason: command?.reason?.trim() || null,
+            },
+          },
+          requestId,
+        );
+        return { status: "deleted", webhookId };
+      });
+    });
   }
 
   createWebhookEndpoint(
@@ -9129,9 +9168,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     data: Record<string, unknown> = {},
   ): Promise<StoredWebhookDelivery | null> {
     return this.runConfigurationCommand(endpoint.tenantId, async () => {
-      endpoint = this.cloneStoredWebhookEndpoint(
-        this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+      const liveEndpoint = await this.resolveLiveWebhookEndpoint(
+        endpoint.tenantId,
+        endpoint.webhookId,
       );
+      if (!liveEndpoint) {
+        if (eventType !== "tenant.webhook.test") {
+          return null;
+        }
+        this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId);
+      }
+      endpoint = liveEndpoint!;
       this.reconcileStoredWebhookEndpoint(endpoint, createdAt);
       // The publisher's initial cache selection can predate a metadata COMMIT.
       // Reapply the original live-event predicate under the configuration lock
@@ -9197,10 +9244,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         {
           webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
           webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+          requireExistingWebhookEndpoints: true,
         },
         context,
         endpoint.tenantId,
       );
+      if (
+        this.tenantPartnerRepository?.isEnabled() &&
+        typeof this.tenantPartnerRepository.findNotificationWebhookEndpoint ===
+          "function" &&
+        !(await this.tenantPartnerRepository.findNotificationWebhookEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
+        ))
+      ) {
+        this.clearWebhookRetriesForEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
+        );
+        this.webhookEndpoints = this.webhookEndpoints.filter(
+          (item) => item.webhookId !== endpoint.webhookId,
+        );
+        return null;
+      }
       this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
       this.webhookEndpoints = this.webhookEndpoints.map((item) =>
         item.webhookId === endpoint.webhookId ? endpoint : item,
@@ -9230,9 +9296,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       retryPolicySnapshot?: WebhookRetryPolicyRecord;
     },
   ): Promise<WebhookDispatchAttemptResult> {
-    endpoint = this.cloneStoredWebhookEndpoint(
-      this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+    const initialEndpoint = this.webhookEndpoints.find(
+      (candidate) =>
+        candidate.tenantId === endpoint.tenantId &&
+        candidate.webhookId === endpoint.webhookId,
     );
+    if (!initialEndpoint) {
+      this.clearWebhookRetry(delivery.deliveryId);
+      return {
+        ...this.cloneStoredWebhookDelivery(delivery),
+        nextAttemptAt: null,
+      };
+    }
+    endpoint = this.cloneStoredWebhookEndpoint(initialEndpoint);
     // An edit can also commit after enqueue or before a process resumes its
     // first interrupted attempt. Recheck the original live-event predicate
     // before sending; leave the original identity/payload/key/policy intact.
@@ -9269,9 +9345,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         signingSecret.status !== "overlap_active")
     ) {
       return this.runConfigurationCommand(endpoint.tenantId, async () => {
-        endpoint = this.cloneStoredWebhookEndpoint(
-          this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+        const liveEndpoint = await this.resolveLiveWebhookEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
         );
+        if (!liveEndpoint) {
+          this.clearWebhookRetry(delivery.deliveryId);
+          return {
+            ...this.cloneStoredWebhookDelivery(delivery),
+            nextAttemptAt: null,
+          };
+        }
+        endpoint = liveEndpoint;
         const attemptedAt = new Date().toISOString();
         delivery.attempt += 1;
         delivery.status = "delivery_failed";
@@ -9325,10 +9410,40 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           {
             webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
             webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+            requireExistingWebhookEndpoints: true,
           },
           "webhook_dispatch_secret_unavailable",
           endpoint.tenantId,
         );
+        if (
+          this.tenantPartnerRepository?.isEnabled() &&
+          typeof this.tenantPartnerRepository
+            .findNotificationWebhookEndpoint === "function" &&
+          !(await this.tenantPartnerRepository.findNotificationWebhookEndpoint(
+            endpoint.tenantId,
+            endpoint.webhookId,
+          ))
+        ) {
+          this.clearWebhookRetriesForEndpoint(
+            endpoint.tenantId,
+            endpoint.webhookId,
+          );
+          this.webhookEndpoints = this.webhookEndpoints.filter(
+            (item) => item.webhookId !== endpoint.webhookId,
+          );
+          return {
+            attempt: delivery.attempt,
+            status: delivery.status,
+            httpStatus: null,
+            signature: "",
+            attemptedAt,
+            nextAttemptAt: null,
+            signatureHeader: "",
+            signatureVersion: delivery.secretVersion,
+            secretVersion: delivery.secretVersion,
+            rawBody: { ...delivery.rawBody },
+          };
+        }
         publish();
         this.clearWebhookRetry(delivery.deliveryId);
         return {
@@ -9372,9 +9487,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       // Configuration may have changed while HTTP was in flight. Apply the
       // outcome to the current committed configuration; an old test nonce must
       // never restore an earlier URL/secret or activate the replacement.
-      endpoint = this.cloneStoredWebhookEndpoint(
-        this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+      const liveEndpoint = await this.resolveLiveWebhookEndpoint(
+        endpoint.tenantId,
+        endpoint.webhookId,
       );
+      if (!liveEndpoint) {
+        this.clearWebhookRetry(delivery.deliveryId);
+        return {
+          ...result,
+          nextAttemptAt: null,
+        };
+      }
+      endpoint = liveEndpoint;
       const currentSigningSecret = this.resolveWebhookSecretMaterial(
         endpoint,
         delivery.secretVersion,
@@ -9400,10 +9524,32 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         {
           webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
           webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+          requireExistingWebhookEndpoints: true,
         },
         "webhook_dispatch_attempt",
         endpoint.tenantId,
       );
+      if (
+        this.tenantPartnerRepository?.isEnabled() &&
+        typeof this.tenantPartnerRepository.findNotificationWebhookEndpoint ===
+          "function" &&
+        !(await this.tenantPartnerRepository.findNotificationWebhookEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
+        ))
+      ) {
+        this.clearWebhookRetriesForEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
+        );
+        this.webhookEndpoints = this.webhookEndpoints.filter(
+          (item) => item.webhookId !== endpoint.webhookId,
+        );
+        return {
+          ...result,
+          nextAttemptAt: null,
+        };
+      }
       publish();
 
       if (
@@ -10101,24 +10247,43 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ) {
-    const endpoint = this.webhookEndpoints.find(
+    const initialEndpoint = this.webhookEndpoints.find(
       (candidate) => candidate.webhookId === webhookId,
     );
     const delivery = this.webhookDeliveries.find(
       (candidate) => candidate.deliveryId === deliveryId,
     );
 
-    if (!endpoint || !delivery || delivery.status !== "queued") {
+    if (!initialEndpoint || !delivery || delivery.status !== "queued") {
       this.clearWebhookRetry(deliveryId);
-      if (!endpoint || !delivery) {
+      if (!initialEndpoint || !delivery) {
         return undefined;
       }
       return this.toDeliveryResponse(delivery, identity);
     }
 
+    const endpoint = await this.resolveLiveWebhookEndpoint(
+      initialEndpoint.tenantId,
+      webhookId,
+    );
+    if (!endpoint) {
+      this.clearWebhookRetry(deliveryId);
+      return undefined;
+    }
+
     // Passenger deliveries are owned exclusively by the consumer outbox, including after restart/manual retry.
     if (delivery.eventType.startsWith("passenger.")) return;
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
+    if (
+      !this.webhookEndpoints.some(
+        (candidate) =>
+          candidate.tenantId === endpoint.tenantId &&
+          candidate.webhookId === webhookId,
+      )
+    ) {
+      this.clearWebhookRetry(deliveryId);
+      return undefined;
+    }
     // Dispatch publishes a staged delivery only after its durable outcome ACK.
     // The pre-dispatch object still describes the queued attempt.
     const committedDelivery =
@@ -16682,10 +16847,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       if (profile)
         this.slaProfiles.set(tenantId, this.cloneSlaProfile(profile));
     }
-    if (changes.webhookEndpoints) {
-      const ids = new Set(
-        changes.webhookEndpoints.map((item) => item.webhookId),
+    if (changes.webhookEndpoints || changes.deletedWebhookEndpointIds) {
+      const ids = new Set([
+        ...(changes.webhookEndpoints?.map((item) => item.webhookId) ?? []),
+        ...(changes.deletedWebhookEndpointIds ?? []),
+      ]);
+      const canonicalIds = new Set(
+        canonical.webhookEndpoints.map((item) => item.webhookId),
       );
+      for (const deletedId of changes.deletedWebhookEndpointIds ?? []) {
+        if (!canonicalIds.has(deletedId)) {
+          this.clearWebhookRetriesForEndpoint(tenantId, deletedId);
+        }
+      }
       this.webhookEndpoints = [
         ...this.webhookEndpoints.filter((item) => !ids.has(item.webhookId)),
         ...canonical.webhookEndpoints
@@ -16726,6 +16900,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         };
         for (const key of [
           "webhookEndpoints",
+          "deletedWebhookEndpointIds",
           "webhookDeliveries",
           "quotaPolicies",
           "slaProfiles",

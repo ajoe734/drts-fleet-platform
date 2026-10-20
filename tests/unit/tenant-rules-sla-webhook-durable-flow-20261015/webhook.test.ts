@@ -3,6 +3,7 @@ import type { IdentityContext } from "@drts/contracts";
 import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import { createHmac } from "node:crypto";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { TenantPartnerController } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import { TenantPartnerService } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { WebhookDispatchService } from "../../../apps/api/src/modules/tenant-partner/webhook-dispatch.service";
 import { persistenceHarness } from "./persistence-harness";
@@ -534,7 +535,7 @@ describe("C112 durable commands and first in-flight restart", () => {
     expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe("active");
   });
 
-  it.each(["create", "edit", "disable", "rotate"] as const)(
+  it.each(["create", "edit", "disable", "delete", "rotate"] as const)(
     "%s SQL rejection restores canonical state without success audit",
     async (kind) => {
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -550,20 +551,27 @@ describe("C112 durable commands and first in-flight restart", () => {
       const pending =
         kind === "create"
           ? service.createWebhookEndpoint(tenantId, command)
-          : kind === "rotate"
-            ? service.rotateWebhookSecret(tenantId, {
-                webhookId: created!.webhookId,
-                secret: "new-secret",
+          : kind === "delete"
+            ? service.deleteWebhookEndpoint(tenantId, created!.webhookId, {
+                reason: "operator removal",
               })
-            : service.updateWebhookEndpoint(
-                tenantId,
-                created!.webhookId,
-                kind === "disable"
-                  ? { status: "disabled", disableReason: "maintenance" }
-                  : { url: command.url + "/edited" },
-              );
+            : kind === "rotate"
+              ? service.rotateWebhookSecret(tenantId, {
+                  webhookId: created!.webhookId,
+                  secret: "new-secret",
+                })
+              : service.updateWebhookEndpoint(
+                  tenantId,
+                  created!.webhookId,
+                  kind === "disable"
+                    ? { status: "disabled", disableReason: "maintenance" }
+                    : { url: command.url + "/edited" },
+                );
       await expect(Promise.resolve(pending)).rejects.toThrow("SQL rejected");
       expect(service.listWebhookEndpoints(tenantId)).toEqual(before);
+      expect((await p.repository.loadState()).webhookEndpoints).toHaveLength(
+        before.length,
+      );
       expect(auditSpy).not.toHaveBeenCalled();
     },
   );
@@ -602,7 +610,7 @@ describe("C112 durable commands and first in-flight restart", () => {
     expect(service.listWebhookEndpoints(tenantId)[0]?.status).toBe("active");
   });
 
-  it.each(["create", "edit", "disable", "rotate"] as const)(
+  it.each(["create", "edit", "disable", "delete", "rotate"] as const)(
     "%s holds cache and audit until the actual repository COMMIT",
     async (kind) => {
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -624,18 +632,22 @@ describe("C112 durable commands and first in-flight restart", () => {
       const pending =
         kind === "create"
           ? service.createWebhookEndpoint(tenantId, command)
-          : kind === "rotate"
-            ? service.rotateWebhookSecret(tenantId, {
-                webhookId: created!.webhookId,
-                secret: "new-secret",
+          : kind === "delete"
+            ? service.deleteWebhookEndpoint(tenantId, created!.webhookId, {
+                reason: "operator removal",
               })
-            : service.updateWebhookEndpoint(
-                tenantId,
-                created!.webhookId,
-                kind === "disable"
-                  ? { status: "disabled", disableReason: "maintenance" }
-                  : { url: command.url + "/edited" },
-              );
+            : kind === "rotate"
+              ? service.rotateWebhookSecret(tenantId, {
+                  webhookId: created!.webhookId,
+                  secret: "new-secret",
+                })
+              : service.updateWebhookEndpoint(
+                  tenantId,
+                  created!.webhookId,
+                  kind === "disable"
+                    ? { status: "disabled", disableReason: "maintenance" }
+                    : { url: command.url + "/edited" },
+                );
       let settled = false;
       void Promise.resolve(pending).then(() => {
         settled = true;
@@ -731,5 +743,295 @@ describe("C112 durable commands and first in-flight restart", () => {
     expect(second.fetcher).toHaveBeenCalledOnce();
     releaseHttp({ ok: true, status: 204 });
     await interrupted;
+  });
+
+  it("delete with lost COMMIT ACK reconciles canonical removal without resurrecting or stranding the endpoint", async () => {
+    vi.useFakeTimers();
+    const p = persistenceHarness();
+    const first = serviceFor(p.repository);
+    const endpoint = await first.service.createWebhookEndpoint(
+      tenantId,
+      command,
+    );
+    await first.service.sendTestWebhook(tenantId, {
+      webhookId: endpoint.webhookId,
+    });
+    first.fetcher.mockResolvedValueOnce({ ok: false, status: 503 });
+    await first.service.publishWebhookEvent(tenantId, {
+      eventType: "dispatch.assigned",
+      data: { orderId: "lost-ack-retry" },
+    });
+    const auditSpy = vi.spyOn(first.audit, "recordAuditLog");
+    first.fetcher.mockClear();
+    p.loseCommitAck();
+    await expect(
+      Promise.resolve(
+        first.service.deleteWebhookEndpoint(tenantId, endpoint.webhookId, {
+          reason: "operator removal",
+        }),
+      ),
+    ).rejects.toThrow("COMMIT ACK lost");
+    expect(
+      auditSpy.mock.calls.some(
+        ([entry]) => entry.actionName === "delete_webhook_endpoint",
+      ),
+    ).toBe(false);
+    expect(first.service.listWebhookEndpoints(tenantId)).toEqual([]);
+    expect((await p.repository.loadState()).webhookEndpoints).toEqual([]);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(first.fetcher).not.toHaveBeenCalled();
+    first.service.onModuleDestroy();
+    const second = serviceFor(p.repository);
+    await second.service.onModuleInit();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(second.service.listWebhookEndpoints(tenantId)).toEqual([]);
+    expect(second.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("delete durably removes only the target endpoint, cancels queued retries across restart, and preserves other endpoints and delivery history", async () => {
+    vi.useFakeTimers();
+    const otherTenantId = "tenant-durable-webhook-other";
+    const p = persistenceHarness();
+    const first = serviceFor(p.repository);
+    const controller = new TenantPartnerController(
+      first.service,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+    const targetEndpoint = await first.service.createWebhookEndpoint(tenantId, {
+      url: "https://receiver.example.test/target-hook",
+      secret: "target-webhook-secret",
+      events: ["dispatch.assigned"],
+    });
+    const siblingEndpoint = await first.service.createWebhookEndpoint(
+      tenantId,
+      {
+        url: "https://receiver.example.test/sibling-hook",
+        secret: "sibling-webhook-secret",
+        events: ["dispatch.assigned"],
+      },
+    );
+    const otherTenantEndpoint = await first.service.createWebhookEndpoint(
+      otherTenantId,
+      {
+        url: "https://receiver.example.test/other-tenant-hook",
+        secret: "other-tenant-secret",
+        events: ["dispatch.assigned"],
+      },
+    );
+    await first.service.sendTestWebhook(tenantId, {
+      webhookId: targetEndpoint.webhookId,
+    });
+    await first.service.sendTestWebhook(tenantId, {
+      webhookId: siblingEndpoint.webhookId,
+    });
+    await first.service.sendTestWebhook(otherTenantId, {
+      webhookId: otherTenantEndpoint.webhookId,
+    });
+
+    // Fail target endpoint delivery so a retry timer + queued delivery exist.
+    first.fetcher.mockImplementationOnce(async (url: string) => {
+      if (url === "https://receiver.example.test/target-hook") {
+        return { ok: false, status: 503 };
+      }
+      return { ok: true, status: 204 };
+    });
+    await first.service.publishWebhookEvent(tenantId, {
+      eventType: "dispatch.assigned",
+      data: { orderId: "before-delete" },
+    });
+    const targetDeliveriesBefore = first.service
+      .listWebhookDeliveries(tenantId)
+      .filter((item) => item.webhookId === targetEndpoint.webhookId)
+      .map((item) => item.deliveryId)
+      .sort();
+    expect(targetDeliveriesBefore).toHaveLength(2);
+
+    // Deleting unknown or wrong-tenant webhookId returns not_found without mutating state.
+    const missingEnvelope = await controller.deleteWebhookEndpoint(
+      "whk-non-existent",
+      { reason: "missing" },
+      tenantId,
+      "req-delete-missing",
+      retryIdentity,
+    );
+    expect(missingEnvelope.data).toEqual({ status: "not_found" });
+    const crossTenantEnvelope = await controller.deleteWebhookEndpoint(
+      otherTenantEndpoint.webhookId,
+      { reason: "wrong tenant" },
+      tenantId,
+      "req-delete-wrong-tenant",
+      retryIdentity,
+    );
+    expect(crossTenantEnvelope.data).toEqual({ status: "not_found" });
+
+    first.fetcher.mockClear();
+    const deletedEnvelope = await controller.deleteWebhookEndpoint(
+      targetEndpoint.webhookId,
+      { reason: "decommission target" },
+      tenantId,
+      "req-delete-target",
+      retryIdentity,
+    );
+    expect(deletedEnvelope.data).toEqual({
+      status: "deleted",
+      webhookId: targetEndpoint.webhookId,
+    });
+    expect(
+      p.query.mock.calls.some(
+        ([sql, values]) =>
+          sql.includes("DELETE FROM admin.phase1_tenant_webhook_endpoints") &&
+          values?.[0] === targetEndpoint.webhookId,
+      ),
+    ).toBe(true);
+    expect(
+      first.service
+        .listWebhookEndpoints(tenantId)
+        .map((item) => item.webhookId),
+    ).toEqual([siblingEndpoint.webhookId]);
+    expect(
+      (await p.repository.loadState()).webhookEndpoints.map(
+        (item) => item.webhookId,
+      ),
+    ).toEqual([siblingEndpoint.webhookId, otherTenantEndpoint.webhookId]);
+
+    // Queued retry timer for deleted endpoint must not fire.
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(first.fetcher).not.toHaveBeenCalled();
+
+    // Restart into a fresh service and verify no resurrection or retry resumption.
+    first.service.onModuleDestroy();
+    const second = serviceFor(p.repository);
+    await second.service.onModuleInit();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(second.fetcher).not.toHaveBeenCalled();
+    expect(
+      second.service
+        .listWebhookEndpoints(tenantId)
+        .map((item) => item.webhookId),
+    ).toEqual([siblingEndpoint.webhookId]);
+    expect(
+      second.service
+        .listWebhookEndpoints(otherTenantId)
+        .map((item) => item.webhookId),
+    ).toEqual([otherTenantEndpoint.webhookId]);
+    expect(
+      second.service
+        .listWebhookDeliveries(tenantId)
+        .filter((item) => item.webhookId === targetEndpoint.webhookId)
+        .map((item) => item.deliveryId)
+        .sort(),
+    ).toEqual(targetDeliveriesBefore);
+
+    // Subsequent events only dispatch to the remaining active sibling endpoint.
+    const publishedAfter = await second.service.publishWebhookEvent(tenantId, {
+      eventType: "dispatch.assigned",
+      data: { orderId: "after-delete" },
+    });
+    expect(publishedAfter.map((item) => item.webhookId)).toEqual([
+      siblingEndpoint.webhookId,
+    ]);
+    expect(second.fetcher).toHaveBeenCalledOnce();
+    expect((second.fetcher.mock.calls[0] as unknown[])[0]).toBe(
+      "https://receiver.example.test/sibling-hook",
+    );
+  });
+
+  it("in-flight HTTP delivery and cross-instance retry cannot resurrect or reinsert an endpoint deleted before outcome persistence", async () => {
+    vi.useFakeTimers();
+    const p = persistenceHarness();
+    const first = serviceFor(p.repository);
+    const second = serviceFor(p.repository);
+
+    // 1. Same-instance in-flight HTTP completing after delete commits.
+    const sameInstanceEndpoint = await first.service.createWebhookEndpoint(
+      tenantId,
+      {
+        url: "https://receiver.example.test/inflight-same",
+        secret: "inflight-same-secret",
+        events: ["dispatch.assigned"],
+      },
+    );
+    await first.service.sendTestWebhook(tenantId, {
+      webhookId: sameInstanceEndpoint.webhookId,
+    });
+    let releaseSameInstanceHttp!: (result: {
+      ok: boolean;
+      status: number;
+    }) => void;
+    first.fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseSameInstanceHttp = resolve;
+        }),
+    );
+    const inFlightPublish = first.service.publishWebhookEvent(tenantId, {
+      eventType: "dispatch.assigned",
+      data: { orderId: "inflight-same-order" },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await first.service.deleteWebhookEndpoint(
+      tenantId,
+      sameInstanceEndpoint.webhookId,
+      { reason: "delete during in-flight HTTP" },
+    );
+    releaseSameInstanceHttp({ ok: false, status: 503 });
+    await inFlightPublish;
+    first.fetcher.mockClear();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(first.fetcher).not.toHaveBeenCalled();
+    expect(
+      first.service
+        .listWebhookEndpoints(tenantId)
+        .find((item) => item.webhookId === sameInstanceEndpoint.webhookId),
+    ).toBeUndefined();
+    expect(
+      (await p.repository.loadState()).webhookEndpoints.find(
+        (item) => item.webhookId === sameInstanceEndpoint.webhookId,
+      ),
+    ).toBeUndefined();
+
+    // 2. Cross-instance: second instance has a queued retry / in-flight HTTP when first instance deletes the endpoint.
+    const crossInstanceEndpoint = await first.service.createWebhookEndpoint(
+      tenantId,
+      {
+        url: "https://receiver.example.test/inflight-cross",
+        secret: "inflight-cross-secret",
+        events: ["dispatch.assigned"],
+      },
+    );
+    await first.service.sendTestWebhook(tenantId, {
+      webhookId: crossInstanceEndpoint.webhookId,
+    });
+    await second.service.onModuleInit();
+    let releaseCrossInstanceHttp!: (result: {
+      ok: boolean;
+      status: number;
+    }) => void;
+    second.fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseCrossInstanceHttp = resolve;
+        }),
+    );
+    const crossInFlight = second.service.publishWebhookEvent(tenantId, {
+      eventType: "dispatch.assigned",
+      data: { orderId: "inflight-cross-order" },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await first.service.deleteWebhookEndpoint(
+      tenantId,
+      crossInstanceEndpoint.webhookId,
+      { reason: "deleted by first instance while second instance in flight" },
+    );
+    releaseCrossInstanceHttp({ ok: true, status: 204 });
+    await crossInFlight;
+    second.fetcher.mockClear();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(second.fetcher).not.toHaveBeenCalled();
+    expect(second.service.listWebhookEndpoints(tenantId)).toEqual([]);
+    expect((await p.repository.loadState()).webhookEndpoints).toEqual([]);
   });
 });

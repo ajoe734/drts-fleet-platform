@@ -2382,7 +2382,7 @@ export class TenantPartnerController {
   }
 
   @Delete("tenant/webhooks/:webhookId")
-  deleteWebhookEndpoint(
+  async deleteWebhookEndpoint(
     @Param("webhookId") webhookId: string,
     @Body() command: DeleteTenantWebhookEndpointCommand,
     @Headers("x-tenant-id") tenantId?: string,
@@ -2390,12 +2390,12 @@ export class TenantPartnerController {
     @CurrentIdentity() identity?: IdentityContext | null,
   ) {
     return toApiSuccessEnvelope(
-      this.tenantPartnerService.deleteWebhookEndpoint(
+      (await this.tenantPartnerService.deleteWebhookEndpoint(
         this.requireTenantId(tenantId, identity),
         webhookId,
         command,
         requestId,
-      ) ?? {
+      )) ?? {
         status: "not_found",
       },
       requestId,
