@@ -4,6 +4,10 @@ import path from "node:path";
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  materializeString,
+  materializeValue,
+} from "../../e2e/operational-document-upload";
 import { POST } from "../../../apps/referral-embed-web/app/api/referral/session/route";
 import { middleware } from "../../../apps/referral-embed-web/middleware";
 import {
@@ -47,9 +51,8 @@ vi.mock("../../../apps/referral-embed-web/lib/embed-api", async (original) => ({
 }));
 
 const entrySlug = "yuhe-residence";
-// Current registered primary host, independently documented in the domain
-// runbook and returned by the controlled canonical entry GET port below.
-const canonicalHost = "app.yuhe-living.com.tw";
+// Controlled current registry response; deployment supplies real host data at runtime.
+const canonicalHost = "registered.partner.example.test";
 const staleHost = "app.fabrikam-living.example";
 const publicOrigin = "https://referral.example.test";
 const internalOrigin = "http://0.0.0.0:3014";
@@ -99,7 +102,10 @@ function deployedAllowedHosts(): string {
     ?.split("\n      - name:")[0];
   const value = step?.match(/REFERRAL_EMBED_ALLOWED_HOSTS=([^,"]+)/)?.[1];
   if (!value) throw new Error("Actual referral deployment allowlist required");
-  return value;
+  return value.replace(
+    "${{ steps.referral_entry_host.outputs.host }}",
+    canonicalHost,
+  );
 }
 function referralJourney() {
   const manifest = JSON.parse(
@@ -114,6 +120,7 @@ function referralJourney() {
     journeys: {
       id: string;
       route: string;
+      environmentVariables?: Record<string, string>;
       setup: {
         path: string;
         method: string;
@@ -176,6 +183,7 @@ describe("current canonical Referral entry deployment and original setup", () =>
       "synthetic-cookie-signing-secret",
     );
     vi.stubEnv("REFERRAL_EMBED_ALLOWED_HOSTS", deployedAllowedHosts());
+    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_ENTRY_HOST", canonicalHost);
     ports.jar.clear();
     ports.options.clear();
     ports.entry.mockReset().mockResolvedValue({ entryHost: canonicalHost });
@@ -209,7 +217,19 @@ describe("current canonical Referral entry deployment and original setup", () =>
 
   it("executes the actual original manifest bootstrap then requires explicit consent before active cookies", async () => {
     const { journey, setup } = referralJourney();
-    const response = await POST(request(setup.body));
+    const variables: Record<string, string> = {};
+    for (const [key, name] of Object.entries(
+      journey.environmentVariables ?? {},
+    )) {
+      const value = process.env[name];
+      if (!value) throw new Error("Missing runtime manifest variable");
+      variables[key] = value;
+    }
+    const command = materializeValue(setup.body, variables);
+    if (!command || typeof command !== "object" || Array.isArray(command))
+      throw new Error("Manifest bootstrap object required");
+    const route = materializeString(journey.route, variables);
+    const response = await POST(request(command));
     expect(response.status).toBe(200);
     expect(setup.path).toBe("/api/referral/session");
     expect(setup.method).toBe("POST");
@@ -217,7 +237,7 @@ describe("current canonical Referral entry deployment and original setup", () =>
     expect(body.session.identityActive).toBe(false);
     expect(body.session).not.toHaveProperty("accessToken");
     expect(body.session).not.toHaveProperty("sessionId");
-    expect(body.nextPath).toBe(journey.route);
+    expect(body.nextPath).toBe(route);
     expect(ports.entry).toHaveBeenCalledWith(entrySlug);
     expect(ports.issue).toHaveBeenCalledWith({
       entrySlug,
@@ -235,8 +255,7 @@ describe("current canonical Referral entry deployment and original setup", () =>
     expect((await getReferralEmbedSession())?.identityActive).toBe(false);
     expect(
       navigation(
-        new URL(journey.route, publicOrigin).searchParams.get("entryHost") ??
-          "",
+        new URL(route, publicOrigin).searchParams.get("entryHost") ?? "",
       ).status,
     ).toBe(200);
 
