@@ -1926,6 +1926,18 @@ jobs:
           headers_file="$(mktemp)"
           trap 'rm -f "$body_file" "$headers_file"' EXIT
 
+          handoff_failure() {
+            local phase="$1" status="$2" code
+            [[ "$status" =~ ^[0-9]{3}$ ]] || status="unavailable"
+            code="$(jq -r '.error.code // .code // empty' "$body_file" 2>/dev/null)" || code=""
+            case "$code" in
+              WORKLOAD_ROUTE_SCOPE_DENIED|REFERRAL_HANDOFF_REPLAYED|REFERRAL_HANDOFF_HOST_MISMATCH) ;;
+              *) code="unavailable" ;;
+            esac
+            echo "::error::Referral embed handoff ${phase} returned HTTP ${status}; phase=${phase}; code=${code}; validation failed." >&2
+            exit 1
+          }
+
           issue_artifact_status() {
             local partner_user_ref="$1"
             jq -nc \
@@ -1949,10 +1961,10 @@ jobs:
             local status
             status="$(issue_artifact_status "$partner_user_ref")"
             if [[ "$status" != "201" ]]; then
-              echo "::error::Referral embed handoff issuance returned HTTP ${status}: $(cat "$body_file")" >&2
-              exit 1
+              handoff_failure "issuance" "$status"
             fi
-            jq -er '.data.artifact' "$body_file"
+            jq -er '.data.artifact | select(type == "string" and length > 0)' "$body_file" 2>/dev/null \
+              || handoff_failure "issuance-payload" "$status"
           }
 
           exchange_artifact() {
@@ -1980,25 +1992,31 @@ jobs:
             # -- then stop without claiming the positive lifecycle passed.
             status="$(issue_artifact_status "deploy-smoke-pending-rollout-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
             if [[ "$status" != "403" ]] || ! jq -e '.error.code == "WORKLOAD_ROUTE_SCOPE_DENIED"' "$body_file" >/dev/null 2>&1; then
-              echo "::error::Expected the documented pending-rollout rejection (403 WORKLOAD_ROUTE_SCOPE_DENIED) but got HTTP ${status}: $(cat "$body_file")" >&2
-              exit 1
+              handoff_failure "pending-rollout" "$status"
             fi
             echo "::warning::referral embed handoff WIF registry rollout (docs/02-architecture/internal-key-exceptions.md §10.3) has not landed yet; fail-closed rejection confirmed, issue/consume/replay/cross-host lifecycle deferred until ops applies it."
           else
             artifact="$(issue_artifact "deploy-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
-            [[ "$(exchange_artifact "$artifact" "$entry_host")" == "200" ]]
-            jq -e '.ok == true' "$body_file" >/dev/null
-            grep -Eqi '^set-cookie: drts_referral_embed_session=' "$headers_file"
+            status="$(exchange_artifact "$artifact" "$entry_host")"
+            [[ "$status" == "200" ]] || handoff_failure "consume-status" "$status"
+            jq -e '.ok == true' "$body_file" >/dev/null 2>&1 \
+              || handoff_failure "consume-payload" "$status"
+            grep -Eqi '^set-cookie: drts_referral_embed_session=' "$headers_file" \
+              || handoff_failure "consume-cookie" "$status"
 
-            [[ "$(exchange_artifact "$artifact" "$entry_host")" == "400" ]]
-            jq -e \
-              '.ok == false and .message == "The referral handoff artifact has already been consumed."' \
-              "$body_file" >/dev/null
+            status="$(exchange_artifact "$artifact" "$entry_host")"
+            if [[ "$status" != "409" ]] || ! jq -e \
+              '.ok == false and .code == "REFERRAL_HANDOFF_REPLAYED" and .message == "The referral handoff artifact has already been consumed."' \
+              "$body_file" >/dev/null 2>&1; then
+              handoff_failure "replay" "$status"
+            fi
             artifact_for_wrong_host="$(issue_artifact "deploy-smoke-cross-host-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
-            [[ "$(exchange_artifact "$artifact_for_wrong_host" "evil.example")" == "400" ]]
-            jq -e \
-              '.ok == false and .message == "The referral handoff artifact is not valid for this entry host."' \
-              "$body_file" >/dev/null
+            status="$(exchange_artifact "$artifact_for_wrong_host" "evil.example")"
+            if [[ "$status" != "403" ]] || ! jq -e \
+              '.ok == false and .code == "REFERRAL_HANDOFF_HOST_MISMATCH" and .message == "The referral handoff artifact is not valid for this entry host."' \
+              "$body_file" >/dev/null 2>&1; then
+              handoff_failure "wrong-host" "$status"
+            fi
           fi
 
       - name: Print dev URLs
