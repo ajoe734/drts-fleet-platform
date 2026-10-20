@@ -1,6 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   voiceDialogueSnapshotContentSchema,
+  voiceToolResultSchemas,
+  type VoiceCapabilityScope,
   type VoiceDialogueOutput,
 } from "@drts/contracts";
 import {
@@ -45,6 +47,7 @@ export interface VoiceCallTurnSpeaker {
     languageCode: string,
     signal: AbortSignal,
     mediaEpoch: number,
+    controlledPlaybackId?: string,
   ): Promise<void>;
   /** The session's *live* media-authority epoch, read fresh on every call
    * -- never the snapshot captured when a transcript arrived (Codex
@@ -337,10 +340,6 @@ interface TurnSession {
 }
 
 const DEFAULT_TURN_TIMEOUT_MS = 8_000;
-const HANDOFF_CAPABILITY_SCOPES: readonly ["session_execute", "handoff_request"] = [
-  "session_execute",
-  "handoff_request",
-];
 
 /**
  * The real session.event -> bounded-turn composition that
@@ -490,7 +489,10 @@ export class VoiceCallTurnCoordinator {
    * supplies one yet (no call-admission flow exists -- see
    * `../dialogue/voice-session-binding.ts`'s own doc); this is the
    * composition seam a future one calls through. */
-  attach(sessionId: string, binding?: VoiceSessionBinding): VoiceCallAttachment {
+  attach(
+    sessionId: string,
+    binding?: VoiceSessionBinding,
+  ): VoiceCallAttachment {
     const attachment: VoiceCallAttachment = { sessionId };
     const turnSession: TurnSession = {
       // One engine per attachment: `VoiceDialogueEngine.turn` guards itself
@@ -665,7 +667,8 @@ export class VoiceCallTurnCoordinator {
           snapshot.sessionVersion <= restoration.session.sessionVersion &&
           snapshot.inputEpoch <= restoration.session.inputEpoch &&
           new Date(snapshot.retentionExpiresAt).getTime() > Date.now() &&
-          voiceDialogueSnapshotContentSchema.safeParse(snapshot.content).success;
+          voiceDialogueSnapshotContentSchema.safeParse(snapshot.content)
+            .success;
         if (!snapshotCorrelates) {
           throw new Error(
             "voice_restore_snapshot_mismatch: the restored dialogue-snapshot does not correlate with this session's authoritative revision, or has already expired.",
@@ -1114,10 +1117,7 @@ export class VoiceCallTurnCoordinator {
     if (evictable.length > MAX_CONTROL_EVENT_BACKLOG) {
       const oldest = evictable[0]!;
       const evictIndex = turnSession.pendingControlEvents.indexOf(oldest);
-      const [evicted] = turnSession.pendingControlEvents.splice(
-        evictIndex,
-        1,
-      );
+      const [evicted] = turnSession.pendingControlEvents.splice(evictIndex, 1);
       evicted?.settle?.reject(
         new Error(
           "voice_control_event_evicted: backlog capacity exceeded before this never-attempted observation could be delivered.",
@@ -1138,7 +1138,9 @@ export class VoiceCallTurnCoordinator {
     // currently awaiting (if any) is preserved -- its own HTTP attempt is
     // already in flight and may yet durably land -- every OTHER queued
     // entry is rejected and removed.
-    if (turnSession.pendingControlEvents.length > MAX_TOTAL_CONTROL_EVENT_BACKLOG) {
+    if (
+      turnSession.pendingControlEvents.length > MAX_TOTAL_CONTROL_EVENT_BACKLOG
+    ) {
       const inFlight = turnSession.inFlightControlEvent;
       const stuck = turnSession.pendingControlEvents.filter(
         (candidate) => candidate !== inFlight,
@@ -1399,7 +1401,10 @@ export class VoiceCallTurnCoordinator {
     // either.
     if (!turnSession || turnSession.restoreFailed) return;
 
-    if (event.type === "speech.started" || event.type === "media.epoch.advanced") {
+    if (
+      event.type === "speech.started" ||
+      event.type === "media.epoch.advanced"
+    ) {
       turnSession.inputEpoch += 1;
       turnSession.activeAbort?.abort();
       // R4-control (Codex reopen round 16/17): a real `speech.started`
@@ -1637,7 +1642,31 @@ export class VoiceCallTurnCoordinator {
       !turnSession.released &&
       turnSession.activeAbort === abortController &&
       !abortController.signal.aborted;
-    if (result.prompt && isCurrent) {
+    const readbackRaw = result.results.find(
+      (value: unknown) =>
+        typeof value === "object" && value !== null && "confirmation" in value,
+    );
+    const readback =
+      readbackRaw === undefined
+        ? undefined
+        : voiceToolResultSchemas.prepare_booking_readback.parse(readbackRaw);
+    const plan = readback?.confirmation;
+    if (
+      plan &&
+      (readback!.script !== plan.script ||
+        readback!.playbackTaskId !== plan.readbackPlaybackId ||
+        plan.templateVersion !== "zh-TW-booking-v1" ||
+        plan.expectedDigit !== "1" ||
+        createHash("sha256").update(plan.script).digest("hex") !==
+          plan.readbackScriptHash ||
+        !Number.isFinite(Date.parse(plan.expiresAt)) ||
+        Date.parse(plan.expiresAt) <= Date.now())
+    )
+      throw new Error("voice_readback_invalid");
+    const spoken = plan?.script ?? result.prompt;
+    if (plan && isCurrent)
+      turnSession.state.confirmationId = plan.confirmationId;
+    if (spoken && isCurrent) {
       // Deliberately not awaited (Codex reopen round 3, R3): the engine
       // stage above (`propose`/`persist`/`execute`) is what needs
       // per-attachment serialization against `VoiceDialogueEngine`'s own
@@ -1653,13 +1682,16 @@ export class VoiceCallTurnCoordinator {
       // `VoiceSessionComposer.attach`), so a superseded result it
       // eventually produces is still fenced from ever reaching the caller.
       void speaker
-        .speak(result.prompt, languageCode, abortController.signal, mediaEpoch)
+        .speak(
+          spoken,
+          languageCode,
+          abortController.signal,
+          mediaEpoch,
+          plan?.readbackPlaybackId,
+        )
         .catch((error) => {
           if (!this.isExpectedSupersession(error)) {
-            console.error(
-              "[voice-call-turn-coordinator] speak failed",
-              error,
-            );
+            console.error("[voice-call-turn-coordinator] speak failed", error);
           }
         });
     }
@@ -1684,15 +1716,7 @@ export class VoiceCallTurnCoordinator {
   ): Promise<unknown[]> {
     const { state } = turnSession;
     if (output.tools.length === 0) return [];
-    const onlyHandoffRequested = output.tools.every(
-      (tool) => tool.name === "request_handoff",
-    );
-    if (!onlyHandoffRequested) {
-      // A tool other than `request_handoff` needs the unreachable
-      // domain-execution channel (see class doc) to resolve honestly.
-      // Force the same outcome a genuinely unavailable provider would
-      // produce, instead of fabricating a location/eligibility/readback/
-      // booking-status result this worker has no way to verify.
+    if (!turnSession.binding || !this.apiClient) {
       state.handoff = { reason: "provider_unavailable", intent: output.intent };
       return output.tools.map(() => ({
         status: "unavailable" as const,
@@ -1700,13 +1724,19 @@ export class VoiceCallTurnCoordinator {
       }));
     }
 
-    // Codex reopen round 5/6, R4: when this attachment has a real
-    // `VoiceSessionBinding` and the coordinator has a real `apiClient`,
-    // `request_handoff` is executed through the actual
-    // `VoiceToolGatewayService.execute` repair anchor (apps/api) instead of
-    // a local stub -- see `attach()`'s doc. Any other attachment (today,
-    // every one -- no call-admission flow supplies a binding yet) keeps
-    // the existing honest local stub unchanged.
+    // Codex reopen round 5/6, R4 (generalized, AUDIT-VOICE-APPLICATION-
+    // REGRESSION-20261018): when this attachment has a real
+    // `VoiceSessionBinding` and the coordinator has a real `apiClient`, the
+    // WHOLE batch of (reachable) tool proposals is executed in one call
+    // through the actual `VoiceToolGatewayService.execute` repair anchor
+    // (apps/api) instead of a local stub -- see `attach()`'s doc. The
+    // gateway itself already loops over every proposal in `output.tools`
+    // (or its own authoritative override, e.g. forcing a single
+    // `request_handoff` for an emergency/complaint intent) inside that one
+    // HTTP call; a worker-side per-tool loop calling the SAME endpoint
+    // once per matching tool would redundantly re-submit the identical
+    // `output` and double-count `response.results` for a batch with more
+    // than one matching proposal.
     //
     // R6 (same reopen, residual): `request.signal` is this stage's own
     // bounded controller (see `dialogue-engine.ts#boundedStage`) -- already
@@ -1722,47 +1752,65 @@ export class VoiceCallTurnCoordinator {
     // counter, which may already have been bumped past this turn's own
     // admitted value by the same supersession that aborted
     // `request.signal`) and never the pre-residual `request.inputEpoch`
-    // either -- is what is submitted, so this turn's `request_handoff`
-    // CAS references the SAME authoritative watermark `persist` already
+    // either -- is what is submitted, so this turn's tool-execution CAS
+    // references the SAME authoritative watermark `persist` already
     // admitted it under, and a stale proposal can never be laundered
     // under a newer epoch merely because the HTTP call happened to still
     // be let through. `execute` only ever runs after this same turn's
     // `persist` stage has already set it (see `VoiceDialogueEngine.turn`'s
     // own stage order), so this is never undefined on a bound attachment
     // in practice; the local counter is kept as a defensive fallback only.
-    if (turnSession.binding && this.apiClient) {
-      const binding = turnSession.binding;
-      const authoritativeInputEpoch =
-        turnSession.authoritativeInputEpoch ?? request.inputEpoch;
-      const results: unknown[] = [];
-      for (const tool of output.tools) {
-        if (tool.name !== "request_handoff") continue;
-        request.signal.throwIfAborted();
-        const capability = await this.apiClient.issueCapability(
-          {
-            voiceSessionId: binding.voiceSessionId,
-            resourceScopeId: binding.resourceScopeId,
-            routeProfileVersion: binding.routeProfileVersion,
-            leaseEpoch: binding.leaseEpoch,
-            scopes: HANDOFF_CAPABILITY_SCOPES,
-          },
-          request.signal,
-        );
-        request.signal.throwIfAborted();
-        const response = await this.apiClient.requestHandoff(
-          binding.voiceSessionId,
-          capability.token,
-          { inputEpoch: authoritativeInputEpoch, output },
-          request.signal,
-        );
-        results.push(...response.results);
-      }
-      return results;
+    const binding = turnSession.binding;
+    const authoritativeInputEpoch =
+      turnSession.authoritativeInputEpoch ?? request.inputEpoch;
+    // Each tool proposal needs its own scope on the minted capability (SD
+    // §6.3 tool-level scope fencing -- see `assertVoiceCapabilityScope`);
+    // `session_execute` is required for every proposal regardless of name.
+    const scopes = new Set<VoiceCapabilityScope>(["session_execute"]);
+    for (const tool of output.tools) {
+      if (tool.name === "resolve_location") scopes.add("address_resolve");
+      else if (tool.name === "get_bound_booking_status")
+        scopes.add("order_read_bound");
+      else if (tool.name === "request_handoff") scopes.add("handoff_request");
     }
-
-    return output.tools.map(() => ({
-      status: "unavailable" as const,
-      handoffId: null,
-    }));
+    request.signal.throwIfAborted();
+    const capability = await this.apiClient.issueCapability(
+      {
+        voiceSessionId: binding.voiceSessionId,
+        resourceScopeId: binding.resourceScopeId,
+        routeProfileVersion: binding.routeProfileVersion,
+        leaseEpoch: binding.leaseEpoch,
+        scopes: [...scopes],
+      },
+      request.signal,
+    );
+    request.signal.throwIfAborted();
+    const response = await this.apiClient.requestHandoff(
+      binding.voiceSessionId,
+      capability.token,
+      { inputEpoch: authoritativeInputEpoch, output },
+      request.signal,
+    );
+    request.signal.throwIfAborted();
+    for (let i = 0; i < output.tools.length; i++) {
+      const tool = output.tools[i]!;
+      const value = response.results[i] as {
+        candidates?: Array<{
+          placeId: string;
+          label: string;
+          region: string;
+          entranceId?: string;
+        }>;
+      };
+      if (tool.name === "resolve_location" && value?.candidates) {
+        const field =
+          tool.args.field ??
+          (["pickup", "dropoff"] as const).find(
+            (key) => state.slots[key]?.rawText === tool.args.query,
+          );
+        if (field) state.unresolvedAddress(field, value.candidates, false);
+      }
+    }
+    return [...response.results];
   }
 }

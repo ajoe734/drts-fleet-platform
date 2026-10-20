@@ -1,5 +1,6 @@
 import type {
   VoiceCapabilityScope,
+  VoiceRecordingContinuationEvent,
   VoiceCapabilityTokenEnvelope,
   VoiceDialogueSnapshotContent,
 } from "@drts/contracts";
@@ -25,6 +26,24 @@ import type { WorkloadIdentityTokenSource } from "./workload-identity-token-sour
  * this client method exists so a future caller has a real seam to call
  * through rather than none at all.
  */
+/** apps/api's global SnakeCaseInterceptor emits canonical wire keys. Match
+ * the existing SDK's recursive response conversion before any typed worker
+ * consumer sees a session, snapshot, recording event or readback plan. Opaque
+ * values (ids, hashes, credentials and model strings) are never rewritten. */
+function fromVoiceApiWire(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(fromVoiceApiWire);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [
+        key.replace(/_([a-z])/g, (_match, letter: string) =>
+          letter.toUpperCase(),
+        ),
+        fromVoiceApiWire(nested),
+      ]),
+    );
+  return value;
+}
+
 export class VoiceApiError extends Error {
   constructor(
     readonly code: string,
@@ -50,6 +69,7 @@ export interface IssueCapabilityCommand {
 }
 
 export interface GetSessionResult {
+  recordingContext?: { brandId: string; callId: string };
   session: {
     voiceSessionId: string;
     resourceScopeId: string;
@@ -220,11 +240,21 @@ export interface RequestHandoffCommand {
   output: unknown;
 }
 
+/**
+ * AUDIT-VOICE-APPLICATION-REGRESSION-20261018: despite this route/method's
+ * name, apps/api's `VoiceToolGatewayService.execute` (which this call
+ * reaches, see `VoiceBookingController.requestHandoff`) already runs the
+ * WHOLE submitted `output.tools` batch, not only `request_handoff` -- each
+ * element of `results` is whichever `voiceToolResultSchemas[tool.name]`
+ * shape that proposal's own tool produced, in proposal order. Kept as
+ * `unknown` rather than a discriminated union: this client has no local
+ * copy of `voiceDialogueOutputSchema`'s own per-tool result schemas to
+ * stay in sync with, and the caller (`VoiceCallTurnCoordinator.
+ * executeTools`) only ever forwards these untouched as this turn's own
+ * tool-call results.
+ */
 export interface RequestHandoffResult {
-  results: ReadonlyArray<{
-    status: "queued" | "connected" | "unavailable";
-    handoffId: string | null;
-  }>;
+  results: ReadonlyArray<unknown>;
 }
 
 /** Mirrors `RecordControlEventCommand` (apps/api's
@@ -317,6 +347,30 @@ export class VoiceApiClient {
    * webhook never created one; the caller must treat that as "stay on
    * the fixture-only path for this attachment," not an admission failure.
    */
+  async appendRecordingEvent(
+    voiceSessionId: string,
+    event: VoiceRecordingContinuationEvent,
+    signal?: AbortSignal,
+  ): Promise<{ event: VoiceRecordingContinuationEvent }> {
+    return this.requestWithWorkloadIdentity(
+      "POST",
+      `/callcenter/voice/sessions/${encodeURIComponent(voiceSessionId)}/recording-events`,
+      event,
+      signal,
+    );
+  }
+  async getRecordingEvents(
+    voiceSessionId: string,
+    signal?: AbortSignal,
+  ): Promise<{ events: VoiceRecordingContinuationEvent[] }> {
+    return this.requestWithWorkloadIdentity(
+      "GET",
+      `/callcenter/voice/sessions/${encodeURIComponent(voiceSessionId)}/recording-events`,
+      undefined,
+      signal,
+    );
+  }
+
   async getSession(
     voiceSessionId: string,
     signal?: AbortSignal,
@@ -501,6 +555,21 @@ export class VoiceApiClient {
     });
   }
 
+  private async requestWithWorkloadIdentity<T>(
+    method: string,
+    path: string,
+    body: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    signal?.throwIfAborted();
+    const token = await this.raceAgainstAbort(
+      signal,
+      this.workloadTokenSource.getToken(signal),
+    );
+    signal?.throwIfAborted();
+    return this.request<T>(method, path, token, body, signal);
+  }
+
   private async request<T>(
     method: string,
     path: string,
@@ -539,7 +608,10 @@ export class VoiceApiClient {
       // surface as a clear, bounded failure, never be swallowed into a
       // `null` body that then crashes `response.ok` success handling
       // below with an unrelated TypeError.
-      if (err instanceof Error && err.message.startsWith("voice_api_client_aborted")) {
+      if (
+        err instanceof Error &&
+        err.message.startsWith("voice_api_client_aborted")
+      ) {
         throw new VoiceApiError("VOICE_API_UNREACHABLE", err.message);
       }
       parsed = null;
@@ -565,10 +637,11 @@ export class VoiceApiClient {
       // rejection (fail closed immediately).
       throw new VoiceApiError(
         envelope.error?.code ?? "VOICE_API_UNSTRUCTURED_RESPONSE",
-        envelope.error?.message ?? `apps/api '${path}' returned HTTP ${response.status}.`,
+        envelope.error?.message ??
+          `apps/api '${path}' returned HTTP ${response.status}.`,
       );
     }
 
-    return (parsed as { data: T }).data;
+    return fromVoiceApiWire((parsed as { data: unknown }).data) as T;
   }
 }

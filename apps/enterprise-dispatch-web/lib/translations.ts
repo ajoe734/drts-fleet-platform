@@ -243,6 +243,22 @@ const en = {
   "trip.time": "Time",
   "trip.costCenter": "Cost ownership",
   "trip.contactDriver": "Contact driver",
+  "trip.contactLoading": "Getting current driver contact…",
+  "trip.contactReady": "Calling through the current driver's masked number.",
+  "trip.contactExpired":
+    "The contact option expired. Try again for the current driver.",
+  "trip.contactNoDriver":
+    "There is no current driver contact for this trip. Refresh or contact support.",
+  "trip.contactDenied":
+    "You do not have access to this trip's driver contact. Sign in again or contact support.",
+  "trip.contactMissing": "This booking is no longer available.",
+  "trip.contactError": "Driver contact could not be loaded. Please try again.",
+  "trip.contactProviderUnavailable":
+    "Masked driver calling is unavailable. You can contact support.",
+  "trip.contactProviderError":
+    "Driver calling is temporarily unavailable. You can try again or contact support.",
+  "trip.contactTerminal": "Driver contact is unavailable after the trip ends.",
+
   "trip.contactSupport": "Enterprise support",
   "trip.detail": "Booking details",
   "trip.driverContactUnavailable": "Driver contact isn't available yet",
@@ -923,6 +939,19 @@ const zh: Record<TranslationKey, string> = {
   "trip.time": "時間",
   "trip.costCenter": "費用歸屬",
   "trip.contactDriver": "聯絡司機",
+  "trip.contactLoading": "正在取得目前司機的聯絡方式…",
+  "trip.contactReady": "正在透過目前司機的遮罩號碼撥號。",
+  "trip.contactExpired": "聯絡方式已到期，請重試以取得目前司機的聯絡方式。",
+  "trip.contactNoDriver": "此行程尚無可聯絡的司機，請重新整理或聯絡客服。",
+  "trip.contactDenied":
+    "您無法使用此行程的司機聯絡功能，請重新登入或聯絡客服。",
+  "trip.contactMissing": "此預約已不存在。",
+  "trip.contactError": "無法取得司機聯絡方式，請稍後重試。",
+  "trip.contactProviderUnavailable":
+    "司機遮罩通話目前無法使用，您仍可聯絡客服。",
+  "trip.contactProviderError": "司機通話暫時無法使用，請重試或聯絡客服。",
+  "trip.contactTerminal": "行程結束後無法再聯絡司機。",
+
   "trip.contactSupport": "企業客服",
   "trip.detail": "預約詳情",
   "trip.driverContactUnavailable": "司機聯絡資訊暫不提供",

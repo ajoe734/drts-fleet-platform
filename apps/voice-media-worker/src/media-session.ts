@@ -343,20 +343,28 @@ export class VoiceMediaWorkerSession {
     occurredAt: string,
     isStillValid?: () => boolean,
     cancelOn?: AbortSignal,
+    controlledPlaybackId?: string,
   ): Promise<VoiceTtsPlaybackHandle> {
     const generation = this.activeGeneration;
-    const handle = await this.ttsAdapter.synthesize({
+    if (controlledPlaybackId && this.playbacksById.has(controlledPlaybackId))
+      throw new Error("voice_playback_identity_reused");
+    const synthesized = await this.ttsAdapter.synthesize({
       sessionId: this.sessionId,
       text,
       languageCode,
       generation,
     });
+    const handle = controlledPlaybackId
+      ? { ...synthesized, playbackId: controlledPlaybackId }
+      : synthesized;
     if (
       generation !== this.activeGeneration ||
       (isStillValid && !isStillValid())
     ) {
       return { ...handle, audioChunks: [] };
     }
+    if (controlledPlaybackId && this.playbacksById.has(controlledPlaybackId))
+      throw new Error("voice_playback_identity_reused");
     this.playbacksById.set(handle.playbackId, {
       playbackId: handle.playbackId,
       generation,

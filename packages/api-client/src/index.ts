@@ -1,6 +1,8 @@
 import type { TenantInvoiceMailView } from "@drts/contracts";
 import type {
   VoiceCallbackCreateRequest,
+  VoiceContactCorrection,
+  VoiceContactRolesView,
   VoiceCallbackCreateResponse,
   VoiceCallbackOperation,
   VoiceCallbackOperationRequest,
@@ -1939,6 +1941,24 @@ export class ApiClient {
   async getVoiceCallbackCreateReceipt(actionKey: string) {
     return this.get<VoiceCallbackCreateResponse>(
       `/api/voice/callback-receipts?${new URLSearchParams({ actionKey })}`,
+    );
+  }
+
+  async getVoiceContactRoles(sessionId: string) {
+    return this.get<{ contacts: VoiceContactRolesView | null }>(
+      `/api/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/contacts`,
+    );
+  }
+  async correctVoiceContact(
+    sessionId: string,
+    command: VoiceContactCorrection,
+  ) {
+    return this.post<{
+      contacts: VoiceContactRolesView | null;
+      confirmationInvalidated: boolean;
+    }>(
+      `/api/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/contacts`,
+      { body: command },
     );
   }
 

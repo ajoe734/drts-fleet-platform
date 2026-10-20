@@ -22,6 +22,7 @@ type RouteSpec = {
   label: string;
   path: string;
   markers: RegExp[];
+  messageCode?: string;
 };
 
 function embedPath(state: string, screen?: string) {
@@ -130,25 +131,29 @@ const fallbackSpecs: RouteSpec[] = [
     screenshot: "16-fb-vehicle-change.png",
     label: "vehicle_change_in_progress",
     path: embedPath("handoff", "vehicle_change_in_progress"),
-    markers: [/正在為您重新安排車輛/, /messageCode · pax\.fallback\.vehicle_change\.body/],
+    markers: [/正在為您重新安排車輛/, /您的車輛正在重新安排/],
+    messageCode: "pax.fallback.vehicle_change.body",
   },
   {
     screenshot: "17-fb-human-assigned.png",
     label: "human_fallback_assigned",
     path: embedPath("handoff", "human_fallback_assigned"),
-    markers: [/新車已為您指派/, /messageCode · pax\.fallback\.human_assigned\.body/],
+    markers: [/新車已為您指派/, /已為您指派新的車輛前往接您/],
+    messageCode: "pax.fallback.human_assigned.body",
   },
   {
     screenshot: "18-fb-service-continuing.png",
     label: "service_continuing",
     path: embedPath("handoff", "service_continuing"),
-    markers: [/行程繼續進行/, /messageCode · pax\.fallback\.service_continuing\.body/],
+    markers: [/行程繼續進行/, /您的行程正常進行中/],
+    messageCode: "pax.fallback.service_continuing.body",
   },
   {
     screenshot: "19-fb-eta-updated.png",
     label: "eta_updated",
     path: embedPath("handoff", "eta_updated"),
-    markers: [/預計時間已更新/, /messageCode · pax\.fallback\.eta_updated\.body/],
+    markers: [/預計時間已更新/, /預計上車時間已更新/],
+    messageCode: "pax.fallback.eta_updated.body",
   },
 ];
 
@@ -189,6 +194,9 @@ test.describe("referral embed 15-screen parity", () => {
         await expect(page.locator("body")).toContainText(
           "同一筆行程繼續 · 不會重新下單，也不會加收費用。",
         );
+        await expect(
+          page.locator(`[data-message-code="${route.messageCode}"]`),
+        ).toHaveCount(1);
         await page.screenshot({
           path: path.join(screenshotDir, route.screenshot),
           fullPage: true,

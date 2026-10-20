@@ -2,13 +2,20 @@
   "$schema": "https://drts.local/schemas/operational-browser-journeys.v2.json",
   "version": 2,
   "candidateSha": "__SET_DRTS_CANDIDATE_SHA__",
+  "fleetApplicationSetup": {
+    "fleetPartnerId": "fleet-demo-001",
+    "tenantId": "10000000-0000-0000-0000-000000000201"
+  },
   "journeys": [
     {
       "id": "referral-create-read-cancel-receipt",
       "surface": "referral",
       "baseUrlEnv": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
-      "route": "/embed/yuhe-residence?screen=book",
+      "route": "/embed/yuhe-residence?state=consent&entryHost={{referralEntryHost}}",
       "actorScope": "partner-scoped referral passenger",
+      "environmentVariables": {
+        "referralEntryHost": "DRTS_OPERATIONAL_REFERRAL_ENTRY_HOST"
+      },
       "setup": [
         {
           "path": "/api/referral/session",
@@ -16,11 +23,21 @@
           "body": {
             "action": "demo-bootstrap",
             "entrySlug": "yuhe-residence",
-            "entryHost": "app.fabrikam-living.example"
+            "entryHost": "{{referralEntryHost}}"
           }
         }
       ],
       "operations": [
+        {
+          "kind": "navigation",
+          "name": "explicit-consent",
+          "control": "form[action='/api/referral/session'] button[type='submit']",
+          "expectedPath": "/embed/yuhe-residence",
+          "expectedQuery": {
+            "state": "handoff",
+            "screen": "book"
+          }
+        },
         {
           "kind": "request",
           "name": "create",
@@ -29,12 +46,12 @@
             {
               "kind": "fill",
               "control": "input[name='pickupAddress']",
-              "value": "台北車站"
+              "value": "新北市板橋區縣民大道二段7號"
             },
             {
               "kind": "fill",
               "control": "input[name='dropoffAddress']",
-              "value": "桃園國際機場 T2"
+              "value": "臺北市信義區市府路1號"
             }
           ],
           "requestUrlIncludes": "/api/referral/booking",
@@ -350,14 +367,18 @@
         {
           "kind": "request",
           "name": "approve",
-          "control": "[data-drt-operation='admin-approve']",
+          "control": "button:has-text(\"確認核可\"), button:has-text(\"Confirm approval\")",
           "before": [
             {
               "kind": "click",
               "control": "[data-drt-operation='admin-start-review']"
+            },
+            {
+              "kind": "click",
+              "control": "[data-drt-operation='admin-approve']"
             }
           ],
-          "requestUrlIncludes": "/control-plane-proxy/",
+          "requestUrlIncludes": "/control-plane-proxy/admin/supply-review/submissions/{{adminSubmissionId}}/approve",
           "requestMethod": "POST",
           "responseKind": "json",
           "resultIdPath": "data.submission_id",

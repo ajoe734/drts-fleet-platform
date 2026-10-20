@@ -8,7 +8,11 @@
     "emitDecoratorMetadata": true,
     "paths": {
       "@drts/contracts": ["packages/contracts/src/index.ts"],
-      "@drts/control-plane-auth": ["packages/control-plane-auth/src/index.ts"]
+      "@drts/control-plane-auth/review-driver-web": [
+        "packages/control-plane-auth/src/review-driver-web.ts"
+      ],
+      "@drts/control-plane-auth": ["packages/control-plane-auth/src/index.ts"],
+      "@drts/ui-tokens": ["packages/ui-tokens/src/index.ts"]
     },
     "types": ["node"]
   },

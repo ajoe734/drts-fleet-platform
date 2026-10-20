@@ -1538,11 +1538,13 @@ describe("tenant partner foundation service", () => {
 });
 
 describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
-  it("lists seeded referral rates and filters by entrySlug", () => {
+  it("lists seeded referral rates and filters by entrySlug", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    const all = service.listReferralRevenueShareRules();
+    const all = await service.listReferralRevenueShareRules();
     expect(all.length).toBeGreaterThanOrEqual(2);
-    expect(service.listReferralRevenueShareRules("yuhe-residence")).toEqual([
+    expect(
+      await service.listReferralRevenueShareRules("yuhe-residence"),
+    ).toEqual([
       expect.objectContaining({
         partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
         partnerEntrySlug: "yuhe-residence",
@@ -1555,7 +1557,7 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
         channelKey: "partner_referral",
       }),
     ]);
-    const filtered = service.listReferralRevenueShareRules(
+    const filtered = await service.listReferralRevenueShareRules(
       "referral-demo-community",
     );
     expect(
@@ -1563,16 +1565,16 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     ).toBe(true);
   });
 
-  it("does not expose seeded referral rates in production", () => {
+  it("does not expose seeded referral rates in production", async () => {
     const originalAppEnv = process.env.APP_ENV;
 
     process.env.APP_ENV = "production";
     try {
       const service = new TenantPartnerService(new AuditNotificationService());
 
-      expect(service.listReferralRevenueShareRules()).toEqual([]);
+      expect(await service.listReferralRevenueShareRules()).toEqual([]);
       expect(
-        service.listReferralRevenueShareRules("referral-demo-community"),
+        await service.listReferralRevenueShareRules("referral-demo-community"),
       ).toEqual([]);
     } finally {
       if (originalAppEnv === undefined) {
@@ -1583,10 +1585,10 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     }
   });
 
-  it("upserts a referral rate and writes an audit log", () => {
+  it("upserts a referral rate and writes an audit log", async () => {
     const audit = new AuditNotificationService();
     const service = new TenantPartnerService(audit);
-    const rule = service.upsertReferralRevenueShareRule({
+    const rule = await service.upsertReferralRevenueShareRule({
       partnerEntrySlug: "referral-demo-community",
       rateType: "per_trip",
       value: 5000,
@@ -1602,21 +1604,21 @@ describe("tenant partner referral revenue-share rates (CRC-BE-006)", () => {
     expect(audits.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("rejects an invalid rateType or negative value", () => {
+  it("rejects an invalid rateType or negative value", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    expect(() =>
+    await expect(
       service.upsertReferralRevenueShareRule({
         partnerEntrySlug: "x",
         rateType: "bogus" as any,
         value: 1,
       }),
-    ).toThrow();
-    expect(() =>
+    ).rejects.toThrow();
+    await expect(
       service.upsertReferralRevenueShareRule({
         partnerEntrySlug: "x",
         rateType: "percent",
         value: -5,
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 });

@@ -5,6 +5,12 @@ export function enabledRegistryRepository() {
   return new RegulatoryRegistryRepository({
     isEnabled: () => true,
     query: async () => ({ rows: [] }),
+    // Same controlled empty-row query boundary, now through the repository's
+    // actual dedicated transaction client contract as well as direct saves.
+    connect: async () => ({
+      query: async () => ({ rows: [] }),
+      release: () => undefined,
+    }),
   } as never);
 }
 

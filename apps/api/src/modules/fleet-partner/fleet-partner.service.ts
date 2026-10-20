@@ -652,10 +652,12 @@ export class FleetPartnerService implements OnModuleInit {
       if (existing) {
         existing.activeDriverIds.push(pair.driverId);
         existing.activeDriverNames.push(driver?.name ?? pair.driverId);
-        existing.currentEtaMinutes = Math.min(
-          existing.currentEtaMinutes ?? pair.etaMinutes,
-          pair.etaMinutes,
-        );
+        if (pair.etaMinutes !== null) {
+          existing.currentEtaMinutes =
+            existing.currentEtaMinutes === null
+              ? pair.etaMinutes
+              : Math.min(existing.currentEtaMinutes, pair.etaMinutes);
+        }
         continue;
       }
 

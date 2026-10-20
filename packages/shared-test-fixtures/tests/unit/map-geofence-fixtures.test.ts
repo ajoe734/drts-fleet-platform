@@ -10,10 +10,25 @@ import {
   buildMapGeofenceServiceAreaDefinitionsResponse,
   getMapGeofenceFixture,
   listMapGeofenceFixtures,
+  mapGeofenceGeometryContainsPoint,
+  mapGeofenceGeometryToGeoJson,
   MapGeofenceFixtureError,
   MAP_GEOFENCE_FIXTURE_KEYS,
   MAP_GEOFENCE_PROVIDER_UNAVAILABLE_SENTINEL,
 } from "../../src/map-geofence-fixtures";
+
+const DONUT_OUTER = [
+  { lat: 22.58, lng: 120.25 },
+  { lat: 22.58, lng: 120.35 },
+  { lat: 22.68, lng: 120.35 },
+  { lat: 22.68, lng: 120.25 },
+];
+const DONUT_HOLE = [
+  { lat: 22.61, lng: 120.28 },
+  { lat: 22.61, lng: 120.32 },
+  { lat: 22.65, lng: 120.32 },
+  { lat: 22.65, lng: 120.28 },
+];
 
 describe("map geofence fixtures", () => {
   it("publishes the expected stable fixture keys", () => {
@@ -182,6 +197,56 @@ describe("map geofence fixtures", () => {
         }),
       ]),
     );
+  });
+
+  it("serializes a polygon hole as a closed RFC 7946 CW ring alongside a CCW exterior ring", () => {
+    const geoJson = mapGeofenceGeometryToGeoJson({
+      type: "polygon",
+      coordinates: DONUT_OUTER,
+      holes: [DONUT_HOLE],
+    });
+
+    expect(geoJson.coordinates).toHaveLength(2);
+    const [outerRing, holeRing] = geoJson.coordinates;
+    expect(outerRing![0]).toEqual(outerRing![outerRing!.length - 1]);
+    expect(holeRing![0]).toEqual(holeRing![holeRing!.length - 1]);
+
+    function shoelaceArea(ring: [number, number][]) {
+      let area = 0;
+      for (let i = 0; i < ring.length - 1; i += 1) {
+        const [lngA, latA] = ring[i]!;
+        const [lngB, latB] = ring[i + 1]!;
+        area += lngA * latB - lngB * latA;
+      }
+      return area / 2;
+    }
+    expect(shoelaceArea(outerRing!)).toBeGreaterThan(0);
+    expect(shoelaceArea(holeRing!)).toBeLessThan(0);
+  });
+
+  it("excludes a polygon's hole interior from containment while including its boundary and the outer region", () => {
+    const donut = {
+      type: "polygon" as const,
+      coordinates: DONUT_OUTER,
+      holes: [DONUT_HOLE],
+    };
+
+    // outer-inside
+    expect(
+      mapGeofenceGeometryContainsPoint(donut, { lat: 22.595, lng: 120.265 }),
+    ).toBe(true);
+    // hole-inside
+    expect(
+      mapGeofenceGeometryContainsPoint(donut, { lat: 22.63, lng: 120.3 }),
+    ).toBe(false);
+    // hole-edge (on the hole boundary, which is still part of the polygon)
+    expect(
+      mapGeofenceGeometryContainsPoint(donut, { lat: 22.61, lng: 120.3 }),
+    ).toBe(true);
+    // outside the exterior ring
+    expect(
+      mapGeofenceGeometryContainsPoint(donut, { lat: 22.5, lng: 120.2 }),
+    ).toBe(false);
   });
 
   it("keeps geo health deterministic for offline harness runs", () => {

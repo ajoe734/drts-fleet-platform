@@ -29,17 +29,19 @@ const partnerIdentity: IdentityContext = {
 
 describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽匯出", () => {
   describe("1. C086: 用量→分潤→對帳明細→CSV", () => {
-    it("computes referral statement with 15% revenue share, GMV, and active riders (drts_pays_partner)", () => {
+    it("computes referral statement with 15% revenue share, GMV, and active riders (drts_pays_partner)", async () => {
       const auditNotifications = new AuditNotificationService();
       const service = new BillingSettlementService(auditNotifications);
 
-      const statement = service.getReferralStatement(
+      const statement = await service.getReferralStatement(
         "referral-demo-community",
         "2026-06",
       );
 
       expect(statement.channelKey).toBe(PARTNER_REFERRAL_CHANNEL_KEY);
-      expect(statement.direction).toBe(REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER);
+      expect(statement.direction).toBe(
+        REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
+      );
       expect(statement.totals.tripCount).toBe(2);
       expect(statement.totals.activeRiderCount).toBe(2);
       expect(statement.totals.gmv.amountMinor).toBe(150000); // 1500 NTD
@@ -49,11 +51,11 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
       expect(statement.lines[0]!.rateValue).toBe(15);
     });
 
-    it("resolves referral revenue share rule dynamically and rejects unregistered channels", () => {
+    it("resolves referral revenue share rule dynamically and rejects unregistered channels", async () => {
       const auditNotifications = new AuditNotificationService();
       const service = new BillingSettlementService(auditNotifications);
 
-      const validRule = service.resolveReferralRevenueShareRule(
+      const validRule = await service.resolveReferralRevenueShareRule(
         "referral-demo-community",
         "2026-06-15T00:00:00Z",
       );
@@ -64,7 +66,7 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
         REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
       );
 
-      const invalidRule = service.resolveReferralRevenueShareRule(
+      const invalidRule = await service.resolveReferralRevenueShareRule(
         "unregistered-channel-slug",
         "2026-06-15T00:00:00Z",
       );
@@ -75,12 +77,16 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
       const auditNotifications = new AuditNotificationService();
       const service = new BillingSettlementService(auditNotifications);
 
-      const statements = await service.listReferralStatements("referral-demo-community");
+      const statements = await service.listReferralStatements(
+        "referral-demo-community",
+      );
       expect(statements.length).toBeGreaterThanOrEqual(1);
       expect(statements.map((s) => s.period)).toContain("2026-06");
-      expect(statements.every((s) => s.partnerEntrySlug === "referral-demo-community")).toBe(
-        true,
-      );
+      expect(
+        statements.every(
+          (s) => s.partnerEntrySlug === "referral-demo-community",
+        ),
+      ).toBe(true);
     });
   });
 
@@ -90,7 +96,7 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
       const settlements = new BillingSettlementService(auditNotifications);
       const partners = new TenantPartnerService(auditNotifications);
 
-      const statement = settlements.getReferralStatement(
+      const statement = await settlements.getReferralStatement(
         "referral-demo-community",
         "2026-06",
       );
@@ -103,7 +109,9 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
       expect(dashboard.period).toBe("2026-06");
       expect(dashboard.tripCount).toBe(statement.totals.tripCount);
       expect(dashboard.gmv).toEqual(statement.totals.gmv);
-      expect(dashboard.estimatedShareAmount).toEqual(statement.totals.shareTotal);
+      expect(dashboard.estimatedShareAmount).toEqual(
+        statement.totals.shareTotal,
+      );
     });
 
     it("verifies portal UI binds channel-overview-export to real report endpoint with query filters", async () => {
@@ -112,9 +120,15 @@ describe("SR-QA-FINANCE-001 - C086 & C087: 通路分潤、對帳明細與總覽�
         "utf8",
       );
 
-      expect(dashboardSource).toContain('data-drt-operation="channel-overview-export"');
-      expect(dashboardSource).toContain("statements/${encodeURIComponent(currentPeriod)}/artifact");
-      expect(dashboardSource).not.toContain("download={`referral-statement-${currentPeriod}.csv`}");
+      expect(dashboardSource).toContain(
+        'data-drt-operation="channel-overview-export"',
+      );
+      expect(dashboardSource).toContain(
+        "statements/${encodeURIComponent(currentPeriod)}/artifact",
+      );
+      expect(dashboardSource).not.toContain(
+        "download={`referral-statement-${currentPeriod}.csv`}",
+      );
     });
   });
 });

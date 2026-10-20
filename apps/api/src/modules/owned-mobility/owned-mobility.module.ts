@@ -1,5 +1,12 @@
+import { PassengerFareRepository } from "../passenger-app/fare/passenger-fare.repository";
+import { ComplaintModule } from "../complaint/complaint.module";
+import {
+  MASKED_CALL_PORT,
+  UnavailableMaskedCallPort,
+} from "../multi-taxi/masked-call.port";
 import { Module, OnModuleInit, forwardRef } from "@nestjs/common";
 
+import { GeoModule } from "../geo/geo.module";
 import { DatabaseModule } from "../../common/db";
 import { IdempotencyModule } from "../../common/idempotency";
 import { OpsDispatchEventsModule } from "../../common/ops-dispatch-events.module";
@@ -27,6 +34,8 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
 
 @Module({
   imports: [
+    GeoModule,
+    ComplaintModule,
     DatabaseModule,
     IdempotencyModule,
     OpsDispatchEventsModule,
@@ -44,11 +53,13 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
   ],
   controllers: [OwnedMobilityController],
   providers: [
+    { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
     // Stateless DB adapter only; importing MultiTaxiModule would add a cycle.
     MultiTaxiRepository,
     FleetPartnerRepository,
     RegulatoryRegistryRepository,
     OwnedMobilityRepository,
+    PassengerFareRepository,
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
     ReferralBindingScaffoldService,

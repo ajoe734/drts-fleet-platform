@@ -1132,6 +1132,36 @@ describe("Trusted composition: real VoiceSessionComposer + VoiceCallTurnCoordina
             },
           });
         }
+        if (path.endsWith("/handoffs")) {
+          // AUDIT-VOICE-APPLICATION-REGRESSION-20261018: `resolve_location`
+          // now has real apps/api domain backing for any bound attachment
+          // (see `VoiceDomainToolPorts`), so the later final below ("你好",
+          // which the shared `OpenAiRealtimeFixtureAdapter` fixture's own
+          // fallback branch turns into a `resolve_location` proposal, not a
+          // handoff) now actually reaches this same first-party route --
+          // see .local/passenger-bureau-gap-correction-20261018/
+          // Voice-R4-exact-fetch-fixture-scope-coordination-20261018T205514Z.json
+          // for the coordinated scope grant covering this one branch.
+          // `results: []` (no candidates proposal even attempted) rather
+          // than a one-element real `resolve_location` result: this test's
+          // own trailing assertion (`sentBinary.length` > 0, unmodified --
+          // see the coordination grant's own hunk boundary) proves the
+          // point this test actually exists for ("a later final still
+          // reaches the provider instead of being wedged behind the first,
+          // now-aborted write"), and `VoiceDialogueEngine.turn` only speaks
+          // its own collection prompt when `results.length` is zero. A
+          // non-empty `results` array here would make this specific
+          // assertion fail for a reason orthogonal to what this test
+          // verifies (an empty `resolve_location` candidate list is itself
+          // a legitimate real outcome, but it still counts as "handled",
+          // producing no further prompt -- see `call-turn-coordinator.test.ts`'s
+          // own dedicated coverage of real resolve_location routing).
+          return jsonResponse(200, {
+            data: {
+              results: [],
+            },
+          });
+        }
         throw new Error(`unexpected path ${path}`);
       },
     );

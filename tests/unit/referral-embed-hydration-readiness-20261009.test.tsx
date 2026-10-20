@@ -4,7 +4,7 @@ import { fireEvent, waitFor } from "@testing-library/dom";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import * as ReactDOMServer from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/link", async () => {
   const React = await import("react");
@@ -115,7 +115,32 @@ function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+function quoteResponse() {
+  return Response.json({
+    ok: true,
+    data: {
+      quoteId: "owned-hydration-quote",
+      fixedPrice: false,
+      isGuaranteed: false,
+      estimatedMin: 265,
+      estimatedMax: 340,
+      expiresAt: new Date(Date.now() + 900000).toISOString(),
+      quotedFareRuleVersion: "unit-published-taxi",
+    },
+  });
+}
+
 describe("referral embed booking hydration readiness", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        if (url === "/api/referral/quote") return quoteResponse();
+        throw new Error("Unexpected hydration transport request");
+      }),
+    );
+  });
   afterEach(() => {
     while (roots.length > 0) {
       const root = roots.pop();
@@ -195,15 +220,19 @@ describe("referral embed booking hydration readiness", () => {
   });
 
   it("keeps mounted typed values and submits exactly one original booking command with idempotency and returned-order navigation", async () => {
-    const fetchSpy = vi.fn(async () =>
-      Response.json({
-        ok: true,
-        data: {
-          orderId: "ord-returned-001",
-          orderNo: "DRTS-20261009-001",
-          status: "pending",
-        },
-      }),
+    const fetchSpy = vi.fn(async (url: string) =>
+      url === "/api/referral/quote"
+        ? quoteResponse()
+        : Response.json({
+            ok: true,
+            data: {
+              orderId: "ord-returned-001",
+              orderNo: "DRTS-20261009-001",
+              status: "pending",
+              quote: { quoteId: "owned-hydration-quote" },
+              confirmedAt: "2026-10-20T02:00:00Z",
+            },
+          }),
     );
     const assignSpy = vi.fn();
 
@@ -250,12 +279,19 @@ describe("referral embed booking hydration readiness", () => {
     });
     vi.stubGlobal("window", testWindow);
 
+    await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        fetchSpy.mock.calls.filter(([url]) => url === "/api/referral/booking"),
+      ).toHaveLength(1),
+    );
     await waitFor(() => expect(assignSpy).toHaveBeenCalledTimes(1));
 
-    const [url, init] = fetchSpy.mock.calls[0] as [
+    const [url, init] = fetchSpy.mock.calls.find(
+      ([url]) => url === "/api/referral/booking",
+    ) as unknown as [
       string,
       {
         method: string;
@@ -273,6 +309,7 @@ describe("referral embed booking hydration readiness", () => {
     });
     expect(command).toEqual({
       entrySlug: "referral-demo-community",
+      quoteId: "owned-hydration-quote",
       pickupAddress: "測試社區大廳",
       dropoffAddress: "台北醫院急診入口",
       vehicleType: "xl",

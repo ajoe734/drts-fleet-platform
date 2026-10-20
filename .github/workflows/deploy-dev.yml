@@ -67,6 +67,12 @@ env:
   DEV_MAP_PROVIDER_ALLOWED_ORIGINS: ${{ vars.DEV_MAP_PROVIDER_ALLOWED_ORIGINS }}
   # Explicit shared rehearsal selection. No public access or role policy change.
   DEV_PAX_REVIEW_DEMO_ENABLED: ${{ vars.DEV_PAX_REVIEW_DEMO_ENABLED }}
+  # Hostname of the Cloud IAP public front door provisioned by
+  # operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh
+  # (see domain-mappings-dev.yml). Empty until that workflow has been run for
+  # this project; passenger-app-web itself stays --no-allow-unauthenticated
+  # either way (see "Grant Cloud IAP service agent run.invoker" below).
+  DEV_PAX_BUREAU_ENTRY_HOST: ${{ vars.DEV_PAX_BUREAU_ENTRY_HOST }}
   DEV_JWT_ISSUER: ${{ vars.DEV_JWT_ISSUER }}
   DEV_JWT_AUDIENCE: ${{ vars.DEV_JWT_AUDIENCE }}
   DEV_GCP_API_SERVICE: ${{ vars.DEV_GCP_API_SERVICE }}
@@ -669,6 +675,7 @@ jobs:
     environment: dev
     outputs:
       candidate_sha: ${{ needs.build-push.outputs.candidate_sha }}
+      referral_entry_host: ${{ steps.referral_entry_host.outputs.host }}
 
     steps:
       - name: Checkout deploy source
@@ -1067,7 +1074,8 @@ jobs:
           # keep startup and acceptance traffic moving; one API instance keeps
           # rollout demand below the 25-connection dev database limit.
           env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@AUTH_MODE=explicit@API_PORT=3001@DATABASE_POOL_MAX=6@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@AUTH_ALLOWED_ORIGINS=${auth_allowed_origins}@DRTS_INTERNAL_KEY_ENFORCED=false@PLATFORM_ADMIN_ASSISTANT_ENABLED=true@WORKLOAD_IDENTITY_ISSUER=${DEV_WORKLOAD_IDENTITY_ISSUER}@WORKLOAD_IDENTITY_AUDIENCE=${DEV_WORKLOAD_IDENTITY_AUDIENCE}@WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED=${DEV_WORKLOAD_IDENTITY_CI_TENANT_ACTOR_ENABLED:-false}@LLM_GATEWAY_PROVIDER=${{ steps.api_secrets.outputs.llm_provider }}@LLM_GATEWAY_CHAT_MODEL=${{ steps.api_secrets.outputs.llm_chat_model }}@LLM_GATEWAY_SUMMARIZER_MODEL=${{ steps.api_secrets.outputs.llm_summarizer_model }}@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_BACKEND=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
-          env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}"
+          # Existing 2026-10-05 dev workforce policy is independent of tenant OIDC.
+          env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}@DRTS_DEV_MFA_WAIVED=true"
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
           env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
@@ -1101,7 +1109,7 @@ jobs:
               echo "::error::Google OIDC needs both tenant and dispatch HTTPS origins before it can be enabled."
               exit 1
             fi
-            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@DRTS_DEV_MFA_WAIVED=true@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
+            env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
           fi
           # Dev API only: seed the fixed live-map-observer principal and its
           # read-only ops_observer membership. Never enable in staging/prod
@@ -1172,6 +1180,31 @@ jobs:
             --format='value(status.url)')"
           echo "url=${URL}" >> "$GITHUB_OUTPUT"
 
+      - name: Mint identity token — canonical Referral entry API invocation
+        id: referral_entry_host_proof
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.api_url.outputs.url }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
+      - name: Resolve canonical Referral entry host
+        id: referral_entry_host
+        env:
+          DRTS_DEV_API_BASE_URL: ${{ steps.api_url.outputs.url }}
+          DRTS_REFERRAL_ENTRY_SLUG: ${{ needs.prepare.outputs.referral_embed_entry_slug }}
+          DRTS_REFERRAL_HOST_API_ID_TOKEN: ${{ steps.referral_entry_host_proof.outputs.id_token }}
+          DRTS_CANDIDATE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          entry_host="$(operations/verification/run-operational-browser-acceptance.sh --resolve-referral-entry-host)"
+          printf 'host=%s\n' "$entry_host" >> "$GITHUB_OUTPUT"
+
       - name: Build shared web env vars
         id: web_env
         run: |
@@ -1232,7 +1265,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,DRTS_DEV_WORKFORCE_PRINCIPAL_ID=principal_platform_admin_default,NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1271,7 +1304,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false},PAX_PUBLIC_PASSENGER_ONLY=false" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1371,7 +1404,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.referral_embed }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.fabrikam-living.example app-stg.fabrikam-living.example,REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.fabrikam-living.example app-stg.fabrikam-living.example ${{ steps.referral_entry_host.outputs.host }},REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
             --allow-unauthenticated \
             --cpu 1 \
             --concurrency 80 \
@@ -1438,6 +1471,12 @@ jobs:
           # Dedicated BFF env: no tenant identity, client secret, or browser API URL.
           env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${{ steps.api_url.outputs.url }},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
           env_vars="${env_vars},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          passenger_public_only=false
+          if [[ "${{ needs.prepare.outputs.passenger_app_exposure_flag }}" == "--allow-unauthenticated" ]]; then
+            passenger_public_only=true
+          fi
+          env_vars="${env_vars},PAX_PUBLIC_PASSENGER_ONLY=${passenger_public_only}"
+          env_vars="${env_vars},PAX_BUREAU_ENTRY_HOST=${DEV_PAX_BUREAU_ENTRY_HOST:-}"
           operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.passenger_app_service }}" \
             --region "${{ needs.prepare.outputs.region }}" \
             --image "$IMAGE" \
@@ -1459,6 +1498,19 @@ jobs:
         if: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--no-allow-unauthenticated' }}
         run: |
           ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.passenger_app_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
+      # Additive only: grants run.invoker solely to the Cloud IAP service
+      # agent (see grant-passenger-app-iap-invoker.sh), never to allUsers or
+      # allAuthenticatedUsers. Gated on DEV_PAX_BUREAU_ENTRY_HOST so dev
+      # environments that have not run domain-mappings-dev.yml's bureau
+      # public-entry provisioning step are unaffected.
+      - name: Grant Cloud IAP service agent run.invoker — passenger-app-web
+        if: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--no-allow-unauthenticated' && env.DEV_PAX_BUREAU_ENTRY_HOST != '' }}
+        run: |
+          ./operations/deployment/passenger-bureau-entry/grant-passenger-app-iap-invoker.sh \
             "${{ needs.prepare.outputs.passenger_app_service }}" \
             "${{ needs.prepare.outputs.region }}" \
             "${{ needs.prepare.outputs.project_id }}"
@@ -1510,6 +1562,7 @@ jobs:
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
       passenger_app: ${{ steps.urls.outputs.passenger_app }}
+      referral_entry_host: ${{ needs.deploy.outputs.referral_entry_host }}
 
     steps:
       - name: Authenticate to GCP
@@ -1900,6 +1953,18 @@ jobs:
           headers_file="$(mktemp)"
           trap 'rm -f "$body_file" "$headers_file"' EXIT
 
+          handoff_failure() {
+            local phase="$1" status="$2" code
+            [[ "$status" =~ ^[0-9]{3}$ ]] || status="unavailable"
+            code="$(jq -r '.error.code // .code // empty' "$body_file" 2>/dev/null)" || code=""
+            case "$code" in
+              WORKLOAD_ROUTE_SCOPE_DENIED|REFERRAL_HANDOFF_REPLAYED|REFERRAL_HANDOFF_HOST_MISMATCH) ;;
+              *) code="unavailable" ;;
+            esac
+            echo "::error::Referral embed handoff ${phase} returned HTTP ${status}; phase=${phase}; code=${code}; validation failed." >&2
+            exit 1
+          }
+
           issue_artifact_status() {
             local partner_user_ref="$1"
             jq -nc \
@@ -1923,10 +1988,10 @@ jobs:
             local status
             status="$(issue_artifact_status "$partner_user_ref")"
             if [[ "$status" != "201" ]]; then
-              echo "::error::Referral embed handoff issuance returned HTTP ${status}: $(cat "$body_file")" >&2
-              exit 1
+              handoff_failure "issuance" "$status"
             fi
-            jq -er '.data.artifact' "$body_file"
+            jq -er '.data.artifact | select(type == "string" and length > 0)' "$body_file" 2>/dev/null \
+              || handoff_failure "issuance-payload" "$status"
           }
 
           exchange_artifact() {
@@ -1954,25 +2019,31 @@ jobs:
             # -- then stop without claiming the positive lifecycle passed.
             status="$(issue_artifact_status "deploy-smoke-pending-rollout-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
             if [[ "$status" != "403" ]] || ! jq -e '.error.code == "WORKLOAD_ROUTE_SCOPE_DENIED"' "$body_file" >/dev/null 2>&1; then
-              echo "::error::Expected the documented pending-rollout rejection (403 WORKLOAD_ROUTE_SCOPE_DENIED) but got HTTP ${status}: $(cat "$body_file")" >&2
-              exit 1
+              handoff_failure "pending-rollout" "$status"
             fi
             echo "::warning::referral embed handoff WIF registry rollout (docs/02-architecture/internal-key-exceptions.md §10.3) has not landed yet; fail-closed rejection confirmed, issue/consume/replay/cross-host lifecycle deferred until ops applies it."
           else
             artifact="$(issue_artifact "deploy-smoke-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
-            [[ "$(exchange_artifact "$artifact" "$entry_host")" == "200" ]]
-            jq -e '.ok == true' "$body_file" >/dev/null
-            grep -Eqi '^set-cookie: drts_referral_embed_session=' "$headers_file"
+            status="$(exchange_artifact "$artifact" "$entry_host")"
+            [[ "$status" == "200" ]] || handoff_failure "consume-status" "$status"
+            jq -e '.ok == true' "$body_file" >/dev/null 2>&1 \
+              || handoff_failure "consume-payload" "$status"
+            grep -Eqi '^set-cookie: drts_referral_embed_session=' "$headers_file" \
+              || handoff_failure "consume-cookie" "$status"
 
-            [[ "$(exchange_artifact "$artifact" "$entry_host")" == "400" ]]
-            jq -e \
-              '.ok == false and .message == "The referral handoff artifact has already been consumed."' \
-              "$body_file" >/dev/null
+            status="$(exchange_artifact "$artifact" "$entry_host")"
+            if [[ "$status" != "409" ]] || ! jq -e \
+              '.ok == false and .code == "REFERRAL_HANDOFF_REPLAYED" and .message == "The referral handoff artifact has already been consumed."' \
+              "$body_file" >/dev/null 2>&1; then
+              handoff_failure "replay" "$status"
+            fi
             artifact_for_wrong_host="$(issue_artifact "deploy-smoke-cross-host-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
-            [[ "$(exchange_artifact "$artifact_for_wrong_host" "evil.example")" == "400" ]]
-            jq -e \
-              '.ok == false and .message == "The referral handoff artifact is not valid for this entry host."' \
-              "$body_file" >/dev/null
+            status="$(exchange_artifact "$artifact_for_wrong_host" "evil.example")"
+            if [[ "$status" != "403" ]] || ! jq -e \
+              '.ok == false and .code == "REFERRAL_HANDOFF_HOST_MISMATCH" and .message == "The referral handoff artifact is not valid for this entry host."' \
+              "$body_file" >/dev/null 2>&1; then
+              handoff_failure "wrong-host" "$status"
+            fi
           fi
 
       - name: Print dev URLs
@@ -2365,6 +2436,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Execute candidate-bound operational journeys
         env:
+          DRTS_OPERATIONAL_REFERRAL_ENTRY_HOST: ${{ needs.health-check.outputs.referral_entry_host }}
           DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
           DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
           DRTS_DEV_REFERRAL_EMBED_BASE_URL: ${{ needs.health-check.outputs.referral_embed }}
@@ -2414,21 +2486,27 @@ jobs:
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_PLATFORM_ADMIN_ORIGIN: ${{ needs.health-check.outputs.platform_admin }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
           PAX_REVIEW_PLATFORM_ADMIN_ID_TOKEN: ${{ steps.id_token_platform_admin.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-review-shared-order.config.ts
       - name: Exercise additional real shared-dev passenger branches
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-review-additional-branches.config.ts
       - name: Upload additional shared-dev passenger branch evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
@@ -2452,6 +2530,7 @@ jobs:
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           PAX_QUOTE_EXPIRY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
@@ -2472,11 +2551,14 @@ jobs:
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           PAX_DISPATCH_TIMEOUT_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.pax-real-dispatch-timeout.config.ts
       - name: Upload shared-dev reservation offer timeout evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
@@ -2492,11 +2574,14 @@ jobs:
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
           PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
           OPS_REVIEW_RECOVERY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
           PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
           PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_DRIVER_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
           PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
           PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+          PAX_REVIEW_DRIVER_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
         run: pnpm exec playwright test -c playwright.ops-review-recovery.config.ts
       - name: Upload shared-dev Ops declined-command recovery evidence
         if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'

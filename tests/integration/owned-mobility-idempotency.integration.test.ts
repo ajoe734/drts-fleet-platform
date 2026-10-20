@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
+import { domainFixture } from "../unit/referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 
 import {
   IDEMPOTENCY_KEY_REQUIRED,
@@ -429,33 +430,32 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
     });
 
     it("reconciles referral passenger booking with header and body field precedence", async () => {
-      const { controller, ownedMobilityService } = createHarness();
-      const referralPassengerIdentity: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        realm: "partner",
-        actorType: "referral_passenger",
-        actorId: "pax-ref-001",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "pax-ref-001",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        requestId: "req-ref-001",
-      };
-
-      const referralCommand: CreateReferralPassengerBookingCommand = {
-        entrySlug: "yuhe-residence",
+      const f = await domainFixture();
+      const ownedMobilityService = f.service;
+      const controller = new OwnedMobilityController(
+        ownedMobilityService,
+        ownedMobilityService.getIdempotencyService(),
+        f.partner,
+      );
+      const referralPassengerIdentity = await f.identity();
+      const route = {
+        entrySlug: f.entry.entrySlug,
         pickupAddress: "Hotel Grand, Xinyi Dist",
         dropoffAddress: "Taoyuan Airport Terminal 2",
+      };
+      const quote = await ownedMobilityService.quoteReferralPassengerFare(
+        route,
+        referralPassengerIdentity,
+      );
+      const referralCommand: CreateReferralPassengerBookingCommand = {
+        ...route,
+        quoteId: quote.quoteId,
         passengerName: "Referral VIP",
         passengerPhone: "0912345678",
         idempotencyKey: "body-referral-key-100",
       };
 
-      // First call uses body idempotencyKey when header is omitted
+      // First call uses body idempotencyKey when header is omitted.
       const firstRes = await controller.createReferralPassengerBooking(
         referralCommand,
         referralPassengerIdentity,
@@ -463,11 +463,10 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         undefined,
         undefined,
       );
-
       expect(firstRes.data.orderId).toBeDefined();
       expect(firstRes.data.replayed).toBe(false);
 
-      // Replay with identical body key
+      // Replay the exact original quote/body key.
       const replayRes = await controller.createReferralPassengerBooking(
         referralCommand,
         referralPassengerIdentity,
@@ -475,22 +474,37 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         undefined,
         undefined,
       );
-
       expect(replayRes.data.orderId).toBe(firstRes.data.orderId);
       expect(replayRes.data.replayed).toBe(true);
       expect(ownedMobilityService.listOrders()).toHaveLength(1);
 
-      // Now pass explicit Header `Idempotency-Key`: header takes precedence
+      // A distinct command needs its own unused owned quote. If the header
+      // were ignored, the reused body key with this new quote would be409.
+      const nextQuote = await ownedMobilityService.quoteReferralPassengerFare(
+        route,
+        referralPassengerIdentity,
+      );
       const headerPrecedenceKey = "header-referral-key-200";
       const headerRes = await controller.createReferralPassengerBooking(
-        referralCommand,
+        { ...referralCommand, quoteId: nextQuote.quoteId },
         referralPassengerIdentity,
         "req-3",
         undefined,
         headerPrecedenceKey,
       );
-
       expect(headerRes.data.orderId).not.toBe(firstRes.data.orderId);
+      expect(ownedMobilityService.listOrders()).toHaveLength(2);
+
+      // The original quote remains single-use even under a new header key.
+      await expect(
+        controller.createReferralPassengerBooking(
+          referralCommand,
+          referralPassengerIdentity,
+          "req-4",
+          undefined,
+          "third-referral-key",
+        ),
+      ).rejects.toMatchObject({ code: "FARE_QUOTE_ALREADY_CONSUMED" });
       expect(ownedMobilityService.listOrders()).toHaveLength(2);
     });
   });
@@ -809,8 +823,7 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
 
   describe("Database Constraint & Concurrency Safety", () => {
     it("handles concurrent insert collision via UNIQUE constraint and safely replays winner response", async () => {
-      const { idempotencyRepository, controller } =
-        createHarness();
+      const { idempotencyRepository, controller } = createHarness();
 
       const passengerIdentity: BootstrapRequestIdentity = {
         authMode: "jwt_bearer",

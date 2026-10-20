@@ -354,6 +354,7 @@ export function hasAddressCoordinateProvenance(
 export type GeoPolygon = {
   type: "polygon";
   coordinates: GeoPoint[];
+  holes?: GeoPoint[][];
 };
 
 export type GeoCircle = {
@@ -1185,6 +1186,8 @@ export interface PartnerChannelEntryRecord {
 
 export interface CreatePartnerChannelEntryCommand {
   tenantId: string;
+  /** Optional existing active Fleet master reference for fleet_partner entries. */
+  fleetPartnerId?: string;
   partnerCode: string;
   partnerType: PartnerType;
   programId: string;
@@ -3645,6 +3648,9 @@ export interface OwnedOrderRecord {
   dispatchTimeout: DispatchTimeoutRecord | null;
   referralPassengerLifecycle?: {
     bookingIdempotencyKey?: string;
+    bookingIntent?: import("./referral-channel").ReferralBookingIntent;
+    quote?: import("./referral-channel").ReferralPassengerFareQuoteRecord;
+    confirmedAt?: string;
     rating?: {
       orderId: string;
       score: 1 | 2 | 3 | 4 | 5;
@@ -3652,6 +3658,10 @@ export interface OwnedOrderRecord {
       tags: string[];
       idempotencyKey?: string;
       submittedAt: string;
+      policyVersion?: "legacy" | "referral_rating_v1";
+      contactRequested?: boolean;
+      complaintCaseNo?: string | null;
+      createdTimelineId?: string | null;
     };
   } | null;
   createdAt: string;
@@ -4457,6 +4467,7 @@ export const DRIVER_ELIGIBILITY_BLOCK_REASONS = [
   "work_state_paused",
   "work_state_suspended",
   "work_state_incident_hold",
+  "incident_matching_suppression",
   "work_state_offline",
 ] as const;
 export type DriverEligibilityBlockReason =

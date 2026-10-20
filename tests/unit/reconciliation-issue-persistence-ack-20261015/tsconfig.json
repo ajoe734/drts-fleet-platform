@@ -1,0 +1,21 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "types": ["node", "vitest/globals"],
+    "baseUrl": "../../..",
+    "paths": {
+      "@drts/contracts": ["packages/contracts/src/index.ts"],
+      "@drts/control-plane-auth": ["packages/control-plane-auth/src/index.ts"],
+      "@drts/control-plane-auth/review-driver-web": [
+        "packages/control-plane-auth/src/review-driver-web.ts"
+      ],
+      "@drts/api-client": ["packages/api-client/src/index.ts"]
+    }
+  },
+  "include": [
+    "*.test.ts",
+    "../../../apps/api/src/modules/billing-settlement/billing-settlement.service.ts"
+  ]
+}

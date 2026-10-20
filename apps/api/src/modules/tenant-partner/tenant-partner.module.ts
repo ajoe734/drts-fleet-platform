@@ -7,6 +7,7 @@ import { IdempotencyModule } from "../../common/idempotency";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
 import { IdentityModule } from "../identity/identity.module";
+import { FleetPartnerRepository } from "../fleet-partner/fleet-partner.repository";
 import { createNotificationDeliveryServiceFromEnv } from "../notification-delivery/notification-delivery.factory";
 import { NotificationDeliveryService } from "../notification-delivery/notification-delivery.service";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
@@ -56,6 +57,7 @@ export function createTenantInvitationNotificationDeliveryService(
     JwtAuthService,
     GoogleWorkloadIdentityAdapter,
     TenantPartnerRepository,
+    FleetPartnerRepository,
     GoogleWorkloadIdentityAdapter,
     {
       provide: NotificationDeliveryService,

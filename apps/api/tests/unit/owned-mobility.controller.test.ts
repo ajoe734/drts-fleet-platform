@@ -29,6 +29,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
       submitReferralPassengerRating: vi.fn().mockResolvedValue({
         orderId: "order-rating-001",
         score: 5,
+        contactRequested: false,
+        complaintCaseNo: null,
         comment: null,
         tags: [],
         submittedAt: "2026-08-22T15:00:00.000Z",
@@ -38,7 +40,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
 
     const response = await controller.submitReferralPassengerRating(
       "order-rating-001",
-      { score: 5 } as never,
+      { orderId: "order-rating-001", score: 5, contactRequested: false },
       null,
       "req-rating-001",
     );
@@ -49,7 +51,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
     });
     expect(service.submitReferralPassengerRating).toHaveBeenCalledWith(
       "order-rating-001",
-      { score: 5 },
+      { orderId: "order-rating-001", score: 5, contactRequested: false },
       null,
     );
   });
@@ -317,7 +319,7 @@ describe("OwnedMobilityController tenant booking routes", () => {
     );
   });
 
-  it("wraps canonical queue list and detail reads without changing records", () => {
+  it("wraps canonical queue list and detail reads without changing records", async () => {
     const queueEntry = {
       queueEntryId: "queue-entry-001",
       vehicleId: "veh-demo-001",
@@ -347,8 +349,8 @@ describe("OwnedMobilityController tenant booking routes", () => {
     } as unknown as OwnedMobilityService;
     const controller = new OwnedMobilityController(service, {} as never);
 
-    const listResponse = controller.listQueueEntries("req-queue-list");
-    const detailResponse = controller.getQueueEntry(
+    const listResponse = await controller.listQueueEntries("req-queue-list");
+    const detailResponse = await controller.getQueueEntry(
       queueEntry.queueEntryId,
       "req-queue-detail",
     );

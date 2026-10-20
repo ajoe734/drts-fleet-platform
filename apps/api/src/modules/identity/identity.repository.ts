@@ -728,6 +728,33 @@ export class IdentityRepository implements OnModuleInit {
       : null;
   }
 
+  /** Read-only lookup of the canonical membership mirror that
+   * `syncLegacyTenantUserRole` maintains for a legacy tenant user, keyed by
+   * the same `tenant_user_role:${userId}:membership` sourceRef it upserts.
+   * Callers use the returned membershipId to consult the authoritative
+   * active-grant projection (`findActivePrivilegedGrantsForMembership`)
+   * without writing a fresh mirror on every read. */
+  async findMembershipIdForLegacyTenantUser(
+    userId: string,
+    client?: PoolClient,
+  ): Promise<string | null> {
+    const sourceRef = `tenant_user_role:${userId}:membership`;
+    if (!this.isEnabled()) {
+      return this.fallbackMembershipSourceRefs.get(sourceRef) ?? null;
+    }
+    const result = await this.executeSql<JsonRecordRow>(
+      `SELECT record FROM iam.identity_memberships WHERE source_ref = $1 LIMIT 1`,
+      [sourceRef],
+      client,
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+          result.rows[0].record,
+          "iam.identity_memberships",
+        ).membershipId
+      : null;
+  }
+
   async findTenantUserByOidcSubject(
     proof: Pick<TenantOidcProof, "issuer" | "subject" | "tenantId">,
   ): Promise<OidcBoundTenantUser | null> {
@@ -1310,15 +1337,16 @@ export class IdentityRepository implements OnModuleInit {
 
   async findMembershipById(
     membershipId: string,
+    client?: PoolClient,
   ): Promise<CanonicalIdentityMembershipRecord | null> {
     if (!this.isEnabled()) {
       const membership = this.fallbackMemberships.get(membershipId);
       return membership ? { ...membership } : null;
     }
 
-    const client = await this.databaseService!.connect();
+    const runner = client ?? (await this.databaseService!.connect());
     try {
-      const result = await client.query<JsonRecordRow>(
+      const result = await runner.query<JsonRecordRow>(
         `
           SELECT record FROM iam.identity_memberships
           WHERE membership_id = $1
@@ -1334,7 +1362,7 @@ export class IdentityRepository implements OnModuleInit {
         "iam.identity_memberships",
       );
     } finally {
-      client.release();
+      if (!client) runner.release();
     }
   }
 
@@ -1504,9 +1532,12 @@ export class IdentityRepository implements OnModuleInit {
         if (isNaN(validToMs) || validToMs <= currentTimeMs) return false;
       }
 
-      const matchesTarget =
-        grant.targetMembershipId === membershipId ||
-        (membership && grant.targetUserId === membership.principalId);
+      // An explicit targetMembershipId scopes the grant to that membership
+      // only; it must never also leak into a different membership of the
+      // same principal via the targetUserId fallback below.
+      const matchesTarget = grant.targetMembershipId
+        ? grant.targetMembershipId === membershipId
+        : Boolean(membership && grant.targetUserId === membership.principalId);
 
       if (!matchesTarget) return false;
 

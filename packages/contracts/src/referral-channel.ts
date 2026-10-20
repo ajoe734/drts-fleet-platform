@@ -184,6 +184,7 @@ export interface PartnerIngressHandoffSession {
 }
 
 export interface CreateReferralPassengerBookingCommand {
+  quoteId: string;
   entrySlug: string;
   partnerUserRef?: string;
   passengerName?: string;
@@ -204,9 +205,107 @@ export interface CancelReferralPassengerTripCommand {
 export interface SubmitReferralPassengerRatingCommand {
   orderId: string;
   score: 1 | 2 | 3 | 4 | 5;
+  contactRequested: boolean;
   comment?: string;
   tags?: string[];
   idempotencyKey?: string;
+}
+
+export interface ReferralPassengerQuoteCommand {
+  entrySlug: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  scheduledAt?: string;
+  vehicleType?: string;
+}
+
+/** An immutable referral-owned estimate, never an amount collected from a rider. */
+export interface ReferralPassengerFareQuoteRecord {
+  quoteId: string;
+  tenantId: string;
+  partnerId: string;
+  partnerProgramId: string;
+  entrySlug: string;
+  drtsPassengerId: string;
+  businessDispatchSubtype: string;
+  serviceProductCode: string;
+  timingMode: "immediate" | "scheduled";
+  requestedScheduledAt: string | null;
+  pricingAt: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  pickup: { lat: number; lng: number };
+  dropoff: { lat: number; lng: number };
+  vehicleType: string | null;
+  currency: "TWD";
+  estimatedMin: number;
+  estimatedMax: number;
+  estimatedMinMinor: number;
+  estimatedMaxMinor: number;
+  fixedPrice: false;
+  isGuaranteed: false;
+  quotedFareSource: "platform_pricing_rule";
+  quotedFareRuleVersion: string;
+  tariffSnapshot: Record<string, unknown>;
+  route: Record<string, unknown>;
+  breakdown: Record<string, unknown>;
+  serviceAreaEvaluation: Record<string, unknown>;
+  createdAt: string;
+  expiresAt: string;
+  consumedByOrderId: string | null;
+  consumedAt: string | null;
+}
+
+export interface ReferralBookingIntent {
+  entrySlug: string;
+  quoteId: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  timingMode: "immediate" | "scheduled";
+  requestedScheduledAt: string | null;
+  vehicleType: string | null;
+  passengerName: string;
+  passengerPhone: string;
+  partnerUserRef: string | null;
+}
+
+/** Public immutable estimate; server ownership and full tariff authority remain private. */
+export type ReferralPassengerFareQuote = Pick<
+  ReferralPassengerFareQuoteRecord,
+  | "quoteId"
+  | "businessDispatchSubtype"
+  | "serviceProductCode"
+  | "timingMode"
+  | "requestedScheduledAt"
+  | "pricingAt"
+  | "pickupAddress"
+  | "dropoffAddress"
+  | "pickup"
+  | "dropoff"
+  | "vehicleType"
+  | "currency"
+  | "estimatedMin"
+  | "estimatedMax"
+  | "estimatedMinMinor"
+  | "estimatedMaxMinor"
+  | "fixedPrice"
+  | "isGuaranteed"
+  | "quotedFareSource"
+  | "quotedFareRuleVersion"
+  | "createdAt"
+  | "expiresAt"
+  | "consumedByOrderId"
+  | "consumedAt"
+>;
+
+export interface ReferralPassengerRatingResult {
+  orderId: string;
+  score: number;
+  comment: string | null;
+  tags: string[];
+  contactRequested: boolean | null;
+  complaintCaseNo: string | null;
+  submittedAt: string;
 }
 
 export interface ReferralPassengerTripSnapshot {
@@ -226,6 +325,9 @@ export interface ReferralPassengerTripSnapshot {
   createdAt: string;
   updatedAt: string;
   rated: boolean;
+  quote?: ReferralPassengerFareQuote | null;
+  confirmedAt?: string | null;
+  rating?: ReferralPassengerRatingResult | null;
 }
 
 export interface ReferralPassengerActiveTripResult {
@@ -243,6 +345,9 @@ export interface ReferralPassengerHistoryItem {
   formattedFare: string;
   completedAt: string | null;
   createdAt: string;
+  quote?: ReferralPassengerFareQuote | null;
+  confirmedAt?: string | null;
+  rating?: ReferralPassengerRatingResult | null;
 }
 
 export interface ReferralPassengerReceipt {
@@ -257,13 +362,16 @@ export interface ReferralPassengerReceipt {
   vehicleType: string;
   pickupAddress: string;
   dropoffAddress: string;
-  fareBase: number;
-  fareDistance: number;
-  fareTime: number;
-  totalFare: number;
+  fareBase: number | null;
+  fareDistance: number | null;
+  fareTime: number | null;
+  fareNight?: number | null;
+  totalFare: number | null;
   formattedTotal: string;
   paymentChannel: string;
   downloadUrl?: string;
+  quote?: ReferralPassengerFareQuote | null;
+  confirmedAt?: string | null;
 }
 
 export interface ResolvePartnerNotificationNavigationCommand {

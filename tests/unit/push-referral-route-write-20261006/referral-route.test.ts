@@ -1,3 +1,5 @@
+import type { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
+import { domainFixture } from "../referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import type {
   ConsumerNotificationOutboxRecord,
@@ -11,181 +13,81 @@ import { OwnedMobilityModule } from "../../../apps/api/src/modules/owned-mobilit
 import { MultiTaxiModule } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.module";
 import { PartnerUserIdentityLinkRepository } from "../../../apps/api/src/modules/tenant-partner/partner-user-identity-link.repository";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth";
-import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
-import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
-import { OwnedMobilityRepository } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { MultiTaxiRepository } from "../../../apps/api/src/modules/multi-taxi/multi-taxi.repository";
-import { TenantPartnerService } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
-const identity: BootstrapRequestIdentity = {
-  authMode: "jwt_bearer",
-  actorType: "referral_passenger",
-  actorId: "referral-route-passenger",
-  realm: "partner",
-  tenantId: "tenant-demo-001",
-  partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-  partnerProgramId: "program-referral-community",
-  partnerEntrySlug: "yuhe-residence",
-  drtsPassengerId: "referral-route-passenger",
-  roleFamilies: ["partner"],
-  roles: ["referral_passenger"],
-  scopes: [],
-  requestId: null,
-};
-const command = {
-  entrySlug: identity.partnerEntrySlug!,
-  pickupAddress: "Pickup fixture",
-  dropoffAddress: "Dropoff fixture",
-};
-
-// Only the DB boundary is mocked. The booking, governance, route writer and
-// outbox repository are production code. This is not a Postgres schema probe.
-function harness() {
-  const statements: string[] = [];
-  const routes = new Map<string, Record<string, unknown>>();
-  const sequences = new Map<string, number>();
-  const outboxes = new Map<string, ConsumerNotificationOutboxRecord>();
-  let savedRoutes = new Map(routes);
-  const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
-    statements.push(sql.trim());
-    if (sql === "SAVEPOINT partner_notification_route")
-      savedRoutes = new Map(routes);
-    if (sql === "ROLLBACK TO SAVEPOINT partner_notification_route") {
-      routes.clear();
-      for (const [key, row] of savedRoutes) routes.set(key, row);
-    }
-    if (sql.includes("RETURNING aggregate_version"))
-      return { rows: [{ aggregate_version: 1 }] };
-    if (
-      sql.includes("INSERT INTO mobility.phase1_partner_notification_sequences")
-    ) {
-      sequences.set(String(values?.[0]), 1);
-    }
-    if (sql.includes("UPDATE mobility.phase1_partner_notification_sequences")) {
-      const orderId = String(values?.[0]);
-      const next = sequences.get(orderId);
-      if (next === undefined) return { rows: [] };
-      sequences.set(orderId, next + 1);
-      return { rows: [{ event_sequence: String(next) }] };
-    }
-    if (sql.includes("INSERT INTO ops.consumer_notification_outbox")) {
-      const v = values!;
-      const row = {
-        outboxId: v[0],
-        orderId: v[1],
-        passengerSubjectRef: v[2],
-        eventType: v[3],
-        assignmentVersion: v[4],
-        payload: JSON.parse(String(v[5])),
-        status: v[6],
-        attemptCount: v[7],
-        nextAttemptAt: v[8],
-        createdAt: v[9],
-        deliveredAt: v[10],
-      } as ConsumerNotificationOutboxRecord;
-      outboxes.set(row.outboxId, row);
-      return { rows: [{ outbox_id: row.outboxId }] };
-    }
-    if (sql.includes("UPDATE ops.consumer_notification_outbox")) {
-      outboxes.get(String(values?.[0]))!.payload.eventSequence = Number(
-        values?.[1],
-      );
-    }
-    if (
-      sql.includes(
-        "INSERT INTO mobility.phase1_order_partner_notification_routes",
-      )
-    ) {
-      const columns = [
-        "order_id",
-        "tenant_id",
-        "partner_id",
-        "entry_slug",
-        "partner_user_ref",
-        "drts_passenger_id",
-        "passenger_subject_ref",
-        "identity_linked_at",
-        "consent_bundle_version",
-        "notification_policy_version",
-        "ride_ref",
-        "created_at",
-      ];
-      const row = Object.fromEntries(
-        columns.map((key, i) => [key, values?.[i]]),
-      );
-      if (routes.has(String(row.order_id))) return { rows: [] };
-      routes.set(String(row.order_id), row);
-      return { rows: [row] };
-    }
-    if (
-      sql.includes("FROM mobility.phase1_order_partner_notification_routes")
-    ) {
-      const row = routes.get(String(values?.[0]));
-      return { rows: row ? [row] : [] };
-    }
-    return { rows: [] };
-  });
-  const client = { query, release: vi.fn() };
-  const database = {
-    isEnabled: () => true,
-    query,
-    connect: vi.fn(async () => client),
-  };
-  const allocator = new MultiTaxiRepository(database as never);
-  const repository = new OwnedMobilityRepository(database as never, allocator);
-  const audit = new AuditNotificationService();
-  const tenant = new TenantPartnerService(audit);
-  const link = {
-    entrySlug: identity.partnerEntrySlug,
-    partnerUserRef: "opaque-partner-recipient",
-    drtsPassengerId: identity.drtsPassengerId,
-    status: "active",
-    consentScope: "passenger_identity_link",
-    linkedAt: "2026-10-01T00:00:00.000Z",
-  };
-  const links = {
-    findByDrtsPassengerId: vi.fn(async () => link as typeof link | null),
-  };
-  const publish = vi.fn(() => {
-    statements.push("PUBLISH");
-  });
-  const service = new OwnedMobilityService(
-    {} as never,
-    audit,
-    new CallcenterService(audit),
-    { publishTaskUpdated: vi.fn() } as never,
-    { publishOrderCreated: publish } as never,
-    repository,
-    tenant,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    links as never,
+// Actual quote/authority/repositories; only SQL I/O/faults are controlled.
+async function harness() {
+  const f = await domainFixture(),
+    identity = await f.identity("opaque-partner-recipient");
+  const command = await f.command(identity);
+  Reflect.set(f.service, "callcenterService", new CallcenterService(f.audit));
+  const link = await f.links.findByDrtsPassengerId(
+    identity.partnerEntrySlug,
+    identity.drtsPassengerId,
   );
+  if (!link) throw new Error("Normal identity link was not created");
+  const findByDrtsPassengerId = vi
+    .spyOn(f.links, "findByDrtsPassengerId")
+    .mockResolvedValue(link);
+  const queryBase = f.db.query.bind(f.db),
+    connectBase = f.db.connect.bind(f.db);
+  const statements: string[] = [];
+  const query = vi.fn(
+    async (
+      sql: string,
+      values: readonly unknown[] = [],
+      execute: (
+        sql: string,
+        values: readonly unknown[],
+      ) => ReturnType<typeof f.db.query> = queryBase,
+    ) => {
+      statements.push(sql.replace(/\s+/g, " ").trim());
+      return execute(sql, values);
+    },
+  );
+  vi.spyOn(f.db, "query").mockImplementation((sql, values = []) =>
+    query(sql, values, queryBase),
+  );
+  vi.spyOn(f.db, "connect").mockImplementation(async () => {
+    const client = await connectBase(),
+      execute = client.query.bind(client);
+    client.query = (sql, values = []) => query(sql, values, execute);
+    return client;
+  });
+  const events = Reflect.get(
+    f.service,
+    "opsDispatchEventsService",
+  ) as OpsDispatchEventsService;
+  const emit = events.publishOrderCreated.bind(events);
+  const publish = vi
+    .spyOn(events, "publishOrderCreated")
+    .mockImplementation(
+      (
+        ...args: Parameters<OpsDispatchEventsService["publishOrderCreated"]>
+      ) => {
+        statements.push("PUBLISH");
+        return emit(...args);
+      },
+    );
+  const allocator = new MultiTaxiRepository(f.db as never);
   return {
-    service,
-    repository,
-    allocator,
-    tenant,
-    links,
-    link,
-    routes,
+    ...f,
+    identity,
+    command,
     query,
-    statements,
     publish,
-    database,
-    sequences,
-    outboxes,
+    allocator,
+    tenant: f.partner,
+    links: { findByDrtsPassengerId },
+    link,
+    database: f.db,
+    get routes() {
+      return f.db.table("mobility.phase1_order_partner_notification_routes");
+    },
+    get sequences() {
+      return f.db.table("mobility.phase1_partner_notification_sequences");
+    },
+    statements,
   };
 }
 
@@ -193,23 +95,23 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("referral embed notification route", () => {
   it("persists the trusted route and sequence before publishing the committed booking", async () => {
-    const h = harness();
+    const h = await harness();
     const result = await h.service.createReferralPassengerBooking(
-      command,
-      identity,
+      h.command,
+      h.identity,
     );
     expect(h.routes.get(result.orderId)).toMatchObject({
-      tenant_id: identity.tenantId,
-      partner_id: identity.partnerId,
-      entry_slug: identity.partnerEntrySlug,
+      tenant_id: h.identity.tenantId,
+      partner_id: h.identity.partnerId,
+      entry_slug: h.identity.partnerEntrySlug,
       partner_user_ref: h.link.partnerUserRef,
-      drts_passenger_id: identity.drtsPassengerId,
+      drts_passenger_id: h.identity.drtsPassengerId,
       notification_policy_version: "partner_notification_v1",
       ride_ref: result.orderId,
     });
-    expect(h.links.findByDrtsPassengerId).toHaveBeenCalledExactlyOnceWith(
-      identity.partnerEntrySlug,
-      identity.drtsPassengerId,
+    expect(h.links.findByDrtsPassengerId).toHaveBeenCalledWith(
+      h.identity.partnerEntrySlug,
+      h.identity.drtsPassengerId,
     );
     const routeIndex = h.statements.findIndex((sql) =>
       sql.includes(
@@ -232,41 +134,55 @@ describe("referral embed notification route", () => {
 
 describe("referral route negative cases and replay", () => {
   it("writes the route for scheduled referral bookings too", async () => {
-    const h = harness();
+    const h = await harness();
+    const input = {
+      ...h.route,
+      scheduledAt: new Date(Date.now() + 7200000).toISOString(),
+    };
+    const quote = await h.service.quoteReferralPassengerFare(input, h.identity);
     const booking = await h.service.createReferralPassengerBooking(
-      { ...command, scheduledAt: new Date(Date.now() + 7200000).toISOString() },
-      identity,
+      {
+        ...input,
+        quoteId: quote.quoteId,
+        passengerName: "Synthetic rider",
+        passengerPhone: "0912345678",
+      },
+      h.identity,
     );
     expect(h.routes.get(booking.orderId)?.partner_user_ref).toBe(
       h.link.partnerUserRef,
     );
-    expect(h.sequences.get(booking.orderId)).toBe(1);
+    expect(h.sequences.get(booking.orderId)?.next_sequence).toBe(1);
   });
 
-  it("keeps booking successful when the entry disappears at route resolution", async () => {
-    const h = harness();
+  it("rolls back booking when the entry disappears at route resolution", async () => {
+    const h = await harness();
     h.links.findByDrtsPassengerId.mockImplementation(async () => {
-      // Booking authorization has already checked the entry; only the later
-      // notification registry lookup fails. Intake authorization stays intact.
+      // The current entry read succeeded, then the next authority/route read
+      // disappears. R5 cannot commit a booking after that loss of authority.
       vi.spyOn(h.tenant, "getPartnerEntry").mockImplementation(() => {
         throw new Error("entry no longer available");
       });
       return h.link;
     });
-    const booking = await h.service.createReferralPassengerBooking(
-      command,
-      identity,
-    );
-    expect(booking.orderId).toBeTruthy();
+    await expect(
+      h.service.createReferralPassengerBooking(h.command, h.identity),
+    ).rejects.toThrow("entry no longer available");
+    expect(h.db.table("ops.phase1_owned_orders").size).toBe(0);
+    expect(
+      h.db
+        .table("ops.phase1_referral_fare_quote_snapshots")
+        .get(h.command.quoteId).consumedByOrderId,
+    ).toBeNull();
     expect(h.routes.size).toBe(0);
     expect(h.sequences.size).toBe(0);
-    expect(h.publish).toHaveBeenCalledTimes(1);
+    expect(h.publish).not.toHaveBeenCalled();
   });
 
   it.each(["missing", "revoked", "lookup-error", "missing-subject"])(
-    "%s skips routing without blocking the booking",
+    "%s denies current authority before creating or routing a booking",
     async (mode) => {
-      const h = harness();
+      const h = await harness();
       if (mode === "missing")
         h.links.findByDrtsPassengerId.mockResolvedValue(null);
       if (mode === "revoked") h.link.status = "revoked";
@@ -276,61 +192,76 @@ describe("referral route negative cases and replay", () => {
         );
       const actor =
         mode === "missing-subject"
-          ? { ...identity, drtsPassengerId: null }
-          : identity;
-      const result = await h.service.createReferralPassengerBooking(
-        command,
+          ? { ...h.identity, drtsPassengerId: null, actorId: null }
+          : h.identity;
+      const attempt = h.service.createReferralPassengerBooking(
+        h.command,
         actor,
       );
-      expect(result.orderId).toBeTruthy();
+      if (mode === "lookup-error")
+        await expect(attempt).rejects.toThrow("lookup unavailable");
+      else
+        await expect(attempt).rejects.toMatchObject({
+          status: 403,
+          code:
+            mode === "missing-subject"
+              ? "REFERRAL_PASSENGER_IDENTITY_REQUIRED"
+              : "REFERRAL_HANDOFF_REVOKED",
+        });
+      expect(h.db.table("ops.phase1_owned_orders").size).toBe(0);
+      expect(
+        h.db
+          .table("ops.phase1_referral_fare_quote_snapshots")
+          .get(h.command.quoteId).consumedByOrderId,
+      ).toBeNull();
+      expect(h.publish).not.toHaveBeenCalled();
       expect(h.routes.size).toBe(0);
       expect(h.sequences.size).toBe(0);
     },
   );
 
-  it("preserves the entry mismatch 403 and ignores caller recipient claims", async () => {
-    const h = harness();
+  it("preserves entry mismatch 403 and rejects unknown caller recipient claims", async () => {
+    const h = await harness();
     await expect(
       h.service.createReferralPassengerBooking(
-        { ...command, entrySlug: "another-entry" },
-        identity,
+        { ...h.command, entrySlug: "another-entry" },
+        h.identity,
       ),
     ).rejects.toMatchObject({ status: 403 });
     expect(h.links.findByDrtsPassengerId).not.toHaveBeenCalled();
     expect(h.publish).not.toHaveBeenCalled();
     const spoofed = {
-      ...command,
+      ...h.command,
       partnerUserRef: "attacker",
       drtsPassengerId: "attacker",
       tenantId: "attacker",
       partnerId: "attacker",
     };
-    const booking = await h.service.createReferralPassengerBooking(
-      spoofed,
-      identity,
-    );
-    expect(h.routes.get(booking.orderId)).toMatchObject({
-      partner_user_ref: h.link.partnerUserRef,
-      drts_passenger_id: identity.drtsPassengerId,
-      tenant_id: identity.tenantId,
-      partner_id: identity.partnerId,
-    });
+    await expect(
+      h.service.createReferralPassengerBooking(spoofed, h.identity),
+    ).rejects.toMatchObject({ status: 400, code: "VALIDATION_ERROR" });
+    expect(h.routes.size).toBe(0);
+    expect(h.db.table("ops.phase1_owned_orders").size).toBe(0);
+    expect(h.publish).not.toHaveBeenCalled();
   });
 
   it("does not repeat route writes or overwrite recipient/sequence on API replay", async () => {
-    const h = harness();
-    const input = { ...command, idempotencyKey: "referral-route-replay" };
+    const h = await harness();
+    const input = { ...h.command, idempotencyKey: "referral-route-replay" };
     const first = await h.service.createReferralPassengerBooking(
       input,
-      identity,
+      h.identity,
     );
     h.link.partnerUserRef = "changed-after-booking";
     const replay = await h.service.createReferralPassengerBooking(
       input,
-      identity,
+      h.identity,
     );
     expect(replay).toMatchObject({ orderId: first.orderId, replayed: true });
-    expect(h.links.findByDrtsPassengerId).toHaveBeenCalledTimes(1);
+    expect(h.links.findByDrtsPassengerId).toHaveBeenCalledWith(
+      h.identity.partnerEntrySlug,
+      h.identity.drtsPassengerId,
+    );
     expect(
       h.statements.filter((sql) =>
         sql.includes(
@@ -341,19 +272,19 @@ describe("referral route negative cases and replay", () => {
     expect(h.routes.get(first.orderId)?.partner_user_ref).toBe(
       "opaque-partner-recipient",
     );
-    expect(h.sequences.get(first.orderId)).toBe(1);
+    expect(h.sequences.get(first.orderId)?.next_sequence).toBe(1);
   });
 
   it("both repository entry points use the immutable SQL and preserve an advanced sequence", async () => {
-    const h = harness();
+    const h = await harness();
     const booking = await h.service.createReferralPassengerBooking(
-      command,
-      identity,
+      h.command,
+      h.identity,
     );
     const stored = (await h.allocator.findOrderPartnerNotificationRoute(
       booking.orderId,
     ))!;
-    h.sequences.set(booking.orderId, 9);
+    h.sequences.get(booking.orderId)!.next_sequence = 9;
     expect(
       await h.allocator.writeOrderPartnerNotificationRoute({
         ...stored,
@@ -366,7 +297,7 @@ describe("referral route negative cases and replay", () => {
         entrySlug: "replacement",
       }),
     ).toEqual(stored);
-    expect(h.sequences.get(booking.orderId)).toBe(9);
+    expect(h.sequences.get(booking.orderId)?.next_sequence).toBe(9);
     expect(
       h.statements.filter((sql) =>
         sql.includes(
@@ -376,64 +307,62 @@ describe("referral route negative cases and replay", () => {
     ).toHaveLength(1);
   });
 
-  it("commits the booking without partner rows when first-party routing already exists", async () => {
-    const h = harness();
+  it("rejects the booking without partner rows when first-party routing already exists", async () => {
+    const h = await harness();
     const baseQuery = h.query.getMockImplementation()!;
-    h.query.mockImplementation(async (sql, values) => {
+    h.query.mockImplementation(async (sql, values, execute) => {
       if (
         sql.includes(
           "FROM mobility.phase1_order_first_party_notification_routes",
         )
       )
         return { rows: [{ order_id: values?.[0] }] };
-      return baseQuery(sql, values);
+      return baseQuery(sql, values, execute);
     });
-    const booking = await h.service.createReferralPassengerBooking(
-      command,
-      identity,
-    );
-    expect(h.service.getOrder(booking.orderId).status).toBe("created");
+    await expect(
+      h.service.createReferralPassengerBooking(h.command, h.identity),
+    ).rejects.toMatchObject({ code: "FARE_QUOTE_UNAVAILABLE" });
+    expect(h.db.table("ops.phase1_owned_orders").size).toBe(0);
     expect(h.routes.size).toBe(0);
     expect(h.sequences.size).toBe(0);
-    expect(h.statements).toContain(
-      "RELEASE SAVEPOINT partner_notification_route",
-    );
-    expect(h.statements).toContain("COMMIT");
-    expect(h.publish).toHaveBeenCalledTimes(1);
+    expect(h.statements).toContain("ROLLBACK");
+    expect(h.publish).not.toHaveBeenCalled();
   });
 
   it.each(["lock", "first-party-check", "route", "sequence"])(
-    "%s failure rolls back only notification setup and logs it",
+    "%s failure rolls back the whole uncommitted referral unit",
     async (target) => {
-      const h = harness();
+      const h = await harness();
       const baseQuery = h.query.getMockImplementation()!;
       const failure = new Error("injected notification write failure");
-      h.query.mockImplementation(async (sql, values) => {
-        if (
-          sql.includes(
-            {
-              lock: "pg_advisory_xact_lock",
-              "first-party-check":
-                "FROM mobility.phase1_order_first_party_notification_routes",
-              route:
-                "INSERT INTO mobility.phase1_order_partner_notification_routes",
-              sequence:
-                "INSERT INTO mobility.phase1_partner_notification_sequences",
-            }[target]!,
-          )
-        )
-          throw failure;
-        return baseQuery(sql, values);
+      const report = vi.spyOn(h.repository, "reportPersistenceFailure");
+      h.query.mockImplementation(async (sql, values, execute) => {
+        const isTarget =
+          target === "lock"
+            ? sql.replace(/\s+/g, " ").trim() ===
+                "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))" &&
+              typeof values?.[0] === "string" &&
+              values[0].startsWith("passenger-push-first-party-route:")
+            : sql.includes(
+                {
+                  "first-party-check":
+                    "FROM mobility.phase1_order_first_party_notification_routes",
+                  route:
+                    "INSERT INTO mobility.phase1_order_partner_notification_routes",
+                  sequence:
+                    "INSERT INTO mobility.phase1_partner_notification_sequences",
+                }[target]!,
+              );
+        if (isTarget) throw failure;
+        return baseQuery(sql, values, execute);
       });
-      const report = vi
-        .spyOn(h.repository, "reportPersistenceFailure")
-        .mockImplementation(() => {});
-      const booking = await h.service.createReferralPassengerBooking(
-        command,
-        identity,
-      );
-      expect(h.service.getOrder(booking.orderId).status).toBe("created");
-      expect(report).toHaveBeenCalledExactlyOnceWith(
+      await expect(
+        h.service.createReferralPassengerBooking(h.command, h.identity),
+      ).rejects.toMatchObject({
+        status: 503,
+        code: "FARE_QUOTE_UNAVAILABLE",
+      });
+      expect(report).toHaveBeenCalledWith(
         failure,
         "write order partner notification route",
       );
@@ -443,22 +372,28 @@ describe("referral route negative cases and replay", () => {
       expect(h.statements).toContain(
         "RELEASE SAVEPOINT partner_notification_route",
       );
-      expect(h.statements).toContain("COMMIT");
-      expect(h.publish).toHaveBeenCalledTimes(1);
+      expect(h.db.table("ops.phase1_owned_orders").size).toBe(0);
+      expect(
+        h.db
+          .table("ops.phase1_referral_fare_quote_snapshots")
+          .get(h.command.quoteId).consumedByOrderId,
+      ).toBeNull();
+      expect(h.statements).toContain("ROLLBACK");
+      expect(h.publish).not.toHaveBeenCalled();
       expect(h.routes.size).toBe(0);
       expect(h.sequences.size).toBe(0);
     },
   );
 
   it("does not publish or expose a booking when its transaction fails to commit", async () => {
-    const h = harness();
+    const h = await harness();
     const baseQuery = h.query.getMockImplementation()!;
-    h.query.mockImplementation(async (sql, values) => {
+    h.query.mockImplementation(async (sql, values, execute) => {
       if (sql === "COMMIT") throw new Error("commit failed");
-      return baseQuery(sql, values);
+      return baseQuery(sql, values, execute);
     });
     await expect(
-      h.service.createReferralPassengerBooking(command, identity),
+      h.service.createReferralPassengerBooking(h.command, h.identity),
     ).rejects.toThrow("commit failed");
     expect(h.publish).not.toHaveBeenCalled();
     expect(h.service.listOrders()).toHaveLength(0);
@@ -468,7 +403,7 @@ describe("referral route negative cases and replay", () => {
   it.each(["tenant", "partner-staff"])(
     "%s bookings never invoke recipient lookup or route SQL",
     async (source) => {
-      const h = harness();
+      const h = await harness();
       const booking = await h.service.createTenantBooking(
         {
           businessDispatchSubtype: "enterprise_dispatch",
@@ -478,12 +413,12 @@ describe("referral route negative cases and replay", () => {
           reservationWindowStart: new Date(Date.now() + 7200000).toISOString(),
           reservationWindowEnd: new Date(Date.now() + 10800000).toISOString(),
           ...(source === "partner-staff"
-            ? { partnerEntrySlug: identity.partnerEntrySlug! }
+            ? { partnerEntrySlug: h.identity.partnerEntrySlug! }
             : {}),
         },
-        identity.tenantId!,
+        h.identity.tenantId!,
         source === "partner-staff"
-          ? { ...identity, actorType: "partner_api_key" }
+          ? { ...h.identity, actorType: "partner_api_key" }
           : null,
       );
       expect(booking.orderId).toBeTruthy();
@@ -493,14 +428,14 @@ describe("referral route negative cases and replay", () => {
   );
 
   it("phone and voice creation never write a partner route even with passenger/contact data", async () => {
-    const h = harness();
+    const h = await harness();
     const phone = await h.service.createCallCenterOrder({
       callId: "phone-route-negative",
       agentId: "agent-fixture",
       pickup: { address: "Pickup fixture" },
       dropoff: { address: "Dropoff fixture" },
       passenger: {
-        passengerId: identity.drtsPassengerId!,
+        passengerId: h.identity.drtsPassengerId!,
         name: "Fixture",
         phone: "0912345678",
       },
@@ -519,8 +454,8 @@ describe("referral route negative cases and replay", () => {
     expect(h.routes.size).toBe(0);
   });
 
-  it("shared resolution skips an unavailable entry and scopes identity lookup to the exact entry/subject", async () => {
-    const h = harness();
+  it("shared resolution skips an unavailable entry and scopes h.identity lookup to the exact entry/subject", async () => {
+    const h = await harness();
     const order = buildOrderFixture({ orderId: "scoped-resolution" });
     vi.spyOn(h.tenant, "getPartnerEntry").mockImplementation(() => {
       throw new Error("entry unavailable");
@@ -528,21 +463,21 @@ describe("referral route negative cases and replay", () => {
     expect(
       await resolveOrderPartnerNotificationRoute(
         order,
-        identity,
+        h.identity,
         h.links as never,
         h.tenant,
       ),
     ).toBeNull();
     const links = new PartnerUserIdentityLinkRepository();
     const linked = await links.resolveOrCreate({
-      entrySlug: identity.partnerEntrySlug!,
+      entrySlug: h.identity.partnerEntrySlug!,
       partnerUserRef: "scoped-recipient",
     });
     expect(
       await resolveOrderPartnerNotificationRoute(
         order,
         {
-          ...identity,
+          ...h.identity,
           partnerEntrySlug: "other-entry",
           drtsPassengerId: linked.drtsPassengerId,
         },
@@ -553,14 +488,14 @@ describe("referral route negative cases and replay", () => {
     expect(
       await resolveOrderPartnerNotificationRoute(
         order,
-        { ...identity, drtsPassengerId: "other-passenger" },
+        { ...h.identity, drtsPassengerId: "other-passenger" },
         links,
         h.tenant,
       ),
     ).toBeNull();
   });
 
-  it("keeps the module edge one way and resolves the existing narrow identity export", () => {
+  it("keeps the module edge one way and resolves the existing narrow h.identity export", () => {
     const imports = (
       Reflect.getMetadata("imports", OwnedMobilityModule) as Array<{
         forwardRef?: () => unknown;
@@ -575,35 +510,56 @@ describe("referral route negative cases and replay", () => {
 
 describe("referral booking to partner notification delivery", () => {
   it("the real arrival producer allocates an event sequence and reaches the mock partner HTTP endpoint", async () => {
-    const h = harness();
+    const h = await harness();
     const booking = await h.service.createReferralPassengerBooking(
-      command,
-      identity,
+      h.command,
+      h.identity,
     );
     // Seed a valid driver task as the precondition for the arrival producer;
     // assignment generation is owned by the following task in this wave.
+    const acceptedAt = new Date().toISOString();
+    const task: DriverTaskRecord = {
+      taskId: "arrival-fixture",
+      dispatchJobId: "arrival-dispatch-fixture",
+      assignmentId: "arrival-assignment-fixture",
+      sourcePlatform: null,
+      routeProvided: false,
+      waypoints: [],
+      fare: null,
+      proof: null,
+      orderId: booking.orderId,
+      status: "enroute_pickup",
+      driverId: "driver-fixture",
+      vehicleId: "vehicle-fixture",
+      acceptedAt,
+      departedAt: acceptedAt,
+      arrivedPickupAt: null,
+      startedAt: null,
+      completedAt: null,
+      actualDistanceKm: null,
+      actualDurationSec: null,
+    };
     (h.service as unknown as { driverTasks: DriverTaskRecord[] }).driverTasks =
-      [
-        {
-          taskId: "arrival-fixture",
-          orderId: booking.orderId,
-          status: "enroute_pickup",
-          driverId: "driver-fixture",
-          vehicleId: "vehicle-fixture",
-          acceptedAt: new Date().toISOString(),
-        } as DriverTaskRecord,
-      ];
+      [task];
     await h.service.arrivedPickup("arrival-fixture", {
       arrivedAt: new Date().toISOString(),
     });
-    const row = [...h.outboxes.values()].find(
-      (item) => item.eventType === "driver_arrived",
-    )!;
+    const persisted = [
+      ...h.db.table("ops.consumer_notification_outbox").values(),
+    ].find((item) => item.event_type === "driver_arrived")!;
+    const row = Object.fromEntries(
+      Object.entries(persisted).map(([key, value]) => [
+        key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()),
+        key === "payload" && typeof value === "string"
+          ? JSON.parse(value)
+          : value,
+      ]),
+    ) as unknown as ConsumerNotificationOutboxRecord;
     expect(row).toMatchObject({
       orderId: booking.orderId,
       payload: { eventSequence: 1 },
     });
-    expect(h.sequences.get(booking.orderId)).toBe(2);
+    expect(h.sequences.get(booking.orderId)?.next_sequence).toBe(2);
     const delivery = await transportHarness();
     const route = (await h.allocator.findOrderPartnerNotificationRoute(
       booking.orderId,
@@ -633,7 +589,7 @@ describe("referral booking to partner notification delivery", () => {
     const payload = JSON.parse(String(delivery.fetch.mock.calls[0]?.[1]?.body));
     expect(payload.data).toMatchObject({
       event_sequence: 1,
-      partner_entry_slug: identity.partnerEntrySlug,
+      partner_entry_slug: h.identity.partnerEntrySlug,
       recipient: { partner_user_ref: h.link.partnerUserRef },
       ride_ref: booking.orderId,
     });

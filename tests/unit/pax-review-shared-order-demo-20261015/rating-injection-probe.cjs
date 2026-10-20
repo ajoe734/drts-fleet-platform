@@ -283,7 +283,7 @@ async function scenario(mode) {
     assert.equal(consentWrites[0].rating.orderId, orderId);
     assert.equal(consentWrites[0].rating.score, low ? 2 : 5);
     assert.equal(consentWrites[0].consent, contactRequested);
-    assert.equal(consentWrites[0].hasDraft, low && contactRequested);
+    assert.equal(consentWrites[0].hasDraft, low);
   }
 }
 async function main() {

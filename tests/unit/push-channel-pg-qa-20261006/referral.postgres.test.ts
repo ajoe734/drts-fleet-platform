@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { domainFixture } from "../referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
+import { ReferralEmbedHandoffRepository } from "../../../apps/api/src/modules/tenant-partner/referral-embed-handoff.repository";
+import { PassengerFareRepository } from "../../../apps/api/src/modules/passenger-app/fare/passenger-fare.repository";
 import {
   afterAll,
   afterEach,
@@ -12,7 +16,6 @@ import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth
 import type { DispatchJobRecord } from "@drts/contracts";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
-import { TenantPartnerService } from "../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { PartnerUserIdentityLinkRepository } from "../../../apps/api/src/modules/tenant-partner/partner-user-identity-link.repository";
 import { PartnerNotificationTransport } from "../../../apps/api/src/modules/multi-taxi/partner-notification.transport";
 import { databaseUrl, PostgresHarness } from "./postgres-harness";
@@ -30,26 +33,61 @@ describe.skipIf(!databaseUrl)(
     });
 
     async function bookingHarness() {
-      const audit = new AuditNotificationService();
-      // Registry eligibility and event publication remain in-memory boundaries;
-      // identity lookup, booking, route, sequence and outbox use production PG I/O.
-      const tenant = new TenantPartnerService(audit);
+      const f = await domainFixture(),
+        tenant = f.partner;
       const entry = tenant.getPartnerEntry("yuhe-residence");
       await h.pool.query(
         `INSERT INTO admin.phase1_partner_channel_entries
-      (entry_slug,tenant_id,partner_id,program_id,status,created_at,updated_at,record)
-      VALUES ($1,$2,$3,'program-referral-community','active',now(),now(),$4::jsonb) ON CONFLICT DO NOTHING`,
+        (entry_slug,tenant_id,partner_id,program_id,status,created_at,updated_at,record)
+        VALUES ($1,$2,$3,$4,'active',now(),now(),$5::jsonb) ON CONFLICT DO NOTHING`,
         [
           entry.entrySlug,
           entry.tenantId,
           entry.partnerId,
+          entry.programId,
           JSON.stringify(entry),
         ],
       );
       const links = new PartnerUserIdentityLinkRepository(h.database);
+      const handoffs = new ReferralEmbedHandoffRepository(h.database);
+      Reflect.set(tenant, "partnerUserIdentityLinkRepository", links);
+      Reflect.set(tenant, "referralEmbedHandoffRepository", handoffs);
       const link = await links.resolveOrCreate({
         entrySlug: entry.entrySlug,
         partnerUserRef: "opaque-referral",
+      });
+      const artifact = randomUUID();
+      const issued = await handoffs.issue({
+        artifact,
+        entrySlug: entry.entrySlug,
+        entryHost: entry.entryHost!,
+        partnerUserRef: link.partnerUserRef,
+        drtsPassengerId: link.drtsPassengerId,
+        tenantId: entry.tenantId,
+        partnerId: entry.partnerId,
+        partnerProgramId: entry.programId,
+        consentRequired: true,
+        consentBundleVersion: null,
+        consentGrantedAt: null,
+        issuedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 120000).toISOString(),
+      });
+      await handoffs.consume({
+        artifact,
+        entrySlug: entry.entrySlug,
+        entryHost: entry.entryHost!,
+      });
+      await tenant.recordReferralEmbedConsent({
+        handoffId: issued.handoffId,
+        entrySlug: entry.entrySlug,
+        entryHost: entry.entryHost!,
+        currentDrtsPassengerId: link.drtsPassengerId,
+        currentPartnerEntrySlug: entry.entrySlug,
+        consentBundle: {
+          bundleVersion: "pg-referral-v1",
+          grantedScopes: ["trip.manage", "pii.trip", "identity.bind"],
+          grantedAt: new Date().toISOString(),
+        },
       });
       const identity: BootstrapRequestIdentity = {
         authMode: "jwt_bearer",
@@ -58,43 +96,37 @@ describe.skipIf(!databaseUrl)(
         realm: "partner",
         tenantId: entry.tenantId,
         partnerId: entry.partnerId,
-        partnerProgramId: "program-referral-community",
+        partnerProgramId: entry.programId,
         partnerEntrySlug: entry.entrySlug,
         drtsPassengerId: link.drtsPassengerId,
         roleFamilies: ["partner"],
         roles: ["referral_passenger"],
-        scopes: [],
+        scopes: ["partner:book"],
         requestId: null,
       };
-      const publish = vi.fn();
-      const service = new OwnedMobilityService(
-        {} as never,
-        audit,
-        {
-          linkOrderToCallSession: vi.fn(() => ({ recordingId: null })),
-        } as never,
-        { publishTaskUpdated: vi.fn() } as never,
-        { publishOrderCreated: publish } as never,
-        h.owned,
-        tenant,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        links,
+      const service = f.service;
+      Reflect.set(service, "ownedMobilityRepository", h.owned);
+      Reflect.set(service, "partnerUserIdentityLinkRepository", links);
+      Reflect.set(
+        service,
+        "referralFareRepository",
+        new PassengerFareRepository(h.database),
       );
-      const command = {
+      const publish = vi.spyOn(
+        Reflect.get(service, "opsDispatchEventsService"),
+        "publishOrderCreated",
+      );
+      const input = {
         entrySlug: entry.entrySlug,
         pickupAddress: "Synthetic pickup",
         dropoffAddress: "Synthetic dropoff",
+      };
+      const quote = await service.quoteReferralPassengerFare(input, identity);
+      const command = {
+        ...input,
+        quoteId: quote.quoteId,
+        passengerName: "Synthetic PG rider",
+        passengerPhone: "0912345678",
         idempotencyKey: "pg-referral",
       };
       return { service, identity, command, publish, link };
@@ -115,6 +147,9 @@ describe.skipIf(!databaseUrl)(
       await h.owned.persistChanges({ dispatchJobs: [job] });
       const service = new OwnedMobilityService(
         {
+          prepareMatchingSuppressions: () => undefined,
+          assertCurrentMatchingSuppressionClear: () => undefined,
+
           getVehicleDispatchability: () => true,
           getDriverAvailability: () => true,
         } as never,
@@ -234,7 +269,7 @@ describe.skipIf(!databaseUrl)(
     });
 
     it.each(["missing", "revoked"])(
-      "books without a route when the durable identity link is %s",
+      "denies booking before writing when the durable identity link is %s",
       async (state) => {
         const b = await bookingHarness();
         if (state === "missing")
@@ -245,21 +280,23 @@ describe.skipIf(!databaseUrl)(
           await h.pool.query(
             "UPDATE admin.phase1_partner_user_identity_links SET status='revoked',record=jsonb_set(record,'{status}','\"revoked\"')",
           );
-        const booking = await b.service.createReferralPassengerBooking(
-          b.command,
-          b.identity,
-        );
+        await expect(
+          b.service.createReferralPassengerBooking(b.command, b.identity),
+        ).rejects.toMatchObject({
+          status: 403,
+          code: "REFERRAL_HANDOFF_REVOKED",
+        });
+        expect(
+          (await h.pool.query("SELECT order_id FROM ops.phase1_owned_orders"))
+            .rows,
+        ).toHaveLength(0);
         expect(
           (
             await h.pool.query(
-              "SELECT order_id FROM ops.phase1_owned_orders WHERE order_id=$1",
-              [booking.orderId],
+              "SELECT * FROM mobility.phase1_order_partner_notification_routes",
             )
           ).rows,
-        ).toHaveLength(1);
-        expect(
-          await h.taxi.findOrderPartnerNotificationRoute(booking.orderId),
-        ).toBeNull();
+        ).toHaveLength(0);
         expect(
           (
             await h.pool.query(
@@ -267,30 +304,48 @@ describe.skipIf(!databaseUrl)(
             )
           ).rows,
         ).toHaveLength(0);
+        expect(
+          (
+            await h.pool.query(
+              "SELECT consumed_by_order_id FROM ops.phase1_referral_fare_quote_snapshots WHERE quote_id=$1",
+              [b.command.quoteId],
+            )
+          ).rows[0].consumed_by_order_id,
+        ).toBeNull();
+        expect(b.publish).not.toHaveBeenCalled();
       },
     );
 
-    it("rolls back route plus sequence to the real savepoint while preserving booking", async () => {
+    it("rolls back quote claim, booking, route and sequence on a real SQL fault before COMMIT", async () => {
       const b = await bookingHarness();
+      const report = vi.spyOn(h.owned, "reportPersistenceFailure");
       await h.pool
         .query(`CREATE FUNCTION mobility.qa_reject_sequence() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'qa sequence fault'; END $$;
       CREATE TRIGGER qa_reject_sequence BEFORE INSERT ON mobility.phase1_partner_notification_sequences FOR EACH ROW EXECUTE FUNCTION mobility.qa_reject_sequence()`);
       try {
-        const booking = await b.service.createReferralPassengerBooking(
-          b.command,
-          b.identity,
+        await expect(
+          b.service.createReferralPassengerBooking(b.command, b.identity),
+        ).rejects.toMatchObject({
+          status: 503,
+          code: "FARE_QUOTE_UNAVAILABLE",
+        });
+        expect(report).toHaveBeenCalledWith(
+          expect.objectContaining({
+            message: expect.stringContaining("qa sequence fault"),
+          }),
+          "write order partner notification route",
         );
+        expect(
+          (await h.pool.query("SELECT order_id FROM ops.phase1_owned_orders"))
+            .rows,
+        ).toHaveLength(0);
         expect(
           (
             await h.pool.query(
-              "SELECT order_id FROM ops.phase1_owned_orders WHERE order_id=$1",
-              [booking.orderId],
+              "SELECT * FROM mobility.phase1_order_partner_notification_routes",
             )
           ).rows,
-        ).toHaveLength(1);
-        expect(
-          await h.taxi.findOrderPartnerNotificationRoute(booking.orderId),
-        ).toBeNull();
+        ).toHaveLength(0);
         expect(
           (
             await h.pool.query(
@@ -298,6 +353,15 @@ describe.skipIf(!databaseUrl)(
             )
           ).rows,
         ).toHaveLength(0);
+        expect(
+          (
+            await h.pool.query(
+              "SELECT consumed_by_order_id FROM ops.phase1_referral_fare_quote_snapshots WHERE quote_id=$1",
+              [b.command.quoteId],
+            )
+          ).rows[0].consumed_by_order_id,
+        ).toBeNull();
+        expect(b.publish).not.toHaveBeenCalled();
       } finally {
         await h.pool.query(
           "DROP TRIGGER qa_reject_sequence ON mobility.phase1_partner_notification_sequences; DROP FUNCTION mobility.qa_reject_sequence()",

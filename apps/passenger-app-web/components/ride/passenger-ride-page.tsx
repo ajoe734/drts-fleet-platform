@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { t } from "./translations";
+import { parsePublicFareEffectiveDate, t } from "./translations";
 import Link from "next/link";
 import {
   startTransition,
@@ -37,11 +37,39 @@ import {
   subscribePassengerRideAuthority,
 } from "../../lib/ride/passenger-live";
 import { ComplaintForm } from "./complaint-form";
+import { ReceiptShareActions } from "./receipt-share-actions";
 
 const ConnectionContext = React.createContext<{
   connectionState: "connecting" | "connected" | "disconnected";
   lastEventTime: number;
+  now?: number;
 }>({ connectionState: "connected", lastEventTime: 0 });
+
+// Reuse the map's existing observation clock for both map and ETA expiry.
+// This is a local presentation clock, never another authority poller.
+function PassengerConnectionProvider({
+  connectionState,
+  lastEventTime,
+  mapState,
+  children,
+}: {
+  connectionState: "connecting" | "connected" | "disconnected";
+  lastEventTime: number;
+  mapState: PassengerRideFixture["mapState"];
+  children: ReactNode;
+}) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (mapState !== "fresh" && mapState !== "stale") return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [mapState]);
+  return (
+    <ConnectionContext.Provider value={{ connectionState, lastEventTime, now }}>
+      {children}
+    </ConnectionContext.Provider>
+  );
+}
 
 const monoFont = '"JetBrains Mono", ui-monospace, SFMono-Regular, monospace';
 const shellInset = 14;
@@ -345,15 +373,12 @@ function InlineBanner({ fixture }: { fixture: PassengerRideFixture }) {
 
 function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
   const positions = getPassengerTrackingMapPositions(fixture);
-  const { lastEventTime, connectionState } =
-    React.useContext(ConnectionContext);
-  const [now, setNow] = React.useState(Date.now());
-
-  React.useEffect(() => {
-    if (fixture.mapState !== "fresh" && fixture.mapState !== "stale") return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [fixture.mapState]);
+  const {
+    lastEventTime,
+    connectionState,
+    now: observationClock,
+  } = React.useContext(ConnectionContext);
+  const now = Math.max(observationClock ?? 0, Date.now());
 
   const elapsedSeconds =
     lastEventTime > 0
@@ -540,7 +565,26 @@ function MapCard({ fixture }: { fixture: PassengerRideFixture }) {
 }
 
 function EtaBlock({ fixture }: { fixture: PassengerRideFixture }) {
-  if (!fixture.etaMain) return null;
+  const { connectionState, now } = React.useContext(ConnectionContext);
+  const location = fixture.tracking?.location;
+  const observationAge = location
+    ? Math.max(now ?? 0, Date.now()) - Date.parse(location.recordedAt)
+    : NaN;
+  const staleObservation =
+    fixture.tracking !== undefined &&
+    (fixture.tracking?.locationFreshness !== "fresh" ||
+      !Number.isFinite(observationAge) ||
+      observationAge < -5_000 ||
+      observationAge >= 60_000);
+  const unavailable =
+    connectionState === "disconnected" || staleObservation || !fixture.etaMain;
+  if (unavailable) {
+    return fixture.screenId === "P5-07" ? (
+      <div role="status" style={{ margin: "0 14px 12px", textAlign: "center" }}>
+        {t.LiveRouteEstimateUnavailable}
+      </div>
+    ) : null;
+  }
   const tone =
     fixture.etaTone === "success"
       ? passengerChrome.success.fg
@@ -827,8 +871,7 @@ function isCurrentPublicFare(value: unknown): value is CurrentPublicFare {
   return (
     typeof fare.version === "string" &&
     fare.version.trim().length > 0 &&
-    typeof fare.effectiveAt === "string" &&
-    Number.isFinite(Date.parse(fare.effectiveAt)) &&
+    parsePublicFareEffectiveDate(fare.effectiveAt) !== null &&
     validNumbers(
       ["baseFare", "distanceRate", "delayRate", "nightSurcharge"],
       0,
@@ -1636,6 +1679,7 @@ function RatingCard({
           >
             <input
               type="checkbox"
+              role="switch"
               checked={contactRequested}
               onChange={(e) => setContactRequested(e.target.checked)}
               style={{ width: 16, height: 16 }}
@@ -2246,6 +2290,12 @@ function Actions({
             {t.DownloadHtml}
           </a>
         ) : null}
+        <ReceiptShareActions
+          pdfUrl={cert?.pdfUrl}
+          receiptNo={cert?.receiptNo}
+          token={token}
+          authMode={authMode}
+        />
         <Link
           href={authMode === "token" ? `/r/${token}` : `/rides/${token}`}
           style={buttonStyle("ghost")}
@@ -2685,6 +2735,12 @@ function RideContent({
         <VehicleCard fixture={fixture} />
         <FareCard fixture={fixture} />
         <PaymentCard fixture={fixture} />
+        <Actions
+          fixture={fixture}
+          token={token}
+          authMode={authMode}
+          onFixtureUpdate={onFixtureUpdate}
+        />
       </>
     );
   }
@@ -2960,7 +3016,11 @@ export function PassengerRidePage({
 
   return (
     <Shell>
-      <ConnectionContext.Provider value={{ connectionState, lastEventTime }}>
+      <PassengerConnectionProvider
+        connectionState={connectionState}
+        lastEventTime={lastEventTime}
+        mapState={fixture.mapState}
+      >
         <PassengerScreen
           fixture={fixture}
           token={token}
@@ -2968,7 +3028,7 @@ export function PassengerRidePage({
           onCertificateUpdate={handleCertificateUpdate}
           onFixtureUpdate={handleFixtureUpdate}
         />
-      </ConnectionContext.Provider>
+      </PassengerConnectionProvider>
     </Shell>
   );
 }

@@ -106,7 +106,7 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     const { auditService, platformAdminService } = createService(store);
 
     // Create a public info disclosure version
-    const publicInfo = platformAdminService.createPublicInfoVersion({
+    const publicInfo = await platformAdminService.createPublicInfoVersion({
       title: "Hualien County DRTS Public Service",
       callPhone: "0800-888-999",
       complaintPhone: "0800-111-222",
@@ -118,7 +118,7 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     });
 
     // Publish the public info version
-    platformAdminService.publishPublicInfoVersion(
+    await platformAdminService.publishPublicInfoVersion(
       publicInfo.versionId,
       {},
       "req-publish-public-info",
@@ -202,7 +202,7 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
     const store = new InMemoryDocumentArtifactStore();
     const { platformAdminService } = createService(store);
 
-    const publicInfo = platformAdminService.createPublicInfoVersion({
+    const publicInfo = await platformAdminService.createPublicInfoVersion({
       title: "花蓮偏遠地區彈性運輸服務",
       callPhone: "0800-888-999",
       complaintPhone: "0800-111-222",
@@ -212,7 +212,7 @@ describe("SR-PLACARD-001: vehicle placard renders a real, parseable PDF", () => 
       effectiveFrom: "2026-07-01T00:00:00.000Z",
     });
 
-    platformAdminService.publishPublicInfoVersion(
+    await platformAdminService.publishPublicInfoVersion(
       publicInfo.versionId,
       {},
       "req-publish-cjk",

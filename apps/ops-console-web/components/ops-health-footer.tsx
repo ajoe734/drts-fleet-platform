@@ -43,11 +43,23 @@ function useApiHealth() {
           signal: controller.signal,
         });
         const body = await response.json().catch(() => null);
-        if (active) setStatus(normalizeHealthStatus(body?.status, response.ok));
+        if (active) {
+          const sourceTime =
+            typeof body?.timestamp === "string"
+              ? new Date(body.timestamp)
+              : null;
+          setStatus(normalizeHealthStatus(body?.status, response.ok));
+          setLastCheckedAt(
+            sourceTime && Number.isFinite(sourceTime.getTime())
+              ? sourceTime
+              : null,
+          );
+        }
       } catch {
-        if (active) setStatus("down");
-      } finally {
-        if (active) setLastCheckedAt(new Date());
+        if (active) {
+          setStatus("down");
+          setLastCheckedAt(null);
+        }
       }
     }
 
@@ -104,7 +116,9 @@ export function OpsHealthFooter() {
   const c = copy[status];
   const checkedLabel = lastCheckedAt
     ? lastCheckedAt.toLocaleTimeString(locale === "zh" ? "zh-TW" : "en-US")
-    : t("opsShell.health.notChecked");
+    : status === "checking"
+      ? t("opsShell.health.notChecked")
+      : t("opsShell.health.sourceTimeUnknown");
 
   return (
     <div

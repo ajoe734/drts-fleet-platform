@@ -25,12 +25,69 @@ type ComplaintState = {
 type PersistComplaintChanges = {
   complaintCases?: readonly ComplaintCaseRecord[];
   complaintTimelines?: readonly ComplaintTimelineEntry[];
+  /** Prepared ordinary command identities confirmed by this same transaction. */
+  commandKeys?: readonly string[];
 };
 
 export interface PassengerIntakeResult {
   complaintCase: ComplaintCaseRecord;
   timeline: ComplaintTimelineEntry;
   replayed: boolean;
+}
+
+export type ComplaintPendingCommitStatus = "pending" | "confirmed" | "failed";
+
+/** Durable mirror of a ComplaintService in-memory PendingUncertainComplaintCommit,
+ * so a same-logical-command retry can recover the originally allocated
+ * caseNo/entryIds across an API process restart or on a different replica,
+ * not only within the originating process's Map. */
+export type ComplaintPendingCommitRecord = {
+  commandKey: string;
+  caseNo: string;
+  action: string;
+  commandPayload: unknown;
+  caseSnapshot: ComplaintCaseRecord;
+  timelineSnapshot: ComplaintTimelineEntry[];
+  previousCaseSnapshot: ComplaintCaseRecord | null;
+  status: ComplaintPendingCommitStatus;
+};
+
+type PendingCommitRow = {
+  command_key: string;
+  case_no: string;
+  action: string;
+  command_payload: unknown;
+  case_snapshot: unknown;
+  timeline_snapshot: unknown;
+  previous_case_snapshot: unknown;
+  status: ComplaintPendingCommitStatus;
+};
+
+/** Thrown when the client failed after issuing COMMIT: the transaction may
+ * have actually been applied server-side. Callers must not assume rollback
+ * (and must not treat the write as a fresh, safely-retryable attempt). */
+export class ComplaintCommitOutcomeUnknownError extends Error {
+  constructor(public readonly cause: unknown) {
+    super(
+      cause instanceof Error
+        ? `Complaint persistence commit outcome is unknown: ${cause.message}`
+        : "Complaint persistence commit outcome is unknown.",
+    );
+    this.name = "ComplaintCommitOutcomeUnknownError";
+  }
+}
+
+/** Only raised by the prepared predecessor check, before any business write. */
+export class ComplaintPreparedCaseChangedError extends ApiRequestError {
+  constructor(caseNo: string) {
+    super(
+      409,
+      "IDEMPOTENCY_IN_PROGRESS",
+      "The complaint changed after this command was prepared; canonical confirmation is required.",
+      { caseNo },
+      true,
+    );
+  }
 }
 
 @Injectable()
@@ -92,24 +149,129 @@ export class ComplaintRepository {
       return;
     }
 
-    if (
-      !transaction &&
-      changes.complaintCases?.some(
-        (item) => item.category === "settlement_dispute",
-      )
-    ) {
+    // Every top-level call commits its case + timeline rows atomically, not
+    // only settlement_dispute ones, so an ordinary case can never commit
+    // without its timeline (or vice versa).
+    if (!transaction) {
       const client = await this.databaseService!.connect();
+      let committed = false;
+      let commitAttempted = false;
       try {
         await client.query("BEGIN");
         await this.persistChanges(changes, client);
+        commitAttempted = true;
         await client.query("COMMIT");
+        committed = true;
       } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
+        throw commitAttempted
+          ? new ComplaintCommitOutcomeUnknownError(error)
+          : error;
       } finally {
-        client.release();
+        if (!committed) {
+          try {
+            await client.query("ROLLBACK");
+          } catch {
+            this.logger.warn(
+              "Complaint persistence rollback failed; discarding the transaction connection.",
+            );
+          } finally {
+            client.release(true);
+          }
+        } else {
+          client.release();
+        }
       }
       return;
+    }
+
+    if (changes.commandKeys?.length) {
+      // Serialise retries of the same prepared command before touching its
+      // case row. A retry queued behind a successful COMMIT must replay the
+      // result, not upsert an old snapshot over a later legitimate mutation.
+      let confirmed = 0;
+      for (const commandKey of changes.commandKeys) {
+        const reserved = await transaction!.query<{
+          status: ComplaintPendingCommitStatus;
+          case_no: string;
+          previous_case_snapshot: unknown;
+          timeline_snapshot: ComplaintTimelineEntry[];
+        }>(
+          `SELECT status, case_no, previous_case_snapshot, timeline_snapshot FROM crm.phase1_complaint_pending_commits WHERE command_key = $1 FOR UPDATE`,
+          [commandKey],
+        );
+        if (!reserved.rows[0])
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_IN_PROGRESS",
+            "Complaint command reservation is unavailable; retry the same key.",
+            undefined,
+            true,
+          );
+        const originalTimeline = reserved.rows[0].timeline_snapshot;
+        const expectedTimeline = (changes.complaintTimelines ?? []).filter(
+          (entry) => entry.caseNo === reserved.rows[0]!.case_no,
+        );
+        if (
+          !Array.isArray(originalTimeline) ||
+          originalTimeline.length !== expectedTimeline.length ||
+          expectedTimeline.some(
+            (entry) =>
+              !originalTimeline.some(
+                (original) => original.entryId === entry.entryId,
+              ),
+          )
+        )
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_IN_PROGRESS",
+            "The complaint reservation changed; retry the original command.",
+            undefined,
+            true,
+          );
+        if (reserved.rows[0].status === "confirmed") {
+          confirmed++;
+          continue;
+        }
+        if (reserved.rows[0].status !== "pending")
+          throw new ApiRequestError(
+            409,
+            "IDEMPOTENCY_IN_PROGRESS",
+            "The complaint preparation was rejected; retry after canonical refresh.",
+            undefined,
+            true,
+          );
+        // A pending command may have been prepared before a later command
+        // was acknowledged by another replica. Lock the actual case and
+        // compare its original prepared predecessor before any upsert. This
+        // also serialises distinct command keys that read the same old case.
+        const original = reserved.rows[0];
+        const current = await transaction!.query<{
+          matches_prepared: boolean | null;
+        }>(
+          `SELECT record = $2::jsonb AS matches_prepared
+           FROM crm.phase1_complaint_cases WHERE case_no = $1 FOR UPDATE`,
+          [
+            original.case_no,
+            original.previous_case_snapshot
+              ? JSON.stringify(original.previous_case_snapshot)
+              : null,
+          ],
+        );
+        const matches = original.previous_case_snapshot
+          ? current.rows[0]?.matches_prepared === true
+          : current.rows.length === 0;
+        if (!matches)
+          throw new ComplaintPreparedCaseChangedError(original.case_no);
+      }
+      if (confirmed === changes.commandKeys.length) return;
+      if (confirmed)
+        throw new ApiRequestError(
+          409,
+          "IDEMPOTENCY_IN_PROGRESS",
+          "Complaint command outcomes require individual replay.",
+          undefined,
+          true,
+        );
     }
 
     const queryable: {
@@ -181,6 +343,15 @@ export class ComplaintRepository {
     }
 
     await Promise.all(writes);
+    // The prepared identity already exists outside this transaction. Its
+    // confirmed result changes atomically with the canonical case/timeline.
+    for (const commandKey of changes.commandKeys ?? []) {
+      await transaction!.query(
+        `UPDATE crm.phase1_complaint_pending_commits
+         SET status = 'confirmed', updated_at = now() WHERE command_key = $1`,
+        [commandKey],
+      );
+    }
   }
 
   /** Commit intake, canonical CRM case and timeline together; fail closed. */
@@ -358,10 +529,19 @@ export class ComplaintRepository {
     const existing = await client.query<{
       request_hash: string;
       rating_id: string;
+      contact_requested: boolean;
+      case_required: boolean;
       complaint_case_no: string | null;
+      record: unknown;
+      timeline: unknown;
     }>(
-      `SELECT request_hash, rating_id, complaint_case_no FROM passenger.rating_consents
-       WHERE order_id = $1 AND drts_passenger_id = $2 FOR UPDATE`,
+      `SELECT request_hash, rating_id, complaint_case_no, contact_requested, case_required,
+              c.record, t.record AS timeline
+       FROM passenger.rating_consents r
+       LEFT JOIN crm.phase1_complaint_cases c ON c.case_no = r.complaint_case_no
+       LEFT JOIN crm.phase1_complaint_timelines t
+         ON t.case_no = r.complaint_case_no AND t.action = 'case_created'
+       WHERE order_id = $1 AND drts_passenger_id = $2 FOR UPDATE OF r`,
       [rating.orderId, rating.passengerSubjectRef],
     );
     const row = existing.rows[0];
@@ -381,6 +561,31 @@ export class ComplaintRepository {
         "The original rating and contact choice cannot be changed.",
       );
     }
+    const requiresCase = rating.score <= 2;
+    if (row) {
+      if (
+        row.contact_requested !== contactRequested ||
+        typeof row.case_required !== "boolean" ||
+        row.case_required !== Boolean(row.complaint_case_no) ||
+        (row.case_required &&
+          (!requiresCase || !row.record || !row.timeline)) ||
+        (!row.case_required && requiresCase && contactRequested)
+      )
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_CONSENT_INCONSISTENT",
+          "The persisted rating contact source is inconsistent.",
+        );
+      // V0126 captured the pre-existing rule explicitly. An exact legacy opt-out
+      // replay must not backfill a case; missing provenance never means legacy.
+      if (!row.case_required) return null;
+    }
+    if (Boolean(intake) !== requiresCase)
+      throw new ApiRequestError(
+        409,
+        "PASSENGER_RATING_CONSENT_INCONSISTENT",
+        "The required low-rating case is unavailable.",
+      );
     const stored = intake
       ? await this.persistPassengerIntakeWithClient(
           client,
@@ -401,8 +606,8 @@ export class ComplaintRepository {
     }
     await client.query(
       `INSERT INTO passenger.rating_consents
-       (order_id, drts_passenger_id, rating_id, contact_requested, request_hash, complaint_case_no, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       (order_id, drts_passenger_id, rating_id, contact_requested, request_hash, complaint_case_no, created_at, case_required)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
         rating.orderId,
         rating.passengerSubjectRef,
@@ -411,6 +616,7 @@ export class ComplaintRepository {
         requestHash,
         stored?.complaintCase.caseNo ?? null,
         rating.submittedAt,
+        requiresCase,
       ],
     );
     return stored;
@@ -434,11 +640,12 @@ export class ComplaintRepository {
       request_hash: string;
       rating_id: string;
       contact_requested: boolean;
+      case_required: boolean;
       complaint_case_no: string | null;
       record: unknown;
       timeline: unknown;
     }>(
-      `SELECT p.request_hash, p.rating_id, p.contact_requested, p.complaint_case_no,
+      `SELECT p.request_hash, p.rating_id, p.contact_requested, p.complaint_case_no, p.case_required,
               c.record, t.record AS timeline
        FROM ops.passenger_ride_rating_consents p
        LEFT JOIN crm.phase1_complaint_cases c ON c.case_no = p.complaint_case_no
@@ -460,9 +667,11 @@ export class ComplaintRepository {
           "The original rating and contact choice cannot be changed.",
         );
       if (
-        Boolean(row.complaint_case_no) !==
-          (contactRequested && rating.score <= 2) ||
-        (row.complaint_case_no && (!row.record || !row.timeline))
+        typeof row.case_required !== "boolean" ||
+        row.case_required !== Boolean(row.complaint_case_no) ||
+        (row.case_required &&
+          (rating.score > 2 || !row.record || !row.timeline)) ||
+        (!row.case_required && rating.score <= 2 && contactRequested)
       )
         throw new ApiRequestError(
           409,
@@ -484,15 +693,33 @@ export class ComplaintRepository {
         : null;
     }
     if (!isNew) {
-      // An old omitted-contact retry is still a valid rating retry. Never infer
-      // historical consent, accept a new explicit choice, or retroactively open CRM.
-      if (!choiceProvided) return null;
+      // Only a rating explicitly captured before V0126 can have no consent.
+      // A new/unknown row is never reclassified as legacy after an unknown COMMIT.
+      const provenance = await client.query<{
+        low_rating_case_policy_v2: boolean;
+      }>(
+        `SELECT low_rating_case_policy_v2 FROM ops.passenger_trip_ratings
+         WHERE rating_id = $1 AND order_id = $2 AND passenger_subject_ref = $3 FOR UPDATE`,
+        [rating.ratingId, rating.orderId, rating.passengerSubjectRef],
+      );
+      if (
+        !choiceProvided &&
+        provenance.rows[0]?.low_rating_case_policy_v2 === false
+      )
+        return null;
       throw new ApiRequestError(
         409,
         "PASSENGER_RATING_CONSENT_UNAVAILABLE",
         "The original rating has no captured contact choice.",
       );
     }
+    const requiresCase = rating.score <= 2;
+    if (Boolean(draft) !== requiresCase)
+      throw new ApiRequestError(
+        409,
+        "PASSENGER_RATING_CONSENT_INCONSISTENT",
+        "The required low-rating case is unavailable.",
+      );
     if (draft)
       await this.persistChanges(
         {
@@ -504,8 +731,8 @@ export class ComplaintRepository {
     await client.query(
       `INSERT INTO ops.passenger_ride_rating_consents
        (order_id, passenger_subject_ref, rating_id, original_token_id, rating_score,
-        contact_requested, request_hash, complaint_case_no, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        contact_requested, request_hash, complaint_case_no, created_at, case_required)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         rating.orderId,
         rating.passengerSubjectRef,
@@ -516,6 +743,7 @@ export class ComplaintRepository {
         requestHash,
         draft?.complaintCase.caseNo ?? null,
         rating.submittedAt,
+        requiresCase,
       ],
     );
     return draft ? { ...draft, replayed: false } : null;
@@ -575,6 +803,196 @@ export class ComplaintRepository {
         row.record,
         "crm.phase1_complaint_timelines",
       ),
+    );
+  }
+
+  /** Reads the current durable record for one case, independent of category
+   * and of the in-memory optimistic cache. Used to reconcile a case whose
+   * COMMIT outcome was unknown. For a create, `null` definitively proves the
+   * write never landed (safe to roll back). For an update the row already
+   * existed before the uncertain attempt, so `null` is a repository/
+   * connectivity anomaly rather than proof either way (left pending); only a
+   * record that does not match the attempted snapshot proves that update
+   * did not land, and an exact match proves it did. */
+  async loadCaseByCaseNo(caseNo: string): Promise<ComplaintCaseRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM crm.phase1_complaint_cases WHERE case_no = $1`,
+      [caseNo],
+    );
+    return result.rows[0]
+      ? this.parseRecord<ComplaintCaseRecord>(
+          result.rows[0].record,
+          "crm.phase1_complaint_cases",
+        )
+      : null;
+  }
+
+  /** Reserve PREPARED identity before the business transaction. A concurrent
+   * retry can observe the original IDs; it must never replace them. */
+  async recordPendingCommit(
+    record: ComplaintPendingCommitRecord,
+  ): Promise<ComplaintPendingCommitRecord | undefined> {
+    if (!this.isEnabled()) return;
+    const result = await this.databaseService!.query<PendingCommitRow>(
+      `INSERT INTO crm.phase1_complaint_pending_commits (
+         command_key, case_no, action, command_payload, case_snapshot,
+         timeline_snapshot, previous_case_snapshot, status, updated_at
+       ) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::jsonb, $8, now())
+       ON CONFLICT (command_key) DO UPDATE SET
+         command_key = EXCLUDED.command_key
+       RETURNING command_key, case_no, action, command_payload, case_snapshot,
+                 timeline_snapshot, previous_case_snapshot, status`,
+      [
+        record.commandKey,
+        record.caseNo,
+        record.action,
+        JSON.stringify(record.commandPayload ?? null),
+        JSON.stringify(record.caseSnapshot),
+        JSON.stringify(record.timelineSnapshot),
+        record.previousCaseSnapshot
+          ? JSON.stringify(record.previousCaseSnapshot)
+          : null,
+        record.status,
+      ],
+    ).catch((error: unknown) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "23505"
+      ) {
+        throw new ApiRequestError(
+          409,
+          "IDEMPOTENCY_IN_PROGRESS",
+          "Another complaint creation has reserved this case number; retry the same key.",
+          undefined,
+          true,
+        );
+      }
+      throw error;
+    });
+    const reserved = result.rows[0]
+      ? this.parsePendingCommit(result.rows[0])
+      : undefined;
+    if (reserved?.status === "failed") {
+      // Only a durable, definite rejection permits a new reservation. An
+      // unknown pending or confirmed result is never removed here.
+      await this.databaseService!.query(
+        `DELETE FROM crm.phase1_complaint_pending_commits
+         WHERE command_key = $1 AND status = 'failed' AND timeline_snapshot = $2::jsonb`,
+        [record.commandKey, JSON.stringify(reserved.timelineSnapshot)],
+      );
+      return this.recordPendingCommit(record);
+    }
+    return reserved;
+  }
+
+  /** Prepared commands and confirmed replay results survive process restarts. */
+  async loadPendingCommits(): Promise<ComplaintPendingCommitRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<PendingCommitRow>(
+      `
+        SELECT command_key, case_no, action, command_payload, case_snapshot,
+               timeline_snapshot, previous_case_snapshot, status
+        FROM crm.phase1_complaint_pending_commits
+        WHERE status = 'pending' OR status = 'confirmed'
+      `,
+    );
+    return result.rows.map((row) => this.parsePendingCommit(row));
+  }
+
+  private parsePendingCommit(
+    row: PendingCommitRow,
+  ): ComplaintPendingCommitRecord {
+    return {
+      commandKey: row.command_key,
+      caseNo: row.case_no,
+      action: row.action,
+      commandPayload: row.command_payload,
+      caseSnapshot: this.parseRecord<ComplaintCaseRecord>(
+        row.case_snapshot,
+        "crm.phase1_complaint_pending_commits.case_snapshot",
+      ),
+      timelineSnapshot: Array.isArray(row.timeline_snapshot)
+        ? (row.timeline_snapshot as ComplaintTimelineEntry[])
+        : [],
+      previousCaseSnapshot: row.previous_case_snapshot
+        ? this.parseRecord<ComplaintCaseRecord>(
+            row.previous_case_snapshot,
+            "crm.phase1_complaint_pending_commits.previous_case_snapshot",
+          )
+        : null,
+      status: row.status,
+    };
+  }
+
+  /** One statement gives the ordinary case and its full timeline one
+   * canonical snapshot, including changes made by another API replica. */
+  async loadCaseState(caseNo: string): Promise<ComplaintState> {
+    if (!this.isEnabled())
+      return { complaintCases: [], complaintTimelines: [] };
+    const result = await this.databaseService!.query<
+      JsonRecordRow & { kind: "case" | "timeline" }
+    >(
+      `SELECT kind, record FROM (
+         SELECT 'case' AS kind, record, created_at FROM crm.phase1_complaint_cases WHERE case_no = $1
+         UNION ALL
+         SELECT 'timeline' AS kind, record, created_at FROM crm.phase1_complaint_timelines WHERE case_no = $1
+       ) complaint_case_snapshot ORDER BY kind, created_at`,
+      [caseNo],
+    );
+    return {
+      complaintCases: result.rows
+        .filter((row) => row.kind === "case")
+        .map((row) =>
+          this.parseRecord<ComplaintCaseRecord>(
+            row.record,
+            "crm.phase1_complaint_cases",
+          ),
+        ),
+      complaintTimelines: result.rows
+        .filter((row) => row.kind === "timeline")
+        .map((row) =>
+          this.parseRecord<ComplaintTimelineEntry>(
+            row.record,
+            "crm.phase1_complaint_timelines",
+          ),
+        ),
+    };
+  }
+
+  /** Only the caller's matched, new, pre-business predicate rejection.
+   * Retained failed rows let another process recover if DELETE fails. */
+  async markPendingCommitFailed(
+    commandKey: string,
+    rejectedTimeline: readonly ComplaintTimelineEntry[],
+  ): Promise<void> {
+    if (!this.isEnabled()) return;
+    await this.databaseService!.query(
+      `UPDATE crm.phase1_complaint_pending_commits SET status = 'failed', updated_at = now()
+       WHERE command_key = $1 AND status = 'pending' AND timeline_snapshot = $2::jsonb`,
+      [commandKey, JSON.stringify(rejectedTimeline)],
+    );
+  }
+
+  /** Clears the durable pending-commit marker once reconcilePendingCase has
+   * definitively resolved it (confirmed landed, or proven not to have). */
+  async clearPendingCommit(
+    commandKey: string,
+    expectedTimeline?: readonly ComplaintTimelineEntry[],
+    expectedStatus: ComplaintPendingCommitStatus = "confirmed",
+  ): Promise<void> {
+    if (!this.isEnabled()) return;
+    await this.databaseService!.query(
+      `DELETE FROM crm.phase1_complaint_pending_commits WHERE command_key = $1${
+        expectedTimeline
+          ? " AND timeline_snapshot = $2::jsonb AND status = $3"
+          : ""
+      }`,
+      expectedTimeline
+        ? [commandKey, JSON.stringify(expectedTimeline), expectedStatus]
+        : [commandKey],
     );
   }
 

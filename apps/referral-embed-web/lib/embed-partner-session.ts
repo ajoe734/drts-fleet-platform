@@ -1,129 +1,245 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
-
+// This module is a server boundary: next/headers and node crypto must never
+// be imported by a client component. Public callers receive the explicit DTO.
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-
 import type {
   RecordReferralEmbedConsentCommand,
   ReferralEmbedSession,
 } from "@drts/contracts";
 import { REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES } from "@drts/contracts";
+import { getGoogleWorkloadIdentityHeader } from "./embed-api";
 
 const REFERRAL_EMBED_SESSION_COOKIE = "drts_referral_embed_session";
+const REFERRAL_EMBED_BEARER_COOKIE = "drts_referral_embed_bearer";
 const REFERRAL_EMBED_SESSION_MAX_AGE_SECONDS = 8 * 60 * 60;
 const REFERRAL_EMBED_CONSENT_BUNDLE_VERSION =
   "referral-embed-consent-v1-2026-08-01";
 
-type ReferralEmbedSessionCookie = ReferralEmbedSession & {
+export type ServerReferralEmbedSession = ReferralEmbedSession & {
+  accessToken?: string;
+  tokenType?: "Bearer";
+  expiresAt?: string;
+  sessionId?: string;
+};
+export type PublicReferralEmbedSession = Pick<
+  ReferralEmbedSession,
+  | "handoffId"
+  | "partnerEntrySlug"
+  | "entryHost"
+  | "identityActive"
+  | "consent"
+  | "navigationContext"
+> & { recoveryScope: string };
+type SessionCookie = Omit<ServerReferralEmbedSession, "accessToken"> & {
   issuedAt: string;
+  bearerDigest?: string;
 };
 
+function authError(message = "An active referral session is required.") {
+  return Object.assign(new Error(message), {
+    status: 401,
+    code: "REFERRAL_SESSION_REQUIRED",
+  });
+}
 function getSessionSecret() {
   const secret =
     process.env.REFERRAL_EMBED_SESSION_SECRET ?? process.env.DRTS_INTERNAL_KEY;
-  if (!secret?.trim()) {
+  if (!secret?.trim())
     throw new Error(
       "REFERRAL_EMBED_SESSION_SECRET or DRTS_INTERNAL_KEY is required for referral embed sessions.",
     );
-  }
   return secret;
 }
-
-function sign(payload: string) {
+function digest(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+function sign(body: string) {
   return createHmac("sha256", getSessionSecret())
-    .update(payload)
+    .update(body)
     .digest("base64url");
 }
-
-function encode(payload: ReferralEmbedSessionCookie) {
-  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  return `${body}.${sign(body)}`;
-}
-
-function decode(value: string | undefined): ReferralEmbedSessionCookie | null {
+function decode(value: string | undefined): SessionCookie | null {
   if (!value) return null;
-  const [body, signature] = value.split(".");
+  const parts = value.split(".");
+  if (parts.length !== 2) return null;
+  const [body, signature] = parts;
   if (!body || !signature) return null;
-  const expected = sign(body);
-  const expectedBuffer = Buffer.from(expected);
-  const actualBuffer = Buffer.from(signature);
-  if (
-    expectedBuffer.length !== actualBuffer.length ||
-    !timingSafeEqual(expectedBuffer, actualBuffer)
-  ) {
+  const expected = Buffer.from(sign(body));
+  const actual = Buffer.from(signature);
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual))
     return null;
-  }
   try {
-    const parsed = JSON.parse(
+    const session = JSON.parse(
       Buffer.from(body, "base64url").toString("utf8"),
-    ) as ReferralEmbedSessionCookie;
-
-    if (!parsed.issuedAt || typeof parsed.issuedAt !== "string") {
-      return null;
-    }
-    const issuedAt = new Date(parsed.issuedAt).getTime();
-    if (Number.isNaN(issuedAt)) {
-      return null;
-    }
-    const ageSeconds = (Date.now() - issuedAt) / 1000;
-    if (ageSeconds < 0 || ageSeconds > REFERRAL_EMBED_SESSION_MAX_AGE_SECONDS) {
-      return null;
-    }
-
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-export function decodeReferralEmbedSessionHint(value: string | undefined): {
-  partnerEntrySlug: string;
-  entryHost: string;
-} | null {
-  if (!value) return null;
-  const [body] = value.split(".");
-  if (!body) return null;
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(body, "base64url").toString("utf8"),
-    ) as Partial<ReferralEmbedSessionCookie>;
+    ) as SessionCookie;
+    const age = Date.now() - Date.parse(session.issuedAt);
     if (
-      typeof parsed.partnerEntrySlug !== "string" ||
-      typeof parsed.entryHost !== "string"
-    ) {
+      !Number.isFinite(age) ||
+      age < 0 ||
+      age > REFERRAL_EMBED_SESSION_MAX_AGE_SECONDS * 1000 ||
+      !session.handoffId ||
+      !session.partnerEntrySlug ||
+      !session.entryHost ||
+      !session.identity ||
+      !session.consent
+    )
       return null;
-    }
-    return {
-      partnerEntrySlug: parsed.partnerEntrySlug,
-      entryHost: parsed.entryHost,
-    };
+    return session;
   } catch {
     return null;
   }
 }
 
-export async function getReferralEmbedSession() {
-  const cookieStore = await cookies();
-  return decode(cookieStore.get(REFERRAL_EMBED_SESSION_COOKIE)?.value);
+/** Untrusted middleware hint only; never establishes authentication. */
+export function decodeReferralEmbedSessionHint(
+  value: string | undefined,
+): { partnerEntrySlug: string; entryHost: string } | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value.split(".")[0] ?? "", "base64url").toString("utf8"),
+    ) as Partial<SessionCookie>;
+    return typeof parsed.partnerEntrySlug === "string" &&
+      typeof parsed.entryHost === "string"
+      ? {
+          partnerEntrySlug: parsed.partnerEntrySlug,
+          entryHost: parsed.entryHost,
+        }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
-export async function writeReferralEmbedSession(session: ReferralEmbedSession) {
-  const cookieStore = await cookies();
-  const payload: ReferralEmbedSessionCookie = {
-    ...session,
-    issuedAt: new Date().toISOString(),
+export function toPublicReferralEmbedSession(
+  session: ServerReferralEmbedSession,
+): PublicReferralEmbedSession {
+  const owner = [
+    session.identity.tenantId,
+    session.identity.partnerId,
+    session.identity.partnerProgramId,
+    session.partnerEntrySlug,
+    session.drtsPassengerId,
+  ];
+  const recoveryScope = createHmac("sha256", getSessionSecret())
+    .update("referral-ui-recovery:v1:")
+    .update(JSON.stringify(owner))
+    .digest("hex");
+  return {
+    recoveryScope,
+    handoffId: session.handoffId,
+    partnerEntrySlug: session.partnerEntrySlug,
+    entryHost: session.entryHost,
+    identityActive: session.identityActive,
+    consent: {
+      requiredScopes: [...session.consent.requiredScopes],
+      bundleVersion: session.consent.bundleVersion,
+      grantedAt: session.consent.grantedAt,
+    },
+    ...(session.navigationContext
+      ? {
+          navigationContext: {
+            orderId: session.navigationContext.orderId,
+            screen: session.navigationContext.screen,
+          },
+        }
+      : {}),
   };
-  cookieStore.set(REFERRAL_EMBED_SESSION_COOKIE, encode(payload), {
+}
+
+export async function getReferralEmbedSession(): Promise<ServerReferralEmbedSession | null> {
+  const jar = await cookies();
+  const session = decode(jar.get(REFERRAL_EMBED_SESSION_COOKIE)?.value);
+  if (!session) return null;
+  if (!session.identityActive) return session;
+  const token = jar.get(REFERRAL_EMBED_BEARER_COOKIE)?.value;
+  if (
+    !token ||
+    !session.bearerDigest ||
+    digest(token) !== session.bearerDigest ||
+    !session.expiresAt ||
+    Date.parse(session.expiresAt) <= Date.now() ||
+    !Number.isFinite(Date.parse(session.expiresAt))
+  )
+    return null;
+  return { ...session, accessToken: token };
+}
+
+export async function readActiveReferralSession(): Promise<ServerReferralEmbedSession> {
+  const session = await getReferralEmbedSession();
+  if (
+    !session?.identityActive ||
+    !session.accessToken ||
+    session.tokenType !== "Bearer"
+  )
+    throw authError();
+  return session;
+}
+
+export async function getReferralIdentityHeaders(
+  session: ServerReferralEmbedSession,
+): Promise<Record<string, string>> {
+  if (
+    !session.identityActive ||
+    !session.accessToken ||
+    session.tokenType !== "Bearer" ||
+    !session.expiresAt ||
+    !Number.isFinite(Date.parse(session.expiresAt)) ||
+    Date.parse(session.expiresAt) <= Date.now()
+  )
+    throw authError();
+  // Workload proof is transport authentication only. API durable JWT validation
+  // is performed for every business call; no identity bootstrap header exists.
+  return {
+    Authorization: `Bearer ${session.accessToken}`,
+    ...(await getGoogleWorkloadIdentityHeader()),
+  };
+}
+
+export async function writeReferralEmbedSession(
+  session: ServerReferralEmbedSession,
+) {
+  if (
+    session.identityActive &&
+    (!session.accessToken ||
+      session.tokenType !== "Bearer" ||
+      !session.expiresAt ||
+      !Number.isFinite(Date.parse(session.expiresAt)) ||
+      Date.parse(session.expiresAt) <= Date.now())
+  )
+    throw authError("Canonical referral bearer is missing or expired.");
+  const jar = await cookies();
+  const { accessToken, ...metadata } = session;
+  const payload: SessionCookie = {
+    ...metadata,
+    issuedAt: new Date().toISOString(),
+    ...(accessToken ? { bearerDigest: digest(accessToken) } : {}),
+  };
+  const body = Buffer.from(JSON.stringify(payload), "utf8").toString(
+    "base64url",
+  );
+  const maxAge = session.identityActive
+    ? Math.min(
+        REFERRAL_EMBED_SESSION_MAX_AGE_SECONDS,
+        Math.floor((Date.parse(session.expiresAt!) - Date.now()) / 1000),
+      )
+    : REFERRAL_EMBED_SESSION_MAX_AGE_SECONDS;
+  const options = {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: REFERRAL_EMBED_SESSION_MAX_AGE_SECONDS,
-  });
+    maxAge,
+  };
+  jar.set(REFERRAL_EMBED_SESSION_COOKIE, `${body}.${sign(body)}`, options);
+  if (accessToken) jar.set(REFERRAL_EMBED_BEARER_COOKIE, accessToken, options);
+  else jar.delete(REFERRAL_EMBED_BEARER_COOKIE);
 }
 
 export async function clearReferralEmbedSession() {
-  const cookieStore = await cookies();
-  cookieStore.delete(REFERRAL_EMBED_SESSION_COOKIE);
+  const jar = await cookies();
+  jar.delete(REFERRAL_EMBED_SESSION_COOKIE);
+  jar.delete(REFERRAL_EMBED_BEARER_COOKIE);
 }
 
 export function buildReferralEmbedConsentCommand(input: {

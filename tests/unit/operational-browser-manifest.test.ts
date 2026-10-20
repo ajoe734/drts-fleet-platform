@@ -1,8 +1,84 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { operationalRequestHeaders } from "../e2e/operational-document-upload";
 
 describe("operational browser journeys manifest guard", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("uses Fleet proof for both original setup arrays while retaining Admin review authority", () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        path.join(
+          process.cwd(),
+          "tests/e2e/fixtures/operational-browser-journeys.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(manifest.fleetApplicationSetup.fleetPartnerId).toBe(
+      "fleet-demo-001",
+    );
+    const tenant = manifest.journeys.find(
+      (item: { id: string }) => item.id === "tenant-ops-dispatch-intent",
+    );
+    expect(manifest.fleetApplicationSetup.tenantId).toBe(
+      tenant.setup[0].headers["x-tenant-id"],
+    );
+    vi.stubEnv(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      "https://fleet.example.invalid",
+    );
+    vi.stubEnv(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN",
+      "fleet-invocation-dummy",
+    );
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+      "existing-partner-session-dummy",
+    );
+    vi.stubEnv(
+      "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+      "https://admin.example.invalid",
+    );
+    vi.stubEnv("DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN", "admin-invocation-dummy");
+    for (const id of [
+      "fleet-submit-read-withdraw-resubmit",
+      "admin-review-approve-readback",
+    ]) {
+      const journey = manifest.journeys.find(
+        (item: { id: string }) => item.id === id,
+      );
+      expect(journey).toBeDefined();
+      expect(journey.setup).toHaveLength(
+        id === "fleet-submit-read-withdraw-resubmit" ? 4 : 6,
+      );
+      for (const step of journey.setup) {
+        const baseUrlEnv = step.baseUrlEnv ?? journey.baseUrlEnv;
+        expect(baseUrlEnv).toBe("DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL");
+        const headers = operationalRequestHeaders(
+          baseUrlEnv,
+          "https://fleet.example.invalid",
+        );
+        expect(headers.Authorization).toBe("Bearer fleet-invocation-dummy");
+        expect(headers["x-drts-authorization"]).toBe(
+          "Bearer existing-partner-session-dummy",
+        );
+      }
+    }
+    const admin = manifest.journeys.find(
+      (item: { id: string }) => item.id === "admin-review-approve-readback",
+    );
+    expect(
+      operationalRequestHeaders(
+        admin.baseUrlEnv,
+        "https://admin.example.invalid/supply-review",
+      ),
+    ).toEqual({
+      Authorization: "Bearer admin-invocation-dummy",
+    });
+  });
+
   it("keeps the source evidence document independent of a candidate SHA", () => {
     const evidencePath = path.join(
       process.cwd(),
@@ -44,15 +120,23 @@ describe("operational browser journeys manifest guard", () => {
         }),
         expect.objectContaining({
           kind: "document-upload",
-          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
-          intentBody: expect.objectContaining({ documentType: "professional_driver_license" }),
-          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+          intentPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({
+            documentType: "professional_driver_license",
+          }),
+          confirmPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
         }),
         expect.objectContaining({
           kind: "document-upload",
-          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
-          intentBody: expect.objectContaining({ documentType: "taxi_driver_registration" }),
-          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+          intentPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({
+            documentType: "taxi_driver_registration",
+          }),
+          confirmPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
         }),
       ]),
     );
@@ -82,16 +166,24 @@ describe("operational browser journeys manifest guard", () => {
         expect.objectContaining({
           baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
           kind: "document-upload",
-          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
-          intentBody: expect.objectContaining({ documentType: "professional_driver_license" }),
-          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+          intentPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({
+            documentType: "professional_driver_license",
+          }),
+          confirmPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
         }),
         expect.objectContaining({
           baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
           kind: "document-upload",
-          intentPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
-          intentBody: expect.objectContaining({ documentType: "taxi_driver_registration" }),
-          confirmPath: "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+          intentPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({
+            documentType: "taxi_driver_registration",
+          }),
+          confirmPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
         }),
       ]),
     );
@@ -104,7 +196,14 @@ describe("operational browser journeys manifest guard", () => {
         kind: "click",
         control: "[data-drt-operation='admin-start-review']",
       },
+      { kind: "click", control: "[data-drt-operation='admin-approve']" },
     ]);
+    expect(approveOp.control).toBe(
+      'button:has-text("確認核可"), button:has-text("Confirm approval")',
+    );
+    expect(approveOp.requestUrlIncludes).toBe(
+      "/control-plane-proxy/admin/supply-review/submissions/{{adminSubmissionId}}/approve",
+    );
     expect(approveOp.readback.url).toBe(
       "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
     );

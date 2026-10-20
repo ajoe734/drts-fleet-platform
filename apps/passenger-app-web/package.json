@@ -14,14 +14,15 @@
   "dependencies": {
     "@drts/api-client": "workspace:*",
     "@drts/contracts": "workspace:*",
+    "@drts/control-plane-auth": "workspace:*",
     "@drts/passenger-client": "workspace:*",
     "@drts/shared-types": "workspace:*",
     "@drts/ui-tokens": "workspace:*",
     "@drts/ui-web": "workspace:*",
+    "jose": "^5.0.0",
     "next": "^16.3.8",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0",
-    "jose": "^5.0.0"
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@drts/tsconfig": "workspace:*",

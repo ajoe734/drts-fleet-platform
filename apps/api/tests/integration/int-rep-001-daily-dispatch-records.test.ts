@@ -30,6 +30,7 @@ function createHarness() {
   const driverRows = new Map<string, DriverRegistryRecord>();
   const regulatoryRegistryRepository = {
     isEnabled: () => true,
+    loadDriverMatchingSuppressions: async () => [],
     upsertDriverLocation: async () => true,
     lockDriver: async (driverId: string) =>
       structuredClone(driverRows.get(driverId) ?? null),
@@ -132,7 +133,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       { mode: "auto" },
       "req-int-rep-dispatch-001",
     );
-    ownedMobilityService.assignDispatch(
+    await ownedMobilityService.assignDispatch(
       {
         dispatchJobId: firstDispatch.dispatchJobId,
         vehicleId: "veh-demo-001",
@@ -195,7 +196,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       { mode: "auto" },
       "req-int-rep-dispatch-002",
     );
-    ownedMobilityService.assignDispatch(
+    await ownedMobilityService.assignDispatch(
       {
         dispatchJobId: secondDispatch.dispatchJobId,
         vehicleId: "veh-demo-001",
@@ -211,7 +212,7 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       },
       "req-int-rep-redispatch-001",
     );
-    ownedMobilityService.assignDispatch(
+    await ownedMobilityService.assignDispatch(
       {
         dispatchJobId: redispatchResult.dispatchJobId,
         vehicleId: "veh-demo-001",

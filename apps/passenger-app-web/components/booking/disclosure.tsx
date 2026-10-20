@@ -19,7 +19,7 @@ export function FeeDisclosure({ fare }: { fare: FareVersion }) {
             }}
           >
             <strong style={{ color: P5.brand }}>{label}</strong>
-            <div>{content}</div>
+            <span>{content}</span>
           </div>
         ))}
         <p>{PASSENGER_FREE_CANCELLATION_NOTICE}</p>

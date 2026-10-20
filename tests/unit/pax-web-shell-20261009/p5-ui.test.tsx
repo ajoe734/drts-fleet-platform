@@ -1,7 +1,11 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, it, expect } from "vitest";
-import { P5Map, P5VehicleCard, P5Header } from "../../../apps/passenger-app-web/components/p5-ui";
+import {
+  P5Map,
+  P5VehicleCard,
+  P5Header,
+} from "../../../apps/passenger-app-web/components/p5-ui";
 
 describe("P5 UI Components", () => {
   it("P5Map requires explicit position inputs to show car and claims", () => {
@@ -14,22 +18,33 @@ describe("P5 UI Components", () => {
     // Missing position but explicit fresh
     const htmlFreshNoPos = renderToStaticMarkup(<P5Map state="fresh" />);
     expect(htmlFreshNoPos).not.toContain("位置已更新");
-    expect(htmlFreshNoPos).toContain("正在取得司機位置");
+    expect(htmlFreshNoPos).toContain("目前沒有可顯示的地圖資料");
 
     // Valid inputs
-    html = renderToStaticMarkup(<P5Map state="fresh" carPosition={{ left: "40px", top: "100px" }} pinPosition={{ left: "10px", top: "10px" }} routeSvgPath="M0" />);
+    html = renderToStaticMarkup(
+      <P5Map
+        state="fresh"
+        carPosition={{ left: "40px", top: "100px" }}
+        pinPosition={{ left: "10px", top: "10px" }}
+        routeSvgPath="M0"
+      />,
+    );
     expect(html).toContain("位置已更新");
   });
 
   it("P5VehicleCard distinguishes registration status", () => {
-    let html = renderToStaticMarkup(<P5VehicleCard driver="TEST" registrationValid={true} />);
+    let html = renderToStaticMarkup(
+      <P5VehicleCard driver="TEST" registrationValid={true} />,
+    );
     expect(html).toContain("執登有效");
     expect(html).not.toContain("執登無效");
 
-    html = renderToStaticMarkup(<P5VehicleCard driver="TEST" registrationValid={false} />);
+    html = renderToStaticMarkup(
+      <P5VehicleCard driver="TEST" registrationValid={false} />,
+    );
     expect(html).toContain("執登無效");
     expect(html).not.toContain("執登有效");
-    
+
     html = renderToStaticMarkup(<P5VehicleCard driver="TEST" />);
     expect(html).not.toContain("執登有效");
     expect(html).not.toContain("執登無效");

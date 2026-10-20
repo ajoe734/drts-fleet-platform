@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ApiClientError } from "@drts/api-client";
 import type {
   DriverRegistryRecord,
   DriverSosAlertLatencySummary,
+  DriverSosEventRecord,
   IdentityContext,
   IncidentRecord,
   RecordDriverSosOpsAlertRenderedResult,
+  SosDutyAcknowledgement,
   VehicleRegistryRecord,
 } from "@drts/contracts";
 import {
@@ -27,8 +28,9 @@ import {
   DEFAULT_OPS_ACTOR_ID,
   createOpsDispatchEventSource,
   getOpsClient,
-} from "@/lib/api-client";
+} from "../../lib/api-client";
 import {
+  applyCanonicalSosDuty,
   buildDriverNameMap,
   buildSosQueueRows,
   buildVehiclePlateMap,
@@ -38,8 +40,8 @@ import {
   unwrapListItems,
   type SosPillTone,
   type SosQueueRow,
-} from "@/lib/sos-view-model";
-import { useTranslation } from "@/lib/i18n";
+} from "../../lib/sos-view-model";
+import { useTranslation } from "../../lib/i18n";
 
 const theme = buildCanvasTheme({
   surface: "ops",
@@ -149,11 +151,17 @@ export default function SosQueuePage() {
             .catch(() => null as DriverSosAlertLatencySummary | null),
         ]);
 
-      setIncidents(
-        unwrapListItems<IncidentRecord>(incidentRes).filter((incident) =>
-          isSosIncident(incident),
-        ),
+      const sosIncidents =
+        unwrapListItems<IncidentRecord>(incidentRes).filter(isSosIncident);
+      const canonical = await Promise.all(
+        sosIncidents.map(async (incident) => {
+          const { event } = await client.get<{ event: DriverSosEventRecord }>(
+            `/api/ops/driver-sos/by-incident/${encodeURIComponent(incident.incidentId)}`,
+          );
+          return applyCanonicalSosDuty(incident, event);
+        }),
       );
+      setIncidents(canonical);
       setDrivers(unwrapListItems<DriverRegistryRecord>(driverRes));
       setVehicles(unwrapListItems<VehicleRegistryRecord>(vehicleRes));
       setIdentity(identityRes);
@@ -297,36 +305,32 @@ export default function SosQueuePage() {
 
     try {
       const client = getOpsClient();
-      await client.patch(`/api/incidents/${incidentId}`, {
-        body: {
-          assignedTo: currentActorId,
-        },
-      });
+      const { event } = await client.get<{ event: DriverSosEventRecord }>(
+        `/api/ops/driver-sos/by-incident/${encodeURIComponent(incidentId)}`,
+      );
+      const ack = await client.post<{
+        dutyAcknowledgement: SosDutyAcknowledgement;
+        wonAcknowledgement: boolean;
+      }>(
+        `/api/ops/driver-sos/${encodeURIComponent(event.sosEventId)}/duty-ack`,
+        { body: {} },
+      );
 
-      setNotice({
-        tone: "success",
-        title: "已確認接手",
-        body: `${currentActorLabel} 已取得此 SOS 事件的處理權。`,
-      });
-      await fetchRuntime();
-    } catch (error) {
-      if (
-        error instanceof ApiClientError &&
-        error.code === "INCIDENT_ASSIGNMENT_CONFLICT"
-      ) {
-        const winner =
-          typeof error.details?.existingAssignment === "string"
-            ? error.details.existingAssignment
-            : "其他值班人員";
+      if (ack.wonAcknowledgement) {
+        setNotice({
+          tone: "success",
+          title: "已確認接手",
+          body: `${currentActorLabel} 已取得此 SOS 事件的處理權。`,
+        });
+      } else {
         setNotice({
           tone: "warn",
           title: "First-writer-wins",
-          body: `${winner} 已先確認此事件，畫面已同步最新處理權。`,
+          body: `${formatSosActorLabel(ack.dutyAcknowledgement.acknowledgedByActorId)} 已先確認此事件，畫面已同步最新處理權。`,
         });
-        await fetchRuntime();
-        return;
       }
-
+      await fetchRuntime();
+    } catch (error) {
       console.error("Failed to acknowledge SOS incident", error);
       setNotice({
         tone: "danger",

@@ -247,15 +247,17 @@ function buildHarness(
         const cursorKey = cursor
           ? `${cursor.purgedAtCursor} ${cursor.voiceSessionId} ${String(cursor.sessionVersion).padStart(20, "0")}`
           : null;
+        // Preserve a fresh full-table transport snapshot and the exact SQL
+        // keyset ordering/filter. Decorate each row once instead of rebuilding
+        // its padded composite key inside every sort comparison/page.
+        const cutoff = new Date(purgedBefore).getTime();
         return purgeReceipts
-          .filter(
-            (r) =>
-              new Date(r.purgedAt).getTime() <=
-              new Date(purgedBefore).getTime(),
-          )
-          .filter((r) => cursorKey === null || key(r) > cursorKey)
-          .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0))
-          .slice(0, limit)
+          .filter(r => new Date(r.purgedAt).getTime() <= cutoff)
+          .map(row => ({row, sortKey:key(row)}))
+          .filter(item => cursorKey === null || item.sortKey > cursorKey)
+          .sort((a,b) => a.sortKey < b.sortKey ? -1 : a.sortKey > b.sortKey ? 1 : 0)
+          .slice(0,limit)
+          .map(item => item.row)
           // This fake's `purgedAt` is already a plain ISO string with no
           // sub-millisecond component to lose -- see
           // `tests/integration/unattended-voice-postgres.integration.test.ts`

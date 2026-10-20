@@ -15,6 +15,7 @@ describe("Passenger Booking History API - Spec requirements", () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     repoMock = {
+      findCompletedBooking: vi.fn().mockResolvedValue(null),
       createBookingHistory: vi.fn(),
       listBookingHistories: vi.fn(),
       getBookingHistoryOwner: vi.fn(),

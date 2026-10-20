@@ -2152,7 +2152,9 @@ export class MultiTaxiService implements OnModuleInit {
           ) {
             if (
               previous.tracking?.pickupEta?.minutes !==
-              view.tracking.pickupEta?.minutes
+                view.tracking.pickupEta?.minutes ||
+              JSON.stringify(previous.tracking?.dropoffRoute ?? null) !==
+                JSON.stringify(view.tracking.dropoffRoute ?? null)
             ) {
               actualType = "eta_changed";
             } else if (
@@ -3209,6 +3211,7 @@ export class MultiTaxiService implements OnModuleInit {
             locationFreshness: view.tracking.locationFreshness,
             location: view.tracking.location,
             pickupEtaMinutes: view.tracking.pickupEta?.minutes ?? null,
+            dropoffRoute: view.tracking.dropoffRoute ?? null,
           }
         : null,
       ratingId: view.rating?.ratingId ?? null,

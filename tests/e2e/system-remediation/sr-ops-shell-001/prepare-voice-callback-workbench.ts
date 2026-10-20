@@ -80,12 +80,24 @@ async function prepare() {
     const orderId = committed.orderId;
     stage("Confirmed fixture media commits one real original order");
     const reason = `SIM callback ${randomUUID()}`;
+    // Explicit SIM consent is an external prerequisite; ANI initialization,
+    // encrypted contact revision and callback creation remain actual API/SQL.
+    const contact = await post(
+      `/callcenter/voice/sessions/${voiceSessionId}/contacts`,
+      {
+        role: "callbackRecipient",
+        name: "SIM callback A",
+        phone: "0900000016",
+        consentRef: "SIM-callback-browser-explicit-consent",
+        reason: "SIM caller requested callback",
+      },
+    );
     const callback = await post(
       `/voice/sessions/${voiceSessionId}/callbacks`,
       {
-        contactPhoneEncrypted: "SIM-callback-browser-cipher",
-        contactPhoneLookupToken: "SIM-callback-browser-lookup",
-        consentSnapshotHash: "SIM-callback-browser-explicit-consent",
+        contactRevisionNumber:
+          contact.contacts.callback_recipient_revision_number,
+        consentRef: contact.contacts.callback_recipient_consent_ref,
         reason,
       },
       randomUUID(),

@@ -245,7 +245,7 @@ describe("ForwarderController", () => {
     });
   });
 
-  it("wraps driver-safe forwarded reject responses using the explicit driverId for non-driver callers", () => {
+  it("wraps driver-safe forwarded reject responses using the explicit driverId for non-driver callers", async () => {
     const forwarderService = {
       rejectForwardedOrder: vi.fn(() => ({
         action: "reject",
@@ -260,7 +260,7 @@ describe("ForwarderController", () => {
     };
     const controller = new ForwarderController(forwarderService as never);
 
-    const response = controller.rejectForwardedOrder(
+    const response = await controller.rejectForwardedOrder(
       "FWD-reject-001",
       opsIdentity(),
       {

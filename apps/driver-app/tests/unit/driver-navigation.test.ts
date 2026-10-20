@@ -249,10 +249,13 @@ describe("driver route authority and degraded states", () => {
   });
 
   it("documents missing and stale driver GPS fixes", () => {
-    expect(getDriverLocationFixState({ location: null }).state).toBe("missing");
+    expect(
+      getDriverLocationFixState({ task: buildTask(), location: null }).state,
+    ).toBe("missing");
 
     expect(
       getDriverLocationFixState({
+        task: buildTask(),
         location: {
           latitude: 25.0478,
           longitude: 121.517,
@@ -268,6 +271,7 @@ describe("driver route authority and degraded states", () => {
 
     expect(
       getDriverLocationFixState({
+        task: buildTask(),
         location: {
           latitude: 25.0478,
           longitude: 121.517,
@@ -277,6 +281,43 @@ describe("driver route authority and degraded states", () => {
       }).state,
     ).toBe("stale");
   });
+
+  it.each(["completed", "cancelled", "rejected"] as const)(
+    "shows stopped location for a %s task regardless of fix age",
+    (status) => {
+      const task = buildTask({ status });
+      const location = {
+        latitude: 25.0478,
+        longitude: 121.517,
+        recordedAt: "2026-07-01T00:00:00.000Z",
+      };
+
+      for (const now of [
+        Date.parse("2026-07-01T00:00:30.000Z"),
+        Date.parse("2026-07-01T00:02:30.000Z"),
+      ]) {
+        expect(
+          getDriverLocationFixState({ task, location, now }),
+        ).toMatchObject({
+          state: "stopped",
+          label: "本任務定位已停止",
+          detail: expect.stringContaining("最後已知座標"),
+          coordinateLabel: "25.047800, 121.517000",
+        });
+      }
+
+      for (const missingLocation of [null, { ...location, latitude: 91 }]) {
+        expect(
+          getDriverLocationFixState({ task, location: missingLocation }),
+        ).toMatchObject({
+          state: "stopped",
+          label: "本任務定位已停止",
+          detail: "任務已結束，沒有可顯示的最後定位。",
+          coordinateLabel: null,
+        });
+      }
+    },
+  );
 });
 
 describe("driver root tab bar navigation", () => {
@@ -309,9 +350,8 @@ describe("driver root tab bar navigation", () => {
   });
 
   it("maps all existing screens to their designated parent tab", async () => {
-    const { DRIVER_ROUTE_TAB_MAP, resolveActiveDriverTab } = await import(
-      "../../lib/driver-navigation"
-    );
+    const { DRIVER_ROUTE_TAB_MAP, resolveActiveDriverTab } =
+      await import("../../lib/driver-navigation");
 
     expect(DRIVER_ROUTE_TAB_MAP.index).toBe("workbench");
     expect(DRIVER_ROUTE_TAB_MAP.jobs).toBe("jobs");
@@ -346,9 +386,8 @@ describe("driver root tab bar navigation", () => {
   });
 
   it("respects tab overrides passed through navigation state/params", async () => {
-    const { resolveActiveDriverTab } = await import(
-      "../../lib/driver-navigation"
-    );
+    const { resolveActiveDriverTab } =
+      await import("../../lib/driver-navigation");
 
     expect(resolveActiveDriverTab("earnings", "workbench")).toBe("workbench");
     expect(resolveActiveDriverTab("incident", "workbench")).toBe("workbench");
@@ -369,4 +408,3 @@ describe("driver root tab bar navigation", () => {
     expect(isDriverTabRoute("safety-operator")).toBe(false);
   });
 });
-

@@ -3,6 +3,7 @@ import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 
 import type {
   PartnerChannelEntryRecord,
+  ReferralRevenueShareRule,
   PartnerEligibilityVerificationRecord,
   PartnerIngressCredentialRecord,
   TenantAddressRecord,
@@ -28,6 +29,11 @@ import { DatabaseService } from "../../common/db";
 
 type JsonRecordRow = {
   record: unknown;
+};
+
+/** Storage-only extension of the existing partner entry JSONB record. */
+export type StoredReferralRateEntry = PartnerChannelEntryRecord & {
+  referralRevenueShareRules?: ReferralRevenueShareRule[];
 };
 
 export type TenantPartnerQueryExecutor = {
@@ -205,6 +211,50 @@ export class TenantPartnerRepository {
 
   isEnabled() {
     return this.databaseService?.isEnabled() ?? false;
+  }
+
+  async loadReferralRateEntries(
+    entrySlug?: string,
+  ): Promise<StoredReferralRateEntry[]> {
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_partner_channel_entries${entrySlug ? " WHERE entry_slug = $1" : ""}`,
+      entrySlug ? [entrySlug] : [],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<StoredReferralRateEntry>(
+        row.record,
+        "admin.phase1_partner_channel_entries",
+      ),
+    );
+  }
+
+  /** Patch only rate history on the locked canonical entry; never publish before COMMIT. */
+  async updateReferralRevenueShareRules(
+    entrySlug: string,
+    update: (
+      entry: StoredReferralRateEntry | null,
+    ) => ReferralRevenueShareRule[],
+  ) {
+    return this.withTransaction(async (executor) => {
+      const result = await executor.query<JsonRecordRow>(
+        "SELECT record FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1 FOR UPDATE",
+        [entrySlug],
+      );
+      const entry = result.rows[0]
+        ? this.parseRecord<StoredReferralRateEntry>(
+            result.rows[0].record,
+            "admin.phase1_partner_channel_entries",
+          )
+        : null;
+      const rules = update(entry);
+      await executor.query(
+        `UPDATE admin.phase1_partner_channel_entries
+         SET record = jsonb_set(record, '{referralRevenueShareRules}', $2::jsonb)
+         WHERE entry_slug = $1`,
+        [entrySlug, JSON.stringify(rules)],
+      );
+      return rules;
+    });
   }
 
   /** Notification dispatch must observe governance committed by other instances. */
@@ -902,7 +952,11 @@ export class TenantPartnerRepository {
               status = EXCLUDED.status,
               created_at = EXCLUDED.created_at,
               updated_at = EXCLUDED.updated_at,
-              record = EXCLUDED.record
+              record = CASE
+                WHEN admin.phase1_partner_channel_entries.record ? 'referralRevenueShareRules'
+                THEN jsonb_set(EXCLUDED.record, '{referralRevenueShareRules}',
+                  admin.phase1_partner_channel_entries.record->'referralRevenueShareRules')
+                ELSE EXCLUDED.record END
           `,
           [
             entry.entrySlug,
@@ -1592,6 +1646,32 @@ export class TenantPartnerRepository {
         changes.quotaMonthlySnapshots ?? [],
       ),
     ]);
+  }
+
+  /** Current request authority for lifecycle commands. Discovery is unlocked;
+   * callers that mutate lock the order first, then read this row on that tx.
+   * Decisions are embedded in the same canonical record by the existing writer.
+   */
+  async findApprovalRequest(
+    tenantId: string | null,
+    approvalRequestId: string,
+    executor?: TenantPartnerQueryExecutor,
+  ): Promise<TenantBookingApprovalRequestRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await (
+      executor ?? this.databaseService!
+    ).query<JsonRecordRow>(
+      `SELECT record FROM core.phase1_tenant_approval_requests
+       WHERE ${tenantId === null ? "approval_request_id = $1" : "tenant_id = $1 AND approval_request_id = $2"}
+       ${executor ? "FOR UPDATE" : ""}`,
+      tenantId === null ? [approvalRequestId] : [tenantId, approvalRequestId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<TenantBookingApprovalRequestRecord>(
+          result.rows[0].record,
+          "core.phase1_tenant_approval_requests",
+        )
+      : null;
   }
 
   async persistApprovalWorkflow(
