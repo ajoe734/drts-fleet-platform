@@ -802,6 +802,110 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertIn("pnpm exec playwright", request.message)
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
 
+    def test_provisions_node_modules_for_created_and_reused_coordination_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            (root / ".gitignore").write_text("node_modules\n.artifacts\n", encoding="utf-8")
+            for rel_pkg in ("apps/api", "packages/contracts", "packages/control-plane-auth"):
+                pkg_dir = root / rel_pkg
+                pkg_dir.mkdir(parents=True, exist_ok=True)
+                (pkg_dir / "package.json").write_text("{}\n", encoding="utf-8")
+            _git(root, "add", ".gitignore", "apps/api/package.json", "packages/contracts/package.json", "packages/control-plane-auth/package.json")
+            _git(root, "commit", "-m", "add workspace package manifests")
+
+            (root / "node_modules" / ".bin").mkdir(parents=True)
+            nest_dir = root / "apps" / "api" / "node_modules" / "@nestjs" / "common"
+            nest_dir.mkdir(parents=True)
+            (nest_dir / "index.js").write_text("module.exports = {};\n", encoding="utf-8")
+            zod_dir = root / "packages" / "contracts" / "node_modules" / "zod"
+            zod_dir.mkdir(parents=True)
+            (zod_dir / "index.js").write_text("module.exports = {};\n", encoding="utf-8")
+            (root / "packages" / "control-plane-auth" / "node_modules" / "jose").mkdir(parents=True)
+
+            config = self._repo_config(root)
+            root_status_before = _git(root, "status", "--porcelain").stdout
+            request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="coordination audit",
+                task_id=None,
+                reason="coordination:remaining34_driver_lifecycle",
+                metadata={"mode": "coordination", "workspace_key": "remaining34-driver_lifecycle-f5"},
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                config,
+                request,
+                None,
+            )
+
+            self.assertIsNone(branch)
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "created_coordination_worktree")
+            self.assertTrue((workspace / "node_modules").is_symlink())
+            self.assertEqual((workspace / "node_modules").resolve(), (root / "node_modules").resolve())
+            self.assertTrue((workspace / "apps" / "api" / "node_modules").is_symlink())
+            self.assertEqual(
+                (workspace / "apps" / "api" / "node_modules").resolve(),
+                (root / "apps" / "api" / "node_modules").resolve(),
+            )
+            self.assertTrue((workspace / "packages" / "contracts" / "node_modules").is_symlink())
+            self.assertEqual(
+                (workspace / "packages" / "contracts" / "node_modules").resolve(),
+                (root / "packages" / "contracts" / "node_modules").resolve(),
+            )
+            self.assertTrue((workspace / "packages" / "control-plane-auth" / "node_modules").is_symlink())
+            self.assertTrue((workspace / "apps" / "api" / "node_modules" / "@nestjs" / "common" / "index.js").is_file())
+            self.assertTrue((workspace / "packages" / "contracts" / "node_modules" / "zod" / "index.js").is_file())
+            self.assertEqual(_git(root, "status", "--porcelain").stdout, root_status_before)
+            self.assertEqual(_git(workspace, "status", "--porcelain").stdout.strip(), "")
+
+            # Simulate an existing coordination worktree missing one workspace link
+            # and holding a real node_modules directory in another (no-clobber).
+            (workspace / "packages" / "contracts" / "node_modules").unlink()
+            (workspace / "apps" / "api" / "node_modules").unlink()
+            custom_nm = workspace / "apps" / "api" / "node_modules"
+            custom_nm.mkdir()
+            (custom_nm / "local-marker.txt").write_text("keep\n", encoding="utf-8")
+
+            reused_workspace, reused_branch, reused_base, reused_source = supervisor.ensure_execution_workspace(
+                config,
+                request,
+                None,
+            )
+            self.assertEqual(reused_workspace, workspace)
+            self.assertIsNone(reused_branch)
+            self.assertEqual(reused_base, "dev")
+            self.assertEqual(reused_source, "existing_coordination_worktree")
+            self.assertTrue((workspace / "packages" / "contracts" / "node_modules").is_symlink())
+            self.assertTrue((workspace / "packages" / "contracts" / "node_modules" / "zod" / "index.js").is_file())
+            self.assertFalse((workspace / "apps" / "api" / "node_modules").is_symlink())
+            self.assertTrue((workspace / "apps" / "api" / "node_modules" / "local-marker.txt").is_file())
+
+            # Canonical fallback must be a no-op and never turn canonical node_modules into symlinks.
+            bad_config = self._repo_config(root)
+            bad_config["branch_strategy"]["worker_worktrees"]["coordination_base_branch"] = "nonexistent-base-branch"
+            fallback_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="coordination fallback",
+                task_id=None,
+                reason="coordination:fallback_check",
+                metadata={"mode": "coordination", "workspace_key": "fallback-check"},
+            )
+            fallback_workspace, _, _, fallback_source = supervisor.ensure_execution_workspace(
+                bad_config,
+                fallback_request,
+                None,
+            )
+            self.assertEqual(fallback_workspace, root.resolve())
+            self.assertEqual(fallback_source, "fallback_canonical")
+            self.assertFalse((root / "node_modules").is_symlink())
+            self.assertFalse((root / "apps" / "api" / "node_modules").is_symlink())
+
     def test_review_dispatch_ignores_owner_execution_branch_override(self) -> None:
         """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 regression.
 
