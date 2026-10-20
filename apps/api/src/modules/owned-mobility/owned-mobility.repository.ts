@@ -384,10 +384,10 @@ export class OwnedMobilityRepository {
     );
     const now = new Date(clock.rows[0]!.now).toISOString();
     const result = await executor.query<JsonRecordRow>(
-      `UPDATE ops.phase1_referral_fare_quote_snapshots SET consumed_by_order_id=$7,consumed_at=$8,
+      `UPDATE ops.phase1_referral_fare_quote_snapshots SET consumed_by_order_id=$7::text,consumed_at=($8::text)::timestamptz,
        record=jsonb_set(jsonb_set(record,'{consumedByOrderId}',to_jsonb($7::text)),'{consumedAt}',to_jsonb($8::text))
        WHERE quote_id=$1 AND tenant_id=$2 AND partner_id=$3 AND partner_program_id=$4
-       AND entry_slug=$5 AND drts_passenger_id=$6 AND consumed_by_order_id IS NULL AND expires_at>$8::timestamptz
+       AND entry_slug=$5 AND drts_passenger_id=$6 AND consumed_by_order_id IS NULL AND expires_at>($8::text)::timestamptz
        RETURNING record`,
       [
         quote.quoteId,

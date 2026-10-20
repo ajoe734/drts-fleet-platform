@@ -1,6 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { GET } from "../../../../apps/referral-embed-web/app/api/referral/history/[orderId]/route";
-import { getReferralEmbedSession } from "../../../../apps/referral-embed-web/lib/embed-partner-session";
+import {
+  getReferralEmbedSession,
+  readActiveReferralSession,
+} from "../../../../apps/referral-embed-web/lib/embed-partner-session";
 
 vi.mock("../../../../apps/referral-embed-web/lib/embed-partner-session");
 vi.mock("next/server", () => ({
@@ -37,7 +40,9 @@ describe("GET /api/referral/history/[orderId]", () => {
     });
 
     const req = new Request("https://test.com/api/referral/history/order-123");
-    const res = await GET(req, { params: Promise.resolve({ orderId: "order-123" }) });
+    const res = await GET(req, {
+      params: Promise.resolve({ orderId: "order-123" }),
+    });
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -60,13 +65,20 @@ describe("GET /api/referral/history/[orderId]", () => {
       }),
     });
 
-    const req = new Request("https://test.com/api/referral/history/order-unknown");
-    const res = await GET(req, { params: Promise.resolve({ orderId: "order-unknown" }) });
+    const req = new Request(
+      "https://test.com/api/referral/history/order-unknown",
+    );
+    const res = await GET(req, {
+      params: Promise.resolve({ orderId: "order-unknown" }),
+    });
 
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.ok).toBe(false);
-    expect(body.error.message).toBe("Trip not found or access denied");
+    expect(body.error.message).toBe("找不到這筆行程。");
+    expect(body.error.code).toBe("ORDER_NOT_FOUND");
+    expect(body).not.toHaveProperty("data");
+    expect(res.headers.get("cache-control")).toContain("no-store");
   });
 
   it("returns 404 for wrong subject (backend filtered)", async () => {
@@ -85,12 +97,17 @@ describe("GET /api/referral/history/[orderId]", () => {
     });
 
     const req = new Request("https://test.com/api/referral/history/order-123");
-    const res = await GET(req, { params: Promise.resolve({ orderId: "order-123" }) });
+    const res = await GET(req, {
+      params: Promise.resolve({ orderId: "order-123" }),
+    });
 
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.ok).toBe(false);
-    expect(body.error.message).toBe("Trip not found or access denied");
+    expect(body.error.message).toBe("找不到這筆行程。");
+    expect(body.error.code).toBe("ORDER_NOT_FOUND");
+    expect(body).not.toHaveProperty("data");
+    expect(res.headers.get("cache-control")).toContain("no-store");
   });
 
   it("returns 404 for same tenant different entry (backend filtered)", async () => {
@@ -110,7 +127,9 @@ describe("GET /api/referral/history/[orderId]", () => {
     });
 
     const req = new Request("https://test.com/api/referral/history/order-123");
-    const res = await GET(req, { params: Promise.resolve({ orderId: "order-123" }) });
+    const res = await GET(req, {
+      params: Promise.resolve({ orderId: "order-123" }),
+    });
 
     expect(res.status).toBe(404);
   });
@@ -131,21 +150,32 @@ describe("GET /api/referral/history/[orderId]", () => {
     });
 
     const req = new Request("https://test.com/api/referral/history/order-123");
-    const res = await GET(req, { params: Promise.resolve({ orderId: "order-123" }) });
+    const res = await GET(req, {
+      params: Promise.resolve({ orderId: "order-123" }),
+    });
 
     expect(res.status).toBe(404);
   });
 
-  it("returns 400 when no session exists", async () => {
-    vi.mocked(getReferralEmbedSession).mockResolvedValue(null);
+  it("returns 401 when no session exists", async () => {
+    vi.mocked(readActiveReferralSession).mockRejectedValueOnce(
+      Object.assign(new Error("An active referral session is required."), {
+        status: 401,
+        code: "REFERRAL_SESSION_REQUIRED",
+      }),
+    );
 
     const req = new Request("https://test.com/api/referral/history/order-123");
-    const res = await GET(req, { params: Promise.resolve({ orderId: "order-123" }) });
+    const res = await GET(req, {
+      params: Promise.resolve({ orderId: "order-123" }),
+    });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(401);
     const body = await res.json();
     expect(body.ok).toBe(false);
-    expect(body.error.message).toMatch(/UNAUTHORIZED/);
+    expect(body.error.code).toBe("REFERRAL_SESSION_REQUIRED");
+    expect(body).not.toHaveProperty("data");
+    expect(res.headers.get("cache-control")).toContain("no-store");
     expect(globalFetchMock).not.toHaveBeenCalled();
   });
 });

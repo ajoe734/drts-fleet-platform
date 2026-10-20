@@ -2,17 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReferralEmbedHandoffRepository } from "../../../../apps/api/src/modules/tenant-partner/referral-embed-handoff.repository";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
+import { TenantPartnerController } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
+import { IdentityRepository } from "../../../../apps/api/src/modules/identity/identity.repository";
+import { JwtAuthService } from "../../../../apps/api/src/common/auth/jwt-auth.service";
+import { GoogleWorkloadIdentityAdapter } from "../../../../apps/api/src/modules/auth/google-workload-identity.adapter";
 
 // This suite is the BFF "production path" regression the Codex reviewer
 // asked for on top of embed-session-route.test.ts (BFF-only, embed-api fully
 // mocked) and consent-replay-guards.test.ts (service-only, no BFF/cookie
 // layer): here the mocked HTTP bridge (embed-api.ts, the only thing this repo
 // lets us mock without also mocking the authority we are testing) delegates
-// straight into a real TenantPartnerService + ReferralEmbedHandoffRepository
+// straight into the real TenantPartnerController/issuer + TenantPartnerService + ReferralEmbedHandoffRepository
 // (fallback/in-memory, the same class used against Postgres), and the cookie
 // layer (embed-partner-session.ts, including its real HMAC sign/verify and
 // 8h TTL) is exercised unmocked against an in-memory `next/headers` jar. Only
-// Next's cookie store, the wall clock, and the HTTP bridge are test doubles;
+// Next's cookie store, the wall clock, and the external HTTP/workload bridge are test doubles;
 // nothing about the authorization decision itself is faked.
 
 const cookieJar = new Map<string, string>();
@@ -43,8 +47,11 @@ vi.mock("next/server", () => ({
   },
 }));
 
-type ServiceHarness = { service: TenantPartnerService | null };
-const harness: ServiceHarness = { service: null };
+type ServiceHarness = {
+  service: TenantPartnerService | null;
+  controller: TenantPartnerController | null;
+};
+const harness: ServiceHarness = { service: null, controller: null };
 
 function toBridgeError(err: unknown): Error {
   if (err && typeof err === "object" && "message" in err) {
@@ -63,32 +70,49 @@ function toBridgeError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
-vi.mock("../../../../apps/referral-embed-web/lib/embed-api", () => ({
-  getPartnerEntry: async (entrySlug: string) => {
-    if (!harness.service) throw new Error("harness service not configured");
-    try {
-      return await harness.service.getPartnerEntry(entrySlug);
-    } catch (err) {
-      throw toBridgeError(err);
-    }
-  },
-  consumeReferralEmbedHandoffArtifact: async (command: any) => {
-    if (!harness.service) throw new Error("harness service not configured");
-    try {
-      return await harness.service.consumeReferralEmbedHandoffArtifact(command);
-    } catch (err) {
-      throw toBridgeError(err);
-    }
-  },
-  recordReferralEmbedConsent: async (command: any) => {
-    if (!harness.service) throw new Error("harness service not configured");
-    try {
-      return await harness.service.recordReferralEmbedConsent(command);
-    } catch (err) {
-      throw toBridgeError(err);
-    }
-  },
-}));
+vi.mock(
+  "../../../../apps/referral-embed-web/lib/embed-api",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("../../../../apps/referral-embed-web/lib/embed-api")
+    >()),
+    getPartnerEntry: async (entrySlug: string) => {
+      if (!harness.service) throw new Error("harness service not configured");
+      try {
+        return await harness.service.getPartnerEntry(entrySlug);
+      } catch (err) {
+        throw toBridgeError(err);
+      }
+    },
+    consumeReferralEmbedHandoffArtifact: async (command: any) => {
+      if (!harness.controller)
+        throw new Error("harness controller not configured");
+      try {
+        return (
+          await harness.controller.consumeReferralEmbedHandoffArtifact(
+            command,
+            { headers: {} },
+          )
+        ).data;
+      } catch (err) {
+        throw toBridgeError(err);
+      }
+    },
+    recordReferralEmbedConsent: async (command: any) => {
+      if (!harness.controller)
+        throw new Error("harness controller not configured");
+      try {
+        return (
+          await harness.controller.recordReferralEmbedConsent(command, {
+            headers: {},
+          })
+        ).data;
+      } catch (err) {
+        throw toBridgeError(err);
+      }
+    },
+  }),
+);
 
 import { GET } from "../../../../apps/referral-embed-web/app/api/referral/notification-navigation/route";
 import { POST } from "../../../../apps/referral-embed-web/app/api/referral/session/route";
@@ -99,6 +123,8 @@ const ENTRY_A = {
   status: "active" as const,
   tenantId: "tenant-a",
   partnerId: "partner-a",
+  programId: "program-a",
+  updatedAt: "2026-10-19T00:00:00.000Z",
   activeFlag: true,
   authMode: "partner_api_key" as const,
 };
@@ -109,6 +135,8 @@ const ENTRY_B = {
   status: "active" as const,
   tenantId: "tenant-b",
   partnerId: "partner-b",
+  programId: "program-b",
+  updatedAt: "2026-10-19T00:00:00.000Z",
   activeFlag: true,
   authMode: "partner_api_key" as const,
 };
@@ -119,7 +147,10 @@ function buildService(
   handoffRepo: ReferralEmbedHandoffRepository,
 ) {
   const linkRepo = {
-    findByDrtsPassengerId: async (_entrySlug: string, drtsPassengerId: string) => {
+    findByDrtsPassengerId: async (
+      _entrySlug: string,
+      drtsPassengerId: string,
+    ) => {
       const status = linkStatusByPassenger[drtsPassengerId] ?? "active";
       return status === null ? null : { status, drtsPassengerId };
     },
@@ -128,7 +159,7 @@ function buildService(
     loadState: async () => ({ partnerEntries: entries }),
   };
   const auditNotificationService = { recordAuditLog: () => {} };
-  return new TenantPartnerService(
+  const service = new TenantPartnerService(
     auditNotificationService as any,
     tenantPartnerRepo as any,
     undefined,
@@ -137,12 +168,37 @@ function buildService(
     linkRepo as any,
     handoffRepo,
   );
+  const identities = new IdentityRepository();
+  const issuer = new JwtAuthService(identities, service);
+  const workload = new GoogleWorkloadIdentityAdapter(identities);
+  // Only external HTTP/workload transport is controlled; current entry,
+  // handoff/consent, canonical JWT/session storage and BFF cookies are real.
+  vi.spyOn(workload, "verifyServicePrincipal").mockResolvedValue(
+    {} as Awaited<
+      ReturnType<GoogleWorkloadIdentityAdapter["verifyServicePrincipal"]>
+    >,
+  );
+  harness.controller = new TenantPartnerController(
+    service,
+    undefined!,
+    undefined!,
+    issuer,
+    undefined!,
+    identities,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    workload,
+  );
+  return service;
 }
 
 async function issueHandoff(
   handoffRepo: ReferralEmbedHandoffRepository,
   overrides: Partial<Parameters<ReferralEmbedHandoffRepository["issue"]>[0]>,
 ) {
+  const entry = overrides.entrySlug === ENTRY_B.entrySlug ? ENTRY_B : ENTRY_A;
   return handoffRepo.issue({
     artifact: overrides.artifact ?? `artifact-${Math.random()}`,
     entrySlug: overrides.entrySlug ?? ENTRY_A.entrySlug,
@@ -151,7 +207,7 @@ async function issueHandoff(
     drtsPassengerId: overrides.drtsPassengerId ?? "pass-1",
     tenantId: overrides.tenantId ?? ENTRY_A.tenantId,
     partnerId: overrides.partnerId ?? ENTRY_A.partnerId,
-    partnerProgramId: overrides.partnerProgramId ?? null,
+    partnerProgramId: overrides.partnerProgramId ?? entry.programId,
     consentRequired: overrides.consentRequired ?? true,
     consentBundleVersion: overrides.consentBundleVersion ?? null,
     consentGrantedAt: overrides.consentGrantedAt ?? null,
@@ -161,7 +217,12 @@ async function issueHandoff(
   });
 }
 
-function decodeCookie(): { drtsPassengerId: string; partnerEntrySlug: string; identityActive: boolean; consent: { bundleVersion: string | null } } | null {
+function decodeCookie(): {
+  drtsPassengerId: string;
+  partnerEntrySlug: string;
+  identityActive: boolean;
+  consent: { bundleVersion: string | null };
+} | null {
   const raw = cookieJar.get("drts_referral_embed_session");
   if (!raw) return null;
   const [body] = raw.split(".");
@@ -173,7 +234,8 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
   let handoffRepo: ReferralEmbedHandoffRepository;
 
   beforeEach(() => {
-    process.env.REFERRAL_EMBED_SESSION_SECRET = "test-secret";
+    vi.stubEnv("REFERRAL_EMBED_SESSION_SECRET", "test-secret");
+    vi.stubEnv("JWT_SECRET", "canonical-navigation-unit-key");
     cookieJar.clear();
     handoffRepo = new ReferralEmbedHandoffRepository();
   });
@@ -181,7 +243,9 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
   afterEach(() => {
     vi.useRealTimers();
     harness.service = null;
-    delete process.env.REFERRAL_EMBED_SESSION_SECRET;
+    harness.controller = null;
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   // The mocked `next/headers` cookies() above is a single shared jar (the
@@ -191,8 +255,11 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
   // in a test exactly as it would across sequential requests from the same
   // browser, without needing a Next.js request-scoped cookie store.
   function getRequest(params: Record<string, string>) {
-    const url = new URL("https://entry-a.example.com/api/referral/notification-navigation");
-    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+    const url = new URL(
+      "https://entry-a.example.com/api/referral/notification-navigation",
+    );
+    for (const [key, value] of Object.entries(params))
+      url.searchParams.set(key, value);
     return new Request(url);
   }
 
@@ -208,7 +275,9 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
         getRequest({ artifact: "art-positive", entrySlug: ENTRY_A.entrySlug }),
       );
       expect(res.status).toBe(307);
-      expect(res.headers.get("Location")).toContain(`/embed/${ENTRY_A.entrySlug}`);
+      expect(res.headers.get("Location")).toContain(
+        `/embed/${ENTRY_A.entrySlug}`,
+      );
 
       const cookie = decodeCookie();
       expect(cookie?.drtsPassengerId).toBe("pass-1");
@@ -374,19 +443,24 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       const cookieAfterB = cookieJar.get("drts_referral_embed_session");
       expect(cookieAfterB).toBeTruthy();
 
-      await issueHandoff(handoffRepo, { artifact: "art-post-exchange-entry-a" });
-      const req = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "exchange",
-          artifact: "art-post-exchange-entry-a",
-          entrySlug: ENTRY_A.entrySlug,
-          entryHost: ENTRY_A.entryHost,
-        }),
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-exchange-entry-a",
       });
+      const req = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-post-exchange-entry-a",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
       const res = await POST(req);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
       expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterB);
 
       const rightfulConsume = await handoffRepo.consume({
@@ -423,12 +497,15 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       formData.append("artifact", "art-post-exchange-subject-1");
       formData.append("entrySlug", ENTRY_A.entrySlug);
       formData.append("entryHost", ENTRY_A.entryHost);
-      const req = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        body: formData,
-      });
+      const req = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          body: formData,
+        },
+      );
       const res = await POST(req);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
       expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieForPass2);
 
       const rightfulConsume = await handoffRepo.consume({
@@ -443,7 +520,9 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       harness.service = buildService([ENTRY_A], {}, handoffRepo);
       await harness.service.onModuleInit();
 
-      await issueHandoff(handoffRepo, { artifact: "art-post-exchange-legit-first" });
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-exchange-legit-first",
+      });
       const bootstrap = await GET(
         getRequest({
           artifact: "art-post-exchange-legit-first",
@@ -468,10 +547,14 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
         },
       );
       const invalidRes = await POST(invalidReq);
-      expect(invalidRes.status).toBe(400);
-      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieBeforeInvalid);
+      expect(invalidRes.status).toBe(404);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(
+        cookieBeforeInvalid,
+      );
 
-      await issueHandoff(handoffRepo, { artifact: "art-post-exchange-legit-second" });
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-exchange-legit-second",
+      });
       const followupReq = new Request(
         "https://entry-a.example.com/api/referral/session",
         {
@@ -512,7 +595,9 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       vi.useFakeTimers();
       vi.setSystemTime(now);
 
-      await issueHandoff(handoffRepo, { artifact: "art-post-expired-bootstrap" });
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-expired-bootstrap",
+      });
       const bootstrap = await GET(
         getRequest({
           artifact: "art-post-expired-bootstrap",
@@ -530,19 +615,24 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       });
       vi.setSystemTime(now + 121_000);
 
-      const req = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "exchange",
-          artifact: "art-post-expired-target",
-          entrySlug: ENTRY_A.entrySlug,
-          entryHost: ENTRY_A.entryHost,
-        }),
-      });
+      const req = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-post-expired-target",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
       const res = await POST(req);
-      expect(res.status).toBe(400);
-      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterBootstrap);
+      expect(res.status).toBe(410);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(
+        cookieAfterBootstrap,
+      );
 
       // A different subject presenting a fresh artifact must still be
       // rejected as a cross-subject takeover attempt: the expired-artifact
@@ -565,8 +655,10 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
         },
       );
       const crossSubjectRes = await POST(crossSubjectReq);
-      expect(crossSubjectRes.status).toBe(400);
-      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterBootstrap);
+      expect(crossSubjectRes.status).toBe(403);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(
+        cookieAfterBootstrap,
+      );
 
       // Same-subject fresh exchange still succeeds afterward: the failed
       // attempts above did not corrupt the exchange path itself.
@@ -595,7 +687,9 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       harness.service = buildService([ENTRY_A], {}, handoffRepo);
       await harness.service.onModuleInit();
 
-      await issueHandoff(handoffRepo, { artifact: "art-post-replay-bootstrap" });
+      await issueHandoff(handoffRepo, {
+        artifact: "art-post-replay-bootstrap",
+      });
       const bootstrap = await GET(
         getRequest({
           artifact: "art-post-replay-bootstrap",
@@ -617,19 +711,24 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       });
       expect(outOfBandConsume.outcome).toBe("consumed");
 
-      const req = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "exchange",
-          artifact: "art-post-replay-target",
-          entrySlug: ENTRY_A.entrySlug,
-          entryHost: ENTRY_A.entryHost,
-        }),
-      });
+      const req = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "exchange",
+            artifact: "art-post-replay-target",
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
       const res = await POST(req);
-      expect(res.status).toBe(400);
-      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterBootstrap);
+      expect(res.status).toBe(409);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(
+        cookieAfterBootstrap,
+      );
 
       // A different subject presenting a fresh artifact must still be
       // rejected as a cross-subject takeover attempt after the replay
@@ -652,8 +751,10 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
         },
       );
       const crossSubjectRes = await POST(crossSubjectReq);
-      expect(crossSubjectRes.status).toBe(400);
-      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieAfterBootstrap);
+      expect(crossSubjectRes.status).toBe(403);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(
+        cookieAfterBootstrap,
+      );
 
       // Same-subject fresh exchange still succeeds afterward.
       await issueHandoff(handoffRepo, {
@@ -683,9 +784,15 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       artifact: string,
       overrides: Partial<Parameters<typeof issueHandoff>[1]> = {},
     ) {
-      const handoff = await issueHandoff(handoffRepo, { artifact, ...overrides });
+      const handoff = await issueHandoff(handoffRepo, {
+        artifact,
+        ...overrides,
+      });
       const res = await GET(
-        getRequest({ artifact, entrySlug: overrides.entrySlug ?? ENTRY_A.entrySlug }),
+        getRequest({
+          artifact,
+          entrySlug: overrides.entrySlug ?? ENTRY_A.entrySlug,
+        }),
       );
       expect(res.status).toBe(307);
       const cookie = cookieJar.get("drts_referral_embed_session");
@@ -700,24 +807,30 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       const now = Date.now();
       vi.useFakeTimers();
       vi.setSystemTime(now);
-      const { handoff, cookie: cookieBeforeAttempt } = await consumeToCookie("art-ttl");
+      const { handoff, cookie: cookieBeforeAttempt } =
+        await consumeToCookie("art-ttl");
       vi.setSystemTime(now + 8 * 60 * 60 * 1000 + 1000);
 
-      const req = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "grant-consent",
-          handoffId: handoff.handoffId,
-          entrySlug: ENTRY_A.entrySlug,
-          entryHost: ENTRY_A.entryHost,
-        }),
-      });
+      const req = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "grant-consent",
+            handoffId: handoff.handoffId,
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
       const res = await POST(req);
       expect(res.status).toBe(400);
       // The rejected attempt must not silently log the caller out or mutate
       // the still-pending-consent cookie it started with.
-      expect(cookieJar.get("drts_referral_embed_session")).toBe(cookieBeforeAttempt);
+      expect(cookieJar.get("drts_referral_embed_session")).toBe(
+        cookieBeforeAttempt,
+      );
 
       const ledger = await handoffRepo.findLatestConsent(
         ENTRY_A.entrySlug,
@@ -739,18 +852,21 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
 
       linkStatus["pass-1"] = "revoked";
 
-      const req = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "grant-consent",
-          handoffId: handoff.handoffId,
-          entrySlug: ENTRY_A.entrySlug,
-          entryHost: ENTRY_A.entryHost,
-        }),
-      });
+      const req = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "grant-consent",
+            handoffId: handoff.handoffId,
+            entrySlug: ENTRY_A.entrySlug,
+            entryHost: ENTRY_A.entryHost,
+          }),
+        },
+      );
       const res = await POST(req);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
 
       expect(cookieJar.get("drts_referral_embed_session")).toBe(cookie);
       const postCookie = decodeCookie();
@@ -768,20 +884,25 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       harness.service = buildService([ENTRY_A, ENTRY_B], {}, handoffRepo);
       await harness.service.onModuleInit();
 
-      const { handoff, cookie } = await consumeToCookie("art-cross-entry-consent");
+      const { handoff, cookie } = await consumeToCookie(
+        "art-cross-entry-consent",
+      );
 
-      const req = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          action: "grant-consent",
-          handoffId: handoff.handoffId,
-          entrySlug: ENTRY_B.entrySlug,
-          entryHost: ENTRY_B.entryHost,
-        }),
-      });
+      const req = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "grant-consent",
+            handoffId: handoff.handoffId,
+            entrySlug: ENTRY_B.entrySlug,
+            entryHost: ENTRY_B.entryHost,
+          }),
+        },
+      );
       const res = await POST(req);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
       expect(cookieJar.get("drts_referral_embed_session")).toBe(cookie);
 
       const ledgerA = await handoffRepo.findLatestConsent(
@@ -811,10 +932,13 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
         return formData;
       };
 
-      const firstReq = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        body: buildForm(),
-      });
+      const firstReq = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          body: buildForm(),
+        },
+      );
       const firstRes = await POST(firstReq);
       expect(firstRes.status).toBe(307);
       const cookieAfterGrant = cookieJar.get("drts_referral_embed_session");
@@ -827,10 +951,13 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917 BFF production-path regression", () => 
       );
       expect(ledgerAfterFirst).not.toBeNull();
 
-      const secondReq = new Request("https://entry-a.example.com/api/referral/session", {
-        method: "POST",
-        body: buildForm(),
-      });
+      const secondReq = new Request(
+        "https://entry-a.example.com/api/referral/session",
+        {
+          method: "POST",
+          body: buildForm(),
+        },
+      );
       const secondRes = await POST(secondReq);
       expect(secondRes.status).toBe(307);
 

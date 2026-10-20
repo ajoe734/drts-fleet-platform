@@ -407,7 +407,9 @@ export class OwnedMobilityController {
   @Post("partner/referral/passenger/quote")
   @RequireRealms("partner")
   @RequireScopes("partner:book")
-  async quoteReferralPassengerFare(
+  // Estimate calculation with an expiring owned evidence snapshot. Repeated
+  // calculations may create distinct snapshots; this is not booking or payment.
+  async estimateReferralPassengerFare(
     @Body() command: ReferralPassengerQuoteCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
