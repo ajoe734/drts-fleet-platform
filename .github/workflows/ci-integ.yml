@@ -44,6 +44,11 @@ on:
         required: false
         default: false
         type: boolean
+      readonly_admin_root_instance_failure:
+        description: "Read fixed Admin request reasons and only actually observed instance context; never replays"
+        required: false
+        default: false
+        type: boolean
       owned_referral_business:
         description: "Opt in to one owned synthetic business ride on the existing shared Referral Demo; never deploys"
         required: false
@@ -644,6 +649,53 @@ jobs:
         with:
           name: dev-admin-root-failure-readback-${{ github.run_id }}
           path: .artifacts/dev-admin-root-failure-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
+
+  readonly-admin-root-instance-failure-readback:
+    if: github.event_name == 'workflow_dispatch' && inputs.readonly_admin_root_instance_failure == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable instance diagnostic definition and fixed dev target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual instance diagnostic checkout
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only instance diagnostics
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read fixed request reasons and only observed-instance stdout and stderr
+        run: >-
+          python3 operations/verification/read-dev-fleet-document-failure-log.py
+          --profile admin-root-87ea-b1b-instance-v1
+          --output .artifacts/dev-admin-root-instance-failure-readback/snapshot.json
+      - name: Preserve only the closed instance diagnostic projection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-admin-root-instance-failure-readback-${{ github.run_id }}
+          path: .artifacts/dev-admin-root-instance-failure-readback/snapshot.json
           if-no-files-found: error
           retention-days: 14
 
