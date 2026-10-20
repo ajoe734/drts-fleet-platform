@@ -35,6 +35,9 @@ import {
   terminalizeOwnOrder,
   BookingWriteJournal,
   observeOriginalBookingAck,
+  settleRoutedOriginalBookingAck,
+  originalBookingRouteFailure,
+  type BookingAckResponse,
   clickAndSettleOriginalBookingAck,
   persistPrivateJson,
   readOwnedReferralCookies,
@@ -47,6 +50,11 @@ import {
   RETAINED_REFERRAL_ORDER,
   recoverRetainedReferralOrder,
 } from "./retained-order-recovery";
+
+import {
+  parseOriginalUnknownBookingJournal,
+  recoverOriginalUnknownBookingAck,
+} from "./original-journal-recovery";
 
 const RECOVERY_ONLY = process.env.OWNED_REFERRAL_RECOVERY_ONLY === "true";
 const ENTRY = "yuhe-residence";
@@ -124,6 +132,13 @@ test(journeyName, async ({ browser, request }) => {
   let referralSessionId: string | undefined;
   let completed = false;
   let recoveryResolved = false;
+  let retainedRecovery: Readonly<{
+    originalRun: number;
+    orderId: string;
+    quoteId: string;
+    bodySha256: string;
+    entrySlug: string;
+  }> = RETAINED_REFERRAL_ORDER;
   let recoveryResult:
     | Awaited<ReturnType<typeof recoverRetainedReferralOrder>>
     | undefined;
@@ -402,51 +417,86 @@ test(journeyName, async ({ browser, request }) => {
         "recovery requires existing active Referral consent",
       );
       const boundPassengerId = await bindReferralSession();
+      if (process.env.OWNED_REFERRAL_RECOVER_ORIGINAL_JOURNAL === "true") {
+        const bytes = await readFile(
+          `${DIRECTORY}/retained-original-journal.json`,
+        );
+        requireFact(
+          bytes.length <= 16384,
+          "bounded private original journal required",
+        );
+        const original = parseOriginalUnknownBookingJournal(
+          JSON.parse(bytes.toString("utf8")),
+          runtime,
+        );
+        retainedRecovery = await recoverOriginalUnknownBookingAck(
+          original,
+          async (command, key) =>
+            (
+              await referral("/api/referral/booking", {
+                method: "POST",
+                body: command,
+                headers: { "Idempotency-Key": key },
+              })
+            ).data,
+        );
+        await persistPrivateJson(`${DIRECTORY}/booking-write-journal.json`, {
+          ...original.journal,
+          state: "acknowledged",
+          orderId: retainedRecovery.orderId,
+        });
+        evidence.record({
+          stage: "original-journal-replay-ACK-recovered",
+          orderId: retainedRecovery.orderId,
+          quoteId: retainedRecovery.quoteId,
+          sha256: retainedRecovery.bodySha256,
+          result: "observed",
+        });
+      }
       recoveryResult = await recoverRetainedReferralOrder({
+        retained: retainedRecovery,
         passengerId: boundPassengerId,
         readHistory: async () =>
           (
             await referral(
-              `/api/referral/history/${encodeURIComponent(RETAINED_REFERRAL_ORDER.orderId)}`,
+              `/api/referral/history/${encodeURIComponent(retainedRecovery.orderId)}`,
             )
           ).data,
         readActive: async () => (await referral("/api/referral/active")).data,
         readOwn: () =>
-          opsControl(
-            `/orders/${encodeURIComponent(RETAINED_REFERRAL_ORDER.orderId)}`,
-          ),
+          opsControl(`/orders/${encodeURIComponent(retainedRecovery.orderId)}`),
         cancel: () =>
           cancelReferralOrder(
-            RETAINED_REFERRAL_ORDER.orderId,
+            retainedRecovery.orderId,
             "Own retained synthetic Referral order normal recovery",
           ),
         dispatch: () =>
           opsControl(
-            `/orders/${encodeURIComponent(RETAINED_REFERRAL_ORDER.orderId)}/dispatch`,
+            `/orders/${encodeURIComponent(retainedRecovery.orderId)}/dispatch`,
             {
               method: "POST",
               body: { mode: "auto" },
               headers: {
-                "Idempotency-Key": `owned-referral-recovery:${RETAINED_REFERRAL_ORDER.originalRun}:${RETAINED_REFERRAL_ORDER.orderId}:dispatch`,
+                "Idempotency-Key": `owned-referral-recovery:${retainedRecovery.originalRun}:${retainedRecovery.orderId}:dispatch`,
               },
             },
           ),
         resolve: () =>
           opsControl(
-            `/orders/${encodeURIComponent(RETAINED_REFERRAL_ORDER.orderId)}/resolve-exception-hold`,
+            `/orders/${encodeURIComponent(retainedRecovery.orderId)}/resolve-exception-hold`,
             {
               method: "POST",
               body: {
                 resolution: "cancel_order",
                 reason:
                   "Own retained synthetic Referral order genuine exception-hold recovery",
-                traceId: `owned-referral-recovery:${RETAINED_REFERRAL_ORDER.originalRun}:${RETAINED_REFERRAL_ORDER.orderId}:cancel`,
+                traceId: `owned-referral-recovery:${retainedRecovery.originalRun}:${retainedRecovery.orderId}:cancel`,
               },
             },
           ),
         claim: (id) => {
           requireFact(
-            id === RETAINED_REFERRAL_ORDER.orderId,
+            id === retainedRecovery.orderId,
             "exact retained recovery order only",
           );
           orderId = id;
@@ -829,6 +879,43 @@ test(journeyName, async ({ browser, request }) => {
         );
       };
       await heartbeat(null, "available", 1);
+      let resolveOriginalResponse!: (response: BookingAckResponse) => void;
+      let rejectOriginalResponse!: (error: unknown) => void;
+      const originalResponse = new Promise<BookingAckResponse>(
+        (resolve, reject) => {
+          resolveOriginalResponse = resolve;
+          rejectOriginalResponse = reject;
+        },
+      );
+      let routeStarted = false;
+      let finishOriginalRoute!: () => void;
+      const originalRouteFinished = new Promise<void>((resolve) => {
+        finishOriginalRoute = resolve;
+      });
+      // Retain the original native response wait's deadline/error semantics;
+      // its browser body is never read after the real UI navigates.
+      const browserResponseDeadline = page
+        .waitForResponse(
+          (response) =>
+            response.url() === `${origins.referral}/api/referral/booking` &&
+            response.request().method() === "POST",
+        )
+        .then(() => originalResponse);
+      const bookingAck = observeOriginalBookingAck(
+        Promise.race([originalResponse, browserResponseDeadline]),
+        () => ({
+          url: `${origins.referral}/api/referral/booking`,
+          runtimeSha: runtime,
+          journal: bookingState.journal,
+          quote: bookingState.quote,
+        }),
+        (id) => {
+          orderId = id;
+        },
+        evidence,
+      );
+      // Attach before clicking, including if the original fetch itself fails.
+      void bookingAck.catch(() => undefined);
       await page.route(
         `${origins.referral}/api/referral/booking`,
         async (route) => {
@@ -836,6 +923,7 @@ test(journeyName, async ({ browser, request }) => {
             await route.continue();
             return;
           }
+          routeStarted = true;
           try {
             const rawBody = text(
               route.request().postData(),
@@ -885,41 +973,50 @@ test(journeyName, async ({ browser, request }) => {
                 route.request().headers()["idempotency-key"],
                 "actual UI booking key header required",
               ),
-              () => route.continue(),
+              async () => {
+                const original = await route.fetch({
+                  maxRedirects: 0,
+                  maxRetries: 0,
+                });
+                try {
+                  await settleRoutedOriginalBookingAck(
+                    original,
+                    route.request(),
+                    (response) => {
+                      resolveOriginalResponse(response);
+                      return bookingAck;
+                    },
+                    (bytes) =>
+                      route.fulfill({ response: original, body: bytes }),
+                  );
+                } finally {
+                  await original.dispose();
+                }
+              },
             );
           } catch (error) {
-            bookingState.routeError = error;
+            bookingState.routeError = originalBookingRouteFailure(error);
+            rejectOriginalResponse(bookingState.routeError);
             evidence.record({
               stage: bookingState.journal?.current
                 ? "booking:send-ACK-unknown"
                 : "booking:command-or-journal-rejected-before-send",
               result: "failed",
             });
-            await route.abort("blockedbyclient");
+            await route.abort("blockedbyclient").catch(() => undefined);
+          } finally {
+            finishOriginalRoute();
           }
         },
       );
-      const bookingAck = observeOriginalBookingAck(
-        page.waitForResponse(
-          (value) =>
-            value.url() === `${origins.referral}/api/referral/booking` &&
-            value.request().method() === "POST",
-        ),
-        () => ({
-          url: `${origins.referral}/api/referral/booking`,
-          runtimeSha: runtime,
-          journal: bookingState.journal,
-          quote: bookingState.quote,
-        }),
-        (id) => {
-          orderId = id;
-        },
-        evidence,
-      );
-      await clickAndSettleOriginalBookingAck(
-        () => page.locator('[data-drt-operation="referral-create"]').click(),
-        bookingAck,
-      );
+      try {
+        await clickAndSettleOriginalBookingAck(
+          () => page.locator('[data-drt-operation="referral-create"]').click(),
+          bookingAck,
+        );
+      } finally {
+        if (routeStarted) await originalRouteFinished;
+      }
       if (bookingState.routeError) throw bookingState.routeError;
       requireFact(
         orderId && bookingState.quote,
@@ -1634,10 +1731,10 @@ test(journeyName, async ({ browser, request }) => {
           mode: RECOVERY_ONLY ? "recovery-only" : "full-journey",
           recovery: RECOVERY_ONLY
             ? {
-                originalRun: RETAINED_REFERRAL_ORDER.originalRun,
-                orderId: RETAINED_REFERRAL_ORDER.orderId,
-                quoteId: RETAINED_REFERRAL_ORDER.quoteId,
-                bodySha256: RETAINED_REFERRAL_ORDER.bodySha256,
+                originalRun: retainedRecovery.originalRun,
+                orderId: retainedRecovery.orderId,
+                quoteId: retainedRecovery.quoteId,
+                bodySha256: retainedRecovery.bodySha256,
                 claimedOrderId: orderId ?? null,
                 resolved: recoveryResolved,
                 terminalStatus: recoveryResult?.status ?? null,

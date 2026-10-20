@@ -338,6 +338,9 @@ type BookingObservationPhase =
   | "booking-response-wait"
   | "booking-response-request"
   | "booking-response-json"
+  | "booking-response-body"
+  | "booking-response-release"
+  | "booking-original-route"
   | "booking-ack-persist";
 
 function bookingObservationFailure(
@@ -356,6 +359,10 @@ function bookingObservationFailure(
     : "UnknownError";
   // Native messages/stacks can contain URLs, request bodies or authority.
   return new JourneyFailure(`${phase}:${safeClass}`);
+}
+
+export function originalBookingRouteFailure(error: unknown): JourneyFailure {
+  return bookingObservationFailure("booking-original-route", error);
 }
 
 export type BookingAckResponse = {
@@ -471,6 +478,51 @@ export async function observeOriginalBookingAck(
     evidence.failure(failure);
     throw failure;
   }
+}
+
+/** Keep the real server ACK available until durable recognition precedes UI navigation. */
+export async function settleRoutedOriginalBookingAck<T>(
+  response: {
+    url(): string;
+    status(): number;
+    headers(): Record<string, string>;
+    body(): Promise<Buffer>;
+  },
+  request: ReturnType<BookingAckResponse["request"]>,
+  observe: (original: BookingAckResponse) => Promise<T>,
+  release: (bytes: Buffer) => Promise<void>,
+): Promise<T> {
+  let bytes: Buffer;
+  try {
+    bytes = await response.body();
+    requireFact(bytes.length <= 1024 * 1024, "bounded booking ACK required");
+  } catch (error) {
+    throw bookingObservationFailure("booking-response-body", error);
+  }
+  // The response is from this route's one real network fetch. There is no
+  // replacement request, response, credential, payload or inferred order ID.
+  const result = await observe({
+    url: () => response.url(),
+    status: () => response.status(),
+    headers: () => response.headers(),
+    json: async () => JSON.parse(bytes.toString("utf8")),
+    request: () => request,
+  }).then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  let releaseError: unknown;
+  try {
+    // Deliver those exact server bytes even if the observer rejected them.
+    // A refused or malformed ACK must not become a fabricated browser success.
+    await release(bytes);
+  } catch (error) {
+    releaseError = error;
+  }
+  if (!result.ok) throw result.error;
+  if (releaseError)
+    throw bookingObservationFailure("booking-response-release", releaseError);
+  return result.value;
 }
 
 /** A failed click stays failed; settle its one observer before owned cleanup. */
