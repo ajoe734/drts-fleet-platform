@@ -170,7 +170,7 @@ jobs:
           DEV_OPS_API_ID_TOKEN: ${{ steps.api_token.outputs.id_token }}
           DEV_OPS_ADMIN_ID_TOKEN: ${{ steps.admin_token.outputs.id_token }}
           DEV_OPS_CONSOLE_ID_TOKEN: ${{ steps.ops_token.outputs.id_token }}
-        run: pnpm exec tsx tools/dev-ops-enablement/run.ts
+        run: ./apps/api/node_modules/.bin/tsx tools/dev-ops-enablement/run.ts
       - name: Preserve only the normal setup safe journal
         if: always()
         uses: actions/upload-artifact@v4

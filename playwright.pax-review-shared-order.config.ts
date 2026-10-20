@@ -103,7 +103,8 @@ export default defineConfig({
           timeout: 180_000,
         },
         {
-          command: "pnpm exec tsx tools/dev-ops-enablement/start-hosted-ops.ts",
+          command:
+            "./apps/api/node_modules/.bin/tsx tools/dev-ops-enablement/start-hosted-ops.ts",
           env: {
             ...apiEnvironment,
             DRTS_API_URL: apiOrigin,
