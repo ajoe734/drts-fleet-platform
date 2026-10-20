@@ -1,7 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { PoolClient, QueryResult, QueryResultRow } from "pg";
+import {
+  Client,
+  type PoolClient,
+  type QueryResult,
+  type QueryResultRow,
+} from "pg";
 
 import type {
   DriverDeviceBindingRecord,
@@ -15,12 +20,14 @@ type JsonRecordRow = {
   record: unknown;
 };
 
+type TransactionQueryClient = Pick<PoolClient, "query">;
+
 @Injectable()
 export class DriverDeviceSessionRepository {
   private readonly logger = new Logger(DriverDeviceSessionRepository.name);
 
   private readonly transactionClientStorage =
-    new AsyncLocalStorage<PoolClient>();
+    new AsyncLocalStorage<TransactionQueryClient>();
 
   private inMemoryLockChain: Promise<void> = Promise.resolve();
 
@@ -45,15 +52,55 @@ export class DriverDeviceSessionRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
-  private get activeTransactionClient(): PoolClient | undefined {
+  private get activeTransactionClient(): TransactionQueryClient | undefined {
     return this.transactionClientStorage.getStore();
   }
 
   private canUseTransactionalAdvisoryLock(): boolean {
-    return (
-      this.isEnabled() &&
-      resolveDatabasePoolMax(process.env.DATABASE_POOL_MAX) !== 1
-    );
+    return this.isEnabled();
+  }
+
+  private async acquireTransactionClient(): Promise<{
+    client: TransactionQueryClient;
+    release: () => Promise<void>;
+  }> {
+    const connectionString = process.env.DATABASE_URL?.trim();
+    if (
+      resolveDatabasePoolMax(process.env.DATABASE_POOL_MAX) === 1 &&
+      this.databaseService instanceof DatabaseService &&
+      Boolean(connectionString)
+    ) {
+      // Callbacks inside withRegistrationLock / withDeviceDriverLock invoke
+      // DriverProfileService and JwtAuthService, which query DatabaseService's
+      // pool directly. When DATABASE_POOL_MAX=1, borrowing the sole pooled
+      // connection for the outer transaction would starve those inner queries;
+      // use a dedicated connection on the existing DATABASE_URL so cross-instance
+      // SQL advisory/row locks remain active without pool-size-1 self-deadlock.
+      const dedicatedClient = new Client({ connectionString });
+      dedicatedClient.on("error", (error: Error) => {
+        this.reportPersistenceFailure(error, "dedicatedTransactionClient");
+      });
+      try {
+        await dedicatedClient.connect();
+      } catch (error) {
+        await dedicatedClient.end().catch(() => undefined);
+        throw error;
+      }
+      return {
+        client: dedicatedClient,
+        release: async () => {
+          await dedicatedClient.end().catch(() => undefined);
+        },
+      };
+    }
+
+    const pooledClient = await this.databaseService!.connect();
+    return {
+      client: pooledClient,
+      release: async () => {
+        pooledClient.release();
+      },
+    };
   }
 
   private async runWithInMemoryLock<T>(callback: () => Promise<T>): Promise<T> {
@@ -75,7 +122,7 @@ export class DriverDeviceSessionRepository {
   }
 
   private async acquireAdvisoryXactLocks(
-    client: PoolClient,
+    client: TransactionQueryClient,
     lockKeys: readonly string[],
   ): Promise<void> {
     const sortedUniqueKeys = [
@@ -107,7 +154,7 @@ export class DriverDeviceSessionRepository {
         return callback();
       }
 
-      const client = await this.databaseService!.connect();
+      const { client, release } = await this.acquireTransactionClient();
       try {
         await client.query("BEGIN");
         await this.acquireAdvisoryXactLocks(client, [
@@ -128,7 +175,7 @@ export class DriverDeviceSessionRepository {
         }
         throw error;
       } finally {
-        client.release();
+        await release();
       }
     });
   }
@@ -169,7 +216,7 @@ export class DriverDeviceSessionRepository {
         return callback();
       }
 
-      const client = await this.databaseService!.connect();
+      const { client, release } = await this.acquireTransactionClient();
       try {
         await client.query("BEGIN");
         await this.acquireAdvisoryXactLocks(client, [
@@ -192,7 +239,7 @@ export class DriverDeviceSessionRepository {
         }
         throw error;
       } finally {
-        client.release();
+        await release();
       }
     });
   }
@@ -217,7 +264,10 @@ export class DriverDeviceSessionRepository {
     }
 
     const txClient = this.activeTransactionClient;
-    const client = txClient ?? (await this.databaseService!.connect());
+    const pooledClient = txClient
+      ? null
+      : await this.databaseService!.connect();
+    const client = txClient ?? pooledClient!;
     try {
       const result = await client.query<JsonRecordRow>(
         `
@@ -268,9 +318,7 @@ export class DriverDeviceSessionRepository {
       this.fallbackInvitations.set(record.invitationId, { ...record });
       return { ...record };
     } finally {
-      if (!txClient) {
-        client.release();
-      }
+      pooledClient?.release();
     }
   }
 
@@ -329,7 +377,10 @@ export class DriverDeviceSessionRepository {
     }
 
     const txClient = this.activeTransactionClient;
-    const client = txClient ?? (await this.databaseService!.connect());
+    const pooledClient = txClient
+      ? null
+      : await this.databaseService!.connect();
+    const client = txClient ?? pooledClient!;
     try {
       const result = await client.query<JsonRecordRow>(
         `
@@ -385,9 +436,7 @@ export class DriverDeviceSessionRepository {
       this.fallbackBindings.set(record.bindingId, { ...record });
       return { ...record };
     } finally {
-      if (!txClient) {
-        client.release();
-      }
+      pooledClient?.release();
     }
   }
 
@@ -574,7 +623,10 @@ export class DriverDeviceSessionRepository {
     }
 
     const txClient = this.activeTransactionClient;
-    const client = txClient ?? (await this.databaseService!.connect());
+    const pooledClient = txClient
+      ? null
+      : await this.databaseService!.connect();
+    const client = txClient ?? pooledClient!;
     try {
       const result = await client.query<JsonRecordRow>(
         `
@@ -635,9 +687,7 @@ export class DriverDeviceSessionRepository {
       this.fallbackRefreshFamilies.set(record.familyId, { ...record });
       return { ...record };
     } finally {
-      if (!txClient) {
-        client.release();
-      }
+      pooledClient?.release();
     }
   }
 

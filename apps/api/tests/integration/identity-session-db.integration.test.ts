@@ -764,4 +764,122 @@ describe("Identity Session and Refresh Family Postgres Integration", () => {
       },
     );
   });
+
+  it("enforces cross-instance SQL advisory and FOR UPDATE locking without self-deadlock when DATABASE_POOL_MAX=1", async () => {
+    expect(DATABASE_URL).toBeTruthy();
+
+    const previousPoolMax = process.env.DATABASE_POOL_MAX;
+    process.env.DATABASE_POOL_MAX = "1";
+    try {
+      const dbA = new DatabaseService();
+      const dbB = new DatabaseService();
+      databases.push(dbA, dbB);
+
+      const driverId = `drv_pg_pool1_${randomUUID()}`;
+      createdDriverIds.add(driverId);
+
+      const profileA = new DriverProfileService(
+        new AuditNotificationService(),
+        new DriverProfileRepository(dbA),
+      );
+      await profileA.onModuleInit();
+      await profileA.createProfile(driverId, {
+        name: "Pool1 Replacement Driver",
+      });
+
+      const profileB = new DriverProfileService(
+        new AuditNotificationService(),
+        new DriverProfileRepository(dbB),
+      );
+      await profileB.onModuleInit();
+
+      const serviceA = new DriverDeviceSessionService(
+        new JwtAuthService(new IdentityRepository(dbA)),
+        profileA,
+        new DriverDeviceSessionRepository(dbA),
+      );
+      const serviceB = new DriverDeviceSessionService(
+        new JwtAuthService(new IdentityRepository(dbB)),
+        profileB,
+        new DriverDeviceSessionRepository(dbB),
+      );
+      await Promise.all([serviceA.onModuleInit(), serviceB.onModuleInit()]);
+
+      const [inviteA, inviteB] = await Promise.all([
+        serviceA.issueRegistrationInvitation({ driverId }),
+        serviceB.issueRegistrationInvitation({ driverId }),
+      ]);
+
+      const [regA, regB] = await Promise.all([
+        serviceA.register({
+          registrationCode: inviteA.registrationCode,
+          deviceId: `pg-pool1-device-a-${randomUUID()}`,
+        }),
+        serviceB.register({
+          registrationCode: inviteB.registrationCode,
+          deviceId: `pg-pool1-device-b-${randomUUID()}`,
+        }),
+      ]);
+      createdSessionIds.add(regA.bindingId);
+      createdSessionIds.add(regB.bindingId);
+      await Promise.all([
+        profileA.prepareProfileAuthority(driverId),
+        profileB.prepareProfileAuthority(driverId),
+      ]);
+
+      const activeBindingRows = await dbA.query<{ binding_id: string }>(
+        `
+          SELECT binding_id
+          FROM iam.driver_device_bindings
+          WHERE driver_id = $1 AND status = 'active'
+        `,
+        [driverId],
+      );
+      expect(activeBindingRows.rows).toHaveLength(1);
+
+      const winner =
+        activeBindingRows.rows[0]?.binding_id === regA.bindingId ? regA : regB;
+      const superseded = winner.bindingId === regA.bindingId ? regB : regA;
+
+      const activeFamilyRows = await dbA.query<{ binding_id: string }>(
+        `
+          SELECT binding_id
+          FROM iam.driver_refresh_families
+          WHERE driver_id = $1 AND status = 'active'
+        `,
+        [driverId],
+      );
+      expect(activeFamilyRows.rows).toHaveLength(1);
+      expect(activeFamilyRows.rows[0]?.binding_id).toBe(winner.bindingId);
+
+      const activeCanonicalSessionRows = await dbA.query<{
+        session_id: string;
+      }>(
+        `
+          SELECT session_id
+          FROM iam.identity_sessions
+          WHERE principal_id = $1 AND status = 'active'
+        `,
+        [driverId],
+      );
+      expect(activeCanonicalSessionRows.rows).toHaveLength(1);
+      expect(activeCanonicalSessionRows.rows[0]?.session_id).toBe(
+        winner.bindingId,
+      );
+
+      expect(
+        await serviceA.isBindingActive(
+          superseded.bindingId,
+          superseded.deviceId,
+          driverId,
+        ),
+      ).toBe(false);
+    } finally {
+      if (previousPoolMax === undefined) {
+        delete process.env.DATABASE_POOL_MAX;
+      } else {
+        process.env.DATABASE_POOL_MAX = previousPoolMax;
+      }
+    }
+  });
 });

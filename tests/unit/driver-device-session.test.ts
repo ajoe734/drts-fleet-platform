@@ -492,4 +492,55 @@ describe("DriverDeviceSessionService (IAM-DRV-001)", () => {
       sid: winner.bindingId,
     });
   });
+
+  it("executes SQL transactional advisory and FOR UPDATE locks even when DATABASE_POOL_MAX=1", async () => {
+    const previousPoolMax = process.env.DATABASE_POOL_MAX;
+    process.env.DATABASE_POOL_MAX = "1";
+    try {
+      const executedStatements: string[] = [];
+      let released = false;
+      const repository = new DriverDeviceSessionRepository({
+        isEnabled: () => true,
+        connect: async () => ({
+          query: async (sql: string) => {
+            executedStatements.push(sql.trim());
+            return { rows: [] };
+          },
+          release: () => {
+            released = true;
+          },
+        }),
+      } as never);
+
+      await repository.withRegistrationLock(
+        { regCodeHash: "hash-pool1", deviceId: "device-pool1" },
+        async () => {
+          await repository.lockDriverRegistrationScope("drv-demo-001");
+          await repository.findActiveBindingsByDriverId("drv-demo-001");
+        },
+      );
+
+      expect(executedStatements[0]).toBe("BEGIN");
+      expect(
+        executedStatements.some((sql) =>
+          sql.includes("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))"),
+        ),
+      ).toBe(true);
+      expect(
+        executedStatements.some(
+          (sql) =>
+            sql.includes("FROM iam.driver_device_bindings") &&
+            sql.includes("FOR UPDATE"),
+        ),
+      ).toBe(true);
+      expect(executedStatements.at(-1)).toBe("COMMIT");
+      expect(released).toBe(true);
+    } finally {
+      if (previousPoolMax === undefined) {
+        delete process.env.DATABASE_POOL_MAX;
+      } else {
+        process.env.DATABASE_POOL_MAX = previousPoolMax;
+      }
+    }
+  });
 });
