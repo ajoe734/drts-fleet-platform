@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ExternalPaymentSim } from "./external-payment-sim";
 import {
   type ChangeEvent,
   type ReactNode,
@@ -2167,6 +2168,64 @@ function TripScreen({
   const activeTrip = liveData?.activeTrip?.trip;
   const isRequestedTripActive =
     !requestedOrderId || activeTrip?.orderId === requestedOrderId;
+  const cancellation = activeTrip?.cancellationWindow;
+  const asOf =
+    typeof cancellation?.asOf === "string"
+      ? Date.parse(cancellation.asOf)
+      : Number.NaN;
+  const deadline =
+    typeof cancellation?.cancelableUntil === "string"
+      ? Date.parse(cancellation.cancelableUntil)
+      : null;
+  const windowKnown =
+    typeof cancellation?.canCancel === "boolean" &&
+    Number.isFinite(asOf) &&
+    (cancellation.cancelableUntil === null ||
+      (deadline !== null && Number.isFinite(deadline)));
+  const windowKey = `${activeTrip?.orderId ?? ""}:${cancellation?.asOf ?? ""}`;
+  const [clock, setClock] = useState({ key: windowKey, now: asOf });
+  const [rejectedWindow, setRejectedWindow] = useState<string | null>(null);
+  const windowAnchor = useRef<{ key: string; startedAt: number } | null>(null);
+  useEffect(() => {
+    if (!Number.isFinite(asOf)) {
+      windowAnchor.current = null;
+      return;
+    }
+    // The snapshot is server time; elapsed time must not use the device wall clock.
+    const anchor = { key: windowKey, startedAt: performance.now() };
+    windowAnchor.current = anchor;
+    const tick = () =>
+      setClock((previous) => ({
+        key: windowKey,
+        now: Math.max(
+          asOf + Math.max(0, performance.now() - anchor.startedAt),
+          previous.key === windowKey ? previous.now : asOf,
+        ),
+      }));
+    tick();
+    const timer = globalThis.setInterval(tick, 1000);
+    return () => {
+      globalThis.clearInterval(timer);
+      if (windowAnchor.current === anchor) windowAnchor.current = null;
+    };
+  }, [windowKey, asOf]);
+  const observedNow = clock.key === windowKey ? clock.now : asOf;
+  const isClosed =
+    rejectedWindow === windowKey ||
+    (windowKnown &&
+      (!cancellation!.canCancel ||
+        (deadline !== null && observedNow > deadline)));
+  const remainingSeconds =
+    deadline === null || !Number.isFinite(deadline)
+      ? null
+      : Math.max(0, Math.ceil((deadline - observedNow) / 1000));
+  const deadlineLabel =
+    windowKnown && deadline !== null
+      ? new Date(deadline).toLocaleString("zh-TW", {
+          timeZone: "Asia/Taipei",
+          hour12: false,
+        })
+      : null;
 
   if (requestedOrderId && !isRequestedTripActive) {
     return (
@@ -2201,14 +2260,25 @@ function TripScreen({
         plate: activeTrip.plateNumber || "待更新",
         rating: 0,
         etaMin: activeTrip.etaMin,
-        cancelWindowMin: activeTrip.cancelWindowMin,
+        cancellationWindow: activeTrip.cancellationWindow,
         driverPhoneMasked: activeTrip.driverPhoneMasked,
         estimatedFare: activeTrip.estimatedFare,
       }
     : null;
 
   function handleCancel() {
-    if (!trip) return;
+    if (!trip || isClosed) return;
+    const anchor = windowAnchor.current;
+    const currentWindowTime =
+      asOf +
+      (anchor?.key === windowKey
+        ? Math.max(0, performance.now() - anchor.startedAt)
+        : 0);
+    // Keep the exact inclusive deadline: only a strictly later instant closes it.
+    if (windowKnown && deadline !== null && currentWindowTime > deadline) {
+      setClock({ key: windowKey, now: currentWindowTime });
+      return;
+    }
     startTransition(async () => {
       try {
         setError(null);
@@ -2224,6 +2294,12 @@ function TripScreen({
         );
         const payload = await response.json().catch(() => null);
         if (!response.ok || !payload?.ok) {
+          if (
+            response.status === 409 &&
+            payload?.error?.code === "ORDER_NOT_CANCELABLE"
+          ) {
+            setRejectedWindow(windowKey);
+          }
           throw new Error(payload?.error?.message || "取消行程失敗");
         }
         window.location.assign(
@@ -2260,15 +2336,11 @@ function TripScreen({
             icon="phone"
           />
           <ActionButton
-            label={
-              isPending
-                ? "取消中…"
-                : `取消行程 · 剩 ${trip.cancelWindowMin} 分鐘可免費取消`
-            }
+            label={isPending ? "取消中…" : "取消行程"}
             theme={theme}
             variant="danger"
             onClick={handleCancel}
-            disabled={isPending}
+            disabled={isPending || isClosed}
             dataDrtOperation="referral-cancel"
           />
         </>
@@ -2356,6 +2428,31 @@ function TripScreen({
           </div>
         </div>
       </Card>
+
+      <div
+        data-drt-operation="referral-cancellation-window"
+        style={{ fontSize: 12, color: theme.muted, lineHeight: 1.6 }}
+      >
+        {isClosed
+          ? "目前已無法取消此行程，請以最新行程狀態為準。"
+          : !windowKnown
+            ? "目前未提供取消時段資訊，送出後由系統確認。"
+            : deadlineLabel
+              ? `可取消至 ${deadlineLabel}（台灣時間；剩餘 ${remainingSeconds} 秒）。送出時仍由系統確認行程狀態。`
+              : "目前可提出取消，系統未提供固定截止時間；送出時仍由系統確認行程狀態。"}
+        {windowKnown ? (
+          <div>
+            查詢時間：
+            <time dateTime={cancellation!.asOf}>
+              {new Date(asOf).toLocaleString("zh-TW", {
+                timeZone: "Asia/Taipei",
+                hour12: false,
+              })}
+            </time>
+            （台灣時間）
+          </div>
+        ) : null}
+      </div>
 
       {error ? (
         <Banner theme={theme} tone="danger" icon="alert">
@@ -2626,6 +2723,7 @@ function ReceiptScreen({
           fareTime: formatFare(liveData.receipt.fareTime),
           fareNight: formatFare(liveData.receipt.fareNight),
           total: liveData.receipt.formattedTotal,
+          actualFare: liveData.receipt.totalFare,
           payment: liveData.receipt.paymentChannel,
           channel: context.strings.appName,
           downloadUrl: liveData.receipt.downloadUrl,
@@ -2763,9 +2861,34 @@ function ReceiptScreen({
           </Banner>
         </div>
       </Card>
+      <ExternalPaymentSim
+        key={receipt.orderId}
+        orderId={receipt.orderId}
+        actualFare={receipt.actualFare}
+        accent={context.accent}
+        returnHref={buildHref(context, {
+          screen: "completed",
+          state: "handoff",
+          orderId: receipt.orderId,
+        })}
+      />
     </AppShell>
   );
 }
+
+// Existing PassengerAPP RatingCard display options, reused as UI labels only.
+// These do not define a new backend or business classification policy.
+const REFERRAL_RATING_TAG_OPTIONS = [
+  "車內整潔",
+  "駕駛親切",
+  "路線順暢",
+  "準時到達",
+  "駕駛態度",
+  "車內氣味",
+  "繞路",
+  "遲到",
+  "駕駛違規",
+] as const;
 
 function OutcomeScreen({
   context,
@@ -2788,6 +2911,8 @@ function OutcomeScreen({
   const [score, setScore] = useState<number | null>(null);
   const [ratingMessage, setRatingMessage] = useState<string | null>(null);
   const [contactRequested, setContactRequested] = useState(true);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [comment, setComment] = useState("");
   const [ratingReceipt, setRatingReceipt] =
     useState<ReferralPassengerRatingResult | null>(null);
   const [pendingRating, setPendingRating] =
@@ -2812,6 +2937,8 @@ function OutcomeScreen({
   useEffect(() => {
     setScore(null);
     setContactRequested(true);
+    setSelectedTags([]);
+    setComment("");
     setRatingReceipt(null);
     setRatingMessage(null);
     setError(null);
@@ -2833,15 +2960,33 @@ function OutcomeScreen({
         typeof saved.contactRequested === "boolean" &&
         typeof saved.idempotencyKey === "string" &&
         saved.idempotencyKey.length <= 255 &&
+        (saved.tags === undefined ||
+          (Array.isArray(saved.tags) &&
+            saved.tags.length <= 10 &&
+            saved.tags.every(
+              (tag: unknown) => typeof tag === "string" && tag.length <= 100,
+            ))) &&
+        // Preserve an existing valid original command; the UI's 200-character
+        // input does not narrow the existing API's 2000-character contract.
+        (saved.comment === undefined ||
+          (typeof saved.comment === "string" &&
+            saved.comment.length <= 2000)) &&
         Object.keys(saved).every((k) =>
-          ["orderId", "score", "contactRequested", "idempotencyKey"].includes(
-            k,
-          ),
+          [
+            "orderId",
+            "score",
+            "contactRequested",
+            "idempotencyKey",
+            "tags",
+            "comment",
+          ].includes(k),
         )
       ) {
         setPendingRating(saved);
         setScore(saved.score);
         setContactRequested(saved.contactRequested);
+        setSelectedTags(saved.tags ?? []);
+        setComment(saved.comment ?? "");
       }
     } catch {
       /* An invalid local draft grants no identity or rating authority. */
@@ -2851,10 +2996,12 @@ function OutcomeScreen({
 
   function submitRating(nextScore: number) {
     if (!trip || submitted || isPending) return;
-    const command = originalRating ?? {
+    const command: SubmitReferralPassengerRatingCommand = originalRating ?? {
       orderId: trip.orderId,
       score: nextScore as 1 | 2 | 3 | 4 | 5,
       contactRequested: nextScore <= 2 ? contactRequested : false,
+      ...(selectedTags.length ? { tags: [...selectedTags] } : {}),
+      ...(comment ? { comment } : {}),
       idempotencyKey: createIdempotencyKey("referral-rating"),
     };
     setPendingRating(command);
@@ -2883,10 +3030,19 @@ function OutcomeScreen({
               : "尚未確認評分結果，請重送原評分或重新讀取本行程。",
           );
         }
+        const expectedTags = [
+          ...new Set(
+            (command.tags ?? []).map((tag) => tag.trim()).filter(Boolean),
+          ),
+        ].sort();
         if (
           payload.data?.orderId !== trip.orderId ||
           payload.data?.score !== command.score ||
           payload.data?.contactRequested !== command.contactRequested ||
+          JSON.stringify([...(payload.data?.tags ?? [])].sort()) !==
+            JSON.stringify(expectedTags) ||
+          (payload.data?.comment ?? null) !==
+            (command.comment?.trim() || null) ||
           (command.score <= 2 && !payload.data.complaintCaseNo)
         )
           throw new ReferralUiError("評分尚未取得同單回執，請重送原評分。");
@@ -2978,6 +3134,9 @@ function OutcomeScreen({
       </Card>
       {completed ? (
         <Card theme={theme} title="為這趟行程評分">
+          <p style={{ fontSize: 12, color: theme.muted, lineHeight: 1.6 }}>
+            評價與本行程一併保存；低分評價會建立服務紀錄，並記錄您是否需要客服聯絡。
+          </p>
           <div
             style={{
               display: "flex",
@@ -3021,6 +3180,76 @@ function OutcomeScreen({
               </button>
             ))}
           </div>
+          {submitted ? (
+            <div aria-label="已送出評分內容">
+              <p>
+                評價標籤：
+                {submitted.tags?.length ? submitted.tags.join("、") : "未選擇"}
+              </p>
+              <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                意見：{submitted.comment || "未填寫"}
+              </p>
+            </div>
+          ) : (
+            <fieldset
+              disabled={isPending || Boolean(originalRating)}
+              style={{ border: 0, margin: "12px 0", padding: 0 }}
+            >
+              <legend>評價標籤（可複選）</legend>
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 10,
+                  margin: "8px 0",
+                }}
+              >
+                {REFERRAL_RATING_TAG_OPTIONS.map((tag) => (
+                  <label
+                    key={tag}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedTags.includes(tag)}
+                      onChange={() =>
+                        setSelectedTags((current) =>
+                          current.includes(tag)
+                            ? current.filter((selected) => selected !== tag)
+                            : [...current, tag],
+                        )
+                      }
+                    />
+                    {tag}
+                  </label>
+                ))}
+              </div>
+              <label style={{ display: "block" }}>
+                意見（最多200字）
+                <textarea
+                  aria-describedby="referral-rating-comment-count"
+                  maxLength={200}
+                  value={comment}
+                  onChange={(event) =>
+                    setComment(event.currentTarget.value.slice(0, 200))
+                  }
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    minHeight: 80,
+                    boxSizing: "border-box",
+                  }}
+                />
+              </label>
+              <p id="referral-rating-comment-count" aria-live="polite">
+                {comment.length}/200 字
+              </p>
+            </fieldset>
+          )}
           {(submitted?.score ?? score ?? 5) <= 2 ? (
             <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {submitted?.contactRequested === null ? (

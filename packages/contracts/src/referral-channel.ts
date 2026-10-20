@@ -308,13 +308,25 @@ export interface ReferralPassengerRatingResult {
   submittedAt: string;
 }
 
+/** Read-only snapshot of the existing cancellation command policy. */
+export interface ReferralPassengerCancellationWindow {
+  canCancel: boolean;
+  /** Exact existing policy deadline, or null when no finite deadline applies. */
+  cancelableUntil: string | null;
+  /** Server evaluation time; the command still checks its current order state. */
+  asOf: string;
+}
+
 export interface ReferralPassengerTripSnapshot {
   orderId: string;
   orderNo: string;
   status: string;
   statusCode: string;
   etaMin: number | null;
+  /** @deprecated Approximate remaining minutes; use cancellationWindow for policy. */
   cancelWindowMin: number;
+  /** Optional during rolling releases. Absence never asserts permission/denial. */
+  cancellationWindow?: ReferralPassengerCancellationWindow;
   pickupAddress: string;
   dropoffAddress: string;
   driverName: string | null;
