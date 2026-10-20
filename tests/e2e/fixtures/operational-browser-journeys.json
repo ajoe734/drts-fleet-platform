@@ -11,7 +11,7 @@
       "id": "referral-create-read-cancel-receipt",
       "surface": "referral",
       "baseUrlEnv": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
-      "route": "/embed/yuhe-residence?screen=book",
+      "route": "/embed/yuhe-residence?state=consent&entryHost=app.fabrikam-living.example",
       "actorScope": "partner-scoped referral passenger",
       "setup": [
         {
@@ -26,6 +26,16 @@
       ],
       "operations": [
         {
+          "kind": "navigation",
+          "name": "explicit-consent",
+          "control": "form[action='/api/referral/session'] button[type='submit']",
+          "expectedPath": "/embed/yuhe-residence",
+          "expectedQuery": {
+            "state": "handoff",
+            "screen": "book"
+          }
+        },
+        {
           "kind": "request",
           "name": "create",
           "control": "[data-drt-operation='referral-create']",
@@ -33,12 +43,12 @@
             {
               "kind": "fill",
               "control": "input[name='pickupAddress']",
-              "value": "台北車站"
+              "value": "新北市板橋區縣民大道二段7號"
             },
             {
               "kind": "fill",
               "control": "input[name='dropoffAddress']",
-              "value": "桃園國際機場 T2"
+              "value": "臺北市信義區市府路1號"
             }
           ],
           "requestUrlIncludes": "/api/referral/booking",

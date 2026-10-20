@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server";
-import type { ReferralEmbedSession } from "@drts/contracts";
 
 import {
   consumeReferralEmbedHandoffArtifact,
   getPartnerEntry,
+  issueReferralEmbedHandoffArtifact,
+  isEmbedAuthorityError,
   recordReferralEmbedConsent,
 } from "../../../../lib/embed-api";
 import {
   buildReferralEmbedConsentCommand,
   getReferralEmbedSession,
   writeReferralEmbedSession,
+  toPublicReferralEmbedSession,
+  type ServerReferralEmbedSession,
 } from "../../../../lib/embed-partner-session";
 
 type SessionAction =
@@ -98,53 +101,74 @@ async function parseAction(request: Request): Promise<SessionAction> {
 async function buildDemoSession(
   entrySlug: string,
   entryHost: string,
-): Promise<ReferralEmbedSession> {
-  if (process.env.REFERRAL_EMBED_DEMO !== "true") {
-    throw new Error("DEMO_BOOTSTRAP_DISABLED");
+): Promise<ServerReferralEmbedSession> {
+  const environment = process.env.DRTS_ENV?.trim().toLowerCase();
+  if (
+    process.env.REFERRAL_EMBED_DEMO !== "true" ||
+    (environment !== "development" && environment !== "test")
+  ) {
+    throw Object.assign(new Error("DEMO_BOOTSTRAP_DISABLED"), {
+      status: 403,
+      code: "DEMO_BOOTSTRAP_DISABLED",
+    });
   }
-
   const entry = await getPartnerEntry(entrySlug);
-  const now = new Date().toISOString();
-  const partnerId = entry.partnerId;
-  const tenantId = entry.tenantId;
-  const partnerProgramId = entry.programId;
-  const drtsPassengerId = `referral-demo-${entrySlug}`;
-
-  return {
-    handoffId: `handoff-demo-${entrySlug}`,
-    partnerEntrySlug: entry.entrySlug,
+  if (!entry.entryHost || entryHost !== entry.entryHost)
+    throw Object.assign(
+      new Error("Entry host does not match the current entry."),
+      { status: 403 },
+    );
+  const existing = await getReferralEmbedSession();
+  if (existing) {
+    if (
+      existing.partnerEntrySlug !== entrySlug ||
+      existing.entryHost !== entryHost
+    )
+      throw Object.assign(
+        new Error("Existing referral session belongs to another entry."),
+        { status: 403 },
+      );
+    return existing;
+  }
+  // Existing legal dev bootstrap goes through the normal single-use handoff.
+  // Consent is not silently granted by an effect or a query parameter.
+  const artifact = await issueReferralEmbedHandoffArtifact({
+    entrySlug,
     entryHost,
-    drtsPassengerId,
-    identityActive: true,
-    consent: {
-      requiredScopes: ["trip.manage", "pii.trip", "identity.bind"],
-      bundleVersion: "referral-embed-demo-consent-v1-2026-08-08",
-      grantedAt: now,
-    },
-    identity: {
-      actorType: "referral_passenger",
-      actorId: drtsPassengerId,
-      realm: "partner",
-      authMode: "jwt_bearer",
-      roleFamilies: ["partner"],
-      roles: ["referral_passenger"],
-      scopes: ["trip.manage", "pii.trip", "identity.bind"],
-      tenantId,
-      partnerId,
-      partnerProgramId,
-      partnerEntrySlug: entry.entrySlug,
-      drtsPassengerId,
-    },
-  };
+    partnerUserRef: `referral-demo-${entrySlug}`,
+    consentBundle: null,
+  });
+  return consumeReferralEmbedHandoffArtifact({
+    artifact: artifact.artifact,
+    entrySlug,
+    entryHost,
+  });
 }
 
 export async function POST(request: Request) {
   try {
+    const origin = request.headers.get("origin");
+    if (origin && origin !== new URL(request.url).origin)
+      return jsonResponse(
+        { ok: false, message: "Cross-origin session request is not allowed." },
+        403,
+      );
     const action = await parseAction(request);
     if (action.action === "demo-bootstrap") {
-      const session = await buildDemoSession(action.entrySlug, action.entryHost);
+      const session = await buildDemoSession(
+        action.entrySlug,
+        action.entryHost,
+      );
       await writeReferralEmbedSession(session);
-      return jsonResponse({ ok: true, session });
+      return jsonResponse({
+        ok: true,
+        session: toPublicReferralEmbedSession(session),
+        ...(!session.identityActive
+          ? {
+              nextPath: `/embed/${encodeURIComponent(session.partnerEntrySlug)}?state=consent&entryHost=${encodeURIComponent(session.entryHost)}`,
+            }
+          : {}),
+      });
     }
 
     if (action.action === "grant-consent") {
@@ -166,11 +190,20 @@ export async function POST(request: Request) {
       );
       await writeReferralEmbedSession(session);
       if (
-        request.headers.get("content-type")?.toLowerCase().includes(
-          "application/json",
-        )
+        request.headers
+          .get("content-type")
+          ?.toLowerCase()
+          .includes("application/json")
       ) {
-        return jsonResponse({ ok: true, session });
+        return jsonResponse({
+          ok: true,
+          session: toPublicReferralEmbedSession(session),
+          ...(!session.identityActive
+            ? {
+                nextPath: `/embed/${encodeURIComponent(session.partnerEntrySlug)}?state=consent&entryHost=${encodeURIComponent(session.entryHost)}`,
+              }
+            : {}),
+        });
       }
       return redirectResponse(request, action.returnTo);
     }
@@ -189,11 +222,20 @@ export async function POST(request: Request) {
     });
     await writeReferralEmbedSession(session);
     if (
-      request.headers.get("content-type")?.toLowerCase().includes(
-        "application/json",
-      )
+      request.headers
+        .get("content-type")
+        ?.toLowerCase()
+        .includes("application/json")
     ) {
-      return jsonResponse({ ok: true, session });
+      return jsonResponse({
+        ok: true,
+        session: toPublicReferralEmbedSession(session),
+        ...(!session.identityActive
+          ? {
+              nextPath: `/embed/${encodeURIComponent(session.partnerEntrySlug)}?state=consent&entryHost=${encodeURIComponent(session.entryHost)}`,
+            }
+          : {}),
+      });
     }
     return redirectResponse(request, action.returnTo);
   } catch (error) {
@@ -206,7 +248,23 @@ export async function POST(request: Request) {
     // untouched; the mismatch check above (via current*) is what stops the
     // takeover, not clearing the cookie.
     const message =
-      error instanceof Error ? error.message : "Referral session exchange failed.";
-    return jsonResponse({ ok: false, message }, 400);
+      error instanceof Error
+        ? error.message
+        : "Referral session exchange failed.";
+    const status = isEmbedAuthorityError(error)
+      ? error.status
+      : error instanceof Error &&
+          "status" in error &&
+          typeof error.status === "number"
+        ? error.status
+        : 400;
+    return jsonResponse(
+      {
+        ok: false,
+        message,
+        ...(isEmbedAuthorityError(error) ? { code: error.code } : {}),
+      },
+      status,
+    );
   }
 }

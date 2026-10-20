@@ -1,3 +1,4 @@
+import { referralErrorResponse } from "../../../../../lib/embed-booking-api";
 import { NextResponse } from "next/server";
 import { getReferralTripHistoryServer } from "../../../../../lib/embed-booking-api";
 
@@ -12,18 +13,19 @@ export async function GET(
 
     if (!item) {
       return NextResponse.json(
-        { ok: false, error: { message: "Trip not found or access denied" } },
-        { status: 404 }
+        {
+          ok: false,
+          error: { code: "ORDER_NOT_FOUND", message: "找不到這筆行程。" },
+        },
+        { status: 404, headers: { "Cache-Control": "no-store, max-age=0" } },
       );
     }
 
-    return NextResponse.json({ ok: true, data: item });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Trip history lookup failed";
     return NextResponse.json(
-      { ok: false, error: { message } },
-      { status: 400 },
+      { ok: true, data: item },
+      { headers: { "Cache-Control": "no-store, max-age=0" } },
     );
+  } catch (error) {
+    return referralErrorResponse(error);
   }
 }

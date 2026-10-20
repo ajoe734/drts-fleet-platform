@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   if (!artifact || !entrySlug) {
     return NextResponse.json(
       { ok: false, message: "Missing required parameters." },
-      { status: 400 },
+      { status: 400, headers: { "Cache-Control": "no-store, max-age=0" } },
     );
   }
 
@@ -42,7 +42,10 @@ export async function GET(request: Request) {
 
     await writeReferralEmbedSession(session);
 
-    const redirectUrl = new URL(`/embed/${entrySlug}`, request.url);
+    const redirectUrl = new URL(
+      `/embed/${encodeURIComponent(entrySlug)}`,
+      request.url,
+    );
     if (session.navigationContext) {
       redirectUrl.searchParams.set("screen", session.navigationContext.screen);
       redirectUrl.searchParams.set(
@@ -63,7 +66,10 @@ export async function GET(request: Request) {
     // reasoning; the mismatch check (current*) is the actual boundary.
     return new Response("Notification link is invalid or expired.", {
       status: 403,
-      headers: { "Content-Type": "text/plain" },
+      headers: {
+        "Content-Type": "text/plain",
+        "Cache-Control": "no-store, max-age=0",
+      },
     });
   }
 }
