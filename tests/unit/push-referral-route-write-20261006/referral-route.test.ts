@@ -1,3 +1,4 @@
+import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import type { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
 import { domainFixture } from "../referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
@@ -144,6 +145,8 @@ describe("referral route negative cases and replay", () => {
       {
         ...input,
         quoteId: quote.quoteId,
+        feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        feeConfirmed: true,
         passengerName: "Synthetic rider",
         passengerPhone: "0912345678",
       },

@@ -182,6 +182,7 @@ export type BookingJournalContext = {
   passengerName: string;
   passengerPhone: string;
   vehicleType: string | null;
+  feeDisclosureVersion?: string;
 };
 export type BookingJournalSnapshot = Readonly<{
   version: 1;
@@ -210,6 +211,8 @@ const bookingBusinessFields = new Set([
   "partnerUserRef",
   "idempotencyKey",
   "scheduledAt",
+  "feeDisclosureVersion",
+  "feeConfirmed",
 ]);
 export class BookingWriteJournal {
   private attempted = false;
@@ -255,10 +258,22 @@ export class BookingWriteJournal {
       "booking journal forbids credential or unknown fields",
     );
     requireFact(
-      Object.values(body).every(
-        (item) => typeof item === "string" && item.length <= 2048,
+      Object.entries(body).every(([key, item]) =>
+        key === "feeConfirmed"
+          ? typeof item === "boolean"
+          : typeof item === "string" && item.length <= 2048,
       ),
       "booking business fields must be bounded strings",
+    );
+    // Historical original journals omit both fields; never upgrade their body/key.
+    // Every new caller supplies an expected version from its actual quote.
+    requireFact(
+      this.expected.feeDisclosureVersion === undefined
+        ? body.feeDisclosureVersion === undefined &&
+            body.feeConfirmed === undefined
+        : body.feeDisclosureVersion === this.expected.feeDisclosureVersion &&
+            body.feeConfirmed === true,
+      "booking exact explicit fee confirmation",
     );
     for (const key of [
       "entrySlug",
@@ -460,6 +475,18 @@ export async function observeOriginalBookingAck(
     const orderId = text(created.orderId);
     const quoteId = text(object(created.quote).quoteId);
     requireFact(quoteId === pending.quoteId, "create consumed exact quote");
+    if (command.feeConfirmed === true) {
+      const confirmation = object(created.feeConfirmation);
+      requireFact(
+        confirmation.orderId === orderId &&
+          confirmation.quoteId === quoteId &&
+          confirmation.disclosureVersion === command.feeDisclosureVersion &&
+          confirmation.contentHash === quote.feeContentHash &&
+          typeof confirmation.feeConfirmedAt === "string" &&
+          Number.isFinite(Date.parse(confirmation.feeConfirmedAt)),
+        "actual server per-order fee confirmation",
+      );
+    }
     // Recognition follows all ownership bindings. Even a disk ACK failure leaves
     // this known own ID available to the normal same-subject cleanup readback.
     claim(orderId);

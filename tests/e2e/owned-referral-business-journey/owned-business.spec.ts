@@ -1,4 +1,8 @@
 import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
+import {
   test,
   expect,
   type BrowserContext,
@@ -786,6 +790,37 @@ test(journeyName, async ({ browser, request }) => {
         "actual Driver session identity",
       );
 
+      const currentFees = object((await referral("/api/referral/fees")).data);
+      requireFact(
+        currentFees.disclosureVersion === PASSENGER_FEE_DISCLOSURE_VERSION &&
+          currentFees.contentHash === PASSENGER_FEE_CONTENT_HASH,
+        "runtime exact fee copy version",
+      );
+      if (!currentFees.acknowledgedAt) {
+        const response = page.waitForResponse(
+          (item) =>
+            item.url() === origins.referral + "/api/referral/fees" &&
+            item.request().method() === "POST",
+        );
+        await page.locator('[data-drt-operation="referral-fee-agree"]').click();
+        requireFact(
+          (await response).ok(),
+          "actual browser first fee acknowledgement",
+        );
+      }
+      const feesReadback = object((await referral("/api/referral/fees")).data);
+      requireFact(
+        feesReadback.disclosureVersion === currentFees.disclosureVersion &&
+          feesReadback.contentHash === currentFees.contentHash &&
+          typeof feesReadback.acknowledgedAt === "string" &&
+          Number.isFinite(Date.parse(feesReadback.acknowledgedAt)),
+        "canonical first fee acknowledgement readback",
+      );
+      evidence.record({
+        stage: "browser-first-fee-acknowledgement",
+        result: "observed",
+      });
+
       const pickupAddress = "新北市板橋區縣民大道二段7號";
       const dropoffAddress = "臺北市信義區市府路1號";
       const passengerName = `合成測試 ${nonce.slice(-10)}`;
@@ -975,6 +1010,7 @@ test(journeyName, async ({ browser, request }) => {
                 entrySlug: ENTRY,
                 partnerUserRef: SUBJECT,
                 quoteId: text(selected.quoteId),
+                feeDisclosureVersion: text(selected.feeDisclosureVersion),
                 pickupAddress,
                 dropoffAddress,
                 passengerName,
@@ -1033,6 +1069,16 @@ test(journeyName, async ({ browser, request }) => {
           }
         },
       );
+      const feeCheckbox = page.getByRole("checkbox", {
+        name: "我已確認費用與優惠說明",
+        exact: true,
+      });
+      await expect(feeCheckbox).not.toBeChecked();
+      await expect(
+        page.locator('[data-drt-operation="referral-create"]'),
+      ).toBeDisabled();
+      await feeCheckbox.check();
+      await expect(feeCheckbox).toBeChecked();
       try {
         await clickAndSettleOriginalBookingAck(
           () => page.locator('[data-drt-operation="referral-create"]').click(),

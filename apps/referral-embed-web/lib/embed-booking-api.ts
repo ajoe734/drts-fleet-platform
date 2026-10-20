@@ -12,6 +12,9 @@ import type {
   SubmitReferralPassengerRatingCommand,
   ReferralPassengerQuoteCommand,
   ReferralPassengerFareQuote,
+  ReferralFeeStatus,
+  ReferralOrderFeeConfirmation,
+  AcknowledgeReferralFeesCommand,
   ReferralPassengerRatingResult,
 } from "@drts/contracts";
 import {
@@ -156,6 +159,7 @@ export function createReferralBookingServer(
     replayed: boolean;
     quote: ReferralPassengerFareQuote;
     confirmedAt: string;
+    feeConfirmation: ReferralOrderFeeConfirmation | null;
   }>("bookings", "POST", command, command.idempotencyKey);
 }
 export function getReferralActiveTripServer() {
@@ -194,4 +198,13 @@ export function submitReferralTripRatingServer(
     "POST",
     { ...command, orderId },
   );
+}
+
+export function getReferralFeesServer() {
+  return request<ReferralFeeStatus>("fees");
+}
+export function acknowledgeReferralFeesServer(
+  command: AcknowledgeReferralFeesCommand,
+) {
+  return request<ReferralFeeStatus>("fees", "POST", command);
 }

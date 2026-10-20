@@ -1,3 +1,7 @@
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
@@ -18,6 +22,7 @@ import {
   type SetupRequest,
 } from "./operational-document-upload";
 type JourneyStep =
+  | { kind: "referral-fees"; control: string }
   | { kind: "navigate"; path: string }
   | { kind: "click"; control: string }
   | { kind: "fill"; control: string; value: string };
@@ -229,6 +234,33 @@ async function runSteps(
   variables: TemplateVariables,
 ) {
   for (const step of steps) {
+    if (step.kind === "referral-fees") {
+      const url = origin + "/api/referral/fees";
+      const response = await page.request.get(url);
+      expect(response.ok()).toBe(true);
+      const body = await response.json();
+      expect(body.data).toMatchObject({
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        contentHash: PASSENGER_FEE_CONTENT_HASH,
+      });
+      if (body.data.acknowledgedAt === null) {
+        const submitted = page.waitForResponse(
+          (item) => item.url() === url && item.request().method() === "POST",
+        );
+        await page.locator(step.control).click();
+        expect((await submitted).ok()).toBe(true);
+      }
+      const read = await page.request.get(url);
+      expect(read.ok()).toBe(true);
+      const ack = (await read.json()).data;
+      expect(ack).toMatchObject({
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        contentHash: PASSENGER_FEE_CONTENT_HASH,
+      });
+      expect(typeof ack.acknowledgedAt).toBe("string");
+      expect(Number.isFinite(Date.parse(ack.acknowledgedAt))).toBe(true);
+      continue;
+    }
     if (step.kind === "navigate") {
       await navigate(
         page,

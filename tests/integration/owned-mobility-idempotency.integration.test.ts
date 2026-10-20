@@ -1,3 +1,4 @@
+import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { domainFixture } from "../unit/referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
@@ -443,6 +444,13 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
         pickupAddress: "Hotel Grand, Xinyi Dist",
         dropoffAddress: "Taoyuan Airport Terminal 2",
       };
+      await ownedMobilityService.acknowledgeReferralFees(
+        {
+          disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          acknowledged: true,
+        },
+        referralPassengerIdentity,
+      );
       const quote = await ownedMobilityService.quoteReferralPassengerFare(
         route,
         referralPassengerIdentity,
@@ -450,6 +458,8 @@ describe("Owned Mobility Idempotency Integration (CONF-IDEM-002)", () => {
       const referralCommand: CreateReferralPassengerBookingCommand = {
         ...route,
         quoteId: quote.quoteId,
+        feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        feeConfirmed: true,
         passengerName: "Referral VIP",
         passengerPhone: "0912345678",
         idempotencyKey: "body-referral-key-100",

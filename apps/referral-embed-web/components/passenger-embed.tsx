@@ -1,4 +1,14 @@
 "use client";
+import {
+  ReferralFirstFeeDisclosure,
+  ReferralOrderFeeDisclosure,
+  ReferralFeeDisclosureReader,
+} from "./referral-fee-disclosure";
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+  type ReferralFeeStatus,
+} from "@drts/contracts";
 import { ReferralComplaintPanel } from "./referral-complaint-panel";
 
 import Link from "next/link";
@@ -120,6 +130,11 @@ function validRecovery(saved: any, scope: string, entrySlug: string) {
         command[k] === undefined ||
         (typeof command[k] === "string" && command[k].length <= 500),
     ) &&
+    (command.feeDisclosureVersion === undefined ||
+      (typeof command.feeDisclosureVersion === "string" &&
+        command.feeDisclosureVersion.length <= 100)) &&
+    (command.feeConfirmed === undefined ||
+      typeof command.feeConfirmed === "boolean") &&
     Object.keys(command).every((k) =>
       [
         "entrySlug",
@@ -132,6 +147,8 @@ function validRecovery(saved: any, scope: string, entrySlug: string) {
         "passengerName",
         "passengerPhone",
         "partnerUserRef",
+        "feeDisclosureVersion",
+        "feeConfirmed",
       ].includes(k),
     )
   );
@@ -1127,6 +1144,9 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
         由 {context.strings.appName}{" "}
         安全帶入叫車身分；首次使用仍須確認同意事項。內嵌頁不會要求輸入帳號密碼。
       </Banner>
+      <Card theme={theme}>
+        <ReferralFeeDisclosureReader />
+      </Card>
     </AppShell>
   );
 }
@@ -1519,6 +1539,16 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     "idle" | "loading" | "quoted" | "expired" | "error"
   >("idle");
   const [refreshQuote, setRefreshQuote] = useState(0);
+  const [feeStatus, setFeeStatus] = useState<ReferralFeeStatus | null>(null);
+  const [feeError, setFeeError] = useState<string | null>(null);
+  const [feeBusy, setFeeBusy] = useState(false);
+  const [feeRefresh, setFeeRefresh] = useState(0);
+  const [confirmedQuoteId, setConfirmedQuoteId] = useState<string | null>(null);
+  const feeReady =
+    feeStatus?.disclosureVersion === PASSENGER_FEE_DISCLOSURE_VERSION &&
+    feeStatus.contentHash === PASSENGER_FEE_CONTENT_HASH &&
+    !!feeStatus.acknowledgedAt;
+
   const [recovery, setRecovery] = useState<{
     scope: string;
     command: CreateReferralPassengerBookingCommand;
@@ -1598,8 +1628,90 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     };
   }, [bootstrapped, context, scope]);
   useEffect(() => {
+    if (!bootstrapped) return;
+    let current = true;
+    const controller = new AbortController();
+    void fetch("/api/referral/fees", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const body = await response.json();
+        const status = body?.data;
+        if (
+          !response.ok ||
+          !body?.ok ||
+          status?.disclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+          status?.contentHash !== PASSENGER_FEE_CONTENT_HASH ||
+          !(
+            status.acknowledgedAt === null ||
+            (typeof status.acknowledgedAt === "string" &&
+              Number.isFinite(Date.parse(status.acknowledgedAt)))
+          )
+        )
+          throw new Error("無法讀取目前費用同意紀錄，請重新讀取。");
+        if (current) {
+          setFeeStatus(status);
+          setFeeError(null);
+        }
+      })
+      .catch(() => {
+        if (current) setFeeError("無法讀取目前費用同意紀錄，請重新讀取。");
+      });
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [bootstrapped, scope, feeRefresh]);
+
+  async function agreeFees() {
+    if (!feeStatus || feeBusy) return;
+    setFeeBusy(true);
+    setFeeError(null);
+    try {
+      const response = await fetch("/api/referral/fees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          disclosureVersion: feeStatus.disclosureVersion,
+          acknowledged: true,
+        }),
+      });
+      const ack = await response.json();
+      if (
+        !response.ok ||
+        !ack?.ok ||
+        ack.data?.disclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+        ack.data?.contentHash !== PASSENGER_FEE_CONTENT_HASH ||
+        !Number.isFinite(Date.parse(ack.data?.acknowledgedAt))
+      )
+        throw new Error("費用同意尚未確認，請以原版本重新確認。");
+      const read = await fetch("/api/referral/fees", { cache: "no-store" });
+      const body = await read.json();
+      if (
+        !read.ok ||
+        !body?.ok ||
+        body.data?.disclosureVersion !== ack.data.disclosureVersion ||
+        body.data?.contentHash !== ack.data.contentHash ||
+        body.data?.acknowledgedAt !== ack.data.acknowledgedAt
+      )
+        throw new Error("費用同意回讀尚未確認，請重新讀取。");
+      if (mountedUi.current) setFeeStatus(body.data);
+    } catch (cause) {
+      if (mountedUi.current)
+        setFeeError(
+          cause instanceof Error ? cause.message : "費用同意尚未確認。",
+        );
+    } finally {
+      if (mountedUi.current) setFeeBusy(false);
+    }
+  }
+
+  useEffect(() => {
     setQuote(null);
+    setConfirmedQuoteId(null);
     if (
+      !feeReady ||
       !bootstrapped ||
       !recoveryReady ||
       pendingCommand ||
@@ -1639,6 +1751,8 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         if (!active) return;
         if (
           !result?.quoteId ||
+          result.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+          result.feeContentHash !== PASSENGER_FEE_CONTENT_HASH ||
           result.fixedPrice !== false ||
           result.isGuaranteed !== false ||
           !Number.isSafeInteger(result.estimatedMin) ||
@@ -1676,6 +1790,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     recoveryReady,
     pendingCommand,
     refreshQuote,
+    feeReady,
   ]);
   useEffect(() => {
     if (!quote || quoteState !== "quoted") return;
@@ -1700,7 +1815,9 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
       !recoveryReady ||
       inFlightForScope.current ||
       (!pendingCommand &&
-        (!quote ||
+        (!feeReady ||
+          !quote ||
+          confirmedQuoteId !== quote.quoteId ||
           quoteState !== "quoted" ||
           quotedIntent.current !== quoteIntent ||
           quotedScope.current !== scope ||
@@ -1710,6 +1827,8 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     const command = pendingCommand ?? {
       ...buildBookingCommand(context, form, intentKey.current),
       quoteId: quote!.quoteId,
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeConfirmed: true,
     };
     const saved = { scope, command, form };
     setRecovery(saved);
@@ -1742,6 +1861,9 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             [
               "FARE_QUOTE_EXPIRED",
               "FARE_QUOTE_MISMATCH",
+              "FEE_DISCLOSURE_CHANGED",
+              "FEE_CONFIRMATION_REQUIRED",
+              "FEE_DISCLOSURE_REQUIRED",
               "VALIDATION_ERROR",
             ].includes(code)
           ) {
@@ -1759,7 +1881,25 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         if (
           typeof payload.data?.orderId !== "string" ||
           payload.data?.quote?.quoteId !== command.quoteId ||
-          !payload.data.confirmedAt
+          !payload.data.confirmedAt ||
+          (command.feeConfirmed === true &&
+            (payload.data.quote?.feeDisclosureVersion !==
+              command.feeDisclosureVersion ||
+              typeof payload.data.quote?.feeContentHash !== "string" ||
+              !/^[a-f0-9]{64}$/.test(payload.data.quote.feeContentHash) ||
+              (command.feeDisclosureVersion ===
+                PASSENGER_FEE_DISCLOSURE_VERSION &&
+                payload.data.quote.feeContentHash !==
+                  PASSENGER_FEE_CONTENT_HASH) ||
+              payload.data.feeConfirmation?.orderId !== payload.data.orderId ||
+              payload.data.feeConfirmation?.quoteId !== command.quoteId ||
+              payload.data.feeConfirmation?.disclosureVersion !==
+                command.feeDisclosureVersion ||
+              payload.data.feeConfirmation?.contentHash !==
+                payload.data.quote.feeContentHash ||
+              !Number.isFinite(
+                Date.parse(payload.data.feeConfirmation?.feeConfirmedAt),
+              )))
         )
           throw new ReferralUiError(referralUiMessage(null, true));
         try {
@@ -1795,7 +1935,10 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     !recoveryReady ||
     isPending ||
     (!pendingCommand &&
-      (quoteState !== "quoted" ||
+      (!feeReady ||
+        !quote ||
+        confirmedQuoteId !== quote.quoteId ||
+        quoteState !== "quoted" ||
         quotedIntent.current !== quoteIntent ||
         quotedScope.current !== scope));
   const estimateLabel =
@@ -1863,6 +2006,38 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         </>
       }
     >
+      {!feeReady && !pendingCommand ? (
+        <Card theme={theme}>
+          <ReferralFirstFeeDisclosure
+            status={feeStatus}
+            busy={feeBusy}
+            error={feeError}
+            onAgree={() => {
+              void agreeFees();
+            }}
+          />
+          {feeError ? (
+            <button type="button" onClick={() => setFeeRefresh((n) => n + 1)}>
+              重新讀取費用同意紀錄
+            </button>
+          ) : null}
+        </Card>
+      ) : null}
+      <Card theme={theme}>
+        <ReferralFeeDisclosureReader />
+      </Card>
+      {feeReady && quote && !pendingCommand ? (
+        <Card theme={theme}>
+          <ReferralOrderFeeDisclosure
+            quote={quote}
+            checked={confirmedQuoteId === quote.quoteId}
+            disabled={isPending || quoteState !== "quoted"}
+            onChange={(checked) =>
+              setConfirmedQuoteId(checked ? quote.quoteId : null)
+            }
+          />
+        </Card>
+      ) : null}
       <div
         style={{
           display: "flex",
@@ -2368,6 +2543,18 @@ function TripScreen({
         </span>
       </div>
 
+      <Card theme={theme}>
+        <DetailRow
+          theme={theme}
+          label="費用確認時間"
+          value={
+            activeTrip?.feeConfirmation?.feeConfirmedAt
+              ? formatShortDateTime(activeTrip.feeConfirmation.feeConfirmedAt)
+              : "未提供確認紀錄"
+          }
+          last
+        />
+      </Card>
       <Card theme={theme} accent={theme.primary}>
         <div
           style={{
@@ -2555,6 +2742,7 @@ function TripsScreen({
       id: trip.orderNo,
       orderId: trip.orderId,
       date: formatShortDateTime(trip.completedAt || trip.createdAt),
+      feeConfirmedAt: trip.feeConfirmation?.feeConfirmedAt ?? null,
       from: trip.pickupAddress,
       to: trip.dropoffAddress,
       state: normalizeTripState(trip.status),
@@ -2667,6 +2855,12 @@ function TripsScreen({
                     }}
                   >
                     {trip.date} · {trip.id}
+                  </div>
+                  <div>
+                    費用確認時間：
+                    {trip.feeConfirmedAt
+                      ? formatShortDateTime(trip.feeConfirmedAt)
+                      : "未提供確認紀錄"}
                   </div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -2804,6 +2998,20 @@ function ReceiptScreen({
             <div style={{ fontSize: 12.5, fontWeight: 600 }}>{receipt.to}</div>
           </div>
         </div>
+      </Card>
+      <Card theme={theme}>
+        <DetailRow
+          theme={theme}
+          label="費用確認時間"
+          value={
+            liveData?.receipt?.feeConfirmation?.feeConfirmedAt
+              ? formatShortDateTime(
+                  liveData.receipt.feeConfirmation.feeConfirmedAt,
+                )
+              : "未提供確認紀錄"
+          }
+          last
+        />
       </Card>
       <Card theme={theme} title="乘客與車輛" subtitle="PII 已遮罩">
         <DetailRow theme={theme} label="乘客" value={receipt.passenger} />

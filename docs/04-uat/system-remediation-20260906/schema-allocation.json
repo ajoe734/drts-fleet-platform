@@ -812,5 +812,29 @@
         "All license, contract, insurance, exclusivity, workstate, product and location checks remain unchanged."
       ]
     }
+  ],
+  "referral_passenger_fee_consent_allocations": [
+    {
+      "task_id": "REFERRAL-E19A-E19B-CANONICAL-FEE-CONSENT-FULL-FLOW-20261020",
+      "version": "V0129",
+      "migration_filename": "V0129__referral_passenger_fee_consent.sql",
+      "domain": "referral_passenger_fee_consent",
+      "target_schema": "ops",
+      "primary_tables": [
+        "ops.phase1_referral_passenger_fee_acknowledgements",
+        "ops.phase1_referral_order_fee_confirmations"
+      ],
+      "referenced_tables": [
+        "admin.phase1_partner_channel_entries",
+        "ops.phase1_owned_orders",
+        "ops.phase1_referral_fare_quote_snapshots"
+      ],
+      "description": "Exact E19 shared copy, canonical first-version acknowledgement and immutable per-order server confirmation.",
+      "table_invariants": [
+        "Canonical tenant/partner/program/entry/passenger/version unique first acknowledgement; original time immutable. No passenger.accounts FK.",
+        "Order/quote/fee snapshot/normal notification route share the existing transaction and owned quote; server time, disclosure hash and real quote tariff kept distinct.",
+        "Exact committed old intent can replay without fee backfill; no historical quote-consumption/creation/privacy time is transformed into fee agreement."
+      ]
+    }
   ]
 }

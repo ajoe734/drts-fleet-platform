@@ -1,3 +1,10 @@
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+  type ReferralFeeOwner,
+  type ReferralFeeStatus,
+  type AcknowledgeReferralFeesCommand,
+} from "@drts/contracts";
 import type {
   SubmitReferralPassengerComplaintCommand,
   ReferralPassengerComplaintSubmission,
@@ -236,6 +243,9 @@ type TenantBookingResult = {
   dispatchSemantics: "reservation";
   status: OwnedOrderRecord["status"];
   replayed: boolean;
+  feeConfirmation?:
+    | import("@drts/contracts").ReferralOrderFeeConfirmation
+    | null;
 };
 
 const REFERRAL_PASSENGER_CANCEL_WINDOW_MS = 2 * 60_000;
@@ -2239,10 +2249,45 @@ export class OwnedMobilityService
                   order.orderId,
                   tx,
                 );
+              const acknowledgement = await this.requireReferralFeeAgreement(
+                claimed,
+                claimed,
+                tx,
+              );
+              const feeClock = await tx.query<{ now: Date | string }>(
+                "SELECT clock_timestamp() AS now",
+              );
+              const feeConfirmation = {
+                tenantId: claimed.tenantId,
+                partnerId: claimed.partnerId,
+                partnerProgramId: claimed.partnerProgramId,
+                entrySlug: claimed.entrySlug,
+                drtsPassengerId: claimed.drtsPassengerId,
+                orderId: order.orderId,
+                quoteId: claimed.quoteId,
+                disclosureVersion: acknowledgement.disclosureVersion,
+                contentHash: acknowledgement.contentHash,
+                quotedFareRuleVersion: claimed.quotedFareRuleVersion,
+                acknowledgedAt: acknowledgement.acknowledgedAt,
+                feeConfirmedAt: new Date(feeClock.rows[0]!.now).toISOString(),
+                summary: {
+                  pickupAddress: claimed.pickupAddress,
+                  dropoffAddress: claimed.dropoffAddress,
+                  requestedScheduledAt: claimed.requestedScheduledAt,
+                  vehicleType: claimed.vehicleType,
+                  estimatedMin: claimed.estimatedMin,
+                  estimatedMax: claimed.estimatedMax,
+                },
+              };
+              await this.ownedMobilityRepository!.insertReferralOrderFeeConfirmation(
+                feeConfirmation,
+                tx,
+              );
               order.referralPassengerLifecycle = {
                 ...order.referralPassengerLifecycle,
                 quote: claimed,
                 confirmedAt: claimed.consumedAt!,
+                feeConfirmation,
               };
             }
             await applyPassengerDisclosure();
@@ -15497,6 +15542,8 @@ export class OwnedMobilityService
             "passengerPhone",
             "partnerUserRef",
             "idempotencyKey",
+            "feeDisclosureVersion",
+            "feeConfirmed",
           ]
         : []),
     ];
@@ -15539,8 +15586,20 @@ export class OwnedMobilityService
       requestedScheduledAt = new Date(rawTime).toISOString();
     }
     const c = command as CreateReferralPassengerBookingCommand;
-    if (create) text(c.idempotencyKey, false, 255);
+    if (create) {
+      text(c.idempotencyKey, false, 255);
+      if (c.feeConfirmed !== undefined && typeof c.feeConfirmed !== "boolean")
+        invalid();
+      if (c.feeDisclosureVersion !== undefined)
+        text(c.feeDisclosureVersion, true, 100);
+    }
     return {
+      ...(create && c.feeDisclosureVersion !== undefined
+        ? { feeDisclosureVersion: text(c.feeDisclosureVersion, true, 100) }
+        : {}),
+      ...(create && c.feeConfirmed !== undefined
+        ? { feeConfirmed: c.feeConfirmed }
+        : {}),
       entrySlug: text(command.entrySlug, true, 150),
       quoteId: create ? text(c.quoteId, true, 100) : "",
       pickupAddress: text(command.pickupAddress, true),
@@ -15634,11 +15693,107 @@ export class OwnedMobilityService
       isGuaranteed: quote.isGuaranteed,
       quotedFareSource: quote.quotedFareSource,
       quotedFareRuleVersion: quote.quotedFareRuleVersion,
+      ...(quote.feeDisclosureVersion
+        ? { feeDisclosureVersion: quote.feeDisclosureVersion }
+        : {}),
+      ...(quote.feeContentHash ? { feeContentHash: quote.feeContentHash } : {}),
       createdAt: quote.createdAt,
       expiresAt: quote.expiresAt,
       consumedByOrderId: quote.consumedByOrderId,
       consumedAt: quote.consumedAt,
     };
+  }
+
+  async getReferralFeeStatus(
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralFeeStatus> {
+    const { owner } = await this.referralAuthority(identity);
+    const ack =
+      await this.ownedMobilityRepository!.findReferralFeeAcknowledgement(
+        owner,
+        PASSENGER_FEE_DISCLOSURE_VERSION,
+      );
+    if (ack && ack.contentHash !== PASSENGER_FEE_CONTENT_HASH)
+      throw new ApiRequestError(
+        503,
+        "FEE_DISCLOSURE_UNAVAILABLE",
+        "Fee disclosure version/content conflict.",
+      );
+    return {
+      disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      contentHash: PASSENGER_FEE_CONTENT_HASH,
+      acknowledgedAt: ack?.acknowledgedAt ?? null,
+    };
+  }
+
+  async acknowledgeReferralFees(
+    command: AcknowledgeReferralFeesCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralFeeStatus> {
+    const { owner } = await this.referralAuthority(identity);
+    if (
+      !command ||
+      typeof command !== "object" ||
+      Array.isArray(command) ||
+      Object.keys(command).some(
+        (key) => !["disclosureVersion", "acknowledged"].includes(key),
+      ) ||
+      command.acknowledged !== true
+    )
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Explicit fee acknowledgement is required.",
+      );
+    if (command.disclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION)
+      throw new ApiRequestError(
+        409,
+        "FEE_DISCLOSURE_CHANGED",
+        "Read the current fee disclosure.",
+      );
+    const ack = await this.ownedMobilityRepository!.acknowledgeReferralFees(
+      owner,
+      PASSENGER_FEE_DISCLOSURE_VERSION,
+      PASSENGER_FEE_CONTENT_HASH,
+    );
+    return {
+      disclosureVersion: ack.disclosureVersion,
+      contentHash: ack.contentHash,
+      acknowledgedAt: ack.acknowledgedAt,
+    };
+  }
+
+  private async requireReferralFeeAgreement(
+    quote: ReferralPassengerFareQuoteRecord,
+    owner: ReferralFeeOwner,
+    tx?: OwnedMobilityQueryExecutor,
+  ) {
+    if (
+      quote.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+      quote.feeContentHash !== PASSENGER_FEE_CONTENT_HASH
+    )
+      throw new ApiRequestError(
+        409,
+        "FEE_DISCLOSURE_CHANGED",
+        "Refresh the quote after reading the current fees.",
+      );
+    const ack =
+      await this.ownedMobilityRepository!.findReferralFeeAcknowledgement(
+        owner,
+        PASSENGER_FEE_DISCLOSURE_VERSION,
+        tx,
+      );
+    if (
+      !ack ||
+      ack.contentHash !== PASSENGER_FEE_CONTENT_HASH ||
+      !Number.isFinite(Date.parse(ack.acknowledgedAt))
+    )
+      throw new ApiRequestError(
+        403,
+        "FEE_DISCLOSURE_REQUIRED",
+        "A canonical fee agreement is required.",
+      );
+    return ack;
   }
 
   async quoteReferralPassengerFare(
@@ -15773,6 +15928,8 @@ export class OwnedMobilityService
       quotedFareSource: "platform_pricing_rule",
       quotedFareRuleVersion: tariff.version,
       tariffSnapshot: { ...tariff },
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeContentHash: PASSENGER_FEE_CONTENT_HASH,
       route: { ...route },
       breakdown: { ...estimate.breakdown },
       serviceAreaEvaluation: { ...serviceAreaEvaluation },
@@ -15800,6 +15957,8 @@ export class OwnedMobilityService
       replayed,
       quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
       confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+      feeConfirmation:
+        order.referralPassengerLifecycle?.feeConfirmation ?? null,
     };
   }
 
@@ -15847,9 +16006,11 @@ export class OwnedMobilityService
       !life?.quote ||
       life.bookingIdempotencyKey !== key ||
       !life.bookingIntent ||
-      (Object.keys(intent) as Array<keyof ReferralBookingIntent>).some(
-        (k) => life.bookingIntent![k] !== intent[k],
-      )
+      (
+        Object.keys({ ...life.bookingIntent, ...intent }) as Array<
+          keyof ReferralBookingIntent
+        >
+      ).some((k) => life.bookingIntent![k] !== intent[k])
     )
       throw new ApiRequestError(
         409,
@@ -15918,6 +16079,18 @@ export class OwnedMobilityService
     const prior = await recover();
     if (prior) return prior;
     const fresh = async () => {
+      if (command.feeConfirmed !== true)
+        throw new ApiRequestError(
+          400,
+          "FEE_CONFIRMATION_REQUIRED",
+          "Confirm the fees for this order.",
+        );
+      if (command.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION)
+        throw new ApiRequestError(
+          409,
+          "FEE_DISCLOSURE_CHANGED",
+          "Read and confirm the current fees.",
+        );
       const quote = await repo.findReferralFareQuoteSnapshotById(
         intent.quoteId,
       );
@@ -15928,6 +16101,7 @@ export class OwnedMobilityService
           "Quote not found.",
         );
       this.assertReferralQuoteOwner(quote, owner);
+      await this.requireReferralFeeAgreement(quote, owner);
       if (quote.consumedByOrderId) {
         const existing = await recover();
         if (existing) return existing;
@@ -16321,6 +16495,8 @@ export class OwnedMobilityService
         ),
         confirmedAt:
           activeOrder.referralPassengerLifecycle?.confirmedAt ?? null,
+        feeConfirmation:
+          activeOrder.referralPassengerLifecycle?.feeConfirmation ?? null,
         rating: this.referralRatingResult(activeOrder),
       },
     };
@@ -16401,6 +16577,8 @@ export class OwnedMobilityService
               : `NT$ ${details.fareTotal}`,
           quote: this.referralQuoteView(o.referralPassengerLifecycle?.quote),
           confirmedAt: o.referralPassengerLifecycle?.confirmedAt ?? null,
+          feeConfirmation:
+            o.referralPassengerLifecycle?.feeConfirmation ?? null,
           rating: this.referralRatingResult(o),
           completedAt: completedAt ?? details.task?.completedAt ?? null,
           createdAt: o.createdAt ?? new Date().toISOString(),
@@ -16514,6 +16692,8 @@ export class OwnedMobilityService
       paymentChannel: "付款及結算狀態未提供",
       quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
       confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+      feeConfirmation:
+        order.referralPassengerLifecycle?.feeConfirmation ?? null,
       downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
     };
   }

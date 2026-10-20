@@ -356,3 +356,32 @@ describe("operational browser journeys manifest guard", () => {
     ).not.toMatch(/\bdownload=/);
   });
 });
+
+it("keeps both original Referral cases on real first-version and per-order fee controls", () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      path.join(
+        process.cwd(),
+        "tests/e2e/fixtures/operational-browser-journeys.json",
+      ),
+      "utf8",
+    ),
+  );
+  const referrals = manifest.journeys.filter(
+    (item: { surface: string }) => item.surface === "referral",
+  );
+  expect(referrals).toHaveLength(1);
+  const create = referrals[0].operations.find(
+    (op: { name: string }) => op.name === "create",
+  );
+  expect(create.before[0]).toEqual({
+    kind: "referral-fees",
+    control: "[data-drt-operation='referral-fee-agree']",
+  });
+  expect(create.before.at(-1)).toEqual({
+    kind: "click",
+    control: "[data-drt-operation='referral-fee-confirm']",
+  });
+  expect(create.requestUrlIncludes).toBe("/api/referral/booking");
+  expect(create.readback.expectedState).toBe("created");
+});

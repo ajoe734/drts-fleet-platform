@@ -198,3 +198,65 @@ describe("frozen own booking before network send", () => {
     }
   });
 });
+
+describe("new fee intent journal retains exact original business bytes", () => {
+  const expected = { ...context, feeDisclosureVersion: "fee-version-unit" };
+  function feeBody(patch: Record<string, unknown> = {}) {
+    return JSON.stringify(
+      command({
+        feeDisclosureVersion: expected.feeDisclosureVersion,
+        feeConfirmed: true,
+        ...patch,
+      }),
+    );
+  }
+  it("awaits durable storage before sending the exact explicitly confirmed command", async () => {
+    const events: string[] = [],
+      saved: BookingJournalSnapshot[] = [];
+    const journal = new BookingWriteJournal(expected, async (snapshot) => {
+      events.push("persist");
+      saved.push(snapshot);
+    });
+    const raw = feeBody();
+    await journal.beforeSend(raw, "own-key-1", async () => {
+      events.push("send");
+      expect(saved[0]?.body).toBe(raw);
+    });
+    expect(events).toEqual(["persist", "send"]);
+    expect(journal.current?.bodySha256).toBe(hash(Buffer.from(raw)));
+  });
+  it.each([
+    { feeConfirmed: false },
+    { feeConfirmed: undefined },
+    { feeDisclosureVersion: "different" },
+  ])(
+    "rejects absent/false/changed fee intent before any write or send %#",
+    async (patch) => {
+      const persist = vi.fn(),
+        send = vi.fn();
+      const journal = new BookingWriteJournal(expected, persist);
+      await expect(
+        journal.beforeSend(feeBody(patch), "own-key-1", send),
+      ).rejects.toThrow("fee confirmation");
+      expect(persist).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+  it("retains an unknown ACK original body/key and never adds a replacement key", async () => {
+    const raw = feeBody(),
+      journal = new BookingWriteJournal(expected, async () => undefined);
+    await expect(
+      journal.beforeSend(raw, "own-key-1", async () => {
+        throw new Error("controlled response loss");
+      }),
+    ).rejects.toThrow("controlled response loss");
+    expect(journal.current).toMatchObject({
+      body: raw,
+      idempotencyKey: "own-key-1",
+      state: "ack_unknown",
+    });
+    await expect(
+      journal.beforeSend(feeBody(), "replacement", async () => undefined),
+    ).rejects.toThrow("one frozen booking send");
+  });
+});

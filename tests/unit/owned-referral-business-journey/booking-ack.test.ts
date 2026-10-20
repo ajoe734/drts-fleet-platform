@@ -386,3 +386,62 @@ describe("original route failure privacy", () => {
     expect(originalBookingRouteFailure(failure)).toBe(failure);
   });
 });
+
+it("validates an actual new server fee snapshot without altering legacy original ACK handling", async () => {
+  const s = await setup();
+  // The original command remains a legacy immutable body. A new command has
+  // explicit fields and a distinct own journal; it does not rewrite s.raw.
+  const version = "fee-version-unit",
+    contentHash = "c".repeat(64);
+  const command = {
+    ...s.command,
+    feeDisclosureVersion: version,
+    feeConfirmed: true,
+  };
+  const raw = JSON.stringify(command);
+  const journal = new BookingWriteJournal(
+    {
+      ...command,
+      definitionSha: "b".repeat(40),
+      runtimeSha: runtime,
+      nonce: "fee-unit",
+      partnerUserRef: "referral-demo-yuhe-residence",
+    },
+    async () => undefined,
+  );
+  await journal.beforeSend(raw, command.idempotencyKey, async () => undefined);
+  const response: BookingAckResponse = {
+    ...s.response,
+    request: () => ({ ...s.response.request(), postData: () => raw }),
+    json: async () => ({
+      ok: true,
+      data: {
+        orderId: "order-own",
+        quote: { quoteId: command.quoteId },
+        feeConfirmation: {
+          orderId: "order-own",
+          quoteId: command.quoteId,
+          disclosureVersion: version,
+          contentHash,
+          feeConfirmedAt: "2026-10-20T00:00:00Z",
+        },
+      },
+    }),
+  };
+  const claim = vi.fn();
+  await expect(
+    observeOriginalBookingAck(
+      Promise.resolve(response),
+      () => ({
+        url,
+        runtimeSha: runtime,
+        journal,
+        quote: { quoteId: command.quoteId, feeContentHash: contentHash },
+      }),
+      claim,
+      new Evidence(),
+    ),
+  ).resolves.toEqual({ orderId: "order-own", quoteId: command.quoteId });
+  expect(claim).toHaveBeenCalledExactlyOnceWith("order-own");
+  expect(s.raw).not.toContain("feeConfirmed");
+});
