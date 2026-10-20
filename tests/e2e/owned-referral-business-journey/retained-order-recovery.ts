@@ -18,6 +18,13 @@ export const RETAINED_REFERRAL_ORDER = Object.freeze({
 });
 
 export type RetainedReferralOrderRecovery = {
+  retained?: Readonly<{
+    originalRun: number;
+    orderId: string;
+    quoteId: string;
+    bodySha256: string;
+    entrySlug: string;
+  }>;
   passengerId: string;
   readHistory: () => Promise<unknown>;
   readActive: () => Promise<unknown>;
@@ -44,7 +51,7 @@ function hasExceptionHold(order: ObjectData) {
 export async function recoverRetainedReferralOrder(
   callbacks: RetainedReferralOrderRecovery,
 ): Promise<{ orderId: string; status: "cancelled" | "completed" }> {
-  const retained = RETAINED_REFERRAL_ORDER;
+  const retained = callbacks.retained ?? RETAINED_REFERRAL_ORDER;
   const passengerId = text(
     callbacks.passengerId,
     "retained-order-recovery:passenger-required",

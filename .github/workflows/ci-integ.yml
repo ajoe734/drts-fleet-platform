@@ -190,6 +190,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
+      actions: read
       id-token: write
     env:
       EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
@@ -217,6 +218,13 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 -m unittest discover -s tests/unit/owned-referral-business-journey -p 'test_*.py' -v
+      - name: Read the exact retained original booking journal
+        if: inputs.owned_referral_recovery_only == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNED_REFERRAL_HOSTED_OPT_IN: "true"
+          OWNED_REFERRAL_RECOVERY_ONLY: "true"
+        run: python3 tests/e2e/owned-referral-business-journey/retained-journal.py
       - name: Authenticate existing hosted verification identity
         uses: google-github-actions/auth@v2
         with:
@@ -289,6 +297,7 @@ jobs:
         env:
           OWNED_REFERRAL_HOSTED_OPT_IN: "true"
           OWNED_REFERRAL_RECOVERY_ONLY: ${{ inputs.owned_referral_recovery_only }}
+          OWNED_REFERRAL_RECOVER_ORIGINAL_JOURNAL: ${{ inputs.owned_referral_recovery_only }}
           OWNED_TEST_CODE_SHA: ${{ github.sha }}
           DRTS_CANDIDATE_SHA: ${{ inputs.expected_runtime_sha }}
           OWNED_REFERRAL_ORIGIN: ${{ steps.runtime_before.outputs.referral_origin }}
