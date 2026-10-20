@@ -392,7 +392,7 @@ describe("native payment and captured E04 facts", () => {
     expect(rows).toMatchObject({
       乘車證明編號: "RECEIPT-UNIQUE-77",
       車隊: "Captured operator",
-      駕駛: "Captured surname",
+      駕駛: "Captured surname○○",
       遮罩執登號: "TEST***77",
       車牌: "TEST-7788",
       行駛時間: "20 分 7 秒",
@@ -413,6 +413,26 @@ describe("native payment and captured E04 facts", () => {
     expect(doc.htmlUrl).toBe("/captured/receipt.html");
     expect(doc.pdfUrl).toBeUndefined();
   });
+
+  it.each([
+    ["蔡", "蔡○○"],
+    ["歐陽", "歐陽○○"],
+    ["蔡○○", "蔡○○"],
+    ["蔡**", "蔡**"],
+    ["蔡＊＊", "蔡＊＊"],
+  ])(
+    "masks captured driver surname %s as fixed public redaction %s without touching registration mask",
+    (rawSurname, expectedMasked) => {
+      const fixture = receipt();
+      (fixture.record as any).e04Snapshot.driverSurname = rawSurname;
+      const doc = mapNativePassengerCertificate(fixture, true);
+      const rows = Object.fromEntries(
+        doc.rows!.map((row) => [row.label, row.value]),
+      );
+      expect(rows["駕駛"]).toBe(expectedMasked);
+      expect(rows["遮罩執登號"]).toBe("TEST***77");
+    },
+  );
 
   it("URL-only metadata does not supply missing facts or invent PDF capability", () => {
     expect(

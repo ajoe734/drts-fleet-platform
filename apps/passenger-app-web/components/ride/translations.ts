@@ -142,4 +142,13 @@ export const t = {
   CancellationTime: "取消時間",
   PickupLocation: "上車地點",
   DropoffLocation: "下車地點",
+  SharePdfPreparing: "正在準備可分享的 PDF...",
+  SharePdfReady: "PDF 已就緒，可以分享",
+  SharePdf: "分享 PDF",
+  ShareInProgress: "正在分享...",
+  ShareFinished: "分享流程已完成",
+  ShareCancelled: "已取消分享",
+  ShareUnsupported: "此瀏覽器不支援檔案分享，請改用下方下載",
+  ShareFailed: "分享失敗，請重試或改用下方下載",
+  ShareRetry: "重試準備分享",
 };

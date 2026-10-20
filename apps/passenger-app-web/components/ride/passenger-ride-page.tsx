@@ -37,6 +37,7 @@ import {
   subscribePassengerRideAuthority,
 } from "../../lib/ride/passenger-live";
 import { ComplaintForm } from "./complaint-form";
+import { ReceiptShareActions } from "./receipt-share-actions";
 
 const ConnectionContext = React.createContext<{
   connectionState: "connecting" | "connected" | "disconnected";
@@ -2289,6 +2290,12 @@ function Actions({
             {t.DownloadHtml}
           </a>
         ) : null}
+        <ReceiptShareActions
+          pdfUrl={cert?.pdfUrl}
+          receiptNo={cert?.receiptNo}
+          token={token}
+          authMode={authMode}
+        />
         <Link
           href={authMode === "token" ? `/r/${token}` : `/rides/${token}`}
           style={buttonStyle("ghost")}
