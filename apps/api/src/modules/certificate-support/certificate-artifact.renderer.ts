@@ -199,11 +199,15 @@ function value(input: string | number | null) {
   return input === null || input === "" ? "未取得" : String(input);
 }
 
+const ALREADY_MASKED_SUFFIXES = ["○○", "**", "＊＊"];
+
 /** Fixed-length public redaction; not a claim about the real surname length. */
 function formatMaskedSurname(surname: string): string {
   const trimmed = surname.trim();
   if (!trimmed) return trimmed;
-  return trimmed.endsWith("○○") ? trimmed : `${trimmed}○○`;
+  return ALREADY_MASKED_SUFFIXES.some((suffix) => trimmed.endsWith(suffix))
+    ? trimmed
+    : `${trimmed}○○`;
 }
 
 function money(input: number | null, currency: string, exact = false) {

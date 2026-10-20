@@ -849,6 +849,8 @@ describe("certificate artifact masked public surname matrix (real renderer, no D
     ["蔡", "蔡○○"],
     ["歐陽", "歐陽○○"],
     ["蔡○○", "蔡○○"],
+    ["蔡**", "蔡**"],
+    ["蔡＊＊", "蔡＊＊"],
   ])(
     "renders e04Snapshot driver surname %s as fixed public redaction %s in HTML and PDF",
     async (rawSurname, expectedMasked) => {
@@ -885,6 +887,8 @@ describe("certificate artifact masked public surname matrix (real renderer, no D
     ["蔡", "蔡○○"],
     ["歐陽", "歐陽○○"],
     ["蔡○○", "蔡○○"],
+    ["蔡**", "蔡**"],
+    ["蔡＊＊", "蔡＊＊"],
   ])(
     "renders declared (non-verified) driver surname %s as %s without double-masking",
     async (rawSurname, expectedMasked) => {

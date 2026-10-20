@@ -149,6 +149,36 @@ describe("receipt web file sharing (real Actions component, fetch/browser bounda
     expect(rows["駕駛"]).toBe("蔡○○");
   });
 
+  it.each([
+    ["蔡**", "蔡**"],
+    ["蔡＊＊", "蔡＊＊"],
+  ])(
+    "does not double-mask an already masked driver surname %s through the real Web receipt mapper",
+    (rawSurname, expectedMasked) => {
+      const { fixture } = buildP5_10Fixture({
+        e04Snapshot: {
+          fleetOperatorName: "unit-operator",
+          driverSurname: rawSurname,
+          driverRegistrationMasked: "TEST***01",
+          paymentMethodDisplay: "unit-pay",
+          fareBreakdown: {
+            startMinor: 100,
+            distanceMinor: 200,
+            delayMinor: 0,
+            nightMinor: 0,
+          },
+        },
+      } as any);
+      const rows = Object.fromEntries(
+        (fixture.certificate as any).rows.map((row: any) => [
+          row.label,
+          row.value,
+        ]),
+      );
+      expect(rows["駕駛"]).toBe(expectedMasked);
+    },
+  );
+
   it("keeps the original PDF/HTML download links mounted next to the new share action", () => {
     const { fixture } = buildP5_10Fixture();
     render(<Actions fixture={fixture} token="ETA-ORDER" authMode="id" />);

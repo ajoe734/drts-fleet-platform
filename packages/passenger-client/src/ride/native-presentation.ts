@@ -606,11 +606,15 @@ function readText(record: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+const ALREADY_MASKED_SUFFIXES = ["○○", "**", "＊＊"];
+
 /** Fixed-length public redaction; not a claim about the real surname length. */
 function formatMaskedSurname(surname: string | null): string | null {
   const trimmed = surname?.trim();
   if (!trimmed) return trimmed ?? null;
-  return trimmed.endsWith("○○") ? trimmed : `${trimmed}○○`;
+  return ALREADY_MASKED_SUFFIXES.some((suffix) => trimmed.endsWith(suffix))
+    ? trimmed
+    : `${trimmed}○○`;
 }
 
 function readDate(record: Record<string, unknown>, key: string) {

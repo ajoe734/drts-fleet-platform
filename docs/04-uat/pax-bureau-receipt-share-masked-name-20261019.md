@@ -35,6 +35,42 @@ cannot start a duplicate share` 與
    `ignores a late share settlement after the receipt identity has already
 changed` 兩項測試。
 
+## 第四輪獨立審查退修：已遮名輸入的星號後綴雙重遮罩（已修復）
+
+獨立 reviewer 以實際 production 公開呼叫路徑（Web mapper／native
+mapper／API renderer 三者，皆為真實模組、無 DB／裝置層宣稱）重現：
+輸入已是可辨識遮名字串但以星號結尾的 `蔡**`／`蔡＊＊`，三個消費者皆
+輸出 `蔡**○○`／`蔡＊＊○○`，等於對已遮名字串再疊一層 `○○`，違反原
+r2「已遮名公開呈現（如 蔡○○／既有遮罩樣式）維持不變、不重複遮罩」
+條款；一般姓氏、複姓、`蔡○○` 本身與全空白四類控制案例皆仍通過。
+
+第二輪退修第 2 點曾以「系統中沒有任何既有路徑會讓 `driverSurname`
+欄位出現星號」為理由不採納星號偵測；該推論本身仍成立（目前程式碼
+確實不會生成星號遮名），但原 r2 條款保護的是**輸入端已經是遮名字串
+的情形**，不限定該字串必須由本系統既有邏輯產生——使用者截圖與未來
+上游（例如既有 `driver_profile_declared` 自填來源）都可能已經帶入
+星號遮名慣例。因此第二輪「不採納」的結論對本條款過窄，本輪修正之。
+
+修復：三個檔案（`passenger-live.ts`／`native-presentation.ts`／
+`certificate-artifact.renderer.ts`）內各自既有、刻意保持重複的
+`formatMaskedSurname` 小函式，由單一 `trimmed.endsWith("○○")` 判斷
+改為對照一個新增的本地常數陣列 `["○○", "**", "＊＊"]`（半形／全形
+星號與既有圓圈樣式皆視為「已遮名」，命中任一後綴即原樣回傳，不再
+補 `○○`）；未新增驗證器、API、schema 或任何新的全域遮罩框架，三個
+格式器之間仍不共用程式碼，符合既有「刻意重複小函式」設計。原第二輪
+空白姓氏修復、第三輪 caller-context 比對與第一輪 origin／重複送出
+防護完全未變動。
+
+新增測試（各矩陣追加 `蔡**→蔡**`／`蔡＊＊→蔡＊＊` 兩列，不移除既有
+列）：`tests/unit/pax-receipt-complaint-20261009/receipt-download.test.ts`
+兩個既有 `it.each` 矩陣（e04Snapshot 擷取姓氏、自填姓氏）、
+`tests/unit/pax-native-app-20261009/native-ride-presentation.test.ts`
+既有 native mapper 矩陣，以及
+`tests/unit/pax-bureau-receipt-share-masked-name-20261019/web-share.test.tsx`
+新增一個 `it.each`（透過真實 `buildP5_10Fixture`／`mapPassengerRideAuthorityToFixture`
+掛載取得的 Web mapper 輸出）。修復前以同一輸入重現：四個消費者皆得到
+多一層 `○○` 的錯誤輸出；修復後四處皆回傳未變動的原始已遮名字串。
+
 ## 第三輪獨立審查退修：窄化後的 caller-context 比對（已實作）
 
 獨立 reviewer 將第一輪「依 authMode/token 自行推導 PDF 目標」的要求窄化為
@@ -136,11 +172,11 @@ lint 檢查，未啟動任何伺服器。
 
 ### 遮名一致性（PAX-BUREAU-RECEIPT-MASKED-NAME-CONSISTENCY-SOURCE）
 
-| 來源                                                   | 案例                                                                                                                                   | 結果                   |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `apps/api/.../certificate-artifact.renderer.ts`        | 真實 `renderCertificateArtifact` 直接呼叫，`蔡→蔡○○`、`歐陽→歐陽○○`（複姓保留）、`蔡○○→蔡○○`（已遮名不重複）、兩姓氏欄位皆缺時整列省略 | HTML／PDF 位元組皆通過 |
-| `packages/passenger-client/.../native-presentation.ts` | `mapNativePassengerCertificate` 同一矩陣（蔡/歐陽/蔡○○），另保留既有 `Captured surname○○` 精確列值與遮罩執登號不變斷言                 | 通過                   |
-| `apps/passenger-app-web/lib/ride/passenger-live.ts`    | `mapPassengerCertificate`／`mapPassengerRideAuthorityToFixture` 經真實 Web mapper 得到 `駕駛: 蔡○○`（於 `web-share.test.tsx` 內斷言）  | 通過                   |
+| 來源                                                   | 案例                                                                                                                                                                               | 結果                   |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `apps/api/.../certificate-artifact.renderer.ts`        | 真實 `renderCertificateArtifact` 直接呼叫，`蔡→蔡○○`、`歐陽→歐陽○○`（複姓保留）、`蔡○○→蔡○○`／`蔡**→蔡**`／`蔡＊＊→蔡＊＊`（三種已遮名樣式皆不重複遮罩）、兩姓氏欄位皆缺時整列省略 | HTML／PDF 位元組皆通過 |
+| `packages/passenger-client/.../native-presentation.ts` | `mapNativePassengerCertificate` 同一矩陣（蔡/歐陽/蔡○○/蔡\*\*/蔡＊＊），另保留既有 `Captured surname○○` 精確列值與遮罩執登號不變斷言                                               | 通過                   |
+| `apps/passenger-app-web/lib/ride/passenger-live.ts`    | `mapPassengerCertificate`／`mapPassengerRideAuthorityToFixture` 經真實 Web mapper 得到 `駕駛: 蔡○○`，另以 `蔡**`／`蔡＊＊` 輸入核對不重複遮罩（於 `web-share.test.tsx` 內斷言）    | 通過                   |
 
 修正前基準：三個檔案改動前，上列欄位顯示未遮名原始姓氏（渲染器兩處、
 Web／native 各一處），已於 `tests/unit/pax-receipt-complaint-20261009/
@@ -181,22 +217,26 @@ vitest run \
   tests/unit/pax-bureau-journey-coverage-20261018/receipt-pending-screen.test.tsx \
   tests/unit/pax-native-app-20261009/native-stream-and-receipt-adapters.test.ts \
   tests/unit/system-remediation/sr-qa-reports-001/c098-electronic-ride-certificate.test.ts
-  → 7 files, 163 passed, EXIT:0 (2026-10-19T23:37:46Z, after the caller-context
-    descriptor check; a prior 160-passed/EXIT:0 run at 23:08:07Z covered the
-    same seven files before that round's 3 additional web-share cases)
+  → 7 files, 171 passed, EXIT:0 (2026-10-20T00:07:29Z, after the already-masked
+    `**`／`＊＊` suffix fix; a prior 163-passed/EXIT:0 run at 23:37:46Z covered
+    the same seven files before this round's 8 additional masked-surname-matrix
+    cases)
 
 (apps/passenger-app) vitest run tests/unit/native-p5-screen.test.ts --config vitest.config.ts
-  → 1 file, 22 passed, EXIT:0 (separate vitest config/project; not part of the 163 above)
+  → 1 file, 22 passed, EXIT:0 (separate vitest config/project; not part of the 171 above)
 ```
 
-Combined: 185 passed／0 failed／0 skipped across the eight regression files listed
+Combined: 193 passed／0 failed／0 skipped across the eight regression files listed
 in the original r2 verification plan. `web-share.test.tsx` grew from the initial
 13 cases to 16 (origin-rejection, duplicate-share-disabled, stale-settlement-
-ignored) in the second round, then to 19 (legitimate token-mode descriptor,
-wrong-order rejection, wrong-mode-shape rejection) in this third round;
+ignored) in the second round, to 19 (legitimate token-mode descriptor,
+wrong-order rejection, wrong-mode-shape rejection) in the third round, and to 21
+(already-masked `**`／`＊＊` surname matrix) in this fourth round;
 `receipt-download.test.ts` gained 2 more (whitespace-only surname, both call
-sites) in the second round. All are included in the 163/185 above, not stacked
-on top of it.
+sites) in the second round and 4 more (already-masked `**`／`＊＊`, both
+matrices) in this fourth round; `native-ride-presentation.test.ts` gained 2
+more (already-masked `**`／`＊＊`) in this fourth round. All are included in
+the 171/193 above, not stacked on top of it.
 
 型別檢查（`tsc --noEmit --incremental false`，捕捉真實 compiler exit code，
 不透過 `tail` pipeline）：

@@ -418,6 +418,8 @@ describe("native payment and captured E04 facts", () => {
     ["蔡", "蔡○○"],
     ["歐陽", "歐陽○○"],
     ["蔡○○", "蔡○○"],
+    ["蔡**", "蔡**"],
+    ["蔡＊＊", "蔡＊＊"],
   ])(
     "masks captured driver surname %s as fixed public redaction %s without touching registration mask",
     (rawSurname, expectedMasked) => {
