@@ -105,3 +105,65 @@ Branch `claude2/sr-leave-be-001-acceptance-runner`, PR #1919, push-triggered run
 - Raw SQL evidence extracted for `phase1_driver_leave_requests`, `phase1_driver_shifts`, `phase1_driver_matching_suppressions`.
 
 **A prior run on this branch (`34492646164`, commit `9d7143250`) failed for cause, not infrastructure**: Suite 3 seeded its shift row on a hardcoded absolute `2026-09-10T11:00–16:00Z` window while the leave request used `futureIso()` (relative to the real `Date.now()` when the GitHub runner executes). By the time that job actually ran (15:00 UTC), the leave window had drifted past the shift's fixed end, so `impactedShiftIds` was correctly empty — a test-fixture bug, not a production shift-matching bug. Fixed by anchoring the shift window to the same `futureIso()` clock as the leave request (commit `07a97ace2`).
+
+---
+
+## 8. Current-Source Contract Remediation & C052/N01 Lifecycle Extension — `LEAVE-CURRENT-SOURCE-PG-ACCEPTANCE-20261020`
+
+- **Child Task ID**: `LEAVE-CURRENT-SOURCE-PG-ACCEPTANCE-20261020`
+- **Parent Task ID**: `SR-LEAVE-BE-001-ACCEPTANCE-RUNNER` (original parent `done` status and keys preserved unchanged)
+- **Owner**: `Gemini`
+- **Reviewer**: `Gemini2`
+- **Source Requirements**: `C052` (`補申請、撤回、核准／駁回、重疊班次與可派狀態`), `N01` (`司機申請與主管決定後，兩端班表一致；非法日期及重疊申請被阻擋`)
+- **Write Scopes**:
+  - `tests/integration/system-remediation/sr-leave-be-001/leave-acceptance-test-harness.ts`
+  - `tests/integration/system-remediation/sr-leave-be-001/leave-persistence-race.integration.test.ts`
+  - `docs/04-uat/system-remediation-20260906/leave-acceptance-runner.md`
+- **Required Acceptance Keys**:
+  - `leave_current_source_real_http_pg_and_restart`
+  - `leave_current_source_original_review_ci_merge`
+
+### 8.1 Preserved Reproduction of Actual Hosted Failure on Current Source (`ba11837fb7dc2185cf51aa3dba61774cd57f249b`)
+
+When `.github/workflows/leave-acceptance.yml` was dispatched against the current published source commit `ba11837fb7dc2185cf51aa3dba61774cd57f249b` (where both `requestedCandidateSha`/`resolvedCandidateSha` and `harnessSha` resolved to `ba11837fb7dc2185cf51aa3dba61774cd57f249b`):
+
+- **Workflow Run**: [`39420842127`](https://github.com/ajoe734/drts-fleet-platform/actions/runs/39420842127) (job `118621097708`, `workflow_dispatch` on `publish/v2026.10.20.0`, `2026-10-20T12:15:08Z`–`12:17:19Z`, conclusion: `failure`)
+- **Artifact**: ID `12263538768`, `sha256:755bf133b25b7c0d548f70e42632c88cfd29d4eb15b320b68bf71419a044ef88` (`6045` bytes, archived at `/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T-current-frontier/C052-leave-39420842127-artifact-12263538768.zip`)
+- **Harness Overlay Hashes in Run `39420842127`**:
+  - `leave-persistence-race.integration.test.ts`: `93e389ca819682f6bd76032076cb2786da129229`
+  - `leave-durable-reload.integration.test.ts`: `c7ac1756581730e4e6992cf5b5dfff2c5fa3e1b5`
+  - `leave-acceptance-test-harness.ts`: `a67de3b3b78b5e52809b41f440ef20baaa3eb845`
+- **Phase 1 Result**: `14 total, 9 passed, 5 failed, 0 skipped` (`numTotalTests=14`, `numPassedTests=9`, `numFailedTests=5`, `numPendingTests=0`, `success=false`).
+- **Phase 2 & Container Restart Result**: **Not executed** (steps 16 and 17 were `skipped` because step 15 failed in Phase 1; `restart-evidence.json` and `phase2-report.json` were not produced, and no restart pass is claimed for run `39420842127`).
+- **Root Cause & Exact Returned `400` Error Code**:
+  - In `apps/api/src/modules/driver-leave/driver-leave.controller.ts` (`DriverLeaveController.createDriverLeave`, lines 50 and 89–98), `POST /api/driver-leave/requests` reads `@Headers("idempotency-key") idempotencyKey?: string` and delegates creation to `this.idempotencyService.execute({ scope: \`driver:\${effectiveDriverId}:leave_request_create\`, idempotencyKey, requestPath: "driver-leave/requests", payload: command, ... })`.
+  - In `apps/api/src/common/idempotency/idempotency.service.ts` (`IdempotencyService.execute`, lines 45–56), `required` defaults to `true`. When `idempotencyKey` is missing or blank, `IdempotencyService.execute` throws `ApiRequestError(HttpStatus.BAD_REQUEST, IDEMPOTENCY_KEY_REQUIRED, "Idempotency-Key header is required for this command.")` — returning HTTP **`400`** with `error.code = "IDEMPOTENCY_KEY_REQUIRED"`.
+  - `tests/integration/system-remediation/sr-leave-be-001/leave-acceptance-test-harness.ts` (`apiRequest`, lines 133–151) only accepted `{ token?: string; body?: unknown }` and had no `idempotencyKey` / custom header propagation, and the 5 legitimate HTTP leave-creation tests in `leave-persistence-race.integration.test.ts` omitted `Idempotency-Key`, failing at:
+    1. Line `218` (Suite 2: `rejects invalid state transitions on terminal leaves via real HTTP (409 LEAVE_INVALID_STATE_TRANSITION)` — `expect(created.status).toBe(201)` received `400`)
+    2. Line `307` (Suite 3: `permits exactly one HTTP-guarded transition when approval (instance 1) and withdrawal (instance 2) race` — `expect(created.status).toBe(201)` received `400`)
+    3. Line `405` (Suite 4: `accepts only one of two concurrent overlapping HTTP creation requests for the same driver` — `expect(statuses.filter((s) => s === 201)).toHaveLength(1)` received `0` because both concurrent requests returned `400`)
+    4. Line `444` (Suite 4: `allows concurrent overlapping HTTP creation for different drivers across two instances` — `expect([r1.status, r2.status].every((s) => s === 201)).toBe(true)` received `false` because both returned `400`)
+    5. Line `461` (Suite 4: `allows adjacent non-overlapping half-open intervals for the same driver across two instances` — `expect(first.status).toBe(201)` received `400`)
+  - Meanwhile, the cross-driver `POST /api/driver-leave/requests` test at line `128` passed in run `39420842127` only because `DriverLeaveController.createDriverLeave` checks `isDriverIdentityMatching` (lines 64–74) and throws `403 LEAVE_FORBIDDEN_ACCESS` before reaching `this.idempotencyService.execute(...)` at line 89; and Suite 5 (`service1.createLeave`) and `leave-durable-reload.integration.test.ts` (`service.createLeave`) passed because they invoked `DriverLeaveService` directly rather than HTTP `POST /api/driver-leave/requests`.
+
+### 8.2 Remediation Scope & Explicit Boundaries
+
+1. **Harness Header Propagation Without Default Key Masking (`leave-acceptance-test-harness.ts`)**:
+   - Extend `apiRequest` options (`ApiRequestOptions`) with optional `idempotencyKey?: string` and `headers?: Record<string, string>`, and expose lowercase response `headers: Record<string, string>` on `ApiResponse<T>`.
+   - **No default or automatic `Idempotency-Key` generation**: when `options.idempotencyKey` is omitted, no `Idempotency-Key` header is sent, so missing-key requests continue to hit `IdempotencyService.execute` and fail closed with `400 IDEMPOTENCY_KEY_REQUIRED`.
+   - Include `"driver:read"` in the controlled test fixture `opsReviewerIdentity` (`scopes: ["driver:read", "dispatch:read", "dispatch:write"]`, matching `tests/unit/system-remediation/sr-leave-be-001/sr-leave-be-001.test.ts:758`) so an Ops reviewer fixture token can exercise both `POST /api/driver-leave/requests/:leaveId/review` (`@RequireScopes("dispatch:write")`) and `GET /api/driver-leave/requests` (`@RequireRealms("driver", "ops", "system")` + `@RequireScopes("driver:read")`), while keeping `opsReadOnlyIdentity` at `scopes: ["dispatch:read"]` so the missing-`dispatch:write` `403 AUTH_SCOPE_DENIED` guard test remains unchanged.
+2. **Explicit Unique `Idempotency-Key` at Legitimate Create Call Sites (`leave-persistence-race.integration.test.ts`)**:
+   - Pass an explicit unique `idempotencyKey` per distinct create action at all existing legitimate `POST /api/driver-leave/requests` call sites in Suites 2, 3, and 4 (lines 209, 298, 384, 393, 434, 438, 452, 464 of the original file, plus the cross-driver forbidden probe so it is isolated to `403 LEAVE_FORBIDDEN_ACCESS`).
+3. **New Substantive Real HTTP + PostgreSQL Coverage in Suite 2 (`leave-persistence-race.integration.test.ts`)**:
+   - **Missing-key rejection & zero PG rows**: `POST /api/driver-leave/requests` without `Idempotency-Key` (and with whitespace-only `Idempotency-Key`) returns `400 IDEMPOTENCY_KEY_REQUIRED` and persists `0` rows in `ops.phase1_driver_leave_requests` and `ops.idempotency_records`.
+   - **Identical-body same-key replay & changed-payload same-key `409`**: repeating `POST /api/driver-leave/requests` with the same `Idempotency-Key` and identical payload returns `201` with `X-Idempotent-Replay: true`, the exact same `leaveId`, and a single durable row in `ops.phase1_driver_leave_requests` (plus `status = 'completed'`, `status_code = 201` in `ops.idempotency_records`); reusing the same `Idempotency-Key` with a mutated payload returns `409 IDEMPOTENCY_KEY_REUSED` and creates no extra row in `ops.phase1_driver_leave_requests`.
+   - **C052/N01 illegal date ranges, 15-minute grace window & sequential overlap**: with valid unique `Idempotency-Key` headers over real HTTP+PG, verifies `endTime < startTime`, `endTime === startTime`, malformed ISO date strings, and `startTime` older than the 15-minute grace window (`MAX_PAST_APPLICATION_GRACE_MS`) all fail with `400 LEAVE_INVALID_TIME_RANGE` and persist `0` leave rows; a request within the 15-minute past grace window succeeds with `201 pending`; and a subsequent overlapping request for the same driver with a new unique `Idempotency-Key` fails with `409 LEAVE_OVERLAPPING_REQUEST` and persists no second row.
+   - **C052/N01 Ops `reject` lifecycle, shift/suppression non-impact & Driver/Ops authorized `GET` readbacks**: seeds an overlapping scheduled shift in `ops.phase1_driver_shifts`, creates a pending leave over real HTTP, verifies pre-decision Driver and Ops `GET /api/driver-leave/requests` readbacks, executes Ops `POST /api/driver-leave/requests/:leaveId/review` with `{ decision: "reject" }`, and verifies:
+     - `status === "rejected"` and `impactedShiftIds === []` in both the HTTP response and raw SQL `ops.phase1_driver_leave_requests`;
+     - `ops.phase1_driver_shifts` overlapping shift remains un-reassigned (`leaveReassigned` falsy);
+     - `ops.phase1_driver_matching_suppressions` has `0` rows for the rejected leave and `service1.getDriverPresenceEligibility` reports `eligible` (`onLeave: false`);
+     - Driver (`GET /api/driver-leave/requests`) and Ops (`GET /api/driver-leave/requests?driverId=...&status=rejected`) read back the exact same persisted `rejected` record, while cross-driver `GET` with another driver's `driverId` is blocked with `403 LEAVE_FORBIDDEN_ACCESS`;
+     - Re-withdrawing or re-reviewing the `rejected` leave fails with `409 LEAVE_INVALID_STATE_TRANSITION`, while submitting a new leave in the same window with a new unique `Idempotency-Key` succeeds (`201 pending`), can be approved by Ops (`201 approved`, annotating the overlapping shift and inserting an active `DRIVER_ON_LEAVE` suppression), and is read back identically by both Driver and Ops `GET /api/driver-leave/requests`.
+4. **Explicit Non-Claims & Scope Limits**:
+   - No production code, migration, or UI file is modified; pending-leave shift annotation, derived eligibility, and domain semantics remain completely unchanged.
+   - Test-signed JWT claims/scopes (`driverIdentity`, `opsReviewerIdentity`, `opsReadOnlyIdentity`) are controlled test fixtures for exercising `BootstrapAuthGuard` and controller guards; they do not prove real user account login, shared cloud runtime, rendered two-end schedule UI screens, or native Android/iOS physical devices.
