@@ -16777,6 +16777,16 @@ export class OwnedMobilityService
     };
   }
 
+  async getReferralPassengerReceiptPdf(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<import("@drts/contracts").ReferralPassengerReceiptPdfDocument> {
+    const receipt = await this.getReferralPassengerReceipt(orderId, identity);
+    const { renderReferralReceiptDocument } =
+      await import("./referral-receipt-document");
+    return renderReferralReceiptDocument(receipt);
+  }
+
   async getReferralPassengerReceipt(
     orderId: string,
     identity?: BootstrapRequestIdentity | null,

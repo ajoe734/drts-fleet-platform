@@ -473,6 +473,16 @@ export interface ReferralPassengerHistoryItem {
   rating?: ReferralPassengerRatingResult | null;
 }
 
+export interface ReferralPassengerReceiptPdfDocument {
+  orderId: string;
+  fileName: string;
+  mimeType: "application/pdf";
+  contentBase64: string;
+  bytes: number;
+  sha256: string;
+  formalTaxReceipt: false;
+}
+
 export interface ReferralPassengerReceipt {
   orderId: string;
   orderNo: string;
