@@ -186,6 +186,9 @@ export interface PartnerIngressHandoffSession {
 export interface CreateReferralPassengerBookingCommand {
   quoteId: string;
   entrySlug: string;
+  /** Optional only for exact replay of already committed pre-fee commands. */
+  feeDisclosureVersion?: string;
+  feeConfirmed?: boolean;
   partnerUserRef?: string;
   passengerName?: string;
   passengerPhone?: string;
@@ -247,6 +250,9 @@ export interface ReferralPassengerFareQuoteRecord {
   quotedFareSource: "platform_pricing_rule";
   quotedFareRuleVersion: string;
   tariffSnapshot: Record<string, unknown>;
+  /** Absent on historical quotes, which may only be replayed after commit. */
+  feeDisclosureVersion?: string;
+  feeContentHash?: string;
   route: Record<string, unknown>;
   breakdown: Record<string, unknown>;
   serviceAreaEvaluation: Record<string, unknown>;
@@ -256,7 +262,47 @@ export interface ReferralPassengerFareQuoteRecord {
   consumedAt: string | null;
 }
 
+export interface ReferralFeeOwner {
+  tenantId: string;
+  partnerId: string;
+  partnerProgramId: string;
+  entrySlug: string;
+  drtsPassengerId: string;
+}
+export interface ReferralFeeAcknowledgement extends ReferralFeeOwner {
+  disclosureVersion: string;
+  contentHash: string;
+  acknowledgedAt: string;
+}
+export interface ReferralFeeStatus {
+  disclosureVersion: string;
+  contentHash: string;
+  acknowledgedAt: string | null;
+}
+export interface AcknowledgeReferralFeesCommand {
+  disclosureVersion: string;
+  acknowledged: true;
+}
+export interface ReferralOrderFeeConfirmation extends ReferralFeeOwner {
+  orderId: string;
+  quoteId: string;
+  disclosureVersion: string;
+  contentHash: string;
+  quotedFareRuleVersion: string;
+  acknowledgedAt: string;
+  feeConfirmedAt: string;
+  summary: {
+    pickupAddress: string;
+    dropoffAddress: string;
+    requestedScheduledAt: string | null;
+    vehicleType: string | null;
+    estimatedMin: number;
+    estimatedMax: number;
+  };
+}
 export interface ReferralBookingIntent {
+  feeDisclosureVersion?: string;
+  feeConfirmed?: boolean;
   entrySlug: string;
   quoteId: string;
   pickupAddress: string;
@@ -292,6 +338,8 @@ export type ReferralPassengerFareQuote = Pick<
   | "isGuaranteed"
   | "quotedFareSource"
   | "quotedFareRuleVersion"
+  | "feeDisclosureVersion"
+  | "feeContentHash"
   | "createdAt"
   | "expiresAt"
   | "consumedByOrderId"
@@ -400,6 +448,7 @@ export interface ReferralPassengerTripSnapshot {
   rated: boolean;
   quote?: ReferralPassengerFareQuote | null;
   confirmedAt?: string | null;
+  feeConfirmation?: ReferralOrderFeeConfirmation | null;
   rating?: ReferralPassengerRatingResult | null;
 }
 
@@ -420,6 +469,7 @@ export interface ReferralPassengerHistoryItem {
   createdAt: string;
   quote?: ReferralPassengerFareQuote | null;
   confirmedAt?: string | null;
+  feeConfirmation?: ReferralOrderFeeConfirmation | null;
   rating?: ReferralPassengerRatingResult | null;
 }
 
@@ -455,6 +505,7 @@ export interface ReferralPassengerReceipt {
   downloadUrl?: string;
   quote?: ReferralPassengerFareQuote | null;
   confirmedAt?: string | null;
+  feeConfirmation?: ReferralOrderFeeConfirmation | null;
 }
 
 export interface ResolvePartnerNotificationNavigationCommand {

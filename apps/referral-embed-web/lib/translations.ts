@@ -3,6 +3,23 @@ export type Locale = "en" | "zh";
 type Params = Record<string, string | number>;
 
 const en = {
+  "fees.first": "First-use fee disclosure",
+  "fees.title": "Fee disclosure",
+  "fees.support": "Customer service: {phone}",
+  "fees.agree": "I have read and agree",
+  "fees.read": "Fee and offer disclosure",
+  "fees.saving": "Confirming agreement…",
+  "fees.order": "Confirm this trip and its fees",
+  "fees.schedule": "Pickup time: {time} · Vehicle: {vehicle}",
+  "fees.now": "Leave now",
+  "fees.scheduledTaipei": "{time} (Taipei time)",
+  "fees.timePending": "Pickup time to be confirmed",
+  "fees.vehiclePending": "Vehicle to be confirmed",
+  "fees.unspecified": "Unspecified",
+  "fees.estimate":
+    "Estimated NT$ {min}–{max}; not guaranteed and not the actual collected fare.",
+  "fees.tariff": "Tariff version: {version}",
+  "fees.checkbox": "I confirm the fee and offer disclosure",
   "receiptDocument.section": "PDF trip details and sharing",
   "receiptDocument.download": "Download PDF details",
   "receiptDocument.prepare": "Prepare PDF sharing",
@@ -893,6 +910,22 @@ const en = {
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
+  "fees.first": "首次費用告知",
+  "fees.title": "費用告知",
+  "fees.support": "客服 {phone}",
+  "fees.agree": "我已閱讀並同意",
+  "fees.read": "費用與優惠說明",
+  "fees.saving": "同意處理中…",
+  "fees.order": "本次行程與費用確認",
+  "fees.schedule": "用車時間：{time} · 車型：{vehicle}",
+  "fees.now": "現在出發",
+  "fees.scheduledTaipei": "{time}（臺北時間）",
+  "fees.timePending": "用車時間待確認",
+  "fees.vehiclePending": "車型待確認",
+  "fees.unspecified": "未指定",
+  "fees.estimate": "預估 NT$ {min}–{max}，非保證價、非實收金額。",
+  "fees.tariff": "運價版本：{version}",
+  "fees.checkbox": "我已確認費用與優惠說明",
   "receiptDocument.section": "PDF乘車明細與分享",
   "receiptDocument.download": "下載 PDF 明細",
   "receiptDocument.prepare": "準備分享 PDF",
