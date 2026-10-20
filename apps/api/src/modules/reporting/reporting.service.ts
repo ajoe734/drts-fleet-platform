@@ -956,15 +956,20 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         generatedAt,
       );
       const periodMonth = record.serviceDate.slice(0, 7);
-      if (!periods.includes(periodMonth)) {
-        continue;
-      }
       const businessArea = this.resolveOrderBusinessArea(
         order,
         source.dispatchAssignments,
         vehicleAreaById,
       );
+      // A complaint can be filed after its trip's service month. Keep the
+      // canonical order dimensions even when that trip is outside this period.
+      dimensionByOrderId.set(order.orderId, {
+        periodMonth,
+        businessArea,
+        serviceProductCode: record.serviceProductCode,
+      });
       if (
+        !periods.includes(periodMonth) ||
         (query.businessArea && businessArea !== query.businessArea) ||
         (query.serviceProductCode &&
           record.serviceProductCode !== query.serviceProductCode)
@@ -972,11 +977,6 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
       recordsByOrderId.set(order.orderId, record);
-      dimensionByOrderId.set(order.orderId, {
-        periodMonth,
-        businessArea,
-        serviceProductCode: record.serviceProductCode,
-      });
     }
 
     const groups = new Map<string, MonthlyOperationsSummaryRecord>();
@@ -1055,26 +1055,63 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // SA §7.4: distinct cases CREATED in the requested period, grouped by
+    // their actual category. Neither an earlier service month nor no linked
+    // order makes a submitted case disappear from the unfiltered total.
+    const countedComplaintCases = new Set<string>();
     for (const complaintCase of source.complaintCases) {
-      const relatedOrderId = complaintCase.relatedOrderId;
-      if (!relatedOrderId) {
+      const periodMonth = complaintCase.createdAt.slice(0, 7);
+      if (
+        !periods.includes(periodMonth) ||
+        countedComplaintCases.has(complaintCase.caseNo)
+      ) {
         continue;
       }
-      const dimension = dimensionByOrderId.get(relatedOrderId);
-      if (!dimension) {
+      const dimension = complaintCase.relatedOrderId
+        ? dimensionByOrderId.get(complaintCase.relatedOrderId)
+        : undefined;
+      // Unknown dimensions are explicit; never attribute an unlinked case to
+      // a selected service product or a convenient fleet/business area.
+      const businessArea = dimension?.businessArea ?? "unassigned";
+      const serviceProductCode = dimension?.serviceProductCode ?? "unknown";
+      if (
+        (query.businessArea && businessArea !== query.businessArea) ||
+        (query.serviceProductCode &&
+          serviceProductCode !== query.serviceProductCode)
+      ) {
         continue;
       }
-      if (complaintCase.createdAt.slice(0, 7) !== dimension.periodMonth) {
-        continue;
-      }
-      const group = ensureGroup(
-        dimension.periodMonth,
-        dimension.businessArea,
-        dimension.serviceProductCode,
-      );
+      countedComplaintCases.add(complaintCase.caseNo);
+      const group = ensureGroup(periodMonth, businessArea, serviceProductCode);
       group.complaintCount += 1;
       group.complaintsByCategory[complaintCase.category] =
         (group.complaintsByCategory[complaintCase.category] ?? 0) + 1;
+    }
+
+    // Coverage is for the requested interval, including months with no
+    // orders/cases/samples. Keep the observed dimensions and existing month
+    // expectation; do not fabricate a valid sample or change its weighted mean.
+    const dimensions = new Map<
+      string,
+      { businessArea: string; serviceProductCode: string }
+    >();
+    for (const group of groups.values()) {
+      dimensions.set(
+        JSON.stringify([group.businessArea, group.serviceProductCode]),
+        {
+          businessArea: group.businessArea,
+          serviceProductCode: group.serviceProductCode,
+        },
+      );
+    }
+    for (const dimension of dimensions.values()) {
+      for (const periodMonth of periods) {
+        ensureGroup(
+          periodMonth,
+          dimension.businessArea,
+          dimension.serviceProductCode,
+        );
+      }
     }
 
     return Array.from(groups.values())
