@@ -68,11 +68,15 @@ export function ReferralFirstFeeDisclosure({
 
 export function ReferralOrderFeeDisclosure({
   quote,
+  pickupTimeLabel,
+  vehicleLabel,
   checked,
   disabled,
   onChange,
 }: {
   quote: ReferralPassengerFareQuote;
+  pickupTimeLabel: string;
+  vehicleLabel: string;
   checked: boolean;
   disabled: boolean;
   onChange: (value: boolean) => void;
@@ -86,8 +90,8 @@ export function ReferralOrderFeeDisclosure({
       </p>
       <p>
         {t("fees.schedule", {
-          time: quote.requestedScheduledAt ?? t("fees.now"),
-          vehicle: quote.vehicleType ?? t("fees.unspecified"),
+          time: pickupTimeLabel,
+          vehicle: vehicleLabel,
         })}
       </p>
       <p>

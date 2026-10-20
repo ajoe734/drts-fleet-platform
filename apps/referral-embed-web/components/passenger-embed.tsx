@@ -42,6 +42,7 @@ import {
   type EmbedTripFallbackScreen,
 } from "../lib/embed-fixtures";
 import { buildEmbedTheme, getEntryHost } from "../lib/embed-presentation";
+import { useTranslation } from "../lib/i18n";
 
 export type PassengerEmbedLiveData = {
   activeTrip: ReferralPassengerActiveTripResult | null;
@@ -165,10 +166,26 @@ function createInitialBookingForm(): BookingFormState {
   };
 }
 
-function formatShortDateTime(value: string | null | undefined) {
+function formatShortDateTime(
+  value: string | null | undefined,
+  timeZone?: "Asia/Taipei",
+) {
   if (!value) return "時間待更新";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  if (timeZone) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((value) => value.type === type)!.value;
+    return `${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+  }
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   const hours = String(date.getHours()).padStart(2, "0");
@@ -1514,6 +1531,7 @@ export function BookScreen({ context }: { context: EmbedContext }) {
 
 function ReferralBookingForm({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const { t } = useTranslation();
   const scope =
     context.session?.recoveryScope ??
     context.session?.handoffId ??
@@ -2030,6 +2048,27 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         <Card theme={theme}>
           <ReferralOrderFeeDisclosure
             quote={quote}
+            pickupTimeLabel={
+              quote.requestedScheduledAt
+                ? Number.isFinite(Date.parse(quote.requestedScheduledAt))
+                  ? t("fees.scheduledTaipei", {
+                      time: formatShortDateTime(
+                        quote.requestedScheduledAt,
+                        "Asia/Taipei",
+                      ),
+                    })
+                  : t("fees.timePending")
+                : t("fees.now")
+            }
+            vehicleLabel={
+              quote.vehicleType
+                ? embedVehicles.some(
+                    (vehicle) => vehicle.code === quote.vehicleType,
+                  )
+                  ? t(`embed.vehicle.${quote.vehicleType}.name`)
+                  : t("fees.vehiclePending")
+                : t("fees.unspecified")
+            }
             checked={confirmedQuoteId === quote.quoteId}
             disabled={isPending || quoteState !== "quoted"}
             onChange={(checked) =>
@@ -2549,7 +2588,10 @@ function TripScreen({
           label="費用確認時間"
           value={
             activeTrip?.feeConfirmation?.feeConfirmedAt
-              ? formatShortDateTime(activeTrip.feeConfirmation.feeConfirmedAt)
+              ? formatShortDateTime(
+                  activeTrip.feeConfirmation.feeConfirmedAt,
+                  "Asia/Taipei",
+                )
               : "未提供確認紀錄"
           }
           last
@@ -2859,7 +2901,7 @@ function TripsScreen({
                   <div>
                     費用確認時間：
                     {trip.feeConfirmedAt
-                      ? formatShortDateTime(trip.feeConfirmedAt)
+                      ? formatShortDateTime(trip.feeConfirmedAt, "Asia/Taipei")
                       : "未提供確認紀錄"}
                   </div>
                 </div>
@@ -3007,6 +3049,7 @@ function ReceiptScreen({
             liveData?.receipt?.feeConfirmation?.feeConfirmedAt
               ? formatShortDateTime(
                   liveData.receipt.feeConfirmation.feeConfirmedAt,
+                  "Asia/Taipei",
                 )
               : "未提供確認紀錄"
           }

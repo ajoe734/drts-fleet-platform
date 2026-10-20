@@ -63,6 +63,7 @@ function setup({
   feeReadUnavailable = false,
   bookingAcknowledgement,
   home = false,
+  quoteVehicleType,
 }: {
   already?: boolean;
   ackReadbackMismatch?: boolean;
@@ -70,6 +71,7 @@ function setup({
   feeReadUnavailable?: boolean;
   bookingAcknowledgement?: Record<string, unknown>;
   home?: boolean;
+  quoteVehicleType?: string;
 } = {}) {
   let acknowledged = already,
     quoteNo = 0,
@@ -110,6 +112,7 @@ function setup({
           ok: true,
           data: {
             ...input,
+            vehicleType: quoteVehicleType ?? input.vehicleType,
             quoteId: "fee-quote-" + ++quoteNo,
             feeDisclosureVersion: version,
             feeContentHash: contentHash,
@@ -339,7 +342,8 @@ it("renders only the persisted fee time and leaves historical absence explicit",
   );
   const parsed = document.createElement("div");
   parsed.innerHTML = markup;
-  expect(parsed.textContent).toContain("費用確認時間：10-20");
+  expect(parsed.textContent).toContain("費用確認時間：10-20 12:05");
+  expect(parsed.textContent).not.toContain("費用確認時間：10-20 04:05");
   expect(parsed.textContent).toContain("未提供確認紀錄");
   expect(parsed.textContent).not.toContain("費用確認時間：09-02");
 });
@@ -535,6 +539,48 @@ it.each(["home", "returning-book"] as const)(
     expect(details.open).toBe(false);
     expect(s.events).not.toContain("POST /api/referral/fees");
     expect(s.events).not.toContain("POST /api/referral/booking");
+    expect(s.bookings).toHaveLength(0);
+  },
+);
+
+it("renders a scheduled Taipei pickup and a known vehicle name while preserving the original wire values", async () => {
+  const s = setup({ already: true });
+  await enterRoute(s.host);
+  const scheduledAt = "2026-10-21T17:45:00.000Z";
+  fireEvent.change(getByRole(s.host, "textbox", { name: "用車時間" }), {
+    target: { name: "scheduledAt", value: scheduledAt },
+  });
+  fireEvent.click(getByRole(s.host, "radio", { name: "標準車" }));
+  await waitFor(() => {
+    const summary = getByRole(s.host, "region", { name: "本次行程與費用確認" });
+    expect(summary.textContent).toContain("10-22 01:45（臺北時間）");
+    expect(summary.textContent).toContain("標準車");
+    expect(summary.textContent).not.toContain(scheduledAt);
+    expect(summary.textContent).not.toContain("standard");
+  });
+  fireEvent.click(
+    getByRole(s.host, "checkbox", { name: "我已確認費用與優惠說明" }),
+  );
+  await waitFor(() => expect(create(s.host).disabled).toBe(false));
+  fireEvent.click(create(s.host));
+  await waitFor(() => expect(s.assign).toHaveBeenCalledOnce());
+  expect(s.bookings).toHaveLength(1);
+  expect(s.bookings[0]).toMatchObject({
+    scheduledAt,
+    vehicleType: "standard",
+    feeDisclosureVersion: version,
+    feeConfirmed: true,
+  });
+});
+it.each(["business_vehicle", "unrecognized_vehicle_code"])(
+  "uses a neutral summary label for unknown vehicle %s without exposing its wire code",
+  async (wireCode) => {
+    const s = setup({ already: true, quoteVehicleType: wireCode });
+    await enterRoute(s.host);
+    const summary = getByRole(s.host, "region", { name: "本次行程與費用確認" });
+    expect(summary.textContent).toContain("車型待確認");
+    expect(summary.textContent).not.toContain(wireCode);
+    expect(summary.textContent).toContain("現在出發");
     expect(s.bookings).toHaveLength(0);
   },
 );
