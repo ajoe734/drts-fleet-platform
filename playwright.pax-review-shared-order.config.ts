@@ -115,6 +115,8 @@ export default defineConfig({
           url: "http://127.0.0.1:3202/review",
           reuseExistingServer: false,
           timeout: 180_000,
+          // Let the starter stop its detached child process group before EOF.
+          gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
         },
         {
           command:
