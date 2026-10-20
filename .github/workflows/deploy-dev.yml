@@ -2526,27 +2526,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Exercise real shared-dev quote expiry and recovery
-        if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
-        env:
-          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
-          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
-          PAX_QUOTE_EXPIRY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
-          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
-          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
-          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
-          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
-        run: pnpm exec playwright test -c playwright.pax-real-quote-expiry.config.ts
-      - name: Upload shared-dev real quote expiry evidence
-        if: always() && env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: shared-dev-pax-real-quote-expiry-${{ needs.build-push.outputs.candidate_sha }}
-          path: .artifacts/pax-real-quote-expiry
-          include-hidden-files: true
-          if-no-files-found: ignore
-          retention-days: 14
-
       - name: Exercise real shared-dev reservation offer timeout and same-order recovery
         if: env.DEV_PAX_REVIEW_DEMO_ENABLED == 'true'
         env:
@@ -2593,6 +2572,83 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # CI-DEPLOY-DEV-PARALLEL-ACCEPTANCE-20261020: the real quote-expiry suite
+  # spends ~15 minutes waiting out the backend quote TTL
+  # (QUOTE_TTL_MS in passenger-fare.service.ts). It books one far-future order
+  # that is never dispatched and touches no driver or vehicle, so it runs beside
+  # the sequential acceptance job instead of after it. The other shared-dev
+  # suites stay sequential in operational-candidate-acceptance: they share the
+  # fixed pax-review-driver-a/b and vehicle-a/b and pause/restore that supply
+  # for everyone. This job's one "準備虛構演練車司" call refreshes driver-a's
+  # location; it lands about a minute after start, while the shared-order
+  # suite's real GPS-staleness wait starts several minutes later, after the
+  # operational journeys and its first trip.
+  operational-quote-expiry-acceptance:
+    name: Candidate SHA quote-expiry acceptance
+    runs-on: ubuntu-latest
+    needs: [prepare, build-push, health-check, retired-service-cleanup]
+    if: ${{ always() && needs.health-check.result == 'success' && needs.retired-service-cleanup.result == 'success' && vars.DEV_PAX_REVIEW_DEMO_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build-push.outputs.candidate_sha }}
+      # These two ID tokens only pass Cloud Run IAM (X-Serverless-Authorization)
+      # for the private Ops and passenger surfaces; neither is exchanged at
+      # POST /api/auth/token, so the single-use assertion guard does not apply.
+      - name: Mint identity token — ops console (quote expiry)
+        id: id_token_ops_console
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.ops_console }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Mint identity token — passenger rehearsal (quote expiry)
+        id: id_token_passenger_review
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.passenger_app }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Exercise real shared-dev quote expiry and recovery
+        env:
+          PAX_REVIEW_SHARED_DEV_SMOKE: "true"
+          PAX_REVIEW_PUBLIC_PASSENGER: ${{ needs.prepare.outputs.passenger_app_exposure_flag == '--allow-unauthenticated' }}
+          PAX_QUOTE_EXPIRY_SOURCE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          PAX_REVIEW_PASSENGER_ORIGIN: ${{ needs.health-check.outputs.passenger_app }}
+          PAX_REVIEW_OPS_ORIGIN: ${{ needs.health-check.outputs.ops_console }}
+          PAX_REVIEW_PASSENGER_ID_TOKEN: ${{ steps.id_token_passenger_review.outputs.id_token }}
+          PAX_REVIEW_OPS_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
+        run: pnpm exec playwright test -c playwright.pax-real-quote-expiry.config.ts
+      - name: Upload shared-dev real quote expiry evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-dev-pax-real-quote-expiry-${{ needs.build-push.outputs.candidate_sha }}
+          path: .artifacts/pax-real-quote-expiry
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
   # A red run used to mean two very different things that looked identical in the
   # run list: images never reached Artifact Registry and nothing was deployed, or
   # the deploy succeeded and a post-deploy check failed. Between 2026-08-09 and
@@ -2612,6 +2668,7 @@ jobs:
       - health-check
       - retired-service-cleanup
       - operational-candidate-acceptance
+      - operational-quote-expiry-acceptance
     steps:
       - name: Summarise what actually reached Cloud Run
         env:
@@ -2625,6 +2682,7 @@ jobs:
           R_HEALTH_CHECK: ${{ needs.health-check.result }}
           R_RETIRED_CLEANUP: ${{ needs.retired-service-cleanup.result }}
           R_ACCEPTANCE: ${{ needs.operational-candidate-acceptance.result }}
+          R_QUOTE_EXPIRY: ${{ needs.operational-quote-expiry-acceptance.result }}
         run: |
           set -euo pipefail
 
@@ -2639,6 +2697,7 @@ jobs:
             "health-check|Dev health check|after deploy|${R_HEALTH_CHECK}"
             "retired-cleanup|Fail-closed retired service cleanup|after deploy|${R_RETIRED_CLEANUP}"
             "acceptance|Candidate SHA operational acceptance|after deploy|${R_ACCEPTANCE}"
+            "quote-expiry|Candidate SHA quote-expiry acceptance|after deploy|${R_QUOTE_EXPIRY}"
           )
 
           failed_name=""
