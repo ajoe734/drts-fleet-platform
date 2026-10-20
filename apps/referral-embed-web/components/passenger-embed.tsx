@@ -696,7 +696,7 @@ function EditableField({
   autoComplete?: string;
 }) {
   return (
-    <label style={{ display: "grid", gap: 6 }}>
+    <label style={{ display: "grid", gap: 6, minWidth: 0 }}>
       <span style={{ fontSize: 11.5, color: theme.muted, fontWeight: 600 }}>
         {label}
       </span>
@@ -705,6 +705,7 @@ function EditableField({
           display: "flex",
           alignItems: "center",
           gap: 8,
+          minWidth: 0,
           minHeight: 42,
           borderRadius: 12,
           padding: "0 12px",
@@ -725,6 +726,7 @@ function EditableField({
           autoComplete={autoComplete}
           style={{
             flex: 1,
+            minWidth: 0,
             border: "none",
             outline: "none",
             background: "transparent",
@@ -1918,7 +1920,11 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             disabled={bookingControlsDisabled}
           />
           <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+              gap: 10,
+            }}
           >
             <EditableField
               theme={theme}
@@ -3132,53 +3138,18 @@ function MessageSlot({
 }) {
   return (
     <div
+      data-message-code={code}
       style={{
-        position: "relative",
         padding: "11px 13px",
         borderRadius: 10,
         background: theme.surfaceLo,
-        border: `1px dashed ${theme.line}`,
+        border: `1px solid ${theme.line}`,
+        fontSize: 13,
+        lineHeight: 1.55,
+        color: theme.ink2,
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          top: -8,
-          left: 10,
-          fontSize: 9,
-          fontWeight: 600,
-          fontFamily: theme.mono,
-          color: theme.muted,
-          background: theme.surface,
-          padding: "0 5px",
-          borderRadius: 4,
-        }}
-      >
-        messageCode · {code}
-      </div>
-      <div
-        style={{
-          marginTop: 2,
-          fontSize: 13,
-          lineHeight: 1.55,
-          color: theme.ink2,
-        }}
-      >
-        {sample}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          marginTop: 6,
-          fontSize: 10,
-          color: theme.faint,
-        }}
-      >
-        <Icon name="info" size={11} />
-        文案由後端 messageCode 渲染 · 此為示意
-      </div>
+      {sample}
     </div>
   );
 }
@@ -3323,24 +3294,12 @@ function FallbackTripScreen({
         theme={theme}
         tone={fallback.tone}
         icon={fallback.icon}
-        title={<span style={{ fontSize: 16 }}>{fallback.titleSample}</span>}
+        title={
+          <span data-message-code={fallback.titleCode} style={{ fontSize: 16 }}>
+            {fallback.titleSample}
+          </span>
+        }
       />
-
-      <div style={{ marginTop: -2, display: "flex", justifyContent: "center" }}>
-        <span
-          style={{
-            fontSize: 9.5,
-            color: theme.faint,
-            background: theme.surfaceLo,
-            border: `1px dashed ${theme.line}`,
-            borderRadius: 999,
-            padding: "2px 8px",
-            fontFamily: theme.mono,
-          }}
-        >
-          title ← {fallback.titleCode}
-        </span>
-      </div>
 
       {fallback.progressStage ? (
         <Card theme={theme}>
