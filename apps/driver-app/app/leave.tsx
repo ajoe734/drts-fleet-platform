@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { createIdempotencyKey } from "@drts/api-client";
 import type {
   CreateDriverLeaveCommand,
   DriverLeaveRecord,
@@ -43,6 +44,11 @@ export default function DriverLeaveScreen() {
   const [error, setError] = useState<string | null>(null);
   const [conflictVariant, setConflictVariant] =
     useState<DriverConflictVariant>("withdraw_conflict");
+  const createIntentRef = useRef<{
+    driverId: string;
+    payloadSignature: string;
+    idempotencyKey: string;
+  } | null>(null);
 
   // Fetch leaves from API
   const fetchLeaves = useCallback(async () => {
@@ -102,7 +108,29 @@ export default function DriverLeaveScreen() {
     setError(null);
     try {
       const client = getDriverClient();
-      const newLeave = await client.createDriverLeave(command);
+      const driverId = getDriverId();
+      const payloadSignature = JSON.stringify({
+        leaveType: command.leaveType,
+        startTime: command.startTime,
+        endTime: command.endTime,
+        reason: command.reason,
+      });
+      const currentIntent = createIntentRef.current;
+      const idempotencyKey =
+        currentIntent &&
+        currentIntent.driverId === driverId &&
+        currentIntent.payloadSignature === payloadSignature
+          ? currentIntent.idempotencyKey
+          : createIdempotencyKey("driver-leave-create");
+      createIntentRef.current = {
+        driverId,
+        payloadSignature,
+        idempotencyKey,
+      };
+      const newLeave = await client.createDriverLeave(command, {
+        idempotencyKey,
+      });
+      createIntentRef.current = null;
       setLeaves((prev) => [newLeave, ...prev]);
       setSelectedLeave(newLeave);
       setActiveView("detail");
@@ -154,6 +182,7 @@ export default function DriverLeaveScreen() {
             onPress={
               activeView !== "list"
                 ? () => {
+                    createIntentRef.current = null;
                     setActiveView("list");
                     setError(null);
                   }
@@ -178,7 +207,10 @@ export default function DriverLeaveScreen() {
           error={error}
           isLoading={isLoading}
           leaves={leaves}
-          onCreatePress={() => setActiveView("create")}
+          onCreatePress={() => {
+            createIntentRef.current = null;
+            setActiveView("create");
+          }}
           onRefresh={fetchLeaves}
           onSelectLeave={(lv) => {
             setSelectedLeave(lv);
@@ -192,7 +224,10 @@ export default function DriverLeaveScreen() {
         <DriverLeaveForm
           existingLeaves={leaves}
           isSubmitting={isSubmitting}
-          onCancel={() => setActiveView("list")}
+          onCancel={() => {
+            createIntentRef.current = null;
+            setActiveView("list");
+          }}
           onSubmit={handleCreateSubmit}
           serverError={error}
           theme={driverCanvasTheme}
