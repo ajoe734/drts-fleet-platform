@@ -2451,6 +2451,13 @@ function ReferralDemoTripControls({
   const action = DEMO_TRIP_DISPATCHABLE.includes(status)
     ? "assign"
     : "complete";
+  // live.refresh is a new function on every render; keep the latest one in a
+  // ref so the heartbeat timer below depends only on the trip, or each
+  // refresh-triggered render would restart it and send another heartbeat.
+  const onAssignedRef = useRef(onAssigned);
+  useEffect(() => {
+    onAssignedRef.current = onAssigned;
+  }, [onAssigned]);
   // Like the driver app, report the test driver's location every 30 s so the
   // live tracking and pickup ETA stay fresh while this demo trip is open.
   useEffect(() => {
@@ -2466,7 +2473,7 @@ function ReferralDemoTripControls({
         },
       )
         .then((response) => {
-          if (active && response.ok) onAssigned();
+          if (active && response.ok) onAssignedRef.current();
         })
         .catch(() => undefined);
     beat();
@@ -2475,7 +2482,7 @@ function ReferralDemoTripControls({
       active = false;
       globalThis.clearInterval(timer);
     };
-  }, [action, orderId, onAssigned]);
+  }, [action, orderId]);
 
   async function run() {
     setPending(true);
