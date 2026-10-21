@@ -25,6 +25,8 @@ import {
   NativeTransport,
   JourneyFailure,
   requireFact,
+  validateActualReceiptPdfBytes,
+  consumeNativeReceiptPdfDownload,
   object,
   text,
   integer,
@@ -1772,7 +1774,28 @@ test(journeyName, async ({ browser, request }) => {
         );
         const pdfUrl = `${origins.referral}/api/referral/receipt/${encodeURIComponent(completedOrderId)}/pdf`;
         const pdfFilename = `receipt-${completedOrderId}.pdf`;
-        const observePdfAction = async (action: () => Promise<void>) => {
+        const expectedPdfText = [
+          "乘車明細（非正式稅務憑證）",
+          `行程 ID：${completedOrderId}`,
+          `訂單編號：${text(receipt.orderNo)}`,
+          pickupAddress,
+          dropoffAddress,
+          `實際車資合計：${text(receipt.formattedTotal)}`,
+          `起步價：NT$ ${completion.actualFareBreakdown.startMinor / 100}`,
+          `里程費：NT$ ${completion.actualFareBreakdown.distanceMinor / 100}`,
+          `時間費：NT$ ${completion.actualFareBreakdown.delayMinor / 100}`,
+          `夜間費：NT$ ${completion.actualFareBreakdown.nightMinor / 100}`,
+          "付款及結算狀態未提供",
+          "02-2944-0985",
+          "1999",
+        ];
+        const validatePdfBytes = (bytes: Buffer) =>
+          validateActualReceiptPdfBytes(bytes, expectedPdfText, (actual) =>
+            pdfPhase("browser-pdf-content-parse", () => parsePdf(actual)),
+          );
+        const observePreparedPdfAction = async (
+          action: () => Promise<void>,
+        ) => {
           let resolveResponse!: (bytes: Buffer) => void;
           let rejectResponse!: (error: unknown) => void;
           const responseObserved = new Promise<Buffer>((resolve, reject) => {
@@ -1810,8 +1833,7 @@ test(journeyName, async ({ browser, request }) => {
                   /(?:^|,)\s*no-store\s*(?:,|$)/i.test(
                     headers["cache-control"] ?? "",
                   ) &&
-                  bytes.length > 0 &&
-                  bytes.subarray(0, 5).toString("ascii") === "%PDF-",
+                  bytes.length > 0,
                 "actual nonformal PDF headers and bytes",
               );
               const declaredLength = headers["content-length"];
@@ -1821,30 +1843,7 @@ test(journeyName, async ({ browser, request }) => {
                     Number(declaredLength) === bytes.length,
                   "actual PDF declared byte length",
                 );
-              const parsed = await pdfPhase("browser-pdf-content-parse", () =>
-                parsePdf(bytes),
-              );
-              const compact = (value: string) => value.replace(/\s+/g, "");
-              const pdfText = compact(parsed.text);
-              for (const expectedText of [
-                "乘車明細（非正式稅務憑證）",
-                `行程 ID：${completedOrderId}`,
-                `訂單編號：${text(receipt.orderNo)}`,
-                pickupAddress,
-                dropoffAddress,
-                `實際車資合計：${text(receipt.formattedTotal)}`,
-                `起步價：NT$ ${completion.actualFareBreakdown.startMinor / 100}`,
-                `里程費：NT$ ${completion.actualFareBreakdown.distanceMinor / 100}`,
-                `時間費：NT$ ${completion.actualFareBreakdown.delayMinor / 100}`,
-                `夜間費：NT$ ${completion.actualFareBreakdown.nightMinor / 100}`,
-                "付款及結算狀態未提供",
-                "02-2944-0985",
-                "1999",
-              ])
-                requireFact(
-                  pdfText.includes(compact(expectedText)),
-                  "PDF contains the same completed order and actual recorded fare",
-                );
+              await validatePdfBytes(bytes);
               resolveResponse(bytes);
             } catch (error) {
               rejectResponse(error);
@@ -1880,36 +1879,21 @@ test(journeyName, async ({ browser, request }) => {
             (await pdfLink.getAttribute("download")) === pdfFilename,
           "mounted PDF link retains the exact completed order",
         );
-        const pdfDownloadPromise = page.waitForEvent("download");
-        void pdfDownloadPromise.catch(() => undefined);
-        const downloadedResponse = await pdfPhase(
-          "browser-pdf-download-action",
-          () => observePdfAction(() => pdfLink.click()),
-        );
-        const pdfDownload = await pdfPhase(
-          "browser-pdf-download-event",
-          () => pdfDownloadPromise,
-        );
-        requireFact(
-          pdfDownload.url() === pdfUrl &&
-            pdfDownload.suggestedFilename() === pdfFilename &&
-            (await pdfDownload.failure()) === null,
-          "actual browser same-order PDF download",
-        );
-        const pdfDownloadBytes = await pdfPhase(
-          "browser-pdf-download-file",
-          async () =>
-            readFile(
-              text(
-                await pdfDownload.path(),
-                "browser PDF download file required",
+        const pdfDownloadBytes = await consumeNativeReceiptPdfDownload(
+          {
+            waitForDownload: () =>
+              pdfPhase("browser-pdf-download-event", () =>
+                page.waitForEvent("download", { timeout: 15_000 }),
               ),
-            ),
-        );
-        requireFact(
-          pdfDownloadBytes.length === downloadedResponse.length &&
-            hash(pdfDownloadBytes) === hash(downloadedResponse),
-          "downloaded file equals its original BFF PDF response",
+            click: () =>
+              pdfPhase("browser-pdf-download-action", () =>
+                pdfLink.click({ timeout: 15_000 }),
+              ),
+            readFile: (path) =>
+              pdfPhase("browser-pdf-download-file", () => readFile(path)),
+          },
+          { url: pdfUrl, filename: pdfFilename },
+          validatePdfBytes,
         );
         evidence.record({
           stage: "browser-same-order-nonformal-PDF-download",
@@ -1922,7 +1906,7 @@ test(journeyName, async ({ browser, request }) => {
         const preparedResponse = await pdfPhase(
           "browser-pdf-prepare-action",
           () =>
-            observePdfAction(() =>
+            observePreparedPdfAction(() =>
               pdfRegion
                 .getByRole("button", { name: "準備分享 PDF", exact: true })
                 .click(),

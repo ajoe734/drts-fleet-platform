@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+import PDFDocument from "pdfkit";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import {
   Evidence,
+  consumeNativeReceiptPdfDownload,
+  validateActualReceiptPdfBytes,
   JourneyFailure,
   NativeTransport,
   assertNoForeignActive,
@@ -814,4 +821,144 @@ describe("native fetch failure diagnostics", () => {
     expect((failure as JourneyFailure).transportFacts).toBeUndefined();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("actual native receipt PDF bytes without user routing", () => {
+  const orderId = "synthetic-completed-order";
+  const expected = {
+    url: `https://referral.example.test/api/referral/receipt/${orderId}/pdf`,
+    filename: `receipt-${orderId}.pdf`,
+  };
+  const expectedText = [
+    "乘車明細（非正式稅務憑證）",
+    `行程 ID：${orderId}`,
+    "訂單編號：R-TEST-1",
+    "新北市板橋區縣民大道二段7號",
+    "臺北市信義區市府路1號",
+    "實際車資合計：NT$ 120",
+    "起步價：NT$ 85",
+    "里程費：NT$ 20",
+    "時間費：NT$ 10",
+    "夜間費：NT$ 5",
+    "付款及結算狀態未提供",
+    "02-2944-0985",
+    "1999",
+  ];
+  async function realPdf(lines = expectedText): Promise<Buffer> {
+    const doc = new PDFDocument({ compress: false });
+    const chunks: Buffer[] = [];
+    const complete = new Promise<Buffer>((resolve, reject) => {
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+    });
+    doc.font(path.resolve("apps/api/assets/fonts/NotoSansCJKtc-Regular.otf"));
+    doc.fontSize(12).text(lines.join("\n"));
+    doc.end();
+    return complete;
+  }
+  async function fixture(bytes: Buffer) {
+    const dir = await mkdtemp(path.join(tmpdir(), "owned-native-pdf-"));
+    const file = path.join(dir, "actual-downloaded-file.pdf");
+    await writeFile(file, bytes);
+    let release!: (value: {
+      url(): string;
+      suggestedFilename(): string;
+      failure(): Promise<string | null>;
+      path(): Promise<string | null>;
+    }) => void;
+    const pending = new Promise<Parameters<typeof release>[0]>((resolve) => {
+      release = resolve;
+    });
+    const download = {
+      url: () => expected.url,
+      suggestedFilename: () => expected.filename,
+      failure: async (): Promise<string | null> => null,
+      path: async (): Promise<string | null> => file,
+    };
+    const actions: string[] = [];
+    const ports = {
+      waitForDownload: vi.fn(() => {
+        actions.push("wait");
+        return pending;
+      }),
+      click: vi.fn(async () => {
+        actions.push("click");
+        // Simulate the native Download event, with no userRoute callback at all.
+        release(download);
+      }),
+      readFile: vi.fn((filePath: string) => readFile(filePath)),
+    };
+    return {
+      ports,
+      download,
+      actions,
+      file,
+      cleanup: () => rm(dir, { recursive: true, force: true }),
+    };
+  }
+  const validate = (bytes: Buffer) =>
+    validateActualReceiptPdfBytes(bytes, expectedText, parsePdf);
+
+  it("consumes the real downloaded file when native download bypasses userRoute", async () => {
+    const bytes = await realPdf();
+    const f = await fixture(bytes);
+    try {
+      const actual = await consumeNativeReceiptPdfDownload(
+        f.ports,
+        expected,
+        validate,
+      );
+      expect(f.actions).toEqual(["wait", "click"]);
+      expect(f.ports.readFile).toHaveBeenCalledExactlyOnceWith(f.file);
+      expect(actual).toEqual(bytes);
+      expect(hash(actual)).toBe(hash(bytes));
+      // The independent real parser, including Chinese font text, is the gate.
+      expect((await parsePdf(actual)).text).toContain(orderId);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it.each(["order", "fare", "nonPDF"] as const)(
+    "rejects a downloaded %s mismatch using its actual bytes",
+    async (mismatch) => {
+      const lines = expectedText.map((line) =>
+        mismatch === "order"
+          ? line.replace(orderId, "foreign-order")
+          : line.replace("實際車資合計：NT$ 120", "實際車資合計：NT$ 999"),
+      );
+      const bytes =
+        mismatch === "nonPDF" ? Buffer.from("not a PDF") : await realPdf(lines);
+      const f = await fixture(bytes);
+      try {
+        await expect(
+          consumeNativeReceiptPdfDownload(f.ports, expected, validate),
+        ).rejects.toBeInstanceOf(JourneyFailure);
+        expect(f.ports.readFile).toHaveBeenCalledExactlyOnceWith(f.file);
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+
+  it.each(["url", "filename", "failure", "path"] as const)(
+    "rejects native Download %s mismatch without accepting bytes",
+    async (mismatch) => {
+      const f = await fixture(await realPdf());
+      if (mismatch === "url") f.download.url = () => expected.url + "-foreign";
+      if (mismatch === "filename")
+        f.download.suggestedFilename = () => "foreign.pdf";
+      if (mismatch === "failure") f.download.failure = async () => "synthetic";
+      if (mismatch === "path") f.download.path = async () => null;
+      try {
+        await expect(
+          consumeNativeReceiptPdfDownload(f.ports, expected, validate),
+        ).rejects.toBeInstanceOf(JourneyFailure);
+        expect(f.ports.readFile).not.toHaveBeenCalled();
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
 });
