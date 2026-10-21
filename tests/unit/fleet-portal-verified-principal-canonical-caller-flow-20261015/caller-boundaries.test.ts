@@ -16,6 +16,7 @@ import { NextRequest } from "next/server";
 import { middleware } from "../../../apps/fleet-partner-portal-web/middleware";
 import * as proxy from "../../../apps/fleet-partner-portal-web/app/control-plane-proxy/[...path]/route";
 import { BootstrapAuthGuard } from "../../../apps/api/src/common/auth/bootstrap-auth.guard";
+import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import { JwtAuthService } from "../../../apps/api/src/common/auth/jwt-auth.service";
 import { IdentityRepository } from "../../../apps/api/src/modules/identity/identity.repository";
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
@@ -399,4 +400,368 @@ it("missing CSRF cookie still denies the actual form before any session or comma
   await waitFor(() => expect(form.getAttribute("aria-busy")).toBe("false"));
   expect(router.push).not.toHaveBeenCalled();
   expect(apiCalls).toEqual([]);
+});
+
+it("real SupplySubmissionDetailView staged retry/resume reuses the same intent on scanner 503, resumes confirm without re-PUT, and reconciles consumed-intent confirm via canonical GET readback", async () => {
+  const created = await fleetDocumentRequest<SupplySubmissionDetail>(
+    "/api/fleet-partner/supply-submissions/drivers",
+    { method: "POST", body: JSON.stringify(driver) },
+  );
+  const id = created.submission.submissionId;
+  const root = `/api/fleet-partner/supply-submissions/${id}`;
+  apiCalls.length = 0;
+  requests.length = 0;
+
+  const { container } = render(
+    createElement(SupplySubmissionDetailView, {
+      initialDetail: created,
+      source: "live",
+    }),
+  );
+  const uploadButton = screen.getByRole("button", {
+    name: /建立 upload intent 並確認|Create upload intent and confirm/,
+  });
+  await waitFor(() =>
+    expect((uploadButton as HTMLButtonElement).disabled).toBe(false),
+  );
+
+  const storageInternal = fixture.storage as unknown as {
+    scannerFactory: (...args: unknown[]) => {
+      availability: () => { state: string };
+      scan: (...scanArgs: unknown[]) => Promise<{ scanState: string }>;
+    };
+  };
+  const realScannerFactory = storageInternal.scannerFactory.bind(
+    fixture.storage,
+  );
+
+  // Stage 1a: Selecting a different File (even with identical name and byte length) after scanner 503
+  // must invalidate the previous intent and request a fresh upload-url instead of hitting 409 DOCUMENT_CONTENT_MISMATCH.
+  let scannerFailuresRemaining = 2;
+  storageInternal.scannerFactory = (...args: unknown[]) => {
+    const scanner = realScannerFactory(...args);
+    return {
+      availability: () => scanner.availability(),
+      scan: async (...scanArgs: unknown[]) => {
+        if (scannerFailuresRemaining > 0) {
+          scannerFailuresRemaining -= 1;
+          throw new Error("ClamAV daemon transiently unavailable");
+        }
+        return scanner.scan(...scanArgs);
+      },
+    };
+  };
+
+  const staleLicenseFile = new File(
+    [Buffer.from("driver-license-staged-retry-v001")],
+    "driver-license.pdf",
+    { type: "application/pdf" },
+  );
+  const licenseBytes = Buffer.from("driver-license-staged-retry-v002");
+  const licenseFile = new File([licenseBytes], "driver-license.pdf", {
+    type: "application/pdf",
+  });
+  const fileInput =
+    container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  fireEvent.change(fileInput, { target: { files: [staleLicenseFile] } });
+  fireEvent.click(uploadButton);
+
+  await waitFor(() =>
+    expect(
+      screen.getByText(/Document scanning is unavailable|scanner/i),
+    ).toBeTruthy(),
+  );
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/upload-url")),
+  ).toHaveLength(1);
+
+  // Replace with same-name, same-byte-length File and click upload: must create a new intent (2nd upload-url), which also hits scanner 503 once.
+  fireEvent.change(fileInput, { target: { files: [licenseFile] } });
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      apiCalls.filter((call) => call.path.endsWith("/documents/upload-url")),
+    ).toHaveLength(2),
+  );
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+  ).toHaveLength(2);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(0);
+
+  // Stage 1b: Explicit retry with the SAME licenseFile reuses intent #2 (still 2 upload-url calls),
+  // completes PUT scan, and hits a pre-persistence confirm 503 failure.
+  const realConfirm = fixture.supplyDocumentService.confirmUpload.bind(
+    fixture.supplyDocumentService,
+  );
+  const confirmSpy = vi
+    .spyOn(fixture.supplyDocumentService, "confirmUpload")
+    .mockRejectedValueOnce(
+      new ApiRequestError(
+        503,
+        "CONFIRM_PRE_COMMIT_UNAVAILABLE",
+        "Confirm transiently unavailable before commit.",
+      ),
+    );
+
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      screen.getByText(/Confirm transiently unavailable before commit/i),
+    ).toBeTruthy(),
+  );
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/upload-url")),
+  ).toHaveLength(2);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+  ).toHaveLength(3);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(1);
+
+  // Stage 1c: Retry after PUT succeeded checks canonical GET first (not yet persisted),
+  // resumes ONLY confirm (no re-PUT, no new upload-url), and when post-confirm GET refresh fails once,
+  // does not falsely display success until retry reconciles from canonical GET.
+  const realGetDetail =
+    fixture.supplySubmissionService.getSupplySubmissionDetail.bind(
+      fixture.supplySubmissionService,
+    );
+  let getDetailCallCount = 0;
+  const getDetailSpy = vi
+    .spyOn(fixture.supplySubmissionService, "getSupplySubmissionDetail")
+    .mockImplementation(async (...args) => {
+      getDetailCallCount += 1;
+      if (getDetailCallCount === 2) {
+        throw new ApiRequestError(
+          503,
+          "READBACK_REFRESH_UNAVAILABLE",
+          "Canonical detail readback transiently unavailable after confirm.",
+        );
+      }
+      return realGetDetail(...args);
+    });
+
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      screen.getByText(
+        /Canonical detail readback transiently unavailable after confirm/i,
+      ),
+    ).toBeTruthy(),
+  );
+  expect(screen.queryByText("driver-license.pdf")).toBeNull();
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/upload-url")),
+  ).toHaveLength(2);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+  ).toHaveLength(3);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(2);
+
+  // Retry after confirm_completed: only calls canonical GET readback (0 extra upload-url, PUT, or confirm).
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(screen.getAllByText("driver-license.pdf").length).toBeGreaterThan(0),
+  );
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/upload-url")),
+  ).toHaveLength(2);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+  ).toHaveLength(3);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(2);
+  getDetailSpy.mockRestore();
+
+  // Stage 2: Second document PUT succeeds, confirm persists on server & consumes intent,
+  // but confirm response is lost (503). Retry must first read canonical GET detail,
+  // match documents.fileObjectKey === intent.objectKey, and reconcile without re-calling confirm or upload-url.
+  apiCalls.length = 0;
+  const typeSelect = container.querySelector<HTMLSelectElement>("select")!;
+  fireEvent.change(typeSelect, {
+    target: { value: "taxi_driver_registration" },
+  });
+  const taxiBytes = Buffer.from("taxi-registration-consumed-intent-bytes");
+  const taxiFile = new File([taxiBytes], "taxi-reg.pdf", {
+    type: "application/pdf",
+  });
+  fireEvent.change(fileInput, { target: { files: [taxiFile] } });
+
+  confirmSpy.mockImplementationOnce(async (...args) => {
+    await realConfirm(...args);
+    throw new ApiRequestError(
+      503,
+      "CONFIRM_RESPONSE_LOST",
+      "Confirm response lost after Supply intent consumption.",
+    );
+  });
+
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(screen.getByText(/Confirm response lost/i)).toBeTruthy(),
+  );
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/upload-url")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(1);
+
+  // Explicit user retry: checks GET /api/fleet-partner/supply-submissions/:id first,
+  // discovers taxi-reg.pdf via fileObjectKey, and completes without a second confirm (which would 409 UPLOAD_URL_INVALID) or second upload-url.
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(screen.getAllByText("taxi-reg.pdf").length).toBeGreaterThan(0),
+  );
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/upload-url")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(1);
+  confirmSpy.mockRestore();
+
+  const finalDetail = await fleetDocumentRequest<SupplySubmissionDetail>(root);
+  expect(finalDetail.documents).toHaveLength(2);
+});
+
+it("real CaseReplyComposer staged retry/resume reuses the same intent on scanner 503, resumes confirm without re-PUT, and reconciles persisted attachment via canonical GET readback", async () => {
+  await usePartner("METRO_FLEET");
+  apiCalls.length = 0;
+  requests.length = 0;
+
+  const { container } = render(
+    createElement(CaseReplyComposer, {
+      caseDetail: {
+        id: "cmp_0908",
+        fleetPartnerId: "METRO_FLEET",
+        status: "open",
+        responsibility: "fleet",
+      } as FleetCaseItem,
+      initialAttachments: [],
+    }),
+  );
+
+  const storageInternal = fixture.storage as unknown as {
+    scannerFactory: (...args: unknown[]) => {
+      availability: () => { state: string };
+      scan: (...scanArgs: unknown[]) => Promise<{ scanState: string }>;
+    };
+  };
+  const realScannerFactory = storageInternal.scannerFactory.bind(
+    fixture.storage,
+  );
+
+  let failScannerOnce = true;
+  storageInternal.scannerFactory = (...args: unknown[]) => {
+    const scanner = realScannerFactory(...args);
+    return {
+      availability: () => scanner.availability(),
+      scan: async (...scanArgs: unknown[]) => {
+        if (failScannerOnce) {
+          failScannerOnce = false;
+          throw new Error("ClamAV daemon transiently unavailable");
+        }
+        return scanner.scan(...scanArgs);
+      },
+    };
+  };
+
+  const fileInput =
+    container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  const evidenceFile = new File(
+    [Buffer.from("case-attachment-staged-retry-bytes")],
+    "dispatch-log.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(fileInput, { target: { files: [evidenceFile] } });
+
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /重試/ })).toBeTruthy(),
+  );
+  expect(screen.queryByText("已上傳")).toBeNull();
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/upload-url")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/content")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/confirm")),
+  ).toHaveLength(0);
+
+  // Now make confirm persist on backend and then throw 503 response-lost once.
+  const caseService = (
+    fixture.controller as unknown as {
+      caseService: {
+        confirmAttachmentUpload: (...args: unknown[]) => Promise<unknown>;
+      };
+    }
+  ).caseService;
+  const realConfirm = caseService.confirmAttachmentUpload.bind(caseService);
+  const confirmSpy = vi
+    .spyOn(caseService, "confirmAttachmentUpload")
+    .mockImplementationOnce(async (...args) => {
+      await realConfirm(...args);
+      throw new ApiRequestError(
+        503,
+        "CONFIRM_RESPONSE_LOST",
+        "Case attachment confirm response lost after commit.",
+      );
+    });
+
+  // First retry click: reuses original intent, re-PUTs same bytes (scan now succeeds), calls confirm (persists then 503).
+  fireEvent.click(screen.getByRole("button", { name: /重試/ }));
+  await waitFor(() =>
+    expect(
+      apiCalls.filter((call) => call.path.endsWith("/attachments/confirm")),
+    ).toHaveLength(1),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: /重試/ })).toBeTruthy(),
+  );
+  expect(screen.queryByText("已上傳")).toBeNull();
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/upload-url")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/content")),
+  ).toHaveLength(2);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/confirm")),
+  ).toHaveLength(1);
+
+  // Second retry click: checks canonical GET /api/fleet-partner/cases/cmp_0908 first,
+  // finds the already-confirmed attachment by attachmentId/objectKey, marks it 已上傳 without re-PUT or re-confirm!
+  fireEvent.click(screen.getByRole("button", { name: /重試/ }));
+  await waitFor(() => expect(screen.getByText("已上傳")).toBeTruthy());
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/upload-url")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/content")),
+  ).toHaveLength(2);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/attachments/confirm")),
+  ).toHaveLength(1);
+  confirmSpy.mockRestore();
+
+  const detail = await fixture.controller.getPortalCaseDetail(
+    "METRO_FLEET",
+    "cmp_0908",
+  );
+  expect(
+    detail.data.attachments.filter((item) => item.name === "dispatch-log.pdf"),
+  ).toHaveLength(1);
 });
