@@ -850,7 +850,7 @@ it("real SupplySubmissionDetailView staged retry/resume reuses the same intent o
     .mockImplementationOnce(
       async () =>
         new Promise((resolve) => {
-          resolveHeldAGet = resolve;
+          resolveHeldAGet = (detail) => resolve(detail as never);
         }),
     );
   // Click retry on A so A's canonical GET is in-flight and held.
@@ -921,7 +921,7 @@ it("real SupplySubmissionDetailView staged retry/resume reuses the same intent o
   heldGetDetailSpy.mockImplementationOnce(
     async () =>
       new Promise((resolve) => {
-        resolveHeldADraftGet = resolve;
+        resolveHeldADraftGet = (detail) => resolve(detail as never);
       }),
   );
   heldGetConfirmSpy.mockRejectedValueOnce(
