@@ -732,25 +732,34 @@ export async function prepareOperationalRoleSessions(
   let opsToken: string | undefined;
   let ownOpsSessionId: string | undefined;
   let opsBffIssued = false;
+  let opsSessionRevoked = false;
   let systemToken: string | undefined;
   let driverToken: string | undefined;
   let registrationCode: string | undefined;
   let invitationAttempted = false;
+  let driverInvitationRevoked = false;
   let foreignFleetToken: string | undefined;
   let ownForeignFleetSessionId: string | undefined;
   let foreignFleetBootstrapIssued = false;
+  let foreignFleetSessionRevoked = false;
   let adminToken: string | undefined;
   let ownAdminSessionId: string | undefined;
   let adminBffIssued = false;
+  let adminSessionRevoked = false;
 
   const cleanupIssuedResources = async () => {
     const cleanupFailures: string[] = [];
-    if (registrationCode && systemToken) {
+    if (registrationCode && systemToken && !driverInvitationRevoked) {
       try {
         await revokeOperationalDriverInvitation(
           apiRequest,
           systemToken,
           registrationCode,
+        );
+        driverInvitationRevoked = true;
+        deps.exportSession(
+          "DRTS_OPERATIONAL_DRIVER_INVITATION_CLEANUP_STATUS",
+          "passed",
         );
         deps.exportSession(
           "DRTS_OPERATIONAL_DRIVER_INVITATION_REVOKED",
@@ -762,12 +771,21 @@ export async function prepareOperationalRoleSessions(
     } else if (invitationAttempted && !registrationCode) {
       cleanupFailures.push("driver_invitation_unconfirmed");
     }
-    if (ownForeignFleetSessionId && foreignFleetToken) {
+    if (
+      ownForeignFleetSessionId &&
+      foreignFleetToken &&
+      !foreignFleetSessionRevoked
+    ) {
       try {
         await revokeOperationalApplicationSession(
           apiRequest,
           foreignFleetToken,
           ownForeignFleetSessionId,
+        );
+        foreignFleetSessionRevoked = true;
+        deps.exportSession(
+          "DRTS_OPERATIONAL_FOREIGN_FLEET_CLEANUP_STATUS",
+          "passed",
         );
         deps.exportSession(
           "DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_REVOKED",
@@ -779,12 +797,17 @@ export async function prepareOperationalRoleSessions(
     } else if (foreignFleetBootstrapIssued && !ownForeignFleetSessionId) {
       cleanupFailures.push("foreign_fleet_session_unconfirmed");
     }
-    if (ownOpsSessionId && opsToken) {
+    if (ownOpsSessionId && opsToken && !opsSessionRevoked) {
       try {
         await revokeOperationalApplicationSession(
           apiRequest,
           opsToken,
           ownOpsSessionId,
+        );
+        opsSessionRevoked = true;
+        deps.exportSession(
+          "DRTS_OPERATIONAL_OPS_NON_REVIEWER_CLEANUP_STATUS",
+          "passed",
         );
         deps.exportSession(
           "DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_REVOKED",
@@ -796,12 +819,17 @@ export async function prepareOperationalRoleSessions(
     } else if (opsBffIssued && !ownOpsSessionId) {
       cleanupFailures.push("ops_session_unconfirmed");
     }
-    if (ownAdminSessionId && adminToken) {
+    if (ownAdminSessionId && adminToken && !adminSessionRevoked) {
       try {
         await revokeOperationalApplicationSession(
           apiRequest,
           adminToken,
           ownAdminSessionId,
+        );
+        adminSessionRevoked = true;
+        deps.exportSession(
+          "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
+          "passed",
         );
         deps.exportSession(
           "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED",
@@ -839,16 +867,20 @@ export async function prepareOperationalRoleSessions(
   };
 
   const verifyCanonicalForeignFleetViaAdminBff = async (partnerId: string) => {
-    if (!config.adminOrigin) {
-      return;
-    }
     evidence.stage = "foreign_fleet:verify-canonical-fleet";
+    if (!config.adminOrigin) {
+      evidence.foreign_fleet_precondition = "missing-external-fixture";
+      throw new OperationalForeignFleetFixturePreconditionError(
+        "External foreign_fleet fixture precondition unmet: DRTS_OPERATIONAL_PLATFORM_ADMIN_URL (or DRTS_DEV_PLATFORM_ADMIN_BASE_URL) is required to verify canonical foreign Fleet record via Platform Admin BFF",
+      );
+    }
     const adminInvocation =
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN) ??
       nonEmptyTrimmed(env.DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN);
     if (!adminInvocation) {
-      throw new Error(
-        "DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN or DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN is required for Platform Admin BFF canonical Fleet verification",
+      evidence.foreign_fleet_precondition = "missing-external-fixture";
+      throw new OperationalForeignFleetFixturePreconditionError(
+        "External foreign_fleet fixture precondition unmet: DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN (or DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN) is required to verify canonical foreign Fleet record via Platform Admin BFF",
       );
     }
     assertOpaqueCredential(
@@ -861,6 +893,7 @@ export async function prepareOperationalRoleSessions(
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN) ??
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_REVIEWER_SESSION_TOKEN);
     let issuedAdminPrincipalId: string | undefined;
+    const cleanupBeforeAdmin = evidence.cleanup;
 
     if (suppliedAdminSessionToken) {
       assertOpaqueCredential(
@@ -905,7 +938,12 @@ export async function prepareOperationalRoleSessions(
       );
       adminToken = issuedToken;
       adminBffIssued = true;
+      adminSessionRevoked = false;
       evidence.cleanup = "unconfirmed";
+      deps.exportSession(
+        "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
+        "pending",
+      );
       deps.exportSession(
         "DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN",
         adminToken,
@@ -938,76 +976,106 @@ export async function prepareOperationalRoleSessions(
       assert.equal(adminIssued.actorType, "platform_admin");
     }
 
-    const rawAdminSession = await requestControlPlaneProxy<
-      Record<string, unknown>
-    >(
-      config.adminOrigin,
-      config,
-      deps.fetch,
-      "auth/session",
-      {
+    try {
+      const rawAdminSession = await requestControlPlaneProxy<
+        Record<string, unknown>
+      >(
+        config.adminOrigin,
+        config,
+        deps.fetch,
+        "auth/session",
+        {
+          method: "GET",
+          headers: {
+            authorization: `Bearer ${adminInvocation}`,
+            "x-drts-authorization": `Bearer ${adminToken}`,
+          },
+        },
+        "Platform Admin BFF proxy",
+      );
+      const adminSession = objectRecord(
+        rawAdminSession.data ?? rawAdminSession,
+      );
+      const adminIdentity = objectRecord(adminSession.identity);
+      assert.equal(
+        adminSession.active,
+        true,
+        "Platform Admin session must be active",
+      );
+      assert.equal(adminIdentity.authMode, "jwt_bearer");
+      assert.equal(adminIdentity.realm, "platform");
+      assert.equal(adminIdentity.actorType, "platform_admin");
+      if (
+        !suppliedAdminSessionToken &&
+        ownAdminSessionId &&
+        issuedAdminPrincipalId
+      ) {
+        assert.equal(adminIdentity.sessionId, ownAdminSessionId);
+        assert.equal(adminIdentity.principalId, issuedAdminPrincipalId);
+      }
+
+      const fleetUrl = `${config.adminOrigin}/control-plane-proxy/admin/fleet-partners/${encodeURIComponent(partnerId)}`;
+      assertAllowedTargetUrl(fleetUrl, config.allowedTargets);
+      const fleetResponse = await deps.fetch(fleetUrl, {
         method: "GET",
         headers: {
           authorization: `Bearer ${adminInvocation}`,
           "x-drts-authorization": `Bearer ${adminToken}`,
         },
-      },
-      "Platform Admin BFF proxy",
-    );
-    const adminSession = objectRecord(rawAdminSession.data ?? rawAdminSession);
-    const adminIdentity = objectRecord(adminSession.identity);
-    assert.equal(
-      adminSession.active,
-      true,
-      "Platform Admin session must be active",
-    );
-    assert.equal(adminIdentity.authMode, "jwt_bearer");
-    assert.equal(adminIdentity.realm, "platform");
-    assert.equal(adminIdentity.actorType, "platform_admin");
-    if (!suppliedAdminSessionToken && ownAdminSessionId && issuedAdminPrincipalId) {
-      assert.equal(adminIdentity.sessionId, ownAdminSessionId);
-      assert.equal(adminIdentity.principalId, issuedAdminPrincipalId);
-    }
-
-    const fleetUrl = `${config.adminOrigin}/control-plane-proxy/admin/fleet-partners/${encodeURIComponent(partnerId)}`;
-    assertAllowedTargetUrl(fleetUrl, config.allowedTargets);
-    const fleetResponse = await deps.fetch(fleetUrl, {
-      method: "GET",
-      headers: {
-        authorization: `Bearer ${adminInvocation}`,
-        "x-drts-authorization": `Bearer ${adminToken}`,
-      },
-      redirect: "error",
-      signal: AbortSignal.timeout(15_000),
-    });
-    assert.equal(
-      fleetResponse.headers.get("x-drts-candidate-sha"),
-      config.candidateSha,
-    );
-    if (fleetResponse.status === 404) {
-      evidence.foreign_fleet_precondition = "invalid-external-fixture";
-      throw new OperationalForeignFleetFixturePreconditionError(
-        `Foreign Fleet partnerId (${partnerId}) does not have an active canonical Fleet record`,
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      });
+      assert.equal(
+        fleetResponse.headers.get("x-drts-candidate-sha"),
+        config.candidateSha,
       );
-    }
-    assert(
-      fleetResponse.ok,
-      `Canonical Fleet read failed with HTTP ${fleetResponse.status}`,
-    );
-    const fleetPayload = objectRecord(
-      normalizeApiResponse(await fleetResponse.json()),
-    );
-    const fleetRecord = objectRecord(fleetPayload.data ?? fleetPayload);
-    const canonicalFleetId = nonEmptyTrimmed(fleetRecord.fleetPartnerId);
-    if (
-      canonicalFleetId !== partnerId ||
-      fleetRecord.active !== true ||
-      canonicalFleetId === config.expectedOwnFleetId
-    ) {
-      evidence.foreign_fleet_precondition = "invalid-external-fixture";
-      throw new OperationalForeignFleetFixturePreconditionError(
-        `Foreign Fleet partnerId (${partnerId}) is not an active canonical Fleet partner distinct from own Fleet (${config.expectedOwnFleetId})`,
+      if (fleetResponse.status === 404) {
+        evidence.foreign_fleet_precondition = "invalid-external-fixture";
+        throw new OperationalForeignFleetFixturePreconditionError(
+          `Foreign Fleet partnerId (${partnerId}) does not have an active canonical Fleet record`,
+        );
+      }
+      assert(
+        fleetResponse.ok,
+        `Canonical Fleet read failed with HTTP ${fleetResponse.status}`,
       );
+      const fleetPayload = objectRecord(
+        normalizeApiResponse(await fleetResponse.json()),
+      );
+      const fleetRecord = objectRecord(fleetPayload.data ?? fleetPayload);
+      const canonicalFleetId = nonEmptyTrimmed(fleetRecord.fleetPartnerId);
+      if (
+        canonicalFleetId !== partnerId ||
+        fleetRecord.active !== true ||
+        canonicalFleetId === config.expectedOwnFleetId
+      ) {
+        evidence.foreign_fleet_precondition = "invalid-external-fixture";
+        throw new OperationalForeignFleetFixturePreconditionError(
+          `Foreign Fleet partnerId (${partnerId}) is not an active canonical Fleet partner distinct from own Fleet (${config.expectedOwnFleetId})`,
+        );
+      }
+    } finally {
+      if (ownAdminSessionId && adminToken && !adminSessionRevoked) {
+        try {
+          await revokeOperationalApplicationSession(
+            apiRequest,
+            adminToken,
+            ownAdminSessionId,
+          );
+          adminSessionRevoked = true;
+          deps.exportSession(
+            "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
+            "passed",
+          );
+          deps.exportSession(
+            "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED",
+            "true",
+          );
+          evidence.cleanup = cleanupBeforeAdmin;
+        } catch {
+          // Leave adminSessionRevoked false so cleanupIssuedResources / teardown retries.
+        }
+      }
     }
   };
 
@@ -1095,7 +1163,12 @@ export async function prepareOperationalRoleSessions(
       );
       opsToken = token;
       opsBffIssued = true;
+      opsSessionRevoked = false;
       evidence.cleanup = "unconfirmed";
+      deps.exportSession(
+        "DRTS_OPERATIONAL_OPS_NON_REVIEWER_CLEANUP_STATUS",
+        "pending",
+      );
       deps.exportSession(
         "DRTS_OPERATIONAL_OPS_NON_REVIEWER_RECOVERY_TOKEN",
         opsToken,
@@ -1308,8 +1381,13 @@ export async function prepareOperationalRoleSessions(
         "DRTS_LIVE_MAP_PROVISIONER_SESSION_TOKEN",
         systemToken,
       );
+      deps.exportSession(
+        "DRTS_OPERATIONAL_DRIVER_INVITATION_CLEANUP_STATUS",
+        "pending",
+      );
       deps.exportSession("DRTS_LIVE_MAP_INVITATION_ATTEMPTED", "true");
       invitationAttempted = true;
+      driverInvitationRevoked = false;
       evidence.cleanup = "unconfirmed";
 
       const invite = await apiRequest<{
@@ -1550,7 +1628,12 @@ export async function prepareOperationalRoleSessions(
       // transient /api/auth/session failure still revokes the newly issued session.
       foreignFleetToken = accessToken;
       foreignFleetBootstrapIssued = true;
+      foreignFleetSessionRevoked = false;
       evidence.cleanup = "unconfirmed";
+      deps.exportSession(
+        "DRTS_OPERATIONAL_FOREIGN_FLEET_CLEANUP_STATUS",
+        "pending",
+      );
       deps.exportSession(
         "DRTS_OPERATIONAL_FOREIGN_FLEET_RECOVERY_TOKEN",
         foreignFleetToken,
@@ -1579,6 +1662,7 @@ export async function prepareOperationalRoleSessions(
       }
 
       const resolvedPartnerId = String(partnerEntry.partnerId ?? "").trim();
+      const resolvedPartnerType = nonEmptyTrimmed(partnerEntry.partnerType);
       const expiresIn = nonEmptyTrimmed(bootstrap.expiresIn) ?? "1h";
       if (
         bootstrap.tokenType !== "Bearer" ||
@@ -1597,6 +1681,12 @@ export async function prepareOperationalRoleSessions(
         evidence.foreign_fleet_precondition = "invalid-external-fixture";
         throw new OperationalForeignFleetFixturePreconditionError(
           "Foreign Fleet partner bootstrap receipt did not match canonical partner entry binding",
+        );
+      }
+      if (resolvedPartnerType !== "fleet_partner") {
+        evidence.foreign_fleet_precondition = "invalid-external-fixture";
+        throw new OperationalForeignFleetFixturePreconditionError(
+          `Foreign Fleet partnerEntry.partnerType (${resolvedPartnerType ?? "missing"}) must be fleet_partner`,
         );
       }
       if (resolvedPartnerId === config.expectedOwnFleetId) {
@@ -1664,20 +1754,54 @@ export async function prepareOperationalRoleSessions(
       );
     }
 
-    const hasExternalCleanupMarker = Boolean(
-      nonEmptyTrimmed(env.DRTS_LIVE_MAP_INVITE_CODE) ||
-      nonEmptyTrimmed(env.DRTS_LIVE_MAP_INVITATION_ATTEMPTED) === "true" ||
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_OWNED_SESSION_ID) ||
+    const hasUnrevokedDriverMarker =
+      (Boolean(nonEmptyTrimmed(env.DRTS_LIVE_MAP_INVITE_CODE)) ||
+        nonEmptyTrimmed(env.DRTS_LIVE_MAP_INVITATION_ATTEMPTED) === "true") &&
       nonEmptyTrimmed(
-        env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_ISSUED_ATTEMPTED,
-      ) === "true" ||
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID) ||
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_ISSUED_ATTEMPTED) ===
-        "true" ||
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID) ||
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED) ===
-        "true",
-    );
+        env.DRTS_OPERATIONAL_DRIVER_INVITATION_CLEANUP_STATUS,
+      ) !== "passed" &&
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_DRIVER_INVITATION_REVOKED) !==
+        "true";
+    const hasUnrevokedOpsMarker =
+      (Boolean(
+        nonEmptyTrimmed(env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_OWNED_SESSION_ID),
+      ) ||
+        nonEmptyTrimmed(
+          env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_ISSUED_ATTEMPTED,
+        ) === "true") &&
+      nonEmptyTrimmed(
+        env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_CLEANUP_STATUS,
+      ) !== "passed" &&
+      nonEmptyTrimmed(
+        env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_REVOKED,
+      ) !== "true";
+    const hasUnrevokedForeignMarker =
+      (Boolean(
+        nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID),
+      ) ||
+        nonEmptyTrimmed(
+          env.DRTS_OPERATIONAL_FOREIGN_FLEET_ISSUED_ATTEMPTED,
+        ) === "true") &&
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_CLEANUP_STATUS) !==
+        "passed" &&
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_REVOKED) !==
+        "true";
+    const hasUnrevokedAdminMarker =
+      (Boolean(
+        nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID),
+      ) ||
+        nonEmptyTrimmed(
+          env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED,
+        ) === "true") &&
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS) !==
+        "passed" &&
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED) !==
+        "true";
+    const hasExternalCleanupMarker =
+      hasUnrevokedDriverMarker ||
+      hasUnrevokedOpsMarker ||
+      hasUnrevokedForeignMarker ||
+      hasUnrevokedAdminMarker;
     if (hasExternalCleanupMarker && evidence.cleanup === "not-required") {
       evidence.cleanup = "required";
     }
@@ -1772,20 +1896,25 @@ export async function teardownOperationalRoleSessions(
     const invitationAttempted =
       nonEmptyTrimmed(env.DRTS_LIVE_MAP_INVITATION_ATTEMPTED) === "true";
     const driverAlreadyRevoked =
+      nonEmptyTrimmed(
+        env.DRTS_OPERATIONAL_DRIVER_INVITATION_CLEANUP_STATUS,
+      ) === "passed" ||
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_DRIVER_INVITATION_REVOKED) ===
-      "true";
+        "true";
 
-    if (!inviteCode) {
+    if (driverAlreadyRevoked) {
+      if (inviteCode) {
+        deps.mask(inviteCode);
+      }
+      evidence.driver_recovery = "consumed-invitation";
+      evidence.driver_revoked = true;
+    } else if (!inviteCode) {
       // An attempted invitation mutation with lost recovery data must fail closed.
       if (invitationAttempted) {
         teardownFailures.push("driver_invitation_unconfirmed");
       } else {
         evidence.driver_recovery = "not-required";
       }
-    } else if (driverAlreadyRevoked) {
-      deps.mask(inviteCode);
-      evidence.driver_recovery = "consumed-invitation";
-      evidence.driver_revoked = true;
     } else {
       deps.mask(inviteCode);
       evidence.driver_recovery = "consumed-invitation";
@@ -1822,6 +1951,10 @@ export async function teardownOperationalRoleSessions(
           inviteCode,
         );
         deps.exportSession?.(
+          "DRTS_OPERATIONAL_DRIVER_INVITATION_CLEANUP_STATUS",
+          "passed",
+        );
+        deps.exportSession?.(
           "DRTS_OPERATIONAL_DRIVER_INVITATION_REVOKED",
           "true",
         );
@@ -1838,15 +1971,19 @@ export async function teardownOperationalRoleSessions(
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_ISSUED_ATTEMPTED) ===
       "true";
     const foreignAlreadyRevoked =
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_CLEANUP_STATUS) ===
+        "passed" ||
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_REVOKED) ===
-      "true";
-    if (!ownForeignSessionId) {
+        "true";
+    if (foreignAlreadyRevoked) {
+      if (ownForeignSessionId) {
+        deps.mask(ownForeignSessionId);
+      }
+      evidence.foreign_fleet_session_revoked = true;
+    } else if (!ownForeignSessionId) {
       if (foreignIssuedAttempted) {
         teardownFailures.push("foreign_fleet_session_unconfirmed");
       }
-    } else if (foreignAlreadyRevoked) {
-      deps.mask(ownForeignSessionId);
-      evidence.foreign_fleet_session_revoked = true;
     } else {
       deps.mask(ownForeignSessionId);
       const foreignToken =
@@ -1862,6 +1999,10 @@ export async function teardownOperationalRoleSessions(
             apiRequest,
             foreignToken,
             ownForeignSessionId,
+          );
+          deps.exportSession?.(
+            "DRTS_OPERATIONAL_FOREIGN_FLEET_CLEANUP_STATUS",
+            "passed",
           );
           deps.exportSession?.(
             "DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_REVOKED",
@@ -1883,15 +2024,20 @@ export async function teardownOperationalRoleSessions(
       ) === "true";
     const opsAlreadyRevoked =
       nonEmptyTrimmed(
+        env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_CLEANUP_STATUS,
+      ) === "passed" ||
+      nonEmptyTrimmed(
         env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_REVOKED,
       ) === "true";
-    if (!ownOpsSessionId) {
+    if (opsAlreadyRevoked) {
+      if (ownOpsSessionId) {
+        deps.mask(ownOpsSessionId);
+      }
+      evidence.ops_session_revoked = true;
+    } else if (!ownOpsSessionId) {
       if (opsIssuedAttempted) {
         teardownFailures.push("ops_session_unconfirmed");
       }
-    } else if (opsAlreadyRevoked) {
-      deps.mask(ownOpsSessionId);
-      evidence.ops_session_revoked = true;
     } else {
       deps.mask(ownOpsSessionId);
       const opsToken =
@@ -1906,6 +2052,10 @@ export async function teardownOperationalRoleSessions(
             apiRequest,
             opsToken,
             ownOpsSessionId,
+          );
+          deps.exportSession?.(
+            "DRTS_OPERATIONAL_OPS_NON_REVIEWER_CLEANUP_STATUS",
+            "passed",
           );
           deps.exportSession?.(
             "DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_REVOKED",
@@ -1925,14 +2075,18 @@ export async function teardownOperationalRoleSessions(
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED) ===
       "true";
     const adminAlreadyRevoked =
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS) ===
+        "passed" ||
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED) ===
-      "true";
-    if (!ownAdminSessionId) {
+        "true";
+    if (adminAlreadyRevoked) {
+      if (ownAdminSessionId) {
+        deps.mask(ownAdminSessionId);
+      }
+    } else if (!ownAdminSessionId) {
       if (adminIssuedAttempted) {
         teardownFailures.push("admin_session_unconfirmed");
       }
-    } else if (adminAlreadyRevoked) {
-      deps.mask(ownAdminSessionId);
     } else {
       deps.mask(ownAdminSessionId);
       const adminToken = nonEmptyTrimmed(
@@ -1947,6 +2101,10 @@ export async function teardownOperationalRoleSessions(
             apiRequest,
             adminToken,
             ownAdminSessionId,
+          );
+          deps.exportSession?.(
+            "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
+            "passed",
           );
           deps.exportSession?.(
             "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED",

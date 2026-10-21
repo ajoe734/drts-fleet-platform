@@ -363,6 +363,8 @@ function createBaseSimulationEnv(
     DRTS_OPERATIONAL_API_URL: API_ORIGIN,
     DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
     DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN: SIM_OPS_CONSOLE_ID_TOKEN,
+    DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+    DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
     DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN:
       SIM_PROVISIONING_GOOGLE_ID_TOKEN,
     DRTS_LIVE_MAP_TEST_DRIVER_ID: SEEDED_MAP_DRIVER_ID,
@@ -385,6 +387,7 @@ function createStandardMockFetch(
     opsActorType?: string;
     foreignPartnerId?: string;
     foreignEntrySlug?: string;
+    foreignPartnerType?: string | null;
     foreignPartnerStatus?: string;
     foreignPartnerActiveFlag?: boolean;
     foreignSessionStatus?: number;
@@ -737,6 +740,12 @@ function createStandardMockFetch(
               entryId: `entry-${foreignPartnerId}`,
               entrySlug: foreignEntrySlug,
               partnerId: foreignPartnerId,
+              ...(options.foreignPartnerType === null
+                ? {}
+                : {
+                    partnerType:
+                      options.foreignPartnerType ?? "fleet_partner",
+                  }),
               status: options.foreignPartnerStatus ?? "active",
               activeFlag: options.foreignPartnerActiveFlag ?? true,
             },
@@ -1320,10 +1329,9 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
     });
 
-    it("verifies foreign_fleet partnerId against canonical Fleet read API via Platform Admin BFF and rejects non-Fleet partner entries while revoking owned bootstrap sessions", async () => {
+    it("rejects non-Fleet partner entries from partnerEntry.partnerType and verifies foreign_fleet partnerId against canonical Fleet read API via Platform Admin BFF while revoking owned sessions (AFB-FOREIGN-KIND)", async () => {
+      // 1. Bootstrap receipt with partnerEntry.partnerType !== "fleet_partner" is rejected and revokes owned session.
       const referralBootstrapEnv = createBaseSimulationEnv({
-        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
-        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
         DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: "partner-referral-entry",
         DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID: undefined,
       });
@@ -1332,6 +1340,7 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       const { fetchImpl, calls } = createStandardMockFetch({
         foreignEntrySlug: "partner-referral-entry",
         foreignPartnerId: "partner-referral-extra",
+        foreignPartnerType: "referral_channel",
         omitForeignSessionIdInSessionLookup: true,
       });
 
@@ -1357,14 +1366,6 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(
         exported.DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN,
       ).toBeUndefined();
-      expect(
-        calls.some(
-          (c) =>
-            c.method === "GET" &&
-            c.url ===
-              `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/partner-referral-extra`,
-        ),
-      ).toBe(true);
       // Both the Ops session AND the newly issued referral partner session must be revoked via JWT sid.
       const revokedSessionIds = calls
         .filter(
@@ -1376,10 +1377,9 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(revokedSessionIds).toContain(SIM_FOREIGN_FLEET_SESSION_ID);
       expect(revokedSessionIds).toContain(SIM_OPS_SESSION_ID);
 
-      // Also reject pre-provided session tokens whose partnerId has no canonical Fleet record (HTTP 404).
+      // 2. Also reject pre-provided session tokens (which have no partnerType on /api/auth/session or JWT)
+      // when Admin BFF GET /control-plane-proxy/admin/fleet-partners/:partnerId returns 404.
       const providedNonFleetEnv = createBaseSimulationEnv({
-        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
-        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
         DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN:
           SIM_FOREIGN_FLEET_SESSION_TOKEN,
         DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: undefined,
@@ -1401,6 +1401,14 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(
         providedNonFleetCalls.some(
           (c) =>
+            c.method === "GET" &&
+            c.url ===
+              `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/partner-referral-hotel`,
+        ),
+      ).toBe(true);
+      expect(
+        providedNonFleetCalls.some(
+          (c) =>
             c.method === "POST" &&
             c.url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
             (c.body as { sessionId?: string })?.sessionId ===
@@ -1408,10 +1416,31 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
         ),
       ).toBe(false);
 
-      // Accept pre-provided session tokens when Admin BFF confirms an active canonical Fleet record.
+      // 3. Fail closed with missing-external-fixture when Platform Admin BFF URL or invocation token is absent.
+      const missingAdminOriginEnv = createBaseSimulationEnv({
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: undefined,
+        DRTS_DEV_PLATFORM_ADMIN_BASE_URL: undefined,
+      });
+      let missingAdminSaved: OperationalRoleSessionsEvidence | undefined;
+      const { fetchImpl: missingAdminFetch } = createStandardMockFetch();
+      await expect(
+        prepareOperationalRoleSessions(missingAdminOriginEnv, {
+          fetch: missingAdminFetch,
+          mask: () => {},
+          exportSession: () => {},
+          save: (_name, data) => {
+            missingAdminSaved = data;
+          },
+        }),
+      ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
+      expect(missingAdminSaved?.foreign_fleet_precondition).toBe(
+        "missing-external-fixture",
+      );
+
+      // 4. Accept pre-provided session tokens when Admin BFF confirms an active canonical Fleet record,
+      // and revoke any newly exchanged owned Admin session immediately while keeping cleanup: "not-required".
       const providedCanonicalFleetEnv = createBaseSimulationEnv({
-        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
-        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_REVIEWER_SESSION_TOKEN: undefined,
         DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN: SIM_OPS_SESSION_TOKEN,
         DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN: SIM_SYSTEM_SESSION_TOKEN,
         DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN: SIM_DRIVER_SESSION_TOKEN,
@@ -1420,7 +1449,8 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
         DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: undefined,
         DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY: undefined,
       });
-      const { fetchImpl: providedCanonicalFetch } = createStandardMockFetch();
+      const { fetchImpl: providedCanonicalFetch, calls: providedCanonicalCalls } =
+        createStandardMockFetch();
       const canonicalEvidence = await prepareOperationalRoleSessions(
         providedCanonicalFleetEnv,
         {
@@ -1431,9 +1461,19 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
         },
       );
       expect(canonicalEvidence.status).toBe("passed");
+      expect(canonicalEvidence.cleanup).toBe("not-required");
       expect(canonicalEvidence.foreign_fleet_precondition).toBe(
         "satisfied-by-provided-session",
       );
+      expect(
+        providedCanonicalCalls.some(
+          (c) =>
+            c.method === "POST" &&
+            c.url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+            (c.body as { sessionId?: string })?.sessionId ===
+              SIM_PLATFORM_ADMIN_SESSION_ID,
+        ),
+      ).toBe(true);
     });
 
     it("records and revokes owned foreign_fleet session via JWT sid claim even when /api/auth/session fails with 503 after bootstrap-session (AFB-FOREIGN-OWNED-RECOVERY)", async () => {
