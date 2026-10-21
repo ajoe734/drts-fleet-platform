@@ -706,8 +706,13 @@ export async function uploadOperationalDocument(
       canonicalCaseData?.data?.case_detail ??
       canonicalCaseData?.data?.caseDetail ??
       canonicalCaseData?.data;
-    const canonicalAttachments = Array.isArray(canonicalCaseDetail?.attachments)
-      ? (canonicalCaseDetail.attachments as Array<Record<string, unknown>>)
+    const rawCanonicalAttachments = Array.isArray(
+      canonicalCaseData?.data?.attachments,
+    )
+      ? canonicalCaseData.data.attachments
+      : canonicalCaseDetail?.attachments;
+    const canonicalAttachments = Array.isArray(rawCanonicalAttachments)
+      ? (rawCanonicalAttachments as Array<Record<string, unknown>>)
       : [];
     const matchedAttachment = canonicalAttachments.find(
       (item) =>
@@ -2339,8 +2344,14 @@ const ROLE_SESSION_TOKEN_ENVS: Record<
     "DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN",
     "DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN",
   ],
-  tenant_admin: ["DRTS_OPERATIONAL_TENANT_ADMIN_SESSION_TOKEN"],
-  tenant_ops: ["DRTS_OPERATIONAL_TENANT_OPS_SESSION_TOKEN"],
+  tenant_admin: [
+    "DRTS_OPERATIONAL_TENANT_ADMIN_SESSION_TOKEN",
+    "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+  ],
+  tenant_ops: [
+    "DRTS_OPERATIONAL_TENANT_OPS_SESSION_TOKEN",
+    "DRTS_OPERATIONAL_DISPATCH_SESSION_TOKEN",
+  ],
   driver: ["DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN"],
   ops_non_reviewer: ["DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN"],
   system: ["DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN"],
@@ -2527,16 +2538,18 @@ export async function verifyOperationalRoleSession(
   } else if (role === "tenant_admin") {
     expect(realm, "tenant_admin session must be tenant realm").toBe("tenant");
     expect(
-      actorType === "tenant_admin" || roles.includes("tenant_admin"),
+      roles.includes("tenant_admin") ||
+        (actorType === "tenant_admin" && !roles.includes("tenant_ops_admin")),
       "tenant_admin session must carry tenant_admin role",
     ).toBe(true);
   } else if (role === "tenant_ops") {
     expect(realm, "tenant_ops session must be tenant realm").toBe("tenant");
     expect(
-      roles.includes("tenant_ops") ||
+      roles.includes("tenant_ops_admin") ||
+        roles.includes("tenant_ops") ||
         roles.includes("dispatcher") ||
         actorType === "tenant_ops",
-      "tenant_ops session must carry tenant_ops/dispatcher role",
+      "tenant_ops session must carry tenant_ops_admin/tenant_ops/dispatcher role",
     ).toBe(true);
     expect(
       roles.includes("tenant_admin"),
@@ -2548,13 +2561,23 @@ export async function verifyOperationalRoleSession(
       "driver session must carry driver identity",
     ).toBe(true);
   } else if (role === "ops_non_reviewer") {
-    expect(realm, "ops_non_reviewer session must be platform realm").toBe(
-      "platform",
-    );
+    expect(
+      realm === "ops" || realm === "platform",
+      "ops_non_reviewer session must be ops or platform realm",
+    ).toBe(true);
+    expect(
+      actorType === "ops_user" ||
+        realm === "ops" ||
+        roles.includes("ops_user") ||
+        roles.includes("operator") ||
+        roles.includes("ops_dispatcher"),
+      "ops_non_reviewer session must carry ops identity",
+    ).toBe(true);
     expect(
       roles.includes("platform_reviewer") ||
         roles.includes("platform_admin") ||
         roles.includes("super_admin") ||
+        roles.includes("superadmin") ||
         actorType === "platform_admin",
       "ops_non_reviewer session must not have platform_reviewer/platform_admin authority",
     ).toBe(false);
@@ -2588,9 +2611,14 @@ export async function probeOperationalDocumentRoleAccess(
     probe.role !== "unauthenticated" &&
     probe.role !== "invalid_session"
   ) {
+    const sessionBaseUrlEnv = process.env.DRTS_OPERATIONAL_API_URL?.trim()
+      ? "DRTS_OPERATIONAL_API_URL"
+      : process.env.DRTS_DEV_API_BASE_URL?.trim()
+        ? "DRTS_DEV_API_BASE_URL"
+        : baseUrlEnv;
     await verifyOperationalRoleSession(
       probe.role,
-      baseUrlEnv,
+      sessionBaseUrlEnv,
       probe.expectedOwnFleetId ?? "fleet-demo-001",
     );
   }
@@ -2702,10 +2730,15 @@ export async function resolveOperationalEditableCase(
   expectCandidateRevision(listResponse.headers, `GET fleet cases ${listUrl}`);
   const listData = (await listResponse.json()) as {
     data?: {
+      items?: Array<Record<string, unknown>>;
       cases?: Array<Record<string, unknown>>;
     };
   };
-  const cases = Array.isArray(listData?.data?.cases) ? listData.data.cases : [];
+  const cases = Array.isArray(listData?.data?.items)
+    ? listData.data.items
+    : Array.isArray(listData?.data?.cases)
+      ? listData.data.cases
+      : [];
   for (const item of cases) {
     const id = String(item.id ?? item.case_id ?? item.caseId ?? "").trim();
     const fleetId = String(
@@ -2754,12 +2787,15 @@ export async function resolveOperationalEditableCase(
     );
     const statementsData = (await statementsResponse.json()) as {
       data?: {
+        items?: Array<Record<string, unknown>>;
         statements?: Array<Record<string, unknown>>;
       };
     };
-    const statements = Array.isArray(statementsData?.data?.statements)
-      ? statementsData.data.statements
-      : [];
+    const statements = Array.isArray(statementsData?.data?.items)
+      ? statementsData.data.items
+      : Array.isArray(statementsData?.data?.statements)
+        ? statementsData.data.statements
+        : [];
     const matchingStatement = statements.find((stmt) => {
       const stmtFleetId = String(
         stmt.fleet_partner_id ?? stmt.fleetPartnerId ?? expectedFleetPartnerId,

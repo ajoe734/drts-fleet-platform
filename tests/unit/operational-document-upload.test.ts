@@ -3070,15 +3070,17 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
                 fleet_partner_id: caseFleetId,
                 status: caseStatus,
                 responsibility: caseResponsibility,
-                attachments: Array.from(caseAttachments.values()).map((a) => ({
-                  attachment_id: a.attachment_id,
-                  object_key: a.object_key,
-                  file_size: a.file_size,
-                  content_type: a.content_type,
-                  name: a.name,
-                  state: a.state,
-                })),
               },
+              attachments: Array.from(caseAttachments.values()).map((a) => ({
+                attachment_id: a.attachment_id,
+                case_id: "CASE-STL-202603-001",
+                fleet_partner_id: caseFleetId,
+                object_key: a.object_key,
+                file_size: a.file_size,
+                content_type: a.content_type,
+                name: a.name,
+                state: a.state,
+              })),
             },
           });
         }
@@ -3335,7 +3337,17 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
           method === "GET" &&
           url.pathname === "/control-plane-proxy/fleet-partner/cases"
         ) {
-          return jsonResponse({ data: { cases: casesList } });
+          return jsonResponse({
+            data: {
+              items: casesList,
+              page_info: {
+                page: 1,
+                page_size: Math.max(casesList.length, 20),
+                total_items: casesList.length,
+                total_pages: casesList.length > 0 ? 1 : 0,
+              },
+            },
+          });
         }
         if (
           method === "GET" &&
@@ -3343,12 +3355,18 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         ) {
           return jsonResponse({
             data: {
-              statements: [
+              items: [
                 {
                   statement_id: "STL-2026-03-fleet-demo-001",
                   fleet_partner_id: "fleet-demo-001",
                 },
               ],
+              page_info: {
+                page: 1,
+                page_size: 20,
+                total_items: 1,
+                total_pages: 1,
+              },
             },
           });
         }
@@ -3419,16 +3437,22 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
   });
 
   it("verifies backend role sessions, rejects spoofed identity headers, and executes cross-role denial probes", async () => {
+    const apiOrigin = "https://api.example.invalid";
+    vi.stubEnv("DRTS_OPERATIONAL_API_URL", apiOrigin);
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_API_ID_TOKEN",
+      "api-cloud-run-invocation-token",
+    );
     vi.stubEnv(
       "DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN",
       "foreign-fleet-session-token",
     );
     vi.stubEnv(
-      "DRTS_OPERATIONAL_TENANT_ADMIN_SESSION_TOKEN",
+      "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
       "tenant-admin-session-token",
     );
     vi.stubEnv(
-      "DRTS_OPERATIONAL_TENANT_OPS_SESSION_TOKEN",
+      "DRTS_OPERATIONAL_DISPATCH_SESSION_TOKEN",
       "tenant-ops-session-token",
     );
     vi.stubEnv("DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN", "driver-session-token");
@@ -3478,7 +3502,22 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         const headers = new Headers(init?.headers);
         const appAuth = headers.get("x-drts-authorization") || "";
 
-        if (url.pathname === "/control-plane-proxy/auth/session") {
+        if (
+          url.origin === origin &&
+          url.pathname === "/control-plane-proxy/auth/session" &&
+          appAuth !== "Bearer own-fleet-session-token"
+        ) {
+          return jsonResponse(
+            { error: { code: "FLEET_PARTNER_AUTHORITY_REQUIRED" } },
+            403,
+          );
+        }
+
+        if (
+          (url.origin === apiOrigin && url.pathname === "/api/auth/session") ||
+          (url.origin === origin &&
+            url.pathname === "/control-plane-proxy/auth/session")
+        ) {
           if (appAuth === "Bearer own-fleet-session-token") {
             return jsonResponse({
               data: {
@@ -3535,8 +3574,8 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
                 active: true,
                 identity: {
                   realm: "tenant",
-                  actorType: "tenant_user",
-                  roles: ["tenant_ops"],
+                  actorType: "tenant_admin",
+                  roles: ["tenant_ops_admin"],
                 },
               },
             });
@@ -3558,9 +3597,9 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
               data: {
                 active: true,
                 identity: {
-                  realm: "platform",
+                  realm: "ops",
                   actorType: "ops_user",
-                  roles: ["ops_dispatcher"],
+                  roles: ["ops_user"],
                 },
               },
             });
