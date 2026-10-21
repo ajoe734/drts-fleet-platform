@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "../../../lib/i18n";
 import {
@@ -11,11 +11,13 @@ import {
   CanvasIcon,
 } from "@drts/ui-web";
 import {
+  executeStagedFleetUpload,
   fleetDocumentRequest,
   fleetMutationHeaders,
   fleetDocumentProxyPath,
   putFleetDocument,
   type FleetDocumentUploadIntent,
+  type FleetStagedUploadSession,
 } from "../../../lib/fleet-document-upload";
 import { FleetActionButton } from "../../../components/fleet-action-button";
 import { buildFleetTheme } from "../../../lib/fleet-portal-theme";
@@ -48,11 +50,51 @@ export function CaseReplyComposer({
 
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadFiles = useRef(new Map<string, File>());
+  const uploadSessions = useRef(
+    new Map<
+      string,
+      FleetStagedUploadSession<
+        FleetDocumentUploadIntent & { attachmentId: string; objectKey: string }
+      >
+    >(),
+  );
+  const inFlightUploads = useRef(new Set<string>());
+  const operationEpochs = useRef(new Map<string, number>());
+  const composerEpoch = useRef(0);
+  const mountedRef = useRef(true);
+  const activeCaseIdRef = useRef(caseDetail.id);
   const retryTarget = useRef<string | null>(null);
 
   const isClosed = caseDetail.status === "closed";
   const responseUnavailable = caseDetail.actionDescriptor?.enabled === false;
   const isPlatform = caseDetail.responsibility === "platform";
+  const isEditable = !isClosed && !isPlatform && !responseUnavailable;
+  const editableRef = useRef(isEditable);
+  editableRef.current = isEditable;
+
+  if (activeCaseIdRef.current !== caseDetail.id) {
+    activeCaseIdRef.current = caseDetail.id;
+    composerEpoch.current += 1;
+    uploadSessions.current.clear();
+    uploadFiles.current.clear();
+    inFlightUploads.current.clear();
+    operationEpochs.current.clear();
+  }
+  if (!isEditable && inFlightUploads.current.size > 0) {
+    composerEpoch.current += 1;
+    uploadSessions.current.clear();
+    inFlightUploads.current.clear();
+  }
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      composerEpoch.current += 1;
+      uploadSessions.current.clear();
+      inFlightUploads.current.clear();
+    };
+  }, []);
 
   const handleDownload = async (attachment: FleetCaseAttachmentRecord) => {
     try {
@@ -76,7 +118,31 @@ export function CaseReplyComposer({
     file: File,
     temporaryId = `upload-${crypto.randomUUID()}`,
   ) => {
+    if (!editableRef.current) return;
+    const previousFile = uploadFiles.current.get(temporaryId);
+    if (previousFile === file && inFlightUploads.current.has(temporaryId)) {
+      return;
+    }
+    if (previousFile && previousFile !== file) {
+      uploadSessions.current.delete(temporaryId);
+    }
+
+    const targetCaseId = caseDetail.id;
+    const startComposerEpoch = composerEpoch.current;
+    const opEpoch = (operationEpochs.current.get(temporaryId) ?? 0) + 1;
+    operationEpochs.current.set(temporaryId, opEpoch);
+    inFlightUploads.current.add(temporaryId);
     uploadFiles.current.set(temporaryId, file);
+
+    const isOperationActive = () =>
+      mountedRef.current &&
+      editableRef.current &&
+      activeCaseIdRef.current === targetCaseId &&
+      composerEpoch.current === startComposerEpoch &&
+      operationEpochs.current.get(temporaryId) === opEpoch &&
+      uploadFiles.current.get(temporaryId) === file;
+
+    const contentType = file.type || "application/octet-stream";
     const pending: FleetCaseAttachmentRecord = {
       attachmentId: temporaryId,
       caseId: caseDetail.id,
@@ -84,7 +150,7 @@ export function CaseReplyComposer({
       name: file.name,
       size: `${file.size} B`,
       fileSize: file.size,
-      contentType: file.type || "application/octet-stream",
+      contentType,
       state: "uploading",
       pct: 0,
       uploadedAt: new Date().toISOString(),
@@ -96,48 +162,116 @@ export function CaseReplyComposer({
       pending,
     ]);
     setErrorMessage(null);
+    const metadata = {
+      fileName: file.name,
+      fileSize: file.size,
+      contentType: pending.contentType,
+    };
+    const scopeKey = `${targetCaseId}:${temporaryId}:${file.name}:${file.size}:${pending.contentType}`;
+
     try {
-      const metadata = {
-        fileName: file.name,
-        fileSize: file.size,
-        contentType: pending.contentType,
-      };
-      const intent = await fleetDocumentRequest<
-        FleetDocumentUploadIntent & { attachmentId: string; objectKey: string }
-      >(`/api/fleet-partner/cases/${caseDetail.id}/attachments/upload-url`, {
-        method: "POST",
-        body: JSON.stringify(metadata),
-      });
-      await putFleetDocument(intent, file);
-      const confirmed = await fleetDocumentRequest<FleetCaseAttachmentRecord>(
-        `/api/fleet-partner/cases/${caseDetail.id}/attachments/confirm`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            ...metadata,
-            attachmentId: intent.attachmentId,
-            objectKey: intent.objectKey,
-          }),
+      await executeStagedFleetUpload({
+        file,
+        scopeKey,
+        getSession: () => uploadSessions.current.get(temporaryId),
+        setSession: (nextSession) => {
+          if (nextSession) uploadSessions.current.set(temporaryId, nextSession);
+          else uploadSessions.current.delete(temporaryId);
         },
-      );
-      setAttachments((previous) =>
-        previous.map((item) =>
-          item.attachmentId === temporaryId ? confirmed : item,
-        ),
-      );
-      uploadFiles.current.delete(temporaryId);
-      router.refresh();
+        isActive: isOperationActive,
+        createIntent: () =>
+          fleetDocumentRequest<
+            FleetDocumentUploadIntent & {
+              attachmentId: string;
+              objectKey: string;
+            }
+          >(`/api/fleet-partner/cases/${targetCaseId}/attachments/upload-url`, {
+            method: "POST",
+            body: JSON.stringify(metadata),
+          }),
+        putContent: (intent, targetFile) =>
+          putFleetDocument(intent, targetFile),
+        readCanonical: async (intent) => {
+          const detail = await fleetDocumentRequest<{
+            caseDetail?: FleetCaseItem;
+            attachments?: FleetCaseAttachmentRecord[];
+          }>(`/api/fleet-partner/cases/${targetCaseId}`);
+          const matched = (detail.attachments ?? []).find(
+            (item) =>
+              (item.attachmentId === intent.attachmentId ||
+                (Boolean(intent.objectKey) &&
+                  item.objectKey === intent.objectKey)) &&
+              item.state === "done",
+          );
+          if (matched) return matched;
+          if (
+            detail.caseDetail &&
+            (detail.caseDetail.status === "closed" ||
+              detail.caseDetail.responsibility === "platform" ||
+              detail.caseDetail.actionDescriptor?.enabled === false)
+          ) {
+            editableRef.current = false;
+            composerEpoch.current += 1;
+          }
+          return null;
+        },
+        confirmUpload: (intent) =>
+          fleetDocumentRequest<FleetCaseAttachmentRecord>(
+            `/api/fleet-partner/cases/${targetCaseId}/attachments/confirm`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                ...metadata,
+                attachmentId: intent.attachmentId,
+                objectKey: intent.objectKey,
+              }),
+            },
+          ),
+        finalizeResult: async (confirmed) => {
+          if (
+            !confirmed ||
+            confirmed.state !== "done" ||
+            !confirmed.attachmentId
+          ) {
+            throw new Error("附件確認讀回無效");
+          }
+          await Promise.resolve(router.refresh());
+          if (!isOperationActive()) return;
+          setAttachments((previous) => {
+            const updated: FleetCaseAttachmentRecord[] = [];
+            let replaced = false;
+            for (const item of previous) {
+              if (item.attachmentId === temporaryId) {
+                updated.push(confirmed);
+                replaced = true;
+              } else if (item.attachmentId !== confirmed.attachmentId) {
+                updated.push(item);
+              }
+            }
+            return replaced ? updated : [...updated, confirmed];
+          });
+          uploadFiles.current.delete(temporaryId);
+        },
+      });
     } catch (error) {
+      if (!isOperationActive()) return;
       setAttachments((previous) =>
         previous.map((item) =>
           item.attachmentId === temporaryId ? { ...item, state: "fail" } : item,
         ),
       );
       setErrorMessage(error instanceof Error ? error.message : "附件上傳失敗");
+    } finally {
+      if (operationEpochs.current.get(temporaryId) === opEpoch) {
+        inFlightUploads.current.delete(temporaryId);
+      }
     }
   };
 
   const handleRetryUpload = (attachmentId: string) => {
+    if (!editableRef.current || inFlightUploads.current.has(attachmentId)) {
+      return;
+    }
     const file = uploadFiles.current.get(attachmentId);
     if (file) void uploadAttachment(file, attachmentId);
     else {
@@ -557,8 +691,18 @@ export function CaseReplyComposer({
             style={{ display: "none" }}
             onChange={(event) => {
               const file = event.target.files?.[0];
-              if (file)
-                void uploadAttachment(file, retryTarget.current ?? undefined);
+              const targetId = retryTarget.current;
+              retryTarget.current = null;
+              if (file) {
+                void uploadAttachment(file, targetId ?? undefined);
+              } else {
+                composerEpoch.current += 1;
+                uploadSessions.current.clear();
+                inFlightUploads.current.clear();
+                if (targetId) {
+                  uploadFiles.current.delete(targetId);
+                }
+              }
               event.target.value = "";
             }}
           />

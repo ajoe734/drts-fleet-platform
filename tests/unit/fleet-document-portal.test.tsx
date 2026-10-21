@@ -10,7 +10,10 @@ import {
 import type { ReactNode } from "react";
 import { CaseReplyComposer } from "../../apps/fleet-partner-portal-web/app/cases/[caseId]/case-reply-composer";
 import type { FleetCaseItem } from "../../apps/fleet-partner-portal-web/lib/fleet-portal-data.server";
-import { putFleetDocument } from "../../apps/fleet-partner-portal-web/lib/fleet-document-upload";
+import {
+  fleetDocumentRequest,
+  putFleetDocument,
+} from "../../apps/fleet-partner-portal-web/lib/fleet-document-upload";
 
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
@@ -141,11 +144,15 @@ describe("C125 actual portal file interactions", () => {
       .mockResolvedValueOnce(apiIntent())
       .mockResolvedValueOnce(
         Response.json(
-          { error: { message: "scanner unavailable" } },
+          {
+            error: {
+              code: "DOCUMENT_SCANNER_UNAVAILABLE",
+              message: "scanner unavailable",
+            },
+          },
           { status: 503 },
         ),
       )
-      .mockResolvedValueOnce(apiIntent())
       .mockResolvedValueOnce(Response.json({ data: { scan_state: "clean" } }))
       .mockResolvedValueOnce(Response.json({ data: record }));
     vi.stubGlobal("fetch", fetcher);
@@ -162,8 +169,17 @@ describe("C125 actual portal file interactions", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(refresh).not.toHaveBeenCalled();
     fireEvent.click(screen.getByText("重試"));
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(5));
-    expect(fetcher.mock.calls[3][1].body).toBe(file);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(4));
+    expect(fetcher.mock.calls[2]).toEqual([
+      path.replace("/api/", "/control-plane-proxy/"),
+      { method: "PUT", headers: intent.headers, body: file },
+    ]);
+    expect(JSON.parse(fetcher.mock.calls[3][1].body)).toMatchObject({
+      attachmentId: "att-1",
+      objectKey: "key-1",
+      fileName: "evidence.pdf",
+      fileSize: 8,
+    });
     await waitFor(() => expect(screen.getByText("已上傳")).toBeDefined());
     expect(refresh).toHaveBeenCalledTimes(1);
   });
@@ -211,5 +227,252 @@ describe("C125 actual portal file interactions", () => {
       ),
     ).rejects.toThrow();
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("resumes confirmation after PUT succeeded by checking canonical case GET first and reconciling without duplicate PUT or duplicate attachment", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(apiIntent())
+      .mockResolvedValueOnce(Response.json({ data: { scan_state: "clean" } }))
+      .mockResolvedValueOnce(
+        Response.json(
+          { error: { message: "confirmation unavailable" } },
+          { status: 503 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { case_detail: caseDetail, attachments: [] },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ data: record }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { case_detail: caseDetail, attachments: [] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { case_detail: caseDetail, attachments: [record] },
+        }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    render(
+      <CaseReplyComposer caseDetail={caseDetail} initialAttachments={[]} />,
+    );
+    const file = new File(["evidence"], "evidence.pdf", {
+      type: "application/pdf",
+    });
+    fireEvent.change(screen.getByLabelText("檔名"), {
+      target: { files: [file] },
+    });
+    await waitFor(() => expect(screen.getByText("上傳失敗")).toBeDefined());
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(refresh).not.toHaveBeenCalled();
+
+    // Retry 1: GET sees attachment not yet confirmed, resumes only confirm, but refresh fails.
+    refresh.mockImplementationOnce(() => {
+      throw new Error("refresh failed");
+    });
+    fireEvent.click(screen.getByText("重試"));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(5));
+    expect(fetcher.mock.calls[3][0]).toBe(
+      "/control-plane-proxy/fleet-partner/cases/case-1",
+    );
+    expect(fetcher.mock.calls[4][0]).toBe(
+      "/control-plane-proxy/fleet-partner/cases/case-1/attachments/confirm",
+    );
+    expect(screen.queryByText("已上傳")).toBeNull();
+    expect(screen.getByText("上傳失敗")).toBeDefined();
+
+    // Retry 2: confirm already succeeded; GET without matching canonical attachment cannot claim success.
+    fireEvent.click(screen.getByText("重試"));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(6));
+    expect(fetcher.mock.calls[5][0]).toBe(
+      "/control-plane-proxy/fleet-partner/cases/case-1",
+    );
+    expect(screen.queryByText("已上傳")).toBeNull();
+    expect(screen.getByText("上傳失敗")).toBeDefined();
+
+    // Retry 3: GET returns the canonical confirmed attachment; readback reconciles without re-POSTing confirm.
+    fireEvent.click(screen.getByText("重試"));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(7));
+    expect(fetcher.mock.calls[6][0]).toBe(
+      "/control-plane-proxy/fleet-partner/cases/case-1",
+    );
+    await waitFor(() => expect(screen.getByText("已上傳")).toBeDefined());
+    expect(screen.getAllByText("evidence.pdf")).toHaveLength(1);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves HTTP status/code on helper errors, deduplicates in-flight retries, invalidates on new File/clear/closed case, and checks canonical GET on expired intent before explicit rebuild", async () => {
+    const secondPath =
+      "/api/fleet-partner/cases/case-1/attachments/content?objectKey=key-2";
+    const secondRecord = {
+      ...record,
+      attachment_id: "att-2",
+      object_key: "key-2",
+    };
+    let resolveExpiredPut!: (value: Response) => void;
+    let resolveClosedPut!: (value: Response) => void;
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "DOCUMENT_SCAN_REJECTED",
+              message: "malware detected",
+            },
+          },
+          { status: 422 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { status: "down", error: "upstream unavailable" },
+          { status: 503 },
+        ),
+      )
+      .mockResolvedValueOnce(apiIntent())
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "DOCUMENT_SCANNER_UNAVAILABLE",
+              message: "scanner unavailable",
+            },
+          },
+          { status: 503 },
+        ),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveExpiredPut = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: { case_detail: caseDetail, attachments: [] },
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            upload_url: secondPath,
+            method: "PUT",
+            headers: intent.headers,
+            attachment_id: "att-2",
+            object_key: "key-2",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ data: { scan_state: "clean" } }))
+      .mockResolvedValueOnce(Response.json({ data: secondRecord }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            upload_url:
+              "/api/fleet-partner/cases/case-1/attachments/content?objectKey=key-3",
+            method: "PUT",
+            headers: intent.headers,
+            attachment_id: "att-3",
+            object_key: "key-3",
+          },
+        }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveClosedPut = resolve;
+          }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(
+      putFleetDocument(intent, new File(["bad"], "bad.pdf")),
+    ).rejects.toMatchObject({
+      message: "malware detected",
+      status: 422,
+      code: "DOCUMENT_SCAN_REJECTED",
+    });
+    await expect(
+      fleetDocumentRequest("/api/fleet-partner/cases/case-1"),
+    ).rejects.toMatchObject({
+      message: "upstream unavailable",
+      status: 503,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+
+    const { rerender } = render(
+      <CaseReplyComposer caseDetail={caseDetail} initialAttachments={[]} />,
+    );
+    const fileA = new File(["evidence"], "evidence.pdf", {
+      type: "application/pdf",
+    });
+    fireEvent.change(screen.getByLabelText("檔名"), {
+      target: { files: [fileA] },
+    });
+    await waitFor(() => expect(screen.getByText("上傳失敗")).toBeDefined());
+    expect(fetcher).toHaveBeenCalledTimes(4);
+
+    // Double-click retry while in-flight: only one PUT request is issued.
+    const retryButton = screen.getByText("重試");
+    fireEvent.click(retryButton);
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(5));
+    expect(fetcher.mock.calls[4][0]).toBe(
+      path.replace("/api/", "/control-plane-proxy/"),
+    );
+
+    // Intent expired (409 UPLOAD_URL_INVALID): checks canonical GET first, then surfaces 409 without auto-retry.
+    resolveExpiredPut(
+      Response.json(
+        {
+          error: {
+            code: "UPLOAD_URL_INVALID",
+            message:
+              "Upload intent is missing, expired or outside this resource scope.",
+          },
+        },
+        { status: 409 },
+      ),
+    );
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(6));
+    expect(fetcher.mock.calls[5][0]).toBe(
+      "/control-plane-proxy/fleet-partner/cases/case-1",
+    );
+    await waitFor(() => expect(screen.getByText("上傳失敗")).toBeDefined());
+
+    // Explicit new retry after expiry issues a fresh upload-url intent, scans and confirms.
+    fireEvent.click(screen.getByText("重試"));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(9));
+    expect(fetcher.mock.calls[6][0]).toBe(
+      "/control-plane-proxy/fleet-partner/cases/case-1/attachments/upload-url",
+    );
+    expect(fetcher.mock.calls[7][0]).toBe(
+      secondPath.replace("/api/", "/control-plane-proxy/"),
+    );
+    await waitFor(() => expect(screen.getByText("已上傳")).toBeDefined());
+
+    // New same-name same-size File starts a new intent; closing the case while PUT is in-flight stops before confirm.
+    const fileB = new File(["evidence"], "evidence.pdf", {
+      type: "application/pdf",
+    });
+    fireEvent.change(screen.getByLabelText("檔名"), {
+      target: { files: [fileB] },
+    });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(11));
+    rerender(
+      <CaseReplyComposer
+        caseDetail={{ ...caseDetail, status: "closed" }}
+        initialAttachments={[]}
+      />,
+    );
+    resolveClosedPut(Response.json({ data: { scan_state: "clean" } }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetcher).toHaveBeenCalledTimes(11);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });
