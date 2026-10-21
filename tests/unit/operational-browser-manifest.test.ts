@@ -791,9 +791,21 @@ describe("C125 full document family, Case attachment, and cross-role manifest co
         "tenant_ops",
         "driver",
         "ops_non_reviewer",
+        "system",
         "unauthenticated",
         "invalid_session",
       ]),
     );
+    const adminReviewerProbes = roleProbes.filter((item) =>
+      String(item.path).startsWith(
+        "/control-plane-proxy/admin/fleet-partners/",
+      ),
+    );
+    expect(adminReviewerProbes.length).toBeGreaterThanOrEqual(14);
+    expect(
+      adminReviewerProbes.every(
+        (item) => item.baseUrlEnv === "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+      ),
+    ).toBe(true);
   });
 });

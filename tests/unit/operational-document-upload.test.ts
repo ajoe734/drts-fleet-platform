@@ -2769,14 +2769,20 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
     const png = getOperationalDocumentFixture("image/png", "evidence.png");
     const pngFacts = checkActualPng(png.bytes);
     expect(png.bytes).toEqual(OPERATIONAL_PNG_BYTES);
-    expect(png.fileSize).toBe(70);
+    expect(png.fileSize).toBe(69);
+    expect(png.sha256).toBe(
+      "2128be2646bad332aa1e97b2676d9f960a43ff1a9d80bc6baf42c2d131034b83",
+    );
     expect(png.sha256).toBe(pngFacts.sha256);
     expect(png.originalFileName).toBe("evidence.png");
 
     const jpeg = getOperationalDocumentFixture("image/jpeg", "evidence.jpg");
     const jpegFacts = checkActualJpeg(jpeg.bytes);
     expect(jpeg.bytes).toEqual(OPERATIONAL_JPEG_BYTES);
-    expect(jpeg.fileSize).toBe(314);
+    expect(jpeg.fileSize).toBe(332);
+    expect(jpeg.sha256).toBe(
+      "2873aca24970d8ab5f392f0d694229e3b14cf65c9425cadd92a8295399576288",
+    );
     expect(jpeg.sha256).toBe(jpegFacts.sha256);
     expect(jpeg.originalFileName).toBe("evidence.jpg");
 
@@ -2884,9 +2890,12 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
           });
         }
         if (method === "GET" && url.pathname.endsWith("/download")) {
+          const adminMatch = url.pathname.match(
+            /^\/control-plane-proxy\/admin\/fleet-partners\/supply-documents\/([^/]+)\/([^/]+)\/download$/,
+          );
           const parts = url.pathname.split("/");
-          const subId = parts[4]!;
-          const docId = parts[6]!;
+          const subId = adminMatch ? adminMatch[1]! : parts[4]!;
+          const docId = adminMatch ? adminMatch[2]! : parts[6]!;
           const stored = uploadedObjects.get(`${subId}:${docId}`)!;
           return new Response(new Uint8Array(stored.bytes), {
             status: 200,
@@ -2966,6 +2975,23 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
       expect(ev.confirmDocumentType).toBe(spec.documentType);
       expect(ev.readbackContentType).toBe(spec.contentType);
       expect(ev.readbackSha256).toBe(ev.sha256);
+      const reviewerSupplyReadback =
+        await downloadOperationalDocumentAsReviewer(
+          adminOrigin,
+          "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+          {
+            kind: "supply",
+            submissionId: spec.subId,
+            documentId: ev.documentId!,
+          },
+          {
+            sha256: ev.sha256,
+            fileSize: ev.fileSize,
+            contentType: spec.contentType as any,
+          },
+        );
+      expect(reviewerSupplyReadback.downloadStatus).toBe(200);
+      expect(reviewerSupplyReadback.readbackSha256).toBe(ev.sha256);
     }
 
     // Reject invented photo enum
@@ -3155,11 +3181,19 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         }
         if (
           method === "GET" &&
-          url.pathname.match(
+          (url.pathname.match(
             /^\/control-plane-proxy\/fleet-partner\/cases\/CASE-STL-202603-001\/attachments\/([^/]+)\/download$/,
-          )
+          ) ||
+            url.pathname.match(
+              /^\/control-plane-proxy\/admin\/fleet-partners\/case-attachments\/CASE-STL-202603-001\/([^/]+)\/download$/,
+            ))
         ) {
-          const attachmentId = url.pathname.split("/")[6]!;
+          const adminMatch = url.pathname.match(
+            /^\/control-plane-proxy\/admin\/fleet-partners\/case-attachments\/CASE-STL-202603-001\/([^/]+)\/download$/,
+          );
+          const attachmentId = adminMatch
+            ? adminMatch[1]!
+            : url.pathname.split("/")[6]!;
           const record = caseAttachments.get(attachmentId)!;
           return new Response(new Uint8Array(record.bytes), {
             status: 200,
@@ -3402,6 +3436,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
       "DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN",
       "ops-non-reviewer-session-token",
     );
+    vi.stubEnv("DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN", "system-session-token");
 
     // Reject spoofed headers on both standard and role header builders
     for (const spoofHeader of [
@@ -3530,10 +3565,22 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
               },
             });
           }
+          if (appAuth === "Bearer system-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "system",
+                  actorType: "system",
+                  roles: ["system"],
+                },
+              },
+            });
+          }
           return jsonResponse({ error: { code: "UNAUTHENTICATED" } }, 401);
         }
 
-        // Business endpoints: only own_fleet or platform_reviewer allowed
+        // Business endpoints: only own_fleet on fleet-partner routes or platform_reviewer on admin routes allowed
         if (
           !appAuth ||
           appAuth === "Bearer invalid.operational.session.token"
@@ -3543,16 +3590,25 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
             401,
           );
         }
+        const isAdminReviewerRoute = url.pathname.startsWith(
+          "/control-plane-proxy/admin/fleet-partners/",
+        );
+        if (isAdminReviewerRoute) {
+          if (appAuth === "Bearer platform-reviewer-session-token") {
+            return jsonResponse({ data: { ok: true } }, 200);
+          }
+          return jsonResponse(
+            { error: { code: "DOCUMENT_REVIEW_DENIED" } },
+            403,
+          );
+        }
         if (appAuth === "Bearer foreign-fleet-session-token") {
           return jsonResponse(
             { error: { code: "SUPPLY_SUBMISSION_NOT_FOUND" } },
             404,
           );
         }
-        if (
-          appAuth === "Bearer own-fleet-session-token" ||
-          appAuth === "Bearer platform-reviewer-session-token"
-        ) {
+        if (appAuth === "Bearer own-fleet-session-token") {
           return jsonResponse({ data: { ok: true } }, 200);
         }
         return jsonResponse({ error: { code: "FORBIDDEN" } }, 403);
@@ -3576,8 +3632,18 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         {
           kind: "role-access-probe",
           baseUrlEnv: "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+          role: "own_fleet",
+          verifySession: false,
+          path: "/control-plane-proxy/admin/fleet-partners/supply-documents/sub-1/doc-1/download",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "DOCUMENT_REVIEW_DENIED",
+        },
+        {
+          kind: "role-access-probe",
+          baseUrlEnv: "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
           role: "platform_reviewer",
-          path: "/control-plane-proxy/fleet-partner/supply-submissions/sub-1/documents/doc-1/download",
+          path: "/control-plane-proxy/admin/fleet-partners/supply-documents/sub-1/doc-1/download",
           method: "GET",
           expectedStatus: 200,
         },
@@ -3623,6 +3689,24 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         },
         {
           kind: "role-access-probe",
+          baseUrlEnv: "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+          role: "ops_non_reviewer",
+          verifySession: false,
+          path: "/control-plane-proxy/admin/fleet-partners/case-attachments/CASE-1/att-1/download",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "DOCUMENT_REVIEW_DENIED",
+        },
+        {
+          kind: "role-access-probe",
+          role: "system",
+          path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "FORBIDDEN",
+        },
+        {
+          kind: "role-access-probe",
           role: "unauthenticated",
           path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
           method: "GET",
@@ -3645,8 +3729,9 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
       acceptance,
       {},
     );
-    expect(recorded).toHaveLength(9);
+    expect(recorded).toHaveLength(12);
     expect(recorded.map((r) => r.role)).toEqual([
+      "own_fleet",
       "own_fleet",
       "platform_reviewer",
       "foreign_fleet",
@@ -3654,6 +3739,8 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
       "tenant_ops",
       "driver",
       "ops_non_reviewer",
+      "ops_non_reviewer",
+      "system",
       "unauthenticated",
       "invalid_session",
     ]);

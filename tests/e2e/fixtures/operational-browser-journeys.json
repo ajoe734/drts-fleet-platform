@@ -1011,6 +1011,24 @@
       },
       {
         "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "own_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/supply-documents/{{c125DriverSubmissionId}}/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "own_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/case-attachments/{{c125CaseId}}/{{c125CasePdfAttachmentId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
         "role": "foreign_fleet",
         "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}",
         "method": "GET",
@@ -1023,6 +1041,15 @@
         "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
         "method": "GET",
         "expectedStatus": [403, 404]
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "foreign_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/supply-documents/{{c125DriverSubmissionId}}/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
       },
       {
         "kind": "role-access-probe",
@@ -1050,6 +1077,15 @@
       },
       {
         "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "foreign_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/case-attachments/{{c125CaseId}}/{{c125CasePdfAttachmentId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
         "role": "tenant_admin",
         "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
         "method": "GET",
@@ -1060,6 +1096,24 @@
         "role": "tenant_admin",
         "verifySession": false,
         "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "tenant_admin",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/supply-documents/{{c125DriverSubmissionId}}/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "tenant_admin",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/case-attachments/{{c125CaseId}}/{{c125CasePdfAttachmentId}}/download",
         "method": "GET",
         "expectedStatus": 403
       },
@@ -1080,6 +1134,24 @@
       },
       {
         "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "tenant_ops",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/supply-documents/{{c125DriverSubmissionId}}/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "tenant_ops",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/case-attachments/{{c125CaseId}}/{{c125CasePdfAttachmentId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
         "role": "driver",
         "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
         "method": "GET",
@@ -1095,6 +1167,24 @@
       },
       {
         "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "driver",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/supply-documents/{{c125DriverSubmissionId}}/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "driver",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/case-attachments/{{c125CaseId}}/{{c125CasePdfAttachmentId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
         "role": "ops_non_reviewer",
         "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
         "method": "GET",
@@ -1105,6 +1195,57 @@
         "role": "ops_non_reviewer",
         "verifySession": false,
         "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "ops_non_reviewer",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/supply-documents/{{c125DriverSubmissionId}}/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "ops_non_reviewer",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/case-attachments/{{c125CaseId}}/{{c125CasePdfAttachmentId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "system",
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "system",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "system",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/supply-documents/{{c125DriverSubmissionId}}/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "system",
+        "verifySession": false,
+        "path": "/control-plane-proxy/admin/fleet-partners/case-attachments/{{c125CaseId}}/{{c125CasePdfAttachmentId}}/download",
         "method": "GET",
         "expectedStatus": 403
       },
@@ -1133,6 +1274,22 @@
         "kind": "role-access-probe",
         "role": "invalid_session",
         "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 401
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "invalid_session",
+        "path": "/control-plane-proxy/admin/fleet-partners/supply-documents/{{c125DriverSubmissionId}}/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 401
+      },
+      {
+        "kind": "role-access-probe",
+        "baseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "role": "invalid_session",
+        "path": "/control-plane-proxy/admin/fleet-partners/case-attachments/{{c125CaseId}}/{{c125CasePdfAttachmentId}}/download",
         "method": "GET",
         "expectedStatus": 401
       }

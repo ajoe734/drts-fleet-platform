@@ -35,21 +35,24 @@ export const OPERATIONAL_PDF_BYTES = Buffer.from(
 );
 
 export const OPERATIONAL_PNG_BYTES = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
-  "base64",
+  "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de" +
+    "0000000c4944415478da6338639c060003340166067b33000000000049454e44ae" +
+    "426082",
+  "hex",
 );
 
 export const OPERATIONAL_JPEG_BYTES = Buffer.from(
-  "ffd8ffe000104a46494600010100000100010000ffdb0043000101010101010101" +
-    "010101010101010101010101010101010101010101010101010101010101010101" +
-    "0101010101010101010101010101010101010101010101ffc0000b080001000101" +
+  "ffd8ffe000104a46494600010101006000600000ffdb0043000806060706050807" +
+    "07070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c" +
+    "231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101" +
     "011100ffc4001f0000010501010101010100000000000000000102030405060708" +
     "090a0bffc400b5100002010303020403050504040000017d010203000411051221" +
     "31410613516107227114328191a1082342b1c11552d1f02433627282090a161718" +
     "191a25262728292a3435363738393a434445464748494a535455565758595a6364" +
     "65666768696a737475767778797a838485868788898a92939495969798999aa2a3" +
     "a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9" +
-    "dadbc2ffda0008010100003f007f00ffd9",
+    "dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f00fbfd" +
+    "ffd9",
   "hex",
 );
 
@@ -563,8 +566,11 @@ export async function uploadOperationalDocument(
           case_id?: string;
           caseId?: string;
           checksum_sha256?: string;
+          checksumSha256?: string;
           file_size?: number;
+          fileSize?: number;
           scan_state?: string;
+          scanState?: string;
         };
       };
       checkDeadline();
@@ -574,10 +580,15 @@ export async function uploadOperationalDocument(
           "PUT attachment_id must match intent attachmentId",
         ).toBe(attachmentId);
       }
-      expect(putData?.data?.checksum_sha256, "PUT checksum").toBe(sha256);
-      expect(putData?.data?.file_size, "PUT file_size").toBe(fileSize);
-      expect(putData?.data?.scan_state, "PUT scan_state").toBe("clean");
-      putScanState = putData?.data?.scan_state || "";
+      const casePutChecksum =
+        putData?.data?.checksum_sha256 ?? putData?.data?.checksumSha256;
+      const casePutSize = putData?.data?.file_size ?? putData?.data?.fileSize;
+      const casePutScanState =
+        putData?.data?.scan_state ?? putData?.data?.scanState;
+      expect(casePutChecksum, "PUT checksum").toBe(sha256);
+      expect(casePutSize, "PUT file_size").toBe(fileSize);
+      expect(casePutScanState, "PUT scan_state").toBe("clean");
+      putScanState = casePutScanState || "";
       scanReceiptOk = true;
     }
     expect(
@@ -968,19 +979,27 @@ export async function uploadOperationalDocument(
   const intentText = intentResponse.body.toString("utf8");
   const intentData = JSON.parse(intentText) as {
     data: {
-      object_key: string;
-      upload_url: string;
+      object_key?: string;
+      objectKey?: string;
+      upload_url?: string;
+      uploadUrl?: string;
       method: string;
       headers: Record<string, string>;
       submission_id?: string;
+      submissionId?: string;
       fleet_partner_id?: string;
+      fleetPartnerId?: string;
     };
   };
 
-  const objectKey = intentData.data.object_key;
-  const rawUploadUrl = intentData.data.upload_url;
+  const objectKey =
+    intentData.data.object_key ?? intentData.data.objectKey ?? "";
+  const rawUploadUrl =
+    intentData.data.upload_url ?? intentData.data.uploadUrl ?? "";
   const uploadMethod = intentData.data.method;
   const uploadHeaders = intentData.data.headers;
+  const intentSubmissionId =
+    intentData.data.submission_id ?? intentData.data.submissionId;
 
   expect(objectKey, "object_key from intent").toBeTruthy();
   expect(
@@ -990,11 +1009,10 @@ export async function uploadOperationalDocument(
     "object_key must begin with exact authoritative prefix",
   ).toBeTruthy();
 
-  if (intentData.data.submission_id) {
-    expect(
-      intentData.data.submission_id,
-      "intent submission_id must match",
-    ).toBe(expectedSubmissionId);
+  if (intentSubmissionId) {
+    expect(intentSubmissionId, "intent submission_id must match").toBe(
+      expectedSubmissionId,
+    );
   }
 
   expect(rawUploadUrl, "upload_url from intent").toBeTruthy();
@@ -1098,15 +1116,23 @@ export async function uploadOperationalDocument(
     const putData = JSON.parse(putText) as {
       data?: {
         checksum_sha256?: string;
+        checksumSha256?: string;
         file_size?: number;
+        fileSize?: number;
         scan_state?: string;
+        scanState?: string;
       };
     };
     checkDeadline();
-    expect(putData?.data?.checksum_sha256, "PUT checksum").toBe(sha256);
-    expect(putData?.data?.file_size, "PUT file_size").toBe(fileSize);
-    expect(putData?.data?.scan_state, "PUT scan_state").toBe("clean");
-    putScanState = putData?.data?.scan_state || "";
+    const supplyPutChecksum =
+      putData?.data?.checksum_sha256 ?? putData?.data?.checksumSha256;
+    const supplyPutSize = putData?.data?.file_size ?? putData?.data?.fileSize;
+    const supplyPutScanState =
+      putData?.data?.scan_state ?? putData?.data?.scanState;
+    expect(supplyPutChecksum, "PUT checksum").toBe(sha256);
+    expect(supplyPutSize, "PUT file_size").toBe(fileSize);
+    expect(supplyPutScanState, "PUT scan_state").toBe("clean");
+    putScanState = supplyPutScanState || "";
     scanReceiptOk = true;
   }
   expect(
@@ -1307,6 +1333,7 @@ export type OperationalProbeRole =
   | "tenant_ops"
   | "driver"
   | "ops_non_reviewer"
+  | "system"
   | "unauthenticated"
   | "invalid_session";
 export type RoleAccessProbeSetup = {
@@ -2250,134 +2277,49 @@ export async function downloadOperationalDocumentAsReviewer(
   readbackFileSize: number;
   readbackContentType: string;
 }> {
-  if (target.kind === "supply") {
-    const downloadPath = `/control-plane-proxy/fleet-partner/supply-submissions/${encodeURIComponent(target.submissionId)}/documents/${encodeURIComponent(target.documentId)}/download`;
-    const downloadUrl = new URL(downloadPath, reviewerOrigin).toString();
-    const headers = operationalReviewerRequestHeaders(
-      reviewerBaseUrlEnv,
-      downloadUrl,
-    );
-    const response = await fetch(downloadUrl, {
-      method: "GET",
-      headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(30_000),
-    });
-    expect(
-      response.status,
-      `Reviewer GET supply document download ${downloadUrl}`,
-    ).toBe(200);
-    expectCandidateRevision(
-      response.headers,
-      `Reviewer GET supply document download ${downloadUrl}`,
-    );
-    const body = Buffer.from(await response.arrayBuffer());
-    const readbackSha256 = createHash("sha256").update(body).digest("hex");
-    const returnedType = response.headers.get("content-type") || "";
-    expect(readbackSha256, "Reviewer supply readback checksum").toBe(
-      expected.sha256,
-    );
-    expect(body.length, "Reviewer supply readback file_size").toBe(
-      expected.fileSize,
-    );
-    expect(
-      (returnedType.split(";")[0] || "").trim().toLowerCase(),
-      `Reviewer supply readback content_type exactly ${expected.contentType}`,
-    ).toBe(expected.contentType);
-    return {
-      downloadStatus: response.status,
-      readbackSha256,
-      readbackFileSize: body.length,
-      readbackContentType: returnedType,
-    };
-  }
-
-  const readUrlPath = `/control-plane-proxy/fleet-partner/cases/${encodeURIComponent(target.caseId)}/attachments/${encodeURIComponent(target.attachmentId)}/read-url`;
-  const readUrl = new URL(readUrlPath, reviewerOrigin).toString();
-  const readUrlHeaders = operationalReviewerRequestHeaders(
+  const prefix =
+    reviewerBaseUrlEnv === "DRTS_OPERATIONAL_API_URL" ||
+    reviewerBaseUrlEnv === "DRTS_DEV_API_BASE_URL"
+      ? "/api"
+      : "/control-plane-proxy";
+  const downloadPath =
+    target.kind === "supply"
+      ? `${prefix}/admin/fleet-partners/supply-documents/${encodeURIComponent(target.submissionId)}/${encodeURIComponent(target.documentId)}/download`
+      : `${prefix}/admin/fleet-partners/case-attachments/${encodeURIComponent(target.caseId)}/${encodeURIComponent(target.attachmentId)}/download`;
+  const downloadUrl = new URL(downloadPath, reviewerOrigin).toString();
+  const headers = operationalReviewerRequestHeaders(
     reviewerBaseUrlEnv,
-    readUrl,
+    downloadUrl,
   );
-  const readUrlResponse = await fetch(readUrl, {
+  const response = await fetch(downloadUrl, {
     method: "GET",
-    headers: readUrlHeaders,
+    headers,
     redirect: "manual",
     signal: AbortSignal.timeout(30_000),
   });
   expect(
-    readUrlResponse.status,
-    `Reviewer GET case attachment read-url ${readUrl}`,
+    response.status,
+    `Reviewer GET ${target.kind} document download ${downloadUrl}`,
   ).toBe(200);
   expectCandidateRevision(
-    readUrlResponse.headers,
-    `Reviewer GET case attachment read-url ${readUrl}`,
+    response.headers,
+    `Reviewer GET ${target.kind} document download ${downloadUrl}`,
   );
-  const readUrlPayload = (await readUrlResponse.json()) as {
-    data?: {
-      authorized?: boolean;
-      attachment_id?: string;
-      attachmentId?: string;
-      download_url?: string;
-      downloadUrl?: string;
-    };
-  };
-  expect(
-    readUrlPayload?.data?.authorized,
-    "Reviewer case read-url must return authorized=true",
-  ).toBe(true);
-  expect(
-    readUrlPayload?.data?.attachment_id || readUrlPayload?.data?.attachmentId,
-    "Reviewer case read-url attachment_id must match",
-  ).toBe(target.attachmentId);
-  const rawDownloadUrl =
-    readUrlPayload?.data?.download_url ||
-    readUrlPayload?.data?.downloadUrl ||
-    "";
-  expect(
-    rawDownloadUrl,
-    "Reviewer case read-url must return download_url",
-  ).toBeTruthy();
-
-  const parsedDownloadUrl = new URL(rawDownloadUrl, reviewerOrigin);
-  if (parsedDownloadUrl.pathname.startsWith("/api/")) {
-    parsedDownloadUrl.pathname = parsedDownloadUrl.pathname.replace(
-      /^\/api\//,
-      "/control-plane-proxy/",
-    );
-  }
-  const downloadHeaders = operationalReviewerRequestHeaders(
-    reviewerBaseUrlEnv,
-    parsedDownloadUrl.toString(),
-  );
-  const downloadResponse = await fetch(parsedDownloadUrl.toString(), {
-    method: "GET",
-    headers: downloadHeaders,
-    redirect: "manual",
-    signal: AbortSignal.timeout(30_000),
-  });
-  expect(
-    downloadResponse.status,
-    `Reviewer GET case attachment signed download ${parsedDownloadUrl.toString()}`,
-  ).toBe(200);
-  expectCandidateRevision(
-    downloadResponse.headers,
-    `Reviewer GET case attachment signed download ${parsedDownloadUrl.toString()}`,
-  );
-  const body = Buffer.from(await downloadResponse.arrayBuffer());
+  const body = Buffer.from(await response.arrayBuffer());
   const readbackSha256 = createHash("sha256").update(body).digest("hex");
-  const returnedType = downloadResponse.headers.get("content-type") || "";
-  expect(readbackSha256, "Reviewer case readback checksum").toBe(
+  const returnedType = response.headers.get("content-type") || "";
+  expect(readbackSha256, `Reviewer ${target.kind} readback checksum`).toBe(
     expected.sha256,
   );
-  expect(body.length, "Reviewer case readback file_size").toBe(
+  expect(body.length, `Reviewer ${target.kind} readback file_size`).toBe(
     expected.fileSize,
   );
   expect(
     (returnedType.split(";")[0] || "").trim().toLowerCase(),
-    `Reviewer case readback content_type exactly ${expected.contentType}`,
+    `Reviewer ${target.kind} readback content_type exactly ${expected.contentType}`,
   ).toBe(expected.contentType);
   return {
-    downloadStatus: downloadResponse.status,
+    downloadStatus: response.status,
     readbackSha256,
     readbackFileSize: body.length,
     readbackContentType: returnedType,
@@ -2401,6 +2343,7 @@ const ROLE_SESSION_TOKEN_ENVS: Record<
   tenant_ops: ["DRTS_OPERATIONAL_TENANT_OPS_SESSION_TOKEN"],
   driver: ["DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN"],
   ops_non_reviewer: ["DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN"],
+  system: ["DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN"],
 };
 
 function resolveOperationalRoleSessionToken(
@@ -2615,6 +2558,11 @@ export async function verifyOperationalRoleSession(
         actorType === "platform_admin",
       "ops_non_reviewer session must not have platform_reviewer/platform_admin authority",
     ).toBe(false);
+  } else if (role === "system") {
+    expect(
+      realm === "system" || actorType === "system" || roles.includes("system"),
+      "system session must carry system identity",
+    ).toBe(true);
   }
 
   return identity;
