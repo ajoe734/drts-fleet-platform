@@ -296,3 +296,115 @@ No product runtime, PG/browser test, deployment or external acceptance was
 performed. Both original parent acceptance keys remain OPEN. Owner handoff
 locks only this documentation candidate; GitHub bus/reviewer lifecycle owns
 its review, CI, protected merge and derived completion.
+
+## 2026-10-21 cycle — Claude2, task PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-MANUAL-UNBLOCK
+
+This is a freshly chair-generated `manual_unblock` helper (the 2026-10-12/10-18
+history-repair and manual-unblock children above were archived). The chair's own
+`chair_unblock_task_created` log entry explicitly says this helper exists only
+to satisfy `blocked_task_triage` validation, "without recreating archived
+helpers or violating the parent E-04 authority HOLD" — i.e. the chair is not
+asserting a new fixable defect exists. This cycle re-verified current machine
+truth via `ai-status.sh show` rather than trusting any stale `next` text.
+
+**depends_on is not the real gate.** All six `DRIVER-*-20261013` dependencies
+are `status: done` (`DRIVER-ACTUAL-FARE-CAPTURE-20261013` 75dfa2a3,
+`DRIVER-COMPLETION-ACTUAL-FARE-INPUT-20261013` df757486,
+`DRIVER-EXPLICIT-SURNAME-PROFILE-CAPTURE-20261013` 96f6099e,
+`DRIVER-EXPLICIT-SURNAME-PROFILE-SETTINGS-20261013` de05947d,
+`DRIVER-PROFILE-DURABLE-SAVE-ACK-20261013` 035aba04,
+`DRIVER-TRIP-SURNAME-SNAPSHOT-20261013` 3ad06567). `dependency_is_satisfied`
+only gates `backlog`/`todo` dispatch readiness in the active release
+(`ai_status.py` `recompute_agents`); it plays no role once a task is already
+`status: blocked` via an explicit `blocker`/HOLD call, so a fully satisfied
+`depends_on` list does not by itself move anything.
+
+**Real mechanism keeping the parent stuck.** `PAX-RECEIPT-COMPLAINT-20261009`
+is `status: blocked`, `waiting_for: Codex`, and already carries a fully
+reconciled candidate: `candidate_sha=b68ead3d7820`, `reviewed_sha` matches,
+`ci_status=success` on that same SHA, `merge_sha=835f6c1ba024` (already an
+ancestor of `dev`). Despite that, in the active release
+(`.artifacts/releases/orchestrator-7653d153659b/.../bin/ai_status.py`):
+
+- the GitHub-bus candidate-sync path has an explicit branch
+  `elif task.get("status") == "blocked": # CI/merge observations cannot
+  resume an explicitly blocked task` (~line 2487) — CI/merge events for this
+  exact SHA will never auto-advance the task while it stays `blocked`;
+- `command_record_acceptance` hard-requires `task.get("status") ==
+  "acceptance"` (~line 2562) — nobody, in any role, can record the missing
+  evidence key while the task sits in `blocked`;
+- `command_resume_blocked` requires `actor == "Supervisor"` (~line 1984) and
+  is **not** in `_guard_worker_command`'s dispatched-worker allowlist
+  (`start/progress/note/handoff/approve/reopen/blocker/system-block/
+  record-acceptance/request-acceptance-review/decline-acceptance-review`), so
+  no dispatched owner/reviewer session — including this one — can call it,
+  on the parent or on itself.
+
+This matches [[project-unblock-helper-dispatch-guard-parent-writes]] and
+[[project-review-dispatch-pinned-candidate-blocks-all-commands]]: a dispatched
+helper owner has no write path to the parent at all (`note <parent-id>` fails
+with "Dispatched worker cannot mutate a different task"; `assign` is outright
+rejected for dispatched workers). Only a Supervisor session with no
+`ORCH_RUN_ID`/`ORCH_DISPATCH_ROLE` can move this forward, and this helper
+cannot and should not try to simulate that by unsetting its own dispatch
+environment.
+
+**What is new since the 2026-10-12 HOLD was set.** The original HOLD text
+above cites an open `F-E04 / pax-receipt_e04_fields_and_passenger_download`
+gap: "authoritative issuer/operator, surname/masked credential, four actual
+fare components, captured payment method and total convention... ungranted".
+Since then, `PAX-RECEIPT-E04-CAPTURE-20261015` (owner Codex, reviewer
+Claude2) reached `status: done`: candidate `67a425d77e03` merged as
+`e323b9424f46`. Its one open reviewer finding
+(`E04-SHARED-PAX-OTP-CSRF-403`, request `68076ed7723a`) was independently
+resolved **declined, not reopened** on 2026-10-18: the OTP 403 was root-caused
+to `apps/passenger-app-web/.../route.ts` CSRF origin comparison breaking under
+Cloud Run's TLS-terminating proxy, a pre-existing bug already fixed by
+`PAX-CLOUD-RUN-ORIGIN-20261016` (commit `32205265`, merge-base confirms it
+lands between the v3 failing source `90e37f80` and the v4 passing source
+`48d9488c`, and the parent's own `merge_sha` `835f6c1b`/this candidate's
+`e323b942` both descend from `48d9488c`). The decline's live v4 re-verification
+(`DeployDev39131364323`, terminal success, artifact digest/CRC matched) shows
+real production ride records carrying the actual canonical E04 snapshot —
+`driver_surname`, all four `fare_breakdown` components, `fleet_operator_name`,
+`payment_method_display`, `driver_registration_masked` — with OTP/login and
+E04 capture passing end to end and no 403. Full resolution text and evidence
+paths are in the E04 task's own `acceptance_review_request.resolution` and
+`/home/lupin/workspace/drts-fleet-platform/.local/passenger-transport-bureau-review-20261015/e04-codex-owner-20261016/acceptance-67a425d7/shared-v3-terminal-20261016T103242Z/terminal-verification.json`.
+
+The parent's `required_acceptance` is still only half-recorded:
+`acceptance_evidence` has `pax-complaint_intake_and_low_rating` (passed,
+recorded 2026-10-14) but **no entry for
+`pax-receipt_e04_fields_and_passenger_download`** — the key the 2026-10-12
+HOLD was protecting. This report does not assert the HOLD's underlying
+concern (authoritative fleet-operator/legal mapping, as distinct from the
+field-capture plumbing) is fully closed — that is a business-authority
+judgment this dispatched helper is not positioned to make, and the chair's own
+note warns against unilaterally lifting it. What this report does establish
+is that the concrete field-capture gap the HOLD text named now has a done,
+merged, live-verified candidate behind it, so the HOLD is stale evidence that
+needs a fresh Supervisor/reviewer look, not an unchanged blocker.
+
+**No task-scoped code change was needed or made.** This helper's only
+qualifying action is this diagnosis update; the actual unblock step (resuming
+the parent, then recording the missing acceptance key) is outside this
+dispatch's write scope by design (see guard citations above) and is reported
+through this helper's own `blocker` call rather than attempted here.
+
+Recommended next action for a Supervisor-privileged session (no
+`ORCH_RUN_ID`), to be judged against the live HOLD context above before
+running:
+
+```
+AI_NAME=Supervisor ORCH_STATUS_ROOT=$(pwd) python3 \
+  /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-7653d153659b/tools/development-orchestrator/bin/ai_status.py \
+  resume-blocked PAX-RECEIPT-COMPLAINT-20261009 in_progress \
+  "E-04 field-capture gap behind the 2026-10-12 HOLD is now covered by PAX-RECEIPT-E04-CAPTURE-20261015 (done, merged e323b9424f, OTP-403 declined/not-reopened, live v4 verified); resuming so existing candidate b68ead3d7820/merge 835f6c1ba024 can reconcile to acceptance and the missing pax-receipt_e04_fields_and_passenger_download evidence can be recorded."
+```
+
+Followed by the parent's own owner (Codex2) or reviewer (Codex) running
+`record-acceptance PAX-RECEIPT-COMPLAINT-20261009 ...` with fresh
+`ACCEPTANCE_EVIDENCE_JSON` for `pax-receipt_e04_fields_and_passenger_download`,
+citing the PAX-RECEIPT-E04-CAPTURE-20261015 evidence above, per
+`AI_COLLABORATION_GUIDE.md` §0.7 (fresh same-candidate verification, not a
+copy-forward of this report).
