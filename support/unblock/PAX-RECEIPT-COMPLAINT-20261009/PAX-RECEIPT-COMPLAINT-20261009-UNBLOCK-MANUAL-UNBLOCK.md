@@ -358,7 +358,7 @@ Claude2) reached `status: done`: candidate `67a425d77e03` merged as
 `e323b9424f46`. Its one open reviewer finding
 (`E04-SHARED-PAX-OTP-CSRF-403`, request `68076ed7723a`) was independently
 resolved **declined, not reopened** on 2026-10-18: the OTP 403 was root-caused
-to `apps/passenger-app-web/.../route.ts` CSRF origin comparison breaking under
+to `apps/passenger-app-web/app/api/passenger-app/[...path]/route.ts` CSRF origin comparison breaking under
 Cloud Run's TLS-terminating proxy, a pre-existing bug already fixed by
 `PAX-CLOUD-RUN-ORIGIN-20261016` (commit `32205265`, merge-base confirms it
 lands between the v3 failing source `90e37f80` and the v4 passing source
