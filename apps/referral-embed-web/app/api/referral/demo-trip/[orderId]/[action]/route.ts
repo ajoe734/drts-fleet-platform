@@ -5,7 +5,7 @@ import {
   runReferralDemoTripServer,
 } from "../../../../../../lib/embed-booking-api";
 
-const ACTIONS = new Set(["assign", "complete"]);
+const ACTIONS = new Set(["assign", "heartbeat", "complete"]);
 
 function demoTripEnabled() {
   return (
@@ -30,7 +30,10 @@ export async function POST(
   try {
     await readReferralBody<Record<string, never>>(request);
     return referralResult(
-      await runReferralDemoTripServer(orderId, action as "assign" | "complete"),
+      await runReferralDemoTripServer(
+        orderId,
+        action as "assign" | "heartbeat" | "complete",
+      ),
     );
   } catch (error) {
     return referralErrorResponse(error);

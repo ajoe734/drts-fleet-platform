@@ -148,6 +148,7 @@ function harness(
     ]),
     listExclusivities: vi.fn(() => [{ vehicleId: "pax-review-vehicle-a" }]),
     prepareDispatchSupply: vi.fn(async () => undefined),
+    recordDriverLocationBatch: vi.fn(async () => ({ items: [] })),
   };
   const registryRepository = {
     loadState: vi.fn(async () => ({ drivers: [], vehicles: [] })),
@@ -307,6 +308,16 @@ describe("ReferralDemoTripService", () => {
       expect.objectContaining({ acceptedAt: expect.any(String) }),
       "req-1",
     );
+    // The first simulated driver-app heartbeat is bound to the accepted task.
+    const [heartbeat] =
+      h.registry.recordDriverLocationBatch.mock.calls[0]![0].items;
+    expect(heartbeat).toMatchObject({
+      driverId: "referral-demo-driver-2",
+      vehicleId: "referral-demo-vehicle-2",
+      taskId: "task-1",
+      workState: "assigned",
+      appState: "foreground",
+    });
     // Only the pair that was not chosen goes back offline.
     const offline = h.registry.updateDriverWorkStateFromPersistence.mock.calls
       .filter(([, command]) => command.workState === "offline")
@@ -530,5 +541,79 @@ describe("ReferralDemoTripService", () => {
       expect.any(Object),
       undefined,
     );
+  });
+
+  it("reports a task-bound heartbeat only for a demo driver's trip", async () => {
+    const h = harness({
+      order: order({ status: "driver_accepted" }),
+      tasks: [
+        {
+          taskId: "task-1",
+          orderId: "order-1",
+          driverId: "referral-demo-driver-3",
+          vehicleId: "referral-demo-vehicle-3",
+          status: "accepted",
+        },
+      ],
+    });
+    await h.service.heartbeat("order-1", identity);
+    expect(
+      h.registry.recordDriverLocationBatch.mock.calls[0]![0].items[0],
+    ).toMatchObject({
+      driverId: "referral-demo-driver-3",
+      vehicleId: "referral-demo-vehicle-3",
+      taskId: "task-1",
+      deviceId: "referral-demo-device-referral-demo-driver-3",
+    });
+
+    const real = harness({
+      order: order({ status: "driver_accepted" }),
+      tasks: [
+        {
+          taskId: "task-9",
+          orderId: "order-1",
+          driverId: "real-driver",
+          vehicleId: "real-vehicle",
+          status: "accepted",
+        },
+      ],
+    });
+    await expect(
+      real.service.heartbeat("order-1", identity),
+    ).rejects.toMatchObject({ code: "REFERRAL_DEMO_TRIP_NOT_ASSIGNED" });
+    expect(real.registry.recordDriverLocationBatch).not.toHaveBeenCalled();
+  });
+
+  it("closes in on the pickup over the approach and stays there once arrived", () => {
+    const h = harness();
+    const acceptedAt = "2026-10-21T02:00:00.000Z";
+    const base = Date.parse(acceptedAt);
+    const task = (status: string) =>
+      ({
+        taskId: "t",
+        driverId: "d",
+        vehicleId: "v",
+        status,
+        acceptedAt,
+      }) as never;
+    const start = h.service.simulatedPosition(
+      h.current as never,
+      task("accepted"),
+      base,
+    );
+    const later = h.service.simulatedPosition(
+      h.current as never,
+      task("enroute_pickup"),
+      base + 3 * 60_000,
+    );
+    const arrived = h.service.simulatedPosition(
+      h.current as never,
+      task("arrived_pickup"),
+      base + 3 * 60_000,
+    );
+    expect(start.lat).toBeCloseTo(25.01 + 0.012, 6);
+    expect(later.lat).toBeLessThan(start.lat);
+    expect(later.lat).toBeGreaterThan(25.01);
+    expect(arrived).toEqual({ lat: 25.01, lng: 121.46 });
   });
 });
