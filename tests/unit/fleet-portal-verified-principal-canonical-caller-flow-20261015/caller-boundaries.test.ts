@@ -809,7 +809,71 @@ it("real SupplySubmissionDetailView staged retry/resume reuses the same intent o
   expect(screen.getByText(new RegExp(idB))).toBeTruthy();
   expect(screen.queryByText("replacement-id.pdf")).toBeNull();
 
-  // Upload a document on B in the same instance: succeeds and confirms on B.
+  // Upload a document on B in the same instance while A's held canonical GET (both noneditable and editable with different revision)
+  // resolves mid-flight: neither may cancel B's confirm nor overwrite B's expectedRevisionNo.
+  const subAForHeldGet =
+    await fleetDocumentRequest<SupplySubmissionDetail>(root);
+  apiCalls.length = 0;
+  rerender(
+    createElement(SupplySubmissionDetailView, {
+      initialDetail: subAForHeldGet,
+      source: "live",
+    }),
+  );
+  const heldGetConfirmSpy = vi
+    .spyOn(fixture.supplyDocumentService, "confirmUpload")
+    .mockRejectedValueOnce(
+      new ApiRequestError(
+        503,
+        "CONFIRM_PRE_COMMIT_UNAVAILABLE",
+        "Submission A confirm transiently unavailable before held GET.",
+      ),
+    );
+  const subAHeldGetFile = new File(
+    [Buffer.from("submission-a-held-get-bytes")],
+    "sub-a-held-get.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(fileInput, { target: { files: [subAHeldGetFile] } });
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      screen.getByText(
+        /Submission A confirm transiently unavailable before held GET/i,
+      ),
+    ).toBeTruthy(),
+  );
+  let resolveHeldAGet!: (detail: SupplySubmissionDetail) => void;
+  let resolveHeldADraftGet!: (detail: SupplySubmissionDetail) => void;
+  const heldGetDetailSpy = vi
+    .spyOn(fixture.supplySubmissionService, "getSupplySubmissionDetail")
+    .mockImplementationOnce(
+      async () =>
+        new Promise((resolve) => {
+          resolveHeldAGet = resolve;
+        }),
+    );
+  // Click retry on A so A's canonical GET is in-flight and held.
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(apiCalls.filter((call) => call.path === root)).toHaveLength(1),
+  );
+  // Switch the SAME mounted instance back to B while A's canonical GET is still unresolved.
+  rerender(
+    createElement(SupplySubmissionDetailView, {
+      initialDetail: createdB,
+      source: "live",
+    }),
+  );
+  let releaseSubBPut!: () => void;
+  uploadContentSpy.mockImplementationOnce(
+    async (...args) =>
+      new Promise((resolve, reject) => {
+        releaseSubBPut = () => {
+          realUploadContent(...args).then(resolve, reject);
+        };
+      }),
+  );
   const subBFile = new File(
     [Buffer.from("submission-b-fresh-license-bytes")],
     "sub-b-license.pdf",
@@ -818,6 +882,24 @@ it("real SupplySubmissionDetailView staged retry/resume reuses the same intent o
   fireEvent.change(fileInput, { target: { files: [subBFile] } });
   fireEvent.click(uploadButton);
   await waitFor(() =>
+    expect(
+      apiCalls.filter((call) =>
+        call.path.endsWith(`/supply-submissions/${idB}/documents/content`),
+      ),
+    ).toHaveLength(1),
+  );
+  // Resolve A's held canonical GET with noneditable status="submitted" and high revisionNo=99 while B's PUT is pending.
+  resolveHeldAGet({
+    ...subAForHeldGet,
+    submission: {
+      ...subAForHeldGet.submission,
+      status: "submitted",
+      revisionNo: 99,
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  releaseSubBPut();
+  await waitFor(() =>
     expect(screen.getAllByText("sub-b-license.pdf").length).toBeGreaterThan(0),
   );
   expect(
@@ -825,6 +907,96 @@ it("real SupplySubmissionDetailView staged retry/resume reuses the same intent o
       call.path.endsWith(`/supply-submissions/${idB}/documents/confirm`),
     ),
   ).toHaveLength(1);
+
+  // Also verify editable status="draft" held canonical GET from A with revisionNo=99 does not overwrite B's revisionNo during B's in-flight PUT.
+  const subBAfterFirstDoc = await fleetDocumentRequest<SupplySubmissionDetail>(
+    `/api/fleet-partner/supply-submissions/${idB}`,
+  );
+  rerender(
+    createElement(SupplySubmissionDetailView, {
+      initialDetail: subAForHeldGet,
+      source: "live",
+    }),
+  );
+  heldGetDetailSpy.mockImplementationOnce(
+    async () =>
+      new Promise((resolve) => {
+        resolveHeldADraftGet = resolve;
+      }),
+  );
+  heldGetConfirmSpy.mockRejectedValueOnce(
+    new ApiRequestError(
+      503,
+      "CONFIRM_PRE_COMMIT_UNAVAILABLE",
+      "Submission A second confirm transiently unavailable.",
+    ),
+  );
+  const subADraftHeldFile = new File(
+    [Buffer.from("submission-a-draft-held-get-bytes")],
+    "sub-a-draft-held.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(fileInput, { target: { files: [subADraftHeldFile] } });
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      screen.getByText(/Submission A second confirm transiently unavailable/i),
+    ).toBeTruthy(),
+  );
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(apiCalls.filter((call) => call.path === root)).toHaveLength(2),
+  );
+  rerender(
+    createElement(SupplySubmissionDetailView, {
+      initialDetail: subBAfterFirstDoc,
+      source: "live",
+    }),
+  );
+  let releaseSubBSecondPut!: () => void;
+  uploadContentSpy.mockImplementationOnce(
+    async (...args) =>
+      new Promise((resolve, reject) => {
+        releaseSubBSecondPut = () => {
+          realUploadContent(...args).then(resolve, reject);
+        };
+      }),
+  );
+  const subBIdCardFile = new File(
+    [Buffer.from("submission-b-id-card-bytes")],
+    "sub-b-id-card.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(typeSelect, { target: { value: "driver_national_id" } });
+  fireEvent.change(fileInput, { target: { files: [subBIdCardFile] } });
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      apiCalls.filter((call) =>
+        call.path.endsWith(`/supply-submissions/${idB}/documents/content`),
+      ),
+    ).toHaveLength(2),
+  );
+  resolveHeldADraftGet({
+    ...subAForHeldGet,
+    submission: {
+      ...subAForHeldGet.submission,
+      status: "draft",
+      revisionNo: 99,
+    },
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  releaseSubBSecondPut();
+  await waitFor(() =>
+    expect(screen.getAllByText("sub-b-id-card.pdf").length).toBeGreaterThan(0),
+  );
+  expect(
+    apiCalls.filter((call) =>
+      call.path.endsWith(`/supply-submissions/${idB}/documents/confirm`),
+    ),
+  ).toHaveLength(2);
+  heldGetDetailSpy.mockRestore();
+  heldGetConfirmSpy.mockRestore();
 
   // Rerendering the SAME instance with B becoming non-editable ("submitted") while PUT is in-flight stops before confirm.
   apiCalls.length = 0;
