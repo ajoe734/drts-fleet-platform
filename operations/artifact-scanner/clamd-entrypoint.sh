@@ -227,10 +227,12 @@ echo "Starting clamd..."
 clamd --config-file=/etc/clamav/clamd.conf &
 CLAMD_PID=$!
 
+startup_ready=0
 attempt=0
 while [ "$attempt" -lt 60 ]; do
   if clamdscan --ping 1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then
     refresh_daily_readiness "$initial_freshclam_output" || echo "clamd is live but no signatures were found yet" >&2
+    startup_ready=1
     break
   fi
   attempt=$((attempt + 1))
@@ -247,9 +249,32 @@ done
 # update succeeding but its reload notification to clamd silently failing --
 # clamd reloads a genuinely changed database directory on its own within
 # that bound, well inside MAX_SIGNATURE_AGE_MS.
+#
+# If the initial 60-probe window exhausted while clamd is still alive and
+# finishing a slow cold-start signature load, continue 1-second readiness
+# probing until clamd answers a live ping and initial readiness is published
+# before entering the hourly freshclam refresh sleep.
 (
+  SLEEP_PID=""
+  trap 'if [ -n "$SLEEP_PID" ]; then pkill -P "$SLEEP_PID" 2>/dev/null || true; kill "$SLEEP_PID" 2>/dev/null || true; fi; exit 0' TERM INT
+  while [ "$startup_ready" -ne 1 ] && kill -0 "$CLAMD_PID" 2>/dev/null; do
+    if clamdscan --ping 1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then
+      refresh_daily_readiness "$initial_freshclam_output" || echo "clamd is live but no signatures were found yet" >&2
+      startup_ready=1
+      break
+    fi
+    kill -0 "$CLAMD_PID" 2>/dev/null || break
+    sleep 1 &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID" 2>/dev/null || true
+    SLEEP_PID=""
+  done
   while kill -0 "$CLAMD_PID" 2>/dev/null; do
-    sleep "$FRESHCLAM_INTERVAL_SECONDS"
+    sleep "$FRESHCLAM_INTERVAL_SECONDS" &
+    SLEEP_PID=$!
+    wait "$SLEEP_PID" 2>/dev/null || true
+    SLEEP_PID=""
+    kill -0 "$CLAMD_PID" 2>/dev/null || break
     if refresh_output=$(freshclam --stdout 2>&1); then
       printf '%s\n' "$refresh_output"
       refresh_daily_readiness "$refresh_output" || true
@@ -261,6 +286,6 @@ done
   done
 ) &
 WATCHDOG_PID=$!
-trap 'kill "$WATCHDOG_PID" 2>/dev/null || true' EXIT
+trap 'kill "$WATCHDOG_PID" 2>/dev/null || true; wait "$WATCHDOG_PID" 2>/dev/null || true' EXIT
 
 wait "$CLAMD_PID"
