@@ -681,4 +681,26 @@ describe("FLEET-MASTER-CANONICAL-READBACK-20261021: cross-instance canonical Fle
       (await c.getFleetPartner(created.fleetPartnerId)).fleetPartnerId,
     ).toBe(created.fleetPartnerId);
   });
+
+  it("does not fall back to stale in-memory cache when enabled repository returns empty list or null row", async () => {
+    const emptyRepo = new FleetPartnerRepository({
+      isEnabled: () => true,
+      query: async () => ({ rows: [], rowCount: 0 }),
+    } as unknown as DatabaseService);
+    const service = new FleetPartnerService(
+      {} as never,
+      {} as never,
+      {} as never,
+      emptyRepo,
+    );
+    expect(await service.listFleetPartners()).toEqual([]);
+    await expect(
+      service.getFleetPartner("fleet-demo-001"),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      service.updateFleetPartner("fleet-demo-001", {
+        displayName: "Should fail 404",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 });

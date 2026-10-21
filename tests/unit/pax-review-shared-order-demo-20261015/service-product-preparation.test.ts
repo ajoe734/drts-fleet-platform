@@ -66,7 +66,7 @@ function productPeers() {
           })),
         };
       const supplyInsert =
-        /INSERT INTO ((?:reg\.phase1_registry_\w+)|ops\.phase1_driver_profiles)/.exec(
+        /INSERT INTO ((?:reg\.phase1_registry_\w+)|admin\.phase1_(?:fleet_partners|driver_fleet_affiliations)|ops\.phase1_driver_profiles)/.exec(
           sql,
         );
       if (supplyInsert) {
@@ -124,15 +124,28 @@ function productPeers() {
             rows: policyVisible ? [{ record: structuredClone(policy) }] : [],
           };
         const table =
-          /FROM ((?:reg\.phase1_registry_\w+)|ops\.phase1_driver_profiles)/.exec(
+          /FROM ((?:reg\.phase1_registry_\w+)|admin\.phase1_(?:fleet_partners|driver_fleet_affiliations)|ops\.phase1_driver_profiles)/.exec(
             sql,
           )?.[1];
         if (table)
           return {
             rows: values.length
-              ? supplyRows(table).filter(
-                  (r) =>
-                    (r.record as { driverId?: string }).driverId === values[0],
+              ? supplyRows(table).filter((r) =>
+                  table === "admin.phase1_fleet_partners"
+                    ? sql.includes("multiTaxiOperatorIds")
+                      ? Boolean(
+                          (
+                            r.record as { multiTaxiOperatorIds?: string[] }
+                          ).multiTaxiOperatorIds?.includes(
+                            JSON.parse(String(values[0]))[0],
+                          ),
+                        )
+                      : (r.record as { fleetPartnerId?: string })
+                          .fleetPartnerId === values[0] &&
+                        (!sql.includes("active = true") ||
+                          (r.record as { active?: boolean }).active === true)
+                    : (r.record as { driverId?: string }).driverId ===
+                      values[0],
                 )
               : supplyRows(table),
           };
