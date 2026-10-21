@@ -27,6 +27,7 @@ import {
   requireFact,
   validateActualReceiptPdfBytes,
   consumeNativeReceiptPdfDownload,
+  captureOriginalUiCancellation,
   object,
   text,
   integer,
@@ -2065,101 +2066,148 @@ test(journeyName, async ({ browser, request }) => {
                 uiDisabled: true,
               };
             }
-            // Unknown legacy metadata does not fabricate a window or add a new
-            // cancellation gate; the original active button and POST still apply.
-            await expect(button).toBeEnabled();
-            // Start reading this original response as soon as it arrives;
-            // the successful UI is allowed to navigate while click completes.
-            const waiting = page
-              .waitForResponse(
-                (response) =>
-                  response.request().method() === "POST" &&
-                  response.url() ===
-                    `${origins.referral}/api/referral/cancel/${encodeURIComponent(id)}`,
-              )
-              .then(async (response) => ({
-                response,
-                bytes: await response.body(),
-              }));
-            void waiting.catch(() => undefined);
-            await button.click();
-            const { response, bytes } = await waiting;
-            requireFact(
-              (await response.headerValue("x-drts-candidate-sha")) === runtime,
-              "actual UI cancellation response runtime binding",
-            );
-            requireFact(
-              bytes.length <= 1024 * 1024,
-              "bounded actual UI cancellation response",
-            );
-            const payload = object(JSON.parse(bytes.toString("utf8")));
-            const command = object(response.request().postDataJSON());
-            requireFact(
-              typeof command.idempotencyKey === "string",
-              "actual UI cancellation command key",
-            );
-            if (response.status() === 200) {
-              requireFact(
-                payload.ok === true,
-                "actual UI cancellation success envelope",
-              );
-              await page.waitForURL(
-                (url) =>
-                  url.searchParams.get("screen") === "cancelled" &&
-                  url.searchParams.get("orderId") === id,
-              );
-            } else {
-              requireFact(payload.ok === false, "actual UI denial envelope");
-              const afterDenial = object(
-                (await referral("/api/referral/active")).data,
-              );
-              const deniedTrip = object(afterDenial.trip);
-              requireFact(
-                deniedTrip.orderId === id,
-                "UI denial retains exact active order",
-              );
-              const deniedWindow = readCancellationWindowSnapshot(
-                deniedTrip.cancellationWindow,
-              );
-              const hasWindowUI =
-                (await page
-                  .locator(
-                    '[data-drt-operation="referral-cancellation-window"]',
-                  )
-                  .count()) === 1;
-              const rejectedByPolicy =
-                payload.error &&
-                object(payload.error).code === "ORDER_NOT_CANCELABLE";
-              // The window-aware UI closes this same snapshot after its real 409,
-              // including an originally unknown/rolling snapshot. Legacy UI keeps
-              // its original error Banner and enabled retry behavior.
-              if (
-                (hasWindowUI && rejectedByPolicy) ||
-                deniedWindow?.canCancel === false
-              )
-                await expect(button).toBeDisabled();
-              else await expect(button).toBeEnabled();
-              await expect(
-                page.getByText(text(object(payload.error).message), {
-                  exact: true,
-                }),
-              ).toBeVisible();
-              requireFact(
-                new URL(page.url()).searchParams.get("orderId") === id &&
-                  new URL(page.url()).searchParams.get("screen") === "trip",
-                "denial retains selected trip URL",
-              );
-            }
-            return {
-              status: response.status(),
-              data: response.status() >= 400 ? payload : payload.data,
-              headers: new Headers(await response.allHeaders()),
-              bytes,
-              command,
-              requestSource: "actual-ui" as const,
-              uiDisabled:
-                response.status() === 200 ? false : await button.isDisabled(),
+            const cancelPhase = async <T>(
+              stage:
+                | "browser-cancel-consumer"
+                | "browser-cancel-response-capture"
+                | "browser-cancel-route-fetch"
+                | "browser-cancel-response-release"
+                | "browser-cancel-action"
+                | "browser-cancel-terminal-ui",
+              action: () => Promise<T>,
+            ) => {
+              evidence.record({ stage, orderId: id, result: "observed" });
+              try {
+                return await action();
+              } catch (error) {
+                evidence.record({
+                  stage,
+                  orderId: id,
+                  ...closedPdfFailureFacts(error),
+                  result: "failed",
+                });
+                throw error;
+              }
             };
+            return cancelPhase("browser-cancel-consumer", async () => {
+              // Unknown legacy metadata keeps the original enabled UI action.
+              await expect(button).toBeEnabled();
+              const cancelUrl = `${origins.referral}/api/referral/cancel/${encodeURIComponent(id)}`;
+              type Captured = Awaited<
+                ReturnType<typeof captureOriginalUiCancellation>
+              >;
+              let resolveResponse!: (value: Captured) => void;
+              let rejectResponse!: (error: unknown) => void;
+              const waiting = new Promise<Captured>((resolve, reject) => {
+                resolveResponse = resolve;
+                rejectResponse = reject;
+              });
+              void waiting.catch(() => undefined);
+              const observe = async (route: Route) => {
+                try {
+                  const captured = await cancelPhase(
+                    "browser-cancel-response-capture",
+                    () =>
+                      captureOriginalUiCancellation(
+                        {
+                          request: () => route.request(),
+                          fetch: (options) =>
+                            cancelPhase("browser-cancel-route-fetch", () =>
+                              route.fetch(options),
+                            ),
+                          fulfill: (options) =>
+                            cancelPhase("browser-cancel-response-release", () =>
+                              route.fulfill(options),
+                            ),
+                        },
+                        { url: cancelUrl, orderId: id, runtime },
+                      ),
+                  );
+                  resolveResponse(captured);
+                } catch (error) {
+                  rejectResponse(error);
+                  await route.abort("failed").catch(() => undefined);
+                }
+              };
+              await page.route(cancelUrl, observe, { times: 1 });
+              const deadline = setTimeout(
+                () =>
+                  rejectResponse(
+                    new JourneyFailure("browser-cancel-response-timeout"),
+                  ),
+                15_000,
+              );
+              try {
+                await cancelPhase("browser-cancel-action", () =>
+                  button.click({ timeout: 15_000 }),
+                );
+                const captured = await waiting;
+                const { payload } = captured;
+                await cancelPhase("browser-cancel-terminal-ui", async () => {
+                  if (captured.status === 200) {
+                    await page.waitForURL(
+                      (url) =>
+                        url.searchParams.get("screen") === "cancelled" &&
+                        url.searchParams.get("orderId") === id,
+                    );
+                  } else {
+                    const afterDenial = object(
+                      (await referral("/api/referral/active")).data,
+                    );
+                    const deniedTrip = object(afterDenial.trip);
+                    requireFact(
+                      deniedTrip.orderId === id,
+                      "UI denial retains exact active order",
+                    );
+                    const deniedWindow = readCancellationWindowSnapshot(
+                      deniedTrip.cancellationWindow,
+                    );
+                    const hasWindowUI =
+                      (await page
+                        .locator(
+                          '[data-drt-operation="referral-cancellation-window"]',
+                        )
+                        .count()) === 1;
+                    const rejectedByPolicy =
+                      payload.error &&
+                      object(payload.error).code === "ORDER_NOT_CANCELABLE";
+                    // The window-aware UI closes this same snapshot after its real 409,
+                    // including an originally unknown/rolling snapshot. Legacy UI keeps
+                    // its original error Banner and enabled retry behavior.
+                    if (
+                      (hasWindowUI && rejectedByPolicy) ||
+                      deniedWindow?.canCancel === false
+                    )
+                      await expect(button).toBeDisabled();
+                    else await expect(button).toBeEnabled();
+                    await expect(
+                      page.getByText(text(object(payload.error).message), {
+                        exact: true,
+                      }),
+                    ).toBeVisible();
+                    requireFact(
+                      new URL(page.url()).searchParams.get("orderId") === id &&
+                        new URL(page.url()).searchParams.get("screen") ===
+                          "trip",
+                      "denial retains selected trip URL",
+                    );
+                  }
+                });
+                return {
+                  status: captured.status,
+                  data: captured.data,
+                  headers: captured.headers,
+                  bytes: captured.bytes,
+                  command: captured.command,
+                  requestSource: "actual-ui" as const,
+                  uiDisabled:
+                    captured.status === 200 ? false : await button.isDisabled(),
+                };
+              } finally {
+                clearTimeout(deadline);
+                await page.unroute(cancelUrl, observe);
+              }
+            });
           },
           capture: async (name, id, screen) => {
             // Keep the denied page intact: navigating would clear its real error Banner.

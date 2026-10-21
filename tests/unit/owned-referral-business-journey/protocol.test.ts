@@ -8,6 +8,7 @@ import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-
 import {
   Evidence,
   consumeNativeReceiptPdfDownload,
+  captureOriginalUiCancellation,
   validateActualReceiptPdfBytes,
   JourneyFailure,
   NativeTransport,
@@ -959,6 +960,172 @@ describe("actual native receipt PDF bytes without user routing", () => {
       } finally {
         await f.cleanup();
       }
+    },
+  );
+});
+
+describe("original UI cancellation response capture before navigation release", () => {
+  const expected = {
+    url: "https://referral.example.test/api/referral/cancel/owned-case",
+    orderId: "owned-case",
+    runtime: SHA,
+  };
+  function fixture() {
+    let released = false;
+    const readBeforeRelease = () => {
+      if (released) throw new Error("synthetic response resource released");
+    };
+    const command: Record<string, unknown> = {
+      idempotencyKey: "synthetic-key",
+    };
+    const payload = {
+      ok: true,
+      data: {
+        orderId: expected.orderId,
+        status: "cancelled",
+        cancelledAt: "2026-10-21T01:00:00.000Z",
+      },
+    };
+    let bytes: Buffer = Buffer.from(JSON.stringify(payload));
+    const response = {
+      url: vi.fn(() => {
+        readBeforeRelease();
+        return expected.url;
+      }),
+      status: vi.fn(() => {
+        readBeforeRelease();
+        return 200;
+      }),
+      headers: vi.fn(() => {
+        readBeforeRelease();
+        return {
+          "x-drts-candidate-sha": SHA,
+          "content-type": "application/json",
+        };
+      }),
+      body: vi.fn(async () => {
+        readBeforeRelease();
+        return bytes;
+      }),
+    };
+    const request = {
+      method: () => "POST",
+      url: () => expected.url,
+      postDataJSON: vi.fn(() => {
+        readBeforeRelease();
+        return command;
+      }),
+    };
+    const route = {
+      request: () => request,
+      fetch: vi.fn(async () => response),
+      fulfill: vi.fn(
+        async (options: { response: typeof response; body: Buffer }) => {
+          expect(options.response).toBe(response);
+          expect(options.body).toBe(bytes);
+          released = true;
+        },
+      ),
+    };
+    return {
+      route,
+      response,
+      request,
+      payload,
+      command,
+      setBytes: (value: Buffer) => {
+        bytes = value;
+      },
+      get bytes() {
+        return bytes;
+      },
+    };
+  }
+
+  it("reads the one original POST bytes, headers and command before unchanged fulfill", async () => {
+    const f = fixture();
+    const snapshot = await captureOriginalUiCancellation(f.route, expected);
+    expect(f.route.fetch).toHaveBeenCalledExactlyOnceWith({
+      maxRedirects: 0,
+      maxRetries: 0,
+      timeout: 15000,
+    });
+    expect(f.route.fulfill).toHaveBeenCalledTimes(1);
+    expect(f.response.body).toHaveBeenCalledTimes(1);
+    expect(f.request.postDataJSON).toHaveBeenCalledTimes(1);
+    expect(snapshot.bytes).toBe(f.bytes);
+    expect(snapshot.command).toBe(f.command);
+    expect(snapshot.status).toBe(200);
+    expect(snapshot.data).toEqual(f.payload.data);
+    expect(snapshot.headers.get("x-drts-candidate-sha")).toBe(SHA);
+    // A post-release body read really fails; the returned original RAM bytes work.
+    await expect(f.response.body()).rejects.toThrow(
+      "synthetic response resource released",
+    );
+    expect(JSON.parse(Buffer.from(snapshot.bytes).toString("utf8"))).toEqual(
+      f.payload,
+    );
+  });
+
+  it.each([
+    "order",
+    "runtime",
+    "responseURL",
+    "oversize",
+    "JSON",
+    "command",
+  ] as const)(
+    "rejects a %s mismatch before release and never sends a second POST",
+    async (mismatch) => {
+      const f = fixture();
+      if (mismatch === "order") f.payload.data.orderId = "foreign-case";
+      if (mismatch === "runtime")
+        f.response.headers.mockReturnValue({
+          "x-drts-candidate-sha": "b".repeat(40),
+          "content-type": "application/json",
+        });
+      if (mismatch === "responseURL")
+        f.response.url.mockReturnValue(expected.url + "-foreign");
+      if (mismatch === "oversize") f.setBytes(Buffer.alloc(1024 * 1024 + 1));
+      if (mismatch === "JSON") f.setBytes(Buffer.from("invalid JSON"));
+      if (mismatch === "command") delete f.command.idempotencyKey;
+      if (mismatch === "order")
+        f.setBytes(Buffer.from(JSON.stringify(f.payload)));
+      await expect(
+        captureOriginalUiCancellation(f.route, expected),
+      ).rejects.toBeInstanceOf(Error);
+      expect(f.route.fetch).toHaveBeenCalledTimes(
+        mismatch === "command" ? 0 : 1,
+      );
+      expect(f.route.fulfill).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a real 409 denial status, code and original body independent from successful cancellation", async () => {
+    const f = fixture();
+    const payload = { ok: false, error: { code: "ORDER_NOT_CANCELABLE" } };
+    f.setBytes(Buffer.from(JSON.stringify(payload)));
+    f.response.status.mockReturnValue(409);
+    const snapshot = await captureOriginalUiCancellation(f.route, expected);
+    expect(snapshot.status).toBe(409);
+    expect(snapshot.data).toEqual(payload);
+    expect(snapshot.bytes).toBe(f.bytes);
+    expect(f.route.fetch).toHaveBeenCalledTimes(1);
+    expect(f.route.fulfill).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["fetch", "fulfill"] as const)(
+    "rethrows the original %s failure without retry or a fabricated ACK",
+    async (phase) => {
+      const f = fixture();
+      const failure = new TypeError("synthetic controlled failure");
+      if (phase === "fetch") f.route.fetch.mockRejectedValue(failure);
+      else f.route.fulfill.mockRejectedValue(failure);
+      await expect(
+        captureOriginalUiCancellation(f.route, expected),
+      ).rejects.toBe(failure);
+      expect(f.route.fetch).toHaveBeenCalledTimes(1);
+      expect(f.route.fulfill).toHaveBeenCalledTimes(phase === "fetch" ? 0 : 1);
     },
   );
 });
