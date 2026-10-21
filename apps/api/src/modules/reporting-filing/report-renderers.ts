@@ -263,7 +263,7 @@ export function recordsToPdf(
       let rowTexts = columns.map((col) => cellText(rows[ri]?.[col]));
       const fill = ri % 2 === 0 ? "#FFFFFF" : "#F8FAFC";
 
-      while (rowTexts.some((t) => t.length > 0)) {
+      do {
         let availH = pageBottom - y;
         if (availH < 25) {
           doc.addPage();
@@ -312,7 +312,7 @@ export function recordsToPdf(
 
         y += sliceH;
         rowTexts = nextTexts;
-      }
+      } while (rowTexts.some((t) => t.length > 0));
     }
 
     doc.end();

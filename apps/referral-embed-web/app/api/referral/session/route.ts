@@ -142,10 +142,13 @@ async function buildDemoSession(
   }
   // Existing legal dev bootstrap goes through the normal single-use handoff.
   // Consent is not silently granted by an effect or a query parameter.
+  // Each new demo browser session is its own demo resident: consent is kept
+  // per resident, so one shared resident would carry the first visitor's
+  // consent to every later visitor and hide the first-use consent page.
   const artifact = await issueReferralEmbedHandoffArtifact({
     entrySlug,
     entryHost,
-    partnerUserRef: `referral-demo-${entrySlug}`,
+    partnerUserRef: `referral-demo-${entrySlug}-${crypto.randomUUID()}`,
     consentBundle: null,
   });
   return consumeReferralEmbedHandoffArtifact({

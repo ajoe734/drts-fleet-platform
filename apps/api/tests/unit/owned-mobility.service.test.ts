@@ -1,3 +1,4 @@
+import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import { domainFixture } from "../../../../tests/unit/referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
 import { createHash } from "node:crypto";
@@ -6793,11 +6794,20 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
     const f = await domainFixture(),
       who = await f.identity();
     const input = { ...f.route, vehicleType: "comfort" };
+    await f.service.acknowledgeReferralFees(
+      {
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        acknowledged: true,
+      },
+      who,
+    );
     const quote = await f.service.quoteReferralPassengerFare(input, who);
     const booking = await f.service.createReferralPassengerBooking(
       {
         ...input,
         quoteId: quote.quoteId,
+        feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        feeConfirmed: true,
         passengerName: "Synthetic rider",
         passengerPhone: "0912345678",
       },
@@ -6823,11 +6833,20 @@ describe("OwnedMobilityService referral attribution (CRC-BE-003)", () => {
       who = await f.identity("scheduled");
     const scheduledAt = new Date(Date.now() + 4 * 60 * 60_000).toISOString();
     const input = { ...f.route, scheduledAt };
+    await f.service.acknowledgeReferralFees(
+      {
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        acknowledged: true,
+      },
+      who,
+    );
     const quote = await f.service.quoteReferralPassengerFare(input, who);
     const booking = await f.service.createReferralPassengerBooking(
       {
         ...input,
         quoteId: quote.quoteId,
+        feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        feeConfirmed: true,
         passengerName: "Synthetic rider",
         passengerPhone: "0912345678",
       },

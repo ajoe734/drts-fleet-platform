@@ -732,7 +732,8 @@ export async function issueControlPlaneRequestAuth(options: {
     ? extractIapJwtAssertion(options.headers)
     : null;
   if (
-    options.actorType === "platform_admin" &&
+    (options.actorType === "platform_admin" ||
+      options.actorType === "ops_user") &&
     options.devCanonicalPrincipalId !== undefined &&
     !options.strictIapMode &&
     !options.iapEnabled &&

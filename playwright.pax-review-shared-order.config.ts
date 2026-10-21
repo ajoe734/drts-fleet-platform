@@ -104,16 +104,19 @@ export default defineConfig({
         },
         {
           command:
-            "pnpm --filter @drts/ops-console-web exec next dev --webpack --hostname 127.0.0.1 --port 3202",
+            "./apps/api/node_modules/.bin/tsx tools/dev-ops-enablement/start-hosted-ops.ts",
           env: {
             ...apiEnvironment,
             DRTS_API_URL: apiOrigin,
+            DRTS_HOSTED_OPS_FIXTURE_SETUP: "true",
             NEXT_PUBLIC_API_URL: "/control-plane-proxy",
             NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN: "http://127.0.0.1:3204",
           },
           url: "http://127.0.0.1:3202/review",
           reuseExistingServer: false,
           timeout: 180_000,
+          // Let the starter stop its detached child process group before EOF.
+          gracefulShutdown: { signal: "SIGTERM", timeout: 10_000 },
         },
         {
           command:

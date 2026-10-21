@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
 import type {
+  ReferralMonthlyRatingQuery,
   ComplaintCaseRecord,
   DispatchAssignmentRecord,
   DispatchDailyRecord,
@@ -270,6 +271,7 @@ export class ReportingRepository {
 
   async upsertMonthlyOperationsSummaries(
     records: readonly MonthlyOperationsSummaryRecord[],
+    execute?: (sql: string, values: unknown[]) => Promise<unknown>,
   ) {
     if (!this.isEnabled() || records.length === 0) {
       return;
@@ -277,7 +279,11 @@ export class ReportingRepository {
 
     await Promise.all(
       records.map((record) =>
-        this.databaseService!.query(
+        (
+          execute ??
+          ((sql: string, values: unknown[]) =>
+            this.databaseService!.query(sql, values))
+        )(
           `
             INSERT INTO reporting.monthly_operations_summaries (
               period_month,
@@ -332,6 +338,112 @@ export class ReportingRepository {
         ),
       ),
     );
+  }
+
+  /** One SQL statement: committed order + task/assignment attribution share MVCC. */
+  async loadReferralMonthlyRatingSource(
+    query: ReferralMonthlyRatingQuery,
+    fromInclusive: string,
+    toExclusive: string,
+  ): Promise<
+    Pick<
+      DispatchDailyRecordSource,
+      "orders" | "driverTasks" | "dispatchAssignments"
+    >
+  > {
+    if (!this.isEnabled()) {
+      throw new Error(
+        "Canonical Referral monthly rating storage is unavailable.",
+      );
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        WITH selected_orders AS (
+          SELECT o.order_id, o.record
+          FROM ops.phase1_owned_orders o
+          WHERE o.status = 'completed'
+            AND o.record #> '{referralPassengerLifecycle,rating}' IS NOT NULL
+            AND ((o.record #>> '{referralPassengerLifecycle,rating,submittedAt}')::timestamptz AT TIME ZONE 'Asia/Taipei')::date >= $1::date
+            AND ((o.record #>> '{referralPassengerLifecycle,rating,submittedAt}')::timestamptz AT TIME ZONE 'Asia/Taipei')::date < $2::date
+            AND ($3::text IS NULL OR o.record ->> 'tenantId' = $3::text)
+            AND ($4::text IS NULL OR o.record ->> 'partnerId' = $4::text)
+            AND ($5::text IS NULL OR o.record ->> 'partnerProgramId' = $5::text)
+            AND ($6::text IS NULL OR o.record ->> 'partnerEntrySlug' = $6::text)
+        )
+        SELECT jsonb_build_object(
+          'orders', coalesce((SELECT jsonb_agg(record ORDER BY order_id) FROM selected_orders), '[]'::jsonb),
+          'driverTasks', coalesce((SELECT jsonb_agg(t.record ORDER BY t.task_id) FROM ops.phase1_driver_tasks t JOIN selected_orders o ON o.order_id = t.order_id), '[]'::jsonb),
+          'dispatchAssignments', coalesce((SELECT jsonb_agg(a.record ORDER BY a.assignment_id) FROM ops.phase1_dispatch_assignments a JOIN selected_orders o ON o.order_id = a.order_id), '[]'::jsonb)
+        ) AS record
+      `,
+      [
+        fromInclusive,
+        toExclusive,
+        query.tenantId ?? null,
+        query.partnerId ?? null,
+        query.partnerProgramId ?? null,
+        query.entrySlug ?? null,
+      ],
+    );
+    const record = this.parseRecord<
+      Pick<
+        DispatchDailyRecordSource,
+        "orders" | "driverTasks" | "dispatchAssignments"
+      >
+    >(result.rows[0]?.record, "referral_monthly_rating_source");
+    if (
+      !Array.isArray(record.orders) ||
+      !Array.isArray(record.driverTasks) ||
+      !Array.isArray(record.dispatchAssignments)
+    ) {
+      throw new Error("Invalid canonical Referral monthly rating source.");
+    }
+    return record;
+  }
+
+  async replaceMonthlyOperationsSummaries(
+    records: readonly MonthlyOperationsSummaryRecord[],
+    periods: readonly string[],
+    query: MonthlyOperationsSummaryQuery = {},
+  ) {
+    if (!this.isEnabled() || periods.length === 0) return;
+    const values: unknown[] = [[...periods]];
+    const where = ["period_month = ANY($1::text[])"];
+    if (query.businessArea) {
+      values.push(query.businessArea);
+      where.push("business_area = $" + values.length);
+    }
+    if (query.serviceProductCode) {
+      values.push(query.serviceProductCode);
+      where.push("service_product_code = $" + values.length);
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      // Serialize replacement writers of this derived read model. Readers keep
+      // the previous committed report until the complete replacement commits.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        ["reporting.monthly_operations_summaries:rebuild"],
+      );
+      await client.query(
+        `DELETE FROM reporting.monthly_operations_summaries WHERE ${where.join(" AND ")}`,
+        values,
+      );
+      await this.upsertMonthlyOperationsSummaries(records, (sql, bound) =>
+        client.query(sql, bound),
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* Keep the original rebuild failure. */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async loadDailyDispatchRecordSource(): Promise<DispatchDailyRecordSource> {

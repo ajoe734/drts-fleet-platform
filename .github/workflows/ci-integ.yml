@@ -34,8 +34,33 @@ on:
         required: false
         default: ""
         type: string
+      readonly_fleet_failure:
+        description: "Read only the two fixed original Fleet failure requests; never reruns them"
+        required: false
+        default: false
+        type: boolean
+      readonly_admin_root_failure:
+        description: "Read only the fixed original Admin root HTTP500 request logs; never replays it"
+        required: false
+        default: false
+        type: boolean
+      readonly_admin_root_instance_failure:
+        description: "Read fixed Admin request reasons and only actually observed instance context; never replays"
+        required: false
+        default: false
+        type: boolean
       owned_referral_business:
         description: "Opt in to one owned synthetic business ride on the existing shared Referral Demo; never deploys"
+        required: false
+        default: false
+        type: boolean
+      owned_referral_recovery_only:
+        description: "Recover only the exact retained original Referral order; no new booking or full-journey PASS"
+        required: false
+        default: false
+        type: boolean
+      dev_ops_enablement:
+        description: "Explicitly enable the existing development Ops account through normal Admin activation and private service configuration; no ride operations"
         required: false
         default: false
         type: boolean
@@ -69,6 +94,108 @@ env:
 # hang is capped in minutes rather than hours.
 
 jobs:
+  dev-ops-enablement:
+    if: github.event_name == 'workflow_dispatch' && inputs.dev_ops_enablement == true && inputs.owned_referral_business != true && inputs.shared_bureau != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: shared-dev-owned-referral-business-journey
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      EXPECTED_RUNTIME_SHA: ${{ inputs.expected_runtime_sha }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate explicit immutable development setup target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_RUNTIME_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual normal setup checkout
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing development deploy identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Bind existing five services before normal account setup
+        id: runtime_before
+        run: python3 tests/e2e/owned-referral-business-journey/runtime-check.py --phase before
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.0, run_install: false }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Mint existing private API audience proof
+        id: api_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.api_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Mint existing private Admin audience proof
+        id: admin_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.admin_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Mint existing private Ops audience proof
+        id: ops_token
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          token_format: id_token
+          id_token_audience: ${{ steps.runtime_before.outputs.ops_origin }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Explicit normal existing-account activation and Ops verification
+        env:
+          DRTS_DEV_OPS_ENABLEMENT: "true"
+          DEV_OPS_API_ID_TOKEN: ${{ steps.api_token.outputs.id_token }}
+          DEV_OPS_ADMIN_ID_TOKEN: ${{ steps.admin_token.outputs.id_token }}
+          DEV_OPS_CONSOLE_ID_TOKEN: ${{ steps.ops_token.outputs.id_token }}
+        run: ./apps/api/node_modules/.bin/tsx tools/dev-ops-enablement/run.ts
+      - name: Preserve only the normal setup safe journal
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-ops-enablement-${{ inputs.expected_runtime_sha }}-${{ github.run_id }}
+          path: .artifacts/dev-ops-enablement/setup.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
+
   owned-referral-business-journey:
     if: github.event_name == 'workflow_dispatch' && inputs.owned_referral_business == true
     runs-on: ubuntu-latest
@@ -78,6 +205,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
+      actions: read
       id-token: write
     env:
       EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
@@ -105,6 +233,13 @@ jobs:
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python3 -m unittest discover -s tests/unit/owned-referral-business-journey -p 'test_*.py' -v
+      - name: Read the exact retained original booking journal
+        if: inputs.owned_referral_recovery_only == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNED_REFERRAL_HOSTED_OPT_IN: "true"
+          OWNED_REFERRAL_RECOVERY_ONLY: "true"
+        run: python3 tests/e2e/owned-referral-business-journey/retained-journal.py
       - name: Authenticate existing hosted verification identity
         uses: google-github-actions/auth@v2
         with:
@@ -176,6 +311,8 @@ jobs:
       - name: Execute one owned synthetic same-order business lifecycle
         env:
           OWNED_REFERRAL_HOSTED_OPT_IN: "true"
+          OWNED_REFERRAL_RECOVERY_ONLY: ${{ inputs.owned_referral_recovery_only }}
+          OWNED_REFERRAL_RECOVER_ORIGINAL_JOURNAL: ${{ inputs.owned_referral_recovery_only }}
           OWNED_TEST_CODE_SHA: ${{ github.sha }}
           DRTS_CANDIDATE_SHA: ${{ inputs.expected_runtime_sha }}
           OWNED_REFERRAL_ORIGIN: ${{ steps.runtime_before.outputs.referral_origin }}
@@ -204,6 +341,10 @@ jobs:
             .artifacts/owned-referral-business-journey/journey-evidence.json
             .artifacts/owned-referral-business-journey/booking-write-journal.json
             .artifacts/owned-referral-business-journey/own-receipt.txt
+            .artifacts/owned-referral-business-journey/cancellations/*-facts.json
+            .artifacts/owned-referral-business-journey/cancellations/*-booking-write-journal.json
+            .artifacts/owned-referral-business-journey/cancellations/results.json
+            .artifacts/owned-referral-business-journey/cancellations/*.png
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14
@@ -418,6 +559,146 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  readonly-fleet-document-failure-readback:
+    if: github.event_name == 'workflow_dispatch' && inputs.readonly_fleet_failure == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable diagnostic definition and dev target before authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual diagnostic checkout
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only request diagnostics
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read only the fixed failure window without invoking the product
+        run: >-
+          python3 operations/verification/read-dev-fleet-document-failure-log.py
+          --output .artifacts/dev-fleet-document-failure-readback/snapshot.json
+      - name: Preserve only the safe diagnostic projection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-fleet-document-failure-readback-${{ github.run_id }}
+          path: .artifacts/dev-fleet-document-failure-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
+
+  readonly-admin-root-failure-readback:
+    if: github.event_name == 'workflow_dispatch' && inputs.readonly_admin_root_failure == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable Admin diagnostic definition and fixed dev target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual Admin diagnostic checkout
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only Admin diagnostics
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read the fixed Admin request and observed-trace stderr only
+        run: >-
+          python3 operations/verification/read-dev-fleet-document-failure-log.py
+          --profile admin-root-87ea-b1b
+          --output .artifacts/dev-admin-root-failure-readback/snapshot.json
+      - name: Preserve only the safe Admin diagnostic projection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-admin-root-failure-readback-${{ github.run_id }}
+          path: .artifacts/dev-admin-root-failure-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
+
+  readonly-admin-root-instance-failure-readback:
+    if: github.event_name == 'workflow_dispatch' && inputs.readonly_admin_root_instance_failure == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
+      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
+      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
+    steps:
+      - name: Validate immutable instance diagnostic definition and fixed dev target
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
+          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
+          [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify actual instance diagnostic checkout
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
+      - name: Authenticate existing deploy identity for read-only instance diagnostics
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
+          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read fixed request reasons and only observed-instance stdout and stderr
+        run: >-
+          python3 operations/verification/read-dev-fleet-document-failure-log.py
+          --profile admin-root-87ea-b1b-instance-v1
+          --output .artifacts/dev-admin-root-instance-failure-readback/snapshot.json
+      - name: Preserve only the closed instance diagnostic projection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-admin-root-instance-failure-readback-${{ github.run_id }}
+          path: .artifacts/dev-admin-root-instance-failure-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
+
   # Owner checkpoints are intentionally cheap. A review candidate is the first
   # immutable SHA that may start the full integration gate.
   candidate:
@@ -478,6 +759,8 @@ jobs:
           python3 -m unittest tools/ci/test_ops_proof_acceptance_workflow.py
           python3 -m unittest tools/ci/test_tenant_uat_acceptance_workflow.py
           python3 -m unittest tests/unit/system-remediation/sr-live-ops-001/test_drill.py -v
+      - name: Verify fixed Fleet read-only diagnostic contracts
+        run: python3 -m unittest tools/ci/test_read_dev_fleet_document_failure_log.py
       - name: Verify live mail Python unit tests
         run: python3 -m unittest discover -s tests/unit/system-remediation/sr-live-mail-001 -p 'test_*.py' -v
       - name: Verify live invoice mail Python unit tests
@@ -1206,6 +1489,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/drts_bureau_acceptance
+      PAX_REVIEW_OPS_FIXTURE_EVIDENCE_DIR: .artifacts/pax-bureau-acceptance
     steps:
       - uses: actions/checkout@v4
       - name: Verify shared release binding and private-role failure cases without sockets

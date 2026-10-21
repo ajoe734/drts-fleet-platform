@@ -1,3 +1,4 @@
+import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import { domainFixture } from "../../referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -312,6 +313,13 @@ describe("SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME: Tenant and referral booking le
         who = await f.identity();
       const scheduledAt = new Date(Date.now() + 20 * 60_000).toISOString();
       const input = { ...f.route, scheduledAt };
+      await f.service.acknowledgeReferralFees(
+        {
+          disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          acknowledged: true,
+        },
+        who,
+      );
       const quote = await f.service.quoteReferralPassengerFare(input, who);
       vi.setSystemTime(new Date("2026-10-01T10:06:00.000Z"));
       // The original quote is still within its 15m TTL, but a new create is now too soon.
@@ -320,6 +328,8 @@ describe("SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME: Tenant and referral booking le
           {
             ...input,
             quoteId: quote.quoteId,
+            feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+            feeConfirmed: true,
             passengerName: "Synthetic rider",
             passengerPhone: "0912345678",
             idempotencyKey: "ref-idem-cutoff-001",
@@ -355,11 +365,20 @@ describe("SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME: Tenant and referral booking le
         who = await f.identity();
       const scheduledAt = new Date(Date.now() + 60 * 60_000).toISOString();
       const input = { ...f.route, scheduledAt };
+      await f.service.acknowledgeReferralFees(
+        {
+          disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          acknowledged: true,
+        },
+        who,
+      );
       const quote = await f.service.quoteReferralPassengerFare(input, who);
       const booking = await f.service.createReferralPassengerBooking(
         {
           ...input,
           quoteId: quote.quoteId,
+          feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          feeConfirmed: true,
           passengerName: "Synthetic rider",
           passengerPhone: "0912345678",
         },

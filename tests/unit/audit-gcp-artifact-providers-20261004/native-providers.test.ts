@@ -1,7 +1,14 @@
 import { FleetDocumentStorageService } from "../../../apps/api/src/modules/fleet-partner/fleet-document-storage.service";
 import { FleetPartnerCaseService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner-case.service";
+import { FleetPartnerController } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.controller";
+import { SupplyDocumentService } from "../../../apps/api/src/modules/fleet-partner/supply-document.service";
+import { SupplySubmissionService } from "../../../apps/api/src/modules/fleet-partner/supply-submission.service";
+import { SupplySubmissionRepository } from "../../../apps/api/src/modules/fleet-partner/supply-submission.repository";
+import { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { fleetIdentity } from "../helpers/fleet-document-fixture";
 import { Readable } from "node:stream";
 import { createHash } from "node:crypto";
+import { inflateSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDocumentArtifactStore } from "../../../apps/api/src/common/document-artifacts/document-artifact-runtime.config";
 import {
@@ -17,6 +24,71 @@ const bucket = "drts-test-private-artifacts";
 const origin = "https://drts-dev-proof-scanner-test-uc.a.run.app";
 const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 const md5 = (b: Buffer) => createHash("md5").update(b).digest("base64");
+const pngBytes = Buffer.from(
+  "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de0000000c4944415478da6338639c060003340166067b33000000000049454e44ae426082",
+  "hex",
+);
+const jpegBytes = Buffer.from(
+  "ffd8ffe000104a46494600010101006000600000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101011100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f00fbfdffd9",
+  "hex",
+);
+const photoFixtures = [
+  {
+    label: "PNG",
+    fileName: "native-photo.png",
+    contentType: "image/png" as const,
+    alternateMime: "image/jpeg" as const,
+    bytes: pngBytes,
+    byteLength: 69,
+    sha256: "2128be2646bad332aa1e97b2676d9f960a43ff1a9d80bc6baf42c2d131034b83",
+  },
+  {
+    label: "JPEG",
+    fileName: "native-photo.jpg",
+    contentType: "image/jpeg" as const,
+    alternateMime: "image/png" as const,
+    bytes: jpegBytes,
+    byteLength: 332,
+    sha256: "2873aca24970d8ab5f392f0d694229e3b14cf65c9425cadd92a8295399576288",
+  },
+] as const;
+
+function assertValidPhotoFixture(photo: (typeof photoFixtures)[number]) {
+  expect(photo.bytes.length).toBe(photo.byteLength);
+  expect(sha(photo.bytes)).toBe(photo.sha256);
+  expect(photo.bytes.some((b) => b > 0x7f)).toBe(true);
+  expect(
+    Buffer.from(photo.bytes.toString("utf8"), "utf8").equals(photo.bytes),
+  ).toBe(false);
+  if (photo.contentType === "image/png") {
+    expect(photo.bytes.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    expect(photo.bytes.subarray(12, 16).toString("ascii")).toBe("IHDR");
+    expect(photo.bytes.readUInt32BE(16)).toBe(1);
+    expect(photo.bytes.readUInt32BE(20)).toBe(1);
+    expect(photo.bytes.subarray(37, 41).toString("ascii")).toBe("IDAT");
+    const idatLen = photo.bytes.readUInt32BE(33);
+    expect(inflateSync(photo.bytes.subarray(41, 41 + idatLen))).toEqual(
+      Buffer.from([0x00, 0xcc, 0x33, 0x66]),
+    );
+    expect(photo.bytes.subarray(photo.bytes.length - 12)).toEqual(
+      Buffer.from("0000000049454e44ae426082", "hex"),
+    );
+  } else {
+    expect(photo.bytes.subarray(0, 4)).toEqual(
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+    );
+    expect(photo.bytes.subarray(6, 11).toString("ascii")).toBe("JFIF\0");
+    expect(photo.bytes.includes(Buffer.from([0xff, 0xdb]))).toBe(true);
+    expect(photo.bytes.includes(Buffer.from([0xff, 0xc0]))).toBe(true);
+    expect(photo.bytes.includes(Buffer.from([0xff, 0xc4]))).toBe(true);
+    expect(photo.bytes.includes(Buffer.from([0xff, 0xda]))).toBe(true);
+    expect(photo.bytes.subarray(photo.bytes.length - 2)).toEqual(
+      Buffer.from([0xff, 0xd9]),
+    );
+  }
+}
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -194,20 +266,33 @@ describe("native GCS shared artifact storage", () => {
     ["placard", "application/pdf"],
     ["report", "text/csv; charset=utf-8"],
     ["fleet-upload-content", "image/png"],
+    ["fleet-upload-content", "image/jpeg"],
     ["fleet-upload-content", "application/octet-stream"],
   ] as const)(
     "matches multipart media MIME for %s / %s",
     async (kind, mimeType) => {
       const io = transport();
       const store = createDocumentArtifactStore(documentEnv);
+      const payloadBytes =
+        mimeType === "image/png"
+          ? pngBytes
+          : mimeType === "image/jpeg"
+            ? jpegBytes
+            : Buffer.from("harmless MIME boundary payload");
       const input = {
         kind,
         subjectId: "mime-boundary",
         mimeType,
-        bytes: Buffer.from("harmless MIME boundary payload"),
+        bytes: payloadBytes,
       };
       const created = await store.putIfAbsent(input);
       expect(created.created).toBe(true);
+      const storedRow = io.live.get(
+        `document-artifacts/${kind}/${input.subjectId}`,
+      );
+      expect(storedRow?.contentType).toBe(mimeType);
+      expect(storedRow?.bytes).toEqual(input.bytes);
+      expect(storedRow?.md5Hash).toBe(md5(input.bytes));
       const readback = await createDocumentArtifactStore(documentEnv).get(
         kind,
         input.subjectId,
@@ -651,4 +736,617 @@ describe("C125 fleet upload composition with native GCS and Cloud Run scanner", 
       ),
     ).rejects.toMatchObject({ code: "DOCUMENT_NOT_SCANNED" });
   });
+
+  it.each(photoFixtures)(
+    "composes native GCS factory, multipart client and Cloud Run scanner for Case $contentType binary lifecycle across instances",
+    async (photo) => {
+      assertValidPhotoFixture(photo);
+      const cloud = transport();
+      const createStorage = () =>
+        new FleetDocumentStorageService(
+          createDocumentArtifactStore(documentEnv),
+          (storage) =>
+            createRemittanceProofScanner(storage, {
+              REMITTANCE_PROOF_SCANNER_PROVIDER: "cloud-run-clamd",
+              REMITTANCE_PROOF_SCANNER_URL: origin,
+            }),
+        );
+      const createCaseService = () =>
+        new FleetPartnerCaseService(
+          undefined,
+          undefined,
+          undefined,
+          createStorage(),
+        );
+      const controllerFor = (service: FleetPartnerCaseService) =>
+        new FleetPartnerController(
+          undefined as never,
+          undefined as never,
+          undefined as never,
+          undefined as never,
+          undefined as never,
+          service,
+        );
+      const partnerIdentity = { ...fleetIdentity, partnerId: "METRO_FLEET" };
+      const metadata = {
+        fileName: photo.fileName,
+        fileSize: photo.bytes.length,
+        contentType: photo.contentType,
+      };
+      const service = createCaseService();
+      const intent = await service.createAttachmentUploadUrl(
+        "METRO_FLEET",
+        "cmp_0908",
+        "owner",
+        metadata,
+      );
+      await expect(
+        createCaseService().confirmAttachmentUpload(
+          "METRO_FLEET",
+          "cmp_0908",
+          "owner",
+          {
+            ...metadata,
+            ...intent,
+            checksumSha256: photo.sha256,
+          },
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_NOT_SCANNED" });
+
+      const uploaded = await service.uploadAttachmentContent(
+        "METRO_FLEET",
+        "cmp_0908",
+        intent.objectKey,
+        Readable.from([photo.bytes]),
+        "application/octet-stream",
+      );
+      expect(uploaded).toEqual({
+        checksumSha256: photo.sha256,
+        fileSize: photo.bytes.length,
+        scanState: "clean",
+      });
+
+      const contentKey = `document-artifacts/fleet-upload-content/${encodeURIComponent(intent.objectKey)}`;
+      const scanKey = `document-artifacts/fleet-upload-scan/${encodeURIComponent(intent.objectKey)}`;
+      const gcsContent = cloud.live.get(contentKey)!;
+      expect(gcsContent.contentType).toBe(photo.contentType);
+      expect(gcsContent.bytes.equals(photo.bytes)).toBe(true);
+      expect(gcsContent.size).toBe(String(photo.byteLength));
+      expect(gcsContent.md5Hash).toBe(md5(photo.bytes));
+
+      const gcsScan = JSON.parse(
+        cloud.live.get(scanKey)!.bytes.toString("utf8"),
+      );
+      expect(gcsScan).toMatchObject({
+        sha256: photo.sha256,
+        size: photo.byteLength,
+        contentType: photo.contentType,
+      });
+      expect(
+        cloud.requests.filter((url) => url.origin === origin),
+      ).toHaveLength(1);
+
+      const utf8Corrupted = Buffer.from(photo.bytes.toString("utf8"), "utf8");
+      const utf8CorruptedSha = sha(utf8Corrupted);
+      expect(utf8CorruptedSha).not.toBe(photo.sha256);
+
+      await expect(
+        createCaseService().confirmAttachmentUpload(
+          "METRO_FLEET",
+          "cmp_0908",
+          "owner",
+          {
+            ...metadata,
+            ...intent,
+            checksumSha256: utf8CorruptedSha,
+          },
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_CONTENT_MISMATCH" });
+      for (const badMime of ["application/pdf", photo.alternateMime]) {
+        await expect(
+          createCaseService().confirmAttachmentUpload(
+            "METRO_FLEET",
+            "cmp_0908",
+            "owner",
+            {
+              ...metadata,
+              ...intent,
+              contentType: badMime,
+              checksumSha256: photo.sha256,
+            },
+          ),
+        ).rejects.toMatchObject({ code: "UPLOAD_URL_INVALID" });
+      }
+
+      const record = await createCaseService().confirmAttachmentUpload(
+        "METRO_FLEET",
+        "cmp_0908",
+        "owner",
+        {
+          ...metadata,
+          ...intent,
+          checksumSha256: photo.sha256,
+        },
+      );
+      expect(record.contentType).toBe(photo.contentType);
+      expect(record.fileSize).toBe(photo.byteLength);
+
+      const secondInstance = createCaseService();
+      const grant = await secondInstance.getAttachmentReadUrl(
+        "METRO_FLEET",
+        "cmp_0908",
+        record.attachmentId,
+      );
+      const params = new URL(grant.downloadUrl, "https://local.invalid")
+        .searchParams;
+      const ownerRead = await secondInstance.verifyAndGetAttachmentForDownload(
+        "METRO_FLEET",
+        "cmp_0908",
+        record.attachmentId,
+        Number(params.get("expiresAt")),
+        params.get("sig")!,
+      );
+      expect(ownerRead.fileContent.equals(photo.bytes)).toBe(true);
+      expect(sha(ownerRead.fileContent)).toBe(photo.sha256);
+      expect(ownerRead.attachment.contentType).toBe(photo.contentType);
+      expect(ownerRead.fileContent.length).toBe(photo.byteLength);
+
+      const ownerRes = { setHeader: vi.fn(), send: vi.fn() };
+      await controllerFor(createCaseService()).downloadPortalCaseAttachment(
+        "METRO_FLEET",
+        "cmp_0908",
+        record.attachmentId,
+        params.get("expiresAt")!,
+        params.get("sig")!,
+        ownerRes,
+        partnerIdentity,
+      );
+      expect(ownerRes.send).toHaveBeenCalledWith(photo.bytes);
+      expect(ownerRes.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        photo.contentType,
+      );
+      expect(ownerRes.setHeader).toHaveBeenCalledWith(
+        "Content-Length",
+        photo.byteLength,
+      );
+
+      const thirdInstance = createCaseService();
+      const reviewRead = await thirdInstance.downloadAttachmentForReview(
+        "cmp_0908",
+        record.attachmentId,
+      );
+      expect(reviewRead.fileContent.equals(photo.bytes)).toBe(true);
+      expect(reviewRead.attachment.contentType).toBe(photo.contentType);
+
+      const reviewRes = { setHeader: vi.fn(), send: vi.fn() };
+      await controllerFor(createCaseService()).downloadCaseAttachmentForReview(
+        "cmp_0908",
+        record.attachmentId,
+        { ...partnerIdentity, realm: "platform", actorType: "platform_admin" },
+        reviewRes,
+      );
+      expect(reviewRes.send).toHaveBeenCalledWith(photo.bytes);
+      expect(reviewRes.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        photo.contentType,
+      );
+      expect(reviewRes.setHeader).toHaveBeenCalledWith(
+        "Content-Length",
+        photo.byteLength,
+      );
+
+      await expect(
+        createCaseService().getAttachmentReadUrl(
+          "OTHER",
+          "cmp_0908",
+          record.attachmentId,
+        ),
+      ).rejects.toMatchObject({ code: "CASE_NOT_FLEET_SCOPED" });
+      await expect(
+        controllerFor(createCaseService()).downloadCaseAttachmentForReview(
+          "cmp_0908",
+          record.attachmentId,
+          partnerIdentity,
+          { setHeader: vi.fn(), send: vi.fn() },
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_REVIEW_DENIED" });
+
+      gcsContent.bytes = utf8Corrupted;
+      gcsContent.size = String(utf8Corrupted.length);
+      gcsContent.md5Hash = md5(utf8Corrupted);
+      await expect(
+        createCaseService().downloadAttachmentForReview(
+          "cmp_0908",
+          record.attachmentId,
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_CONTENT_MISMATCH" });
+
+      gcsContent.bytes = Buffer.from(photo.bytes);
+      gcsContent.size = String(photo.byteLength);
+      gcsContent.md5Hash = md5(photo.bytes);
+      gcsContent.contentType = "application/pdf";
+      await expect(
+        createCaseService().downloadAttachmentForReview(
+          "cmp_0908",
+          record.attachmentId,
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_CONTENT_MISMATCH" });
+      gcsContent.contentType = photo.contentType;
+
+      cloud.scanWith((content) =>
+        json({
+          sha256: sha(content),
+          sizeBytes: content.length,
+          verdict: "infected",
+        }),
+      );
+      const infected = await service.createAttachmentUploadUrl(
+        "METRO_FLEET",
+        "cmp_0908",
+        "owner",
+        metadata,
+      );
+      await expect(
+        service.uploadAttachmentContent(
+          "METRO_FLEET",
+          "cmp_0908",
+          infected.objectKey,
+          Readable.from([photo.bytes]),
+          "application/octet-stream",
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_SCAN_REJECTED" });
+      await expect(
+        createCaseService().confirmAttachmentUpload(
+          "METRO_FLEET",
+          "cmp_0908",
+          "owner",
+          { ...metadata, ...infected },
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_NOT_SCANNED" });
+
+      cloud.scanWith((content) =>
+        json({
+          sha256: "0".repeat(64),
+          sizeBytes: content.length,
+          verdict: "clean",
+        }),
+      );
+      const mismatchedScan = await service.createAttachmentUploadUrl(
+        "METRO_FLEET",
+        "cmp_0908",
+        "owner",
+        metadata,
+      );
+      await expect(
+        service.uploadAttachmentContent(
+          "METRO_FLEET",
+          "cmp_0908",
+          mismatchedScan.objectKey,
+          Readable.from([photo.bytes]),
+          "application/octet-stream",
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_SCANNER_UNAVAILABLE" });
+    },
+  );
+
+  it.each(photoFixtures)(
+    "composes native GCS factory, multipart client and Cloud Run scanner for Supply other $contentType binary lifecycle across instances",
+    async (photo) => {
+      assertValidPhotoFixture(photo);
+      const cloud = transport();
+      const repository = new SupplySubmissionRepository();
+      const createStorage = () =>
+        new FleetDocumentStorageService(
+          createDocumentArtifactStore(documentEnv),
+          (storage) =>
+            createRemittanceProofScanner(storage, {
+              REMITTANCE_PROOF_SCANNER_PROVIDER: "cloud-run-clamd",
+              REMITTANCE_PROOF_SCANNER_URL: origin,
+            }),
+        );
+      const createSupplyInstance = () => {
+        const submissions = new SupplySubmissionService(
+          repository,
+          new RegulatoryRegistryService(
+            undefined as never,
+            undefined as never,
+            undefined as never,
+          ),
+        );
+        const documents = new SupplyDocumentService(
+          submissions,
+          repository,
+          createStorage(),
+        );
+        return { submissions, documents };
+      };
+      const controllerFor = (documents: SupplyDocumentService) =>
+        new FleetPartnerController(
+          undefined as never,
+          undefined as never,
+          documents,
+          undefined as never,
+          undefined as never,
+          undefined,
+        );
+      const partnerIdentity = { ...fleetIdentity, partnerId: "METRO_FLEET" };
+      const firstInstance = createSupplyInstance();
+      const draft = await firstInstance.submissions.createDriverDraft(
+        "METRO_FLEET",
+        "owner",
+        {
+          name: "Native GCS photo upload test",
+          mobile: "+886900111222",
+          professionalDriverLicenseNo: "TEST-LICENSE",
+          professionalDriverLicenseExpiry: "2027-12-31",
+          taxiDriverRegistrationNo: "TEST-REG",
+          taxiDriverRegistrationArea: "TPE",
+          taxiDriverRegistrationExpiry: "2027-12-31",
+          supportedServiceProductCodes: ["taxi_realtime"],
+          preferredVehicleSubmissionId: null,
+        },
+      );
+      const submissionId = draft.submission.submissionId;
+      const metadata = {
+        documentType: "other" as const,
+        originalFileName: photo.fileName,
+        contentType: photo.contentType,
+        expectedRevisionNo: 1,
+      };
+      const intent = await firstInstance.documents.createUploadUrl(
+        "METRO_FLEET",
+        submissionId,
+        "owner",
+        metadata,
+      );
+      const confirmCommand = {
+        ...metadata,
+        objectKey: intent.objectKey,
+        fileSize: photo.bytes.length,
+        checksumSha256: photo.sha256,
+      };
+      await expect(
+        createSupplyInstance().documents.confirmUpload(
+          "METRO_FLEET",
+          submissionId,
+          "owner",
+          confirmCommand,
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_NOT_SCANNED" });
+
+      const uploaded = await firstInstance.documents.uploadContent(
+        "METRO_FLEET",
+        submissionId,
+        intent.objectKey,
+        Readable.from([photo.bytes]),
+        "application/octet-stream",
+      );
+      expect(uploaded).toEqual({
+        checksumSha256: photo.sha256,
+        fileSize: photo.bytes.length,
+        scanState: "clean",
+      });
+
+      const contentKey = `document-artifacts/fleet-upload-content/${encodeURIComponent(intent.objectKey)}`;
+      const scanKey = `document-artifacts/fleet-upload-scan/${encodeURIComponent(intent.objectKey)}`;
+      const gcsContent = cloud.live.get(contentKey)!;
+      expect(gcsContent.contentType).toBe(photo.contentType);
+      expect(gcsContent.bytes.equals(photo.bytes)).toBe(true);
+      expect(gcsContent.size).toBe(String(photo.byteLength));
+      expect(gcsContent.md5Hash).toBe(md5(photo.bytes));
+
+      const gcsScan = JSON.parse(
+        cloud.live.get(scanKey)!.bytes.toString("utf8"),
+      );
+      expect(gcsScan).toMatchObject({
+        sha256: photo.sha256,
+        size: photo.byteLength,
+        contentType: photo.contentType,
+      });
+      expect(
+        cloud.requests.filter((url) => url.origin === origin),
+      ).toHaveLength(1);
+
+      const utf8Corrupted = Buffer.from(photo.bytes.toString("utf8"), "utf8");
+      const utf8CorruptedSha = sha(utf8Corrupted);
+      await expect(
+        createSupplyInstance().documents.confirmUpload(
+          "METRO_FLEET",
+          submissionId,
+          "owner",
+          {
+            ...confirmCommand,
+            checksumSha256: utf8CorruptedSha,
+          },
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_CONTENT_MISMATCH" });
+      for (const badMime of ["application/pdf", photo.alternateMime]) {
+        await expect(
+          createSupplyInstance().documents.confirmUpload(
+            "METRO_FLEET",
+            submissionId,
+            "owner",
+            {
+              ...confirmCommand,
+              contentType: badMime,
+            },
+          ),
+        ).rejects.toMatchObject({ code: "UPLOAD_URL_INVALID" });
+      }
+
+      const doc = await createSupplyInstance().documents.confirmUpload(
+        "METRO_FLEET",
+        submissionId,
+        "owner",
+        confirmCommand,
+      );
+      expect(doc.documentType).toBe("other");
+      expect(doc.contentType).toBe(photo.contentType);
+      expect(doc.fileSize).toBe(photo.byteLength);
+      expect(doc.checksumSha256).toBe(photo.sha256);
+
+      const secondRead =
+        await createSupplyInstance().documents.downloadDocument(
+          "METRO_FLEET",
+          submissionId,
+          doc.documentId,
+        );
+      expect(secondRead.bytes.equals(photo.bytes)).toBe(true);
+      expect(secondRead.contentType).toBe(photo.contentType);
+      expect(secondRead.fileSize).toBe(photo.byteLength);
+      expect(secondRead.checksumSha256).toBe(photo.sha256);
+
+      const ownerRes = { setHeader: vi.fn(), send: vi.fn() };
+      await controllerFor(
+        createSupplyInstance().documents,
+      ).downloadSupplyDocument(
+        "METRO_FLEET",
+        submissionId,
+        doc.documentId,
+        partnerIdentity,
+        ownerRes,
+      );
+      expect(ownerRes.send).toHaveBeenCalledWith(photo.bytes);
+      expect(ownerRes.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        photo.contentType,
+      );
+      expect(ownerRes.setHeader).toHaveBeenCalledWith(
+        "Content-Length",
+        photo.byteLength,
+      );
+
+      const reviewRes = { setHeader: vi.fn(), send: vi.fn() };
+      await controllerFor(
+        createSupplyInstance().documents,
+      ).downloadSupplyDocumentForReview(
+        submissionId,
+        doc.documentId,
+        { ...partnerIdentity, realm: "platform", actorType: "platform_admin" },
+        reviewRes,
+      );
+      expect(reviewRes.send).toHaveBeenCalledWith(photo.bytes);
+      expect(reviewRes.setHeader).toHaveBeenCalledWith(
+        "Content-Type",
+        photo.contentType,
+      );
+      expect(reviewRes.setHeader).toHaveBeenCalledWith(
+        "Content-Length",
+        photo.byteLength,
+      );
+
+      await expect(
+        createSupplyInstance().documents.downloadDocument(
+          "OTHER",
+          submissionId,
+          doc.documentId,
+        ),
+      ).rejects.toMatchObject({ code: "FLEET_SCOPE_DENIED" });
+      await expect(
+        controllerFor(createSupplyInstance().documents).downloadSupplyDocument(
+          "METRO_FLEET",
+          submissionId,
+          doc.documentId,
+          { ...partnerIdentity, realm: "tenant" },
+          { setHeader: vi.fn(), send: vi.fn() },
+        ),
+      ).rejects.toMatchObject({ code: "FLEET_SCOPE_DENIED" });
+      await expect(
+        controllerFor(
+          createSupplyInstance().documents,
+        ).downloadSupplyDocumentForReview(
+          submissionId,
+          doc.documentId,
+          partnerIdentity,
+          { setHeader: vi.fn(), send: vi.fn() },
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_REVIEW_DENIED" });
+
+      gcsContent.bytes = utf8Corrupted;
+      gcsContent.size = String(utf8Corrupted.length);
+      gcsContent.md5Hash = md5(utf8Corrupted);
+      await expect(
+        createSupplyInstance().documents.downloadDocument(
+          "METRO_FLEET",
+          submissionId,
+          doc.documentId,
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_CONTENT_MISMATCH" });
+
+      gcsContent.bytes = Buffer.from(photo.bytes);
+      gcsContent.size = String(photo.byteLength);
+      gcsContent.md5Hash = md5(photo.bytes);
+      gcsContent.contentType = "application/pdf";
+      await expect(
+        createSupplyInstance().documents.downloadDocument(
+          "METRO_FLEET",
+          submissionId,
+          doc.documentId,
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_CONTENT_MISMATCH" });
+      gcsContent.contentType = photo.contentType;
+
+      cloud.scanWith((content) =>
+        json({
+          sha256: sha(content),
+          sizeBytes: content.length,
+          verdict: "infected",
+        }),
+      );
+      const infectedMetadata = { ...metadata, expectedRevisionNo: 2 };
+      const infected = await createSupplyInstance().documents.createUploadUrl(
+        "METRO_FLEET",
+        submissionId,
+        "owner",
+        infectedMetadata,
+      );
+      await expect(
+        createSupplyInstance().documents.uploadContent(
+          "METRO_FLEET",
+          submissionId,
+          infected.objectKey,
+          Readable.from([photo.bytes]),
+          "application/octet-stream",
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_SCAN_REJECTED" });
+      await expect(
+        createSupplyInstance().documents.confirmUpload(
+          "METRO_FLEET",
+          submissionId,
+          "owner",
+          {
+            ...infectedMetadata,
+            objectKey: infected.objectKey,
+            fileSize: photo.bytes.length,
+            checksumSha256: photo.sha256,
+          },
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_NOT_SCANNED" });
+
+      cloud.scanWith((content) =>
+        json({
+          sha256: "0".repeat(64),
+          sizeBytes: content.length,
+          verdict: "clean",
+        }),
+      );
+      const mismatchedScan =
+        await createSupplyInstance().documents.createUploadUrl(
+          "METRO_FLEET",
+          submissionId,
+          "owner",
+          infectedMetadata,
+        );
+      await expect(
+        createSupplyInstance().documents.uploadContent(
+          "METRO_FLEET",
+          submissionId,
+          mismatchedScan.objectKey,
+          Readable.from([photo.bytes]),
+          "application/octet-stream",
+        ),
+      ).rejects.toMatchObject({ code: "DOCUMENT_SCANNER_UNAVAILABLE" });
+    },
+  );
 });
