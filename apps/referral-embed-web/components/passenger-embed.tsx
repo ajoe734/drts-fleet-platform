@@ -12,6 +12,7 @@ import {
   type ReferralFeeStatus,
 } from "@drts/contracts";
 import { ReferralComplaintPanel } from "./referral-complaint-panel";
+import { ReferralPlaceField } from "./referral-place-field";
 import { ReferralReceiptDocumentActions } from "./referral-receipt-document-actions";
 import { useReferralLiveTrip } from "./use-referral-live-trip";
 import {
@@ -1584,6 +1585,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
   const [isMounted, setIsMounted] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(false);
   const [quote, setQuote] = useState<ReferralPassengerFareQuote | null>(null);
+  const mapConfig = context.map ?? null;
   const [quoteState, setQuoteState] = useState<
     "idle" | "loading" | "quoted" | "expired" | "error"
   >("idle");
@@ -1850,6 +1852,14 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     return () => clearTimeout(timer);
   }, [quote, quoteState]);
 
+  function setAddressField(
+    name: "pickupAddress" | "dropoffAddress",
+    value: string,
+  ) {
+    setQuote(null);
+    setQuoteState("idle");
+    setForm((current) => ({ ...current, [name]: value }));
+  }
   function updateField(event: ChangeEvent<HTMLInputElement>) {
     const { name, value } = event.currentTarget;
     if (["pickupAddress", "dropoffAddress", "scheduledAt"].includes(name)) {
@@ -2148,23 +2158,26 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
 
       <Card theme={theme} title="行程" subtitle="上車 · 下車 · 時間">
         <div style={{ display: "grid", gap: 10 }}>
-          <EditableField
+          <ReferralPlaceField
             theme={theme}
             label="上車地點"
-            icon="pin"
+            icon={<Icon name="pin" size={15} />}
             name="pickupAddress"
             value={form.pickupAddress}
-            onChange={updateField}
+            onChange={(value) => setAddressField("pickupAddress", value)}
             disabled={bookingControlsDisabled}
+            allowCurrentLocation
+            mapConfig={mapConfig}
           />
-          <EditableField
+          <ReferralPlaceField
             theme={theme}
             label="下車地點"
-            icon="pin"
+            icon={<Icon name="pin" size={15} />}
             name="dropoffAddress"
             value={form.dropoffAddress}
-            onChange={updateField}
+            onChange={(value) => setAddressField("dropoffAddress", value)}
             disabled={bookingControlsDisabled}
+            mapConfig={mapConfig}
           />
           <div
             style={{
