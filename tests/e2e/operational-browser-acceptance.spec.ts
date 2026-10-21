@@ -235,7 +235,7 @@ async function runSteps(
 ) {
   for (const step of steps) {
     if (step.kind === "referral-fees") {
-      const url = origin + "/api/referral/fees";
+      const url = new URL("/api/referral/fees", origin).toString();
       const response = await page.request.get(url);
       expect(response.ok()).toBe(true);
       const body = await response.json();

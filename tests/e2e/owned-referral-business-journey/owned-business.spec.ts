@@ -81,6 +81,67 @@ const future = () =>
 const start = () =>
   new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
 
+function closedPdfFailureFacts(error: unknown) {
+  let nativeFailureClass = "UNKNOWN";
+  let nativeCauseCode = "UNKNOWN";
+  try {
+    const name = (error as { name?: unknown } | null)?.name;
+    if (
+      typeof name === "string" &&
+      [
+        "Error",
+        "ReferenceError",
+        "TypeError",
+        "RangeError",
+        "SyntaxError",
+        "TimeoutError",
+        "AbortError",
+      ].includes(name)
+    )
+      nativeFailureClass = name;
+  } catch {
+    // Accessor failures remain unknown; no message or stack is inspected.
+  }
+  try {
+    const codes = [
+      (error as { code?: unknown } | null)?.code,
+      (error as { cause?: { code?: unknown } } | null)?.cause?.code,
+    ];
+    for (const code of codes) {
+      if (
+        typeof code === "string" &&
+        [
+          "ENOENT",
+          "EACCES",
+          "ECONNRESET",
+          "ECONNREFUSED",
+          "ETIMEDOUT",
+          "ENOTFOUND",
+          "EAI_AGAIN",
+          "ERR_MODULE_NOT_FOUND",
+          "MODULE_NOT_FOUND",
+          "ERR_REQUIRE_ASYNC_MODULE",
+          "ERR_REQUIRE_ESM",
+          "ERR_UNKNOWN_FILE_EXTENSION",
+          "ERR_INVALID_ARG_TYPE",
+          "ERR_INVALID_ARG_VALUE",
+          "ERR_OUT_OF_RANGE",
+          "UND_ERR_CONNECT_TIMEOUT",
+          "UND_ERR_HEADERS_TIMEOUT",
+          "UND_ERR_BODY_TIMEOUT",
+          "UND_ERR_SOCKET",
+        ].includes(code)
+      ) {
+        nativeCauseCode = code;
+        break;
+      }
+    }
+  } catch {
+    // Never serialize an unknown code or a nested cause.
+  }
+  return { nativeFailureClass, nativeCauseCode };
+}
+
 async function cookieHeader(
   context: BrowserContext,
   target: string,
@@ -1670,15 +1731,50 @@ test(journeyName, async ({ browser, request }) => {
         result: "observed",
       });
 
+      type PdfPhase =
+        | "browser-pdf-region"
+        | "browser-pdf-parser-import"
+        | "browser-pdf-response-fetch"
+        | "browser-pdf-response-body"
+        | "browser-pdf-content-parse"
+        | "browser-pdf-download-action"
+        | "browser-pdf-download-event"
+        | "browser-pdf-download-file"
+        | "browser-pdf-prepare-action"
+        | "browser-pdf-share-capability"
+        | "browser-pdf-share-action";
+      const pdfPhase = async <T>(stage: PdfPhase, action: () => Promise<T>) => {
+        evidence.record({
+          stage,
+          orderId: completedOrderId,
+          result: "observed",
+        });
+        try {
+          return await action();
+        } catch (error) {
+          evidence.record({
+            stage,
+            orderId: completedOrderId,
+            ...closedPdfFailureFacts(error),
+            result: "failed",
+          });
+          throw error;
+        }
+      };
       const pdfRegion = page.getByRole("region", {
         name: "PDF乘車明細與分享",
         exact: true,
       });
-      await expect(pdfRegion).toBeVisible();
+      await pdfPhase("browser-pdf-region", () =>
+        expect(pdfRegion).toBeVisible(),
+      );
       const pdfUrl = `${origins.referral}/api/referral/receipt/${encodeURIComponent(completedOrderId)}/pdf`;
       const pdfFilename = `receipt-${completedOrderId}.pdf`;
-      const { parsePdf } =
-        await import("../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser");
+      const { parsePdf } = await pdfPhase(
+        "browser-pdf-parser-import",
+        () =>
+          import("../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser"),
+      );
       const observePdfAction = async (action: () => Promise<void>) => {
         let resolveResponse!: (bytes: Buffer) => void;
         let rejectResponse!: (error: unknown) => void;
@@ -1692,8 +1788,12 @@ test(journeyName, async ({ browser, request }) => {
             // Fetch this browser request once and release the original server
             // bytes unchanged. Attachment downloads do not reliably expose a
             // readable Playwright Response after the browser consumes them.
-            const response = await route.fetch({ maxRedirects: 0 });
-            const bytes = await response.body();
+            const response = await pdfPhase("browser-pdf-response-fetch", () =>
+              route.fetch({ maxRedirects: 0 }),
+            );
+            const bytes = await pdfPhase("browser-pdf-response-body", () =>
+              response.body(),
+            );
             const headers = response.headers();
             await route.fulfill({ response, body: bytes });
             requireFact(
@@ -1723,7 +1823,9 @@ test(journeyName, async ({ browser, request }) => {
                   Number(declaredLength) === bytes.length,
                 "actual PDF declared byte length",
               );
-            const parsed = await parsePdf(bytes);
+            const parsed = await pdfPhase("browser-pdf-content-parse", () =>
+              parsePdf(bytes),
+            );
             const compact = (value: string) => value.replace(/\s+/g, "");
             const pdfText = compact(parsed.text);
             for (const expectedText of [
@@ -1782,16 +1884,29 @@ test(journeyName, async ({ browser, request }) => {
       );
       const pdfDownloadPromise = page.waitForEvent("download");
       void pdfDownloadPromise.catch(() => undefined);
-      const downloadedResponse = await observePdfAction(() => pdfLink.click());
-      const pdfDownload = await pdfDownloadPromise;
+      const downloadedResponse = await pdfPhase(
+        "browser-pdf-download-action",
+        () => observePdfAction(() => pdfLink.click()),
+      );
+      const pdfDownload = await pdfPhase(
+        "browser-pdf-download-event",
+        () => pdfDownloadPromise,
+      );
       requireFact(
         pdfDownload.url() === pdfUrl &&
           pdfDownload.suggestedFilename() === pdfFilename &&
           (await pdfDownload.failure()) === null,
         "actual browser same-order PDF download",
       );
-      const pdfDownloadBytes = await readFile(
-        text(await pdfDownload.path(), "browser PDF download file required"),
+      const pdfDownloadBytes = await pdfPhase(
+        "browser-pdf-download-file",
+        async () =>
+          readFile(
+            text(
+              await pdfDownload.path(),
+              "browser PDF download file required",
+            ),
+          ),
       );
       requireFact(
         pdfDownloadBytes.length === downloadedResponse.length &&
@@ -1806,32 +1921,40 @@ test(journeyName, async ({ browser, request }) => {
         result: "observed",
       });
 
-      const preparedResponse = await observePdfAction(() =>
-        pdfRegion
-          .getByRole("button", { name: "準備分享 PDF", exact: true })
-          .click(),
+      const preparedResponse = await pdfPhase(
+        "browser-pdf-prepare-action",
+        () =>
+          observePdfAction(() =>
+            pdfRegion
+              .getByRole("button", { name: "準備分享 PDF", exact: true })
+              .click(),
+          ),
       );
       // Capability uses the actual prepared response bytes and browser APIs,
       // without replacing navigator.share/canShare or creating a fake success.
-      const canSharePdf = await page.evaluate(
-        ({ bytes, filename }) => {
-          const file = new File([Uint8Array.from(bytes)], filename, {
-            type: "application/pdf",
-          });
-          return (
-            typeof navigator.share === "function" &&
-            typeof navigator.canShare === "function" &&
-            navigator.canShare({ files: [file] })
-          );
-        },
-        { bytes: Array.from(preparedResponse), filename: pdfFilename },
+      const canSharePdf = await pdfPhase("browser-pdf-share-capability", () =>
+        page.evaluate(
+          ({ bytes, filename }) => {
+            const file = new File([Uint8Array.from(bytes)], filename, {
+              type: "application/pdf",
+            });
+            return (
+              typeof navigator.share === "function" &&
+              typeof navigator.canShare === "function" &&
+              navigator.canShare({ files: [file] })
+            );
+          },
+          { bytes: Array.from(preparedResponse), filename: pdfFilename },
+        ),
       );
       const pdfStatus = pdfRegion.getByRole("status");
       if (canSharePdf) {
         await expect(pdfStatus).toHaveText("PDF 已準備完成，請按分享。");
-        await pdfRegion
-          .getByRole("button", { name: "分享 PDF 明細", exact: true })
-          .click();
+        await pdfPhase("browser-pdf-share-action", () =>
+          pdfRegion
+            .getByRole("button", { name: "分享 PDF 明細", exact: true })
+            .click(),
+        );
         await expect(pdfStatus).toHaveText(
           /^(已完成分享操作。|已取消分享，可重新準備。|尚未完成分享，請重試或下載 PDF。)$/,
         );
