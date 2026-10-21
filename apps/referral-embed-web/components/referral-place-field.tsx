@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { buildEmbedTheme } from "../lib/embed-presentation";
+import { useTranslation } from "../lib/i18n";
 import {
   googleMapsAuthFailed,
   loadGoogleMaps,
@@ -77,6 +78,7 @@ export function ReferralPlaceField({
   allowCurrentLocation?: boolean;
   mapConfig: ReferralMapConfig | null;
 }) {
+  const { t } = useTranslation();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [typing, setTyping] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
@@ -156,7 +158,7 @@ export function ReferralPlaceField({
       setTyping(false);
       onChange(address);
     } catch {
-      setNotice("無法取得這個位置的地址，請改用地址搜尋。");
+      setNotice(t("place.noAddress"));
     } finally {
       setBusy(false);
     }
@@ -164,7 +166,7 @@ export function ReferralPlaceField({
 
   function useCurrentLocation() {
     if (!("geolocation" in navigator)) {
-      setNotice("這個裝置無法取得目前位置。");
+      setNotice(t("place.noGeolocation"));
       return;
     }
     setBusy(true);
@@ -177,7 +179,7 @@ export function ReferralPlaceField({
         }),
       () => {
         setBusy(false);
-        setNotice("未取得定位權限，請改用地址搜尋或在地圖上選擇。");
+        setNotice(t("place.locationDenied"));
       },
       { enableHighAccuracy: true, timeout: 10_000 },
     );
@@ -225,7 +227,7 @@ export function ReferralPlaceField({
             }}
             disabled={disabled}
             autoComplete="off"
-            placeholder="輸入地址或地標"
+            placeholder={t("place.placeholder")}
             style={{
               flex: 1,
               minWidth: 0,
@@ -243,7 +245,7 @@ export function ReferralPlaceField({
       {suggestions.length > 0 && !disabled ? (
         <ul
           role="listbox"
-          aria-label={`${label}建議`}
+          aria-label={t("place.suggestions", { label })}
           style={{
             listStyle: "none",
             margin: 0,
@@ -301,7 +303,7 @@ export function ReferralPlaceField({
             aria-expanded={mapOpen}
             onClick={() => setMapOpen((open) => !open)}
           >
-            {mapOpen ? "收起地圖" : "在地圖上選擇"}
+            {mapOpen ? t("place.mapClose") : t("place.mapOpen")}
           </button>
         ) : null}
         {allowCurrentLocation ? (
@@ -311,14 +313,14 @@ export function ReferralPlaceField({
             disabled={disabled || busy}
             onClick={useCurrentLocation}
           >
-            使用目前位置
+            {t("place.currentLocation")}
           </button>
         ) : null}
         {busy ? (
           <span
             style={{ fontSize: 12, color: theme.muted, alignSelf: "center" }}
           >
-            取得地址中…
+            {t("place.resolving")}
           </span>
         ) : null}
       </div>
@@ -326,7 +328,7 @@ export function ReferralPlaceField({
         <PlacePickerMap
           browserKey={mapConfig.browserKey}
           point={point}
-          label={label}
+          label={t("place.mapLabel", { label })}
           onSelect={(next) => void choosePoint(next)}
           onUnavailable={() => setMapFailed(true)}
         />
@@ -419,7 +421,7 @@ function PlacePickerMap({
     <div
       ref={container}
       role="application"
-      aria-label={`${label}地圖：點選或拖曳圖釘以選擇位置`}
+      aria-label={label}
       style={{
         width: "100%",
         height: 220,
