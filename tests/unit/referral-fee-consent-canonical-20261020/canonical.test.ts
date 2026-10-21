@@ -388,3 +388,42 @@ describe("E19 canonical fee agreement and real SQL wire", () => {
     ).toBe(0);
   });
 });
+
+it("reads only the genuine cancellation timestamp through a new service and preserves a missing legacy value", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2026-10-20T15:59:30.000Z"));
+    const f = await unacknowledged();
+    await f.service.acknowledgeReferralFees(agree, f.who);
+    const ack = await f.service.createReferralPassengerBooking(
+      f.command,
+      f.who,
+    );
+    vi.setSystemTime(new Date("2026-10-20T16:00:15.000Z"));
+    const cancelled = await f.service.cancelReferralPassengerTrip(
+      ack.orderId,
+      { orderId: ack.orderId, reason: "Controlled own cancellation" },
+      f.who,
+    );
+    expect(cancelled.cancelledAt).toBe("2026-10-20T16:00:15.000Z");
+    expect(cancelled.cancelledAt).not.toBe(cancelled.createdAt);
+    const current = (
+      await f.newService().listReferralPassengerHistory(f.who)
+    ).items.find((item) => item.orderId === ack.orderId);
+    expect(current).toMatchObject({
+      status: "cancelled",
+      cancelledAt: cancelled.cancelledAt,
+    });
+    // Controlled persisted legacy row: missing cancellation metadata stays absent.
+    const stored = f.db.table("ops.phase1_owned_orders").get(ack.orderId);
+    expect(stored).toBeDefined();
+    stored.cancelledAt = null;
+    const legacy = (
+      await f.newService().listReferralPassengerHistory(f.who)
+    ).items.find((item) => item.orderId === ack.orderId);
+    expect(legacy?.cancelledAt).toBeNull();
+    expect(legacy?.createdAt).toBe(cancelled.createdAt);
+  } finally {
+    vi.useRealTimers();
+  }
+});

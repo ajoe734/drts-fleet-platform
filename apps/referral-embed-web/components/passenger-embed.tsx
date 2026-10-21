@@ -7,6 +7,8 @@ import {
 import {
   PASSENGER_FEE_DISCLOSURE_VERSION,
   PASSENGER_FEE_CONTENT_HASH,
+  PASSENGER_FEE_ROWS,
+  PASSENGER_FREE_CANCELLATION_NOTICE,
   type ReferralFeeStatus,
 } from "@drts/contracts";
 import { ReferralComplaintPanel } from "./referral-complaint-panel";
@@ -67,6 +69,8 @@ type BookingFormState = {
   vehicleType: string;
 };
 
+const [REFERRAL_CANCELLATION_FEE_LABEL, REFERRAL_CANCELLATION_FEE_VALUE] =
+  PASSENGER_FEE_ROWS[2];
 const REFERRAL_SUPPORT_PHONE = "02-2944-0985";
 const REFERRAL_AUTHORITY_PHONE = "1999";
 const DEMO_PASSENGER_PHONE = "0912345820";
@@ -2798,7 +2802,12 @@ function TripsScreen({
     liveData?.history?.items.map((trip) => ({
       id: trip.orderNo,
       orderId: trip.orderId,
-      date: formatShortDateTime(trip.completedAt || trip.createdAt),
+      date: formatShortDateTime(
+        trip.status === "cancelled"
+          ? trip.cancelledAt
+          : trip.completedAt || trip.createdAt,
+        "Asia/Taipei",
+      ),
       feeConfirmedAt: trip.feeConfirmation?.feeConfirmedAt ?? null,
       from: trip.pickupAddress,
       to: trip.dropoffAddress,
@@ -2962,7 +2971,10 @@ function ReceiptScreen({
       ? {
           id: liveData.receipt.orderNo,
           orderId: liveData.receipt.orderId,
-          date: formatShortDateTime(liveData.receipt.completedAt),
+          date: formatShortDateTime(
+            liveData.receipt.completedAt,
+            "Asia/Taipei",
+          ),
           from: liveData.receipt.pickupAddress,
           to: liveData.receipt.dropoffAddress,
           vehicle: liveData.receipt.vehicleType,
@@ -3617,18 +3629,28 @@ function OutcomeScreen({
               : trip?.status === "dispatch_failed" ||
                   trip?.status === "dispatch_timeout"
                 ? "本次派車失敗，未產生車資，請重新叫車。"
-                : "此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。"}
+                : `此行程已取消。${PASSENGER_FREE_CANCELLATION_NOTICE}`}
           </div>
+          {trip?.status === "cancelled" ? (
+            <DetailRow
+              theme={theme}
+              label="取消時間"
+              value={formatShortDateTime(trip.cancelledAt, "Asia/Taipei")}
+              mono
+            />
+          ) : null}
           <DetailRow
             theme={theme}
-            label="取消時間"
-            value={formatShortDateTime(trip?.completedAt || trip?.createdAt)}
-            mono
-          />
-          <DetailRow
-            theme={theme}
-            label="費用"
-            value={trip?.formattedFare ?? "—"}
+            label={
+              trip?.status === "cancelled"
+                ? REFERRAL_CANCELLATION_FEE_LABEL
+                : "費用"
+            }
+            value={
+              trip?.status === "cancelled"
+                ? REFERRAL_CANCELLATION_FEE_VALUE
+                : (trip?.formattedFare ?? "—")
+            }
             strong
             last
           />
