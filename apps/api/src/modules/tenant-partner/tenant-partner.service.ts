@@ -249,6 +249,7 @@ import {
 } from "./referral-embed-handoff.repository";
 import {
   TenantPartnerRepository,
+  mergeCanonicalTenantApiKeyRecord,
   type IdentityGovernanceChanges,
   type PersistTenantPartnerChanges,
   type StoredPartnerIngressCredentialRecord,
@@ -8149,8 +8150,78 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    this.reconcileStoredApiKey(matchingKey);
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      return this.authenticateTenantApiKeyWithCanonicalState(
+        matchingKey,
+        options,
+      );
+    }
 
+    return this.completeAuthenticateTenantApiKey(matchingKey, options);
+  }
+
+  private async loadCanonicalTenantApiKey(
+    tenantId: string,
+    apiKeyId: string,
+  ): Promise<StoredTenantApiKeyRecord | null> {
+    const repository = this.tenantPartnerRepository;
+    if (!repository?.isEnabled()) {
+      return null;
+    }
+    if (typeof (repository as any).findTenantApiKey === "function") {
+      return await (repository as any).findTenantApiKey(apiKeyId, tenantId);
+    }
+    if (typeof repository.loadState === "function") {
+      const state = await repository.loadState();
+      return (
+        (state.apiKeys ?? []).find(
+          (candidate) =>
+            candidate.apiKeyId === apiKeyId && candidate.tenantId === tenantId,
+        ) ?? null
+      );
+    }
+    return null;
+  }
+
+  private async authenticateTenantApiKeyWithCanonicalState(
+    matchingKey: StoredTenantApiKeyRecord,
+    options?: AuthenticateTenantApiKeyOptions,
+  ): Promise<TenantApiKeyResolution> {
+    const canonicalKey = await this.loadCanonicalTenantApiKey(
+      matchingKey.tenantId,
+      matchingKey.apiKeyId,
+    );
+    if (canonicalKey) {
+      const merged = mergeCanonicalTenantApiKeyRecord(
+        canonicalKey,
+        matchingKey,
+      );
+      Object.assign(matchingKey, this.cloneStoredApiKey(merged));
+    }
+    const changed = this.reconcileStoredApiKey(matchingKey);
+    if (
+      (changed ||
+        (canonicalKey &&
+          canonicalKey.status !== "auto_revoked" &&
+          !canonicalKey.autoRevokedAt)) &&
+      (matchingKey.autoRevokedAt ||
+        matchingKey.status === "auto_revoked" ||
+        matchingKey.revokeReason === "rotation_overlap_elapsed")
+    ) {
+      await Promise.resolve(
+        this.persistChanges(
+          {
+            apiKeys: [this.cloneStoredApiKey(matchingKey)],
+          },
+          "auto_revoke_tenant_api_key",
+        ),
+      );
+    }
+
+    return await this.completeAuthenticateTenantApiKey(matchingKey, options);
+  }
+
+  private assertTenantApiKeyNotRevoked(matchingKey: StoredTenantApiKeyRecord) {
     if (
       matchingKey.autoRevokedAt ||
       matchingKey.status === "auto_revoked" ||
@@ -8182,6 +8253,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
       );
     }
+  }
+
+  private completeAuthenticateTenantApiKey(
+    matchingKey: StoredTenantApiKeyRecord,
+    options?: AuthenticateTenantApiKeyOptions,
+  ): MaybePromise<TenantApiKeyResolution> {
+    this.reconcileStoredApiKey(matchingKey);
+    this.assertTenantApiKeyNotRevoked(matchingKey);
 
     const now = Date.now();
     const expiresAtMs = matchingKey.expiresAt
@@ -8238,38 +8317,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       nowIso,
     );
 
-    this.maybeRecordDormantCredentialUse({
-      tenantId: matchingKey.tenantId,
-      channel: "ops_notice",
-      title: "Dormant tenant API key used",
-      message: `Tenant API key ${matchingKey.apiKeyId} (${matchingKey.keyName}) was used after dormancy.`,
-      previousLastUsedAt,
-      createdAt: matchingKey.createdAt,
-    });
-
-    this.recordTenantAudit(
-      {
-        actorId: matchingKey.ownerRef ?? matchingKey.apiKeyId,
-        actorType: "tenant_admin",
-        tenantId: matchingKey.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "use_api_key",
-        resourceType: "tenant_api_key",
-        resourceId: matchingKey.apiKeyId,
-        newValuesSummary: {
-          apiKeyId: matchingKey.apiKeyId,
-          keyName: matchingKey.keyName,
-          lastUsedAt: matchingKey.lastUsedAt,
-          lastUsedWorkload: matchingKey.lastUsedWorkload,
-          workload: matchingKey.lastUsedWorkload,
-        },
-      },
-      options?.requestId,
-    );
-
+    const persistedKey = this.cloneStoredApiKey(matchingKey);
     const persisted = this.persistChanges(
       {
-        apiKeys: [this.cloneStoredApiKey(matchingKey)],
+        apiKeys: [persistedKey],
       },
       "authenticate_tenant_api_key",
     );
@@ -8291,10 +8342,50 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ],
     };
 
-    return this.afterPersistence(persisted, () => ({
-      apiKey: this.cloneStoredApiKey(matchingKey),
-      identity,
-    }));
+    return this.afterPersistence(persisted, () => {
+      Object.assign(
+        matchingKey,
+        this.cloneStoredApiKey(
+          mergeCanonicalTenantApiKeyRecord(persistedKey, matchingKey),
+        ),
+      );
+      this.reconcileStoredApiKey(matchingKey);
+      this.assertTenantApiKeyNotRevoked(matchingKey);
+
+      this.maybeRecordDormantCredentialUse({
+        tenantId: matchingKey.tenantId,
+        channel: "ops_notice",
+        title: "Dormant tenant API key used",
+        message: `Tenant API key ${matchingKey.apiKeyId} (${matchingKey.keyName}) was used after dormancy.`,
+        previousLastUsedAt,
+        createdAt: matchingKey.createdAt,
+      });
+
+      this.recordTenantAudit(
+        {
+          actorId: matchingKey.ownerRef ?? matchingKey.apiKeyId,
+          actorType: "tenant_admin",
+          tenantId: matchingKey.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "use_api_key",
+          resourceType: "tenant_api_key",
+          resourceId: matchingKey.apiKeyId,
+          newValuesSummary: {
+            apiKeyId: matchingKey.apiKeyId,
+            keyName: matchingKey.keyName,
+            lastUsedAt: matchingKey.lastUsedAt,
+            lastUsedWorkload: matchingKey.lastUsedWorkload,
+            workload: matchingKey.lastUsedWorkload,
+          },
+        },
+        options?.requestId,
+      );
+
+      return {
+        apiKey: this.cloneStoredApiKey(matchingKey),
+        identity,
+      };
+    });
   }
 
   issueApiKey(
@@ -8472,6 +8563,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       currentApiKey.autoRevokedAt ?? null,
       rotatedAt,
     );
+    this.reconcileStoredApiKey(currentApiKey, rotatedAt);
     const retiredApiKeys = this.apiKeys
       .filter(
         (apiKey) =>
@@ -10860,8 +10952,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       apiKey.revokeReason = "manual_revoke";
       apiKey.status = "revoked";
       apiKey.overlapEndsAt = null;
+      const persistedApiKey = this.cloneStoredApiKey(apiKey);
       const persisted = this.persistIdentityGovernanceMutation({
-        changes: { apiKeys: [this.cloneStoredApiKey(apiKey)] },
+        changes: { apiKeys: [persistedApiKey] },
         context: "revoke_api_key",
         rollback: () => {
           this.apiKeys = previousApiKeys.map((entry) =>
@@ -10901,6 +10994,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       });
 
       return this.afterPersistence(persisted, () => {
+        Object.assign(
+          apiKey,
+          this.cloneStoredApiKey(
+            mergeCanonicalTenantApiKeyRecord(persistedApiKey, apiKey),
+          ),
+        );
+        this.reconcileStoredApiKey(apiKey);
         this.recordTenantAudit(
           {
             actorId: null,
@@ -11491,8 +11591,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const event = params.event;
 
     if (!this.securityEventsService || !event) {
-      this.persistChanges(params.changes, params.context);
-      return;
+      const persisted = this.persistChanges(params.changes, params.context);
+      return this.tenantPartnerRepository?.isEnabled() ? persisted : undefined;
     }
 
     const canUseTransaction =
@@ -11506,10 +11606,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             executor,
             params.changes,
           );
+          if (
+            params.context === "revoke_api_key" &&
+            params.changes.apiKeys?.[0]
+          ) {
+            const mergedKey = params.changes.apiKeys[0];
+            event.afterSummary = this.toApiKeyResponse(mergedKey);
+          }
           await this.securityEventsService!.recordEventRequired(
             event,
             executor,
           );
+        })
+        .then(() => {
+          this.applyMergedApiKeysToCache(params.changes.apiKeys);
         })
         .catch((error) => {
           this.tenantPartnerRepository?.reportPersistenceFailure(
@@ -11524,7 +11634,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.securityEventsService
       .recordEventRequired(event)
       .then(() => {
-        this.persistChanges(params.changes, params.context);
+        return this.persistChanges(params.changes, params.context);
       })
       .catch((error) => {
         params.rollback();
@@ -16931,6 +17041,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       });
   }
 
+  private applyMergedApiKeysToCache(
+    apiKeys: readonly StoredTenantApiKeyRecord[] | undefined,
+  ) {
+    if (!apiKeys || apiKeys.length === 0) {
+      return;
+    }
+    for (const updated of apiKeys) {
+      const target = this.apiKeys.find(
+        (candidate) =>
+          candidate.apiKeyId === updated.apiKeyId &&
+          candidate.tenantId === updated.tenantId,
+      );
+      if (target) {
+        Object.assign(
+          target,
+          this.cloneStoredApiKey(
+            mergeCanonicalTenantApiKeyRecord(updated, target),
+          ),
+        );
+        this.reconcileStoredApiKey(target);
+      }
+    }
+  }
+
   private persistChanges(
     changes: PersistTenantPartnerChanges,
     context: string,
@@ -16945,7 +17079,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const result = this.tenantPartnerRepository.persistChanges(changes);
     if (result && typeof (result as any).catch === "function") {
       return (result as Promise<unknown>)
-        .then(() => undefined)
+        .then(() => {
+          this.applyMergedApiKeysToCache(changes.apiKeys);
+        })
         .catch((error: unknown) => {
           if (
             typeof (this.tenantPartnerRepository as any)
@@ -16958,6 +17094,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           }
         });
     }
+    this.applyMergedApiKeysToCache(changes.apiKeys);
   }
 
   private syncIdentityTenantUserRoles(context: string) {

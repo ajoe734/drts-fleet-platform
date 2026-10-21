@@ -121,6 +121,137 @@ export type StoredTenantApiKeyRecord = TenantApiKeyRecord & {
   keyHash: string;
 };
 
+export function mergeCanonicalTenantApiKeyRecord(
+  existing: StoredTenantApiKeyRecord | null | undefined,
+  incoming: StoredTenantApiKeyRecord,
+): StoredTenantApiKeyRecord {
+  if (!existing) {
+    return {
+      ...incoming,
+      scopes: [...incoming.scopes],
+      ...(incoming.signals !== undefined
+        ? { signals: { ...incoming.signals } }
+        : {}),
+    };
+  }
+
+  const isTerminal = (record: StoredTenantApiKeyRecord) =>
+    Boolean(
+      record.revokedAt ||
+        record.autoRevokedAt ||
+        record.status === "revoked" ||
+        record.status === "auto_revoked",
+    );
+  const isAutoRevoked = (record: StoredTenantApiKeyRecord) =>
+    Boolean(
+      record.autoRevokedAt ||
+        record.status === "auto_revoked" ||
+        record.revokeReason === "rotation_overlap_elapsed",
+    );
+
+  const existingTerminal = isTerminal(existing);
+  const incomingTerminal = isTerminal(incoming);
+
+  const existingUsedMs = existing.lastUsedAt
+    ? Date.parse(existing.lastUsedAt)
+    : Number.NaN;
+  const incomingUsedMs = incoming.lastUsedAt
+    ? Date.parse(incoming.lastUsedAt)
+    : Number.NaN;
+  const preferExistingUsage =
+    existing.lastUsedAt !== null &&
+    (incoming.lastUsedAt === null ||
+      (Number.isFinite(existingUsedMs) &&
+        (!Number.isFinite(incomingUsedMs) || existingUsedMs > incomingUsedMs)));
+
+  const lastUsedAt = preferExistingUsage
+    ? existing.lastUsedAt
+    : incoming.lastUsedAt;
+  const lastUsedWorkload = preferExistingUsage
+    ? (existing.lastUsedWorkload ?? incoming.lastUsedWorkload ?? null)
+    : (incoming.lastUsedWorkload ?? existing.lastUsedWorkload ?? null);
+
+  let status: NonNullable<StoredTenantApiKeyRecord["status"]> =
+    incoming.status ?? existing.status ?? "active";
+  let revokedAt = incoming.revokedAt;
+  let autoRevokedAt = incoming.autoRevokedAt ?? null;
+  let revokeReason = incoming.revokeReason ?? null;
+  let overlapEndsAt = incoming.overlapEndsAt ?? null;
+  const supersededByApiKeyId =
+    existing.supersededByApiKeyId ?? incoming.supersededByApiKeyId ?? null;
+  const rotatedFromApiKeyId =
+    existing.rotatedFromApiKeyId ?? incoming.rotatedFromApiKeyId ?? null;
+
+  if (existingTerminal) {
+    const existingAuto = isAutoRevoked(existing);
+    status = existingAuto ? "auto_revoked" : "revoked";
+    revokedAt =
+      existing.revokedAt ??
+      existing.autoRevokedAt ??
+      incoming.revokedAt ??
+      incoming.autoRevokedAt ??
+      null;
+    autoRevokedAt = existingAuto
+      ? (existing.autoRevokedAt ?? existing.revokedAt ?? revokedAt)
+      : null;
+    revokeReason =
+      existing.revokeReason ??
+      (existingAuto
+        ? "rotation_overlap_elapsed"
+        : (incoming.revokeReason ?? "revoked"));
+    overlapEndsAt = null;
+  } else if (incomingTerminal) {
+    const incomingAuto = isAutoRevoked(incoming);
+    status = incomingAuto ? "auto_revoked" : "revoked";
+    revokedAt = incoming.revokedAt ?? incoming.autoRevokedAt ?? null;
+    autoRevokedAt = incomingAuto
+      ? (incoming.autoRevokedAt ?? incoming.revokedAt ?? revokedAt)
+      : null;
+    revokeReason =
+      incoming.revokeReason ??
+      (incomingAuto ? "rotation_overlap_elapsed" : "revoked");
+    overlapEndsAt = null;
+  } else if (
+    (existing.status === "overlap_active" ||
+      existing.overlapEndsAt !== null ||
+      existing.supersededByApiKeyId !== null) &&
+    incoming.status === "active" &&
+    !incoming.overlapEndsAt &&
+    !incoming.supersededByApiKeyId
+  ) {
+    status = existing.status === "expired" ? "expired" : "overlap_active";
+    overlapEndsAt = existing.overlapEndsAt ?? null;
+  } else if (existing.status === "expired" && incoming.status === "active") {
+    status = "expired";
+  }
+
+  const baseSignals = preferExistingUsage
+    ? (existing.signals ?? incoming.signals)
+    : (incoming.signals ?? existing.signals);
+  const signals = baseSignals
+    ? {
+        ...baseSignals,
+        autoRevoked: autoRevokedAt !== null,
+      }
+    : undefined;
+
+  return {
+    ...existing,
+    ...incoming,
+    scopes: [...incoming.scopes],
+    lastUsedAt,
+    lastUsedWorkload,
+    status,
+    overlapEndsAt,
+    autoRevokedAt,
+    rotatedFromApiKeyId,
+    supersededByApiKeyId,
+    revokedAt,
+    revokeReason,
+    ...(signals !== undefined ? { signals } : {}),
+  };
+}
+
 export type StoredPartnerIngressCredentialRecord =
   PartnerIngressCredentialRecord & {
     keyHash: string;
@@ -294,6 +425,37 @@ export class TenantPartnerRepository {
     return (
       (result.rows[0]?.record as StoredWebhookDeliveryRecord | undefined) ??
       null
+    );
+  }
+
+  async findTenantApiKey(
+    apiKeyId: string,
+    tenantId?: string | null,
+    executor?: TenantPartnerQueryExecutor,
+  ): Promise<StoredTenantApiKeyRecord | null> {
+    if (!executor && !this.isEnabled()) {
+      return null;
+    }
+    const target = executor ?? this.databaseService!;
+    const result = await target.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_tenant_api_keys WHERE api_key_id = $1`,
+      [apiKeyId],
+    );
+    return (
+      result.rows
+        .map((row) =>
+          row?.record
+            ? this.parseRecord<StoredTenantApiKeyRecord>(
+                row.record,
+                "admin.phase1_tenant_api_keys",
+              )
+            : undefined,
+        )
+        .find(
+          (record) =>
+            record?.apiKeyId === apiKeyId &&
+            (!tenantId || record.tenantId === tenantId),
+        ) ?? null
     );
   }
 
@@ -1991,8 +2153,15 @@ export class TenantPartnerRepository {
     apiKeys: readonly StoredTenantApiKeyRecord[],
   ) {
     await Promise.all(
-      apiKeys.map((apiKey) =>
-        executor.query(
+      apiKeys.map(async (apiKey) => {
+        const existing = await this.findTenantApiKey(
+          apiKey.apiKeyId,
+          apiKey.tenantId,
+          executor,
+        );
+        const merged = mergeCanonicalTenantApiKeyRecord(existing, apiKey);
+        Object.assign(apiKey, merged);
+        await executor.query(
           `
             INSERT INTO admin.phase1_tenant_api_keys (
               api_key_id,
@@ -2005,19 +2174,65 @@ export class TenantPartnerRepository {
             )
             ON CONFLICT (api_key_id) DO UPDATE SET
               tenant_id = EXCLUDED.tenant_id,
-              revoked_at = EXCLUDED.revoked_at,
+              revoked_at = COALESCE(
+                admin.phase1_tenant_api_keys.revoked_at,
+                EXCLUDED.revoked_at
+              ),
               created_at = EXCLUDED.created_at,
-              record = EXCLUDED.record
+              record = CASE
+                WHEN (
+                  admin.phase1_tenant_api_keys.revoked_at IS NOT NULL
+                  OR admin.phase1_tenant_api_keys.record->>'status' IN ('revoked', 'auto_revoked')
+                )
+                AND EXCLUDED.revoked_at IS NULL
+                AND COALESCE(EXCLUDED.record->>'status', '') NOT IN ('revoked', 'auto_revoked')
+                THEN CASE
+                  WHEN (EXCLUDED.record->>'lastUsedAt') IS NOT NULL
+                    AND (
+                      (admin.phase1_tenant_api_keys.record->>'lastUsedAt') IS NULL
+                      OR (EXCLUDED.record->>'lastUsedAt')::timestamptz >= (admin.phase1_tenant_api_keys.record->>'lastUsedAt')::timestamptz
+                    )
+                  THEN jsonb_set(
+                    jsonb_set(
+                      admin.phase1_tenant_api_keys.record,
+                      '{lastUsedAt}',
+                      to_jsonb(EXCLUDED.record->>'lastUsedAt'),
+                      true
+                    ),
+                    '{lastUsedWorkload}',
+                    COALESCE(EXCLUDED.record->'lastUsedWorkload', 'null'::jsonb),
+                    true
+                  )
+                  ELSE admin.phase1_tenant_api_keys.record
+                END
+                WHEN (admin.phase1_tenant_api_keys.record->>'lastUsedAt') IS NOT NULL
+                  AND (
+                    (EXCLUDED.record->>'lastUsedAt') IS NULL
+                    OR (admin.phase1_tenant_api_keys.record->>'lastUsedAt')::timestamptz > (EXCLUDED.record->>'lastUsedAt')::timestamptz
+                  )
+                THEN jsonb_set(
+                  jsonb_set(
+                    EXCLUDED.record,
+                    '{lastUsedAt}',
+                    to_jsonb(admin.phase1_tenant_api_keys.record->>'lastUsedAt'),
+                    true
+                  ),
+                  '{lastUsedWorkload}',
+                  COALESCE(admin.phase1_tenant_api_keys.record->'lastUsedWorkload', 'null'::jsonb),
+                  true
+                )
+                ELSE EXCLUDED.record
+              END
           `,
           [
-            apiKey.apiKeyId,
-            apiKey.tenantId,
-            apiKey.revokedAt,
-            apiKey.createdAt,
-            JSON.stringify(apiKey),
+            merged.apiKeyId,
+            merged.tenantId,
+            merged.revokedAt,
+            merged.createdAt,
+            JSON.stringify(merged),
           ],
-        ),
-      ),
+        );
+      }),
     );
   }
 

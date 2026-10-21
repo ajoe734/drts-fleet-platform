@@ -18,11 +18,16 @@ import {
   type PartnerEligibilityAdapterInterface,
 } from "../../src/modules/tenant-partner/partner-eligibility-adapter.interface";
 import { TenantInvitationDeliveryService } from "../../src/modules/tenant-partner/tenant-invitation-delivery.service";
-import type {
-  PersistTenantPartnerChanges,
-  StoredPartnerIngressCredentialRecord,
-  TenantPartnerState,
-  TenantPartnerQueryExecutor,
+import { SecurityEventsService } from "../../src/modules/security-events/security-events.service";
+import { TenantApiKeyAuthGuard } from "../../src/modules/tenant-partner/tenant-partner.controller";
+import {
+  TenantPartnerRepository,
+  mergeCanonicalTenantApiKeyRecord,
+  type PersistTenantPartnerChanges,
+  type StoredPartnerIngressCredentialRecord,
+  type StoredTenantApiKeyRecord,
+  type TenantPartnerState,
+  type TenantPartnerQueryExecutor,
 } from "../../src/modules/tenant-partner/tenant-partner.repository";
 import { createEmptyTenantQuotaUsage } from "../../src/modules/tenant-partner/tenant-quota-ledger";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
@@ -174,6 +179,22 @@ function withoutKeys<T>(
   return current.filter((value) => !removed.has(keyOf(value)));
 }
 
+function mergeApiKeysByKey(
+  current: readonly StoredTenantApiKeyRecord[],
+  incoming: readonly StoredTenantApiKeyRecord[] | undefined,
+) {
+  const merged = new Map(current.map((value) => [value.apiKeyId, value]));
+  for (const value of incoming ?? []) {
+    const nextValue = mergeCanonicalTenantApiKeyRecord(
+      merged.get(value.apiKeyId) ?? null,
+      value,
+    );
+    Object.assign(value, nextValue);
+    merged.set(value.apiKeyId, nextValue);
+  }
+  return [...merged.values()];
+}
+
 function createInMemoryTenantPartnerRepository(
   initialState: TenantPartnerState = createEmptyRepositoryState(),
 ) {
@@ -182,6 +203,18 @@ function createInMemoryTenantPartnerRepository(
   const repository = {
     isEnabled: vi.fn(() => false),
     loadState: vi.fn(async () => cloneState(state)),
+    findTenantApiKey: vi.fn(
+      async (apiKeyId: string, tenantId?: string | null) => {
+        const found = state.apiKeys.find(
+          (candidate) =>
+            candidate.apiKeyId === apiKeyId &&
+            (!tenantId || candidate.tenantId === tenantId),
+        );
+        return found
+          ? (JSON.parse(JSON.stringify(found)) as StoredTenantApiKeyRecord)
+          : null;
+      },
+    ),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       const nextState = {
         notificationPreferences: withoutKeys(
@@ -376,10 +409,9 @@ function createInMemoryTenantPartnerRepository(
           changes.userRoles,
           (value) => value.userId,
         ),
-        apiKeys: mergeByKey(
+        apiKeys: mergeApiKeysByKey(
           nextState.apiKeys,
           changes.apiKeys,
-          (value) => value.apiKeyId,
         ),
       };
     }),
@@ -3085,6 +3117,528 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(loadedKey).toBeDefined();
     expect(loadedKey?.lastUsedAt).toBe(resolution.apiKey.lastUsedAt);
     expect(loadedKey?.lastUsedWorkload).toBe("etl_ingest");
+  });
+
+  it("enforces monotonic canonical revocation against warm-peer authentication, TenantApiKeyAuthGuard, and fresh reloads", async () => {
+    const rows = new Map<
+      string,
+      {
+        api_key_id: string;
+        tenant_id: string;
+        revoked_at: string | null;
+        created_at: string;
+        record: StoredTenantApiKeyRecord;
+      }
+    >();
+
+    const sqlPort = {
+      isEnabled: () => true,
+      connect: async () => ({
+        query: sqlPort.query,
+        release: () => {},
+      }),
+      withTransaction: async <T>(
+        work: (tx: TenantPartnerQueryExecutor) => Promise<T>,
+      ) => work(sqlPort as unknown as TenantPartnerQueryExecutor),
+      query: vi.fn(
+        async <T>(
+          sql: string,
+          params: readonly unknown[] = [],
+        ): Promise<{ rows: T[] }> => {
+          const normalized = sql.replace(/\s+/g, " ").trim();
+          if (
+            normalized.includes(
+              "FROM admin.phase1_tenant_api_keys WHERE api_key_id = $1",
+            )
+          ) {
+            const apiKeyId = String(params[0]);
+            const tenantId = params[1] ? String(params[1]) : undefined;
+            const row = rows.get(apiKeyId);
+            if (!row || (tenantId && row.tenant_id !== tenantId)) {
+              return { rows: [] };
+            }
+            return {
+              rows: [
+                {
+                  record: JSON.parse(JSON.stringify(row.record)),
+                } as unknown as T,
+              ],
+            };
+          }
+          if (normalized.includes("FROM admin.phase1_tenant_api_keys")) {
+            return {
+              rows: [...rows.values()].map(
+                (row) =>
+                  ({
+                    record: JSON.parse(JSON.stringify(row.record)),
+                  }) as unknown as T,
+              ),
+            };
+          }
+          if (
+            normalized.startsWith("INSERT INTO admin.phase1_tenant_api_keys")
+          ) {
+            const [api_key_id, tenant_id, revoked_at, created_at, rawRecord] =
+              params as [string, string, string | null, string, string];
+            const incomingRecord = JSON.parse(
+              rawRecord,
+            ) as StoredTenantApiKeyRecord;
+            const existing = rows.get(api_key_id);
+            if (!existing) {
+              rows.set(api_key_id, {
+                api_key_id,
+                tenant_id,
+                revoked_at,
+                created_at,
+                record: incomingRecord,
+              });
+            } else {
+              const existingTerminal =
+                existing.revoked_at !== null ||
+                existing.record.status === "revoked" ||
+                existing.record.status === "auto_revoked";
+              const incomingTerminal =
+                revoked_at !== null ||
+                incomingRecord.status === "revoked" ||
+                incomingRecord.status === "auto_revoked";
+              let sqlMergedRecord = incomingRecord;
+              if (existingTerminal && !incomingTerminal) {
+                sqlMergedRecord = {
+                  ...existing.record,
+                  ...(incomingRecord.lastUsedAt &&
+                  (!existing.record.lastUsedAt ||
+                    Date.parse(incomingRecord.lastUsedAt) >=
+                      Date.parse(existing.record.lastUsedAt))
+                    ? {
+                        lastUsedAt: incomingRecord.lastUsedAt,
+                        lastUsedWorkload: incomingRecord.lastUsedWorkload,
+                      }
+                    : {}),
+                };
+              }
+              rows.set(api_key_id, {
+                api_key_id,
+                tenant_id,
+                revoked_at: existing.revoked_at ?? revoked_at,
+                created_at,
+                record: sqlMergedRecord,
+              });
+            }
+            return { rows: [] };
+          }
+          return { rows: [] };
+        },
+      ),
+    };
+
+    const recordedSecurityEvents: Array<Record<string, unknown>> = [];
+    const securityEventsService = Object.assign(
+      Object.create(SecurityEventsService.prototype),
+      {
+        isEnabled: () => true,
+        recordEventRequired: vi.fn(async (event: Record<string, unknown>) => {
+          recordedSecurityEvents.push(JSON.parse(JSON.stringify(event)));
+        }),
+      },
+    );
+
+    const actorIdentity: IdentityContext = {
+      actorId: "usr-tenant-admin-001",
+      actorType: "tenant_admin",
+      realm: "tenant",
+      tenantId: "tenant-demo-001",
+      roles: ["tenant_admin"],
+      scopes: ["tenant:read", "tenant:write"],
+      authMode: "jwt",
+    };
+
+    const repoA = new TenantPartnerRepository(sqlPort as never);
+    const serviceA = new TenantPartnerService(
+      new AuditNotificationService(),
+      repoA,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService as never,
+    );
+    await serviceA.onModuleInit();
+
+    const issued = await serviceA.issueApiKey(
+      "tenant-demo-001",
+      {
+        keyName: "Warm peer canonical revocation key",
+        scopes: ["tenant:read", "tenant:write"],
+        ownerRef: "usr-tenant-admin-001",
+      },
+      "req-issue-c111-warm-001",
+      actorIdentity,
+    );
+
+    const repoB = new TenantPartnerRepository(sqlPort as never);
+    const serviceB = new TenantPartnerService(
+      new AuditNotificationService(),
+      repoB,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService as never,
+    );
+    await serviceB.onModuleInit();
+    const guardB = new TenantApiKeyAuthGuard(serviceB);
+
+    const guardRequestBefore: Record<string, unknown> = {
+      headers: {
+        authorization: `Bearer ${issued.plaintextKey}`,
+        "x-tenant-id": "tenant-demo-001",
+        "x-request-id": "req-guard-before-001",
+      },
+      query: {},
+    };
+    const guardContextBefore = {
+      switchToHttp: () => ({
+        getRequest: () => guardRequestBefore,
+      }),
+    };
+    expect(await guardB.canActivate(guardContextBefore as never)).toBe(true);
+
+    const bUsedBeforeRevoke = await serviceB.authenticateTenantApiKey(
+      issued.plaintextKey,
+      {
+        tenantId: "tenant-demo-001",
+        requiredScopes: ["tenant:write"],
+        workload: "dispatch_sync",
+        requestId: "req-b-use-before-revoke",
+      },
+    );
+    expect(bUsedBeforeRevoke.apiKey.lastUsedAt).toBeTruthy();
+    expect(bUsedBeforeRevoke.apiKey.lastUsedWorkload).toBe("dispatch_sync");
+
+    // Instance A revokes the key while A's own in-memory cache still had lastUsedAt === null
+    await serviceA.revokeApiKey(
+      "tenant-demo-001",
+      issued.apiKey.apiKeyId,
+      "req-revoke-c111-warm-001",
+      actorIdentity,
+    );
+
+    const rowAfterARevoke = rows.get(issued.apiKey.apiKeyId);
+    expect(rowAfterARevoke?.revoked_at).toBeTruthy();
+    expect(rowAfterARevoke?.record.status).toBe("revoked");
+    expect(rowAfterARevoke?.record.revokedAt).toBe(rowAfterARevoke?.revoked_at);
+    expect(rowAfterARevoke?.record.revokeReason).toBe("manual_revoke");
+    // A's revoke must preserve B's canonical lastUsedAt and lastUsedWorkload
+    expect(rowAfterARevoke?.record.lastUsedAt).toBe(
+      bUsedBeforeRevoke.apiKey.lastUsedAt,
+    );
+    expect(rowAfterARevoke?.record.lastUsedWorkload).toBe("dispatch_sync");
+    expect(recordedSecurityEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "tenant_api_key.issued",
+          targetId: issued.apiKey.apiKeyId,
+        }),
+        expect.objectContaining({
+          eventType: "tenant_api_key.revoked",
+          targetId: issued.apiKey.apiKeyId,
+          afterSummary: expect.objectContaining({
+            status: "revoked",
+            lastUsedAt: bUsedBeforeRevoke.apiKey.lastUsedAt,
+            lastUsedWorkload: "dispatch_sync",
+          }),
+        }),
+      ]),
+    );
+
+    // Instance A immediately rejects the revoked key
+    await expect(
+      Promise.resolve(
+        serviceA.authenticateTenantApiKey(issued.plaintextKey, {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:write"],
+          workload: "post_revoke_a",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+
+    // Warm peer B (holding stale active state in memory) must fail closed on both direct auth and guard
+    await expect(
+      Promise.resolve(
+        serviceB.authenticateTenantApiKey(issued.plaintextKey, {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:write"],
+          workload: "warm_peer_b_direct",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+
+    const guardRequestAfter: Record<string, unknown> = {
+      headers: {
+        "x-api-key": issued.plaintextKey,
+        "x-tenant-id": "tenant-demo-001",
+        "x-request-id": "req-guard-after-001",
+      },
+      query: {},
+    };
+    const guardContextAfter = {
+      switchToHttp: () => ({
+        getRequest: () => guardRequestAfter,
+      }),
+    };
+    await expect(
+      guardB.canActivate(guardContextAfter as never),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+
+    // Warm peer B's local cache is now reconciled to revoked and canonical DB remains revoked
+    const bCachedKey = serviceB
+      .listApiKeys("tenant-demo-001")
+      .find((key) => key.apiKeyId === issued.apiKey.apiKeyId);
+    expect(bCachedKey).toMatchObject({
+      status: "revoked",
+      revokedAt: rowAfterARevoke?.revoked_at,
+      revokeReason: "manual_revoke",
+    });
+
+    const rowAfterBWarmAttempt = rows.get(issued.apiKey.apiKeyId);
+    expect(rowAfterBWarmAttempt?.revoked_at).toBe(rowAfterARevoke?.revoked_at);
+    expect(rowAfterBWarmAttempt?.record.status).toBe("revoked");
+    expect(rowAfterBWarmAttempt?.record.revokedAt).toBe(
+      rowAfterARevoke?.revoked_at,
+    );
+
+    // Simulate an in-flight stale active usage write racing with revocation at the repository boundary
+    const racingUsageTimestamp = new Date(Date.now() + 5_000).toISOString();
+    const staleActiveRecord: StoredTenantApiKeyRecord = {
+      ...(JSON.parse(
+        JSON.stringify(rowAfterARevoke?.record),
+      ) as StoredTenantApiKeyRecord),
+      status: "active",
+      revokedAt: null,
+      revokeReason: null,
+      lastUsedAt: racingUsageTimestamp,
+      lastUsedWorkload: "inflight_racing_worker",
+    };
+    await repoB.persistChanges({
+      apiKeys: [staleActiveRecord],
+    });
+
+    const rowAfterRacingPersist = rows.get(issued.apiKey.apiKeyId);
+    expect(rowAfterRacingPersist?.revoked_at).toBe(rowAfterARevoke?.revoked_at);
+    expect(rowAfterRacingPersist?.record.status).toBe("revoked");
+    expect(rowAfterRacingPersist?.record.revokedAt).toBe(
+      rowAfterARevoke?.revoked_at,
+    );
+    expect(rowAfterRacingPersist?.record.revokeReason).toBe("manual_revoke");
+    expect(rowAfterRacingPersist?.record.lastUsedAt).toBe(racingUsageTimestamp);
+    expect(rowAfterRacingPersist?.record.lastUsedWorkload).toBe(
+      "inflight_racing_worker",
+    );
+
+    // Fresh instance C and restarted instance A both load canonical state as revoked and reject the key
+    const repoC = new TenantPartnerRepository(sqlPort as never);
+    const serviceC = new TenantPartnerService(
+      new AuditNotificationService(),
+      repoC,
+    );
+    await serviceC.onModuleInit();
+
+    expect(
+      serviceC
+        .listApiKeys("tenant-demo-001")
+        .find((key) => key.apiKeyId === issued.apiKey.apiKeyId),
+    ).toMatchObject({
+      status: "revoked",
+      revokedAt: rowAfterARevoke?.revoked_at,
+      lastUsedAt: racingUsageTimestamp,
+      lastUsedWorkload: "inflight_racing_worker",
+    });
+
+    await expect(
+      Promise.resolve(
+        serviceC.authenticateTenantApiKey(issued.plaintextKey, {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:read"],
+          workload: "fresh_instance_c",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+
+    await serviceA.onModuleInit();
+    await expect(
+      Promise.resolve(
+        serviceA.authenticateTenantApiKey(issued.plaintextKey, {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:read"],
+          workload: "restarted_instance_a",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+  });
+
+  it("enforces monotonic canonical auto-revocation across rotation overlap expiry, zero-day rotation, warm peers, and fresh reloads", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-01T00:00:00.000Z"));
+      const repository = createInMemoryTenantPartnerRepository();
+      repository.isEnabled.mockReturnValue(true);
+
+      const serviceA = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+      );
+      await serviceA.onModuleInit();
+
+      const issued = await serviceA.issueApiKey("tenant-demo-001", {
+        keyName: "Overlap rotation key",
+        scopes: ["tenant:read"],
+      });
+
+      const serviceB = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+      );
+      await serviceB.onModuleInit();
+
+      const rotated = await serviceA.rotateApiKey(
+        "tenant-demo-001",
+        issued.apiKey.apiKeyId,
+        { overlapDays: 2 },
+      );
+
+      // Advance past the 2-day overlap window
+      vi.setSystemTime(new Date("2026-10-04T00:00:00.000Z"));
+
+      // Warm peer B (holding stale active state from before rotation) attempts to authenticate the outgoing key
+      await expect(
+        Promise.resolve(
+          serviceB.authenticateTenantApiKey(issued.plaintextKey, {
+            tenantId: "tenant-demo-001",
+            requiredScopes: ["tenant:read"],
+            workload: "warm_peer_after_overlap",
+          }),
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: {
+          error: {
+            code: "TENANT_API_KEY_AUTO_REVOKED",
+          },
+        },
+      });
+
+      const canonicalAfterOverlap = await repository.findTenantApiKey(
+        issued.apiKey.apiKeyId,
+        "tenant-demo-001",
+      );
+      expect(canonicalAfterOverlap?.status).toBe("auto_revoked");
+      expect(canonicalAfterOverlap?.autoRevokedAt).toBeTruthy();
+      expect(canonicalAfterOverlap?.revokeReason).toBe(
+        "rotation_overlap_elapsed",
+      );
+
+      // Zero-day overlap rotation immediately transitions the outgoing key to auto_revoked
+      const rotatedImmediate = await serviceA.rotateApiKey(
+        "tenant-demo-001",
+        rotated.apiKey.apiKeyId,
+        { overlapDays: 0 },
+      );
+      const canonicalZeroOverlap = await repository.findTenantApiKey(
+        rotated.apiKey.apiKeyId,
+        "tenant-demo-001",
+      );
+      expect(canonicalZeroOverlap?.status).toBe("auto_revoked");
+      expect(canonicalZeroOverlap?.autoRevokedAt).toBeTruthy();
+
+      // Fresh instance C rejects both auto-revoked keys and accepts the newest active key
+      const serviceC = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+      );
+      await serviceC.onModuleInit();
+
+      await expect(
+        Promise.resolve(
+          serviceC.authenticateTenantApiKey(issued.plaintextKey, {
+            tenantId: "tenant-demo-001",
+            requiredScopes: ["tenant:read"],
+          }),
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: {
+          error: {
+            code: "TENANT_API_KEY_AUTO_REVOKED",
+          },
+        },
+      });
+
+      await expect(
+        Promise.resolve(
+          serviceC.authenticateTenantApiKey(rotated.plaintextKey, {
+            tenantId: "tenant-demo-001",
+            requiredScopes: ["tenant:read"],
+          }),
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: {
+          error: {
+            code: "TENANT_API_KEY_AUTO_REVOKED",
+          },
+        },
+      });
+
+      const latestAuth = await serviceC.authenticateTenantApiKey(
+        rotatedImmediate.plaintextKey,
+        {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:read"],
+          workload: "fresh_instance_c_active",
+        },
+      );
+      expect(latestAuth.apiKey.apiKeyId).toBe(rotatedImmediate.apiKey.apiKeyId);
+      expect(latestAuth.apiKey.status).toBe("active");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("falls back to manual review after retry exhaustion with explicit adapter attempt history", async () => {
