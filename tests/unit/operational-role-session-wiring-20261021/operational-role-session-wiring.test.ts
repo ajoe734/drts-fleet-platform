@@ -44,6 +44,7 @@ const CANDIDATE_SHA = "337f3dd7fb530b44f4e65875dd03c7a2191e3706";
 const IMMUTABLE_BASELINE_REF = "337f3dd7fb530b44f4e65875dd03c7a2191e3706";
 const API_ORIGIN = "https://drts-dev-api-uc.a.run.app";
 const OPS_ORIGIN = "https://drts-dev-ops-console-web-uc.a.run.app";
+const ADMIN_ORIGIN = "https://drts-dev-platform-admin-web-uc.a.run.app";
 const GCP_PROJECT_ID = "drts-dev-devcc-20260825";
 
 const C125_PRESERVED_FILES = [
@@ -274,14 +275,12 @@ function makeFakeJwt(
 }
 
 const SIM_PROVISIONING_GOOGLE_ID_TOKEN = makeFakeJwt({
-  iss: "https://accounts.google.com",
   aud: `${API_ORIGIN}/driver-provisioning`,
   email: `drts-dev-live-map@${GCP_PROJECT_ID}.iam.gserviceaccount.com`,
-  email_verified: true,
-  sub: "112233445566778899000",
 });
 
 const SIM_OPS_CONSOLE_ID_TOKEN = "sim-cloud-run-ops-console-id-token";
+const SIM_PLATFORM_ADMIN_ID_TOKEN = "sim-cloud-run-platform-admin-id-token";
 const SIM_API_ID_TOKEN = "sim-cloud-run-api-id-token";
 const SIM_OPS_SESSION_TOKEN = "sim-app-ops-non-reviewer-jwt-token";
 const SIM_OPS_SESSION_ID = "sess-ops-non-reviewer-001";
@@ -306,6 +305,8 @@ const SIM_FOREIGN_FLEET_SESSION_TOKEN = makeFakeJwt(
 const SIM_OWN_FLEET_SESSION_TOKEN = "sim-app-own-fleet-001-jwt-token";
 const SIM_PLATFORM_REVIEWER_SESSION_TOKEN =
   "sim-app-platform-reviewer-jwt-token";
+const SIM_PLATFORM_ADMIN_SESSION_ID = "sess-platform-admin-001";
+const SIM_PLATFORM_ADMIN_PRINCIPAL_ID = "platform-admin-001";
 
 type RecordedCall = {
   method: string;
@@ -384,12 +385,12 @@ function createStandardMockFetch(
     opsActorType?: string;
     foreignPartnerId?: string;
     foreignEntrySlug?: string;
-    foreignPartnerType?: string;
     foreignPartnerStatus?: string;
     foreignPartnerActiveFlag?: boolean;
     foreignSessionStatus?: number;
     omitForeignSessionIdInSessionLookup?: boolean;
     foreignBootstrapStatus?: number;
+    canonicalFleetPartnerIds?: string[];
     candidateShaOverride?: string | null;
     failDriverRevoke?: boolean;
     failForeignSessionRevokeOnce?: boolean;
@@ -402,7 +403,12 @@ function createStandardMockFetch(
       : options.candidateShaOverride;
   const foreignPartnerId = options.foreignPartnerId ?? "fleet-foreign-002";
   const foreignEntrySlug = options.foreignEntrySlug ?? "foreign-fleet-alpha";
-  const foreignPartnerType = options.foreignPartnerType ?? "fleet_partner";
+  const canonicalFleetPartnerIds = new Set(
+    options.canonicalFleetPartnerIds ?? [
+      OPERATIONAL_OWN_FLEET_PARTNER_ID,
+      "fleet-foreign-002",
+    ],
+  );
   let failedForeignRevokeOnce = false;
 
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -427,6 +433,94 @@ function createStandardMockFetch(
             realm: "ops",
             actorType: options.opsActorType ?? "ops_user",
           },
+        },
+        { candidateSha },
+      );
+    }
+
+    if (
+      method === "POST" &&
+      url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token`
+    ) {
+      expect(headers.authorization).toBe(
+        `Bearer ${SIM_PLATFORM_ADMIN_ID_TOKEN}`,
+      );
+      return jsonResponse(
+        {
+          data: {
+            token: SIM_PLATFORM_REVIEWER_SESSION_TOKEN,
+            sessionId: SIM_PLATFORM_ADMIN_SESSION_ID,
+            principalId: SIM_PLATFORM_ADMIN_PRINCIPAL_ID,
+            expiresIn: "8h",
+            realm: "platform",
+            actorType: "platform_admin",
+          },
+        },
+        { candidateSha },
+      );
+    }
+
+    if (
+      method === "GET" &&
+      url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session`
+    ) {
+      expect(headers.authorization).toBe(
+        `Bearer ${SIM_PLATFORM_ADMIN_ID_TOKEN}`,
+      );
+      expect(headers["x-drts-authorization"]).toBe(
+        `Bearer ${SIM_PLATFORM_REVIEWER_SESSION_TOKEN}`,
+      );
+      return jsonResponse(
+        {
+          data: {
+            active: true,
+            identity: {
+              realm: "platform",
+              actorType: "platform_admin",
+              actorId: SIM_PLATFORM_ADMIN_PRINCIPAL_ID,
+              principalId: SIM_PLATFORM_ADMIN_PRINCIPAL_ID,
+              sessionId: SIM_PLATFORM_ADMIN_SESSION_ID,
+              authMode: "jwt_bearer",
+              roles: ["platform_admin"],
+              scopes: ["foundation:read"],
+            },
+          },
+        },
+        { candidateSha },
+      );
+    }
+
+    if (
+      method === "GET" &&
+      url.startsWith(`${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/`)
+    ) {
+      expect(headers.authorization).toBe(
+        `Bearer ${SIM_PLATFORM_ADMIN_ID_TOKEN}`,
+      );
+      expect(headers["x-drts-authorization"]).toBe(
+        `Bearer ${SIM_PLATFORM_REVIEWER_SESSION_TOKEN}`,
+      );
+      const requestedPartnerId = decodeURIComponent(
+        url.slice(
+          `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/`.length,
+        ),
+      );
+      if (!canonicalFleetPartnerIds.has(requestedPartnerId)) {
+        return jsonResponse(
+          { error: { code: "RESOURCE_NOT_FOUND" } },
+          { status: 404, candidateSha },
+        );
+      }
+      return jsonResponse(
+        {
+          fleetPartnerId: requestedPartnerId,
+          active: true,
+          legalName: "Simulated Canonical Foreign Fleet",
+          displayName: "Simulated Canonical Foreign Fleet",
+          businessRegistrationNo: "sim-reg-002",
+          contactName: "Sim Contact",
+          contactPhone: "0900000000",
+          partnershipType: "fleet_management",
         },
         { candidateSha },
       );
@@ -527,7 +621,6 @@ function createStandardMockFetch(
                 actorType: "partner_api_key",
                 actorId: `partner_bootstrap:${foreignPartnerId}:${foreignEntrySlug}`,
                 partnerId: foreignPartnerId,
-                partnerType: foreignPartnerType,
                 ...(options.omitForeignSessionIdInSessionLookup
                   ? {}
                   : { sessionId: SIM_FOREIGN_FLEET_SESSION_ID }),
@@ -644,7 +737,6 @@ function createStandardMockFetch(
               entryId: `entry-${foreignPartnerId}`,
               entrySlug: foreignEntrySlug,
               partnerId: foreignPartnerId,
-              partnerType: foreignPartnerType,
               status: options.foreignPartnerStatus ?? "active",
               activeFlag: options.foreignPartnerActiveFlag ?? true,
             },
@@ -1228,8 +1320,10 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
     });
 
-    it("rejects non-Fleet partner entries (e.g. referral_channel / bank_partner) for foreign_fleet and revokes the issued bootstrap session (AFB-FOREIGN-KIND)", async () => {
+    it("verifies foreign_fleet partnerId against canonical Fleet read API via Platform Admin BFF and rejects non-Fleet partner entries while revoking owned bootstrap sessions", async () => {
       const referralBootstrapEnv = createBaseSimulationEnv({
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
         DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: "partner-referral-entry",
         DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID: undefined,
       });
@@ -1238,7 +1332,6 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       const { fetchImpl, calls } = createStandardMockFetch({
         foreignEntrySlug: "partner-referral-entry",
         foreignPartnerId: "partner-referral-extra",
-        foreignPartnerType: "referral_channel",
         omitForeignSessionIdInSessionLookup: true,
       });
 
@@ -1264,6 +1357,14 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(
         exported.DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN,
       ).toBeUndefined();
+      expect(
+        calls.some(
+          (c) =>
+            c.method === "GET" &&
+            c.url ===
+              `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/partner-referral-extra`,
+        ),
+      ).toBe(true);
       // Both the Ops session AND the newly issued referral partner session must be revoked via JWT sid.
       const revokedSessionIds = calls
         .filter(
@@ -1275,18 +1376,20 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(revokedSessionIds).toContain(SIM_FOREIGN_FLEET_SESSION_ID);
       expect(revokedSessionIds).toContain(SIM_OPS_SESSION_ID);
 
-      // Also reject pre-provided session tokens belonging to known non-Fleet partners.
+      // Also reject pre-provided session tokens whose partnerId has no canonical Fleet record (HTTP 404).
       const providedNonFleetEnv = createBaseSimulationEnv({
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
         DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN:
           SIM_FOREIGN_FLEET_SESSION_TOKEN,
         DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: undefined,
         DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY: undefined,
         DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID: undefined,
       });
-      const { fetchImpl: providedNonFleetFetch } = createStandardMockFetch({
-        foreignPartnerId: "partner-referral-hotel",
-        foreignPartnerType: "referral_channel",
-      });
+      const { fetchImpl: providedNonFleetFetch, calls: providedNonFleetCalls } =
+        createStandardMockFetch({
+          foreignPartnerId: "partner-referral-hotel",
+        });
       await expect(
         prepareOperationalRoleSessions(providedNonFleetEnv, {
           fetch: providedNonFleetFetch,
@@ -1295,6 +1398,42 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
           save: () => {},
         }),
       ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
+      expect(
+        providedNonFleetCalls.some(
+          (c) =>
+            c.method === "POST" &&
+            c.url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+            (c.body as { sessionId?: string })?.sessionId ===
+              SIM_FOREIGN_FLEET_SESSION_ID,
+        ),
+      ).toBe(false);
+
+      // Accept pre-provided session tokens when Admin BFF confirms an active canonical Fleet record.
+      const providedCanonicalFleetEnv = createBaseSimulationEnv({
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN: SIM_OPS_SESSION_TOKEN,
+        DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN: SIM_SYSTEM_SESSION_TOKEN,
+        DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN: SIM_DRIVER_SESSION_TOKEN,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN:
+          SIM_FOREIGN_FLEET_SESSION_TOKEN,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: undefined,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY: undefined,
+      });
+      const { fetchImpl: providedCanonicalFetch } = createStandardMockFetch();
+      const canonicalEvidence = await prepareOperationalRoleSessions(
+        providedCanonicalFleetEnv,
+        {
+          fetch: providedCanonicalFetch,
+          mask: () => {},
+          exportSession: () => {},
+          save: () => {},
+        },
+      );
+      expect(canonicalEvidence.status).toBe("passed");
+      expect(canonicalEvidence.foreign_fleet_precondition).toBe(
+        "satisfied-by-provided-session",
+      );
     });
 
     it("records and revokes owned foreign_fleet session via JWT sid claim even when /api/auth/session fails with 503 after bootstrap-session (AFB-FOREIGN-OWNED-RECOVERY)", async () => {
@@ -1345,7 +1484,8 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
 
       // If in-process revocation of the owned foreign session also fails transiently,
       // cleanup status must be "failed" and subsequent teardownOperationalRoleSessions
-      // must revoke the owned foreign session using the exported recovery metadata.
+      // must revoke the owned foreign session using the exported recovery metadata
+      // without replaying already-revoked Ops/Driver resources.
       const retryEnv = createBaseSimulationEnv();
       const retryExported: Record<string, string> = {};
       let retrySaved: OperationalRoleSessionsEvidence | undefined;
@@ -1385,6 +1525,7 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
         save: () => {},
       });
       expect(teardownEvidence.status).toBe("passed");
+      expect(teardownEvidence.ops_session_revoked).toBe(true);
       expect(teardownEvidence.foreign_fleet_session_revoked).toBe(true);
       expect(
         retryCalls.filter(
@@ -1395,6 +1536,15 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
               SIM_FOREIGN_FLEET_SESSION_ID,
         ),
       ).toHaveLength(2);
+      expect(
+        retryCalls.filter(
+          (c) =>
+            c.method === "POST" &&
+            c.url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+            (c.body as { sessionId?: string })?.sessionId ===
+              SIM_OPS_SESSION_ID,
+        ),
+      ).toHaveLength(1);
     });
 
     it("rejects raw Google/Cloud Run invocation tokens or wrong service account / audience for SYSTEM provisioning", async () => {
