@@ -204,6 +204,26 @@ function formatFare(amount: number | null | undefined) {
   return amount === null || amount === undefined ? "—" : `NT$ ${amount}`;
 }
 
+/**
+ * The passenger's chosen vehicle class (from the trip's quote) rather than
+ * the service product code the trip APIs report as vehicleType.
+ */
+function vehicleClassLabel(
+  t: (key: string) => string,
+  reported: string | null | undefined,
+  quoted: string | null | undefined,
+) {
+  const known = (code: string | null | undefined) =>
+    code && embedVehicles.some((vehicle) => vehicle.code === code)
+      ? t(`embed.vehicle.${code}.name`)
+      : null;
+  return (
+    known(quoted) ??
+    known(reported) ??
+    (reported === "enterprise_dispatch" ? "商務派車" : (reported ?? ""))
+  );
+}
+
 function normalizeTripState(state: string | null | undefined) {
   const value = state?.toLowerCase() ?? "";
   if (value === "in_progress") return "inprogress";
@@ -2631,13 +2651,11 @@ function TripScreen({
         from: activeTrip.pickupAddress,
         to: activeTrip.dropoffAddress,
         win: referralLiveArrival(activeTrip, t("referralLive.pending")),
-        vehicle:
-          activeTrip.quote?.vehicleType &&
-          embedVehicles.some(
-            (vehicle) => vehicle.code === activeTrip.quote?.vehicleType,
-          )
-            ? t(`embed.vehicle.${activeTrip.quote.vehicleType}.name`)
-            : activeTrip.vehicleType,
+        vehicle: vehicleClassLabel(
+          t,
+          activeTrip.vehicleType,
+          activeTrip.quote?.vehicleType,
+        ),
         driver: activeTrip.driverName || "媒合中",
         plate: activeTrip.plateNumber || "待更新",
         rating: 0,
@@ -3133,6 +3151,7 @@ function ReceiptScreen({
   context: EmbedContext;
   liveData: PassengerEmbedLiveData;
 }) {
+  const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
   // Only a genuinely completed trip gets the "trip completed" receipt: the
   // API returns whatever the order's current status is, and this screen must
@@ -3146,7 +3165,11 @@ function ReceiptScreen({
           date: formatShortDateTime(liveData.receipt.completedAt),
           from: liveData.receipt.pickupAddress,
           to: liveData.receipt.dropoffAddress,
-          vehicle: liveData.receipt.vehicleType,
+          vehicle: vehicleClassLabel(
+            t,
+            liveData.receipt.vehicleType,
+            liveData.receipt.quote?.vehicleType,
+          ),
           driver: liveData.receipt.driverName || "資料未提供",
           plate: liveData.receipt.plateNumber || "待更新",
           passenger: liveData.receipt.passengerNameMasked,
