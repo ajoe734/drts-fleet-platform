@@ -837,6 +837,9 @@ jobs:
           if [[ "$map_secret_count" -eq 3 ]]; then
             secret_args="${secret_args},GOOGLE_MAPS_GEOCODING_API_KEY=${geocoding_secret}:latest,GOOGLE_MAPS_ROUTES_API_KEY=${routes_secret}:latest"
             ops_secret_args="${ops_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
+            # The referral embed's pickup/drop-off map uses the same browser key;
+            # its route hands it only to origins on MAP_PROVIDER_ALLOWED_ORIGINS.
+            referral_embed_secret_args="${referral_embed_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
             map_provider_mode="external"
           elif [[ "$map_secret_count" -ne 0 ]]; then
             echo "::error::Google Maps configuration is partial. Geocoding, Routes, and Browser secrets must be provisioned together."
@@ -1012,7 +1015,9 @@ jobs:
           export GOOGLE_MAPS_GEOCODING_API_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-geocoding-api-key" --project="$project_id")"
           export GOOGLE_MAPS_ROUTES_API_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-routes-api-key" --project="$project_id")"
           export GOOGLE_MAPS_BROWSER_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-browser-key" --project="$project_id")"
-          export MAP_PROVIDER_SMOKE_ORIGIN="${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          # The allow-list may name several browser origins (Ops console, referral
+          # embed); the live key check probes the first one.
+          export MAP_PROVIDER_SMOKE_ORIGIN="${DEV_MAP_PROVIDER_ALLOWED_ORIGINS%%,*}"
           echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
