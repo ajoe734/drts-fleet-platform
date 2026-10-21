@@ -255,27 +255,95 @@ done
 # probing until clamd answers a live ping and initial readiness is published,
 # while still running the periodic freshclam refresh on each configured
 # FRESHCLAM_INTERVAL_SECONDS boundary without waiting for ping readiness.
-run_periodic_freshclam_refresh() {
-  if refresh_output=$(freshclam --stdout 2>&1); then
-    printf '%s\n' "$refresh_output"
-    initial_freshclam_output="$refresh_output"
-    last_freshclam_ok=1
-    refresh_daily_readiness "$refresh_output" || true
-  else
-    printf '%s\n' "$refresh_output"
-    last_freshclam_ok=0
-    echo "freshclam refresh failed; marking not ready" >&2
-    rm -f "$READY_MARKER" "$READY_VERSION_FILE"
-  fi
-}
-
 (
   SLEEP_PID=""
+  REFRESH_PID=""
+  REFRESH_OUTPUT_FILE="${TMPDIR:-/tmp}/clamd-freshclam-output.$$"
   last_freshclam_ok=1
   refresh_elapsed=0
-  trap 'if [ -n "$SLEEP_PID" ]; then pkill -P "$SLEEP_PID" 2>/dev/null || true; kill "$SLEEP_PID" 2>/dev/null || true; fi; exit 0' TERM INT
+
+  cleanup_watchdog() {
+    trap - EXIT TERM INT
+    if [ -n "$SLEEP_PID" ]; then
+      child_pids=$(pgrep -P "$SLEEP_PID" 2>/dev/null || true)
+      kill "$SLEEP_PID" 2>/dev/null || true
+      pkill -P "$SLEEP_PID" 2>/dev/null || true
+      for child_pid in $child_pids; do
+        kill "$child_pid" 2>/dev/null || true
+      done
+      wait "$SLEEP_PID" 2>/dev/null || true
+      SLEEP_PID=""
+    fi
+    if [ -n "$REFRESH_PID" ]; then
+      child_pids=$(pgrep -P "$REFRESH_PID" 2>/dev/null || true)
+      kill "$REFRESH_PID" 2>/dev/null || true
+      pkill -P "$REFRESH_PID" 2>/dev/null || true
+      for child_pid in $child_pids; do
+        kill "$child_pid" 2>/dev/null || true
+      done
+      wait "$REFRESH_PID" 2>/dev/null || true
+      REFRESH_PID=""
+    fi
+    rm -f "$REFRESH_OUTPUT_FILE"
+  }
+
+  finish_periodic_freshclam_refresh() {
+    [ -n "$REFRESH_PID" ] || return 0
+    if wait "$REFRESH_PID" 2>/dev/null; then
+      refresh_rc=0
+    else
+      refresh_rc=$?
+    fi
+    REFRESH_PID=""
+    refresh_output=$(cat "$REFRESH_OUTPUT_FILE" 2>/dev/null || true)
+    rm -f "$REFRESH_OUTPUT_FILE"
+    kill -0 "$CLAMD_PID" 2>/dev/null || return 0
+    if [ "$refresh_rc" -eq 0 ]; then
+      printf '%s\n' "$refresh_output"
+      initial_freshclam_output="$refresh_output"
+      last_freshclam_ok=1
+      if [ "$startup_ready" -eq 1 ]; then
+        refresh_daily_readiness "$refresh_output" || true
+      fi
+    else
+      printf '%s\n' "$refresh_output"
+      last_freshclam_ok=0
+      echo "freshclam refresh failed; marking not ready" >&2
+      rm -f "$READY_MARKER" "$READY_VERSION_FILE"
+    fi
+  }
+
+  start_periodic_freshclam_refresh() {
+    if [ -n "$REFRESH_PID" ]; then
+      if kill -0 "$REFRESH_PID" 2>/dev/null; then
+        return 0
+      fi
+      finish_periodic_freshclam_refresh
+    fi
+    : > "$REFRESH_OUTPUT_FILE"
+    freshclam --stdout >"$REFRESH_OUTPUT_FILE" 2>&1 &
+    REFRESH_PID=$!
+    refresh_wait_ticks=0
+    while kill -0 "$REFRESH_PID" 2>/dev/null && kill -0 "$CLAMD_PID" 2>/dev/null && [ "$refresh_wait_ticks" -lt 5 ]; do
+      /bin/sleep 0.01
+      refresh_wait_ticks=$((refresh_wait_ticks + 1))
+    done
+    if ! kill -0 "$REFRESH_PID" 2>/dev/null; then
+      finish_periodic_freshclam_refresh
+    fi
+  }
+
+  trap 'cleanup_watchdog; exit 0' TERM INT
+  trap 'cleanup_watchdog' EXIT
+
   while [ "$startup_ready" -ne 1 ] && kill -0 "$CLAMD_PID" 2>/dev/null; do
+    if [ -n "$REFRESH_PID" ] && ! kill -0 "$REFRESH_PID" 2>/dev/null; then
+      finish_periodic_freshclam_refresh
+    fi
     if clamdscan --ping 1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then
+      if [ -n "$REFRESH_PID" ] && ! kill -0 "$REFRESH_PID" 2>/dev/null; then
+        finish_periodic_freshclam_refresh
+      fi
       if [ "$last_freshclam_ok" -eq 1 ]; then
         refresh_daily_readiness "$initial_freshclam_output" || echo "clamd is live but no signatures were found yet" >&2
       fi
@@ -288,22 +356,42 @@ run_periodic_freshclam_refresh() {
     wait "$SLEEP_PID" 2>/dev/null || true
     SLEEP_PID=""
     kill -0 "$CLAMD_PID" 2>/dev/null || break
+    if [ -n "$REFRESH_PID" ] && ! kill -0 "$REFRESH_PID" 2>/dev/null; then
+      finish_periodic_freshclam_refresh
+    fi
     refresh_elapsed=$((refresh_elapsed + 1))
     if [ "$refresh_elapsed" -ge "$FRESHCLAM_INTERVAL_SECONDS" ]; then
       refresh_elapsed=0
-      run_periodic_freshclam_refresh
+      start_periodic_freshclam_refresh
     fi
   done
+
+  if [ -n "$REFRESH_PID" ] && kill -0 "$CLAMD_PID" 2>/dev/null; then
+    finish_periodic_freshclam_refresh
+  fi
+
   while kill -0 "$CLAMD_PID" 2>/dev/null; do
     sleep "$FRESHCLAM_INTERVAL_SECONDS" &
     SLEEP_PID=$!
     wait "$SLEEP_PID" 2>/dev/null || true
     SLEEP_PID=""
     kill -0 "$CLAMD_PID" 2>/dev/null || break
-    run_periodic_freshclam_refresh
+    start_periodic_freshclam_refresh
+    finish_periodic_freshclam_refresh
   done
 ) &
 WATCHDOG_PID=$!
-trap 'kill "$WATCHDOG_PID" 2>/dev/null || true; wait "$WATCHDOG_PID" 2>/dev/null || true' EXIT
+cleanup_entrypoint() {
+  trap - EXIT TERM INT
+  kill "$WATCHDOG_PID" 2>/dev/null || true
+  if kill -0 "$CLAMD_PID" 2>/dev/null; then
+    pkill -P "$CLAMD_PID" 2>/dev/null || true
+    kill "$CLAMD_PID" 2>/dev/null || true
+  fi
+  wait "$WATCHDOG_PID" 2>/dev/null || true
+  wait "$CLAMD_PID" 2>/dev/null || true
+}
+trap 'cleanup_entrypoint' EXIT
+trap 'cleanup_entrypoint; exit 0' TERM INT
 
 wait "$CLAMD_PID"

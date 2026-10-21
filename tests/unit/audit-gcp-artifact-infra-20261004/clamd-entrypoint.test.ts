@@ -1521,4 +1521,726 @@ describe("clamd-entrypoint.sh late-ready marker recovery after startup probe cei
       }
     }
   }, 15000);
+
+  const CANDIDATE_760260_BLOB = "0ec2e3de12c1bd95c8e0c2197d07a37dff65fc50";
+  const CANDIDATE_760260_SHA256 =
+    "a19ddaf16cc99aec92621254cba8c36f0be3e968e123c843cf98e1af38192d85";
+  const CANDIDATE_760260_BYTES = 14210;
+
+  const CANDIDATE_760260_TAIL_BLOCK = [
+    "startup_ready=0",
+    "attempt=0",
+    'while [ "$attempt" -lt 60 ]; do',
+    "  if clamdscan --ping 1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then",
+    '    refresh_daily_readiness "$initial_freshclam_output" || echo "clamd is live but no signatures were found yet" >&2',
+    "    startup_ready=1",
+    "    break",
+    "  fi",
+    "  attempt=$((attempt + 1))",
+    "  sleep 1",
+    "done",
+    "",
+    "# A long-lived instance must never keep serving verdicts against",
+    "# definitions that have gone stale (R8): this refreshes signatures on a",
+    "# bounded interval and only republishes the readiness marker from the real",
+    "# on-disk signature files (never on freshclam's exit status alone), so a",
+    "# cooldown-faked success, a failed refresh, or an overdue refresh all leave",
+    "# readiness to age out or be removed instead of silently continuing to scan.",
+    "# clamd.conf's `SelfCheck` bound independently guards against freshclam's",
+    "# update succeeding but its reload notification to clamd silently failing --",
+    "# clamd reloads a genuinely changed database directory on its own within",
+    "# that bound, well inside MAX_SIGNATURE_AGE_MS.",
+    "#",
+    "# If the initial 60-probe window exhausted while clamd is still alive and",
+    "# finishing a slow cold-start signature load, continue 1-second readiness",
+    "# probing until clamd answers a live ping and initial readiness is published,",
+    "# while still running the periodic freshclam refresh on each configured",
+    "# FRESHCLAM_INTERVAL_SECONDS boundary without waiting for ping readiness.",
+    "run_periodic_freshclam_refresh() {",
+    "  if refresh_output=$(freshclam --stdout 2>&1); then",
+    "    printf '%s\\n' \"$refresh_output\"",
+    '    initial_freshclam_output="$refresh_output"',
+    "    last_freshclam_ok=1",
+    '    refresh_daily_readiness "$refresh_output" || true',
+    "  else",
+    "    printf '%s\\n' \"$refresh_output\"",
+    "    last_freshclam_ok=0",
+    '    echo "freshclam refresh failed; marking not ready" >&2',
+    '    rm -f "$READY_MARKER" "$READY_VERSION_FILE"',
+    "  fi",
+    "}",
+    "",
+    "(",
+    '  SLEEP_PID=""',
+    "  last_freshclam_ok=1",
+    "  refresh_elapsed=0",
+    '  trap \'if [ -n "$SLEEP_PID" ]; then pkill -P "$SLEEP_PID" 2>/dev/null || true; kill "$SLEEP_PID" 2>/dev/null || true; fi; exit 0\' TERM INT',
+    '  while [ "$startup_ready" -ne 1 ] && kill -0 "$CLAMD_PID" 2>/dev/null; do',
+    "    if clamdscan --ping 1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then",
+    '      if [ "$last_freshclam_ok" -eq 1 ]; then',
+    '        refresh_daily_readiness "$initial_freshclam_output" || echo "clamd is live but no signatures were found yet" >&2',
+    "      fi",
+    "      startup_ready=1",
+    "      break",
+    "    fi",
+    '    kill -0 "$CLAMD_PID" 2>/dev/null || break',
+    "    sleep 1 &",
+    "    SLEEP_PID=$!",
+    '    wait "$SLEEP_PID" 2>/dev/null || true',
+    '    SLEEP_PID=""',
+    '    kill -0 "$CLAMD_PID" 2>/dev/null || break',
+    "    refresh_elapsed=$((refresh_elapsed + 1))",
+    '    if [ "$refresh_elapsed" -ge "$FRESHCLAM_INTERVAL_SECONDS" ]; then',
+    "      refresh_elapsed=0",
+    "      run_periodic_freshclam_refresh",
+    "    fi",
+    "  done",
+    '  while kill -0 "$CLAMD_PID" 2>/dev/null; do',
+    '    sleep "$FRESHCLAM_INTERVAL_SECONDS" &',
+    "    SLEEP_PID=$!",
+    '    wait "$SLEEP_PID" 2>/dev/null || true',
+    '    SLEEP_PID=""',
+    '    kill -0 "$CLAMD_PID" 2>/dev/null || break',
+    "    run_periodic_freshclam_refresh",
+    "  done",
+    ") &",
+    "WATCHDOG_PID=$!",
+    'trap \'kill "$WATCHDOG_PID" 2>/dev/null || true; wait "$WATCHDOG_PID" 2>/dev/null || true\' EXIT',
+    "",
+    'wait "$CLAMD_PID"',
+    "",
+  ].join("\n");
+
+  function materialize760260Entrypoint(dir: string): string {
+    const candidateContent = readFileSync(DEFAULT_ENTRYPOINT, "utf8");
+    const markerIndex = candidateContent.indexOf(
+      "\nstartup_ready=0\nattempt=0\n",
+    );
+    const reconstructed =
+      markerIndex !== -1
+        ? `${candidateContent.slice(0, markerIndex + 1)}${CANDIDATE_760260_TAIL_BLOCK}`
+        : candidateContent;
+    expect(Buffer.byteLength(reconstructed, "utf8")).toBe(
+      CANDIDATE_760260_BYTES,
+    );
+    expect(createHash("sha256").update(reconstructed).digest("hex")).toBe(
+      CANDIDATE_760260_SHA256,
+    );
+    let content = reconstructed;
+    try {
+      content = execFileSync(
+        "git",
+        ["cat-file", "blob", CANDIDATE_760260_BLOB],
+        {
+          cwd: REPO_ROOT,
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        },
+      );
+    } catch {
+      content = reconstructed;
+    }
+    expect(Buffer.byteLength(content, "utf8")).toBe(CANDIDATE_760260_BYTES);
+    expect(createHash("sha256").update(content).digest("hex")).toBe(
+      CANDIDATE_760260_SHA256,
+    );
+    const scriptPath = join(dir, "760260-clamd-entrypoint.sh");
+    writeFileSync(scriptPath, content);
+    chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  it("proves 760260 is red by falsely publishing marker/version on periodic freshclam refresh when clamd never answers ping across virtual seconds 0..72 while the candidate keeps periodic refresh running without publishing marker or version (N1)", async () => {
+    async function runNeverReadyMarkerScenario(scriptPath: string) {
+      const dir = mkdtempSync(join(tmpdir(), "clamd-n1-never-ready-marker-"));
+      const binDir = join(dir, "bin");
+      const dbDir = join(dir, "db");
+      const stateDir = join(dir, "state");
+      const readyMarker = join(dir, "ready", "ready");
+      const readyVersionFile = `${readyMarker}.version`;
+      mkdirSync(binDir);
+      mkdirSync(dbDir);
+      mkdirSync(stateDir);
+      writeFileSync(join(stateDir, "virtual_seconds"), "0");
+
+      writeMock(
+        join(binDir, "freshclam"),
+        [
+          `n=0; [ ! -f "$DRTS_TIMING_STATE/freshclam_count" ] || n=$(cat "$DRTS_TIMING_STATE/freshclam_count")`,
+          `n=$((n + 1)); printf '%s' "$n" > "$DRTS_TIMING_STATE/freshclam_count"`,
+          `t=$(cat "$DRTS_TIMING_STATE/virtual_seconds"); printf '%s %s\\n' "$n" "$t" >> "$DRTS_TIMING_STATE/freshclam_events"`,
+          `printf 'ClamAV-VDB:2026-10-21:27315:1:1:fixture:fixture:fixture:fixture\\n' > "$CLAMAV_DB_DIR/daily.cvd"`,
+          `printf 'daily.cvd database is up-to-date (version: 27315, sigs: 1, f-level: 1, builder: fixture)\\n'`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "clamd"),
+        `trap 'exit 0' TERM INT\nwhile true; do /bin/sleep 0.02; done`,
+      );
+      writeMock(
+        join(binDir, "clamdscan"),
+        [
+          `n=0; [ ! -f "$DRTS_TIMING_STATE/ping_count" ] || n=$(cat "$DRTS_TIMING_STATE/ping_count")`,
+          `n=$((n + 1)); printf '%s' "$n" > "$DRTS_TIMING_STATE/ping_count"`,
+          `exit 1`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "sleep"),
+        [
+          `old=$(cat "$DRTS_TIMING_STATE/virtual_seconds")`,
+          `new=$((old + $1))`,
+          `printf '%s %s %s\\n' "$1" "$old" "$new" >> "$DRTS_TIMING_STATE/sleep_events"`,
+          `printf '%s' "$new" > "$DRTS_TIMING_STATE/virtual_seconds"`,
+          `if [ "$new" -ge 72 ]; then`,
+          `  : > "$DRTS_TIMING_STATE/reached_poststartup_grace"`,
+          `  while true; do /bin/sleep 0.02; done`,
+          `fi`,
+          `exec /bin/sleep 0.001`,
+        ].join("\n"),
+      );
+
+      const child = spawn("sh", [scriptPath], {
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          CLAMAV_READY_MARKER: readyMarker,
+          CLAMAV_READY_VERSION_FILE: readyVersionFile,
+          CLAMAV_DB_DIR: dbDir,
+          FRESHCLAM_INTERVAL_SECONDS: "2",
+          DRTS_TIMING_STATE: stateDir,
+        },
+        detached: true,
+        stdio: "ignore",
+      });
+
+      try {
+        const checkpointReached = await waitUntil(
+          () => existsSync(join(stateDir, "reached_poststartup_grace")),
+          5000,
+        );
+        expect(checkpointReached).toBe(true);
+
+        const freshclamEvents = readFileSync(
+          join(stateDir, "freshclam_events"),
+          "utf8",
+        )
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            const [invocation, virtualSecond] = line.trim().split(/\s+/);
+            return {
+              invocation: Number(invocation),
+              virtual_second: Number(virtualSecond),
+            };
+          });
+
+        return {
+          totalFailedPings: Number(
+            readFileSync(join(stateDir, "ping_count"), "utf8").trim(),
+          ),
+          virtualSecond: Number(
+            readFileSync(join(stateDir, "virtual_seconds"), "utf8").trim(),
+          ),
+          freshclamEvents,
+          readyMarkerExists: existsSync(readyMarker),
+          expectedVersionFileExists: existsSync(readyVersionFile),
+          expectedVersion: existsSync(readyVersionFile)
+            ? readFileSync(readyVersionFile, "utf8").trim()
+            : null,
+        };
+      } finally {
+        if (child.pid) {
+          try {
+            process.kill(-child.pid, "SIGTERM");
+          } catch {
+            // already exited
+          }
+        }
+      }
+    }
+
+    const tempDir = mkdtempSync(join(tmpdir(), "clamd-n1-760260-compare-"));
+    const script760260 = materialize760260Entrypoint(tempDir);
+
+    const expectedFreshclamSchedule = [
+      { invocation: 1, virtual_second: 0 },
+      { invocation: 2, virtual_second: 62 },
+      { invocation: 3, virtual_second: 64 },
+      { invocation: 4, virtual_second: 66 },
+      { invocation: 5, virtual_second: 68 },
+      { invocation: 6, virtual_second: 70 },
+    ];
+
+    // 760260 is RED on N1: it falsely publishes the ready marker and version 27315
+    // on periodic freshclam refresh even though all 72 clamdscan --ping calls failed.
+    const result760260 = await runNeverReadyMarkerScenario(script760260);
+    expect(result760260).toEqual({
+      totalFailedPings: 72,
+      virtualSecond: 72,
+      freshclamEvents: expectedFreshclamSchedule,
+      readyMarkerExists: true,
+      expectedVersionFileExists: true,
+      expectedVersion: "27315",
+    });
+
+    // Candidate is GREEN on N1: periodic freshclam refresh still runs on schedule,
+    // all 72 pings are attempted, and neither marker nor version file is ever published.
+    const candidateResult = await runNeverReadyMarkerScenario(ENTRYPOINT);
+    expect(candidateResult).toEqual({
+      totalFailedPings: 72,
+      virtualSecond: 72,
+      freshclamEvents: expectedFreshclamSchedule,
+      readyMarkerExists: false,
+      expectedVersionFileExists: false,
+      expectedVersion: null,
+    });
+  }, 15000);
+
+  it("proves 760260 is red when a pending periodic freshclam refresh blocks 1-second late-ready probing and marker recovery while the candidate recovers readiness during the pending refresh and completes the refresh cleanly upon release (N2)", async () => {
+    async function runPendingRefreshLateReadyScenario(
+      scriptPath: string,
+      releaseVersion = "27315",
+    ) {
+      const dir = mkdtempSync(join(tmpdir(), "clamd-n2-pending-refresh-"));
+      const binDir = join(dir, "bin");
+      const dbDir = join(dir, "db");
+      const stateDir = join(dir, "state");
+      const readyMarker = join(dir, "ready", "ready");
+      const readyVersionFile = `${readyMarker}.version`;
+      mkdirSync(binDir);
+      mkdirSync(dbDir);
+      mkdirSync(stateDir);
+      writeFileSync(join(stateDir, "virtual_seconds"), "0");
+
+      writeMock(
+        join(binDir, "freshclam"),
+        [
+          `n=0; [ ! -f "$STATE/freshclam_count" ] || n=$(cat "$STATE/freshclam_count")`,
+          `n=$((n + 1)); printf '%s' "$n" > "$STATE/freshclam_count"`,
+          `printf 'ClamAV-VDB:2026-10-21:27315:1:1:fixture:fixture:fixture:fixture\\n' > "$CLAMAV_DB_DIR/daily.cvd"`,
+          `if [ "$n" -eq 2 ]; then`,
+          `  : > "$STATE/engine_ready"`,
+          `  : > "$STATE/second_refresh_pending"`,
+          `  while [ ! -f "$STATE/release_refresh" ]; do /bin/sleep 0.01; done`,
+          `  printf 'ClamAV-VDB:2026-10-21:${releaseVersion}:1:1:fixture:fixture:fixture:fixture\\n' > "$CLAMAV_DB_DIR/daily.cvd"`,
+          `  printf 'daily.cvd database is up-to-date (version: ${releaseVersion}, sigs: 1, f-level: 1, builder: fixture)\\n'`,
+          `  exit 0`,
+          `fi`,
+          `printf 'daily.cvd database is up-to-date (version: 27315, sigs: 1, f-level: 1, builder: fixture)\\n'`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "clamd"),
+        `trap 'exit 0' TERM INT\nwhile true; do /bin/sleep 0.02; done`,
+      );
+      writeMock(
+        join(binDir, "clamdscan"),
+        [
+          `n=0; [ ! -f "$STATE/ping_count" ] || n=$(cat "$STATE/ping_count")`,
+          `n=$((n + 1)); printf '%s' "$n" > "$STATE/ping_count"`,
+          `[ -f "$STATE/engine_ready" ]`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "sleep"),
+        [
+          `old=$(cat "$STATE/virtual_seconds"); new=$((old + $1)); printf '%s' "$new" > "$STATE/virtual_seconds"`,
+          `if [ "$1" != 1 ]; then : > "$STATE/entered_regular_periodic_wait"; while true; do /bin/sleep 0.02; done; fi`,
+          `exec /bin/sleep 0.001`,
+        ].join("\n"),
+      );
+
+      const child = spawn("sh", [scriptPath], {
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          CLAMAV_DB_DIR: dbDir,
+          CLAMAV_READY_MARKER: readyMarker,
+          CLAMAV_READY_VERSION_FILE: readyVersionFile,
+          FRESHCLAM_INTERVAL_SECONDS: "2",
+          STATE: stateDir,
+        },
+        detached: true,
+        stdio: "ignore",
+      });
+
+      try {
+        const pendingReached = await waitUntil(
+          () => existsSync(join(stateDir, "second_refresh_pending")),
+          5000,
+        );
+        expect(pendingReached).toBe(true);
+
+        const pingCountBefore = Number(
+          readFileSync(join(stateDir, "ping_count"), "utf8").trim(),
+        );
+        await wait(1200);
+        const pingCountAfter = Number(
+          readFileSync(join(stateDir, "ping_count"), "utf8").trim(),
+        );
+        const whilePending = {
+          enginePingReady: existsSync(join(stateDir, "engine_ready")),
+          freshclamCall2Pending: !existsSync(join(stateDir, "release_refresh")),
+          pingCountBefore,
+          pingCountAfter,
+          newPingCalls: pingCountAfter - pingCountBefore,
+          readyMarkerExists: existsSync(readyMarker),
+          expectedVersion: existsSync(readyVersionFile)
+            ? readFileSync(readyVersionFile, "utf8").trim()
+            : null,
+        };
+
+        writeFileSync(join(stateDir, "release_refresh"), "1");
+        const resumed = await waitUntil(
+          () => existsSync(join(stateDir, "entered_regular_periodic_wait")),
+          5000,
+        );
+        expect(resumed).toBe(true);
+
+        const afterRelease = {
+          pingCount: Number(
+            readFileSync(join(stateDir, "ping_count"), "utf8").trim(),
+          ),
+          freshclamCount: Number(
+            readFileSync(join(stateDir, "freshclam_count"), "utf8").trim(),
+          ),
+          readyMarkerExists: existsSync(readyMarker),
+          expectedVersion: existsSync(readyVersionFile)
+            ? readFileSync(readyVersionFile, "utf8").trim()
+            : null,
+        };
+
+        return { whilePending, afterRelease };
+      } finally {
+        if (child.pid) {
+          try {
+            process.kill(-child.pid, "SIGTERM");
+          } catch {
+            // already exited
+          }
+        }
+      }
+    }
+
+    const tempDir = mkdtempSync(join(tmpdir(), "clamd-n2-760260-compare-"));
+    const script760260 = materialize760260Entrypoint(tempDir);
+
+    // 760260 is RED on N2: while periodic freshclam call #2 is pending and the engine
+    // is already ping-ready, synchronous refresh blocks 1s probing (newPingCalls: 0, readyMarkerExists: false).
+    const result760260 = await runPendingRefreshLateReadyScenario(script760260);
+    expect(result760260.whilePending).toEqual({
+      enginePingReady: true,
+      freshclamCall2Pending: true,
+      pingCountBefore: 62,
+      pingCountAfter: 62,
+      newPingCalls: 0,
+      readyMarkerExists: false,
+      expectedVersion: null,
+    });
+    expect(result760260.afterRelease).toEqual({
+      pingCount: 63,
+      freshclamCount: 2,
+      readyMarkerExists: true,
+      expectedVersion: "27315",
+    });
+
+    // Candidate is GREEN on N2: while periodic freshclam call #2 is still pending,
+    // 1-second readiness probing advances ping_count from 62 to 63 and publishes marker/version 27315;
+    // after release, freshclam call #2 finishes cleanly without duplicate invocations.
+    const candidateResult =
+      await runPendingRefreshLateReadyScenario(ENTRYPOINT);
+    expect(candidateResult.whilePending).toEqual({
+      enginePingReady: true,
+      freshclamCall2Pending: true,
+      pingCountBefore: 62,
+      pingCountAfter: 63,
+      newPingCalls: 1,
+      readyMarkerExists: true,
+      expectedVersion: "27315",
+    });
+    expect(candidateResult.afterRelease).toEqual({
+      pingCount: 63,
+      freshclamCount: 2,
+      readyMarkerExists: true,
+      expectedVersion: "27315",
+    });
+
+    // Also verify that if the pending periodic refresh writes an updated daily database (27316)
+    // upon release, the candidate publishes 27315 during the pending window and then cleanly
+    // advances to 27316 on release without duplicate freshclam runs or stale-state overwrite:
+    const candidateAdvanceOnRelease = await runPendingRefreshLateReadyScenario(
+      ENTRYPOINT,
+      "27316",
+    );
+    expect(candidateAdvanceOnRelease.whilePending).toEqual({
+      enginePingReady: true,
+      freshclamCall2Pending: true,
+      pingCountBefore: 62,
+      pingCountAfter: 63,
+      newPingCalls: 1,
+      readyMarkerExists: true,
+      expectedVersion: "27315",
+    });
+    expect(candidateAdvanceOnRelease.afterRelease).toEqual({
+      pingCount: 63,
+      freshclamCount: 2,
+      readyMarkerExists: true,
+      expectedVersion: "27316",
+    });
+  }, 15000);
+
+  it("proves 760260 is red when clamd exits or entrypoint receives SIGTERM while periodic freshclam is pending whereas the candidate exits within the 5s shutdown window without waiting for refresh release and leaves no background processes (N3)", async () => {
+    async function runEngineExitDuringPendingRefreshScenario(
+      scriptPath: string,
+      observeShutdownWindowMs: number,
+    ) {
+      const dir = mkdtempSync(join(tmpdir(), "clamd-n3-exit-pending-refresh-"));
+      const binDir = join(dir, "bin");
+      const dbDir = join(dir, "db");
+      const stateDir = join(dir, "state");
+      const readyMarker = join(dir, "ready", "ready");
+      const readyVersionFile = `${readyMarker}.version`;
+      mkdirSync(binDir);
+      mkdirSync(dbDir);
+      mkdirSync(stateDir);
+      writeFileSync(join(stateDir, "virtual_seconds"), "0");
+
+      writeMock(
+        join(binDir, "freshclam"),
+        [
+          `n=0; [ ! -f "$STATE/freshclam_count" ] || n=$(cat "$STATE/freshclam_count")`,
+          `n=$((n + 1)); printf '%s' "$n" > "$STATE/freshclam_count"`,
+          `printf 'ClamAV-VDB:2026-10-21:27315:1:1:fixture:fixture:fixture:fixture\\n' > "$CLAMAV_DB_DIR/daily.cvd"`,
+          `if [ "$n" -eq 2 ]; then`,
+          `  : > "$STATE/engine_ready"`,
+          `  : > "$STATE/second_refresh_pending"`,
+          `  while [ ! -f "$STATE/release_refresh" ]; do /bin/sleep 0.01; done`,
+          `fi`,
+          `printf 'daily.cvd database is up-to-date (version: 27315, sigs: 1, f-level: 1, builder: fixture)\\n'`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "clamd"),
+        [
+          `trap 'exit 0' TERM INT`,
+          `while [ ! -f "$STATE/stop_clamd" ]; do /bin/sleep 0.02; done`,
+          `: > "$STATE/clamd_exited"`,
+          `exit 0`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "clamdscan"),
+        [
+          `n=0; [ ! -f "$STATE/ping_count" ] || n=$(cat "$STATE/ping_count")`,
+          `n=$((n + 1)); printf '%s' "$n" > "$STATE/ping_count"`,
+          `[ -f "$STATE/engine_ready" ]`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "sleep"),
+        [
+          `old=$(cat "$STATE/virtual_seconds"); new=$((old + $1)); printf '%s' "$new" > "$STATE/virtual_seconds"`,
+          `if [ "$1" != 1 ]; then : > "$STATE/entered_regular_periodic_wait"; while true; do /bin/sleep 0.02; done; fi`,
+          `exec /bin/sleep 0.001`,
+        ].join("\n"),
+      );
+
+      const child = spawn("sh", [scriptPath], {
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          CLAMAV_DB_DIR: dbDir,
+          CLAMAV_READY_MARKER: readyMarker,
+          CLAMAV_READY_VERSION_FILE: readyVersionFile,
+          FRESHCLAM_INTERVAL_SECONDS: "2",
+          STATE: stateDir,
+        },
+        detached: true,
+        stdio: "ignore",
+      });
+
+      let childExited = false;
+      child.on("exit", () => {
+        childExited = true;
+      });
+
+      try {
+        const pendingReached = await waitUntil(
+          () => existsSync(join(stateDir, "second_refresh_pending")),
+          5000,
+        );
+        expect(pendingReached).toBe(true);
+
+        writeFileSync(join(stateDir, "stop_clamd"), "1");
+        const clamdExited = await waitUntil(
+          () => existsSync(join(stateDir, "clamd_exited")),
+          2000,
+        );
+        expect(clamdExited).toBe(true);
+
+        const exitedWithoutRelease = await waitUntil(
+          () => childExited,
+          observeShutdownWindowMs,
+        );
+        const externalRefreshStillPending = !existsSync(
+          join(stateDir, "release_refresh"),
+        );
+
+        let exitedAfterRelease = exitedWithoutRelease;
+        if (!exitedWithoutRelease) {
+          writeFileSync(join(stateDir, "release_refresh"), "1");
+          exitedAfterRelease = await waitUntil(() => childExited, 5000);
+        }
+
+        const groupEmpty = await waitUntil(() => {
+          if (!child.pid) return true;
+          try {
+            process.kill(-child.pid, 0);
+            return false;
+          } catch {
+            return true;
+          }
+        }, 2000);
+
+        return {
+          clamdOwnExitCompleted: clamdExited,
+          entrypointExitedWithoutRelease: exitedWithoutRelease,
+          externalRefreshStillPending,
+          entrypointExitedAfterRelease: exitedAfterRelease,
+          groupEmpty,
+        };
+      } finally {
+        if (child.pid) {
+          try {
+            process.kill(-child.pid, "SIGTERM");
+          } catch {
+            // already exited
+          }
+        }
+      }
+    }
+
+    const tempDir = mkdtempSync(join(tmpdir(), "clamd-n3-760260-compare-"));
+    const script760260 = materialize760260Entrypoint(tempDir);
+
+    // 760260 is RED on N3: when clamd exits on its own while periodic freshclam call #2
+    // is pending, the entrypoint remains blocked in `wait "$WATCHDOG_PID"` across the
+    // 5-second shutdown window until the external freshclam barrier is released.
+    const result760260 = await runEngineExitDuringPendingRefreshScenario(
+      script760260,
+      5000,
+    );
+    expect(result760260).toEqual({
+      clamdOwnExitCompleted: true,
+      entrypointExitedWithoutRelease: false,
+      externalRefreshStillPending: true,
+      entrypointExitedAfterRelease: true,
+      groupEmpty: true,
+    });
+
+    // Candidate is GREEN on N3: when clamd exits on its own while periodic freshclam call #2
+    // is pending, the entrypoint terminates its watchdog and in-flight freshclam/sleep children
+    // and exits within the 5-second shutdown window without waiting for release_refresh.
+    const candidateResult = await runEngineExitDuringPendingRefreshScenario(
+      ENTRYPOINT,
+      5000,
+    );
+    expect(candidateResult).toEqual({
+      clamdOwnExitCompleted: true,
+      entrypointExitedWithoutRelease: true,
+      externalRefreshStillPending: true,
+      entrypointExitedAfterRelease: true,
+      groupEmpty: true,
+    });
+
+    // Also verify direct SIGTERM to the candidate entrypoint PID while periodic freshclam is pending:
+    const dir = mkdtempSync(join(tmpdir(), "clamd-n3-direct-sigterm-"));
+    const binDir = join(dir, "bin");
+    const dbDir = join(dir, "db");
+    const stateDir = join(dir, "state");
+    const readyMarker = join(dir, "ready", "ready");
+    mkdirSync(binDir);
+    mkdirSync(dbDir);
+    mkdirSync(stateDir);
+    writeFileSync(join(stateDir, "virtual_seconds"), "0");
+
+    writeMock(
+      join(binDir, "freshclam"),
+      [
+        `n=0; [ ! -f "$STATE/freshclam_count" ] || n=$(cat "$STATE/freshclam_count")`,
+        `n=$((n + 1)); printf '%s' "$n" > "$STATE/freshclam_count"`,
+        `printf 'ClamAV-VDB:2026-10-21:27315:1:1:fixture:fixture:fixture:fixture\\n' > "$CLAMAV_DB_DIR/daily.cvd"`,
+        `if [ "$n" -eq 2 ]; then`,
+        `  : > "$STATE/second_refresh_pending"`,
+        `  while [ ! -f "$STATE/release_refresh" ]; do /bin/sleep 0.01; done`,
+        `fi`,
+        `printf 'daily.cvd database is up-to-date (version: 27315, sigs: 1, f-level: 1, builder: fixture)\\n'`,
+      ].join("\n"),
+    );
+    writeMock(
+      join(binDir, "clamd"),
+      `trap 'exit 0' TERM INT\nwhile true; do /bin/sleep 0.02; done`,
+    );
+    writeMock(join(binDir, "clamdscan"), `exit 1`);
+    writeMock(
+      join(binDir, "sleep"),
+      [
+        `old=$(cat "$STATE/virtual_seconds"); new=$((old + $1)); printf '%s' "$new" > "$STATE/virtual_seconds"`,
+        `if [ "$new" -gt 62 ]; then /bin/sleep 5; exit 0; fi`,
+        `exec /bin/sleep 0.001`,
+      ].join("\n"),
+    );
+
+    const child = spawn("sh", [ENTRYPOINT], {
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        CLAMAV_DB_DIR: dbDir,
+        CLAMAV_READY_MARKER: readyMarker,
+        FRESHCLAM_INTERVAL_SECONDS: "2",
+        STATE: stateDir,
+      },
+      detached: true,
+      stdio: "ignore",
+    });
+
+    let directTermExited = false;
+    child.on("exit", () => {
+      directTermExited = true;
+    });
+
+    try {
+      const pendingReached = await waitUntil(
+        () => existsSync(join(stateDir, "second_refresh_pending")),
+        5000,
+      );
+      expect(pendingReached).toBe(true);
+      expect(child.pid).toBeDefined();
+      process.kill(child.pid!, "SIGTERM");
+
+      const exited = await waitUntil(() => directTermExited, 5000);
+      expect(exited).toBe(true);
+
+      const groupEmpty = await waitUntil(() => {
+        if (!child.pid) return true;
+        try {
+          process.kill(-child.pid, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      }, 2000);
+      expect(groupEmpty).toBe(true);
+    } finally {
+      if (child.pid) {
+        try {
+          process.kill(-child.pid, "SIGTERM");
+        } catch {
+          // already exited
+        }
+      }
+    }
+  }, 15000);
 });
