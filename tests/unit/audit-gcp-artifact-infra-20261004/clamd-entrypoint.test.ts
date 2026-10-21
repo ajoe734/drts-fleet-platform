@@ -1097,6 +1097,161 @@ describe("clamd-entrypoint.sh late-ready marker recovery after startup probe cei
     });
   }, 15000);
 
+  it("continues periodic freshclam refresh on each configured interval even when clamd stays alive and ping never succeeds across virtual seconds 0..72", async () => {
+    async function runNeverReadyPeriodicRefreshScenario(scriptPath: string) {
+      const dir = mkdtempSync(
+        join(tmpdir(), "clamd-never-ready-periodic-virtual-"),
+      );
+      const binDir = join(dir, "bin");
+      const dbDir = join(dir, "db");
+      const stateDir = join(dir, "state");
+      const readyMarker = join(dir, "ready", "ready");
+      mkdirSync(binDir);
+      mkdirSync(dbDir);
+      mkdirSync(stateDir);
+      writeFileSync(join(stateDir, "virtual_seconds"), "0");
+
+      writeMock(
+        join(binDir, "freshclam"),
+        [
+          `n=0; [ ! -f "$DRTS_TIMING_STATE/freshclam_count" ] || n=$(cat "$DRTS_TIMING_STATE/freshclam_count")`,
+          `n=$((n + 1)); printf '%s' "$n" > "$DRTS_TIMING_STATE/freshclam_count"`,
+          `t=$(cat "$DRTS_TIMING_STATE/virtual_seconds"); printf '%s %s\\n' "$n" "$t" >> "$DRTS_TIMING_STATE/freshclam_events"`,
+          `printf 'ClamAV-VDB:2026-10-21:27315:1:1:fixture:fixture:fixture:fixture\\n' > "$CLAMAV_DB_DIR/daily.cvd"`,
+          `printf 'daily.cvd database is up-to-date (version: 27315, sigs: 1, f-level: 1, builder: fixture)\\n'`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "clamd"),
+        `trap 'exit 0' TERM INT\nwhile true; do /bin/sleep 0.02; done`,
+      );
+      writeMock(
+        join(binDir, "clamdscan"),
+        [
+          `n=0; [ ! -f "$DRTS_TIMING_STATE/ping_count" ] || n=$(cat "$DRTS_TIMING_STATE/ping_count")`,
+          `n=$((n + 1)); printf '%s' "$n" > "$DRTS_TIMING_STATE/ping_count"`,
+          `exit 1`,
+        ].join("\n"),
+      );
+      writeMock(
+        join(binDir, "sleep"),
+        [
+          `old=$(cat "$DRTS_TIMING_STATE/virtual_seconds")`,
+          `new=$((old + $1))`,
+          `printf '%s %s %s\\n' "$1" "$old" "$new" >> "$DRTS_TIMING_STATE/sleep_events"`,
+          `printf '%s' "$new" > "$DRTS_TIMING_STATE/virtual_seconds"`,
+          `if [ "$new" -ge 72 ]; then`,
+          `  : > "$DRTS_TIMING_STATE/reached_poststartup_grace"`,
+          `  while true; do /bin/sleep 0.02; done`,
+          `fi`,
+          `exec /bin/sleep 0.001`,
+        ].join("\n"),
+      );
+
+      const child = spawn("sh", [scriptPath], {
+        env: {
+          ...process.env,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          CLAMAV_READY_MARKER: readyMarker,
+          CLAMAV_DB_DIR: dbDir,
+          FRESHCLAM_INTERVAL_SECONDS: "2",
+          DRTS_TIMING_STATE: stateDir,
+        },
+        detached: true,
+        stdio: "ignore",
+      });
+
+      try {
+        const checkpointReached = await waitUntil(
+          () => existsSync(join(stateDir, "reached_poststartup_grace")),
+          5000,
+        );
+        expect(checkpointReached).toBe(true);
+
+        let scriptAlive = false;
+        if (child.pid) {
+          try {
+            process.kill(child.pid, 0);
+            scriptAlive = true;
+          } catch {
+            scriptAlive = false;
+          }
+        }
+
+        const totalPingCalls = Number(
+          readFileSync(join(stateDir, "ping_count"), "utf8").trim(),
+        );
+        const virtualSecondAtCheckpoint = Number(
+          readFileSync(join(stateDir, "virtual_seconds"), "utf8").trim(),
+        );
+        const freshclamEvents = readFileSync(
+          join(stateDir, "freshclam_events"),
+          "utf8",
+        )
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map((line) => {
+            const [invocation, virtualSecond] = line.trim().split(/\s+/);
+            return {
+              invocation: Number(invocation),
+              virtual_second: Number(virtualSecond),
+            };
+          });
+
+        return {
+          checkpointReached,
+          scriptAlive,
+          totalPingCalls,
+          virtualSecondAtCheckpoint,
+          freshclamEvents,
+        };
+      } finally {
+        if (child.pid) {
+          try {
+            process.kill(-child.pid, "SIGTERM");
+          } catch {
+            // already exited
+          }
+        }
+      }
+    }
+
+    const tempDir = mkdtempSync(
+      join(tmpdir(), "clamd-cf134-periodic-compare-"),
+    );
+    const cf134ScriptPath = materializeCf134Entrypoint(tempDir);
+
+    const expectedFreshclamSchedule = [
+      { invocation: 1, virtual_second: 0 },
+      { invocation: 2, virtual_second: 62 },
+      { invocation: 3, virtual_second: 64 },
+      { invocation: 4, virtual_second: 66 },
+      { invocation: 5, virtual_second: 68 },
+      { invocation: 6, virtual_second: 70 },
+    ];
+
+    const cf134Result =
+      await runNeverReadyPeriodicRefreshScenario(cf134ScriptPath);
+    expect(cf134Result).toEqual({
+      checkpointReached: true,
+      scriptAlive: true,
+      totalPingCalls: 60,
+      virtualSecondAtCheckpoint: 72,
+      freshclamEvents: expectedFreshclamSchedule,
+    });
+
+    const candidateResult =
+      await runNeverReadyPeriodicRefreshScenario(ENTRYPOINT);
+    expect(candidateResult).toEqual({
+      checkpointReached: true,
+      scriptAlive: true,
+      totalPingCalls: 72,
+      virtualSecondAtCheckpoint: 72,
+      freshclamEvents: expectedFreshclamSchedule,
+    });
+  }, 15000);
+
   it("preserves subsequent periodic freshclam advance/fail refresh and corrupt-signature / loaded-version rejection after late-ready recovery", async () => {
     // 1. Corrupt signature file is still rejected even when late-ready ping succeeds after 60 failed probes:
     const corruptLateReady = await runTimingBoundaryScenario({

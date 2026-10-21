@@ -252,14 +252,33 @@ done
 #
 # If the initial 60-probe window exhausted while clamd is still alive and
 # finishing a slow cold-start signature load, continue 1-second readiness
-# probing until clamd answers a live ping and initial readiness is published
-# before entering the hourly freshclam refresh sleep.
+# probing until clamd answers a live ping and initial readiness is published,
+# while still running the periodic freshclam refresh on each configured
+# FRESHCLAM_INTERVAL_SECONDS boundary without waiting for ping readiness.
+run_periodic_freshclam_refresh() {
+  if refresh_output=$(freshclam --stdout 2>&1); then
+    printf '%s\n' "$refresh_output"
+    initial_freshclam_output="$refresh_output"
+    last_freshclam_ok=1
+    refresh_daily_readiness "$refresh_output" || true
+  else
+    printf '%s\n' "$refresh_output"
+    last_freshclam_ok=0
+    echo "freshclam refresh failed; marking not ready" >&2
+    rm -f "$READY_MARKER" "$READY_VERSION_FILE"
+  fi
+}
+
 (
   SLEEP_PID=""
+  last_freshclam_ok=1
+  refresh_elapsed=0
   trap 'if [ -n "$SLEEP_PID" ]; then pkill -P "$SLEEP_PID" 2>/dev/null || true; kill "$SLEEP_PID" 2>/dev/null || true; fi; exit 0' TERM INT
   while [ "$startup_ready" -ne 1 ] && kill -0 "$CLAMD_PID" 2>/dev/null; do
     if clamdscan --ping 1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then
-      refresh_daily_readiness "$initial_freshclam_output" || echo "clamd is live but no signatures were found yet" >&2
+      if [ "$last_freshclam_ok" -eq 1 ]; then
+        refresh_daily_readiness "$initial_freshclam_output" || echo "clamd is live but no signatures were found yet" >&2
+      fi
       startup_ready=1
       break
     fi
@@ -268,6 +287,12 @@ done
     SLEEP_PID=$!
     wait "$SLEEP_PID" 2>/dev/null || true
     SLEEP_PID=""
+    kill -0 "$CLAMD_PID" 2>/dev/null || break
+    refresh_elapsed=$((refresh_elapsed + 1))
+    if [ "$refresh_elapsed" -ge "$FRESHCLAM_INTERVAL_SECONDS" ]; then
+      refresh_elapsed=0
+      run_periodic_freshclam_refresh
+    fi
   done
   while kill -0 "$CLAMD_PID" 2>/dev/null; do
     sleep "$FRESHCLAM_INTERVAL_SECONDS" &
@@ -275,14 +300,7 @@ done
     wait "$SLEEP_PID" 2>/dev/null || true
     SLEEP_PID=""
     kill -0 "$CLAMD_PID" 2>/dev/null || break
-    if refresh_output=$(freshclam --stdout 2>&1); then
-      printf '%s\n' "$refresh_output"
-      refresh_daily_readiness "$refresh_output" || true
-    else
-      printf '%s\n' "$refresh_output"
-      echo "freshclam refresh failed; marking not ready" >&2
-      rm -f "$READY_MARKER" "$READY_VERSION_FILE"
-    fi
+    run_periodic_freshclam_refresh
   done
 ) &
 WATCHDOG_PID=$!
