@@ -234,3 +234,33 @@ it("sends no test location before a test driver is assigned", async () => {
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(calls.some((c) => c.url.endsWith("/heartbeat"))).toBe(false);
 });
+
+it("sends one heartbeat per interval even as live refreshes re-render the trip", async () => {
+  const calls = stubFetch(
+    () =>
+      Response.json({
+        ok: true,
+        data: {
+          orderId,
+          status: "driver_accepted",
+          driverId: "d",
+          simulated: true,
+        },
+      }),
+    trip("driver_accepted", "商務測試司機 1（虛構）"),
+  );
+  render(
+    <PassengerEmbed
+      context={context(true) as never}
+      liveData={live("driver_accepted", "商務測試司機 1（虛構）") as never}
+    />,
+  );
+  // Each heartbeat triggers a live refresh and a re-render; none of those may
+  // start another heartbeat before the 30 s interval.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const heartbeats = calls.filter((c) => c.url.endsWith("/heartbeat"));
+  expect(heartbeats).toHaveLength(1);
+  expect(
+    calls.filter((c) => c.url === "/api/referral/active").length,
+  ).toBeGreaterThan(0);
+});
