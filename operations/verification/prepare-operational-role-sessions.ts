@@ -75,6 +75,42 @@ const DISALLOWED_OPS_REVIEWER_ROLES = new Set([
   "superadmin",
 ]);
 
+const KNOWN_NON_FLEET_PARTNER_IDS = new Set([
+  "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
+  "partner-bank-demo-001",
+  "partner-bank-demo-002",
+  "partner-referral-demo-001",
+  "partner-acme-card-001",
+  "partner-contoso-card-001",
+  "partner-fabrikam-card-001",
+  "partner-northwind-card-001",
+  "partner-tailspin-claim-001",
+  "partner-adventure-works-001",
+]);
+
+const KNOWN_NON_FLEET_ENTRY_SLUGS = new Set([
+  "yuhe-residence",
+  "bank-demo-alpha-airport",
+  "bank-demo-beta-airport",
+  "referral-demo-community",
+  "acme",
+  "contoso",
+  "fabrikam",
+  "northwind",
+  "tailspin",
+  "adventureworks",
+]);
+
+const NON_FLEET_GENERATED_PARTNER_ID_PATTERN =
+  /^partner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isKnownNonFleetPartnerId(partnerId: string): boolean {
+  return (
+    KNOWN_NON_FLEET_PARTNER_IDS.has(partnerId) ||
+    NON_FLEET_GENERATED_PARTNER_ID_PATTERN.test(partnerId)
+  );
+}
+
 export class OperationalForeignFleetFixturePreconditionError extends Error {
   constructor(message: string) {
     super(message);
@@ -377,6 +413,76 @@ function decodeJwtPayloadIfStructured(
   return null;
 }
 
+function validateOperationalGoogleProvisioningAssertion(
+  rawToken: string,
+  env: LiveEnv,
+  config?: Pick<
+    OperationalRoleSessionTargetConfig,
+    "apiOrigin" | "gcpProjectId"
+  >,
+): string {
+  assertOpaqueCredential(
+    rawToken,
+    "DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN",
+  );
+  for (const envName of NON_PROVISIONING_INVOCATION_TOKEN_ENV_NAMES) {
+    const other = nonEmptyTrimmed(env[envName]);
+    if (other && other === rawToken) {
+      throw new Error(
+        "DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN must be a dedicated driver-provisioning assertion, not a general service invocation ID token",
+      );
+    }
+  }
+  const claims = decodeJwtPayloadIfStructured(rawToken);
+  if (claims) {
+    if (
+      claims.iss !== undefined &&
+      !["https://accounts.google.com", "accounts.google.com"].includes(
+        String(claims.iss).trim(),
+      )
+    ) {
+      throw new Error(
+        "Google provisioning ID token issuer must be Google's OIDC issuer",
+      );
+    }
+    if (claims.email_verified !== undefined && claims.email_verified !== true) {
+      throw new Error(
+        "Google provisioning ID token email_verified claim must be true",
+      );
+    }
+    const rawAud = Array.isArray(claims.aud) ? claims.aud[0] : claims.aud;
+    const aud = typeof rawAud === "string" ? rawAud.trim() : "";
+    if (config) {
+      const expectedAudience = `${config.apiOrigin}/driver-provisioning`;
+      if (aud !== expectedAudience) {
+        throw new Error(
+          "Google provisioning ID token audience must match <ApiOrigin>/driver-provisioning",
+        );
+      }
+    } else if (!aud.endsWith("/driver-provisioning")) {
+      throw new Error(
+        "Google provisioning ID token audience must match <ApiOrigin>/driver-provisioning",
+      );
+    }
+    const email =
+      typeof claims.email === "string" ? claims.email.trim().toLowerCase() : "";
+    const gcpProjectId =
+      config?.gcpProjectId ?? nonEmptyTrimmed(env.DEV_GCP_PROJECT_ID);
+    const isValidPrincipal = gcpProjectId
+      ? email ===
+        `drts-dev-live-map@${gcpProjectId.toLowerCase()}.iam.gserviceaccount.com`
+      : /^drts-dev-live-map@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$/.test(
+          email,
+        );
+    if (!isValidPrincipal) {
+      throw new Error(
+        "Google provisioning ID token principal must be drts-dev-live-map@<project>.iam.gserviceaccount.com",
+      );
+    }
+  }
+  return rawToken;
+}
+
 export function readOperationalGoogleProvisioningIdToken(
   env: LiveEnv,
   config?: Pick<
@@ -392,43 +498,7 @@ export function readOperationalGoogleProvisioningIdToken(
       "DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN is required to issue the SYSTEM driver-provisioning session",
     );
   }
-  assertOpaqueCredential(
-    rawToken,
-    "DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN",
-  );
-  for (const envName of NON_PROVISIONING_INVOCATION_TOKEN_ENV_NAMES) {
-    const other = nonEmptyTrimmed(env[envName]);
-    if (other && other === rawToken) {
-      throw new Error(
-        "DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN must be a dedicated driver-provisioning assertion, not a general service invocation ID token",
-      );
-    }
-  }
-  const claims = decodeJwtPayloadIfStructured(rawToken);
-  if (claims && config) {
-    if (claims.aud !== undefined) {
-      const expectedAudience = `${config.apiOrigin}/driver-provisioning`;
-      if (claims.aud !== expectedAudience) {
-        throw new Error(
-          "Google provisioning ID token audience must match <ApiOrigin>/driver-provisioning",
-        );
-      }
-    }
-    if (claims.email !== undefined) {
-      const email = String(claims.email);
-      const expectedPattern = config.gcpProjectId
-        ? new RegExp(
-            `^drts-dev-live-map@${config.gcpProjectId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.iam\\.gserviceaccount\\.com$`,
-          )
-        : /^drts-dev-live-map@[a-z0-9-]+\.iam\.gserviceaccount\.com$/;
-      if (!expectedPattern.test(email)) {
-        throw new Error(
-          "Google provisioning ID token principal must be drts-dev-live-map@<project>.iam.gserviceaccount.com",
-        );
-      }
-    }
-  }
-  return rawToken;
+  return validateOperationalGoogleProvisioningAssertion(rawToken, env, config);
 }
 
 async function verifyOpsNonReviewerSession(
@@ -548,6 +618,7 @@ async function verifyForeignFleetRoleSession(
   expectedOwnFleetId: string,
   expectedForeignPartnerId?: string,
   requireSessionId = false,
+  expectedEntrySlug?: string,
 ): Promise<{
   realm: string;
   actorType: string;
@@ -564,6 +635,8 @@ async function verifyForeignFleetRoleSession(
   });
   const data = objectRecord(response.data ?? response);
   const identity = objectRecord(data.identity);
+  const sessionPartnerEntry = objectRecord(data.partnerEntry);
+  const jwtClaims = decodeJwtPayloadIfStructured(token);
   if (data.active !== true) {
     throw new OperationalForeignFleetFixturePreconditionError(
       "Foreign Fleet session is not active in /api/auth/session",
@@ -592,12 +665,46 @@ async function verifyForeignFleetRoleSession(
       `Foreign Fleet session partnerId (${partnerId}) must differ from own Fleet (${expectedOwnFleetId})`,
     );
   }
+  if (isKnownNonFleetPartnerId(partnerId)) {
+    throw new OperationalForeignFleetFixturePreconditionError(
+      `Foreign Fleet session partnerId (${partnerId}) belongs to a non-Fleet partner channel`,
+    );
+  }
   if (expectedForeignPartnerId && partnerId !== expectedForeignPartnerId) {
     throw new OperationalForeignFleetFixturePreconditionError(
       `Foreign Fleet session partnerId (${partnerId}) does not match expected foreign Fleet (${expectedForeignPartnerId})`,
     );
   }
-  const sessionId = nonEmptyTrimmed(identity.sessionId);
+  const reportedPartnerType =
+    nonEmptyTrimmed(identity.partnerType) ??
+    nonEmptyTrimmed(sessionPartnerEntry.partnerType) ??
+    nonEmptyTrimmed(jwtClaims?.partnerType);
+  if (
+    reportedPartnerType !== undefined &&
+    reportedPartnerType !== "fleet_partner"
+  ) {
+    throw new OperationalForeignFleetFixturePreconditionError(
+      `Foreign Fleet session partnerType (${reportedPartnerType}) must be fleet_partner`,
+    );
+  }
+  const reportedEntrySlug =
+    nonEmptyTrimmed(identity.partnerEntrySlug) ??
+    nonEmptyTrimmed(sessionPartnerEntry.entrySlug) ??
+    nonEmptyTrimmed(jwtClaims?.partnerEntrySlug);
+  if (reportedEntrySlug !== undefined) {
+    if (KNOWN_NON_FLEET_ENTRY_SLUGS.has(reportedEntrySlug)) {
+      throw new OperationalForeignFleetFixturePreconditionError(
+        `Foreign Fleet session entrySlug (${reportedEntrySlug}) belongs to a non-Fleet partner channel`,
+      );
+    }
+    if (expectedEntrySlug && reportedEntrySlug !== expectedEntrySlug) {
+      throw new OperationalForeignFleetFixturePreconditionError(
+        `Foreign Fleet session entrySlug (${reportedEntrySlug}) does not match expected entrySlug (${expectedEntrySlug})`,
+      );
+    }
+  }
+  const sessionId =
+    nonEmptyTrimmed(identity.sessionId) ?? nonEmptyTrimmed(jwtClaims?.sid);
   if (requireSessionId && !sessionId) {
     throw new OperationalForeignFleetFixturePreconditionError(
       "Bootstrapped foreign Fleet session must include a revocable sessionId",
@@ -688,12 +795,14 @@ export async function prepareOperationalRoleSessions(
 
   let opsToken: string | undefined;
   let ownOpsSessionId: string | undefined;
+  let opsBffIssued = false;
   let systemToken: string | undefined;
   let driverToken: string | undefined;
   let registrationCode: string | undefined;
   let invitationAttempted = false;
   let foreignFleetToken: string | undefined;
   let ownForeignFleetSessionId: string | undefined;
+  let foreignFleetBootstrapIssued = false;
 
   const cleanupIssuedResources = async () => {
     const cleanupFailures: string[] = [];
@@ -720,6 +829,8 @@ export async function prepareOperationalRoleSessions(
       } catch {
         cleanupFailures.push("foreign_fleet_session");
       }
+    } else if (foreignFleetBootstrapIssued && !ownForeignFleetSessionId) {
+      cleanupFailures.push("foreign_fleet_session_unconfirmed");
     }
     if (ownOpsSessionId && opsToken) {
       try {
@@ -731,6 +842,8 @@ export async function prepareOperationalRoleSessions(
       } catch {
         cleanupFailures.push("ops_session");
       }
+    } else if (opsBffIssued && !ownOpsSessionId) {
+      cleanupFailures.push("ops_session_unconfirmed");
     }
     if (cleanupFailures.length === 0) {
       if (registrationCode || ownForeignFleetSessionId || ownOpsSessionId) {
@@ -741,11 +854,10 @@ export async function prepareOperationalRoleSessions(
         );
       }
     } else {
-      evidence.cleanup = cleanupFailures.includes(
-        "driver_invitation_unconfirmed",
-      )
-        ? "unconfirmed"
-        : "failed";
+      const onlyUnconfirmed = cleanupFailures.every((item) =>
+        item.endsWith("_unconfirmed"),
+      );
+      evidence.cleanup = onlyUnconfirmed ? "unconfirmed" : "failed";
       deps.exportSession(
         "DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS",
         evidence.cleanup,
@@ -835,11 +947,31 @@ export async function prepareOperationalRoleSessions(
         invocationTokens,
         "ops_non_reviewer",
       );
+      opsToken = token;
+      opsBffIssued = true;
+      evidence.cleanup = "unconfirmed";
+      deps.exportSession(
+        "DRTS_OPERATIONAL_OPS_NON_REVIEWER_RECOVERY_TOKEN",
+        opsToken,
+      );
+      deps.exportSession(
+        "DRTS_OPERATIONAL_OPS_NON_REVIEWER_ISSUED_ATTEMPTED",
+        "true",
+      );
+
+      const opsJwtClaims = decodeJwtPayloadIfStructured(token);
       const sessionId = assertOpaqueCredential(
-        issued.sessionId,
+        issued.sessionId ?? opsJwtClaims?.sid ?? opsJwtClaims?.sessionId,
         "Ops BFF issued sessionId",
       );
       deps.mask(sessionId);
+      ownOpsSessionId = sessionId;
+      evidence.cleanup = "required";
+      deps.exportSession(
+        "DRTS_OPERATIONAL_OPS_NON_REVIEWER_OWNED_SESSION_ID",
+        ownOpsSessionId,
+      );
+
       const principalId = assertOpaqueCredential(
         issued.principalId,
         "Ops BFF issued principalId",
@@ -851,18 +983,6 @@ export async function prepareOperationalRoleSessions(
       );
       assert.equal(issued.realm, "ops");
       assert.equal(issued.actorType, "ops_user");
-
-      opsToken = token;
-      ownOpsSessionId = sessionId;
-      evidence.cleanup = "required";
-      deps.exportSession(
-        "DRTS_OPERATIONAL_OPS_NON_REVIEWER_OWNED_SESSION_ID",
-        ownOpsSessionId,
-      );
-      deps.exportSession(
-        "DRTS_OPERATIONAL_OPS_NON_REVIEWER_RECOVERY_TOKEN",
-        opsToken,
-      );
 
       evidence.stage = "ops_non_reviewer:verify-session";
       const verifiedOps = await verifyOpsNonReviewerSession(
@@ -926,38 +1046,11 @@ export async function prepareOperationalRoleSessions(
           readGoogleIdToken: (purpose) => {
             const assertion = readGoogleIdToken(purpose).trim();
             if (purpose === "provisioning") {
-              for (const envName of NON_PROVISIONING_INVOCATION_TOKEN_ENV_NAMES) {
-                const other = nonEmptyTrimmed(env[envName]);
-                if (other && other === assertion) {
-                  throw new Error(
-                    "Google provisioning assertion must not equal a service invocation ID token",
-                  );
-                }
-              }
-              const claims = decodeJwtPayloadIfStructured(assertion);
-              if (claims) {
-                if (
-                  claims.aud !== undefined &&
-                  claims.aud !== `${config.apiOrigin}/driver-provisioning`
-                ) {
-                  throw new Error(
-                    "Google provisioning assertion audience must match <ApiOrigin>/driver-provisioning",
-                  );
-                }
-                if (claims.email !== undefined) {
-                  const email = String(claims.email);
-                  const expectedPattern = config.gcpProjectId
-                    ? new RegExp(
-                        `^drts-dev-live-map@${config.gcpProjectId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.iam\\.gserviceaccount\\.com$`,
-                      )
-                    : /^drts-dev-live-map@[a-z0-9-]+\.iam\.gserviceaccount\.com$/;
-                  if (!expectedPattern.test(email)) {
-                    throw new Error(
-                      "Google provisioning assertion email must be drts-dev-live-map@<project>.iam.gserviceaccount.com",
-                    );
-                  }
-                }
-              }
+              return validateOperationalGoogleProvisioningAssertion(
+                assertion,
+                env,
+                config,
+              );
             }
             return assertion;
           },
@@ -1150,11 +1243,12 @@ export async function prepareOperationalRoleSessions(
 
     if (
       expectedForeignPartnerId &&
-      expectedForeignPartnerId === config.expectedOwnFleetId
+      (expectedForeignPartnerId === config.expectedOwnFleetId ||
+        isKnownNonFleetPartnerId(expectedForeignPartnerId))
     ) {
       evidence.foreign_fleet_precondition = "invalid-external-fixture";
       throw new OperationalForeignFleetFixturePreconditionError(
-        `Foreign Fleet fixture precondition invalid: expected foreign partnerId (${expectedForeignPartnerId}) must differ from own Fleet (${config.expectedOwnFleetId})`,
+        `Foreign Fleet fixture precondition invalid: expected foreign partnerId (${expectedForeignPartnerId}) must be a canonical Fleet partner distinct from own Fleet (${config.expectedOwnFleetId})`,
       );
     }
 
@@ -1223,6 +1317,12 @@ export async function prepareOperationalRoleSessions(
           "Foreign Fleet entrySlug must be a valid canonical lowercase partner entry slug",
         );
       }
+      if (KNOWN_NON_FLEET_ENTRY_SLUGS.has(foreignEntrySlug)) {
+        evidence.foreign_fleet_precondition = "invalid-external-fixture";
+        throw new OperationalForeignFleetFixturePreconditionError(
+          `Foreign Fleet entrySlug (${foreignEntrySlug}) is a non-Fleet partner entry`,
+        );
+      }
       if (/\s/.test(foreignApiKey)) {
         evidence.foreign_fleet_precondition = "invalid-external-fixture";
         throw new OperationalForeignFleetFixturePreconditionError(
@@ -1274,8 +1374,40 @@ export async function prepareOperationalRoleSessions(
           "Foreign Fleet partner bootstrap token must differ from own Fleet session token",
         );
       }
+
+      // Record owned session recovery metadata immediately after bootstrap-session
+      // issues a token so that any subsequent partnerEntry validation error or
+      // transient /api/auth/session failure still revokes the newly issued session.
+      foreignFleetToken = accessToken;
+      foreignFleetBootstrapIssued = true;
+      evidence.cleanup = "unconfirmed";
+      deps.exportSession(
+        "DRTS_OPERATIONAL_FOREIGN_FLEET_RECOVERY_TOKEN",
+        foreignFleetToken,
+      );
+      deps.exportSession(
+        "DRTS_OPERATIONAL_FOREIGN_FLEET_ISSUED_ATTEMPTED",
+        "true",
+      );
+
       const partnerEntry = objectRecord(bootstrap.partnerEntry);
       const bootstrapIdentity = objectRecord(bootstrap.identity);
+      const bootstrapJwtClaims = decodeJwtPayloadIfStructured(accessToken);
+      const issuedForeignSessionId =
+        nonEmptyTrimmed(bootstrap.sessionId) ??
+        nonEmptyTrimmed(bootstrapIdentity.sessionId) ??
+        nonEmptyTrimmed(bootstrapJwtClaims?.sid) ??
+        nonEmptyTrimmed(bootstrapJwtClaims?.sessionId);
+      if (issuedForeignSessionId && !/\s/.test(issuedForeignSessionId)) {
+        deps.mask(issuedForeignSessionId);
+        ownForeignFleetSessionId = issuedForeignSessionId;
+        evidence.cleanup = "required";
+        deps.exportSession(
+          "DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID",
+          ownForeignFleetSessionId,
+        );
+      }
+
       const resolvedPartnerId = String(partnerEntry.partnerId ?? "").trim();
       const expiresIn = nonEmptyTrimmed(bootstrap.expiresIn) ?? "1h";
       if (
@@ -1291,6 +1423,19 @@ export async function prepareOperationalRoleSessions(
         evidence.foreign_fleet_precondition = "invalid-external-fixture";
         throw new OperationalForeignFleetFixturePreconditionError(
           "Foreign Fleet partner bootstrap receipt did not match canonical partner entry binding",
+        );
+      }
+      if (
+        partnerEntry.partnerType !== "fleet_partner" ||
+        (partnerEntry.status !== undefined &&
+          partnerEntry.status !== "active") ||
+        (partnerEntry.activeFlag !== undefined &&
+          partnerEntry.activeFlag !== true) ||
+        isKnownNonFleetPartnerId(resolvedPartnerId)
+      ) {
+        evidence.foreign_fleet_precondition = "invalid-external-fixture";
+        throw new OperationalForeignFleetFixturePreconditionError(
+          `Foreign Fleet partnerEntry (${foreignEntrySlug} -> ${resolvedPartnerId}) must be an active canonical fleet_partner entry, got partnerType=${String(partnerEntry.partnerType ?? "missing")}`,
         );
       }
       if (resolvedPartnerId === config.expectedOwnFleetId) {
@@ -1309,7 +1454,6 @@ export async function prepareOperationalRoleSessions(
         );
       }
 
-      foreignFleetToken = accessToken;
       evidence.stage = "foreign_fleet:verify-session";
       const verifiedForeign = await verifyForeignFleetRoleSession(
         apiRequest,
@@ -1318,17 +1462,26 @@ export async function prepareOperationalRoleSessions(
         resolvedPartnerId,
         true,
       );
-      ownForeignFleetSessionId = verifiedForeign.sessionId;
-      if (ownForeignFleetSessionId) {
+      if (verifiedForeign.sessionId) {
+        if (
+          ownForeignFleetSessionId &&
+          verifiedForeign.sessionId !== ownForeignFleetSessionId
+        ) {
+          throw new Error(
+            "Foreign Fleet sessionId mismatch between bootstrap token and /api/auth/session",
+          );
+        }
+        ownForeignFleetSessionId = verifiedForeign.sessionId;
         deps.mask(ownForeignFleetSessionId);
         evidence.cleanup = "required";
         deps.exportSession(
           "DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID",
           ownForeignFleetSessionId,
         );
-        deps.exportSession(
-          "DRTS_OPERATIONAL_FOREIGN_FLEET_RECOVERY_TOKEN",
-          foreignFleetToken,
+      }
+      if (!ownForeignFleetSessionId) {
+        throw new Error(
+          "Issued foreign Fleet session must expose a revocable sessionId",
         );
       }
       evidence.foreign_fleet_precondition = "satisfied-by-partner-bootstrap";
@@ -1353,7 +1506,12 @@ export async function prepareOperationalRoleSessions(
       nonEmptyTrimmed(env.DRTS_LIVE_MAP_INVITE_CODE) ||
       nonEmptyTrimmed(env.DRTS_LIVE_MAP_INVITATION_ATTEMPTED) === "true" ||
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_OWNED_SESSION_ID) ||
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID),
+      nonEmptyTrimmed(
+        env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_ISSUED_ATTEMPTED,
+      ) === "true" ||
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID) ||
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_ISSUED_ATTEMPTED) ===
+        "true",
     );
     if (hasExternalCleanupMarker && evidence.cleanup === "not-required") {
       evidence.cleanup = "required";
@@ -1477,7 +1635,17 @@ export async function teardownOperationalRoleSessions(
           config.driverId,
           apiRequest,
           {
-            readGoogleIdToken,
+            readGoogleIdToken: (purpose) => {
+              const assertion = readGoogleIdToken(purpose).trim();
+              if (purpose === "provisioning") {
+                return validateOperationalGoogleProvisioningAssertion(
+                  assertion,
+                  env,
+                  config,
+                );
+              }
+              return assertion;
+            },
             mask: deps.mask,
           },
         );
@@ -1494,7 +1662,15 @@ export async function teardownOperationalRoleSessions(
     const ownForeignSessionId = nonEmptyTrimmed(
       env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID,
     );
-    if (ownForeignSessionId) {
+    const foreignIssuedAttempted =
+      nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_ISSUED_ATTEMPTED) ===
+      "true";
+    if (!ownForeignSessionId) {
+      assert(
+        !foreignIssuedAttempted,
+        "Foreign Fleet bootstrap session was issued but sessionId recovery data was lost",
+      );
+    } else {
       deps.mask(ownForeignSessionId);
       const foreignToken =
         nonEmptyTrimmed(env.DRTS_OPERATIONAL_FOREIGN_FLEET_RECOVERY_TOKEN) ??
@@ -1516,7 +1692,16 @@ export async function teardownOperationalRoleSessions(
     const ownOpsSessionId = nonEmptyTrimmed(
       env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_OWNED_SESSION_ID,
     );
-    if (ownOpsSessionId) {
+    const opsIssuedAttempted =
+      nonEmptyTrimmed(
+        env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_ISSUED_ATTEMPTED,
+      ) === "true";
+    if (!ownOpsSessionId) {
+      assert(
+        !opsIssuedAttempted,
+        "Ops BFF session was issued but sessionId recovery data was lost",
+      );
+    } else {
       deps.mask(ownOpsSessionId);
       const opsToken =
         nonEmptyTrimmed(env.DRTS_OPERATIONAL_OPS_NON_REVIEWER_RECOVERY_TOKEN) ??

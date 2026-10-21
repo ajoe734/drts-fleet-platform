@@ -47,15 +47,219 @@ const OPS_ORIGIN = "https://drts-dev-ops-console-web-uc.a.run.app";
 const GCP_PROJECT_ID = "drts-dev-devcc-20260825";
 
 const C125_PRESERVED_FILES = [
-  "tests/e2e/operational-document-upload.ts",
-  "tests/e2e/fixtures/operational-browser-journeys.json",
-  "tests/e2e/operational-browser-acceptance.spec.ts",
-  "tests/unit/operational-document-upload.test.ts",
-  "tests/unit/operational-browser-manifest.test.ts",
+  {
+    path: "tests/e2e/operational-document-upload.ts",
+    bytes: 111023,
+    blob: "da67f731d2538f9559d51f18a0d21e62cb4047c4",
+    sha256: "2064b7f32e65aa7b6cb44c560bb3dc493550563513632747c2444dd191e88ec9",
+  },
+  {
+    path: "tests/e2e/fixtures/operational-browser-journeys.json",
+    bytes: 49995,
+    blob: "d8be0523a7fe38834e3b398bbead2ffa5ead289e",
+    sha256: "0bd7312b43629bd6b0b0be5dfc81ad87934c3ae7420c94114cfc29edf129d6ad",
+  },
+  {
+    path: "tests/e2e/operational-browser-acceptance.spec.ts",
+    bytes: 23626,
+    blob: "83926082888a8140246a96a9de080429f7685200",
+    sha256: "6ad1b38cfd921a36866eca9844a504b552676d530afb30dddfca7dc38d1c46b2",
+  },
+  {
+    path: "tests/unit/operational-document-upload.test.ts",
+    bytes: 127833,
+    blob: "049566a9fbac4c2bf38c0bdd5aa34e27e8c8ba35",
+    sha256: "d00824df6b63ac5b9a88c4266c0329fd8a0facf20390433dec6a886f6d39c2a8",
+  },
+  {
+    path: "tests/unit/operational-browser-manifest.test.ts",
+    bytes: 28303,
+    blob: "fe056d5045e3d0d193c7fdab088d11e6202d37bf",
+    sha256: "6f2ae5870576e93287159c92b3cfc0734f638cde316700b222fe423a9c36a4e1",
+  },
 ] as const;
+
+const IMMUTABLE_337_CALLER_BASELINES = {
+  workflow: {
+    path: ".github/workflows/deploy-dev.yml",
+    bytes: 156378,
+    blob: "45f3ae0f3388750c93cf5c3b9d72354b7f5c0f60",
+    sha256: "1daf71f8bb8304c758e23181369ca4ac5e8dc41fc3b639ecaffba436ae3f1cb5",
+  },
+  runner: {
+    path: "operations/verification/run-operational-browser-acceptance.sh",
+    bytes: 8799,
+    blob: "4e2fd9fc1c5d9c4746651482ca42a5080daf0a78",
+    sha256: "6853cd60277a718b24cf34f754628c74cd0923f4b51920bad6e29b04c989b70a",
+  },
+} as const;
 
 function sha256Hex(content: Buffer | string): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function gitBlobSha1Hex(content: Buffer | string): string {
+  const buf = typeof content === "string" ? Buffer.from(content) : content;
+  return createHash("sha1")
+    .update(`blob ${buf.byteLength}\0`)
+    .update(buf)
+    .digest("hex");
+}
+
+function hasLocalBaselineCommit(commitSha: string): boolean {
+  const probe = spawnSync(
+    "git",
+    ["cat-file", "-e", `${commitSha}^{commit}`],
+    { encoding: "utf8" },
+  );
+  return probe.status === 0;
+}
+
+function reconstructImmutable337CallerSources(): {
+  baselineWorkflow: string;
+  baselineRunner: string;
+} {
+  const currentWorkflow = readFileSync(
+    path.join(process.cwd(), IMMUTABLE_337_CALLER_BASELINES.workflow.path),
+    "utf8",
+  );
+  const currentRunner = readFileSync(
+    path.join(process.cwd(), IMMUTABLE_337_CALLER_BASELINES.runner.path),
+    "utf8",
+  );
+
+  const workflowAddedBlocks = [
+    [
+      "      - name: Mint identity token — driver provisioning (operational candidate)",
+      "        id: id_token_driver_provisioning",
+      "        uses: google-github-actions/auth@v2",
+      "        with:",
+      "          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}",
+      "          service_account: drts-dev-live-map@${{ needs.prepare.outputs.project_id }}.iam.gserviceaccount.com",
+      "          project_id: ${{ needs.prepare.outputs.project_id }}",
+      "          token_format: id_token",
+      "          id_token_audience: ${{ format('{0}/driver-provisioning', needs.health-check.outputs.api) }}",
+      "          id_token_include_email: true",
+      "          create_credentials_file: false",
+      "          export_environment_variables: false",
+      "",
+      "",
+    ].join("\n"),
+    [
+      "          DEV_GCP_PROJECT_ID: ${{ needs.prepare.outputs.project_id }}",
+      "          DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.id_token_driver_provisioning.outputs.id_token }}",
+      "          DRTS_OPERATIONAL_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.id_token_driver_provisioning.outputs.id_token }}",
+      "          DRTS_LIVE_MAP_TEST_DRIVER_ID: drv-demo-002",
+      "          DRTS_OPERATIONAL_OWN_FLEET_PARTNER_ID: fleet-demo-001",
+      "          DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN }}",
+      "          DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN }}",
+      "          DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN }}",
+      "          DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN }}",
+      "          DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN }}",
+      "          DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: ${{ vars.DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG || secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG }}",
+      "          DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY: ${{ secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY }}",
+      "          DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID: ${{ vars.DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID || secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID }}",
+      "",
+    ].join("\n"),
+    [
+      "      - name: Refresh identity token — driver provisioning cleanup (operational candidate)",
+      "        if: always() && env.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS != 'passed'",
+      "        id: id_token_driver_provisioning_cleanup",
+      "        uses: google-github-actions/auth@v2",
+      "        with:",
+      "          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}",
+      "          service_account: drts-dev-live-map@${{ needs.prepare.outputs.project_id }}.iam.gserviceaccount.com",
+      "          project_id: ${{ needs.prepare.outputs.project_id }}",
+      "          token_format: id_token",
+      "          id_token_audience: ${{ format('{0}/driver-provisioning', needs.health-check.outputs.api) }}",
+      "          id_token_include_email: true",
+      "          create_credentials_file: false",
+      "          export_environment_variables: false",
+      "      - name: Revoke operational role sessions and driver device invitation",
+      "        if: always() && env.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS != 'passed'",
+      "        env:",
+      "          DRTS_CANDIDATE_SHA: ${{ needs.build-push.outputs.candidate_sha }}",
+      "          DEV_GCP_PROJECT_ID: ${{ needs.prepare.outputs.project_id }}",
+      "          DRTS_OPERATIONAL_API_URL: ${{ needs.health-check.outputs.api }}",
+      "          DRTS_OPERATIONAL_OPS_CONSOLE_URL: ${{ needs.health-check.outputs.ops_console }}",
+      "          DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.id_token_driver_provisioning_cleanup.outputs.id_token }}",
+      "          DRTS_OPERATIONAL_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.id_token_driver_provisioning_cleanup.outputs.id_token }}",
+      "          DRTS_LIVE_MAP_TEST_DRIVER_ID: drv-demo-002",
+      "          DRTS_OPERATIONAL_OWN_FLEET_PARTNER_ID: fleet-demo-001",
+      "        run: npx tsx operations/verification/prepare-operational-role-sessions.ts --teardown",
+      "",
+    ].join("\n"),
+  ];
+
+  let baselineWorkflow = currentWorkflow;
+  for (const block of workflowAddedBlocks) {
+    expect(baselineWorkflow).toContain(block);
+    baselineWorkflow = baselineWorkflow.replace(block, "");
+  }
+
+  const baselineRunner = currentRunner
+    .replace("\numask 077\n", "\n")
+    .replace(
+      [
+        'ROLE_SESSIONS_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/drts-operational-role-sessions.XXXXXX.env")"',
+        "ROLE_SESSIONS_BOOTSTRAP_INVOKED=0",
+        "",
+        "load_operational_role_session_exports() {",
+        '  [[ -f "$ROLE_SESSIONS_ENV_FILE" ]] || return 0',
+        "  local env_key env_value",
+        '  while IFS=\'=\' read -r env_key env_value || [[ -n "$env_key" ]]; do',
+        '    [[ -n "$env_key" ]] || continue',
+        '    case "$env_key" in',
+        "      DRTS_OPERATIONAL_*|DRTS_LIVE_MAP_*)",
+        '        if [[ "$env_key" =~ ^(DRTS_OPERATIONAL_|DRTS_LIVE_MAP_)[A-Z0-9_]+$ ]]; then',
+        '          export "${env_key}=${env_value}"',
+        "        fi",
+        "        ;;",
+        "    esac",
+        '  done < "$ROLE_SESSIONS_ENV_FILE"',
+        "}",
+        "",
+        "cleanup_operational_acceptance() {",
+        "  local exit_code=$?",
+        "  set +e",
+        "  load_operational_role_session_exports",
+        '  if [[ "$ROLE_SESSIONS_BOOTSTRAP_INVOKED" -eq 1 && "${DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS:-}" != "passed" ]]; then',
+        "    npx tsx operations/verification/prepare-operational-role-sessions.ts \\",
+        '      --teardown --env-file "$ROLE_SESSIONS_ENV_FILE"',
+        "    local teardown_code=$?",
+        "    load_operational_role_session_exports",
+        '    if [[ "$teardown_code" -ne 0 && "$exit_code" -eq 0 ]]; then',
+        '      exit_code="$teardown_code"',
+        "    fi",
+        "  fi",
+        '  rm -f "$MATERIALIZED_MANIFEST" "$MATERIALIZED_SURFACE_MANIFEST" "$ROLE_SESSIONS_ENV_FILE"',
+        '  exit "$exit_code"',
+        "}",
+        "trap cleanup_operational_acceptance EXIT",
+      ].join("\n"),
+      'trap \'rm -f "$MATERIALIZED_MANIFEST" "$MATERIALIZED_SURFACE_MANIFEST"\' EXIT',
+    )
+    .replace(
+      [
+        'export DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN="${DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN:-${DRTS_OPERATIONAL_GOOGLE_PROVISIONING_ID_TOKEN:-}}"',
+        'export DRTS_OPERATIONAL_GOOGLE_PROVISIONING_ID_TOKEN="${DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN}"',
+        "",
+        "ROLE_SESSIONS_BOOTSTRAP_INVOKED=1",
+        "npx tsx operations/verification/prepare-operational-role-sessions.ts \\",
+        '  --env-file "$ROLE_SESSIONS_ENV_FILE"',
+        "load_operational_role_session_exports",
+        "",
+        ': "${DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN:?missing ops_non_reviewer operational session token}"',
+        ': "${DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN:?missing system operational session token}"',
+        ': "${DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN:?missing driver operational session token}"',
+        ': "${DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN:?missing foreign_fleet operational session token}"',
+        'export DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN="${DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN:-${DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN}}"',
+        "",
+      ].join("\n"),
+      "",
+    );
+
+  return { baselineWorkflow, baselineRunner };
 }
 
 function makeFakeJwt(
@@ -86,8 +290,19 @@ const SIM_SYSTEM_SESSION_TOKEN = "sim-app-system-provisioner-jwt-token";
 const SIM_DRIVER_INVITE_CODE = "sim-driver-invite-code-drv-demo-002";
 const SIM_DRIVER_SESSION_TOKEN = "sim-app-driver-demo-002-jwt-token";
 const SIM_FOREIGN_FLEET_API_KEY = "sim-foreign-fleet-api-key-002";
-const SIM_FOREIGN_FLEET_SESSION_TOKEN = "sim-app-foreign-fleet-002-jwt-token";
 const SIM_FOREIGN_FLEET_SESSION_ID = "sess-foreign-fleet-002";
+const SIM_FOREIGN_FLEET_SESSION_TOKEN = makeFakeJwt(
+  {
+    sub: "partner_bootstrap:fleet-foreign-002:foreign-fleet-alpha",
+    realm: "partner",
+    actorType: "partner_api_key",
+    sid: SIM_FOREIGN_FLEET_SESSION_ID,
+    partnerId: "fleet-foreign-002",
+    roles: ["partner_ingress"],
+    scopes: ["fleet:read", "fleet:write", "regulatory:write"],
+  },
+  "sim-app-foreign-fleet-sig",
+);
 const SIM_OWN_FLEET_SESSION_TOKEN = "sim-app-own-fleet-001-jwt-token";
 const SIM_PLATFORM_REVIEWER_SESSION_TOKEN =
   "sim-app-platform-reviewer-jwt-token";
@@ -168,9 +383,16 @@ function createStandardMockFetch(
     opsRoles?: string[];
     opsActorType?: string;
     foreignPartnerId?: string;
+    foreignEntrySlug?: string;
+    foreignPartnerType?: string;
+    foreignPartnerStatus?: string;
+    foreignPartnerActiveFlag?: boolean;
+    foreignSessionStatus?: number;
+    omitForeignSessionIdInSessionLookup?: boolean;
     foreignBootstrapStatus?: number;
     candidateShaOverride?: string | null;
     failDriverRevoke?: boolean;
+    failForeignSessionRevokeOnce?: boolean;
   } = {},
 ) {
   const calls: RecordedCall[] = [];
@@ -179,6 +401,9 @@ function createStandardMockFetch(
       ? CANDIDATE_SHA
       : options.candidateShaOverride;
   const foreignPartnerId = options.foreignPartnerId ?? "fleet-foreign-002";
+  const foreignEntrySlug = options.foreignEntrySlug ?? "foreign-fleet-alpha";
+  const foreignPartnerType = options.foreignPartnerType ?? "fleet_partner";
+  let failedForeignRevokeOnce = false;
 
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -284,16 +509,29 @@ function createStandardMockFetch(
         );
       }
       if (auth === `Bearer ${SIM_FOREIGN_FLEET_SESSION_TOKEN}`) {
+        if (
+          options.foreignSessionStatus &&
+          options.foreignSessionStatus !== 200
+        ) {
+          return jsonResponse(
+            { error: "session_lookup_unavailable" },
+            { status: options.foreignSessionStatus, candidateSha },
+          );
+        }
         return jsonResponse(
           {
             data: {
               active: true,
               identity: {
                 realm: "partner",
-                actorType: "partner_user",
-                actorId: `partner_bootstrap:${foreignPartnerId}:foreign-fleet-alpha`,
+                actorType: "partner_api_key",
+                actorId: `partner_bootstrap:${foreignPartnerId}:${foreignEntrySlug}`,
                 partnerId: foreignPartnerId,
-                sessionId: SIM_FOREIGN_FLEET_SESSION_ID,
+                partnerType: foreignPartnerType,
+                ...(options.omitForeignSessionIdInSessionLookup
+                  ? {}
+                  : { sessionId: SIM_FOREIGN_FLEET_SESSION_ID }),
+                roles: ["partner_ingress"],
                 scopes: ["fleet:read", "fleet:write", "regulatory:write"],
               },
             },
@@ -394,7 +632,7 @@ function createStandardMockFetch(
         );
       }
       const payload = body as { entrySlug?: string; apiKey?: string };
-      expect(payload.entrySlug).toBe("foreign-fleet-alpha");
+      expect(payload.entrySlug).toBe(foreignEntrySlug);
       expect(payload.apiKey).toBe(SIM_FOREIGN_FLEET_API_KEY);
       return jsonResponse(
         {
@@ -403,15 +641,21 @@ function createStandardMockFetch(
             tokenType: "Bearer",
             expiresIn: "1h",
             partnerEntry: {
-              entrySlug: "foreign-fleet-alpha",
+              entryId: `entry-${foreignPartnerId}`,
+              entrySlug: foreignEntrySlug,
               partnerId: foreignPartnerId,
-              entryKind: "fleet_portal",
+              partnerType: foreignPartnerType,
+              status: options.foreignPartnerStatus ?? "active",
+              activeFlag: options.foreignPartnerActiveFlag ?? true,
             },
+            // Real AuthController.issuePartnerBootstrapSession / TenantPartnerService
+            // returns identity without sessionId (sessionId is carried in JWT sid claim).
             identity: {
               realm: "partner",
-              actorType: "partner_user",
-              actorId: `partner_bootstrap:${foreignPartnerId}:foreign-fleet-alpha`,
+              actorType: "partner_api_key",
+              actorId: `partner_bootstrap:${foreignPartnerId}:${foreignEntrySlug}`,
               partnerId: foreignPartnerId,
+              roles: ["partner_ingress"],
               scopes: ["fleet:read", "fleet:write", "regulatory:write"],
             },
           },
@@ -445,6 +689,17 @@ function createStandardMockFetch(
 
     if (method === "POST" && url === `${API_ORIGIN}/api/auth/sessions/revoke`) {
       const payload = body as { sessionId?: string };
+      if (
+        options.failForeignSessionRevokeOnce &&
+        !failedForeignRevokeOnce &&
+        payload.sessionId === SIM_FOREIGN_FLEET_SESSION_ID
+      ) {
+        failedForeignRevokeOnce = true;
+        return jsonResponse(
+          { error: "temporary_revoke_failure" },
+          { status: 503, candidateSha },
+        );
+      }
       return jsonResponse(
         {
           data: {
@@ -465,19 +720,46 @@ function createStandardMockFetch(
 describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
   describe("immutable baseline gap proof and C125 5-file byte-for-byte preservation", () => {
     it("proves immutable baseline 337f3dd7fb530b44f4e65875dd03c7a2191e3706 lacked the four role-session producers/forwarders in deploy-dev.yml and run-operational-browser-acceptance.sh", () => {
-      const baselineWorkflow = execFileSync(
-        "git",
-        ["show", `${IMMUTABLE_BASELINE_REF}:.github/workflows/deploy-dev.yml`],
-        { encoding: "utf8" },
+      const { baselineWorkflow, baselineRunner } =
+        reconstructImmutable337CallerSources();
+
+      expect(Buffer.byteLength(baselineWorkflow, "utf8")).toBe(
+        IMMUTABLE_337_CALLER_BASELINES.workflow.bytes,
       );
-      const baselineRunner = execFileSync(
-        "git",
-        [
-          "show",
-          `${IMMUTABLE_BASELINE_REF}:operations/verification/run-operational-browser-acceptance.sh`,
-        ],
-        { encoding: "utf8" },
+      expect(gitBlobSha1Hex(baselineWorkflow)).toBe(
+        IMMUTABLE_337_CALLER_BASELINES.workflow.blob,
       );
+      expect(sha256Hex(baselineWorkflow)).toBe(
+        IMMUTABLE_337_CALLER_BASELINES.workflow.sha256,
+      );
+
+      expect(Buffer.byteLength(baselineRunner, "utf8")).toBe(
+        IMMUTABLE_337_CALLER_BASELINES.runner.bytes,
+      );
+      expect(gitBlobSha1Hex(baselineRunner)).toBe(
+        IMMUTABLE_337_CALLER_BASELINES.runner.blob,
+      );
+      expect(sha256Hex(baselineRunner)).toBe(
+        IMMUTABLE_337_CALLER_BASELINES.runner.sha256,
+      );
+
+      if (hasLocalBaselineCommit(IMMUTABLE_BASELINE_REF)) {
+        const gitWorkflow = execFileSync(
+          "git",
+          ["show", `${IMMUTABLE_BASELINE_REF}:.github/workflows/deploy-dev.yml`],
+          { encoding: "utf8" },
+        );
+        const gitRunner = execFileSync(
+          "git",
+          [
+            "show",
+            `${IMMUTABLE_BASELINE_REF}:operations/verification/run-operational-browser-acceptance.sh`,
+          ],
+          { encoding: "utf8" },
+        );
+        expect(baselineWorkflow).toBe(gitWorkflow);
+        expect(baselineRunner).toBe(gitRunner);
+      }
 
       // Baseline issued tenant & dispatch sessions, but none of the four C125 role sessions.
       expect(baselineWorkflow).toContain(
@@ -496,16 +778,24 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
     });
 
     it("preserves all five accepted C125 files byte-for-byte and keeps 7 journeys / 16 browser tests / 69 steps / 15 uploads / 37 role probes / 16 lineage checks intact", () => {
-      for (const relativePath of C125_PRESERVED_FILES) {
-        const baselineBytes = execFileSync("git", [
-          "show",
-          `${IMMUTABLE_BASELINE_REF}:${relativePath}`,
-        ]);
-        const currentBytes = readFileSync(
-          path.join(process.cwd(), relativePath),
-        );
-        expect(sha256Hex(currentBytes)).toBe(sha256Hex(baselineBytes));
-        expect(currentBytes.byteLength).toBe(baselineBytes.byteLength);
+      const hasCommit = hasLocalBaselineCommit(IMMUTABLE_BASELINE_REF);
+      for (const spec of C125_PRESERVED_FILES) {
+        const currentBytes = readFileSync(path.join(process.cwd(), spec.path));
+        expect(currentBytes.byteLength).toBe(spec.bytes);
+        expect(gitBlobSha1Hex(currentBytes)).toBe(spec.blob);
+        expect(sha256Hex(currentBytes)).toBe(spec.sha256);
+
+        // Even in shallow fetch-depth: 1 checkouts, unchanged file blobs exist in HEAD.
+        const blobBytes = execFileSync("git", ["cat-file", "blob", spec.blob]);
+        expect(sha256Hex(currentBytes)).toBe(sha256Hex(blobBytes));
+
+        if (hasCommit) {
+          const baselineBytes = execFileSync("git", [
+            "show",
+            `${IMMUTABLE_BASELINE_REF}:${spec.path}`,
+          ]);
+          expect(sha256Hex(currentBytes)).toBe(sha256Hex(baselineBytes));
+        }
       }
 
       const manifest = JSON.parse(
@@ -604,7 +894,9 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       const exported: Record<string, string> = {};
       const masked: string[] = [];
       const savedEvidence: Record<string, OperationalRoleSessionsEvidence> = {};
-      const { fetchImpl, calls } = createStandardMockFetch();
+      const { fetchImpl, calls } = createStandardMockFetch({
+        omitForeignSessionIdInSessionLookup: true,
+      });
 
       const evidence = await prepareOperationalRoleSessions(env, {
         fetch: fetchImpl,
@@ -654,6 +946,9 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       );
       expect(exported.DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN).toBe(
         SIM_FOREIGN_FLEET_SESSION_TOKEN,
+      );
+      expect(exported.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID).toBe(
+        SIM_FOREIGN_FLEET_SESSION_ID,
       );
       expect(exported.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS).toBe(
         "pending",
@@ -730,7 +1025,7 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
           "DRTS_OPERATIONAL_API_URL",
           `${API_ORIGIN}/api/auth/session`,
         );
-        expect(roleHeaders.Authorization).toMatch(/^Bearer sim-app-/);
+        expect(roleHeaders.Authorization).toMatch(/^Bearer \S+$/);
         expect(roleHeaders["x-drts-authorization"]).toBeUndefined();
       }
 
@@ -931,6 +1226,175 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
           save: () => {},
         }),
       ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
+    });
+
+    it("rejects non-Fleet partner entries (e.g. referral_channel / bank_partner) for foreign_fleet and revokes the issued bootstrap session (AFB-FOREIGN-KIND)", async () => {
+      const referralBootstrapEnv = createBaseSimulationEnv({
+        DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: "partner-referral-entry",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID: undefined,
+      });
+      const exported: Record<string, string> = {};
+      let saved: OperationalRoleSessionsEvidence | undefined;
+      const { fetchImpl, calls } = createStandardMockFetch({
+        foreignEntrySlug: "partner-referral-entry",
+        foreignPartnerId: "partner-referral-extra",
+        foreignPartnerType: "referral_channel",
+        omitForeignSessionIdInSessionLookup: true,
+      });
+
+      await expect(
+        prepareOperationalRoleSessions(referralBootstrapEnv, {
+          fetch: fetchImpl,
+          mask: () => {},
+          exportSession: (name, value) => {
+            exported[name] = value;
+            referralBootstrapEnv[name] = value;
+          },
+          save: (_name, data) => {
+            saved = data;
+          },
+        }),
+      ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
+
+      expect(saved?.status).toBe("failed");
+      expect(saved?.foreign_fleet_precondition).toBe(
+        "invalid-external-fixture",
+      );
+      expect(saved?.cleanup).toBe("passed");
+      expect(
+        exported.DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN,
+      ).toBeUndefined();
+      // Both the Ops session AND the newly issued referral partner session must be revoked via JWT sid.
+      const revokedSessionIds = calls
+        .filter(
+          (c) =>
+            c.method === "POST" &&
+            c.url === `${API_ORIGIN}/api/auth/sessions/revoke`,
+        )
+        .map((c) => (c.body as { sessionId?: string })?.sessionId);
+      expect(revokedSessionIds).toContain(SIM_FOREIGN_FLEET_SESSION_ID);
+      expect(revokedSessionIds).toContain(SIM_OPS_SESSION_ID);
+
+      // Also reject pre-provided session tokens belonging to known non-Fleet partners.
+      const providedNonFleetEnv = createBaseSimulationEnv({
+        DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN:
+          SIM_FOREIGN_FLEET_SESSION_TOKEN,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: undefined,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY: undefined,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID: undefined,
+      });
+      const { fetchImpl: providedNonFleetFetch } = createStandardMockFetch({
+        foreignPartnerId: "partner-referral-hotel",
+        foreignPartnerType: "referral_channel",
+      });
+      await expect(
+        prepareOperationalRoleSessions(providedNonFleetEnv, {
+          fetch: providedNonFleetFetch,
+          mask: () => {},
+          exportSession: () => {},
+          save: () => {},
+        }),
+      ).rejects.toThrow(OperationalForeignFleetFixturePreconditionError);
+    });
+
+    it("records and revokes owned foreign_fleet session via JWT sid claim even when /api/auth/session fails with 503 after bootstrap-session (AFB-FOREIGN-OWNED-RECOVERY)", async () => {
+      const env = createBaseSimulationEnv();
+      const exported: Record<string, string> = {};
+      let saved: OperationalRoleSessionsEvidence | undefined;
+      const { fetchImpl, calls } = createStandardMockFetch({
+        foreignSessionStatus: 503,
+        omitForeignSessionIdInSessionLookup: true,
+      });
+
+      await expect(
+        prepareOperationalRoleSessions(env, {
+          fetch: fetchImpl,
+          mask: () => {},
+          exportSession: (name, value) => {
+            exported[name] = value;
+            env[name] = value;
+          },
+          save: (_name, data) => {
+            saved = data;
+          },
+        }),
+      ).rejects.toThrow(OperationalRoleSessionBootstrapError);
+
+      expect(saved?.status).toBe("failed");
+      expect(saved?.stage).toBe("foreign_fleet:verify-session");
+      expect(saved?.cleanup).toBe("passed");
+      expect(exported.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_SESSION_ID).toBe(
+        SIM_FOREIGN_FLEET_SESSION_ID,
+      );
+      expect(exported.DRTS_OPERATIONAL_FOREIGN_FLEET_RECOVERY_TOKEN).toBe(
+        SIM_FOREIGN_FLEET_SESSION_TOKEN,
+      );
+      expect(
+        exported.DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN,
+      ).toBeUndefined();
+
+      const revokedSessionIds = calls
+        .filter(
+          (c) =>
+            c.method === "POST" &&
+            c.url === `${API_ORIGIN}/api/auth/sessions/revoke`,
+        )
+        .map((c) => (c.body as { sessionId?: string })?.sessionId);
+      expect(revokedSessionIds).toContain(SIM_FOREIGN_FLEET_SESSION_ID);
+      expect(revokedSessionIds).toContain(SIM_OPS_SESSION_ID);
+
+      // If in-process revocation of the owned foreign session also fails transiently,
+      // cleanup status must be "failed" and subsequent teardownOperationalRoleSessions
+      // must revoke the owned foreign session using the exported recovery metadata.
+      const retryEnv = createBaseSimulationEnv();
+      const retryExported: Record<string, string> = {};
+      let retrySaved: OperationalRoleSessionsEvidence | undefined;
+      const { fetchImpl: retryFetch, calls: retryCalls } =
+        createStandardMockFetch({
+          foreignSessionStatus: 503,
+          omitForeignSessionIdInSessionLookup: true,
+          failForeignSessionRevokeOnce: true,
+        });
+
+      await expect(
+        prepareOperationalRoleSessions(retryEnv, {
+          fetch: retryFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            retryExported[name] = value;
+            retryEnv[name] = value;
+          },
+          save: (_name, data) => {
+            retrySaved = data;
+          },
+        }),
+      ).rejects.toThrow(OperationalRoleSessionBootstrapError);
+
+      expect(retrySaved?.cleanup).toBe("failed");
+      expect(retryExported.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS).toBe(
+        "failed",
+      );
+
+      const teardownEvidence = await teardownOperationalRoleSessions(retryEnv, {
+        fetch: retryFetch,
+        mask: () => {},
+        exportSession: (name, value) => {
+          retryExported[name] = value;
+          retryEnv[name] = value;
+        },
+        save: () => {},
+      });
+      expect(teardownEvidence.status).toBe("passed");
+      expect(teardownEvidence.foreign_fleet_session_revoked).toBe(true);
+      expect(
+        retryCalls.filter(
+          (c) =>
+            c.method === "POST" &&
+            c.url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+            (c.body as { sessionId?: string })?.sessionId ===
+              SIM_FOREIGN_FLEET_SESSION_ID,
+        ),
+      ).toHaveLength(2);
     });
 
     it("rejects raw Google/Cloud Run invocation tokens or wrong service account / audience for SYSTEM provisioning", async () => {
