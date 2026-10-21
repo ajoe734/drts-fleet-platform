@@ -1,0 +1,9 @@
+/** Compatibility exports; the fixed E19 copy has one shared source. */
+export {
+  PASSENGER_FEE_ROWS,
+  PASSENGER_CONFIRMATION_ROWS,
+  PASSENGER_FREE_CANCELLATION_NOTICE,
+  PASSENGER_SUPPORT_PHONE,
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";

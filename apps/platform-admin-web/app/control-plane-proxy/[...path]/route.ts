@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyIdentitySessionCsrf } from "../../../lib/identity-session-csrf.server";
 import {
   CONTROL_PLANE_DEFAULT_EMAILS,
+  CONTROL_PLANE_REQUEST_AUTH_HEADER,
+  extractIapJwtAssertion,
   CONTROL_PLANE_REQUEST_HEADER_BLOCKLIST,
   isControlPlaneIapEnabled,
   isStrictControlPlaneIapEnvironment,
@@ -130,27 +133,47 @@ async function applyUpstreamAuth(
     process.env.IAP_AUDIENCE ||
     process.env.JWT_AUDIENCE;
   const expectedIapIssuer = process.env.IAP_EXPECTED_ISSUER;
-  const controlPlaneAuth = await issueControlPlaneRequestAuth({
-    actorType: "platform_admin",
-    headers: request.headers,
-    defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.platform_admin,
-    requestId: request.headers.get("x-request-id"),
-    strictIapMode,
-    iapEnabled: isControlPlaneIapEnabled(),
-    assumeTenantId: request.headers.get("x-tenant-id"),
-    ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
-    ...(expectedIapAudience ? { expectedIapAudience } : {}),
-    ...(expectedIapIssuer ? { expectedIapIssuer } : {}),
-    ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
-    ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
-    ...(process.env.JWT_AUDIENCE
-      ? { jwtAudience: process.env.JWT_AUDIENCE }
-      : {}),
-  });
+  const devSessionMode =
+    !strictIapMode &&
+    !isControlPlaneIapEnabled() &&
+    !extractIapJwtAssertion(request.headers) &&
+    process.env.DRTS_DEV_MFA_WAIVED?.trim().toLowerCase() === "true";
+  const suppliedInner = devSessionMode
+    ? request.headers.get(CONTROL_PLANE_REQUEST_AUTH_HEADER)
+    : null;
+  if (suppliedInner !== null) {
+    // The API's existing durable JWT verifier owns validity. A bad/empty token
+    // must be rejected there, never replaced with the default proxy identity.
+    headers.set(CONTROL_PLANE_REQUEST_AUTH_HEADER, suppliedInner);
+  } else {
+    const controlPlaneAuth = await issueControlPlaneRequestAuth({
+      ...(devSessionMode
+        ? {
+            devCanonicalPrincipalId:
+              process.env.DRTS_DEV_WORKFORCE_PRINCIPAL_ID?.trim() || "",
+          }
+        : {}),
+      actorType: "platform_admin",
+      headers: request.headers,
+      defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.platform_admin,
+      requestId: request.headers.get("x-request-id"),
+      strictIapMode,
+      iapEnabled: isControlPlaneIapEnabled(),
+      assumeTenantId: request.headers.get("x-tenant-id"),
+      ...(iapJwtSecretOrPublicKey ? { iapJwtSecretOrPublicKey } : {}),
+      ...(expectedIapAudience ? { expectedIapAudience } : {}),
+      ...(expectedIapIssuer ? { expectedIapIssuer } : {}),
+      ...(process.env.JWT_SECRET ? { jwtSecret: process.env.JWT_SECRET } : {}),
+      ...(process.env.JWT_ISSUER ? { jwtIssuer: process.env.JWT_ISSUER } : {}),
+      ...(process.env.JWT_AUDIENCE
+        ? { jwtAudience: process.env.JWT_AUDIENCE }
+        : {}),
+    });
 
-  Object.entries(controlPlaneAuth.headers).forEach(([key, value]) => {
-    headers.set(key, value as string);
-  });
+    Object.entries(controlPlaneAuth.headers).forEach(([key, value]) => {
+      headers.set(key, value as string);
+    });
+  }
 
   if (process.env.DRTS_API_AUTH_AUDIENCE) {
     const metadataToken = await mintMetadataIdentityToken(
@@ -179,6 +202,36 @@ async function forward(
   const { path } = await params;
   const method = request.method.toUpperCase();
   const targetUrl = buildTargetUrl(request, path);
+  // Match the resulting API route (including normalized/decoded catch-all
+  // segments), with Express's case-insensitive and optional trailing slash.
+  if (
+    method === "POST" &&
+    /^\/api\/identity\/sessions\/[^/]+\/revoke\/?$/i.test(targetUrl.pathname)
+  ) {
+    try {
+      if (!verifyIdentitySessionCsrf(request)) {
+        return NextResponse.json(
+          {
+            error: {
+              code: "CSRF_TOKEN_INVALID",
+              message: "Session revocation requires same-origin CSRF proof.",
+            },
+          },
+          { status: 403, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        {
+          error: {
+            code: "CSRF_PROOF_UNAVAILABLE",
+            message: "Session CSRF verification is unavailable.",
+          },
+        },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+  }
   const headers = copyRequestHeaders(request);
 
   try {

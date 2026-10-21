@@ -46,6 +46,15 @@ import {
   type CanvasTableColumn,
   type CanvasTone,
 } from "@drts/ui-web";
+import {
+  buildOpsHealthEnvelope,
+  buildOpsObservabilitySignals,
+  buildOpsRefreshMetadata,
+  loadOpsObservabilityReadState,
+  parseValidOpsTimestamp,
+  resolveOpsAdapterEmptyState,
+  resolveOpsStaleLocationKpi,
+} from "./observability-read-state";
 
 type IdentitySummary = { realm?: string; actorType?: string } | null;
 type HealthPayload = {
@@ -268,7 +277,8 @@ const externalLinkStyle = {
 };
 
 function formatDateTime(locale: Locale, value: string | null | undefined) {
-  if (!value) {
+  const parsed = parseValidOpsTimestamp(value);
+  if (parsed === null) {
     return "—";
   }
 
@@ -280,12 +290,12 @@ function formatDateTime(locale: Locale, value: string | null | undefined) {
     hour12: false,
     timeZone: "UTC",
   })
-    .format(new Date(value))
+    .format(new Date(parsed))
     .replace(",", "");
 }
 
 function formatTimestamp(value: string | null, locale: Locale) {
-  if (!value) {
+  if (parseValidOpsTimestamp(value) === null) {
     return t("dashboard.platformOps.notReported", locale);
   }
 
@@ -360,42 +370,6 @@ function getAdapterSeverityRank(
   return 2;
 }
 
-function getHealthEnvelope(
-  health: HealthPayload,
-  adapters: OperationalAdapterDetailRecord[],
-): UiHealthEnvelope {
-  const degradedServices: UiHealthEnvelope["degradedServices"] = [];
-  if (health.status === "degraded" || health.status === "down") {
-    degradedServices.push({
-      service: health.service,
-      impact:
-        health.status === "down"
-          ? "dashboard.section.banner.serviceImpact.unavailable"
-          : "dashboard.section.banner.serviceImpact.stale",
-      severity: health.status === "down" ? "critical" : "warning",
-    });
-  }
-
-  for (const adapter of adapters.filter((item) => item.status !== "healthy")) {
-    degradedServices.push({
-      service: adapter.platformCode,
-      impact: adapter.reason,
-      severity: adapter.status === "down" ? "critical" : "warning",
-    });
-  }
-
-  return {
-    status:
-      health.status === "down"
-        ? "down"
-        : degradedServices.length > 0
-          ? "degraded"
-          : "healthy",
-    degradedServices,
-    lastCheckedAt: health.timestamp,
-  };
-}
-
 function formatDegradedServiceImpact(impact: string, locale: Locale) {
   if (
     impact === "dashboard.section.banner.serviceImpact.unavailable" ||
@@ -407,54 +381,20 @@ function formatDegradedServiceImpact(impact: string, locale: Locale) {
   return formatOpsCodeLabel(locale, impact);
 }
 
-function getRefreshMetadata(
-  generatedAt: string,
-  healthEnvelope: UiHealthEnvelope,
-): UiRefreshMetadata {
-  const ageMs = Math.max(0, Date.now() - new Date(generatedAt).getTime());
-  return {
-    generatedAt,
-    staleAfterMs: DASHBOARD_REFRESH_WINDOW_MS,
-    dataFreshness:
-      healthEnvelope.status === "down"
-        ? "degraded"
-        : ageMs > DASHBOARD_REFRESH_WINDOW_MS
-          ? "stale"
-          : "fresh",
-    source: healthEnvelope.status === "down" ? "cache" : "live",
-  };
-}
-
-function createFallbackEnvelope<T>(
-  data: T,
-  referenceDate = new Date(),
-): ApiEnvelope<T> {
+function createFallbackEnvelope<T>(data: T): ApiEnvelope<T> {
   return {
     data,
     meta: {
       requestId: "dashboard-fallback",
-      timestamp: referenceDate.toISOString(),
+      timestamp: "",
     },
   };
 }
 
 function createFallbackListEnvelope<T>(
   items: T[],
-  referenceDate = new Date(),
 ): ApiEnvelope<ApiListPayload<T>> {
-  return createFallbackEnvelope({ items }, referenceDate);
-}
-
-function getOldestTimestamp(
-  timestamps: Array<string | null | undefined>,
-  fallback: string,
-) {
-  const sorted = timestamps
-    .filter((value): value is string => Boolean(value))
-    .sort(
-      (left, right) => new Date(left).getTime() - new Date(right).getTime(),
-    );
-  return sorted[0] ?? fallback;
+  return createFallbackEnvelope({ items });
 }
 
 function getFreshnessTone(
@@ -848,150 +788,6 @@ async function resolveOrFallback<T>(
   }
 }
 
-function createFallbackObservabilitySnapshot(
-  referenceDate = new Date(),
-): OperationalObservabilitySnapshot {
-  return {
-    generatedAt: referenceDate.toISOString(),
-    alerts: [],
-    dispatch: {
-      activeOrders: 0,
-      queueDepth: 0,
-      laggedOrders: 0,
-      redispatchOrders: 0,
-      exceptionHoldOrders: 0,
-      dispatchFailedOrders: 0,
-      oldestReadyOrderLagMinutes: null,
-    },
-    recording: {
-      phoneOrders: 0,
-      linkedOrders: 0,
-      pendingOrders: 0,
-      pendingCallSessions: 0,
-      missingRecordingLinks: 0,
-      oldestPendingLagMinutes: null,
-      linkedRatioPercent: 0,
-    },
-    driverState: {
-      totalDrivers: 0,
-      availableDrivers: 0,
-      dispatchEligibleDrivers: 0,
-      offlineDrivers: 0,
-      staleLocationDrivers: 0,
-      missingLocationDrivers: 0,
-      oldestLocationLagMinutes: null,
-    },
-    webhook: {
-      totalEndpoints: 0,
-      activeEndpoints: 0,
-      disabledEndpoints: 0,
-      queuedDeliveries: 0,
-      failedDeliveriesLastHour: 0,
-      oldestQueuedDeliveryLagMinutes: null,
-    },
-    eligibility: {
-      totalReviewQueue: 0,
-      manualReviewQueue: 0,
-      manualFallbackQueue: 0,
-      ineligibleQueue: 0,
-      recentFailureCount24h: 0,
-    },
-    reporting: {
-      queuedJobs: 0,
-      failedJobs: 0,
-      dispatchRecordingIndexQueuedJobs: 0,
-    },
-    adapters: {
-      totalAdapters: 0,
-      healthyAdapters: 0,
-      degradedAdapters: 0,
-      downAdapters: 0,
-    },
-    forwarderOps: {
-      totalForwardedOrders: 0,
-      syncFailedOrders: 0,
-      acceptPendingOrders: 0,
-      manualFallbackQueue: 0,
-      reconciliationQueue: 0,
-      oldestSyncFailedLagMinutes: null,
-      oldestAcceptPendingLagMinutes: null,
-      oldestManualFallbackLagMinutes: null,
-      oldestReconciliationLagMinutes: null,
-    },
-    mapGeofence: {
-      providerHealth: {
-        status: "unknown",
-        provider: null,
-        mode: null,
-        failClosed: false,
-        lastCheckedAt: null,
-        quota: {
-          dailyLimit: null,
-          minuteLimit: null,
-          dailyUsed: null,
-          minuteUsed: null,
-          usagePercent: null,
-          status: "unknown",
-          warningThresholdPercent: null,
-          criticalThresholdPercent: null,
-          policy: null,
-        },
-      },
-      geo: {
-        providerOutageCount: 0,
-        addressAmbiguityCount: 0,
-        coordinateLessAttemptCount: 0,
-        manualOverrideCount: 0,
-        resolvedAddressCount: 0,
-        requests: {
-          total: 0,
-          successful: 0,
-          providerErrorCount: 0,
-          successRatePercent: null,
-          byOperation: {
-            search: 0,
-            resolve: 0,
-            reverse: 0,
-          },
-          byResult: {
-            resolved: 0,
-            manualOverride: 0,
-            addressAmbiguity: 0,
-            coordinateLessAttempt: 0,
-            providerOutage: 0,
-          },
-        },
-        latencyMs: {
-          count: 0,
-          average: null,
-          max: null,
-          p95: null,
-        },
-      },
-      serviceArea: {
-        evaluations: 0,
-        serviceableCount: 0,
-        manualReviewCount: 0,
-        policyDenialCount: 0,
-        outOfAreaCount: 0,
-        coordinateLessAttemptCount: 0,
-      },
-      governance: {
-        geometryMutationCount: 0,
-        serviceAreaPublishedCount: 0,
-        serviceAreaRetiredCount: 0,
-        stopPolicyPublishedCount: 0,
-        stopPolicyRetiredCount: 0,
-        manualOverrideCount: 0,
-      },
-      lastEventAt: null,
-    },
-    adapterDetails: [],
-    phase2SandboxKpiDashboard: null,
-    roleViews: [],
-  };
-}
-
 async function loadHealthPayload(): Promise<HealthPayload> {
   const apiBaseUrl = process.env.DRTS_API_URL ?? "http://localhost:3001";
   const response = await fetch(new URL("/api/health", apiBaseUrl), {
@@ -1020,7 +816,7 @@ export default async function DashboardPage() {
     incidentsResponse,
     maintenanceResponse,
     reportJobsResponse,
-    observabilityResponse,
+    observabilityState,
     complaintsResponse,
     forwardedOrdersResponse,
   ] = await Promise.all([
@@ -1033,7 +829,7 @@ export default async function DashboardPage() {
       status: "degraded",
       mode: "unknown",
       execution_mode: "unknown",
-      timestamp: new Date().toISOString(),
+      timestamp: "",
     }),
     resolveOrFallback(
       () => client.getListEnvelope<OwnedOrderRecord>("/api/orders"),
@@ -1077,12 +873,10 @@ export default async function DashboardPage() {
       () => client.getListEnvelope<ReportJobRecord>("/api/reports/jobs"),
       createFallbackListEnvelope([] as ReportJobRecord[]),
     ),
-    resolveOrFallback(
-      () =>
-        client.getEnvelope<OperationalObservabilitySnapshot>(
-          "/api/operational-observability",
-        ),
-      createFallbackEnvelope(createFallbackObservabilitySnapshot()),
+    loadOpsObservabilityReadState(() =>
+      client.getEnvelope<OperationalObservabilitySnapshot>(
+        "/api/operational-observability",
+      ),
     ),
     resolveOrFallback(
       () => client.getListEnvelope<ComplaintCaseRecord>("/api/complaints"),
@@ -1104,7 +898,7 @@ export default async function DashboardPage() {
   const incidents = incidentsResponse.data.items;
   const maintenance = maintenanceResponse.data.items;
   const reportJobs = reportJobsResponse.data.items;
-  const observability = observabilityResponse.data;
+  const observability = observabilityState.snapshot;
   const complaints = complaintsResponse.data.items;
   const forwardedOrders = forwardedOrdersResponse.data.items;
 
@@ -1136,22 +930,21 @@ export default async function DashboardPage() {
     (record: ComplaintCaseRecord) => record.severity === "high",
   ).length;
   const dispatchEligibleDrivers =
-    observability.driverState.dispatchEligibleDrivers ||
+    observability?.driverState.dispatchEligibleDrivers ||
     operations.onlineDrivers;
   const onlineDrivers =
-    observability.driverState.availableDrivers || operations.onlineDrivers;
-  const staleLocationDrivers = observability.driverState.staleLocationDrivers;
-  const staleLocationDelta =
-    observability.driverState.oldestLocationLagMinutes !== null
-      ? t("dashboard.kpi.staleLocation.oldest", locale, {
-          minutes: observability.driverState.oldestLocationLagMinutes,
-        })
-      : undefined;
+    observability?.driverState.availableDrivers || operations.onlineDrivers;
+  const staleLocationKpi = resolveOpsStaleLocationKpi({
+    observabilityState,
+    offlineVehicles: operations.offlineVehicles,
+    locale,
+  });
 
-  const adapterAttentionCount =
-    observability.adapters.degradedAdapters +
-    observability.adapters.downAdapters;
-  const sortedAdapterDetails = [...observability.adapterDetails].sort(
+  const adapterAttentionCount = observability
+    ? observability.adapters.degradedAdapters +
+      observability.adapters.downAdapters
+    : 0;
+  const sortedAdapterDetails = [...(observability?.adapterDetails ?? [])].sort(
     (left, right) => {
       const severityDiff =
         getAdapterSeverityRank(left.status) -
@@ -1162,13 +955,10 @@ export default async function DashboardPage() {
       return right.lastCheckedAt.localeCompare(left.lastCheckedAt);
     },
   );
-  const healthEnvelope = getHealthEnvelope(
-    health,
-    observability.adapterDetails,
-  );
-  const dashboardGeneratedAt = getOldestTimestamp(
-    [
-      observability.generatedAt,
+  const healthEnvelope = buildOpsHealthEnvelope(health, observabilityState);
+  const refreshMetadata = buildOpsRefreshMetadata({
+    observabilityState,
+    otherSourceTimestamps: [
       ordersResponse.meta.timestamp,
       dispatchJobsResponse.meta.timestamp,
       driverTasksResponse.meta.timestamp,
@@ -1181,12 +971,10 @@ export default async function DashboardPage() {
       complaintsResponse.meta.timestamp,
       forwardedOrdersResponse.meta.timestamp,
     ],
-    health.timestamp,
-  );
-  const refreshMetadata = getRefreshMetadata(
-    dashboardGeneratedAt,
     healthEnvelope,
-  );
+    staleAfterMs: DASHBOARD_REFRESH_WINDOW_MS,
+  });
+  const adapterEmptyState = resolveOpsAdapterEmptyState(observabilityState);
   const refreshAction: DashboardActionLink = {
     descriptor: buildAction("refresh_dashboard", "low"),
     label: t("dashboard.action.refresh", locale),
@@ -1232,7 +1020,6 @@ export default async function DashboardPage() {
     (order: ForwardedOrderRecord) => order.status === "sync_failed",
   ).length;
   const topAdapter = sortedAdapterDetails[0] ?? null;
-  const healthSignalAdapters = sortedAdapterDetails.slice(0, 2);
 
   const headerSubtitle = [
     formatTimestamp(health.timestamp, locale),
@@ -1331,71 +1118,13 @@ export default async function DashboardPage() {
       : null,
   ].filter(Boolean) as AttentionBanner[];
 
-  const healthSignals: Array<{
-    label: string;
-    value: string;
-    tone: CanvasTone;
-  }> = [
-    {
-      label: t("dashboard.health.dispatchLag.label", locale),
-      value:
-        observability.dispatch.oldestReadyOrderLagMinutes !== null
-          ? t("dashboard.health.dispatchLag.minutes", locale, {
-              minutes: observability.dispatch.oldestReadyOrderLagMinutes,
-            })
-          : t("dashboard.health.dispatchLag.withinSla", locale),
-      tone:
-        observability.dispatch.oldestReadyOrderLagMinutes &&
-        observability.dispatch.oldestReadyOrderLagMinutes > 10
-          ? "warn"
-          : "success",
-    },
-    {
-      label: t("dashboard.health.webhookP95.label", locale),
-      value:
-        observability.webhook.oldestQueuedDeliveryLagMinutes !== null
-          ? t("dashboard.health.webhookP95.queued", locale, {
-              minutes: observability.webhook.oldestQueuedDeliveryLagMinutes,
-            })
-          : t("dashboard.health.webhookP95.healthy", locale),
-      tone:
-        observability.webhook.failedDeliveriesLastHour > 0 ||
-        observability.webhook.oldestQueuedDeliveryLagMinutes !== null
-          ? "warn"
-          : "success",
-    },
-    ...healthSignalAdapters.map((adapter) => ({
-      label: t("dashboard.health.forwarder.label", locale, {
-        platform: formatOpsCodeLabel(locale, adapter.platformCode),
-      }),
-      value: formatOpsCodeLabel(locale, adapter.status),
-      tone: getHealthTone(adapter.status),
-    })),
-    {
-      label:
-        topAdapter?.credentialStatus && topAdapter.credentialStatus !== "valid"
-          ? t("dashboard.health.credential.platform", locale, {
-              platform: formatOpsCodeLabel(locale, topAdapter.platformCode),
-            })
-          : t("dashboard.health.credential.default", locale),
-      value: topAdapter
-        ? topAdapter.credentialStatus !== "valid"
-          ? formatOpsCodeLabel(locale, topAdapter.credentialStatus)
-          : formatOpsCodeLabel(locale, topAdapter.authStatus)
-        : "—",
-      tone:
-        topAdapter &&
-        (topAdapter.credentialStatus !== "valid" ||
-          topAdapter.authStatus !== "authenticated")
-          ? "danger"
-          : "success",
-    },
-    {
-      label: t("dashboard.health.identityRuntime", locale),
-      value: `${identity?.realm ?? "ops"} / ${identity?.actorType ?? "ops_user"} · ${formatOpsCodeLabel(locale, health.status)}`,
-      tone: getHealthTone(health.status),
-    },
-  ];
+  const healthSignals = buildOpsObservabilitySignals({
+    observabilityState,
+    sortedAdapterDetails,
+    identity,
+    health,
+    locale,
+  });
 
   const jobByOrderId = new Map<string, DispatchJobRecord>(
     dispatchJobs.map((job: DispatchJobRecord) => [job.orderId, job]),
@@ -1719,13 +1448,7 @@ export default async function DashboardPage() {
                 </div>
               </div>
             ) : (
-              <EmptyStateCard
-                locale={locale}
-                emptyState={{
-                  reason: "not_provisioned",
-                  messageCode: "dashboard.adapters.not_provisioned",
-                }}
-              />
+              <EmptyStateCard locale={locale} emptyState={adapterEmptyState} />
             )}
           </Card>
         </div>
@@ -1776,23 +1499,13 @@ export default async function DashboardPage() {
           <KPI
             theme={theme}
             label={t("dashboard.kpi.staleLocation", locale)}
-            value={formatCompactNumber(staleLocationDrivers)}
-            delta={
-              staleLocationDrivers > 0
-                ? t("dashboard.kpi.staleLocation.delta", locale, {
-                    count: formatCompactNumber(staleLocationDrivers),
-                  })
-                : undefined
-            }
-            deltaTone={
-              staleLocationDrivers > 0 || operations.offlineVehicles > 0
-                ? "down"
-                : "neutral"
-            }
+            value={staleLocationKpi.value}
+            delta={staleLocationKpi.delta}
+            deltaTone={staleLocationKpi.deltaTone}
             sub={t("dashboard.dispatchableVehiclesSub", locale, {
               count: operations.offlineVehicles,
             })}
-            hint={staleLocationDelta}
+            hint={staleLocationKpi.hint}
           />
           <KPI
             theme={theme}

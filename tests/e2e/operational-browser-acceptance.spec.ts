@@ -1,18 +1,28 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-
-type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-type TemplateVariables = Record<string, unknown>;
-type SetupRequest = {
-  baseUrlEnv?: string;
-  path: string;
-  method: HttpMethod;
-  body?: unknown;
-  headers?: Record<string, string>;
-  capture?: Record<string, string>;
-};
+import { createOperationalEvidenceJournal } from "./operational-evidence-journal";
+import {
+  runSetup,
+  requiredOrigin,
+  operationalRequestHeaders,
+  fetchOperationalSurface,
+  installOperationalBrowserHeaders,
+  prepareOperationalFleetSession,
+  type FleetApplicationSetup,
+  type PreparedOperationalFleetSession,
+  valueAtPath,
+  materializeString,
+  type HttpMethod,
+  type TemplateVariables,
+  type SetupRequest,
+} from "./operational-document-upload";
 type JourneyStep =
+  | { kind: "referral-fees"; control: string }
   | { kind: "navigate"; path: string }
   | { kind: "click"; control: string }
   | { kind: "fill"; control: string; value: string };
@@ -81,6 +91,7 @@ type RetiredSurface = { id: string; baseUrlEnv: string; path: string };
 type Manifest = {
   version: number;
   candidateSha: string;
+  fleetApplicationSetup: FleetApplicationSetup;
   journeys: Journey[];
   retiredSurfaces: RetiredSurface[];
 };
@@ -96,18 +107,12 @@ const candidateSha = process.env.DRTS_CANDIDATE_SHA?.trim();
 const evidenceDir =
   process.env.DRTS_OPERATIONAL_EVIDENCE_DIR ??
   path.join(process.cwd(), "test-results/operational-browser");
-const evidence: Array<Record<string, unknown>> = [];
+const evidenceJournal = createOperationalEvidenceJournal(
+  evidenceDir,
+  candidateSha,
+  manifestPath,
+);
 const interactionTimeoutMs = 10_000;
-
-function requiredOrigin(envName: string) {
-  const value = process.env[envName]?.trim();
-  if (!value) {
-    throw new Error(
-      `${envName} is required: release acceptance must target a deployed candidate URL.`,
-    );
-  }
-  return new URL(value).toString();
-}
 
 function requiredEnvironmentValue(envName: string) {
   const value = process.env[envName]?.trim();
@@ -119,80 +124,9 @@ function requiredEnvironmentValue(envName: string) {
   return value;
 }
 
-function getIdentityToken(baseUrlEnv?: string): string | undefined {
-  if (!baseUrlEnv) return undefined;
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_TENANT_CONSOLE_URL" ||
-    baseUrlEnv === "DRTS_DEV_TENANT_CONSOLE_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_TENANT_CONSOLE_ID_TOKEN ||
-      process.env.DRTS_DEV_TENANT_CONSOLE_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_BANK_CONSOLE_URL" ||
-    baseUrlEnv === "DRTS_DEV_BANK_CONSOLE_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_BANK_CONSOLE_ID_TOKEN ||
-      process.env.DRTS_DEV_BANK_CONSOLE_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_URL" ||
-    baseUrlEnv === "DRTS_DEV_ENTERPRISE_DISPATCH_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_ENTERPRISE_DISPATCH_ID_TOKEN ||
-      process.env.DRTS_DEV_ENTERPRISE_DISPATCH_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL" ||
-    baseUrlEnv === "DRTS_DEV_PLATFORM_ADMIN_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN ||
-      process.env.DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_OPS_CONSOLE_URL" ||
-    baseUrlEnv === "DRTS_DEV_OPS_CONSOLE_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN ||
-      process.env.DRTS_DEV_OPS_CONSOLE_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL" ||
-    baseUrlEnv === "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN ||
-      process.env.DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN
-    );
-  }
-  if (
-    baseUrlEnv === "DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_URL" ||
-    baseUrlEnv === "DRTS_DEV_CHANNEL_PARTNER_PORTAL_BASE_URL"
-  ) {
-    return (
-      process.env.DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN ||
-      process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN
-    );
-  }
-  return undefined;
-}
-
 function record(entry: Record<string, unknown>) {
-  evidence.push({
-    candidateSha,
-    recordedAt: new Date().toISOString(),
-    ...entry,
-  });
+  const { workerIndex, testId, retry } = test.info();
+  evidenceJournal.record({ ...entry, workerIndex, testId, retry });
 }
 
 function expectCandidateRevision(
@@ -203,49 +137,6 @@ function expectCandidateRevision(
     headers["x-drts-candidate-sha"],
     `${evidenceLabel} must report the deployed immutable candidate SHA`,
   ).toBe(candidateSha);
-}
-
-function valueAtPath(value: unknown, dotPath: string): unknown {
-  return dotPath.split(".").reduce<unknown>((current, key) => {
-    if (!current || typeof current !== "object") return undefined;
-    return (current as Record<string, unknown>)[key];
-  }, value);
-}
-
-function variableValue(name: string, variables: TemplateVariables) {
-  const value = variables[name];
-  expect(value, `template variable ${name}`).not.toBeUndefined();
-  return value;
-}
-
-function materializeString(template: string, variables: TemplateVariables) {
-  return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (_, name) =>
-    String(variableValue(name, variables)),
-  );
-}
-
-function materializeValue(
-  value: unknown,
-  variables: TemplateVariables,
-): unknown {
-  if (typeof value === "string") {
-    const wholeVariable = value.match(/^\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}$/);
-    return wholeVariable
-      ? variableValue(wholeVariable[1]!, variables)
-      : materializeString(value, variables);
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => materializeValue(item, variables));
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
-        key,
-        materializeValue(item, variables),
-      ]),
-    );
-  }
-  return value;
 }
 
 function interpolatePath(
@@ -259,10 +150,9 @@ function interpolatePath(
     resultId,
     `${materialized} requires a prior operation result ID`,
   ).toBeTruthy();
-  return materialized.replaceAll(
-    "{resultId}",
-    encodeURIComponent(String(resultId)),
-  );
+  return materialized
+    .split("{resultId}")
+    .join(encodeURIComponent(String(resultId)));
 }
 
 async function navigate(page: Page, origin: string, route: string) {
@@ -282,7 +172,7 @@ function interpolateOperationValue(
     resultId,
     `${value} requires a prior operation result ID`,
   ).toBeTruthy();
-  return materialized.replaceAll("{resultId}", String(resultId));
+  return materialized.split("{resultId}").join(String(resultId));
 }
 
 async function assertReadback(
@@ -296,16 +186,19 @@ async function assertReadback(
   variables: TemplateVariables,
 ) {
   const readbackPath = interpolatePath(readback.url, resultId, variables);
-  const idToken = getIdentityToken(journey.baseUrlEnv);
-  const readbackHeaders: Record<string, string> = {};
-  if (idToken) {
-    readbackHeaders["Authorization"] = `Bearer ${idToken}`;
-  }
-  const readbackResponse = await page
-    .context()
-    .request.get(new URL(readbackPath, origin).toString(), {
-      ...(idToken ? { headers: readbackHeaders } : {}),
-    });
+  const readbackUrl = new URL(readbackPath, origin).toString();
+  const readbackHeaders = operationalRequestHeaders(
+    journey.baseUrlEnv,
+    readbackUrl,
+  );
+  const readbackResponse = await fetchOperationalSurface(
+    page.context().request,
+    journey.baseUrlEnv,
+    readbackUrl,
+    {
+      headers: readbackHeaders,
+    },
+  );
   expect(
     readbackResponse.ok(),
     `${journey.id}/${operationName} readback`,
@@ -341,6 +234,33 @@ async function runSteps(
   variables: TemplateVariables,
 ) {
   for (const step of steps) {
+    if (step.kind === "referral-fees") {
+      const url = new URL("/api/referral/fees", origin).toString();
+      const response = await page.request.get(url);
+      expect(response.ok()).toBe(true);
+      const body = await response.json();
+      expect(body.data).toMatchObject({
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        contentHash: PASSENGER_FEE_CONTENT_HASH,
+      });
+      if (body.data.acknowledgedAt === null) {
+        const submitted = page.waitForResponse(
+          (item) => item.url() === url && item.request().method() === "POST",
+        );
+        await page.locator(step.control).click();
+        expect((await submitted).ok()).toBe(true);
+      }
+      const read = await page.request.get(url);
+      expect(read.ok()).toBe(true);
+      const ack = (await read.json()).data;
+      expect(ack).toMatchObject({
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        contentHash: PASSENGER_FEE_CONTENT_HASH,
+      });
+      expect(typeof ack.acknowledgedAt).toBe("string");
+      expect(Number.isFinite(Date.parse(ack.acknowledgedAt))).toBe(true);
+      continue;
+    }
     if (step.kind === "navigate") {
       await navigate(
         page,
@@ -359,76 +279,6 @@ async function runSteps(
     } else {
       await control.click();
     }
-  }
-}
-
-async function runSetup(
-  page: Page,
-  journey: Journey,
-  variables: TemplateVariables,
-) {
-  for (const setup of journey.setup ?? []) {
-    const setupBaseUrlEnv = setup.baseUrlEnv ?? journey.baseUrlEnv;
-    const origin = requiredOrigin(setupBaseUrlEnv);
-    const body = setup.body
-      ? materializeValue(setup.body, variables)
-      : undefined;
-    const rawHeaders = setup.headers
-      ? (materializeValue(setup.headers, variables) as Record<string, string>)
-      : undefined;
-    const headers: Record<string, string> = { ...(rawHeaders ?? {}) };
-    const setupIdToken = getIdentityToken(setupBaseUrlEnv);
-    if (
-      setupIdToken &&
-      !Object.keys(headers).some((k) => k.toLowerCase() === "authorization")
-    ) {
-      headers["Authorization"] = `Bearer ${setupIdToken}`;
-    }
-    const response = await page
-      .context()
-      .request.fetch(
-        new URL(materializeString(setup.path, variables), origin).toString(),
-        {
-          method: setup.method,
-          maxRedirects: 0,
-          ...(body
-            ? {
-                data: body,
-                headers: { "Content-Type": "application/json", ...headers },
-              }
-            : Object.keys(headers).length > 0
-              ? { headers }
-              : {}),
-        },
-      );
-    expect(response.status(), `${journey.id} setup ${setup.path}`).toBeLessThan(
-      400,
-    );
-    expectCandidateRevision(
-      response.headers(),
-      `${journey.id} setup ${setup.path}`,
-    );
-    if (setup.capture) {
-      const responseBody = (await response.json()) as unknown;
-      for (const [name, valuePath] of Object.entries(setup.capture)) {
-        const value = valueAtPath(responseBody, valuePath);
-        expect(
-          value,
-          `${journey.id} setup ${setup.path} capture ${name}`,
-        ).toBeTruthy();
-        variables[name] = value;
-      }
-    }
-    record({
-      kind: "setup",
-      journey: journey.id,
-      surface: journey.surface,
-      actorScope: journey.actorScope,
-      method: setup.method,
-      url: response.url(),
-      status: response.status(),
-      captures: setup.capture ? Object.keys(setup.capture) : [],
-    });
   }
 }
 
@@ -474,16 +324,37 @@ function installEnvironmentVariables(
   }
 }
 
-test.afterAll(() => {
-  mkdirSync(evidenceDir, { recursive: true });
-  writeFileSync(
-    path.join(evidenceDir, "operational-browser-evidence.json"),
-    `${JSON.stringify(
-      { candidateSha, manifest: path.basename(manifestPath), evidence },
-      null,
-      2,
-    )}\n`,
+let fleetSession: PreparedOperationalFleetSession | undefined;
+test.beforeAll(async () => {
+  fleetSession = await prepareOperationalFleetSession(
+    manifest.fleetApplicationSetup,
   );
+  record({ kind: "fleet-application-session", ...fleetSession.metadata });
+});
+
+test.afterAll(async () => {
+  try {
+    await fleetSession?.cleanup();
+    if (fleetSession)
+      record({
+        kind: "fleet-application-session-cleanup",
+        ...fleetSession.metadata,
+        outcome:
+          fleetSession.metadata.source === "provided-session"
+            ? "provided-session-preserved"
+            : "own-session-key-entry-revoked",
+      });
+  } catch (error) {
+    if (fleetSession)
+      record({
+        kind: "fleet-application-session-cleanup",
+        ...fleetSession.metadata,
+        outcome: "failed",
+      });
+    throw error;
+  } finally {
+    evidenceJournal.flush();
+  }
 });
 
 test("requires a single immutable candidate SHA and complete formal journey manifest", () => {
@@ -572,14 +443,13 @@ for (const journey of manifest.journeys) {
       runId: `${journey.id}-${Date.now().toString(36)}`,
     };
     installEnvironmentVariables(journey, variables);
-    const idToken = getIdentityToken(journey.baseUrlEnv);
-    if (idToken) {
-      await page.context().setExtraHTTPHeaders({
-        Authorization: `Bearer ${idToken}`,
-      });
-    }
+    await installOperationalBrowserHeaders(page, journey.baseUrlEnv);
     await installBrowserSession(page, journey, origin, variables);
-    await runSetup(page, journey, variables);
+    await runSetup(
+      { request: page.context().request, record },
+      journey,
+      variables,
+    );
     await navigate(
       page,
       origin,
@@ -712,14 +582,18 @@ for (const journey of manifest.journeys) {
         ).toBeTruthy();
 
         const downloadUrl = download.url();
-        const opIdToken = getIdentityToken(journey.baseUrlEnv);
-        const downloadHeaders: Record<string, string> = {};
-        if (opIdToken) {
-          downloadHeaders["Authorization"] = `Bearer ${opIdToken}`;
-        }
-        const downloadResponse = await page.context().request.get(downloadUrl, {
-          ...(opIdToken ? { headers: downloadHeaders } : {}),
-        });
+        const downloadHeaders = operationalRequestHeaders(
+          journey.baseUrlEnv,
+          downloadUrl,
+        );
+        const downloadResponse = await fetchOperationalSurface(
+          page.context().request,
+          journey.baseUrlEnv,
+          downloadUrl,
+          {
+            headers: downloadHeaders,
+          },
+        );
         expect(
           downloadResponse.ok(),
           `${journey.id}/${operation.name} download response ok`,
@@ -758,7 +632,15 @@ for (const journey of manifest.journeys) {
       const responsePromise = page.waitForResponse(
         (response) =>
           response.request().method() === operation.requestMethod &&
-          response.url().includes(operation.requestUrlIncludes),
+          response
+            .url()
+            .includes(
+              interpolatePath(
+                operation.requestUrlIncludes,
+                lastResultId,
+                variables,
+              ),
+            ),
         { timeout: interactionTimeoutMs },
       );
       // Begin reading before a mutation-triggered navigation can detach the
@@ -818,14 +700,13 @@ for (const journey of manifest.journeys) {
       runId: `${journey.id}-route-${Date.now().toString(36)}`,
     };
     installEnvironmentVariables(journey, variables);
-    const idToken = getIdentityToken(journey.baseUrlEnv);
-    if (idToken) {
-      await page.context().setExtraHTTPHeaders({
-        Authorization: `Bearer ${idToken}`,
-      });
-    }
+    await installOperationalBrowserHeaders(page, journey.baseUrlEnv);
     await installBrowserSession(page, journey, origin, variables);
-    await runSetup(page, journey, variables);
+    await runSetup(
+      { request: page.context().request, record },
+      journey,
+      variables,
+    );
     const response = await page.goto(
       new URL(
         interpolatePath(journey.route, null, variables),

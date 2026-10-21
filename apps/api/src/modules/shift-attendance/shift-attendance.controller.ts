@@ -124,10 +124,9 @@ export class ShiftAttendanceController {
       targetDriverId = normalizeDriverId(identity.actorId) ?? undefined;
     }
 
-    return toApiSuccessEnvelope(
-      { items: this.shiftAttendanceService.listShifts(targetDriverId) },
-      requestId,
-    );
+    return this.shiftAttendanceService
+      .listShifts(targetDriverId)
+      .then((items) => toApiSuccessEnvelope({ items }, requestId));
   }
 
   @Get("shifts/:shiftId")
@@ -138,21 +137,22 @@ export class ShiftAttendanceController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const shift = this.shiftAttendanceService.getShift(shiftId);
-    if (
-      identity?.realm === "driver" &&
-      identity.actorId &&
-      !isDriverIdentityMatching(identity.actorId, shift.driverId)
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "NOT_FOUND",
-        "Shift not found.",
-        { shiftId },
-      );
-    }
+    return this.shiftAttendanceService.getShift(shiftId).then((shift) => {
+      if (
+        identity?.realm === "driver" &&
+        identity.actorId &&
+        !isDriverIdentityMatching(identity.actorId, shift.driverId)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "Shift not found.",
+          { shiftId },
+        );
+      }
 
-    return toApiSuccessEnvelope(shift, requestId);
+      return toApiSuccessEnvelope(shift, requestId);
+    });
   }
 
   @Post("shifts/:shiftId/abandon")
@@ -164,24 +164,29 @@ export class ShiftAttendanceController {
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const shift = this.shiftAttendanceService.getShift(shiftId);
-    if (
-      identity?.realm === "driver" &&
-      identity.actorId &&
-      !isDriverIdentityMatching(identity.actorId, shift.driverId)
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "NOT_FOUND",
-        "Shift not found.",
-        { shiftId },
-      );
-    }
+    return this.shiftAttendanceService
+      .getShift(shiftId)
+      .then((shift) => {
+        if (
+          identity?.realm === "driver" &&
+          identity.actorId &&
+          !isDriverIdentityMatching(identity.actorId, shift.driverId)
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "NOT_FOUND",
+            "Shift not found.",
+            { shiftId },
+          );
+        }
 
-    return toApiSuccessEnvelope(
-      this.shiftAttendanceService.abandonShift(shiftId, body.reason, requestId),
-      requestId,
-    );
+        return this.shiftAttendanceService.abandonShift(
+          shiftId,
+          body.reason,
+          requestId,
+        );
+      })
+      .then((updated) => toApiSuccessEnvelope(updated, requestId));
   }
 
   @Get("attendance")
@@ -203,9 +208,8 @@ export class ShiftAttendanceController {
       targetDriverId = normalizeDriverId(identity.actorId) ?? undefined;
     }
 
-    return toApiSuccessEnvelope(
-      { items: this.shiftAttendanceService.listAttendance(targetDriverId) },
-      requestId,
-    );
+    return this.shiftAttendanceService
+      .listAttendance(targetDriverId)
+      .then((items) => toApiSuccessEnvelope({ items }, requestId));
   }
 }

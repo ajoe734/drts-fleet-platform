@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import { ApiClientError } from "@drts/api-client";
 import type {
   DriverTaskRecord,
   ForwardedDriverActionOutcome,
@@ -37,6 +38,7 @@ import DriverTripMap, {
   type DriverTripMapLocation,
 } from "@/components/driver-trip-map";
 import { getPlatformDisplayLabel } from "@/components/platform-task-badge";
+import { OwnedTaskRejectionDialog } from "@/components/owned-task-rejection-dialog";
 import {
   appendProofPhotos,
   buildCompletionExpenseItem,
@@ -55,6 +57,8 @@ import {
   getDriverClient,
   getDriverIdentityIssue,
   getPendingDriverTaskCompletion,
+  initializeDriverIdentity,
+  isDriverIdentityHydrated,
   isDriverIdentityProvisioned,
   registerProtectedCacheClearHandler,
   rejectForwardedDriverOffer,
@@ -83,6 +87,12 @@ import {
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import { formatMoney } from "@/lib/money";
 import {
+  actualFareFields,
+  emptyActualFareDraft,
+  readActualFareInput,
+  type ActualFareDraft,
+} from "@/lib/actual-fare-input";
+import {
   formatDriverServiceProductLabel,
   formatDriverTaskStatusLabel,
   readDriverServiceProductCode,
@@ -94,7 +104,11 @@ import {
   type TripExperienceState,
   type TripPrimaryActionKey,
 } from "@/lib/trip-workflow";
-import { driverStrings, driverTripActionSuccessLabels } from "@/lib/strings";
+import {
+  driverStrings,
+  driverTaskActionLabels,
+  driverTripActionSuccessLabels,
+} from "@/lib/strings";
 import { usePendingCompletionReplay } from "@/lib/use-pending-completion-replay";
 
 function ActionButton({
@@ -374,6 +388,7 @@ function getTrackingDescriptor(
   locationTrackingState: LocationTrackingState,
   locationTrackingMessage: string | null,
   recordingActive: boolean,
+  taskStatus: string | null | undefined,
 ) {
   if (isForwardedTrip) {
     return {
@@ -388,6 +403,22 @@ function getTrackingDescriptor(
       label: "錄製中",
       tone: "danger" as const,
       detail: locationTrackingMessage ?? "里程與時長正在即時更新。",
+    };
+  }
+
+  if (taskStatus === "completed") {
+    return {
+      label: "已結束",
+      tone: "neutral" as const,
+      detail: "行程已完成，追蹤已結束，不再更新里程與時長。",
+    };
+  }
+
+  if (taskStatus === "cancelled" || taskStatus === "rejected") {
+    return {
+      label: "已停止",
+      tone: "neutral" as const,
+      detail: "此任務已結束，追蹤已停止，不再更新里程與時長。",
     };
   }
 
@@ -595,6 +626,18 @@ function getTripStatusPresentation(
             tone: "warning",
             detail: "完單前需補齊照片、簽收或費用佐證。",
           };
+        case "cancelled":
+          return {
+            label: "任務已取消",
+            tone: "neutral",
+            detail: "此任務已取消，請勿繼續接送。原訂單與任務紀錄仍可查閱。",
+          };
+        case "rejected":
+          return {
+            label: "已婉拒任務",
+            tone: "neutral",
+            detail: "已送出婉拒，此任務不再需要接送。請等待新的派遣任務。",
+          };
         case "completed":
           return {
             label: "行程已完成",
@@ -657,7 +700,15 @@ function getTripLockBody(state: TripExperienceState | null): {
   }
 }
 
-function getIdleBottomActionLabel(state: TripExperienceState | null) {
+function getIdleBottomActionLabel(
+  state: TripExperienceState | null,
+  task: DriverTaskRecord | null,
+) {
+  if (task && !isForwardedTask(task)) {
+    if (task.status === "cancelled") return "任務已取消";
+    if (task.status === "rejected") return "已婉拒任務";
+    if (task.status === "completed") return "行程已完成";
+  }
   switch (state) {
     case "forwarded_pending":
       return "等待平台確認";
@@ -689,6 +740,22 @@ function getTripAuthorityBannerProps(
   state: TripExperienceState | null,
 ): TripAuthorityBannerDescriptor {
   if (!task || !isForwardedTask(task)) {
+    if (task && ["cancelled", "rejected", "completed"].includes(task.status)) {
+      const completed = task.status === "completed";
+      return {
+        title: completed
+          ? "行程已完成"
+          : task.status === "rejected"
+            ? "已婉拒任務"
+            : "任務已取消",
+        authorityLabel: "DRTS 行程主控",
+        description: completed
+          ? "行程已結束，保留原訂單與任務紀錄供查閱。"
+          : "此任務已結束，請勿繼續接送。原訂單與任務紀錄保留；後續派車請等候新任務。",
+        tone: "info",
+        icon: completed ? "checkmark-done-outline" : "close-circle-outline",
+      };
+    }
     return {
       title: "自營派單",
       authorityLabel: "DRTS 行程主控",
@@ -775,6 +842,10 @@ function getTripAuthorityBannerProps(
 export default function TripScreen() {
   const [taskDetail, setTaskDetail] = useState<DriverTaskRecord | null>(null);
   const [orderDetail, setOrderDetail] = useState<OwnedOrderRecord | null>(null);
+  const [actualFareState, setActualFareState] = useState<{
+    taskId: string | null;
+    draft: ActualFareDraft;
+  }>({ taskId: null, draft: emptyActualFareDraft() });
   const [proofPhotos, setProofPhotos] = useState<ProofPhoto[]>([]);
   const [signoffReference, setSignoffReference] = useState("");
   const [expenseType, setExpenseType] = useState("");
@@ -783,6 +854,11 @@ export default function TripScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
+  const [ownedRejectionOpen, setOwnedRejectionOpen] = useState(false);
+  const [ownedRejectionError, setOwnedRejectionError] = useState<string | null>(
+    null,
+  );
+  const ownedRejectionInFlight = useRef(false);
   const [forwardedActionResult, setForwardedActionResult] =
     useState<ForwardedDriverActionResponse | null>(null);
   const [taskViewDetail, setTaskViewDetail] =
@@ -814,9 +890,23 @@ export default function TripScreen() {
   );
   const router = useRouter();
 
-  const proofRequirements = getCompletionProofRequirements(orderDetail);
+  const completionOrder =
+    orderDetail?.orderId === taskDetail?.orderId ? orderDetail : null;
+  const actualFareDraft =
+    actualFareState.taskId === taskDetail?.taskId
+      ? actualFareState.draft
+      : emptyActualFareDraft();
+  const actualFareInput = readActualFareInput(
+    actualFareDraft,
+    Boolean(completionOrder?.fixedPrice),
+    completionOrder?.quotedFare,
+  );
+  const actualFareError = actualFareInput.issue
+    ? driverStrings.trip.actualFare.errors[actualFareInput.issue]
+    : null;
+  const proofRequirements = getCompletionProofRequirements(completionOrder);
   const proofRequirementsUnavailable = Boolean(
-    taskDetail?.orderId && !orderDetail,
+    taskDetail?.orderId && !completionOrder,
   );
   const remainingSlots = MAX_COMPLETION_PROOF_PHOTOS - proofPhotos.length;
   const missingRequiredPhotos = Math.max(
@@ -922,6 +1012,10 @@ export default function TripScreen() {
   const forwardedRejectAllowed =
     tripExperienceState === "forwarded_offered" &&
     (taskViewDetail?.allowedActions.includes("reject") ?? true);
+  const ownedRejectAllowed =
+    !isForwardedTrip &&
+    taskDetail?.status === "pending_acceptance" &&
+    (taskViewDetail?.allowedActions.includes("reject") ?? true);
   const forwardedOfferOfflineBlocked =
     tripExperienceState === "forwarded_offered" && sourcePlatformOffline;
   const disabledForwardedAcceptReason = forwardedOfferOfflineBlocked
@@ -942,14 +1036,21 @@ export default function TripScreen() {
     : sourcePlatformOffline
       ? `${platformLabel} 目前為離線模式。來源平台的轉送動作已鎖定，請先回平台健康頁恢復上線。`
       : null;
+  const isOwnedTaskTerminal =
+    !isForwardedTrip &&
+    Boolean(
+      taskDetail && ["completed", "cancelled", "rejected"].includes(taskDetail.status),
+    );
   const recordingActive =
-    Boolean(orderDetail?.recordingId) ||
-    (!isForwardedTrip && locationTrackingState === "active");
+    !isOwnedTaskTerminal &&
+    (Boolean(orderDetail?.recordingId) ||
+      (!isForwardedTrip && locationTrackingState === "active"));
   const trackingDescriptor = getTrackingDescriptor(
     isForwardedTrip,
     locationTrackingState,
     locationTrackingMessage,
     recordingActive,
+    taskDetail?.status,
   );
   const trackingGapNotice =
     !isForwardedTrip &&
@@ -984,7 +1085,8 @@ export default function TripScreen() {
     dispatchSemantics: orderDetail?.dispatchSemantics ?? null,
   });
   const footerNotice =
-    completionSubmitBlocker === "proof_requirements_unavailable"
+    actualFareError ??
+    (completionSubmitBlocker === "proof_requirements_unavailable"
       ? "完單前需先載入訂單佐證需求，請重新整理後再送出。"
       : completionSubmitBlocker === "expense_amount_invalid"
         ? "費用金額格式無效，請輸入有效的正數後再完成行程。"
@@ -1008,10 +1110,11 @@ export default function TripScreen() {
                         ? tripAuthorityBanner.description
                         : primaryTripAction
                           ? primaryTripAction.helperText
-                          : tripStatusPresentation.detail;
+                          : tripStatusPresentation.detail);
   const completeActionDisabled =
     primaryTripAction?.action === "complete"
-      ? shouldDisableCompleteTripAction({
+      ? Boolean(actualFareError) ||
+        shouldDisableCompleteTripAction({
           submittingAction,
           proofRequirementsUnavailable,
           missingRequiredPhotos,
@@ -1035,7 +1138,7 @@ export default function TripScreen() {
         disabled:
           primaryTripAction.action === "complete"
             ? completeActionDisabled
-            : submittingAction !== null,
+            : submittingAction !== null || ownedRejectionOpen,
       }
     : tripExperienceState === "forwarded_offered" &&
         forwardedActionResult === null
@@ -1049,10 +1152,19 @@ export default function TripScreen() {
             !forwardedAcceptAllowed,
         }
       : undefined;
-  const bottomSecondaryAction =
-    tripExperienceState === "forwarded_offered" &&
-    forwardedActionResult === null &&
-    (forwardedRejectAllowed || forwardedOfferOfflineBlocked)
+  const bottomSecondaryAction = ownedRejectAllowed
+    ? {
+        title: driverTaskActionLabels.reject,
+        onPress: () => {
+          setOwnedRejectionError(null);
+          setOwnedRejectionOpen(true);
+        },
+        loading: submittingAction === "owned_reject",
+        disabled: submittingAction !== null,
+      }
+    : tripExperienceState === "forwarded_offered" &&
+        forwardedActionResult === null &&
+        (forwardedRejectAllowed || forwardedOfferOfflineBlocked)
       ? {
           title: forwardedRejectAllowed ? "婉拒平台訂單" : "平台不支援婉拒",
           onPress: () => void handleForwardedReject(),
@@ -1087,7 +1199,8 @@ export default function TripScreen() {
     },
     {
       label: "送出狀態",
-      value: completionSubmitBlocker ? "仍有缺口" : "可完成行程",
+      value:
+        completionSubmitBlocker || actualFareError ? "仍有缺口" : "可完成行程",
     },
   ];
 
@@ -1107,7 +1220,20 @@ export default function TripScreen() {
     );
   }
 
+  function updateActualFareDraft(field: keyof ActualFareDraft, value: string) {
+    setActualFareState((current) => ({
+      taskId: taskDetail?.taskId ?? null,
+      draft: {
+        ...(current.taskId === taskDetail?.taskId
+          ? current.draft
+          : emptyActualFareDraft()),
+        [field]: value,
+      },
+    }));
+  }
+
   function resetCompletionDraft() {
+    setActualFareState({ taskId: null, draft: emptyActualFareDraft() });
     setProofPhotos([]);
     setSignoffReference("");
     setExpenseType("");
@@ -1125,7 +1251,23 @@ export default function TripScreen() {
     resetDriverAppToOnboarding(router);
   }
 
-  const isProvisioned = isDriverIdentityProvisioned();
+  const [identityReady, setIdentityReady] = useState(isDriverIdentityHydrated);
+  const isProvisioned = identityReady && isDriverIdentityProvisioned();
+
+  useEffect(() => {
+    if (identityReady) return;
+    let cancelled = false;
+    initializeDriverIdentity()
+      .catch((identityError: unknown) => {
+        if (!cancelled) setError(getErrorMessage(identityError));
+      })
+      .finally(() => {
+        if (!cancelled) setIdentityReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [identityReady]);
 
   useEffect(() => {
     const unregister = registerProtectedCacheClearHandler(() => {
@@ -1160,6 +1302,9 @@ export default function TripScreen() {
       const tasks = await client.listDriverTasks();
       const firstTask = tasks[0] ?? null;
       setTaskDetail(firstTask);
+      setOrderDetail((current) =>
+        current?.orderId === firstTask?.orderId ? current : null,
+      );
       setForwardedActionResult(null);
 
       const [pendingCompletion, unifiedTasks, presenceSummary] =
@@ -1186,12 +1331,22 @@ export default function TripScreen() {
       }
 
       try {
-        const order = (await client.getOrder(
-          firstTask.orderId,
-        )) as OwnedOrderRecord;
+        const order = isForwardedTask(firstTask)
+          ? await client.getOrder(firstTask.orderId)
+          : await client.getDriverTaskOrder(firstTask.taskId);
         setOrderDetail(order);
-      } catch {
-        setOrderDetail(null);
+      } catch (orderError) {
+        const temporaryFailure =
+          orderError instanceof ApiClientError &&
+          (orderError.statusCode === 429 || orderError.statusCode >= 500);
+        setOrderDetail((current) =>
+          temporaryFailure && current?.orderId === firstTask.orderId
+            ? current
+            : null,
+        );
+        if (temporaryFailure) {
+          setError("行程資料暫時無法更新，請稍後重新整理。");
+        }
       }
     } catch (loadError) {
       setError(getErrorMessage(loadError));
@@ -1205,12 +1360,13 @@ export default function TripScreen() {
   }
 
   useEffect(() => {
+    if (!identityReady) return;
     if (isProvisioned) {
       void loadTrip(true);
     } else {
       setLoading(false);
     }
-  }, [isProvisioned]);
+  }, [identityReady, isProvisioned]);
 
   useEffect(() => {
     return subscribeTrackingDiagnostic(setTrackingDiagnostic);
@@ -1220,6 +1376,11 @@ export default function TripScreen() {
     resetCompletionDraft();
     setForwardedActionResult(null);
   }, [taskDetail?.taskId]);
+
+  useEffect(() => {
+    setOwnedRejectionOpen(false);
+    setOwnedRejectionError(null);
+  }, [taskDetail?.taskId, taskDetail?.status]);
 
   useEffect(() => {
     syncTripMetricsFromTask(taskDetail);
@@ -1519,7 +1680,16 @@ export default function TripScreen() {
             return;
           }
 
+          if (actualFareInput.issue) {
+            Alert.alert(
+              driverStrings.trip.actualFare.invalidTitle,
+              actualFareError ?? "",
+            );
+            return;
+          }
+
           await submitDriverTaskCompletion(taskDetail.taskId, {
+            ...actualFareInput.command,
             completedAt: now,
             actualDistanceKm: roundTripDistanceKm(liveDistanceKm),
             actualDurationSec: calculateTripDurationSec(
@@ -1575,6 +1745,39 @@ export default function TripScreen() {
 
       Alert.alert("錯誤", actionErrorMessage);
     } finally {
+      setSubmittingAction(null);
+    }
+  }
+
+  async function handleOwnedReject(reasonNote?: string) {
+    if (
+      !taskDetail?.taskId ||
+      !ownedRejectAllowed ||
+      submittingAction !== null ||
+      ownedRejectionInFlight.current
+    ) {
+      return;
+    }
+    ownedRejectionInFlight.current = true;
+    setSubmittingAction("owned_reject");
+    setOwnedRejectionError(null);
+    try {
+      await getDriverClient().rejectTask(taskDetail.taskId, {
+        reasonCode: "driver_rejected",
+        ...(reasonNote ? { reasonNote } : {}),
+      });
+      setOwnedRejectionOpen(false);
+      await loadTrip(false);
+      Alert.alert("婉拒已送出", "任務結果已儲存，可由調度重新派遣。");
+    } catch (actionError) {
+      if (getDriverIdentityIssue()) {
+        await routeToOnboardingAfterSessionFailure();
+        return;
+      }
+      setOwnedRejectionError(getErrorMessage(actionError));
+      await loadTrip(false);
+    } finally {
+      ownedRejectionInFlight.current = false;
       setSubmittingAction(null);
     }
   }
@@ -1638,11 +1841,11 @@ export default function TripScreen() {
     }
   }
 
-  if (!isProvisioned) {
+  if (identityReady && !isProvisioned) {
     return <Redirect href="/onboarding" />;
   }
 
-  if (loading) {
+  if (!identityReady || loading) {
     return (
       <Shell
         theme={driverCanvasTheme}
@@ -1669,7 +1872,7 @@ export default function TripScreen() {
             <Text style={styles.footerNotice}>
               {bottomPrimaryAction || bottomSecondaryAction
                 ? footerNotice
-                : getIdleBottomActionLabel(tripExperienceState)}
+                : getIdleBottomActionLabel(tripExperienceState, taskDetail)}
             </Text>
             <View style={styles.footerButtons}>
               {bottomSecondaryAction ? (
@@ -1691,7 +1894,10 @@ export default function TripScreen() {
                 />
               ) : (
                 <ActionButton
-                  label={getIdleBottomActionLabel(tripExperienceState)}
+                  label={getIdleBottomActionLabel(
+                    tripExperienceState,
+                    taskDetail,
+                  )}
                   onPress={() => undefined}
                   disabled
                   variant="secondary"
@@ -1702,8 +1908,22 @@ export default function TripScreen() {
         ) : undefined
       }
     >
+      <OwnedTaskRejectionDialog
+        taskId={taskDetail?.taskId ?? null}
+        visible={ownedRejectionOpen && ownedRejectAllowed}
+        busy={submittingAction === "owned_reject"}
+        error={ownedRejectionError}
+        onCancel={() => setOwnedRejectionOpen(false)}
+        onConfirm={(reasonNote) => void handleOwnedReject(reasonNote)}
+      />
       <PageHeader
-        title={driverStrings.trip.title}
+        title={
+          !isForwardedTrip &&
+          taskDetail &&
+          ["cancelled", "rejected", "completed"].includes(taskDetail.status)
+            ? tripStatusPresentation.label
+            : driverStrings.trip.title
+        }
         subtitle={headerSubtitle}
         actions={
           <View style={styles.headerActionRow}>
@@ -1969,6 +2189,74 @@ export default function TripScreen() {
                 </View>
               }
             />
+          ) : null}
+
+          {!isForwardedTrip && showCompletionProofCard ? (
+            <Card
+              theme={driverCanvasTheme}
+              title={driverStrings.trip.actualFare.title}
+              subtitle={driverStrings.trip.actualFare.hint}
+            >
+              <View style={styles.fieldStack}>
+                {actualFareFields.map((field) => (
+                  <Field
+                    key={field}
+                    theme={driverCanvasTheme}
+                    label={driverStrings.trip.actualFare.fields[field]}
+                  >
+                    <Input
+                      theme={driverCanvasTheme}
+                      value={actualFareDraft[field]}
+                      onChangeText={(value) =>
+                        updateActualFareDraft(field, value)
+                      }
+                      editable={
+                        submittingAction === null &&
+                        !proofRequirementsUnavailable &&
+                        !queuedCompletionForActiveTask
+                      }
+                      ph={driverStrings.trip.actualFare.placeholder}
+                      mono
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </Field>
+                ))}
+                {completionOrder?.fixedPrice ? (
+                  <Text style={styles.fieldFeedbackText}>
+                    {driverStrings.trip.actualFare.fixedPriceHint}
+                  </Text>
+                ) : (
+                  <Field
+                    theme={driverCanvasTheme}
+                    label={driverStrings.trip.actualFare.fields.aggregate}
+                    hint={driverStrings.trip.actualFare.aggregateHint}
+                  >
+                    <Input
+                      theme={driverCanvasTheme}
+                      value={actualFareDraft.aggregate}
+                      onChangeText={(value) =>
+                        updateActualFareDraft("aggregate", value)
+                      }
+                      editable={
+                        submittingAction === null &&
+                        !proofRequirementsUnavailable &&
+                        !queuedCompletionForActiveTask
+                      }
+                      ph={driverStrings.trip.actualFare.placeholder}
+                      mono
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </Field>
+                )}
+                {actualFareError ? (
+                  <Text style={styles.fieldFeedbackText}>
+                    {actualFareError}
+                  </Text>
+                ) : null}
+              </View>
+            </Card>
           ) : null}
 
           {!isForwardedTrip && showCompletionProofCard ? (

@@ -1,3 +1,4 @@
+import type { NoticeCommand } from "./platform-notice-lifecycle";
 import {
   Body,
   Controller,
@@ -14,7 +15,6 @@ import { Throttle } from "@nestjs/throttler";
 import type {
   CreatePlatformPricingRuleCommand,
   CreatePlatformAdminUserCommand,
-  CreatePlatformNoticeCommand,
   CreatePublicInfoVersionCommand,
   GeneratePlacardVersionCommand,
   PlatformAdapter,
@@ -65,25 +65,28 @@ export class PlatformAdminController {
   }
 
   @Post("public-info")
-  createPublicInfoVersion(
+  async createPublicInfoVersion(
     @Body() command: CreatePublicInfoVersionCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.createPublicInfoVersion(command, requestId),
+      await this.platformAdminService.createPublicInfoVersion(
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("public-info/:versionId/publish")
-  publishPublicInfoVersion(
+  async publishPublicInfoVersion(
     @Param("versionId") versionId: string,
     @Body() command: PublishPublicInfoVersionCommand,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.publishPublicInfoVersion(
+      await this.platformAdminService.publishPublicInfoVersion(
         versionId,
         command,
         requestId,
@@ -94,13 +97,13 @@ export class PlatformAdminController {
   }
 
   @Delete("public-info/:versionId")
-  deleteDraftPublicInfoVersion(
+  async deleteDraftPublicInfoVersion(
     @Param("versionId") versionId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.platformAdminService.deleteDraftPublicInfoVersion(
+      await this.platformAdminService.deleteDraftPublicInfoVersion(
         versionId,
         requestId,
         this.requireActorId(identity),
@@ -207,7 +210,7 @@ export class PlatformAdminController {
 
   @Post("notices")
   createPlatformNotice(
-    @Body() command: CreatePlatformNoticeCommand,
+    @Body() command: NoticeCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
@@ -363,9 +366,14 @@ export class PlatformAdminController {
     @Res({ passthrough: true }) response: PassthroughResponseLike,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
   ) {
     if (!this.idempotencyService) {
-      const data = this.platformAdminService.registerPlatformAdapter(adapter);
+      const data = await this.platformAdminService.registerPlatformAdapter(
+        adapter,
+        requestId,
+        identity?.actorId ?? null,
+      );
       return toApiSuccessEnvelope(data, requestId);
     }
     const result = await this.idempotencyService.execute({
@@ -374,7 +382,11 @@ export class PlatformAdminController {
       requestPath: "platform-admin/adapters",
       payload: adapter,
       execute: async () => ({
-        data: this.platformAdminService.registerPlatformAdapter(adapter),
+        data: await this.platformAdminService.registerPlatformAdapter(
+          adapter,
+          requestId,
+          identity?.actorId ?? null,
+        ),
         statusCode: 201,
       }),
     });

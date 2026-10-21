@@ -167,9 +167,7 @@ describe("SR-QA-TENANT-001 — users & invites (C006/C008)", () => {
     expect(revoked.revokedAt).not.toBeNull();
 
     // READ BACK #1: identity repository record itself is marked revoked.
-    expect(
-      identityRepository.listInvitations()[0]?.revokedAt,
-    ).not.toBeNull();
+    expect(identityRepository.listInvitations()[0]?.revokedAt).not.toBeNull();
 
     // READ BACK #2: the raw token that was actually delivered to the user
     // (captured by the delivery stub, exactly as a real mail transport would
@@ -182,8 +180,9 @@ describe("SR-QA-TENANT-001 — users & invites (C006/C008)", () => {
 
     // The user must still be in "invited" state, not silently activated.
     expect(
-      service.listTenantUsers(TENANT_ID).find((u) => u.userId === created.userId)
-        ?.status,
+      service
+        .listTenantUsers(TENANT_ID)
+        .find((u) => u.userId === created.userId)?.status,
     ).toBe("invited");
   });
 
@@ -206,15 +205,15 @@ describe("SR-QA-TENANT-001 — users & invites (C006/C008)", () => {
 });
 
 describe("SR-QA-TENANT-001 — addresses & passengers, including their relationship (C027 常用地址／預約乘客)", () => {
-  it("links a tenant address to a tenant passenger and both are readable back through independent getters", () => {
+  it("links a tenant address to a tenant passenger and both are readable back through independent getters", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const passenger = service.upsertPassenger(TENANT_ID, {
+    const passenger = await service.upsertPassenger(TENANT_ID, {
       fullName: "QA Passenger",
       mobile: "0912345678",
     } as never);
 
-    const address = service.upsertAddress(TENANT_ID, {
+    const address = await service.upsertAddress(TENANT_ID, {
       addressName: "HQ Reception",
       addressText: "Taipei HQ, 1F Reception",
       ownerPassengerId: passenger.passengerId,
@@ -229,19 +228,19 @@ describe("SR-QA-TENANT-001 — addresses & passengers, including their relations
       service.getAddressMasterRecord(TENANT_ID, address.addressId)
         .ownerPassengerId,
     ).toBe(passenger.passengerId);
-    expect(
-      service.listAddresses(TENANT_ID).map((a) => a.addressId),
-    ).toContain(address.addressId);
+    expect(service.listAddresses(TENANT_ID).map((a) => a.addressId)).toContain(
+      address.addressId,
+    );
     expect(
       service.listPassengers(TENANT_ID).map((p) => p.passengerId),
     ).toContain(passenger.passengerId);
   });
 
-  it("negative: an address cannot claim ownership of a passenger that does not exist in the tenant (PASSENGER_NOT_FOUND)", () => {
+  it("negative: an address cannot claim ownership of a passenger that does not exist in the tenant (PASSENGER_NOT_FOUND)", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     expect(
-      codeOf(() =>
+      await asyncCodeOf(() =>
         service.upsertAddress(TENANT_ID, {
           addressName: "Orphan Address",
           addressText: "Nowhere",
@@ -251,9 +250,9 @@ describe("SR-QA-TENANT-001 — addresses & passengers, including their relations
     ).toBe("PASSENGER_NOT_FOUND");
   });
 
-  it("negative: reading a passenger that was created under a different tenant fails closed (PASSENGER_NOT_FOUND), confirming tenant isolation still holds", () => {
+  it("negative: reading a passenger that was created under a different tenant fails closed (PASSENGER_NOT_FOUND), confirming tenant isolation still holds", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    const passenger = service.upsertPassenger(OTHER_TENANT_ID, {
+    const passenger = await service.upsertPassenger(OTHER_TENANT_ID, {
       fullName: "Other Tenant Passenger",
     } as never);
 
@@ -266,20 +265,20 @@ describe("SR-QA-TENANT-001 — addresses & passengers, including their relations
 });
 
 describe("SR-QA-TENANT-001 — cost centres directory (C027)", () => {
-  it("creates, lists, and disables a cost center, with the disabled state visible on re-read", () => {
+  it("creates, lists, and disables a cost center, with the disabled state visible on re-read", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const created = service.upsertCostCenter(TENANT_ID, {
+    const created = await service.upsertCostCenter(TENANT_ID, {
       code: "cc-directory-01",
       name: "Directory Test Cost Center",
     } as never);
     // Codes are normalized (uppercased) by the service.
     expect(created.code).toBe("CC-DIRECTORY-01");
-    expect(
-      service.listCostCenters(TENANT_ID).map((c) => c.code),
-    ).toContain("CC-DIRECTORY-01");
+    expect(service.listCostCenters(TENANT_ID).map((c) => c.code)).toContain(
+      "CC-DIRECTORY-01",
+    );
 
-    service.disableCostCenter(TENANT_ID, {
+    await service.disableCostCenter(TENANT_ID, {
       code: "cc-directory-01",
       reason: "qa_regression_disable",
     } as never);
@@ -301,17 +300,17 @@ describe("SR-QA-TENANT-001 — cost centres directory (C027)", () => {
 });
 
 describe("SR-QA-TENANT-001 — approval rules directory (C028 用車規則)", () => {
-  it("creates an approval rule, reads it back, then reorders and disables it", () => {
+  it("creates an approval rule, reads it back, then reorders and disables it", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const ruleA = service.upsertApprovalRule(TENANT_ID, {
+    const ruleA = await service.upsertApprovalRule(TENANT_ID, {
       ruleName: "Rule A",
       priority: 10,
       conditions: [],
       action: "flag_manual_review",
       approvers: [],
     } as never);
-    const ruleB = service.upsertApprovalRule(TENANT_ID, {
+    const ruleB = await service.upsertApprovalRule(TENANT_ID, {
       ruleName: "Rule B",
       priority: 20,
       conditions: [],
@@ -325,16 +324,19 @@ describe("SR-QA-TENANT-001 — approval rules directory (C028 用車規則)", ()
     });
 
     // WRITE: reorder so B now sorts first.
-    const reordered = service.reorderApprovalRules(TENANT_ID, {
+    const reordered = await service.reorderApprovalRules(TENANT_ID, {
       orderedRuleIds: [ruleB.ruleId, ruleA.ruleId],
     } as never);
-    expect(reordered.map((r) => r.ruleId)).toEqual([ruleB.ruleId, ruleA.ruleId]);
+    expect(reordered.map((r) => r.ruleId)).toEqual([
+      ruleB.ruleId,
+      ruleA.ruleId,
+    ]);
     // READ BACK: priority values on independent re-fetch reflect the new order.
     const rereadB = service.getApprovalRule(TENANT_ID, ruleB.ruleId);
     const rereadA = service.getApprovalRule(TENANT_ID, ruleA.ruleId);
     expect(rereadB.priority).toBeLessThan(rereadA.priority);
 
-    service.disableApprovalRule(TENANT_ID, ruleA.ruleId);
+    await service.disableApprovalRule(TENANT_ID, ruleA.ruleId);
     expect(service.getApprovalRule(TENANT_ID, ruleA.ruleId).activeFlag).toBe(
       false,
     );
@@ -346,9 +348,9 @@ describe("SR-QA-TENANT-001 — approval rules directory (C028 用車規則)", ()
     ).not.toContain(ruleA.ruleId);
   });
 
-  it("negative: reordering with an incomplete rule-id list is rejected instead of silently dropping rules", () => {
+  it("negative: reordering with an incomplete rule-id list is rejected instead of silently dropping rules", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    service.upsertApprovalRule(TENANT_ID, {
+    await service.upsertApprovalRule(TENANT_ID, {
       ruleName: "Only Rule",
       priority: 10,
       conditions: [],
@@ -373,7 +375,7 @@ describe("SR-QA-TENANT-001 — SLA profile (C028)", () => {
   // has never had one written — use a distinct id for that half of the test.
   const FRESH_TENANT_ID = "tenant-qa-sla-fresh-001";
 
-  it("starts unprovisioned for a tenant with no SLA history, then a write is visible through both the raw getter and the UI view read model", () => {
+  it("starts unprovisioned for a tenant with no SLA history, then a write is visible through both the raw getter and the UI view read model", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
     const initialView = service.getSlaProfileView(FRESH_TENANT_ID);
@@ -381,7 +383,7 @@ describe("SR-QA-TENANT-001 — SLA profile (C028)", () => {
     expect(initialView.emptyState?.reason).toBe("not_provisioned");
 
     // WRITE
-    const receipt = service.updateSlaProfile(FRESH_TENANT_ID, {
+    const receipt = await service.updateSlaProfile(FRESH_TENANT_ID, {
       waitThresholdMin: 10,
       arrivalThresholdMin: 15,
       completionThresholdMin: 60,
@@ -411,12 +413,14 @@ describe("SR-QA-TENANT-001 — SLA profile (C028)", () => {
     // A different tenant's (seeded) SLA profile must be unaffected by the
     // write above (seed default is completionThresholdMin: 90, not 60).
     expect(service.getSlaProfile(TENANT_ID).tenantId).toBe(TENANT_ID);
-    expect(service.getSlaProfile(TENANT_ID).completionThresholdMin).not.toBe(60);
+    expect(service.getSlaProfile(TENANT_ID).completionThresholdMin).not.toBe(
+      60,
+    );
   });
 
-  it("negative: recalculating SLA bookings without a reason is rejected (validation, not a silent no-op)", () => {
+  it("negative: recalculating SLA bookings without a reason is rejected (validation, not a silent no-op)", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
-    service.updateSlaProfile(TENANT_ID, {
+    await service.updateSlaProfile(TENANT_ID, {
       waitThresholdMin: 10,
       arrivalThresholdMin: 15,
       completionThresholdMin: 60,
@@ -470,12 +474,12 @@ describe("SR-QA-TENANT-001 — feature flags with tenant scoping (C109; gap: no 
 });
 
 describe("SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶生命週期與跨租戶治理)", () => {
-  it("creates a platform tenant, then updates its settings and status, with each write visible on independent re-read", () => {
+  it("creates a platform tenant, then updates its settings and status, with each write visible on independent re-read", async () => {
     const auditService = new AuditNotificationService();
     const service = new TenantsService(auditService);
 
     // WRITE #1: create.
-    const created = service.create({
+    const created = await service.create({
       name: "QA Regression Tenant",
       code: `qa_regression_${Date.now()}`,
     } as never);
@@ -488,14 +492,16 @@ describe("SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶�
     });
 
     // WRITE #2: settings update.
-    service.updateSettings(created.id, { name: "QA Regression Tenant (Renamed)" } as never);
+    await service.updateSettings(created.id, {
+      name: "QA Regression Tenant (Renamed)",
+    } as never);
     expect(service.get(created.id).name).toBe("QA Regression Tenant (Renamed)");
 
     // WRITE #3: lifecycle status transition.
-    service.setStatus(created.id, "paused");
+    await service.setStatus(created.id, "paused");
     expect(service.get(created.id).status).toBe("paused");
 
-    service.setStatus(created.id, "active");
+    await service.setStatus(created.id, "active");
     expect(service.get(created.id).status).toBe("active");
 
     // READ BACK: list() includes the tenant with its latest state.
@@ -504,20 +510,24 @@ describe("SR-QA-TENANT-001 — tenant lifecycle (C102 平臺管理員 | 租戶�
     );
   });
 
-  it("negative: creating a tenant with a code that already exists is rejected (TENANT_CODE_CONFLICT)", () => {
+  it("negative: creating a tenant with a code that already exists is rejected (TENANT_CODE_CONFLICT)", async () => {
     const service = new TenantsService(new AuditNotificationService());
     const code = `qa_conflict_${Date.now()}`;
-    service.create({ name: "First", code } as never);
+    await service.create({ name: "First", code } as never);
 
     expect(
-      codeOf(() => service.create({ name: "Second", code } as never)),
+      await asyncCodeOf(() =>
+        service.create({ name: "Second", code } as never),
+      ),
     ).toBe("TENANT_CODE_CONFLICT");
   });
 
-  it("negative: transitioning the status of an unknown tenant is rejected instead of creating a phantom record (TENANT_NOT_FOUND)", () => {
+  it("negative: transitioning the status of an unknown tenant is rejected instead of creating a phantom record (TENANT_NOT_FOUND)", async () => {
     const service = new TenantsService(new AuditNotificationService());
     expect(
-      codeOf(() => service.setStatus("tenant-does-not-exist", "paused")),
+      await asyncCodeOf(() =>
+        service.setStatus("tenant-does-not-exist", "paused"),
+      ),
     ).toBe("TENANT_NOT_FOUND");
   });
 });

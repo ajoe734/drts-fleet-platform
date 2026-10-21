@@ -5,7 +5,6 @@ import { CallcenterService } from "../../src/modules/callcenter/callcenter.servi
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 
 function createService(options?: {
-  callSessionRecordingId?: string | null;
   tenantPartnerService?: Record<string, unknown>;
 }) {
   const tenantPartnerService = options?.tenantPartnerService
@@ -32,6 +31,8 @@ function createService(options?: {
       }
     : undefined;
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: vi.fn(() => undefined),
+    assertCurrentMatchingSuppressionClear: vi.fn(() => undefined),
     getEligibleCandidates: vi.fn(() => [
       {
         vehicleId: "vehicle-001",
@@ -44,13 +45,9 @@ function createService(options?: {
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
   };
-  const callcenterService = {
-    registerRecordingAttachmentListener: vi.fn(),
-    registerRecordingStateChangeListener: vi.fn(),
-    linkOrderToCallSession: vi.fn(() => ({
-      recordingId: options?.callSessionRecordingId ?? null,
-    })),
-  };
+  const callcenterService = new CallcenterService(
+    new AuditNotificationService(),
+  );
   const taskEventsService = {
     publishTaskAssigned: vi.fn(),
     publishTaskUpdated: vi.fn(),
@@ -60,7 +57,7 @@ function createService(options?: {
   const __svc = new OwnedMobilityService(
     regulatoryRegistryService as never,
     new AuditNotificationService(),
-    callcenterService as never,
+    callcenterService,
     taskEventsService as never,
     undefined,
     undefined,
@@ -81,7 +78,7 @@ describe("OwnedMobilityService compliance gates", () => {
   });
 
   it("marks phone orders without recording linkage as dispatch-blocked", () => {
-    const service = createService({ callSessionRecordingId: null });
+    const service = createService();
 
     const order = service.createCallCenterOrder({
       callId: "call-001",

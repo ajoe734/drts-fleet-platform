@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { domainFixture } from "./referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
@@ -61,76 +62,6 @@ function createService(
     regulatoryRegistryService,
     ownedMobilityService,
   };
-}
-
-function createMemoryOwnedMobilityRepository() {
-  const state = {
-    orders: [] as Record<string, unknown>[],
-    dispatchJobs: [] as Record<string, unknown>[],
-    dispatchAttempts: [] as Record<string, unknown>[],
-    dispatchAssignments: [] as Record<string, unknown>[],
-    driverTasks: [] as Record<string, unknown>[],
-    dispatchTraceLogs: [] as Record<string, unknown>[],
-  };
-
-  const replaceByKey = <T extends Record<string, unknown>>(
-    current: T[],
-    incoming: readonly T[] | undefined,
-    key: keyof T,
-  ) => {
-    if (!incoming) {
-      return current;
-    }
-
-    const next = new Map<string, T>(
-      current.map((item) => [
-        String(item[key]),
-        JSON.parse(JSON.stringify(item)) as T,
-      ]),
-    );
-    for (const item of incoming) {
-      next.set(String(item[key]), JSON.parse(JSON.stringify(item)) as T);
-    }
-    return [...next.values()];
-  };
-
-  return {
-    isEnabled: () => true,
-    loadState: vi.fn(async () => JSON.parse(JSON.stringify(state))),
-    persistChanges: vi.fn(async (changes: Record<string, unknown>) => {
-      state.orders = replaceByKey(
-        state.orders,
-        changes.orders as Record<string, unknown>[] | undefined,
-        "orderId",
-      );
-      state.dispatchJobs = replaceByKey(
-        state.dispatchJobs,
-        changes.dispatchJobs as Record<string, unknown>[] | undefined,
-        "dispatchJobId",
-      );
-      state.dispatchAttempts = replaceByKey(
-        state.dispatchAttempts,
-        changes.dispatchAttempts as Record<string, unknown>[] | undefined,
-        "attemptId",
-      );
-      state.dispatchAssignments = replaceByKey(
-        state.dispatchAssignments,
-        changes.dispatchAssignments as Record<string, unknown>[] | undefined,
-        "assignmentId",
-      );
-      state.driverTasks = replaceByKey(
-        state.driverTasks,
-        changes.driverTasks as Record<string, unknown>[] | undefined,
-        "taskId",
-      );
-      state.dispatchTraceLogs = replaceByKey(
-        state.dispatchTraceLogs,
-        changes.dispatchTraceLogs as Record<string, unknown>[] | undefined,
-        "traceLogId",
-      );
-    }),
-    reportPersistenceFailure: vi.fn(),
-  } as unknown as OwnedMobilityRepository;
 }
 
 const TENANT_ACME = "tenant-acme-001";
@@ -281,41 +212,33 @@ function getErrorCode(error: unknown) {
 }
 
 async function completeOrderForRating(
-  ownedMobilityService: OwnedMobilityService,
+  service: OwnedMobilityService,
   orderId: string,
 ) {
-  const orderStore = (
-    ownedMobilityService as unknown as {
-      orders:
-        | Map<
-            string,
-            {
-              orderId?: string;
-              status: string;
-              completedAt?: string;
-              updatedAt?: string;
-            }
-          >
-        | Array<{
-            orderId: string;
-            status: string;
-            completedAt?: string;
-            updatedAt?: string;
-          }>;
-    }
-  ).orders;
-
-  const order = Array.isArray(orderStore)
-    ? orderStore.find((item) => item.orderId === orderId)
-    : orderStore.get(orderId);
-
-  if (!order) {
-    throw new Error(`Missing order ${orderId}`);
-  }
-
-  order.status = "completed";
-  order.completedAt = "2026-04-10T09:45:00Z";
-  order.updatedAt = "2026-04-10T09:45:00Z";
+  const dispatchJob = await service.dispatchOrder(orderId, { mode: "auto" });
+  const assignment = await service.assignDispatch({
+    dispatchJobId: (dispatchJob as { dispatchJobId: string }).dispatchJobId,
+    vehicleId: "vehicle-referral-001",
+    driverId: "driver-referral-001",
+  });
+  await service.acceptDriverTask(assignment.taskId, {
+    acceptedAt: new Date().toISOString(),
+  });
+  await service.departDriverTask(assignment.taskId, {
+    departedAt: new Date().toISOString(),
+  });
+  await service.arrivedPickup(assignment.taskId, {
+    arrivedAt: new Date().toISOString(),
+  });
+  await service.startDriverTask(assignment.taskId, {
+    startedAt: new Date().toISOString(),
+  });
+  await service.completeDriverTask(assignment.taskId, {
+    completedAt: new Date().toISOString(),
+    actualDistanceKm: 8.4,
+    actualDurationSec: 900,
+    proof: { photos: ["cmVmZXJyYWwtcHJvb2Y="] },
+  });
 }
 
 async function flushWebhookDispatch() {
@@ -1193,7 +1116,7 @@ describe("owned mobility service", () => {
         new WebhookDispatchService(fetchMock),
       );
 
-      const acmeEndpoint = tenantPartnerService.createWebhookEndpoint(
+      const acmeEndpoint = await tenantPartnerService.createWebhookEndpoint(
         TENANT_ACME,
         {
           url: "https://acme.example.com/webhooks/orders",
@@ -1201,7 +1124,7 @@ describe("owned mobility service", () => {
           events: ["order.created", "order.cancelled"],
         },
       );
-      const newcoEndpoint = tenantPartnerService.createWebhookEndpoint(
+      const newcoEndpoint = await tenantPartnerService.createWebhookEndpoint(
         TENANT_NEWCO,
         {
           url: "https://newco.example.com/webhooks/orders",
@@ -1571,6 +1494,7 @@ describe("owned mobility service", () => {
   it("persists queue check-in and check-out traces through the repository", async () => {
     const persistChanges = vi.fn(async () => undefined);
     const repository = {
+      isEnabled: vi.fn(() => false),
       loadState: vi.fn(async () => ({
         orders: [],
         dispatchJobs: [],
@@ -1586,11 +1510,11 @@ describe("owned mobility service", () => {
     const { ownedMobilityService } = createService(repository);
     await ownedMobilityService.onModuleInit();
 
-    const checkedIn = ownedMobilityService.queueCheckIn({
+    const checkedIn = await ownedMobilityService.queueCheckIn({
       vehicleId: "veh-demo-001",
       siteId: "site-demo-001",
     });
-    const checkedOut = ownedMobilityService.queueCheckOut({
+    const checkedOut = await ownedMobilityService.queueCheckOut({
       vehicleId: "veh-demo-001",
       siteId: "site-demo-001",
     });
@@ -1843,56 +1767,28 @@ describe("owned mobility service", () => {
 
   describe("referral passenger authority and lifecycle endpoints", () => {
     it("idempotent create replay returns TenantBookingResult shape without PII leak", async () => {
-      const tenantPartnerService = new TenantPartnerService(
-        new AuditNotificationService(),
-      );
-      const { ownedMobilityService } = createService(
-        undefined,
-        tenantPartnerService,
-      );
-      const identity: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        actorType: "referral_passenger",
-        actorId: "pax-ref-001",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "pax-ref-001",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        requestId: "req-ref-001",
-      };
-
-      const bookingCommand = {
-        entrySlug: "yuhe-residence",
-        pickupAddress: "123 Main St",
-        dropoffAddress: "456 Market St",
+      const f = await domainFixture(),
+        identity = await f.identity();
+      const bookingCommand = await f.command(identity, {
         idempotencyKey: "idemp-test-key-100",
-      };
-
-      const result1 = await ownedMobilityService.createReferralPassengerBooking(
+      });
+      const result1 = await f.service.createReferralPassengerBooking(
         bookingCommand,
         identity,
       );
-
       expect(result1.orderId).toBeDefined();
       expect(result1.bookingId).toBeDefined();
       expect(result1.serviceBucket).toBe("business_dispatch");
       expect(result1.replayed).toBe(false);
-
-      const result2 = await ownedMobilityService.createReferralPassengerBooking(
+      const result2 = await f.service.createReferralPassengerBooking(
         bookingCommand,
         identity,
       );
-
       expect(result2.orderId).toBe(result1.orderId);
       expect(result2.replayed).toBe(true);
-      expect((result2 as any).passenger).toBeUndefined();
-      expect((result2 as any).passengerName).toBeUndefined();
-      expect((result2 as any).passengerPhone).toBeUndefined();
+      expect(result2).not.toHaveProperty("passenger");
+      expect(result2).not.toHaveProperty("passengerName");
+      expect(result2).not.toHaveProperty("passengerPhone");
     });
 
     it("allows partner_api_key identities to create bookings within the same partner entry scope", async () => {
@@ -1962,114 +1858,46 @@ describe("owned mobility service", () => {
     });
 
     it("prevents cross-passenger and cross-partner access", async () => {
-      const tenantPartnerService = new TenantPartnerService(
-        new AuditNotificationService(),
-      );
-      const { ownedMobilityService } = createService(
-        undefined,
-        tenantPartnerService,
-      );
-      const identity1: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        actorType: "referral_passenger",
-        actorId: "pax-ref-001",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "pax-ref-001",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        requestId: "req-ref-001",
-      };
-
-      const identity2: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        actorType: "referral_passenger",
-        actorId: "pax-ref-002",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "pax-ref-002",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        requestId: "req-ref-002",
-      };
-
-      const booking = await ownedMobilityService.createReferralPassengerBooking(
-        {
-          entrySlug: "yuhe-residence",
-          pickupAddress: "Pickup Spot",
-          dropoffAddress: "Dropoff Spot",
-        },
+      const f = await domainFixture(),
+        identity1 = await f.identity("first"),
+        identity2 = await f.identity("second");
+      const booking = await f.service.createReferralPassengerBooking(
+        await f.command(identity1),
         identity1,
       );
-
-      let caught: any = null;
-      try {
-        await ownedMobilityService.getReferralPassengerReceipt(
-          booking.orderId,
-          identity2,
-        );
-      } catch (err) {
-        caught = err;
-      }
-      expect(caught).not.toBeNull();
-      expect(caught.getStatus()).toBe(403);
-      expect(caught.getResponse().error.code).toMatch(
-        /PASSENGER_SCOPE_MISMATCH|PARTNER_SCOPE_MISMATCH/,
-      );
+      await expect(
+        f.service.getReferralPassengerReceipt(booking.orderId, identity2),
+      ).rejects.toMatchObject({ status: 403, code: "PARTNER_SCOPE_MISMATCH" });
+      await expect(
+        f.service.getReferralPassengerReceipt(booking.orderId, {
+          ...identity1,
+          partnerId: "another-partner",
+        }),
+      ).rejects.toMatchObject({ status: 403, code: "PARTNER_SCOPE_MISMATCH" });
     });
 
     it("returns dynamic trip details and downloadUrl in receipt", async () => {
-      const tenantPartnerService = new TenantPartnerService(
-        new AuditNotificationService(),
-      );
-      const { ownedMobilityService } = createService(
-        undefined,
-        tenantPartnerService,
-      );
-      const identity: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        actorType: "referral_passenger",
-        actorId: "pax-ref-001",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "pax-ref-001",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        requestId: "req-ref-001",
-      };
-
-      const booking = await ownedMobilityService.createReferralPassengerBooking(
-        {
-          entrySlug: "yuhe-residence",
-          pickupAddress: "Pickup Spot",
-          dropoffAddress: "Dropoff Spot",
-        },
+      const f = await domainFixture(),
+        identity = await f.identity();
+      const booking = await f.service.createReferralPassengerBooking(
+        await f.command(identity),
         identity,
       );
-
       const activeTrip =
-        await ownedMobilityService.getReferralPassengerActiveTrip(identity);
+        await f.service.getReferralPassengerActiveTrip(identity);
       expect(activeTrip.active).toBe(true);
       expect(activeTrip.trip?.orderId).toBe(booking.orderId);
-
-      const history =
-        await ownedMobilityService.listReferralPassengerHistory(identity);
+      const history = await f.service.listReferralPassengerHistory(identity);
       expect(history.items.length).toBeGreaterThan(0);
       expect(history.items[0]?.orderId).toBe(booking.orderId);
-
-      const receipt = await ownedMobilityService.getReferralPassengerReceipt(
+      await expect(
+        f.service.getReferralPassengerReceipt(booking.orderId, identity),
+      ).rejects.toMatchObject({
+        status: 409,
+        code: "PASSENGER_RECEIPT_TRIP_NOT_COMPLETED",
+      });
+      await completeOrderForRating(f.service, booking.orderId);
+      const receipt = await f.service.getReferralPassengerReceipt(
         booking.orderId,
         identity,
       );
@@ -2078,380 +1906,189 @@ describe("owned mobility service", () => {
         `/api/referral/receipt/${booking.orderId}/download`,
       );
     });
+
     it("denies access to historical null-tenant trips when the entry tenant is reassigned", async () => {
-      const mockNavRepo = {
-        findByOrderId: vi.fn(),
-        resolveRoute: vi.fn(),
-      } as any;
-      const tenantPartnerService = new TenantPartnerService(
-        new AuditNotificationService(),
-      );
-      const { ownedMobilityService } = createService(
-        undefined,
-        tenantPartnerService,
-        mockNavRepo,
-      );
-
-      const originalIdentity: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        actorType: "referral_passenger",
-        actorId: "pax-ref-002",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "pax-ref-002",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        requestId: "req-ref-002",
-      };
-
-      await ownedMobilityService.createMultiTaxiRide(
-        {
-          pickup: { address: "Pickup Spot 2" },
-          dropoff: { address: "Dropoff Spot 2" },
-          passenger: {
-            passengerId: "pax-ref-002",
-            name: "Pass",
-            phone: "0900",
-          },
-          requestedPickupAt: new Date().toISOString(),
-          timingMode: "on_demand",
-          paymentMethodTokenRef: null,
-        },
-        {
-          authorized: true,
-          authorizedTypes: ["standard"],
-          authorizationId: "auth-1",
-          activeFareVersionId: "v1",
-        } as any,
+      const f = await domainFixture(),
+        originalIdentity = await f.identity("historical");
+      const booking = await f.service.createReferralPassengerBooking(
+        await f.command(originalIdentity),
         originalIdentity,
       );
-
-      // Verify the active trip is visible to the original identity
-      mockNavRepo.findByOrderId.mockResolvedValueOnce({
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-      });
-      const originalActive =
-        await ownedMobilityService.getReferralPassengerActiveTrip(
-          originalIdentity,
-        );
-      expect(originalActive.active).toBe(true);
-
-      // Verify history is visible to the original identity
-      mockNavRepo.findByOrderId.mockResolvedValueOnce({
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-      });
-      const originalHistory =
-        await ownedMobilityService.listReferralPassengerHistory(
-          originalIdentity,
-        );
-      expect(originalHistory.items.length).toBeGreaterThan(0);
-
-      // Now create a new identity with the same partner but a different tenantId
-      const reassignedIdentity: BootstrapRequestIdentity = {
-        ...originalIdentity,
-        tenantId: "tenant-demo-002", // Changed tenant!
+      // Explicit historical record precondition, not a PAX creation/identity bypass.
+      f.db.table("ops.phase1_owned_orders").get(booking.orderId).tenantId =
+        null;
+      const mockNavRepo = {
+        findByOrderId: vi.fn().mockResolvedValue({
+          tenantId: originalIdentity.tenantId,
+          partnerId: originalIdentity.partnerId,
+        }),
       };
-
-      // Verify active trip is NO LONGER visible to the reassigned identity
-      mockNavRepo.findByOrderId.mockResolvedValueOnce({
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-      });
-      const reassignedActive =
-        await ownedMobilityService.getReferralPassengerActiveTrip(
-          reassignedIdentity,
-        );
-      expect(reassignedActive.active).toBe(false);
-
-      // Verify history is NO LONGER visible to the reassigned identity
-      mockNavRepo.findByOrderId.mockResolvedValueOnce({
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-      });
-      const reassignedHistory =
-        await ownedMobilityService.listReferralPassengerHistory(
-          reassignedIdentity,
-        );
-      expect(reassignedHistory.items.length).toBe(0);
-
-      // Also verify wrong partnerId
-      const wrongPartnerIdentity: BootstrapRequestIdentity = {
+      Reflect.set(
+        f.service,
+        "partnerNotificationNavigationRepository",
+        mockNavRepo,
+      );
+      const originalActive =
+        await f.service.getReferralPassengerActiveTrip(originalIdentity);
+      expect(originalActive.active).toBe(true);
+      expect(
+        (await f.service.listReferralPassengerHistory(originalIdentity)).items
+          .length,
+      ).toBeGreaterThan(0);
+      const reassignedIdentity = {
+        ...originalIdentity,
+        tenantId: "tenant-demo-002",
+      };
+      const wrongPartnerIdentity = {
         ...originalIdentity,
         partnerId: "partner_wrong",
       };
-      const wrongPartnerActive =
-        await ownedMobilityService.getReferralPassengerActiveTrip(
-          wrongPartnerIdentity,
-        );
-      expect(wrongPartnerActive.active).toBe(false);
-      const wrongPartnerHistory =
-        await ownedMobilityService.listReferralPassengerHistory(
-          wrongPartnerIdentity,
-        );
-      expect(wrongPartnerHistory.items.length).toBe(0);
-
-      // Also verify missing route denial
-      mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
-      const missingRouteActive =
-        await ownedMobilityService.getReferralPassengerActiveTrip(
-          originalIdentity,
-        );
-      expect(missingRouteActive.active).toBe(false);
-
-      mockNavRepo.findByOrderId.mockResolvedValueOnce(null); // route missing
-      const missingRouteHistory =
-        await ownedMobilityService.listReferralPassengerHistory(
-          originalIdentity,
-        );
-      expect(missingRouteHistory.items.length).toBe(0);
-
-      // ---- Added for receipt/cancel/rating cross-tenant null-tenant denial ----
-      const orderId = originalActive.trip?.orderId;
-      if (!orderId) throw new Error("Missing active trip orderId");
-
-      mockNavRepo.findByOrderId.mockResolvedValueOnce({
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-      });
-      let caughtReceipt: any = null;
-      try {
-        await ownedMobilityService.getReferralPassengerReceipt(
-          orderId,
-          reassignedIdentity,
-        );
-      } catch (err) {
-        caughtReceipt = err;
+      // R5 Step1 rejects changed current authority instead of returning empty success.
+      for (const who of [reassignedIdentity, wrongPartnerIdentity]) {
+        await expect(
+          f.service.getReferralPassengerActiveTrip(who),
+        ).rejects.toMatchObject({
+          status: 403,
+          code: "PARTNER_SCOPE_MISMATCH",
+        });
+        await expect(
+          f.service.listReferralPassengerHistory(who),
+        ).rejects.toMatchObject({
+          status: 403,
+          code: "PARTNER_SCOPE_MISMATCH",
+        });
       }
-      expect(caughtReceipt).not.toBeNull();
-      expect(caughtReceipt.getStatus()).toBe(403);
-      expect(caughtReceipt.getResponse().error.code).toBe(
-        "PARTNER_SCOPE_MISMATCH",
-      );
-
-      mockNavRepo.findByOrderId.mockResolvedValueOnce({
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-      });
-      let caughtCancel: any = null;
-      try {
-        await ownedMobilityService.cancelReferralPassengerTrip(
-          orderId,
-          { orderId, reason: "test" },
-          reassignedIdentity,
-        );
-      } catch (err) {
-        caughtCancel = err;
-      }
-      expect(caughtCancel).not.toBeNull();
-      expect(caughtCancel.getStatus()).toBe(403);
-      expect(caughtCancel.getResponse().error.code).toBe(
-        "PARTNER_SCOPE_MISMATCH",
-      );
-
-      mockNavRepo.findByOrderId.mockResolvedValueOnce({
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-      });
-      let caughtRating: any = null;
-      try {
-        await ownedMobilityService.submitReferralPassengerRating(
-          orderId,
-          { orderId, score: 5 },
-          reassignedIdentity,
-        );
-      } catch (err) {
-        caughtRating = err;
-      }
-      expect(caughtRating).not.toBeNull();
-      expect(caughtRating.getStatus()).toBe(403);
-      expect(caughtRating.getResponse().error.code).toBe(
-        "PARTNER_SCOPE_MISMATCH",
-      );
+      mockNavRepo.findByOrderId.mockResolvedValue(null);
+      expect(
+        (await f.service.getReferralPassengerActiveTrip(originalIdentity))
+          .active,
+      ).toBe(false);
+      expect(
+        (await f.service.listReferralPassengerHistory(originalIdentity)).items,
+      ).toHaveLength(0);
+      for (const operation of [
+        () =>
+          f.service.getReferralPassengerReceipt(
+            booking.orderId,
+            reassignedIdentity,
+          ),
+        () =>
+          f.service.cancelReferralPassengerTrip(
+            booking.orderId,
+            { orderId: booking.orderId, reason: "test" },
+            reassignedIdentity,
+          ),
+        () =>
+          f.service.submitReferralPassengerRating(
+            booking.orderId,
+            { orderId: booking.orderId, score: 5, contactRequested: false },
+            reassignedIdentity,
+          ),
+      ])
+        await expect(operation()).rejects.toMatchObject({
+          status: 403,
+          code: "PARTNER_SCOPE_MISMATCH",
+        });
     });
 
     it("only allows referral ratings after completion and keeps duplicates idempotent", async () => {
-      const tenantPartnerService = new TenantPartnerService(
-        new AuditNotificationService(),
-      );
-      const { ownedMobilityService } = createService(
-        undefined,
-        tenantPartnerService,
-      );
-      const identity: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        actorType: "referral_passenger",
-        actorId: "pax-ref-001",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "pax-ref-001",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        requestId: "req-ref-rating-001",
-      };
-
-      const booking = await ownedMobilityService.createReferralPassengerBooking(
-        {
-          entrySlug: "yuhe-residence",
-          pickupAddress: "Pickup Spot",
-          dropoffAddress: "Dropoff Spot",
-        },
+      const f = await domainFixture(),
+        identity = await f.identity();
+      const booking = await f.service.createReferralPassengerBooking(
+        await f.command(identity),
         identity,
       );
-
-      try {
-        await ownedMobilityService.submitReferralPassengerRating(
+      const command = {
+        orderId: booking.orderId,
+        score: 5 as const,
+        contactRequested: false,
+        comment: " Great ride ",
+        tags: [" polite ", "fast", "fast"],
+        idempotencyKey: "rating-idemp-001",
+      };
+      await expect(
+        f.service.submitReferralPassengerRating(
           booking.orderId,
-          {
-            orderId: booking.orderId,
-            score: 5,
-            comment: " Great ride ",
-            tags: [" polite ", "fast", "fast"],
-          },
+          command,
           identity,
-        );
-        expect.unreachable("rating before completion should fail");
-      } catch (error) {
-        expect(getErrorCode(error)).toBe("PASSENGER_RATING_TRIP_NOT_COMPLETED");
-      }
-
-      await completeOrderForRating(ownedMobilityService, booking.orderId);
-
-      const firstRating =
-        await ownedMobilityService.submitReferralPassengerRating(
-          booking.orderId,
-          {
-            orderId: booking.orderId,
-            score: 5,
-            comment: " Great ride ",
-            tags: [" polite ", "fast", "fast"],
-            idempotencyKey: "rating-idemp-001",
-          },
-          identity,
-        );
+        ),
+      ).rejects.toMatchObject({ code: "PASSENGER_RATING_TRIP_NOT_COMPLETED" });
+      await completeOrderForRating(f.service, booking.orderId);
+      const firstRating = await f.service.submitReferralPassengerRating(
+        booking.orderId,
+        command,
+        identity,
+      );
       expect(firstRating).toMatchObject({
         orderId: booking.orderId,
         score: 5,
         comment: "Great ride",
         tags: ["fast", "polite"],
+        complaintCaseNo: null,
       });
-
-      const replayRating =
-        await ownedMobilityService.submitReferralPassengerRating(
+      const replay = await f.service.submitReferralPassengerRating(
+        booking.orderId,
+        {
+          ...command,
+          comment: "Great ride",
+          tags: ["fast", "polite"],
+          idempotencyKey: "rating-idemp-002",
+        },
+        identity,
+      );
+      expect(replay).toEqual(firstRating);
+      await expect(
+        f.service.submitReferralPassengerRating(
           booking.orderId,
           {
-            orderId: booking.orderId,
-            score: 5,
-            comment: "Great ride",
-            tags: ["fast", "polite"],
-            idempotencyKey: "rating-idemp-002",
-          },
-          identity,
-        );
-      expect(replayRating).toEqual(firstRating);
-
-      try {
-        await ownedMobilityService.submitReferralPassengerRating(
-          booking.orderId,
-          {
-            orderId: booking.orderId,
+            ...command,
             score: 4,
             comment: "Different payload",
             tags: ["slow"],
           },
           identity,
-        );
-        expect.unreachable("different duplicate rating should conflict");
-      } catch (error) {
-        expect(getErrorCode(error)).toBe("PASSENGER_RATING_ALREADY_SUBMITTED");
-      }
+        ),
+      ).rejects.toMatchObject({ code: "PASSENGER_RATING_ALREADY_SUBMITTED" });
     });
 
     it("replays referral booking and rating after repository reload", async () => {
-      const repository = createMemoryOwnedMobilityRepository();
-      const tenantPartnerService = new TenantPartnerService(
-        new AuditNotificationService(),
-      );
-      const identity: BootstrapRequestIdentity = {
-        authMode: "jwt_bearer",
-        actorType: "referral_passenger",
-        actorId: "pax-ref-001",
-        realm: "partner",
-        tenantId: "tenant-demo-001",
-        partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-        partnerProgramId: "program-referral-community",
-        partnerEntrySlug: "yuhe-residence",
-        drtsPassengerId: "pax-ref-001",
-        roleFamilies: ["partner"],
-        roles: ["referral_passenger"],
-        scopes: [],
-        requestId: "req-ref-reload-001",
-      };
-      const bookingCommand = {
-        entrySlug: "yuhe-residence",
-        pickupAddress: "Pickup Spot",
-        dropoffAddress: "Dropoff Spot",
+      const f = await domainFixture(),
+        identity = await f.identity();
+      const command = await f.command(identity, {
         idempotencyKey: "referral-create-reload-001",
+      });
+      const created = await f.service.createReferralPassengerBooking(
+        command,
+        identity,
+      );
+      await completeOrderForRating(f.service, created.orderId);
+      const ratingCommand = {
+        orderId: created.orderId,
+        score: 5 as const,
+        contactRequested: false,
+        comment: "Smooth ride",
+        tags: ["clean", "on-time"],
+        idempotencyKey: "referral-rating-reload-001",
       };
-
-      const { ownedMobilityService: firstService } = createService(
-        repository,
-        tenantPartnerService,
-      );
-      await firstService.onModuleInit();
-
-      const created = await firstService.createReferralPassengerBooking(
-        bookingCommand,
-        identity,
-      );
-      await completeOrderForRating(firstService, created.orderId);
-      const firstRating = await firstService.submitReferralPassengerRating(
+      const firstRating = await f.service.submitReferralPassengerRating(
         created.orderId,
-        {
-          orderId: created.orderId,
-          score: 5,
-          comment: "Smooth ride",
-          tags: ["clean", "on-time"],
-          idempotencyKey: "referral-rating-reload-001",
-        },
+        ratingCommand,
         identity,
       );
-
-      const { ownedMobilityService: reloadedService } = createService(
-        repository,
-        tenantPartnerService,
-      );
-      await reloadedService.onModuleInit();
-
+      const reloadedService = f.newService();
       const replayed = await reloadedService.createReferralPassengerBooking(
-        bookingCommand,
+        command,
         identity,
       );
       expect(replayed.orderId).toBe(created.orderId);
       expect(replayed.replayed).toBe(true);
-
-      const replayedRating =
+      expect(
         await reloadedService.submitReferralPassengerRating(
           created.orderId,
-          {
-            orderId: created.orderId,
-            score: 5,
-            comment: "Smooth ride",
-            tags: ["clean", "on-time"],
-            idempotencyKey: "referral-rating-reload-002",
-          },
+          { ...ratingCommand, idempotencyKey: "referral-rating-reload-002" },
           identity,
-        );
-      expect(replayedRating).toEqual(firstRating);
+        ),
+      ).toEqual(firstRating);
     });
   });
 

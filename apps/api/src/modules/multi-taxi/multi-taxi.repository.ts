@@ -4,7 +4,23 @@ import {
 } from "@drts/contracts";
 import { PLATFORM_CURRENCY } from "@drts/contracts";
 import { Injectable, Logger, Optional } from "@nestjs/common";
-import type { QueryResultRow } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
+import { ApiRequestError } from "../../common/api-envelope";
+import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
+import { PassengerFareRepository } from "../passenger-app/fare/passenger-fare.repository";
+
+export interface PassengerAccountRatingHook {
+  execute(
+    client: PoolClient,
+    rating: PassengerTripRatingRecord,
+    isNew: boolean,
+  ): Promise<void>;
+}
+
+export interface PassengerRideRatingContext extends PassengerAccountRatingHook {
+  token: PassengerRideAccessToken;
+  tokenDigest: string;
+}
 
 import type {
   ConsumerNotificationOutboxRecord,
@@ -12,12 +28,17 @@ import type {
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiElectronicReceipt,
   MultiTaxiOperatingAuthorizationRecord,
+  OrderFirstPartyNotificationRoute,
   OrderPartnerNotificationRoute,
+  PartnerNotificationRetryDisposition,
+  PassengerNotificationFailureReason,
   PassengerPaymentStatus,
+  PassengerBookingFareDisclosure,
   PassengerRatingModerationAuditRecord,
   PassengerRatingReviewListItem,
   PassengerPushDeliveryOutcome,
   PassengerRideAccessToken,
+  OwnedOrderRecord,
   PassengerTripRatingRecord,
   PushProviderAckState,
 } from "@drts/contracts";
@@ -27,9 +48,55 @@ import type {
   PartnerDeliveryMetadata,
   StoredPartnerNotificationContext,
 } from "./partner-notification.types";
+import type {
+  StoredFirstPartyContext,
+  FirstPartyDeliveryMetadata,
+} from "./first-party-notification.transport";
+import type { PassengerNotificationRouteResolution } from "./passenger-notification-channel-router";
 
+import {
+  persistOrderPartnerNotificationRoute,
+  mapOrderPartnerNotificationRoute,
+  type OrderPartnerNotificationRouteRow,
+} from "../tenant-partner/order-partner-notification-route";
 import { DatabaseService } from "../../common/db/database.service";
 import { PartnerNotificationDispatchFacade } from "../tenant-partner/partner-notification-dispatch.facade";
+
+/**
+ * Row shape of `mobility.phase1_order_first_party_notification_routes`
+ * (V0107, D5). Mirrors `OrderPartnerNotificationRouteRow`'s precedent: this
+ * repository owns its own mapper rather than importing one from the
+ * `passenger-push-devices` module, which must stay independent of
+ * multi-taxi (PUSH-FIRST-PARTY-REGISTRY-20261006).
+ */
+type FirstPartyNotificationRouteRow = QueryResultRow & {
+  order_id: string;
+  tenant_id: string;
+  drts_passenger_id: string;
+  passenger_subject_ref: string;
+  app_id: string;
+  notification_policy_version: string;
+  consent_version: string;
+  ride_ref: string;
+  created_at: Date | string;
+};
+
+function mapFirstPartyNotificationRoute(
+  row: FirstPartyNotificationRouteRow,
+): OrderFirstPartyNotificationRoute {
+  return {
+    orderId: row.order_id,
+    tenantId: row.tenant_id,
+    drtsPassengerId: row.drts_passenger_id,
+    passengerSubjectRef: row.passenger_subject_ref,
+    appId: row.app_id,
+    notificationPolicyVersion:
+      row.notification_policy_version as OrderFirstPartyNotificationRoute["notificationPolicyVersion"],
+    consentVersion: row.consent_version,
+    rideRef: row.ride_ref,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
 
 type AuthorizationRow = QueryResultRow & {
   authorization_id: string;
@@ -153,6 +220,26 @@ export type PushDeliveryClaimOutcome =
   | PushDeliveryClaimGranted
   | PushDeliveryClaimDenied;
 
+/**
+ * PUSH-CHANNEL-ROUTER-20261006 D3/D6 — the router-level outcome for a row
+ * that resolved to `ambiguous`, `none`, or the dormant `first_party_app`
+ * skeleton. Kept distinct from `PartnerDeliveryMetadata` (whose
+ * `failureReason` type does not include `no_notification_channel`) rather
+ * than widening that unrelated, already-shipped partner type; stored under
+ * its own `payload.channelRouting` key so it never collides with
+ * `payload.partnerNotification`.
+ */
+export interface PassengerNotificationChannelMetadata {
+  resolvedChannel: "first_party_app" | "ambiguous" | "none";
+  deliveryTarget: null;
+  deliveryStage: null;
+  retryDisposition: PartnerNotificationRetryDisposition;
+  failureReason: PassengerNotificationFailureReason;
+  receiptId: null;
+  downstreamStatus: "unknown";
+  expiresAt: string | null;
+}
+
 export interface RecordPushDeliveryOutcomeInput {
   outboxId: string;
   passengerSubjectRef: string;
@@ -162,6 +249,8 @@ export interface RecordPushDeliveryOutcomeInput {
   providerMessageRef: string | null;
   deliveryOutcome: PassengerPushDeliveryOutcome;
   partnerMetadata?: PartnerDeliveryMetadata;
+  firstPartyMetadata?: FirstPartyDeliveryMetadata;
+  channelMetadata?: PassengerNotificationChannelMetadata;
 }
 
 export type RecordPushDeliveryOutcomeResult =
@@ -217,21 +306,6 @@ type ElectronicReceiptRow = QueryResultRow & {
   record: unknown;
 };
 
-type OrderPartnerNotificationRouteRow = QueryResultRow & {
-  order_id: string;
-  tenant_id: string;
-  partner_id: string;
-  entry_slug: string;
-  partner_user_ref: string;
-  drts_passenger_id: string;
-  passenger_subject_ref: string;
-  identity_linked_at: Date | string;
-  consent_bundle_version: string;
-  notification_policy_version: string;
-  ride_ref: string;
-  created_at: Date | string;
-};
-
 @Injectable()
 export class MultiTaxiRepository {
   private readonly logger = new Logger(MultiTaxiRepository.name);
@@ -269,6 +343,19 @@ export class MultiTaxiRepository {
       ),
       vehicles: vehicleResult.rows.map((row: any) => this.mapVehicle(row)),
     };
+  }
+
+  async findEffectiveAuthorizations(asOf: string) {
+    if (!this.isEnabled())
+      throw new Error("Persisted authorization lookup requires a database.");
+    const result = await this.databaseService!.query<AuthorizationRow>(
+      `SELECT * FROM reg.multi_taxi_operating_authorizations
+       WHERE status = 'approved' AND effective_from <= $1::timestamptz
+         AND (effective_until IS NULL OR effective_until > $1::timestamptz)
+       ORDER BY updated_at DESC`,
+      [asOf],
+    );
+    return result.rows.map((row) => this.mapAuthorization(row));
   }
 
   async persistAuthorization(
@@ -429,66 +516,9 @@ export class MultiTaxiRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      const insertResult = await client.query<OrderPartnerNotificationRouteRow>(
-        `
-          INSERT INTO mobility.phase1_order_partner_notification_routes (
-            order_id, tenant_id, partner_id, entry_slug, partner_user_ref,
-            drts_passenger_id, passenger_subject_ref, identity_linked_at,
-            consent_bundle_version, notification_policy_version, ride_ref,
-            created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-          ON CONFLICT (order_id) DO NOTHING
-          RETURNING order_id, tenant_id, partner_id, entry_slug,
-            partner_user_ref, drts_passenger_id, passenger_subject_ref,
-            identity_linked_at, consent_bundle_version,
-            notification_policy_version, ride_ref, created_at
-        `,
-        [
-          route.orderId,
-          route.tenantId,
-          route.partnerId,
-          route.entrySlug,
-          route.partnerUserRef,
-          route.drtsPassengerId,
-          route.passengerSubjectRef,
-          route.identityLinkedAt,
-          route.consentBundleVersion,
-          route.notificationPolicyVersion,
-          route.rideRef,
-          route.createdAt,
-        ],
-      );
-
-      let insertedRow = insertResult.rows[0];
-      if (!insertedRow) {
-        const existing = await client.query<OrderPartnerNotificationRouteRow>(
-          `
-            SELECT order_id, tenant_id, partner_id, entry_slug,
-              partner_user_ref, drts_passenger_id, passenger_subject_ref,
-              identity_linked_at, consent_bundle_version,
-              notification_policy_version, ride_ref, created_at
-            FROM mobility.phase1_order_partner_notification_routes
-            WHERE order_id = $1
-          `,
-          [route.orderId],
-        );
-        insertedRow = existing.rows[0];
-      } else {
-        await client.query(
-          `
-            INSERT INTO mobility.phase1_partner_notification_sequences (
-              order_id, next_sequence
-            ) VALUES ($1, 1)
-            ON CONFLICT (order_id) DO NOTHING
-          `,
-          [route.orderId],
-        );
-      }
-
+      const stored = await persistOrderPartnerNotificationRoute(client, route);
       await client.query("COMMIT");
-      return insertedRow
-        ? this.mapOrderPartnerNotificationRoute(insertedRow)
-        : null;
+      return stored;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       this.logger.warn(
@@ -497,6 +527,175 @@ export class MultiTaxiRepository {
         }`,
       );
       return null;
+    } finally {
+      client.release();
+    }
+  }
+
+  async findOrderFirstPartyNotificationRoute(
+    orderId: string,
+  ): Promise<OrderFirstPartyNotificationRoute | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const result = await this.databaseService!.query<any>(
+      `
+      SELECT order_id, tenant_id, drts_passenger_id, passenger_subject_ref,
+        app_id, notification_policy_version, consent_version, ride_ref, created_at
+      FROM mobility.phase1_order_first_party_notification_routes
+      WHERE order_id = $1
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      orderId: row.order_id,
+      tenantId: row.tenant_id,
+      drtsPassengerId: row.drts_passenger_id,
+      passengerSubjectRef: row.passenger_subject_ref,
+      appId: row.app_id,
+      notificationPolicyVersion: row.notification_policy_version,
+      consentVersion: row.consent_version,
+      rideRef: row.ride_ref,
+      createdAt:
+        row.created_at instanceof Date
+          ? row.created_at.toISOString()
+          : row.created_at,
+    };
+  }
+
+  private mapFirstPartyContext(
+    row: Record<string, any>,
+  ): StoredFirstPartyContext {
+    return {
+      outboxId: row.outbox_id,
+      orderId: row.order_id,
+      tenantId: row.tenant_id,
+      routeSnapshot: row.route_snapshot,
+      targetDevices: row.target_devices,
+      wireMessage: row.wire_message,
+      wireMessageHash: row.wire_message_hash,
+      retryPolicySnapshot: row.retry_policy_snapshot,
+      deviceOutcomes: row.device_outcomes,
+      eventSequence: Number(row.event_sequence),
+      expiresAt: new Date(row.expires_at).toISOString(),
+      deliveryTarget: row.delivery_target,
+      deliveryStage: row.delivery_stage,
+      retryDisposition: row.retry_disposition,
+      failureReason: row.failure_reason,
+      receiptId: row.receipt_id,
+      createdAt: new Date(row.created_at).toISOString(),
+      deliveredAt: row.delivered_at
+        ? new Date(row.delivered_at).toISOString()
+        : null,
+    };
+  }
+
+  async findFirstPartyNotificationContextAndTokens(
+    outboxId: string,
+  ): Promise<{ context: StoredFirstPartyContext } | null> {
+    if (!this.isEnabled()) return null;
+    // Tokens are resolved separately immediately before each device IO, never
+    // bundled into the durable context or a long-lived batch cache.
+    const result = await this.databaseService!.query(
+      `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`,
+      [outboxId],
+    );
+    return result.rows[0]
+      ? { context: this.mapFirstPartyContext(result.rows[0]) }
+      : null;
+  }
+
+  async findFirstPartyNotificationDeviceToken(
+    context: StoredFirstPartyContext,
+    target: StoredFirstPartyContext["targetDevices"][number],
+    fenceToken: number,
+  ): Promise<string | null> {
+    if (!this.isEnabled())
+      throw new Error("First-party persistence unavailable");
+    const result = await this.databaseService!.query<{
+      fence_valid: boolean;
+      token: string | null;
+    }>(
+      `
+      SELECT EXISTS (
+        SELECT 1 FROM ops.phase1_push_delivery_claims
+        WHERE outbox_id=$1 AND fence_token=$3 AND claim_state='claimed'
+          AND lease_expires_at > clock_timestamp()
+      ) AS fence_valid, (
+        SELECT d.token
+        FROM mobility.phase1_first_party_notification_delivery_contexts c
+        CROSS JOIN LATERAL jsonb_to_recordset(c.target_devices) AS t("deviceId" uuid, "tokenSha256" text)
+        JOIN iam.phase1_passenger_push_devices d ON d.device_id=t."deviceId" AND d.token_sha256=t."tokenSha256"
+        WHERE c.outbox_id=$1 AND d.device_id=$2 AND d.token_sha256=$4 AND d.status='active'
+          AND d.drts_passenger_id=c.route_snapshot->>'drtsPassengerId'
+          AND d.app_id=c.route_snapshot->>'appId'
+          AND d.last_seen_at >= now() - interval '60 days'
+      ) AS token
+    `,
+      [context.outboxId, target.deviceId, fenceToken, target.tokenSha256],
+    );
+    if (!result.rows[0]?.fence_valid)
+      throw new Error("First-party notification fence lost before send");
+    return result.rows[0].token;
+  }
+
+  async prepareFirstPartyNotificationContext(
+    context: Omit<StoredFirstPartyContext, "createdAt" | "deliveredAt">,
+    fenceToken: number,
+  ): Promise<StoredFirstPartyContext> {
+    if (!this.isEnabled())
+      throw new Error("First-party persistence unavailable");
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      // Match claim/outcome lock order; concurrent preparations serialize here.
+      const outbox = await client.query(
+        `SELECT outbox_id FROM ops.consumer_notification_outbox WHERE outbox_id=$1 AND order_id=$2 AND status='sending' FOR UPDATE`,
+        [context.outboxId, context.orderId],
+      );
+      const claim = await client.query(
+        `SELECT fence_token FROM ops.phase1_push_delivery_claims
+         WHERE outbox_id=$1 AND fence_token=$2 AND claim_state='claimed'
+           AND lease_expires_at > clock_timestamp() FOR UPDATE`,
+        [context.outboxId, fenceToken],
+      );
+      if (!outbox.rows.length || !claim.rows.length)
+        throw new Error(
+          "First-party notification fence lost before preparation",
+        );
+      await client.query(
+        `
+        INSERT INTO mobility.phase1_first_party_notification_delivery_contexts (
+          outbox_id, order_id, tenant_id, route_snapshot, target_devices, wire_message, wire_message_hash,
+          event_sequence, expires_at, retry_policy_snapshot
+        ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7,$8,$9,$10::jsonb)
+        ON CONFLICT (outbox_id) DO NOTHING
+      `,
+        [
+          context.outboxId,
+          context.orderId,
+          context.tenantId,
+          JSON.stringify(context.routeSnapshot),
+          JSON.stringify(context.targetDevices),
+          JSON.stringify(context.wireMessage),
+          context.wireMessageHash,
+          context.eventSequence,
+          context.expiresAt,
+          JSON.stringify(context.retryPolicySnapshot),
+        ],
+      );
+      const result = await client.query(
+        `SELECT * FROM mobility.phase1_first_party_notification_delivery_contexts WHERE outbox_id=$1`,
+        [context.outboxId],
+      );
+      const stored = this.mapFirstPartyContext(result.rows[0]);
+      await client.query("COMMIT");
+      return stored;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
     } finally {
       client.release();
     }
@@ -521,7 +720,162 @@ export class MultiTaxiRepository {
         [orderId],
       );
     const row = result.rows[0];
-    return row ? this.mapOrderPartnerNotificationRoute(row) : null;
+    return row ? mapOrderPartnerNotificationRoute(row) : null;
+  }
+
+  /**
+   * PUSH-CHANNEL-ROUTER-20261006 D2 — one query against both frozen route
+   * snapshot tables (the existing partner one and the new first-party one,
+   * V0107). Both present at once is `ambiguous` (manual_only, send on
+   * neither per D2); neither present is `none` (D3). This never re-derives
+   * a channel from the passenger's current session/devices — only these
+   * two immutable snapshots decide it.
+   */
+  async resolvePassengerNotificationChannel(
+    orderId: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
+  ): Promise<PassengerNotificationRouteResolution> {
+    if (!this.isEnabled()) return { channel: "none" };
+    const result = await executor.query<{
+      partner_route: OrderPartnerNotificationRouteRow | null;
+      first_party_route: FirstPartyNotificationRouteRow | null;
+    }>(
+      `
+        SELECT
+          (SELECT to_jsonb(p) FROM mobility.phase1_order_partner_notification_routes p WHERE p.order_id = $1) AS partner_route,
+          (SELECT to_jsonb(f) FROM mobility.phase1_order_first_party_notification_routes f WHERE f.order_id = $1) AS first_party_route
+      `,
+      [orderId],
+    );
+    const row = result.rows[0];
+    const partnerRow = row?.partner_route ?? null;
+    const firstPartyRow = row?.first_party_route ?? null;
+    if (partnerRow && firstPartyRow) return { channel: "ambiguous" };
+    if (partnerRow)
+      return {
+        channel: "partner_webhook",
+        route: mapOrderPartnerNotificationRoute(partnerRow),
+      };
+    if (firstPartyRow)
+      return {
+        channel: "first_party_app",
+        route: mapFirstPartyNotificationRoute(firstPartyRow),
+      };
+    return { channel: "none" };
+  }
+
+  async isPaymentRecoveryNoticeRelevant(
+    orderId: string,
+    subjectRef: string,
+    executor: Pick<DatabaseService, "query"> = this.databaseService!,
+  ): Promise<boolean> {
+    if (!this.isEnabled()) return false;
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        orderId,
+      ) ||
+      !subjectRef ||
+      subjectRef.length > 255
+    )
+      return false;
+    const result = await executor.query(
+      `SELECT c.order_id FROM passenger.payment_charge_records c
+       JOIN passenger.booking_histories h ON h.order_id=c.order_id AND h.drts_passenger_id=c.drts_passenger_id
+       JOIN passenger.accounts a ON a.drts_passenger_id=c.drts_passenger_id AND a.status='active'
+       JOIN billing.multi_taxi_passenger_payments p ON p.payment_id=c.payment_id AND p.order_id=c.order_id::text
+       JOIN ops.phase1_owned_orders o ON o.order_id=c.order_id::text
+       JOIN mobility.phase1_order_first_party_notification_routes r
+         ON r.order_id=c.order_id::text AND r.drts_passenger_id=c.drts_passenger_id
+       WHERE c.order_id=$1 AND r.passenger_subject_ref=$2 AND o.status='completed'
+         AND o.record->'passenger'->>'passengerId'=c.drts_passenger_id
+         AND c.status='manual_recovery' AND p.status='manual_recovery'
+         AND c.recovery_notice_requested_at IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM mobility.phase1_order_partner_notification_routes pr WHERE pr.order_id=r.order_id)`,
+      [orderId, subjectRef],
+    );
+    return result.rows.length === 1;
+  }
+
+  /** Called inside the payment account-first transaction on its SAME client.
+   * No route is manufactured and no receipt/delivery status is written here.
+   */
+  async enqueuePaymentRecoveryNotice(
+    executor: Pick<DatabaseService, "query">,
+    orderId: string,
+    expiresAt: string,
+  ): Promise<string | null> {
+    if (
+      !this.isEnabled() ||
+      !Number.isFinite(Date.parse(expiresAt)) ||
+      Date.parse(expiresAt) <= Date.now()
+    )
+      return null;
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        orderId,
+      )
+    )
+      return null;
+    const resolution = await this.resolvePassengerNotificationChannel(
+      orderId,
+      executor,
+    );
+    if (resolution.channel !== "first_party_app") return null;
+    const route = resolution.route;
+    if (
+      !(await this.isPaymentRecoveryNoticeRelevant(
+        orderId,
+        route.passengerSubjectRef,
+        executor,
+      ))
+    )
+      return null;
+    const outboxId = `pax:payment-recovery:${orderId}`;
+    const prior = await executor.query(
+      `SELECT * FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE`,
+      [outboxId],
+    );
+    if (prior.rows[0]) {
+      const row = prior.rows[0];
+      if (
+        row.order_id !== orderId ||
+        row.passenger_subject_ref !== route.passengerSubjectRef ||
+        row.event_type !== "payment_recovery_required" ||
+        !Number.isSafeInteger(row.payload?.eventSequence) ||
+        row.payload.eventSequence < 1 ||
+        typeof row.payload?.expiresAt !== "string" ||
+        !Number.isFinite(Date.parse(row.payload.expiresAt)) ||
+        Date.parse(row.payload.expiresAt) <= new Date(row.created_at).getTime()
+      )
+        throw new Error("payment_recovery_notice_state_conflict");
+      return outboxId; // Original expiry/sequence/claim/receipt are immutable.
+    }
+    const inserted = await executor.query(
+      `INSERT INTO ops.consumer_notification_outbox (outbox_id,order_id,passenger_subject_ref,event_type,assignment_version,payload,status,attempt_count,next_attempt_at,created_at,delivered_at)
+       VALUES ($1,$2,$3,'payment_recovery_required',NULL,$4::jsonb,'pending',0,now(),now(),NULL)
+       ON CONFLICT (outbox_id) DO NOTHING RETURNING outbox_id`,
+      [
+        outboxId,
+        orderId,
+        route.passengerSubjectRef,
+        JSON.stringify({ expiresAt: new Date(expiresAt).toISOString() }),
+      ],
+    );
+    if (inserted.rowCount !== 1)
+      throw new Error("payment_recovery_notice_state_conflict");
+    const sequence = await this.allocateNotificationEventSequence(
+      orderId,
+      executor,
+    );
+    if (sequence === null || !Number.isSafeInteger(sequence) || sequence < 1)
+      throw new Error("payment_recovery_notice_sequence_unavailable");
+    const updated = await executor.query(
+      `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload,'{eventSequence}',to_jsonb($2::bigint)) WHERE outbox_id=$1 AND order_id=$3 AND event_type='payment_recovery_required' AND passenger_subject_ref=$4`,
+      [outboxId, sequence, orderId, route.passengerSubjectRef],
+    );
+    if (updated.rowCount !== 1)
+      throw new Error("payment_recovery_notice_state_conflict");
+    return outboxId;
   }
 
   /**
@@ -553,32 +907,23 @@ export class MultiTaxiRepository {
     return row ? Number(row.event_sequence) : null;
   }
 
-  private mapOrderPartnerNotificationRoute(
-    row: OrderPartnerNotificationRouteRow,
-  ): OrderPartnerNotificationRoute {
-    return {
-      orderId: row.order_id,
-      tenantId: row.tenant_id,
-      partnerId: row.partner_id,
-      entrySlug: row.entry_slug,
-      partnerUserRef: row.partner_user_ref,
-      drtsPassengerId: row.drts_passenger_id,
-      passengerSubjectRef: row.passenger_subject_ref,
-      identityLinkedAt: new Date(row.identity_linked_at).toISOString(),
-      consentBundleVersion: row.consent_bundle_version,
-      notificationPolicyVersion:
-        row.notification_policy_version as OrderPartnerNotificationRoute["notificationPolicyVersion"],
-      rideRef: row.ride_ref,
-      createdAt: new Date(row.created_at).toISOString(),
-    };
-  }
-
   /**
    * Records the result of one push-delivery attempt. `delivered_at` is only set
    * for a `delivered` outcome, so a row whose provider was never provisioned
    * stays queryable as undelivered instead of looking like a sent notification.
    */
-  /** Durable selection; blocked/manual/terminal rows never become automatic retries. */
+  /**
+   * Durable selection; blocked/manual/terminal rows never become automatic
+   * retries. PUSH-CHANNEL-ROUTER-20261006 D7: this single due-set covers
+   * every channel a row might still resolve to — a brand new row with no
+   * channel context yet (both COALESCE branches null, defaults to
+   * `automatic`), a partner row whose context/payload disposition is
+   * `automatic`, and a row already sealed `ambiguous`/`none`/
+   * `first_party_app`-skeleton via `payload.channelRouting` (added by
+   * `recordPushDeliveryOutcome`'s `channelMetadata` path) — the last group
+   * is excluded here exactly like a `manual_only` partner row already was,
+   * so it is never rescanned once sealed.
+   */
   async listDuePartnerNotifications(
     limit = 100,
   ): Promise<ConsumerNotificationOutboxRecord[]> {
@@ -590,7 +935,13 @@ export class MultiTaxiRepository {
       SELECT to_jsonb(o) AS record FROM ops.consumer_notification_outbox o
       LEFT JOIN mobility.phase1_partner_notification_delivery_contexts c USING (outbox_id)
       WHERE o.status IN ('pending','sending','failed') AND o.next_attempt_at <= now()
-        AND COALESCE(c.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition', 'automatic') = 'automatic'
+        AND COALESCE(
+          o.payload->'channelRouting'->>'retryDisposition',
+          o.payload->'firstPartyNotification'->>'retryDisposition',
+          c.retry_disposition,
+          o.payload->'partnerNotification'->>'retryDisposition',
+          'automatic'
+        ) = 'automatic'
         AND NOT EXISTS (SELECT 1 FROM ops.phase1_push_delivery_claims l
           WHERE l.outbox_id=o.outbox_id AND l.claim_state='claimed' AND l.lease_expires_at > now())
       ORDER BY CASE WHEN c.expires_at <= now() THEN 0 ELSE 1 END, o.next_attempt_at LIMIT $1
@@ -635,8 +986,23 @@ export class MultiTaxiRepository {
       const metadata = record.payload.partnerNotification as
         | PartnerDeliveryMetadata
         | undefined;
+      const channelMetadata = record.payload.channelRouting as
+        | PassengerNotificationChannelMetadata
+        | undefined;
+      // A sealed router stop (channelRouting) is authoritative over any
+      // older/default partner-automatic signal — see
+      // listDuePartnerNotifications' matching COALESCE order. Only an
+      // explicit manual retry (retryPartnerNotificationDelivery), which
+      // clears channelRouting, can reopen a row the router has stopped.
       const disposition =
-        context.rows[0]?.retry_disposition ?? metadata?.retryDisposition;
+        channelMetadata?.retryDisposition ??
+        (
+          record.payload.firstPartyNotification as
+            | FirstPartyDeliveryMetadata
+            | undefined
+        )?.retryDisposition ??
+        context.rows[0]?.retry_disposition ??
+        metadata?.retryDisposition;
       if (
         record.status === "delivered" ||
         Date.parse(record.nextAttemptAt) > Date.now() ||
@@ -820,7 +1186,13 @@ export class MultiTaxiRepository {
       assignment_version: number;
     }>(
       `
-      SELECT o.status, COALESCE((SELECT MAX(assignment_version) FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id=o.order_id), 0) AS assignment_version
+      SELECT o.status, COALESCE(
+        (SELECT MAX(assignment_version)
+         FROM ops.passenger_dispatch_disclosure_snapshots s WHERE s.order_id = o.order_id),
+        CASE WHEN o.runtime_profile_code = 'business_dispatch' THEN
+          (SELECT count(*) FROM ops.phase1_dispatch_assignments a WHERE a.order_id = o.order_id)
+        ELSE 0 END
+      ) AS assignment_version
       FROM ops.phase1_owned_orders o WHERE o.order_id=$1
     `,
       [orderId],
@@ -947,8 +1319,20 @@ export class MultiTaxiRepository {
     const client = await this.databaseService!.connect();
     try {
       await client.query("BEGIN");
-      if (input.partnerMetadata) {
-        // Same lock order as claimPartnerNotification avoids a claim/outbox deadlock.
+      // Router-level outcomes are claimed through the same strict,
+      // fenced claimPartnerNotification() as the partner path (D7: one
+      // shared claim/fence owner for every channel), so they re-validate
+      // the lease at write time identically.
+      const fencedClaim = Boolean(
+        input.partnerMetadata ||
+        input.firstPartyMetadata ||
+        input.channelMetadata,
+      );
+      if (fencedClaim) {
+        // Same lock order as claimPartnerNotification (outbox before claim)
+        // for every fenced channel, partner or router-sealed, avoids a
+        // claim/outbox deadlock between a recovering worker and an
+        // in-flight writer of the other kind.
         await client.query(
           "SELECT outbox_id FROM ops.consumer_notification_outbox WHERE outbox_id=$1 FOR UPDATE",
           [input.outboxId],
@@ -962,7 +1346,7 @@ export class MultiTaxiRepository {
             AND ($2::boolean = false OR (claim_state = 'claimed' AND lease_expires_at > clock_timestamp()))
           FOR UPDATE
         `,
-        [input.outboxId, Boolean(input.partnerMetadata)],
+        [input.outboxId, fencedClaim],
       );
       const claimRow = claimResult.rows[0];
       if (!claimRow || claimRow.fence_token !== input.fenceToken) {
@@ -1013,6 +1397,44 @@ export class MultiTaxiRepository {
         await client.query(
           `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{partnerNotification}', $2::jsonb) WHERE outbox_id=$1`,
           [input.outboxId, JSON.stringify(m)],
+        );
+      }
+
+      if (input.firstPartyMetadata) {
+        const m = input.firstPartyMetadata;
+        await client.query(
+          `
+          UPDATE mobility.phase1_first_party_notification_delivery_contexts
+          SET delivery_stage=$2, retry_disposition=$3, failure_reason=$4,
+              receipt_id=$5, delivered_at=$6, device_outcomes=$7::jsonb
+          WHERE outbox_id=$1
+        `,
+          [
+            input.outboxId,
+            m.deliveryStage,
+            m.retryDisposition,
+            m.failureReason,
+            m.receiptId,
+            input.deliveryOutcome.deliveredAt,
+            JSON.stringify(m.deviceOutcomes),
+          ],
+        );
+        // Also persist pre-context configuration/route failures. This metadata
+        // is read by the same outbox scheduler/claim path as durable contexts.
+        await client.query(
+          `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{firstPartyNotification}', $2::jsonb) WHERE outbox_id=$1`,
+          [input.outboxId, JSON.stringify(m)],
+        );
+      }
+
+      if (input.channelMetadata) {
+        // PUSH-CHANNEL-ROUTER-20261006: router-level outcomes (ambiguous/
+        // none/first_party_app-skeleton) have no partner context row to
+        // update — only the outbox's own payload carries the sealed
+        // disposition `listDuePartnerNotifications` reads back.
+        await client.query(
+          `UPDATE ops.consumer_notification_outbox SET payload=jsonb_set(payload, '{channelRouting}', $2::jsonb) WHERE outbox_id=$1`,
+          [input.outboxId, JSON.stringify(input.channelMetadata)],
         );
       }
 
@@ -1253,8 +1675,18 @@ export class MultiTaxiRepository {
     return result.rows[0] ? this.mapDriverRatingSummary(result.rows[0]) : null;
   }
 
-  async persistPassengerRating(rating: PassengerTripRatingRecord) {
+  async persistPassengerRating(
+    rating: PassengerTripRatingRecord,
+    accountHook?: PassengerAccountRatingHook,
+    rideContext?: PassengerRideRatingContext,
+  ) {
     if (!this.isEnabled()) {
+      if (accountHook || rideContext)
+        throw new ApiRequestError(
+          503,
+          "PASSENGER_RATING_STORAGE_UNAVAILABLE",
+          "Rating storage is unavailable.",
+        );
       return {
         rating,
         summary: this.createSingleRatingSummary(rating),
@@ -1262,8 +1694,114 @@ export class MultiTaxiRepository {
     }
 
     const client = await this.databaseService!.connect();
+    let committed = false;
     try {
       await client.query("BEGIN");
+      if (accountHook || rideContext) {
+        await client.query("SET LOCAL lock_timeout = '3s'");
+        await client.query("SET LOCAL statement_timeout = '8s'");
+      }
+      if (rideContext) {
+        const verified = await client.query<{
+          scopes: string[];
+          expires_at: Date | string;
+          revoked_at: Date | string | null;
+          database_now: Date | string;
+        }>(
+          `SELECT scopes, expires_at, revoked_at, clock_timestamp() AS database_now
+           FROM ops.passenger_ride_access_tokens
+           WHERE token_id = $1 AND token_digest = $2 AND order_id = $3
+             AND passenger_subject_ref = $4 FOR SHARE`,
+          [
+            rideContext.token.tokenId,
+            rideContext.tokenDigest,
+            rating.orderId,
+            rating.passengerSubjectRef,
+          ],
+        );
+        const token = verified.rows[0];
+        if (
+          !token ||
+          token.revoked_at !== null ||
+          !Number.isFinite(new Date(token.expires_at).getTime()) ||
+          new Date(token.expires_at).getTime() <=
+            new Date(token.database_now).getTime()
+        )
+          throw new ApiRequestError(
+            404,
+            "PASSENGER_RIDE_TOKEN_INVALID",
+            "The passenger ride link is invalid or expired.",
+          );
+        if (!Array.isArray(token.scopes) || !token.scopes.includes("ride:rate"))
+          throw new ApiRequestError(
+            403,
+            "PASSENGER_RIDE_SCOPE_FORBIDDEN",
+            "The passenger ride token does not grant this action.",
+          );
+        const owned = await client.query<{
+          status: string;
+          record: OwnedOrderRecord;
+        }>(
+          `SELECT o.status, o.record FROM ops.phase1_owned_orders o
+           WHERE o.order_id = $1 FOR SHARE`,
+          [rating.orderId],
+        );
+        const order = owned.rows[0];
+        if (
+          !order ||
+          order.record.runtimeProfileCode !== "multi_taxi_direct" ||
+          resolvePassengerSubjectRef(order.record.passenger) !==
+            rating.passengerSubjectRef
+        )
+          throw new ApiRequestError(
+            404,
+            "PASSENGER_RIDE_NOT_FOUND",
+            "Ride not found.",
+          );
+        if (order.status !== "completed")
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+            "The trip must be completed.",
+          );
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [`passenger-rating:${rating.orderId}:${rating.passengerSubjectRef}`],
+        );
+      }
+      if (accountHook) {
+        const owner = await client.query<{
+          status: string;
+          record: { passenger?: { passengerId?: string } };
+        }>(
+          `SELECT o.status, o.record FROM passenger.booking_histories b
+           JOIN passenger.accounts a ON a.drts_passenger_id = b.drts_passenger_id
+           JOIN ops.phase1_owned_orders o ON o.order_id = b.order_id::text
+           WHERE b.order_id = $1 AND b.drts_passenger_id = $2
+             AND a.status = 'active' AND a.deleted_at IS NULL FOR SHARE OF b, a, o`,
+          [rating.orderId, rating.passengerSubjectRef],
+        );
+        const order = owner.rows[0];
+        if (
+          !order ||
+          order.record.passenger?.passengerId !== rating.passengerSubjectRef
+        )
+          throw new ApiRequestError(
+            404,
+            "PASSENGER_RIDE_NOT_FOUND",
+            "Ride not found.",
+          );
+        if (order.status !== "completed")
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+            "The trip must be completed.",
+          );
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [`passenger-rating:${rating.orderId}:${rating.passengerSubjectRef}`],
+        );
+      }
       const ratingResult = await client.query<PassengerTripRatingRow>(
         `
           INSERT INTO ops.passenger_trip_ratings (
@@ -1298,6 +1836,66 @@ export class MultiTaxiRepository {
         ],
       );
       const storedRating = this.mapPassengerRating(ratingResult.rows[0]!);
+      if (accountHook || rideContext) {
+        if (
+          storedRating.score !== rating.score ||
+          JSON.stringify(
+            rideContext ? [...storedRating.tags].sort() : storedRating.tags,
+          ) !== JSON.stringify(rating.tags) ||
+          storedRating.comment !== rating.comment
+        ) {
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_ALREADY_SUBMITTED",
+            "The original rating cannot be changed.",
+          );
+        }
+        const isNew = storedRating.ratingId === rating.ratingId;
+        if (
+          rideContext &&
+          (storedRating.tripId !== rating.tripId ||
+            storedRating.driverId !== rating.driverId)
+        )
+          throw new ApiRequestError(
+            409,
+            "PASSENGER_RATING_ASSIGNMENT_MISSING",
+            "The original rating assignment cannot be changed.",
+          );
+        if (isNew) {
+          const task = await client.query<{
+            completed_at: string | null;
+            database_now: Date | string;
+          }>(
+            `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now
+             FROM ops.phase1_driver_tasks WHERE order_id = $1 AND assignment_id = $2
+               AND status = 'completed' AND record->>'driverId' = $3 FOR SHARE`,
+            [rating.orderId, rating.tripId, rating.driverId],
+          );
+          if (!this.passengerRatingWindow(task.rows[0]).withinWindow) {
+            throw new ApiRequestError(
+              409,
+              "PASSENGER_RATING_WINDOW_CLOSED",
+              "Ratings require an actual completion within 24 hours.",
+            );
+          }
+          const paid = await client.query(
+            `SELECT payment_id FROM billing.multi_taxi_passenger_payments
+             WHERE order_id = $1 AND status = 'captured' FOR SHARE`,
+            [rating.orderId],
+          );
+          if (!paid.rows.length)
+            throw new ApiRequestError(
+              409,
+              "PASSENGER_RATING_PAYMENT_REQUIRED",
+              "The completed trip must be paid.",
+            );
+        }
+        await (accountHook ?? rideContext)!.execute(
+          client,
+          storedRating,
+          isNew,
+        );
+      }
       const calculatedAt = new Date().toISOString();
       const summaryResult = await client.query<DriverRatingSummaryRow>(
         `
@@ -1311,7 +1909,7 @@ export class MultiTaxiRepository {
             calculated_at
           )
           SELECT
-            $1,
+            $1::varchar,
             CASE WHEN count(*) = 0 THEN 'new_driver' ELSE 'rated' END,
             CASE
               WHEN count(*) = 0 THEN NULL
@@ -1322,7 +1920,7 @@ export class MultiTaxiRepository {
             1,
             $2
           FROM ops.passenger_trip_ratings
-          WHERE driver_id = $1
+          WHERE driver_id = $1::varchar
             AND status = 'active'
           ON CONFLICT (driver_id) DO UPDATE SET
             display_state = EXCLUDED.display_state,
@@ -1334,18 +1932,25 @@ export class MultiTaxiRepository {
             calculated_at = EXCLUDED.calculated_at
           RETURNING *
         `,
-        [rating.driverId, calculatedAt],
+        [storedRating.driverId, calculatedAt],
       );
       await client.query("COMMIT");
+      committed = true;
       return {
         rating: storedRating,
         summary: this.mapDriverRatingSummary(summaryResult.rows[0]!),
       };
     } catch (error) {
-      await client.query("ROLLBACK");
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        this.logger.warn(
+          "Passenger rating rollback failed; discarding the connection.",
+        );
+      }
       throw error;
     } finally {
-      client.release();
+      client.release(!committed);
     }
   }
 
@@ -1438,7 +2043,7 @@ export class MultiTaxiRepository {
             calculated_at
           )
           SELECT
-            $1,
+            $1::varchar,
             CASE WHEN count(*) = 0 THEN 'new_driver' ELSE 'rated' END,
             CASE
               WHEN count(*) = 0 THEN NULL
@@ -1449,7 +2054,7 @@ export class MultiTaxiRepository {
             1,
             $2
           FROM ops.passenger_trip_ratings
-          WHERE driver_id = $1
+          WHERE driver_id = $1::varchar
             AND status = 'active'
           ON CONFLICT (driver_id) DO UPDATE SET
             display_state = EXCLUDED.display_state,
@@ -1511,6 +2116,89 @@ export class MultiTaxiRepository {
     }
   }
 
+  private passengerRatingWindow(row?: {
+    completed_at: string | null;
+    database_now: Date | string;
+  }) {
+    const completedAt = Date.parse(row?.completed_at ?? "");
+    const databaseNow = new Date(row?.database_now ?? NaN).getTime();
+    return {
+      completedAt: Number.isFinite(completedAt)
+        ? new Date(completedAt).toISOString()
+        : null,
+      withinWindow:
+        Number.isFinite(completedAt) &&
+        Number.isFinite(databaseNow) &&
+        completedAt <= databaseNow &&
+        databaseNow - completedAt <= 24 * 60 * 60 * 1000,
+    };
+  }
+
+  async findPassengerRatingWindow(
+    orderId: string,
+    assignmentId: string,
+    driverId: string,
+  ) {
+    if (!this.isEnabled()) return this.passengerRatingWindow();
+    const result = await this.databaseService!.query<{
+      completed_at: string | null;
+      database_now: Date | string;
+    }>(
+      `SELECT record->>'completedAt' AS completed_at, clock_timestamp() AS database_now
+       FROM ops.phase1_driver_tasks WHERE order_id = $1 AND assignment_id = $2
+         AND status = 'completed' AND record->>'driverId' = $3`,
+      [orderId, assignmentId, driverId],
+    );
+    return this.passengerRatingWindow(result.rows[0]);
+  }
+
+  async findBookedPassengerQuote(
+    order: OwnedOrderRecord,
+  ): Promise<PassengerBookingFareDisclosure | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<{
+      fare_snapshot_id: string;
+      drts_passenger_id: string;
+      passenger_confirmed_at: Date | string;
+    }>(
+      `SELECT fare_snapshot_id, drts_passenger_id, passenger_confirmed_at
+       FROM passenger.booking_histories WHERE order_id = $1`,
+      [order.orderId],
+    );
+    const booking = result.rows[0];
+    if (!booking) return null; // Legacy rides have no first-party booking.
+    const snapshot =
+      booking.drts_passenger_id === order.passenger.passengerId
+        ? await new PassengerFareRepository(
+            this.databaseService!,
+          ).findOwnedSnapshot(
+            booking.fare_snapshot_id,
+            booking.drts_passenger_id,
+          )
+        : null;
+    if (!snapshot)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_BOOKING_QUOTE_UNAVAILABLE",
+        "The original booking quote is unavailable.",
+      );
+    // Booking validated ownership, route, schedule and expiry before committing
+    // this reference. Historical disclosure must not reprice or expire it.
+    return {
+      fareSnapshotId: snapshot.fareSnapshotId,
+      fareVersion: snapshot.fareVersion,
+      estimatedMin: snapshot.estimatedMin,
+      estimatedMax: snapshot.estimatedMax,
+      route: structuredClone(snapshot.route),
+      tariffSnapshot: { ...snapshot.tariffSnapshot },
+      breakdown: { ...snapshot.breakdown },
+      passengerConfirmedAt: new Date(
+        booking.passenger_confirmed_at,
+      ).toISOString(),
+      createdAt: snapshot.createdAt,
+    };
+  }
+
   async findPassengerPayment(orderId: string) {
     if (!this.isEnabled()) {
       return null;
@@ -1550,7 +2238,8 @@ export class MultiTaxiRepository {
       `
         SELECT *
         FROM reporting.multi_taxi_electronic_receipts
-        WHERE order_id = $1
+        WHERE order_id = $1 AND is_current = true
+        ORDER BY receipt_version DESC
         LIMIT 1
       `,
       [orderId],
@@ -1766,13 +2455,34 @@ export class MultiTaxiRepository {
         ctx.wire_payload as "wirePayload",
         ctx.wire_payload_hash as "wirePayloadHash",
         ctx.event_sequence as "eventSequence",
-        COALESCE(ctx.expires_at, (o.payload->'partnerNotification'->>'expiresAt')::timestamptz) as "expiresAt",
-        COALESCE(ctx.delivery_target, o.payload->'partnerNotification'->>'deliveryTarget') as "deliveryTarget",
-        COALESCE(ctx.delivery_stage, o.payload->'partnerNotification'->>'deliveryStage') as "deliveryStage",
-        COALESCE(ctx.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition') as "retryDisposition",
-        COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') as "failureReason",
-        COALESCE(ctx.receipt_id, o.payload->'partnerNotification'->>'receiptId') as "receiptId",
-        COALESCE(ctx.downstream_status, o.payload->'partnerNotification'->>'downstreamStatus') as "downstreamStatus",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN (o.payload->'channelRouting'->>'expiresAt')::timestamptz
+          ELSE COALESCE(ctx.expires_at, (o.payload->'partnerNotification'->>'expiresAt')::timestamptz)
+        END as "expiresAt",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'deliveryTarget'
+          ELSE COALESCE(ctx.delivery_target, o.payload->'partnerNotification'->>'deliveryTarget')
+        END as "deliveryTarget",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'deliveryStage'
+          ELSE COALESCE(ctx.delivery_stage, o.payload->'partnerNotification'->>'deliveryStage')
+        END as "deliveryStage",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'retryDisposition'
+          ELSE COALESCE(ctx.retry_disposition, o.payload->'partnerNotification'->>'retryDisposition')
+        END as "retryDisposition",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'failureReason'
+          ELSE COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason')
+        END as "failureReason",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'receiptId'
+          ELSE COALESCE(ctx.receipt_id, o.payload->'partnerNotification'->>'receiptId')
+        END as "receiptId",
+        CASE WHEN o.payload ? 'channelRouting'
+          THEN o.payload->'channelRouting'->>'downstreamStatus'
+          ELSE COALESCE(ctx.downstream_status, o.payload->'partnerNotification'->>'downstreamStatus')
+        END as "downstreamStatus",
         o.created_at as "createdAt",
         ctx.delivered_at as "deliveredAt",
         o.status,
@@ -1780,7 +2490,10 @@ export class MultiTaxiRepository {
         o.event_type as "eventType",
         CASE
           WHEN o.status = 'delivered' THEN 'delivered'
-          WHEN COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason') IN ('endpoint_disabled', 'configuration_blocked') THEN 'provider_not_configured'
+          WHEN (CASE WHEN o.payload ? 'channelRouting'
+                  THEN o.payload->'channelRouting'->>'failureReason'
+                  ELSE COALESCE(ctx.failure_reason, o.payload->'partnerNotification'->>'failureReason')
+                END) IN ('endpoint_disabled', 'configuration_blocked', 'no_notification_channel') THEN 'provider_not_configured'
           WHEN o.status = 'failed' THEN 'provider_error'
           ELSE NULL
         END as result,
@@ -1814,7 +2527,9 @@ export class MultiTaxiRepository {
         deliveredAt: row.deliveredAt ? this.toIso(row.deliveredAt) : null,
         expiresAt: row.expiresAt ? this.toIso(row.expiresAt) : null,
         nextAttemptAt: row.nextAttemptAt ? this.toIso(row.nextAttemptAt) : null,
-        leaseExpiresAt: row.leaseExpiresAt ? this.toIso(row.leaseExpiresAt) : null,
+        leaseExpiresAt: row.leaseExpiresAt
+          ? this.toIso(row.leaseExpiresAt)
+          : null,
       })),
       total: parseInt(countResult.rows[0]?.cnt || "0", 10),
     };
@@ -1923,7 +2638,10 @@ export class MultiTaxiRepository {
         : outbox.payload?.partnerNotification?.retryDisposition;
       if (
         retryDisp === "terminal" ||
-        (retryDisp && !["manual_only", "automatic", "configuration_blocked"].includes(retryDisp))
+        (retryDisp &&
+          !["manual_only", "automatic", "configuration_blocked"].includes(
+            retryDisp,
+          ))
       ) {
         await client.query("ROLLBACK");
         return {
@@ -2125,7 +2843,10 @@ export class MultiTaxiRepository {
         };
       }
 
-      if (internalEvent !== "receipt_ready") {
+      if (
+        internalEvent !== "receipt_ready" &&
+        internalEvent !== "trip_cancelled"
+      ) {
         if (
           ["cancelled", "completed", "closed", "rejected"].includes(
             relevance.status,
@@ -2187,6 +2908,14 @@ export class MultiTaxiRepository {
       );
 
       const newPayload = outbox.payload || {};
+      // A deliberate manual retry clears a prior router-sealed stop
+      // (ambiguous/none/first_party_app-skeleton) so the next attempt
+      // re-resolves the channel fresh; if it is still ambiguous/none,
+      // deliverNonPartnerChannelOutcome reseals channelRouting and
+      // listDuePartnerNotifications/claimPartnerNotification stop it again
+      // (PUSH-CHANNEL-ROUTER-20261006 R2) instead of leaving the old seal in
+      // place to fight the `retry_disposition = 'automatic'` write below.
+      delete newPayload.channelRouting;
 
       await client.query(
         "UPDATE ops.consumer_notification_outbox SET status = 'pending', next_attempt_at = NOW(), payload = $2::jsonb WHERE outbox_id = $1",

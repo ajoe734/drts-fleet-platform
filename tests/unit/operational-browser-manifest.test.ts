@@ -1,8 +1,92 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import * as ts from "typescript";
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  operationalRequestHeaders,
+  requiredOrigin,
+} from "../e2e/operational-document-upload";
 
 describe("operational browser journeys manifest guard", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("uses Fleet proof for both original setup arrays while retaining Admin review authority", () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        path.join(
+          process.cwd(),
+          "tests/e2e/fixtures/operational-browser-journeys.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(manifest.fleetApplicationSetup.fleetPartnerId).toBe(
+      "fleet-demo-001",
+    );
+    const tenant = manifest.journeys.find(
+      (item: { id: string }) => item.id === "tenant-ops-dispatch-intent",
+    );
+    expect(manifest.fleetApplicationSetup.tenantId).toBe(
+      tenant.setup[0].headers["x-tenant-id"],
+    );
+    vi.stubEnv(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      "https://fleet.example.invalid",
+    );
+    vi.stubEnv(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN",
+      "fleet-invocation-dummy",
+    );
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+      "existing-partner-session-dummy",
+    );
+    vi.stubEnv(
+      "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+      "https://admin.example.invalid",
+    );
+    vi.stubEnv("DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN", "admin-invocation-dummy");
+    for (const id of [
+      "fleet-submit-read-withdraw-resubmit",
+      "admin-review-approve-readback",
+    ]) {
+      const journey = manifest.journeys.find(
+        (item: { id: string }) => item.id === id,
+      );
+      expect(journey).toBeDefined();
+      expect(journey.setup).toHaveLength(
+        id === "fleet-submit-read-withdraw-resubmit" ? 4 : 6,
+      );
+      for (const step of journey.setup) {
+        const baseUrlEnv = step.baseUrlEnv ?? journey.baseUrlEnv;
+        expect(baseUrlEnv).toBe("DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL");
+        const headers = operationalRequestHeaders(
+          baseUrlEnv,
+          "https://fleet.example.invalid",
+        );
+        expect(headers.Authorization).toBe("Bearer fleet-invocation-dummy");
+        expect(headers["x-drts-authorization"]).toBe(
+          "Bearer existing-partner-session-dummy",
+        );
+      }
+    }
+    const admin = manifest.journeys.find(
+      (item: { id: string }) => item.id === "admin-review-approve-readback",
+    );
+    expect(
+      operationalRequestHeaders(
+        admin.baseUrlEnv,
+        "https://admin.example.invalid/supply-review",
+      ),
+    ).toEqual({
+      Authorization: "Bearer admin-invocation-dummy",
+    });
+  });
+
   it("keeps the source evidence document independent of a candidate SHA", () => {
     const evidencePath = path.join(
       process.cwd(),
@@ -43,8 +127,24 @@ describe("operational browser journeys manifest guard", () => {
           }),
         }),
         expect.objectContaining({
-          path: expect.stringContaining("documents/confirm"),
-          method: "POST",
+          kind: "document-upload",
+          intentPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({
+            documentType: "professional_driver_license",
+          }),
+          confirmPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
+        }),
+        expect.objectContaining({
+          kind: "document-upload",
+          intentPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({
+            documentType: "taxi_driver_registration",
+          }),
+          confirmPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{fleetSubmissionId}}/documents/confirm",
         }),
       ]),
     );
@@ -69,6 +169,32 @@ describe("operational browser journeys manifest guard", () => {
     expect(adminJourney.setup[0].body.supportedServiceProductCodes).toEqual([
       "business_dispatch",
     ]);
+    expect(adminJourney.setup).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          kind: "document-upload",
+          intentPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({
+            documentType: "professional_driver_license",
+          }),
+          confirmPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+        }),
+        expect.objectContaining({
+          baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          kind: "document-upload",
+          intentPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/upload-url",
+          intentBody: expect.objectContaining({
+            documentType: "taxi_driver_registration",
+          }),
+          confirmPath:
+            "/control-plane-proxy/fleet-partner/supply-submissions/{{adminSubmissionId}}/documents/confirm",
+        }),
+      ]),
+    );
     const approveOp = adminJourney.operations[0];
     expect(approveOp.kind).toBe("request");
     expect(approveOp.responseKind).toBe("json");
@@ -78,7 +204,14 @@ describe("operational browser journeys manifest guard", () => {
         kind: "click",
         control: "[data-drt-operation='admin-start-review']",
       },
+      { kind: "click", control: "[data-drt-operation='admin-approve']" },
     ]);
+    expect(approveOp.control).toBe(
+      'button:has-text("確認核可"), button:has-text("Confirm approval")',
+    );
+    expect(approveOp.requestUrlIncludes).toBe(
+      "/control-plane-proxy/admin/supply-review/submissions/{{adminSubmissionId}}/approve",
+    );
     expect(approveOp.readback.url).toBe(
       "/control-plane-proxy/admin/supply-review/submissions/{resultId}",
     );
@@ -200,9 +333,10 @@ describe("operational browser journeys manifest guard", () => {
     const anchorAttributesFor = (filePath: string, marker: string) => {
       const source = readFileSync(path.join(process.cwd(), filePath), "utf8");
       const markerIndex = source.indexOf(marker);
-      expect(markerIndex, `${marker} must exist in ${filePath}`).toBeGreaterThan(
-        -1,
-      );
+      expect(
+        markerIndex,
+        `${marker} must exist in ${filePath}`,
+      ).toBeGreaterThan(-1);
       const tagStart = source.lastIndexOf("<a", markerIndex);
       const tagEnd = source.indexOf(">", markerIndex);
       expect(tagStart).toBeGreaterThan(-1);
@@ -228,5 +362,327 @@ describe("operational browser journeys manifest guard", () => {
         'data-drt-operation="bank-statement-download"',
       ),
     ).not.toMatch(/\bdownload=/);
+  });
+});
+
+it("keeps both original Referral cases on real first-version and per-order fee controls", () => {
+  const manifest = JSON.parse(
+    readFileSync(
+      path.join(
+        process.cwd(),
+        "tests/e2e/fixtures/operational-browser-journeys.json",
+      ),
+      "utf8",
+    ),
+  );
+  const referrals = manifest.journeys.filter(
+    (item: { surface: string }) => item.surface === "referral",
+  );
+  expect(referrals).toHaveLength(1);
+  const create = referrals[0].operations.find(
+    (op: { name: string }) => op.name === "create",
+  );
+  expect(create.before[0]).toEqual({
+    kind: "referral-fees",
+    control: "[data-drt-operation='referral-fee-agree']",
+  });
+  expect(create.before.at(-1)).toEqual({
+    kind: "click",
+    control: "[data-drt-operation='referral-fee-confirm']",
+  });
+  expect(create.requestUrlIncludes).toBe("/api/referral/booking");
+  expect(create.readback.expectedState).toBe("created");
+});
+
+type FeeResponse = {
+  url(): string;
+  request(): { method(): string };
+  ok(): boolean;
+};
+type FeeStep = { kind: "referral-fees"; control: string };
+type FeePage = {
+  request: {
+    get(url: string): Promise<{
+      ok(): boolean;
+      json(): Promise<{
+        data: {
+          disclosureVersion: string;
+          contentHash: string;
+          acknowledgedAt: string | null;
+        };
+      }>;
+    }>;
+  };
+  waitForResponse(
+    match: (response: FeeResponse) => boolean,
+  ): Promise<FeeResponse>;
+  locator(control: string): { click(): Promise<void> };
+};
+
+function actualOperationalFeeSteps() {
+  // Execute the actual runner body without registering Playwright tests or
+  // starting a browser. Only its Page transport is controlled below.
+  const filename = path.join(
+    process.cwd(),
+    "tests/e2e/operational-browser-acceptance.spec.ts",
+  );
+  const source = ts.createSourceFile(
+    filename,
+    readFileSync(filename, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const declaration = source.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === "runSteps",
+  );
+  if (!declaration) throw new Error("Actual operational runSteps is missing");
+  const { outputText } = ts.transpileModule(declaration.getText(source), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  });
+  const instantiate = new Function(
+    "expect",
+    "PASSENGER_FEE_DISCLOSURE_VERSION",
+    "PASSENGER_FEE_CONTENT_HASH",
+    `${outputText}\nreturn runSteps;`,
+  );
+  const run: (
+    page: FeePage,
+    origin: string,
+    steps: FeeStep[],
+    lastResultId: null,
+    variables: Record<string, string>,
+  ) => Promise<void> = instantiate(
+    expect,
+    PASSENGER_FEE_DISCLOSURE_VERSION,
+    PASSENGER_FEE_CONTENT_HASH,
+  );
+  return run;
+}
+
+describe("actual operational first-fee browser response URL", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    "https://referral.example.invalid",
+    "https://referral.example.invalid/",
+  ])(
+    "matches the real browser POST and retains fee ACK readback for %s",
+    async (configuredOrigin) => {
+      vi.stubEnv("DRTS_DEV_REFERRAL_EMBED_BASE_URL", configuredOrigin);
+      const origin = requiredOrigin("DRTS_DEV_REFERRAL_EMBED_BASE_URL");
+      const browserUrl = new URL(
+        "/api/referral/fees",
+        configuredOrigin,
+      ).toString();
+      const serverTime = "2026-10-21T00:27:12.118Z";
+      let acknowledgedAt: string | null = null;
+      let matches: ((response: FeeResponse) => boolean) | undefined;
+      let resolveResponse: ((response: FeeResponse) => void) | undefined;
+      let rejectResponse: ((error: Error) => void) | undefined;
+      const get = vi.fn(async (url: string) => ({
+        ok: () => new URL(url).origin === new URL(browserUrl).origin,
+        json: async () => ({
+          data: {
+            disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+            contentHash: PASSENGER_FEE_CONTENT_HASH,
+            acknowledgedAt,
+          },
+        }),
+      }));
+      const waitForResponse = vi.fn(
+        (match: (response: FeeResponse) => boolean) => {
+          matches = match;
+          return new Promise<FeeResponse>((resolve, reject) => {
+            resolveResponse = resolve;
+            rejectResponse = reject;
+          });
+        },
+      );
+      const click = vi.fn(async () => {
+        if (!matches || !resolveResponse || !rejectResponse)
+          throw new Error("Response observer must be installed before consent");
+        const response = (url: string, method: string): FeeResponse => ({
+          url: () => url,
+          request: () => ({ method: () => method }),
+          ok: () => true,
+        });
+        expect(matches(response(browserUrl, "GET"))).toBe(false);
+        expect(matches(response(`${browserUrl}/other`, "POST"))).toBe(false);
+        const post = response(browserUrl, "POST");
+        acknowledgedAt = serverTime;
+        if (!matches(post)) {
+          rejectResponse(
+            new Error(
+              "Actual fee observer did not match the canonical browser POST",
+            ),
+          );
+          return;
+        }
+        resolveResponse(post);
+      });
+      const locator = vi.fn(() => ({ click }));
+      await actualOperationalFeeSteps()(
+        { request: { get }, waitForResponse, locator },
+        origin,
+        [
+          {
+            kind: "referral-fees",
+            control: "[data-drt-operation='referral-fee-agree']",
+          },
+        ],
+        null,
+        {},
+      );
+      expect(get.mock.calls.map(([url]) => url)).toEqual([
+        browserUrl,
+        browserUrl,
+      ]);
+      expect(locator).toHaveBeenCalledWith(
+        "[data-drt-operation='referral-fee-agree']",
+      );
+      expect(click).toHaveBeenCalledOnce();
+      expect(waitForResponse).toHaveBeenCalledOnce();
+      expect(acknowledgedAt).toBe(serverTime);
+    },
+  );
+
+  it.each([
+    "https://referral.example.invalid",
+    "https://referral.example.invalid/",
+  ])(
+    "reads an existing canonical fee ACK without resubmitting consent for %s",
+    async (configuredOrigin) => {
+      vi.stubEnv("DRTS_DEV_REFERRAL_EMBED_BASE_URL", configuredOrigin);
+      const browserUrl = new URL(
+        "/api/referral/fees",
+        configuredOrigin,
+      ).toString();
+      const get = vi.fn(async (url: string) => ({
+        ok: () => new URL(url).origin === new URL(browserUrl).origin,
+        json: async () => ({
+          data: {
+            disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+            contentHash: PASSENGER_FEE_CONTENT_HASH,
+            acknowledgedAt: "2026-10-21T00:27:12.118Z",
+          },
+        }),
+      }));
+      const waitForResponse = vi.fn<FeePage["waitForResponse"]>();
+      const locator = vi.fn<FeePage["locator"]>();
+      await actualOperationalFeeSteps()(
+        { request: { get }, waitForResponse, locator },
+        requiredOrigin("DRTS_DEV_REFERRAL_EMBED_BASE_URL"),
+        [
+          {
+            kind: "referral-fees",
+            control: "[data-drt-operation='referral-fee-agree']",
+          },
+        ],
+        null,
+        {},
+      );
+      expect(get.mock.calls.map(([url]) => url)).toEqual([
+        browserUrl,
+        browserUrl,
+      ]);
+      expect(waitForResponse).not.toHaveBeenCalled();
+      expect(locator).not.toHaveBeenCalled();
+    },
+  );
+});
+
+function actualClosedPdfFailureFacts() {
+  const filename = path.join(
+    process.cwd(),
+    "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+  );
+  const source = ts.createSourceFile(
+    filename,
+    readFileSync(filename, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const declaration = source.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "closedPdfFailureFacts",
+  );
+  if (!declaration) throw new Error("Actual PDF failure classifier is missing");
+  const { outputText } = ts.transpileModule(declaration.getText(source), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  });
+  const classify: (error: unknown) => {
+    nativeFailureClass: string;
+    nativeCauseCode: string;
+  } = new Function(`${outputText}\nreturn closedPdfFailureFacts;`)();
+  return classify;
+}
+
+describe("actual hosted PDF closed failure facts", () => {
+  it("retains standard classes and known codes without reading message or stack", () => {
+    const classify = actualClosedPdfFailureFacts();
+    const sensitive = vi.fn(() => {
+      throw new Error("must not inspect");
+    });
+    for (const name of [
+      "Error",
+      "ReferenceError",
+      "TypeError",
+      "RangeError",
+      "SyntaxError",
+      "TimeoutError",
+      "AbortError",
+    ]) {
+      const error = Object.defineProperties(
+        { name, cause: { code: "ERR_REQUIRE_ASYNC_MODULE" } },
+        {
+          message: { get: sensitive },
+          stack: { get: sensitive },
+        },
+      );
+      expect(classify(error)).toEqual({
+        nativeFailureClass: name,
+        nativeCauseCode: "ERR_REQUIRE_ASYNC_MODULE",
+      });
+    }
+    expect(sensitive).not.toHaveBeenCalled();
+    expect(classify({ name: "Error", code: "ENOENT" })).toEqual({
+      nativeFailureClass: "Error",
+      nativeCauseCode: "ENOENT",
+    });
+  });
+
+  it("does not serialize unknown names, codes, messages or nested causes", () => {
+    expect(
+      actualClosedPdfFailureFacts()({
+        name: "nonstandard private name",
+        code: "nonstandard private code",
+        message: "private message",
+        stack: "private stack",
+        cause: {
+          code: "nonstandard private cause",
+          message: "private cause message",
+        },
+      }),
+    ).toEqual({ nativeFailureClass: "UNKNOWN", nativeCauseCode: "UNKNOWN" });
+  });
+
+  it("keeps throwing metadata accessors unknown without replacing the error", () => {
+    const accessor = () => {
+      throw new Error("private accessor failure");
+    };
+    const error = Object.defineProperties(
+      {},
+      {
+        name: { get: accessor },
+        code: { get: accessor },
+        cause: { get: accessor },
+      },
+    );
+    expect(actualClosedPdfFailureFacts()(error)).toEqual({
+      nativeFailureClass: "UNKNOWN",
+      nativeCauseCode: "UNKNOWN",
+    });
   });
 });

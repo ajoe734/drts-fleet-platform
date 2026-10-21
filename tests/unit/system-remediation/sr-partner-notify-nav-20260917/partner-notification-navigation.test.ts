@@ -156,7 +156,11 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
       }
     });
 
-    it("issues handoff artifact successfully", async () => {
+    it.each([
+      ["assigned", "trip"],
+      ["cancelled", "cancelled"],
+      ["completed", "receipt"],
+    ])("issues handoff to %s order screen %s", async (status, screen) => {
       mockTenantPartnerService.getPartnerEntry.mockResolvedValue({
         tenantId: "tenant1",
         partnerId: "partner1",
@@ -167,7 +171,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         partnerId: "partner1",
         drtsPassengerId: "p1",
         orderId: "order1",
-        status: "assigned",
+        status,
         consentBundleVersion: "v1",
       });
       mockIdentityLinkRepo.find.mockResolvedValue({
@@ -194,7 +198,7 @@ describe("SR-PARTNER-NOTIFY-NAV-20260917", () => {
         mockTenantPartnerService.issueReferralEmbedHandoffArtifact,
       ).toHaveBeenCalledWith(
         expect.objectContaining({
-          navigationContext: { orderId: "order1", screen: "trip" },
+          navigationContext: { orderId: "order1", screen },
         }),
         undefined,
         { allowInternalBootstrap: false },

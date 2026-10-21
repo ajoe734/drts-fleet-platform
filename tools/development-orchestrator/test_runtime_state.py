@@ -1,12 +1,59 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from control_plane.infra import runtime_repo as runtime_state
 
 
 class RuntimeStateMigrationTests(unittest.TestCase):
+    def test_migrate_state_initializes_legacy_governance_escalations(self) -> None:
+        for raw in (None, {}, {"version": 5}):
+            with self.subTest(raw=raw):
+                self.assertEqual(
+                    runtime_state.migrate_state(raw)["governance_escalations"], {}
+                )
+
+    def test_governance_escalations_survive_save_and_load(self) -> None:
+        escalation = {
+            "task_id": "TASK-UNBLOCK",
+            "task_class": "unblock",
+            "helper_parent": "TASK",
+            "reason": "History disposition requires human triage.",
+            "flagged_at": "2026-10-15T04:28:00Z",
+        }
+        state = runtime_state.default_state()
+        state["governance_escalations"] = {escalation["task_id"]: escalation}
+        decision = {
+            "actions": [{"task_id": escalation["task_id"], "action": "unblock"}]
+        }
+        state["chair_review"]["last_decision"] = decision
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            state_path = Path(temporary_directory) / "state.json"
+            config = {
+                "paths": {
+                    "state_file": str(state_path),
+                    "event_queue": str(Path(temporary_directory) / "queue.jsonl"),
+                }
+            }
+            runtime_state.save_runtime_state(config, state)
+
+            serialized = json.loads(state_path.read_text())
+            self.assertEqual(
+                serialized.get("governance_escalations"),
+                {escalation["task_id"]: escalation},
+            )
+            restored = runtime_state.load_runtime_state(config)
+
+        self.assertEqual(
+            restored["governance_escalations"], {escalation["task_id"]: escalation}
+        )
+        self.assertEqual(restored["chair_review"]["last_decision"], decision)
+
     def test_migrate_state_preserves_maintenance_throttle_metadata(self) -> None:
         raw = {
             "version": 4,

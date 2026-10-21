@@ -107,3 +107,51 @@
 - [x] **Remote Acceptance Workflow**:
   - 建立 `.github/workflows/booking-search-acceptance.yml`，具備 PostGIS 容器、db:migrate、零略過檢查與 run-status 記錄。
   - 經由 `tools/ci/test_booking_search_acceptance_workflow.py` 嚴格測試驗證。
+
+---
+
+## 5. BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020 — C013 代表性大量資料 PostgreSQL 分頁與跨租戶／第二實例驗收補強
+
+- **Continuation Task ID**: `BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020`
+- **Parent Task ID**: `SR-BOOKING-VERIFY`（維持原 `done` 狀態與既有 keys 不變）
+- **Source Requirement ID**: `C013`（補查詢條件與大量資料分頁；未等同建立到結算完成）
+- **Owner**: `Gemini`
+- **Reviewer**: `Gemini2`
+- **Branch**: `gemini/booking-query-large-pg-acceptance-20261020`
+- **Base Commit**: `28ba56f7abb0292c4560d87c2c76bde5676984f7` (`origin/dev`)
+- **Write Scopes**:
+  - `tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts`
+  - `docs/04-uat/system-remediation-20260906/SR-BOOKING-VERIFY.md`
+
+### 5.1 設計錨點（Design Anchor）
+
+1. **問題背景與覆蓋缺口**：
+   - 既有 `SR-BOOKING-VERIFY` 已透過真實 PostgreSQL 驗證 3 筆自有租戶訂單＋1 筆他租戶訂單之篩選、排序、`100%` 萬用字元轉義、分頁（`pageSize=2`, `page=1/2/99`）與第二實例 SQL 異動觀察；而 `booking-query.test.ts` 中之 125 筆分頁測試為 API client `fetch` 替身。
+   - 為完整覆蓋 `C013` 原驗收「代表性大量資料分頁」要求，於既有 `tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts` 之 `Real PostgreSQL Acceptance Matrix` 新增代表性大量資料案例，完全沿用既有正式 `OwnedMobilityController` / `OwnedMobilityService` / `OwnedMobilityRepository` / `DatabaseService` 與 `ops.phase1_owned_orders` 遷移 schema，不新增任何產品路徑、helper、workflow 或替代資料表。
+2. **代表性語料與獨立已知 Cohort 設計（1,003 筆自有 ＋ 251 筆外租戶）**：
+   - **自有租戶（`tenant-integ-large-alpha`）**：固定建立 `1,003` 筆訂單（`integ-lrg-own-0001` .. `integ-lrg-own-1003`，對應 `bk-lrg-own-0001` .. `bk-lrg-own-1003`）。
+   - **外租戶（`tenant-integ-large-beta`）**：固定建立 `251` 筆訂單（`integ-lrg-foreign-0001` .. `integ-lrg-foreign-0251`，對應 `bk-lrg-foreign-0001` .. `bk-lrg-foreign-0251`），並故意配置重疊之時間區間、狀態與搜尋關鍵字作為跨租戶隔離誘餌。
+   - **穩定排序與同時間戳平手（Tie-Breaking）設計**：
+     - 每 3 筆連續訂單共用同一 `reservationWindowStart` 與 `createdAt` 時間戳（`slot = Math.floor(i / 3)`，由 `2026-09-20T00:00:00.000Z` 依 slot 每小時遞減），寫入資料庫時於每個 3 筆同時間戳群組內故意打亂插入順序（如 `3, 1, 2`），驗證正式 SQL `ORDER BY ... DESC NULLS LAST, booking_id ASC` 能於頁內與跨頁邊界（例如 `pageSize=100` 時第 100 筆與第 101、102 筆同屬 `slot=33`）維持嚴格 `bk-lrg-own-0001` .. `bk-lrg-own-1003` 排序。
+   - **已知篩選 Cohort**：
+     - 狀態 Cohort：`0001..0200`（200 筆）為 `completed`；`0201..0350`（150 筆）為 `cancelled`；`0351..1003`（653 筆）為 `dispatched`（對應 bookingStatus `active`）。
+     - 搜尋與萬用字元轉義 Cohort：`0001..0065`（65 筆）含字面 `CohortVIP_100%`；`0001..0012`（12 筆）具 `passengerId = "pax-lrg-key-cohort"`。
+     - 日期開閉區間 Cohort：`[2026-09-18T15:00:00.000Z, 2026-09-20T00:00:00.000Z)` 精準涵蓋 `slot = 1..33` 共 `99` 筆（`bk-lrg-own-0004` .. `bk-lrg-own-0102`），排除邊界 `slot = 0`（3 筆）與 `slot >= 34`。
+   - **第二實例重水合（Rehydration）與持久化異動驗證**：
+     - 實例化獨立之第二組 `DatabaseService` / `OwnedMobilityRepository` / `OwnedMobilityService` / `OwnedMobilityController`，將原本位於最末頁（第 11 頁第 3 筆、`status = "dispatched"`）之 `integ-lrg-own-1003` 直接以 SQL 更新為 `status = "completed"` 且 `reservationWindowStart = "2026-09-21T00:00:00.000Z"`，驗證第二實例立即觀察到其躍升至第 1 頁第 1 筆、`completed` 總筆數由 `200` 增至 `201`（總頁數由 `2` 增至 `3`）、`active` 總筆數由 `653` 減至 `652`。
+
+### 5.2 實作與驗證對照表（依 `AI_COLLABORATION_GUIDE.md` §0.7）
+
+- **Design Anchor Commit**: `379a0a23943411ed41c53b38da2e03b47924b7eb` (`wip(BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020): anchor C013 large-corpus PG acceptance design`)
+- **Implementation Commit**: `460bd56633a41e83f971720c44d7514570add340` (`BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020: add C013 representative large-corpus PostgreSQL booking-query acceptance`)
+- **Pull Request**: `#2874` (`https://github.com/ajoe734/drts-fleet-platform/pull/2874`, `gemini/booking-query-large-pg-acceptance-20261020` → `dev`)
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+|---|---|---|---|---|
+| `booking_query_large_real_pg_pagination_and_isolation` | 既有正式查詢路徑：`OwnedMobilityController.listTenantBookings` (`apps/api/src/modules/owned-mobility/owned-mobility.controller.ts#L544-L569`) → `OwnedMobilityService.listTenantBookings` (`apps/api/src/modules/owned-mobility/owned-mobility.service.ts#L3240-L3291`) → `OwnedMobilityRepository.queryTenantBookings` (`apps/api/src/modules/owned-mobility/owned-mobility.repository.ts#L559-L724`) 與正式 `ops.phase1_owned_orders` (`infra/migrations/V0011__phase1_runtime_snapshots.sql`, `V0064__owned_booking_cross_instance_identity.sql`)。<br>測試修改位置：`tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts` 新增 `"executes representative large-corpus (1003 own + 251 foreign) real PostgreSQL pagination, tie-breaking sort, cohort filtering, tenant isolation, and rehydrated second-instance mutation observation"`，並完整保留原 DI 測試與原 3 own + 1 foreign 小語料測試案例。 | 舊版 `ba11837fb7dc2185cf51aa3dba61774cd57f249b` / `28ba56f7abb0292c4560d87c2c76bde5676984f7` 之真實 PG 整合測試僅涵蓋 3 筆自有＋1 筆外租戶訂單（hosted run `39397025176` 共 `27 passed, 0 skipped`），未涵蓋 C013 代表性大量資料跨多頁與末頁部分頁之真 PG 驗證。<br>→ 修正版於同一 `booking-query-acceptance.test.ts` 補齊 `1,003` 筆自有＋`251` 筆外租戶真實 PG 測試：驗證 `pageSize=100` 下第 `1..10` 滿頁（各 100 筆）與第 `11` 部分末頁（3 筆）及第 `12` 超界頁（0 筆、總數維持 1,003）、1,003 筆自有 ID 恰各出現一次、頁內與跨頁邊界（`slot=0` 與 `slot=33`）同時間戳 tie-breaking (`DESC NULLS LAST, booking_id ASC`)、已知狀態／`CohortVIP_100%` 萬用字元轉義／`passengerId`／日期區間／`subtype`＋`createdAt` 篩選與清除還原、251 筆外租戶 3 頁分頁與雙向 403 `TENANT_SCOPE_MISMATCH`、以及重水合第二組 `DatabaseService`/`OwnedMobilityRepository`/`OwnedMobilityService`/`OwnedMobilityController` 實例觀察 `integ-lrg-own-1003` 持久化異動後第 1 頁／第 11 頁與 `completed` (`200→201`, `totalPages 2→3`)／`active` (`653→652`) 即時更新。 | 1. `git diff --check` → Exit `0`。<br>2. `pnpm exec eslint tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts --max-warnings=0` → Exit `0`。<br>3. `pnpm --filter @drts/contracts build && pnpm --filter @drts/control-plane-auth build && pnpm --filter @drts/api typecheck` → Exit `0`。<br>4. `env -u DRTS_BOOKING_VERIFY_DATABASE_URL -u DATABASE_URL pnpm exec vitest run tests/unit/system-remediation/sr-booking-verify/booking-query.test.ts tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts` → Exit `0`（本機無 PG 守護下：`26 passed, 2 skipped (28 total)`）。<br>5. `python3 tools/ci/test_booking_search_acceptance_workflow.py` → Exit `0`（9 項工作流合約測試全數通過）。 | 依 VM 限制規範，不在本機啟動 PostgreSQL 或產品伺服器；真實遷移後 PostgreSQL（`28/28 passed, 0 skipped`）由候選發布後透過既有 `.github/workflows/booking-search-acceptance.yml` 於 GitHub-hosted disposable runner 執行並收錄 raw `test-report.json` / `run-status.json` 證據。 |
+| `booking_query_large_source_review_ci_merge` | 僅修改授權 `write_scopes` 內之兩檔案：<br>- `tests/integration/system-remediation/sr-booking-verify/booking-query-acceptance.test.ts`<br>- `docs/04-uat/system-remediation-20260906/SR-BOOKING-VERIFY.md` | 保留原 `SR-BOOKING-VERIFY` 母任務 `done` 狀態、原驗收項目與所有既有測試名稱／斷言；先建立 `wip(BOOKING-QUERY-LARGE-PG-ACCEPTANCE-20261020)` 設計錨點 commit `379a0a23943411ed41c53b38da2e03b47924b7eb`，再完成實作並推送候選分支與 PR 交由 `Gemini2` 獨立審查。 | 1. `git status --short` 確認僅觸及上述 2 個授權檔案。<br>2. `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head HEAD` → Exit `0`。<br>3. 本地 `HEAD`、遠端 `origin/gemini/booking-query-large-pg-acceptance-20261020` 與 PR `headRefOid` 完整 40 字元 SHA 一致後執行 `ai-status.sh handoff`。 | 待 `Gemini2` 對鎖定之 `CANDIDATE_SHA` 完成獨立 review、GitHub Actions 必過 CI 綠燈、受保護分支 merge，以及 Root 於既有 `booking-search-acceptance.yml` 執行 `0 skip / 0 fail` 後記錄兩項 acceptance keys。 |
+
+### 5.3 範圍邊界與限制聲明（Limitations）
+
+- 本次交付僅補強 `C013` 原有「代表性大量資料分頁」在真實遷移 PostgreSQL 下之整合驗收覆蓋（`1,003` 筆自有＋`251` 筆外租戶代表性測試語料），**不構成**新的產品吞吐量／效能 SLO，亦未修改任何產品 API、service、repository、migration 或 workflow 定義。
+- 本次驗證屬於原始碼與 GitHub-hosted disposable PostgreSQL 驗收工作流（`.github/workflows/booking-search-acceptance.yml`）範圍；**不等同**完整預訂到結算（booking-to-settlement）端到端閉環，亦不取代真實外部供應商、實體裝置、人工營運演練、正式環境部署／回滾、PAX 或 Final 階段驗收要求。

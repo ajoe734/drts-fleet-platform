@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  CanvasBanner,
   CanvasCard,
   CanvasDL,
   CanvasPageHeader,
@@ -9,6 +8,8 @@ import {
   CanvasTable,
   type CanvasTableColumn,
 } from "@drts/ui-web";
+import { statementDisplayStatus } from "@/lib/fleet-portal-statement-actions";
+import { StatementDecisionNote } from "@/components/fleet-statement-actions";
 import { buildFleetTheme } from "@/lib/fleet-portal-theme";
 import {
   loadStatementDetail,
@@ -42,7 +43,11 @@ export default async function StatementDetailPage({
   }
 
   const columns: CanvasTableColumn<StatementDetailLine>[] = [
-    { h: trStatements("statements.column.formula", locale), k: "formula", w: 160 },
+    {
+      h: trStatements("statements.column.formula", locale),
+      k: "formula",
+      w: 160,
+    },
     {
       h: trStatements("statements.column.order", locale),
       k: "orderId",
@@ -152,7 +157,10 @@ export default async function StatementDetailPage({
               },
               {
                 k: trStatements("statements.column.status", locale),
-                v: statement.status,
+                v: t(
+                  `statement.status.${statementDisplayStatus(statement)}`,
+                  locale,
+                ),
                 mono: true,
               },
               {
@@ -172,6 +180,7 @@ export default async function StatementDetailPage({
               },
             ]}
           />
+          <StatementDecisionNote statement={statement} />
           <div style={{ marginTop: 12 }}>
             <Link
               href={`/statements/export?statementId=${encodeURIComponent(statement.id)}`}
@@ -187,16 +196,6 @@ export default async function StatementDetailPage({
           </div>
         </CanvasCard>
 
-        <CanvasBanner
-          theme={theme}
-          tone="info"
-          icon="notices"
-          body={trStatements(
-            "statements.detail.confirmDisputeUnavailable",
-            locale,
-          )}
-        />
-
         <CanvasCard
           theme={theme}
           title={trStatements("statements.detail.linesTitle", locale)}
@@ -207,7 +206,11 @@ export default async function StatementDetailPage({
               {trStatements("statements.detail.noLines", locale)}
             </div>
           ) : (
-            <CanvasTable theme={theme} columns={columns} rows={statement.lines} />
+            <CanvasTable
+              theme={theme}
+              columns={columns}
+              rows={statement.lines}
+            />
           )}
         </CanvasCard>
       </div>

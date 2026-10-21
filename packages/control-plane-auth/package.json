@@ -11,6 +11,12 @@
       "import": "./dist/index.js",
       "require": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./review-driver-web": {
+      "types": "./dist/review-driver-web.d.ts",
+      "import": "./dist/review-driver-web.js",
+      "require": "./dist/review-driver-web.js",
+      "default": "./dist/review-driver-web.js"
     }
   },
   "files": [

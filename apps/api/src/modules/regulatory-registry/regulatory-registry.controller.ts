@@ -35,6 +35,15 @@ import {
   ApiRequestError,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import {
+  CurrentIdentity,
+  RequireScopes,
+} from "../../common/auth/auth.decorators";
+import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
+import type {
+  DisclosureSubjectType,
+  DisclosureReviewCommand,
+} from "./disclosure-review.types";
 import { ContractOperationalViewService } from "./contract-operational-view.service";
 import type {
   DeliveryIntentStatus,
@@ -139,13 +148,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("vehicles/:vehicleId/offboarding")
-  initiateVehicleOffboarding(
+  async initiateVehicleOffboarding(
     @Param("vehicleId") vehicleId: string,
     @Body() command: InitiateVehicleOffboardingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.initiateVehicleOffboarding(
+      await this.regulatoryRegistryService.initiateVehicleOffboarding(
         vehicleId,
         command,
       ),
@@ -154,13 +163,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("vehicles/:vehicleId/offboarding/complete-debranding")
-  completeVehicleDebranding(
+  async completeVehicleDebranding(
     @Param("vehicleId") vehicleId: string,
     @Body() command: CompleteVehicleDebrandingCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.completeVehicleDebranding(
+      await this.regulatoryRegistryService.completeVehicleDebranding(
         vehicleId,
         command,
       ),
@@ -170,12 +179,16 @@ export class RegulatoryRegistryController {
 
   @Get("drivers")
   listDrivers(@Headers("x-request-id") requestId?: string) {
-    return toApiSuccessEnvelope(
-      {
-        items: this.regulatoryRegistryService.listDrivers(),
-      },
-      requestId,
-    );
+    const respond = () =>
+      toApiSuccessEnvelope(
+        {
+          items: this.regulatoryRegistryService.listDrivers(),
+        },
+        requestId,
+      );
+    const refresh =
+      this.regulatoryRegistryService.prepareMatchingSuppressions();
+    return refresh instanceof Promise ? refresh.then(respond) : respond();
   }
 
   @Get("driver-locations")
@@ -189,12 +202,12 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers")
-  createDriver(
+  async createDriver(
     @Body() command: CreateDriverMasterCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.createDriver(command, requestId),
+      await this.regulatoryRegistryService.createDriver(command, requestId),
       requestId,
     );
   }
@@ -228,13 +241,16 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers/:driverId/work-state")
-  updateDriverWorkState(
+  async updateDriverWorkState(
     @Param("driverId") driverId: string,
     @Body() command: UpdateDriverWorkStateCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverWorkState(driverId, command),
+      await this.regulatoryRegistryService.updateDriverWorkStateFromPersistence(
+        driverId,
+        command,
+      ),
       requestId,
     );
   }
@@ -243,13 +259,13 @@ export class RegulatoryRegistryController {
   // only ever be made at registration -- the one moment the platform knows least
   // about the driver.
   @Post("drivers/:driverId/service-buckets")
-  updateDriverServiceBuckets(
+  async updateDriverServiceBuckets(
     @Param("driverId") driverId: string,
     @Body() command: UpdateDriverServiceBucketsCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverServiceBuckets(
+      await this.regulatoryRegistryService.updateDriverServiceBuckets(
         driverId,
         command,
         requestId,
@@ -259,13 +275,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers/:driverId/lifecycle")
-  updateDriverLifecycle(
+  async updateDriverLifecycle(
     @Param("driverId") driverId: string,
     @Body() command: UpdateDriverMasterLifecycleCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverLifecycle(
+      await this.regulatoryRegistryService.updateDriverLifecycle(
         driverId,
         command,
         requestId,
@@ -291,13 +307,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("drivers/:driverId/licenses")
-  updateDriverLicenses(
+  async updateDriverLicenses(
     @Param("driverId") driverId: string,
     @Body() command: UpdateDriverLicensesCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.updateDriverLicenses(
+      await this.regulatoryRegistryService.updateDriverLicenses(
         driverId,
         command,
         requestId,
@@ -317,24 +333,27 @@ export class RegulatoryRegistryController {
   }
 
   @Post("contracts")
-  createContract(
+  async createContract(
     @Body() command: CreateVehicleContractCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.createContract(command),
+      await this.regulatoryRegistryService.createContract(command),
       requestId,
     );
   }
 
   @Post("contracts/:contractId/activate")
-  activateContract(
+  async activateContract(
     @Param("contractId") contractId: string,
     @Body() command: ActivateVehicleContractCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.activateContract(contractId, command),
+      await this.regulatoryRegistryService.activateContract(
+        contractId,
+        command,
+      ),
       requestId,
     );
   }
@@ -443,24 +462,27 @@ export class RegulatoryRegistryController {
   }
 
   @Post("policies")
-  createInsurancePolicy(
+  async createInsurancePolicy(
     @Body() command: CreateInsurancePolicyCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.createInsurancePolicy(command),
+      await this.regulatoryRegistryService.createInsurancePolicy(command),
       requestId,
     );
   }
 
   @Post("policies/:policyId/activate")
-  activateInsurancePolicy(
+  async activateInsurancePolicy(
     @Param("policyId") policyId: string,
     @Body() command: ActivateInsurancePolicyCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.activateInsurancePolicy(policyId, command),
+      await this.regulatoryRegistryService.activateInsurancePolicy(
+        policyId,
+        command,
+      ),
       requestId,
     );
   }
@@ -476,13 +498,13 @@ export class RegulatoryRegistryController {
   }
 
   @Post("exclusivities/:vehicleId/submit-review")
-  submitExclusivityReview(
+  async submitExclusivityReview(
     @Param("vehicleId") vehicleId: string,
     @Body() command: SubmitExclusivityReviewCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.submitExclusivityReview(
+      await this.regulatoryRegistryService.submitExclusivityReview(
         vehicleId,
         command,
       ),
@@ -491,25 +513,81 @@ export class RegulatoryRegistryController {
   }
 
   @Post("exclusivities/:vehicleId/approve")
-  approveExclusivity(
+  async approveExclusivity(
     @Param("vehicleId") vehicleId: string,
     @Body() command: ApproveExclusivityCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.approveExclusivity(vehicleId, command),
+      await this.regulatoryRegistryService.approveExclusivity(
+        vehicleId,
+        command,
+      ),
       requestId,
     );
   }
 
   @Post("exclusivities/:vehicleId/reject")
-  rejectExclusivity(
+  async rejectExclusivity(
     @Param("vehicleId") vehicleId: string,
     @Body() command: RejectExclusivityCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.regulatoryRegistryService.rejectExclusivity(vehicleId, command),
+      await this.regulatoryRegistryService.rejectExclusivity(
+        vehicleId,
+        command,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("disclosure-reviews")
+  async listDisclosureReviews(
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.listDisclosureReviews(identity),
+      requestId,
+    );
+  }
+
+  @Get("disclosure-reviews/:subjectType/:subjectId")
+  async getDisclosureReview(
+    @Param("subjectType") type: DisclosureSubjectType,
+    @Param("subjectId") id: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.getDisclosureReview(
+        type,
+        id,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("disclosure-reviews/:subjectType/:subjectId")
+  @RequireScopes("regulatory:write")
+  async reviewDisclosure(
+    @Param("subjectType") type: DisclosureSubjectType,
+    @Param("subjectId") id: string,
+    @Body() command: DisclosureReviewCommand,
+    @Headers("idempotency-key") key?: string,
+    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.regulatoryRegistryService.reviewDisclosure(
+        type,
+        id,
+        command,
+        key,
+        identity,
+      ),
       requestId,
     );
   }

@@ -13,6 +13,10 @@ import {
   loadTrips,
   scopeTripRows,
 } from "@/lib/fleet-portal-data.server";
+import {
+  fleetTripPageHref,
+  paginateFleetTrips,
+} from "@/lib/fleet-trip-pagination";
 import { DataSourceNotice } from "@/lib/fleet-portal-ui";
 import { TripsTable } from "@/components/portal-tables";
 import { getServerLocale } from "@/lib/server-locale";
@@ -28,6 +32,7 @@ export default async function FleetTripsPage({
     period?: string;
     q?: string;
     status?: string;
+    page?: string;
   }>;
 }) {
   const params = searchParams ? await searchParams : {};
@@ -40,7 +45,10 @@ export default async function FleetTripsPage({
 
   // Filter rows by period, status, and query criteria before computing service tab counts,
   // ensuring tab badges, table list, and CSV export reflect the exact same scope.
-  const scopedRows = scopeTripRows(rows, { q: params.q, status: params.status });
+  const scopedRows = scopeTripRows(rows, {
+    q: params.q,
+    status: params.status,
+  });
   const tabCounts = computeTripTabCounts(scopedRows);
 
   const tabDefs = [
@@ -73,6 +81,28 @@ export default async function FleetTripsPage({
   ];
 
   const filteredRows = filterTripsForService(scopedRows, currentSvc);
+  const { rows: pageRows, pageInfo } = paginateFleetTrips(
+    filteredRows,
+    params.page,
+  );
+  const pageHref = (page: number) =>
+    fleetTripPageHref(
+      {
+        svc: currentSvc === "all" ? undefined : currentSvc,
+        period: currentPeriod,
+        status: params.status,
+        q: params.q,
+      },
+      page,
+    );
+  const navLinkStyle = {
+    fontSize: 11.5,
+    fontWeight: 600,
+    textDecoration: "none",
+    padding: "4px 9px",
+    borderRadius: 6,
+    border: `1px solid ${theme.border}`,
+  } as const;
 
   const tabs = tabDefs.map((tab) => {
     const isSelected = currentSvc === tab.id;
@@ -83,7 +113,9 @@ export default async function FleetTripsPage({
       query.set("status", params.status);
     }
     if (params.q) query.set("q", params.q);
-    const href = query.toString() ? `?${query.toString()}` : `/trips?period=${encodeURIComponent(currentPeriod)}`;
+    const href = query.toString()
+      ? `?${query.toString()}`
+      : `/trips?period=${encodeURIComponent(currentPeriod)}`;
 
     return (
       <Link
@@ -208,7 +240,7 @@ export default async function FleetTripsPage({
         </form>
         <CanvasCard theme={theme} padding={0}>
           {filteredRows.length > 0 ? (
-            <TripsTable rows={filteredRows} />
+            <TripsTable rows={pageRows} />
           ) : (
             <div
               style={{
@@ -221,6 +253,54 @@ export default async function FleetTripsPage({
               {t("supply.empty.none", locale)}
             </div>
           )}
+          {!error ? (
+            <nav
+              aria-label={t("trips.pagination", locale)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "10px 14px",
+                borderTop: `1px solid ${theme.border}`,
+                fontSize: 11.5,
+                color: theme.textMuted,
+              }}
+            >
+              <span>{t("trips.paginationSummary", locale, pageInfo)}</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                {pageInfo.page > 1 ? (
+                  <Link
+                    href={pageHref(pageInfo.page - 1)}
+                    style={{ ...navLinkStyle, color: theme.text }}
+                  >
+                    {t("trips.previous", locale)}
+                  </Link>
+                ) : (
+                  <span
+                    aria-disabled="true"
+                    style={{ ...navLinkStyle, color: theme.textDim }}
+                  >
+                    {t("trips.previous", locale)}
+                  </span>
+                )}
+                {pageInfo.page < pageInfo.totalPages ? (
+                  <Link
+                    href={pageHref(pageInfo.page + 1)}
+                    style={{ ...navLinkStyle, color: theme.text }}
+                  >
+                    {t("trips.next", locale)}
+                  </Link>
+                ) : (
+                  <span
+                    aria-disabled="true"
+                    style={{ ...navLinkStyle, color: theme.textDim }}
+                  >
+                    {t("trips.next", locale)}
+                  </span>
+                )}
+              </div>
+            </nav>
+          ) : null}
         </CanvasCard>
       </div>
     </>

@@ -137,6 +137,36 @@
       "amended_at": "2026-10-06",
       "scope": "Appended `passenger_push_channel_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations and partner_notification_allocations entries above are unchanged",
       "reason": "PUSH-CHANNEL-SD-20261006 finalizes per-order passenger notification channel routing and a dormant first-party push receiver (docs/02-architecture/passenger-notification-channel-routing-20261006.md; docs/01-decisions/SD-DP-20261006-001-passenger-notification-channel-routing.md), and allocates migration numbers for its two new first-party push tables. At inspected base (origin/dev, fixed baseline 446228cbc771a4ced774126a7d4aaddea4db73e6) the highest migration registered in this ledger is V0106__voice_dialogue_snapshot.sql (voice_application_allocations, added by AUDIT-VOICE-APPLICATION-WIRING-20261003). V0107-V0108 below were unclaimed by any allocation entry in this file at allocation time. Per the SR-CONTRACT-001 / SR-RECOVERY-CONTRACTS-20260911 / SR-PARTNER-NOTIFY-CON-20260917 precedent, this task supplies typed contracts (packages/contracts/src/passenger-notification-channel.ts) and migration allocation only; it does not write the infra/migrations/*.sql files themselves, does not implement the channel router, the device registry service, or the FCM transport, and does not change DI wiring. The two tables are grouped into two migration files by which downstream backend task owns their write path: V0107 (first-party device registry + first-party order route) for PUSH-FIRST-PARTY-REGISTRY-20261006, and V0108 (first-party delivery context) for PUSH-FIRST-PARTY-FCM-20261006, mirroring how V0104-V0105 were grouped by consuming task."
+    },
+    {
+      "amended_by_task_id": "VOICE-CALLBACK-DB-OPERATIONS-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Appended voice_callback_allocations V0120 only; existing allocation entries remain unchanged",
+      "reason": "Registers the callback attempt-details migration at accepted parent f5baad9d641f2bbace6ae5376acd40d88fcc1254, whose existing reservation range ends at V0119. Existing collision, exact filename and highest-migration checks include this added group without changing their assertions."
+    },
+    {
+      "amended_by_task_id": "VOICE-CALLBACK-CREATE-RECEIPT-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Append V0121 to voice_callback_allocations; original allocation entries unchanged",
+      "reason": "Extends the callback functionality on exact parent48bf70e, whose highest reserved migration is V0120. Existing allocation collectors already include voice_callback_allocations; no guard or assertion is changed."
+    },
+    {
+      "amended_by_task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "amended_at": "2026-10-18",
+      "scope": "Append V0122 to voice_application_allocations; original V0106 entry and all other groups/amendments unchanged",
+      "reason": "Registers the durable contact-role revision ledger for VoiceContactService (SD §6.4), reserved by Root at exact parent 4db295df5129b57b66a27950348f6a1fbb2ae049 (.local/passenger-bureau-gap-correction-20261018/Voice-C-V0122-exact-root-allocation-20261018/result.json, sha256 b1c388065f8243ef63a4d65ee63031b3e768d9802f0c7799c12c8f0eeda9c86c). Existing allocation collectors already include voice_application_allocations; no guard or assertion beyond the group's own length is changed."
+    },
+    {
+      "amended_by_task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "amended_at": "2026-10-18",
+      "scope": "Appended `complaint_command_allocations` only; all prior allocations, amendments, additional_allocations, launch_allocations, voice_application_allocations, voice_callback_allocations, passenger_push_channel_allocations, passenger_app_allocations, fleet_statement_decision_allocations and public_fare_management_allocations entries above are unchanged",
+      "reason": "Registers V0123 (Root allocation record: .local/passenger-bureau-gap-correction-20261018/Complaint-V0123-exact-root-allocation-20261018/result.json, V0122 reserved separately for Voice and not reused) for the original C045 restart/replica same-logical-command durable identity gap (docs/04-uat/COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015.md §10.4): a durable pending-commit table so an ordinary complaint mutation whose COMMIT outcome was left unknown keeps its allocated caseNo/entryId recoverable by a same-command retry even across an API process restart or a different replica, not only within the originating process's in-memory Map. This task writes both the migration file and the caller wiring (complaint.repository.ts/complaint.service.ts are already in its write_scopes); highest canonical migration at allocation time was V0121."
+    },
+    {
+      "amended_by_task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "amended_at": "2026-10-19",
+      "scope": "Append sos_duty_allocations V0124 only; all previous entries and V0122/V0123 reservations remain owned by their original tasks.",
+      "reason": "Complete the original S-3 §24 outbox acknowledged semantics after normal Root exact scope/number coordination. Existing migration collision collector includes this new group; no existing assertion is weakened."
     }
   ],
   "voice_application_allocations": [
@@ -162,6 +192,75 @@
       ],
       "description": "Versioned encrypted candidate-dialogue snapshots for trusted voice persistence/restoration, reserved by the original audit execution scope; no booking-draft or consent authority is introduced. V0106 also carries a bounded, non-content purge-receipt table so a governed purge cannot be mistaken for proof a write never landed, plus a session-level floor so that receipt's own governed metadata retention can age it out without either reopening its key for write reuse or being mistaken for proof the write never landed.",
       "downstream_tasks": ["AUDIT-SHARED-DEV-VERIFY-20261002"]
+    },
+    {
+      "task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "version": "V0122",
+      "migration_filename": "V0122__voice_contact_role_revision.sql",
+      "domain": "voice_contact_role_revision",
+      "target_schema": "voice",
+      "primary_tables": [
+        "voice.contact_role_revision",
+        "voice.callback_task_contact_binding"
+      ],
+      "referenced_tables": ["voice.session", "voice.callback_task"],
+      "table_invariants": [
+        "revision_id uuid PRIMARY KEY DEFAULT gen_random_uuid(); voice_session_id uuid NOT NULL REFERENCES voice.session(voice_session_id); UNIQUE (voice_session_id, revision_number) -- revision_number is a single counter shared across every role for a session (matching VoiceContactService.updateContactRole's existing ++latestRevisionNumber contract), not re-scoped per role.",
+        "role text NOT NULL CHECK (role IN ('caller','booker','passenger','driverContact','callbackRecipient')); replaced_revision references the prior revision_number this row supersedes for the same role, or NULL for a role's first revision.",
+        "phone_key_version, phone_nonce, phone_ciphertext and phone_auth_tag store the phone number under the SAME AES-256-GCM envelope convention as voice.dialogue_snapshot.content_ciphertext (apps/api/src/modules/voice-booking/voice-dialogue-snapshot-crypto.ts), keyed server-side at apps/api only; consent_ref is nullable (an opaque reference into existing consent evidence, not a new consent record). Transactional append authority, cold reconstruction and selective confirmation-invalidation behavior remain application/schema verification obligations, not claims certified by this allocation entry.",
+        "Append-only (voice._make_append_only); corrections append and never update. Finite retention_expires_at follows the original session voice_booking_evidence window; V0093 governed deletion removes expired bindings/revisions only for closed, unheld sessions and records the existing retention execution log. Original tasks/receipts remain intact; expired sessions cannot reinitialize the ledger.",
+        "role_source is an explicit/default_pointer/selected_pointer discriminator; one immutable callback creation binding per task pins the exact revision; explicit cancelled-task replacements retain replaces_task_id history."
+      ],
+      "description": "Durable encrypted contact-role revisions and immutable callback creation bindings, preserving the original role/consent and controlled replacement contract.",
+      "downstream_tasks": []
+    },
+    {
+      "task_id": "AUDIT-VOICE-APPLICATION-REGRESSION-20261018",
+      "version": "V0125",
+      "migration_filename": "V0125__voice_recording_continuation_event.sql",
+      "domain": "voice_recording_continuation",
+      "target_schema": "voice",
+      "primary_tables": ["voice.recording_continuation_event"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "Append-only recording/leg/event key metadata with real session FK; UNIQUE(session,recording,event_key).",
+        "Same payload replays the original event; a different payload at the same identity is rejected by the production repository under the original session lock.",
+        "No voice.session_event sequence or control watermark is consumed; sealed segment/checkpoint/authority closure/final manifest references retain immutable object versions and full coverage."
+      ],
+      "description": "Original Voice B durable continuation journal, allocated by Root 2026-10-19; external recording ingress/call authority remains explicit.",
+      "downstream_tasks": []
+    }
+  ],
+  "voice_callback_allocations": [
+    {
+      "task_id": "VOICE-CALLBACK-DB-OPERATIONS-20261018",
+      "version": "V0120",
+      "migration_filename": "V0120__voice_callback_attempt_details.sql",
+      "domain": "voice_callback_attempt_details",
+      "target_schema": "voice",
+      "primary_tables": ["voice.callback_attempt", "voice.callback_task"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "voice.callback_attempt retains dial_operation_key, dial_status, hangup_confirmed and notes on the same existing task/attempt rows.",
+        "Existing ended_at values backfill dial_status and hangup_confirmed; no task, attempt or customer data is deleted.",
+        "voice.callback_task retains cancellation_reason; existing task/session/order relationships and terminal states are preserved."
+      ],
+      "description": "Persist existing voice callback attempt details and cancellation reason for cold readers and the current runner; no additional telephone provider or consent claim."
+    },
+    {
+      "task_id": "VOICE-CALLBACK-CREATE-RECEIPT-20261018",
+      "version": "V0121",
+      "migration_filename": "V0121__voice_callback_create_receipt.sql",
+      "domain": "voice_callback_create_receipt",
+      "target_schema": "voice",
+      "primary_tables": ["voice.callback_task"],
+      "referenced_tables": ["voice.session"],
+      "table_invariants": [
+        "The existing callback task row stores its create_command_id, create_action_key and create_payload_hash with the supplied consent_snapshot_hash in the same INSERT.",
+        "The existing one-active-task-per-session constraint remains; the create action key additionally identifies retries after task completion or cancellation.",
+        "Existing rows retain null create-receipt fields; no missing historical command or consent evidence is fabricated."
+      ],
+      "description": "Recover a committed callback create result after a lost response or closed call while retaining the original task and terminal state."
     }
   ],
   "additional_allocations": [
@@ -207,7 +306,11 @@
         "Persistence-failure handling is an application-transaction concern, not a schema constraint: the service records provider ack results by first executing the fence-checked UPDATE/INSERT inside a transaction; if that transaction itself fails to commit, the caller's return value must be the outcome 'persistence_unknown' (see packages/contracts/src/passenger-push-delivery.ts), never a fabricated 'recorded' outcome — this table design supplies the idempotent target for a retry, it does not itself prevent a caller from mis-reporting a failed commit."
       ],
       "description": "被動推播送達 claim/lease/fence 與冪等收據 migration；provider 回執與真實裝置送達分離記錄",
-      "downstream_tasks": ["SR-PUSH-001", "SR-LIVE-PUSH-001", "SR-QA-NEWFEATURES-001"]
+      "downstream_tasks": [
+        "SR-PUSH-001",
+        "SR-LIVE-PUSH-001",
+        "SR-QA-NEWFEATURES-001"
+      ]
     },
     {
       "task_id": "SR-RECOVERY-CONTRACTS-20260911",
@@ -242,9 +345,7 @@
         "voice.phase1_work_item_repair_audits",
         "voice.phase1_work_item_attempt_audits"
       ],
-      "referenced_tables": [
-        "voice.work_item"
-      ],
+      "referenced_tables": ["voice.work_item"],
       "table_invariants": [
         "voice.phase1_work_item_repair_audits: repair_id uuid PRIMARY KEY DEFAULT gen_random_uuid(), work_id uuid NOT NULL REFERENCES voice.work_item(work_id), request_id varchar(255) NOT NULL, actor_id varchar(100) NOT NULL, reason text NOT NULL, expected_lease_epoch integer NOT NULL, previous_status varchar(20) NOT NULL, previous_attempt_count integer NOT NULL, previous_last_error text NULL, allocated_max_attempts integer NOT NULL DEFAULT 5, created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (work_id, request_id) — captures durable ops repair authorization with request-level deduplication; never creates a parallel queue.",
         "Repair transaction invariants: repair execution must verify in the same transaction that target work_item is currently status='failed' with lease_epoch=expected_lease_epoch; resets status to 'pending' with a fresh maxAttempts budget, preserving original work_id, payload_ref, dedupe_key, command_id and ordinary-call nullable voice_session_id.",
@@ -253,10 +354,7 @@
         "Historical data invariant: existing historical work only preserves recorded attempt count and last_error; repair records do not fabricate non-existent historical attempt timestamps."
       ],
       "description": "Voice work_item 補跑稽核、嘗試紀錄與 lease-fenced 修復資料表 migration",
-      "downstream_tasks": [
-        "SR-QA-WEBHOOK-001",
-        "SR-QA-BOOKING-001"
-      ]
+      "downstream_tasks": ["SR-QA-WEBHOOK-001", "SR-QA-BOOKING-001"]
     },
     {
       "task_id": "SR-LAUNCH-SCHEMA-20260913",
@@ -282,10 +380,7 @@
         "Idempotency key format: derived deterministically as ['credential-alert/v1', scope, eventId, recipientEmail] to prevent duplicate alert fan-out."
       ],
       "description": "Registry 證照與保險到期掃描處理、來源指紋去重、租約保護與不可變告警交付意圖 migration",
-      "downstream_tasks": [
-        "SR-QA-WEBHOOK-001",
-        "SR-LIVE-OPS-001"
-      ]
+      "downstream_tasks": ["SR-QA-WEBHOOK-001", "SR-LIVE-OPS-001"]
     },
     {
       "task_id": "SR-LAUNCH-SCHEMA-20260913",
@@ -306,10 +401,7 @@
         "Separation of provider acknowledgement and inbox arrival: provider acknowledgement is recorded as transport acceptance evidence, never converted to a false assertion of end-user inbox receipt. Late acknowledgements remain associated with their original attempt."
       ],
       "description": "PostgreSQL 版 Notification MailOutbox 持久儲存、租約重試、冪等交付與嘗試稽核 migration",
-      "downstream_tasks": [
-        "SR-QA-WEBHOOK-001",
-        "SR-LIVE-MAIL-001"
-      ]
+      "downstream_tasks": ["SR-QA-WEBHOOK-001", "SR-LIVE-MAIL-001"]
     }
   ],
   "partner_notification_allocations": [
@@ -447,6 +539,301 @@
       "downstream_tasks": [
         "PUSH-FIRST-PARTY-FCM-20261006",
         "PUSH-CHANNEL-PG-QA-20261006"
+      ]
+    }
+  ],
+  "passenger_app_allocations": [
+    {
+      "task_id": "PAX-ACCOUNT-SESSION-20261009",
+      "version": "V0109",
+      "migration_filename": "V0109__passenger_account_session.sql",
+      "domain": "passenger_account_session",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.accounts",
+        "passenger.logins",
+        "passenger.sessions"
+      ],
+      "referenced_tables": [],
+      "description": "乘客 realm、帳號、登入身分與 session migration",
+      "downstream_tasks": ["PAX-OTP-20261009", "PAX-OIDC-LOGIN-20261009"]
+    },
+    {
+      "task_id": "PAX-OTP-20261009",
+      "version": "V0110",
+      "migration_filename": "V0110__passenger_otp.sql",
+      "domain": "passenger_otp",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.otps"],
+      "referenced_tables": [],
+      "description": "手機與 Email OTP migration",
+      "downstream_tasks": ["PAX-SMS-PROVIDER-20261009"]
+    },
+    {
+      "task_id": "PAX-OIDC-LOGIN-20261009",
+      "version": "V0111",
+      "migration_filename": "V0111__passenger_oidc_login.sql",
+      "domain": "passenger_oidc_login",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.oauth_transactions"],
+      "referenced_tables": [],
+      "description": "OAuth transaction migration",
+      "downstream_tasks": ["PAX-FACEBOOK-LOGIN-20261009"]
+    },
+    {
+      "task_id": "PAX-FARE-QUOTE-20261009",
+      "version": "V0112",
+      "migration_filename": "V0112__passenger_fare_quote.sql",
+      "domain": "passenger_fare_quote",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.fare_versions",
+        "passenger.fare_quote_snapshots"
+      ],
+      "referenced_tables": [],
+      "description": "運價版本與試算 migration",
+      "downstream_tasks": ["PAX-BOOKING-HISTORY-20261009"]
+    },
+    {
+      "task_id": "PAX-BOOKING-HISTORY-20261009",
+      "version": "V0113",
+      "migration_filename": "V0113__passenger_booking_history.sql",
+      "domain": "passenger_booking_history",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.booking_histories"],
+      "referenced_tables": [],
+      "description": "帳號行程歸屬 migration",
+      "downstream_tasks": [
+        "PAX-RECEIPT-COMPLAINT-20261009",
+        "PAX-PAYMENT-CORE-20261009"
+      ]
+    },
+    {
+      "task_id": "PAX-RECEIPT-COMPLAINT-20261009",
+      "version": "V0114",
+      "migration_filename": "V0114__passenger_receipt_complaint.sql",
+      "domain": "passenger_receipt_complaint",
+      "target_schema": "passenger",
+      "primary_tables": ["passenger.complaints"],
+      "referenced_tables": [],
+      "description": "客訴與遺失物入口 migration",
+      "downstream_tasks": []
+    },
+    {
+      "task_id": "PAX-PAYMENT-CORE-20261009",
+      "version": "V0115",
+      "migration_filename": "V0115__passenger_payment_core.sql",
+      "domain": "passenger_payment_core",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.psp_tokens",
+        "passenger.payment_idempotency_keys",
+        "passenger.payment_charge_records"
+      ],
+      "referenced_tables": ["billing.multi_taxi_passenger_payments"],
+      "description": "付款 port、綁卡、扣款與狀態 migration",
+      "downstream_tasks": ["PAX-PSP-ADAPTER-20261009"]
+    },
+    {
+      "task_id": "PAX-PUSH-DEVICE-API-20261009",
+      "version": "V0116",
+      "migration_filename": "V0116__passenger_push_device_api.sql",
+      "domain": "passenger_push_device_api",
+      "target_schema": "iam + mobility",
+      "primary_tables": [],
+      "referenced_tables": [
+        "iam.phase1_passenger_push_devices",
+        "mobility.phase1_order_first_party_notification_routes"
+      ],
+      "description": "裝置登錄與現有裝置表 reuse，並對 mobility.phase1_order_first_party_notification_routes 執行 forward ALTER tenant_id DROP NOT NULL",
+      "downstream_tasks": ["PAX-NATIVE-APP-20261009"]
+    },
+    {
+      "task_id": "PAX-RECEIPT-COMPLAINT-20261009",
+      "version": "V0119",
+      "migration_filename": "V0119__passenger_ride_rating_contact.sql",
+      "domain": "existing_token_rating_contact_choice_and_canonical_CRM",
+      "target_schema": "ops",
+      "primary_tables": ["ops.passenger_ride_rating_consents"],
+      "referenced_tables": [
+        "ops.passenger_trip_ratings",
+        "ops.phase1_owned_orders",
+        "crm.phase1_complaint_cases"
+      ],
+      "description": "既有 token 評分的原始聯繫選擇與 canonical CRM 案件關聯保存；不建立虛構第一方帳號，沿用既有評分／CRM 同交易與重送語意。",
+      "downstream_tasks": ["PAX-QA-20261009", "PAX-WEB-RIDE-UI-20261009"],
+      "allocation_decision_ref": "docs/04-uat/passenger-app-20261009/schema-allocation-20261014-token-rating-contact.json"
+    }
+  ],
+  "fleet_statement_decision_allocations": [
+    {
+      "task_id": "FLEET-STATEMENT-DECISIONS-20261013",
+      "version": "V0117",
+      "migration_filename": "V0117__fleet_statement_decisions.sql",
+      "domain": "fleet_statement_decision",
+      "target_schema": "billing",
+      "primary_tables": ["billing.phase1_fleet_statement_decisions"],
+      "referenced_tables": [
+        "billing.phase1_fleet_partner_statements",
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "車行確認／爭議及原始對帳單快照獨立保存；爭議與客服案件／初始歷程同交易寫入，保留既有撥款與金額計算。",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "One terminal decision per statement_id; same action and normalized note returns the original decision, conflicting decisions do not overwrite.",
+        "Persist fleet_partner_id, period_month, actor and timestamp with the authoritative statement snapshot independently from period rebuild deletion/reinsertion.",
+        "No cascading foreign key to rebuilt statement rows; mutation resolves the current fleet-owned source under the shared statement transaction lock.",
+        "A disputed decision, its linked crm complaint and initial timeline commit or roll back together. Existing payout amounts and calculation algorithms are unchanged."
+      ]
+    }
+  ],
+  "public_fare_management_allocations": [
+    {
+      "task_id": "P5-FARE-MANAGEMENT-20261013",
+      "version": "V0118",
+      "migration_filename": "V0118__public_fare_version_management.sql",
+      "domain": "public_fare_management",
+      "target_schema": "passenger",
+      "primary_tables": [
+        "passenger.fare_version_management",
+        "passenger.fare_version_command_receipts"
+      ],
+      "referenced_tables": ["passenger.fare_versions", "admin.audit_logs"],
+      "description": "公開運價管理 metadata 與同交易命令收據；唯一運價權威沿用 passenger.fare_versions，原 seed／試算快照與計價算法不改。",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Management metadata contains no second copy of price fields.",
+        "Filing metadata records actual operator evidence; simulations never write official authority.",
+        "Schedule splits one covered published interval; historical published rows and immutable quote snapshots remain available.",
+        "Tariff mutation, audit and command receipt commit or roll back together; receipt retry returns current row without replaying interval changes."
+      ]
+    }
+  ],
+  "sos_duty_allocations": [
+    {
+      "task_id": "SOS-DUTY-CANONICAL-ACK-AND-READBACK-20261015",
+      "version": "V0124",
+      "migration_filename": "V0124__sos_urgent_outbox_acknowledged.sql",
+      "domain": "sos_duty_acknowledgment",
+      "target_schema": "safety",
+      "primary_tables": ["safety.driver_sos_urgent_alert_outbox"],
+      "referenced_tables": ["safety.driver_sos_events"],
+      "description": "Forward ALTER of the existing V0053 status check for the original S-3 §24 acknowledged state. No new tables/columns. Backfill only same-event non-null canonical duty actor/time; preserve delivery/render as distinct transitions. Root reserved V0124 after existing Voice V0122 and Complaint V0123 reservations."
+    }
+  ],
+  "complaint_command_allocations": [
+    {
+      "task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "version": "V0123",
+      "migration_filename": "V0123__complaint_command_identity.sql",
+      "domain": "complaint_command_identity",
+      "target_schema": "crm",
+      "primary_tables": ["crm.phase1_complaint_pending_commits"],
+      "referenced_tables": [
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "Durable cross-process pending-commit identity for an ordinary (non-settlement) complaint mutation whose COMMIT outcome was left unknown, so a same-logical-command retry recovers the originally allocated caseNo/entryId after an API restart or on a different replica instead of only within the originating process's in-memory pendingUncertainCommits Map.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "crm.phase1_complaint_pending_commits: command_key varchar(64) PRIMARY KEY. Identified callers hash stableStringify([action, original caller scope, trimmed original key]); legacy unkeyed commands hash action + colon + caseNo + colon + stableStringify(matchCommand). The original payload is bound separately, so distinct keyed intents remain distinct and a changed payload under one key conflicts.",
+        "case_no varchar(100) NOT NULL, action varchar(100) NOT NULL, command_payload jsonb NOT NULL (the original matchCommand, re-hydrated into PendingUncertainComplaintCommit.matchCommand on recovery so the existing stableStringify comparison keeps working verbatim), case_snapshot jsonb NOT NULL, timeline_snapshot jsonb NOT NULL, previous_case_snapshot jsonb NULL (NULL for a create-type action; the update-type actions' pre-mutation snapshot otherwise, used to rebuild the existing in-memory revertComplaintCaseMutation rollback instead of a non-serializable closure).",
+        "status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','confirmed','failed')), created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now().",
+        "CREATE INDEX idx_phase1_complaint_pending_commits_case_no ON crm.phase1_complaint_pending_commits (case_no) — reconcilePendingCase's existing durable-store sweep scans by case_no.",
+        "Write timing: mandatory durable PREPARED reservation is awaited before the ordinary business transaction can begin. The winning original caseNo, timeline entry IDs, caller identity and payload are preserved; reservation failure cannot acknowledge or issue a business COMMIT. The same transaction locks the prepared row and atomically confirms it with canonical case/timeline writes. Confirmed keyed results remain durable for original-result replay without another upsert; unknown outcomes preserve their original reservation. Only a definitely rejected new preparation or a reconciled legacy result is eligible for its own bounded cleanup; a missing or failed read cannot prove an unknown COMMIT rolled back."
+      ]
+    },
+    {
+      "task_id": "COMPLAINT-CANONICAL-LIFECYCLE-AND-ACK-20261015",
+      "version": "V0126",
+      "migration_filename": "V0126__low_rating_case_contact_independence.sql",
+      "domain": "passenger_low_rating_case_contact_independence",
+      "target_schema": "passenger, ops",
+      "primary_tables": [
+        "passenger.rating_consents",
+        "ops.passenger_ride_rating_consents",
+        "ops.passenger_trip_ratings"
+      ],
+      "referenced_tables": [
+        "passenger.complaints",
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "USER policy: every new score 1/2 creates its canonical case and initial timeline independently of immutable contact choice. Capture pre-existing consent case requirements and pre-existing rating policy provenance without backfilling cases or contact. New missing provenance fails closed.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Existing consent rows capture case_required from their existing non-null case reference; new consent writes explicitly provide case_required with no database default. Equality with presence of the original FK-bound case is mandatory. Token case-required rows retain rating_score <= 2. Existing FK, unique, subject, score and immutable request constraints are retained.",
+        "Existing rating rows capture low_rating_case_policy_v2=false. Subsequent rows have a NOT NULL true default; only explicit historical false permits the original omitted-contact retry without a consent row. Missing/unknown provenance never establishes legacy consent or permits a new missing case.",
+        "contact_requested remains the original immutable passenger choice. A false low-rating choice still has a canonical case and timeline with an explicit no-contact description; internal audit/SLA handling does not imply passenger contact."
+      ]
+    }
+  ],
+  "referral_passenger_journey_allocations": [
+    {
+      "task_id": "REFERRAL-EMBED-VERIFIED-SESSION-CANONICAL-JOURNEY-FLOW-20261015",
+      "version": "V0127",
+      "migration_filename": "V0127__referral_passenger_fare_quote_snapshots.sql",
+      "domain": "referral_passenger_quote_and_rating_provenance",
+      "target_schema": "ops",
+      "primary_tables": ["ops.phase1_referral_fare_quote_snapshots"],
+      "referenced_tables": [
+        "ops.phase1_owned_orders",
+        "crm.phase1_complaint_cases",
+        "crm.phase1_complaint_timelines"
+      ],
+      "description": "R6 normal reservation after V0126: immutable referral-owned taxi-policy estimates and atomic consumption; explicitly identify pre-existing referral ratings as legacy without creating cases or changing their contact choice.",
+      "table_invariants": [
+        "Quote ownership is the exact verified tenant/partner/program/entry/passenger tuple; no passenger.accounts FK or fabricated pre-order owned order.",
+        "Only consumed order/time can change. Quote consumption, original order/intent and notification route commit together.",
+        "New referral ratings require explicit policy provenance and score<=2 canonical case/timeline regardless of contact preference. Migration marks only pre-existing rating objects legacy; missing provenance is not legacy."
+      ]
+    }
+  ],
+  "normal_onboarding_supply_pair_allocations": [
+    {
+      "task_id": "NORMAL-ONBOARDING-APPROVED-VEHICLE-DRIVER-PAIR-20261020",
+      "version": "V0128",
+      "migration_filename": "V0128__registry_supply_pair_unknown_eta.sql",
+      "domain": "normal_onboarding_supply_pair",
+      "target_schema": "reg",
+      "primary_tables": ["reg.phase1_registry_supply_pairs"],
+      "referenced_tables": [
+        "fleet.supply_submissions",
+        "reg.phase1_registry_drivers",
+        "reg.phase1_registry_vehicles"
+      ],
+      "description": "Normal approval of an explicit same-fleet approved driver reference creates the structural vehicle-driver pair. Unknown onboarding ETA is NULL, never a fabricated zero/five-minute measurement; only the existing ETA column nullability changes.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Only eta_minutes nullability changes; all existing rows, pair keys and other columns remain unchanged.",
+        "Pair, canonical vehicle and submission approval/document/event writes use the existing single transaction. Publish the new local pair only after successful COMMIT.",
+        "Existing numeric legacy ETA values preserve their behavior; a new NULL estimate without driver observation/destination does not create a zero-minute candidate.",
+        "All license, contract, insurance, exclusivity, workstate, product and location checks remain unchanged."
+      ]
+    }
+  ],
+  "referral_passenger_fee_consent_allocations": [
+    {
+      "task_id": "REFERRAL-E19A-E19B-CANONICAL-FEE-CONSENT-FULL-FLOW-20261020",
+      "version": "V0129",
+      "migration_filename": "V0129__referral_passenger_fee_consent.sql",
+      "domain": "referral_passenger_fee_consent",
+      "target_schema": "ops",
+      "primary_tables": [
+        "ops.phase1_referral_passenger_fee_acknowledgements",
+        "ops.phase1_referral_order_fee_confirmations"
+      ],
+      "referenced_tables": [
+        "admin.phase1_partner_channel_entries",
+        "ops.phase1_owned_orders",
+        "ops.phase1_referral_fare_quote_snapshots"
+      ],
+      "description": "Exact E19 shared copy, canonical first-version acknowledgement and immutable per-order server confirmation.",
+      "table_invariants": [
+        "Canonical tenant/partner/program/entry/passenger/version unique first acknowledgement; original time immutable. No passenger.accounts FK.",
+        "Order/quote/fee snapshot/normal notification route share the existing transaction and owned quote; server time, disclosure hash and real quote tariff kept distinct.",
+        "Exact committed old intent can replay without fee backfill; no historical quote-consumption/creation/privacy time is transformed into fee agreement."
       ]
     }
   ]

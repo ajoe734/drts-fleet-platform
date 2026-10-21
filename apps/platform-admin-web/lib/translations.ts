@@ -32,6 +32,7 @@ const supplyReviewEn = {
   "supplyReview.queue.subtitle":
     "Fleet submission → Review → Approve into canonical registry",
   "supplyReview.queue.moreFilters": "More Filters",
+  "supplyReview.queue.hideFilters": "Hide Filters",
   "supplyReview.queue.tabPending": "Pending",
   "supplyReview.queue.tabMine": "Under My Review",
   "supplyReview.queue.tabHistory": "History",
@@ -78,7 +79,7 @@ const supplyReviewEn = {
   "supplyReview.detail.startReview": "Start Review",
   "supplyReview.detail.requestRevision": "Request Revision",
   "supplyReview.detail.reject": "Reject",
-  "supplyReview.detail.approveProvision": "Approve & Provision",
+  "supplyReview.detail.approveProvision": "Approve and update records",
   "supplyReview.detail.reload": "Reload",
   "supplyReview.detail.opError": "Operation Error",
   "supplyReview.detail.diffTitle":
@@ -102,26 +103,27 @@ const supplyReviewEn = {
   "supplyReview.detail.approveNoNote": "— N/A for Approval —",
   "supplyReview.detail.commentPlaceholder":
     "Enter reviewer comment for fleet partner...",
-  "supplyReview.detail.canonicalPreviewTitle": "Canonical Provision Preview",
+  "supplyReview.detail.canonicalPreviewTitle": "Changes after approval",
   "supplyReview.detail.previewSubtitle":
-    "VQ-4 · Approval mutates registry (irreversible)",
+    "Approval updates official records and cannot be undone here",
   "supplyReview.detail.previewWarn":
-    "Approval is a single transaction: provision canonical + affiliation + readiness + audit. Integrity check failures prevent approval.",
-  "supplyReview.detail.guardrailTitle": "Guardrail",
+    "Approval creates or updates official driver or vehicle records, links them to the fleet partner, rechecks service requirements, and saves the review history and notifications in one transaction. Complete missing fields or documents before approval.",
+  "supplyReview.detail.guardrailTitle": "Review requirements",
   "supplyReview.detail.guardrailBody":
-    "Reviewers cannot approve self-submitted fleet data (REVIEWER_SELF_APPROVAL_DENIED) and cannot bypass required documents.",
+    "You cannot approve a fleet submission you sent yourself. Ask another authorized reviewer to handle it. Required documents must be complete before approval.",
   "supplyReview.detail.auditReceiptTitle": "Audit Receipt",
   "supplyReview.detail.confirmApproveTitle":
-    "Confirm Approval and Provision Canonical?",
+    "Confirm approval and record updates?",
   "supplyReview.detail.confirmApproveIntro":
-    "This action will approve submission ({submissionId}) and within a single transaction:",
+    "The following changes for application {submissionId} will be saved together:",
   "supplyReview.detail.confirmApproveStep1":
-    "1. Provision / update canonical record",
+    "1. Create or update the official driver or vehicle record",
   "supplyReview.detail.confirmApproveStep2":
-    "2. Bind fleet partner affiliation relationship",
-  "supplyReview.detail.confirmApproveStep3": "3. Recalculate readiness",
+    "2. Link the driver or vehicle to the fleet partner",
+  "supplyReview.detail.confirmApproveStep3":
+    "3. Recheck whether service requirements are met",
   "supplyReview.detail.confirmApproveStep4":
-    "4. Write audit log and send notifications",
+    "4. Save the review history and notify the fleet partner and driver",
   "supplyReview.detail.cancel": "Cancel",
   "supplyReview.detail.selectReason": "— Select Reason —",
   "supplyReview.detail.actionCommentPlaceholder":
@@ -225,9 +227,9 @@ const supplyReviewEn = {
   "supplyReview.banner.conflictTitle": "SUBMISSION_REVISION_CONFLICT · 409",
   "supplyReview.banner.conflictBody":
     "This submission has been updated (revision {rev}). Please reload before reviewing.",
-  "supplyReview.banner.selfApprovalTitle": "REVIEWER_SELF_APPROVAL_DENIED",
+  "supplyReview.banner.selfApprovalTitle": "Another reviewer is required",
   "supplyReview.banner.selfApprovalBody":
-    "Reviewers cannot approve submissions submitted by themselves as fleet partners (REVIEWER_SELF_APPROVAL_DENIED).",
+    "You cannot approve a fleet submission you sent yourself. Ask another authorized reviewer to review this application.",
   "supplyReview.banner.loadingBody":
     "Loading submission details from server...",
   "supplyReview.banner.processing": "Processing, please wait...",
@@ -238,7 +240,7 @@ const supplyReviewEn = {
   "supplyReview.validation.completeBody":
     "All required fields complete · Document types complete · No duplicate targets.",
   "supplyReview.validation.completeInfo":
-    "Insurance policies and affiliation contracts verified. Approving will sync canonical records and readiness.",
+    "Insurance policies and fleet contracts have been checked. Approval updates official records and checks whether service requirements are met.",
   "supplyReview.validation.missingDocs":
     "Missing required documents (Vehicle Registration / Insurance Policy). Integrity check failed, cannot approve.",
   "supplyReview.validation.docExpired":
@@ -247,8 +249,8 @@ const supplyReviewEn = {
   // DL items & Modal
   "supplyReview.dl.createUpdateVehicle": "Create / Update vehicle",
   "supplyReview.dl.createUpdateDriver": "Create / Update driver",
-  "supplyReview.dl.affiliation": "Affiliation",
-  "supplyReview.dl.recalcReadiness": "Recalculate readiness",
+  "supplyReview.dl.affiliation": "Fleet relationship",
+  "supplyReview.dl.recalcReadiness": "Service requirement checks",
   "supplyReview.dl.notifications": "Notifications",
   "supplyReview.dl.notifyTargets": "Fleet Partner + Driver",
   "supplyReview.modal.confirmRevisionTitle":
@@ -257,7 +259,7 @@ const supplyReviewEn = {
   "supplyReview.modal.reasonLabel": "Reason Code (Required)",
   "supplyReview.modal.commentLabel": "Comment (Required)",
   "supplyReview.modal.processing": "Processing...",
-  "supplyReview.modal.confirmApproveBtn": "Confirm Approval · provision",
+  "supplyReview.modal.confirmApproveBtn": "Confirm approval",
   "supplyReview.modal.confirmRevisionBtn": "Confirm Revision",
   "supplyReview.modal.confirmRejectBtn": "Confirm Reject",
   "supplyReview.defaultCommentStart": "Platform reviewer starting review",
@@ -284,6 +286,7 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.queue.subtitle":
     "車行送件 → 審核 → 核可寫入 canonical registry",
   "supplyReview.queue.moreFilters": "更多篩選",
+  "supplyReview.queue.hideFilters": "收合篩選",
   "supplyReview.queue.tabPending": "待審",
   "supplyReview.queue.tabMine": "我審核中",
   "supplyReview.queue.tabHistory": "歷史",
@@ -330,7 +333,7 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.detail.startReview": "受理審核 · start review",
   "supplyReview.detail.requestRevision": "退回補正",
   "supplyReview.detail.reject": "駁回",
-  "supplyReview.detail.approveProvision": "核可 · provision",
+  "supplyReview.detail.approveProvision": "核可並更新資料",
   "supplyReview.detail.reload": "重新載入",
   "supplyReview.detail.opError": "操作錯誤",
   "supplyReview.detail.diffTitle": "逐欄位對照 · submission vs canonical",
@@ -350,23 +353,22 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.detail.noteSubtitle": "VQ-3 · 退補 / 駁回需填 reason code",
   "supplyReview.detail.approveNoNote": "— 核可免填 —",
   "supplyReview.detail.commentPlaceholder": "輸入給車行的審核說明…",
-  "supplyReview.detail.canonicalPreviewTitle": "核可將寫入 · canonical preview",
-  "supplyReview.detail.previewSubtitle":
-    "VQ-4 · approve 會改動 registry（不可逆）",
+  "supplyReview.detail.canonicalPreviewTitle": "核可後的資料異動",
+  "supplyReview.detail.previewSubtitle": "核可會更新正式資料，本頁無法復原",
   "supplyReview.detail.previewWarn":
-    "核可為單一交易：provision canonical + affiliation + readiness + audit。完整性未過則 SUBMISSION_INCOMPLETE，不可核可。",
-  "supplyReview.detail.guardrailTitle": "把關 · guardrail",
+    "核可會在同一筆交易中建立或更新司機／車輛正式資料、綁定車行關係、重新檢查服務條件，並保存審核紀錄及通知。資料或文件未齊全時無法核可，請先退回補正。",
+  "supplyReview.detail.guardrailTitle": "審核須知",
   "supplyReview.detail.guardrailBody":
-    "審核人不得核可自己以車行身分提交的資料（REVIEWER_SELF_APPROVAL_DENIED），不得繞過必填文件。",
+    "不得核可自己以車行身分提交的資料，請交由其他具審核權限的人員處理。必要文件須齊全，不得略過檢查。",
   "supplyReview.detail.auditReceiptTitle": "審核憑證 · audit receipt",
-  "supplyReview.detail.confirmApproveTitle": "確認核可並寫入 canonical？",
+  "supplyReview.detail.confirmApproveTitle": "確認核可並更新正式資料？",
   "supplyReview.detail.confirmApproveIntro":
-    "此動作將把該筆 submission ({submissionId}) 核可，並在單一交易內：",
-  "supplyReview.detail.confirmApproveStep1":
-    "1. Provision / 更新 canonical 紀錄",
-  "supplyReview.detail.confirmApproveStep2": "2. 綁定車行 affiliation 關係",
-  "supplyReview.detail.confirmApproveStep3": "3. 重新計算 readiness",
-  "supplyReview.detail.confirmApproveStep4": "4. 寫入 audit log 並發送通知",
+    "即將核可申請 {submissionId}，以下異動會在同一筆交易中完成：",
+  "supplyReview.detail.confirmApproveStep1": "1. 建立或更新司機／車輛正式資料",
+  "supplyReview.detail.confirmApproveStep2":
+    "2. 建立司機／車輛與車行的歸屬關係",
+  "supplyReview.detail.confirmApproveStep3": "3. 重新檢查是否符合服務條件",
+  "supplyReview.detail.confirmApproveStep4": "4. 保存審核紀錄並通知車行與司機",
   "supplyReview.detail.cancel": "取消",
   "supplyReview.detail.selectReason": "— 請選擇 —",
   "supplyReview.detail.actionCommentPlaceholder": "說明具體補正要求或駁回原因…",
@@ -471,17 +473,17 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.validation.completeBody":
     "必填欄位齊全 · 文件類型完整 · 無重複標的。",
   "supplyReview.validation.completeInfo":
-    "保險保單與加盟合約已完成校對，核可後將同步更新 canonical 紀錄與 readiness。",
+    "保險保單與車行合約已完成校對，核可後將更新正式資料並檢查是否符合服務條件。",
   "supplyReview.validation.missingDocs":
     "缺必要文件（行照 / 保險保單），完整性未過，不可核可。",
   "supplyReview.validation.docExpired":
     "文件過期：{name} 已於 {until} 到期，需要求車行補正。",
 
   // DL items & Modal
-  "supplyReview.dl.createUpdateVehicle": "建立 / 更新 vehicle",
-  "supplyReview.dl.createUpdateDriver": "建立 / 更新 driver",
-  "supplyReview.dl.affiliation": "affiliation",
-  "supplyReview.dl.recalcReadiness": "重算 readiness",
+  "supplyReview.dl.createUpdateVehicle": "建立／更新車輛資料",
+  "supplyReview.dl.createUpdateDriver": "建立／更新司機資料",
+  "supplyReview.dl.affiliation": "車行歸屬",
+  "supplyReview.dl.recalcReadiness": "服務條件檢查",
   "supplyReview.dl.notifications": "通知",
   "supplyReview.dl.notifyTargets": "車行 + 司機",
   "supplyReview.modal.confirmRevisionTitle": "確認退回車行補正？",
@@ -489,7 +491,7 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.modal.reasonLabel": "reason code（必填）",
   "supplyReview.modal.commentLabel": "說明 / comment（必填）",
   "supplyReview.modal.processing": "處理中…",
-  "supplyReview.modal.confirmApproveBtn": "確認核可 · provision",
+  "supplyReview.modal.confirmApproveBtn": "確認核可",
   "supplyReview.modal.confirmRevisionBtn": "確認退補",
   "supplyReview.modal.confirmRejectBtn": "確認駁回",
   "supplyReview.defaultCommentStart": "平台審核人受理審核",
@@ -1524,6 +1526,128 @@ const cmpZh: Record<keyof typeof cmpEn, string> = {
 };
 
 const en = {
+  "referralMonthly.navigationLabel": "Rating reports",
+  "referralMonthly.navigationLink": "Referral monthly ratings (Taipei time)",
+  "referralMonthly.back": "Back to rating management",
+  "referralMonthly.title": "Referral monthly ratings",
+  "referralMonthly.description":
+    "Grouped by rating submission time in Asia/Taipei; drivers come from the same completed task.",
+  "referralMonthly.month": "Month",
+  "referralMonthly.driverId": "Driver ID",
+  "referralMonthly.refresh": "Search / refresh",
+  "referralMonthly.loading": "Loading…",
+  "referralMonthly.loadFailed": "Unable to load. Please try again.",
+  "referralMonthly.results": "Monthly rating results",
+  "referralMonthly.period": "{month} ({timeZone})",
+  "referralMonthly.summary":
+    "Ratings: {count}; average: {average}; attribution pending: {unattributed}",
+  "referralMonthly.noRatings": "No ratings",
+  "referralMonthly.driverStatistics": "Driver monthly statistics",
+  "referralMonthly.driver": "Driver",
+  "referralMonthly.count": "Count",
+  "referralMonthly.average": "Average",
+  "referralMonthly.lastRating": "Last rating",
+  "referralMonthly.originalRatings": "Original ratings",
+  "referralMonthly.order": "Order",
+  "referralMonthly.tenantSource": "Tenant / source",
+  "referralMonthly.completedDriverTask": "Completed driver / task",
+  "referralMonthly.score": "Score",
+  "referralMonthly.tags": "Tags",
+  "referralMonthly.comment": "Comment",
+  "referralMonthly.submittedAt": "Submitted at",
+  "referralMonthly.contactCase": "Contact requested / case",
+  "referralMonthly.unattributed": "Attribution pending",
+  "referralMonthly.notProvided": "Not provided",
+  "referralMonthly.yes": "Yes",
+  "referralMonthly.no": "No",
+  "referralMonthly.empty": "No ratings for this month / driver.",
+  "referralMonthly.tagSeparator": ", ",
+  "fareManage.inputError":
+    "Complete the required fields with valid whole TWD amounts, increments and times.",
+  "fareManage.revisionError":
+    "This version changed while you were editing. Your input is retained. Refresh to review the latest version, then cancel and reopen the editor before applying your changes.",
+  "fareManage.lifecycleError":
+    "This version is no longer available for that action. Refresh to review its current state.",
+  "fareManage.timeError":
+    "This time conflicts with the published fare schedule. Refresh and choose a valid future time.",
+  "fareManage.replacement":
+    "A current or scheduled fare remains published until a filed replacement takes over. Create and schedule a replacement to change this interval.",
+  "fareManage.existsError": "This version ID already exists. Choose a new ID.",
+  "fareManage.saveError":
+    "The action could not be completed. Your input is retained; you can retry.",
+  "fareManage.saved": "Saved to the official fare records.",
+  "fareManage.demoSaved":
+    "Simulation updated. Official fare records were not changed.",
+  "fareManage.enterDemo": "Try isolated simulation",
+  "fareManage.exitDemo": "Return to official records",
+  "fareManage.demoNotice":
+    "Simulation only: this copy and clock are isolated. Filing can be skipped for demonstration; no official filing or fare changes are submitted.",
+  "fareManage.loading": "Loading official fare versions…",
+  "fareManage.loadError":
+    "Official fare versions could not be read. Retry to load current data; changes are unavailable until the read succeeds.",
+  "fareManage.savedReadError":
+    "The change was saved, but the latest list could not be read. The saved version is shown; other rows may be out of date. Retry the read before making further changes.",
+  "fareManage.retry": "Retry read",
+  "fareManage.resetDemo": "Reset simulation",
+  "fareManage.advanceDemo": "Advance simulation to scheduled time",
+  "fareManage.refresh": "Refresh",
+  "fareManage.evaluatedAt":
+    "State evaluated at {time} · Taiwan time (UTC+08:00)",
+  "fareManage.empty":
+    "No official fare versions are available. Create a draft with explicit fare parameters.",
+  "fareManage.edit": "Edit draft",
+  "fareManage.choose": "Choose a rule",
+  "fareManage.feeName": "Additional fee name",
+  "fareManage.feeAmount": "Additional fee (whole TWD)",
+  "fareManage.removeFee": "Remove fee",
+  "fareManage.addFee": "Add fee",
+  "fareManage.saving": "Saving…",
+  "fareManage.saveDraft": "Save draft",
+  "fareManage.cancel": "Cancel",
+  "fareManage.effectiveUntil": "Effective until · Taiwan time (UTC+08:00)",
+  "fareManage.evidence": "Filing evidence reference",
+  "fareManage.filedAt": "Filing recorded at · Taiwan time (UTC+08:00)",
+  "fareManage.filedBy": "Filing recorded by",
+  "fareManage.scheduled":
+    "Scheduled for {time} · Taiwan time (UTC+08:00); not active yet.",
+  "fareManage.filingUnavailable":
+    "The external filing service is unavailable in this simulation. Retry the demonstration or skip filing to continue. No official approval was received.",
+  "fareManage.tryDemoFiling": "Try / retry simulated filing",
+  "fareManage.skipFiling": "Skip external filing in simulation",
+  "fareManage.manualFiling":
+    "Record the actual filing reference and supporting evidence you received. This action records metadata; it does not submit to or verify with the authority.",
+  "fareManage.recordFiling": "Record actual filing",
+  "fareManage.activateNow": "Activate now",
+  "fareManage.retireReason": "Retirement reason",
+  "fareManage.retire": "Retire version",
+  "fareManage.selectVersion":
+    "Select a version to preview its full fare parameters.",
+  "fareManage.field.fareVersionId": "New version ID",
+  "fareManage.field.displayName": "Version name",
+  "fareManage.field.publicSummary": "Public summary",
+  "fareManage.field.sourceReference": "Fare source reference",
+  "fareManage.field.effectiveLocal": "Effective time · Taiwan time (UTC+08:00)",
+  "fareManage.field.baseFare": "Base fare (whole TWD)",
+  "fareManage.field.baseDistanceMeters": "Base distance (m)",
+  "fareManage.field.distanceRate": "Distance fare (whole TWD)",
+  "fareManage.field.distanceIncrementMeters": "Distance increment (m)",
+  "fareManage.field.delayRate": "Waiting fare (whole TWD)",
+  "fareManage.field.delayIncrementSeconds": "Waiting increment (seconds)",
+  "fareManage.field.nightSurchargeAmount":
+    "Night surcharge (whole TWD per trip)",
+  "fareManage.field.totalIncrement": "Total rounding increment (whole TWD)",
+  "fareManage.field.nightSurchargeWindowStart":
+    "Night period starts (Taiwan time)",
+  "fareManage.field.nightSurchargeWindowEnd": "Night period ends (Taiwan time)",
+  "fareManage.field.distanceRounding": "Distance rounding",
+  "fareManage.field.delayRounding": "Waiting rounding",
+  "fareManage.field.totalRounding": "Total rounding",
+  "fareManage.field.nightApplication": "Night surcharge application",
+  "fareManage.rule.ceil": "Round up",
+  "fareManage.rule.floor": "Round down",
+  "fareManage.rule.nearest": "Round to nearest",
+  "fareManage.rule.pickup": "Based on pickup time",
+  "fareManage.rule.any_overlap": "Any overlap with night period",
   "partnerNotification.permissionDenied": "Permission Denied",
   "partnerNotification.saveFailed": "Save Failed",
   "partnerNotification.reload": "Reload",
@@ -3544,6 +3668,8 @@ const en = {
   "audit.page.refresh": "Refresh (T6 manual)",
   "audit.page.refreshing": "Refreshing…",
   "audit.page.exportCsv": "Export CSV",
+  "audit.page.exportStarted": "CSV download started: {count} record(s).",
+  "audit.page.exportFailed": "CSV download failed. Please try again.",
   "audit.page.tabLog": "Audit log",
   "audit.page.tabPolicy": "Retention policies",
   "audit.page.tabHold": "Active legal holds",
@@ -4051,8 +4177,8 @@ const en = {
   "notices.col.severityShort": "SEV",
   "notices.history.subtitle": "Broadcast history · cross-app delivery outcomes",
   "notices.history.delivery.archived": "resolved delivery archived",
-  "notices.history.delivery.all": "delivered 3 / 3",
-  "notices.history.delivery.single": "delivered 1 / 1",
+  "notices.history.delivery.all": "No recorded recipient outcome",
+  "notices.history.delivery.single": "No recorded recipient outcome",
   "notices.noticeTitleRequired": "Notice title is required.",
   "notices.noticeBodyRequired": "Notice body is required.",
   "notices.warning.operationError":
@@ -4063,9 +4189,15 @@ const en = {
   "notices.status.scheduled": "scheduled",
   "notices.status.resolved": "resolved",
   "notices.status.archived": "archived",
+  "notices.status.expired": "Expired",
+  "notices.status.unknown": "Unknown",
+  "notices.form.expiry": "Expiry (optional)",
+  "notices.form.highRiskConfirmation":
+    "Confirm this high-risk notice for the selected audience",
   "notices.severity.info": "low",
   "notices.severity.warning": "medium",
   "notices.severity.critical": "high",
+  "notices.severity.maintenance": "Maintenance",
   "notices.window.notScheduled": "Not scheduled",
   "notices.risk.high": "high risk",
   "notices.systemUser": "system",
@@ -4221,6 +4353,80 @@ const en = {
   "adapterRegistry.modal.supportedActions": "Supported actions",
   "adapterRegistry.modal.noSupportedActions":
     "No adapter actions are enabled for this platform.",
+  "adapterRegistry.modal.cancel": "Cancel",
+  "adapterRegistry.refreshErrorBanner":
+    "Live credential expiry refresh failed ({message}). Showing last verified adapter snapshot.",
+  "adapterRegistry.revisionPill": "rev {revision}",
+  "adapterRegistry.expiryEvaluatedAtLabel": "Evaluated",
+  "adapterRegistry.credentialReferenceLabel": "Ref",
+  "adapterRegistry.lastMutationSummary":
+    "Audit {auditId} · rev {previousRevision} -> {newRevision} · actor {actorId} · reason: {reason}",
+  "adapterRegistry.registerModal.title": "Register governed platform adapter",
+  "adapterRegistry.registerModal.subtitle":
+    "Submit an authoritative adapter registration record. Only non-secret credential references and expiry timestamps are stored here.",
+  "adapterRegistry.registerModal.id": "Adapter ID",
+  "adapterRegistry.registerModal.idPlaceholder": "partner-fleet-01",
+  "adapterRegistry.registerModal.platformCode": "Platform code",
+  "adapterRegistry.registerModal.platformCodePlaceholder": "yoxi",
+  "adapterRegistry.registerModal.description": "Description",
+  "adapterRegistry.registerModal.descriptionPlaceholder":
+    "Partner dispatch adapter",
+  "adapterRegistry.registerModal.environment": "Environment",
+  "adapterRegistry.registerModal.rolloutStage": "Rollout stage",
+  "adapterRegistry.registerModal.adapterType": "Adapter type",
+  "adapterRegistry.registerModal.isForwarded": "Forwarder mode",
+  "adapterRegistry.registerModal.credReference":
+    "Credential reference (non-secret)",
+  "adapterRegistry.registerModal.credReferencePlaceholder":
+    "vault://platform/adapters/key-ref",
+  "adapterRegistry.registerModal.credExpiresAt":
+    "Credential expires at (ISO-8601)",
+  "adapterRegistry.registerModal.credExpiresAtPlaceholder":
+    "2026-11-15T00:00:00.000Z",
+  "adapterRegistry.registerModal.serviceBucketsPlaceholder":
+    "standard_taxi, corporate",
+  "adapterRegistry.registerModal.financeAuthorityMode":
+    "Finance authority mode",
+  "adapterRegistry.registerModal.submit": "Register adapter",
+  "adapterRegistry.registerModal.submitting": "Registering...",
+  "adapterRegistry.registerSuccess":
+    "{name} ({id}) registered at revision {revision}.",
+  "adapterRegistry.configModal.title": "Edit adapter configuration: {name}",
+  "adapterRegistry.configModal.subtitle":
+    "Updates rollout posture, dispatch policies, webhook settings, and feature flags with optimistic concurrency (expectedRevision {revision}).",
+  "adapterRegistry.configModal.featureFlags":
+    "Feature flags (key=on/off, comma-separated)",
+  "adapterRegistry.configModal.featureFlagsPlaceholder":
+    "enableInstantDispatch=on, enableDynamicEta=off",
+  "adapterRegistry.configModal.reason": "Governance reason",
+  "adapterRegistry.configModal.reasonPlaceholder":
+    "Document why this adapter configuration is being updated",
+  "adapterRegistry.configModal.submit": "Save configuration",
+  "adapterRegistry.configModal.submitting": "Saving...",
+  "adapterRegistry.configSuccess":
+    "{auditPrefix}{name} configuration updated to revision {revision}.{reasonClause}",
+  "adapterRegistry.credentialModal.title":
+    "Edit credential reference & expiry: {name}",
+  "adapterRegistry.credentialModal.subtitle":
+    "Updates non-secret credential reference metadata and server-evaluated expiry timestamp (expectedRevision {revision}).",
+  "adapterRegistry.credentialModal.nonSecretNotice":
+    "Governance boundary: This form records non-secret credential references and expiry timestamps only. It does not rotate or store external provider secret material.",
+  "adapterRegistry.credentialModal.clearExpiry":
+    "Clear credential expiry metadata (set to null / unknown)",
+  "adapterRegistry.credentialModal.submit": "Save credential metadata",
+  "adapterRegistry.credentialModal.submitting": "Saving...",
+  "adapterRegistry.credentialSuccess":
+    "{auditPrefix}{name} credential reference metadata updated to revision {revision}.{reasonClause}",
+  "adapterRegistry.validation.idRequired":
+    "Adapter ID, platform code, name, and version are required.",
+  "adapterRegistry.validation.policyNumbers":
+    "Max candidates, accept timeout, and manual fallback threshold must be positive numbers.",
+  "adapterRegistry.validation.webhookUrlRequired":
+    "Webhook URL is required when webhook is enabled.",
+  "adapterRegistry.validation.credReferenceRequired":
+    "Credential reference is required when setting credential expiry metadata.",
+  "adapterRegistry.validation.reasonRequired":
+    "Governance reason is required for this update.",
 
   // ── Common (more) ──
   "common.noValues": "No values",
@@ -4697,6 +4903,121 @@ const en = {
 };
 
 const zh: typeof en = {
+  "referralMonthly.navigationLabel": "評價報表",
+  "referralMonthly.navigationLink": "Referral 月評價（台北時間）",
+  "referralMonthly.back": "返回評價管理",
+  "referralMonthly.title": "Referral 月評價",
+  "referralMonthly.description":
+    "依評價送出時間（Asia/Taipei）統計；駕駛來自同筆已完乘任務。",
+  "referralMonthly.month": "月份",
+  "referralMonthly.driverId": "駕駛 ID",
+  "referralMonthly.refresh": "查詢／重新整理",
+  "referralMonthly.loading": "讀取中…",
+  "referralMonthly.loadFailed": "讀取失敗，請重試。",
+  "referralMonthly.results": "月評價結果",
+  "referralMonthly.period": "{month}（{timeZone}）",
+  "referralMonthly.summary":
+    "評價數：{count}；平均：{average}；歸屬待確認：{unattributed}",
+  "referralMonthly.noRatings": "無評價",
+  "referralMonthly.driverStatistics": "駕駛月統計",
+  "referralMonthly.driver": "駕駛",
+  "referralMonthly.count": "筆數",
+  "referralMonthly.average": "平均",
+  "referralMonthly.lastRating": "最後評價",
+  "referralMonthly.originalRatings": "原始評價",
+  "referralMonthly.order": "訂單",
+  "referralMonthly.tenantSource": "租戶／來源",
+  "referralMonthly.completedDriverTask": "完乘駕駛／任務",
+  "referralMonthly.score": "分數",
+  "referralMonthly.tags": "標籤",
+  "referralMonthly.comment": "意見",
+  "referralMonthly.submittedAt": "送出時間",
+  "referralMonthly.contactCase": "客服聯繫／案件",
+  "referralMonthly.unattributed": "歸屬待確認",
+  "referralMonthly.notProvided": "未提供",
+  "referralMonthly.yes": "是",
+  "referralMonthly.no": "否",
+  "referralMonthly.empty": "此月份／駕駛沒有評價。",
+  "referralMonthly.tagSeparator": "、",
+  "fareManage.inputError":
+    "請填妥必要欄位，並使用有效的整數新臺幣金額、計價單位及時間。",
+  "fareManage.revisionError":
+    "編輯期間此版本已被更新，已保留您的輸入。請重新整理比對最新版本，再取消並重新開啟編輯後套用變更。",
+  "fareManage.lifecycleError":
+    "此版本目前無法執行這項操作，請重新整理確認最新狀態。",
+  "fareManage.timeError":
+    "此時間與已發布費率排程衝突，請重新整理並選擇有效的未來時間。",
+  "fareManage.replacement":
+    "現行或已排程費率須由已備查的替代版本接續。若要變更此區間，請建立替代版本並排程生效。",
+  "fareManage.existsError": "此版本 ID 已存在，請使用新的 ID。",
+  "fareManage.saveError": "操作未能完成，已保留輸入，可再次重試。",
+  "fareManage.saved": "已儲存至正式費率資料。",
+  "fareManage.demoSaved": "示範已更新，正式費率資料未變更。",
+  "fareManage.enterDemo": "進入獨立示範",
+  "fareManage.exitDemo": "返回正式資料",
+  "fareManage.demoNotice":
+    "僅供示範：此份資料與時間獨立運作。可跳過外部備查以繼續示範，不會提交正式備查或變更正式費率。",
+  "fareManage.loading": "正在載入正式費率版本…",
+  "fareManage.loadError":
+    "無法讀取正式費率版本，請重試取得最新資料；讀取成功前暫時無法變更。",
+  "fareManage.savedReadError":
+    "變更已儲存，但無法讀取最新列表。目前顯示已儲存的版本，其他列可能尚未更新；請重試讀取後再進行其他變更。",
+  "fareManage.retry": "重試讀取",
+  "fareManage.resetDemo": "重設示範",
+  "fareManage.advanceDemo": "將示範時間推進至排程生效時間",
+  "fareManage.refresh": "重新整理",
+  "fareManage.evaluatedAt": "狀態判定時間：{time} · 台灣時間（UTC+08:00）",
+  "fareManage.empty": "目前沒有正式費率版本，可明確填寫費率參數建立草稿。",
+  "fareManage.edit": "編輯草稿",
+  "fareManage.choose": "選擇規則",
+  "fareManage.feeName": "附加費名稱",
+  "fareManage.feeAmount": "附加費（整數新臺幣）",
+  "fareManage.removeFee": "移除附加費",
+  "fareManage.addFee": "新增附加費",
+  "fareManage.saving": "儲存中…",
+  "fareManage.saveDraft": "儲存草稿",
+  "fareManage.cancel": "取消",
+  "fareManage.effectiveUntil": "生效截止 · 台灣時間（UTC+08:00）",
+  "fareManage.evidence": "備查證據識別",
+  "fareManage.filedAt": "備查記錄時間 · 台灣時間（UTC+08:00）",
+  "fareManage.filedBy": "備查記錄者",
+  "fareManage.scheduled":
+    "已排程於 {time} · 台灣時間（UTC+08:00）生效，目前尚未啟用。",
+  "fareManage.filingUnavailable":
+    "此示範無法使用外部備查服務。可再次示範或跳過備查繼續操作；並未取得正式核准。",
+  "fareManage.tryDemoFiling": "示範／重試外部備查",
+  "fareManage.skipFiling": "示範中跳過外部備查",
+  "fareManage.manualFiling":
+    "請填寫實際取得的備查文號與證據識別。此操作記錄備查資料，不會向主管機關提交或驗證。",
+  "fareManage.recordFiling": "記錄實際備查",
+  "fareManage.activateNow": "立即生效",
+  "fareManage.retireReason": "停用理由",
+  "fareManage.retire": "停用版本",
+  "fareManage.selectVersion": "請選擇版本，預覽完整費率參數。",
+  "fareManage.field.fareVersionId": "新版本 ID",
+  "fareManage.field.displayName": "版本名稱",
+  "fareManage.field.publicSummary": "公開摘要",
+  "fareManage.field.sourceReference": "費率來源依據",
+  "fareManage.field.effectiveLocal": "生效時間 · 台灣時間（UTC+08:00）",
+  "fareManage.field.baseFare": "起跳金額（整數新臺幣）",
+  "fareManage.field.baseDistanceMeters": "起跳里程（公尺）",
+  "fareManage.field.distanceRate": "里程單位金額（整數新臺幣）",
+  "fareManage.field.distanceIncrementMeters": "里程計價單位（公尺）",
+  "fareManage.field.delayRate": "延滯單位金額（整數新臺幣）",
+  "fareManage.field.delayIncrementSeconds": "延滯計價單位（秒）",
+  "fareManage.field.nightSurchargeAmount": "夜間加收（每趟整數新臺幣）",
+  "fareManage.field.totalIncrement": "總額取整單位（整數新臺幣）",
+  "fareManage.field.nightSurchargeWindowStart": "夜間時段起點（台灣時間）",
+  "fareManage.field.nightSurchargeWindowEnd": "夜間時段終點（台灣時間）",
+  "fareManage.field.distanceRounding": "里程取整",
+  "fareManage.field.delayRounding": "延滯取整",
+  "fareManage.field.totalRounding": "總額取整",
+  "fareManage.field.nightApplication": "夜間加收適用方式",
+  "fareManage.rule.ceil": "無條件進位",
+  "fareManage.rule.floor": "無條件捨去",
+  "fareManage.rule.nearest": "四捨五入",
+  "fareManage.rule.pickup": "依上車時間",
+  "fareManage.rule.any_overlap": "行程經過夜間時段即適用",
   "partnerNotification.lifecycleCtrl": "生命週期控制",
   "partnerNotification.testRejected": "綁定測試遭拒",
   "partnerNotification.enableFailed": "啟用失敗",
@@ -5683,6 +6004,74 @@ const zh: typeof en = {
   "adapterRegistry.modal.supportedActions": "支援動作",
   "adapterRegistry.modal.noSupportedActions":
     "此平台目前沒有啟用任何轉接器動作。",
+  "adapterRegistry.modal.cancel": "取消",
+  "adapterRegistry.refreshErrorBanner":
+    "即時憑證到期狀態刷新失敗（{message}），目前顯示最後一次已驗證的轉接器快照。",
+  "adapterRegistry.revisionPill": "版本 {revision}",
+  "adapterRegistry.expiryEvaluatedAtLabel": "評估時間",
+  "adapterRegistry.credentialReferenceLabel": "憑證參照",
+  "adapterRegistry.lastMutationSummary":
+    "稽核 {auditId} · 版本 {previousRevision} -> {newRevision} · 操作者 {actorId} · 原因：{reason}",
+  "adapterRegistry.registerModal.title": "註冊受治理平台轉接器",
+  "adapterRegistry.registerModal.subtitle":
+    "送出權威轉接器註冊紀錄。此處僅儲存非機密憑證參照與到期時間戳記。",
+  "adapterRegistry.registerModal.id": "轉接器 ID",
+  "adapterRegistry.registerModal.idPlaceholder": "partner-fleet-01",
+  "adapterRegistry.registerModal.platformCode": "平台代碼",
+  "adapterRegistry.registerModal.platformCodePlaceholder": "yoxi",
+  "adapterRegistry.registerModal.description": "說明",
+  "adapterRegistry.registerModal.descriptionPlaceholder": "合作車隊派遣轉接器",
+  "adapterRegistry.registerModal.environment": "環境",
+  "adapterRegistry.registerModal.rolloutStage": "部署階段",
+  "adapterRegistry.registerModal.adapterType": "轉接器類型",
+  "adapterRegistry.registerModal.isForwarded": "轉派模式",
+  "adapterRegistry.registerModal.credReference": "憑證參照（非機密）",
+  "adapterRegistry.registerModal.credReferencePlaceholder":
+    "vault://platform/adapters/key-ref",
+  "adapterRegistry.registerModal.credExpiresAt": "憑證到期時間（ISO-8601）",
+  "adapterRegistry.registerModal.credExpiresAtPlaceholder":
+    "2026-11-15T00:00:00.000Z",
+  "adapterRegistry.registerModal.serviceBucketsPlaceholder":
+    "standard_taxi, corporate",
+  "adapterRegistry.registerModal.financeAuthorityMode": "財務權限模式",
+  "adapterRegistry.registerModal.submit": "註冊轉接器",
+  "adapterRegistry.registerModal.submitting": "註冊中...",
+  "adapterRegistry.registerSuccess":
+    "{name}（{id}）已完成註冊，目前版本 {revision}。",
+  "adapterRegistry.configModal.title": "編輯轉接器設定：{name}",
+  "adapterRegistry.configModal.subtitle":
+    "以樂觀鎖（expectedRevision {revision}）更新部署狀態、派遣政策、Webhook 設定與功能旗標。",
+  "adapterRegistry.configModal.featureFlags":
+    "功能旗標（key=on/off，以逗號分隔）",
+  "adapterRegistry.configModal.featureFlagsPlaceholder":
+    "enableInstantDispatch=on, enableDynamicEta=off",
+  "adapterRegistry.configModal.reason": "治理原因",
+  "adapterRegistry.configModal.reasonPlaceholder":
+    "請記錄更新此轉接器設定的治理原因",
+  "adapterRegistry.configModal.submit": "儲存設定",
+  "adapterRegistry.configModal.submitting": "儲存中...",
+  "adapterRegistry.configSuccess":
+    "{auditPrefix}{name} 設定已更新至版本 {revision}。{reasonClause}",
+  "adapterRegistry.credentialModal.title": "編輯憑證參照與到期時間：{name}",
+  "adapterRegistry.credentialModal.subtitle":
+    "更新非機密憑證參照中繼資料與伺服端評估之到期時間戳記（expectedRevision {revision}）。",
+  "adapterRegistry.credentialModal.nonSecretNotice":
+    "治理邊界：此表單僅登錄非機密憑證參照與到期時間戳記，不會輪替或儲存外部供應商機密金鑰。",
+  "adapterRegistry.credentialModal.clearExpiry":
+    "清除憑證到期中繼資料（設為 null / 未知）",
+  "adapterRegistry.credentialModal.submit": "儲存憑證中繼資料",
+  "adapterRegistry.credentialModal.submitting": "儲存中...",
+  "adapterRegistry.credentialSuccess":
+    "{auditPrefix}{name} 憑證參照中繼資料已更新至版本 {revision}。{reasonClause}",
+  "adapterRegistry.validation.idRequired":
+    "轉接器 ID、平台代碼、名稱與版本皆為必填。",
+  "adapterRegistry.validation.policyNumbers":
+    "最大候選數、接受逾時與人工備援門檻必須為正數。",
+  "adapterRegistry.validation.webhookUrlRequired":
+    "啟用 Webhook 時必須填寫 Webhook 網址。",
+  "adapterRegistry.validation.credReferenceRequired":
+    "設定憑證到期中繼資料時必須填寫憑證參照。",
+  "adapterRegistry.validation.reasonRequired": "此更新必須填寫治理原因。",
   // ── Users ──
   "users.title": "使用者與角色",
   "users.subtitle": "共 {count} 位人員",
@@ -7135,8 +7524,8 @@ const zh: typeof en = {
   "notices.col.severityShort": "SEV",
   "notices.history.subtitle": "廣播歷史 · 跨應用投遞結果",
   "notices.history.delivery.archived": "已封存的已解決投遞",
-  "notices.history.delivery.all": "已投遞 3 / 3",
-  "notices.history.delivery.single": "已投遞 1 / 1",
+  "notices.history.delivery.all": "尚無接收者結果",
+  "notices.history.delivery.single": "尚無接收者結果",
   "notices.noticeTitleRequired": "公告標題為必填。",
   "notices.noticeBodyRequired": "公告內容為必填。",
   "notices.warning.operationError": "公告/維護模式操作異常：{error}",
@@ -7145,9 +7534,14 @@ const zh: typeof en = {
   "notices.status.scheduled": "已排程",
   "notices.status.resolved": "已解決",
   "notices.status.archived": "已封存",
+  "notices.status.expired": "已到期下架",
+  "notices.status.unknown": "狀態未知",
+  "notices.form.expiry": "到期下架時間（選填）",
+  "notices.form.highRiskConfirmation": "確認向選定受眾發布此高風險公告",
   "notices.severity.info": "低",
   "notices.severity.warning": "中",
   "notices.severity.critical": "高",
+  "notices.severity.maintenance": "維護",
   "notices.window.notScheduled": "未排定",
   "notices.risk.high": "高風險",
   "notices.systemUser": "system",
@@ -7190,6 +7584,8 @@ const zh: typeof en = {
   "audit.page.refresh": "重新整理 (T6 手動)",
   "audit.page.refreshing": "重新整理中…",
   "audit.page.exportCsv": "匯出 CSV",
+  "audit.page.exportStarted": "已開始下載 CSV，共 {count} 筆紀錄。",
+  "audit.page.exportFailed": "CSV 下載失敗，請再試一次。",
   "audit.page.tabLog": "稽核紀錄",
   "audit.page.tabPolicy": "保留政策",
   "audit.page.tabHold": "有效法定保留",
@@ -7932,7 +8328,7 @@ export function getNoticesAudienceLabel(
 
 export function getNoticeSeverityLabel(
   locale: Locale,
-  severity: PlatformNoticeSeverity,
+  severity: PlatformNoticeSeverity | "maintenance",
 ): string {
   return translateKey(locale, `notices.severity.${severity}`);
 }
@@ -7965,14 +8361,18 @@ export function formatNoticeWindow(
 export function getNoticeHistoryDeliveryLabel(
   locale: Locale,
   status: PlatformNoticeStatus,
-  audience: PlatformNoticeRecord["targetAudience"],
+  _audience: PlatformNoticeRecord["targetAudience"],
 ): string {
-  if (status === "resolved") {
+  void _audience; // Audience membership cannot prove any delivery outcome.
+  if (status === "resolved")
     return translateKey(locale, "notices.history.delivery.archived");
-  }
-  return audience === "all"
-    ? translateKey(locale, "notices.history.delivery.all")
-    : translateKey(locale, "notices.history.delivery.single");
+  if (status === "scheduled")
+    return locale === "zh"
+      ? "已排程，尚未開放"
+      : "Scheduled; not yet available";
+  return locale === "zh"
+    ? "請查閱實際受眾回執"
+    : "See recorded audience receipts";
 }
 
 export function getNoticesPageCopy(locale: Locale) {
@@ -8052,6 +8452,13 @@ export function getNoticesPageCopy(locale: Locale) {
     id: translateKey(locale, "notices.col.id"),
     historySubtitle: translateKey(locale, "notices.history.subtitle"),
     archived: translateKey(locale, "notices.status.archived"),
+    expired: translateKey(locale, "notices.status.expired"),
+    unknown: translateKey(locale, "notices.status.unknown"),
+    expiry: translateKey(locale, "notices.form.expiry"),
+    highRiskConfirmation: translateKey(
+      locale,
+      "notices.form.highRiskConfirmation",
+    ),
     noticeTitleRequired: translateKey(locale, "notices.noticeTitleRequired"),
     noticeBodyRequired: translateKey(locale, "notices.noticeBodyRequired"),
     maintenanceRisk: translateKey(locale, "notices.risk.high"),
@@ -8060,6 +8467,7 @@ export function getNoticesPageCopy(locale: Locale) {
       info: translateKey(locale, "notices.severity.info"),
       warning: translateKey(locale, "notices.severity.warning"),
       critical: translateKey(locale, "notices.severity.critical"),
+      maintenance: translateKey(locale, "notices.severity.maintenance"),
     },
     audienceOptions: {
       ops: translateKey(locale, "notices.audience.ops"),

@@ -1,0 +1,242 @@
+// Replay the same production boundary fixture against an immutable prior SHA.
+// No checkout/reset, server, real PG or substituted business SQL.
+/* eslint-disable @typescript-eslint/no-require-imports -- This replay loader must load CommonJS-transpiled historical TypeScript via Node's module hooks. */
+const fs = require("node:fs");
+const path = require("node:path");
+const Module = require("node:module");
+const { execFileSync } = require("node:child_process");
+const ts = require("typescript");
+const root = path.resolve(__dirname, "../../..");
+const reference = process.argv[2];
+if (reference && !/^[a-f0-9]{40}$/.test(reference))
+  throw new Error("Expected full immutable SHA");
+const previousFiles = new Set([
+  "apps/api/src/modules/passenger-app/booking/passenger-booking.service.ts",
+  "apps/api/src/modules/passenger-app/booking/passenger-booking.repository.ts",
+  "apps/api/src/modules/passenger-app/booking/passenger-booking.controller.ts",
+  "apps/api/src/modules/passenger-app/booking/passenger-booking-settings.controller.ts",
+  "apps/api/src/modules/multi-taxi/multi-taxi.service.ts",
+  "apps/api/src/modules/owned-mobility/owned-mobility.service.ts",
+]);
+const resolve = Module._resolveFilename;
+Module._resolveFilename = function (request, ...args) {
+  if (request === "@drts/contracts")
+    return path.join(root, "packages/contracts/src/index.ts");
+  if (request === "@drts/control-plane-auth")
+    return path.join(root, "packages/control-plane-auth/src/index.ts");
+  return resolve.call(this, request, ...args);
+};
+require.extensions[".ts"] = (module, filename) => {
+  const relative = path.relative(root, filename);
+  const source =
+    reference && previousFiles.has(relative)
+      ? execFileSync("git", ["show", `${reference}:${relative}`], {
+          cwd: root,
+          encoding: "utf8",
+        })
+      : fs.readFileSync(filename, "utf8");
+  module._compile(
+    ts.transpileModule(source, {
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        experimentalDecorators: true,
+        emitDecoratorMetadata: false,
+      },
+      fileName: filename,
+    }).outputText,
+    filename,
+  );
+};
+const { Logger } = require(
+  path.join(root, "apps/api/node_modules/@nestjs/common"),
+);
+Logger.overrideLogger(false);
+const {
+  createProductionBookingFixture,
+  NOW,
+  OWNER,
+} = require("./production-booking-fixture.ts");
+const {
+  observeTrustedCancellation,
+} = require("./production-cancellation-fixture.ts");
+const RealDate = Date;
+global.Date = class extends RealDate {
+  constructor(...args) {
+    super(...(args.length ? args : [NOW]));
+  }
+  static now() {
+    return NOW;
+  }
+};
+process.env.REQUIRE_SMS_VERIFICATION = "false";
+process.env.SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES = "15";
+delete process.env.MULTI_TAXI_DEFAULT_AUTHORIZATION_ID;
+async function main() {
+  let failures = 0;
+  const { PassengerBookingSettingsController } = require(
+    path.join(
+      root,
+      "apps/api/src/modules/passenger-app/booking/passenger-booking-settings.controller.ts",
+    ),
+  );
+  const settingsPaths = Reflect.getMetadata(
+    "path",
+    PassengerBookingSettingsController.prototype.getSettings,
+  );
+  const normalizedPaths = Array.isArray(settingsPaths)
+    ? settingsPaths
+    : [settingsPaths];
+  const canonicalSettings =
+    normalizedPaths.includes("settings") &&
+    normalizedPaths.includes("booking-settings");
+  if (!canonicalSettings) failures++;
+  console.log(
+    JSON.stringify({
+      sha: reference || "working-tree",
+      scenario: "canonical_settings_route",
+      paths: settingsPaths,
+      safe: canonicalSettings,
+    }),
+  );
+  for (const faults of [
+    [],
+    ["order"],
+    ["history", "cancel_connect"],
+    ["history", "cancel_write"],
+    ["token", "cancel_connect"],
+    ["history", "rollback"],
+  ]) {
+    const f = createProductionBookingFixture(faults);
+    let error = null;
+    try {
+      await f.service.createRide(OWNER, f.command);
+    } catch (e) {
+      error = e.code || e.message;
+    }
+    const safe =
+      faults.length === 0
+        ? error === null &&
+          f.state.history?.[0] === OWNER &&
+          f.published.length === 1
+        : error !== null &&
+          f.state.order === null &&
+          f.state.history === null &&
+          f.state.token === null &&
+          f.published.length === 0 &&
+          f.owned.listOrders().length === 0;
+    if (!safe) failures++;
+    console.log(
+      JSON.stringify({
+        sha: reference || "working-tree",
+        faults,
+        error,
+        durable: f.state.order?.status || null,
+        memory: f.owned.listOrders()[0]?.status || null,
+        history: !!f.state.history,
+        token: !!f.state.token,
+        published: f.published.length,
+        historyEntry: f.historyObservations,
+        safe,
+      }),
+    );
+  }
+  console.log(`PRODUCTION_FAILURE_PROBE failures=${failures}`);
+  for (const scenario of [
+    "http_envelope",
+    "expired_at_now",
+    "array_confirmation",
+    "malformed_order_id",
+  ]) {
+    const f = createProductionBookingFixture();
+    let error = null,
+      result = null;
+    if (scenario === "expired_at_now")
+      f.snapshot.expiresAt = new Date(NOW).toISOString();
+    if (scenario === "array_confirmation")
+      f.command.passengerConfirmedAt = [f.command.passengerConfirmedAt];
+    try {
+      result =
+        scenario === "malformed_order_id"
+          ? await f.service.getRide(OWNER, "not-a-uuid")
+          : await f.controller.createRide(
+              { realm: "passenger", drtsPassengerId: OWNER },
+              "probe-request",
+              f.command,
+            );
+    } catch (e) {
+      error = e.code || e.message;
+    }
+    const safe =
+      scenario === "http_envelope"
+        ? result?.data?.ride?.order?.orderId === f.state.order?.orderId &&
+          result?.meta?.requestId === "probe-request"
+        : scenario === "malformed_order_id"
+          ? error === "PASSENGER_RIDE_NOT_FOUND" && f.calls.length === 0
+          : error ===
+              (scenario === "expired_at_now"
+                ? "FARE_QUOTE_EXPIRED"
+                : "PASSENGER_NOT_CONFIRMED") &&
+            f.state.order === null &&
+            f.published.length === 0;
+    if (!safe) failures++;
+    console.log(
+      JSON.stringify({
+        sha: reference || "working-tree",
+        scenario,
+        error,
+        safe,
+        databaseCalls: f.calls.length,
+      }),
+    );
+  }
+  console.log(`PRODUCTION_CONTRACT_PROBE total_failures=${failures}`);
+  for (const status of [
+    "ready_for_dispatch",
+    "assigned",
+    "driver_accepted",
+    "on_trip",
+    "proof_pending",
+    "completed",
+    "cancelled",
+  ]) {
+    for (const memory of ["synchronized", "stale", "race"]) {
+      const o = await observeTrustedCancellation(status, memory);
+      const denied = [
+        "on_trip",
+        "proof_pending",
+        "completed",
+        "cancelled",
+      ].includes(status);
+      const writes = o.cancellationCalls.filter((c) =>
+        /^(INSERT|UPDATE|DELETE)/.test(c.sql),
+      );
+      const safe = denied
+        ? o.error?.code === "ORDER_NOT_CANCELABLE" &&
+          JSON.stringify(o.f.state.order) === JSON.stringify(o.durableBefore) &&
+          writes.length === 0 &&
+          Object.values(o.effects).every((n) => n === 0)
+        : o.error === null && o.f.state.order.status === "cancelled";
+      if (!safe) failures++;
+      console.log(
+        JSON.stringify({
+          sha: reference || "working-tree",
+          scenario: "trusted_cancel",
+          status,
+          memory,
+          error: o.error?.code || o.error?.message || null,
+          durableAfter: o.f.state.order.status,
+          writes: writes.length,
+          effects: o.effects,
+          safe,
+        }),
+      );
+    }
+  }
+  console.log(`PRODUCTION_CANCELLATION_PROBE total_failures=${failures}`);
+  process.exitCode = failures ? 1 : 0;
+}
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

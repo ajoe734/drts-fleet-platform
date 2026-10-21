@@ -1,0 +1,515 @@
+{
+  "accepted": "d9b63d0317475ba79160f8d633df0ab24cf1df64",
+  "producer": "actual unmodified accepted BillingSettlementService -> real repository (query SIM) -> real artifact store -> ControlledDownloadController drained bytes",
+  "tables": [
+    [
+      "billing.phase1_tenant_billing_profiles",
+      [
+        [
+          "tenant-demo-001",
+          {
+            "tenantId": "tenant-demo-001",
+            "invoiceTitle": "ASCII Legacy Ltd.",
+            "taxId": null,
+            "address": "ASCII (A)\\B",
+            "contactName": null,
+            "email": "legacy@example.invalid",
+            "updatedAt": "2026-10-19T06:45:38.889Z"
+          }
+        ],
+        [
+          "tenant-pdf-cjk",
+          {
+            "tenantId": "tenant-pdf-cjk",
+            "invoiceTitle": "示範租戶股份有限公司（中文）(A)\\B",
+            "taxId": "24567891",
+            "address": "臺中市中山路１２號，財務部 — Finance (2026)\\尾",
+            "contactName": null,
+            "email": "pdf@example.invalid",
+            "updatedAt": "2026-10-19T06:45:38.873Z"
+          }
+        ]
+      ]
+    ],
+    [
+      "billing.phase1_reconciliation_issues",
+      [
+        [
+          "recon-partner-sponsor-202603-001",
+          {
+            "issueId": "recon-partner-sponsor-202603-001",
+            "issueType": "partner_sponsor_mismatch",
+            "source": "finance_manual",
+            "status": "open",
+            "channelKey": "partner_airport",
+            "summary": "Partner sponsor claim does not match issuer authorization references for March airport-transfer settlement.",
+            "ownerId": "fin-partner-ops",
+            "openedBy": "finance.review.bot",
+            "orderId": "order-demo-032",
+            "tenantId": "tenant-demo-001",
+            "partnerId": "partner-bank-demo-001",
+            "partnerProgramId": "program-airport-alpha",
+            "sponsorReference": "benefit-bank-demo-032",
+            "mirrorOrderId": null,
+            "externalOrderId": null,
+            "linkedReconciliationJobId": null,
+            "linkedInvoiceId": "invoice-demo-partner-airport-202603",
+            "linkedReimbursementBatchId": "reimbursement-demo-partner-airport-202603",
+            "forwardedFinanceContext": null,
+            "resolutionCode": null,
+            "resolutionSummary": null,
+            "resolvedAt": null,
+            "reopenCount": 0,
+            "evidenceArtifactIds": [
+              "artifact-benefit-ledger-202603",
+              "artifact-issuer-032"
+            ],
+            "comments": [
+              {
+                "commentId": "recon-comment-seed-001",
+                "actorId": "finance.review.bot",
+                "message": "Benefit reference exists, but sponsor export attributes the trip to an inactive March campaign. Finance review required before closeout.",
+                "artifactIds": ["artifact-benefit-ledger-202603"],
+                "createdAt": "2026-04-01T03:00:00.000Z"
+              }
+            ],
+            "createdAt": "2026-04-01T03:00:00.000Z",
+            "updatedAt": "2026-04-01T03:00:00.000Z"
+          }
+        ]
+      ]
+    ],
+    [
+      "billing.phase1_driver_fee_plans",
+      [
+        [
+          "fee-plan-02e44f59-6e5f-452d-8374-ca82a4545476",
+          {
+            "feePlanId": "fee-plan-02e44f59-6e5f-452d-8374-ca82a4545476",
+            "planName": "既有費率",
+            "version": "費率v1-2026",
+            "serviceFeeBps": 1500,
+            "reimbursementMode": "platform_funded",
+            "status": "published",
+            "publishedAt": "2026-10-19T06:45:38.875Z"
+          }
+        ]
+      ]
+    ],
+    [
+      "billing.phase1_tenant_invoices",
+      [
+        [
+          "invoice-a1596c67-a821-40c4-bcf3-567de220fa6c",
+          {
+            "invoiceId": "invoice-a1596c67-a821-40c4-bcf3-567de220fa6c",
+            "tenantId": "tenant-pdf-cjk",
+            "periodStart": "2026-05-01T00:00:00Z",
+            "periodEnd": "2026-05-31T23:59:59Z",
+            "amount": {
+              "currency": "TWD",
+              "amountMinor": 37038
+            },
+            "status": "issued",
+            "artifactUrl": "/downloads/tenant-invoice/invoice-a1596c67-a821-40c4-bcf3-567de220fa6c?signed_at=2026-10-19T06%3A45%3A38.878Z&expires_at=2026-10-19T07%3A00%3A38.878Z&key_id=phase1-controlled-download-key-v1&manifest_hash=7e7fd53d6bcf7d6fb37c9fa53ec59036445a8edf946c7097c670e2138a09f53f&sig=19950da2918d2ffedc8957e2e343d98140a12f9e5c0a344b21a7556aae955241&sig_v=1",
+            "pricingVersionSnapshot": "tenant-pricing-live",
+            "lines": [
+              {
+                "lineId": "invoice-line-934c1d39-1bbe-4216-9ce6-4905c6ac187a",
+                "orderId": "order-pdf-0002",
+                "description": "Bank-airport benefit trip order-pdf-0002 (partner-pdf-2)",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 12347
+                },
+                "channelKey": "partner_airport",
+                "orderSource": "portal",
+                "serviceBucket": "business_dispatch",
+                "businessDispatchSubtype": "credit_card_airport_transfer",
+                "partnerId": "partner-pdf",
+                "partnerProgramId": "program-pdf",
+                "partnerEntrySlug": "partner-pdf-2",
+                "eligibilityVerificationId": null,
+                "issuerAuthorizationRef": "issuer-pdf",
+                "benefitReference": "benefit-pdf"
+              },
+              {
+                "lineId": "invoice-line-23322410-cb02-4908-84b3-7d6b13309c07",
+                "orderId": "order-pdf-0001",
+                "description": "Bank-airport benefit trip order-pdf-0001 (partner-pdf-1)",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 12346
+                },
+                "channelKey": "partner_airport",
+                "orderSource": "portal",
+                "serviceBucket": "business_dispatch",
+                "businessDispatchSubtype": "credit_card_airport_transfer",
+                "partnerId": "partner-pdf",
+                "partnerProgramId": "program-pdf",
+                "partnerEntrySlug": "partner-pdf-1",
+                "eligibilityVerificationId": null,
+                "issuerAuthorizationRef": "issuer-pdf",
+                "benefitReference": "benefit-pdf"
+              },
+              {
+                "lineId": "invoice-line-3a937853-523a-49b0-aa65-f4c8db45ce90",
+                "orderId": "order-pdf-0000",
+                "description": "Bank-airport benefit trip order-pdf-0000 (partner-pdf-0)",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 12345
+                },
+                "channelKey": "partner_airport",
+                "orderSource": "portal",
+                "serviceBucket": "business_dispatch",
+                "businessDispatchSubtype": "credit_card_airport_transfer",
+                "partnerId": "partner-pdf",
+                "partnerProgramId": "program-pdf",
+                "partnerEntrySlug": "partner-pdf-0",
+                "eligibilityVerificationId": null,
+                "issuerAuthorizationRef": "issuer-pdf",
+                "benefitReference": "benefit-pdf"
+              }
+            ],
+            "createdAt": "2026-10-19T06:45:38.878Z",
+            "updatedAt": "2026-10-19T06:45:38.878Z",
+            "artifactDownloadMetadata": {
+              "kind": "tenant-invoice",
+              "subjectId": "invoice-a1596c67-a821-40c4-bcf3-567de220fa6c",
+              "manifestHash": "7e7fd53d6bcf7d6fb37c9fa53ec59036445a8edf946c7097c670e2138a09f53f",
+              "host": "/downloads",
+              "keyId": "phase1-controlled-download-key-v1",
+              "signedAt": "2026-10-19T06:45:38.878Z",
+              "expiresAt": "2026-10-19T07:00:38.878Z",
+              "ttlMinutes": 15,
+              "signatureVersion": 1,
+              "signature": "19950da2918d2ffedc8957e2e343d98140a12f9e5c0a344b21a7556aae955241",
+              "downloadUrl": "/downloads/tenant-invoice/invoice-a1596c67-a821-40c4-bcf3-567de220fa6c?signed_at=2026-10-19T06%3A45%3A38.878Z&expires_at=2026-10-19T07%3A00%3A38.878Z&key_id=phase1-controlled-download-key-v1&manifest_hash=7e7fd53d6bcf7d6fb37c9fa53ec59036445a8edf946c7097c670e2138a09f53f&sig=19950da2918d2ffedc8957e2e343d98140a12f9e5c0a344b21a7556aae955241&sig_v=1",
+              "immutable": true
+            }
+          }
+        ],
+        [
+          "invoice-01c1998b-79d2-4271-b12a-5efe7430cf56",
+          {
+            "invoiceId": "invoice-01c1998b-79d2-4271-b12a-5efe7430cf56",
+            "tenantId": "tenant-demo-001",
+            "periodStart": "2026-03-01T00:00:00Z",
+            "periodEnd": "2026-03-31T23:59:59Z",
+            "amount": {
+              "currency": "TWD",
+              "amountMinor": 350000
+            },
+            "status": "issued",
+            "artifactUrl": "/downloads/tenant-invoice/invoice-01c1998b-79d2-4271-b12a-5efe7430cf56?signed_at=2026-10-19T06%3A45%3A38.890Z&expires_at=2026-10-19T07%3A00%3A38.890Z&key_id=phase1-controlled-download-key-v1&manifest_hash=bcb6b203cfaecd921e4b657f8b781f6df30fd1967dcb47f2f92e4bb045979115&sig=203e0e43b2e4f72600f25f3b28460a2c95c5b7199365241aeda58d523c56bc8e&sig_v=1",
+            "pricingVersionSnapshot": "tenant-pricing-v1",
+            "lines": [
+              {
+                "lineId": "invoice-line-7014f8b6-17f0-4cd4-b83d-013b0250ca19",
+                "orderId": "order-demo-033",
+                "description": "Completed owned trip order-demo-033",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 150000
+                },
+                "channelKey": "tenant_enterprise",
+                "orderSource": "portal",
+                "serviceBucket": "business_dispatch",
+                "businessDispatchSubtype": "enterprise_dispatch",
+                "partnerId": null,
+                "partnerProgramId": null,
+                "partnerEntrySlug": null,
+                "eligibilityVerificationId": null,
+                "issuerAuthorizationRef": null,
+                "benefitReference": null
+              },
+              {
+                "lineId": "invoice-line-fb792c4f-9d7d-4496-a7a3-d706bdef339d",
+                "orderId": "order-demo-032",
+                "description": "Bank-airport benefit trip order-demo-032 (bank-demo-alpha-airport)",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 80000
+                },
+                "channelKey": "partner_airport",
+                "orderSource": "api",
+                "serviceBucket": "business_dispatch",
+                "businessDispatchSubtype": "credit_card_airport_transfer",
+                "partnerId": "partner-bank-demo-001",
+                "partnerProgramId": "program-airport-alpha",
+                "partnerEntrySlug": "bank-demo-alpha-airport",
+                "eligibilityVerificationId": "elig-demo-032",
+                "issuerAuthorizationRef": "issuer-auth-bank-demo-032",
+                "benefitReference": "benefit-bank-demo-032"
+              },
+              {
+                "lineId": "invoice-line-b3057064-c797-4c88-ba87-da048cfc1d64",
+                "orderId": "order-demo-031",
+                "description": "Completed owned trip order-demo-031",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 120000
+                },
+                "channelKey": "tenant_enterprise",
+                "orderSource": "portal",
+                "serviceBucket": "business_dispatch",
+                "businessDispatchSubtype": "enterprise_dispatch",
+                "partnerId": null,
+                "partnerProgramId": null,
+                "partnerEntrySlug": null,
+                "eligibilityVerificationId": null,
+                "issuerAuthorizationRef": null,
+                "benefitReference": null
+              }
+            ],
+            "createdAt": "2026-10-19T06:45:38.890Z",
+            "updatedAt": "2026-10-19T06:45:38.890Z",
+            "artifactDownloadMetadata": {
+              "kind": "tenant-invoice",
+              "subjectId": "invoice-01c1998b-79d2-4271-b12a-5efe7430cf56",
+              "manifestHash": "bcb6b203cfaecd921e4b657f8b781f6df30fd1967dcb47f2f92e4bb045979115",
+              "host": "/downloads",
+              "keyId": "phase1-controlled-download-key-v1",
+              "signedAt": "2026-10-19T06:45:38.890Z",
+              "expiresAt": "2026-10-19T07:00:38.890Z",
+              "ttlMinutes": 15,
+              "signatureVersion": 1,
+              "signature": "203e0e43b2e4f72600f25f3b28460a2c95c5b7199365241aeda58d523c56bc8e",
+              "downloadUrl": "/downloads/tenant-invoice/invoice-01c1998b-79d2-4271-b12a-5efe7430cf56?signed_at=2026-10-19T06%3A45%3A38.890Z&expires_at=2026-10-19T07%3A00%3A38.890Z&key_id=phase1-controlled-download-key-v1&manifest_hash=bcb6b203cfaecd921e4b657f8b781f6df30fd1967dcb47f2f92e4bb045979115&sig=203e0e43b2e4f72600f25f3b28460a2c95c5b7199365241aeda58d523c56bc8e&sig_v=1",
+              "immutable": true
+            }
+          }
+        ]
+      ]
+    ],
+    [
+      "billing.phase1_driver_statements",
+      [
+        [
+          "statement-65f2d8ca-27ec-4a87-910b-79d7275299f0",
+          {
+            "statementId": "statement-65f2d8ca-27ec-4a87-910b-79d7275299f0",
+            "driverId": "drv-pdf-cjk",
+            "periodMonth": "2026-05",
+            "receiptNo": "DRV-202605-cjk",
+            "payoutStatus": "pending",
+            "grossEarning": {
+              "currency": "TWD",
+              "amountMinor": 37038
+            },
+            "serviceFee": {
+              "currency": "TWD",
+              "amountMinor": 5556
+            },
+            "subsidy": {
+              "currency": "TWD",
+              "amountMinor": 0
+            },
+            "netAmount": {
+              "currency": "TWD",
+              "amountMinor": 31482
+            },
+            "feePlanVersion": "費率v1-2026",
+            "lines": [
+              {
+                "lineId": "statement-line-e586c8c5-07c9-4d1a-8f8e-8507d2f30605",
+                "orderId": "order-pdf-0002",
+                "grossEarning": {
+                  "currency": "TWD",
+                  "amountMinor": 12347
+                },
+                "serviceFee": {
+                  "currency": "TWD",
+                  "amountMinor": 1852
+                },
+                "subsidy": {
+                  "currency": "TWD",
+                  "amountMinor": 0
+                },
+                "netAmount": {
+                  "currency": "TWD",
+                  "amountMinor": 10495
+                },
+                "reimbursementRequired": true,
+                "channelKey": "partner_airport",
+                "orderSource": "portal"
+              },
+              {
+                "lineId": "statement-line-9f1a544a-efa7-476d-9373-8bb2b562ec5b",
+                "orderId": "order-pdf-0001",
+                "grossEarning": {
+                  "currency": "TWD",
+                  "amountMinor": 12346
+                },
+                "serviceFee": {
+                  "currency": "TWD",
+                  "amountMinor": 1852
+                },
+                "subsidy": {
+                  "currency": "TWD",
+                  "amountMinor": 0
+                },
+                "netAmount": {
+                  "currency": "TWD",
+                  "amountMinor": 10494
+                },
+                "reimbursementRequired": true,
+                "channelKey": "partner_airport",
+                "orderSource": "portal"
+              },
+              {
+                "lineId": "statement-line-113c6022-052f-489a-b633-4a85a8cc8359",
+                "orderId": "order-pdf-0000",
+                "grossEarning": {
+                  "currency": "TWD",
+                  "amountMinor": 12345
+                },
+                "serviceFee": {
+                  "currency": "TWD",
+                  "amountMinor": 1852
+                },
+                "subsidy": {
+                  "currency": "TWD",
+                  "amountMinor": 0
+                },
+                "netAmount": {
+                  "currency": "TWD",
+                  "amountMinor": 10493
+                },
+                "reimbursementRequired": true,
+                "channelKey": "partner_airport",
+                "orderSource": "portal"
+              }
+            ],
+            "createdAt": "2026-10-19T06:45:38.883Z",
+            "updatedAt": "2026-10-19T06:45:38.883Z",
+            "artifactUrl": "/downloads/report/statement-65f2d8ca-27ec-4a87-910b-79d7275299f0?signed_at=2026-10-19T06%3A45%3A38.883Z&expires_at=2026-10-19T07%3A00%3A38.883Z&key_id=phase1-controlled-download-key-v1&manifest_hash=0848bbfe5b129886e089f35fb7957ae9154a0cc5e6453703488150dc46981199&sig=734f20829c01948447e0ee85382109e41410e73a11596957de678cbecea02937&sig_v=1",
+            "artifactDownloadMetadata": {
+              "kind": "report",
+              "subjectId": "statement-65f2d8ca-27ec-4a87-910b-79d7275299f0",
+              "manifestHash": "0848bbfe5b129886e089f35fb7957ae9154a0cc5e6453703488150dc46981199",
+              "host": "/downloads",
+              "keyId": "phase1-controlled-download-key-v1",
+              "signedAt": "2026-10-19T06:45:38.883Z",
+              "expiresAt": "2026-10-19T07:00:38.883Z",
+              "ttlMinutes": 15,
+              "signatureVersion": 1,
+              "signature": "734f20829c01948447e0ee85382109e41410e73a11596957de678cbecea02937",
+              "downloadUrl": "/downloads/report/statement-65f2d8ca-27ec-4a87-910b-79d7275299f0?signed_at=2026-10-19T06%3A45%3A38.883Z&expires_at=2026-10-19T07%3A00%3A38.883Z&key_id=phase1-controlled-download-key-v1&manifest_hash=0848bbfe5b129886e089f35fb7957ae9154a0cc5e6453703488150dc46981199&sig=734f20829c01948447e0ee85382109e41410e73a11596957de678cbecea02937&sig_v=1",
+              "immutable": true
+            }
+          }
+        ]
+      ]
+    ],
+    [
+      "billing.phase1_reimbursement_batches",
+      [
+        [
+          "reimbursement-09025761-04c8-43c8-aa4b-8346cd016979",
+          {
+            "batchId": "reimbursement-09025761-04c8-43c8-aa4b-8346cd016979",
+            "driverId": "drv-pdf-cjk",
+            "statementId": "statement-65f2d8ca-27ec-4a87-910b-79d7275299f0",
+            "periodMonth": "2026-05",
+            "status": "pending",
+            "totalAmount": {
+              "currency": "TWD",
+              "amountMinor": 37038
+            },
+            "remittanceProofId": null,
+            "items": [
+              {
+                "itemId": "reimbursement-item-23a26ba0-4fe7-480f-83a7-ac8f03550c60",
+                "orderId": "order-pdf-0002",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 12347
+                },
+                "reason": "交通補助（核准），中文 (A)\\B — TWD 123.45 [0]",
+                "channelKey": "partner_airport"
+              },
+              {
+                "itemId": "reimbursement-item-6d1080a6-5c86-4ffb-9b0a-4fe69bdb4111",
+                "orderId": "order-pdf-0001",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 12346
+                },
+                "reason": "交通補助（核准），中文 (A)\\B — TWD 123.45 [1]",
+                "channelKey": "partner_airport"
+              },
+              {
+                "itemId": "reimbursement-item-991f78ce-6f77-4fbf-9ac5-86db2708fc01",
+                "orderId": "order-pdf-0000",
+                "amount": {
+                  "currency": "TWD",
+                  "amountMinor": 12345
+                },
+                "reason": "交通補助（核准），中文 (A)\\B — TWD 123.45 [2]",
+                "channelKey": "partner_airport"
+              }
+            ],
+            "approvedAt": "2026-10-19T06:45:38.886Z",
+            "paidAt": null,
+            "workflowState": "exported",
+            "exportedAt": "2026-10-19T06:45:38.888Z",
+            "exportedByActorId": "pa-pdf-finance",
+            "exportReceiptId": "reimbursement-export-2282cf19-bcab-4655-91d2-1ded45d75525",
+            "exportManifestHash": "43bd537d45794978e8d6eef3fa4bb39f96b0dec21017aefc5ba7c085b321bb06",
+            "exportDownloadMetadata": {
+              "kind": "report",
+              "subjectId": "reimbursement-09025761-04c8-43c8-aa4b-8346cd016979",
+              "manifestHash": "43bd537d45794978e8d6eef3fa4bb39f96b0dec21017aefc5ba7c085b321bb06",
+              "host": "/downloads",
+              "keyId": "phase1-controlled-download-key-v1",
+              "signedAt": "2026-10-19T06:45:38.888Z",
+              "expiresAt": "2026-10-19T07:00:38.888Z",
+              "ttlMinutes": 15,
+              "signatureVersion": 1,
+              "signature": "d0f1d19acede6717946d1e31e18fe1a63b2ecdce2858c4272eda11ac0318b4f5",
+              "downloadUrl": "/downloads/report/reimbursement-09025761-04c8-43c8-aa4b-8346cd016979?signed_at=2026-10-19T06%3A45%3A38.888Z&expires_at=2026-10-19T07%3A00%3A38.888Z&key_id=phase1-controlled-download-key-v1&manifest_hash=43bd537d45794978e8d6eef3fa4bb39f96b0dec21017aefc5ba7c085b321bb06&sig=d0f1d19acede6717946d1e31e18fe1a63b2ecdce2858c4272eda11ac0318b4f5&sig_v=1",
+              "immutable": true
+            },
+            "reconciledAt": null,
+            "reconciledByActorId": null,
+            "reconciliationReason": null,
+            "reconciliationEvidenceRef": null,
+            "reconciliationReceiptId": null
+          }
+        ]
+      ]
+    ]
+  ],
+  "artifacts": [
+    {
+      "kind": "tenant-invoice",
+      "id": "invoice-a1596c67-a821-40c4-bcf3-567de220fa6c",
+      "url": "/downloads/tenant-invoice/invoice-a1596c67-a821-40c4-bcf3-567de220fa6c?signed_at=2026-10-19T06%3A45%3A38.878Z&expires_at=2026-10-19T07%3A00%3A38.878Z&key_id=phase1-controlled-download-key-v1&manifest_hash=7e7fd53d6bcf7d6fb37c9fa53ec59036445a8edf946c7097c670e2138a09f53f&sig=19950da2918d2ffedc8957e2e343d98140a12f9e5c0a344b21a7556aae955241&sig_v=1",
+      "expected": "7e7fd53d6bcf7d6fb37c9fa53ec59036445a8edf946c7097c670e2138a09f53f",
+      "base64": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCAxMDA5ID4+CnN0cmVhbQpCVAovRjEgMTAgVGYKNDAgNzYwIFRkCihUZW5hbnQgSW52b2ljZSBpbnZvaWNlLWExNTk2YzY3LWE4MjEtNDBjNC1iY2YzLTU2N2RlMjIwZmE2YykgVGoKMCAtMTQgVGQKKEJpbGwgVG86ID8/Pz8/Pz8/Pz8/Pz8/XChBXClcXEIgXCh0ZW5hbnQtcGRmLWNqa1wpKSBUagowIC0xNCBUZAooVGF4IElEOiAyNDU2Nzg5MSkgVGoKMCAtMTQgVGQKKEFkZHJlc3M6ID8/Pz8/Pz8/Pz8/Pz8gPyBGaW5hbmNlIFwoMjAyNlwpXFw/KSBUagowIC0xNCBUZAooQmlsbGluZyBQZXJpb2Q6IDIwMjYtMDUtMDFUMDA6MDA6MDBaIHRvIDIwMjYtMDUtMzFUMjM6NTk6NTlaKSBUagowIC0xNCBUZAooR2VuZXJhdGVkIEF0OiAyMDI2LTEwLTE5VDA2OjQ1OjM4Ljg3OFopIFRqCjAgLTE0IFRkCigpIFRqCjAgLTE0IFRkCihPcmRlciBJRCB8IERlc2NyaXB0aW9uIHwgQ2hhbm5lbCB8IEFtb3VudCkgVGoKMCAtMTQgVGQKKC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0pIFRqCjAgLTE0IFRkCihvcmRlci1wZGYtMDAwMiB8IEJhbmstYWlycG9ydCBiZW5lZml0IHRyaXAgb3JkZXItcGRmLTAwMDIgXChwYXJ0bmVyLXBkZi0yXCkgfCBwYXJ0bmVyX2FpcnBvcnQgfCBUV0QgMTIzLjQ3KSBUagowIC0xNCBUZAoob3JkZXItcGRmLTAwMDEgfCBCYW5rLWFpcnBvcnQgYmVuZWZpdCB0cmlwIG9yZGVyLXBkZi0wMDAxIFwocGFydG5lci1wZGYtMVwpIHwgcGFydG5lcl9haXJwb3J0IHwgVFdEIDEyMy40NikgVGoKMCAtMTQgVGQKKG9yZGVyLXBkZi0wMDAwIHwgQmFuay1haXJwb3J0IGJlbmVmaXQgdHJpcCBvcmRlci1wZGYtMDAwMCBcKHBhcnRuZXItcGRmLTBcKSB8IHBhcnRuZXJfYWlycG9ydCB8IFRXRCAxMjMuNDUpIFRqCjAgLTE0IFRkCigtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tKSBUagowIC0xNCBUZAooVG90YWwgXCgzIGxpbmVzXCk6IFRXRCAzNzAuMzgpIFRqCkVUCmVuZHN0cmVhbQplbmRvYmoKNSAwIG9iago8PCAvVHlwZSAvRm9udCAvU3VidHlwZSAvVHlwZTEgL0Jhc2VGb250IC9IZWx2ZXRpY2EgPj4KZW5kb2JqCnhyZWYKMCA2CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKMDAwMDAwMDI0MSAwMDAwMCBuIAowMDAwMDAxMzAyIDAwMDAwIG4gCnRyYWlsZXIKPDwgL1NpemUgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKMTM3MgolJUVPRg=="
+    },
+    {
+      "kind": "tenant-invoice",
+      "id": "invoice-01c1998b-79d2-4271-b12a-5efe7430cf56",
+      "url": "/downloads/tenant-invoice/invoice-01c1998b-79d2-4271-b12a-5efe7430cf56?signed_at=2026-10-19T06%3A45%3A38.890Z&expires_at=2026-10-19T07%3A00%3A38.890Z&key_id=phase1-controlled-download-key-v1&manifest_hash=bcb6b203cfaecd921e4b657f8b781f6df30fd1967dcb47f2f92e4bb045979115&sig=203e0e43b2e4f72600f25f3b28460a2c95c5b7199365241aeda58d523c56bc8e&sig_v=1",
+      "expected": "bcb6b203cfaecd921e4b657f8b781f6df30fd1967dcb47f2f92e4bb045979115",
+      "base64": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA5MjQgPj4Kc3RyZWFtCkJUCi9GMSAxMCBUZgo0MCA3NjAgVGQKKFRlbmFudCBJbnZvaWNlIGludm9pY2UtMDFjMTk5OGItNzlkMi00MjcxLWIxMmEtNWVmZTc0MzBjZjU2KSBUagowIC0xNCBUZAooQmlsbCBUbzogQVNDSUkgTGVnYWN5IEx0ZC4gXCh0ZW5hbnQtZGVtby0wMDFcKSkgVGoKMCAtMTQgVGQKKEFkZHJlc3M6IEFTQ0lJIFwoQVwpXFxCKSBUagowIC0xNCBUZAooQmlsbGluZyBQZXJpb2Q6IDIwMjYtMDMtMDFUMDA6MDA6MDBaIHRvIDIwMjYtMDMtMzFUMjM6NTk6NTlaKSBUagowIC0xNCBUZAooR2VuZXJhdGVkIEF0OiAyMDI2LTEwLTE5VDA2OjQ1OjM4Ljg5MFopIFRqCjAgLTE0IFRkCigpIFRqCjAgLTE0IFRkCihPcmRlciBJRCB8IERlc2NyaXB0aW9uIHwgQ2hhbm5lbCB8IEFtb3VudCkgVGoKMCAtMTQgVGQKKC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0pIFRqCjAgLTE0IFRkCihvcmRlci1kZW1vLTAzMyB8IENvbXBsZXRlZCBvd25lZCB0cmlwIG9yZGVyLWRlbW8tMDMzIHwgdGVuYW50X2VudGVycHJpc2UgfCBUV0QgMTUwMC4wMCkgVGoKMCAtMTQgVGQKKG9yZGVyLWRlbW8tMDMyIHwgQmFuay1haXJwb3J0IGJlbmVmaXQgdHJpcCBvcmRlci1kZW1vLTAzMiBcKGJhbmstZGVtby1hbHBoYS1haXJwb3J0XCkgfCBwYXJ0bmVyX2FpcnBvcnQgfCBUV0QgODAwLjAwKSBUagowIC0xNCBUZAoob3JkZXItZGVtby0wMzEgfCBDb21wbGV0ZWQgb3duZWQgdHJpcCBvcmRlci1kZW1vLTAzMSB8IHRlbmFudF9lbnRlcnByaXNlIHwgVFdEIDEyMDAuMDApIFRqCjAgLTE0IFRkCigtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tKSBUagowIC0xNCBUZAooVG90YWwgXCgzIGxpbmVzXCk6IFRXRCAzNTAwLjAwKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNDEgMDAwMDAgbiAKMDAwMDAwMTIxNiAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDYgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjEyODYKJSVFT0Y="
+    },
+    {
+      "kind": "report",
+      "id": "statement-65f2d8ca-27ec-4a87-910b-79d7275299f0",
+      "url": "/downloads/report/statement-65f2d8ca-27ec-4a87-910b-79d7275299f0?signed_at=2026-10-19T06%3A45%3A38.883Z&expires_at=2026-10-19T07%3A00%3A38.883Z&key_id=phase1-controlled-download-key-v1&manifest_hash=0848bbfe5b129886e089f35fb7957ae9154a0cc5e6453703488150dc46981199&sig=734f20829c01948447e0ee85382109e41410e73a11596957de678cbecea02937&sig_v=1",
+      "expected": "0848bbfe5b129886e089f35fb7957ae9154a0cc5e6453703488150dc46981199",
+      "base64": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA5NjYgPj4Kc3RyZWFtCkJUCi9GMSAxMCBUZgo0MCA3NjAgVGQKKERyaXZlciBTdGF0ZW1lbnQgc3RhdGVtZW50LTY1ZjJkOGNhLTI3ZWMtNGE4Ny05MTBiLTc5ZDcyNzUyOTlmMCkgVGoKMCAtMTQgVGQKKERyaXZlciBJRDogZHJ2LXBkZi1jamspIFRqCjAgLTE0IFRkCihQZXJpb2Q6IDIwMjYtMDUpIFRqCjAgLTE0IFRkCihSZWNlaXB0IE5vOiBEUlYtMjAyNjA1LWNqaykgVGoKMCAtMTQgVGQKKFBheW91dCBTdGF0dXM6IHBlbmRpbmcpIFRqCjAgLTE0IFRkCihGZWUgUGxhbiBWZXJzaW9uOiA/P3YxLTIwMjYpIFRqCjAgLTE0IFRkCihHZW5lcmF0ZWQgQXQ6IDIwMjYtMTAtMTlUMDY6NDU6MzguODgzWikgVGoKMCAtMTQgVGQKKCkgVGoKMCAtMTQgVGQKKEdyb3NzIEVhcm5pbmc6IFRXRCAzNzAuMzgpIFRqCjAgLTE0IFRkCihTZXJ2aWNlIEZlZTogVFdEIDU1LjU2KSBUagowIC0xNCBUZAooU3Vic2lkeTogVFdEIDAuMDApIFRqCjAgLTE0IFRkCihOZXQgQW1vdW50OiBUV0QgMzE0LjgyKSBUagowIC0xNCBUZAooKSBUagowIC0xNCBUZAooT3JkZXIgSUQgfCBDaGFubmVsIHwgTmV0IEFtb3VudCB8IFJlaW1idXJzZW1lbnQgUmVxdWlyZWQpIFRqCjAgLTE0IFRkCigtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tKSBUagowIC0xNCBUZAoob3JkZXItcGRmLTAwMDIgfCBwYXJ0bmVyX2FpcnBvcnQgfCBUV0QgMTA0Ljk1IHwgeWVzKSBUagowIC0xNCBUZAoob3JkZXItcGRmLTAwMDEgfCBwYXJ0bmVyX2FpcnBvcnQgfCBUV0QgMTA0Ljk0IHwgeWVzKSBUagowIC0xNCBUZAoob3JkZXItcGRmLTAwMDAgfCBwYXJ0bmVyX2FpcnBvcnQgfCBUV0QgMTA0LjkzIHwgeWVzKSBUagowIC0xNCBUZAooLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLSkgVGoKMCAtMTQgVGQKKFRvdGFsIExpbmVzOiAzKSBUagpFVAplbmRzdHJlYW0KZW5kb2JqCjUgMCBvYmoKPDwgL1R5cGUgL0ZvbnQgL1N1YnR5cGUgL1R5cGUxIC9CYXNlRm9udCAvSGVsdmV0aWNhID4+CmVuZG9iagp4cmVmCjAgNgowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA1OCAwMDAwMCBuIAowMDAwMDAwMTE1IDAwMDAwIG4gCjAwMDAwMDAyNDEgMDAwMDAgbiAKMDAwMDAwMTI1OCAwMDAwMCBuIAp0cmFpbGVyCjw8IC9TaXplIDYgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjEzMjgKJSVFT0Y="
+    },
+    {
+      "kind": "report",
+      "id": "reimbursement-09025761-04c8-43c8-aa4b-8346cd016979",
+      "url": "/downloads/report/reimbursement-09025761-04c8-43c8-aa4b-8346cd016979?signed_at=2026-10-19T06%3A45%3A38.888Z&expires_at=2026-10-19T07%3A00%3A38.888Z&key_id=phase1-controlled-download-key-v1&manifest_hash=43bd537d45794978e8d6eef3fa4bb39f96b0dec21017aefc5ba7c085b321bb06&sig=d0f1d19acede6717946d1e31e18fe1a63b2ecdce2858c4272eda11ac0318b4f5&sig_v=1",
+      "expected": "43bd537d45794978e8d6eef3fa4bb39f96b0dec21017aefc5ba7c085b321bb06",
+      "base64": "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvUmVzb3VyY2VzIDw8IC9Gb250IDw8IC9GMSA1IDAgUiA+PiA+PiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA5NjQgPj4Kc3RyZWFtCkJUCi9GMSAxMCBUZgo0MCA3NjAgVGQKKFJlaW1idXJzZW1lbnQgQmF0Y2ggRXhwb3J0IHJlaW1idXJzZW1lbnQtMDkwMjU3NjEtMDRjOC00M2M4LWFhNGItODM0NmNkMDE2OTc5KSBUagowIC0xNCBUZAooRHJpdmVyIElEOiBkcnYtcGRmLWNqaykgVGoKMCAtMTQgVGQKKFN0YXRlbWVudCBJRDogc3RhdGVtZW50LTY1ZjJkOGNhLTI3ZWMtNGE4Ny05MTBiLTc5ZDcyNzUyOTlmMCkgVGoKMCAtMTQgVGQKKFBlcmlvZDogMjAyNi0wNSkgVGoKMCAtMTQgVGQKKEZlZSBQbGFuIFZlcnNpb246ID8/djEtMjAyNikgVGoKMCAtMTQgVGQKKEFwcHJvdmVkIEF0OiAyMDI2LTEwLTE5VDA2OjQ1OjM4Ljg4NlopIFRqCjAgLTE0IFRkCihFeHBvcnRlZCBBdDogMjAyNi0xMC0xOVQwNjo0NTozOC44ODhaKSBUagowIC0xNCBUZAooKSBUagowIC0xNCBUZAooT3JkZXIgSUQgfCBDaGFubmVsIHwgQW1vdW50IHwgUmVhc29uKSBUagowIC0xNCBUZAooLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLSkgVGoKMCAtMTQgVGQKKG9yZGVyLXBkZi0wMDAyIHwgcGFydG5lcl9haXJwb3J0IHwgVFdEIDEyMy40NyB8ID8/Pz8/Pz8/Pz8/IFwoQVwpXFxCID8gVFdEIDEyMy40NSBbMF0pIFRqCjAgLTE0IFRkCihvcmRlci1wZGYtMDAwMSB8IHBhcnRuZXJfYWlycG9ydCB8IFRXRCAxMjMuNDYgfCA/Pz8/Pz8/Pz8/PyBcKEFcKVxcQiA/IFRXRCAxMjMuNDUgWzFdKSBUagowIC0xNCBUZAoob3JkZXItcGRmLTAwMDAgfCBwYXJ0bmVyX2FpcnBvcnQgfCBUV0QgMTIzLjQ1IHwgPz8/Pz8/Pz8/Pz8gXChBXClcXEIgPyBUV0QgMTIzLjQ1IFsyXSkgVGoKMCAtMTQgVGQKKC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0pIFRqCjAgLTE0IFRkCihUb3RhbCBcKDMgbGluZXNcKTogVFdEIDM3MC4zOCkgVGoKRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBlMSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDEyNTYgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxMzI2CiUlRU9G"
+    }
+  ]
+}

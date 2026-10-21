@@ -7,7 +7,7 @@ import signal
 import subprocess
 import tempfile
 import types
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import unittest
 import os
 from pathlib import Path
@@ -801,6 +801,110 @@ class ExecutionWorkspaceTests(unittest.TestCase):
             self.assertIn("must not start product development servers", request.message)
             self.assertIn("pnpm exec playwright", request.message)
             self.assertEqual(request.metadata["workspace_root"], str(workspace))
+
+    def test_provisions_node_modules_for_created_and_reused_coordination_worktrees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "repo"
+            root.mkdir()
+            self._init_repo(root)
+            (root / ".gitignore").write_text("node_modules\n.artifacts\n", encoding="utf-8")
+            for rel_pkg in ("apps/api", "packages/contracts", "packages/control-plane-auth"):
+                pkg_dir = root / rel_pkg
+                pkg_dir.mkdir(parents=True, exist_ok=True)
+                (pkg_dir / "package.json").write_text("{}\n", encoding="utf-8")
+            _git(root, "add", ".gitignore", "apps/api/package.json", "packages/contracts/package.json", "packages/control-plane-auth/package.json")
+            _git(root, "commit", "-m", "add workspace package manifests")
+
+            (root / "node_modules" / ".bin").mkdir(parents=True)
+            nest_dir = root / "apps" / "api" / "node_modules" / "@nestjs" / "common"
+            nest_dir.mkdir(parents=True)
+            (nest_dir / "index.js").write_text("module.exports = {};\n", encoding="utf-8")
+            zod_dir = root / "packages" / "contracts" / "node_modules" / "zod"
+            zod_dir.mkdir(parents=True)
+            (zod_dir / "index.js").write_text("module.exports = {};\n", encoding="utf-8")
+            (root / "packages" / "control-plane-auth" / "node_modules" / "jose").mkdir(parents=True)
+
+            config = self._repo_config(root)
+            root_status_before = _git(root, "status", "--porcelain").stdout
+            request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="coordination audit",
+                task_id=None,
+                reason="coordination:remaining34_driver_lifecycle",
+                metadata={"mode": "coordination", "workspace_key": "remaining34-driver_lifecycle-f5"},
+            )
+            workspace, branch, base_branch, source = supervisor.ensure_execution_workspace(
+                config,
+                request,
+                None,
+            )
+
+            self.assertIsNone(branch)
+            self.assertEqual(base_branch, "dev")
+            self.assertEqual(source, "created_coordination_worktree")
+            self.assertTrue((workspace / "node_modules").is_symlink())
+            self.assertEqual((workspace / "node_modules").resolve(), (root / "node_modules").resolve())
+            self.assertTrue((workspace / "apps" / "api" / "node_modules").is_symlink())
+            self.assertEqual(
+                (workspace / "apps" / "api" / "node_modules").resolve(),
+                (root / "apps" / "api" / "node_modules").resolve(),
+            )
+            self.assertTrue((workspace / "packages" / "contracts" / "node_modules").is_symlink())
+            self.assertEqual(
+                (workspace / "packages" / "contracts" / "node_modules").resolve(),
+                (root / "packages" / "contracts" / "node_modules").resolve(),
+            )
+            self.assertTrue((workspace / "packages" / "control-plane-auth" / "node_modules").is_symlink())
+            self.assertTrue((workspace / "apps" / "api" / "node_modules" / "@nestjs" / "common" / "index.js").is_file())
+            self.assertTrue((workspace / "packages" / "contracts" / "node_modules" / "zod" / "index.js").is_file())
+            self.assertEqual(_git(root, "status", "--porcelain").stdout, root_status_before)
+            self.assertEqual(_git(workspace, "status", "--porcelain").stdout.strip(), "")
+
+            # Simulate an existing coordination worktree missing one workspace link
+            # and holding a real node_modules directory in another (no-clobber).
+            (workspace / "packages" / "contracts" / "node_modules").unlink()
+            (workspace / "apps" / "api" / "node_modules").unlink()
+            custom_nm = workspace / "apps" / "api" / "node_modules"
+            custom_nm.mkdir()
+            (custom_nm / "local-marker.txt").write_text("keep\n", encoding="utf-8")
+
+            reused_workspace, reused_branch, reused_base, reused_source = supervisor.ensure_execution_workspace(
+                config,
+                request,
+                None,
+            )
+            self.assertEqual(reused_workspace, workspace)
+            self.assertIsNone(reused_branch)
+            self.assertEqual(reused_base, "dev")
+            self.assertEqual(reused_source, "existing_coordination_worktree")
+            self.assertTrue((workspace / "packages" / "contracts" / "node_modules").is_symlink())
+            self.assertTrue((workspace / "packages" / "contracts" / "node_modules" / "zod" / "index.js").is_file())
+            self.assertFalse((workspace / "apps" / "api" / "node_modules").is_symlink())
+            self.assertTrue((workspace / "apps" / "api" / "node_modules" / "local-marker.txt").is_file())
+
+            # Canonical fallback must be a no-op and never turn canonical node_modules into symlinks.
+            bad_config = self._repo_config(root)
+            bad_config["branch_strategy"]["worker_worktrees"]["coordination_base_branch"] = "nonexistent-base-branch"
+            fallback_request = supervisor.DeliveryRequest(
+                agent_id="gemini",
+                provider="gemini",
+                delivery_mode="antigravity",
+                message="coordination fallback",
+                task_id=None,
+                reason="coordination:fallback_check",
+                metadata={"mode": "coordination", "workspace_key": "fallback-check"},
+            )
+            fallback_workspace, _, _, fallback_source = supervisor.ensure_execution_workspace(
+                bad_config,
+                fallback_request,
+                None,
+            )
+            self.assertEqual(fallback_workspace, root.resolve())
+            self.assertEqual(fallback_source, "fallback_canonical")
+            self.assertFalse((root / "node_modules").is_symlink())
+            self.assertFalse((root / "apps" / "api" / "node_modules").is_symlink())
 
     def test_review_dispatch_ignores_owner_execution_branch_override(self) -> None:
         """SR-ORCH-REVIEW-WORKTREE-ISOLATION-20260923 regression.
@@ -2955,6 +3059,150 @@ class WorkerAttemptCooldownTests(unittest.TestCase):
         self.assertFalse(supervisor.redispatch_is_deferred(workers, "YIELD-002", "Codex"))
 
 
+class ProgressRedispatchBackoffTests(unittest.TestCase):
+    """An owner that can only report "still waiting" must not be woken every
+    progress_retry_seconds forever: each unchanged attempt doubles the wait."""
+
+    START = datetime(2026, 10, 7, 4, 0, 0, tzinfo=timezone.utc)
+
+    @staticmethod
+    def _task(**overrides: Any) -> dict[str, Any]:
+        task = {
+            "id": "WAIT-001",
+            "status": "acceptance",
+            "owner": "Codex",
+            "reviewer": "Claude2",
+            "depends_on": [],
+            "candidate_sha": "a" * 40,
+            "last_update": "2026-10-07T04:00:00Z",
+            "next": "still waiting",
+            "worker_outcomes": {},
+        }
+        task.update(overrides)
+        return task
+
+    def _attempt(
+        self,
+        state: dict[str, Any],
+        index: int,
+        task: dict[str, Any],
+        now: datetime,
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        worker = {"run_id": f"codex-wait-{index:03d}", "task_id": "WAIT-001", "agent_id": "codex"}
+        consumed = supervisor.consume_progress_outcome(
+            config or {},
+            worker,
+            {"outcome": "progress", "summary": f"still waiting #{index}"},
+            now=now,
+            state=state,
+            task=task,
+            task_map={task["id"]: task},
+        )
+        self.assertTrue(consumed)
+        return worker
+
+    def _wait_seconds(self, worker: dict[str, Any], now: datetime) -> int:
+        resume_at = supervisor.parse_runtime_timestamp(worker["redispatch_after"])
+        return int((resume_at - now).total_seconds())
+
+    def test_unchanged_progress_doubles_the_wait(self) -> None:
+        state: dict[str, Any] = {}
+        now = self.START
+        waits = []
+        for index in range(4):
+            # Each report rewrites only the bookkeeping fields.
+            task = self._task(
+                last_update=now.isoformat(),
+                next=f"still waiting #{index}",
+                worker_outcomes={f"codex-wait-{index:03d}": {"outcome": "progress"}},
+            )
+            worker = self._attempt(state, index, task, now)
+            waits.append(self._wait_seconds(worker, now))
+            self.assertEqual(worker["progress_streak"], index + 1)
+            now += timedelta(seconds=waits[-1])
+        self.assertEqual(waits, [120, 240, 480, 960])
+
+    def test_material_change_starts_over(self) -> None:
+        state: dict[str, Any] = {}
+        self._attempt(state, 0, self._task(), self.START)
+        self._attempt(state, 1, self._task(), self.START)
+        for index, change in enumerate(
+            (
+                {"candidate_sha": "b" * 40},
+                {"status": "in_progress"},
+                {"resolved_parent_status": "blocked"},
+                {"ci_status": "success"},
+                {"acceptance_evidence": {"browser_map_render_live": "run 1"}},
+            ),
+            start=2,
+        ):
+            with self.subTest(change=change):
+                worker = self._attempt(state, index, self._task(**change), self.START)
+                self.assertEqual(worker["progress_streak"], 1)
+                self.assertEqual(self._wait_seconds(worker, self.START), 120)
+
+    def test_wait_is_capped(self) -> None:
+        state: dict[str, Any] = {}
+        config = {"supervisor": {"progress_retry_seconds": 120, "progress_retry_max_seconds": 600}}
+        waits = [
+            self._wait_seconds(self._attempt(state, index, self._task(), self.START, config), self.START)
+            for index in range(5)
+        ]
+        self.assertEqual(waits, [120, 240, 480, 600, 600])
+
+    def test_replayed_result_does_not_extend_the_streak(self) -> None:
+        state: dict[str, Any] = {}
+        task = self._task()
+        worker = self._attempt(state, 0, task, self.START)
+        replay = supervisor.consume_progress_outcome(
+            {},
+            worker,
+            {"outcome": "progress", "summary": "still waiting #0"},
+            now=self.START,
+            state=state,
+            task=task,
+            task_map={task["id"]: task},
+        )
+        self.assertFalse(replay)
+        self.assertEqual(state["progress_streaks"]["WAIT-001:codex"]["count"], 1)
+
+    def test_without_task_context_the_flat_retry_applies(self) -> None:
+        worker = {"run_id": "codex-wait-flat", "task_id": "WAIT-001", "agent_id": "codex"}
+        self.assertTrue(
+            supervisor.consume_progress_outcome({}, worker, {"outcome": "progress"}, now=self.START)
+        )
+        self.assertEqual(self._wait_seconds(worker, self.START), 120)
+        self.assertNotIn("progress_streak", worker)
+
+    def test_stale_streaks_are_dropped(self) -> None:
+        state: dict[str, Any] = {
+            "progress_streaks": {
+                "OLD-001:codex": {"count": 9, "fingerprint": "x", "updated_at": "2026-10-01T00:00:00Z"},
+                "BAD-001:codex": "not a record",
+            }
+        }
+        self._attempt(state, 0, self._task(), self.START)
+        self.assertEqual(sorted(state["progress_streaks"]), ["WAIT-001:codex"])
+
+    def test_fingerprint_ignores_progress_bookkeeping(self) -> None:
+        base = self._task()
+        reported = self._task(
+            last_update="2026-10-07T05:00:00Z",
+            next="checked again, nothing changed",
+            worker_outcomes={"codex-wait-009": {"outcome": "progress"}},
+        )
+        task_map = {base["id"]: base}
+        self.assertEqual(
+            supervisor.material_task_fingerprint(base, task_map),
+            supervisor.material_task_fingerprint(reported, task_map),
+        )
+        self.assertNotEqual(
+            supervisor.material_task_fingerprint(base, task_map),
+            supervisor.material_task_fingerprint(self._task(external_gate=True), task_map),
+        )
+
+
 class DispatchCooldownTests(unittest.TestCase):
     """Cooldown protects freshly-dispatched workers from voluntary supersede.
 
@@ -3376,6 +3624,20 @@ class LaneFailureAutoPauseTests(unittest.TestCase):
         for t in ("T1", "T2", "T3", "T4"):
             supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker(t), "status: 429 rate limited")
         self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
+
+    def test_repeated_failures_on_two_tasks_pause_lane(self) -> None:
+        # 2026-10-06: a rejected model failed the lane every few seconds, but
+        # only ever on two tasks, so the distinct-task threshold never tripped.
+        state: dict[str, Any] = {}
+        reason = "status 400: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."
+        for t in ("T1", "T2", "T1", "T2", "T1"):
+            supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker(t), reason)
+        self.assertNotIn("codex2", supervisor.provider_pause_registry(state))
+        supervisor.maybe_autopause_unhealthy_lane({}, state, self._worker("T2"), reason)
+        pause = supervisor.provider_pause_registry(state)["codex2"]
+        self.assertEqual(pause["kind"], "capacity")
+        self.assertIn("6 terminal worker failures across 2 distinct tasks", pause["reason"])
+        self.assertNotIn("codex2", state.get("lane_failure_streaks", {}))
 
 
 class GovernanceRecursionGuardTests(unittest.TestCase):

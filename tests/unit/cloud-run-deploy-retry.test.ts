@@ -129,7 +129,7 @@ describe("Cloud Run deploy quota retry", () => {
 
     expect(
       workflow.match(/operations\/deployment\/deploy-cloud-run-service\.sh/g),
-    ).toHaveLength(9);
+    ).toHaveLength(10);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
     // Retired surfaces must never be built or deployed. The candidate-bound
     // acceptance job may still derive their former service URLs to prove the
@@ -141,7 +141,7 @@ describe("Cloud Run deploy quota retry", () => {
         .filter((line) => line.includes("passenger-web"))
         .map((line) => line.trim()),
     ).toEqual([
-      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 9 active services plus drts-passenger-web."',
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
       'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
       'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',
@@ -151,15 +151,18 @@ describe("Cloud Run deploy quota retry", () => {
     expect(workflow).toContain(
       'export DRTS_DEV_CONCIERGE_BASE_URL="https://drts-dev-concierge-portal-web-${cloud_run_suffix}"',
     );
-    expect(workflow).not.toMatch(/Deploy — .*passenger/i);
-    expect(workflow).not.toMatch(/Build & push — .*passenger/i);
+    expect(workflow).not.toMatch(/(?:Deploy|Build & push) — passenger-web\b/i);
+    expect(workflow).toContain("Deploy — passenger-app-web");
+    expect(workflow).toContain("Build & push — passenger-app-web");
 
     const domainWorkflow = readFileSync(
       path.join(repoRoot, ".github/workflows/domain-mappings-dev.yml"),
       "utf8",
     );
     expect(domainWorkflow).not.toContain("concierge.smarttransport.tw");
-    expect(domainWorkflow).not.toContain("ride.smarttransport.tw");
+    expect(domainWorkflow).toContain(
+      "map-domain-service.sh ride.smarttransport.tw",
+    );
     expect(domainWorkflow).toContain("uses: actions/checkout@v4");
     expect(domainWorkflow).toContain(
       "./operations/deployment/map-domain-service.sh",

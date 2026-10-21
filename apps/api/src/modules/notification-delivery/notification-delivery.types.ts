@@ -10,10 +10,18 @@ export type EnqueueMail = {
   body: string;
 };
 
+/** Platform messages deliberately carry null rather than a fabricated tenant. */
+export type PlatformMail = Omit<EnqueueMail, "tenantId" | "idempotencyKey">;
+
 export type TransportMessage = EnqueueMail & {
   deliveryId: string;
   messageId: string;
 };
+
+export type PlatformTransportMessage = Omit<TransportMessage, "tenantId"> & {
+  tenantId: null;
+};
+export type OutgoingMailMessage = TransportMessage | PlatformTransportMessage;
 
 /** Acceptance by the provider, never a claim of delivery to a human inbox. */
 export type ProviderAcknowledgement = {
@@ -26,6 +34,10 @@ export type ProviderAcknowledgement = {
 export interface MailTransport {
   readonly provider: string;
   send(message: TransportMessage): Promise<ProviderAcknowledgement>;
+  /** Optional extension: existing tenant-only adapters retain their send contract. */
+  sendPlatform?(
+    message: PlatformTransportMessage,
+  ): Promise<ProviderAcknowledgement>;
 }
 
 export class DeliveryTransportError extends Error {

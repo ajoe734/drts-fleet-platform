@@ -1,3 +1,5 @@
+import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
+import { domainFixture } from "../../referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
@@ -53,17 +55,6 @@ const TENANT_ID = "tenant-demo-001";
 const TENANT_ADMIN = {
   actorType: "tenant_admin",
   actorId: "tenant-leadtime-admin-001",
-} as never;
-
-const REFERRAL_IDENTITY = {
-  actorType: "referral_passenger",
-  actorId: "referral-passenger-001",
-  realm: "partner",
-  tenantId: "tenant-demo-001",
-  partnerId: "partner_ead6bf3d-e858-47cc-bfe1-5a3742524118",
-  partnerProgramId: "program-referral-community",
-  partnerEntrySlug: "yuhe-residence",
-  drtsPassengerId: "referral-passenger-001",
 } as never;
 
 function tenantBookingCommand(overrides?: Record<string, unknown>) {
@@ -272,19 +263,11 @@ describe("SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME: Tenant and referral booking le
 
   describe("3. Referral passenger booking scheduled lead time & past date validation", () => {
     it("rejects scheduled referral booking with scheduledAt earlier than minLeadTime (e.g. 2 min) with 400 TOO_SOON_TO_BOOK", async () => {
-      const { service } = createLeadTimeTestHarness();
+      const f = await domainFixture(),
+        who = await f.identity();
       const scheduledAt = new Date(Date.now() + 2 * 60_000).toISOString();
-
       await expect(
-        service.createReferralPassengerBooking(
-          {
-            entrySlug: "yuhe-residence",
-            pickupAddress: "Taipei Main Station",
-            dropoffAddress: "Taoyuan Airport T2",
-            scheduledAt,
-          },
-          REFERRAL_IDENTITY,
-        ),
+        f.service.quoteReferralPassengerFare({ ...f.route, scheduledAt }, who),
       ).rejects.toMatchObject({
         status: 400,
         response: {
@@ -298,101 +281,114 @@ describe("SR-QA-BOOKING-001-FIX-TENANT-LEAD-TIME: Tenant and referral booking le
           },
         },
       });
+      expect(f.db.table("ops.phase1_referral_fare_quote_snapshots").size).toBe(
+        0,
+      );
     });
 
     it("rejects scheduled referral booking with scheduledAt in the past with 400 TOO_SOON_TO_BOOK", async () => {
-      const { service } = createLeadTimeTestHarness();
-      const pastScheduledAt = new Date(Date.now() - 3600_000).toISOString();
-
+      const f = await domainFixture(),
+        who = await f.identity();
+      const scheduledAt = new Date(Date.now() - 3600_000).toISOString();
       await expect(
-        service.createReferralPassengerBooking(
-          {
-            entrySlug: "yuhe-residence",
-            pickupAddress: "Taipei Main Station",
-            dropoffAddress: "Taoyuan Airport T2",
-            scheduledAt: pastScheduledAt,
-          },
-          REFERRAL_IDENTITY,
-        ),
+        f.service.quoteReferralPassengerFare({ ...f.route, scheduledAt }, who),
       ).rejects.toMatchObject({
         status: 400,
         response: {
           error: {
             code: "TOO_SOON_TO_BOOK",
-            details: {
-              requestedPickupAt: pastScheduledAt,
-              minLeadTimeMinutes: 15,
-            },
+            details: { requestedPickupAt: scheduledAt, minLeadTimeMinutes: 15 },
           },
         },
       });
+      expect(f.db.table("ops.phase1_referral_fare_quote_snapshots").size).toBe(
+        0,
+      );
     });
 
-    it("rejects idempotent scheduled referral booking with past scheduledAt early before locking idempotency", async () => {
-      const { service } = createLeadTimeTestHarness();
-      const pastScheduledAt = new Date(Date.now() - 3600_000).toISOString();
-
+    it("rejects idempotent scheduled referral booking that crosses the lead cutoff while its quote is valid", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-01T10:00:00.000Z"));
+      const f = await domainFixture(),
+        who = await f.identity();
+      const scheduledAt = new Date(Date.now() + 20 * 60_000).toISOString();
+      const input = { ...f.route, scheduledAt };
+      await f.service.acknowledgeReferralFees(
+        {
+          disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          acknowledged: true,
+        },
+        who,
+      );
+      const quote = await f.service.quoteReferralPassengerFare(input, who);
+      vi.setSystemTime(new Date("2026-10-01T10:06:00.000Z"));
+      // The original quote is still within its 15m TTL, but a new create is now too soon.
       await expect(
-        service.createReferralPassengerBooking(
+        f.service.createReferralPassengerBooking(
           {
-            entrySlug: "yuhe-residence",
-            pickupAddress: "Taipei Main Station",
-            dropoffAddress: "Taoyuan Airport T2",
-            scheduledAt: pastScheduledAt,
-            idempotencyKey: "ref-idem-past-001",
+            ...input,
+            quoteId: quote.quoteId,
+            feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+            feeConfirmed: true,
+            passengerName: "Synthetic rider",
+            passengerPhone: "0912345678",
+            idempotencyKey: "ref-idem-cutoff-001",
           },
-          REFERRAL_IDENTITY,
-          undefined,
-          undefined,
-          "ref-idem-past-001",
+          who,
         ),
       ).rejects.toMatchObject({
         status: 400,
-        response: {
-          error: {
-            code: "TOO_SOON_TO_BOOK",
-          },
-        },
+        response: { error: { code: "TOO_SOON_TO_BOOK" } },
       });
+      expect(f.db.table("ops.phase1_owned_orders").size).toBe(0);
+      expect(
+        f.db
+          .table("ops.phase1_referral_fare_quote_snapshots")
+          .get(quote.quoteId).consumedByOrderId,
+      ).toBeNull();
     });
 
     it("allows on-demand referral passenger booking (no scheduledAt) without lead-time rejection", async () => {
-      const { service } = createLeadTimeTestHarness();
-
-      const booking = await service.createReferralPassengerBooking(
-        {
-          entrySlug: "yuhe-residence",
-          pickupAddress: "Taipei Main Station",
-          dropoffAddress: "Taoyuan Airport T2",
-        },
-        REFERRAL_IDENTITY,
+      const f = await domainFixture(),
+        who = await f.identity();
+      const booking = await f.service.createReferralPassengerBooking(
+        await f.command(who),
+        who,
       );
-
       expect(booking.orderId).toBeTruthy();
       expect(booking.status).toBe("created");
       expect(booking.businessDispatchSubtype).toBe("enterprise_dispatch");
     });
 
     it("allows valid scheduled referral passenger booking (>= 15 minutes)", async () => {
-      const { service } = createLeadTimeTestHarness();
-      const validScheduledAt = new Date(
-        Date.now() + 60 * 60_000,
-      ).toISOString();
-
-      const booking = await service.createReferralPassengerBooking(
+      const f = await domainFixture(),
+        who = await f.identity();
+      const scheduledAt = new Date(Date.now() + 60 * 60_000).toISOString();
+      const input = { ...f.route, scheduledAt };
+      await f.service.acknowledgeReferralFees(
         {
-          entrySlug: "yuhe-residence",
-          pickupAddress: "Taipei Main Station",
-          dropoffAddress: "Taoyuan Airport T2",
-          scheduledAt: validScheduledAt,
+          disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          acknowledged: true,
         },
-        REFERRAL_IDENTITY,
+        who,
       );
-
+      const quote = await f.service.quoteReferralPassengerFare(input, who);
+      const booking = await f.service.createReferralPassengerBooking(
+        {
+          ...input,
+          quoteId: quote.quoteId,
+          feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          feeConfirmed: true,
+          passengerName: "Synthetic rider",
+          passengerPhone: "0912345678",
+        },
+        who,
+      );
       expect(booking.orderId).toBeTruthy();
       expect(booking.status).toBe("created");
-      const order = service.getOrder(booking.orderId);
-      expect(order.reservationWindowStart).toBe(validScheduledAt);
+      expect(f.service.getOrder(booking.orderId).reservationWindowStart).toBe(
+        scheduledAt,
+      );
     });
   });
 

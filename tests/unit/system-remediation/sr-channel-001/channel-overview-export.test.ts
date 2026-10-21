@@ -35,7 +35,7 @@ describe("SR-CHANNEL-001: overview export and reconciliation", () => {
     const settlements = new BillingSettlementService(auditNotifications);
     const partners = new TenantPartnerService(auditNotifications);
 
-    const statement = settlements.getReferralStatement(
+    const statement = await settlements.getReferralStatement(
       "referral-demo-community",
       "2026-06",
     );
@@ -67,7 +67,8 @@ describe("SR-CHANNEL-001: overview export and reconciliation", () => {
                 tripCount: 2,
                 gmv: { amountMinor: 150000, currency: "TWD" },
                 estimatedShareAmount: { amountMinor: 22500, currency: "TWD" },
-                statementId: "referral-statement-referral-demo-community-2026-06",
+                statementId:
+                  "referral-statement-referral-demo-community-2026-06",
                 statementStatus: "due",
                 latestStatementPeriod: "2026-06",
                 pendingStatementCount: 1,
@@ -124,7 +125,9 @@ describe("SR-CHANNEL-001: overview export and reconciliation", () => {
     expect(dashboard).toContain(
       "statements/${encodeURIComponent(currentPeriod)}/artifact",
     );
-    expect(dashboard).not.toContain("download={`referral-statement-${currentPeriod}.csv`}");
+    expect(dashboard).not.toContain(
+      "download={`referral-statement-${currentPeriod}.csv`}",
+    );
     expect(dashboard).toContain("<DashboardPeriodFilter");
     expect(tables).toContain('data-drt-filter="period"');
     expect(tables).not.toContain("{r.artifactId}");

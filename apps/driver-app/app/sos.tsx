@@ -16,6 +16,7 @@ import {
   type ConfirmDriverSosAttachmentUploadResult,
   type CreateDriverSosAttachmentUploadIntentResult,
   type DriverSosAttachmentRecord,
+  type DriverSosEventRecord,
   PLATFORM_CODE_REGISTRY,
   type DriverTaskRecord,
   type DriverSosLocationSnapshot,
@@ -43,11 +44,13 @@ import {
 import { resetDriverAppToOnboarding } from "@/lib/driver-identity-routing";
 import {
   applyDriverSosAttachmentSyncResult,
+  applyDriverSosDutyReadback,
   buildDriverSosSubmitCommand,
   createDriverSosActiveCase,
   createDriverSosAttachmentDraft,
   formatSosDescription,
   getSituationLabel,
+  isDriverSosStatusTerminal,
   loadDriverSosActiveCase,
   mapSituationToDriverSosEventType,
   markDriverSosCaseFailed,
@@ -144,7 +147,9 @@ function formatPlatformStatusLabel(status: string | null) {
 }
 
 function isOwnedDomainTask(task: UnifiedDriverTaskView) {
-  return task.orderDomain === "owned" || isOwnedPlatformCode(task.sourcePlatform);
+  return (
+    task.orderDomain === "owned" || isOwnedPlatformCode(task.sourcePlatform)
+  );
 }
 
 function pickSosTaskContext(
@@ -154,7 +159,8 @@ function pickSosTaskContext(
     return null;
   }
 
-  const aggregationForbidden = isDriverCapabilityForbidden("forwarded_order_ui");
+  const aggregationForbidden =
+    isDriverCapabilityForbidden("forwarded_order_ui");
   const summary = summarizeWorkspaceTasks(tasks);
   const prioritizedTasks = [
     summary.activeTripTask,
@@ -659,6 +665,60 @@ export default function DriverSosScreen() {
     void syncActiveCase(activeCase, false);
   }, [activeCase, browserOnline]);
 
+  // Honest duty-ack readback: poll the canonical server state rather than
+  // ever inferring that a duty person has been assigned from submission
+  // alone. Keeps polling past acknowledgment so later investigating /
+  // resolved / closed transitions are still observed; only stops once the
+  // server reports a terminal S-3 status.
+  const sosEventIdForReadback = activeCase?.receipt?.sosEventId ?? null;
+  const sosReadbackIsTerminal = isDriverSosStatusTerminal(
+    activeCase?.status ?? null,
+  );
+  useEffect(() => {
+    if (!sosEventIdForReadback || sosReadbackIsTerminal) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function pollDutyReadback() {
+      try {
+        const readback = await getDriverClient().get<{
+          event: Pick<DriverSosEventRecord, "status" | "dutyAcknowledgement">;
+        }>(
+          `/api/driver/sos-events/${encodeURIComponent(sosEventIdForReadback!)}`,
+        );
+        if (cancelled) {
+          return;
+        }
+        let nextCase: DriverSosActiveCase | null = null;
+        setActiveCase((current) => {
+          if (!current) {
+            return current;
+          }
+          nextCase = applyDriverSosDutyReadback(current, readback.event);
+          return nextCase;
+        });
+        if (nextCase) {
+          await saveDriverSosActiveCase(nextCase);
+        }
+      } catch {
+        // Best-effort background readback; local outbox state is unaffected
+        // and the next poll (or manual retry) will try again.
+      }
+    }
+
+    void pollDutyReadback();
+    const timer = setInterval(() => {
+      void pollDutyReadback();
+    }, 20_000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [sosEventIdForReadback, sosReadbackIsTerminal]);
+
   const syncChip = useMemo(
     () => getSyncChipModel(activeCase, browserOnline),
     [activeCase, browserOnline],
@@ -776,11 +836,11 @@ export default function DriverSosScreen() {
         resetDriverAppToOnboarding(router);
         return;
       }
-      const sanitizedError = formatDriverError(error, "SOS 送出失敗，請稍後再試。");
-      const failedCase = markDriverSosCaseFailed(
-        sendingCase,
-        sanitizedError,
+      const sanitizedError = formatDriverError(
+        error,
+        "SOS 送出失敗，請稍後再試。",
       );
+      const failedCase = markDriverSosCaseFailed(sendingCase, sanitizedError);
       await persistActiveCase(failedCase);
       setScreenError(sanitizedError);
       setUiNotice("SOS 未送達，已保留在本機 outbox。");
@@ -1169,8 +1229,16 @@ export default function DriverSosScreen() {
                   items={[
                     // Owned-domain rows, per the S3-03 canvas
                     // (docs/05-ui/drts-design-canvas/driver-sos.jsx SosCtx).
-                    { label: "行程編號", value: context.orderId ?? "—", mono: true },
-                    { label: "任務編號", value: context.taskId ?? "—", mono: true },
+                    {
+                      label: "行程編號",
+                      value: context.orderId ?? "—",
+                      mono: true,
+                    },
+                    {
+                      label: "任務編號",
+                      value: context.taskId ?? "—",
+                      mono: true,
+                    },
                     {
                       label: "目前狀態",
                       value: formatDriverTaskStatusLabel(context.localStatus),
@@ -1202,8 +1270,11 @@ export default function DriverSosScreen() {
                           },
                           {
                             label: "平台訂單編號",
-                            value: context.crossPlatform.externalOrderId ?? "未提供",
-                            mono: Boolean(context.crossPlatform.externalOrderId),
+                            value:
+                              context.crossPlatform.externalOrderId ?? "未提供",
+                            mono: Boolean(
+                              context.crossPlatform.externalOrderId,
+                            ),
                           },
                         ]
                       : []),
@@ -1250,7 +1321,8 @@ export default function DriverSosScreen() {
                 加入附件
               </Btn>
               <Text style={styles.supportingCopy}>
-                每筆 SOS 合計最多 {MAX_ATTACHMENTS} 件。附件會跟著本機紀錄一起保留。
+                每筆 SOS 合計最多 {MAX_ATTACHMENTS}{" "}
+                件。附件會跟著本機紀錄一起保留。
               </Text>
             </View>
 
@@ -1275,9 +1347,24 @@ export default function DriverSosScreen() {
             subtitle={`狀態 · ${activeCase.syncState === "submitted" || activeCase.syncState === "complete" ? "已送達" : activeCase.syncState === "attachment_pending" ? "附件處理中" : activeCase.syncState === "sending" ? "送出中" : "待補送"}`}
             actions={
               activeCase.receipt ? (
-                <Pill theme={THEME} tone="success" dot>
-                  事件編號 {activeCase.receipt.incidentId}
-                </Pill>
+                <>
+                  <Pill theme={THEME} tone="success" dot>
+                    事件編號 {activeCase.receipt.incidentId}
+                  </Pill>
+                  <Pill
+                    theme={THEME}
+                    tone={
+                      activeCase.dutyAcknowledgement.acknowledgedByActorId
+                        ? "success"
+                        : "warn"
+                    }
+                    dot
+                  >
+                    {activeCase.dutyAcknowledgement.acknowledgedByActorId
+                      ? `值班已認領 · ${activeCase.dutyAcknowledgement.acknowledgedByActorId}`
+                      : "等待值班認領"}
+                  </Pill>
+                </>
               ) : null
             }
           >
@@ -1381,7 +1468,8 @@ export default function DriverSosScreen() {
                       {supplement.note || "附件補件"}
                     </Text>
                     <Text style={styles.supplementMeta}>
-                      {formatAt(supplement.createdAt)} · {supplement.state === "complete" ? "已完成" : "待處理"}
+                      {formatAt(supplement.createdAt)} ·{" "}
+                      {supplement.state === "complete" ? "已完成" : "待處理"}
                     </Text>
                   </View>
                 ))}

@@ -36,6 +36,8 @@ tags:
     description: 匯款證明上傳、掃描狀態、具時效授權讀回與冪等付款收據
   - name: PlatformAdapterRegistry
     description: Platform adapter 憑證到期告警 (唯讀；不含機密內容)
+  - name: ReferralPassenger
+    description: Canonical partner/referral passenger quote and same-order lifecycle.
 security:
   - BearerAuth: []
 paths:
@@ -1670,6 +1672,92 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  /api/reimbursements/proofs/finance-staged-content:
+    post:
+      tags:
+        - RemittanceProof
+      operationId: financeStageRemittanceProofContent
+      summary: 財務角色暫存匯款證明原始位元組 (C081 出納)
+      description: |
+        RBAC: realm `system`/`platform`/`ops`, scope `billing:write`。
+        與 driver-only 的 `POST /api/reimbursements/proofs/staged-content`
+        平行、獨立的路由；不修改、不放寬該路由的既有 RBAC。回傳的
+        `stagedContentRef` 供後續 `POST
+        /api/reimbursements/proofs/finance-upload` 使用。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - contentBase64
+                - contentType
+              properties:
+                contentBase64:
+                  type: string
+                  description: Base64 編碼之原始位元組。
+                contentType:
+                  type: string
+      responses:
+        "200":
+          description: 暫存成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stagedContentRef:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/reimbursements/proofs/finance-upload:
+    post:
+      tags:
+        - RemittanceProof
+      operationId: financeUploadRemittanceProof
+      summary: 財務角色上傳匯款證明 (C081 出納)
+      description: |
+        RBAC: realm `system`/`platform`/`ops`, scope `billing:write`。
+        與 driver-only 的 `POST /api/reimbursements/proofs` 平行、獨立的
+        路由；不修改、不放寬該路由的既有 RBAC。`proofId` 與內容雜湊
+        (`content.contentHash`) 皆由伺服器產生；`driverId` 一律由
+        `batchId` 對應之既有批次取值 (絕非 caller 指定)，
+        `uploadedByActorId` 記錄實際財務呼叫者，與收款司機分屬兩個欄位。
+        新建證明的掃描狀態恆為 `pending_scan` 或由本次同步掃描結果決定。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadRemittanceProofCommand"
+      responses:
+        "201":
+          description: 匯款證明建立成功 (已同步嘗試掃描)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemittanceProofEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
   /api/reimbursements/proofs/{proofId}:
     get:
       tags:
@@ -1786,6 +1874,87 @@ paths:
         "409":
           $ref: "#/components/responses/Conflict"
 
+  /api/reimbursements/{batchId}/export:
+    post:
+      tags:
+        - Reimbursement
+      operationId: exportReimbursementBatch
+      summary: 匯出已核可請款批次之簽署成品 (C080)
+      description: |
+        前置條件：批次須已核可 (`approvedAt` 已設定)，否則回 409。回傳的
+        `manifestHash`/`download` 一經首次匯出即固定；重複呼叫僅在連結過期
+        時重新簽署同一雜湊的連結，絕不重新產生不同內容的位元組。這是批次
+        成品匯出，不是匯款證明讀回，也不是銀行轉帳指示。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 請款批次識別碼
+      responses:
+        "200":
+          description: 簽署匯出收據 (冪等回放或新建)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReimbursementBatchExportReceiptEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/reimbursements/{batchId}/reconcile:
+    post:
+      tags:
+        - Reimbursement
+      operationId: markReimbursementBatchReconciled
+      summary: 手動將已付款請款批次標記為已對帳 (Q-ADM12)
+      description: |
+        前置條件：批次須已付款 (`status=paid`)，否則回 409；`reason` 須為
+        非空白字串，否則回 400。此轉換每批次僅發生一次：重複呼叫 (任何
+        reason 內容) 回傳原始收據，不覆寫原始 actor/time/reason/evidence。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 請款批次識別碼
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkReimbursementBatchReconciledCommand"
+      responses:
+        "200":
+          description: 對帳收據 (冪等回放或新建)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReimbursementBatchReconciliationReceiptEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /api/platform-admin/adapters/{id}/credential-expiry-warning:
     get:
       tags:
@@ -1820,6 +1989,276 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /internal/scheduled-tasks/billing-monthly/run:
+    post:
+      operationId: runMonthlyDriverBilling
+      summary: Resume canonical driver billing for a closed UTC month
+      description: >-
+        System-only verified workload route with billing:monthly:run scope.
+        Empty JSON selects the previous UTC month. Canonical completed task/order
+        sources determine targets; target proposals and committed financial IDs
+        survive retries/restarts. HTTP503 exposes resumable per-target failures.
+        Existing manual platform/ops generation and tenant invoice scope remain unchanged.
+      parameters:
+        - in: header
+          name: x-request-id
+          schema: { type: string }
+          description: Correlation for this HTTP attempt; operationId identifies the period operation.
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string }
+          description: Optional durable operation identity, taking precedence over body operationId. Reuse for another period returns409; partial target failures resume on retry.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                periodMonth:
+                  type: string
+                  pattern: '^\d{4}-(0[1-9]|1[0-2])$'
+                  description: Closed UTC month; defaults to the previous calendar month.
+                operationId:
+                  type: string
+                  minLength: 1
+                  description: Defaults to billing-monthly:YYYY-MM. Repeating a period resumes its canonical targets.
+      responses:
+        "200":
+          description: Every canonical eligible target completed, including a genuinely empty month.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required:
+                      [
+                        periodMonth,
+                        operationId,
+                        requestId,
+                        status,
+                        eligibleDriverIds,
+                        targets,
+                      ]
+                    properties:
+                      periodMonth: { type: string }
+                      operationId: { type: string }
+                      requestId: { type: string }
+                      status: { type: string, enum: [completed] }
+                      eligibleDriverIds:
+                        type: array
+                        items: { type: string }
+                      targets:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            driverId: { type: string }
+                            status: { type: string, enum: [completed, failed] }
+                            statementIds:
+                              { type: array, items: { type: string } }
+                            reimbursementBatchIds:
+                              { type: array, items: { type: string } }
+                            errorCode: { type: string }
+        "400":
+          description: Invalid input or current/future period; no financial work performed.
+        "401":
+          description: Unregistered or unverifiable workload identity, using the existing auth path.
+        "403":
+          description: Wrong realm or missing billing:monthly:run/route scope.
+        "409":
+          description: operationId was already bound to a different period.
+        "503":
+          description: >-
+            Source unavailable or BILLING_MONTHLY_PARTIAL_FAILURE. Error details
+            carry periodMonth/operationId/requestId, eligibleDriverIds and target
+            receipts (completed IDs or failed errorCode). Retry the same period
+            to resume missing work; a failed call does not roll back independently committed rows.
+
+  /api/partner/referral/passenger/quote:
+    post:
+      tags: [ReferralPassenger]
+      operationId: quoteReferralPassengerFare
+      summary: Issue an owned taxi estimate for a verified referral passenger
+      description: |
+        Requires the current canonical partner/referral_passenger bearer, partner:book,
+        active entry/link and explicit consent. Resolve both real addresses with GeoService,
+        enforce enterprise_dispatch service areas, and run the published Passenger taxi
+        tariff through the existing fare engine. This is not a PAX-account quote endpoint.
+        Snapshot ownership, full tariff/route/range/version and 15-minute expiry are durable;
+        public data excludes internal owner IDs and full tariff/area authority metadata.
+        No caller price, guaranteed price, fixed 290/1500 or invented fallback coordinates.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReferralQuoteCommand" }
+      responses:
+        "201":
+          description: Durable owned estimate, not an actual trip charge.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/ReferralFareQuote" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: SERVICE_AREA_NOT_SERVICEABLE or an invalid scheduled lead time; no quote created.
+        "503":
+          description: Missing/ambiguous tariff, Geo/DB failure, invalid metrics or unsafe money; no fabricated estimate.
+  /api/partner/referral/passenger/bookings:
+    post:
+      tags: [ReferralPassenger]
+      operationId: createReferralPassengerBooking
+      summary: Commit or recover the original owned quote and booking intent
+      description: |
+        Header Idempotency-Key takes precedence over the body key. Before expiry/lead checks,
+        recover the same five-owner/key/full-intent committed order or consumed-quote order.
+        Ownership is checked before key classification. A new command validates exact owned
+        route/time/product/vehicle preference, then locks the intent and quote, reads the DB
+        wall clock after the lock, and commits quote consumption, order, trace and referral
+        notification route in one existing transaction. Return the same durable order/quote/
+        confirmedAt after unknown COMMIT acknowledgement; never treat cache alone as authority.
+        Keep the original body/key after an unknown response, including expiry or reauthentication.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          schema: { type: string, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReferralBookingCommand" }
+      responses:
+        "201":
+          description: Same-order durable acknowledgement, including replayed/quote/confirmedAt.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Expired/mismatched/consumed quote or changed key payload; retry processing with the original intent.
+        "503":
+          description: Durable authority/readback unavailable. Preserve uncertain intent; do not create a replacement order.
+  /api/partner/referral/passenger/active:
+    get:
+      tags: [ReferralPassenger]
+      operationId: getReferralPassengerActiveTrip
+      summary: Read current scoped durable active trip
+      responses:
+        "200":
+          description: Successful active:false/trip:null is distinct from any upstream error.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503":
+          {
+            description: Scoped durable storage unavailable; never an empty successful result.,
+          }
+  /api/partner/referral/passenger/history:
+    get:
+      tags: [ReferralPassenger]
+      operationId: getReferralPassengerHistory
+      summary: Read only the current referral passenger's durable same-order history
+      responses:
+        "200":
+          description: Actual statuses, nullable actual fare/completion timestamp, immutable estimate and submitted rating.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "503":
+          {
+            description: Scoped durable storage unavailable; never an empty successful result.,
+          }
+  /api/partner/referral/passenger/orders/{orderId}/cancel:
+    post:
+      tags: [ReferralPassenger]
+      operationId: cancelReferralPassengerTrip
+      summary: Cancel an owned order under the existing cancellation policy
+      parameters:
+        - { in: path, name: orderId, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "201":
+          {
+            description: Actual same-order cancelled state or identical replay.,
+          }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          {
+            description: Existing cancellation deadline/state denial; no synthetic cancelled state.,
+          }
+  /api/partner/referral/passenger/orders/{orderId}/rating:
+    post:
+      tags: [ReferralPassenger]
+      operationId: submitReferralPassengerRating
+      summary: Store one immutable completed-order rating and its canonical low-star CRM case
+      description: |
+        URL orderId is authoritative over body identity. A current owned completed order
+        is locked in the same transaction as the rating and generic CRM case/timeline writes.
+        Every new score <=2 creates one canonical case independently of contactRequested.
+        The UI contact switch defaults ON; explicit opt-out only suppresses contact consent.
+        Identical retries read the original result/case and current Ops state, never upsert
+        the original case over later Ops actions. Changed score/tags/comment/contact is 409.
+        Only the forward migration may mark preexisting ratings legacy; missing provenance
+        is an unavailable error, never inferred legacy/contact=false. No PAX-account intake.
+      parameters:
+        - { in: path, name: orderId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReferralRatingCommand" }
+      responses:
+        "201":
+          {
+            description: Same order/score/contact/case/submittedAt acknowledgement.,
+          }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          {
+            description: Trip incomplete or a different immutable rating already exists.,
+          }
+        "503":
+          {
+            description: Atomic CRM/rating storage or original result readback unavailable.,
+          }
+  /api/partner/referral/passenger/orders/{orderId}/receipt:
+    get:
+      tags: [ReferralPassenger]
+      operationId: getReferralPassengerReceipt
+      summary: Read a masked completed-order trip record with truthful nullable actual fare
+      description: |
+        An estimate never becomes an actual charge. Components are null unless a real
+        authority provides them; no 35/45/20 split, fake completion time or payment status.
+        The browser download is a trip record, not a formal tax certificate. Support is
+        02-2944-0985; competent authority is 1999. All BFF reads/mutations/downloads are
+        no-store and retain upstream status/safe code without tokens or raw messages.
+      parameters:
+        - { in: path, name: orderId, required: true, schema: { type: string } }
+      responses:
+        "200":
+          {
+            description: Masked owned trip record; missing actual fare and payment state remain explicitly unknown.,
+          }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: PASSENGER_RECEIPT_TRIP_NOT_COMPLETED. }
+        "503": { description: Canonical storage unavailable. }
 
 components:
   securitySchemes:
@@ -5524,6 +5963,140 @@ components:
         meta:
           $ref: "#/components/schemas/ApiMeta"
 
+    # === REIMBURSEMENT-BATCH-EXPORT-RECONCILIATION-20261015 ===
+    ControlledDownloadRecord:
+      type: object
+      required:
+        - kind
+        - subjectId
+        - manifestHash
+        - host
+        - keyId
+        - signedAt
+        - expiresAt
+        - ttlMinutes
+        - signatureVersion
+        - signature
+        - downloadUrl
+        - immutable
+      properties:
+        kind:
+          type: string
+        subjectId:
+          type: string
+        manifestHash:
+          type: string
+        host:
+          type: string
+        keyId:
+          type: string
+        signedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        ttlMinutes:
+          type: integer
+        signatureVersion:
+          type: integer
+        signature:
+          type: string
+        downloadUrl:
+          type: string
+        immutable:
+          type: boolean
+          enum: [true]
+    ReimbursementBatchExportReceipt:
+      type: object
+      required:
+        - receiptId
+        - batchId
+        - exportedAt
+        - exportedByActorId
+        - manifestHash
+        - download
+        - createdAt
+      properties:
+        receiptId:
+          type: string
+        batchId:
+          type: string
+        exportedAt:
+          type: string
+          format: date-time
+        exportedByActorId:
+          type: string
+          nullable: true
+        manifestHash:
+          type: string
+        download:
+          $ref: "#/components/schemas/ControlledDownloadRecord"
+        createdAt:
+          type: string
+          format: date-time
+    ReimbursementBatchExportReceiptEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/ReimbursementBatchExportReceipt"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    MarkReimbursementBatchReconciledCommand:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          description: 非空白、經 trim 之對帳原因
+        evidenceRef:
+          type: string
+          nullable: true
+          description: 選填之佐證參照 (例如銀行對帳單編號)
+    ReimbursementBatchReconciliationReceipt:
+      type: object
+      required:
+        - receiptId
+        - batchId
+        - reconciledAt
+        - reconciledByActorId
+        - reason
+        - evidenceRef
+        - createdAt
+      properties:
+        receiptId:
+          type: string
+        batchId:
+          type: string
+        reconciledAt:
+          type: string
+          format: date-time
+        reconciledByActorId:
+          type: string
+          nullable: true
+        reason:
+          type: string
+        evidenceRef:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    ReimbursementBatchReconciliationReceiptEnvelope:
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          $ref: "#/components/schemas/ReimbursementBatchReconciliationReceipt"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+
     # === SR-RECOVERY-CONTRACTS-20260911: Platform Adapter Registry credential expiry ===
     CredentialExpiryWarningState:
       type: string
@@ -5552,3 +6125,103 @@ components:
           $ref: "#/components/schemas/AdapterCredentialExpiryWarning"
         meta:
           $ref: "#/components/schemas/ApiMeta"
+
+    ReferralQuoteCommand:
+      type: object
+      additionalProperties: false
+      required: [entrySlug, pickupAddress, dropoffAddress]
+      properties:
+        entrySlug: { type: string, maxLength: 150 }
+        pickupAddress: { type: string, maxLength: 500 }
+        dropoffAddress: { type: string, maxLength: 500 }
+        scheduledAt:
+          {
+            type: string,
+            format: date-time,
+            description: Omit for immediate pricing captured once by the server.,
+          }
+        vehicleType:
+          {
+            type: string,
+            maxLength: 50,
+            description: Preference; never changes the trusted entry product classification.,
+          }
+    ReferralBookingCommand:
+      type: object
+      additionalProperties: false
+      required: [entrySlug, quoteId, pickupAddress, dropoffAddress]
+      properties:
+        entrySlug: { type: string, maxLength: 150 }
+        quoteId: { type: string, maxLength: 100 }
+        pickupAddress: { type: string, maxLength: 500 }
+        dropoffAddress: { type: string, maxLength: 500 }
+        scheduledAt: { type: string, format: date-time }
+        vehicleType: { type: string, maxLength: 50 }
+        passengerName: { type: string, maxLength: 100 }
+        passengerPhone: { type: string, maxLength: 40 }
+        partnerUserRef:
+          {
+            type: string,
+            maxLength: 200,
+            description: Optional intent text; never identity or notification authority.,
+          }
+        idempotencyKey: { type: string, maxLength: 255 }
+    ReferralFareQuote:
+      type: object
+      required:
+        [
+          quoteId,
+          currency,
+          estimatedMin,
+          estimatedMax,
+          estimatedMinMinor,
+          estimatedMaxMinor,
+          fixedPrice,
+          isGuaranteed,
+          quotedFareRuleVersion,
+          createdAt,
+          expiresAt,
+        ]
+      properties:
+        quoteId: { type: string }
+        currency: { type: string, enum: [TWD] }
+        estimatedMin:
+          {
+            type: integer,
+            minimum: 0,
+            description: Whole TWD estimate,
+            not actual fare.,
+          }
+        estimatedMax:
+          {
+            type: integer,
+            minimum: 0,
+            description: Whole TWD conservative range,
+            not a guarantee.,
+          }
+        estimatedMinMinor: { type: integer, minimum: 0 }
+        estimatedMaxMinor: { type: integer, minimum: 0 }
+        fixedPrice: { type: boolean, enum: [false] }
+        isGuaranteed: { type: boolean, enum: [false] }
+        quotedFareRuleVersion: { type: string }
+        pricingAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        consumedByOrderId: { type: string, nullable: true }
+        consumedAt: { type: string, format: date-time, nullable: true }
+    ReferralRatingCommand:
+      type: object
+      additionalProperties: false
+      required: [orderId, score, contactRequested]
+      properties:
+        orderId: { type: string }
+        score: { type: integer, minimum: 1, maximum: 5 }
+        contactRequested:
+          {
+            type: boolean,
+            description: Explicit choice; high stars use false and all low stars create a case.,
+          }
+        comment: { type: string, maxLength: 2000 }
+        tags:
+          { type: array, maxItems: 10, items: { type: string, maxLength: 100 } }
+        idempotencyKey: { type: string, maxLength: 255 }

@@ -62,12 +62,12 @@ export class ForwarderController {
   }
 
   @Post("forwarder/orders/inbound")
-  ingestInboundOrder(
+  async ingestInboundOrder(
     @Body() command: IngestExternalOrderCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.ingestExternalOrder(command, requestId),
+      await this.forwarderService.ingestExternalOrder(command, requestId),
       requestId,
     );
   }
@@ -101,7 +101,7 @@ export class ForwarderController {
   @Get("driver/task-views")
   @RequireRealms("system", "driver")
   @RequireScopes("dispatch:read")
-  listDriverTaskViews(
+  async listDriverTaskViews(
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("driverId") requestedDriverId?: string,
     @Headers("x-request-id") requestId?: string,
@@ -109,7 +109,7 @@ export class ForwarderController {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
     return toApiSuccessEnvelope(
       {
-        items: this.forwarderService.listDriverTaskViews(driverId),
+        items: await this.forwarderService.listDriverTaskViewsForRead(driverId),
       },
       requestId,
     );
@@ -118,7 +118,7 @@ export class ForwarderController {
   @Get("driver/task-views/:taskId")
   @RequireRealms("system", "driver")
   @RequireScopes("dispatch:read")
-  getDriverTaskView(
+  async getDriverTaskView(
     @Param("taskId") taskId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Query("driverId") requestedDriverId?: string,
@@ -126,7 +126,7 @@ export class ForwarderController {
   ) {
     const driverId = this.resolveDriverId(identity, requestedDriverId);
     return toApiSuccessEnvelope(
-      this.forwarderService.getDriverTaskView(driverId, taskId),
+      await this.forwarderService.getDriverTaskViewForRead(driverId, taskId),
       requestId,
     );
   }
@@ -154,7 +154,7 @@ export class ForwarderController {
   @Post("driver/forwarded-orders/:taskId/reject")
   @RequireRealms("system", "driver")
   @RequireScopes("driver:write")
-  rejectForwardedOrder(
+  async rejectForwardedOrder(
     @Param("taskId") taskId: string,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
     @Body() command: DriverForwardedOrderRejectCommand,
@@ -162,7 +162,7 @@ export class ForwarderController {
   ) {
     const driverId = this.resolveDriverId(identity, command.driverId);
     return toApiSuccessEnvelope(
-      this.forwarderService.rejectForwardedOrder(
+      await this.forwarderService.rejectForwardedOrder(
         taskId,
         driverId,
         command.reason,
@@ -173,13 +173,13 @@ export class ForwarderController {
   }
 
   @Post("forwarder/orders/:orderId/broadcast")
-  broadcastOrder(
+  async broadcastOrder(
     @Param("orderId") orderId: string,
     @Body() command: BroadcastForwardedOrderCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.broadcastOrder(orderId, command, requestId),
+      await this.forwarderService.broadcastOrder(orderId, command, requestId),
       requestId,
     );
   }
@@ -201,49 +201,65 @@ export class ForwarderController {
   }
 
   @Post("forwarder/orders/:orderId/sync-failed")
-  reportSyncFailure(
+  async reportSyncFailure(
     @Param("orderId") orderId: string,
     @Body() command: ReportForwarderSyncFailureCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.reportSyncFailure(orderId, command, requestId),
+      await this.forwarderService.reportSyncFailure(
+        orderId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("forwarder/orders/:orderId/manual-fallback")
-  engageManualFallback(
+  async engageManualFallback(
     @Param("orderId") orderId: string,
     @Body() command: EngageForwarderManualFallbackCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.engageManualFallback(orderId, command, requestId),
+      await this.forwarderService.engageManualFallback(
+        orderId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("forwarder/orders/:orderId/reconciliation/complete")
-  completeReconciliation(
+  async completeReconciliation(
     @Param("orderId") orderId: string,
     @Body() command: CompleteForwarderReconciliationCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.completeReconciliation(orderId, command, requestId),
+      await this.forwarderService.completeReconciliation(
+        orderId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }
 
   @Post("forwarder/orders/:orderId/sync-status")
-  syncNativeStatus(
+  async syncNativeStatus(
     @Param("orderId") orderId: string,
     @Body() command: SyncForwardedOrderStatusCommand,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.forwarderService.syncNativeStatus(orderId, command, requestId),
+      await this.forwarderService.syncNativeStatus(
+        orderId,
+        command,
+        requestId,
+      ),
       requestId,
     );
   }

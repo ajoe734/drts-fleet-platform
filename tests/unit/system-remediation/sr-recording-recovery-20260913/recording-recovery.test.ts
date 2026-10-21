@@ -281,6 +281,28 @@ class InMemoryDatabase {
   ): Promise<{ rows: T[]; rowCount: number }> {
     const trimmed = sql.trim().replace(/\s+/g, " ");
 
+    if (trimmed.startsWith("SELECT s.call_id, scope.brand_id")) {
+      const session = this.voiceSessions.get(String(params[0]));
+      const rows = session
+        ? [
+            {
+              call_id: session.call_id,
+              brand_id: session.resource_scope_id,
+              bound_order_id: null,
+            } as unknown as T,
+          ]
+        : [];
+      return { rows, rowCount: rows.length };
+    }
+
+    if (trimmed.startsWith("SELECT voice_session_id FROM voice.session")) {
+      const session = this.voiceSessions.get(String(params[0]));
+      const rows = session
+        ? [{ voice_session_id: session.voice_session_id } as unknown as T]
+        : [];
+      return { rows, rowCount: rows.length };
+    }
+
     // 1. SELECT for repair dedupe
     if (
       trimmed.includes(
@@ -594,12 +616,12 @@ class InMemoryDatabase {
 
     // 10. voice.session UPDATE
     if (
-      trimmed.includes("UPDATE voice.session SET recording_state = 'sealed'")
+      trimmed.includes("UPDATE voice.session SET recording_state = 'finalized'")
     ) {
       const [voiceSessionId] = params as [string];
       const sess = this.voiceSessions.get(voiceSessionId);
       if (sess) {
-        sess.recording_state = "sealed";
+        sess.recording_state = "finalized";
         sess.session_version += 1;
         return { rows: [sess as unknown as T], rowCount: 1 };
       }
@@ -635,12 +657,15 @@ class InMemoryDatabase {
     // 12. Candidate scans
     if (trimmed.includes("FROM voice.session s LEFT JOIN voice.work_item w")) {
       const candidates = Array.from(this.voiceSessions.values()).filter(
-        (s) => s.dialog_state === "closed" || s.recording_state === "pending",
+        (s) =>
+          s.dialog_state === "closed" || s.recording_state === "finalizing",
       );
       const rows = candidates.map((c) => ({
         voice_session_id: c.voice_session_id,
         call_id: c.call_id,
         resource_scope_id: c.resource_scope_id,
+        brand_id: c.resource_scope_id,
+        bound_order_id: null,
       })) as unknown as T[];
       return { rows, rowCount: rows.length };
     }
@@ -794,14 +819,30 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       );
 
       await runner.completeWorkItemWithDomainState(db as any, workItem as any, {
-        scope: { brandId: "default", callId, recordingId: `rec-${callId}` },
+        scope: {
+          brandId: "default",
+          callId,
+          recordingId: `rec-${callId}`,
+          legId: "leg-fixture",
+        },
         manifestRef: {
           objectKey: "manifest-key-001",
-          checksum: "manifest-sha256",
+          objectVersion: "1",
+          checksum: "a".repeat(64),
+          byteLength: 4096,
+          durableAt: new Date().toISOString(),
         },
         recordingId: `rec-${callId}`,
         recordingUrl: `https://storage.drts.local/rec-${callId}.opus`,
         linkedOrderId: null,
+        coverage: {
+          startMs: 0,
+          endMs: 1000,
+          channels: ["inbound", "outbound"],
+          closedEventId: "provider-close-fixture",
+          endedAt: "2026-09-01T00:00:00.000Z",
+        },
+        verifiedAt: new Date().toISOString(),
       });
 
       expect(workItem.status).toBe("completed");
@@ -877,7 +918,7 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
           finalizeRecording: async (p: any) => ({
             manifestRef: {
               objectKey: "obj-ord-555",
-              checksum: "sha256-order-evidence",
+              checksum: "a".repeat(64),
             },
             recordingId: p.scope.recordingId,
             scope: p.scope,
@@ -887,14 +928,30 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       );
 
       await runner.completeWorkItemWithDomainState(db as any, workItem as any, {
-        scope: { brandId: "default", callId, recordingId: `rec-${callId}` },
+        scope: {
+          brandId: "default",
+          callId,
+          recordingId: `rec-${callId}`,
+          legId: "leg-fixture",
+        },
         manifestRef: {
           objectKey: "obj-ord-555",
-          checksum: "sha256-order-evidence",
+          objectVersion: "1",
+          checksum: "a".repeat(64),
+          byteLength: 4096,
+          durableAt: new Date().toISOString(),
         },
         recordingId: `rec-${callId}`,
         recordingUrl: `https://storage.drts.local/rec-${callId}.opus`,
         linkedOrderId: orderId,
+        coverage: {
+          startMs: 0,
+          endMs: 1000,
+          channels: ["inbound", "outbound"],
+          closedEventId: "provider-close-fixture",
+          endedAt: "2026-09-01T00:00:00.000Z",
+        },
+        verifiedAt: new Date().toISOString(),
       });
 
       expect(workItem.status).toBe("completed");
@@ -908,7 +965,7 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
       expect(updatedOrder.recording_state).toBe("bound");
     });
 
-    it("recovers an AI session and updates voice.session recording_state to sealed", async () => {
+    it("recovers an AI session and updates voice.session recording_state to finalized", async () => {
       const db = new InMemoryDatabase();
       const voiceSessionId = "sess-ai-888";
       const callId = "call-ai-888";
@@ -918,7 +975,7 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         call_id: callId,
         resource_scope_id: "brand-tw",
         dialog_state: "closed",
-        recording_state: "pending",
+        recording_state: "finalizing",
         session_version: 3,
         lease_epoch: 1,
       });
@@ -966,7 +1023,7 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
           finalizeRecording: async () => ({
             manifestRef: {
               objectKey: "ai-manifest",
-              checksum: "sha256-ai-hash",
+              checksum: "a".repeat(64),
             },
             recordingId: `rec-${voiceSessionId}`,
           }),
@@ -979,15 +1036,30 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
           brandId: "brand-tw",
           callId,
           recordingId: `rec-${voiceSessionId}`,
+          legId: "leg-fixture",
         },
-        manifestRef: { objectKey: "ai-manifest", checksum: "sha256-ai-hash" },
+        manifestRef: {
+          objectKey: "ai-manifest",
+          objectVersion: "1",
+          checksum: "a".repeat(64),
+          byteLength: 4096,
+          durableAt: new Date().toISOString(),
+        },
         recordingId: `rec-${voiceSessionId}`,
+        coverage: {
+          startMs: 0,
+          endMs: 1000,
+          channels: ["inbound", "outbound"],
+          closedEventId: "provider-close-fixture",
+          endedAt: "2026-09-01T00:00:00.000Z",
+        },
+        verifiedAt: new Date().toISOString(),
       });
 
       expect(workItem.status).toBe("completed");
 
       const updatedSess = db.voiceSessions.get(voiceSessionId)!;
-      expect(updatedSess.recording_state).toBe("sealed");
+      expect(updatedSess.recording_state).toBe("finalized");
       expect(updatedSess.session_version).toBe(4);
     });
   });
@@ -1468,7 +1540,7 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         call_id: "call-hist-1",
         resource_scope_id: "brand-1",
         dialog_state: "closed",
-        recording_state: "pending",
+        recording_state: "finalizing",
         session_version: 2,
         lease_epoch: 1,
       });
@@ -1477,7 +1549,7 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
         call_id: "call-hist-2",
         resource_scope_id: "brand-2",
         dialog_state: "closed",
-        recording_state: "pending",
+        recording_state: "finalizing",
         session_version: 1,
         lease_epoch: 1,
       });
@@ -1600,7 +1672,37 @@ describe("SR-RECORDING-RECOVERY-20260913: Recording Recovery and Controlled Repl
             payloadRef: null,
           },
           {
-            scope: { brandId: "default", callId: "call-no-audit" },
+            // AUDIT-VOICE-APPLICATION-REGRESSION-20261018: this test's own
+            // point is that a legacy schema missing
+            // voice.phase1_work_item_attempt_audits still completes --
+            // completeWorkItemWithDomainState now additionally requires a
+            // verified manifestRef for ANY finalize_recording completion
+            // (see that method's own doc), which is orthogonal to the
+            // audit-table tolerance this case actually exercises, so a
+            // real manifestRef/recordingId is supplied here same as the
+            // other direct-call cases in this file (e.g. line ~821).
+            scope: {
+              brandId: "default",
+              callId: "call-no-audit",
+              recordingId: "rec-call-no-audit",
+              legId: "leg-fixture",
+            },
+            manifestRef: {
+              objectKey: "obj-no-audit-001",
+              objectVersion: "1",
+              checksum: "a".repeat(64),
+              byteLength: 4096,
+              durableAt: new Date().toISOString(),
+            },
+            recordingId: "rec-call-no-audit",
+            coverage: {
+              startMs: 0,
+              endMs: 1000,
+              channels: ["inbound", "outbound"],
+              closedEventId: "provider-close-fixture",
+              endedAt: "2026-09-01T00:00:00.000Z",
+            },
+            verifiedAt: new Date().toISOString(),
           },
         ),
       ).resolves.not.toThrow();

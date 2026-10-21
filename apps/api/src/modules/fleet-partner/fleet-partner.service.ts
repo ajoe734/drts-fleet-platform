@@ -35,6 +35,7 @@ import {
 import { settlementChannelKeyForTrip } from "../billing-settlement/settlement-matrix";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
+import { FleetStatementDecisionRepository } from "./fleet-statement-decision.repository";
 import {
   FleetPartnerRepository,
   type PersistFleetPartnerChanges,
@@ -104,6 +105,7 @@ export class FleetPartnerService implements OnModuleInit {
     ...rule,
   }));
   private statements: FleetPartnerStatementRecord[] = [];
+  private readonly fleetPartnerUpdates = new Map<string, Promise<void>>();
 
   constructor(
     private readonly billingSettlementService: BillingSettlementService,
@@ -111,6 +113,8 @@ export class FleetPartnerService implements OnModuleInit {
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     @Optional()
     private readonly fleetPartnerRepository?: FleetPartnerRepository,
+    @Optional()
+    private readonly statementDecisions?: FleetStatementDecisionRepository,
   ) {}
 
   async onModuleInit() {
@@ -181,7 +185,29 @@ export class FleetPartnerService implements OnModuleInit {
     return this.cloneFleetPartner(this.requireFleetPartner(fleetPartnerId));
   }
 
-  createFleetPartner(command: CreateFleetPartnerCommand) {
+  async findFleetPartnerForMultiTaxiOperator(operatorId: string) {
+    const partners = this.fleetPartnerRepository?.isEnabled()
+      ? await this.fleetPartnerRepository.findReceiptOperatorFleets(operatorId)
+      : this.fleetPartners.filter((partner) =>
+          partner.multiTaxiOperatorIds?.includes(operatorId),
+        );
+    if (partners.length > 1)
+      throw this.badRequest(
+        "AMBIGUOUS_OPERATOR_MAPPING",
+        "Multiple Fleet masters identify this operator.",
+      );
+    if (!partners[0]) return null;
+    const partner = this.cloneFleetPartner(partners[0]);
+    this.fleetPartners = [
+      partner,
+      ...this.fleetPartners.filter(
+        (p) => p.fleetPartnerId !== partner.fleetPartnerId,
+      ),
+    ];
+    return this.cloneFleetPartner(partner);
+  }
+
+  async createFleetPartner(command: CreateFleetPartnerCommand) {
     this.assertNonBlank(command.legalName, "legalName");
     this.assertNonBlank(command.displayName, "displayName");
     this.assertNonBlank(
@@ -193,6 +219,13 @@ export class FleetPartnerService implements OnModuleInit {
 
     const partner: FleetPartnerRecord = {
       fleetPartnerId: `fleet-${randomUUID()}`,
+      ...(command.multiTaxiOperatorIds === undefined
+        ? {}
+        : {
+            multiTaxiOperatorIds: this.normalizeMultiTaxiOperatorIds(
+              command.multiTaxiOperatorIds,
+            ),
+          }),
       legalName: command.legalName.trim(),
       displayName: command.displayName.trim(),
       businessRegistrationNo: command.businessRegistrationNo.trim(),
@@ -201,55 +234,67 @@ export class FleetPartnerService implements OnModuleInit {
       active: command.active ?? true,
       partnershipType: command.partnershipType,
     };
-    this.fleetPartners = [partner, ...this.fleetPartners];
-    this.persistChanges(
+    await this.persistMasterDataChanges(
       { fleetPartners: [this.cloneFleetPartner(partner)] },
       "create fleet partner",
     );
+    this.fleetPartners = [partner, ...this.fleetPartners];
     return this.cloneFleetPartner(partner);
   }
 
-  updateFleetPartner(
+  async updateFleetPartner(
     fleetPartnerId: string,
     command: UpdateFleetPartnerCommand,
   ) {
-    const partner = this.requireFleetPartner(fleetPartnerId);
-
-    if (command.legalName !== undefined) {
-      this.assertNonBlank(command.legalName, "legalName");
-      partner.legalName = command.legalName.trim();
-    }
-    if (command.displayName !== undefined) {
-      this.assertNonBlank(command.displayName, "displayName");
-      partner.displayName = command.displayName.trim();
-    }
-    if (command.businessRegistrationNo !== undefined) {
-      this.assertNonBlank(
-        command.businessRegistrationNo,
-        "businessRegistrationNo",
+    return this.serializeFleetPartnerUpdate(fleetPartnerId, async () => {
+      const partner = this.cloneFleetPartner(
+        this.requireFleetPartner(fleetPartnerId),
       );
-      partner.businessRegistrationNo = command.businessRegistrationNo.trim();
-    }
-    if (command.contactName !== undefined) {
-      this.assertNonBlank(command.contactName, "contactName");
-      partner.contactName = command.contactName.trim();
-    }
-    if (command.contactPhone !== undefined) {
-      this.assertNonBlank(command.contactPhone, "contactPhone");
-      partner.contactPhone = command.contactPhone.trim();
-    }
-    if (command.active !== undefined) {
-      partner.active = command.active;
-    }
-    if (command.partnershipType !== undefined) {
-      partner.partnershipType = command.partnershipType;
-    }
 
-    this.persistChanges(
-      { fleetPartners: [this.cloneFleetPartner(partner)] },
-      "update fleet partner",
-    );
-    return this.cloneFleetPartner(partner);
+      if (command.legalName !== undefined) {
+        this.assertNonBlank(command.legalName, "legalName");
+        partner.legalName = command.legalName.trim();
+      }
+      if (command.displayName !== undefined) {
+        this.assertNonBlank(command.displayName, "displayName");
+        partner.displayName = command.displayName.trim();
+      }
+      if (command.businessRegistrationNo !== undefined) {
+        this.assertNonBlank(
+          command.businessRegistrationNo,
+          "businessRegistrationNo",
+        );
+        partner.businessRegistrationNo = command.businessRegistrationNo.trim();
+      }
+      if (command.contactName !== undefined) {
+        this.assertNonBlank(command.contactName, "contactName");
+        partner.contactName = command.contactName.trim();
+      }
+      if (command.contactPhone !== undefined) {
+        this.assertNonBlank(command.contactPhone, "contactPhone");
+        partner.contactPhone = command.contactPhone.trim();
+      }
+      if (command.active !== undefined) {
+        partner.active = command.active;
+      }
+      if (command.partnershipType !== undefined) {
+        partner.partnershipType = command.partnershipType;
+      }
+      if (command.multiTaxiOperatorIds !== undefined) {
+        partner.multiTaxiOperatorIds = this.normalizeMultiTaxiOperatorIds(
+          command.multiTaxiOperatorIds,
+        );
+      }
+
+      await this.persistMasterDataChanges(
+        { fleetPartners: [this.cloneFleetPartner(partner)] },
+        "update fleet partner",
+      );
+      this.fleetPartners = this.fleetPartners.map((current) =>
+        current.fleetPartnerId === fleetPartnerId ? partner : current,
+      );
+      return this.cloneFleetPartner(partner);
+    });
   }
 
   listFleetPartnerDrivers(fleetPartnerId: string) {
@@ -262,7 +307,7 @@ export class FleetPartnerService implements OnModuleInit {
       .map((affiliation) => this.cloneAffiliation(affiliation));
   }
 
-  createDriverFleetAffiliation(
+  async createDriverFleetAffiliation(
     driverId: string,
     command: CreateDriverFleetAffiliationCommand,
   ) {
@@ -282,11 +327,11 @@ export class FleetPartnerService implements OnModuleInit {
       effectiveUntil: command.effectiveUntil ?? null,
       driverGroupId: command.driverGroupId?.trim() || null,
     };
-    this.driverAffiliations = [affiliation, ...this.driverAffiliations];
-    this.persistChanges(
+    await this.persistMasterDataChanges(
       { driverAffiliations: [this.cloneAffiliation(affiliation)] },
       "create driver fleet affiliation",
     );
+    this.driverAffiliations = [affiliation, ...this.driverAffiliations];
     return this.cloneAffiliation(affiliation);
   }
 
@@ -424,14 +469,66 @@ export class FleetPartnerService implements OnModuleInit {
       await this.rebuildStatementsForPeriodMonth(periodMonth, fleetPartnerId);
     }
 
-    return this.statements
+    const statements = this.fleetPartnerRepository?.isEnabled()
+      ? await this.fleetPartnerRepository.loadStatements(
+          fleetPartnerId,
+          periodMonth,
+        )
+      : this.statements;
+    const decisions =
+      (await this.statementDecisions?.listDecisions(
+        fleetPartnerId,
+        periodMonth,
+      )) ?? [];
+    const combined = new Map(
+      statements.map((statement) => [statement.statementId, statement]),
+    );
+    for (const statement of decisions) {
+      const current = combined.get(statement.statementId);
+      combined.set(statement.statementId, {
+        ...statement,
+        payoutStatus:
+          current?.payoutStatus === "paid" || statement.payoutStatus === "paid"
+            ? "paid"
+            : statement.payoutStatus,
+      });
+    }
+    return [...combined.values()]
       .filter(
         (statement) =>
           statement.fleetPartnerId === fleetPartnerId &&
           (!periodMonth || statement.periodMonth === periodMonth),
       )
       .sort((left, right) => right.periodMonth.localeCompare(left.periodMonth))
-      .map((statement) => this.cloneStatement(statement));
+      .map((statement) =>
+        statement.decisionStatus === "confirmed" ||
+        statement.decisionStatus === "disputed"
+          ? structuredClone(statement)
+          : this.cloneStatement(statement),
+      );
+  }
+
+  async recordStatementDecision(
+    fleetPartnerId: string,
+    statementId: string,
+    actorId: string,
+    decision: "confirmed" | "disputed",
+    note: unknown,
+  ): Promise<FleetPartnerStatementRecord> {
+    if (!this.statementDecisions) {
+      throw new ApiRequestError(
+        503,
+        "STATEMENT_DECISION_UNAVAILABLE",
+        "Statement persistence is unavailable.",
+      );
+    }
+    return this.statementDecisions.decide(
+      fleetPartnerId,
+      statementId,
+      actorId,
+      decision,
+      note,
+    );
   }
 
   async getPortalDashboard(
@@ -555,10 +652,12 @@ export class FleetPartnerService implements OnModuleInit {
       if (existing) {
         existing.activeDriverIds.push(pair.driverId);
         existing.activeDriverNames.push(driver?.name ?? pair.driverId);
-        existing.currentEtaMinutes = Math.min(
-          existing.currentEtaMinutes ?? pair.etaMinutes,
-          pair.etaMinutes,
-        );
+        if (pair.etaMinutes !== null) {
+          existing.currentEtaMinutes =
+            existing.currentEtaMinutes === null
+              ? pair.etaMinutes
+              : Math.min(existing.currentEtaMinutes, pair.etaMinutes);
+        }
         continue;
       }
 
@@ -1184,6 +1283,44 @@ export class FleetPartnerService implements OnModuleInit {
     return rule;
   }
 
+  // Serialize only edits of the same master record, so a queued partial edit
+  // starts from the last acknowledged state. A failed edit releases the queue.
+  private async serializeFleetPartnerUpdate(
+    fleetPartnerId: string,
+    update: () => Promise<FleetPartnerRecord>,
+  ) {
+    const previous = this.fleetPartnerUpdates.get(fleetPartnerId);
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.fleetPartnerUpdates.set(fleetPartnerId, current);
+    try {
+      if (previous) await previous;
+      return await update();
+    } finally {
+      if (this.fleetPartnerUpdates.get(fleetPartnerId) === current) {
+        this.fleetPartnerUpdates.delete(fleetPartnerId);
+      }
+      release();
+    }
+  }
+
+  // C101 master-data commands must propagate the canonical write outcome.
+  // Other callers retain the existing best-effort persistChanges behavior.
+  private async persistMasterDataChanges(
+    changes: PersistFleetPartnerChanges,
+    context: string,
+  ) {
+    if (!this.fleetPartnerRepository) return;
+    try {
+      await this.fleetPartnerRepository.persistChanges(changes);
+    } catch (error) {
+      this.fleetPartnerRepository.reportPersistenceFailure(error, context);
+      throw error;
+    }
+  }
+
   private async persistChanges(
     changes: PersistFleetPartnerChanges,
     context: string,
@@ -1199,8 +1336,25 @@ export class FleetPartnerService implements OnModuleInit {
     }
   }
 
+  private normalizeMultiTaxiOperatorIds(ids: string[]): string[] {
+    if (
+      !Array.isArray(ids) ||
+      ids.some((id) => typeof id !== "string" || !id.trim())
+    )
+      throw this.badRequest(
+        "INVALID_ARGUMENT",
+        "multiTaxiOperatorIds must contain nonempty operator IDs.",
+      );
+    return [...new Set(ids.map((id) => id.trim()))];
+  }
+
   private cloneFleetPartner(partner: FleetPartnerRecord): FleetPartnerRecord {
-    return { ...partner };
+    return {
+      ...partner,
+      ...(partner.multiTaxiOperatorIds === undefined
+        ? {}
+        : { multiTaxiOperatorIds: [...partner.multiTaxiOperatorIds] }),
+    };
   }
 
   private cloneAffiliation(

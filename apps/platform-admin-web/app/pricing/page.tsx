@@ -11,7 +11,9 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { usePlatformAdminAssistantPage } from "@/components/assistant/route-context";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import { usePlatformAdminAuthority } from "@/lib/platform-admin-authority";
 import type {
+  CreatePlatformPricingRuleCommand,
   DriverFeePlanRecord,
   PlatformPricingRuleRecord,
   ProductRuleCatalog,
@@ -502,6 +504,221 @@ function buildHistoryRows(
   ].sort((left, right) => right.publishedAt.localeCompare(left.publishedAt));
 }
 
+function CreateDraftModal({
+  open,
+  ruleName,
+  onRuleNameChange,
+  version,
+  onVersionChange,
+  serviceFeeBps,
+  onServiceFeeBpsChange,
+  reimbursementMode,
+  onReimbursementModeChange,
+  applicableTo,
+  onApplicableToChange,
+  effectiveFrom,
+  onEffectiveFromChange,
+  notes,
+  onNotesChange,
+  error,
+  creating,
+  onClose,
+  onSubmit,
+  t,
+}: {
+  open: boolean;
+  ruleName: string;
+  onRuleNameChange: (value: string) => void;
+  version: string;
+  onVersionChange: (value: string) => void;
+  serviceFeeBps: string;
+  onServiceFeeBpsChange: (value: string) => void;
+  reimbursementMode: "platform_funded" | "mixed";
+  onReimbursementModeChange: (value: "platform_funded" | "mixed") => void;
+  applicableTo: string;
+  onApplicableToChange: (value: string) => void;
+  effectiveFrom: string;
+  onEffectiveFromChange: (value: string) => void;
+  notes: string;
+  onNotesChange: (value: string) => void;
+  error: string | null;
+  creating: boolean;
+  onClose: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  t: TranslateFn;
+}) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div style={modalBackdropStyle}>
+      <form style={modalCardStyle} onSubmit={onSubmit}>
+        <div style={{ display: "grid", gap: 6 }}>
+          <h2 style={{ margin: 0, fontSize: 18, color: theme.text }}>
+            {t("pricing.sectionCreateDraft")}
+          </h2>
+          <p style={helperStyle}>{t("pricing.newPricingDraft")}</p>
+        </div>
+
+        <div style={fieldGridStyle}>
+          <CanvasField
+            theme={theme}
+            label={t("pricing.form.ruleName")}
+            required
+          >
+            <input
+              type="text"
+              aria-label={t("pricing.form.ruleName")}
+              value={ruleName}
+              onChange={(event) => onRuleNameChange(event.target.value)}
+              style={inputStyle}
+              required
+            />
+          </CanvasField>
+          <CanvasField theme={theme} label={t("pricing.form.version")} required>
+            <input
+              type="text"
+              aria-label={t("pricing.form.version")}
+              value={version}
+              onChange={(event) => onVersionChange(event.target.value)}
+              style={inputStyle}
+              required
+            />
+          </CanvasField>
+        </div>
+
+        <div style={fieldGridStyle}>
+          <CanvasField
+            theme={theme}
+            label={t("pricing.form.serviceFeeBps")}
+            required
+          >
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              aria-label={t("pricing.form.serviceFeeBps")}
+              value={serviceFeeBps}
+              onChange={(event) => onServiceFeeBpsChange(event.target.value)}
+              style={inputStyle}
+              required
+            />
+          </CanvasField>
+          <CanvasField
+            theme={theme}
+            label={t("pricing.form.reimbMode")}
+            required
+          >
+            <select
+              aria-label={t("pricing.form.reimbMode")}
+              value={reimbursementMode}
+              onChange={(event) =>
+                onReimbursementModeChange(
+                  event.target.value === "mixed" ? "mixed" : "platform_funded",
+                )
+              }
+              style={inputStyle}
+            >
+              <option value="platform_funded">
+                {t("pricing.platformFunded")}
+              </option>
+              <option value="mixed">{t("pricing.mixed")}</option>
+            </select>
+          </CanvasField>
+        </div>
+
+        <div style={fieldGridStyle}>
+          <CanvasField
+            theme={theme}
+            label={t("pricing.form.applicableTo")}
+            required
+          >
+            <input
+              type="text"
+              aria-label={t("pricing.form.applicableTo")}
+              value={applicableTo}
+              onChange={(event) => onApplicableToChange(event.target.value)}
+              style={inputStyle}
+              required
+            />
+          </CanvasField>
+          <CanvasField theme={theme} label={t("pricing.form.effectiveFrom")}>
+            <input
+              type="datetime-local"
+              aria-label={t("pricing.form.effectiveFrom")}
+              value={effectiveFrom}
+              onChange={(event) => onEffectiveFromChange(event.target.value)}
+              style={inputStyle}
+            />
+          </CanvasField>
+        </div>
+
+        <CanvasField theme={theme} label={t("pricing.form.notes")}>
+          <textarea
+            aria-label={t("pricing.form.notes")}
+            value={notes}
+            onChange={(event) => onNotesChange(event.target.value)}
+            style={textareaStyle}
+          />
+        </CanvasField>
+
+        {error ? (
+          <CanvasBanner
+            theme={theme}
+            tone="danger"
+            icon="warn"
+            title={t("pricing.modal.errorTitle")}
+            body={error}
+          />
+        ) : null}
+
+        <div style={buttonRowStyle}>
+          <CanvasBtn theme={theme} onClick={onClose} disabled={creating}>
+            {t("pricing.cancelDraft")}
+          </CanvasBtn>
+          <button
+            type="submit"
+            disabled={
+              creating || !ruleName.trim() || !version.trim() || !serviceFeeBps
+            }
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "5px 10px",
+              fontSize: 12,
+              height: 28,
+              fontWeight: 500,
+              background: theme.accent,
+              color: "#ffffff",
+              border: `1px solid ${theme.accent}`,
+              borderRadius: 7,
+              cursor:
+                creating ||
+                !ruleName.trim() ||
+                !version.trim() ||
+                !serviceFeeBps
+                  ? "not-allowed"
+                  : "pointer",
+              opacity:
+                creating ||
+                !ruleName.trim() ||
+                !version.trim() ||
+                !serviceFeeBps
+                  ? 0.55
+                  : 1,
+              fontFamily: theme.fontFamily,
+            }}
+          >
+            {creating ? t("pricing.creating") : t("pricing.createDraft")}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function ReasonModal({
   selectedDraft,
   reason,
@@ -575,6 +792,7 @@ function ReasonModal({
           >
             <input
               type="datetime-local"
+              aria-label={t("pricing.form.publishEffectiveFrom")}
               value={windowFrom}
               onChange={(event) => onWindowFromChange(event.target.value)}
               style={inputStyle}
@@ -587,6 +805,7 @@ function ReasonModal({
           >
             <input
               type="datetime-local"
+              aria-label={t("pricing.form.publishEffectiveTo")}
               value={windowTo}
               onChange={(event) => onWindowToChange(event.target.value)}
               style={inputStyle}
@@ -600,6 +819,7 @@ function ReasonModal({
           required
         >
           <textarea
+            aria-label={t("pricing.form.publishReason")}
             value={reason}
             onChange={(event) => onReasonChange(event.target.value)}
             style={textareaStyle}
@@ -654,7 +874,8 @@ function ReasonModal({
 }
 
 export default function PricingPage() {
-  const { locale, t } = useTranslation();
+  const { t } = useTranslation();
+  const authority = usePlatformAdminAuthority();
   const client = usePlatformAdminClient();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -664,6 +885,18 @@ export default function PricingPage() {
   const [plans, setPlans] = useState<DriverFeePlanRecord[]>([]);
   const [catalog, setCatalog] = useState<ProductRuleCatalog | null>(null);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [draftRuleName, setDraftRuleName] = useState("Standard Service Fee");
+  const [draftVersion, setDraftVersion] = useState("");
+  const [draftServiceFeeBps, setDraftServiceFeeBps] = useState("1500");
+  const [draftReimbMode, setDraftReimbMode] = useState<
+    "platform_funded" | "mixed"
+  >("platform_funded");
+  const [draftApplicableTo, setDraftApplicableTo] = useState("all");
+  const [draftEffectiveFrom, setDraftEffectiveFrom] = useState("");
+  const [draftNotes, setDraftNotes] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creatingDraft, setCreatingDraft] = useState(false);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [publishReason, setPublishReason] = useState("");
   const [publishFrom, setPublishFrom] = useState("");
@@ -1006,29 +1239,44 @@ export default function PricingPage() {
     },
   ];
 
-  async function handlePublish(event: FormEvent<HTMLFormElement>) {
+  async function handleCreateDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!selectedDraft) {
-      setPublishError(t("pricing.error.noDraft"));
+    const trimmedRuleName = draftRuleName.trim();
+    const trimmedVersion = draftVersion.trim();
+    const trimmedApplicableTo = draftApplicableTo.trim() || "all";
+    const parsedFeeBps = Number(draftServiceFeeBps);
+
+    if (!trimmedRuleName || !trimmedVersion) {
+      setCreateError(t("pricing.modal.errorTitle"));
       return;
     }
-    if (publishReason.trim().length < 12) {
-      setPublishError(t("pricing.error.reasonTooShort"));
+    if (
+      !Number.isFinite(parsedFeeBps) ||
+      parsedFeeBps < 0 ||
+      parsedFeeBps > 10000
+    ) {
+      setCreateError(t("pricing.modal.errorTitle"));
       return;
     }
 
-    setPublishing(true);
-    setPublishError(null);
+    setCreatingDraft(true);
+    setCreateError(null);
 
-    const command: PublishPlatformPricingRuleCommand = {
-      effectiveFrom: publishFrom ? new Date(publishFrom).toISOString() : null,
-      effectiveTo: publishTo ? new Date(publishTo).toISOString() : null,
-      publishedBy: `platform_admin:${locale}`,
+    const command: CreatePlatformPricingRuleCommand = {
+      ruleName: trimmedRuleName,
+      version: trimmedVersion,
+      serviceFeeBps: Math.round(parsedFeeBps),
+      reimbursementMode: draftReimbMode,
+      applicableTo: trimmedApplicableTo,
+      effectiveFrom: draftEffectiveFrom
+        ? new Date(draftEffectiveFrom).toISOString()
+        : null,
+      notes: draftNotes.trim() || null,
     };
 
     try {
-      await client.publishPlatformPricingRule(selectedDraft.ruleId, command);
+      const created = await client.createPlatformPricingRule(command);
       const [nextRules, nextPlans, nextCatalog] = await Promise.all([
         client.listPlatformPricingRules(),
         client.listDriverFeePlans(),
@@ -1037,12 +1285,67 @@ export default function PricingPage() {
       setRules(nextRules ?? []);
       setPlans(nextPlans ?? []);
       setCatalog(nextCatalog);
+      setSelectedDraftId(created.ruleId);
+      setCreateModalOpen(false);
+      setDraftVersion("");
+      setDraftNotes("");
+    } catch (createFailure) {
+      setCreateError(
+        createFailure instanceof Error
+          ? createFailure.message
+          : String(createFailure),
+      );
+    } finally {
+      setCreatingDraft(false);
+    }
+  }
+
+  async function handlePublish(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!selectedDraft) {
+      setPublishError(t("pricing.error.noDraft"));
+      return;
+    }
+    const trimmedReason = publishReason.trim();
+    if (trimmedReason.length < 12) {
+      setPublishError(t("pricing.error.reasonTooShort"));
+      return;
+    }
+
+    setPublishing(true);
+    setPublishError(null);
+
+    const actorId = authority.actorId?.trim() || null;
+    const command: PublishPlatformPricingRuleCommand = {
+      effectiveFrom: publishFrom ? new Date(publishFrom).toISOString() : null,
+      effectiveTo: publishTo ? new Date(publishTo).toISOString() : null,
+      publishedBy: actorId,
+      reason: trimmedReason,
+    };
+
+    try {
+      const published = await client.publishPlatformPricingRule(
+        selectedDraft.ruleId,
+        command,
+      );
+      const [nextRules, nextPlans, nextCatalog] = await Promise.all([
+        client.listPlatformPricingRules(),
+        client.listDriverFeePlans(),
+        client.getProductRuleCatalog(),
+      ]);
+      const canonicalPublished =
+        (nextRules ?? []).find((rule) => rule.ruleId === published.ruleId) ??
+        published;
+      setRules(nextRules ?? []);
+      setPlans(nextPlans ?? []);
+      setCatalog(nextCatalog);
       setPublishModalOpen(false);
       setPublishReceipt(
         t("pricing.publishReceipt", {
-          version: selectedDraft.version,
-          reason: publishReason.trim(),
-          timestamp: new Date().toISOString(),
+          version: canonicalPublished.version,
+          reason: canonicalPublished.publishReason ?? trimmedReason,
+          timestamp: canonicalPublished.publishedAt ?? new Date().toISOString(),
         }),
       );
       setPublishReason("");
@@ -1072,11 +1375,26 @@ export default function PricingPage() {
             <CanvasBtn
               theme={theme}
               icon="plus"
-              onClick={() =>
+              onClick={() => {
+                if (activeTab === "passenger") {
+                  setCreateError(null);
+                  setDraftRuleName(
+                    activeRule?.ruleName ?? "Standard Service Fee",
+                  );
+                  setDraftServiceFeeBps(
+                    String(activeRule?.serviceFeeBps ?? 1500),
+                  );
+                  setDraftReimbMode(
+                    activeRule?.reimbursementMode ?? "platform_funded",
+                  );
+                  setDraftApplicableTo(activeRule?.applicableTo ?? "all");
+                  setCreateModalOpen(true);
+                  return;
+                }
                 handleTabChange(
                   activeTab === "history" ? "passenger" : activeTab,
-                )
-              }
+                );
+              }}
             >
               {createDraftLabel}
             </CanvasBtn>
@@ -1797,6 +2115,32 @@ export default function PricingPage() {
           </div>
         ) : null}
       </div>
+
+      <CreateDraftModal
+        open={createModalOpen}
+        ruleName={draftRuleName}
+        onRuleNameChange={setDraftRuleName}
+        version={draftVersion}
+        onVersionChange={setDraftVersion}
+        serviceFeeBps={draftServiceFeeBps}
+        onServiceFeeBpsChange={setDraftServiceFeeBps}
+        reimbursementMode={draftReimbMode}
+        onReimbursementModeChange={setDraftReimbMode}
+        applicableTo={draftApplicableTo}
+        onApplicableToChange={setDraftApplicableTo}
+        effectiveFrom={draftEffectiveFrom}
+        onEffectiveFromChange={setDraftEffectiveFrom}
+        notes={draftNotes}
+        onNotesChange={setDraftNotes}
+        error={createError}
+        creating={creatingDraft}
+        onClose={() => {
+          setCreateModalOpen(false);
+          setCreateError(null);
+        }}
+        onSubmit={handleCreateDraft}
+        t={t}
+      />
 
       {publishModalOpen ? (
         <ReasonModal

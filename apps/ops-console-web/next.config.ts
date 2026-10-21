@@ -51,6 +51,18 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        source: "/review-driver/:path*",
+        headers: [
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+          {
+            key: "Content-Security-Policy",
+            value:
+              "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:;",
+          },
+        ],
+      },
     ];
   },
 };

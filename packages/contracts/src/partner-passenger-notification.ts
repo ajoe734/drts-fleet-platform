@@ -32,8 +32,10 @@ import type { ConsumerNotificationOutboxRecord } from "./phase1-p5-s3-multi-taxi
  * than redeclaring the union, so this module cannot silently drift from the
  * outbox contract it must not rename.
  */
-export type PartnerPassengerEventType =
-  ConsumerNotificationOutboxRecord["eventType"];
+export type PartnerPassengerEventType = Exclude<
+  ConsumerNotificationOutboxRecord["eventType"],
+  "payment_recovery_required"
+>;
 
 export const PARTNER_NOTIFICATION_SCHEMA_VERSION = "1.0" as const;
 export type PartnerNotificationSchemaVersion =
@@ -46,6 +48,7 @@ export const PARTNER_PASSENGER_EVENT_TO_EXTERNAL_NAME = {
   eta_changed: "passenger.eta_changed.v1",
   driver_arrived: "passenger.driver_arrived.v1",
   receipt_ready: "passenger.receipt_ready.v1",
+  trip_cancelled: "passenger.trip_cancelled.v1",
 } as const satisfies Record<PartnerPassengerEventType, string>;
 
 export const PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS = [
@@ -54,6 +57,7 @@ export const PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS = [
   "passenger.eta_changed.v1",
   "passenger.driver_arrived.v1",
   "passenger.receipt_ready.v1",
+  "passenger.trip_cancelled.v1",
 ] as const;
 export type PartnerPassengerNotificationExternalEvent =
   (typeof PARTNER_PASSENGER_NOTIFICATION_EXTERNAL_EVENTS)[number];
@@ -77,6 +81,7 @@ export const PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS = {
   eta_changed: 120,
   driver_arrived: 300,
   receipt_ready: 7 * 24 * 60 * 60,
+  trip_cancelled: 7 * 24 * 60 * 60,
 } as const satisfies Record<PartnerPassengerEventType, number>;
 
 // ===========================================================================

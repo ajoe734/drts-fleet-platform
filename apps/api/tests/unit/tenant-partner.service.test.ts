@@ -18,11 +18,16 @@ import {
   type PartnerEligibilityAdapterInterface,
 } from "../../src/modules/tenant-partner/partner-eligibility-adapter.interface";
 import { TenantInvitationDeliveryService } from "../../src/modules/tenant-partner/tenant-invitation-delivery.service";
-import type {
-  PersistTenantPartnerChanges,
-  StoredPartnerIngressCredentialRecord,
-  TenantPartnerState,
-  TenantPartnerQueryExecutor,
+import { SecurityEventsService } from "../../src/modules/security-events/security-events.service";
+import { TenantApiKeyAuthGuard } from "../../src/modules/tenant-partner/tenant-partner.controller";
+import {
+  TenantPartnerRepository,
+  mergeCanonicalTenantApiKeyRecord,
+  type PersistTenantPartnerChanges,
+  type StoredPartnerIngressCredentialRecord,
+  type StoredTenantApiKeyRecord,
+  type TenantPartnerState,
+  type TenantPartnerQueryExecutor,
 } from "../../src/modules/tenant-partner/tenant-partner.repository";
 import { createEmptyTenantQuotaUsage } from "../../src/modules/tenant-partner/tenant-quota-ledger";
 import { TenantPartnerService } from "../../src/modules/tenant-partner/tenant-partner.service";
@@ -174,14 +179,42 @@ function withoutKeys<T>(
   return current.filter((value) => !removed.has(keyOf(value)));
 }
 
+function mergeApiKeysByKey(
+  current: readonly StoredTenantApiKeyRecord[],
+  incoming: readonly StoredTenantApiKeyRecord[] | undefined,
+) {
+  const merged = new Map(current.map((value) => [value.apiKeyId, value]));
+  for (const value of incoming ?? []) {
+    const nextValue = mergeCanonicalTenantApiKeyRecord(
+      merged.get(value.apiKeyId) ?? null,
+      value,
+    );
+    Object.assign(value, nextValue);
+    merged.set(value.apiKeyId, nextValue);
+  }
+  return [...merged.values()];
+}
+
 function createInMemoryTenantPartnerRepository(
   initialState: TenantPartnerState = createEmptyRepositoryState(),
 ) {
   let state = cloneState(initialState);
 
-  return {
+  const repository = {
     isEnabled: vi.fn(() => false),
     loadState: vi.fn(async () => cloneState(state)),
+    findTenantApiKey: vi.fn(
+      async (apiKeyId: string, tenantId?: string | null) => {
+        const found = state.apiKeys.find(
+          (candidate) =>
+            candidate.apiKeyId === apiKeyId &&
+            (!tenantId || candidate.tenantId === tenantId),
+        );
+        return found
+          ? (JSON.parse(JSON.stringify(found)) as StoredTenantApiKeyRecord)
+          : null;
+      },
+    ),
     persistChanges: vi.fn(async (changes: PersistTenantPartnerChanges) => {
       const nextState = {
         notificationPreferences: withoutKeys(
@@ -376,16 +409,20 @@ function createInMemoryTenantPartnerRepository(
           changes.userRoles,
           (value) => value.userId,
         ),
-        apiKeys: mergeByKey(
+        apiKeys: mergeApiKeysByKey(
           nextState.apiKeys,
           changes.apiKeys,
-          (value) => value.apiKeyId,
         ),
       };
     }),
     reportPersistenceFailure: vi.fn(),
     getState: () => cloneState(state),
   };
+  return Object.assign(repository, {
+    persistConfigurationChanges: vi.fn((changes: PersistTenantPartnerChanges) =>
+      repository.persistChanges(changes),
+    ),
+  });
 }
 
 function createDatabaseQuotaRepository(options?: {
@@ -660,9 +697,13 @@ describe("TenantPartnerService sensitive-data governance", () => {
     persistedState.passengers = [
       localSeedService.listPassengers("tenant-demo-001")[0]!,
     ];
-    persistedState.addresses = [localSeedService.listAddresses("tenant-demo-001")[0]!];
-    persistedState.costCenters = localSeedService.listCostCenters("tenant-demo-001");
-    persistedState.userRoles = localSeedService.listTenantUsers("tenant-demo-001");
+    persistedState.addresses = [
+      localSeedService.listAddresses("tenant-demo-001")[0]!,
+    ];
+    persistedState.costCenters =
+      localSeedService.listCostCenters("tenant-demo-001");
+    persistedState.userRoles =
+      localSeedService.listTenantUsers("tenant-demo-001");
     persistedState.apiKeys = [
       localSeedService.listApiKeys("tenant-demo-001")[0] as never,
     ];
@@ -934,7 +975,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    service.upsertPassenger(
+    await service.upsertPassenger(
       "tenant-demo-001",
       {
         fullName: "王小美",
@@ -946,7 +987,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       "req-passenger-audit-001",
     );
 
-    const createdWebhook = service.createWebhookEndpoint(
+    const createdWebhook = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/dispatch",
@@ -1215,14 +1256,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
         },
         "req-partner-credential-auth-002",
       ),
-      ).toThrowError(
-        expect.objectContaining({
-          response: expect.objectContaining({
-            error: expect.objectContaining({
-              code: "PARTNER_API_KEY_REVOKED",
-            }),
+    ).toThrowError(
+      expect.objectContaining({
+        response: expect.objectContaining({
+          error: expect.objectContaining({
+            code: "PARTNER_API_KEY_REVOKED",
           }),
         }),
+      }),
     );
 
     expect(auditNotificationService.listAuditLogs()).toEqual(
@@ -1262,7 +1303,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
 
       expect(issued.overlapEndsAt).toBe("2026-08-03T12:00:00.000Z");
       expect(
-        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+        service.listPlatformPartnerIngressCredentials(
+          "bank-demo-alpha-airport",
+        ),
       ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1326,7 +1369,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
       );
 
       expect(
-        service.listPlatformPartnerIngressCredentials("bank-demo-alpha-airport"),
+        service.listPlatformPartnerIngressCredentials(
+          "bank-demo-alpha-airport",
+        ),
       ).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -1913,7 +1958,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
   it("applies passenger/address governance quality rules and masks export views", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const passenger = service.upsertPassenger("tenant-demo-001", {
+    const passenger = await service.upsertPassenger("tenant-demo-001", {
       passengerId: "passenger-governance-001",
       fullName: "王小美",
       roles: ["employee", "passenger"],
@@ -1924,7 +1969,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       expect.arrayContaining(["missing_contact", "missing_employee_no"]),
     );
 
-    const address = service.upsertAddress("tenant-demo-001", {
+    const address = await service.upsertAddress("tenant-demo-001", {
       addressId: "address-governance-001",
       ownerPassengerId: passenger.passengerId,
       addressName: "Sensitive Pickup",
@@ -1960,7 +2005,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       true,
     );
 
-    const created = service.upsertCostCenter(
+    const created = await service.upsertCostCenter(
       "tenant-demo-001",
       {
         code: "cc-rd-12",
@@ -1990,7 +2035,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.code).toBe("CC-RD-12");
 
-    const disabled = service.disableCostCenter(
+    const disabled = await service.disableCostCenter(
       "tenant-demo-001",
       {
         code: "cc-rd-12",
@@ -2047,12 +2092,12 @@ describe("TenantPartnerService sensitive-data governance", () => {
 
     await service.onModuleInit();
 
-    service.upsertCostCenter("tenant-demo-001", {
+    await service.upsertCostCenter("tenant-demo-001", {
       code: "CC-BD-09",
       name: "業務開發",
       ownerName: "Regional GM",
     });
-    service.disableCostCenter("tenant-demo-001", {
+    await service.disableCostCenter("tenant-demo-001", {
       code: "CC-BD-09",
       reason: "merged into ops",
     });
@@ -2077,11 +2122,14 @@ describe("TenantPartnerService sensitive-data governance", () => {
   it("allows duplicate cost-center codes across different tenants", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const otherTenantCostCenter = service.upsertCostCenter("tenant-demo-002", {
-      code: "cc-fin-04",
-      name: "Shared Finance Code",
-      description: "Scoped to a different tenant",
-    });
+    const otherTenantCostCenter = await service.upsertCostCenter(
+      "tenant-demo-002",
+      {
+        code: "cc-fin-04",
+        name: "Shared Finance Code",
+        description: "Scoped to a different tenant",
+      },
+    );
 
     expect(otherTenantCostCenter).toMatchObject({
       tenantId: "tenant-demo-002",
@@ -2154,7 +2202,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     }
 
     // Disabled code rejected with the dedicated error code.
-    service.disableCostCenter("tenant-demo-001", {
+    await service.disableCostCenter("tenant-demo-001", {
       code: "CC-OPS-02",
       reason: "sunset",
     });
@@ -2191,7 +2239,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     ).toEqual({ value: "CC-FIN-04", matchedDirectory: true });
 
     // After tenant B onboards CC-X, tenant A still cannot use CC-X.
-    service.upsertCostCenter("tenant-demo-002", {
+    await service.upsertCostCenter("tenant-demo-002", {
       code: "CC-X",
       name: "Tenant B Special",
     });
@@ -2403,7 +2451,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const created = service.createWebhookEndpoint(
+    const created = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/secret-hygiene",
@@ -2417,7 +2465,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       "req-webhook-secret-hygiene-001",
     );
 
-    service.rotateWebhookSecret(
+    await service.rotateWebhookSecret(
       "tenant-demo-001",
       {
         webhookId: created.webhookId,
@@ -2432,7 +2480,8 @@ describe("TenantPartnerService sensitive-data governance", () => {
     for (const record of endpoint.secretHistory) {
       expect(record).not.toHaveProperty("secretValue");
     }
-    for (const record of endpoint.runtimeMetadata.secretRotation.history ?? []) {
+    for (const record of endpoint.runtimeMetadata.secretRotation.history ??
+      []) {
       expect(record).not.toHaveProperty("secretValue");
     }
 
@@ -2442,7 +2491,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
     // The whole read surface must stay clean, not just the history arrays:
     // list reads, the update response, and the audit trail all serialize the
     // same webhook response shape.
-    const updated = service.updateWebhookEndpoint(
+    const updated = await service.updateWebhookEndpoint(
       "tenant-demo-001",
       created.webhookId,
       { events: ["booking.created", "booking.cancelled"] },
@@ -2555,7 +2604,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       .find((value) => value.webhookId === "wh_legacy_material_001");
     expect(listed).toBeDefined();
 
-    const updated = service.updateWebhookEndpoint(
+    const updated = await service.updateWebhookEndpoint(
       "tenant-demo-001",
       "wh_legacy_material_001",
       { events: ["booking.created", "booking.cancelled"] },
@@ -2989,11 +3038,9 @@ describe("TenantPartnerService sensitive-data governance", () => {
         rotatable.apiKey.apiKeyId,
         { overlapDays: 2 },
       );
-      service.rotateApiKey(
-        "tenant-demo-001",
-        rotatedOnce.apiKey.apiKeyId,
-        { overlapDays: 2 },
-      );
+      service.rotateApiKey("tenant-demo-001", rotatedOnce.apiKey.apiKeyId, {
+        overlapDays: 2,
+      });
       vi.setSystemTime(new Date("2026-10-05T00:00:00.000Z"));
       expectAuthErrorCode(
         () => service.authenticateTenantApiKey(rotatedOnce.plaintextKey),
@@ -3070,6 +3117,528 @@ describe("TenantPartnerService sensitive-data governance", () => {
     expect(loadedKey).toBeDefined();
     expect(loadedKey?.lastUsedAt).toBe(resolution.apiKey.lastUsedAt);
     expect(loadedKey?.lastUsedWorkload).toBe("etl_ingest");
+  });
+
+  it("enforces monotonic canonical revocation against warm-peer authentication, TenantApiKeyAuthGuard, and fresh reloads", async () => {
+    const rows = new Map<
+      string,
+      {
+        api_key_id: string;
+        tenant_id: string;
+        revoked_at: string | null;
+        created_at: string;
+        record: StoredTenantApiKeyRecord;
+      }
+    >();
+
+    const sqlPort = {
+      isEnabled: () => true,
+      connect: async () => ({
+        query: sqlPort.query,
+        release: () => {},
+      }),
+      withTransaction: async <T>(
+        work: (tx: TenantPartnerQueryExecutor) => Promise<T>,
+      ) => work(sqlPort as unknown as TenantPartnerQueryExecutor),
+      query: vi.fn(
+        async <T>(
+          sql: string,
+          params: readonly unknown[] = [],
+        ): Promise<{ rows: T[] }> => {
+          const normalized = sql.replace(/\s+/g, " ").trim();
+          if (
+            normalized.includes(
+              "FROM admin.phase1_tenant_api_keys WHERE api_key_id = $1",
+            )
+          ) {
+            const apiKeyId = String(params[0]);
+            const tenantId = params[1] ? String(params[1]) : undefined;
+            const row = rows.get(apiKeyId);
+            if (!row || (tenantId && row.tenant_id !== tenantId)) {
+              return { rows: [] };
+            }
+            return {
+              rows: [
+                {
+                  record: JSON.parse(JSON.stringify(row.record)),
+                } as unknown as T,
+              ],
+            };
+          }
+          if (normalized.includes("FROM admin.phase1_tenant_api_keys")) {
+            return {
+              rows: [...rows.values()].map(
+                (row) =>
+                  ({
+                    record: JSON.parse(JSON.stringify(row.record)),
+                  }) as unknown as T,
+              ),
+            };
+          }
+          if (
+            normalized.startsWith("INSERT INTO admin.phase1_tenant_api_keys")
+          ) {
+            const [api_key_id, tenant_id, revoked_at, created_at, rawRecord] =
+              params as [string, string, string | null, string, string];
+            const incomingRecord = JSON.parse(
+              rawRecord,
+            ) as StoredTenantApiKeyRecord;
+            const existing = rows.get(api_key_id);
+            if (!existing) {
+              rows.set(api_key_id, {
+                api_key_id,
+                tenant_id,
+                revoked_at,
+                created_at,
+                record: incomingRecord,
+              });
+            } else {
+              const existingTerminal =
+                existing.revoked_at !== null ||
+                existing.record.status === "revoked" ||
+                existing.record.status === "auto_revoked";
+              const incomingTerminal =
+                revoked_at !== null ||
+                incomingRecord.status === "revoked" ||
+                incomingRecord.status === "auto_revoked";
+              let sqlMergedRecord = incomingRecord;
+              if (existingTerminal && !incomingTerminal) {
+                sqlMergedRecord = {
+                  ...existing.record,
+                  ...(incomingRecord.lastUsedAt &&
+                  (!existing.record.lastUsedAt ||
+                    Date.parse(incomingRecord.lastUsedAt) >=
+                      Date.parse(existing.record.lastUsedAt))
+                    ? {
+                        lastUsedAt: incomingRecord.lastUsedAt,
+                        lastUsedWorkload: incomingRecord.lastUsedWorkload,
+                      }
+                    : {}),
+                };
+              }
+              rows.set(api_key_id, {
+                api_key_id,
+                tenant_id,
+                revoked_at: existing.revoked_at ?? revoked_at,
+                created_at,
+                record: sqlMergedRecord,
+              });
+            }
+            return { rows: [] };
+          }
+          return { rows: [] };
+        },
+      ),
+    };
+
+    const recordedSecurityEvents: Array<Record<string, unknown>> = [];
+    const securityEventsService = Object.assign(
+      Object.create(SecurityEventsService.prototype),
+      {
+        isEnabled: () => true,
+        recordEventRequired: vi.fn(async (event: Record<string, unknown>) => {
+          recordedSecurityEvents.push(JSON.parse(JSON.stringify(event)));
+        }),
+      },
+    );
+
+    const actorIdentity: IdentityContext = {
+      actorId: "usr-tenant-admin-001",
+      actorType: "tenant_admin",
+      realm: "tenant",
+      tenantId: "tenant-demo-001",
+      roles: ["tenant_admin"],
+      scopes: ["tenant:read", "tenant:write"],
+      authMode: "jwt",
+    };
+
+    const repoA = new TenantPartnerRepository(sqlPort as never);
+    const serviceA = new TenantPartnerService(
+      new AuditNotificationService(),
+      repoA,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService as never,
+    );
+    await serviceA.onModuleInit();
+
+    const issued = await serviceA.issueApiKey(
+      "tenant-demo-001",
+      {
+        keyName: "Warm peer canonical revocation key",
+        scopes: ["tenant:read", "tenant:write"],
+        ownerRef: "usr-tenant-admin-001",
+      },
+      "req-issue-c111-warm-001",
+      actorIdentity,
+    );
+
+    const repoB = new TenantPartnerRepository(sqlPort as never);
+    const serviceB = new TenantPartnerService(
+      new AuditNotificationService(),
+      repoB,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      securityEventsService as never,
+    );
+    await serviceB.onModuleInit();
+    const guardB = new TenantApiKeyAuthGuard(serviceB);
+
+    const guardRequestBefore: Record<string, unknown> = {
+      headers: {
+        authorization: `Bearer ${issued.plaintextKey}`,
+        "x-tenant-id": "tenant-demo-001",
+        "x-request-id": "req-guard-before-001",
+      },
+      query: {},
+    };
+    const guardContextBefore = {
+      switchToHttp: () => ({
+        getRequest: () => guardRequestBefore,
+      }),
+    };
+    expect(await guardB.canActivate(guardContextBefore as never)).toBe(true);
+
+    const bUsedBeforeRevoke = await serviceB.authenticateTenantApiKey(
+      issued.plaintextKey,
+      {
+        tenantId: "tenant-demo-001",
+        requiredScopes: ["tenant:write"],
+        workload: "dispatch_sync",
+        requestId: "req-b-use-before-revoke",
+      },
+    );
+    expect(bUsedBeforeRevoke.apiKey.lastUsedAt).toBeTruthy();
+    expect(bUsedBeforeRevoke.apiKey.lastUsedWorkload).toBe("dispatch_sync");
+
+    // Instance A revokes the key while A's own in-memory cache still had lastUsedAt === null
+    await serviceA.revokeApiKey(
+      "tenant-demo-001",
+      issued.apiKey.apiKeyId,
+      "req-revoke-c111-warm-001",
+      actorIdentity,
+    );
+
+    const rowAfterARevoke = rows.get(issued.apiKey.apiKeyId);
+    expect(rowAfterARevoke?.revoked_at).toBeTruthy();
+    expect(rowAfterARevoke?.record.status).toBe("revoked");
+    expect(rowAfterARevoke?.record.revokedAt).toBe(rowAfterARevoke?.revoked_at);
+    expect(rowAfterARevoke?.record.revokeReason).toBe("manual_revoke");
+    // A's revoke must preserve B's canonical lastUsedAt and lastUsedWorkload
+    expect(rowAfterARevoke?.record.lastUsedAt).toBe(
+      bUsedBeforeRevoke.apiKey.lastUsedAt,
+    );
+    expect(rowAfterARevoke?.record.lastUsedWorkload).toBe("dispatch_sync");
+    expect(recordedSecurityEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: "tenant_api_key.issued",
+          targetId: issued.apiKey.apiKeyId,
+        }),
+        expect.objectContaining({
+          eventType: "tenant_api_key.revoked",
+          targetId: issued.apiKey.apiKeyId,
+          afterSummary: expect.objectContaining({
+            status: "revoked",
+            lastUsedAt: bUsedBeforeRevoke.apiKey.lastUsedAt,
+            lastUsedWorkload: "dispatch_sync",
+          }),
+        }),
+      ]),
+    );
+
+    // Instance A immediately rejects the revoked key
+    await expect(
+      Promise.resolve(
+        serviceA.authenticateTenantApiKey(issued.plaintextKey, {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:write"],
+          workload: "post_revoke_a",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+
+    // Warm peer B (holding stale active state in memory) must fail closed on both direct auth and guard
+    await expect(
+      Promise.resolve(
+        serviceB.authenticateTenantApiKey(issued.plaintextKey, {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:write"],
+          workload: "warm_peer_b_direct",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+
+    const guardRequestAfter: Record<string, unknown> = {
+      headers: {
+        "x-api-key": issued.plaintextKey,
+        "x-tenant-id": "tenant-demo-001",
+        "x-request-id": "req-guard-after-001",
+      },
+      query: {},
+    };
+    const guardContextAfter = {
+      switchToHttp: () => ({
+        getRequest: () => guardRequestAfter,
+      }),
+    };
+    await expect(
+      guardB.canActivate(guardContextAfter as never),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+
+    // Warm peer B's local cache is now reconciled to revoked and canonical DB remains revoked
+    const bCachedKey = serviceB
+      .listApiKeys("tenant-demo-001")
+      .find((key) => key.apiKeyId === issued.apiKey.apiKeyId);
+    expect(bCachedKey).toMatchObject({
+      status: "revoked",
+      revokedAt: rowAfterARevoke?.revoked_at,
+      revokeReason: "manual_revoke",
+    });
+
+    const rowAfterBWarmAttempt = rows.get(issued.apiKey.apiKeyId);
+    expect(rowAfterBWarmAttempt?.revoked_at).toBe(rowAfterARevoke?.revoked_at);
+    expect(rowAfterBWarmAttempt?.record.status).toBe("revoked");
+    expect(rowAfterBWarmAttempt?.record.revokedAt).toBe(
+      rowAfterARevoke?.revoked_at,
+    );
+
+    // Simulate an in-flight stale active usage write racing with revocation at the repository boundary
+    const racingUsageTimestamp = new Date(Date.now() + 5_000).toISOString();
+    const staleActiveRecord: StoredTenantApiKeyRecord = {
+      ...(JSON.parse(
+        JSON.stringify(rowAfterARevoke?.record),
+      ) as StoredTenantApiKeyRecord),
+      status: "active",
+      revokedAt: null,
+      revokeReason: null,
+      lastUsedAt: racingUsageTimestamp,
+      lastUsedWorkload: "inflight_racing_worker",
+    };
+    await repoB.persistChanges({
+      apiKeys: [staleActiveRecord],
+    });
+
+    const rowAfterRacingPersist = rows.get(issued.apiKey.apiKeyId);
+    expect(rowAfterRacingPersist?.revoked_at).toBe(rowAfterARevoke?.revoked_at);
+    expect(rowAfterRacingPersist?.record.status).toBe("revoked");
+    expect(rowAfterRacingPersist?.record.revokedAt).toBe(
+      rowAfterARevoke?.revoked_at,
+    );
+    expect(rowAfterRacingPersist?.record.revokeReason).toBe("manual_revoke");
+    expect(rowAfterRacingPersist?.record.lastUsedAt).toBe(racingUsageTimestamp);
+    expect(rowAfterRacingPersist?.record.lastUsedWorkload).toBe(
+      "inflight_racing_worker",
+    );
+
+    // Fresh instance C and restarted instance A both load canonical state as revoked and reject the key
+    const repoC = new TenantPartnerRepository(sqlPort as never);
+    const serviceC = new TenantPartnerService(
+      new AuditNotificationService(),
+      repoC,
+    );
+    await serviceC.onModuleInit();
+
+    expect(
+      serviceC
+        .listApiKeys("tenant-demo-001")
+        .find((key) => key.apiKeyId === issued.apiKey.apiKeyId),
+    ).toMatchObject({
+      status: "revoked",
+      revokedAt: rowAfterARevoke?.revoked_at,
+      lastUsedAt: racingUsageTimestamp,
+      lastUsedWorkload: "inflight_racing_worker",
+    });
+
+    await expect(
+      Promise.resolve(
+        serviceC.authenticateTenantApiKey(issued.plaintextKey, {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:read"],
+          workload: "fresh_instance_c",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+
+    await serviceA.onModuleInit();
+    await expect(
+      Promise.resolve(
+        serviceA.authenticateTenantApiKey(issued.plaintextKey, {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:read"],
+          workload: "restarted_instance_a",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 401,
+      response: {
+        error: {
+          code: "TENANT_API_KEY_REVOKED",
+        },
+      },
+    });
+  });
+
+  it("enforces monotonic canonical auto-revocation across rotation overlap expiry, zero-day rotation, warm peers, and fresh reloads", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-01T00:00:00.000Z"));
+      const repository = createInMemoryTenantPartnerRepository();
+      repository.isEnabled.mockReturnValue(true);
+
+      const serviceA = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+      );
+      await serviceA.onModuleInit();
+
+      const issued = await serviceA.issueApiKey("tenant-demo-001", {
+        keyName: "Overlap rotation key",
+        scopes: ["tenant:read"],
+      });
+
+      const serviceB = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+      );
+      await serviceB.onModuleInit();
+
+      const rotated = await serviceA.rotateApiKey(
+        "tenant-demo-001",
+        issued.apiKey.apiKeyId,
+        { overlapDays: 2 },
+      );
+
+      // Advance past the 2-day overlap window
+      vi.setSystemTime(new Date("2026-10-04T00:00:00.000Z"));
+
+      // Warm peer B (holding stale active state from before rotation) attempts to authenticate the outgoing key
+      await expect(
+        Promise.resolve(
+          serviceB.authenticateTenantApiKey(issued.plaintextKey, {
+            tenantId: "tenant-demo-001",
+            requiredScopes: ["tenant:read"],
+            workload: "warm_peer_after_overlap",
+          }),
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: {
+          error: {
+            code: "TENANT_API_KEY_AUTO_REVOKED",
+          },
+        },
+      });
+
+      const canonicalAfterOverlap = await repository.findTenantApiKey(
+        issued.apiKey.apiKeyId,
+        "tenant-demo-001",
+      );
+      expect(canonicalAfterOverlap?.status).toBe("auto_revoked");
+      expect(canonicalAfterOverlap?.autoRevokedAt).toBeTruthy();
+      expect(canonicalAfterOverlap?.revokeReason).toBe(
+        "rotation_overlap_elapsed",
+      );
+
+      // Zero-day overlap rotation immediately transitions the outgoing key to auto_revoked
+      const rotatedImmediate = await serviceA.rotateApiKey(
+        "tenant-demo-001",
+        rotated.apiKey.apiKeyId,
+        { overlapDays: 0 },
+      );
+      const canonicalZeroOverlap = await repository.findTenantApiKey(
+        rotated.apiKey.apiKeyId,
+        "tenant-demo-001",
+      );
+      expect(canonicalZeroOverlap?.status).toBe("auto_revoked");
+      expect(canonicalZeroOverlap?.autoRevokedAt).toBeTruthy();
+
+      // Fresh instance C rejects both auto-revoked keys and accepts the newest active key
+      const serviceC = new TenantPartnerService(
+        new AuditNotificationService(),
+        repository as never,
+      );
+      await serviceC.onModuleInit();
+
+      await expect(
+        Promise.resolve(
+          serviceC.authenticateTenantApiKey(issued.plaintextKey, {
+            tenantId: "tenant-demo-001",
+            requiredScopes: ["tenant:read"],
+          }),
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: {
+          error: {
+            code: "TENANT_API_KEY_AUTO_REVOKED",
+          },
+        },
+      });
+
+      await expect(
+        Promise.resolve(
+          serviceC.authenticateTenantApiKey(rotated.plaintextKey, {
+            tenantId: "tenant-demo-001",
+            requiredScopes: ["tenant:read"],
+          }),
+        ),
+      ).rejects.toMatchObject({
+        status: 401,
+        response: {
+          error: {
+            code: "TENANT_API_KEY_AUTO_REVOKED",
+          },
+        },
+      });
+
+      const latestAuth = await serviceC.authenticateTenantApiKey(
+        rotatedImmediate.plaintextKey,
+        {
+          tenantId: "tenant-demo-001",
+          requiredScopes: ["tenant:read"],
+          workload: "fresh_instance_c_active",
+        },
+      );
+      expect(latestAuth.apiKey.apiKeyId).toBe(rotatedImmediate.apiKey.apiKeyId);
+      expect(latestAuth.apiKey.status).toBe("active");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("falls back to manual review after retry exhaustion with explicit adapter attempt history", async () => {
@@ -3528,7 +4097,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    const created = service.createWebhookEndpoint(
+    const created = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/failing",
@@ -3565,7 +4134,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       ]),
     );
 
-    service.rotateWebhookSecret(
+    await service.rotateWebhookSecret(
       "tenant-demo-001",
       {
         webhookId: created.webhookId,
@@ -3614,7 +4183,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
         ],
       } as const;
 
-      const created = service.createWebhookEndpoint(
+      const created = await service.createWebhookEndpoint(
         "tenant-demo-001",
         {
           url: "https://tenant.example/webhooks/overlap-secret",
@@ -3645,7 +4214,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       });
 
       vi.setSystemTime(new Date("2026-08-02T12:00:00.000Z"));
-      const rotated = service.rotateWebhookSecret(
+      const rotated = await service.rotateWebhookSecret(
         "tenant-demo-001",
         {
           webhookId: created.webhookId,
@@ -3751,7 +4320,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    const created = service.createWebhookEndpoint(
+    const created = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/retry-once",
@@ -3841,13 +4410,13 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    const created = service.createWebhookEndpoint("tenant-demo-001", {
+    const created = await service.createWebhookEndpoint("tenant-demo-001", {
       url: "https://tenant.example/webhooks/manual-disable",
       secret: "whsec_manual_disable",
       events: ["booking.created"],
     });
 
-    const updated = service.updateWebhookEndpoint(
+    const updated = await service.updateWebhookEndpoint(
       "tenant-demo-001",
       created.webhookId,
       {
@@ -3879,7 +4448,7 @@ describe("TenantPartnerService sensitive-data governance", () => {
       [],
     );
 
-    const webhook = service.createWebhookEndpoint(
+    const webhook = await service.createWebhookEndpoint(
       "tenant-demo-001",
       {
         url: "https://tenant.example/webhooks/evidence",
@@ -4213,7 +4782,7 @@ describe("TenantPartnerService approval rules", () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new TenantPartnerService(auditNotificationService);
 
-    const created = service.upsertApprovalRule(
+    const created = await service.upsertApprovalRule(
       "tenant-demo-001",
       {
         ruleName: "High-value approval",
@@ -4231,7 +4800,7 @@ describe("TenantPartnerService approval rules", () => {
       "req-approval-rule-create-001",
     );
 
-    const second = service.upsertApprovalRule(
+    const second = await service.upsertApprovalRule(
       "tenant-demo-001",
       {
         ruleName: "Manual review passenger",
@@ -4249,7 +4818,7 @@ describe("TenantPartnerService approval rules", () => {
       "req-approval-rule-create-002",
     );
 
-    const reordered = service.reorderApprovalRules(
+    const reordered = await service.reorderApprovalRules(
       "tenant-demo-001",
       {
         orderedRuleIds: [second.ruleId, created.ruleId],
@@ -4257,7 +4826,7 @@ describe("TenantPartnerService approval rules", () => {
       "req-approval-rule-reorder-001",
     );
 
-    const disabled = service.disableApprovalRule(
+    const disabled = await service.disableApprovalRule(
       "tenant-demo-001",
       created.ruleId,
       "req-approval-rule-disable-001",
@@ -4325,13 +4894,13 @@ describe("TenantPartnerService approval rules", () => {
   it("rejects duplicate orderedRuleIds when reordering approval rules", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    const first = service.upsertApprovalRule("tenant-demo-001", {
+    const first = await service.upsertApprovalRule("tenant-demo-001", {
       ruleName: "Rule one",
       priority: 10,
       conditions: [{ field: "booking.amount_minor", op: "gte", value: 1 }],
       action: "warn",
     });
-    const second = service.upsertApprovalRule("tenant-demo-001", {
+    const second = await service.upsertApprovalRule("tenant-demo-001", {
       ruleName: "Rule two",
       priority: 20,
       conditions: [{ field: "booking.amount_minor", op: "gte", value: 2 }],
@@ -4359,13 +4928,14 @@ describe("TenantPartnerService approval rules", () => {
 
   it("persists approval rule changes into the repository contract state", async () => {
     const repository = createInMemoryTenantPartnerRepository();
+    repository.isEnabled.mockReturnValue(true);
     const service = new TenantPartnerService(
       new AuditNotificationService(),
       repository as never,
     );
 
     await service.onModuleInit();
-    const created = service.upsertApprovalRule("tenant-demo-001", {
+    const created = await service.upsertApprovalRule("tenant-demo-001", {
       ruleName: "Persisted approval",
       priority: 10,
       conditions: [
@@ -4392,13 +4962,14 @@ describe("TenantPartnerService approval rules", () => {
 
   it("records tenant quota policies and previews cost-center impacts", async () => {
     const repository = createInMemoryTenantPartnerRepository();
+    repository.isEnabled.mockReturnValue(true);
     const service = new TenantPartnerService(
       new AuditNotificationService(),
       repository as never,
     );
 
     await service.onModuleInit();
-    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+    await service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
       limit: {
         bookingCountLimit: 2,
@@ -4493,7 +5064,7 @@ describe("TenantPartnerService approval rules", () => {
       }),
     ]);
 
-    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+    await service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
       limit: {
         bookingCountLimit: 5,
@@ -4551,7 +5122,7 @@ describe("TenantPartnerService approval rules", () => {
   it("throws QUOTA_INSUFFICIENT_AT_COMMIT when a hard-block reserve exceeds the limit", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+    await service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
       limit: {
         bookingCountLimit: 0,
@@ -4873,7 +5444,7 @@ describe("TenantPartnerService approval rules", () => {
   it("serializes concurrent reserve calls so only one claimant gets the last quota unit", async () => {
     const service = new TenantPartnerService(new AuditNotificationService());
 
-    service.upsertTenantQuotaPolicy("tenant-demo-001", {
+    await service.upsertTenantQuotaPolicy("tenant-demo-001", {
       period: "monthly",
       limit: {
         bookingCountLimit: 1,
@@ -5162,16 +5733,20 @@ describe("TenantPartnerService approval rules", () => {
       identityRepository,
     );
     const jwtAuthService = new JwtAuthService(identityRepository, service);
-    const activeUser = service.listTenantUsers("tenant-demo-001").find(
-      (candidate) =>
-        candidate.status === "active" && candidate.roleCode !== "tenant_admin",
-    );
+    const activeUser = service
+      .listTenantUsers("tenant-demo-001")
+      .find(
+        (candidate) =>
+          candidate.status === "active" &&
+          candidate.roleCode !== "tenant_admin",
+      );
     expect(activeUser).toBeDefined();
     if (!activeUser) {
       throw new Error("expected a seeded active tenant user");
     }
 
-    const snapshot = await identityRepository.syncLegacyTenantUserRole(activeUser);
+    const snapshot =
+      await identityRepository.syncLegacyTenantUserRole(activeUser);
     const scopes = getTenantRoleScopes(activeUser.roleCode);
     expect(scopes).toBeDefined();
     if (!scopes) {
@@ -5194,7 +5769,9 @@ describe("TenantPartnerService approval rules", () => {
       requestId: "req-tenant-session-issue-001",
     });
 
-    await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.not.toBeNull();
+    await expect(
+      jwtAuthService.verifyAccessToken(issued.token),
+    ).resolves.not.toBeNull();
 
     const updated = await service.updateTenantUserRole(
       activeUser.tenantId,
@@ -5218,12 +5795,16 @@ describe("TenantPartnerService approval rules", () => {
     );
 
     expect(updated.status).toBe("suspended");
-    const revokedSession = await identityRepository.getSession(issued.sessionId);
+    const revokedSession = await identityRepository.getSession(
+      issued.sessionId,
+    );
     expect(revokedSession).toMatchObject({
       status: "revoked",
       revokeReason: "TENANT_ACCOUNT_STATUS_CHANGED",
     });
-    await expect(jwtAuthService.verifyAccessToken(issued.token)).resolves.toBeNull();
+    await expect(
+      jwtAuthService.verifyAccessToken(issued.token),
+    ).resolves.toBeNull();
   });
 
   it("ships a tenant governance dashboard with the required panels and metric bindings", async () => {

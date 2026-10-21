@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
+import { parsePdf } from "../../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
@@ -66,28 +67,6 @@ async function drain(stream: NodeJS.ReadableStream): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-/**
- * Pulls the literal text out of every `(...) Tj` show-text operator in a PDF
- * content stream, undoing the same escaping `billing-settlement.service.ts`
- * applies when writing them. This is what makes the acceptance claim
- * "可解析PDF內容" (the PDF's content can be parsed back out) checkable
- * without a general-purpose PDF parser: the platform's own renderer and this
- * test agree on the same minimal, real PDF-1.4 dialect.
- */
-function extractPdfTextLines(bytes: Buffer): string[] {
-  const content = bytes.toString("latin1");
-  const lines: string[] = [];
-  const tjPattern = /\(((?:\\.|[^\\)])*)\)\s*Tj/g;
-  let match: RegExpExecArray | null;
-  while ((match = tjPattern.exec(content)) !== null) {
-    const raw = match[1] ?? "";
-    lines.push(
-      raw.replace(/\\\(/g, "(").replace(/\\\)/g, ")").replace(/\\\\/g, "\\"),
-    );
-  }
-  return lines;
-}
-
 function minorToDecimal(amountMinor: number): string {
   const whole = Math.floor(Math.abs(amountMinor) / 100);
   const cents = String(Math.abs(amountMinor) % 100).padStart(2, "0");
@@ -146,7 +125,7 @@ describe("SR-INVOICE-001: tenant invoice renders a real, parseable PDF", () => {
       createHash("sha256").update(bytes).digest("hex"),
     );
 
-    const pdfLines = extractPdfTextLines(bytes);
+    const { lines: pdfLines } = await parsePdf(bytes);
     expect(pdfLines[0]).toBe(`Tenant Invoice ${invoice.invoiceId}`);
     expect(pdfLines.join("\n")).toContain(
       `Bill To: Demo Tenant Co., Ltd. (tenant-demo-001)`,
@@ -157,11 +136,27 @@ describe("SR-INVOICE-001: tenant invoice renders a real, parseable PDF", () => {
     );
 
     for (const line of invoice.lines) {
-      const row = pdfLines.find((candidate) =>
+      const rowStart = pdfLines.findIndex((candidate) =>
         candidate.startsWith(`${line.orderId} | `),
       );
-      expect(row, `expected a PDF row for order ${line.orderId}`).toBeDefined();
+      expect(
+        rowStart,
+        `expected a PDF row for order ${line.orderId}`,
+      ).toBeGreaterThanOrEqual(0);
+      const nextRow = pdfLines.findIndex(
+        (candidate, index) =>
+          index > rowStart &&
+          (invoice.lines.some((other) =>
+            candidate.startsWith(`${other.orderId} | `),
+          ) ||
+            candidate.startsWith("---")),
+      );
+      const row = pdfLines
+        .slice(rowStart, nextRow < 0 ? undefined : nextRow)
+        .join(" ");
       expect(row).toContain(minorToDecimal(line.amount.amountMinor));
+      expect(row).toContain(line.description);
+      expect(row).toContain(line.channelKey ?? "-");
     }
 
     expect(
@@ -180,16 +175,16 @@ describe("SR-INVOICE-001: tenant invoice renders a real, parseable PDF", () => {
     );
   });
 
-  it("replaces non-ASCII bytes rather than corrupting the PDF byte stream", async () => {
+  it("preserves readable Traditional Chinese through the actual issued controlled download and embedded glyphs", async () => {
     const store = new InMemoryDocumentArtifactStore();
     const { billingSettlementService } = createService(store);
 
     await billingSettlementService.updateTenantBillingProfile(
       "tenant-demo-001",
       {
-        invoiceTitle: "示範租戶股份有限公司",
+        invoiceTitle: "示範租戶股份有限公司（台中）(A)\\B",
         taxId: "24567891",
-        address: "台中港區",
+        address: "台中港區，中山路１２號 — Finance 2026",
         contactName: "帳務窗口",
         email: "ap@demo-tenant.example.com",
       },
@@ -206,18 +201,32 @@ describe("SR-INVOICE-001: tenant invoice renders a real, parseable PDF", () => {
 
     const stored = await store.get("tenant-invoice", invoice.invoiceId);
     expect(stored).not.toBeNull();
-    // The base-14 Helvetica font this minimal writer uses cannot represent
-    // CJK glyphs; every byte must still be a single-byte Latin-1 code point
-    // in [0x20, 0x7e] so the PDF stays syntactically well-formed instead of
-    // splicing raw UTF-8 into a PDF literal string.
-    for (const byte of stored!.bytes) {
-      if (byte < 0x20 && byte !== 0x0a) continue; // structural newlines only
-      expect(byte).toBeLessThanOrEqual(0x7e);
-    }
-    const pdfLines = extractPdfTextLines(stored!.bytes);
-    // "示範租戶股份有限公司" is 10 non-ASCII code points.
-    expect(pdfLines.join("\n")).toContain(
-      "Bill To: ?????????? (tenant-demo-001)",
+    const controller = new ControlledDownloadController(store);
+    const file = (await resolve(
+      controller,
+      "tenant-invoice",
+      invoice.invoiceId,
+      paramsOf(invoice.artifactUrl!),
+    )) as StreamableFileLike;
+    const bytes = await drain(file.getStream());
+    expect(file.getHeaders().type).toBe("application/pdf");
+    expect(bytes).toEqual(stored!.bytes);
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+      invoice.artifactDownloadMetadata.manifestHash,
     );
+    const parsed = await parsePdf(bytes);
+    expect(parsed.text).toContain(
+      "Bill To: 示範租戶股份有限公司（台中）(A)\\B (tenant-demo-001)",
+    );
+    expect(parsed.text).toContain(
+      "Address: 台中港區，中山路１２號 — Finance 2026",
+    );
+    expect(parsed.text).toContain(invoice.invoiceId);
+    expect(parsed.text).toContain(invoice.createdAt);
+    expect(
+      parsed.glyphs.some((glyph) => glyph.unicode === "示" && glyph.isInFont),
+    ).toBe(true);
+    expect(bytes.toString("latin1")).toContain("/FontFile3");
+    expect(parsed.text).not.toContain("??????????");
   });
 });

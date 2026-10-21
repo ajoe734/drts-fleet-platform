@@ -65,6 +65,8 @@ DRTS 責任：選對 entry／住戶、生成必要且最小事件、簽章、可
 共同責任：至少一次原生裝置整合驗收，以及故障聯絡／處置。
 
 首版不新增第一方乘客 App，不重建 retired passenger-web，不讓 DRTS 持有夥伴 APNs/FCM 憑證與 device token，不加入 SMS／CTI 或行銷推播。外部叫車平台原生負責通知的 forwarded 訂單不轉送這條通知鏈。
+**[2026-10-09 附註]** 本節「首版不新增第一方乘客 App」之限制已被 `SD-DP-20261009-001` 推翻，但「不重建 retired passenger-web」的禁令仍保留（將建立新的 `apps/passenger-app-web`）。
+
 
 前景行程頁仍用既有即時讀取／SSE；背景通知不能取代頁面的正式資料。通知回執也不等於 P-5 揭露頁已顯示。
 
@@ -165,6 +167,14 @@ interface OrderPartnerNotificationRoute {
 ETA：同 order + assignmentVersion 至多每 60 秒一筆，變動至少 2 分鐘才生成；未送出的舊 ETA 可標記 superseded，不顯示 delivered。已送出未知結果仍沿原 ID／payload 重試或依效期結束，不能換內容冒稱同一事件。
 
 送出前重查事件是否仍有通知意義：已取消／已結束的「司機已抵達」、已被新指派取代的舊指派／ETA 停送。receipt_ready 可在完成後送。夥伴收到亂序事件，要去重、依序更新；點擊時一律讀最新正式行程，而非呈現通知內的舊狀態。
+
+### 2026-10-05 使用者決定 A：取消通知（夥伴契約變更）
+
+`multi_taxi_direct` 訂單經正式取消入口 `cancelOwnedOrder` 成功取消時，在相同交易寫入 `trip_cancelled` outbox，沿用持久化 eventSequence、不可變 delivery context、重試去重與 accepted/duplicate ack 契約。重複取消受訂單狀態防護，不新增第二筆取消通知；其它 runtime profile 不新增此事件。
+
+外部事件為 `passenger.trip_cancelled.v1`，`schema_version=1.0`，TTL 為 7 日，仍受 endpoint maxAttempts 限制。夥伴必須明確訂閱並支援本事件；既有 binding 與 endpoint 不會自動加訂。固定文案為「行程已取消，請回行程查看。」。內部原因僅保存分類碼 `passenger_cancelled`；外送 payload 沿用原有 allowlist，不新增原因欄位或個資，不含乘客提供的自由文字取消原因。
+
+取消仍令先前待送的派車／改派／ETA／到場通知成為 `notification_obsolete`；取消通知本身不因行程取消或舊 assignmentVersion 停送，自動派送及受控重送都適用。`navigation.type=ride` 且帶原 `ride_ref`；夥伴需以原 entry 與目前已核身住戶取得 fresh handoff，正式 resolver 讀取最新 cancelled 狀態，導向已取消頁。通知識別與 ride_ref 均不構成授權。
 
 ## 6. 酬載與隱私
 

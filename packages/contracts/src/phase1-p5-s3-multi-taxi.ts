@@ -17,8 +17,13 @@ import { PLATFORM_CURRENCY } from "./index";
 //     and a new safety.* schema for S-3.
 
 import type {
+  ActualTripFareBreakdown,
   AddressPayload,
   ControlledDownloadRecord,
+  DriverLocationFreshness,
+  DriverLocationSnapshot,
+  DriverDeclaredSurnameSnapshot,
+  GeoRouteResponse,
   MoneyAmount,
   OwnedOrderStatus,
   PassengerProfile,
@@ -412,6 +417,20 @@ export const FARE_QUOTE_ANOMALIES = [
 ] as const;
 export type FareQuoteAnomaly = (typeof FARE_QUOTE_ANOMALIES)[number];
 
+/** Original server-owned quote accepted at E19b. Whole NTD estimate range;
+ * the meter's final payable fare remains a separate completion authority. */
+export interface PassengerBookingFareDisclosure {
+  fareSnapshotId: string;
+  fareVersion: string;
+  estimatedMin: number;
+  estimatedMax: number;
+  route: GeoRouteResponse;
+  tariffSnapshot: Readonly<Record<string, unknown>>;
+  breakdown: Readonly<Record<string, unknown>>;
+  passengerConfirmedAt: string;
+  createdAt: string;
+}
+
 export interface RouteFareDisclosureSnapshot {
   routeSnapshotId: string;
   quoteSnapshotId: string;
@@ -437,6 +456,7 @@ export interface RouteFareDisclosureSnapshot {
 
   passengerConfirmedAt: string | null;
   generatedAt: string;
+  bookingQuote?: PassengerBookingFareDisclosure;
 }
 
 // ===========================================================================
@@ -523,6 +543,38 @@ export interface PassengerRideAccessGrant extends PassengerRideAccessToken {
   accessToken: string;
 }
 
+/** An on-trip road route from a specific assigned Driver GPS observation.
+ * Never use the immutable booking quote as a substitute for this live leg. */
+export interface PassengerRideDropoffRouteEstimate {
+  leg: "dropoff";
+  source: "geo_route";
+  provider: string;
+  assignmentId: string;
+  assignmentVersion: number;
+  taskId: string;
+  origin: { lat: number; lng: number };
+  destination: { lat: number; lng: number };
+  locationRecordedAt: string;
+  generatedAt: string;
+  remainingDistanceMeters: number;
+  remainingDurationSeconds: number;
+}
+
+/** Live values are separate from the immutable assignment disclosure. */
+export interface PassengerRideTracking {
+  assignmentId: string;
+  driverId: string;
+  vehicleId: string;
+  locationFreshness: DriverLocationFreshness;
+  location: Pick<
+    DriverLocationSnapshot,
+    "lat" | "lng" | "accuracyM" | "recordedAt"
+  > | null;
+  pickupEta: { minutes: number; calculatedAt: string } | null;
+  /** Omitted by older producers; null means no reliable current road route. */
+  dropoffRoute?: PassengerRideDropoffRouteEstimate | null;
+}
+
 export interface PassengerRideAuthorityView {
   order: {
     orderId: string;
@@ -537,6 +589,9 @@ export interface PassengerRideAuthorityView {
     completedAt: string | null;
   };
   assignment: PassengerDispatchDisclosureSnapshot | null;
+  /** Omitted by older producers; null means no current tracking is available. */
+  tracking?: PassengerRideTracking | null;
+  bookingQuote?: PassengerBookingFareDisclosure;
   rating: PassengerTripRatingRecord | null;
   payment: {
     status: PassengerPaymentStatus;
@@ -555,6 +610,8 @@ export interface SubmitPassengerTripRatingCommand {
   score: 1 | 2 | 3 | 4 | 5;
   tags?: string[];
   comment?: string | null;
+  /** Omitted by legacy callers; new ratings capture false in that case. */
+  contactRequested?: boolean;
 }
 
 export const PASSENGER_CONTACT_UNAVAILABLE_REASONS = [
@@ -626,7 +683,9 @@ export interface ConsumerNotificationOutboxRecord {
     | "assignment_replaced"
     | "eta_changed"
     | "driver_arrived"
-    | "receipt_ready";
+    | "receipt_ready"
+    | "trip_cancelled"
+    | "payment_recovery_required";
   assignmentVersion: number | null;
   payload: Record<string, unknown>;
   status: "pending" | "sending" | "delivered" | "failed";
@@ -682,7 +741,11 @@ export interface MultiTaxiElectronicReceipt {
   record: Partial<MultiTaxiElectronicReceiptRecord> & Record<string, unknown>;
 }
 
-export interface MultiTaxiElectronicReceiptRecord {
+export interface MultiTaxiElectronicReceiptRecord extends Partial<DriverDeclaredSurnameSnapshot> {
+  /** Captured actual components; no aggregate/toll convention or full E-04 inferred. */
+  actualFareBreakdown?: ActualTripFareBreakdown;
+  /** Actual captured completion facts; legacy records may be incomplete. */
+  e04Snapshot?: MultiTaxiReceiptE04Snapshot;
   tripId: string;
   plateNo: string;
   pickupAt: string;
@@ -699,6 +762,19 @@ export interface MultiTaxiElectronicReceiptRecord {
   pdfUrl: string;
   supersededByCertificateId?: string;
   generatedFrom: "owned_mobility_completion" | "certificate_regeneration";
+}
+
+export interface MultiTaxiReceiptE04Snapshot {
+  fleetOperatorName: string;
+  driverSurname: string;
+  driverRegistrationMasked: string;
+  fareBreakdown: {
+    startMinor: number;
+    distanceMinor: number;
+    delayMinor: number;
+    nightMinor: number;
+  };
+  paymentMethodDisplay: string;
 }
 
 export interface RegenerateMultiTaxiElectronicReceiptCommand {
@@ -855,6 +931,109 @@ export interface MultiTaxiPublicFareVersion {
   authorityFilingRef: string | null;
 }
 
+/** Amounts are whole TWD, matching the passenger tariff authority. */
+export interface MultiTaxiFareTariffParameters {
+  baseFare: number;
+  baseDistanceMeters: number;
+  distanceRate: number;
+  distanceIncrementMeters: number;
+  delayRate: number;
+  delayIncrementSeconds: number;
+  nightSurchargeAmount: number;
+  nightSurchargeWindowStart: string;
+  nightSurchargeWindowEnd: string;
+  additionalFees: Record<string, number>;
+  distanceRounding: "ceil" | "floor";
+  delayRounding: "ceil" | "floor";
+  totalRounding: "ceil" | "floor" | "nearest";
+  totalIncrement: number;
+  nightApplication: "pickup" | "any_overlap";
+}
+
+export interface MultiTaxiManagedFareVersion extends MultiTaxiPublicFareVersion {
+  revision: number;
+  sourceReference: string;
+  tariff: MultiTaxiFareTariffParameters;
+  currency: "TWD";
+  nightSurchargeUnit: "TWD_per_trip";
+  publicationScheduled: boolean;
+  scheduledFor: string | null;
+  filingEvidenceReference: string | null;
+  filedAt: string | null;
+  filedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  availableActions: {
+    edit: boolean;
+    file: boolean;
+    schedule: boolean;
+    retire: boolean;
+  };
+  retirementBlockedReason: "replacement_required" | null;
+}
+
+export interface MultiTaxiFareManagementList {
+  items: MultiTaxiManagedFareVersion[];
+  evaluatedAt: string;
+  activeFareVersionId: string | null;
+}
+
+/**
+ * Management responses carry opaque fee identifiers as values so the global
+ * snake_case response serializer cannot rename or merge operator-defined keys.
+ * The SDK restores the domain additionalFees map after decoding the DTO fields.
+ */
+export interface MultiTaxiManagedFareWireVersion extends Omit<
+  MultiTaxiManagedFareVersion,
+  "tariff"
+> {
+  tariff: Omit<MultiTaxiFareTariffParameters, "additionalFees"> & {
+    additionalFeeEntries: Array<{ key: string; amount: number }>;
+  };
+}
+
+export interface MultiTaxiFareManagementWireList extends Omit<
+  MultiTaxiFareManagementList,
+  "items"
+> {
+  items: MultiTaxiManagedFareWireVersion[];
+}
+
+export interface CreatePlatformFareVersionCommand {
+  fareVersionId: string;
+  displayName: string;
+  publicSummary: string;
+  sourceReference: string;
+  effectiveFrom: string;
+  tariff: MultiTaxiFareTariffParameters;
+}
+
+export interface UpdatePlatformFareVersionCommand {
+  expectedRevision: number;
+  displayName: string;
+  publicSummary: string;
+  sourceReference: string;
+  effectiveFrom: string;
+  tariff: MultiTaxiFareTariffParameters;
+}
+
+export interface RecordPlatformFareVersionFilingCommand {
+  expectedRevision: number;
+  authorityFilingRef: string;
+  filingEvidenceReference: string;
+}
+
+export interface SchedulePlatformFareVersionCommand {
+  expectedRevision: number;
+  /** null activates at the database clock after the timeline lock is held. */
+  effectiveFrom: string | null;
+}
+
+export interface RetirePlatformFareVersionCommand {
+  expectedRevision: number;
+  reason: string;
+}
+
 // ===========================================================================
 // §16 S-3 Driver SOS domain
 // ===========================================================================
@@ -982,6 +1161,7 @@ export const DRIVER_SOS_URGENT_ALERT_OUTBOX_STATUSES = [
   "pending",
   "sending",
   "delivered",
+  "acknowledged",
   "failed",
 ] as const;
 export type DriverSosUrgentAlertOutboxStatus =

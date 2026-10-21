@@ -28,11 +28,22 @@ const messages = {
   eta_changed: "預計抵達時間已更新，請回行程查看。",
   driver_arrived: "司機已抵達，請回行程查看。",
   receipt_ready: "乘車證明已備妥，請回行程查看。",
+  trip_cancelled: "行程已取消，請回行程查看。",
 } as const;
 
 export function notificationExpiresAt(message: PassengerPushMessage): string {
   const createdAt = Date.parse(message.createdAt ?? "");
   if (!Number.isFinite(createdAt)) throw partnerFailure("route_missing");
+  if (message.eventType === "payment_recovery_required") {
+    // First-party payment notices have no partner TTL/default authority.
+    const expiry =
+      typeof message.payload.expiresAt === "string"
+        ? Date.parse(message.payload.expiresAt)
+        : NaN;
+    if (!Number.isFinite(expiry) || expiry <= createdAt)
+      throw partnerFailure("notification_expired");
+    return new Date(expiry).toISOString();
+  }
   const ttlEnd =
     createdAt +
     PARTNER_PASSENGER_EVENT_DEFAULT_TTL_SECONDS[message.eventType] * 1000;
@@ -72,6 +83,8 @@ export class PartnerNotificationTransport implements PassengerPushTransport {
     message: PassengerPushMessage,
     existing: StoredPartnerNotificationContext | null,
   ) {
+    if (message.eventType === "payment_recovery_required")
+      throw partnerFailure("configuration_blocked", existing);
     const route = await this.repository.findOrderPartnerNotificationRoute(
       message.orderId,
     );
@@ -116,7 +129,10 @@ export class PartnerNotificationTransport implements PassengerPushTransport {
       message.orderId,
     );
     if (!relevance) throw partnerFailure("route_missing", existing);
-    if (message.eventType !== "receipt_ready") {
+    if (
+      message.eventType !== "receipt_ready" &&
+      message.eventType !== "trip_cancelled"
+    ) {
       if (
         ["cancelled", "completed", "closed", "rejected"].includes(
           relevance.status,
@@ -138,6 +154,8 @@ export class PartnerNotificationTransport implements PassengerPushTransport {
     if (!this.repository.isEnabled())
       throw partnerFailure("configuration_blocked");
     const { message } = request;
+    if (message.eventType === "payment_recovery_required")
+      throw partnerFailure("configuration_blocked");
     let context = await this.repository.findPartnerNotificationContext(
       message.outboxId,
     );

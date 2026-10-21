@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 import { expect, it, vi } from "vitest";
 import { deepToSnakeCase } from "../../../../apps/api/src/common/snake-case.interceptor";
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
@@ -417,7 +418,7 @@ it.each([false, true])(
       new DriverProfileService(audit),
     );
     const controller = new RegulatoryRegistryController(registry);
-    const deps = harness({ snake, registry: controller.listDrivers() });
+    const deps = harness({ snake, registry: await controller.listDrivers() });
     await bootstrapMapSessions(env, deps);
     expect(deps.evidence.sessions).toMatchObject({
       driver_isolation: {
@@ -474,15 +475,31 @@ it("keeps a real lifecycle reactivation isolated until the existing work-state c
   // are memory boundaries. This is not evidence of the current dev DB state.
   const emit = vi.fn();
   const audit = new AuditNotificationService();
+  const repository = enabledRegistryRepository();
+  const storedDrivers = new Map<string, unknown>();
+  vi.spyOn(repository, "persistChanges").mockImplementation(async (changes) => {
+    for (const driver of changes.drivers ?? [])
+      storedDrivers.set(driver.driverId, structuredClone(driver));
+  });
+  vi.spyOn(repository, "lockDriver").mockImplementation(
+    async (driverId) =>
+      structuredClone(storedDrivers.get(driverId) ?? null) as never,
+  );
   const registry = new RegulatoryRegistryService(
     new OpsDispatchEventsService({ emit } as never),
     audit,
     new DriverProfileService(audit),
+    repository,
   );
   const controller = new RegulatoryRegistryController(registry);
   const driverId = env.DRTS_LIVE_MAP_TEST_DRIVER_ID;
-  controller.updateDriverLifecycle(driverId, { lifecycleStatus: "active" });
-  const deps = harness({ snake: true, registry: controller.listDrivers() });
+  await controller.updateDriverLifecycle(driverId, {
+    lifecycleStatus: "active",
+  });
+  const deps = harness({
+    snake: true,
+    registry: await controller.listDrivers(),
+  });
   await expect(bootstrapMapSessions(env, deps)).rejects.toThrow(
     "workState=available",
   );
@@ -503,14 +520,17 @@ it("keeps a real lifecycle reactivation isolated until the existing work-state c
     }),
   );
 
-  const restored = controller.updateDriverWorkState(driverId, {
+  const restored = await controller.updateDriverWorkState(driverId, {
     workState: "offline",
   });
   expect(restored.data).toMatchObject({
     workState: "offline",
     dispatchEligible: false,
   });
-  const isolated = harness({ snake: true, registry: controller.listDrivers() });
+  const isolated = harness({
+    snake: true,
+    registry: await controller.listDrivers(),
+  });
   await bootstrapMapSessions(env, isolated);
   expect(isolated.evidence.sessions).toMatchObject({
     driver_isolation: {

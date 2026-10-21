@@ -1,4 +1,26 @@
 import type { TenantInvoiceMailView } from "@drts/contracts";
+import type {
+  VoiceCallbackCreateRequest,
+  VoiceContactCorrection,
+  VoiceContactRolesView,
+  VoiceCallbackCreateResponse,
+  VoiceCallbackOperation,
+  VoiceCallbackOperationRequest,
+  VoiceCallbackOperationResponse,
+  VoiceCallbackTaskDetail,
+  VoiceCallbackTaskView,
+} from "@drts/contracts";
+import type {
+  CreatePlatformFareVersionCommand,
+  UpdatePlatformFareVersionCommand,
+  RecordPlatformFareVersionFilingCommand,
+  SchedulePlatformFareVersionCommand,
+  RetirePlatformFareVersionCommand,
+  MultiTaxiFareManagementList,
+  MultiTaxiManagedFareVersion,
+  MultiTaxiManagedFareWireVersion,
+  MultiTaxiFareManagementWireList,
+} from "@drts/contracts";
 /**
  * @drts/api-client - Shared API client for DRTS client surfaces
  *
@@ -122,6 +144,8 @@ import type {
   FleetPartnerRevenueShareRuleRecord,
   DriverSupplyDraft,
   FleetPartnerStatementRecord,
+  ConfirmFleetPartnerStatementCommand,
+  DisputeFleetPartnerStatementCommand,
   HostVehicleCaseItem,
   HostVehicleEarningsSummary,
   HostVehicleMaintenanceItem,
@@ -588,13 +612,35 @@ function hasHeader(headers: Record<string, string>, key: string): boolean {
   return Object.keys(headers).some((header) => header.toLowerCase() === target);
 }
 
+// Fee identifiers are transported as string values because the HTTP serializer
+// converts every object key. Decode DTO fields first, then reconstruct the map.
+function decodeManagedFareVersion(value: unknown): MultiTaxiManagedFareVersion {
+  const wire = deepToCamelCase(value) as MultiTaxiManagedFareWireVersion;
+  const { additionalFeeEntries, ...tariff } = wire.tariff;
+  return {
+    ...wire,
+    tariff: {
+      ...tariff,
+      additionalFees: Object.fromEntries(
+        additionalFeeEntries.map(({ key, amount }) => [key, amount]),
+      ),
+    },
+  };
+}
+
 function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
   if (!body.trim()) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(body) as ApiErrorEnvelope;
+    const parsed = JSON.parse(body) as ApiErrorEnvelope & {
+      error: { trace_id?: unknown };
+    };
+    const traceId =
+      typeof parsed?.error?.traceId === "string"
+        ? parsed.error.traceId
+        : parsed?.error?.trace_id;
     if (
       parsed &&
       typeof parsed === "object" &&
@@ -603,9 +649,11 @@ function parseApiErrorEnvelope(body: string): ApiErrorEnvelope["error"] | null {
       typeof parsed.error.code === "string" &&
       typeof parsed.error.message === "string" &&
       typeof parsed.error.retryable === "boolean" &&
-      typeof parsed.error.traceId === "string"
+      typeof traceId === "string"
     ) {
-      return parsed.error;
+      // Keep details and business metadata intact; the global exception filter
+      // serializes trace_id while existing camelCase callers send traceId.
+      return { ...parsed.error, traceId };
     }
   } catch {
     return null;
@@ -1170,6 +1218,12 @@ export class ApiClient {
 
   async getOrder(id: string) {
     return this.get<OwnedOrderRecord>(`/api/orders/${id}`);
+  }
+
+  async getDriverTaskOrder(taskId: string): Promise<OwnedOrderRecord> {
+    return this.get<OwnedOrderRecord>(
+      `/api/driver/tasks/${encodeURIComponent(taskId)}/order`,
+    );
   }
 
   async getOrderDispatchTrace(
@@ -1858,6 +1912,80 @@ export class ApiClient {
 
   // ── Call Center ──
 
+  async listVoiceCallbackScopes() {
+    return this.getList<{ resourceScopeId: string; brandId: string }>(
+      "/api/voice/callback-scopes",
+    );
+  }
+
+  async listVoiceCallbackTasks(filters: {
+    resourceScopeId: string;
+    status?: VoiceCallbackTaskView["status"];
+    voiceSessionId?: string;
+  }) {
+    const query = new URLSearchParams({
+      resourceScopeId: filters.resourceScopeId,
+    });
+    if (filters.status) query.set("status", filters.status);
+    if (filters.voiceSessionId)
+      query.set("voiceSessionId", filters.voiceSessionId);
+    return this.getList<VoiceCallbackTaskView>(`/api/voice/callbacks?${query}`);
+  }
+
+  async getVoiceCallbackTask(taskId: string) {
+    return this.get<VoiceCallbackTaskDetail>(
+      `/api/voice/callbacks/${encodeURIComponent(taskId)}`,
+    );
+  }
+
+  async getVoiceCallbackCreateReceipt(actionKey: string) {
+    return this.get<VoiceCallbackCreateResponse>(
+      `/api/voice/callback-receipts?${new URLSearchParams({ actionKey })}`,
+    );
+  }
+
+  async getVoiceContactRoles(sessionId: string) {
+    return this.get<{ contacts: VoiceContactRolesView | null }>(
+      `/api/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/contacts`,
+    );
+  }
+  async correctVoiceContact(
+    sessionId: string,
+    command: VoiceContactCorrection,
+  ) {
+    return this.post<{
+      contacts: VoiceContactRolesView | null;
+      confirmationInvalidated: boolean;
+    }>(
+      `/api/callcenter/voice/sessions/${encodeURIComponent(sessionId)}/contacts`,
+      { body: command },
+    );
+  }
+
+  async createVoiceCallback(
+    sessionId: string,
+    command: VoiceCallbackCreateRequest,
+    idempotencyKey: string,
+  ) {
+    return this.post<VoiceCallbackCreateResponse>(
+      `/api/voice/sessions/${encodeURIComponent(sessionId)}/callbacks`,
+      { body: command, idempotencyKey },
+    );
+  }
+
+  async executeVoiceCallbackCommand(
+    taskId: string,
+    action: VoiceCallbackOperation,
+    command: VoiceCallbackOperationRequest,
+    idempotencyKey: string,
+  ) {
+    const route = action === "attempt" ? "attempts" : action;
+    return this.post<VoiceCallbackOperationResponse>(
+      `/api/voice/callbacks/${encodeURIComponent(taskId)}/${route}`,
+      { body: command, idempotencyKey },
+    );
+  }
+
   async listCallSessions(): Promise<CallSessionRecord[]> {
     return this.getList<CallSessionRecord>("/api/callcenter/sessions");
   }
@@ -2136,6 +2264,148 @@ export class ApiClient {
     );
   }
 
+  private async complaintActionWithReceipt<T>(
+    method: string,
+    path: string,
+    options?: RequestOptions,
+  ) {
+    const envelope = await this.requestEnvelope<T>(method, path, options);
+    const receipt = envelope.meta.actionReceipt;
+    if (!receipt?.auditId || !receipt.actionId) {
+      const error = new ApiClientError({
+        statusCode: 200,
+        code: "COMPLAINT_ACTION_COMPLETED_WITHOUT_RECEIPT",
+        message:
+          "Complaint action completed, but its audit receipt was not returned. Refresh the case before taking another action.",
+        retryable: false,
+        rawBody: "",
+      });
+      error.message = error.apiMessage;
+      throw error;
+    }
+    return { data: envelope.data, receipt };
+  }
+
+  async createComplaintWithReceipt(
+    command: CreateComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      "/api/complaints",
+      { ...options, body: command },
+    );
+  }
+
+  async assignComplaintWithReceipt(
+    caseNo: string,
+    command: AssignComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/assign`,
+      { ...options, body: command },
+    );
+  }
+
+  async addComplaintNoteWithReceipt(
+    caseNo: string,
+    command: AddComplaintCaseNoteCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/notes`,
+      { ...options, body: command },
+    );
+  }
+
+  async reopenComplaintWithReceipt(
+    caseNo: string,
+    command: ReopenComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/reopen`,
+      { ...options, body: command },
+    );
+  }
+
+  async resolveComplaintWithReceipt(
+    caseNo: string,
+    command: ResolveComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/resolve`,
+      { ...options, body: command },
+    );
+  }
+
+  async closeComplaintWithReceipt(
+    caseNo: string,
+    command: ResolveComplaintCaseCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/close`,
+      { ...options, body: command },
+    );
+  }
+
+  async escalateComplaintToIncidentWithReceipt(
+    caseNo: string,
+    command: EscalateComplaintToIncidentCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<{
+      complaintCase: ComplaintCaseRecord;
+      incident: IncidentRecord;
+    }>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/escalate-to-incident`,
+      { ...options, body: command },
+    );
+  }
+
+  async linkComplaintToIncidentWithReceipt(
+    caseNo: string,
+    command: LinkComplaintToIncidentCommand,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/link-incident`,
+      { ...options, body: command },
+    );
+  }
+
+  async markComplaintSlaBreachWithReceipt(
+    caseNo: string,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintCaseRecord>(
+      "POST",
+      `/api/complaints/${encodeURIComponent(caseNo)}/sla-breach`,
+      options,
+    );
+  }
+
+  async getComplaintExportViewWithReceipt(
+    caseNo: string,
+    options?: RequestOptions,
+  ) {
+    return this.complaintActionWithReceipt<ComplaintExportViewRecord>(
+      "GET",
+      `/api/complaints/${encodeURIComponent(caseNo)}/export?action_receipt=true`,
+      options,
+    );
+  }
+
   // ── Billing ──
 
   async getBillingProfile(): Promise<TenantBillingProfile> {
@@ -2277,6 +2547,26 @@ export class ApiClient {
       : "";
     return this.getList<FleetPartnerStatementRecord>(
       `/api/fleet-partner/statements${query}`,
+    );
+  }
+
+  async confirmFleetPartnerStatement(
+    statementId: string,
+    command: ConfirmFleetPartnerStatementCommand,
+  ): Promise<FleetPartnerStatementRecord> {
+    return this.post<FleetPartnerStatementRecord>(
+      `/api/fleet-partner/statements/${encodeURIComponent(statementId)}/confirm`,
+      { body: command },
+    );
+  }
+
+  async disputeFleetPartnerStatement(
+    statementId: string,
+    command: DisputeFleetPartnerStatementCommand,
+  ): Promise<FleetPartnerStatementRecord> {
+    return this.post<FleetPartnerStatementRecord>(
+      `/api/fleet-partner/statements/${encodeURIComponent(statementId)}/dispute`,
+      { body: command },
     );
   }
 
@@ -3333,8 +3623,13 @@ export class ApiClient {
     return this.post(`/api/tenant/users/${userId}/role`, { body: command });
   }
 
-  async listAuditLogs(): Promise<AuditLogRecord[]> {
-    return this.getList<AuditLogRecord>("/api/audit");
+  async listAuditLogs(options?: {
+    auditId?: string;
+  }): Promise<AuditLogRecord[]> {
+    const suffix = options?.auditId
+      ? `?auditId=${encodeURIComponent(options.auditId)}`
+      : "";
+    return this.getList<AuditLogRecord>(`/api/audit${suffix}`);
   }
 
   async listTenantAuditLogs(options: { tenantId?: string } = {}) {
@@ -4122,6 +4417,91 @@ export class ApiClient {
       "/api/platform-admin/maintenance-mode",
       { body: command },
     );
+  }
+
+  async listPlatformFareVersions(): Promise<MultiTaxiFareManagementList> {
+    const result = await this.fetchEnvelope<MultiTaxiFareManagementWireList>(
+      "GET",
+      "/api/platform-admin/multi-taxi/fare-versions",
+    );
+    const wire = deepToCamelCase(
+      result.data,
+    ) as MultiTaxiFareManagementWireList;
+    return { ...wire, items: wire.items.map(decodeManagedFareVersion) };
+  }
+
+  async getPlatformFareVersion(
+    id: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "GET",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}`,
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async createPlatformFareVersion(
+    command: CreatePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "POST",
+      "/api/platform-admin/multi-taxi/fare-versions",
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async updatePlatformFareVersion(
+    id: string,
+    command: UpdatePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "PUT",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}`,
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async recordPlatformFareVersionFiling(
+    id: string,
+    command: RecordPlatformFareVersionFilingCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/file`,
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async schedulePlatformFareVersion(
+    id: string,
+    command: SchedulePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/schedule`,
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
+  }
+
+  async retirePlatformFareVersion(
+    id: string,
+    command: RetirePlatformFareVersionCommand,
+    idempotencyKey: string,
+  ): Promise<MultiTaxiManagedFareVersion> {
+    const result = await this.fetchEnvelope<MultiTaxiManagedFareWireVersion>(
+      "POST",
+      `/api/platform-admin/multi-taxi/fare-versions/${encodeURIComponent(id)}/retire`,
+      { body: command, idempotencyKey },
+    );
+    return decodeManagedFareVersion(result.data);
   }
 
   async listPlatformPricingRules(): Promise<PlatformPricingRuleRecord[]> {
@@ -5240,3 +5620,4 @@ export * from "./system-remediation";
 export * from "./remittance-proof";
 export * from "./platform-adapter-registry";
 export { ApiClient as DrtsApiClient };
+export { PAX_REVIEW_STOPS, PAX_REVIEW_TRACK } from "./review-demo";

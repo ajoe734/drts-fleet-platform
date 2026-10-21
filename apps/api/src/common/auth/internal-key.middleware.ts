@@ -42,6 +42,24 @@ const EXPLICIT_PUBLIC_ROUTE_KEYS = new Set([
   "POST auth/partner/bootstrap-session",
 ]);
 
+// Original Native pre-login routes; purpose/session/OTP/provider checks remain downstream.
+const NATIVE_PASSENGER_PREAUTH_ROUTE_KEYS = new Set([
+  "GET passenger-app/auth/providers",
+  "POST passenger-app/auth/otp/request",
+  "POST passenger-app/auth/otp/verify",
+  "POST passenger-app/auth/oauth/google/start",
+  "POST passenger-app/auth/oauth/google/callback",
+  "POST passenger-app/auth/oauth/facebook/start",
+  "POST passenger-app/auth/oauth/facebook/callback",
+  "POST passenger-app/auth/oauth/line/start",
+  "POST passenger-app/auth/oauth/line/callback",
+]);
+// Existing commands authenticate their own refreshToken in the unchanged controller/service.
+const NATIVE_PASSENGER_SESSION_COMMAND_ROUTE_KEYS = new Set([
+  "POST passenger-app/auth/refresh",
+  "POST passenger-app/auth/logout",
+]);
+
 const logger = new Logger("InternalKeyMiddleware");
 
 function normalizeHeaderValue(value: HeaderValue): string {
@@ -87,14 +105,54 @@ function isExplicitPublicRequest(
   );
 }
 
+/** Only raw Native transport; supplied credentials retain their existing verification path. */
+function isNativePassengerDirectAuthRequest(request: RequestLike): boolean {
+  const path = request.originalUrl ?? request.url;
+  if (!request.method || !path) return false;
+  const routeKey = `${request.method.toUpperCase()} ${normalizeRequestPath(path)}`;
+  if (
+    !NATIVE_PASSENGER_PREAUTH_ROUTE_KEYS.has(routeKey) &&
+    !NATIVE_PASSENGER_SESSION_COMMAND_ROUTE_KEYS.has(routeKey)
+  )
+    return false;
+  return (
+    !extractGoogleWorkloadIdentityAssertion(request.headers) &&
+    !normalizeHeaderValue(request.headers?.[INTERNAL_KEY_HEADER]) &&
+    !normalizeHeaderValue(request.headers?.[AUTHORIZATION_HEADER]) &&
+    !normalizeHeaderValue(request.headers?.[CONTROL_PLANE_AUTH_HEADER])
+  );
+}
+
 function isRemittanceProofGrantRequest(method: string, path: string): boolean {
   // This one GET endpoint authenticates its bearer grant in the controller
   // (signature, expiry, proof identity and clean scan) before serving bytes.
   // Durable V0098 rows use raw UUIDs; only the test-memory fallback adds
   // `remit-proof-`. Both still require the downstream signed-grant checks.
   // Do not admit uploads, grant issuance, other artifact kinds or child paths.
-  return method.toUpperCase() === "GET" &&
-    /^\/(?:api\/)?reimbursements\/proof-downloads\/remittance-proof\/(?:remit-proof-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(stripQueryString(path));
+  return (
+    method.toUpperCase() === "GET" &&
+    /^\/(?:api\/)?reimbursements\/proof-downloads\/remittance-proof\/(?:remit-proof-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+      stripQueryString(path),
+    )
+  );
+}
+
+export function isFacebookDataDeletionRequest(
+  method: string,
+  path: string,
+): boolean {
+  // Meta calls the API directly, without a BFF credential. The controller
+  // verifies signed_request before account access and the receipt HMAC before
+  // returning status. Keep this exception limited to the two exact API routes.
+  const requestPath = stripQueryString(path);
+  return (
+    (method.toUpperCase() === "POST" &&
+      requestPath === "/api/passenger-app/auth/facebook/data-deletion") ||
+    (method.toUpperCase() === "GET" &&
+      /^\/api\/passenger-app\/auth\/facebook\/data-deletion\/status\/[0-9a-f]{112}$/.test(
+        requestPath,
+      ))
+  );
 }
 
 function hasBearerAuthorization(request: RequestLike): boolean {
@@ -120,16 +178,27 @@ function isInternalKeyEnforcementDisabled(): boolean {
 export async function validateInternalKey(
   request: RequestLike,
   expectedKey: string | undefined,
-  options?: { googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter },
+  options?: {
+    googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter;
+    requireCredential?: boolean;
+  },
 ): Promise<void> {
   const rawPath = request.originalUrl ?? request.url ?? "";
   const requestMethod = request.method ?? "GET";
+
+  if (
+    options?.requireCredential !== true &&
+    isNativePassengerDirectAuthRequest(request)
+  ) {
+    return;
+  }
 
   if (
     isHealthRequest(rawPath) ||
     isOptionsRequest(requestMethod) ||
     isExplicitPublicRequest(requestMethod, rawPath) ||
     isRemittanceProofGrantRequest(requestMethod, rawPath) ||
+    isFacebookDataDeletionRequest(requestMethod, rawPath) ||
     hasBearerAuthorization(request)
   ) {
     return;
@@ -167,6 +236,13 @@ export async function verifyGoogleAssertionOrInternalKey(
   const rawPath = request.originalUrl ?? request.url ?? "";
   const requestPath = stripQueryString(rawPath);
   const requestMethod = request.method ?? "GET";
+  if (
+    options?.requireCredential !== true &&
+    isNativePassengerDirectAuthRequest(request)
+  ) {
+    return;
+  }
+
   const strictEnvironment = Boolean(
     isStrictAuthEnvironment() || options?.requireCredential,
   );

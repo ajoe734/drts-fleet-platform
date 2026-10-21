@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { Module, forwardRef } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
@@ -17,7 +17,7 @@ import { VoiceHandoffQueueService } from "./voice-handoff-queue.service";
     AuditNotificationModule,
     ComplaintModule,
     IncidentModule,
-    VoiceBookingModule,
+    forwardRef(() => VoiceBookingModule),
   ],
   controllers: [CallcenterController],
   providers: [

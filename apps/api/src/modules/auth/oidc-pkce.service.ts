@@ -19,6 +19,7 @@ import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
 import type { AuthActorType, AuthRealm } from "../../common/auth/auth.types";
 import { getTenantRoleScopes } from "../../common/auth/auth.constants";
 import { SecurityEventsService } from "../security-events/security-events.service";
+import { IdentityRepository } from "../identity/identity.repository";
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import {
@@ -85,6 +86,8 @@ export class OidcPkceService {
     private readonly partnerUserIdentityLinkRepo: PartnerUserIdentityLinkRepository = new PartnerUserIdentityLinkRepository(),
     @Optional()
     private readonly consumedStateRepo: ConsumedOidcStateRepository = new ConsumedOidcStateRepository(),
+    @Optional()
+    private readonly identityRepository?: IdentityRepository,
   ) {}
 
   /**
@@ -519,6 +522,50 @@ export class OidcPkceService {
 
     const scopes = getTenantRoleScopes(existingUser.roleCode);
     const scopesList = [...(scopes ?? [])];
+
+    // Bind the durable role to whatever the canonical active-grant projection
+    // says *right now* for this exact membership. A dual-approved privileged
+    // role request only ever mutates that projection (never the durable
+    // TenantUserRole), so without this lookup an active grant would silently
+    // issue a session that still carries the pre-elevation role.
+    let effectiveRoleCode = existingUser.roleCode;
+    let effectiveScopesList = scopesList;
+    let tenantPrivilegedGrantId: string | null = null;
+    // The canonical principal/membership behind this legacy tenant user is
+    // the same identity the dual-approval flow revokes sessions for
+    // (revokeSessionsByPrincipal(targetUserId)) and the same identity any
+    // active grant targets. Every session issued for this legacy user must
+    // carry that canonical principalId/membershipId -- never the legacy
+    // existingUser.userId -- or a post-approval revocation silently misses
+    // sessions issued before (or without) this lookup succeeding.
+    let canonicalPrincipalId: string | null = null;
+    let canonicalMembershipId: string | null = null;
+    const membershipId =
+      await this.identityRepository?.findMembershipIdForLegacyTenantUser(
+        existingUser.userId,
+      );
+    if (membershipId) {
+      const membership =
+        await this.identityRepository?.findMembershipById(membershipId);
+      if (membership?.principalId) {
+        canonicalPrincipalId = membership.principalId;
+        canonicalMembershipId = membershipId;
+      }
+      const activeGrants =
+        (await this.identityRepository?.findActivePrivilegedGrantsForMembership(
+          membershipId,
+        )) ?? [];
+      const applicableGrant = activeGrants[0];
+      if (applicableGrant) {
+        const grantScopes = getTenantRoleScopes(applicableGrant.roleCode);
+        if (grantScopes) {
+          effectiveRoleCode = applicableGrant.roleCode;
+          effectiveScopesList = [...grantScopes];
+          tenantPrivilegedGrantId = applicableGrant.grantId;
+        }
+      }
+    }
+
     const identity: IdentityContext = {
       authMode: "jwt_bearer",
       actorType: "tenant_admin",
@@ -526,8 +573,8 @@ export class OidcPkceService {
       realm: "tenant",
       tenantId: targetTenantId,
       roleFamilies: ["tenant"],
-      roles: [existingUser.roleCode],
-      scopes: scopesList,
+      roles: [effectiveRoleCode],
+      scopes: effectiveScopesList,
       supportedExecutionModes: [
         "discussion_planning",
         "supervisor_managed_execution",
@@ -539,9 +586,12 @@ export class OidcPkceService {
     const acr = claims.acr ?? "";
     const authTime = claims.auth_time ?? Math.floor(Date.now() / 1000);
     const mfaVerified = hasTrustedMfa({ amr, acr });
+    // The MFA gate must bind to the role actually being issued (which may
+    // be elevated by an active privileged-role grant), not the durable
+    // membership roleCode a grant deliberately leaves unchanged.
     const mfaRequired =
       isOrdinaryLoginMfaRequired() ||
-      ["tenant_admin", "tenant_ops_admin"].includes(existingUser.roleCode);
+      ["tenant_admin", "tenant_ops_admin"].includes(effectiveRoleCode);
     const mfaPolicy = resolveOrdinaryLoginMfaPolicy();
     const mfaWaived = mfaRequired && !mfaVerified && waiverConfigured;
     if (mfaWaived) {
@@ -591,19 +641,21 @@ export class OidcPkceService {
       authMode: "jwt_bearer" as const,
       actorType: "tenant_admin" as const,
       actorId: existingUser.userId,
-      principalId: existingUser.userId,
+      principalId: canonicalPrincipalId ?? existingUser.userId,
+      membershipId: canonicalMembershipId,
       subject: claims.sub,
       realm: "tenant" as const,
       tenantId: targetTenantId,
       roleFamilies: ["tenant" as const],
-      roles: [existingUser.roleCode],
-      scopes: scopesList,
+      roles: [effectiveRoleCode],
+      scopes: effectiveScopesList,
       tokenVersion: Date.parse(existingUser.updatedAt),
       authTime: new Date(authTime * 1000).toISOString(),
       amr,
       acr,
       policyVersion: "v1",
       requestId: meta?.requestId ?? null,
+      tenantPrivilegedGrantId,
     };
 
     let token: string;

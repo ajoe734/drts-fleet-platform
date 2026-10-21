@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CONTROL_PLANE_IAP_EMAIL_HEADER } from "@drts/control-plane-auth";
+import { ApiClientError } from "@drts/api-client";
+import {
+  fleetApiUrl,
+  resolveFleetPrincipal,
+} from "../../../lib/fleet-principal.server";
 
-const DEFAULT_API_BASE_URL = "http://localhost:3001";
-const METADATA_IDENTITY_TOKEN_URL =
-  "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity";
-const RUN_APP_HOST_SUFFIX = ".a.run.app";
-const FLEET_PARTNER_ID_HEADER = "x-fleet-partner-id";
 const REQUEST_HEADER_BLOCKLIST = new Set([
   "authorization",
   "connection",
@@ -27,35 +26,37 @@ const REQUEST_HEADER_BLOCKLIST = new Set([
   "x-roles",
   "x-scopes",
   "x-serverless-authorization",
+  "x-drts-authorization",
+  "x-drts-runtime-origin",
+  "x-goog-iap-jwt-assertion",
+  "x-goog-authenticated-user-email",
+  "x-tenant-id",
+  "x-partner-program-id",
+  "x-partner-entry-slug",
+  "x-session-id",
+  "x-auth-time",
+  "x-amr",
 ]);
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-function resolveTargetOrigin(): string {
-  return process.env.DRTS_API_URL || DEFAULT_API_BASE_URL;
-}
-
-function resolveFleetPartnerId(requestHeaders: Headers): string {
-  // This single-fleet portal binds identity on the server. A browser header
-  // must never be promoted into both the requested scope and auth identity.
-  const configured = process.env.DRTS_FLEET_PARTNER_ID?.trim();
-  const requested = requestHeaders.get(FLEET_PARTNER_ID_HEADER)?.trim();
-  if (!configured)
-    throw new Error(
-      "Missing fleet scope configuration: DRTS_FLEET_PARTNER_ID is required.",
-    );
-  if (requested && requested !== configured)
-    throw new Error("Fleet scope is outside this portal's configured partner.");
-  return configured;
-}
 
 function buildTargetUrl(request: NextRequest, path: string[]) {
   const targetPath =
     path.length === 1 && path[0] === "health"
       ? "health"
       : ["api", ...path].join("/");
-  const targetUrl = new URL(targetPath, `${resolveTargetOrigin()}/`);
+  if (
+    path.some(
+      (segment) =>
+        !segment ||
+        segment === "." ||
+        segment === ".." ||
+        /[\\/?#%]/.test(segment),
+    )
+  )
+    throw new Error("Invalid proxy path.");
+  const targetUrl = new URL(targetPath, `${fleetApiUrl()}/`);
   targetUrl.search = request.nextUrl.search;
   return targetUrl;
 }
@@ -86,99 +87,56 @@ function copyResponseHeaders(response: Response) {
   return headers;
 }
 
-function isRunAppTarget(targetUrl: URL): boolean {
-  return targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX);
-}
-
-async function mintMetadataIdentityToken(
-  audience: string,
-): Promise<string | null> {
-  const metadataUrl = new URL(METADATA_IDENTITY_TOKEN_URL);
-  metadataUrl.searchParams.set("audience", audience);
-  metadataUrl.searchParams.set("format", "full");
-
-  try {
-    const response = await fetch(metadataUrl, {
-      cache: "no-store",
-      headers: {
-        "Metadata-Flavor": "Google",
-      },
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    return response.text();
-  } catch {
-    return null;
-  }
-}
-
-async function applyUpstreamAuth(
-  headers: Headers,
-  request: NextRequest,
-  targetUrl: URL,
-) {
-  const fleetPartnerId = resolveFleetPartnerId(request.headers);
-
-  headers.set("x-actor-type", "partner_api_key");
-  headers.set("x-actor-id", fleetPartnerId);
-  headers.set("x-partner-id", fleetPartnerId);
-  headers.set("x-realm", "partner");
-  headers.set("x-roles", "partner");
-  headers.set("x-role-families", "partner");
-  // Supply writes need the partner capability, while this API family is
-  // classified under the billing-read policy for every fleet-partner route.
-  headers.set("x-scopes", "billing:read partner:read partner:write");
-  headers.set(FLEET_PARTNER_ID_HEADER, fleetPartnerId);
-
-  const iapEmail = request.headers.get(CONTROL_PLANE_IAP_EMAIL_HEADER);
-  if (iapEmail) {
-    headers.set(CONTROL_PLANE_IAP_EMAIL_HEADER, iapEmail);
-  }
-
-  const requestId = request.headers.get("x-request-id");
-  if (requestId) {
-    headers.set("x-request-id", requestId);
-  }
-
-  const protectedAudience = process.env.DRTS_API_AUTH_AUDIENCE?.trim();
-  if (protectedAudience) {
-    const metadataToken = await mintMetadataIdentityToken(protectedAudience);
-    if (metadataToken) {
-      headers.set("authorization", `Bearer ${metadataToken}`);
-    }
-    return;
-  }
-
-  if (!isRunAppTarget(targetUrl)) {
-    return;
-  }
-
-  const metadataToken = await mintMetadataIdentityToken(targetUrl.origin);
-  if (metadataToken) {
-    headers.set("x-serverless-authorization", `Bearer ${metadataToken}`);
-  }
-}
-
 async function forward(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
 ) {
   const { path } = await params;
   const method = request.method.toUpperCase();
-  const targetUrl = buildTargetUrl(request, path);
+  let targetUrl: URL;
   const headers = copyRequestHeaders(request);
   try {
-    await applyUpstreamAuth(headers, request, targetUrl);
+    const origin = request.headers.get("origin");
+    // The public runtime strips and rebuilds this provenance from the ingress
+    // authority before forwarding to its loopback-only Next child. The child
+    // URL itself is HTTP loopback, not the browser's external HTTPS origin.
+    const expectedOrigin =
+      request.headers.get("x-drts-runtime-origin") ?? request.nextUrl.origin;
+    if (origin !== null && origin !== expectedOrigin) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "FLEET_ORIGIN_DENIED",
+            message: "Same-origin request required.",
+          },
+        },
+        { status: 403, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    targetUrl = buildTargetUrl(request, path);
+    const principal = await resolveFleetPrincipal(request.headers);
+    principal.headers.forEach((value, key) => headers.set(key, value));
   } catch (err) {
     return NextResponse.json(
       {
         status: "error",
-        error: err instanceof Error ? err.message : String(err),
+        error: {
+          code:
+            err instanceof ApiClientError
+              ? err.code
+              : "FLEET_PROXY_REQUEST_INVALID",
+          message:
+            err instanceof ApiClientError
+              ? err.apiMessage
+              : err instanceof Error
+                ? err.message
+                : String(err),
+        },
       },
-      { status: 400 },
+      {
+        status: err instanceof ApiClientError ? err.statusCode : 400,
+        headers: { "Cache-Control": "no-store" },
+      },
     );
   }
 
@@ -202,13 +160,15 @@ async function forward(
         status: "down",
         error: error instanceof Error ? error.message : String(error),
       },
-      { status: 503 },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
 
+  const responseHeaders = copyResponseHeaders(upstream);
+  responseHeaders.set("Cache-Control", "private, no-store");
   return new NextResponse(upstream.body, {
     status: upstream.status,
-    headers: copyResponseHeaders(upstream),
+    headers: responseHeaders,
   });
 }
 

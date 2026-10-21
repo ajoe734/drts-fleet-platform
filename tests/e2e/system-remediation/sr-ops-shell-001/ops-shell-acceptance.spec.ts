@@ -10,12 +10,13 @@ const CANDIDATE_SHA =
 const EVIDENCE_OUTPUT_PATH =
   process.env.OPS_SHELL_EVIDENCE_PATH ||
   ".artifacts/ops-shell-acceptance/evidence.json";
-const OPS_CONSOLE_URL =
-  process.env.OPS_CONSOLE_URL || "http://localhost:3003";
+const OPS_CONSOLE_URL = process.env.OPS_CONSOLE_URL || "http://localhost:3003";
 const PLATFORM_ADMIN_URL =
   process.env.PLATFORM_ADMIN_URL || "http://localhost:3002";
 
 test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () => {
+  // All five cases contribute to the same original evidence file.
+  test.describe.configure({ mode: "serial" });
   let recorder: UatEvidenceRecorder;
 
   test.beforeAll(async () => {
@@ -30,6 +31,7 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
   test.afterAll(async () => {
     if (recorder) {
       recorder.saveToFile(EVIDENCE_OUTPUT_PATH);
+      recorder.assertSuccess();
     }
   });
 
@@ -147,7 +149,9 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
         await expect(launcher).toBeFocused();
 
         await launcher.click();
-        const panel = page.locator('[data-testid="ops-assistant-panel"]').first();
+        const panel = page
+          .locator('[data-testid="ops-assistant-panel"]')
+          .first();
         await expect(panel).toBeVisible();
 
         // Escape closes panel and returns focus
@@ -157,7 +161,9 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
       } else {
         await expect(launcher).toBeVisible();
         await launcher.click();
-        const panel = page.locator('[data-testid="ops-assistant-panel"]').first();
+        const panel = page
+          .locator('[data-testid="ops-assistant-panel"]')
+          .first();
         await expect(panel).toBeVisible();
 
         await page.keyboard.press("Escape");
@@ -192,7 +198,18 @@ test.describe("SR-OPS-SHELL-001: Ops Shell & Assistant Browser Acceptance", () =
         const href = await auditLink.getAttribute("href");
         expect(href).toBeTruthy();
         expect(href).toMatch(/\/audit(?:\?|$)/);
-        expect(href).not.toContain("404");
+        const auditUrl = new URL(href!, OPS_CONSOLE_URL);
+        expect(auditUrl.origin).toBe(new URL(PLATFORM_ADMIN_URL).origin);
+        expect(auditUrl.pathname).toBe("/audit");
+        expect(["order", "forwarded_order"]).toContain(
+          auditUrl.searchParams.get("resourceType"),
+        );
+        expect(auditUrl.searchParams.get("resourceId")?.trim()).toBeTruthy();
+        const response = await page.goto(auditUrl.href, {
+          waitUntil: "domcontentloaded",
+        });
+        expect(response?.status()).toBe(200);
+        await expect(page).toHaveURL(auditUrl.href);
       } else {
         const board = page.locator('[data-testid="ops-shell-content"]');
         await expect(board).toBeVisible();

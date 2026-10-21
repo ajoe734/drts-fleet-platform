@@ -13,6 +13,7 @@ import {
   observeInvitationMailbox,
 } from "./mailbox-observer";
 import { observeBackgroundRetry } from "./retry-profile";
+import { observeDisclosedRetry } from "./retry-option-a";
 import {
   prepareTaskInvitation,
   exerciseInvitationLifecycle,
@@ -166,6 +167,10 @@ export interface MailRunnerDeps {
   approval?: () => Promise<void>;
   expiryVerified?: boolean;
   retryVerified?: boolean;
+  retryEvidence?: (
+    deliveryId: string,
+    receipt: DeliveryReceipt,
+  ) => Promise<boolean>;
 }
 export interface MailRunnerResult {
   status: "passed" | "failed";
@@ -269,6 +274,9 @@ export async function runMailAcceptance(
       "Negative delivery lacks a durable failed attempt or has an unexpected provider acknowledgement.",
     );
 
+  const retryVerified = deps.retryEvidence
+    ? await deps.retryEvidence(negative.deliveryId!, rejected)
+    : deps.retryVerified;
   const outstanding = [
     ...(deps.observeMailbox
       ? []
@@ -283,10 +291,10 @@ export async function runMailAcceptance(
       ? []
       : ["invitation accept, single use, resend and revoke"]),
     ...(deps.expiryVerified ? [] : ["real 24-hour invitation expiry"]),
-    ...(deps.retryVerified
+    ...(retryVerified
       ? []
       : [
-          "automatic retry after a real retryable failure (no authorized fault injection)",
+          "retry option A: historical tests, live Scheduler/Cloud Run and non-retryable failure evidence",
         ]),
   ];
   for (const surface of outstanding)
@@ -496,6 +504,12 @@ async function main(): Promise<void> {
         : {}),
       expiryVerified,
       retryVerified,
+      ...(!retryDeliveryId
+        ? {
+            retryEvidence: (id: string, receipt: DeliveryReceipt) =>
+              observeDisclosedRetry(config, id, receipt, recorder),
+          }
+        : {}),
       recorder,
     });
     evidence = result.evidence;

@@ -1,3 +1,4 @@
+import { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import { proofArtifactPath } from "./proof-artifacts";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
@@ -33,6 +34,7 @@ import {
 import { OwnedMobilityController } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.controller";
 import { OwnedMobilityTaskEventsService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
 import { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import type { OwnedOrderActionContext } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { ServiceAreaService } from "../../../apps/api/src/modules/service-area/service-area.service";
 import { ServiceProductService } from "../../../apps/api/src/modules/service-product/service-product.service";
 import {
@@ -154,11 +156,11 @@ describe("FLEETS-CLOSEOUT-004 Ops map API-envelope proof", () => {
       "req-fleets-closeout-004-api-dispatch",
       "idem-fleets-closeout-004-api-dispatch",
     );
-    const orderResponse = controller.getOrder(
+    const orderResponse = await controller.getOrder(
       orderId,
       "req-fleets-closeout-004-api-order",
     );
-    const jobsResponse = controller.listDispatchJobs(
+    const jobsResponse = await controller.listDispatchJobs(
       "req-fleets-closeout-004-api-jobs",
     );
     const dispatchJob = jobsResponse.data.items.find(
@@ -406,6 +408,8 @@ function createOwnedMobilityService() {
     },
   ];
   const regulatoryRegistryService = {
+    prepareMatchingSuppressions: () => undefined,
+
     getEligibleCandidates: vi.fn(() => regulatoryCandidates),
     getVehicleDispatchability: vi.fn(() => true),
     getDriverAvailability: vi.fn(() => true),
@@ -414,34 +418,81 @@ function createOwnedMobilityService() {
     recordNotification: vi.fn(),
     recordAuditLog: vi.fn(),
   };
+  // External persistence boundary for this existing socket-free map fixture.
+  // Read back exactly the records the production service writes; this remains
+  // controller/map evidence, not a PostgreSQL acceptance implementation.
+  const persisted: OwnedOrderActionContext = {
+    orders: [],
+    dispatchJobs: [],
+    dispatchAttempts: [],
+    dispatchAssignments: [],
+    driverTasks: [],
+    dispatchTraceLogs: [],
+    passengerDisclosureSnapshots: [],
+  };
+  const remember = (payload: Partial<OwnedOrderActionContext>) => {
+    for (const row of payload.orders ?? [])
+      persisted.orders = [
+        structuredClone(row),
+        ...persisted.orders.filter((old) => old.orderId !== row.orderId),
+      ];
+    for (const row of payload.dispatchJobs ?? [])
+      persisted.dispatchJobs = [
+        structuredClone(row),
+        ...persisted.dispatchJobs.filter(
+          (old) => old.dispatchJobId !== row.dispatchJobId,
+        ),
+      ];
+    for (const row of payload.dispatchTraceLogs ?? [])
+      persisted.dispatchTraceLogs = [
+        structuredClone(row),
+        ...persisted.dispatchTraceLogs.filter(
+          (old) => old.traceId !== row.traceId,
+        ),
+      ];
+    return payload;
+  };
   const repository = {
     isEnabled: () => true,
-    persistChanges: async <T>(payload: T) => payload,
-    persistOrderWorkflow: async (...args: unknown[]) => args,
+    persistChanges: async (payload: Partial<OwnedOrderActionContext>) =>
+      remember(payload),
+    persistOrderWorkflow: async (
+      _tx: unknown,
+      payload: Partial<OwnedOrderActionContext>,
+    ) => remember(payload),
+    findOrderById: async (orderId: string) =>
+      structuredClone(
+        persisted.orders.find((row) => row.orderId === orderId) ?? null,
+      ),
+    listOrdersForRead: async (ids?: readonly string[]) =>
+      structuredClone(
+        persisted.orders.filter((row) => !ids || ids.includes(row.orderId)),
+      ),
+    listDispatchJobsForRead: async () =>
+      structuredClone(persisted.dispatchJobs),
+    loadOrderActionContext: async (key: {
+      orderId?: string;
+      dispatchJobId?: string;
+    }) => {
+      const id =
+        key.orderId ??
+        persisted.dispatchJobs.find(
+          (row) => row.dispatchJobId === key.dispatchJobId,
+        )?.orderId;
+      const context = Object.fromEntries(
+        Object.entries(persisted).map(([name, rows]) => [
+          name,
+          rows.filter((row) => row.orderId === id),
+        ]),
+      );
+      return context.orders?.length ? structuredClone(context) : null;
+    },
     withTransaction: async <T>(work: (tx: unknown) => Promise<T>) => work({}),
     reportPersistenceFailure: vi.fn(),
   };
-  const callcenterService = {
-    registerRecordingAttachmentListener: vi.fn(),
-    registerRecordingStateChangeListener: vi.fn(),
-    linkOrderToCallSession: vi.fn(
-      ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId,
-      }) => ({
-        callId,
-        callType,
-        callerPhone,
-        agentId,
-        linkedOrderId,
-        recordingId: recordingId ?? null,
-      }),
-    ),
-  };
+  const callcenterService = new CallcenterService(
+    auditNotificationService as never,
+  );
   const serviceProductService = new ServiceProductService(
     auditNotificationService as never,
     undefined,
@@ -455,7 +506,7 @@ function createOwnedMobilityService() {
   const service = new OwnedMobilityService(
     regulatoryRegistryService as never,
     auditNotificationService as never,
-    callcenterService as never,
+    callcenterService,
     taskEventsService,
     opsDispatchEventsService,
     repository as never,

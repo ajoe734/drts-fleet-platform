@@ -5,7 +5,11 @@ import {
   buildEmbedSecurityDecision,
   type EmbedSecurityDecision,
 } from "./embed-security";
-import { getReferralEmbedSession } from "./embed-partner-session";
+import {
+  getReferralEmbedSession,
+  toPublicReferralEmbedSession,
+  type PublicReferralEmbedSession,
+} from "./embed-partner-session";
 import { resolveAccent } from "./embed-presentation";
 import { getPartnerEntry } from "./embed-api";
 import {
@@ -41,7 +45,7 @@ export type EmbedScreen =
 
 export type EmbedContext = {
   entry: PartnerChannelEntryRecord;
-  session: ReferralEmbedSession | null;
+  session: PublicReferralEmbedSession | null;
   state: EmbedState;
   screen: EmbedScreen;
   requestedScreen: string | null;
@@ -58,6 +62,8 @@ export type EmbedContext = {
   };
   issues: string[];
   fallbackEntry: FallbackEntry | null;
+  /** Dev demo: show the test-driver controls on the trip screen. */
+  demoTrip?: boolean;
 };
 
 function resolveDisplayName(entry: PartnerChannelEntryRecord) {
@@ -186,14 +192,19 @@ export async function resolveEmbedContext(input: {
   });
 
   return {
+    demoTrip:
+      demoMode &&
+      ["development", "test"].includes(
+        process.env.DRTS_ENV?.trim().toLowerCase() ?? "",
+      ),
     entry,
-    session,
+    session: session ? toPublicReferralEmbedSession(session) : null,
     state,
     screen: toEmbedScreen(input.screen),
     requestedScreen: input.screen ?? null,
     handoff: {
-      apiKey: input.apiKey ?? null,
-      partnerUserRef: input.partnerUserRef ?? null,
+      apiKey: null,
+      partnerUserRef: null,
     },
     decision,
     accent: resolveAccent(entry),

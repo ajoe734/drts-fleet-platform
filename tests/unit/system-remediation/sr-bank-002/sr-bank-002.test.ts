@@ -51,10 +51,6 @@ const STATEMENT_DETAIL_PAGE_SRC = readFileSync(
   ),
   "utf8",
 );
-const USERS_PAGE_SRC = readFileSync(
-  join(__dirname, "../../../../apps/bank-console-web/app/users/page.tsx"),
-  "utf8",
-);
 
 describe("SR-BANK-002: Bank role amount / PII / export consistent isolation (R15)", () => {
   describe("1. canViewSettlementAmounts — three-role matrix", () => {
@@ -285,17 +281,8 @@ describe("SR-BANK-002: Bank role amount / PII / export consistent isolation (R15
     });
   });
 
-  describe("6. /users page derives role from the real signed session, not a spoofable query param (source contract)", () => {
-    it("imports and calls resolveServerSessionRole instead of trusting params.role directly", () => {
-      expect(USERS_PAGE_SRC).toContain("resolveServerSessionRole");
-      expect(USERS_PAGE_SRC).toContain(
-        "getBankConsoleSession(tenant, locale, sessionRole)",
-      );
-      expect(USERS_PAGE_SRC).not.toContain(
-        "getBankConsoleSession(tenant, locale, params?.role)",
-      );
-    });
-  });
+  // Replaced by the actual verified-identity and missing-principal page caller
+  // regressions in bank-user-management-flow-20261015/users-page.test.ts.
 
   describe("7. Backend settlement-statements route requires the billing scope family, not bare tenant:read (JSON bypass closure)", () => {
     it.each([

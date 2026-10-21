@@ -1,3 +1,8 @@
+import {
+  RecordingContinuation,
+  type RecordingContinuationSource,
+  type RecordingContinuationJournal,
+} from "./recording-continuation";
 import { MediaRecordingAdapter } from "./media-recording-adapter";
 import type { RecordingClosureLedger } from "./final-manifest";
 import { ObjectStoreRecorderObjectStore } from "./object-store-recorder";
@@ -53,5 +58,22 @@ export function createVoiceRecordingAdapter(
   return new MediaRecordingAdapter(
     store,
     new UnconfiguredRecordingClosureLedger(),
+  );
+}
+
+/** Shares the approved immutable S3 conventions with the existing adapter.
+ * Missing upstream fork/closure authority is explicit; ASR/TTS never supplies
+ * synthetic recording tracks or a fabricated call-close event. */
+export function createVoiceRecordingContinuation(
+  env: NodeJS.ProcessEnv,
+  source: RecordingContinuationSource | undefined,
+  journal: RecordingContinuationJournal | undefined,
+): RecordingContinuation | undefined {
+  const storageConfig = resolveVoiceRecordingS3StorageConfig(env);
+  if (!storageConfig || !source || !journal) return undefined;
+  return new RecordingContinuation(
+    new ObjectStoreRecorderObjectStore(new S3ObjectStoreClient(storageConfig)),
+    journal,
+    source,
   );
 }

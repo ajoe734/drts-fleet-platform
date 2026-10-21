@@ -7,6 +7,14 @@ on:
         description: "Type 'apply' to create Cloud Run domain mappings for smarttransport.tw"
         required: true
         type: string
+      target:
+        description: "'all' = full legacy domain inventory (default); 'passenger-entry-only' = just the passenger bureau public front door, independent of legacy domain verification/mapping outcomes"
+        required: false
+        type: choice
+        options:
+          - all
+          - passenger-entry-only
+        default: all
 
 permissions:
   contents: read
@@ -27,6 +35,13 @@ env:
   DEV_GCP_REFERRAL_EMBED_SERVICE: ${{ vars.DEV_GCP_REFERRAL_EMBED_SERVICE }}
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
+  DEV_GCP_PASSENGER_APP_SERVICE: ${{ vars.DEV_GCP_PASSENGER_APP_SERVICE }}
+  # Hostname for the Cloud IAP public front door in front of passenger-app-web
+  # (see operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh).
+  # Separate from, and not a replacement for, the ride.smarttransport.tw
+  # direct Cloud Run domain mapping below, which still requires an identity
+  # token and stays unusable from an ordinary browser.
+  DEV_PAX_BUREAU_ENTRY_HOST: ${{ vars.DEV_PAX_BUREAU_ENTRY_HOST }}
   DEV_WIF_PROVIDER: ${{ secrets.DEV_WIF_PROVIDER }}
   DEV_WIF_SERVICE_ACCOUNT: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
   WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
@@ -34,7 +49,7 @@ env:
 
 jobs:
   map:
-    if: ${{ inputs.confirm == 'apply' }}
+    if: ${{ inputs.confirm == 'apply' && inputs.target == 'all' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -71,6 +86,12 @@ jobs:
           fi
           echo "::notice::Partner Booking is PAUSED; book.smarttransport.tw is intentionally excluded from domain maintenance."
 
+          passenger_app_service="${DEV_GCP_PASSENGER_APP_SERVICE:-drts-dev-passenger-app-web}"
+          if [[ "$passenger_app_service" != drts-dev-passenger-app-web ]]; then
+            echo "::error::Passenger domain target is outside the reviewed active dev inventory."
+            exit 1
+          fi
+
           ./operations/deployment/map-domain-service.sh fleets.smarttransport.tw     "${DEV_GCP_PLATFORM_ADMIN_SERVICE:-drts-dev-platform-admin-web}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh ops.smarttransport.tw        "${DEV_GCP_OPS_CONSOLE_SERVICE:-drts-dev-ops-console-web}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh partners.smarttransport.tw   "${DEV_GCP_FLEET_PARTNER_PORTAL_SERVICE:-drts-dev-fleet-partner-portal-web}" "$REGION" "$PROJECT"
@@ -80,6 +101,64 @@ jobs:
           ./operations/deployment/map-domain-service.sh tenant.smarttransport.tw     "${DEV_GCP_TENANT_CONSOLE_SERVICE:-drts-dev-tenant-console-web}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh refer.smarttransport.tw      "${DEV_GCP_REFERRAL_EMBED_SERVICE:-drts-dev-referral-embed-web}" "$REGION" "$PROJECT"
           ./operations/deployment/map-domain-service.sh api.smarttransport.tw        "${DEV_GCP_API_SERVICE:-drts-dev-api}" "$REGION" "$PROJECT"
+          ./operations/deployment/map-domain-service.sh ride.smarttransport.tw       "$passenger_app_service" "$REGION" "$PROJECT"
+
+          if [[ -n "${DEV_PAX_BUREAU_ENTRY_HOST:-}" ]]; then
+            ./operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh \
+              "$passenger_app_service" "$REGION" "$PROJECT" "$DEV_PAX_BUREAU_ENTRY_HOST"
+          else
+            echo "::notice::DEV_PAX_BUREAU_ENTRY_HOST is not set; skipping bureau public-entry provisioning."
+          fi
+
+      - name: List mappings
+        run: |
+          gcloud --quiet beta run domain-mappings list \
+            --region "${{ env.DEV_GCP_REGION }}" --project "${{ env.DEV_GCP_PROJECT_ID }}" 2>&1 || true
+
+  passenger-public-entry:
+    # Independent of the `map` job above: lets the reviewed passenger bureau
+    # public front door be provisioned on its own, without first requiring
+    # all ten unrelated legacy custom-domain mappings to succeed. Legacy
+    # all-inventory mode above (target == 'all') is unchanged and remains
+    # the default; this is strictly an additional, explicit opt-in path.
+    if: ${{ inputs.confirm == 'apply' && inputs.target == 'passenger-entry-only' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.DEV_GCP_PROJECT_ID }}
+          install_components: beta
+
+      - name: Create passenger public entry
+        run: |
+          set -euo pipefail
+          PROJECT="${{ env.DEV_GCP_PROJECT_ID }}"
+          REGION="${{ env.DEV_GCP_REGION }}"
+
+          passenger_app_service="${DEV_GCP_PASSENGER_APP_SERVICE:-drts-dev-passenger-app-web}"
+          if [[ "$passenger_app_service" != drts-dev-passenger-app-web ]]; then
+            echo "::error::Passenger domain target is outside the reviewed active dev inventory."
+            exit 1
+          fi
+
+          if [[ -z "${DEV_PAX_BUREAU_ENTRY_HOST:-}" ]]; then
+            echo "::error::DEV_PAX_BUREAU_ENTRY_HOST is not set; cannot provision bureau public-entry independently."
+            exit 1
+          fi
+
+          ./operations/deployment/passenger-bureau-entry/setup-passenger-public-entry.sh \
+            "$passenger_app_service" "$REGION" "$PROJECT" "$DEV_PAX_BUREAU_ENTRY_HOST"
 
       - name: List mappings
         run: |

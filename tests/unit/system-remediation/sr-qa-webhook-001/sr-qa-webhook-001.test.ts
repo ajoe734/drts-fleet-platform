@@ -1,3 +1,4 @@
+import { enabledRegistryRepository } from "../../registry-driver-master-durable-ack-20261014/storage-fixture";
 import { createHmac } from "node:crypto";
 import { EventEmitter } from "node:events";
 import http from "node:http";
@@ -213,7 +214,7 @@ function createInMemoryWebhookRepository() {
     };
   }
 
-  return {
+  const repository = {
     isEnabled: () => true,
     loadState: async () => snapshot(),
     persistChanges: async (changes: PersistTenantPartnerChanges) => {
@@ -233,6 +234,11 @@ function createInMemoryWebhookRepository() {
       }
     },
   };
+  return Object.assign(repository, {
+    persistConfigurationChanges: (changes: PersistTenantPartnerChanges) =>
+      repository.persistChanges(changes),
+    reportPersistenceFailure: vi.fn(),
+  });
 }
 
 function createInMemoryBillingSettlementRepository() {
@@ -498,7 +504,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       );
 
       const sharedSecret = "whsec_super_secret_signing_key_001";
-      const created = service.createWebhookEndpoint(
+      const created = await service.createWebhookEndpoint(
         "tenant-demo-001",
         {
           url: receiver.url,
@@ -562,7 +568,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         [],
       );
 
-      const created = service.createWebhookEndpoint("tenant-demo-001", {
+      const created = await service.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: "whsec_backoff_test_001",
         events: ["tenant.webhook.test"],
@@ -614,7 +620,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
           [],
         );
 
-        const created = service.createWebhookEndpoint("tenant-demo-001", {
+        const created = await service.createWebhookEndpoint("tenant-demo-001", {
           url: dedicatedReceiver.url,
           secret: "whsec_retry_recovery_001",
           events: ["tenant.webhook.test"],
@@ -706,7 +712,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         [],
       );
 
-      const created = service.createWebhookEndpoint("tenant-demo-001", {
+      const created = await service.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: "whsec_timeout_test_001",
         events: ["tenant.webhook.test"],
@@ -751,7 +757,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         [],
       );
 
-      const created = service.createWebhookEndpoint("tenant-demo-001", {
+      const created = await service.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: "whsec_permanent_fail_001",
         events: ["tenant.webhook.test"],
@@ -793,7 +799,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       );
 
       // Endpoint 1: in test_pending
-      service.createWebhookEndpoint("tenant-demo-001", {
+      await service.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: "whsec_pending_001",
         events: ["order.created"],
@@ -849,7 +855,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         [],
       );
 
-      const endpoint = service.createWebhookEndpoint("tenant-demo-001", {
+      const endpoint = await service.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: "whsec_replay_001",
         events: ["tenant.webhook.test"],
@@ -885,7 +891,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       const secretV1 = "whsec_version_1_initial";
       const secretV2 = "whsec_version_2_rotated";
 
-      const created = service.createWebhookEndpoint("tenant-demo-001", {
+      const created = await service.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: secretV1,
         events: ["tenant.webhook.test"],
@@ -912,7 +918,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
 
       // Rotate secret to v2
       receiver.requests.length = 0;
-      service.rotateWebhookSecret("tenant-demo-001", {
+      await service.rotateWebhookSecret("tenant-demo-001", {
         webhookId: created.webhookId,
         secret: secretV2,
         rotationReason: "routine_credential_rotation",
@@ -962,7 +968,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         [],
       );
 
-      const endpoint = service.createWebhookEndpoint("tenant-demo-001", {
+      const endpoint = await service.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: "whsec_dedup_001",
         events: ["dispatch.assigned"],
@@ -1009,7 +1015,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       );
       await serviceA.onModuleInit();
 
-      const endpoint = serviceA.createWebhookEndpoint("tenant-demo-001", {
+      const endpoint = await serviceA.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: "whsec_restart_dedup_001",
         events: ["dispatch.assigned"],
@@ -1075,7 +1081,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       );
       await serviceA.onModuleInit();
 
-      const endpoint = serviceA.createWebhookEndpoint("tenant-demo-001", {
+      const endpoint = await serviceA.createWebhookEndpoint("tenant-demo-001", {
         url: receiver.url,
         secret: "whsec_restart_pending_001",
         events: ["dispatch.assigned"],
@@ -1292,7 +1298,9 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         "order-sandbox-mapped-001",
       );
       expect(treatments.length).toBe(1);
-      expect(treatments[0]!.sandboxBillingTreatmentId).toBe("treat-sandbox-001");
+      expect(treatments[0]!.sandboxBillingTreatmentId).toBe(
+        "treat-sandbox-001",
+      );
       expect(treatments[0]!.treatmentType).toBe("normal_av");
 
       // Isolation check: querying another order returns empty array
@@ -1740,7 +1748,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       const { ownedMobilityService, sandboxWebhookAdapter } =
         createMobilityAndCallServices();
 
-      sandboxWebhookAdapter.ingest(sandboxFixtures.callStarted, "req-start-idem");
+      sandboxWebhookAdapter.ingest(
+        sandboxFixtures.callStarted,
+        "req-start-idem",
+      );
       sandboxWebhookAdapter.ingest(sandboxFixtures.callEnded, "req-end-idem");
       sandboxWebhookAdapter.ingest(
         sandboxFixtures.recordingPending,
@@ -1795,6 +1806,7 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
         opsDispatchEventsService,
         auditService,
         driverProfileService,
+        enabledRegistryRepository(),
       );
 
       const initialDriver = regulatoryRegistryService
@@ -1805,12 +1817,10 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(initialDriver!.licensesValid).toBe(true);
 
       // Degrade status: expire license in the past
-      const expiredDriver = regulatoryRegistryService.updateDriverLicenses(
-        "drv-demo-001",
-        {
+      const expiredDriver =
+        await regulatoryRegistryService.updateDriverLicenses("drv-demo-001", {
           licenseExpiry: "2025-01-01T00:00:00.000Z",
-        },
-      );
+        });
       expect(expiredDriver.dispatchEligible).toBe(false);
       expect(expiredDriver.licensesValid).toBe(false);
       expect(expiredDriver.eligibilityBlockedReasons).toContain(
@@ -1826,17 +1836,16 @@ describe("SR-QA-WEBHOOK-001: Verification Suite", () => {
       expect(expiringDrivers.length).toBeGreaterThan(0);
 
       // Expiring policies scan
-      const expiringPolicies =
-        regulatoryRegistryService.listExpiringPolicies(365 * 5);
+      const expiringPolicies = regulatoryRegistryService.listExpiringPolicies(
+        365 * 5,
+      );
       expect(expiringPolicies.length).toBeGreaterThan(0);
 
       // Renew driver license with future date: restores dispatch eligibility
-      const renewedDriver = regulatoryRegistryService.updateDriverLicenses(
-        "drv-demo-001",
-        {
+      const renewedDriver =
+        await regulatoryRegistryService.updateDriverLicenses("drv-demo-001", {
           licenseExpiry: "2028-12-31T23:59:59.000Z",
-        },
-      );
+        });
       expect(renewedDriver.dispatchEligible).toBe(true);
       expect(renewedDriver.licensesValid).toBe(true);
       expect(renewedDriver.eligibilityBlockedReasons).not.toContain(

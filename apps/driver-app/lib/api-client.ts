@@ -40,6 +40,27 @@ const DRIVER_DEVICE_ID_KEY = "drts.driver.deviceId";
 const DRIVER_SESSION_KEY = "drts.driver.session";
 const DRIVER_PENDING_TASK_COMPLETION_KEY = "drts.driver.pendingTaskCompletion";
 
+// Expo SecureStore has no web implementation. Keep device-bound credentials
+// in this browser tab; native retains its existing secure storage. Orders and
+// payment state are always read from the API, never from this storage adapter.
+export const driverStorage = {
+  async getItemAsync(key: string) {
+    return typeof window !== "undefined" && typeof document !== "undefined"
+      ? window.sessionStorage.getItem(key)
+      : SecureStore.getItemAsync(key);
+  },
+  async setItemAsync(key: string, value: string) {
+    if (typeof window !== "undefined" && typeof document !== "undefined")
+      window.sessionStorage.setItem(key, value);
+    else await SecureStore.setItemAsync(key, value);
+  },
+  async deleteItemAsync(key: string) {
+    if (typeof window !== "undefined" && typeof document !== "undefined")
+      window.sessionStorage.removeItem(key);
+    else await SecureStore.deleteItemAsync(key);
+  },
+};
+
 const publicClient = createPublicClient(API_URL);
 
 let client: ApiClient | null = null;
@@ -103,7 +124,8 @@ export function sanitizeLogMessage(message: unknown): string | null {
     str = message.message;
   } else {
     try {
-      str = typeof message === "object" ? JSON.stringify(message) : String(message);
+      str =
+        typeof message === "object" ? JSON.stringify(message) : String(message);
     } catch {
       str = String(message);
     }
@@ -115,7 +137,10 @@ export function sanitizeLogMessage(message: unknown): string | null {
 
   return str
     .replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]")
-    .replace(/eyJ[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.?[A-Za-z0-9\-_=]*/g, "[REDACTED_JWT]")
+    .replace(
+      /eyJ[A-Za-z0-9\-_=]+\.[A-Za-z0-9\-_=]+\.?[A-Za-z0-9\-_=]*/g,
+      "[REDACTED_JWT]",
+    )
     .replace(
       /(["']?(?:accessToken|access_token|refreshToken|refresh_token|idToken|id_token|authToken|auth_token|deviceToken|device_token|registrationCode|registration_code|secret|clientSecret|client_secret|token)["']?\s*:\s*["'])([^"']+)(["'])/gi,
       "$1[REDACTED]$3",
@@ -141,21 +166,36 @@ function parseApiError(error: unknown): {
   let rawBody: string | null = null;
 
   if (error && typeof error === "object") {
-    if ("statusCode" in error && typeof (error as { statusCode: unknown }).statusCode === "number") {
+    if (
+      "statusCode" in error &&
+      typeof (error as { statusCode: unknown }).statusCode === "number"
+    ) {
       status = (error as { statusCode: number }).statusCode;
-    } else if ("status" in error && typeof (error as { status: unknown }).status === "number") {
+    } else if (
+      "status" in error &&
+      typeof (error as { status: unknown }).status === "number"
+    ) {
       status = (error as { status: number }).status;
     }
 
-    if ("code" in error && typeof (error as { code: unknown }).code === "string") {
+    if (
+      "code" in error &&
+      typeof (error as { code: unknown }).code === "string"
+    ) {
       code = (error as { code: string }).code;
     }
 
-    if ("apiMessage" in error && typeof (error as { apiMessage: unknown }).apiMessage === "string") {
+    if (
+      "apiMessage" in error &&
+      typeof (error as { apiMessage: unknown }).apiMessage === "string"
+    ) {
       message = (error as { apiMessage: string }).apiMessage;
     }
 
-    if ("rawBody" in error && typeof (error as { rawBody: unknown }).rawBody === "string") {
+    if (
+      "rawBody" in error &&
+      typeof (error as { rawBody: unknown }).rawBody === "string"
+    ) {
       rawBody = (error as { rawBody: string }).rawBody;
     }
   }
@@ -339,9 +379,9 @@ export function registerProtectedCacheClearHandler(
 
 async function clearProtectedCachedData(): Promise<void> {
   await Promise.allSettled([
-    SecureStore.deleteItemAsync("drts.driver.sos.activeCase"),
-    SecureStore.deleteItemAsync("drts.safetyOperator.queue"),
-    SecureStore.deleteItemAsync("drts.driver.trackingSessionMarker"),
+    driverStorage.deleteItemAsync("drts.driver.sos.activeCase"),
+    driverStorage.deleteItemAsync("drts.safetyOperator.queue"),
+    driverStorage.deleteItemAsync("drts.driver.trackingSessionMarker"),
   ]);
 
   for (const handler of Array.from(protectedCacheClearHandlers)) {
@@ -404,13 +444,13 @@ export async function recoverDriverSessionFromApiError(
 }
 
 async function getOrCreateDeviceId(): Promise<string> {
-  const existing = await SecureStore.getItemAsync(DRIVER_DEVICE_ID_KEY);
+  const existing = await driverStorage.getItemAsync(DRIVER_DEVICE_ID_KEY);
   if (existing?.trim()) {
     return existing;
   }
 
   const deviceId = createLocalId("device");
-  await SecureStore.setItemAsync(DRIVER_DEVICE_ID_KEY, deviceId);
+  await driverStorage.setItemAsync(DRIVER_DEVICE_ID_KEY, deviceId);
   return deviceId;
 }
 
@@ -420,7 +460,7 @@ export async function getDriverDeviceId(): Promise<string> {
 
 async function clearStoredSession() {
   provisionedSession = null;
-  await SecureStore.deleteItemAsync(DRIVER_SESSION_KEY);
+  await driverStorage.deleteItemAsync(DRIVER_SESSION_KEY);
   applySession(null);
   await clearProtectedCachedData();
 }
@@ -428,14 +468,14 @@ async function clearStoredSession() {
 async function persistPendingDriverTaskCompletion(
   pending: PendingDriverTaskCompletion,
 ): Promise<void> {
-  await SecureStore.setItemAsync(
+  await driverStorage.setItemAsync(
     DRIVER_PENDING_TASK_COMPLETION_KEY,
     JSON.stringify(pending),
   );
 }
 
 async function loadPendingDriverTaskCompletion(): Promise<PendingDriverTaskCompletion | null> {
-  const raw = await SecureStore.getItemAsync(
+  const raw = await driverStorage.getItemAsync(
     DRIVER_PENDING_TASK_COMPLETION_KEY,
   );
   if (!raw) {
@@ -454,18 +494,18 @@ async function loadPendingDriverTaskCompletion(): Promise<PendingDriverTaskCompl
 
     return pending;
   } catch {
-    await SecureStore.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
+    await driverStorage.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
     return null;
   }
 }
 
 async function clearPendingDriverTaskCompletion(): Promise<void> {
-  await SecureStore.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
+  await driverStorage.deleteItemAsync(DRIVER_PENDING_TASK_COMPLETION_KEY);
 }
 
 async function persistSession(session: DriverDeviceProvisioningSession) {
   provisionedSession = session;
-  await SecureStore.setItemAsync(DRIVER_SESSION_KEY, JSON.stringify(session));
+  await driverStorage.setItemAsync(DRIVER_SESSION_KEY, JSON.stringify(session));
   applySession(session);
 }
 
@@ -491,7 +531,7 @@ export async function initializeDriverIdentity(): Promise<void> {
     }
 
     const storedSessionJson =
-      await SecureStore.getItemAsync(DRIVER_SESSION_KEY);
+      await driverStorage.getItemAsync(DRIVER_SESSION_KEY);
     if (!storedSessionJson) {
       setDriverIdentityIssue(null);
       applySession(null);
@@ -528,7 +568,9 @@ export async function refreshDriverSessionSingleFlight(): Promise<DriverDevicePr
   }
 
   if (!provisionedSession) {
-    throw new Error("Cannot refresh driver session: no provisioned session found.");
+    throw new Error(
+      "Cannot refresh driver session: no provisioned session found.",
+    );
   }
 
   const sessionToRefresh = provisionedSession;
@@ -753,7 +795,9 @@ function createDriverClientProxy(): ApiClient {
             } catch (retryError) {
               // Second 401: clear session, logout, set issue
               if (isUnauthorized401Error(retryError)) {
-                setDriverIdentityIssue(getDriverIdentityIssueMessage(retryError));
+                setDriverIdentityIssue(
+                  getDriverIdentityIssueMessage(retryError),
+                );
                 await clearStoredSession();
               }
               throw retryError;
@@ -794,4 +838,3 @@ export function getDriverId(): string {
 }
 
 export { API_URL };
-

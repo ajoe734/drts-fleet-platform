@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { persistOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
+import { createHash, randomUUID } from "node:crypto";
 
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
@@ -12,6 +13,11 @@ import type {
   DriverTaskRecord,
   ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
+  ReferralPassengerFareQuoteRecord,
+  ReferralFeeOwner,
+  ReferralFeeAcknowledgement,
+  ReferralOrderFeeConfirmation,
+  OrderPartnerNotificationRoute,
   PassengerDispatchDisclosureSnapshot,
   TenantBookingListQuery,
 } from "@drts/contracts";
@@ -170,6 +176,17 @@ type OwnedMobilityState = {
   consumerNotificationOutbox: ConsumerNotificationOutboxRecord[];
 };
 
+export type OwnedOrderActionContext = Pick<
+  OwnedMobilityState,
+  | "orders"
+  | "dispatchJobs"
+  | "dispatchAttempts"
+  | "dispatchAssignments"
+  | "driverTasks"
+  | "dispatchTraceLogs"
+  | "passengerDisclosureSnapshots"
+>;
+
 type PersistOwnedMobilityChanges = {
   orders?: readonly OwnedOrderRecord[];
   dispatchJobs?: readonly DispatchJobRecord[];
@@ -225,6 +242,10 @@ export class OwnedMobilityRepository {
     return this.isEnabled();
   }
 
+  findBookedPassengerQuote(order: OwnedOrderRecord) {
+    return this.multiTaxiRepository.findBookedPassengerQuote(order);
+  }
+
   async findOrderById(orderId: string): Promise<OwnedOrderRecord | null> {
     if (!this.isEnabled()) {
       return null;
@@ -244,6 +265,369 @@ export class OwnedMobilityRepository {
       ? this.parseRecord<OwnedOrderRecord>(
           row.record,
           "ops.phase1_owned_orders",
+        )
+      : null;
+  }
+
+  private requireReferralStorage() {
+    if (!this.isEnabled())
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Referral storage is unavailable.",
+      );
+  }
+
+  async findReferralFeeAcknowledgement(
+    owner: ReferralFeeOwner,
+    version: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ): Promise<ReferralFeeAcknowledgement | null> {
+    this.requireReferralStorage();
+    const result = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_referral_passenger_fee_acknowledgements
+       WHERE tenant_id=$1 AND partner_id=$2 AND partner_program_id=$3
+       AND entry_slug=$4 AND drts_passenger_id=$5 AND disclosure_version=$6`,
+      [
+        owner.tenantId,
+        owner.partnerId,
+        owner.partnerProgramId,
+        owner.entrySlug,
+        owner.drtsPassengerId,
+        version,
+      ],
+    );
+    return result.rows[0]
+      ? this.parseRecord<ReferralFeeAcknowledgement>(
+          result.rows[0].record,
+          "referral fee acknowledgement",
+        )
+      : null;
+  }
+
+  async acknowledgeReferralFees(
+    owner: ReferralFeeOwner,
+    version: string,
+    contentHash: string,
+  ) {
+    this.requireReferralStorage();
+    return this.withTransaction(async (tx) => {
+      const clock = await tx.query<{ now: Date | string }>(
+        "SELECT clock_timestamp() AS now",
+      );
+      const record: ReferralFeeAcknowledgement = {
+        ...owner,
+        disclosureVersion: version,
+        contentHash,
+        acknowledgedAt: new Date(clock.rows[0]!.now).toISOString(),
+      };
+      await tx.query(
+        `INSERT INTO ops.phase1_referral_passenger_fee_acknowledgements
+         (tenant_id,partner_id,partner_program_id,entry_slug,drts_passenger_id,disclosure_version,content_hash,acknowledged_at,record)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+         ON CONFLICT (tenant_id,partner_id,partner_program_id,entry_slug,drts_passenger_id,disclosure_version) DO NOTHING`,
+        [
+          owner.tenantId,
+          owner.partnerId,
+          owner.partnerProgramId,
+          owner.entrySlug,
+          owner.drtsPassengerId,
+          version,
+          contentHash,
+          record.acknowledgedAt,
+          JSON.stringify(record),
+        ],
+      );
+      // Read the concurrent winner's original time, never overwrite it on retry.
+      const stored = await this.findReferralFeeAcknowledgement(
+        owner,
+        version,
+        tx,
+      );
+      if (!stored || stored.contentHash !== contentHash)
+        throw new ApiRequestError(
+          503,
+          "FEE_DISCLOSURE_UNAVAILABLE",
+          "Fee acknowledgement readback is unavailable.",
+        );
+      return stored;
+    });
+  }
+
+  async insertReferralOrderFeeConfirmation(
+    record: ReferralOrderFeeConfirmation,
+    tx: OwnedMobilityQueryExecutor,
+  ) {
+    this.requireReferralStorage();
+    await tx.query(
+      `INSERT INTO ops.phase1_referral_order_fee_confirmations
+       (order_id,quote_id,tenant_id,partner_id,partner_program_id,entry_slug,drts_passenger_id,disclosure_version,content_hash,fee_confirmed_at,record)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+      [
+        record.orderId,
+        record.quoteId,
+        record.tenantId,
+        record.partnerId,
+        record.partnerProgramId,
+        record.entrySlug,
+        record.drtsPassengerId,
+        record.disclosureVersion,
+        record.contentHash,
+        record.feeConfirmedAt,
+        JSON.stringify(record),
+      ],
+    );
+  }
+
+  async insertReferralFareQuoteSnapshot(
+    quote: ReferralPassengerFareQuoteRecord,
+  ) {
+    this.requireReferralStorage();
+    await this.databaseService!.query(
+      `INSERT INTO ops.phase1_referral_fare_quote_snapshots
+       (quote_id,tenant_id,partner_id,partner_program_id,entry_slug,drts_passenger_id,created_at,expires_at,record)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
+      [
+        quote.quoteId,
+        quote.tenantId,
+        quote.partnerId,
+        quote.partnerProgramId,
+        quote.entrySlug,
+        quote.drtsPassengerId,
+        quote.createdAt,
+        quote.expiresAt,
+        JSON.stringify(quote),
+      ],
+    );
+  }
+
+  async findReferralFareQuoteSnapshotById(
+    quoteId: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ) {
+    this.requireReferralStorage();
+    const result = await executor.query<JsonRecordRow>(
+      "SELECT record FROM ops.phase1_referral_fare_quote_snapshots WHERE quote_id=$1",
+      [quoteId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<ReferralPassengerFareQuoteRecord>(
+          result.rows[0].record,
+          "referral quote",
+        )
+      : null;
+  }
+
+  async findReferralOrderByIdempotencyKey(
+    owner: Pick<
+      ReferralPassengerFareQuoteRecord,
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "entrySlug"
+      | "drtsPassengerId"
+    >,
+    key: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ) {
+    this.requireReferralStorage();
+    const result = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_owned_orders WHERE tenant_id=$1
+       AND record->>'partnerId'=$2 AND record->>'partnerProgramId'=$3
+       AND record->>'partnerEntrySlug'=$4 AND record->'passenger'->>'passengerId'=$5
+       AND record->'referralPassengerLifecycle'->>'bookingIdempotencyKey'=$6 LIMIT 2`,
+      [
+        owner.tenantId,
+        owner.partnerId,
+        owner.partnerProgramId,
+        owner.entrySlug,
+        owner.drtsPassengerId,
+        key,
+      ],
+    );
+    if (result.rows.length > 1)
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Ambiguous committed booking intent.",
+      );
+    return result.rows[0]
+      ? this.parseRecord<OwnedOrderRecord>(
+          result.rows[0].record,
+          "referral booking",
+        )
+      : null;
+  }
+
+  async lockReferralBookingIntent(
+    ownerAndKey: string[],
+    executor: OwnedMobilityQueryExecutor,
+  ) {
+    const hex = createHash("sha256")
+      .update(JSON.stringify(ownerAndKey))
+      .digest("hex")
+      .slice(0, 16);
+    await executor.query("SELECT pg_advisory_xact_lock($1::bigint)", [
+      BigInt.asIntN(64, BigInt("0x" + hex)).toString(),
+    ]);
+  }
+
+  async claimReferralFareQuoteSnapshot(
+    quote: ReferralPassengerFareQuoteRecord,
+    orderId: string,
+    executor: OwnedMobilityQueryExecutor,
+  ) {
+    this.requireReferralStorage();
+    await executor.query(
+      "SELECT quote_id FROM ops.phase1_referral_fare_quote_snapshots WHERE quote_id=$1 FOR UPDATE",
+      [quote.quoteId],
+    );
+    // Wall-clock time is captured AFTER the lock wait; transaction start is not expiry authority.
+    const clock = await executor.query<{ now: Date | string }>(
+      "SELECT clock_timestamp() AS now",
+    );
+    const now = new Date(clock.rows[0]!.now).toISOString();
+    const result = await executor.query<JsonRecordRow>(
+      `UPDATE ops.phase1_referral_fare_quote_snapshots SET consumed_by_order_id=$7::text,consumed_at=($8::text)::timestamptz,
+       record=jsonb_set(jsonb_set(record,'{consumedByOrderId}',to_jsonb($7::text)),'{consumedAt}',to_jsonb($8::text))
+       WHERE quote_id=$1 AND tenant_id=$2 AND partner_id=$3 AND partner_program_id=$4
+       AND entry_slug=$5 AND drts_passenger_id=$6 AND consumed_by_order_id IS NULL AND expires_at>($8::text)::timestamptz
+       RETURNING record`,
+      [
+        quote.quoteId,
+        quote.tenantId,
+        quote.partnerId,
+        quote.partnerProgramId,
+        quote.entrySlug,
+        quote.drtsPassengerId,
+        orderId,
+        now,
+      ],
+    );
+    if (!result.rows[0]) {
+      const current = await this.findReferralFareQuoteSnapshotById(
+        quote.quoteId,
+        executor,
+      );
+      throw new ApiRequestError(
+        409,
+        current?.consumedByOrderId
+          ? "FARE_QUOTE_ALREADY_CONSUMED"
+          : "FARE_QUOTE_EXPIRED",
+        "The quote can no longer be claimed.",
+      );
+    }
+    return this.parseRecord<ReferralPassengerFareQuoteRecord>(
+      result.rows[0].record,
+      "claimed referral quote",
+    );
+  }
+
+  async listOrdersForRead(
+    orderIds?: readonly string[],
+  ): Promise<OwnedOrderRecord[]> {
+    if (!this.isEnabled() || orderIds?.length === 0) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_owned_orders
+       ${orderIds ? "WHERE order_id = ANY($1::varchar[])" : ""}
+       ORDER BY created_at DESC, order_id`,
+      orderIds ? [orderIds] : [],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<OwnedOrderRecord>(row.record, "ops.phase1_owned_orders"),
+    );
+  }
+
+  async listDriverTasksForRead(): Promise<DriverTaskRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_driver_tasks ORDER BY created_at DESC, task_id`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DriverTaskRecord>(row.record, "ops.phase1_driver_tasks"),
+    );
+  }
+
+  async findDriverTaskForRead(
+    taskId: string,
+  ): Promise<DriverTaskRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_driver_tasks WHERE task_id = $1 LIMIT 1`,
+      [taskId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<DriverTaskRecord>(
+          result.rows[0].record,
+          "ops.phase1_driver_tasks",
+        )
+      : null;
+  }
+
+  async listDispatchJobsForRead(): Promise<DispatchJobRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_jobs ORDER BY created_at DESC, dispatch_job_id`,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DispatchJobRecord>(
+        row.record,
+        "ops.phase1_dispatch_jobs",
+      ),
+    );
+  }
+
+  /** One statement / MVCC snapshot, scoped to one aggregate. Native mutation
+   * transactions still acquire their original row/resource locks afterwards. */
+  async loadOrderActionContext(
+    key: { orderId: string } | { taskId: string } | { dispatchJobId: string },
+  ): Promise<OwnedOrderActionContext | null> {
+    if (!this.isEnabled()) return null;
+    const [predicate, value] =
+      "orderId" in key
+        ? ["o.order_id = $1", key.orderId]
+        : "taskId" in key
+          ? [
+              "o.order_id = (SELECT order_id FROM ops.phase1_driver_tasks WHERE task_id = $1)",
+              key.taskId,
+            ]
+          : [
+              "o.order_id = (SELECT order_id FROM ops.phase1_dispatch_jobs WHERE dispatch_job_id = $1)",
+              key.dispatchJobId,
+            ];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+      SELECT jsonb_build_object(
+        'orders', jsonb_build_array(o.record),
+        'dispatchJobs', (SELECT coalesce(jsonb_agg(record ORDER BY updated_at DESC, created_at DESC), '[]'::jsonb) FROM ops.phase1_dispatch_jobs WHERE order_id = o.order_id),
+        'dispatchAttempts', (SELECT coalesce(jsonb_agg(record ORDER BY sequence DESC, created_at DESC), '[]'::jsonb) FROM ops.phase1_dispatch_attempts WHERE order_id = o.order_id),
+        'dispatchAssignments', (SELECT coalesce(jsonb_agg(record ORDER BY updated_at DESC, created_at DESC), '[]'::jsonb) FROM ops.phase1_dispatch_assignments WHERE order_id = o.order_id),
+        'driverTasks', (SELECT coalesce(jsonb_agg(record ORDER BY updated_at DESC, created_at DESC), '[]'::jsonb) FROM ops.phase1_driver_tasks WHERE order_id = o.order_id),
+        'dispatchTraceLogs', (SELECT coalesce(jsonb_agg(record ORDER BY created_at DESC), '[]'::jsonb) FROM ops.phase1_dispatch_trace_logs WHERE order_id = o.order_id),
+        'passengerDisclosureSnapshots', (SELECT coalesce(jsonb_agg(record ORDER BY assignment_version DESC, created_at DESC), '[]'::jsonb) FROM ops.passenger_dispatch_disclosure_snapshots WHERE order_id = o.order_id)
+      ) AS record FROM ops.phase1_owned_orders o WHERE ${predicate} LIMIT 1`,
+      [value],
+    );
+    return result.rows[0]
+      ? this.parseRecord<OwnedOrderActionContext>(
+          result.rows[0].record,
+          "owned_order_action_context",
+        )
+      : null;
+  }
+
+  async findCurrentPassengerAssignmentDisclosure(orderId: string) {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM ops.passenger_dispatch_disclosure_snapshots
+       WHERE order_id = $1 AND superseded_at IS NULL
+       ORDER BY assignment_version DESC, created_at DESC LIMIT 1`,
+      [orderId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<PassengerDispatchDisclosureSnapshot>(
+          result.rows[0].record,
+          "ops.passenger_dispatch_disclosure_snapshots",
         )
       : null;
   }
@@ -687,11 +1071,91 @@ export class OwnedMobilityRepository {
     }
   }
 
+  /** A failed notification setup must not abort the enclosing booking.
+   * Roll back both route and sequence together before allowing it to commit.
+   * A lost connection/failed savepoint recovery remains a booking DB failure.
+   */
+  async writeOrderPartnerNotificationRoute(
+    route: OrderPartnerNotificationRoute,
+    tx?: OwnedMobilityQueryExecutor,
+  ): Promise<OrderPartnerNotificationRoute | null> {
+    if (!this.isEnabled()) return null;
+    if (!tx) {
+      try {
+        return await this.withTransaction((executor) =>
+          this.writeOrderPartnerNotificationRoute(route, executor),
+        );
+      } catch (error) {
+        this.reportPersistenceFailure(
+          error,
+          "write order partner notification route",
+        );
+        return null;
+      }
+    }
+    await tx.query("SAVEPOINT partner_notification_route");
+    try {
+      const stored = await persistOrderPartnerNotificationRoute(tx, route);
+      await tx.query("RELEASE SAVEPOINT partner_notification_route");
+      return stored;
+    } catch (error) {
+      await tx.query("ROLLBACK TO SAVEPOINT partner_notification_route");
+      await tx.query("RELEASE SAVEPOINT partner_notification_route");
+      this.reportPersistenceFailure(
+        error,
+        "write order partner notification route",
+      );
+      return null;
+    }
+  }
+
   async persistOrderWorkflow(
     executor: OwnedMobilityQueryExecutor,
     changes: PersistOwnedMobilityChanges,
   ) {
     await this.persistChangesWithExecutor(executor, changes);
+  }
+
+  /** The original queue is a trace-log stream. Serialize only one queue
+   * context, then read its committed events inside that same transaction. */
+  async withQueueCommand<T>(
+    context: { siteId: string; runtimeProfileCode: string; queueMode: string },
+    work: (executor: OwnedMobilityQueryExecutor) => Promise<T>,
+  ): Promise<T> {
+    return this.withTransaction(async (executor) => {
+      await executor.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [
+          JSON.stringify([
+            "dispatch-queue",
+            context.siteId,
+            context.runtimeProfileCode,
+            context.queueMode,
+          ]),
+        ],
+      );
+      return work(executor);
+    });
+  }
+
+  async loadQueueTraceLogs(
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+    siteId?: string,
+  ): Promise<DispatchTraceLogRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_dispatch_trace_logs
+       WHERE event_type IN ('queue.entry.created', 'queue.entry.closed')
+       ${siteId === undefined ? "" : "AND record->'details'->>'siteId' = $1"}
+       ORDER BY created_at, trace_id`,
+      siteId === undefined ? [] : [siteId],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DispatchTraceLogRecord>(
+        row.record,
+        "ops.phase1_dispatch_trace_logs",
+      ),
+    );
   }
 
   /**
@@ -1043,9 +1507,30 @@ export class OwnedMobilityRepository {
       `SELECT count(*) FROM ops.phase1_dispatch_assignments WHERE order_id = $1`,
       [orderId],
     );
+    // ROUTE-WRITE freezes this route only for authenticated referral bookings.
+    // Read it after the order lock, using the same transaction and durable
+    // ownership; caller-provided booking fields cannot opt into notifications.
+    const referralRoute =
+      current.order.runtimeProfileCode === "business_dispatch"
+        ? await executor.query<{ passenger_subject_ref: string }>(
+            `SELECT passenger_subject_ref
+             FROM mobility.phase1_order_partner_notification_routes
+             WHERE order_id = $1 AND tenant_id = $2 AND partner_id = $3
+               AND entry_slug = $4 AND drts_passenger_id = $5`,
+            [
+              orderId,
+              current.order.tenantId,
+              current.order.partnerId,
+              current.order.partnerEntrySlug,
+              current.order.passenger.passengerId,
+            ],
+          )
+        : null;
     return {
       order: current.order,
       assignmentVersion: Number(versions.rows[0]!.count),
+      referralPassengerSubjectRef:
+        referralRoute?.rows[0]?.passenger_subject_ref ?? null,
       assignment,
       task,
       dispatchJobs: jobs.rows.map((row) =>
@@ -1847,6 +2332,29 @@ export class OwnedMobilityRepository {
 
     for (const outbox of changes.consumerNotificationOutbox ?? []) {
       writes.push(async () => {
+        let assignmentVersion = outbox.assignmentVersion;
+        if (outbox.eventType === "eta_changed" && assignmentVersion === null) {
+          // ETA's task identifies its assignment, including a superseded one.
+          // Reuse that assignment event's durable generation, never the latest
+          // in-memory count (which could attach an old ETA to a replacement).
+          // Other profiles and pre-existing unversioned events stay unchanged.
+          const assignmentEvent = await executor.query<{
+            assignment_version: number;
+          }>(
+            `SELECT n.assignment_version
+             FROM ops.phase1_driver_tasks t
+             JOIN ops.phase1_owned_orders o ON o.order_id = t.order_id
+             JOIN mobility.phase1_order_partner_notification_routes r ON r.order_id = o.order_id
+             JOIN ops.consumer_notification_outbox n
+               ON n.outbox_id = 'referral-assignment:' || t.assignment_id
+              AND n.order_id = t.order_id
+             WHERE t.task_id = $1 AND t.order_id = $2
+               AND o.runtime_profile_code = 'business_dispatch'`,
+            [outbox.payload.taskId, outbox.orderId],
+          );
+          assignmentVersion =
+            assignmentEvent.rows[0]?.assignment_version ?? assignmentVersion;
+        }
         // Insert first: the unique key serializes concurrent retries of the
         // same event. Only the winner allocates; NOT EXISTS before an insert
         // can race and consume a sequence even when the insert is a no-op.
@@ -1877,7 +2385,7 @@ export class OwnedMobilityRepository {
             outbox.orderId,
             outbox.passengerSubjectRef,
             outbox.eventType,
-            outbox.assignmentVersion,
+            assignmentVersion,
             JSON.stringify(outbox.payload),
             outbox.status,
             outbox.attemptCount,

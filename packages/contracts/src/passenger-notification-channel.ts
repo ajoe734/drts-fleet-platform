@@ -67,7 +67,7 @@ export const FIRST_PARTY_NOTIFICATION_ROUTE_POLICY_VERSION =
  */
 export interface OrderFirstPartyNotificationRoute {
   orderId: string;
-  tenantId: string;
+  tenantId: string | null;
   drtsPassengerId: string;
   passengerSubjectRef: string;
   appId: string;
@@ -321,7 +321,9 @@ export interface FirstPartyPushNotificationText {
  */
 export interface FirstPartyPushWireData {
   notification_id: string;
-  event: PartnerPassengerNotificationExternalEvent;
+  event:
+    | PartnerPassengerNotificationExternalEvent
+    | "passenger.payment_recovery_required.v1";
   ride_ref: string;
   event_sequence: string;
   expires_at: string;

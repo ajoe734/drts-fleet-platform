@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { resolveReferralRequestUrl } from "../../../../lib/embed-request-origin";
 import {
   consumeReferralEmbedHandoffArtifact,
   getPartnerEntry,
@@ -15,11 +16,13 @@ export async function GET(request: Request) {
   if (!artifact || !entrySlug) {
     return NextResponse.json(
       { ok: false, message: "Missing required parameters." },
-      { status: 400 },
+      { status: 400, headers: { "Cache-Control": "no-store, max-age=0" } },
     );
   }
 
   try {
+    const publicRequestUrl = resolveReferralRequestUrl(url, request.headers);
+    if (!publicRequestUrl) throw new Error("Invalid request authority.");
     const partnerEntry = await getPartnerEntry(entrySlug);
     const entryHost = partnerEntry.entryHost;
     if (!entryHost) {
@@ -42,7 +45,10 @@ export async function GET(request: Request) {
 
     await writeReferralEmbedSession(session);
 
-    const redirectUrl = new URL(`/embed/${entrySlug}`, request.url);
+    const redirectUrl = new URL(
+      `/embed/${encodeURIComponent(entrySlug)}`,
+      publicRequestUrl,
+    );
     if (session.navigationContext) {
       redirectUrl.searchParams.set("screen", session.navigationContext.screen);
       redirectUrl.searchParams.set(
@@ -63,7 +69,10 @@ export async function GET(request: Request) {
     // reasoning; the mismatch check (current*) is the actual boundary.
     return new Response("Notification link is invalid or expired.", {
       status: 403,
-      headers: { "Content-Type": "text/plain" },
+      headers: {
+        "Content-Type": "text/plain",
+        "Cache-Control": "no-store, max-age=0",
+      },
     });
   }
 }

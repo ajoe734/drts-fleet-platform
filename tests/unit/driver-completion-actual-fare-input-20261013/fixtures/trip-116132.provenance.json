@@ -1,0 +1,9 @@
+{
+  "sourceCommit": "116132df18b6bc0b64bb3311a44a84697c653985",
+  "sourcePath": "apps/driver-app/app/trip.tsx",
+  "gitBlob": "22523caab023b326d7d86803ae434ae1216e35cc",
+  "sha256": "6ec2233056516651ba25e7109d57ab809117611831d7aae5f1037d3e7fd2cf9e",
+  "bytes": 76127,
+  "fixture": "trip-116132.tsx.source",
+  "extraction": "git show 116132df18b6bc0b64bb3311a44a84697c653985:apps/driver-app/app/trip.tsx (raw stdout; no edits or newline normalization)"
+}

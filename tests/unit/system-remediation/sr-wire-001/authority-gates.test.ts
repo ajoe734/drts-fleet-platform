@@ -29,7 +29,10 @@ function setup() {
   context.currentLocation!.recordedAt = NOW.toISOString();
   context.vehicleCapability.trainingRequired = true;
   const evaluator = new RuntimeEligibilityEvaluator(
-    { resolve: () => context } as never,
+    {
+      prepareMatchingSuppression: async () => false,
+      resolve: () => context,
+    } as never,
     undefined,
     undefined,
     academy,
@@ -82,7 +85,7 @@ describe("SR-WIRE-001 real feature authorities with in-memory repositories (no H
     await expect(f.shifts.clockIn({ driverId: "drv_1" })).rejects.toMatchObject(
       { code: "DRIVER_ON_LEAVE" },
     );
-    expect(f.shifts.listShifts()).toHaveLength(0);
+    expect(await f.shifts.listShifts()).toHaveLength(0);
     await expect(f.presence.setOnline("drv_1", "uber")).rejects.toMatchObject({
       code: "DRIVER_ON_LEAVE",
     });
@@ -121,7 +124,7 @@ describe("SR-WIRE-001 real feature authorities with in-memory repositories (no H
     await expect(
       shifts.clockIn({ driverId: "drv_1", vehicleId: "excluded-av" }),
     ).rejects.toMatchObject({ code: "VEHICLE_NOT_DISPATCHABLE" });
-    expect(shifts.listShifts()).toHaveLength(0);
+    expect(await shifts.listShifts()).toHaveLength(0);
   });
 
   it("uses current course attempts to block, recover after passing, and block again after expiry without changing vehicle capability", async () => {

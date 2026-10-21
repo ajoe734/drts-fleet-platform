@@ -218,11 +218,11 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
   // 2. Integration with TenantPartner Authority
   // ==========================================================================
   describe("2. Integration with TenantPartner Authority", () => {
-    it("maps authMode and tenant SLA when contract is linked to registered partner channel entry", () => {
+    it("maps authMode and tenant SLA when contract is linked to registered partner channel entry", async () => {
       const { regService, opViewService } = setupServices();
 
       // Create a contract linked to partner-bank-demo-001
-      const createdContract = regService.createContract({
+      const createdContract = await regService.createContract({
         vehicleId: "veh-demo-001",
         partnerId: "partner-bank-demo-001",
         partnerType: "bank_partner",
@@ -281,11 +281,11 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
   // 3. Status Distinction & No Fake Defaults (Acceptance: 未提供/不適用/未知分開)
   // ==========================================================================
   describe("3. Status Distinction & No Fake Defaults", () => {
-    it("strictly separates available, not_applicable, and missing_data without fake default numbers", () => {
+    it("strictly separates available, not_applicable, and missing_data without fake default numbers", async () => {
       const { regService, opViewService } = setupServices();
 
       // Contract with unknown/unconfigured service scope
-      const customContract = regService.createContract({
+      const customContract = await regService.createContract({
         vehicleId: "veh-demo-001",
         partnerId: "partner-unconfigured-corp",
         partnerType: "enterprise_partner",
@@ -330,10 +330,10 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
       expect(terms.slaProfileCode).toBeNull();
     });
 
-    it("distinguishes not_applicable for individual_owner / fleet_partner contracts", () => {
+    it("distinguishes not_applicable for individual_owner / fleet_partner contracts", async () => {
       const { regService, opViewService } = setupServices();
 
-      const fleetContract = regService.createContract({
+      const fleetContract = await regService.createContract({
         vehicleId: "veh-demo-001",
         partnerId: "fleet-demo-001",
         partnerType: "fleet_partner",
@@ -358,10 +358,10 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
   // 4. Traceable Lifecycle & Version Tracking (Acceptance: 可追溯版本)
   // ==========================================================================
   describe("4. Traceable Lifecycle & Version Tracking", () => {
-    it("advances versionTag and effectiveFrom upon contract activation / update", () => {
+    it("advances versionTag and effectiveFrom upon contract activation / update", async () => {
       const { regService, opViewService } = setupServices();
 
-      const newContract = regService.createContract({
+      const newContract = await regService.createContract({
         vehicleId: "veh-demo-001",
         partnerId: "partner-demo-004",
         partnerType: "enterprise_partner",
@@ -383,7 +383,7 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
 
       // Activate contract with a newer timestamp
       const activatedAt = "2026-02-15T10:00:00.000Z";
-      regService.activateContract(newContract.contractId, {
+      await regService.activateContract(newContract.contractId, {
         approvedAt: activatedAt,
         approvedBy: "ops-lead-001",
       });
@@ -446,11 +446,11 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
       }
     });
 
-    it("forbids contract access across mismatched tenant scopes", () => {
+    it("forbids contract access across mismatched tenant scopes", async () => {
       const { regService, opViewService } = setupServices();
 
       // Create a contract with partner-bank-demo-001 (which belongs to DEMO_TENANT_ID)
-      const contract = regService.createContract({
+      const contract = await regService.createContract({
         vehicleId: "veh-demo-001",
         partnerId: "partner-bank-demo-001",
         partnerType: "bank_partner",
@@ -576,11 +576,7 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
 
       // Mismatched scope in controller must throw 403
       expect(() =>
-        controller.getContract(
-          "contract-demo-001",
-          undefined,
-          "partner-wrong",
-        ),
+        controller.getContract("contract-demo-001", undefined, "partner-wrong"),
       ).toThrow(ApiRequestError);
     });
   });
@@ -617,10 +613,7 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
 
     const openapiDoc = YAML.parse(fs.readFileSync(openapiPath, "utf8"));
     for (const [name, s] of Object.entries(openapiDoc.components.schemas)) {
-      ajv.addSchema(
-        transformOpenApiToAjv(s),
-        `#/components/schemas/${name}`,
-      );
+      ajv.addSchema(transformOpenApiToAjv(s), `#/components/schemas/${name}`);
     }
 
     const validateView = ajv.getSchema(
@@ -645,7 +638,11 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
 
     it("validates all service-generated ContractOperationalViewRecords against OpenAPI schema", () => {
       const { opViewService, controller } = setupServices();
-      const contracts = ["contract-demo-001", "contract-demo-004", "contract-av-demo-001"];
+      const contracts = [
+        "contract-demo-001",
+        "contract-demo-004",
+        "contract-av-demo-001",
+      ];
 
       for (const cid of contracts) {
         const view = opViewService.getOperationalView(cid);
@@ -659,7 +656,10 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
         const viewEnv = controller.getContractOperationalView(cid);
         const validEnv = validateViewEnvelope(viewEnv);
         if (!validEnv) {
-          console.error("ViewEnvelope validation errors:", validateViewEnvelope.errors);
+          console.error(
+            "ViewEnvelope validation errors:",
+            validateViewEnvelope.errors,
+          );
         }
         expect(validEnv).toBe(true);
       }
@@ -667,7 +667,11 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
 
     it("validates all service-generated ContractOperationalTerms against OpenAPI schema", () => {
       const { opViewService, controller } = setupServices();
-      const contracts = ["contract-demo-001", "contract-demo-004", "contract-av-demo-001"];
+      const contracts = [
+        "contract-demo-001",
+        "contract-demo-004",
+        "contract-av-demo-001",
+      ];
 
       for (const cid of contracts) {
         const terms = opViewService.getOperationalTerms(cid);
@@ -681,7 +685,10 @@ describe("SR-CONTRACT-READ-001: Ops 合約 read model 補真營運條款", () =>
         const termsEnv = controller.getContractOperationalTerms(cid);
         const validEnv = validateTermsEnvelope(termsEnv);
         if (!validEnv) {
-          console.error("TermsEnvelope validation errors:", validateTermsEnvelope.errors);
+          console.error(
+            "TermsEnvelope validation errors:",
+            validateTermsEnvelope.errors,
+          );
         }
         expect(validEnv).toBe(true);
       }

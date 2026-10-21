@@ -10,6 +10,32 @@ export function resolveAuthoritativeShellEnv(locale: Locale = "zh"): string {
 }
 
 const en = {
+  "platformNotice.section": "Platform notices",
+  "platformNotice.read": "Read",
+  "platformNotice.markRead": "Mark as read",
+  "platformNotice.readNotAcknowledged": "Read was not acknowledged",
+  "passengers.form.reason": "Reason",
+  "passengers.form.save": "Save",
+  "passengers.form.saving": "Saving…",
+  "passengers.form.cancel": "Cancel",
+  "passengers.form.close": "Close",
+  "passengers.form.confirm.deactivate":
+    "Deactivate this passenger? Existing bookings and passenger history will remain available.",
+  "passengers.form.confirm.reactivate":
+    "Reactivate this passenger so they can be selected for new bookings.",
+  "passengers.form.unavailable":
+    "This action is currently unavailable. Refresh the directory to check the latest passenger status.",
+  "passengers.form.notFound":
+    "This passenger is no longer available. Refresh the directory and select a passenger again.",
+  "passengers.form.nameRequired": "Enter the passenger name.",
+  "passengers.form.reasonRequired": "Enter a reason for this change.",
+  "passengers.form.failed":
+    "Unable to save the passenger. Your entries have been kept; please try again.",
+  "passengers.form.success.create": "Passenger created.",
+  "passengers.form.success.edit": "Passenger updated.",
+  "passengers.form.success.deactivate":
+    "Passenger deactivated. Existing bookings and history are retained.",
+  "passengers.form.success.reactivate": "Passenger reactivated.",
   "invoices.mail.title": "Invoice email",
   "invoices.mail.recipient":
     "Send to the billing contact saved for this tenant. Retries keep the original recipient.",
@@ -3312,6 +3338,17 @@ const en = {
 
   // ── billing (i18n-fullsweep 20260614) ──
 
+  "billing.form.email": "Billing email",
+  "billing.form.save": "Save billing profile",
+  "billing.form.saving": "Saving…",
+  "billing.form.reset": "Reset changes",
+  "billing.form.required": "Enter the invoice title and billing email.",
+  "billing.form.saved": "Billing profile saved.",
+  "billing.form.failed":
+    "Unable to save the billing profile. Your entries have been kept; please try again.",
+  "billing.form.unavailable":
+    "Billing profile editing is currently unavailable.",
+  "billing.form.open": "Open billing profile",
   "billing.action.editProfile": "Edit billing profile",
   "billing.action.openInvoices": "Open invoices",
   "billing.action.refresh": "Refresh",
@@ -3444,7 +3481,7 @@ const en = {
   "passengers.detail.updatedAt": "Updated at",
   "passengers.detail.availableActions": "Available actions",
   "passengers.detail.actionsHelp":
-    "CTAs are driven by `availableActions` when present. This page falls back to spec-safe disabled affordances until the mutation route is wired.",
+    "Create or update passenger details here. Unavailable actions display the reason supplied by the service.",
   "passengers.detail.softDeactivateHelp":
     "Q-TEN06: passenger deactivation is soft-only. Existing bookings retain their snapshot; inactive records disappear from pickers but stay visible in historical detail.",
   "passengers.detail.deepLinks": "Deep links",
@@ -4111,6 +4148,30 @@ const en = {
 } as const;
 
 const zh: Record<keyof typeof en, string> = {
+  "platformNotice.section": "平台公告",
+  "platformNotice.read": "已讀",
+  "platformNotice.markRead": "標示已讀",
+  "platformNotice.readNotAcknowledged": "讀取未獲確認",
+  "passengers.form.reason": "原因",
+  "passengers.form.save": "儲存",
+  "passengers.form.saving": "儲存中…",
+  "passengers.form.cancel": "取消",
+  "passengers.form.close": "關閉",
+  "passengers.form.confirm.deactivate":
+    "確定停用這位乘客？既有預約與乘客歷史資料會保留。",
+  "passengers.form.confirm.reactivate":
+    "重新啟用這位乘客，讓建立預約時可以再次選取。",
+  "passengers.form.unavailable":
+    "目前無法執行此操作，請重新整理清單確認乘客最新狀態。",
+  "passengers.form.notFound": "找不到這位乘客，請重新整理清單並再次選取。",
+  "passengers.form.nameRequired": "請填寫乘客姓名。",
+  "passengers.form.reasonRequired": "請填寫這次變更的原因。",
+  "passengers.form.failed": "無法儲存乘客資料。已保留填寫內容，請稍後重試。",
+  "passengers.form.success.create": "已新增乘客。",
+  "passengers.form.success.edit": "已更新乘客資料。",
+  "passengers.form.success.deactivate":
+    "已停用乘客，既有預約與歷史資料已保留。",
+  "passengers.form.success.reactivate": "已重新啟用乘客。",
   "invoices.mail.title": "帳單寄信",
   "invoices.mail.recipient":
     "寄送至此租戶已儲存的帳務聯絡信箱。重試沿用首次收件人。",
@@ -7200,6 +7261,15 @@ const zh: Record<keyof typeof en, string> = {
 
   // ── billing (i18n-fullsweep 20260614) ──
 
+  "billing.form.email": "帳務電子郵件",
+  "billing.form.save": "儲存帳務資料",
+  "billing.form.saving": "儲存中…",
+  "billing.form.reset": "還原變更",
+  "billing.form.required": "請填寫發票抬頭與帳務電子郵件。",
+  "billing.form.saved": "已儲存帳務資料。",
+  "billing.form.failed": "無法儲存帳務資料。已保留填寫內容，請稍後重試。",
+  "billing.form.unavailable": "目前無法編輯帳務資料。",
+  "billing.form.open": "開啟帳務資料",
   "billing.action.editProfile": "編輯帳務資料",
   "billing.action.openInvoices": "前往發票",
   "billing.action.refresh": "重新整理",
@@ -7328,7 +7398,7 @@ const zh: Record<keyof typeof en, string> = {
   "passengers.detail.updatedAt": "更新時間",
   "passengers.detail.availableActions": "可用操作",
   "passengers.detail.actionsHelp":
-    "若後端提供 `availableActions`，CTA 會直接採用；在 mutation 路由接上前，頁面會退回符合規格的 disabled 呈現。",
+    "可在此新增或更新乘客資料；無法使用的操作會顯示服務提供的原因。",
   "passengers.detail.softDeactivateHelp":
     "Q-TEN06：乘客僅能軟停用。既有訂單保留當下快照；停用後會從選擇器移除，但仍保留在歷史明細中。",
   "passengers.detail.deepLinks": "深連結",

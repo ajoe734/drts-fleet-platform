@@ -427,6 +427,69 @@ export class PrivilegedRoleGovernanceService {
     }
   }
 
+  /** The same tenant person may be named by an existing legacy user ID,
+   * canonical principal, or an explicitly targeted membership. Resolve only
+   * the repository's existing mirror; never create identity links here. */
+  private async approvalPartyReferences(
+    userId: string | null | undefined,
+    tenantId: string | null,
+    membershipId?: string | null,
+    client?: PoolClient,
+  ): Promise<Set<string>> {
+    const references = new Set<string>();
+    if (userId) references.add(userId);
+    if (!this.identityRepository) return references;
+    const resolvedMembershipId =
+      membershipId ??
+      (userId
+        ? await this.identityRepository.findMembershipIdForLegacyTenantUser(
+            userId,
+            client,
+          )
+        : null);
+    if (resolvedMembershipId) {
+      const membership = await this.identityRepository.findMembershipById(
+        resolvedMembershipId,
+        client,
+      );
+      if (membership?.realm === "tenant" && membership.tenantId === tenantId) {
+        references.add(membership.principalId);
+        const source = /^tenant_user_role:(.+):membership$/.exec(
+          membership.sourceRef ?? "",
+        );
+        if (source?.[1]) references.add(source[1]);
+      }
+    }
+    return references;
+  }
+
+  private async isApprovalParty(
+    request: PrivilegedRoleApprovalRequestRecord,
+    identity: IdentityContext,
+    client?: PoolClient,
+  ): Promise<boolean> {
+    const actor = await this.approvalPartyReferences(
+      identity.actorId,
+      request.tenantId,
+      identity.membershipId,
+      client,
+    );
+    if (identity.principalId) actor.add(identity.principalId);
+    const requester = await this.approvalPartyReferences(
+      request.requesterPrincipalId,
+      request.tenantId,
+      undefined,
+      client,
+    );
+    const target = await this.approvalPartyReferences(
+      request.targetUserId,
+      request.tenantId,
+      request.targetMembershipId,
+      client,
+    );
+    return [...requester, ...target].some((reference) => actor.has(reference));
+  }
+
   private async fetchActiveGrantsForTenant(
     tenantId: string | null,
     client?: PoolClient,
@@ -454,16 +517,27 @@ export class PrivilegedRoleGovernanceService {
     requestedRoleCode: string,
     tenantId: string | null,
     client?: PoolClient,
+    targetMembershipId?: string | null,
   ): Promise<void> {
     const activeGrants = await this.fetchActiveGrantsForTenant(
       tenantId,
       client,
     );
-    const userGrants = activeGrants.filter(
-      (g) => g.targetUserId === targetUserId,
+    const target = await this.approvalPartyReferences(
+      targetUserId,
+      tenantId,
+      targetMembershipId,
+      client,
     );
-
-    for (const grant of userGrants) {
+    for (const grant of activeGrants) {
+      const grantedTarget = await this.approvalPartyReferences(
+        grant.targetUserId,
+        tenantId,
+        grant.targetMembershipId,
+        client,
+      );
+      if (![...grantedTarget].some((reference) => target.has(reference)))
+        continue;
       if (areRolesIncompatible(requestedRoleCode, grant.roleCode)) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -588,6 +662,7 @@ export class PrivilegedRoleGovernanceService {
         command.roleCode.trim(),
         tenantId,
         client,
+        command.targetMembershipId,
       );
 
       const now = new Date().toISOString();
@@ -638,7 +713,10 @@ export class PrivilegedRoleGovernanceService {
         targetMembershipId: command.targetMembershipId ?? null,
         targetEmail: command.targetEmail ?? null,
         requestedRoleCode: command.roleCode.trim(),
-        requesterPrincipalId: requesterIdentity.actorId ?? "unknown_requester",
+        requesterPrincipalId:
+          requesterIdentity.principalId ??
+          requesterIdentity.actorId ??
+          "unknown_requester",
         requesterActorType: requesterIdentity.actorType,
         reason: command.reason.trim(),
         status: "pending",
@@ -825,10 +903,7 @@ export class PrivilegedRoleGovernanceService {
       }
 
       // 2. Separation of Duties (SoD) - Requester or target user cannot approve own grant
-      if (
-        request.requesterPrincipalId === approverIdentity.actorId ||
-        request.targetUserId === approverIdentity.actorId
-      ) {
+      if (await this.isApprovalParty(request, approverIdentity, client)) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
           "IAM_SOD_VIOLATION",
@@ -848,6 +923,7 @@ export class PrivilegedRoleGovernanceService {
         request.requestedRoleCode,
         request.tenantId,
         client,
+        request.targetMembershipId,
       );
 
       const now = new Date().toISOString();
@@ -919,7 +995,8 @@ export class PrivilegedRoleGovernanceService {
       const previousRequestState = { ...request };
       request.status = "approved";
       request.approvalDecision = "approve";
-      request.approverPrincipalId = approverIdentity.actorId;
+      request.approverPrincipalId =
+        approverIdentity.principalId ?? approverIdentity.actorId;
       request.decidedAt = now;
       request.version += 1;
       request.updatedAt = now;
@@ -936,7 +1013,8 @@ export class PrivilegedRoleGovernanceService {
         targetUserId: request.targetUserId,
         targetMembershipId: request.targetMembershipId ?? null,
         roleCode: request.requestedRoleCode,
-        grantedByPrincipalId: approverIdentity.actorId,
+        grantedByPrincipalId:
+          approverIdentity.principalId ?? approverIdentity.actorId,
         approvalId: request.requestId,
         validFrom: request.validFrom,
         validTo: request.validTo ?? null,
@@ -1124,10 +1202,7 @@ export class PrivilegedRoleGovernanceService {
       }
 
       // Separation of Duties (SoD) - Requester or target user cannot reject own request
-      if (
-        request.requesterPrincipalId === rejectorIdentity.actorId ||
-        request.targetUserId === rejectorIdentity.actorId
-      ) {
+      if (await this.isApprovalParty(request, rejectorIdentity, client)) {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
           "IAM_SOD_VIOLATION",
@@ -1145,7 +1220,8 @@ export class PrivilegedRoleGovernanceService {
       const previousRequestState = { ...request };
       request.status = "rejected";
       request.approvalDecision = "reject";
-      request.approverPrincipalId = rejectorIdentity.actorId;
+      request.approverPrincipalId =
+        rejectorIdentity.principalId ?? rejectorIdentity.actorId;
       request.decidedAt = now;
       request.version += 1;
       request.updatedAt = now;
@@ -1434,6 +1510,7 @@ export class PrivilegedRoleGovernanceService {
                 grant.roleCode,
                 grant.tenantId,
                 client,
+                grant.targetMembershipId,
               );
 
               grant.status = "active";

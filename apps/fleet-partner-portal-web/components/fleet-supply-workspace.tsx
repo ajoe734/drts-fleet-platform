@@ -1,6 +1,13 @@
 "use client";
 
-import { putFleetDocument } from "../lib/fleet-document-upload";
+import {
+  createFleetDocumentError,
+  executeStagedFleetUpload,
+  fleetMutationHeaders,
+  putFleetDocument,
+  type FleetDocumentUploadIntent,
+  type FleetStagedUploadSession,
+} from "../lib/fleet-document-upload";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -204,19 +211,21 @@ function camelizeDeep<T>(value: unknown): T {
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = fleetMutationHeaders(init ?? {});
+  if (!headers.has("content-type"))
+    headers.set("content-type", "application/json");
   const response = await fetch(`/control-plane-proxy/${path}`, {
     ...init,
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
-  const payload = camelizeDeep<ApiEnvelope<T> | { error: { message: string } }>(
-    await response.json(),
-  );
+  const payload = camelizeDeep<
+    ApiEnvelope<T> | { error: { code?: string; message: string } }
+  >(await response.json());
   if (!response.ok || !("data" in payload)) {
-    throw new Error(
+    throw createFleetDocumentError(
       "error" in payload ? payload.error.message : `HTTP ${response.status}`,
+      response.status,
+      "error" in payload ? payload.error.code : undefined,
     );
   }
   return payload.data;
@@ -1742,8 +1751,117 @@ export function SupplySubmissionDetailView({
     : VEHICLE_DOC_TYPES;
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
 
+  const prevInitialDetailRef = useRef(initialDetail);
+  const prevDetailRef = useRef(detail);
+  const uploadSessionRef = useRef<
+    | FleetStagedUploadSession<
+        FleetDocumentUploadIntent & { submissionId: string; objectKey: string }
+      >
+    | undefined
+  >(undefined);
+  const uploadInFlightRef = useRef(false);
+  const uploadEpochRef = useRef(0);
+  const mountedRef = useRef(true);
+  const activeSubmissionIdRef = useRef(detail.submission.submissionId);
+  const revisionNoRef = useRef(detail.submission.revisionNo);
+  const editableRef = useRef(editable);
+  if (prevDetailRef.current !== detail) {
+    prevDetailRef.current = detail;
+    revisionNoRef.current = detail.submission.revisionNo;
+    editableRef.current = editable;
+  } else if (!editable) {
+    editableRef.current = false;
+  }
+  const docFileRef = useRef<File | null>(docFile);
+  docFileRef.current = docFile;
+  const docTypeRef = useRef<string>(docType);
+  docTypeRef.current = docType;
+
+  if (prevInitialDetailRef.current !== initialDetail) {
+    const prevDetail = prevInitialDetailRef.current;
+    prevInitialDetailRef.current = initialDetail;
+    prevDetailRef.current = initialDetail;
+    const switchedSubmission =
+      prevDetail.submission.submissionId !==
+        initialDetail.submission.submissionId ||
+      activeSubmissionIdRef.current !== initialDetail.submission.submissionId;
+    const nextEditable = isEditableStatus(initialDetail.submission.status);
+    activeSubmissionIdRef.current = initialDetail.submission.submissionId;
+    revisionNoRef.current = initialDetail.submission.revisionNo;
+    editableRef.current = nextEditable;
+    setDetail(initialDetail);
+    setDriverForm(
+      initialDetail.driverDraft
+        ? {
+            ...initialDetail.driverDraft,
+            preferredVehicleSubmissionId:
+              initialDetail.driverDraft.preferredVehicleSubmissionId ?? null,
+          }
+        : null,
+    );
+    setVehicleForm(
+      initialDetail.vehicleDraft
+        ? {
+            ...initialDetail.vehicleDraft,
+            currentDriverSubmissionId:
+              initialDetail.vehicleDraft.currentDriverSubmissionId ?? null,
+          }
+        : null,
+    );
+    if (switchedSubmission) {
+      const nextDocType = initialDetail.driverDraft
+        ? DRIVER_DOC_TYPES[0]
+        : VEHICLE_DOC_TYPES[0];
+      uploadEpochRef.current += 1;
+      uploadSessionRef.current = undefined;
+      uploadInFlightRef.current = false;
+      docTypeRef.current = nextDocType;
+      docFileRef.current = null;
+      setBusy(null);
+      setError(null);
+      setDocType(nextDocType);
+      setDocFrom("");
+      setDocUntil("");
+      setDocFile(null);
+    } else if (!nextEditable) {
+      uploadEpochRef.current += 1;
+      uploadSessionRef.current = undefined;
+      uploadInFlightRef.current = false;
+      setBusy((current) => (current === "upload" ? null : current));
+    }
+  }
+  if (activeSubmissionIdRef.current !== detail.submission.submissionId) {
+    activeSubmissionIdRef.current = detail.submission.submissionId;
+    uploadEpochRef.current += 1;
+    uploadSessionRef.current = undefined;
+    uploadInFlightRef.current = false;
+    if (busy === "upload") {
+      setBusy(null);
+    }
+  }
+  if (
+    !editable &&
+    (uploadInFlightRef.current ||
+      uploadSessionRef.current !== undefined ||
+      busy === "upload")
+  ) {
+    uploadEpochRef.current += 1;
+    uploadSessionRef.current = undefined;
+    uploadInFlightRef.current = false;
+    if (busy === "upload") {
+      setBusy(null);
+    }
+  }
+
   useEffect(() => {
+    mountedRef.current = true;
     setHydrated(true);
+    return () => {
+      mountedRef.current = false;
+      uploadEpochRef.current += 1;
+      uploadSessionRef.current = undefined;
+      uploadInFlightRef.current = false;
+    };
   }, []);
 
   const setDriverDraftSafe: Dispatch<SetStateAction<DriverDraftInput>> = (
@@ -1772,9 +1890,17 @@ export function SupplySubmissionDetailView({
   };
 
   async function refreshDetail() {
+    const targetSubmissionId = activeSubmissionIdRef.current;
     const next = await apiRequest<SupplySubmissionDetail>(
-      `fleet-partner/supply-submissions/${detail.submission.submissionId}`,
+      `fleet-partner/supply-submissions/${targetSubmissionId}`,
     );
+    if (
+      !mountedRef.current ||
+      activeSubmissionIdRef.current !== targetSubmissionId
+    ) {
+      return;
+    }
+    revisionNoRef.current = next.submission.revisionNo;
     setDetail(next);
     setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
     setVehicleForm(next.vehicleDraft ? { ...next.vehicleDraft } : null);
@@ -1782,14 +1908,32 @@ export function SupplySubmissionDetailView({
   }
 
   async function runAction(label: string, work: () => Promise<void>) {
+    if (label === "upload") {
+      if (uploadInFlightRef.current) return;
+      uploadInFlightRef.current = true;
+    }
+    const startEpoch = uploadEpochRef.current;
     setBusy(label);
     setError(null);
     try {
       await work();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (
+        mountedRef.current &&
+        (label !== "upload" || uploadEpochRef.current === startEpoch)
+      ) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
-      setBusy(null);
+      if (label === "upload" && uploadEpochRef.current === startEpoch) {
+        uploadInFlightRef.current = false;
+      }
+      if (
+        mountedRef.current &&
+        (label !== "upload" || uploadEpochRef.current === startEpoch)
+      ) {
+        setBusy((current) => (current === label ? null : current));
+      }
     }
   }
 
@@ -1821,6 +1965,9 @@ export function SupplySubmissionDetailView({
   }
 
   async function submitSubmission() {
+    uploadEpochRef.current += 1;
+    uploadSessionRef.current = undefined;
+    uploadInFlightRef.current = false;
     await apiRequest<SupplySubmissionDetail>(
       `fleet-partner/supply-submissions/${detail.submission.submissionId}/submit`,
       {
@@ -1834,6 +1981,9 @@ export function SupplySubmissionDetailView({
   }
 
   async function withdrawSubmission() {
+    uploadEpochRef.current += 1;
+    uploadSessionRef.current = undefined;
+    uploadInFlightRef.current = false;
     await apiRequest<SupplySubmissionDetail>(
       `fleet-partner/supply-submissions/${detail.submission.submissionId}/withdraw`,
       {
@@ -1847,53 +1997,140 @@ export function SupplySubmissionDetailView({
   }
 
   async function uploadDocument() {
-    if (!docFile) {
+    const currentFile = docFile;
+    if (!currentFile) {
       throw new Error(t("supply.error.selectFile"));
     }
-    const uploadIntent = await apiRequest<{
-      submissionId: string;
-      objectKey: string;
-      uploadUrl: string;
-      method: string;
-      headers: Record<string, string>;
-    }>(
-      `fleet-partner/supply-submissions/${detail.submission.submissionId}/documents/upload-url`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          expectedRevisionNo: detail.submission.revisionNo,
-          documentType: docType,
-          originalFileName: docFile.name,
-          contentType: docFile.type || "application/octet-stream",
-        }),
+    const targetSubmissionId = detail.submission.submissionId;
+    const targetDocType = docType;
+    const targetFrom = docFrom || null;
+    const targetUntil = docUntil || null;
+    const contentType = currentFile.type || "application/octet-stream";
+    const startEpoch = uploadEpochRef.current;
+
+    const isOperationActive = () =>
+      mountedRef.current &&
+      editableRef.current &&
+      activeSubmissionIdRef.current === targetSubmissionId &&
+      uploadEpochRef.current === startEpoch &&
+      docFileRef.current === currentFile &&
+      docTypeRef.current === targetDocType;
+
+    const scopeKey = `${targetSubmissionId}:${targetDocType}:${currentFile.name}:${currentFile.size}:${contentType}`;
+    let verifiedDetail: SupplySubmissionDetail | null = null;
+
+    await executeStagedFleetUpload({
+      file: currentFile,
+      scopeKey,
+      getSession: () => uploadSessionRef.current,
+      setSession: (nextSession) => {
+        if (!isOperationActive()) return;
+        uploadSessionRef.current = nextSession;
       },
-    );
-    await putFleetDocument(uploadIntent, docFile);
-    const checksumSha256 = await hashFile(docFile);
-    await apiRequest<SupplyDocumentRecord>(
-      `fleet-partner/supply-submissions/${detail.submission.submissionId}/documents/confirm`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          expectedRevisionNo: detail.submission.revisionNo,
-          documentType: docType,
-          objectKey: uploadIntent.objectKey,
-          originalFileName: docFile.name,
-          contentType: docFile.type || "application/octet-stream",
-          fileSize: docFile.size,
-          checksumSha256,
-          effectiveFrom: docFrom || null,
-          effectiveUntil: docUntil || null,
-        }),
+      isActive: isOperationActive,
+      createIntent: () =>
+        apiRequest<
+          FleetDocumentUploadIntent & {
+            submissionId: string;
+            objectKey: string;
+          }
+        >(
+          `fleet-partner/supply-submissions/${targetSubmissionId}/documents/upload-url`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              expectedRevisionNo: revisionNoRef.current,
+              documentType: targetDocType,
+              originalFileName: currentFile.name,
+              contentType,
+            }),
+          },
+        ),
+      putContent: (intent, file) => putFleetDocument(intent, file),
+      readCanonical: async (intent) => {
+        const next = await apiRequest<SupplySubmissionDetail>(
+          `fleet-partner/supply-submissions/${targetSubmissionId}`,
+        );
+        if (!isOperationActive()) {
+          return null;
+        }
+        revisionNoRef.current = next.submission.revisionNo;
+        const matched = next.documents.find(
+          (doc) => doc.fileObjectKey === intent.objectKey,
+        );
+        if (matched) {
+          verifiedDetail = next;
+          return matched;
+        }
+        if (!isEditableStatus(next.submission.status)) {
+          editableRef.current = false;
+          uploadEpochRef.current += 1;
+          uploadSessionRef.current = undefined;
+          uploadInFlightRef.current = false;
+          setBusy((current) => (current === "upload" ? null : current));
+          setDetail(next);
+          setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
+          setVehicleForm(next.vehicleDraft ? { ...next.vehicleDraft } : null);
+        }
+        return null;
       },
-    );
-    setDocFile(null);
-    setDocFrom("");
-    setDocUntil("");
-    await refreshDetail();
+      confirmUpload: async (intent) => {
+        const checksumSha256 = await hashFile(currentFile);
+        if (!isOperationActive()) {
+          return {} as SupplyDocumentRecord;
+        }
+        return apiRequest<SupplyDocumentRecord>(
+          `fleet-partner/supply-submissions/${targetSubmissionId}/documents/confirm`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              expectedRevisionNo: revisionNoRef.current,
+              documentType: targetDocType,
+              objectKey: intent.objectKey,
+              originalFileName: currentFile.name,
+              contentType,
+              fileSize: currentFile.size,
+              checksumSha256,
+              effectiveFrom: targetFrom,
+              effectiveUntil: targetUntil,
+            }),
+          },
+        );
+      },
+      finalizeResult: async (_confirmedDoc, intent) => {
+        const next =
+          verifiedDetail ??
+          (await apiRequest<SupplySubmissionDetail>(
+            `fleet-partner/supply-submissions/${targetSubmissionId}`,
+          ));
+        if (!isOperationActive()) return;
+        const matched = next.documents.some(
+          (doc) => doc.fileObjectKey === intent.objectKey,
+        );
+        if (!matched) {
+          throw createFleetDocumentError(
+            "文件正本讀回尚未就緒，請重試確認",
+            503,
+            "DOCUMENT_READBACK_UNVERIFIED",
+          );
+        }
+        revisionNoRef.current = next.submission.revisionNo;
+        setDetail(next);
+        setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
+        setVehicleForm(next.vehicleDraft ? { ...next.vehicleDraft } : null);
+        setDocFile(null);
+        docFileRef.current = null;
+        setDocFrom("");
+        setDocUntil("");
+        await Promise.resolve(router.refresh());
+      },
+    });
   }
 
   async function deleteDocument(documentId: string) {
+    uploadEpochRef.current += 1;
+    uploadSessionRef.current = undefined;
+    uploadInFlightRef.current = false;
     await apiRequest<{ deleted: true }>(
       `fleet-partner/supply-submissions/${detail.submission.submissionId}/documents/${documentId}`,
       {
@@ -2158,7 +2395,19 @@ export function SupplySubmissionDetailView({
               <FieldSelect
                 id="upload-doc-type"
                 value={docType}
-                onChange={(e) => setDocType(e.currentTarget.value)}
+                onChange={(e) => {
+                  const nextType = e.currentTarget.value;
+                  if (nextType !== docTypeRef.current) {
+                    docTypeRef.current = nextType;
+                    uploadEpochRef.current += 1;
+                    uploadSessionRef.current = undefined;
+                    uploadInFlightRef.current = false;
+                    setBusy((current) =>
+                      current === "upload" ? null : current,
+                    );
+                  }
+                  setDocType(nextType);
+                }}
                 options={documentOptions.map((value) => ({
                   value,
                   label: t(DOCUMENT_LABEL_KEYS[value] ?? value),
@@ -2173,7 +2422,19 @@ export function SupplySubmissionDetailView({
               <input
                 id="upload-file"
                 type="file"
-                onChange={(e) => setDocFile(e.currentTarget.files?.[0] ?? null)}
+                onChange={(e) => {
+                  const nextFile = e.currentTarget.files?.[0] ?? null;
+                  if (nextFile !== docFileRef.current || nextFile === null) {
+                    docFileRef.current = nextFile;
+                    uploadEpochRef.current += 1;
+                    uploadSessionRef.current = undefined;
+                    uploadInFlightRef.current = false;
+                    setBusy((current) =>
+                      current === "upload" ? null : current,
+                    );
+                  }
+                  setDocFile(nextFile);
+                }}
               />
             </FormField>
             <FormField
@@ -2242,7 +2503,7 @@ export function SupplySubmissionDetailView({
 
 async function hashFile(file: File) {
   const bytes = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");

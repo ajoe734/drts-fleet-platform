@@ -1,0 +1,118 @@
+name: Production protected read-only inventory
+
+# Source preparation is not a launch/readiness gate. Supervisor must dispatch a
+# normally reviewed/CI/protected-merged source on a never-rewritten release/*
+# branch allowed by the existing production environment; real human review stays.
+on:
+  workflow_dispatch:
+    inputs:
+      definition_sha:
+        description: Full immutable inspector definition SHA, equal to the dispatch SHA
+        required: true
+        type: string
+      expected_product_sha:
+        description: Full expected product SHA for investigation; never an installed-runtime assertion
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: production-readonly-inventory
+  cancel-in-progress: false
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      INVENTORY_ENVIRONMENT: production
+      DEFINITION_SHA: ${{ inputs.definition_sha }}
+      EXPECTED_PRODUCT_SHA: ${{ inputs.expected_product_sha }}
+      PROD_DEPLOYER_IDENTITY: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
+      PROD_GCP_PROJECT_ID: ${{ vars.PROD_GCP_PROJECT_ID }}
+      PROD_GCP_REGION: ${{ vars.PROD_GCP_REGION }}
+      PROD_GCP_CLOUDSQL_INSTANCE: ${{ vars.PROD_GCP_CLOUDSQL_INSTANCE }}
+      PROD_GCP_RUNTIME_SERVICE_ACCOUNT: ${{ vars.PROD_GCP_RUNTIME_SERVICE_ACCOUNT }}
+      PROD_GCP_MIGRATION_JOB: ${{ vars.PROD_GCP_MIGRATION_JOB }}
+      PROD_SECRET_PREFIX: ${{ vars.PROD_SECRET_PREFIX }}
+      PROD_ARTIFACT_REGISTRY: ${{ vars.PROD_ARTIFACT_REGISTRY }}
+      PROD_ARTIFACT_REGION: ${{ vars.PROD_ARTIFACT_REGION }}
+      PROD_ARTIFACT_PROJECT_ID: ${{ vars.PROD_ARTIFACT_PROJECT_ID }}
+      PROD_ARTIFACT_REPOSITORY: ${{ vars.PROD_ARTIFACT_REPOSITORY }}
+      PROD_MAP_PROVIDER_BACKEND: ${{ vars.PROD_MAP_PROVIDER_BACKEND }}
+      PROD_DOCUMENT_ARTIFACT_STORAGE_PROVIDER: ${{ vars.PROD_DOCUMENT_ARTIFACT_STORAGE_PROVIDER }}
+      PROD_REMITTANCE_PROOF_STORAGE_PROVIDER: ${{ vars.PROD_REMITTANCE_PROOF_STORAGE_PROVIDER }}
+      PROD_PUBLIC_ENTRY_CONFIG_JSON: ${{ vars.PROD_PUBLIC_ENTRY_CONFIG_JSON }}
+      PROD_GCP_API_SERVICE: ${{ vars.PROD_GCP_API_SERVICE }}
+      PROD_GCP_PLATFORM_ADMIN_SERVICE: ${{ vars.PROD_GCP_PLATFORM_ADMIN_SERVICE }}
+      PROD_GCP_OPS_CONSOLE_SERVICE: ${{ vars.PROD_GCP_OPS_CONSOLE_SERVICE }}
+      PROD_GCP_FLEET_PARTNER_PORTAL_SERVICE: ${{ vars.PROD_GCP_FLEET_PARTNER_PORTAL_SERVICE }}
+      PROD_GCP_TENANT_CONSOLE_SERVICE: ${{ vars.PROD_GCP_TENANT_CONSOLE_SERVICE }}
+      PROD_GCP_BANK_CONSOLE_SERVICE: ${{ vars.PROD_GCP_BANK_CONSOLE_SERVICE }}
+      PROD_GCP_REFERRAL_EMBED_SERVICE: ${{ vars.PROD_GCP_REFERRAL_EMBED_SERVICE }}
+      PROD_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.PROD_GCP_ENTERPRISE_DISPATCH_SERVICE }}
+      PROD_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.PROD_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
+      PROD_GCP_PASSENGER_APP_SERVICE: ${{ vars.PROD_GCP_PASSENGER_APP_SERVICE }}
+      PROD_TENANT_OIDC_JWT_PUBLIC_KEY_SECRET: ${{ vars.PROD_TENANT_OIDC_JWT_PUBLIC_KEY_SECRET }}
+      PROD_OIDC_CLIENT_SECRET_SECRET: ${{ vars.PROD_OIDC_CLIENT_SECRET_SECRET }}
+      PROD_PASSENGER_OTP_PEPPER_SECRET: ${{ vars.PROD_PASSENGER_OTP_PEPPER_SECRET }}
+      PROD_PSP_API_KEY_SECRET: ${{ vars.PROD_PSP_API_KEY_SECRET }}
+      PROD_PSP_TOKEN_ENCRYPTION_KEY_NAME_SECRET: ${{ vars.PROD_PSP_TOKEN_ENCRYPTION_KEY_NAME_SECRET }}
+      PROD_REMOTE_SMTP_USERNAME_SECRET: ${{ vars.PROD_REMOTE_SMTP_USERNAME_SECRET }}
+      PROD_REMOTE_SMTP_PASSWORD_SECRET: ${{ vars.PROD_REMOTE_SMTP_PASSWORD_SECRET }}
+      PROD_FACEBOOK_APP_SECRET_SECRET: ${{ vars.PROD_FACEBOOK_APP_SECRET_SECRET }}
+      PROD_GOOGLE_OAUTH_CLIENT_SECRET_SECRET: ${{ vars.PROD_GOOGLE_OAUTH_CLIENT_SECRET_SECRET }}
+      PROD_LINE_CHANNEL_SECRET_SECRET: ${{ vars.PROD_LINE_CHANNEL_SECRET_SECRET }}
+      PROD_DOCUMENT_ARTIFACT_S3_ACCESS_KEY_ID_SECRET: ${{ vars.PROD_DOCUMENT_ARTIFACT_S3_ACCESS_KEY_ID_SECRET }}
+      PROD_DOCUMENT_ARTIFACT_S3_SECRET_ACCESS_KEY_SECRET: ${{ vars.PROD_DOCUMENT_ARTIFACT_S3_SECRET_ACCESS_KEY_SECRET }}
+      PROD_DOCUMENT_ARTIFACT_S3_SESSION_TOKEN_SECRET: ${{ vars.PROD_DOCUMENT_ARTIFACT_S3_SESSION_TOKEN_SECRET }}
+      PROD_REMITTANCE_PROOF_S3_ACCESS_KEY_ID_SECRET: ${{ vars.PROD_REMITTANCE_PROOF_S3_ACCESS_KEY_ID_SECRET }}
+      PROD_REMITTANCE_PROOF_S3_SECRET_ACCESS_KEY_SECRET: ${{ vars.PROD_REMITTANCE_PROOF_S3_SECRET_ACCESS_KEY_SECRET }}
+      PROD_REMITTANCE_PROOF_S3_SESSION_TOKEN_SECRET: ${{ vars.PROD_REMITTANCE_PROOF_S3_SESSION_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Guard exact definition, release branch, rail lineage and production target before auth
+        id: guard
+        run: node operations/verification/production-readonly-inventory/collector.cjs guard
+      - name: Preserve safe pre-auth guard diagnostic
+        if: always() && (steps.guard.outcome == 'success' || steps.guard.outcome == 'failure')
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-guard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/production-readonly-inventory/guard-diagnostic.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Authenticate only the existing production WIF identity
+        id: auth
+        if: success() && steps.guard.outcome == 'success'
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.PROD_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.PROD_WIF_PROVIDER }}
+          service_account: ${{ secrets.PROD_WIF_SERVICE_ACCOUNT }}
+          token_format: access_token
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Collect filtered Google control-plane GET metadata
+        if: always() && steps.guard.outcome == 'success'
+        env:
+          PROD_INVENTORY_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: node operations/verification/production-readonly-inventory/collector.cjs collect
+      - name: Preserve filtered complete or partial failure metadata
+        if: always() && steps.guard.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/production-readonly-inventory/metadata.json
+          if-no-files-found: error
+          retention-days: 30

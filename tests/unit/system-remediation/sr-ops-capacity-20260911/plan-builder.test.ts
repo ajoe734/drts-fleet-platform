@@ -4,6 +4,8 @@ import {
   buildCapacityPlan,
   countForFamily,
   countsForDuration,
+  buildWorkloadSchedule,
+  minimumSpacingMs,
 } from "../../../../tools/system-remediation/ops-capacity/plan-builder.mjs";
 // capacity.mjs belongs to the already-accepted SR-OPS-PROOF-001 (C122) task
 // and is out of this task's write scope, so it has no .d.mts declaration
@@ -42,6 +44,94 @@ function buildPlan(durationSeconds: number) {
 }
 
 describe("SR-OPS-CAPACITY-RUNNER-20260911 plan-builder", () => {
+  it("independently validates a named full budgeted dispatch burst while preserving legacy intervals", () => {
+    const plan = buildPlan(900);
+    plan.profile = "budgeted_dispatch_burst";
+    plan.scheduleMs = buildWorkloadSchedule(
+      plan.profile,
+      countsForDuration(900),
+    );
+    expect(() => validatePlan(plan)).not.toThrow();
+    expect(plan.scheduleMs.dispatch.slice(0, 299)).toEqual(Array(299).fill(0));
+    expect(plan.scheduleMs.dispatch[299]).toBe(59800);
+    expect(plan.scheduleMs.dispatch.at(-1)).toBe(899800);
+    for (const family of ["booking", "dispatch", "report"] as const) {
+      const times = plan.scheduleMs[family];
+      let first = 0;
+      times.forEach((time, i) => {
+        while (time - times[first]! >= 60000) first++;
+        expect(i - first + 1).toBeLessThanOrEqual(
+          { booking: 60, dispatch: 300, report: 30 }[family],
+        );
+      });
+      expect(minimumSpacingMs("uniform", family)).toBe(
+        { booking: 1000, dispatch: 200, report: 2000 }[family],
+      );
+      expect(minimumSpacingMs(plan.profile, family)).toBe(0);
+    }
+    expect(minimumSpacingMs("concurrent", "dispatch")).toBe(200);
+    expect(minimumSpacingMs("concurrent", "booking")).toBe(0);
+    const altered = structuredClone(plan);
+    altered.scheduleMs.dispatch[300] = 59800;
+    expect(() => validatePlan(altered)).toThrow(/profile schedule|budget/);
+    expect(() => validatePlan({ ...plan, durationSeconds: 899.9 })).toThrow(
+      /full 900s/,
+    );
+    expect(() =>
+      buildWorkloadSchedule("budgeted_dispatch_burst", countsForDuration(60)),
+    ).toThrow(/full 900s/);
+  });
+  it("keeps 500 genuine initial IDs and defers the remaining 4000 through the canonical creation route", () => {
+    const plan = buildCapacityPlan({
+      origin: ORIGIN,
+      durationSeconds: 900,
+      maxInFlight: 500,
+      isolatedResourceId: "staged-unit-fixture",
+      tenantId: "tenant",
+      tenantJwt: "tenant-jwt",
+      dispatchJwt: "tenant-jwt",
+      reportJwt: "platform-jwt",
+      runTag: "staged-fixture",
+      orderIds: Array.from({ length: 500 }, (_, i) => `actual-${i}`),
+      profile: "concurrent",
+      stagedDispatch: true,
+    });
+    expect(() => validatePlan(plan)).not.toThrow();
+    expect(
+      plan.workloads.dispatch.filter((item) => item.stageOrder),
+    ).toHaveLength(4000);
+    expect(plan.workloads.dispatch[499]!.path).toBe(
+      "/api/orders/actual-499/dispatch",
+    );
+    expect(plan.workloads.dispatch[500]!.path).toBe(
+      "/api/orders/{orderId}/dispatch",
+    );
+    expect(plan.workloads.dispatch[500]!.stageOrder?.path).toBe("/api/orders");
+    const invalid = structuredClone(plan);
+    invalid.workloads.dispatch[500]!.stageOrder!.path = "/api/unauthorized";
+    expect(() => validatePlan(invalid)).toThrow(/original isolated/);
+  });
+  it("validates an explicit full concurrent profile with intact counts and rolling budgets", () => {
+    const plan = buildPlan(900);
+    plan.profile = "concurrent";
+    plan.scheduleMs = buildWorkloadSchedule(
+      "concurrent",
+      countsForDuration(900),
+    );
+    expect(() => validatePlan(plan)).not.toThrow();
+    expect(plan.scheduleMs.booking.slice(0, 50)).toEqual(Array(50).fill(0));
+    expect(plan.scheduleMs.booking[50]).toBe(50000);
+    expect(plan.scheduleMs.report.filter((time) => time === 0)).toHaveLength(
+      30,
+    );
+    expect(plan.scheduleMs.dispatch.at(-1)).toBe(899800);
+    const invalid = structuredClone(plan);
+    invalid.scheduleMs.report[30] = 0;
+    expect(() => validatePlan(invalid)).toThrow(/profile schedule|budget/);
+    expect(() => validatePlan({ ...plan, profile: "invented" })).toThrow(
+      /Unknown capacity profile/,
+    );
+  });
   it("computes the accepted baseline per-family counts for the full 900s burst", () => {
     expect(countForFamily("booking", 900)).toBe(900);
     expect(countForFamily("dispatch", 900)).toBe(4500);
@@ -135,5 +225,4 @@ describe("SR-OPS-CAPACITY-RUNNER-20260911 plan-builder", () => {
       expect(item.body).toEqual({ mode: "auto" });
     }
   });
-
 });

@@ -1,3 +1,23 @@
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+  type ReferralFeeOwner,
+  type ReferralFeeStatus,
+  type AcknowledgeReferralFeesCommand,
+} from "@drts/contracts";
+import type {
+  SubmitReferralPassengerComplaintCommand,
+  ReferralPassengerComplaintSubmission,
+} from "@drts/contracts";
+import { PassengerFareRepository } from "../passenger-app/fare/passenger-fare.repository";
+import { estimateFare } from "../passenger-app/fare/fare.engine";
+import { ComplaintService } from "../complaint/complaint.service";
+import {
+  InjectMaskedCallPort,
+  type MaskedCallPort,
+} from "../multi-taxi/masked-call.port";
+import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
+import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { PartnerNotificationNavigationRepository } from "../tenant-partner/partner-notification-navigation.repository";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
 import {
@@ -28,11 +48,16 @@ import {
 import { EventEmitter2 } from "@nestjs/event-emitter";
 
 import type {
+  ActualTripFareBreakdown,
+  PassengerRideContactOption,
+  PassengerContactUnavailableReason,
+  DriverDeclaredSurnameSnapshot,
   DriverTaskStatus,
   AddressPayload,
   ApplyManualFareOverrideCommand,
   ApproveTenantBookingApprovalRequestCommand,
   AuditLogRecord,
+  IdentityContext,
   CallRecordingState,
   ComplianceGateRecord,
   ComplianceGateState,
@@ -85,6 +110,10 @@ import type {
   OwnedOrderRecord,
   PartnerChannelEntryRecord,
   PassengerDispatchDisclosureSnapshot,
+  PassengerRideTracking,
+  PassengerRideDropoffRouteEstimate,
+  DriverTrackingStatus,
+  PassengerBookingFareDisclosure,
   PassengerProfile,
   QueueCheckInCommand,
   QueueCheckOutCommand,
@@ -111,7 +140,13 @@ import type {
   RouteFareDisclosureSnapshot,
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
+  ReferralPassengerQuoteCommand,
+  ReferralPassengerFareQuoteRecord,
+  ReferralPassengerFareQuote,
+  ReferralBookingIntent,
+  ReferralPassengerRatingResult,
   ReferralPassengerActiveTripResult,
+  ReferralPassengerCancellationWindow,
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
@@ -134,6 +169,8 @@ import {
 
 import { DRIVER_TASK_TRANSITIONS } from "@drts/contracts";
 
+import { GeoService } from "../geo/geo.service";
+
 import { ApiRequestError } from "../../common/api-envelope";
 import type { BootstrapRequestIdentity } from "../../common/auth";
 import {
@@ -143,7 +180,10 @@ import {
 import { OpsDispatchEventsService } from "../../common/ops-dispatch-events.service";
 import { resolvePassengerSubjectRef } from "../../common/sensitive-data-policy";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
-import { CallcenterService } from "../callcenter/callcenter.service";
+import {
+  CallcenterService,
+  type PhoneSessionWrite,
+} from "../callcenter/callcenter.service";
 import { FareAnomalyService } from "../product-rule/fare-anomaly.service";
 import {
   OwnedMobilityRepository,
@@ -155,6 +195,7 @@ import {
   type DriverCompletionOutboxRecord,
   type DriverTaskCompletionBundleRecord,
   type OwnedMobilityQueryExecutor,
+  type OwnedOrderActionContext,
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
@@ -163,6 +204,7 @@ import { resolveVoiceOrderFence } from "../voice-booking/voice-order-fence";
 import {
   TenantPartnerService,
   type TenantQuotaConsumptionCommitResult,
+  type TenantApprovalCommandContext,
 } from "../tenant-partner/tenant-partner.service";
 import {
   installTenantQuotaRelease,
@@ -185,6 +227,10 @@ import {
 } from "./owned-mobility-events";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { ServiceProductService } from "../service-product/service-product.service";
+import { FleetPartnerRepository } from "../fleet-partner/fleet-partner.repository";
+import { RegulatoryRegistryRepository } from "../regulatory-registry/regulatory-registry.repository";
+import { PaymentMethodService } from "../passenger-app/payment/payment-method.service";
+import type { CertificateE04Snapshot } from "../certificate-support/certificate-support.types";
 import type { MessageEvent } from "@nestjs/common";
 import { EMPTY, type Observable } from "rxjs";
 
@@ -198,6 +244,9 @@ type TenantBookingResult = {
   dispatchSemantics: "reservation";
   status: OwnedOrderRecord["status"];
   replayed: boolean;
+  feeConfirmation?:
+    | import("@drts/contracts").ReferralOrderFeeConfirmation
+    | null;
 };
 
 const REFERRAL_PASSENGER_CANCEL_WINDOW_MS = 2 * 60_000;
@@ -221,6 +270,7 @@ type CallRecordingAttachmentEvent = {
   endedAt: string | null;
   agentId: string | null;
   requestId?: string;
+  write?: PhoneSessionWrite;
 };
 
 export type OwnedMobilityReportingSnapshot = {
@@ -242,9 +292,16 @@ type CallRecordingStateChangeEvent = {
   endedAt: string | null;
   agentId: string | null;
   requestId?: string;
+  write?: PhoneSessionWrite;
 };
 
 type MaybePromise<T> = T | Promise<T>;
+
+/** Commit account ownership and access before exposing a new order. */
+export type MultiTaxiCreationCommit = (
+  order: OwnedOrderRecord,
+  persistOrder: (executor: OwnedMobilityQueryExecutor) => Promise<void>,
+) => Promise<void>;
 
 type DispatchAssignmentBundle = {
   order: OwnedOrderRecord;
@@ -411,6 +468,16 @@ const BOOKING_RULES: Record<
   },
 };
 
+type ReferralBookingOptions = {
+  required?: boolean;
+  isImmediateReferral?: boolean;
+  writeReferralNotificationRoute?: boolean;
+  verifiedServerQuote?: ReferralPassengerFareQuoteRecord;
+  referralPassengerLifecyclePatch?: NonNullable<
+    OwnedOrderRecord["referralPassengerLifecycle"]
+  >;
+};
+
 const MAX_COMPLETION_PROOF_PHOTO_COUNT = 5;
 const MAX_COMPLETION_PROOF_PHOTO_BYTES = 600 * 1024;
 const BASE64_DATA_URL_PREFIX = /^data:[^;]+;base64,/i;
@@ -422,7 +489,7 @@ const DEFAULT_PLATFORM_QUOTED_FARE: MoneyAmount = {
 };
 const DEFAULT_PLATFORM_PRICING_RULE_VERSION = "enterprise_dispatch.default.v1";
 const DEFAULT_TENANT_SERVICE_PROGRAM_ID = "tenant-program-enterprise-dispatch";
-const DEFAULT_CERTIFICATE_SERVICE_PHONE = "0800-090-000";
+const DEFAULT_CERTIFICATE_SERVICE_PHONE = "02-2944-0985";
 const DEFAULT_AUTHORITY_COMPLAINT_PHONE = "1999";
 const DRIVER_COMPLETION_OUTBOX_MAX_ATTEMPTS = 5;
 const DRIVER_COMPLETION_OUTBOX_LEASE_MS = 60_000;
@@ -482,6 +549,18 @@ export class OwnedMobilityService
   private consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
 
   private queueEntries: QueueEntryRecord[] = [];
+  private readonly queueCommands = new Map<string, Promise<unknown>>();
+
+  // Per-observation route reads are shared by the existing 3-second SSE readers.
+  // Bound both cached promises and outstanding provider work, including timeouts.
+  private readonly passengerDropoffRoutes = new Map<
+    string,
+    {
+      expiresAt: number;
+      result: Promise<PassengerRideDropoffRouteEstimate | null>;
+    }
+  >();
+  private passengerDropoffProviderCalls = 0;
 
   private profileQueuePolicies: Map<
     RuntimeProfileCode,
@@ -520,7 +599,7 @@ export class OwnedMobilityService
       process.env.MULTI_TAXI_MIN_LEAD_TIME_MINUTES;
     if (envVal !== undefined && envVal !== "") {
       const parsed = Number(envVal);
-      if (!Number.isNaN(parsed) && parsed >= 0) {
+      if (Number.isFinite(parsed) && parsed >= 0) {
         return parsed;
       }
     }
@@ -529,6 +608,10 @@ export class OwnedMobilityService
 
   setMinLeadTimeMinutes(minutes: number) {
     this.minLeadTimeMinutes = Math.max(0, minutes);
+  }
+
+  getReservationWindowMinutes(): number {
+    return 30;
   }
 
   constructor(
@@ -577,6 +660,23 @@ export class OwnedMobilityService
     // harness that constructs this service directly.
     @Optional()
     private readonly platformPresenceService?: PlatformPresenceService,
+    @Optional()
+    private readonly partnerUserIdentityLinkRepository?: PartnerUserIdentityLinkRepository,
+    @Optional()
+    private readonly receiptFleetRepository?: FleetPartnerRepository,
+    @Optional()
+    private readonly receiptRegistryRepository?: RegulatoryRegistryRepository,
+    @Optional()
+    private readonly receiptPaymentMethods?: PaymentMethodService,
+    @Optional()
+    @InjectMaskedCallPort()
+    private readonly tenantMaskedCallPort?: MaskedCallPort,
+    // Appended LAST: preserve all existing positional constructor consumers.
+    @Optional()
+    private readonly passengerRouteGeoService?: GeoService,
+    @Optional()
+    private readonly referralFareRepository?: PassengerFareRepository,
+    @Optional() private readonly referralComplaintService?: ComplaintService,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -675,6 +775,7 @@ export class OwnedMobilityService
     orderId: string,
   ): Promise<DispatchCandidate[]> {
     const order = this.requireOrder(orderId);
+    await this.prepareDispatchEligibility(order);
     return this.excludePlatformPresenceBlockedCandidates(
       this.listEligibleDispatchCandidates(order),
     );
@@ -1038,13 +1139,7 @@ export class OwnedMobilityService
     return this.cloneOrder(order);
   }
 
-  createMultiTaxiRide(
-    command: CreateMultiTaxiRideCommand,
-    authorization: MultiTaxiOperatingAuthorizationRecord,
-    identity?: BootstrapRequestIdentity | null,
-    requestId?: string,
-    callContext?: MultiTaxiCallContext,
-  ): MaybePromise<OwnedOrderRecord> {
+  validateMultiTaxiRideRequest(command: CreateMultiTaxiRideCommand) {
     this.assertNoCanonicalMultiTaxiContextOverrides(command);
     this.assertAddress(command.pickup?.address, "pickup.address");
     this.assertAddress(command.dropoff?.address, "dropoff.address");
@@ -1076,6 +1171,18 @@ export class OwnedMobilityService
         );
       }
     }
+    return requestedPickupAt;
+  }
+
+  createMultiTaxiRide(
+    command: CreateMultiTaxiRideCommand,
+    authorization: MultiTaxiOperatingAuthorizationRecord,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+    callContext?: MultiTaxiCallContext,
+    commitCreation?: MultiTaxiCreationCommit,
+  ): MaybePromise<OwnedOrderRecord> {
+    const requestedPickupAt = this.validateMultiTaxiRideRequest(command);
     if (callContext && !callContext.callId?.trim()) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -1088,30 +1195,40 @@ export class OwnedMobilityService
     // fence,不能換入口繞過" -- the callcenter/multi-taxi entry point must not
     // be usable to create a second order for a call a voice intent already
     // owns (or has a pending AI command for).
-    if (callContext?.callId && this.voiceBookingRepository?.isEnabled()) {
-      return this.assertNoConflictingVoiceIntentForCall(
-        callContext.callId,
-        "create_multi_taxi_ride",
-      ).then(() =>
-        this.buildAndPersistMultiTaxiRide(
-          command,
-          authorization,
-          requestedPickupAt,
-          identity,
-          requestId,
-          callContext,
-        ),
-      );
-    }
+    const create = () => {
+      if (callContext?.callId && this.voiceBookingRepository?.isEnabled()) {
+        return this.assertNoConflictingVoiceIntentForCall(
+          callContext.callId,
+          "create_multi_taxi_ride",
+        ).then(() =>
+          this.buildAndPersistMultiTaxiRide(
+            command,
+            authorization,
+            requestedPickupAt,
+            identity,
+            requestId,
+            callContext,
+            commitCreation,
+          ),
+        );
+      }
 
-    return this.buildAndPersistMultiTaxiRide(
-      command,
-      authorization,
-      requestedPickupAt,
-      identity,
-      requestId,
-      callContext,
-    );
+      return this.buildAndPersistMultiTaxiRide(
+        command,
+        authorization,
+        requestedPickupAt,
+        identity,
+        requestId,
+        callContext,
+        commitCreation,
+      );
+    };
+    const preparing =
+      this.serviceProductService?.prepareRuntimeProfileServiceProduct(
+        "multi_taxi_direct",
+        "taxi_reservation",
+      );
+    return preparing ? preparing.then(create) : create();
   }
 
   private buildAndPersistMultiTaxiRide(
@@ -1121,7 +1238,8 @@ export class OwnedMobilityService
     identity: BootstrapRequestIdentity | null | undefined,
     requestId: string | undefined,
     callContext: MultiTaxiCallContext | undefined,
-  ): OwnedOrderRecord {
+    commitCreation?: MultiTaxiCreationCommit,
+  ): MaybePromise<OwnedOrderRecord> {
     const serviceProduct =
       this.serviceProductService?.getRuntimeServiceProductByType(
         "taxi_reservation",
@@ -1137,7 +1255,10 @@ export class OwnedMobilityService
     const now = new Date().toISOString();
     const scheduled = command.timingMode === "scheduled";
     const reservationWindowEnd = scheduled
-      ? new Date(Date.parse(requestedPickupAt) + 30 * 60 * 1000).toISOString()
+      ? new Date(
+          Date.parse(requestedPickupAt) +
+            this.getReservationWindowMinutes() * 60 * 1000,
+        ).toISOString()
       : null;
     const order: OwnedOrderRecord = {
       orderId: randomUUID(),
@@ -1231,8 +1352,7 @@ export class OwnedMobilityService
       },
       requestId,
     );
-    this.orders = [order, ...this.orders];
-    const traceLog = this.appendTrace(
+    const traceLog = this.buildTraceLog(
       order.orderId,
       "multi_taxi.order.ready_for_dispatch",
       {
@@ -1243,32 +1363,62 @@ export class OwnedMobilityService
         operatingAuthorizationId: order.operatingAuthorizationId,
       },
     );
-    this.persistChanges(
-      { orders: [order], dispatchTraceLogs: [traceLog] },
-      "create_multi_taxi_ride",
-    );
-    this.recordAudit(
-      {
-        actorId: identity?.actorId ?? null,
-        actorType: callContext ? "ops_user" : "system",
-        tenantId: null,
-        moduleName: "order",
-        actionName: "create_multi_taxi_direct_order",
-        resourceType: "order",
-        resourceId: order.orderId,
-        newValuesSummary: {
-          runtimeProfileCode: order.runtimeProfileCode,
-          timingMode: order.timingMode,
-          operatingAuthorizationId: order.operatingAuthorizationId,
+
+    const completeCreation = () => {
+      this.orders = [order, ...this.orders];
+      this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+      this.recordAudit(
+        {
+          actorId: identity?.actorId ?? null,
+          actorType: callContext ? "ops_user" : "system",
+          tenantId: null,
+          moduleName: "order",
+          actionName: "create_multi_taxi_direct_order",
+          resourceType: "order",
+          resourceId: order.orderId,
+          newValuesSummary: {
+            runtimeProfileCode: order.runtimeProfileCode,
+            timingMode: order.timingMode,
+            operatingAuthorizationId: order.operatingAuthorizationId,
+          },
         },
-      },
-      requestId,
-    );
-    this.opsDispatchEventsService?.publishOrderCreated(
-      this.cloneOrder(order),
-      requestId,
-    );
-    return this.cloneOrder(order);
+        requestId,
+      );
+      this.opsDispatchEventsService?.publishOrderCreated(
+        this.cloneOrder(order),
+        requestId,
+      );
+      return this.cloneOrder(order);
+    };
+
+    if (commitCreation) {
+      const repository = this.ownedMobilityRepository;
+      if (!repository?.isEnabled()) {
+        throw new ApiRequestError(
+          503,
+          "PASSENGER_BOOKING_STORAGE_UNAVAILABLE",
+          "Account bookings require durable storage.",
+        );
+      }
+      return commitCreation(this.cloneOrder(order), (executor) =>
+        repository.persistOrderWorkflow(executor, {
+          orders: [order],
+          dispatchTraceLogs: [traceLog],
+        }),
+      ).then(completeCreation);
+    }
+    if (this.ownedMobilityRepository) {
+      return this.persistChangesRequired(
+        { orders: [order], dispatchTraceLogs: [traceLog] },
+        "create_multi_taxi_ride",
+      ).then(completeCreation);
+    } else {
+      this.persistChanges(
+        { orders: [order], dispatchTraceLogs: [traceLog] },
+        "create_multi_taxi_ride",
+      );
+      return completeCreation();
+    }
   }
 
   /**
@@ -1367,7 +1517,7 @@ export class OwnedMobilityService
     command: CreateCallCenterOrderCommand,
     requestId: string | undefined,
     identity: BootstrapRequestIdentity | null | undefined,
-  ): OwnedOrderRecord {
+  ): MaybePromise<OwnedOrderRecord> {
     const bookingRequirements =
       command.bookingRequirements === undefined
         ? undefined
@@ -1471,72 +1621,184 @@ export class OwnedMobilityService
       },
       requestId,
     );
-    this.orders = [this.stampServiceProductCode(order), ...this.orders];
-    const session = this.callcenterService.linkOrderToCallSession({
-      callId: command.callId,
-      callType: "booking",
-      callerPhone: command.passenger?.phone,
-      agentId: command.agentId,
-      linkedOrderId: order.orderId,
-      recordingId,
-    });
-
-    if (session.recordingId) {
-      order.recordingId = session.recordingId;
-      order.status = "ready_for_dispatch";
-      order.complianceFlags = order.complianceFlags.filter(
-        (flag) => flag !== "recording_pending",
+    Object.assign(order, this.stampServiceProductCode(order));
+    const completeCreation = () => {
+      // A link listener can refine the staged recording state. Its commit
+      // hook publishes that exact final row before this creation hook runs.
+      const committed = this.orders.find(
+        (current) => current.orderId === order.orderId,
       );
-      this.addComplianceFlag(order, "recording_bound");
-      order.updatedAt = now;
-    } else {
-      order.status = "recording_pending";
-      this.addComplianceFlag(order, "recording_pending");
-      order.updatedAt = now;
-    }
-
-    const traceLog = this.appendTrace(
-      order.orderId,
-      "callcenter.order_created",
+      if (committed) Object.assign(order, committed);
+      this.orders = [
+        this.cloneOrder(order),
+        ...this.orders.filter((current) => current.orderId !== order.orderId),
+      ];
+      this.recordAudit(
+        {
+          // SD §7.5: "actor 從 authenticated identity 注入,不能採 body.agentId" --
+          // command.agentId is retained only as descriptive call-session
+          // metadata (who staffed the call, used for spatial-audit/trace
+          // attribution above); the actor of record for this mutation is the
+          // authenticated caller when one is available.
+          actorId: identity?.actorId?.trim() || command.agentId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "callcenter",
+          actionName: "create_phone_order",
+          resourceType: "order",
+          resourceId: order.orderId,
+          newValuesSummary: {
+            callId: command.callId,
+            recordingId: order.recordingId,
+            status: order.status,
+          },
+        },
+        requestId,
+      );
+      void this.opsDispatchEventsService?.publishOrderCreated(
+        this.cloneOrder(order),
+        requestId,
+      );
+      return this.cloneOrder(order);
+    };
+    let traceLog: DispatchTraceLogRecord;
+    const linked = this.callcenterService.withPhoneOrderSession(
       {
         callId: command.callId,
-        recordingId: order.recordingId,
-        recordingPending: order.status === "recording_pending",
+        callType: "booking",
+        callerPhone: command.passenger?.phone,
+        agentId: command.agentId,
+        linkedOrderId: order.orderId,
+        recordingId,
+      },
+      (session, write) => {
+        order.complianceFlags = order.complianceFlags.filter(
+          (flag) =>
+            flag !== "recording_bound" &&
+            flag !== "recording_pending" &&
+            flag !== "recording_missing",
+        );
+        if (session.recordingId) {
+          order.recordingId = session.recordingId;
+          order.status = "ready_for_dispatch";
+          this.addComplianceFlag(order, "recording_bound");
+        } else {
+          order.status = "recording_pending";
+          this.addComplianceFlag(
+            order,
+            session.recordingState === "missing"
+              ? "recording_missing"
+              : "recording_pending",
+          );
+        }
+        traceLog = this.buildPhoneTrace(
+          order.orderId,
+          "callcenter.order_created",
+          {
+            callId: command.callId,
+            recordingId: order.recordingId,
+            recordingPending: order.status === "recording_pending",
+          },
+        );
+        const changes = { orders: [order], dispatchTraceLogs: [traceLog] };
+        if (write && this.ownedMobilityRepository?.isEnabled()) {
+          return this.ownedMobilityRepository.persistOrderWorkflow(
+            write.executor,
+            changes,
+          );
+        }
+        if (this.ownedMobilityRepository)
+          return this.persistChangesRequired(
+            changes,
+            "create_call_center_order",
+          );
+        return undefined;
       },
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchTraceLogs: [traceLog],
-      },
-      "create_call_center_order",
-    );
-    this.recordAudit(
-      {
-        // SD §7.5: "actor 從 authenticated identity 注入,不能採 body.agentId" --
-        // command.agentId is retained only as descriptive call-session
-        // metadata (who staffed the call, used for spatial-audit/trace
-        // attribution above); the actor of record for this mutation is the
-        // authenticated caller when one is available.
-        actorId: identity?.actorId?.trim() || command.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "create_phone_order",
-        resourceType: "order",
-        resourceId: order.orderId,
-        newValuesSummary: {
-          callId: command.callId,
-          recordingId: order.recordingId,
-          status: order.status,
-        },
-      },
-      requestId,
-    );
-    void this.opsDispatchEventsService?.publishOrderCreated(
+    return this.afterMaybePromise(linked, () => {
+      this.dispatchTraceLogs = [traceLog!, ...this.dispatchTraceLogs];
+      return completeCreation();
+    });
+  }
+
+  private buildPhoneTrace(
+    orderId: string,
+    eventType: string,
+    details: Record<string, unknown>,
+  ): DispatchTraceLogRecord {
+    return {
+      traceId: randomUUID(),
+      orderId,
+      eventType,
+      message: eventType,
+      details,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  private publishPhoneRecordingUpdate(
+    order: OwnedOrderRecord,
+    traceLog: DispatchTraceLogRecord,
+    audit?: () => void,
+  ) {
+    this.orders = [
       this.cloneOrder(order),
-      requestId,
+      ...this.orders.filter((current) => current.orderId !== order.orderId),
+    ];
+    this.dispatchTraceLogs = [traceLog, ...this.dispatchTraceLogs];
+    audit?.();
+  }
+
+  private commitPhoneRecordingUpdate(
+    order: OwnedOrderRecord,
+    traceLog: DispatchTraceLogRecord,
+    write?: PhoneSessionWrite,
+    audit?: () => void,
+  ): void | Promise<void> {
+    const finish = () =>
+      this.publishPhoneRecordingUpdate(order, traceLog, audit);
+    const changes = { orders: [order], dispatchTraceLogs: [traceLog] };
+    if (write && this.ownedMobilityRepository?.isEnabled()) {
+      return this.ownedMobilityRepository
+        .persistOrderWorkflow(write.executor, changes)
+        .then(() => {
+          write.afterCommit.push(finish);
+        });
+    }
+    if (this.ownedMobilityRepository)
+      return this.persistChangesRequired(
+        changes,
+        "phone_recording_update",
+      ).then(finish);
+    finish();
+  }
+
+  private async readPhoneRecordingOrder(
+    write: PhoneSessionWrite,
+    orderId: string,
+  ) {
+    const result = await write.executor.query<{ record: OwnedOrderRecord }>(
+      "SELECT record FROM ops.phase1_owned_orders WHERE order_id = $1",
+      [orderId],
     );
+    const order = result.rows[0]?.record;
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order was not found.");
+    // Phone recording writers share the order row lock with dispatch writers.
+    // Voice mutations retain their own authoritative transaction/lock order.
+    if (!order.voiceIntentId && this.ownedMobilityRepository?.isEnabled()) {
+      const locked = await this.ownedMobilityRepository.findOrderForUpdate(
+        write.executor,
+        orderId,
+      );
+      if (!locked)
+        throw new ApiRequestError(
+          404,
+          "ORDER_NOT_FOUND",
+          "Order was not found.",
+        );
+      return this.cloneOrder(locked.order);
+    }
     return this.cloneOrder(order);
   }
 
@@ -1547,10 +1809,7 @@ export class OwnedMobilityService
     requestId?: string,
     runtimeProfileCodeHeader?: string,
     idempotencyKeyHeader?: string,
-    options?: {
-      required?: boolean;
-      isImmediateReferral?: boolean;
-    },
+    options?: ReferralBookingOptions,
   ): MaybePromise<TenantBookingResult> {
     const resolvedKey =
       idempotencyKeyHeader?.trim() ||
@@ -1586,10 +1845,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
-    options?: {
-      required?: boolean;
-      isImmediateReferral?: boolean;
-    },
+    options?: ReferralBookingOptions,
   ): Promise<TenantBookingResult> {
     const scope = `tenant:${tenantId}:booking_create`;
     const idempotencyService = this.getIdempotencyService();
@@ -1640,10 +1896,7 @@ export class OwnedMobilityService
     identity?: BootstrapRequestIdentity | null,
     requestId?: string,
     runtimeProfileCodeHeader?: string,
-    options?: {
-      required?: boolean;
-      isImmediateReferral?: boolean;
-    },
+    options?: ReferralBookingOptions,
   ): MaybePromise<TenantBookingResult> {
     this.assertRuntimeProfileAllowances(command, runtimeProfileCodeHeader);
     this.assertNonBlank(tenantId, "tenantId");
@@ -1771,30 +2024,51 @@ export class OwnedMobilityService
       updatedAt: now,
     };
 
+    if (options?.verifiedServerQuote) {
+      if (!this.ownedMobilityRepository?.isEnabled())
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Referral storage is unavailable.",
+        );
+      const quote = options.verifiedServerQuote;
+      order.fixedPrice = false;
+      order.quotedFare = {
+        currency: quote.currency,
+        amountMinor: quote.estimatedMinMinor,
+      };
+      order.quotedFareSource = quote.quotedFareSource;
+      order.quotedFareRuleVersion = quote.quotedFareRuleVersion;
+      order.referralPassengerLifecycle = {
+        ...options.referralPassengerLifecyclePatch,
+        quote,
+      };
+    }
+
     this.applyServiceAreaCreationPolicy(
       order,
       this.resolveBookingSpatialAuditContext(order, identity),
       requestId,
     );
-    const bookingTraceLog = this.appendTrace(
-      order.orderId,
-      "tenant.booking_created",
-      {
-        bookingId,
-        businessDispatchSubtype: order.businessDispatchSubtype,
-        dispatchSemantics: order.dispatchSemantics,
-      },
-    );
-    const holdTraceLog = this.appendTrace(
-      order.orderId,
-      "reservation.hold.created",
-      {
-        bookingId,
-        reservationHoldId,
-        holdState: order.reservationHoldStatus,
-        confirmationWindowMinutes: bookingWindow.confirmationWindowMinutes,
-      },
-    );
+    const bookingTraceLog = (
+      options?.verifiedServerQuote
+        ? this.buildTraceLog.bind(this)
+        : this.appendTrace.bind(this)
+    )(order.orderId, "tenant.booking_created", {
+      bookingId,
+      businessDispatchSubtype: order.businessDispatchSubtype,
+      dispatchSemantics: order.dispatchSemantics,
+    });
+    const holdTraceLog = (
+      options?.verifiedServerQuote
+        ? this.buildTraceLog.bind(this)
+        : this.appendTrace.bind(this)
+    )(order.orderId, "reservation.hold.created", {
+      bookingId,
+      reservationHoldId,
+      holdState: order.reservationHoldStatus,
+      confirmationWindowMinutes: bookingWindow.confirmationWindowMinutes,
+    });
     const finalizeCreation = (
       previousApprovalState: TenantBookingApprovalState,
       approvalRequest: TenantBookingApprovalRequestRecord | null,
@@ -1803,6 +2077,12 @@ export class OwnedMobilityService
       order.approvalRequestIds = approvalRequest
         ? [approvalRequest.approvalRequestId]
         : [];
+      if (options?.verifiedServerQuote)
+        this.dispatchTraceLogs = [
+          bookingTraceLog,
+          holdTraceLog,
+          ...this.dispatchTraceLogs,
+        ];
       this.orders = [this.stampServiceProductCode(order), ...this.orders];
       if (persistOrderWrite) {
         this.persistChanges(
@@ -1863,13 +2143,52 @@ export class OwnedMobilityService
       };
     };
 
+    const writeReferralRoute = async (tx?: OwnedMobilityQueryExecutor) => {
+      if (!options?.writeReferralNotificationRoute) return;
+      const route = await resolveOrderPartnerNotificationRoute(
+        order,
+        identity,
+        this.partnerUserIdentityLinkRepository,
+        this.tenantPartnerService,
+      );
+      if (!route && options?.verifiedServerQuote)
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Referral notification identity could not be resolved.",
+        );
+      if (route) {
+        const stored =
+          await this.ownedMobilityRepository?.writeOrderPartnerNotificationRoute(
+            route,
+            tx,
+          );
+        if (options?.verifiedServerQuote && !stored)
+          throw new ApiRequestError(
+            503,
+            "FARE_QUOTE_UNAVAILABLE",
+            "Referral notification route could not be persisted.",
+          );
+      }
+    };
+    const finalizeWithRoute = (
+      previous: TenantBookingApprovalState,
+      approval: TenantBookingApprovalRequestRecord | null,
+    ) =>
+      options?.writeReferralNotificationRoute
+        ? writeReferralRoute().then(() => finalizeCreation(previous, approval))
+        : finalizeCreation(previous, approval);
+
     const previousApprovalState = order.approvalState;
     const governanceSnapshot = this.captureTenantGovernanceSnapshot();
     const applyPassengerDisclosure = () =>
       this.refreshPassengerDisclosureSnapshot(order, false, {
         channel: this.resolvePassengerDisclosureChannel(order, identity),
       });
-    const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
+    const applyGovernance = (
+      tx?: OwnedMobilityQueryExecutor | null,
+      afterCommit?: Array<() => void | Promise<void>>,
+    ) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
           tx: tx ?? null,
@@ -1882,6 +2201,7 @@ export class OwnedMobilityService
             this.resolveApprovalStateFromEvaluation(evaluation);
           return this.createApprovalRequestForOrder({
             tx: tx ?? null,
+            ...(afterCommit ? { afterCommit } : {}),
             order,
             evaluation,
             ...(requestId ? { requestId } : {}),
@@ -1891,45 +2211,140 @@ export class OwnedMobilityService
 
     if (
       this.ownedMobilityRepository?.isEnabled() &&
-      this.tenantPartnerService?.isPersistenceEnabled()
+      (options?.verifiedServerQuote ||
+        this.tenantPartnerService?.isPersistenceEnabled() ||
+        (options?.writeReferralNotificationRoute &&
+          this.partnerUserIdentityLinkRepository))
     ) {
-      return this.ownedMobilityRepository
-        .withTransaction(async (tx) => {
-          await applyPassengerDisclosure();
-          const approvalRequest = await applyGovernance(tx);
-          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-            orders: [this.cloneOrder(order)],
-            dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
-          });
-          if (command.passengerDisclosureAcknowledgement) {
-            await this.acknowledgePassengerDisclosure(
-              tenantId,
-              bookingId,
-              command.passengerDisclosureAcknowledgement,
-              identity,
-              requestId,
-              {
-                order,
+      const afterCommit: Array<() => void | Promise<void>> = [];
+      return (
+        this.ownedMobilityRepository
+          .withTransaction(async (tx) => {
+            if (options?.verifiedServerQuote) {
+              const quote = options.verifiedServerQuote;
+              const key =
+                options.referralPassengerLifecyclePatch?.bookingIdempotencyKey;
+              if (key) {
+                await this.ownedMobilityRepository!.lockReferralBookingIntent(
+                  [
+                    quote.tenantId,
+                    quote.partnerId,
+                    quote.partnerProgramId,
+                    quote.entrySlug,
+                    quote.drtsPassengerId,
+                    key,
+                  ],
+                  tx,
+                );
+                if (
+                  await this.ownedMobilityRepository!.findReferralOrderByIdempotencyKey(
+                    quote,
+                    key,
+                    tx,
+                  )
+                )
+                  throw new ApiRequestError(
+                    409,
+                    "REFERRAL_BOOKING_COMMITTED",
+                    "A booking for this intent has committed.",
+                  );
+              }
+              const claimed =
+                await this.ownedMobilityRepository!.claimReferralFareQuoteSnapshot(
+                  quote,
+                  order.orderId,
+                  tx,
+                );
+              const acknowledgement = await this.requireReferralFeeAgreement(
+                claimed,
+                claimed,
                 tx,
-                refreshDisclosure: false,
-              },
+              );
+              const feeClock = await tx.query<{ now: Date | string }>(
+                "SELECT clock_timestamp() AS now",
+              );
+              const feeConfirmation = {
+                tenantId: claimed.tenantId,
+                partnerId: claimed.partnerId,
+                partnerProgramId: claimed.partnerProgramId,
+                entrySlug: claimed.entrySlug,
+                drtsPassengerId: claimed.drtsPassengerId,
+                orderId: order.orderId,
+                quoteId: claimed.quoteId,
+                disclosureVersion: acknowledgement.disclosureVersion,
+                contentHash: acknowledgement.contentHash,
+                quotedFareRuleVersion: claimed.quotedFareRuleVersion,
+                acknowledgedAt: acknowledgement.acknowledgedAt,
+                feeConfirmedAt: new Date(feeClock.rows[0]!.now).toISOString(),
+                summary: {
+                  pickupAddress: claimed.pickupAddress,
+                  dropoffAddress: claimed.dropoffAddress,
+                  requestedScheduledAt: claimed.requestedScheduledAt,
+                  vehicleType: claimed.vehicleType,
+                  estimatedMin: claimed.estimatedMin,
+                  estimatedMax: claimed.estimatedMax,
+                },
+              };
+              await this.ownedMobilityRepository!.insertReferralOrderFeeConfirmation(
+                feeConfirmation,
+                tx,
+              );
+              order.referralPassengerLifecycle = {
+                ...order.referralPassengerLifecycle,
+                quote: claimed,
+                confirmedAt: claimed.consumedAt!,
+                feeConfirmation,
+              };
+            }
+            await applyPassengerDisclosure();
+            const approvalRequest = await applyGovernance(
+              this.tenantPartnerService?.isPersistenceEnabled() ? tx : null,
+              afterCommit,
             );
-          }
-          return finalizeCreation(
-            previousApprovalState,
-            approvalRequest,
-            false,
-          );
-        })
-        .catch((error) => {
-          // The DB transaction rolls back persisted rows, but the in-memory
-          // governance state (quota ledger / approval requests) is mutated
-          // eagerly during reservation. Restore the pre-booking snapshot so a
-          // rejected booking (e.g. APPROVAL_NO_RESOLVABLE_APPROVERS or a quota
-          // hard block) leaves no residue in the in-memory read models.
-          this.restoreTenantGovernanceSnapshot(governanceSnapshot);
-          throw error;
-        });
+            await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+              orders: [this.cloneOrder(order)],
+              dispatchTraceLogs: [bookingTraceLog, holdTraceLog],
+            });
+            await writeReferralRoute(tx);
+            if (command.passengerDisclosureAcknowledgement) {
+              await this.acknowledgePassengerDisclosure(
+                tenantId,
+                bookingId,
+                command.passengerDisclosureAcknowledgement,
+                identity,
+                requestId,
+                {
+                  order,
+                  tx,
+                  refreshDisclosure: false,
+                },
+              );
+            }
+            return approvalRequest;
+          })
+          .catch((error) => {
+            // The DB transaction rolls back persisted rows, but the in-memory
+            // governance state (quota ledger / approval requests) is mutated
+            // eagerly during reservation. Restore the pre-booking snapshot so a
+            // rejected booking (e.g. APPROVAL_NO_RESOLVABLE_APPROVERS or a quota
+            // hard block) leaves no residue in the in-memory read models.
+            this.restoreTenantGovernanceSnapshot(governanceSnapshot);
+            throw error;
+          })
+          // Publish into the in-memory order feed and dispatch events only after
+          // commit: readers must not race the frozen route/sequence setup.
+          .then(async (approvalRequest) => {
+            const result = await finalizeCreation(
+              previousApprovalState,
+              approvalRequest,
+              false,
+            );
+            for (const effect of afterCommit) {
+              await effect();
+            }
+            return result;
+          })
+      );
     }
 
     return this.withRollback(
@@ -1950,9 +2365,9 @@ export class OwnedMobilityService
                     },
                   ),
                   () =>
-                    finalizeCreation(previousApprovalState, approvalRequest),
+                    finalizeWithRoute(previousApprovalState, approvalRequest),
                 )
-              : finalizeCreation(previousApprovalState, approvalRequest);
+              : finalizeWithRoute(previousApprovalState, approvalRequest);
           }),
         ),
       () => this.restoreTenantGovernanceSnapshot(governanceSnapshot),
@@ -1960,13 +2375,23 @@ export class OwnedMobilityService
   }
 
   handleCallRecordingAttached(event: CallRecordingAttachmentEvent) {
-    const order = this.orders.find((candidateOrder) => {
-      return candidateOrder.callId === event.callId;
-    });
-    if (!order) {
-      return;
+    const orderId = event.write?.session?.linkedOrderId;
+    if (event.write && orderId) {
+      return this.readPhoneRecordingOrder(event.write, orderId).then((order) =>
+        this.applyCallRecordingAttached(order, event),
+      );
     }
+    const current = this.orders.find(
+      (candidate) => candidate.callId === event.callId,
+    );
+    if (!current) return;
+    return this.applyCallRecordingAttached(this.cloneOrder(current), event);
+  }
 
+  private applyCallRecordingAttached(
+    order: OwnedOrderRecord,
+    event: CallRecordingAttachmentEvent,
+  ): void | Promise<void> {
     // Legacy callbacks contain no immutable manifest version or verified
     // checkpoint. They cannot establish or replace voice evidence, nor open
     // its dispatch gate. Final recording evidence has its own journal path.
@@ -1986,6 +2411,13 @@ export class OwnedMobilityService
       return;
     }
 
+    if (
+      order.recordingId === event.recordingId &&
+      order.complianceFlags.includes("recording_bound") &&
+      order.status !== "recording_pending"
+    )
+      return;
+
     const now = new Date().toISOString();
     order.recordingId = event.recordingId;
     order.updatedAt = now;
@@ -1999,7 +2431,7 @@ export class OwnedMobilityService
       ];
     }
 
-    const traceLog = this.appendTrace(
+    const traceLog = this.buildPhoneTrace(
       order.orderId,
       "callcenter.recording_bound",
       {
@@ -2011,30 +2443,25 @@ export class OwnedMobilityService
         endedAt: event.endedAt,
       },
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchTraceLogs: [traceLog],
-      },
-      "bind_call_recording",
-    );
-    this.recordAudit(
-      {
-        actorId: event.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "bind_recording_to_phone_order",
-        resourceType: "order",
-        resourceId: order.orderId,
-        newValuesSummary: {
-          callId: event.callId,
-          recordingId: event.recordingId,
-          status: order.status,
+    return this.commitPhoneRecordingUpdate(order, traceLog, event.write, () => {
+      this.recordAudit(
+        {
+          actorId: event.agentId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "callcenter",
+          actionName: "bind_recording_to_phone_order",
+          resourceType: "order",
+          resourceId: order.orderId,
+          newValuesSummary: {
+            callId: event.callId,
+            recordingId: event.recordingId,
+            status: order.status,
+          },
         },
-      },
-      event.requestId,
-    );
+        event.requestId,
+      );
+    });
   }
 
   /**
@@ -2050,13 +2477,23 @@ export class OwnedMobilityService
   handleCallRecordingStateChanged(
     event: CallRecordingStateChangeEvent,
   ): void | Promise<void> {
-    const order = this.orders.find((candidateOrder) => {
-      return candidateOrder.orderId === event.linkedOrderId;
-    });
-    if (!order) {
-      return;
+    if (event.write) {
+      return this.readPhoneRecordingOrder(
+        event.write,
+        event.linkedOrderId,
+      ).then((order) => this.applyCallRecordingStateChanged(order, event));
     }
+    const current = this.orders.find(
+      (candidate) => candidate.orderId === event.linkedOrderId,
+    );
+    if (!current) return;
+    return this.applyCallRecordingStateChanged(this.cloneOrder(current), event);
+  }
 
+  private applyCallRecordingStateChanged(
+    order: OwnedOrderRecord,
+    event: CallRecordingStateChangeEvent,
+  ): void | Promise<void> {
     if (order.voiceIntentId) {
       // Losing the durable repository must not fall through to the legacy
       // in-memory writer and erase established voice evidence/order progress.
@@ -2070,6 +2507,8 @@ export class OwnedMobilityService
       // await completion; existing fire-and-forget callers (the
       // synchronous callcenter listener wiring) simply ignore the return
       // value, and the internal .catch means this never rejects.
+      if (event.write)
+        return this.handleVoiceCallRecordingStateChanged(order, event);
       return this.handleVoiceCallRecordingStateChanged(order, event).catch(
         (error) => {
           this.logger.warn(
@@ -2102,7 +2541,7 @@ export class OwnedMobilityService
         : "recording_pending",
     ];
 
-    const traceLog = this.appendTrace(
+    const traceLog = this.buildPhoneTrace(
       order.orderId,
       "callcenter.recording_state_changed",
       {
@@ -2111,13 +2550,7 @@ export class OwnedMobilityService
         linkedOrderId: event.linkedOrderId,
       },
     );
-    this.persistChanges(
-      {
-        orders: [order],
-        dispatchTraceLogs: [traceLog],
-      },
-      "sync_call_recording_state",
-    );
+    return this.commitPhoneRecordingUpdate(order, traceLog, event.write);
   }
 
   private static readonly PRE_DISPATCH_RECORDING_GATE_STATUSES = new Set<
@@ -2220,6 +2653,89 @@ export class OwnedMobilityService
     return this.orders.map((order) => this.cloneOrder(order));
   }
 
+  // Public HTTP reads use committed rows. Synchronous internal callers retain
+  // their original contract; a database miss/error must never revive a cache.
+  async listOrdersForRead(orderIds?: readonly string[]) {
+    const orders = this.ownedMobilityRepository?.isEnabled()
+      ? await this.ownedMobilityRepository.listOrdersForRead(orderIds)
+      : this.orders.filter(
+          (order) => !orderIds || orderIds.includes(order.orderId),
+        );
+    return orders.map((order) => this.cloneOrder(order));
+  }
+
+  async getOrderForRead(orderId: string) {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.getOrder(orderId);
+    const order = await this.ownedMobilityRepository.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "ORDER_NOT_FOUND",
+        "Order was not found.",
+      );
+    return this.cloneOrder(order);
+  }
+
+  /** Refresh only the target aggregate before entering the unchanged command
+   * implementation. Its row/resource locks and ownership checks remain authoritative. */
+  async prepareOrderAction(
+    key: { orderId: string } | { taskId: string } | { dispatchJobId: string },
+  ) {
+    if (!this.ownedMobilityRepository?.isEnabled()) return;
+    const context =
+      await this.ownedMobilityRepository.loadOrderActionContext(key);
+    if (!context) {
+      if ("taskId" in key)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "DRIVER_TASK_NOT_FOUND",
+          "Driver task was not found.",
+        );
+      if ("dispatchJobId" in key)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "DISPATCH_JOB_NOT_FOUND",
+          "Dispatch job was not found.",
+        );
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "ORDER_NOT_FOUND",
+        "Order was not found.",
+      );
+    }
+    const orderId = context.orders[0]!.orderId;
+    await this.regulatoryRegistryService.prepareDispatchSupply?.(
+      context.orders[0]!.serviceBucket,
+    );
+    const replace = <T extends { orderId: string }>(
+      current: T[],
+      committed: T[],
+    ) => [
+      ...structuredClone(committed),
+      ...current.filter((row) => row.orderId !== orderId),
+    ];
+    this.orders = replace(this.orders, context.orders);
+    this.dispatchJobs = replace(this.dispatchJobs, context.dispatchJobs);
+    this.dispatchAttempts = replace(
+      this.dispatchAttempts,
+      context.dispatchAttempts,
+    );
+    this.dispatchAssignments = replace(
+      this.dispatchAssignments,
+      context.dispatchAssignments,
+    );
+    this.driverTasks = replace(this.driverTasks, context.driverTasks);
+    this.dispatchTraceLogs = replace(
+      this.dispatchTraceLogs,
+      context.dispatchTraceLogs,
+    );
+    this.passengerDisclosureSnapshots = replace(
+      this.passengerDisclosureSnapshots,
+      context.passengerDisclosureSnapshots,
+    );
+  }
+
   getOrder(orderId: string, identity?: BootstrapRequestIdentity | null) {
     const order = this.requireOrder(orderId);
     this.assertPartnerOrderIdentity(identity, order);
@@ -2274,6 +2790,279 @@ export class OwnedMobilityService
         candidate.orderId === orderId && candidate.supersededAt === null,
     );
     return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
+  }
+
+  /** Passenger reads must see assignments committed by another API/worker.
+   * A durable absence also replaces a stale local disclosure. */
+  async resolvePersistedPassengerAssignmentDisclosure(orderId: string) {
+    if (!this.ownedMobilityRepository?.isEnabled()) {
+      return this.findPassengerAssignmentDisclosure(orderId);
+    }
+    const snapshot =
+      await this.ownedMobilityRepository.findCurrentPassengerAssignmentDisclosure(
+        orderId,
+      );
+    return snapshot ? this.clonePassengerDisclosureSnapshot(snapshot) : null;
+  }
+
+  /** Read the assigned Driver's current values without rewriting the atomic
+   * disclosure captured by the assignment transaction. */
+  async resolvePassengerRideTracking(
+    order: OwnedOrderRecord,
+    assignment: PassengerDispatchDisclosureSnapshot | null,
+  ): Promise<PassengerRideTracking | null> {
+    if (
+      !assignment ||
+      !assignment.assignmentId ||
+      !assignment.driver?.driverId ||
+      !assignment.vehicle?.vehicleId ||
+      ![
+        "assigned",
+        "driver_accepted",
+        "enroute_pickup",
+        "arrived_pickup",
+        "on_trip",
+      ].includes(order.status)
+    )
+      return null;
+    const missing: PassengerRideTracking = {
+      assignmentId: assignment.assignmentId,
+      driverId: assignment.driver.driverId,
+      vehicleId: assignment.vehicle.vehicleId,
+      locationFreshness: "missing",
+      location: null,
+      pickupEta: null,
+    };
+    const current = await this.regulatoryRegistryService
+      .getDriverTrackingStatus?.(assignment.driver.driverId)
+      .catch(() => null);
+    if (!current) return missing;
+    const location = current.currentLocation;
+    const waitingForPickup = [
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+    ].includes(order.status);
+    const pickup = assignment.routeFare?.pickup;
+    const eta =
+      waitingForPickup &&
+      current.locationFreshness === "fresh" &&
+      location &&
+      pickup &&
+      Number.isFinite(pickup.lat) &&
+      Number.isFinite(pickup.lng)
+        ? await this.regulatoryRegistryService
+            .getDriverEta?.(assignment.driver.driverId, pickup.lat, pickup.lng)
+            .catch(() => null)
+        : null;
+    return {
+      assignmentId: assignment.assignmentId,
+      driverId: assignment.driver.driverId,
+      vehicleId: assignment.vehicle.vehicleId,
+      locationFreshness: current.locationFreshness,
+      location: location
+        ? {
+            lat: location.lat,
+            lng: location.lng,
+            accuracyM: location.accuracyM,
+            recordedAt: location.recordedAt,
+          }
+        : null,
+      pickupEta: eta
+        ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
+        : null,
+      ...(order.status === "on_trip"
+        ? {
+            dropoffRoute: await this.resolvePassengerDropoffRoute(
+              order,
+              assignment,
+              current,
+            ),
+          }
+        : {}),
+    };
+  }
+
+  private passengerDropoffObservationKey(
+    order: OwnedOrderRecord,
+    assignment: PassengerDispatchDisclosureSnapshot,
+    current: DriverTrackingStatus,
+    task: DriverTaskRecord | null,
+  ): string | null {
+    const location = current.currentLocation;
+    const finitePoint = (
+      point: { lat?: number | null; lng?: number | null } | null | undefined,
+    ) =>
+      point &&
+      typeof point.lat === "number" &&
+      Number.isFinite(point.lat) &&
+      Math.abs(point.lat) <= 90 &&
+      typeof point.lng === "number" &&
+      Number.isFinite(point.lng) &&
+      Math.abs(point.lng) <= 180;
+    const age = location ? Date.now() - Date.parse(location.recordedAt) : NaN;
+    if (
+      order.status !== "on_trip" ||
+      assignment.orderId !== order.orderId ||
+      assignment.supersededAt !== null ||
+      current.driverId !== assignment.driver.driverId ||
+      current.currentVehicleId !== assignment.vehicle.vehicleId ||
+      current.locationFreshness !== "fresh" ||
+      !location ||
+      location.driverId !== assignment.driver.driverId ||
+      !finitePoint(location) ||
+      !finitePoint(order.dropoff) ||
+      typeof location.accuracyM !== "number" ||
+      !Number.isFinite(location.accuracyM) ||
+      location.accuracyM < 0 ||
+      location.accuracyM > 100 ||
+      !isIso8601InstantWithTimezone(location.recordedAt) ||
+      !Number.isFinite(age) ||
+      age < -5_000 ||
+      age >= 60_000 ||
+      !task ||
+      current.currentTaskId !== task.taskId ||
+      task.status !== "on_trip" ||
+      task.orderId !== order.orderId ||
+      task.assignmentId !== assignment.assignmentId ||
+      task.driverId !== assignment.driver.driverId ||
+      task.vehicleId !== assignment.vehicle.vehicleId
+    )
+      return null;
+    return JSON.stringify([
+      order.orderId,
+      assignment.assignmentId,
+      assignment.assignmentVersion,
+      task.taskId,
+      task.driverId,
+      task.vehicleId,
+      location.recordedAt,
+      location.lat,
+      location.lng,
+      order.dropoff.lat,
+      order.dropoff.lng,
+    ]);
+  }
+
+  private async resolvePassengerDropoffRoute(
+    order: OwnedOrderRecord,
+    assignment: PassengerDispatchDisclosureSnapshot,
+    current: DriverTrackingStatus,
+  ): Promise<PassengerRideDropoffRouteEstimate | null> {
+    if (!this.passengerRouteGeoService || !current.currentTaskId) return null;
+    try {
+      const task = await this.findDriverTaskForRead(current.currentTaskId);
+      const key = this.passengerDropoffObservationKey(
+        order,
+        assignment,
+        current,
+        task,
+      );
+      if (!key || !task || !current.currentLocation) return null;
+      const now = Date.now();
+      for (const [cachedKey, entry] of this.passengerDropoffRoutes) {
+        if (entry.expiresAt <= now)
+          this.passengerDropoffRoutes.delete(cachedKey);
+      }
+      let cached = this.passengerDropoffRoutes.get(key);
+      if (!cached) {
+        if (this.passengerDropoffProviderCalls >= 8) return null;
+        if (this.passengerDropoffRoutes.size >= 128) {
+          this.passengerDropoffRoutes.delete(
+            this.passengerDropoffRoutes.keys().next().value!,
+          );
+        }
+        const location = current.currentLocation;
+        const origin = { lat: location.lat, lng: location.lng };
+        const destination = {
+          lat: order.dropoff.lat!,
+          lng: order.dropoff.lng!,
+        };
+        // Keep copies: neither mutable GPS nor a newer assignment can relabel a response.
+        const binding = {
+          leg: "dropoff" as const,
+          source: "geo_route" as const,
+          assignmentId: assignment.assignmentId,
+          assignmentVersion: assignment.assignmentVersion,
+          taskId: task.taskId,
+          origin,
+          destination,
+          locationRecordedAt: location.recordedAt,
+        };
+        this.passengerDropoffProviderCalls++;
+        const provider = Promise.resolve()
+          .then(() =>
+            this.passengerRouteGeoService!.route({
+              origin,
+              destination,
+              travelMode: "drive",
+              locale: "zh-TW",
+            }),
+          )
+          .then((route): PassengerRideDropoffRouteEstimate | null => {
+            const generatedAge = Date.now() - Date.parse(route.generatedAt);
+            if (
+              typeof route.provider !== "string" ||
+              !route.provider.trim() ||
+              !isIso8601InstantWithTimezone(route.generatedAt) ||
+              !Number.isFinite(route.distanceMeters) ||
+              route.distanceMeters < 0 ||
+              !Number.isFinite(route.durationSeconds) ||
+              route.durationSeconds < 0 ||
+              !Number.isFinite(generatedAge) ||
+              generatedAge < -5_000 ||
+              generatedAge >= 60_000
+            )
+              return null;
+            return {
+              ...binding,
+              provider: route.provider,
+              generatedAt: route.generatedAt,
+              remainingDistanceMeters: route.distanceMeters,
+              remainingDurationSeconds: route.durationSeconds,
+            };
+          })
+          .catch(() => null)
+          .finally(() => {
+            this.passengerDropoffProviderCalls--;
+          });
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        const deadline = new Promise<null>((resolve) => {
+          timeout = setTimeout(() => resolve(null), 2_500);
+        });
+        const result = Promise.race([provider, deadline]).finally(() =>
+          clearTimeout(timeout),
+        );
+        cached = { expiresAt: now + 30_000, result };
+        this.passengerDropoffRoutes.set(key, cached);
+      }
+      const route = await cached.result;
+      if (!route) return null;
+      // Re-read durable authority after provider/cache await. A completed trip,
+      // reassignment, or later GPS observation invalidates the old leg immediately.
+      const latestOrder = await this.resolvePersistedOrder(order.orderId);
+      const latestAssignment =
+        await this.resolvePersistedPassengerAssignmentDisclosure(order.orderId);
+      if (!latestAssignment) return null;
+      const latestCurrent =
+        await this.regulatoryRegistryService.getDriverTrackingStatus(
+          assignment.driver.driverId,
+        );
+      const latestTask = latestCurrent.currentTaskId
+        ? await this.findDriverTaskForRead(latestCurrent.currentTaskId)
+        : null;
+      return this.passengerDropoffObservationKey(
+        latestOrder,
+        latestAssignment,
+        latestCurrent,
+        latestTask,
+      ) === key
+        ? route
+        : null;
+    } catch {
+      // A route is advisory; provider/read failure must not obscure the real ride.
+      return null;
+    }
   }
 
   assertTenantAccessScope(
@@ -2743,6 +3532,162 @@ export class OwnedMobilityService
     return this.mapOrderToBooking(order);
   }
 
+  /** Existing tenant:read route; provider input stays identifier-only. */
+  async getTenantBookingDriverContact(
+    tenantId: string,
+    bookingId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<
+    PassengerRideContactOption & {
+      bookingId: string;
+      orderId: string;
+      assignmentId: string;
+    }
+  > {
+    if (
+      !identity?.actorId ||
+      (identity.realm === "tenant" && identity.authMode !== "jwt_bearer")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_REQUIRED",
+        "Authenticated tenant identity is required.",
+      );
+    }
+    this.assertTenantAccessScope(tenantId, identity);
+    const initial = await this.resolveTenantDriverContactContext(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    let reason: PassengerContactUnavailableReason =
+      "masked_call_provider_not_configured";
+    let session: { contactUri: string; expiresAt: string } | null = null;
+    if (this.tenantMaskedCallPort?.isAvailable()) {
+      reason = "masked_call_provider_error";
+      try {
+        const issued = await this.tenantMaskedCallPort.createSession(
+          {
+            orderId: initial.order.orderId,
+            assignmentId: initial.assignment.assignmentId,
+            driverId: initial.assignment.driverId,
+            passengerSubjectRef: `tenant:${tenantId}:${identity.actorId}`,
+          },
+          { requestId },
+        );
+        if (
+          issued.contactUri?.trim() &&
+          Date.parse(issued.expiresAt) > Date.now()
+        ) {
+          session = {
+            contactUri: issued.contactUri,
+            expiresAt: issued.expiresAt,
+          };
+        }
+      } catch {
+        // Provider payloads can contain the real driver leg. Do not log or
+        // return them; preserve the existing explicit provider-error state.
+      }
+    }
+    // A provider await can overlap a normal reassignment or trip completion.
+    // Discard the obsolete leg; the port has no instant-revocation contract.
+    const current = await this.resolveTenantDriverContactContext(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    if (
+      current.order.orderId !== initial.order.orderId ||
+      current.assignment.assignmentId !== initial.assignment.assignmentId ||
+      current.assignment.driverId !== initial.assignment.driverId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_DRIVER_CONTACT_NOT_AVAILABLE",
+        "Driver assignment changed; refresh contact for the current booking.",
+        { bookingId },
+      );
+    }
+    const binding = {
+      bookingId,
+      orderId: current.order.orderId,
+      assignmentId: current.assignment.assignmentId,
+    };
+    if (session)
+      return {
+        ...binding,
+        mode: "masked_call",
+        ...session,
+        unavailableReason: null,
+      };
+    const supportUri = process.env.MULTI_TAXI_SUPPORT_TEL_URI?.trim() || null;
+    return supportUri?.startsWith("tel:")
+      ? {
+          ...binding,
+          mode: "support_fallback",
+          contactUri: supportUri,
+          expiresAt: null,
+          unavailableReason: reason,
+        }
+      : {
+          ...binding,
+          mode: "unavailable",
+          contactUri: null,
+          expiresAt: null,
+          unavailableReason: reason,
+        };
+  }
+
+  private async resolveTenantDriverContactContext(
+    tenantId: string,
+    bookingId: string,
+    identity: BootstrapRequestIdentity,
+  ) {
+    const booking = await this.resolvePersistedTenantBooking(
+      tenantId,
+      bookingId,
+      identity,
+    );
+    // Generic enterprise assignments do not have multi_taxi_direct passenger
+    // disclosure snapshots. Reuse the existing one-aggregate MVCC read instead.
+    const context = this.ownedMobilityRepository?.isEnabled()
+      ? await this.ownedMobilityRepository.loadOrderActionContext({
+          orderId: booking.orderId,
+        })
+      : null;
+    const order = this.ownedMobilityRepository?.isEnabled()
+      ? context?.orders.find(
+          (row) =>
+            row.orderId === booking.orderId &&
+            row.bookingId === bookingId &&
+            row.tenantId === tenantId,
+        )
+      : this.requireBookingOrder(bookingId, tenantId);
+    if (!order)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "BOOKING_NOT_FOUND",
+        "Booking was not found.",
+      );
+    const assignment = this.ownedMobilityRepository?.isEnabled()
+      ? context?.dispatchAssignments.find(
+          (row) =>
+            row.orderId === order.orderId &&
+            ["assigned", "accepted"].includes(row.status),
+        )
+      : this.findLatestActiveAssignment(order.orderId);
+    if (!assignment || ["completed", "cancelled"].includes(order.status)) {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "TENANT_DRIVER_CONTACT_NOT_AVAILABLE",
+        "Driver contact is not available for the current booking state.",
+        { bookingId },
+      );
+    }
+    return { order, assignment };
+  }
+
   /**
    * SD §7.5: "不得以 updatedAt 從 DB 與記憶體挑較新者，因為記憶體可能是未持久化
    * 狀態" -- a persisted DB row is always authoritative over the in-memory
@@ -2912,24 +3857,15 @@ export class OwnedMobilityService
     command: ApproveTenantBookingApprovalRequestCommand,
     requestId?: string,
   ) {
-    if (!this.tenantPartnerService) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_IMPLEMENTED,
-        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
-        "Tenant approval workflow is not available.",
-      );
-    }
-
-    const request = await this.tenantPartnerService.approveApprovalRequest({
+    return this.executeTenantBookingApprovalCommand(
+      "approve",
       tenantId,
       approvalRequestId,
       actorUserId,
       actorRoleCode,
       command,
-      ...(requestId ? { requestId } : {}),
-    });
-    this.applyApprovalRequestResolutionToOrder(request, requestId);
-    return request;
+      requestId,
+    );
   }
 
   async rejectTenantBookingApprovalRequest(
@@ -2940,24 +3876,15 @@ export class OwnedMobilityService
     command: RejectTenantBookingApprovalRequestCommand,
     requestId?: string,
   ) {
-    if (!this.tenantPartnerService) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_IMPLEMENTED,
-        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
-        "Tenant approval workflow is not available.",
-      );
-    }
-
-    const request = await this.tenantPartnerService.rejectApprovalRequest({
+    return this.executeTenantBookingApprovalCommand(
+      "reject",
       tenantId,
       approvalRequestId,
       actorUserId,
       actorRoleCode,
       command,
-      ...(requestId ? { requestId } : {}),
-    });
-    this.applyApprovalRequestResolutionToOrder(request, requestId);
-    return request;
+      requestId,
+    );
   }
 
   async escalateTenantBookingApprovalRequest(
@@ -2968,24 +3895,216 @@ export class OwnedMobilityService
     command: EscalateTenantBookingApprovalRequestCommand,
     requestId?: string,
   ) {
-    if (!this.tenantPartnerService) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_IMPLEMENTED,
-        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
-        "Tenant approval workflow is not available.",
-      );
-    }
-
-    const request = await this.tenantPartnerService.escalateApprovalRequest({
+    return this.executeTenantBookingApprovalCommand(
+      "escalate",
       tenantId,
       approvalRequestId,
       actorUserId,
       actorRoleCode,
       command,
-      ...(requestId ? { requestId } : {}),
-    });
-    this.applyApprovalRequestResolutionToOrder(request, requestId);
-    return request;
+      requestId,
+    );
+  }
+
+  private async executeTenantBookingApprovalCommand(
+    action: "approve" | "reject" | "escalate",
+    tenantId: string,
+    approvalRequestId: string,
+    actorUserId: string,
+    actorRoleCode: string | null,
+    command:
+      | ApproveTenantBookingApprovalRequestCommand
+      | RejectTenantBookingApprovalRequestCommand
+      | EscalateTenantBookingApprovalRequestCommand,
+    requestId?: string,
+  ) {
+    const tenant = this.tenantPartnerService;
+    if (!tenant)
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
+        "Tenant approval workflow is not available.",
+      );
+    const anchor = await tenant.resolveApprovalRequestForCommand(
+      tenantId,
+      approvalRequestId,
+    );
+    return this.executeBookingApprovalCommand(
+      anchor,
+      async (workflow) => {
+        const input = {
+          tenantId,
+          approvalRequestId,
+          actorUserId,
+          actorRoleCode,
+          ...(requestId ? { requestId } : {}),
+        };
+        return action === "approve"
+          ? tenant.approveApprovalRequest(
+              {
+                ...input,
+                command: command as ApproveTenantBookingApprovalRequestCommand,
+              },
+              workflow,
+            )
+          : action === "reject"
+            ? tenant.rejectApprovalRequest(
+                {
+                  ...input,
+                  command: command as RejectTenantBookingApprovalRequestCommand,
+                },
+                workflow,
+              )
+            : tenant.escalateApprovalRequest(
+                {
+                  ...input,
+                  command:
+                    command as EscalateTenantBookingApprovalRequestCommand,
+                },
+                workflow,
+              );
+      },
+      requestId,
+    );
+  }
+
+  async executeOpsBookingApprovalCommand(
+    action: "approve" | "reject" | "escalate",
+    approvalRequestId: string,
+    command:
+      | ApproveTenantBookingApprovalRequestCommand
+      | RejectTenantBookingApprovalRequestCommand
+      | EscalateTenantBookingApprovalRequestCommand,
+    identity: IdentityContext | null,
+    requestId?: string,
+  ) {
+    const tenant = this.tenantPartnerService;
+    if (!tenant)
+      throw new ApiRequestError(
+        HttpStatus.NOT_IMPLEMENTED,
+        "APPROVAL_WORKFLOW_NOT_AVAILABLE",
+        "Tenant approval workflow is not available.",
+      );
+    // Preserve the existing Ops actor authority before cross-tenant discovery.
+    const anchor = await tenant.resolveOpsApprovalRequestForCommand(
+      approvalRequestId,
+      identity,
+    );
+    return this.executeBookingApprovalCommand(
+      anchor,
+      async (workflow) =>
+        action === "approve"
+          ? tenant.approveOpsApprovalRequest(
+              approvalRequestId,
+              command as ApproveTenantBookingApprovalRequestCommand,
+              identity,
+              requestId,
+              workflow,
+            )
+          : action === "reject"
+            ? tenant.rejectOpsApprovalRequest(
+                approvalRequestId,
+                command as RejectTenantBookingApprovalRequestCommand,
+                identity,
+                requestId,
+                workflow,
+              )
+            : tenant.escalateOpsApprovalRequest(
+                approvalRequestId,
+                command as EscalateTenantBookingApprovalRequestCommand,
+                identity,
+                requestId,
+                workflow,
+              ),
+      requestId,
+    );
+  }
+
+  private async executeBookingApprovalCommand<
+    T extends TenantBookingApprovalRequestRecord,
+  >(
+    anchor: TenantBookingApprovalRequestRecord,
+    decide: (workflow: TenantApprovalCommandContext) => Promise<T>,
+    requestId?: string,
+  ) {
+    const tenant = this.tenantPartnerService!;
+    const { tenantId, approvalRequestId } = anchor;
+    const afterCommit: Array<() => void | Promise<void>> = [];
+    const repository = this.ownedMobilityRepository;
+    const apply = async (
+      order: OwnedOrderRecord,
+      tx: OwnedMobilityQueryExecutor | null,
+    ) => {
+      if (order.tenantId !== tenantId || order.bookingId !== anchor.bookingId)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "BOOKING_NOT_FOUND",
+          "Booking was not found.",
+        );
+      if (order.status === "cancelled" || order.status === "completed")
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ORDER_NOT_MODIFIABLE",
+          "The order can no longer be modified.",
+          { orderId: order.orderId },
+        );
+      const current = await tenant.resolveApprovalRequestForCommand(
+        tenantId,
+        approvalRequestId,
+        tx ?? undefined,
+      );
+      if (
+        current.orderId !== order.orderId ||
+        current.bookingId !== order.bookingId
+      )
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "APPROVAL_ORDER_MISMATCH",
+          "Approval request no longer belongs to this booking.",
+        );
+      const workflow = { tx, afterCommit, request: current };
+      const request = await decide(workflow);
+      const prepared = await this.applyApprovalRequestResolutionToOrder(
+        request,
+        order,
+        tx,
+      );
+      return { request, ...prepared };
+    };
+    const project = async (committed: Awaited<ReturnType<typeof apply>>) => {
+      this.applyAuthoritativeOrder(committed.order);
+      if (committed.quotaRelease)
+        tenant.applyCommittedQuotaRelease(committed.quotaRelease);
+      this.recordBookingApprovalStateChanged(
+        committed.order,
+        committed.previousApprovalState,
+        requestId,
+      );
+      for (const effect of afterCommit) await effect();
+      return committed.request;
+    };
+    if (repository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+      const committed = await repository.withTransaction(async (tx) => {
+        const locked = await repository.findOrderForUpdate(tx, anchor.orderId);
+        if (!locked)
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "BOOKING_NOT_FOUND",
+            "Booking was not found.",
+          );
+        return apply(this.cloneOrder(locked.order), tx);
+      });
+      return project(committed);
+    }
+    return tenant.runInMemoryApprovalCommand(approvalRequestId, async () =>
+      project(
+        await apply(
+          this.cloneOrder(this.requireBookingOrder(anchor.bookingId, tenantId)),
+          null,
+        ),
+      ),
+    );
   }
 
   async acknowledgePassengerDisclosure(
@@ -3106,11 +4225,132 @@ export class OwnedMobilityService
   ) {
     this.assertNonBlank(tenantId, "tenantId");
     this.assertTenantChannelCannotSetQuotedFare(command, identity);
-    const order = this.requireBookingOrder(bookingId, tenantId);
-    const originalOrder = this.cloneOrder(order);
-    const governanceSnapshot = this.captureTenantGovernanceSnapshot();
+    const repository = this.ownedMobilityRepository;
+    const afterCommit: Array<() => void | Promise<void>> = [];
+    const project = (prepared: {
+      order: OwnedOrderRecord;
+      traceLog: DispatchTraceLogRecord;
+      previousApprovalState: TenantBookingApprovalState;
+    }) => {
+      this.applyAuthoritativeOrder(prepared.order);
+      this.dispatchTraceLogs = [prepared.traceLog, ...this.dispatchTraceLogs];
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "tenant_admin",
+          tenantId,
+          moduleName: "order",
+          actionName: "update_booking",
+          resourceType: "booking",
+          resourceId: bookingId,
+          newValuesSummary: {
+            orderId: prepared.order.orderId,
+            status: prepared.order.status,
+            businessDispatchSubtype: prepared.order.businessDispatchSubtype,
+            approvalState: prepared.order.approvalState,
+            approvalRequestIds: prepared.order.approvalRequestIds,
+          },
+        },
+        requestId,
+      );
+      this.recordBookingApprovalStateChanged(
+        prepared.order,
+        prepared.previousApprovalState,
+        requestId,
+      );
+      return this.mapOrderToBooking(prepared.order);
+    };
+    if (repository?.isEnabled()) {
+      return (async () => {
+        await Promise.all([...this.pendingWorkflowWrites]);
+        const anchor = await repository.findOrderByBookingId(
+          bookingId,
+          tenantId,
+        );
+        if (!anchor)
+          throw new ApiRequestError(
+            HttpStatus.NOT_FOUND,
+            "BOOKING_NOT_FOUND",
+            "Booking was not found.",
+            { bookingId },
+          );
+        const prepared = await repository.withTransaction(async (tx) => {
+          const locked = await repository.findOrderForUpdate(
+            tx,
+            anchor.orderId,
+          );
+          if (
+            !locked ||
+            locked.order.tenantId !== tenantId ||
+            locked.order.bookingId !== bookingId
+          ) {
+            throw new ApiRequestError(
+              HttpStatus.NOT_FOUND,
+              "BOOKING_NOT_FOUND",
+              "Booking was not found.",
+              { bookingId },
+            );
+          }
+          // Refresh only this already committed row, never an attempted update.
+          this.applyAuthoritativeOrder(locked.order);
+          const result = await this.prepareTenantBookingUpdate(
+            this.cloneOrder(locked.order),
+            command,
+            requestId,
+            tx,
+            afterCommit,
+          );
+          result.order.aggregateVersion = await repository.updateOrderWithCas(
+            tx,
+            result.order,
+            locked.aggregateVersion,
+          );
+          await repository.persistOrderWorkflow(tx, {
+            dispatchTraceLogs: [result.traceLog],
+          });
+          return result;
+        });
+        // No shared order/trace/governance projection or success audit before COMMIT.
+        const result = project(prepared);
+        for (const effect of afterCommit) await effect();
+        return result;
+      })();
+    }
+    const snapshot = this.captureTenantGovernanceSnapshot();
+    return this.withRollback(
+      () =>
+        this.afterMaybePromise(
+          this.prepareTenantBookingUpdate(
+            this.cloneOrder(this.requireBookingOrder(bookingId, tenantId)),
+            command,
+            requestId,
+            null,
+            afterCommit,
+          ),
+          (prepared) => project(prepared),
+        ),
+      () => this.restoreTenantGovernanceSnapshot(snapshot),
+    );
+  }
+
+  private prepareTenantBookingUpdate(
+    order: OwnedOrderRecord,
+    command: UpdateTenantBookingCommand,
+    requestId: string | undefined,
+    tx: OwnedMobilityQueryExecutor | null,
+    afterCommit: Array<() => void | Promise<void>>,
+  ) {
+    const tenantId = order.tenantId!;
+    const bookingId = order.bookingId!;
     this.assertBookingModifiable(order);
+    const originalOrder = this.cloneOrder(order);
     const previousApprovalState = order.approvalState;
+    if (
+      command.reservationWindowStart !== undefined &&
+      command.reservationWindowStart !== order.reservationWindowStart
+    ) {
+      this.assertBookingLeadTime(command.reservationWindowStart);
+    }
     const previousApprovalSnapshot =
       this.buildTenantBookingApprovalInputSnapshot(order);
 
@@ -3268,59 +4508,22 @@ export class OwnedMobilityService
       ) ?? false;
 
     order.updatedAt = new Date().toISOString();
-    const traceLog = this.appendTrace(order.orderId, "booking.updated", {
+    const traceLog = this.buildTraceLog(order.orderId, "booking.updated", {
       bookingId,
       businessDispatchSubtype,
       reservationWindowStart: order.reservationWindowStart,
       reservationWindowEnd: order.reservationWindowEnd,
     });
-    const finalizeUpdate = (persistOrderWrite = true) => {
-      if (persistOrderWrite) {
-        this.persistChanges(
-          {
-            orders: [order],
-            dispatchTraceLogs: [traceLog],
-          },
-          "update_tenant_booking",
-        );
-      }
-      this.recordAudit(
-        {
-          actorId: null,
-          actorType: "tenant_admin",
-          tenantId: order.tenantId,
-          moduleName: "order",
-          actionName: "update_booking",
-          resourceType: "booking",
-          resourceId: bookingId,
-          newValuesSummary: {
-            orderId: order.orderId,
-            status: order.status,
-            businessDispatchSubtype,
-            approvalState: order.approvalState,
-            approvalRequestIds: order.approvalRequestIds,
-          },
-        },
-        requestId,
-      );
-      this.recordBookingApprovalStateChanged(
-        order,
-        previousApprovalState,
-        requestId,
-      );
-      return this.mapOrderToBooking(order);
-    };
-
-    if (!needsApprovalReevaluation) {
-      return finalizeUpdate();
-    }
-
+    const prepared = { order, traceLog, previousApprovalState };
+    if (!needsApprovalReevaluation) return prepared;
     const applyReevaluation = (tx?: OwnedMobilityQueryExecutor | null) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
           tx: tx ?? null,
+          afterCommit,
           order,
           operation: "update",
+          previousOrder: originalOrder,
           ...(requestId ? { requestId } : {}),
         }),
         (evaluation) => {
@@ -3329,6 +4532,7 @@ export class OwnedMobilityService
           return this.afterMaybePromise(
             this.cancelApprovalRequestsForReevaluation({
               tx: tx ?? null,
+              afterCommit,
               order,
               ...(requestId ? { requestId } : {}),
             }),
@@ -3336,6 +4540,7 @@ export class OwnedMobilityService
               this.afterMaybePromise(
                 this.createApprovalRequestForOrder({
                   tx: tx ?? null,
+                  afterCommit,
                   order,
                   evaluation,
                   ...(requestId ? { requestId } : {}),
@@ -3351,35 +4556,7 @@ export class OwnedMobilityService
         },
       );
 
-    if (
-      this.ownedMobilityRepository?.isEnabled() &&
-      this.tenantPartnerService?.isPersistenceEnabled()
-    ) {
-      return this.withRollback(
-        () =>
-          this.ownedMobilityRepository!.withTransaction(async (tx) => {
-            await applyReevaluation(tx);
-            await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
-              orders: [this.cloneOrder(order)],
-              dispatchTraceLogs: [traceLog],
-            });
-            return finalizeUpdate(false);
-          }),
-        () => {
-          this.restoreTenantGovernanceSnapshot(governanceSnapshot);
-          this.restoreOrderSnapshot(originalOrder);
-        },
-      );
-    }
-
-    return this.withRollback(
-      () =>
-        this.afterMaybePromise(applyReevaluation(null), () => finalizeUpdate()),
-      () => {
-        this.restoreTenantGovernanceSnapshot(governanceSnapshot);
-        this.restoreOrderSnapshot(originalOrder);
-      },
-    );
+    return this.afterMaybePromise(applyReevaluation(tx), () => prepared);
   }
 
   async cancelTenantBooking(
@@ -3551,7 +4728,12 @@ export class OwnedMobilityService
         ...(command.idempotencyKey ? { idempotencyKey: resolvedKey } : {}),
       },
       execute: async () => {
-        const res = this._executeDispatchOrder(orderId, command, requestId);
+        const res = await this._executeDispatchOrder(
+          orderId,
+          command,
+          requestId,
+          options?.required === true,
+        );
         return {
           data: res,
           statusCode: 200,
@@ -3566,19 +4748,25 @@ export class OwnedMobilityService
     orderId: string,
     command: DispatchOrderCommand,
     requestId?: string,
+    awaitPersistence = false,
   ) {
     const prepared = this.prepareDispatchOrder(
       this.cloneOrder(this.requireOrder(orderId)),
       command,
       requestId,
     );
-    this.persistChanges(
+    const pending = this.persistChanges(
       {
         ...prepared.changes,
         orders: prepared.shouldPersistOrder ? prepared.changes.orders : [],
       },
       "dispatch_order",
     );
+    // HTTP dispatch must acknowledge its own job/attempt writes before another
+    // instance can consume the returned ID. Internal synchronous callers retain
+    // their original contract; unrelated workflow writes are not awaited here.
+    if (awaitPersistence && pending)
+      return pending.then(() => prepared.apply());
     return prepared.apply();
   }
 
@@ -3669,113 +4857,14 @@ export class OwnedMobilityService
 
     if (candidates.length === 0) {
       shouldPersistOrder = true;
-      order.updatedAt = now;
-      if (isReservation && !exceptionHoldEval.shouldHold) {
-        order.status = "redispatch_required";
-        this.transitionReservationHold(order, "redispatch_queue");
-        traceLogs.push(
-          this.buildTraceLog(orderId, "dispatch.failed", {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: exceptionHoldEval.reasonCode,
-          }),
-        );
-        traceLogs.push(
-          this.buildTraceLog(orderId, "queue.entry.created", {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            queueType: "redispatch",
-            reasonCode: exceptionHoldEval.reasonCode,
-          }),
-        );
-      } else if (isReservation) {
-        shouldPersistOrder = true;
-        order.status = "exception_hold";
-        this.transitionReservationHold(order, "exception_hold");
-        order.exceptionHold = this.createExceptionHoldRecord(
-          exceptionHoldEval.reasonCode,
-          dispatchJob.dispatchJobId,
+      traceLogs.push(
+        ...this.applyDispatchNoSupplyPolicy(
+          order,
+          dispatchJob,
           now,
-          {
-            isReservation: true,
-            isWithinConfirmationWindow: true,
-            hasEligibleSupply: false,
-            reasonCode: exceptionHoldEval.reasonCode,
-          },
-        );
-        traceLogs.push(
-          this.buildTraceLog(orderId, "dispatch.failed", {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: exceptionHoldEval.reasonCode,
-          }),
-        );
-        traceLogs.push(
-          this.buildTraceLog(orderId, "order.exception_hold", {
-            dispatchJobId: dispatchJob.dispatchJobId,
-            reasonCode: exceptionHoldEval.reasonCode,
-            exceptionHoldCriteria: {
-              isReservation: true,
-              isWithinConfirmationWindow: true,
-              hasEligibleSupply: false,
-            },
-          }),
-        );
-      } else {
-        const escalationAction = this.resolveNoSupplyEscalation(order);
-        if (escalationAction === "move_to_delayed_queue") {
-          order.status = "delayed_queue";
-          order.queueFamily = "delayed_retry_queue";
-          order.queueEntryReason = "no_supply_delayed_retry";
-          dispatchJob.status = "no_supply";
-          order.noSupplyEscalation = {
-            orderId,
-            dispatchJobId: dispatchJob.dispatchJobId,
-            attemptCount: order.dispatchAttemptCount + 1,
-            lastAttemptAt: now,
-            escalationAction,
-            escalatedAt: now,
-            resolvedAt: null,
-          };
-          traceLogs.push(
-            this.buildTraceLog(orderId, "dispatch.no_supply_delayed", {
-              dispatchJobId: dispatchJob.dispatchJobId,
-              reasonCode: exceptionHoldEval.reasonCode,
-              escalationAction,
-              attemptCount: order.dispatchAttemptCount + 1,
-            }),
-          );
-        } else if (escalationAction === "escalate_to_ops") {
-          order.status = "no_supply";
-          order.queueFamily = "manual_review_queue";
-          order.queueEntryReason = "no_supply_escalated_to_ops";
-          dispatchJob.status = "no_supply";
-          order.noSupplyEscalation = {
-            orderId,
-            dispatchJobId: dispatchJob.dispatchJobId,
-            attemptCount: order.dispatchAttemptCount + 1,
-            lastAttemptAt: now,
-            escalationAction,
-            escalatedAt: now,
-            resolvedAt: null,
-          };
-          traceLogs.push(
-            this.buildTraceLog(orderId, "dispatch.no_supply_escalated", {
-              dispatchJobId: dispatchJob.dispatchJobId,
-              reasonCode: exceptionHoldEval.reasonCode,
-              escalationAction,
-              attemptCount: order.dispatchAttemptCount + 1,
-            }),
-          );
-        } else {
-          order.status = "dispatch_failed";
-          traceLogs.push(
-            this.buildTraceLog(orderId, "dispatch.failed", {
-              dispatchJobId: dispatchJob.dispatchJobId,
-              reasonCode: exceptionHoldEval.reasonCode,
-            }),
-          );
-        }
-        order.dispatchAttemptCount += 1;
-        order.lastDispatchFailureReason = exceptionHoldEval.reasonCode;
-      }
+          exceptionHoldEval,
+        ),
+      );
     } else if (isReservation) {
       shouldPersistOrder = true;
       order.status = "preassigned";
@@ -3846,6 +4935,240 @@ export class OwnedMobilityService
         };
       },
     };
+  }
+
+  /** Complete an exhausted autonomous round through the existing no-supply policy. */
+  async completeAutonomousNoSupply(
+    orderId: string,
+    dispatchJobId: string,
+    reasonCode: "no_eligible_candidate" | "reservation_conflicts_exhausted",
+    requestId?: string,
+  ): Promise<void> {
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+    }
+    const afterCommit: (() => void)[] = [];
+    const apply = async (tx?: OwnedMobilityQueryExecutor) => {
+      const current = tx
+        ? await this.ownedMobilityRepository!.loadOrderCancellationForUpdate(
+            tx,
+            orderId,
+          )
+        : null;
+      const order = this.cloneOrder(
+        current?.order ?? this.requireOrder(orderId),
+      );
+      const jobs =
+        current?.dispatchJobs ??
+        this.dispatchJobs.filter((j) => j.orderId === orderId);
+      const currentJob = jobs.find((j) => j.dispatchJobId === dispatchJobId);
+      const activeAssignment = current
+        ? current.assignment
+        : this.getActiveDispatchAssignmentForOrder(orderId);
+      if (
+        !currentJob ||
+        activeAssignment ||
+        jobs.some(
+          (j) =>
+            j.dispatchJobId !== dispatchJobId &&
+            ["matching", "assigned", "reserved"].includes(j.status),
+        ) ||
+        [
+          "cancelled",
+          "completed",
+          "driver_accepted",
+          "enroute_pickup",
+          "arrived_pickup",
+          "on_trip",
+        ].includes(order.status)
+      ) {
+        throw new ApiRequestError(
+          409,
+          "DISPATCH_ROUND_SUPERSEDED",
+          "The dispatch round has changed; reload the original order.",
+          { orderId, dispatchJobId },
+        );
+      }
+      // An initial dispatch or a previous worker already committed this result.
+      // Replaying that work must not consume another no-supply attempt.
+      if (["no_supply", "failed", "queued"].includes(currentJob.status)) return;
+      const dispatchJob = { ...currentJob };
+      const now = new Date().toISOString();
+      const traceLogs = this.applyDispatchNoSupplyPolicy(
+        order,
+        dispatchJob,
+        now,
+        this.evaluateExceptionHoldCriteria(order, false, now),
+      );
+      dispatchJob.updatedAt = now;
+      const changes = {
+        orders: [order],
+        dispatchJobs: [dispatchJob],
+        dispatchTraceLogs: traceLogs,
+      };
+      if (tx)
+        await this.ownedMobilityRepository!.persistOrderWorkflow(tx, changes);
+      else await this.persistChangesRequired(changes, "autonomous_no_supply");
+      afterCommit.push(() => {
+        this.applyAuthoritativeOrder(order);
+        this.dispatchJobs = [
+          dispatchJob,
+          ...this.dispatchJobs.filter((j) => j.dispatchJobId !== dispatchJobId),
+        ];
+        this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
+        if (order.dispatchSemantics === "reservation")
+          this.recordReservationEscalationNotifications(order, dispatchJobId);
+        this.opsDispatchEventsService?.publishDispatchJobUpdated(
+          orderId,
+          dispatchJob,
+          requestId,
+        );
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "system",
+            tenantId: order.tenantId,
+            moduleName: "dispatch",
+            actionName: "autonomous_no_supply",
+            resourceType: "dispatch_job",
+            resourceId: dispatchJobId,
+            newValuesSummary: {
+              orderId,
+              status: dispatchJob.status,
+              reasonCode,
+            },
+          },
+          requestId,
+        );
+      });
+    };
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      await this.ownedMobilityRepository.withTransaction((tx) => apply(tx));
+    } else await apply();
+    for (const publish of afterCommit) publish();
+  }
+
+  private applyDispatchNoSupplyPolicy(
+    order: OwnedOrderRecord,
+    dispatchJob: DispatchJobRecord,
+    now: string,
+    exceptionHoldEval: {
+      shouldHold: boolean;
+      reasonCode: ExceptionHoldReasonCode;
+    },
+  ): DispatchTraceLogRecord[] {
+    const orderId = order.orderId;
+    const isReservation = order.dispatchSemantics === "reservation";
+    const traceLogs: DispatchTraceLogRecord[] = [];
+    dispatchJob.status =
+      isReservation && !exceptionHoldEval.shouldHold ? "queued" : "failed";
+    order.updatedAt = now;
+    if (isReservation && !exceptionHoldEval.shouldHold) {
+      order.status = "redispatch_required";
+      this.transitionReservationHold(order, "redispatch_queue");
+      traceLogs.push(
+        this.buildTraceLog(orderId, "dispatch.failed", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          reasonCode: exceptionHoldEval.reasonCode,
+        }),
+      );
+      traceLogs.push(
+        this.buildTraceLog(orderId, "queue.entry.created", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          queueType: "redispatch",
+          reasonCode: exceptionHoldEval.reasonCode,
+        }),
+      );
+    } else if (isReservation) {
+      order.status = "exception_hold";
+      this.transitionReservationHold(order, "exception_hold");
+      order.exceptionHold = this.createExceptionHoldRecord(
+        exceptionHoldEval.reasonCode,
+        dispatchJob.dispatchJobId,
+        now,
+        {
+          isReservation: true,
+          isWithinConfirmationWindow: true,
+          hasEligibleSupply: false,
+          reasonCode: exceptionHoldEval.reasonCode,
+        },
+      );
+      traceLogs.push(
+        this.buildTraceLog(orderId, "dispatch.failed", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          reasonCode: exceptionHoldEval.reasonCode,
+        }),
+      );
+      traceLogs.push(
+        this.buildTraceLog(orderId, "order.exception_hold", {
+          dispatchJobId: dispatchJob.dispatchJobId,
+          reasonCode: exceptionHoldEval.reasonCode,
+          exceptionHoldCriteria: {
+            isReservation: true,
+            isWithinConfirmationWindow: true,
+            hasEligibleSupply: false,
+          },
+        }),
+      );
+    } else {
+      const escalationAction = this.resolveNoSupplyEscalation(order);
+      if (escalationAction === "move_to_delayed_queue") {
+        order.status = "delayed_queue";
+        order.queueFamily = "delayed_retry_queue";
+        order.queueEntryReason = "no_supply_delayed_retry";
+        dispatchJob.status = "no_supply";
+        order.noSupplyEscalation = {
+          orderId,
+          dispatchJobId: dispatchJob.dispatchJobId,
+          attemptCount: order.dispatchAttemptCount + 1,
+          lastAttemptAt: now,
+          escalationAction,
+          escalatedAt: now,
+          resolvedAt: null,
+        };
+        traceLogs.push(
+          this.buildTraceLog(orderId, "dispatch.no_supply_delayed", {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            reasonCode: exceptionHoldEval.reasonCode,
+            escalationAction,
+            attemptCount: order.dispatchAttemptCount + 1,
+          }),
+        );
+      } else if (escalationAction === "escalate_to_ops") {
+        order.status = "no_supply";
+        order.queueFamily = "manual_review_queue";
+        order.queueEntryReason = "no_supply_escalated_to_ops";
+        dispatchJob.status = "no_supply";
+        order.noSupplyEscalation = {
+          orderId,
+          dispatchJobId: dispatchJob.dispatchJobId,
+          attemptCount: order.dispatchAttemptCount + 1,
+          lastAttemptAt: now,
+          escalationAction,
+          escalatedAt: now,
+          resolvedAt: null,
+        };
+        traceLogs.push(
+          this.buildTraceLog(orderId, "dispatch.no_supply_escalated", {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            reasonCode: exceptionHoldEval.reasonCode,
+            escalationAction,
+            attemptCount: order.dispatchAttemptCount + 1,
+          }),
+        );
+      } else {
+        order.status = "dispatch_failed";
+        traceLogs.push(
+          this.buildTraceLog(orderId, "dispatch.failed", {
+            dispatchJobId: dispatchJob.dispatchJobId,
+            reasonCode: exceptionHoldEval.reasonCode,
+          }),
+        );
+      }
+      order.dispatchAttemptCount += 1;
+      order.lastDispatchFailureReason = exceptionHoldEval.reasonCode;
+    }
+    return traceLogs;
   }
 
   redispatchOrder(
@@ -4725,6 +6048,22 @@ export class OwnedMobilityService
     return this.dispatchJobs.map((job) => this.buildDispatchJobSnapshot(job));
   }
 
+  async listDispatchJobsForRead() {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.listDispatchJobs();
+    const jobs = await this.ownedMobilityRepository.listDispatchJobsForRead();
+    const orders = new Map(
+      (
+        await this.listOrdersForRead([
+          ...new Set(jobs.map((job) => job.orderId)),
+        ])
+      ).map((order) => [order.orderId, order]),
+    );
+    return jobs.map((job) =>
+      this.buildDispatchJobSnapshot(job, orders.get(job.orderId) ?? null),
+    );
+  }
+
   listDispatchTrace(orderId: string) {
     this.requireOrder(orderId);
     return this.dispatchTraceLogs
@@ -4738,6 +6077,7 @@ export class OwnedMobilityService
   ): Promise<DispatchCandidate[]> {
     const dispatchJob = this.requireDispatchJob(dispatchJobId);
     const order = this.requireOrder(dispatchJob.orderId);
+    await this.prepareDispatchEligibility(order);
     const candidates = await this.listDispatchCandidatesWithEligibility(
       dispatchJob,
       order,
@@ -4746,10 +6086,16 @@ export class OwnedMobilityService
     return candidates.map((candidate) => ({ ...candidate }));
   }
 
-  private buildDispatchJobSnapshot(dispatchJob: DispatchJobRecord) {
-    const order = this.orders.find(
-      (candidateOrder) => candidateOrder.orderId === dispatchJob.orderId,
-    );
+  private buildDispatchJobSnapshot(
+    dispatchJob: DispatchJobRecord,
+    authoritativeOrder?: OwnedOrderRecord | null,
+  ) {
+    const order =
+      authoritativeOrder === undefined
+        ? this.orders.find(
+            (candidateOrder) => candidateOrder.orderId === dispatchJob.orderId,
+          )
+        : authoritativeOrder;
     if (!order) {
       return { ...dispatchJob };
     }
@@ -5183,6 +6529,7 @@ export class OwnedMobilityService
           }
           order = current.order;
           dispatchJob = currentJob;
+          await this.prepareDispatchEligibility(order, [vehicleId]);
           if (
             order.runtimeProfileCode === "multi_taxi_direct" &&
             order.operatingAuthorizationId
@@ -5221,6 +6568,32 @@ export class OwnedMobilityService
             sandboxDispatchSnapshot,
             options,
             ratingSummary,
+          );
+          if (
+            order.runtimeProfileCode === "business_dispatch" &&
+            current.referralPassengerSubjectRef
+          ) {
+            const assignmentVersion = current.assignmentVersion + 1;
+            bundle.consumerNotificationOutbox = {
+              outboxId: `referral-assignment:${bundle.assignment.assignmentId}`,
+              orderId: order.orderId,
+              passengerSubjectRef: current.referralPassengerSubjectRef,
+              eventType:
+                assignmentVersion === 1
+                  ? "assignment_disclosure_ready"
+                  : "assignment_replaced",
+              assignmentVersion,
+              payload: {},
+              status: "pending",
+              attemptCount: 0,
+              nextAttemptAt: bundle.assignment.createdAt,
+              createdAt: bundle.assignment.createdAt,
+              deliveredAt: null,
+            };
+          }
+          await this.regulatoryRegistryService.assertCurrentMatchingSuppressionClear(
+            driverId,
+            tx,
           );
           await this.assertAssignmentEligibilityRecheck(
             bundle.order,
@@ -5335,11 +6708,21 @@ export class OwnedMobilityService
       );
     }
 
-    const eligibilityRecheckResult = this.assertAssignmentEligibilityRecheck(
-      order,
-      dispatchJob.dispatchJobId,
-      vehicleId,
-      driverId,
+    const eligibilityRecheckResult = this.afterMaybePromise(
+      this.prepareDispatchEligibility(order, [vehicleId]),
+      () =>
+        this.afterMaybePromise(
+          this.regulatoryRegistryService.assertCurrentMatchingSuppressionClear(
+            driverId,
+          ),
+          () =>
+            this.assertAssignmentEligibilityRecheck(
+              order,
+              dispatchJob.dispatchJobId,
+              vehicleId,
+              driverId,
+            ),
+        ),
     );
     return this.afterMaybePromise(eligibilityRecheckResult, () => {
       const sandboxGateResult = this.assertSandboxDispatchGate(
@@ -5428,16 +6811,50 @@ export class OwnedMobilityService
     orderId: string,
     command: CancelOwnedOrderCommand,
     requestId?: string,
+    options?: {
+      cancellationPolicy?: "account_passenger";
+      systemBypassCancelableCheck?: boolean;
+    },
   ) {
     const now = new Date().toISOString();
     const prepare = (bundle: {
       order: OwnedOrderRecord;
+      assignmentVersion?: number;
+      referralPassengerSubjectRef?: string | null;
       assignment: DispatchAssignmentRecord | null | undefined;
       task: DriverTaskRecord | null;
       dispatchJobs: DispatchJobRecord[];
     }) => {
       const order = this.cloneOrder(bundle.order);
-      this.assertOrderCancelable(order);
+      if (order.status === "cancelled" || order.status === "completed") {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "ORDER_NOT_CANCELABLE",
+          "The order can no longer be cancelled.",
+          {
+            orderId: order.orderId,
+            status: order.status,
+          },
+        );
+      }
+      if (options?.cancellationPolicy === "account_passenger") {
+        // Account passengers may cancel short-lead multi-taxi reservations
+        // before a trip starts. Evaluate that policy on the locked durable
+        // row, independently of the reservation cutoff/system compensation.
+        if (
+          order.runtimeProfileCode !== "multi_taxi_direct" ||
+          ["on_trip", "proof_pending"].includes(order.status)
+        ) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            "ORDER_NOT_CANCELABLE",
+            "The order can no longer be cancelled.",
+            { orderId: order.orderId, status: order.status },
+          );
+        }
+      } else if (!options?.systemBypassCancelableCheck) {
+        this.assertOrderCancelable(order);
+      }
       const assignment = bundle.assignment ? { ...bundle.assignment } : null;
       const task = bundle.task ? this.cloneTask(bundle.task) : null;
       // The persisted branch prepares from assignment/task rows locked in the
@@ -5488,7 +6905,43 @@ export class OwnedMobilityService
           reason: order.cancelReason,
         }),
       );
-      return { order, assignment, task, dispatchJobs, traceLogs };
+      const consumerNotificationOutbox: ConsumerNotificationOutboxRecord[] = [];
+      const isRoutedReferral =
+        order.runtimeProfileCode === "business_dispatch" &&
+        !!bundle.referralPassengerSubjectRef;
+      if (
+        order.runtimeProfileCode === "multi_taxi_direct" ||
+        isRoutedReferral
+      ) {
+        const outbox: ConsumerNotificationOutboxRecord = {
+          outboxId: isRoutedReferral
+            ? `referral-cancelled:${order.orderId}`
+            : randomUUID(),
+          orderId: order.orderId,
+          passengerSubjectRef: isRoutedReferral
+            ? bundle.referralPassengerSubjectRef!
+            : resolvePassengerSubjectRef(order.passenger),
+          eventType: "trip_cancelled",
+          assignmentVersion: bundle.assignmentVersion ?? 1,
+          payload: {
+            cancelReason: "passenger_cancelled",
+          },
+          status: "pending",
+          attemptCount: 0,
+          nextAttemptAt: now,
+          createdAt: now,
+          deliveredAt: null,
+        };
+        consumerNotificationOutbox.push(outbox);
+      }
+      return {
+        order,
+        assignment,
+        task,
+        dispatchJobs,
+        traceLogs,
+        consumerNotificationOutbox,
+      };
     };
     const repository = this.ownedMobilityRepository;
     if (repository?.isEnabled()) {
@@ -5510,6 +6963,7 @@ export class OwnedMobilityService
               : [],
             driverTasks: prepared.task ? [prepared.task] : [],
             dispatchTraceLogs: prepared.traceLogs,
+            consumerNotificationOutbox: prepared.consumerNotificationOutbox,
           });
           if (prepared.assignment) {
             await repository.releaseDispatchResourceReservations(
@@ -5560,7 +7014,14 @@ export class OwnedMobilityService
           }),
           quotaRelease: null,
         };
-    const { order, assignment, task, dispatchJobs, traceLogs } = committed;
+    const {
+      order,
+      assignment,
+      task,
+      dispatchJobs,
+      traceLogs,
+      consumerNotificationOutbox,
+    } = committed;
     if (
       repository?.isEnabled() &&
       committed.quotaRelease &&
@@ -5625,6 +7086,12 @@ export class OwnedMobilityService
         ),
       ];
     this.dispatchTraceLogs = [...traceLogs, ...this.dispatchTraceLogs];
+    if (consumerNotificationOutbox?.length) {
+      this.consumerNotificationOutbox = [
+        ...consumerNotificationOutbox,
+        ...this.consumerNotificationOutbox,
+      ];
+    }
     this.recordAudit(
       {
         actorId: null,
@@ -5785,121 +7252,80 @@ export class OwnedMobilityService
     return policy ? Array.from(policy) : [];
   }
 
-  listQueueEntries(): DispatchQueueEntryReadRecord[] {
-    const registryProjection = this.buildQueueRegistryProjection();
-    return this.queueEntries.map((entry) =>
-      this.buildQueueEntryReadRecord(entry, registryProjection),
+  async listQueueEntries(): Promise<DispatchQueueEntryReadRecord[]> {
+    if (this.ownedMobilityRepository?.isEnabled()) {
+      const traces = await this.ownedMobilityRepository.loadQueueTraceLogs();
+      this.queueEntries = this.rebuildQueueEntriesFromTraceLogs(traces);
+    }
+    const registry = await this.prepareQueueRegistryProjection();
+    return Promise.all(
+      this.queueEntries.map(async (entry) => {
+        const record = this.buildQueueEntryReadRecord(entry, registry);
+        if (
+          entry.status === "checked_in" &&
+          record.eligibility.decision === "eligible"
+        ) {
+          try {
+            await this.assertQueuePresence(entry.vehicleId, registry);
+          } catch (error) {
+            record.eligibility = {
+              decision: "denied",
+              reasonCode: this.resolveQueueEligibilityReasonCode(error),
+              evaluatedAt: new Date().toISOString(),
+            };
+          }
+        }
+        // Keep the committed position/history. A denied row is excluded from
+        // effective eligibility without deleting or renumbering historical events.
+        return record;
+      }),
     );
   }
 
-  getQueueEntry(queueEntryId: string): DispatchQueueEntryReadRecord {
+  async getQueueEntry(
+    queueEntryId: string,
+  ): Promise<DispatchQueueEntryReadRecord> {
     const normalizedQueueEntryId = queueEntryId.trim();
-    const queueEntry = this.queueEntries.find(
-      (entry) => entry.queueEntryId === normalizedQueueEntryId,
+    const entry = (await this.listQueueEntries()).find(
+      (row) => row.queueEntryId === normalizedQueueEntryId,
     );
-    if (!queueEntry) {
+    if (!entry)
       throw new ApiRequestError(
         HttpStatus.NOT_FOUND,
         "QUEUE_ENTRY_NOT_FOUND",
         "Queue entry was not found.",
         { queueEntryId: normalizedQueueEntryId },
       );
-    }
-
-    return this.buildQueueEntryReadRecord(
-      queueEntry,
-      this.buildQueueRegistryProjection(),
-    );
+    return entry;
   }
 
-  queueCheckIn(
+  async queueCheckIn(
     command: QueueCheckInCommand,
     requestId?: string,
     runtimeContext?: QueueRuntimeContext,
-  ) {
-    const context: QueueRuntimeContext = runtimeContext ?? {
-      runtimeProfileCode: "ordinary_taxi",
-      queueMode: command.queueMode ?? "physical_rank",
-      operatingAuthorizationId: null,
-    };
-    this.assertNonBlank(command.vehicleId, "vehicleId");
-    this.assertNonBlank(command.siteId, "siteId");
-    this.assertQueueEligibility(command.vehicleId, context);
-
-    const existingEntry = this.queueEntries.find(
-      (entry) =>
-        entry.vehicleId === command.vehicleId &&
-        entry.siteId === command.siteId &&
-        entry.status === "checked_in",
-    );
-    if (existingEntry) {
-      return { ...existingEntry };
-    }
-
-    const checkedInAt = new Date().toISOString();
-    const queueEntry: QueueEntryRecord = {
-      queueEntryId: randomUUID(),
-      vehicleId: command.vehicleId,
-      siteId: command.siteId,
-      runtimeProfileCode: context.runtimeProfileCode,
-      queueMode: context.queueMode,
-      operatingAuthorizationId: context.operatingAuthorizationId,
-      status: "checked_in",
-      position: this.nextQueuePosition(
-        command.siteId,
-        context.runtimeProfileCode,
-        context.queueMode,
-      ),
-      checkedInAt,
-      checkedOutAt: null,
-    };
-    this.queueEntries = [queueEntry, ...this.queueEntries];
-
-    const traceLog = this.appendTrace(
-      this.queueTraceOrderId(command.siteId, command.vehicleId),
-      "queue.entry.created",
-      {
-        queueEntryId: queueEntry.queueEntryId,
-        siteId: command.siteId,
-        vehicleId: command.vehicleId,
-        position: queueEntry.position,
-        runtimeProfileCode: queueEntry.runtimeProfileCode,
-        queueMode: queueEntry.queueMode,
-        operatingAuthorizationId: queueEntry.operatingAuthorizationId,
-      },
-    );
-    this.persistChanges(
-      {
-        dispatchTraceLogs: [traceLog],
-      },
-      "queue_check_in",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "dispatch",
-        actionName: "queue_check_in",
-        resourceType: "queue_entry",
-        resourceId: queueEntry.queueEntryId,
-        newValuesSummary: {
-          siteId: command.siteId,
-          vehicleId: command.vehicleId,
-          position: queueEntry.position,
-        },
-      },
-      requestId,
-    );
-
-    return { ...queueEntry };
+  ): Promise<QueueEntryRecord> {
+    return this.runQueueCommand("check_in", command, requestId, runtimeContext);
   }
 
-  queueCheckOut(
+  async queueCheckOut(
     command: QueueCheckOutCommand,
     requestId?: string,
     runtimeContext?: QueueRuntimeContext,
-  ) {
+  ): Promise<QueueEntryRecord> {
+    return this.runQueueCommand(
+      "check_out",
+      command,
+      requestId,
+      runtimeContext,
+    );
+  }
+
+  private async runQueueCommand(
+    action: "check_in" | "check_out",
+    command: QueueCheckInCommand | QueueCheckOutCommand,
+    requestId?: string,
+    runtimeContext?: QueueRuntimeContext,
+  ): Promise<QueueEntryRecord> {
     const context: QueueRuntimeContext = runtimeContext ?? {
       runtimeProfileCode: "ordinary_taxi",
       queueMode: command.queueMode ?? "physical_rank",
@@ -5907,66 +7333,188 @@ export class OwnedMobilityService
     };
     this.assertNonBlank(command.vehicleId, "vehicleId");
     this.assertNonBlank(command.siteId, "siteId");
-
-    const queueEntry = this.queueEntries.find(
-      (entry) =>
-        entry.vehicleId === command.vehicleId &&
-        entry.siteId === command.siteId &&
-        (entry.runtimeProfileCode ?? "ordinary_taxi") ===
-          context.runtimeProfileCode &&
-        (entry.queueMode ?? "physical_rank") === context.queueMode &&
-        entry.status === "checked_in",
-    );
-    if (!queueEntry) {
-      throw new ApiRequestError(
-        HttpStatus.NOT_FOUND,
-        "QUEUE_ENTRY_NOT_FOUND",
-        "Queue entry was not found.",
+    const repository = this.ownedMobilityRepository;
+    if (action === "check_in") {
+      this.assertQueuePolicy(context);
+      const registry = await this.prepareQueueRegistryProjection();
+      if (!registry.authorityAvailable)
+        throw new ApiRequestError(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
+          "Current queue supply authority is unavailable.",
+        );
+      this.assertQueueEligibility(command.vehicleId, context);
+      // Read the established dependency authorities before taking the queue
+      // transaction's connection/lock. They keep their own current-read scope;
+      // no additional connection is awaited while holding this queue transaction's lock.
+      await this.assertQueuePresence(command.vehicleId, registry);
+    }
+    const execute = async (tx?: OwnedMobilityQueryExecutor) => {
+      const entries = tx
+        ? this.rebuildQueueEntriesFromTraceLogs(
+            await repository!.loadQueueTraceLogs(tx, command.siteId),
+          )
+        : this.queueEntries;
+      const existing = entries.find(
+        (entry) =>
+          entry.vehicleId === command.vehicleId &&
+          entry.siteId === command.siteId &&
+          (entry.runtimeProfileCode ?? "ordinary_taxi") ===
+            context.runtimeProfileCode &&
+          (entry.queueMode ?? "physical_rank") === context.queueMode &&
+          entry.status === "checked_in",
+      );
+      if (action === "check_in" && existing)
+        return { entry: { ...existing }, trace: null };
+      if (action === "check_out" && !existing)
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "QUEUE_ENTRY_NOT_FOUND",
+          "Queue entry was not found.",
+          { vehicleId: command.vehicleId, siteId: command.siteId },
+        );
+      const now = new Date().toISOString();
+      const entry: QueueEntryRecord =
+        action === "check_out"
+          ? { ...existing!, status: "checked_out", checkedOutAt: now }
+          : {
+              queueEntryId: randomUUID(),
+              vehicleId: command.vehicleId,
+              siteId: command.siteId,
+              ...context,
+              status: "checked_in",
+              position: this.nextQueuePosition(
+                command.siteId,
+                context.runtimeProfileCode,
+                context.queueMode,
+                entries,
+              ),
+              checkedInAt: now,
+              checkedOutAt: null,
+            };
+      const trace = this.buildTraceLog(
+        this.queueTraceOrderId(command.siteId, command.vehicleId),
+        action === "check_in" ? "queue.entry.created" : "queue.entry.closed",
         {
-          vehicleId: command.vehicleId,
-          siteId: command.siteId,
+          queueEntryId: entry.queueEntryId,
+          siteId: entry.siteId,
+          vehicleId: entry.vehicleId,
+          position: entry.position,
+          runtimeProfileCode: entry.runtimeProfileCode,
+          queueMode: entry.queueMode,
+          operatingAuthorizationId: entry.operatingAuthorizationId,
         },
       );
+      trace.createdAt = now;
+      if (tx)
+        await repository!.persistOrderWorkflow(tx, {
+          dispatchTraceLogs: [trace],
+        });
+      else
+        await this.persistChangesRequired(
+          { dispatchTraceLogs: [trace] },
+          `queue_${action}`,
+        );
+      return { entry, trace };
+    };
+    const publish = (committed: Awaited<ReturnType<typeof execute>>) => {
+      // Publish only this command's ID delta into the current cache; never
+      // replace other contexts with a pre-transaction snapshot.
+      this.queueEntries = [
+        committed.entry,
+        ...this.queueEntries.filter(
+          (row) => row.queueEntryId !== committed.entry.queueEntryId,
+        ),
+      ];
+      if (committed.trace) {
+        this.dispatchTraceLogs = [committed.trace, ...this.dispatchTraceLogs];
+        this.recordAudit(
+          {
+            actorId: null,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "dispatch",
+            actionName: `queue_${action}`,
+            resourceType: "queue_entry",
+            resourceId: committed.entry.queueEntryId,
+            newValuesSummary:
+              action === "check_in"
+                ? {
+                    siteId: committed.entry.siteId,
+                    vehicleId: committed.entry.vehicleId,
+                    position: committed.entry.position,
+                  }
+                : {
+                    siteId: committed.entry.siteId,
+                    vehicleId: committed.entry.vehicleId,
+                    status: committed.entry.status,
+                  },
+          },
+          requestId,
+        );
+      }
+      return { ...committed.entry };
+    };
+    if (repository?.isEnabled())
+      return publish(
+        await repository.withQueueCommand(
+          { siteId: command.siteId, ...context },
+          execute,
+        ),
+      );
+    // The supported noDB mode uses the same command decisions and serializes
+    // only this instance's requested queue context, including presence awaits.
+    const key = JSON.stringify([
+      command.siteId,
+      context.runtimeProfileCode,
+      context.queueMode,
+    ]);
+    const previous = this.queueCommands.get(key) ?? Promise.resolve();
+    const pending = previous
+      .catch(() => undefined)
+      .then(() => execute())
+      .then(publish);
+    this.queueCommands.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.queueCommands.get(key) === pending)
+        this.queueCommands.delete(key);
     }
+  }
 
-    const checkedOutAt = new Date().toISOString();
-    queueEntry.status = "checked_out";
-    queueEntry.checkedOutAt = checkedOutAt;
+  private async prepareQueueRegistryProjection(): Promise<QueueRegistryProjection> {
+    try {
+      await this.regulatoryRegistryService.prepareDispatchSupply?.(
+        "standard_taxi",
+      );
+      return this.buildQueueRegistryProjection();
+    } catch {
+      // A failed fresh read must not silently reuse the old cached pair.
+      return {
+        authorityAvailable: false,
+        vehiclesById: new Map(),
+        driversById: new Map(),
+        pairsByVehicleId: new Map(),
+      };
+    }
+  }
 
-    const traceLog = this.appendTrace(
-      this.queueTraceOrderId(command.siteId, command.vehicleId),
-      "queue.entry.closed",
-      {
-        queueEntryId: queueEntry.queueEntryId,
-        siteId: command.siteId,
-        vehicleId: command.vehicleId,
-      },
-    );
-    this.persistChanges(
-      {
-        dispatchTraceLogs: [traceLog],
-      },
-      "queue_check_out",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "dispatch",
-        actionName: "queue_check_out",
-        resourceType: "queue_entry",
-        resourceId: queueEntry.queueEntryId,
-        newValuesSummary: {
-          siteId: command.siteId,
-          vehicleId: command.vehicleId,
-          status: queueEntry.status,
-        },
-      },
-      requestId,
-    );
-
-    return { ...queueEntry };
+  private async assertQueuePresence(
+    vehicleId: string,
+    registry: QueueRegistryProjection,
+  ) {
+    const driverId = registry.pairsByVehicleId.get(vehicleId)?.driverId;
+    if (!driverId || !this.platformPresenceService) return;
+    const block =
+      await this.platformPresenceService.findDispatchBlockingPresence(driverId);
+    if (block)
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "VEHICLE_NOT_DISPATCHABLE",
+        "The paired driver is not currently available for queue participation.",
+        { vehicleId, driverId, platformPresence: block },
+      );
   }
 
   queueCheckInMultiTaxi(
@@ -6002,6 +7550,56 @@ export class OwnedMobilityService
       }
       return clone;
     });
+  }
+
+  async listDriverTasksForRead() {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.listDriverTasks();
+    const tasks = await this.ownedMobilityRepository.listDriverTasksForRead();
+    const orders = new Map(
+      (
+        await this.listOrdersForRead([
+          ...new Set(tasks.map((task) => task.orderId)),
+        ])
+      ).map((order) => [order.orderId, order]),
+    );
+    return tasks.map((task) =>
+      this.cloneDriverTaskForRead(task, orders.get(task.orderId) ?? null),
+    );
+  }
+
+  async findDriverTaskForRead(taskId: string) {
+    if (!this.ownedMobilityRepository?.isEnabled())
+      return this.driverTasks.some((task) => task.taskId === taskId)
+        ? this.getDriverTask(taskId)
+        : null;
+    const task =
+      await this.ownedMobilityRepository.findDriverTaskForRead(taskId);
+    if (!task) return null;
+    const order = await this.ownedMobilityRepository.findOrderById(
+      task.orderId,
+    );
+    return this.cloneDriverTaskForRead(task, order);
+  }
+
+  private cloneDriverTaskForRead(
+    task: DriverTaskRecord,
+    order: OwnedOrderRecord | null,
+  ) {
+    const clone = this.cloneTask(task, order);
+    clone.sourcePlatform ??= this.forwarderSourceMap.get(task.orderId) ?? null;
+    return clone;
+  }
+
+  async getDriverTaskForRead(taskId: string) {
+    const task = await this.findDriverTaskForRead(taskId);
+    if (!task)
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "DRIVER_TASK_NOT_FOUND",
+        "Driver task was not found.",
+      );
+    return task;
   }
 
   getReportingSnapshot(): OwnedMobilityReportingSnapshot {
@@ -6701,6 +8299,16 @@ export class OwnedMobilityService
     command: DriverCompleteTaskCommand,
     requestId?: string,
   ) {
+    // Snapshot supplied facts before a database lock/other asynchronous work.
+    // Malformed shapes remain malformed so validation cannot invent fields.
+    command = {
+      ...command,
+      ...(command.actualFareBreakdown &&
+      typeof command.actualFareBreakdown === "object" &&
+      !Array.isArray(command.actualFareBreakdown)
+        ? { actualFareBreakdown: { ...command.actualFareBreakdown } }
+        : {}),
+    };
     const proof = {
       photos: [...(command.proof?.photos ?? [])],
       signatureId: command.proof?.signatureId ?? null,
@@ -6765,6 +8373,10 @@ export class OwnedMobilityService
       );
     }
 
+    const actualFareBreakdown = this.captureActualFareBreakdown(order, command);
+    const receiptIdentity = await this.captureCompletionIdentity(order, task);
+    const driverSurnameSnapshot = receiptIdentity.surname ?? {};
+
     if (proof.photos.length < order.proofRequirements.minPhotoCount) {
       await this.markDriverTaskProofPending(
         task,
@@ -6824,7 +8436,21 @@ export class OwnedMobilityService
 
     const certificateEvent =
       order.runtimeProfileCode === "multi_taxi_direct"
-        ? this.buildMultiTaxiCertificateEvent(order, task, command, proof)
+        ? this.buildMultiTaxiCertificateEvent(
+            order,
+            task,
+            {
+              ...command,
+              ...(actualFareBreakdown ? { actualFareBreakdown } : {}),
+            },
+            proof,
+            driverSurnameSnapshot,
+            await this.captureMultiTaxiE04(
+              order,
+              actualFareBreakdown,
+              receiptIdentity,
+            ),
+          )
         : null;
 
     const finalizeCompletion = async () => {
@@ -6833,7 +8459,11 @@ export class OwnedMobilityService
       task.completedAt = command.completedAt;
       task.actualDistanceKm = command.actualDistanceKm;
       task.actualDurationSec = command.actualDurationSec;
+      Object.assign(task, driverSurnameSnapshot);
       task.fare = order.fixedPrice ? order.quotedFare : (command.fare ?? null);
+      if (actualFareBreakdown) {
+        task.actualFareBreakdown = { ...actualFareBreakdown };
+      }
       task.proof = proofHasEvidence ? proof : null;
       assignment.status = "completed";
       assignment.updatedAt = now;
@@ -6885,7 +8515,7 @@ export class OwnedMobilityService
         await this.publishMultiTaxiCertificateEvent(certificateEvent);
       }
       await this.ownedMobilityTaskEventsService.publishTaskUpdated(
-        task,
+        this.cloneTaskWithDetachedActualFare(task),
         order,
         requestId,
       );
@@ -7048,6 +8678,12 @@ export class OwnedMobilityService
       );
     }
 
+    const actualFareBreakdown = this.captureActualFareBreakdown(
+      order,
+      params.command,
+    );
+    const receiptIdentity = await this.captureCompletionIdentity(order, task);
+    const driverSurnameSnapshot = receiptIdentity.surname ?? {};
     const proofPendingError = this.buildDriverTaskProofPendingError(
       order,
       params.proof,
@@ -7117,8 +8753,17 @@ export class OwnedMobilityService
         ? this.buildMultiTaxiCertificateEvent(
             order,
             task,
-            params.command,
+            {
+              ...params.command,
+              ...(actualFareBreakdown ? { actualFareBreakdown } : {}),
+            },
             params.proof,
+            driverSurnameSnapshot,
+            await this.captureMultiTaxiE04(
+              order,
+              actualFareBreakdown,
+              receiptIdentity,
+            ),
           )
         : null;
 
@@ -7127,9 +8772,13 @@ export class OwnedMobilityService
     task.completedAt = params.command.completedAt;
     task.actualDistanceKm = params.command.actualDistanceKm;
     task.actualDurationSec = params.command.actualDurationSec;
+    Object.assign(task, driverSurnameSnapshot);
     task.fare = order.fixedPrice
       ? order.quotedFare
       : (params.command.fare ?? null);
+    if (actualFareBreakdown) {
+      task.actualFareBreakdown = { ...actualFareBreakdown };
+    }
     task.proof = params.proofHasEvidence ? params.proof : null;
     assignment.status = "completed";
     assignment.updatedAt = now;
@@ -7288,7 +8937,7 @@ export class OwnedMobilityService
         }
       }
       await this.ownedMobilityTaskEventsService.publishTaskUpdated(
-        committed.task,
+        this.cloneTaskWithDetachedActualFare(committed.task),
         committed.order,
         requestId,
       );
@@ -7319,6 +8968,126 @@ export class OwnedMobilityService
     ];
   }
 
+  private captureActualFareBreakdown(
+    order: OwnedOrderRecord,
+    command: DriverCompleteTaskCommand,
+  ): ActualTripFareBreakdown | undefined {
+    const candidate = command.actualFareBreakdown;
+    if (candidate === undefined) {
+      return undefined;
+    }
+    const fields = [
+      "startMinor",
+      "distanceMinor",
+      "delayMinor",
+      "nightMinor",
+    ] as const;
+    const fare = order.fixedPrice ? order.quotedFare : command.fare;
+    if (
+      !candidate ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate) ||
+      fields.some(
+        (field) =>
+          !Object.prototype.hasOwnProperty.call(candidate, field) ||
+          !Number.isSafeInteger(candidate[field]) ||
+          candidate[field] < 0,
+      ) ||
+      !fare ||
+      normalisePlatformCurrency(fare.currency) !== PLATFORM_CURRENCY ||
+      !Number.isSafeInteger(fare.amountMinor) ||
+      fare.amountMinor < 0
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        "ACTUAL_FARE_BREAKDOWN_INVALID",
+        "Actual fare components require all four nonnegative safe integers and a canonical NTD fare.",
+      );
+    }
+    const total = fields.reduce((sum, field) => sum + candidate[field], 0);
+    if (!Number.isSafeInteger(total)) {
+      throw new ApiRequestError(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        "ACTUAL_FARE_BREAKDOWN_INVALID",
+        "Actual fare component total must be a safe integer.",
+      );
+    }
+    // Do not impose a fare/toll total convention. The Receipt task still needs
+    // an authoritative convention; this producer only captures supplied facts.
+    return {
+      startMinor: candidate.startMinor,
+      distanceMinor: candidate.distanceMinor,
+      delayMinor: candidate.delayMinor,
+      nightMinor: candidate.nightMinor,
+    };
+  }
+
+  private async captureCompletionIdentity(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+  ) {
+    if (
+      order.runtimeProfileCode === "multi_taxi_direct" &&
+      this.regulatoryRegistryService.getDriverCompletionReceiptIdentity
+    ) {
+      return this.regulatoryRegistryService.getDriverCompletionReceiptIdentity(
+        task.driverId,
+      );
+    }
+    return {
+      surname:
+        this.regulatoryRegistryService.getDriverDeclaredSurnameSnapshot?.(
+          task.driverId,
+        ) ?? null,
+      driverRegistrationMasked: null,
+    };
+  }
+
+  private async captureMultiTaxiE04(
+    order: OwnedOrderRecord,
+    actualFareBreakdown: ActualTripFareBreakdown | undefined,
+    identity: {
+      surname: DriverDeclaredSurnameSnapshot | null;
+      driverRegistrationMasked: string | null;
+    },
+  ): Promise<CertificateE04Snapshot | undefined> {
+    const operatorId = order.operatingAuthorizationId
+      ? await this.receiptRegistryRepository?.findCompletionOperatorId(
+          order.operatingAuthorizationId,
+        )
+      : null;
+    const fleetOperatorName = operatorId
+      ? await this.receiptFleetRepository?.findReceiptOperatorName(operatorId)
+      : null;
+    const paymentMethodDisplay = order.passenger.passengerId
+      ? await this.receiptPaymentMethods?.getReceiptDisplay(
+          order.passenger.passengerId,
+          order.paymentMethodTokenRef,
+        )
+      : null;
+    const driverSurname = identity.surname?.driverSurname;
+    const driverRegistrationMasked = identity.driverRegistrationMasked;
+    // Incomplete authority remains absent; the existing writer/mapper retains
+    // its missing-fields response. Never fill gaps from IDs, quotes or names.
+    if (
+      !actualFareBreakdown ||
+      !fleetOperatorName ||
+      !driverSurname ||
+      !driverRegistrationMasked ||
+      !paymentMethodDisplay ||
+      Array.from(fleetOperatorName.trim()).length > 200 ||
+      Array.from(driverSurname.trim()).length > 40
+    )
+      return undefined;
+    return {
+      fleetOperatorName,
+      driverSurname,
+      driverRegistrationMasked,
+      paymentMethodDisplay,
+      fareBreakdown: { ...actualFareBreakdown },
+    };
+  }
+
   private buildMultiTaxiCertificateEvent(
     order: OwnedOrderRecord,
     task: DriverTaskRecord,
@@ -7326,6 +9095,8 @@ export class OwnedMobilityService
     proof: Required<Pick<CompletionProofBundle, "photos" | "expenseItems">> & {
       signatureId: string | null;
     },
+    driverSurnameSnapshot: Partial<DriverDeclaredSurnameSnapshot> = {},
+    e04Snapshot?: CertificateE04Snapshot,
   ): OwnedMobilityMultiTaxiTripCompletedEvent {
     const fare = order.fixedPrice ? order.quotedFare : command.fare;
     const plateNo =
@@ -7355,6 +9126,7 @@ export class OwnedMobilityService
         },
       );
     }
+    const actualFareBreakdown = this.captureActualFareBreakdown(order, command);
     const tollMinor = proof.expenseItems
       .filter((item) => item.type.trim().toLowerCase() === "toll")
       .reduce((sum, item) => sum + item.amountMinor, 0);
@@ -7362,6 +9134,8 @@ export class OwnedMobilityService
       runtimeProfileCode: "multi_taxi_direct",
       orderId: order.orderId,
       tripId: task.taskId,
+      ...driverSurnameSnapshot,
+      ...(e04Snapshot ? { e04Snapshot: structuredClone(e04Snapshot) } : {}),
       plateNo,
       pickupAt: task.startedAt,
       dropoffAt: command.completedAt,
@@ -7369,6 +9143,7 @@ export class OwnedMobilityService
       routeSummary: `${order.pickup.address} → ${order.dropoff.address}`,
       distanceMeters: Math.round(command.actualDistanceKm * 1000),
       fareMinor: fare.amountMinor,
+      ...(actualFareBreakdown ? { actualFareBreakdown } : {}),
       tollMinor,
       currency: PLATFORM_CURRENCY,
       consumerServicePhone:
@@ -7988,8 +9763,9 @@ export class OwnedMobilityService
       );
       for (const order of staleReservationHolds) {
         try {
-          await this.dispatchOrder(order.orderId, { mode: "auto" });
-          summary.reservationHoldEscalations += 1;
+          if (await this.escalateReservationHoldRequired(order.orderId, now)) {
+            summary.reservationHoldEscalations += 1;
+          }
         } catch (error) {
           summary.failures += 1;
           this.reportDispatchSchedulerSweepFailure(
@@ -8004,6 +9780,57 @@ export class OwnedMobilityService
     }
 
     return summary;
+  }
+
+  private async escalateReservationHoldRequired(
+    orderId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const prepare = (order: OwnedOrderRecord) => {
+      if (
+        order.dispatchSemantics !== "reservation" ||
+        order.status !== "redispatch_required" ||
+        !this.isWithinConfirmationWindow(order, now.toISOString())
+      )
+        return null;
+      return this.prepareDispatchOrder(this.cloneOrder(order), {
+        mode: "auto",
+      });
+    };
+    const repository = this.ownedMobilityRepository;
+    if (repository?.isEnabled()) {
+      await Promise.all([...this.pendingWorkflowWrites]);
+      const prepared = await repository.withTransaction(async (tx) => {
+        // Reuse the existing assignment -> task -> order lock/current-row
+        // fence. A stale warm replica must not reopen an accepted/newer round.
+        const current = await repository.loadOrderCancellationForUpdate(
+          tx,
+          orderId,
+        );
+        if (
+          !current ||
+          current.assignment ||
+          current.dispatchJobs.some((job) =>
+            ["matching", "reserved", "assigned"].includes(job.status),
+          )
+        )
+          return null;
+        const pending = prepare(current.order);
+        if (pending) await repository.persistOrderWorkflow(tx, pending.changes);
+        return pending;
+      });
+      if (!prepared) return false;
+      prepared.apply();
+      return true;
+    }
+    const prepared = prepare(this.requireOrder(orderId));
+    if (!prepared) return false;
+    await this.persistChangesRequired(
+      prepared.changes,
+      "reservation_hold_escalation",
+    );
+    prepared.apply();
+    return true;
   }
 
   private startDriverCompletionOutboxRecoveryPolling() {
@@ -9042,6 +10869,17 @@ export class OwnedMobilityService
   }
 
   private assertBookingModifiable(order: OwnedOrderRecord) {
+    if (order.status === "cancelled" || order.status === "completed") {
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "ORDER_NOT_MODIFIABLE",
+        "The order can no longer be modified.",
+        {
+          orderId: order.orderId,
+          status: order.status,
+        },
+      );
+    }
     if (!order.modifiableUntil) {
       return;
     }
@@ -9665,8 +11503,9 @@ export class OwnedMobilityService
     siteId: string,
     runtimeProfileCode: RuntimeProfileCode = "ordinary_taxi",
     queueMode: DispatchQueueMode = "physical_rank",
+    entries: readonly QueueEntryRecord[] = this.queueEntries,
   ) {
-    const activeEntries = this.queueEntries.filter(
+    const activeEntries = entries.filter(
       (entry) =>
         entry.siteId === siteId &&
         entry.status === "checked_in" &&
@@ -9688,8 +11527,12 @@ export class OwnedMobilityService
     traceLogs: readonly DispatchTraceLogRecord[],
   ) {
     const queueEntries = new Map<string, QueueEntryRecord>();
-    const sortedTraceLogs = [...traceLogs].sort((left, right) =>
-      left.createdAt.localeCompare(right.createdAt),
+    const sortedTraceLogs = [...traceLogs].sort(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) ||
+        Number(left.eventType === "queue.entry.closed") -
+          Number(right.eventType === "queue.entry.closed") ||
+        left.traceId.localeCompare(right.traceId),
     );
 
     for (const traceLog of sortedTraceLogs) {
@@ -9892,6 +11735,29 @@ export class OwnedMobilityService
       if (error instanceof ApiRequestError) return false;
       throw error;
     }
+  }
+
+  private prepareDispatchEligibility(
+    order: OwnedOrderRecord,
+    vehicleIds?: string[],
+  ): MaybePromise<void> {
+    const matchingSuppressions =
+      this.regulatoryRegistryService.prepareMatchingSuppressions();
+    const capabilities =
+      this.vehicleEligibilityService?.prepareVehicleCapabilities?.(
+        vehicleIds ?? order.serviceBucket,
+      );
+    const product =
+      order.runtimeProfileCode && order.serviceProductCode
+        ? this.serviceProductService?.prepareRuntimeProfileServiceProduct?.(
+            order.runtimeProfileCode,
+            order.serviceProductCode,
+          )
+        : undefined;
+    if (capabilities || product || matchingSuppressions)
+      return Promise.all([capabilities, product, matchingSuppressions]).then(
+        () => undefined,
+      );
   }
 
   private assertAssignmentEligibilityRecheck(
@@ -10409,87 +12275,100 @@ export class OwnedMobilityService
       ).length + 1;
     const routeSnapshotId = randomUUID();
     const quoteSnapshotId = randomUUID();
-    const routeFare = this.buildFareQuoteSnapshot(
-      order,
-      routeSnapshotId,
-      quoteSnapshotId,
-      now,
+    const registrationEffectiveUntil = credential.effectiveUntil;
+    const ratingDisplayState = ratingSummary.displayState;
+    return this.afterMaybePromise(
+      this.ownedMobilityRepository?.isEnabled()
+        ? this.ownedMobilityRepository.findBookedPassengerQuote(order)
+        : null,
+      (bookingQuote) => {
+        const routeFare = this.buildFareQuoteSnapshot(
+          order,
+          routeSnapshotId,
+          quoteSnapshotId,
+          now,
+          bookingQuote,
+        );
+        if (!this.isResolvedRouteFareSnapshot(routeFare)) {
+          return this.recordFareQuoteAnomalyAndFail(
+            "route_unresolved",
+            routeFare,
+          );
+        }
+        const anomalyReason = this.resolveFareQuoteAnomalyReason(order);
+        if (anomalyReason) {
+          return this.recordFareQuoteAnomalyAndFail(anomalyReason, routeFare);
+        }
+        const snapshot: PassengerDispatchDisclosureSnapshot = {
+          snapshotId: randomUUID(),
+          runtimeProfileCode: "multi_taxi_direct",
+          orderId: order.orderId,
+          bookingId: order.bookingId,
+          dispatchJobId: dispatchJob.dispatchJobId,
+          assignmentId: assignment.assignmentId,
+          assignmentVersion,
+          vehicle: {
+            vehicleId,
+            make: disclosure.make,
+            model: disclosure.model,
+            plateNo: vehicle.plateNo,
+            modelYear: disclosure.modelYear,
+            doorCount: disclosure.doorCount,
+            color: disclosure.color,
+            profileVersion: disclosure.version,
+          },
+          driver: {
+            driverId,
+            displayName: driver?.name ?? null,
+            registrationMaskedDisplay: credential.maskedDisplay,
+            registrationStatus: "verified_active",
+            registrationEffectiveUntil,
+            credentialVersion: credential.version,
+          },
+          rating: {
+            displayState: ratingDisplayState,
+            averageRating: ratingSummary.averageRating,
+            ratingCount: ratingSummary.ratingCount,
+            aggregateVersion: ratingSummary.aggregateVersion,
+          },
+          eta: {
+            minutes: order.etaSnapshot?.etaMinutes ?? null,
+            calculatedAt: order.etaSnapshot?.calculatedAt ?? null,
+            locationFreshness: "missing",
+          },
+          routeFare,
+          createdAt: now,
+          supersededAt: null,
+        };
+        // Must match the passenger-authority derivation: a phone-only passenger is
+        // peppered and hashed, never stored as a raw number on an outbox row.
+        const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
+        const outbox: ConsumerNotificationOutboxRecord = {
+          outboxId: randomUUID(),
+          orderId: order.orderId,
+          passengerSubjectRef,
+          eventType:
+            assignmentVersion > 1
+              ? "assignment_replaced"
+              : "assignment_disclosure_ready",
+          assignmentVersion,
+          payload: {
+            snapshotId: snapshot.snapshotId,
+            assignmentId: assignment.assignmentId,
+          },
+          status: "pending",
+          attemptCount: 0,
+          nextAttemptAt: now,
+          createdAt: now,
+          deliveredAt: null,
+        };
+        const authority = {
+          passengerDisclosureSnapshot: snapshot,
+          consumerNotificationOutbox: outbox,
+        };
+        return authority;
+      },
     );
-    if (!this.isResolvedRouteFareSnapshot(routeFare)) {
-      return this.recordFareQuoteAnomalyAndFail("route_unresolved", routeFare);
-    }
-    const anomalyReason = this.resolveFareQuoteAnomalyReason(order);
-    if (anomalyReason) {
-      return this.recordFareQuoteAnomalyAndFail(anomalyReason, routeFare);
-    }
-    const snapshot: PassengerDispatchDisclosureSnapshot = {
-      snapshotId: randomUUID(),
-      runtimeProfileCode: "multi_taxi_direct",
-      orderId: order.orderId,
-      bookingId: order.bookingId,
-      dispatchJobId: dispatchJob.dispatchJobId,
-      assignmentId: assignment.assignmentId,
-      assignmentVersion,
-      vehicle: {
-        vehicleId,
-        make: disclosure.make,
-        model: disclosure.model,
-        plateNo: vehicle.plateNo,
-        modelYear: disclosure.modelYear,
-        doorCount: disclosure.doorCount,
-        color: disclosure.color,
-        profileVersion: disclosure.version,
-      },
-      driver: {
-        driverId,
-        displayName: driver?.name ?? null,
-        registrationMaskedDisplay: credential.maskedDisplay,
-        registrationStatus: "verified_active",
-        registrationEffectiveUntil: credential.effectiveUntil,
-        credentialVersion: credential.version,
-      },
-      rating: {
-        displayState: ratingSummary.displayState,
-        averageRating: ratingSummary.averageRating,
-        ratingCount: ratingSummary.ratingCount,
-        aggregateVersion: ratingSummary.aggregateVersion,
-      },
-      eta: {
-        minutes: order.etaSnapshot?.etaMinutes ?? null,
-        calculatedAt: order.etaSnapshot?.calculatedAt ?? null,
-        locationFreshness: "missing",
-      },
-      routeFare,
-      createdAt: now,
-      supersededAt: null,
-    };
-    // Must match the passenger-authority derivation: a phone-only passenger is
-    // peppered and hashed, never stored as a raw number on an outbox row.
-    const passengerSubjectRef = resolvePassengerSubjectRef(order.passenger);
-    const outbox: ConsumerNotificationOutboxRecord = {
-      outboxId: randomUUID(),
-      orderId: order.orderId,
-      passengerSubjectRef,
-      eventType:
-        assignmentVersion > 1
-          ? "assignment_replaced"
-          : "assignment_disclosure_ready",
-      assignmentVersion,
-      payload: {
-        snapshotId: snapshot.snapshotId,
-        assignmentId: assignment.assignmentId,
-      },
-      status: "pending",
-      attemptCount: 0,
-      nextAttemptAt: now,
-      createdAt: now,
-      deliveredAt: null,
-    };
-    const authority = {
-      passengerDisclosureSnapshot: snapshot,
-      consumerNotificationOutbox: outbox,
-    };
-    return authority;
   }
 
   private buildFareQuoteSnapshot(
@@ -10497,6 +12376,7 @@ export class OwnedMobilityService
     routeSnapshotId: string,
     quoteSnapshotId: string,
     generatedAt: string,
+    bookingQuote?: PassengerBookingFareDisclosure | null,
   ): FareQuoteAnomalySnapshot {
     const fareMinor = order.quotedFare?.amountMinor ?? null;
     const buildAddress = (
@@ -10541,6 +12421,22 @@ export class OwnedMobilityService
         "Fare changes require passenger disclosure and confirmation.",
       passengerConfirmedAt: null,
       generatedAt,
+      ...(bookingQuote
+        ? {
+            routeSnapshotId: bookingQuote.fareSnapshotId,
+            quoteSnapshotId: bookingQuote.fareSnapshotId,
+            estimatedDistanceMeters: bookingQuote.route.distanceMeters,
+            estimatedDurationSeconds: bookingQuote.route.durationSeconds,
+            encodedPolyline: bookingQuote.route.encodedPolyline,
+            // Booking estimates are whole TWD; disclosure consumers use minor units.
+            estimatedFareMinor: bookingQuote.estimatedMin * 100,
+            payableFareMinor: null,
+            farePolicyVersion: bookingQuote.fareVersion,
+            passengerConfirmedAt: bookingQuote.passengerConfirmedAt,
+            generatedAt: bookingQuote.createdAt,
+            bookingQuote,
+          }
+        : {}),
     };
   }
 
@@ -10998,6 +12894,7 @@ export class OwnedMobilityService
         this.ownedMobilityRepository!.reportPersistenceFailure(error, context);
       },
     );
+    return pending;
   }
 
   private async persistChangesRequired(
@@ -11133,11 +13030,11 @@ export class OwnedMobilityService
     });
   }
 
-  private applyApprovalRequestResolutionToOrder(
+  private async applyApprovalRequestResolutionToOrder(
     request: TenantBookingApprovalRequestRecord,
-    requestId?: string,
+    order: OwnedOrderRecord,
+    tx: OwnedMobilityQueryExecutor | null,
   ) {
-    const order = this.requireBookingOrder(request.bookingId, request.tenantId);
     const previousApprovalState = order.approvalState;
     const now = new Date().toISOString();
 
@@ -11159,24 +13056,42 @@ export class OwnedMobilityService
     }
 
     order.updatedAt = now;
-    this.persistChanges(
-      {
-        orders: [order],
-      },
-      "apply approval request resolution",
-    );
-    this.recordBookingApprovalStateChanged(
-      order,
-      previousApprovalState,
-      requestId,
-    );
+    let quotaRelease: Awaited<
+      ReturnType<TenantPartnerService["prepareTenantQuotaRelease"]>
+    > | null = null;
+    if (tx && this.ownedMobilityRepository?.isEnabled()) {
+      order.aggregateVersion =
+        await this.ownedMobilityRepository.updateOrderWithCas(
+          tx,
+          order,
+          order.aggregateVersion!,
+        );
+      if (
+        request.status === "rejected" &&
+        this.tenantPartnerService?.isPersistenceEnabled()
+      ) {
+        quotaRelease =
+          await this.tenantPartnerService.prepareTenantQuotaRelease(tx, {
+            tenantId: request.tenantId,
+            bookingId: request.bookingId,
+          });
+      }
+    } else if (request.status === "rejected" && this.tenantPartnerService) {
+      await this.tenantPartnerService.releaseTenantQuota({
+        tenantId: request.tenantId,
+        bookingId: request.bookingId,
+      });
+    }
+    return { order, previousApprovalState, quotaRelease };
   }
 
   private evaluateTenantBookingGovernance(params: {
     tx?: OwnedMobilityQueryExecutor | null;
     order: OwnedOrderRecord;
     operation: "create" | "update";
+    previousOrder?: OwnedOrderRecord;
     requestId?: string;
+    afterCommit?: Array<() => void | Promise<void>>;
   }): MaybePromise<TenantApprovalEvaluationResult | null> {
     if (
       !this.tenantPartnerService ||
@@ -11187,57 +13102,84 @@ export class OwnedMobilityService
       return null;
     }
 
+    const tenant = this.tenantPartnerService;
+    const tenantId = params.order.tenantId;
+    const bookingId = params.order.bookingId;
+    const reservationWindowStart = params.order.reservationWindowStart;
     const inputSnapshot = this.buildTenantBookingApprovalInputSnapshot(
       params.order,
     );
-    const quotaPreview = this.tenantPartnerService.previewBookingQuotaImpact(
-      params.order.tenantId,
-      {
-        bookingId: params.order.bookingId,
-        costCenterCode: params.order.costCenter,
-        estimatedAmountMinor: params.order.quotedFare?.amountMinor ?? null,
-        ...(params.order.quotedFare?.currency
-          ? { currency: params.order.quotedFare.currency }
-          : {}),
-        reservationWindowStart: params.order.reservationWindowStart,
-      },
-    );
-    const evaluation = this.tenantPartnerService.evaluateApprovalRules(
-      params.order.tenantId,
-      {
-        subject: {
-          subjectType: "booking",
-          bookingId: params.order.bookingId,
-          draftId: null,
-          operation: params.operation,
+    const createQuotaPreview = params.previousOrder
+      ? null
+      : tenant.previewBookingQuotaImpact(tenantId, {
+          bookingId: bookingId,
+          costCenterCode: params.order.costCenter,
+          estimatedAmountMinor: params.order.quotedFare?.amountMinor ?? null,
+          ...(params.order.quotedFare?.currency
+            ? { currency: params.order.quotedFare.currency }
+            : {}),
+          reservationWindowStart: reservationWindowStart,
+        });
+    const updateQuota = params.previousOrder
+      ? tenant.prepareBookingQuotaUpdate(
+          params.tx ?? null,
+          params.previousOrder,
+          params.order,
+          params.tx ? params.afterCommit : undefined,
+        )
+      : null;
+    return this.afterMaybePromise(updateQuota, (preparedUpdate) => {
+      const quotaPreview = preparedUpdate ?? createQuotaPreview!;
+      const evaluation = tenant.evaluateApprovalRules(
+        tenantId,
+        {
+          subject: {
+            subjectType: "booking",
+            bookingId: bookingId,
+            draftId: null,
+            operation: params.operation,
+          },
+          inputSnapshot,
+          quotaImpacts: quotaPreview.impacts,
         },
-        inputSnapshot,
-        quotaImpacts: quotaPreview.impacts,
-      },
-      params.requestId,
-    );
-    const matchedRules = evaluation.matchedRules ?? [];
-    const blockedByRule = matchedRules.some((rule) => rule.action === "block");
+        params.requestId,
+        params.tx ? params.afterCommit : undefined,
+      );
+      const matchedRules = evaluation.matchedRules ?? [];
+      const blockedByRule = matchedRules.some(
+        (rule) => rule.action === "block",
+      );
 
-    if (evaluation.outcome?.blocked && blockedByRule) {
-      return evaluation;
-    }
+      if (evaluation.outcome?.blocked && blockedByRule) {
+        return evaluation;
+      }
 
-    return this.afterMaybePromise(
-      this.tenantPartnerService.reserveTenantQuota(params.tx ?? null, {
-        tenantId: params.order.tenantId,
-        bookingId: params.order.bookingId,
-        evaluationId:
-          evaluation.evaluationId ?? `approval-eval-${randomUUID()}`,
-        reservationWindowStart: params.order.reservationWindowStart,
-        costCenterCode: params.order.costCenter,
-        estimatedAmountMinor: params.order.quotedFare?.amountMinor ?? null,
-        ...(params.order.quotedFare?.currency
-          ? { currency: params.order.quotedFare.currency }
-          : {}),
-      }),
-      () => evaluation,
-    );
+      return this.afterMaybePromise(
+        preparedUpdate
+          ? preparedUpdate.persist()
+          : this.afterMaybePromise(
+              tenant.reserveTenantQuota(
+                params.tx ?? null,
+                {
+                  tenantId: tenantId,
+                  bookingId: bookingId,
+                  evaluationId:
+                    evaluation.evaluationId ?? `approval-eval-${randomUUID()}`,
+                  reservationWindowStart: reservationWindowStart,
+                  costCenterCode: params.order.costCenter,
+                  estimatedAmountMinor:
+                    params.order.quotedFare?.amountMinor ?? null,
+                  ...(params.order.quotedFare?.currency
+                    ? { currency: params.order.quotedFare.currency }
+                    : {}),
+                },
+                params.tx ? params.afterCommit : undefined,
+              ),
+              () => {},
+            ),
+        () => evaluation,
+      );
+    });
   }
 
   private createApprovalRequestForOrder(params: {
@@ -11245,6 +13187,7 @@ export class OwnedMobilityService
     order: OwnedOrderRecord;
     evaluation: TenantApprovalEvaluationResult | null;
     requestId?: string;
+    afterCommit?: Array<() => void | Promise<void>>;
   }): MaybePromise<TenantBookingApprovalRequestRecord | null> {
     if (
       !this.tenantPartnerService ||
@@ -11257,6 +13200,9 @@ export class OwnedMobilityService
 
     return this.tenantPartnerService.createBookingApprovalRequest({
       tx: params.tx ?? null,
+      ...(params.tx && params.afterCommit
+        ? { afterCommit: params.afterCommit }
+        : {}),
       tenantId: params.order.tenantId,
       bookingId: params.order.bookingId,
       orderId: params.order.orderId,
@@ -11269,6 +13215,7 @@ export class OwnedMobilityService
     tx?: OwnedMobilityQueryExecutor | null;
     order: OwnedOrderRecord;
     requestId?: string;
+    afterCommit?: Array<() => void | Promise<void>>;
   }): MaybePromise<TenantBookingApprovalRequestRecord[]> {
     if (
       !this.tenantPartnerService ||
@@ -11280,8 +13227,12 @@ export class OwnedMobilityService
 
     return this.tenantPartnerService.cancelApprovalRequestsForReevaluation({
       tx: params.tx ?? null,
+      ...(params.tx && params.afterCommit
+        ? { afterCommit: params.afterCommit }
+        : {}),
       tenantId: params.order.tenantId,
       bookingId: params.order.bookingId,
+      approvalRequestIds: params.order.approvalRequestIds,
       ...(params.requestId ? { requestId: params.requestId } : {}),
     });
   }
@@ -13493,6 +15444,597 @@ export class OwnedMobilityService
     }
   }
 
+  private async referralAuthority(
+    identity: BootstrapRequestIdentity | null | undefined,
+    entrySlug?: string,
+  ) {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    )
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "An active referral passenger is required.",
+      );
+    if (
+      !this.tenantPartnerService ||
+      !this.ownedMobilityRepository?.isEnabled()
+    )
+      throw new ApiRequestError(
+        503,
+        "PARTNER_ENTRY_UNAVAILABLE",
+        "Referral authority/storage is unavailable.",
+      );
+    const slug = entrySlug ?? identity.partnerEntrySlug;
+    if (!slug || slug !== identity.partnerEntrySlug || !identity.tenantId)
+      throw new ApiRequestError(
+        403,
+        "PARTNER_SCOPE_MISMATCH",
+        "Referral entry does not match the current session.",
+      );
+    const entry = await this.tenantPartnerService.getPartnerEntry(slug);
+    if (
+      entry.status !== "active" ||
+      !entry.activeFlag ||
+      entry.revokedAt ||
+      entry.partnerType !== "referral_channel" ||
+      entry.businessDispatchSubtype !== "enterprise_dispatch" ||
+      entry.tenantId !== identity.tenantId ||
+      entry.partnerId !== identity.partnerId ||
+      entry.programId !== identity.partnerProgramId
+    )
+      throw new ApiRequestError(
+        403,
+        "PARTNER_SCOPE_MISMATCH",
+        "Current referral entry authority has changed.",
+      );
+    const passengerId = identity.drtsPassengerId ?? identity.actorId;
+    if (!passengerId?.trim() || !identity.scopes?.includes("partner:book"))
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "Referral booking scope is required.",
+      );
+    const link =
+      await this.partnerUserIdentityLinkRepository?.findByDrtsPassengerId(
+        slug,
+        passengerId,
+      );
+    if (!link || link.status !== "active")
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_HANDOFF_REVOKED",
+        "The referral identity link is no longer active.",
+      );
+    const consent =
+      await this.tenantPartnerService.getLatestReferralEmbedConsent(
+        slug,
+        passengerId,
+      );
+    if (!consent)
+      throw new ApiRequestError(
+        403,
+        "REFERRAL_CONSENT_REQUIRED",
+        "Current referral consent is required.",
+      );
+    return {
+      entry,
+      owner: {
+        tenantId: entry.tenantId,
+        partnerId: entry.partnerId,
+        partnerProgramId: entry.programId,
+        entrySlug: slug,
+        drtsPassengerId: passengerId,
+      },
+    };
+  }
+
+  private referralInput(
+    command:
+      | ReferralPassengerQuoteCommand
+      | CreateReferralPassengerBookingCommand,
+    create: boolean,
+  ) {
+    const invalid = (): never => {
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Invalid referral quote or booking intent.",
+      );
+    };
+    const fields = [
+      "entrySlug",
+      "pickupAddress",
+      "dropoffAddress",
+      "scheduledAt",
+      "vehicleType",
+      ...(create
+        ? [
+            "quoteId",
+            "passengerName",
+            "passengerPhone",
+            "partnerUserRef",
+            "idempotencyKey",
+            "feeDisclosureVersion",
+            "feeConfirmed",
+          ]
+        : []),
+    ];
+    if (!command || typeof command !== "object" || Array.isArray(command))
+      invalid();
+    if ("quotedFare" in command || "quotedFareRuleVersion" in command)
+      throw new ApiRequestError(
+        403,
+        "PRICING_AUTHORITY_FORBIDDEN",
+        "A referral caller cannot supply a price.",
+      );
+    if (Object.keys(command).some((k) => !fields.includes(k))) invalid();
+    const text = (v: unknown, required = false, max = 500) => {
+      if (v === undefined || v === null) {
+        if (required) invalid();
+        return "";
+      }
+      if (typeof v !== "string" || v.length > max) invalid();
+      const result = (v as string).trim().replace(/\s+/g, " ");
+      if (required && !result) invalid();
+      return result;
+    };
+    const rawTime = text(command.scheduledAt);
+    let requestedScheduledAt: string | null = null;
+    if (rawTime && rawTime !== "現在出發") {
+      const date =
+        /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.exec(
+          rawTime,
+        );
+      if (!date || !Number.isFinite(Date.parse(rawTime))) invalid();
+      const calendar = new Date(
+        Date.UTC(Number(date![1]), Number(date![2]) - 1, Number(date![3])),
+      );
+      if (
+        calendar.getUTCFullYear() !== Number(date![1]) ||
+        calendar.getUTCMonth() + 1 !== Number(date![2]) ||
+        calendar.getUTCDate() !== Number(date![3])
+      )
+        invalid();
+      requestedScheduledAt = new Date(rawTime).toISOString();
+    }
+    const c = command as CreateReferralPassengerBookingCommand;
+    if (create) {
+      text(c.idempotencyKey, false, 255);
+      if (c.feeConfirmed !== undefined && typeof c.feeConfirmed !== "boolean")
+        invalid();
+      if (c.feeDisclosureVersion !== undefined)
+        text(c.feeDisclosureVersion, true, 100);
+    }
+    return {
+      ...(create && c.feeDisclosureVersion !== undefined
+        ? { feeDisclosureVersion: text(c.feeDisclosureVersion, true, 100) }
+        : {}),
+      ...(create && c.feeConfirmed !== undefined
+        ? { feeConfirmed: c.feeConfirmed }
+        : {}),
+      entrySlug: text(command.entrySlug, true, 150),
+      quoteId: create ? text(c.quoteId, true, 100) : "",
+      pickupAddress: text(command.pickupAddress, true),
+      dropoffAddress: text(command.dropoffAddress, true),
+      timingMode: requestedScheduledAt
+        ? ("scheduled" as const)
+        : ("immediate" as const),
+      requestedScheduledAt,
+      vehicleType: text(command.vehicleType, false, 50) || null,
+      passengerName: text(c.passengerName, false, 100),
+      passengerPhone: text(c.passengerPhone, false, 40).replace(/[^\d+]/g, ""),
+      partnerUserRef: text(c.partnerUserRef, false, 200) || null,
+    };
+  }
+
+  private assertReferralQuoteOwner(
+    quote: ReferralPassengerFareQuoteRecord,
+    owner: Pick<
+      ReferralPassengerFareQuoteRecord,
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "entrySlug"
+      | "drtsPassengerId"
+    >,
+  ) {
+    if (
+      [
+        "tenantId",
+        "partnerId",
+        "partnerProgramId",
+        "entrySlug",
+        "drtsPassengerId",
+      ].some(
+        (k) =>
+          quote[k as keyof typeof owner] !== owner[k as keyof typeof owner],
+      )
+    )
+      throw new ApiRequestError(
+        403,
+        "FARE_QUOTE_FORBIDDEN",
+        "The quote belongs to another referral scope.",
+      );
+    if (
+      quote.currency !== "TWD" ||
+      quote.fixedPrice !== false ||
+      quote.isGuaranteed !== false ||
+      typeof quote.quotedFareRuleVersion !== "string" ||
+      !quote.quotedFareRuleVersion.trim() ||
+      !Number.isSafeInteger(quote.estimatedMin) ||
+      !Number.isSafeInteger(quote.estimatedMax) ||
+      quote.estimatedMinMinor !== quote.estimatedMin * 100 ||
+      quote.estimatedMaxMinor !== quote.estimatedMax * 100 ||
+      !Number.isFinite(Date.parse(quote.createdAt)) ||
+      !Number.isFinite(Date.parse(quote.expiresAt)) ||
+      Date.parse(quote.expiresAt) <= Date.parse(quote.createdAt) ||
+      !Number.isSafeInteger(quote.estimatedMinMinor) ||
+      !Number.isSafeInteger(quote.estimatedMaxMinor) ||
+      quote.estimatedMinMinor < 0 ||
+      quote.estimatedMaxMinor < quote.estimatedMinMinor
+    )
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Stored quote money is invalid.",
+      );
+  }
+
+  private referralQuoteView(
+    quote: ReferralPassengerFareQuoteRecord | null | undefined,
+  ): ReferralPassengerFareQuote | null {
+    if (!quote) return null;
+    return {
+      quoteId: quote.quoteId,
+      businessDispatchSubtype: quote.businessDispatchSubtype,
+      serviceProductCode: quote.serviceProductCode,
+      timingMode: quote.timingMode,
+      requestedScheduledAt: quote.requestedScheduledAt,
+      pricingAt: quote.pricingAt,
+      pickupAddress: quote.pickupAddress,
+      dropoffAddress: quote.dropoffAddress,
+      pickup: { lat: quote.pickup.lat, lng: quote.pickup.lng },
+      dropoff: { lat: quote.dropoff.lat, lng: quote.dropoff.lng },
+      vehicleType: quote.vehicleType,
+      currency: quote.currency,
+      estimatedMin: quote.estimatedMin,
+      estimatedMax: quote.estimatedMax,
+      estimatedMinMinor: quote.estimatedMinMinor,
+      estimatedMaxMinor: quote.estimatedMaxMinor,
+      fixedPrice: quote.fixedPrice,
+      isGuaranteed: quote.isGuaranteed,
+      quotedFareSource: quote.quotedFareSource,
+      quotedFareRuleVersion: quote.quotedFareRuleVersion,
+      ...(quote.feeDisclosureVersion
+        ? { feeDisclosureVersion: quote.feeDisclosureVersion }
+        : {}),
+      ...(quote.feeContentHash ? { feeContentHash: quote.feeContentHash } : {}),
+      createdAt: quote.createdAt,
+      expiresAt: quote.expiresAt,
+      consumedByOrderId: quote.consumedByOrderId,
+      consumedAt: quote.consumedAt,
+    };
+  }
+
+  async getReferralFeeStatus(
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralFeeStatus> {
+    const { owner } = await this.referralAuthority(identity);
+    const ack =
+      await this.ownedMobilityRepository!.findReferralFeeAcknowledgement(
+        owner,
+        PASSENGER_FEE_DISCLOSURE_VERSION,
+      );
+    if (ack && ack.contentHash !== PASSENGER_FEE_CONTENT_HASH)
+      throw new ApiRequestError(
+        503,
+        "FEE_DISCLOSURE_UNAVAILABLE",
+        "Fee disclosure version/content conflict.",
+      );
+    return {
+      disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      contentHash: PASSENGER_FEE_CONTENT_HASH,
+      acknowledgedAt: ack?.acknowledgedAt ?? null,
+    };
+  }
+
+  async acknowledgeReferralFees(
+    command: AcknowledgeReferralFeesCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralFeeStatus> {
+    const { owner } = await this.referralAuthority(identity);
+    if (
+      !command ||
+      typeof command !== "object" ||
+      Array.isArray(command) ||
+      Object.keys(command).some(
+        (key) => !["disclosureVersion", "acknowledged"].includes(key),
+      ) ||
+      command.acknowledged !== true
+    )
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Explicit fee acknowledgement is required.",
+      );
+    if (command.disclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION)
+      throw new ApiRequestError(
+        409,
+        "FEE_DISCLOSURE_CHANGED",
+        "Read the current fee disclosure.",
+      );
+    const ack = await this.ownedMobilityRepository!.acknowledgeReferralFees(
+      owner,
+      PASSENGER_FEE_DISCLOSURE_VERSION,
+      PASSENGER_FEE_CONTENT_HASH,
+    );
+    return {
+      disclosureVersion: ack.disclosureVersion,
+      contentHash: ack.contentHash,
+      acknowledgedAt: ack.acknowledgedAt,
+    };
+  }
+
+  private async requireReferralFeeAgreement(
+    quote: ReferralPassengerFareQuoteRecord,
+    owner: ReferralFeeOwner,
+    tx?: OwnedMobilityQueryExecutor,
+  ) {
+    if (
+      quote.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+      quote.feeContentHash !== PASSENGER_FEE_CONTENT_HASH
+    )
+      throw new ApiRequestError(
+        409,
+        "FEE_DISCLOSURE_CHANGED",
+        "Refresh the quote after reading the current fees.",
+      );
+    const ack =
+      await this.ownedMobilityRepository!.findReferralFeeAcknowledgement(
+        owner,
+        PASSENGER_FEE_DISCLOSURE_VERSION,
+        tx,
+      );
+    if (
+      !ack ||
+      ack.contentHash !== PASSENGER_FEE_CONTENT_HASH ||
+      !Number.isFinite(Date.parse(ack.acknowledgedAt))
+    )
+      throw new ApiRequestError(
+        403,
+        "FEE_DISCLOSURE_REQUIRED",
+        "A canonical fee agreement is required.",
+      );
+    return ack;
+  }
+
+  async quoteReferralPassengerFare(
+    command: ReferralPassengerQuoteCommand,
+    identity?: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReferralPassengerFareQuote> {
+    const { entry, owner } = await this.referralAuthority(
+      identity,
+      command?.entrySlug,
+    );
+    const intent = this.referralInput(command, false);
+    if (
+      !this.referralFareRepository ||
+      !this.passengerRouteGeoService ||
+      !this.serviceAreaService
+    )
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Referral fare calculation is unavailable.",
+      );
+    const pricingAt = intent.requestedScheduledAt ?? new Date().toISOString();
+    if (intent.requestedScheduledAt)
+      this.assertBookingLeadTime(intent.requestedScheduledAt);
+    const [origin, destination] = await Promise.all([
+      this.passengerRouteGeoService.resolve(
+        {
+          addressText: intent.pickupAddress,
+          surface: "passenger_entry",
+          selectedByActorId: owner.drtsPassengerId,
+        },
+        requestId,
+      ),
+      this.passengerRouteGeoService.resolve(
+        {
+          addressText: intent.dropoffAddress,
+          surface: "passenger_entry",
+          selectedByActorId: owner.drtsPassengerId,
+        },
+        requestId,
+      ),
+    ]);
+    const pickup = origin.address,
+      dropoff = destination.address;
+    if (
+      ![pickup.lat, pickup.lng, dropoff.lat, dropoff.lng].every(
+        (n) => typeof n === "number" && Number.isFinite(n),
+      )
+    )
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Both actual route coordinates are required.",
+      );
+    const serviceAreaEvaluation = this.serviceAreaService.evaluate(
+      {
+        serviceProductType: entry.businessDispatchSubtype,
+        pickup,
+        dropoff,
+        requestedAt: pricingAt,
+      },
+      requestId,
+    );
+    if (
+      serviceAreaEvaluation.decision !== "serviceable" ||
+      serviceAreaEvaluation.stops.length !== 2 ||
+      serviceAreaEvaluation.stops.some(
+        (stop) => stop.serviceAreaCodes.length === 0,
+      )
+    )
+      throw new ApiRequestError(
+        409,
+        "SERVICE_AREA_NOT_SERVICEABLE",
+        "Both referral stops need effective service coverage.",
+      );
+    const tariff = await this.referralFareRepository.publishedTariff(pricingAt);
+    if (!tariff)
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "No published fare covers the pickup time.",
+      );
+    const route = await this.passengerRouteGeoService.route({
+      origin: pickup,
+      destination: dropoff,
+      travelMode: "drive",
+      requestedByActorId: owner.drtsPassengerId,
+    });
+    let estimate;
+    try {
+      estimate = estimateFare(tariff, { ...route, scheduledAt: pricingAt });
+    } catch (e) {
+      if (!(e instanceof RangeError)) throw e;
+      throw new ApiRequestError(
+        503,
+        "FARE_QUOTE_UNAVAILABLE",
+        "Approved tariff or route metrics are unavailable.",
+      );
+    }
+    const minor = (v: number) => {
+      const n = BigInt(v) * 100n;
+      if (n > BigInt(Number.MAX_SAFE_INTEGER))
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Estimate exceeds monetary bounds.",
+        );
+      return Number(n);
+    };
+    const now = Date.now();
+    const quote: ReferralPassengerFareQuoteRecord = {
+      ...owner,
+      quoteId: randomUUID(),
+      businessDispatchSubtype: entry.businessDispatchSubtype,
+      serviceProductCode: entry.businessDispatchSubtype,
+      timingMode: intent.timingMode,
+      requestedScheduledAt: intent.requestedScheduledAt,
+      pricingAt,
+      pickupAddress: intent.pickupAddress,
+      dropoffAddress: intent.dropoffAddress,
+      pickup: { ...pickup },
+      dropoff: { ...dropoff },
+      vehicleType: intent.vehicleType,
+      currency: "TWD",
+      estimatedMin: estimate.estimatedMin,
+      estimatedMax: estimate.estimatedMax,
+      estimatedMinMinor: minor(estimate.estimatedMin),
+      estimatedMaxMinor: minor(estimate.estimatedMax),
+      fixedPrice: false,
+      isGuaranteed: false,
+      quotedFareSource: "platform_pricing_rule",
+      quotedFareRuleVersion: tariff.version,
+      tariffSnapshot: { ...tariff },
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeContentHash: PASSENGER_FEE_CONTENT_HASH,
+      route: { ...route },
+      breakdown: { ...estimate.breakdown },
+      serviceAreaEvaluation: { ...serviceAreaEvaluation },
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 900000).toISOString(),
+      consumedByOrderId: null,
+      consumedAt: null,
+    };
+    await this.ownedMobilityRepository!.insertReferralFareQuoteSnapshot(quote);
+    return this.referralQuoteView(quote)!;
+  }
+
+  private referralBookingResult(order: OwnedOrderRecord, replayed: boolean) {
+    this.orders = [
+      order,
+      ...this.orders.filter((o) => o.orderId !== order.orderId),
+    ];
+    return {
+      orderId: order.orderId,
+      bookingId: order.bookingId ?? order.orderId,
+      serviceBucket: "business_dispatch" as const,
+      businessDispatchSubtype: order.businessDispatchSubtype!,
+      dispatchSemantics: "reservation" as const,
+      status: order.status,
+      replayed,
+      quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
+      confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+      feeConfirmation:
+        order.referralPassengerLifecycle?.feeConfirmation ?? null,
+    };
+  }
+
+  private assertReferralOrderOwner(
+    order: OwnedOrderRecord,
+    owner: Pick<
+      ReferralPassengerFareQuoteRecord,
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "entrySlug"
+      | "drtsPassengerId"
+    >,
+  ) {
+    if (
+      order.tenantId !== owner.tenantId ||
+      order.partnerId !== owner.partnerId ||
+      order.partnerProgramId !== owner.partnerProgramId ||
+      order.partnerEntrySlug !== owner.entrySlug ||
+      order.passenger?.passengerId !== owner.drtsPassengerId
+    )
+      throw new ApiRequestError(
+        403,
+        "FARE_QUOTE_FORBIDDEN",
+        "Committed order belongs to another referral scope.",
+      );
+  }
+
+  private assertReferralCommittedIntent(
+    order: OwnedOrderRecord,
+    owner: Pick<
+      ReferralPassengerFareQuoteRecord,
+      | "tenantId"
+      | "partnerId"
+      | "partnerProgramId"
+      | "entrySlug"
+      | "drtsPassengerId"
+    >,
+    intent: ReferralBookingIntent,
+    key: string,
+  ) {
+    this.assertReferralOrderOwner(order, owner);
+    const life = order.referralPassengerLifecycle;
+    if (
+      !life?.quote ||
+      life.bookingIdempotencyKey !== key ||
+      !life.bookingIntent ||
+      (
+        Object.keys({ ...life.bookingIntent, ...intent }) as Array<
+          keyof ReferralBookingIntent
+        >
+      ).some((k) => life.bookingIntent![k] !== intent[k])
+    )
+      throw new ApiRequestError(
+        409,
+        "IDEMPOTENCY_KEY_REUSED",
+        "This key belongs to a different original booking intent.",
+      );
+    this.assertReferralQuoteOwner(life.quote, owner);
+  }
+
   async createReferralPassengerBooking(
     command: CreateReferralPassengerBookingCommand,
     identity?: BootstrapRequestIdentity | null,
@@ -13500,252 +16042,260 @@ export class OwnedMobilityService
     runtimeProfileCodeHeader?: string,
     idempotencyKeyHeader?: string,
   ): Promise<TenantBookingResult> {
-    if (
-      !identity ||
-      identity.realm !== "partner" ||
-      identity.actorType !== "referral_passenger"
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
-        "Creating a referral passenger booking requires an active referral_passenger identity.",
-      );
-    }
-
-    if (identity.partnerEntrySlug !== command.entrySlug) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "PARTNER_SCOPE_MISMATCH",
-        "Referral passenger identity cannot book for a different entrySlug.",
-      );
-    }
-
-    const tenantId = identity.tenantId;
-    if (!tenantId) {
-      throw new ApiRequestError(
-        HttpStatus.BAD_REQUEST,
-        "TENANT_ID_REQUIRED",
-        "Referral passenger identity missing tenantId.",
-      );
-    }
-
-    const passengerId =
-      identity.drtsPassengerId ?? identity.actorId ?? "pax-ref-anon";
-
-    if (!this.tenantPartnerService) {
-      throw new ApiRequestError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        "PARTNER_ENTRY_UNAVAILABLE",
-        "Partner entry services are unavailable for this booking flow.",
-        { tenantId, entrySlug: command.entrySlug },
-      );
-    }
-    const partnerEntry = this.tenantPartnerService.getPartnerEntry(
-      command.entrySlug,
+    const { entry, owner } = await this.referralAuthority(
+      identity,
+      command?.entrySlug,
     );
-
-    if (command.scheduledAt) {
-      this.assertBookingLeadTime(command.scheduledAt);
-    }
-
-    try {
-      this.tenantPartnerService.getPassengerMasterRecord(tenantId, passengerId);
-    } catch {
-      this.tenantPartnerService.upsertPassenger(tenantId, {
-        passengerId,
-        fullName: command.passengerName || "Referral Passenger",
-        mobile: command.passengerPhone || "0912345678",
-      });
-    }
-
-    // Reconcile header and body idempotency key with documented precedence:
-    // HTTP Header `Idempotency-Key` takes precedence over body field `idempotencyKey`.
-    const resolvedIdempotencyKey =
+    const intent = this.referralInput(command, true);
+    const key =
       idempotencyKeyHeader?.trim() ||
       command.idempotencyKey?.trim() ||
       undefined;
-
-    if (resolvedIdempotencyKey) {
-      const existing = Array.from(this.orders.values()).find(
-        (o) =>
-          o.tenantId === tenantId &&
-          o.partnerEntrySlug === identity.partnerEntrySlug &&
-          o.passenger?.passengerId === passengerId &&
-          this.getReferralLifecycle(o)?.bookingIdempotencyKey ===
-            resolvedIdempotencyKey,
+    if (key && key.length > 255)
+      throw new ApiRequestError(
+        400,
+        "IDEMPOTENCY_KEY_TOO_LONG",
+        "Booking key exceeds 255 characters.",
       );
-      if (existing) {
-        return {
-          orderId: existing.orderId,
-          bookingId: existing.bookingId ?? existing.orderId,
-          serviceBucket: "business_dispatch",
-          businessDispatchSubtype:
-            existing.businessDispatchSubtype ?? "enterprise_dispatch",
-          dispatchSemantics: "reservation",
-          status: existing.status,
-          replayed: true,
-        };
+    const repo = this.ownedMobilityRepository!;
+    const recover = async () => {
+      if (!key) return null;
+      const committed = await repo.findReferralOrderByIdempotencyKey(
+        owner,
+        key,
+      );
+      if (committed) {
+        this.assertReferralCommittedIntent(committed, owner, intent, key);
+        return this.referralBookingResult(committed, true);
       }
-
-      const scope = `tenant:${tenantId}:booking_create`;
-      const idempotencyService = this.getIdempotencyService();
-
-      const result = await idempotencyService.execute<TenantBookingResult>({
-        scope,
-        idempotencyKey: resolvedIdempotencyKey,
-        tenantId,
-        actorId: passengerId,
-        requestPath: "/partner/referral/passenger/bookings",
-        required: false,
-        payload: {
-          ...command,
-          ...(command.idempotencyKey
-            ? { idempotencyKey: resolvedIdempotencyKey }
-            : {}),
-        },
-        execute: async () => {
-          if (command.scheduledAt) {
-            this.assertBookingLeadTime(command.scheduledAt);
-          }
-          const isImmediateReferral = !command.scheduledAt;
-          const reservationWindowStart =
-            command.scheduledAt ?? new Date().toISOString();
-          const tenantBookingCommand: CreateTenantBookingCommand = {
-            businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
-            direction: "pickup",
-            pickup: {
-              address: command.pickupAddress,
-              lat: 25.033,
-              lng: 121.565,
-            },
-            dropoff: {
-              address: command.dropoffAddress,
-              lat: 25.048,
-              lng: 121.517,
-            },
-            reservationWindowStart,
-            reservationWindowEnd: new Date(
-              new Date(reservationWindowStart).getTime() + 3600000,
-            ).toISOString(),
-            passengerId,
-            passenger: {
-              passengerId,
-              name: command.passengerName || "Referral Passenger",
-              phone: command.passengerPhone || "0912345678",
-            },
-            ...(identity.partnerEntrySlug
-              ? { partnerEntrySlug: identity.partnerEntrySlug }
-              : {}),
-          };
-
-          const bookingResult = await this.createTenantBooking(
-            tenantBookingCommand,
-            tenantId,
-            identity,
-            requestId,
-            runtimeProfileCodeHeader,
-            undefined,
-            { isImmediateReferral },
-          );
-
-          if (
-            typeof bookingResult === "object" &&
-            bookingResult &&
-            "orderId" in bookingResult
-          ) {
-            const order = this.orders.find(
-              (o) => o.orderId === bookingResult.orderId,
-            );
-            if (order) {
-              const nextOrder = this.updateReferralLifecycle(order, {
-                bookingIdempotencyKey: resolvedIdempotencyKey,
-              });
-              await this.persistChangesRequired(
-                { orders: [nextOrder] },
-                "referral.booking.idempotency",
-              );
-            }
-          }
-
-          return {
-            data: {
-              ...bookingResult,
-              replayed: false,
-            },
-            statusCode: 201,
-          };
-        },
-      });
-
-      return {
-        ...result.data,
-        replayed: result.isReplay,
-      };
-    }
-
-    if (command.scheduledAt) {
-      this.assertBookingLeadTime(command.scheduledAt);
-    }
-    const isImmediateReferral = !command.scheduledAt;
-    const reservationWindowStart =
-      command.scheduledAt ?? new Date().toISOString();
-    const tenantBookingCommand: CreateTenantBookingCommand = {
-      // The partner entry owns the service product. VehicleType is a passenger
-      // display preference, not an authorization to select a product.
-      businessDispatchSubtype: partnerEntry.businessDispatchSubtype,
-      direction: "pickup",
-      pickup: {
-        address: command.pickupAddress,
-        lat: 25.033,
-        lng: 121.565,
-      },
-      dropoff: {
-        address: command.dropoffAddress,
-        lat: 25.048,
-        lng: 121.517,
-      },
-      reservationWindowStart,
-      reservationWindowEnd: new Date(
-        new Date(reservationWindowStart).getTime() + 3600000,
-      ).toISOString(),
-      passengerId,
-      passenger: {
-        passengerId,
-        name: command.passengerName || "Referral Passenger",
-        phone: command.passengerPhone || "0912345678",
-      },
-      ...(identity.partnerEntrySlug
-        ? { partnerEntrySlug: identity.partnerEntrySlug }
-        : {}),
+      const quote = await repo.findReferralFareQuoteSnapshotById(
+        intent.quoteId,
+      );
+      if (!quote) return null;
+      this.assertReferralQuoteOwner(quote, owner);
+      if (!quote.consumedByOrderId) return null;
+      const order = await repo.findOrderById(quote.consumedByOrderId);
+      if (!order)
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Consumed quote has no committed order.",
+        );
+      this.assertReferralOrderOwner(order, owner);
+      if (order.referralPassengerLifecycle?.bookingIdempotencyKey !== key)
+        throw new ApiRequestError(
+          409,
+          "FARE_QUOTE_ALREADY_CONSUMED",
+          "Quote was consumed by another intent.",
+        );
+      this.assertReferralCommittedIntent(order, owner, intent, key);
+      return this.referralBookingResult(order, true);
     };
-
-    const result = await this.createTenantBooking(
-      tenantBookingCommand,
-      tenantId,
-      identity,
-      requestId,
-      runtimeProfileCodeHeader,
-      undefined,
-      { isImmediateReferral },
-    );
-
-    return result;
+    const prior = await recover();
+    if (prior) return prior;
+    const fresh = async () => {
+      if (command.feeConfirmed !== true)
+        throw new ApiRequestError(
+          400,
+          "FEE_CONFIRMATION_REQUIRED",
+          "Confirm the fees for this order.",
+        );
+      if (command.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION)
+        throw new ApiRequestError(
+          409,
+          "FEE_DISCLOSURE_CHANGED",
+          "Read and confirm the current fees.",
+        );
+      const quote = await repo.findReferralFareQuoteSnapshotById(
+        intent.quoteId,
+      );
+      if (!quote)
+        throw new ApiRequestError(
+          404,
+          "FARE_QUOTE_NOT_FOUND",
+          "Quote not found.",
+        );
+      this.assertReferralQuoteOwner(quote, owner);
+      await this.requireReferralFeeAgreement(quote, owner);
+      if (quote.consumedByOrderId) {
+        const existing = await recover();
+        if (existing) return existing;
+        throw new ApiRequestError(
+          409,
+          "FARE_QUOTE_ALREADY_CONSUMED",
+          "Quote has already been consumed.",
+        );
+      }
+      if (Date.parse(quote.expiresAt) <= Date.now())
+        throw new ApiRequestError(
+          409,
+          "FARE_QUOTE_EXPIRED",
+          "Refresh the expired estimate.",
+        );
+      if (
+        quote.businessDispatchSubtype !== entry.businessDispatchSubtype ||
+        quote.serviceProductCode !== entry.businessDispatchSubtype ||
+        [
+          "pickupAddress",
+          "dropoffAddress",
+          "timingMode",
+          "requestedScheduledAt",
+          "vehicleType",
+        ].some(
+          (k) =>
+            quote[k as keyof typeof quote] !== intent[k as keyof typeof intent],
+        )
+      )
+        throw new ApiRequestError(
+          409,
+          "FARE_QUOTE_MISMATCH",
+          "The quote does not match the current route/time/product intent.",
+        );
+      if (intent.requestedScheduledAt)
+        this.assertBookingLeadTime(intent.requestedScheduledAt);
+      // The normal passenger directory is real; no PAX account or fabricated quote owner is introduced.
+      try {
+        this.tenantPartnerService!.getPassengerMasterRecord(
+          owner.tenantId,
+          owner.drtsPassengerId,
+        );
+      } catch (error) {
+        if (
+          !(error instanceof ApiRequestError) ||
+          error.code !== "PASSENGER_NOT_FOUND"
+        )
+          throw error;
+        if (
+          !intent.passengerName ||
+          !/^\+?\d{8,15}$/.test(intent.passengerPhone)
+        )
+          throw new ApiRequestError(
+            400,
+            "VALIDATION_ERROR",
+            "A real passenger name and contact phone are required.",
+          );
+        await this.tenantPartnerService!.upsertPassenger(owner.tenantId, {
+          passengerId: owner.drtsPassengerId,
+          fullName: intent.passengerName,
+          mobile: intent.passengerPhone,
+        });
+      }
+      const start = intent.requestedScheduledAt ?? new Date().toISOString();
+      return await this.createTenantBooking(
+        {
+          businessDispatchSubtype: entry.businessDispatchSubtype,
+          direction: "pickup",
+          pickup: { ...quote.pickup, address: intent.pickupAddress },
+          dropoff: { ...quote.dropoff, address: intent.dropoffAddress },
+          reservationWindowStart: start,
+          reservationWindowEnd: new Date(
+            Date.parse(start) + 3600000,
+          ).toISOString(),
+          passengerId: owner.drtsPassengerId,
+          passenger: {
+            passengerId: owner.drtsPassengerId,
+            name: intent.passengerName,
+            phone: intent.passengerPhone,
+          },
+          ...(intent.vehicleType
+            ? { vehiclePreference: intent.vehicleType }
+            : {}),
+          partnerEntrySlug: owner.entrySlug,
+        },
+        owner.tenantId,
+        identity,
+        requestId,
+        runtimeProfileCodeHeader,
+        undefined,
+        {
+          isImmediateReferral: intent.timingMode === "immediate",
+          writeReferralNotificationRoute: true,
+          verifiedServerQuote: quote,
+          referralPassengerLifecyclePatch: {
+            ...(key ? { bookingIdempotencyKey: key } : {}),
+            bookingIntent: intent,
+          },
+        },
+      );
+    };
+    try {
+      if (!key) {
+        const created = await fresh();
+        const order = await repo.findOrderById(created.orderId);
+        if (!order)
+          throw new ApiRequestError(
+            503,
+            "FARE_QUOTE_UNAVAILABLE",
+            "Committed booking readback is unavailable.",
+          );
+        return this.referralBookingResult(order, false);
+      }
+      const result =
+        await this.getIdempotencyService().execute<TenantBookingResult>({
+          scope:
+            "referral_booking:v1:" +
+            createHash("sha256")
+              .update(JSON.stringify(Object.values(owner)))
+              .digest("hex"),
+          idempotencyKey: key,
+          tenantId: owner.tenantId,
+          actorId: owner.drtsPassengerId,
+          requestPath: "/partner/referral/passenger/bookings",
+          required: false,
+          payload: { ...owner, ...intent, key },
+          execute: async () => ({ data: await fresh(), statusCode: 201 }),
+        });
+      const order = await repo.findOrderById(result.data.orderId);
+      if (!order)
+        throw new ApiRequestError(
+          503,
+          "FARE_QUOTE_UNAVAILABLE",
+          "Committed booking readback is unavailable.",
+        );
+      this.assertReferralCommittedIntent(order, owner, intent, key);
+      return this.referralBookingResult(
+        order,
+        result.isReplay || result.data.replayed === true,
+      );
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        (error.getStatus() === 403 ||
+          [
+            "IDEMPOTENCY_KEY_REUSED",
+            "VALIDATION_ERROR",
+            "PRICING_AUTHORITY_FORBIDDEN",
+          ].includes(error.code))
+      )
+        throw error;
+      const committed = await recover();
+      if (committed) return committed;
+      throw error;
+    }
   }
 
-  private resolveReferralTripDetails(order: OwnedOrderRecord) {
-    const assignment = this.dispatchAssignments.find(
+  private resolveReferralTripDetails(
+    order: OwnedOrderRecord,
+    currentAssignments?: readonly DispatchAssignmentRecord[],
+  ) {
+    const assignment = (currentAssignments ?? this.dispatchAssignments).find(
       (a) =>
         a.orderId === order.orderId &&
         ["assigned", "accepted"].includes(a.status),
     );
-    const task = this.driverTasks.find(
-      (t) =>
-        t.orderId === order.orderId &&
-        !["cancelled", "rejected"].includes(t.status),
-    );
+    const task = currentAssignments
+      ? undefined
+      : this.driverTasks.find(
+          (t) =>
+            t.orderId === order.orderId &&
+            !["cancelled", "rejected"].includes(t.status),
+        );
 
-    const candidate = (order as unknown as Record<string, unknown>)
-      .dispatchCandidate as
+    const candidate = (
+      currentAssignments
+        ? undefined
+        : (order as unknown as Record<string, unknown>).dispatchCandidate
+    ) as
       | {
           driverName?: string;
           plateNumber?: string;
@@ -13755,7 +16305,8 @@ export class OwnedMobilityService
 
     let driverName: string | null = candidate?.driverName ?? null;
     let plateNumber: string | null = candidate?.plateNumber ?? null;
-    let driverPhoneMasked: string | null = candidate?.driverPhoneMasked ?? null;
+    const driverPhoneMasked: string | null =
+      candidate?.driverPhoneMasked ?? null;
 
     const driverId = task?.driverId ?? assignment?.driverId;
     const vehicleId = task?.vehicleId ?? assignment?.vehicleId;
@@ -13778,24 +16329,15 @@ export class OwnedMobilityService
       }
     }
 
-    if (driverName && !driverPhoneMasked) {
-      driverPhoneMasked = "0912-***-888";
-    }
-
-    let fareTotal = 0;
-    if (order.status !== "cancelled") {
+    let fareTotal: number | null = null;
+    if (order.status === "completed" && task?.status === "completed") {
       if (
-        task?.fare?.amountMinor !== undefined &&
-        task.fare.amountMinor !== null
+        task.fare &&
+        ["NTD", "TWD"].includes(task.fare.currency) &&
+        Number.isSafeInteger(task.fare.amountMinor) &&
+        task.fare.amountMinor >= 0
       ) {
-        fareTotal = Math.round(task.fare.amountMinor / 100);
-      } else if (
-        order.quotedFare?.amountMinor !== undefined &&
-        order.quotedFare.amountMinor !== null
-      ) {
-        fareTotal = Math.round(order.quotedFare.amountMinor / 100);
-      } else {
-        fareTotal = 290;
+        fareTotal = task.fare.amountMinor / 100;
       }
     }
 
@@ -13807,6 +16349,238 @@ export class OwnedMobilityService
       driverPhoneMasked,
       fareTotal,
     };
+  }
+
+  private referralCancellationWindow(
+    order: OwnedOrderRecord,
+  ): ReferralPassengerCancellationWindow {
+    // The command remains the authority. Do not duplicate its status allowlist
+    // or turn unrelated errors into a fabricated cancellation decision.
+    let canCancel = true;
+    try {
+      this.assertOrderCancelable(order);
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.getStatus() === HttpStatus.CONFLICT &&
+        error.code === "ORDER_NOT_CANCELABLE"
+      ) {
+        canCancel = false;
+      } else {
+        throw error;
+      }
+    }
+    let deadline: number | null = null;
+    if (order.dispatchSemantics === "reservation") {
+      const cutoff = order.cancelableUntil
+        ? Date.parse(order.cancelableUntil)
+        : Number.NaN;
+      // Missing/invalid cutoffs do not close the original reservation command.
+      // A finite grace date alone cannot invent an expiry for that branch.
+      if (Number.isFinite(cutoff)) {
+        deadline = cutoff;
+        const created = Date.parse(order.createdAt);
+        const grace = created + REFERRAL_PASSENGER_CANCEL_WINDOW_MS;
+        if (
+          order.partnerEntrySlug &&
+          order.status === "created" &&
+          Number.isFinite(created) &&
+          Number.isFinite(new Date(grace).getTime())
+        ) {
+          deadline = Math.max(deadline, grace);
+        }
+      }
+    }
+    return {
+      canCancel,
+      cancelableUntil:
+        deadline === null ? null : new Date(deadline).toISOString(),
+      asOf: new Date().toISOString(),
+    };
+  }
+
+  private async resolveReferralPassengerLiveTracking(
+    order: OwnedOrderRecord,
+    context: OwnedOrderActionContext | null,
+  ): Promise<import("@drts/contracts").ReferralPassengerLiveTracking | null> {
+    const activeStatuses = [
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+    ];
+    if (!activeStatuses.includes(order.status) || !context) return null;
+    const assignment = context.dispatchAssignments.find(
+      (a) =>
+        a.orderId === order.orderId &&
+        ["assigned", "accepted"].includes(a.status),
+    );
+    const task =
+      assignment &&
+      context.driverTasks.find(
+        (t) =>
+          t.orderId === order.orderId &&
+          t.assignmentId === assignment.assignmentId &&
+          t.driverId === assignment.driverId &&
+          t.vehicleId === assignment.vehicleId &&
+          !["completed", "cancelled", "rejected"].includes(t.status),
+      );
+    if (!assignment || !task || !this.regulatoryRegistryService) return null;
+    if (order.status === "on_trip" && task.status !== "on_trip") return null;
+    const result: import("@drts/contracts").ReferralPassengerLiveTracking = {
+      assignmentId: assignment.assignmentId,
+      driverId: assignment.driverId,
+      vehicleId: assignment.vehicleId,
+      observedAt: new Date().toISOString(),
+      locationFreshness: "missing",
+      location: null,
+      pickupEta: null,
+      dropoffRoute: null,
+    };
+    try {
+      const current =
+        await this.regulatoryRegistryService.getDriverTrackingStatus(
+          assignment.driverId,
+        );
+      if (
+        !current ||
+        current.driverId !== assignment.driverId ||
+        current.currentVehicleId !== assignment.vehicleId ||
+        (current.currentTaskId && current.currentTaskId !== task.taskId)
+      )
+        return result;
+      const point = current.currentLocation;
+      result.locationFreshness = current.locationFreshness;
+      result.location = point
+        ? {
+            lat: point.lat,
+            lng: point.lng,
+            accuracyM: point.accuracyM,
+            recordedAt: point.recordedAt,
+          }
+        : null;
+      if (current.locationFreshness !== "fresh" || !point) return result;
+      if (
+        ["assigned", "driver_accepted", "enroute_pickup"].includes(
+          order.status,
+        ) &&
+        order.pickup.lat != null &&
+        order.pickup.lng != null
+      ) {
+        // The existing Driver ETA is a Haversine/average-speed estimate.
+        // Bind its actual producer inputs to this observed assignment/point,
+        // rather than relabeling another observation or destination.
+        const eta = await this.regulatoryRegistryService
+          .getDriverEta(assignment.driverId, order.pickup.lat, order.pickup.lng)
+          .catch(() => null);
+        if (
+          eta &&
+          eta.driverId === assignment.driverId &&
+          eta.driverLocation?.driverId === assignment.driverId &&
+          eta.driverLocation.lat === point.lat &&
+          eta.driverLocation.lng === point.lng &&
+          eta.driverLocation.accuracyM === point.accuracyM &&
+          eta.driverLocation.recordedAt === point.recordedAt &&
+          eta.driverLocation.updatedAt === point.updatedAt &&
+          eta.destination?.lat === order.pickup.lat &&
+          eta.destination.lng === order.pickup.lng &&
+          Number.isFinite(eta.etaMinutes) &&
+          eta.etaMinutes >= 0 &&
+          isIso8601InstantWithTimezone(eta.calculatedAt) &&
+          Date.now() - Date.parse(eta.calculatedAt) >= -5000 &&
+          Date.now() - Date.parse(eta.calculatedAt) < 60_000
+        ) {
+          result.pickupEta = {
+            minutes: eta.etaMinutes,
+            calculatedAt: eta.calculatedAt,
+            estimatedArrivalAt: new Date(
+              Date.parse(eta.calculatedAt) + eta.etaMinutes * 60_000,
+            ).toISOString(),
+          };
+        }
+      } else if (
+        order.status === "on_trip" &&
+        current.currentTaskId === task.taskId &&
+        this.passengerRouteGeoService &&
+        order.dropoff.lat != null &&
+        order.dropoff.lng != null
+      ) {
+        const route = await this.passengerRouteGeoService
+          .route({
+            origin: { lat: point.lat, lng: point.lng },
+            destination: { lat: order.dropoff.lat, lng: order.dropoff.lng },
+            travelMode: "drive",
+            locale: "zh-TW",
+          })
+          .catch(() => null);
+        if (
+          route &&
+          Number.isFinite(route.distanceMeters) &&
+          route.distanceMeters >= 0 &&
+          Number.isFinite(route.durationSeconds) &&
+          route.durationSeconds >= 0 &&
+          isIso8601InstantWithTimezone(route.generatedAt) &&
+          Date.now() - Date.parse(route.generatedAt) >= -5000 &&
+          Date.now() - Date.parse(route.generatedAt) < 60_000
+        ) {
+          result.dropoffRoute = {
+            remainingDistanceMeters: route.distanceMeters,
+            remainingDurationSeconds: route.durationSeconds,
+            generatedAt: route.generatedAt,
+            estimatedArrivalAt: new Date(
+              Date.parse(route.generatedAt) + route.durationSeconds * 1000,
+            ).toISOString(),
+            provider: route.provider,
+          };
+        }
+      }
+      // A newer assignment, completed task or newer GPS observation must not
+      // relabel an advisory response obtained while awaiting the route provider.
+      const latest = await this.ownedMobilityRepository!.loadOrderActionContext(
+        { orderId: order.orderId },
+      );
+      const latestOrder = latest?.orders.find(
+        (o) => o.orderId === order.orderId,
+      );
+      const sameAssignment = latest?.dispatchAssignments.some(
+        (a) =>
+          a.assignmentId === assignment.assignmentId &&
+          a.driverId === assignment.driverId &&
+          a.vehicleId === assignment.vehicleId &&
+          ["assigned", "accepted"].includes(a.status),
+      );
+      const sameTask = latest?.driverTasks.some(
+        (t) =>
+          t.taskId === task.taskId &&
+          t.orderId === order.orderId &&
+          t.assignmentId === assignment.assignmentId &&
+          t.driverId === assignment.driverId &&
+          t.vehicleId === assignment.vehicleId &&
+          !["completed", "cancelled", "rejected"].includes(t.status),
+      );
+      const latestCurrent =
+        await this.regulatoryRegistryService.getDriverTrackingStatus(
+          assignment.driverId,
+        );
+      if (
+        !latestOrder ||
+        latestOrder.status !== order.status ||
+        !sameAssignment ||
+        !sameTask ||
+        latestCurrent.currentVehicleId !== assignment.vehicleId ||
+        latestCurrent.currentTaskId !== current.currentTaskId ||
+        latestCurrent.locationFreshness !== "fresh" ||
+        latestCurrent.currentLocation?.recordedAt !== point.recordedAt ||
+        latestCurrent.currentLocation?.lat !== point.lat ||
+        latestCurrent.currentLocation?.lng !== point.lng
+      )
+        return null;
+      return result;
+    } catch {
+      // Tracking is advisory; the canonical same-order trip remains readable.
+      return { ...result, pickupEta: null, dropoffRoute: null };
+    }
   }
 
   async getReferralPassengerActiveTrip(
@@ -13824,10 +16598,11 @@ export class OwnedMobilityService
       );
     }
 
+    await this.referralAuthority(identity);
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
     let activeOrder: OwnedOrderRecord | undefined;
-    for (const o of this.orders.values()) {
+    for (const o of await this.ownedMobilityRepository!.listOrdersForRead()) {
       if (
         o.partnerEntrySlug === identity.partnerEntrySlug &&
         o.passenger?.passengerId === passengerId &&
@@ -13868,8 +16643,21 @@ export class OwnedMobilityService
       return { active: false, trip: null };
     }
 
-    const details = this.resolveReferralTripDetails(activeOrder);
+    // Enterprise assignments do not have multi_taxi_direct disclosures. Read
+    // their current same-order aggregate, never an old reader's task/candidate.
+    const context = await this.ownedMobilityRepository!.loadOrderActionContext({
+      orderId: activeOrder.orderId,
+    });
+    const details = this.resolveReferralTripDetails(
+      activeOrder,
+      context?.dispatchAssignments ?? [],
+    );
     const isRated = Boolean(this.getReferralLifecycle(activeOrder)?.rating);
+    const liveTracking = await this.resolveReferralPassengerLiveTracking(
+      activeOrder,
+      context,
+    );
+    const cancellationWindow = this.referralCancellationWindow(activeOrder);
 
     return {
       active: true,
@@ -13878,8 +16666,20 @@ export class OwnedMobilityService
         orderNo: activeOrder.orderNo,
         status: activeOrder.status,
         statusCode: activeOrder.status,
-        etaMin: activeOrder.etaSnapshot?.etaMinutes ?? 5,
-        cancelWindowMin: 2,
+        etaMin: liveTracking?.pickupEta?.minutes ?? null,
+        liveTracking,
+        cancelWindowMin:
+          cancellationWindow.canCancel && cancellationWindow.cancelableUntil
+            ? Math.max(
+                0,
+                Math.ceil(
+                  (Date.parse(cancellationWindow.cancelableUntil) -
+                    Date.parse(cancellationWindow.asOf)) /
+                    60_000,
+                ),
+              )
+            : 0,
+        cancellationWindow,
         pickupAddress: activeOrder.pickup.address,
         dropoffAddress: activeOrder.dropoff.address,
         driverName: details.driverName,
@@ -13889,10 +16689,19 @@ export class OwnedMobilityService
           activeOrder.serviceProductCode ??
           activeOrder.businessDispatchSubtype ??
           "standard",
-        estimatedFare: details.fareTotal,
+        estimatedFare:
+          activeOrder.referralPassengerLifecycle?.quote?.estimatedMin ?? null,
         createdAt: activeOrder.createdAt ?? new Date().toISOString(),
         updatedAt: activeOrder.updatedAt ?? new Date().toISOString(),
         rated: isRated,
+        quote: this.referralQuoteView(
+          activeOrder.referralPassengerLifecycle?.quote,
+        ),
+        confirmedAt:
+          activeOrder.referralPassengerLifecycle?.confirmedAt ?? null,
+        feeConfirmation:
+          activeOrder.referralPassengerLifecycle?.feeConfirmation ?? null,
+        rating: this.referralRatingResult(activeOrder),
       },
     };
   }
@@ -13912,12 +16721,15 @@ export class OwnedMobilityService
       );
     }
 
+    await this.referralAuthority(identity);
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
+    this.driverTasks =
+      await this.ownedMobilityRepository!.listDriverTasksForRead();
     const passengerOrders: OwnedOrderRecord[] = [];
-    for (const o of Array.from(this.orders.values()).sort((a, b) =>
-      (b.createdAt || "").localeCompare(a.createdAt || ""),
-    )) {
+    for (const o of (
+      await this.ownedMobilityRepository!.listOrdersForRead()
+    ).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))) {
       if (
         o.partnerEntrySlug !== identity.partnerEntrySlug ||
         o.passenger?.passengerId !== passengerId
@@ -13963,16 +16775,31 @@ export class OwnedMobilityService
           pickupAddress: o.pickup.address,
           dropoffAddress: o.dropoff.address,
           fareTotal: details.fareTotal,
-          formattedFare: `NT$ ${details.fareTotal}`,
-          completedAt:
-            completedAt ??
-            o.cancelledAt ??
-            o.createdAt ??
-            new Date().toISOString(),
+          formattedFare:
+            details.fareTotal === null
+              ? "實際車資待確認"
+              : `NT$ ${details.fareTotal}`,
+          quote: this.referralQuoteView(o.referralPassengerLifecycle?.quote),
+          confirmedAt: o.referralPassengerLifecycle?.confirmedAt ?? null,
+          feeConfirmation:
+            o.referralPassengerLifecycle?.feeConfirmation ?? null,
+          rating: this.referralRatingResult(o),
+          cancelledAt: o.cancelledAt ?? null,
+          completedAt: completedAt ?? details.task?.completedAt ?? null,
           createdAt: o.createdAt ?? new Date().toISOString(),
         };
       }),
     };
+  }
+
+  async getReferralPassengerReceiptPdf(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<import("@drts/contracts").ReferralPassengerReceiptPdfDocument> {
+    const receipt = await this.getReferralPassengerReceipt(orderId, identity);
+    const { renderReferralReceiptDocument } =
+      await import("./referral-receipt-document");
+    return renderReferralReceiptDocument(receipt);
   }
 
   async getReferralPassengerReceipt(
@@ -13991,9 +16818,13 @@ export class OwnedMobilityService
       );
     }
 
+    await this.referralAuthority(identity);
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = await this.getOrderAsync(orderId, identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    await this.assertPartnerOrderIdentityAsync(identity, order);
 
     if (
       order.passenger?.passengerId &&
@@ -14006,30 +16837,51 @@ export class OwnedMobilityService
       );
     }
 
+    if (order.status !== "completed")
+      throw new ApiRequestError(
+        409,
+        "PASSENGER_RECEIPT_TRIP_NOT_COMPLETED",
+        "The owned trip is not completed.",
+      );
+    this.driverTasks =
+      await this.ownedMobilityRepository!.listDriverTasksForRead();
     const details = this.resolveReferralTripDetails(order);
 
     const maskName = (name?: string | null) => {
-      if (!name) return "L. Tsai";
+      if (!name) return "乘客";
       const parts = name.trim().split(/\s+/);
       if (parts.length > 1 && parts[0] && parts[parts.length - 1]) {
         return `${parts[0][0]}. ${parts[parts.length - 1]}`;
       }
-      return name.length > 0 ? `${name[0]}*` : "L. Tsai";
+      return name.length > 0 ? `${name[0]}*` : "乘客";
     };
 
     const maskPhone = (phone?: string | null) => {
-      if (!phone) return "0912-***-820";
+      if (!phone) return "未提供";
       const cleaned = phone.replace(/[^\d+]/g, "");
       if (cleaned.length >= 10) {
         return `${cleaned.slice(0, 4)}-***-${cleaned.slice(-3)}`;
       }
-      return "0912-***-820";
+      return "未提供";
     };
 
     const total = details.fareTotal;
-    const fareBase = total > 0 ? Math.round(total * 0.35) : 0;
-    const fareDistance = total > 0 ? Math.round(total * 0.45) : 0;
-    const fareTime = total > 0 ? total - fareBase - fareDistance : 0;
+    const captured = details.task?.actualFareBreakdown;
+    const hasComponents =
+      total !== null &&
+      captured &&
+      [
+        captured.startMinor,
+        captured.distanceMinor,
+        captured.delayMinor,
+        captured.nightMinor,
+      ].every((n) => Number.isSafeInteger(n) && n >= 0);
+    // Actual completion facts only. Never derive components or an actual total
+    // from a quote, percentages or an assumed toll/total convention.
+    const fareBase = hasComponents ? captured.startMinor / 100 : null;
+    const fareDistance = hasComponents ? captured.distanceMinor / 100 : null;
+    const fareTime = hasComponents ? captured.delayMinor / 100 : null;
+    const fareNight = hasComponents ? captured.nightMinor / 100 : null;
     const completedAt = (order as unknown as Record<string, unknown>)
       .completedAt as string | undefined;
 
@@ -14037,11 +16889,7 @@ export class OwnedMobilityService
       orderId: order.orderId,
       orderNo: order.orderNo,
       status: order.status,
-      completedAt:
-        completedAt ??
-        order.cancelledAt ??
-        order.createdAt ??
-        new Date().toISOString(),
+      completedAt: completedAt ?? details.task?.completedAt ?? null,
       passengerNameMasked: maskName(order.passenger?.name),
       passengerPhoneMasked: maskPhone(order.passenger?.phone),
       driverName: details.driverName,
@@ -14053,11 +16901,50 @@ export class OwnedMobilityService
       fareBase,
       fareDistance,
       fareTime,
+      fareNight,
       totalFare: total,
-      formattedTotal: `NT$ ${total}`,
-      paymentChannel: `${identity.partnerEntrySlug} (月結)`,
+      formattedTotal: total === null ? "實際車資待確認" : `NT$ ${total}`,
+      paymentChannel: "付款及結算狀態未提供",
+      quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
+      confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+      feeConfirmation:
+        order.referralPassengerLifecycle?.feeConfirmation ?? null,
       downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
     };
+  }
+
+  /** The persisted order, only when it belongs to this referral passenger. */
+  async requireOwnedReferralPassengerOrder(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<OwnedOrderRecord> {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "This action requires an active referral_passenger identity.",
+      );
+    }
+    await this.referralAuthority(identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    await this.assertPartnerOrderIdentityAsync(identity, order);
+    if (
+      order.passenger?.passengerId !==
+      (identity.drtsPassengerId ?? identity.actorId)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "The order belongs to another referral passenger.",
+      );
+    }
+    return order;
   }
 
   async cancelReferralPassengerTrip(
@@ -14078,9 +16965,13 @@ export class OwnedMobilityService
       );
     }
 
+    await this.referralAuthority(identity);
     const passengerId = identity.drtsPassengerId ?? identity.actorId;
 
-    const order = await this.getOrderAsync(orderId, identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    await this.assertPartnerOrderIdentityAsync(identity, order);
 
     if (
       order.passenger?.passengerId &&
@@ -14096,7 +16987,7 @@ export class OwnedMobilityService
     if (order.status === "cancelled") {
       return order;
     }
-
+    this.orders = [order, ...this.orders.filter((o) => o.orderId !== orderId)];
     return await this.cancelOwnedOrder(
       orderId,
       {
@@ -14106,93 +16997,417 @@ export class OwnedMobilityService
     );
   }
 
+  private referralRatingResult(
+    order: OwnedOrderRecord,
+  ): ReferralPassengerRatingResult | null {
+    const rating = order.referralPassengerLifecycle?.rating;
+    if (!rating) return null;
+    if (
+      rating.policyVersion !== "legacy" &&
+      (rating.policyVersion !== "referral_rating_v1" ||
+        typeof rating.contactRequested !== "boolean" ||
+        (rating.score <= 2 &&
+          (!rating.complaintCaseNo || !rating.createdTimelineId)))
+    )
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Stored rating provenance is incomplete.",
+      );
+    return {
+      orderId: order.orderId,
+      score: rating.score,
+      tags: rating.tags,
+      comment: rating.comment ?? null,
+      contactRequested: rating.contactRequested ?? null,
+      complaintCaseNo: rating.complaintCaseNo ?? null,
+      submittedAt: rating.submittedAt,
+    };
+  }
+
   async submitReferralPassengerRating(
     orderId: string,
     command: SubmitReferralPassengerRatingCommand,
     identity?: BootstrapRequestIdentity | null,
   ) {
+    const { owner } = await this.referralAuthority(identity);
     if (
-      !identity ||
-      identity.realm !== "partner" ||
-      identity.actorType !== "referral_passenger"
-    ) {
+      !command ||
+      command.orderId !== orderId ||
+      !Number.isInteger(command.score) ||
+      command.score < 1 ||
+      command.score > 5 ||
+      (command.tags !== undefined &&
+        (!Array.isArray(command.tags) ||
+          command.tags.some((t) => typeof t !== "string" || t.length > 100))) ||
+      (command.comment !== undefined &&
+        (typeof command.comment !== "string" ||
+          command.comment.length > 2000)) ||
+      (command.contactRequested !== undefined &&
+        typeof command.contactRequested !== "boolean") ||
+      (command.idempotencyKey !== undefined &&
+        (typeof command.idempotencyKey !== "string" ||
+          !command.idempotencyKey.trim() ||
+          command.idempotencyKey.length > 255)) ||
+      Object.keys(command).some(
+        (k) =>
+          ![
+            "orderId",
+            "score",
+            "tags",
+            "comment",
+            "contactRequested",
+            "idempotencyKey",
+          ].includes(k),
+      )
+    )
       throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
-        "Rating a referral trip requires an active referral_passenger identity.",
+        400,
+        "VALIDATION_ERROR",
+        "Invalid referral rating.",
       );
-    }
-
-    const passengerId = identity.drtsPassengerId ?? identity.actorId;
-
-    const order = await this.getOrderAsync(orderId, identity);
-
-    if (
-      order.passenger?.passengerId &&
-      order.passenger.passengerId !== passengerId
-    ) {
-      throw new ApiRequestError(
-        HttpStatus.FORBIDDEN,
-        "PASSENGER_SCOPE_MISMATCH",
-        "Authenticated referral passenger cannot rate another passenger's trip.",
-      );
-    }
-
-    if (order.status !== "completed") {
-      throw new ApiRequestError(
-        HttpStatus.CONFLICT,
-        "PASSENGER_RATING_TRIP_NOT_COMPLETED",
-        "A passenger rating can only be submitted after trip completion.",
-        { orderId: order.orderId, status: order.status },
-      );
-    }
-
-    const score = command.score;
-    const tags = this.normalizeReferralRatingTags(command.tags);
-    const comment = command.comment?.trim() || null;
-
-    const existing = this.getReferralLifecycle(order)?.rating;
-    if (existing) {
-      this.assertIdempotentReferralRating(existing, score, tags, comment);
-      return {
-        orderId,
-        score: existing.score,
-        comment: existing.comment ?? null,
-        tags: existing.tags ?? [],
-        submittedAt: existing.submittedAt,
-      };
-    }
-
-    const ratingRecord: NonNullable<
-      NonNullable<OwnedOrderRecord["referralPassengerLifecycle"]>["rating"]
-    > = {
-      orderId,
-      score,
-      tags,
-      submittedAt: new Date().toISOString(),
+    const tags = this.normalizeReferralRatingTags(command.tags),
+      comment = command.comment?.trim() || null;
+    const verify = (order: OwnedOrderRecord) => {
+      if (
+        order.tenantId !== owner.tenantId ||
+        order.partnerId !== owner.partnerId ||
+        order.partnerProgramId !== owner.partnerProgramId ||
+        order.partnerEntrySlug !== owner.entrySlug ||
+        order.passenger?.passengerId !== owner.drtsPassengerId
+      )
+        throw new ApiRequestError(
+          403,
+          "PARTNER_SCOPE_MISMATCH",
+          "Rating belongs to another referral passenger.",
+        );
+      if (order.status !== "completed")
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_TRIP_NOT_COMPLETED",
+          "Only a completed own trip can be rated.",
+        );
     };
-    if (comment) {
-      ratingRecord.comment = comment;
+    const match = (order: OwnedOrderRecord) => {
+      const existing = order.referralPassengerLifecycle?.rating;
+      if (!existing) return false;
+      this.assertIdempotentReferralRating(
+        existing,
+        command.score,
+        tags,
+        comment,
+      );
+      this.referralRatingResult(order);
+      if (
+        existing.policyVersion !== "legacy" &&
+        existing.contactRequested !== command.contactRequested
+      )
+        throw new ApiRequestError(
+          409,
+          "PASSENGER_RATING_ALREADY_SUBMITTED",
+          "A different contact preference was already submitted.",
+        );
+      return true;
+    };
+    let committed: OwnedOrderRecord;
+    try {
+      committed = await this.ownedMobilityRepository!.withTransaction(
+        async (tx) => {
+          const current =
+            await this.ownedMobilityRepository!.findOrderForUpdate(tx, orderId);
+          if (!current)
+            throw new ApiRequestError(
+              404,
+              "ORDER_NOT_FOUND",
+              "Order not found.",
+            );
+          const order = current.order;
+          verify(order);
+          if (match(order)) return order;
+          if (typeof command.contactRequested !== "boolean")
+            throw new ApiRequestError(
+              400,
+              "VALIDATION_ERROR",
+              "Explicit contact preference is required.",
+            );
+          if (command.score <= 2 && !this.referralComplaintService)
+            throw new ApiRequestError(
+              503,
+              "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+              "Canonical complaint service is unavailable.",
+            );
+          const hook =
+            command.score <= 2
+              ? this.referralComplaintService!.prepareReferralRatingHook(
+                  {
+                    orderId,
+                    passengerId: owner.drtsPassengerId,
+                    tenantId: owner.tenantId,
+                  },
+                  {
+                    score: command.score,
+                    comment,
+                    contactRequested: command.contactRequested,
+                  },
+                )
+              : null;
+          const next: OwnedOrderRecord = {
+            ...order,
+            updatedAt: new Date().toISOString(),
+            referralPassengerLifecycle: {
+              ...order.referralPassengerLifecycle,
+              rating: {
+                orderId,
+                score: command.score,
+                tags,
+                ...(comment ? { comment } : {}),
+                ...(command.idempotencyKey
+                  ? { idempotencyKey: command.idempotencyKey }
+                  : {}),
+                submittedAt: new Date().toISOString(),
+                policyVersion: "referral_rating_v1",
+                contactRequested: command.contactRequested,
+                complaintCaseNo: hook?.caseNo ?? null,
+                createdTimelineId: hook?.createdTimelineId ?? null,
+              },
+            },
+          };
+          await hook?.execute(tx);
+          await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+            orders: [next],
+          });
+          return next;
+        },
+      );
+    } catch (error) {
+      if (error instanceof ApiRequestError && error.getStatus() < 500)
+        throw error;
+      const recovered =
+        await this.ownedMobilityRepository!.findOrderById(orderId);
+      if (!recovered) throw error;
+      verify(recovered);
+      if (!match(recovered)) throw error;
+      committed = recovered;
     }
-    if (command.idempotencyKey) {
-      ratingRecord.idempotencyKey = command.idempotencyKey;
+    const rating = committed.referralPassengerLifecycle!.rating!;
+    if (rating.policyVersion === "referral_rating_v1" && rating.score <= 2) {
+      if (!this.referralComplaintService)
+        throw new ApiRequestError(
+          503,
+          "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+          "Case readback unavailable.",
+        );
+      await this.referralComplaintService.publishReferralRatingCase({
+        caseNo: rating.complaintCaseNo!,
+        createdTimelineId: rating.createdTimelineId!,
+        orderId,
+        passengerId: owner.drtsPassengerId,
+        tenantId: owner.tenantId,
+      });
     }
+    this.orders = [
+      committed,
+      ...this.orders.filter((o) => o.orderId !== orderId),
+    ];
+    return this.referralRatingResult(committed)!;
+  }
 
-    const nextOrder = this.updateReferralLifecycle(order, {
-      rating: ratingRecord,
-    });
-    await this.persistChangesRequired(
-      { orders: [nextOrder] },
-      "referral.rating.idempotency",
-    );
-
+  private normalizeReferralComplaint(
+    orderId: string,
+    command: SubmitReferralPassengerComplaintCommand,
+  ): SubmitReferralPassengerComplaintCommand {
+    const validText = (value: unknown, max: number): value is string =>
+      typeof value === "string" &&
+      Boolean(value.trim()) &&
+      Array.from(value.trim()).length <= max;
+    if (
+      !command ||
+      command.orderId !== orderId ||
+      !["service", "fare", "lost_item"].includes(command.category) ||
+      !validText(command.content, 2000) ||
+      typeof command.contactRequested !== "boolean" ||
+      !validText(command.idempotencyKey, 255) ||
+      (command.category === "lost_item"
+        ? !validText(command.lostItemDescription, 1000)
+        : command.lostItemDescription !== undefined) ||
+      Object.keys(command).some(
+        (k) =>
+          ![
+            "orderId",
+            "category",
+            "content",
+            "lostItemDescription",
+            "contactRequested",
+            "idempotencyKey",
+          ].includes(k),
+      )
+    ) {
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Invalid referral complaint.",
+      );
+    }
     return {
       orderId,
-      score: ratingRecord.score,
-      comment: ratingRecord.comment ?? null,
-      tags: ratingRecord.tags,
-      submittedAt: ratingRecord.submittedAt,
+      category: command.category,
+      content: command.content.trim(),
+      contactRequested: command.contactRequested,
+      idempotencyKey: command.idempotencyKey.trim(),
+      ...(command.lostItemDescription === undefined
+        ? {}
+        : { lostItemDescription: command.lostItemDescription.trim() }),
     };
+  }
+
+  private assertReferralComplaintOwner(
+    order: OwnedOrderRecord,
+    owner: {
+      tenantId: string;
+      partnerId: string;
+      partnerProgramId: string;
+      entrySlug: string;
+      drtsPassengerId: string;
+    },
+  ) {
+    if (
+      order.tenantId !== owner.tenantId ||
+      order.partnerId !== owner.partnerId ||
+      order.partnerProgramId !== owner.partnerProgramId ||
+      order.partnerEntrySlug !== owner.entrySlug ||
+      order.passenger?.passengerId !== owner.drtsPassengerId
+    ) {
+      throw new ApiRequestError(
+        403,
+        "PARTNER_SCOPE_MISMATCH",
+        "Complaint belongs to another referral passenger.",
+      );
+    }
+  }
+
+  async submitReferralPassengerComplaint(
+    orderId: string,
+    input: SubmitReferralPassengerComplaintCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { owner } = await this.referralAuthority(identity);
+    const command = this.normalizeReferralComplaint(orderId, input);
+    if (!this.referralComplaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Complaint service is unavailable.",
+      );
+    // No optimistic accepted state or catch-and-success: a failed/unknown ACK
+    // retains the caller command. A later identical retry reads committed linkage.
+    const submitted = await this.ownedMobilityRepository!.withTransaction(
+      async (tx) => {
+        const current = await this.ownedMobilityRepository!.findOrderForUpdate(
+          tx,
+          orderId,
+        );
+        if (!current)
+          throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+        const order = current.order;
+        this.assertReferralComplaintOwner(order, owner);
+        const previous = order.referralPassengerLifecycle?.complaints ?? [];
+        const same = previous.find(
+          (item) => item.command.idempotencyKey === command.idempotencyKey,
+        );
+        if (same) {
+          if (JSON.stringify(same.command) !== JSON.stringify(command))
+            throw new ApiRequestError(
+              409,
+              "IDEMPOTENCY_PAYLOAD_MISMATCH",
+              "The original complaint command has different content.",
+            );
+          return same;
+        }
+        const hook =
+          this.referralComplaintService!.prepareReferralComplaintHook(
+            orderId,
+            command,
+          );
+        const record: ReferralPassengerComplaintSubmission = {
+          caseNo: hook.caseNo,
+          createdTimelineId: hook.createdTimelineId,
+          command,
+          submittedAt: new Date().toISOString(),
+        };
+        const next: OwnedOrderRecord = {
+          ...order,
+          referralPassengerLifecycle: {
+            ...order.referralPassengerLifecycle,
+            complaints: [...previous, record],
+          },
+        };
+        await hook.execute(tx);
+        await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+          orders: [next],
+        });
+        return record;
+      },
+    );
+    return this.referralComplaintService.publishReferralComplaintCase(
+      {
+        orderId,
+        passengerId: owner.drtsPassengerId,
+        tenantId: owner.tenantId,
+      },
+      submitted,
+    );
+  }
+
+  async listReferralPassengerComplaints(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { owner } = await this.referralAuthority(identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    this.assertReferralComplaintOwner(order, owner);
+    if (!this.referralComplaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Complaint service is unavailable.",
+      );
+    const items = await Promise.all(
+      (order.referralPassengerLifecycle?.complaints ?? []).map((record) =>
+        this.referralComplaintService!.readReferralComplaintCase(
+          orderId,
+          record,
+        ),
+      ),
+    );
+    return {
+      orderId,
+      items: items.sort(
+        (a, b) =>
+          b.submittedAt.localeCompare(a.submittedAt) ||
+          a.caseNo.localeCompare(b.caseNo),
+      ),
+    };
+  }
+
+  async getReferralPassengerComplaint(
+    orderId: string,
+    caseNo: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { items } = await this.listReferralPassengerComplaints(
+      orderId,
+      identity,
+    );
+    const found = items.find((item) => item.caseNo === caseNo);
+    if (!found)
+      throw new ApiRequestError(
+        404,
+        "COMPLAINT_NOT_FOUND",
+        "Complaint not found for this order.",
+      );
+    return found;
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {
@@ -14366,12 +17581,31 @@ export class OwnedMobilityService
     };
   }
 
-  private cloneTask(task: DriverTaskRecord): DriverTaskRecord {
-    const order = this.orders.find(
-      (candidateOrder) => candidateOrder.orderId === task.orderId,
-    );
+  private cloneTaskWithDetachedActualFare(
+    task: DriverTaskRecord,
+  ): DriverTaskRecord {
+    // The task-event service shallow-spreads additive fields. Detach captured
+    // facts at completion producers without changing its unrelated clone policy.
     return {
       ...task,
+      ...(task.actualFareBreakdown
+        ? { actualFareBreakdown: { ...task.actualFareBreakdown } }
+        : {}),
+    };
+  }
+
+  private cloneTask(
+    task: DriverTaskRecord,
+    authoritativeOrder?: OwnedOrderRecord | null,
+  ): DriverTaskRecord {
+    const order =
+      authoritativeOrder === undefined
+        ? this.orders.find(
+            (candidateOrder) => candidateOrder.orderId === task.orderId,
+          )
+        : authoritativeOrder;
+    return {
+      ...this.cloneTaskWithDetachedActualFare(task),
       ...(task.bookingQualification
         ? { bookingQualification: structuredClone(task.bookingQualification) }
         : {}),

@@ -1,5 +1,6 @@
 type RuntimeConfig = {
   apiBaseUrl: string;
+  platformAdminBaseUrl?: string;
 };
 
 const DEFAULT_SERVER_API_BASE_URL = "http://localhost:3001";
@@ -35,8 +36,20 @@ export function getRuntimeApiBaseUrl(): string {
 }
 
 export function RuntimeConfigScript() {
+  // The Cloud Run origin is supplied after image build. Read it on the server
+  // per request, like the existing API base, rather than baking a client value.
+  const environment = process.env;
+  const platformAdminBaseUrl = (
+    environment.NEXT_PUBLIC_PLATFORM_ADMIN_URL ||
+    environment.NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN ||
+    environment.DRTS_PLATFORM_ADMIN_URL ||
+    ""
+  )
+    .trim()
+    .replace(/\/$/, "");
   const config: RuntimeConfig = {
     apiBaseUrl: resolveBrowserApiBaseUrl(),
+    platformAdminBaseUrl,
   };
   const serializedConfig = JSON.stringify(config).replace(/</g, "\\u003c");
 

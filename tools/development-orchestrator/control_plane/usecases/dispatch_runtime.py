@@ -9,7 +9,10 @@ from control_plane.domain.dispatch_policy import (
     dependencies_satisfied as domain_dependencies_satisfied,
     resolve_dispatch_target as resolve_domain_dispatch_target,
 )
-from control_plane.domain.worker_lifecycle import ACTIVE_WORKER_STATUSES as ACTIVE_RUNTIME_STATUSES
+from control_plane.domain.worker_lifecycle import (
+    ACTIVE_WORKER_STATUSES as ACTIVE_RUNTIME_STATUSES,
+    OCCUPIED_WORKER_STATUSES,
+)
 
 
 def ready_dispatch_settings(config: dict[str, Any]) -> dict[str, Any]:
@@ -163,7 +166,9 @@ def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> t
             continue
         agent_id = normalize_agent_id(str(worker.get("agent_id") or ""))
         task_id = str(worker.get("task_id") or "")
-        if agent_id:
+        # Retain the task lock for a suspended session while freeing its lane
+        # for other work, including the chair that can resolve its approval.
+        if agent_id and worker.get("status") in OCCUPIED_WORKER_STATUSES:
             agents.add(agent_id)
         if task_id and agent_id:
             task_agents.add((task_id, agent_id))
@@ -173,7 +178,7 @@ def active_worker_indexes(state: dict[str, Any], active_statuses: set[str]) -> t
 def active_worker_agent_counts(state: dict[str, Any], active_statuses: set[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for worker in state.get("workers", {}).values():
-        if worker.get("status") not in active_statuses:
+        if worker.get("status") not in active_statuses or worker.get("status") not in OCCUPIED_WORKER_STATUSES:
             continue
         agent_id = normalize_agent_id(str(worker.get("agent_id") or ""))
         if agent_id:

@@ -50,6 +50,7 @@ function createHarness(options?: {
   };
   const assignment = options?.assigned
     ? {
+        isEnabled: () => false,
         assignmentId: "assignment-001",
         assignmentVersion: options?.assignmentVersion ?? 1,
         driver: { driverId: "driver-001" },
@@ -59,12 +60,30 @@ function createHarness(options?: {
   const ownedMobilityService = {
     createMultiTaxiRide: vi.fn(() => ({ ...order })),
     getOrder: vi.fn(() => ({ ...order })),
-    findPassengerAssignmentDisclosure: vi.fn(() => assignment),
+    resolvePersistedOrder: vi.fn(async () => ({ ...order })),
+    resolvePassengerRideTracking: async () => null,
+    resolvePersistedPassengerAssignmentDisclosure: vi.fn(
+      async () => assignment,
+    ),
     cancelOwnedOrder: vi.fn(() => ({ ...order })),
   };
+  const authorizations = new Map<
+    string,
+    ReturnType<MultiTaxiService["createAuthorization"]>
+  >();
   const repository = options?.repository
     ? {
-        persistAuthorization: vi.fn(async () => undefined),
+        isEnabled: () => true,
+        persistAuthorization: vi.fn(
+          async (
+            record: ReturnType<MultiTaxiService["createAuthorization"]>,
+          ) => {
+            authorizations.set(record.authorizationId, structuredClone(record));
+          },
+        ),
+        findEffectiveAuthorizations: vi.fn(async () => [
+          ...authorizations.values(),
+        ]),
         persistRideAccessToken: vi.fn(async () => undefined),
         findRideAccessTokenByDigest: vi.fn(async () => null),
         findPassengerRating: vi.fn(async () => null),
@@ -271,7 +290,8 @@ describe("P5-PAX-001 passenger token secrecy", () => {
     // so everything except the per-request trace id must match.
     const withoutTraceId = (envelope: unknown) => {
       const { error } = envelope as { error: Record<string, unknown> };
-      const { traceId: _traceId, ...rest } = error;
+      const rest = { ...error };
+      delete rest.traceId;
       return rest;
     };
     expect(withoutTraceId(expiredEnvelope)).toEqual(

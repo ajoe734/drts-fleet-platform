@@ -518,7 +518,7 @@ expect_audit "create_platform_pricing_rule" "$PRICING_RULE_ID" "UAT-ADM-007 pric
 PRICING_PUBLISH_FILE="${TMP_DIR}/pricing-publish.json"
 write_json "$PRICING_PUBLISH_FILE" \
   --arg publishedBy "e2e-platform-admin-001" \
-  '{ publishedBy: $publishedBy }'
+  '{ publishedBy: $publishedBy, reason: "e2e-011-pricing-rule-publish" }'
 
 log_step "UAT-ADM-007 — POST /platform-admin/pricing-rules/:ruleId/publish"
 http_call POST "/platform-admin/pricing-rules/${PRICING_RULE_ID}/publish" "$PRICING_PUBLISH_FILE"

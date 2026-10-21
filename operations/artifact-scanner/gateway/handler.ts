@@ -50,7 +50,11 @@ function readBoundedBody(
       total += chunk.length;
       if (total > limit) {
         settled = true;
-        req.destroy();
+        // Destroying IncomingMessage here also tears down its socket before
+        // the caller can finish the required JSON 413 response. Release the
+        // retained body and let the existing data listener discard the tail;
+        // settled prevents further buffering, scanning or a second response.
+        chunks.length = 0;
         resolve("too_large");
         return;
       }
@@ -103,7 +107,10 @@ export function createRequestHandler(config: GatewayConfig) {
       }
 
       const contentType = req.headers["content-type"] ?? "";
-      if (typeof contentType !== "string" || !ALLOWED_MIME_TYPES.has(contentType)) {
+      if (
+        typeof contentType !== "string" ||
+        !ALLOWED_MIME_TYPES.has(contentType)
+      ) {
         sendJson(res, 415, { error: "unsupported_content_type" });
         return;
       }

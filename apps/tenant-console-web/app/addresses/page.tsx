@@ -310,7 +310,9 @@ const REFRESH_TIER_CONFIG: Record<
 };
 
 function toErrorMessage(error: unknown, locale: Locale) {
-  return error instanceof Error ? error.message : t("addresses.error.unknown", locale);
+  return error instanceof Error
+    ? error.message
+    : t("addresses.error.unknown", locale);
 }
 
 function parseDate(value: string | null | undefined) {
@@ -346,7 +348,9 @@ function compareAddresses(
   return left.addressName.localeCompare(right.addressName, "zh-Hant");
 }
 
-async function loadAddressesPageData(locale: Locale): Promise<AddressesPageData> {
+async function loadAddressesPageData(
+  locale: Locale,
+): Promise<AddressesPageData> {
   const client = await getTenantClient();
   const errors: string[] = [];
   const generatedAt = new Date().toISOString();
@@ -467,7 +471,8 @@ function getQualityLabel(
   issues: TenantAddressQualityIssue[] | undefined,
   locale: Locale,
 ) {
-  if (!issues || issues.length === 0) return t("addresses.quality.ready", locale);
+  if (!issues || issues.length === 0)
+    return t("addresses.quality.ready", locale);
   if (issues.includes("duplicate_normalized_address")) {
     return t("addresses.quality.duplicate", locale);
   }
@@ -529,7 +534,9 @@ function toAddressRow(
     ownerLabel: getOwnerLabel(address, passengerMap, locale),
     coordinatesLabel: `${formatCoordinates(address.lat)} / ${formatCoordinates(address.lng)}`,
     stateLabel: t(
-      address.activeFlag ? "addresses.state.active" : "addresses.state.deactivated",
+      address.activeFlag
+        ? "addresses.state.active"
+        : "addresses.state.deactivated",
       locale,
     ),
     stateTone: address.activeFlag ? "success" : "neutral",
@@ -629,7 +636,7 @@ function buildCrossAppLinks(
   return [
     {
       targetApp: "tenant-console",
-      route: `/bookings/new?prefillAddressId=${encodeURIComponent(address.addressId)}`,
+      route: `/bookings/new?addressId=${encodeURIComponent(address.addressId)}`,
       resourceType: "tenant_booking_create",
       resourceId: address.addressId,
       openMode: "same_tab",
@@ -871,8 +878,8 @@ export default async function AddressesPage({
       : "create";
 
   const rows = emptyReason
-      ? []
-      : filteredAddresses.map((address) =>
+    ? []
+    : filteredAddresses.map((address) =>
         toAddressRow(address, passengerMap, selectedId, locale),
       );
 
@@ -1027,16 +1034,16 @@ export default async function AddressesPage({
             return (
               <ActionLink
                 key={descriptor.action}
-                  href={buildQueryHref(resolvedSearchParams, {
-                    compose: "lifecycle",
-                    addressId: row.addressId,
-                  })}
-                  descriptor={descriptor}
-                  locale={locale}
-                >
-                  {actionLabel(descriptor.action, locale)}
-                </ActionLink>
-              );
+                href={buildQueryHref(resolvedSearchParams, {
+                  compose: "lifecycle",
+                  addressId: row.addressId,
+                })}
+                descriptor={descriptor}
+                locale={locale}
+              >
+                {actionLabel(descriptor.action, locale)}
+              </ActionLink>
+            );
           })}
         </div>
       ),
@@ -1156,28 +1163,36 @@ export default async function AddressesPage({
 
         <div style={statsGridStyle}>
           <CanvasCard theme={th} style={statCardStyle}>
-            <span style={statLabelStyle}>{t("addresses.kpi.active.label", locale)}</span>
+            <span style={statLabelStyle}>
+              {t("addresses.kpi.active.label", locale)}
+            </span>
             <span style={statValueStyle}>{activeCount}</span>
             <span style={sectionSubtitleStyle}>
               {t("addresses.kpi.active.sub", locale)}
             </span>
           </CanvasCard>
           <CanvasCard theme={th} style={statCardStyle}>
-            <span style={statLabelStyle}>{t("addresses.kpi.inactive.label", locale)}</span>
+            <span style={statLabelStyle}>
+              {t("addresses.kpi.inactive.label", locale)}
+            </span>
             <span style={statValueStyle}>{inactiveCount}</span>
             <span style={sectionSubtitleStyle}>
               {t("addresses.kpi.inactive.sub", locale)}
             </span>
           </CanvasCard>
           <CanvasCard theme={th} style={statCardStyle}>
-            <span style={statLabelStyle}>{t("addresses.kpi.geocoded.label", locale)}</span>
+            <span style={statLabelStyle}>
+              {t("addresses.kpi.geocoded.label", locale)}
+            </span>
             <span style={statValueStyle}>{geocodedCount}</span>
             <span style={sectionSubtitleStyle}>
               {t("addresses.kpi.geocoded.sub", locale)}
             </span>
           </CanvasCard>
           <CanvasCard theme={th} style={statCardStyle}>
-            <span style={statLabelStyle}>{t("addresses.kpi.export.label", locale)}</span>
+            <span style={statLabelStyle}>
+              {t("addresses.kpi.export.label", locale)}
+            </span>
             <span style={statValueStyle}>{pageData.exportRows.length}</span>
             <span style={sectionSubtitleStyle}>
               {t("addresses.kpi.export.sub", locale)}
@@ -1187,7 +1202,10 @@ export default async function AddressesPage({
 
         <CanvasCard theme={th} style={{ padding: 16 }}>
           <form action="/addresses" style={filterGridStyle}>
-            <CanvasField theme={th} label={t("addresses.filters.search", locale)}>
+            <CanvasField
+              theme={th}
+              label={t("addresses.filters.search", locale)}
+            >
               <input
                 name="q"
                 placeholder={t("addresses.filters.searchPlaceholder", locale)}
@@ -1197,7 +1215,9 @@ export default async function AddressesPage({
             </CanvasField>
             <CanvasField theme={th} label={t("addresses.filters.tag", locale)}>
               <select name="tag" defaultValue={tagFilter} style={selectStyle}>
-                <option value="">{t("addresses.filters.tagAll", locale)}</option>
+                <option value="">
+                  {t("addresses.filters.tagAll", locale)}
+                </option>
                 {uniqueTags.map((tag) => (
                   <option key={tag} value={tag}>
                     {tag}
@@ -1205,13 +1225,18 @@ export default async function AddressesPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label={t("addresses.filters.owner", locale)}>
+            <CanvasField
+              theme={th}
+              label={t("addresses.filters.owner", locale)}
+            >
               <select
                 name="owner"
                 defaultValue={ownerFilter}
                 style={selectStyle}
               >
-                <option value="">{t("addresses.filters.ownerAll", locale)}</option>
+                <option value="">
+                  {t("addresses.filters.ownerAll", locale)}
+                </option>
                 {owners.map((owner) => (
                   <option key={owner.passengerId} value={owner.passengerId}>
                     {owner.fullName}
@@ -1219,15 +1244,24 @@ export default async function AddressesPage({
                 ))}
               </select>
             </CanvasField>
-            <CanvasField theme={th} label={t("addresses.filters.state", locale)}>
+            <CanvasField
+              theme={th}
+              label={t("addresses.filters.state", locale)}
+            >
               <select
                 name="state"
                 defaultValue={stateFilter}
                 style={selectStyle}
               >
-                <option value="active">{t("addresses.filters.stateActive", locale)}</option>
-                <option value="all">{t("addresses.filters.stateAll", locale)}</option>
-                <option value="inactive">{t("addresses.filters.stateInactive", locale)}</option>
+                <option value="active">
+                  {t("addresses.filters.stateActive", locale)}
+                </option>
+                <option value="all">
+                  {t("addresses.filters.stateAll", locale)}
+                </option>
+                <option value="inactive">
+                  {t("addresses.filters.stateInactive", locale)}
+                </option>
               </select>
             </CanvasField>
             <div style={{ display: "flex", gap: 8 }}>
@@ -1245,7 +1279,9 @@ export default async function AddressesPage({
                 {t("addresses.action.apply", locale)}
               </SubmitButton>
               <Link href="/addresses" style={{ textDecoration: "none" }}>
-                <CanvasBtn theme={th}>{t("addresses.action.clear", locale)}</CanvasBtn>
+                <CanvasBtn theme={th}>
+                  {t("addresses.action.clear", locale)}
+                </CanvasBtn>
               </Link>
             </div>
           </form>
@@ -1331,7 +1367,10 @@ export default async function AddressesPage({
                         : ""
                     }
                   />
-                  <CanvasField theme={th} label={t("addresses.form.addressName", locale)}>
+                  <CanvasField
+                    theme={th}
+                    label={t("addresses.form.addressName", locale)}
+                  >
                     <input
                       name="addressName"
                       defaultValue={
@@ -1339,12 +1378,18 @@ export default async function AddressesPage({
                           ? (selectedAddress?.addressName ?? "")
                           : ""
                       }
-                      placeholder={t("addresses.form.addressNamePlaceholder", locale)}
+                      placeholder={t(
+                        "addresses.form.addressNamePlaceholder",
+                        locale,
+                      )}
                       required
                       style={inputStyle}
                     />
                   </CanvasField>
-                  <CanvasField theme={th} label={t("addresses.form.addressText", locale)}>
+                  <CanvasField
+                    theme={th}
+                    label={t("addresses.form.addressText", locale)}
+                  >
                     <textarea
                       name="addressText"
                       defaultValue={
@@ -1352,13 +1397,19 @@ export default async function AddressesPage({
                           ? (selectedAddress?.addressText ?? "")
                           : ""
                       }
-                      placeholder={t("addresses.form.addressTextPlaceholder", locale)}
+                      placeholder={t(
+                        "addresses.form.addressTextPlaceholder",
+                        locale,
+                      )}
                       required
                       style={textAreaStyle}
                     />
                   </CanvasField>
                   <div style={detailGridStyle}>
-                    <CanvasField theme={th} label={t("addresses.form.lat", locale)}>
+                    <CanvasField
+                      theme={th}
+                      label={t("addresses.form.lat", locale)}
+                    >
                       <input
                         name="lat"
                         defaultValue={
@@ -1371,7 +1422,10 @@ export default async function AddressesPage({
                         style={inputStyle}
                       />
                     </CanvasField>
-                    <CanvasField theme={th} label={t("addresses.form.lng", locale)}>
+                    <CanvasField
+                      theme={th}
+                      label={t("addresses.form.lng", locale)}
+                    >
                       <input
                         name="lng"
                         defaultValue={
@@ -1386,7 +1440,10 @@ export default async function AddressesPage({
                     </CanvasField>
                   </div>
                   <div style={detailGridStyle}>
-                    <CanvasField theme={th} label={t("addresses.form.tags", locale)}>
+                    <CanvasField
+                      theme={th}
+                      label={t("addresses.form.tags", locale)}
+                    >
                       <input
                         name="tags"
                         defaultValue={
@@ -1394,11 +1451,17 @@ export default async function AddressesPage({
                             ? (selectedAddress?.tags.join(", ") ?? "")
                             : ""
                         }
-                        placeholder={t("addresses.form.tagsPlaceholder", locale)}
+                        placeholder={t(
+                          "addresses.form.tagsPlaceholder",
+                          locale,
+                        )}
                         style={inputStyle}
                       />
                     </CanvasField>
-                    <CanvasField theme={th} label={t("addresses.form.ownerPassenger", locale)}>
+                    <CanvasField
+                      theme={th}
+                      label={t("addresses.form.ownerPassenger", locale)}
+                    >
                       <select
                         name="ownerPassengerId"
                         defaultValue={
@@ -1408,7 +1471,9 @@ export default async function AddressesPage({
                         }
                         style={selectStyle}
                       >
-                        <option value="">{t("addresses.owner.shared", locale)}</option>
+                        <option value="">
+                          {t("addresses.owner.shared", locale)}
+                        </option>
                         {pageData.passengers.map((passenger) => (
                           <option
                             key={passenger.passengerId}
@@ -1473,7 +1538,9 @@ export default async function AddressesPage({
                         href="/addresses"
                         style={{ textDecoration: "none" }}
                       >
-                        <CanvasBtn theme={th}>{t("addresses.action.cancel", locale)}</CanvasBtn>
+                        <CanvasBtn theme={th}>
+                          {t("addresses.action.cancel", locale)}
+                        </CanvasBtn>
                       </Link>
                     ) : null}
                   </div>
@@ -1486,7 +1553,9 @@ export default async function AddressesPage({
                 style={{ display: "flex", flexDirection: "column", gap: 12 }}
               >
                 <div>
-                  <h2 style={sectionTitleStyle}>{t("addresses.detail.title", locale)}</h2>
+                  <h2 style={sectionTitleStyle}>
+                    {t("addresses.detail.title", locale)}
+                  </h2>
                   <p style={sectionSubtitleStyle}>
                     {t("addresses.detail.subtitle", locale)}
                   </p>
@@ -1496,26 +1565,34 @@ export default async function AddressesPage({
                   <>
                     <div style={detailGridStyle}>
                       <div>
-                        <div style={detailLabelStyle}>{t("addresses.detail.address", locale)}</div>
+                        <div style={detailLabelStyle}>
+                          {t("addresses.detail.address", locale)}
+                        </div>
                         <div style={detailValueStyle}>
                           {selectedAddress.addressName}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>{t("addresses.detail.owner", locale)}</div>
+                        <div style={detailLabelStyle}>
+                          {t("addresses.detail.owner", locale)}
+                        </div>
                         <div style={detailValueStyle}>
                           {getOwnerLabel(selectedAddress, passengerMap, locale)}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>{t("addresses.detail.coordinates", locale)}</div>
+                        <div style={detailLabelStyle}>
+                          {t("addresses.detail.coordinates", locale)}
+                        </div>
                         <div style={detailValueStyle}>
                           {formatCoordinates(selectedAddress.lat)} /{" "}
                           {formatCoordinates(selectedAddress.lng)}
                         </div>
                       </div>
                       <div>
-                        <div style={detailLabelStyle}>{t("addresses.detail.updatedAt", locale)}</div>
+                        <div style={detailLabelStyle}>
+                          {t("addresses.detail.updatedAt", locale)}
+                        </div>
                         <div style={detailValueStyle}>
                           {formatDateTime(selectedAddress.updatedAt)}
                         </div>
@@ -1599,13 +1676,25 @@ export default async function AddressesPage({
                           icon={selectedAddress.activeFlag ? "warn" : "check"}
                           title={
                             selectedAddress.activeFlag
-                              ? t("addresses.lifecycle.banner.deactivateTitle", locale)
-                              : t("addresses.lifecycle.banner.reactivateTitle", locale)
+                              ? t(
+                                  "addresses.lifecycle.banner.deactivateTitle",
+                                  locale,
+                                )
+                              : t(
+                                  "addresses.lifecycle.banner.reactivateTitle",
+                                  locale,
+                                )
                           }
                           body={
                             selectedAddress.activeFlag
-                              ? t("addresses.lifecycle.banner.deactivateBody", locale)
-                              : t("addresses.lifecycle.banner.reactivateBody", locale)
+                              ? t(
+                                  "addresses.lifecycle.banner.deactivateBody",
+                                  locale,
+                                )
+                              : t(
+                                  "addresses.lifecycle.banner.reactivateBody",
+                                  locale,
+                                )
                           }
                         />
                         {selectedAddress.activeFlag ? (
@@ -1617,7 +1706,10 @@ export default async function AddressesPage({
                             <textarea
                               name="reason"
                               required
-                              placeholder={t("addresses.lifecycle.reasonPlaceholder", locale)}
+                              placeholder={t(
+                                "addresses.lifecycle.reasonPlaceholder",
+                                locale,
+                              )}
                               style={textAreaStyle}
                             />
                           </CanvasField>
@@ -1632,7 +1724,10 @@ export default async function AddressesPage({
                             danger={selectedAddress.activeFlag}
                           >
                             {selectedAddress.activeFlag
-                              ? t("addresses.action.confirmSoftDeactivate", locale)
+                              ? t(
+                                  "addresses.action.confirmSoftDeactivate",
+                                  locale,
+                                )
                               : t("addresses.action.confirmReactivate", locale)}
                           </SubmitButton>
                           <Link
@@ -1641,7 +1736,9 @@ export default async function AddressesPage({
                             })}
                             style={{ textDecoration: "none" }}
                           >
-                            <CanvasBtn theme={th}>{t("addresses.action.back", locale)}</CanvasBtn>
+                            <CanvasBtn theme={th}>
+                              {t("addresses.action.back", locale)}
+                            </CanvasBtn>
                           </Link>
                         </div>
                       </form>

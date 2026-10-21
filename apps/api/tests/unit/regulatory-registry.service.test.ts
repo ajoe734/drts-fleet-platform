@@ -1,8 +1,10 @@
+import { enabledRegistryRepository } from "../../../../tests/unit/registry-driver-master-durable-ack-20261014/storage-fixture";
 import { HttpStatus } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
+import { DriverProfileRepository } from "../../src/modules/driver-profile/driver-profile.repository";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 
@@ -19,6 +21,7 @@ function createService(
     listLatestDriverLocations: ReturnType<typeof vi.fn>;
     loadState: ReturnType<typeof vi.fn>;
   }> = {},
+  masterStorage = false,
 ) {
   const opsDispatchEventsService = {
     publishDriverLocationUpdated: vi.fn(),
@@ -27,7 +30,12 @@ function createService(
   const auditNotificationService = new AuditNotificationService();
   const driverProfileService = new DriverProfileService(
     auditNotificationService,
+    new DriverProfileRepository({
+      isEnabled: () => true,
+      query: async () => ({ rows: [] }),
+    } as never),
   );
+  const driverRows = new Map<string, unknown>();
   const regulatoryRegistryRepository = {
     isEnabled: vi.fn(() => false),
     persistChanges: vi.fn().mockResolvedValue(undefined),
@@ -38,6 +46,9 @@ function createService(
     findLatestDriverHeartbeatEvent: vi.fn(),
     findDriverHeartbeatEventByRecordedAt: vi.fn(),
     listLatestDriverLocations: vi.fn().mockResolvedValue([]),
+    lockDriver: vi.fn(async (driverId: string) =>
+      structuredClone(driverRows.get(driverId) ?? null),
+    ),
     loadState: vi.fn().mockResolvedValue({
       vehicles: [],
       drivers: [],
@@ -53,8 +64,12 @@ function createService(
     opsDispatchEventsService as never,
     auditNotificationService,
     driverProfileService,
-    regulatoryRegistryRepository as never,
+    masterStorage
+      ? enabledRegistryRepository()
+      : (regulatoryRegistryRepository as never),
   );
+  for (const driver of service.listDrivers())
+    driverRows.set(driver.driverId, structuredClone(driver));
 
   return {
     service,
@@ -109,10 +124,10 @@ describe("RegulatoryRegistryService", () => {
     ).toBe(true);
   });
 
-  it("rejects dispatch enable when exclusivity review is still pending", () => {
+  it("rejects dispatch enable when exclusivity review is still pending", async () => {
     const { service } = createService();
 
-    const contract = service.createContract({
+    const contract = await service.createContract({
       vehicleId: "veh-demo-002",
       partnerId: "partner-demo-002",
       partnerType: "fleet_company_partner",
@@ -121,12 +136,12 @@ describe("RegulatoryRegistryService", () => {
       startAt: "2026-01-01T00:00:00.000Z",
       endAt: "2026-12-31T23:59:59.000Z",
     });
-    service.activateContract(contract.contractId, {
+    await service.activateContract(contract.contractId, {
       approvedBy: "platform-admin-demo-002",
       approvedAt: "2026-01-01T00:00:00.000Z",
     });
 
-    const policy = service.createInsurancePolicy({
+    const policy = await service.createInsurancePolicy({
       vehicleId: "veh-demo-002",
       policyNo: "POL-TAXI-0002",
       insuranceType: "passenger_liability",
@@ -135,7 +150,7 @@ describe("RegulatoryRegistryService", () => {
       startAt: "2026-01-01T00:00:00.000Z",
       endAt: "2026-12-31T23:59:59.000Z",
     });
-    service.activateInsurancePolicy(policy.policyId, {
+    await service.activateInsurancePolicy(policy.policyId, {
       activatedAt: "2026-01-01T00:00:00.000Z",
     });
 
@@ -192,7 +207,7 @@ describe("RegulatoryRegistryService", () => {
     expect(released.supplyLifecycle.dispatch.blockedReasons).toEqual([]);
   });
 
-  it("invalidates active supply and emits a lifecycle event when insurance expires", () => {
+  it("invalidates active supply and emits a lifecycle event when insurance expires", async () => {
     const { service, opsDispatchEventsService } = createService();
 
     const policy = (service as any).policies.find(
@@ -201,9 +216,12 @@ describe("RegulatoryRegistryService", () => {
     );
     policy.endAt = "2026-03-31T23:59:59.000Z";
 
-    const updatedPolicy = service.activateInsurancePolicy("policy-demo-001", {
-      activatedAt: "2026-04-29T00:00:00.000Z",
-    });
+    const updatedPolicy = await service.activateInsurancePolicy(
+      "policy-demo-001",
+      {
+        activatedAt: "2026-04-29T00:00:00.000Z",
+      },
+    );
     const vehicle = service
       .listVehicles()
       .find((candidate) => candidate.vehicleId === "veh-demo-001");
@@ -242,10 +260,10 @@ describe("RegulatoryRegistryService", () => {
     );
   });
 
-  it("surfaces expired contract lifecycle in the registry list", () => {
+  it("surfaces expired contract lifecycle in the registry list", async () => {
     const { service } = createService();
 
-    const contract = service.createContract({
+    const contract = await service.createContract({
       vehicleId: "veh-demo-002",
       partnerId: "partner-demo-002",
       partnerType: "fleet_company_partner",
@@ -254,7 +272,7 @@ describe("RegulatoryRegistryService", () => {
       startAt: "2026-01-01T00:00:00.000Z",
       endAt: "2026-12-31T23:59:59.000Z",
     });
-    service.activateContract(contract.contractId, {
+    await service.activateContract(contract.contractId, {
       approvedAt: "2026-01-01T00:00:00.000Z",
     });
 
@@ -272,10 +290,10 @@ describe("RegulatoryRegistryService", () => {
     expect(listedContract?.lifecycleStatus).toBe("expired");
   });
 
-  it("keeps future-dated approvals non-dispatchable until the effective window starts", () => {
+  it("keeps future-dated approvals non-dispatchable until the effective window starts", async () => {
     const { service } = createService();
 
-    const contract = service.createContract({
+    const contract = await service.createContract({
       vehicleId: "veh-demo-002",
       partnerId: "partner-demo-002",
       partnerType: "fleet_company_partner",
@@ -284,7 +302,7 @@ describe("RegulatoryRegistryService", () => {
       startAt: "2099-05-01T00:00:00.000Z",
       endAt: "2099-12-31T23:59:59.000Z",
     });
-    const policy = service.createInsurancePolicy({
+    const policy = await service.createInsurancePolicy({
       vehicleId: "veh-demo-002",
       policyNo: "POL-TAXI-FUTURE-0002",
       insuranceType: "passenger_liability",
@@ -294,23 +312,32 @@ describe("RegulatoryRegistryService", () => {
       endAt: "2099-12-31T23:59:59.000Z",
     });
 
-    service.submitExclusivityReview("veh-demo-002", {
+    await service.submitExclusivityReview("veh-demo-002", {
       declarationFileId: "file-future-002",
       exclusiveProviderName: "Future Dispatch",
       effectiveStart: "2099-05-01T00:00:00.000Z",
       effectiveEnd: "2099-12-31T23:59:59.000Z",
     });
 
-    const activatedContract = service.activateContract(contract.contractId, {
-      approvedAt: "2099-04-01T00:00:00.000Z",
-    });
-    const activatedPolicy = service.activateInsurancePolicy(policy.policyId, {
-      activatedAt: "2099-04-01T00:00:00.000Z",
-    });
-    const approvedExclusivity = service.approveExclusivity("veh-demo-002", {
-      reviewerId: "platform-admin-demo-002",
-      reviewedAt: "2099-04-01T00:00:00.000Z",
-    });
+    const activatedContract = await service.activateContract(
+      contract.contractId,
+      {
+        approvedAt: "2099-04-01T00:00:00.000Z",
+      },
+    );
+    const activatedPolicy = await service.activateInsurancePolicy(
+      policy.policyId,
+      {
+        activatedAt: "2099-04-01T00:00:00.000Z",
+      },
+    );
+    const approvedExclusivity = await service.approveExclusivity(
+      "veh-demo-002",
+      {
+        reviewerId: "platform-admin-demo-002",
+        reviewedAt: "2099-04-01T00:00:00.000Z",
+      },
+    );
 
     expect(activatedContract.lifecycleStatus).toBe("draft");
     expect(activatedPolicy.lifecycleStatus).toBe("pending");
@@ -357,10 +384,10 @@ describe("RegulatoryRegistryService", () => {
     ]);
   });
 
-  it("creates a driver master with linked profile and lifecycle audit metadata", () => {
-    const { service, auditNotificationService } = createService();
+  it("creates a driver master with linked profile and lifecycle audit metadata", async () => {
+    const { service, auditNotificationService } = createService({}, true);
 
-    const created = service.createDriver(
+    const created = await service.createDriver(
       {
         name: "Driver Admin Created",
         phone: "+886-912-555-666",
@@ -386,14 +413,14 @@ describe("RegulatoryRegistryService", () => {
     expect(auditLog?.resourceId).toBe(created.driverId);
   });
 
-  it("removes suspended and retired drivers from dispatch eligibility", () => {
-    const { service } = createService();
+  it("removes suspended and retired drivers from dispatch eligibility", async () => {
+    const { service } = createService({}, true);
 
     expect(service.getDriverAvailability("drv-demo-001", "standard_taxi")).toBe(
       true,
     );
 
-    const suspended = service.updateDriverLifecycle("drv-demo-001", {
+    const suspended = await service.updateDriverLifecycle("drv-demo-001", {
       lifecycleStatus: "suspended",
       reason: "manual compliance hold",
     });
@@ -405,12 +432,12 @@ describe("RegulatoryRegistryService", () => {
       false,
     );
 
-    const reactivated = service.updateDriverLifecycle("drv-demo-001", {
+    const reactivated = await service.updateDriverLifecycle("drv-demo-001", {
       lifecycleStatus: "active",
     });
     expect(reactivated.dispatchEligible).toBe(true);
 
-    const retired = service.updateDriverLifecycle("drv-demo-001", {
+    const retired = await service.updateDriverLifecycle("drv-demo-001", {
       lifecycleStatus: "retired",
       reason: "driver retired",
     });
@@ -421,7 +448,9 @@ describe("RegulatoryRegistryService", () => {
   it("does not fabricate profile metadata for drivers without a stored profile", () => {
     const { service } = createService();
 
-    (service as { drivers: Array<Record<string, unknown>> }).drivers.unshift({
+    (
+      service as unknown as { drivers: Array<Record<string, unknown>> }
+    ).drivers.unshift({
       driverId: "drv-no-profile-001",
       name: "No Profile Driver",
       supportedServiceBuckets: ["standard_taxi"],
@@ -450,16 +479,25 @@ describe("RegulatoryRegistryService", () => {
     });
   });
 
-  it("tracks debranding work during vehicle offboarding", () => {
+  it("tracks debranding work during vehicle offboarding, and the completed final exit stays excluded from dispatch and candidates (C073 正式退場: debranding 閉環後不得回候選)", async () => {
     const { service } = createService();
 
-    const offboarded = service.initiateVehicleOffboarding("veh-demo-001", {
-      reason: "Partner exit",
-      requestedBy: "ops-lead",
-      debrandingRequired: true,
-      debrandingDueAt: "2026-05-02T00:00:00.000Z",
-      debrandingTicketId: "DEBRAND-001",
-    });
+    // veh-demo-001 is a real, already-paired, fully-compliant seed vehicle
+    // (drv-demo-001, active contract/insurance/exclusivity); it is dispatchable
+    // before offboarding starts, so any post-completion exclusion below is
+    // caused by the final-exit rule itself, not by missing supply.
+    expect(service.getVehicleDispatchability("veh-demo-001")).toBe(true);
+
+    const offboarded = await service.initiateVehicleOffboarding(
+      "veh-demo-001",
+      {
+        reason: "Partner exit",
+        requestedBy: "ops-lead",
+        debrandingRequired: true,
+        debrandingDueAt: "2026-05-02T00:00:00.000Z",
+        debrandingTicketId: "DEBRAND-001",
+      },
+    );
 
     expect(offboarded).toMatchObject({
       dispatchableFlag: false,
@@ -478,7 +516,7 @@ describe("RegulatoryRegistryService", () => {
       },
     });
 
-    const completed = service.completeVehicleDebranding("veh-demo-001", {
+    const completed = await service.completeVehicleDebranding("veh-demo-001", {
       debrandingTicketId: "DEBRAND-001",
       notes: "Branding removed at depot",
     });
@@ -488,15 +526,54 @@ describe("RegulatoryRegistryService", () => {
       debrandingStatus: "completed",
       debrandingTicketId: "DEBRAND-001",
     });
-    expect(completed.supplyLifecycle.dispatch.blockedReasons).not.toContain(
+    // Original Source QA restoration note superseded by the C073 final-exit
+    // authority: a vehicle that has closed out its debranding work order is
+    // retired for good, not merely unblocked from a *pending* debranding
+    // hold. This is deliberately the opposite of what this assertion used to
+    // check (it previously asserted the reason was gone, i.e. the vehicle
+    // regained eligibility) — that was the exact bug C073 closes.
+    expect(completed.supplyLifecycle.dispatch.blockedReasons).toContain(
       "offboarding_pending_debranding",
     );
+    expect(completed.dispatchableFlag).toBe(false);
+    expect(service.getVehicleDispatchability("veh-demo-001")).toBe(false);
+    expect(
+      service
+        .getEligibleCandidates("standard_taxi")
+        .some((candidate) => candidate.vehicleId === "veh-demo-001"),
+    ).toBe(false);
   });
 
-  it("surfaces rejected exclusivity in vehicle lifecycle", () => {
+  it("a canonical write failure during final exit rejects the caller and reports the failure, instead of a log-only catch (C073 正式退場: canonical write 失敗需誠實回傳)", async () => {
+    const persistError = new Error("canonical registry write failed");
+    const { service, regulatoryRegistryRepository } = createService({
+      persistChanges: vi.fn().mockRejectedValue(persistError),
+    });
+
+    await expect(
+      service.initiateVehicleOffboarding("veh-demo-001", {
+        reason: "Partner exit",
+        requestedBy: "ops-lead",
+        debrandingRequired: false,
+      }),
+    ).rejects.toThrow(persistError);
+    expect(
+      regulatoryRegistryRepository.reportPersistenceFailure,
+    ).toHaveBeenCalledWith(persistError, "initiate_vehicle_offboarding");
+
+    // The rejected staged command must not replace the canonical read model.
+    expect(
+      service
+        .listVehicles()
+        .find((vehicle) => vehicle.vehicleId === "veh-demo-001")
+        ?.supplyLifecycle.offboarding.status,
+    ).toBe("none");
+  });
+
+  it("surfaces rejected exclusivity in vehicle lifecycle", async () => {
     const { service } = createService();
 
-    const rejected = service.rejectExclusivity("veh-demo-002", {
+    const rejected = await service.rejectExclusivity("veh-demo-002", {
       reviewerId: "platform-admin-demo-002",
       reason: "Missing declaration evidence",
       reviewedAt: "2026-04-30T00:00:00.000Z",

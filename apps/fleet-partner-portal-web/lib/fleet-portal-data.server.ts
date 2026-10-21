@@ -38,6 +38,13 @@ import type {
   Phase1ServiceBucket,
 } from "@drts/contracts";
 
+import type { FleetStatement } from "./fleet-portal-fixtures";
+import {
+  mapStatementDecision,
+  statementDisplayStatus,
+} from "./fleet-portal-statement-actions";
+export type { FleetStatement } from "./fleet-portal-fixtures";
+
 import { getServerFleetPartnerClient } from "./api-client.server";
 export type ServiceKey =
   | "realtime"
@@ -98,17 +105,6 @@ export type StatementLine = {
   reimbursement?: string | null;
 };
 
-export type FleetStatement = {
-  id: string;
-  period: string;
-  trips: number;
-  sponsorFundedTrips?: number;
-  payable: string;
-  reimbursement?: string | null;
-  status: "pending_confirm" | "paid";
-  issued: string;
-};
-
 export type FleetDoc = {
   driver: string;
   id: string;
@@ -126,7 +122,8 @@ export type FleetCase = {
   driver: string;
   severity: "high" | "medium" | "low";
   responsibility: "fleet" | "shared" | "platform";
-  status: "in_review" | "open" | "pending";
+  status: string;
+  actionDescriptor?: FleetCaseItem["actionDescriptor"];
   sla: "breached" | "on_track";
   date: string;
 };
@@ -442,7 +439,10 @@ export function scopeDriverRows(
 
 export function computeDriverTabCounts(
   scopedRows: FleetDriver[],
-  flags?: { docsAvailable?: boolean | undefined; trainingAvailable?: boolean | undefined },
+  flags?: {
+    docsAvailable?: boolean | undefined;
+    trainingAvailable?: boolean | undefined;
+  },
 ): DriverTabCounts {
   const docsAvailable = flags?.docsAvailable ?? false;
   const trainingAvailable = flags?.trainingAvailable ?? false;
@@ -450,7 +450,7 @@ export function computeDriverTabCounts(
   return {
     all: scopedRows.length,
     available: scopedRows.filter(
-      (r) => r.dispatchEligible ?? (r.status === "available"),
+      (r) => r.dispatchEligible ?? r.status === "available",
     ).length,
     missingDocs: docsAvailable
       ? scopedRows.filter(
@@ -461,8 +461,7 @@ export function computeDriverTabCounts(
       : "—",
     trainingIncomplete: trainingAvailable
       ? scopedRows.filter(
-          (r) =>
-            r.training !== "complete" && r.training !== "unavailable",
+          (r) => r.training !== "complete" && r.training !== "unavailable",
         ).length
       : "—",
   };
@@ -471,7 +470,10 @@ export function computeDriverTabCounts(
 export function filterDriversForTab(
   scopedRows: FleetDriver[],
   activeTabKey: string,
-  flags?: { docsAvailable?: boolean | undefined; trainingAvailable?: boolean | undefined },
+  flags?: {
+    docsAvailable?: boolean | undefined;
+    trainingAvailable?: boolean | undefined;
+  },
 ): FleetDriver[] {
   const docsAvailable = flags?.docsAvailable ?? false;
   const trainingAvailable = flags?.trainingAvailable ?? false;
@@ -479,7 +481,7 @@ export function filterDriversForTab(
   return scopedRows.filter((r) => {
     if (
       activeTabKey === "available" &&
-      !(r.dispatchEligible ?? (r.status === "available"))
+      !(r.dispatchEligible ?? r.status === "available")
     ) {
       return false;
     }
@@ -584,6 +586,12 @@ function mapTripService(record: FleetPartnerPortalTripRecord): ServiceKey {
   }
   if (record.businessDispatchSubtype === "enterprise_dispatch") {
     return "business";
+  }
+  if (record.businessDispatchSubtype === "insurance_replacement_vehicle") {
+    return "insurance";
+  }
+  if (record.businessDispatchSubtype === "travel_agency_transfer") {
+    return "travel";
   }
   return "realtime";
 }
@@ -723,6 +731,7 @@ function mapStatement(record: FleetPartnerStatementRecord): FleetStatement {
     reimbursement: formatOptionalMoney(record.reimbursementAmount),
     status: record.payoutStatus === "paid" ? "paid" : "pending_confirm",
     issued: record.createdAt.slice(0, 10),
+    ...mapStatementDecision(record),
   };
 }
 
@@ -806,7 +815,10 @@ export async function loadStatementDetail(
     const { client } = await getServerFleetPartnerClient();
     const records = await client.listFleetPortalStatements();
     const match = records.find((record) => record.statementId === statementId);
-    return { statement: match ? mapStatementDetail(match) : null, source: "live" };
+    return {
+      statement: match ? mapStatementDetail(match) : null,
+      source: "live",
+    };
   } catch (err) {
     if (isConfigError(err)) {
       throw err;
@@ -854,6 +866,10 @@ export interface RevenueView {
   payable: string;
   lines: StatementLine[];
   source: DataSource;
+  statement: FleetStatement | null;
+  availablePeriods: string[];
+  fleetPartnerId: string | null;
+  error: string | null;
 }
 
 function mapStatementLines(
@@ -921,9 +937,7 @@ export function scopeTripRows(
   });
 }
 
-export function computeTripTabCounts(
-  scopedRows: FleetTrip[],
-): TripTabCounts {
+export function computeTripTabCounts(scopedRows: FleetTrip[]): TripTabCounts {
   return {
     all: scopedRows.length,
     realtime: scopedRows.filter((r) => r.svc === "realtime").length,
@@ -944,42 +958,53 @@ export function filterTripsForService(
   return scopedRows;
 }
 
-export async function loadRevenue(): Promise<RevenueView> {
-  const currentPeriod = getCurrentPeriodMonth();
-  const fallback: RevenueView = {
-    period: currentPeriod,
-    status: FX_FLEET_STATEMENT.status,
-    payable: FX_FLEET_STATEMENT.payable,
-    lines: FX_FLEET_STATEMENT.lines,
-    source: "fallback",
+export async function loadRevenue(periodMonth?: string): Promise<RevenueView> {
+  const empty: RevenueView = {
+    period: periodMonth ?? getCurrentPeriodMonth(),
+    status: "—",
+    payable: "—",
+    lines: [],
+    source: "live",
+    statement: null,
+    availablePeriods: [],
+    fleetPartnerId: null,
+    error: null,
   };
   try {
-    const { client } = await getServerFleetPartnerClient();
+    const { client, fleetPartnerId } = await getServerFleetPartnerClient();
+    empty.fleetPartnerId = fleetPartnerId;
+    // One scoped read supplies the month choices, total, lines and decision.
+    // A requested missing month must never fall through to another statement.
     const records = await client.listFleetPortalStatements();
-    const latest = records[0];
-    if (!latest) {
-      // Endpoint is reachable but the partner has no statements yet — this is
-      // legitimate zero data, so show an empty live revenue, not the demo one.
-      return {
-        period: currentPeriod,
-        status: "—",
-        payable: formatMoney(null),
-        lines: [],
-        source: "live",
-      };
+    const availablePeriods = [
+      ...new Set(records.map((record) => record.periodMonth)),
+    ].sort((a, b) => b.localeCompare(a));
+    const period = periodMonth ?? availablePeriods[0] ?? empty.period;
+    const selected = records.find((record) => record.periodMonth === period);
+    if (!selected) {
+      return { ...empty, period, availablePeriods };
     }
+    const statement = mapStatement(selected);
     return {
-      period: latest.periodMonth,
-      status: latest.payoutStatus === "paid" ? "paid" : "pending_confirm",
-      payable: formatMoney(latest.shareAmount),
-      lines: mapStatementLines(latest),
+      period,
+      status: statementDisplayStatus(statement),
+      payable: statement.payable,
+      lines: mapStatementLines(selected),
       source: "live",
+      statement,
+      availablePeriods,
+      fleetPartnerId,
+      error: null,
     };
   } catch (err) {
     if (isConfigError(err)) {
       throw err;
     }
-    return fallback;
+    return {
+      ...empty,
+      source: "fallback",
+      error: err instanceof Error ? err.message : "READ_FAILED",
+    };
   }
 }
 
@@ -1048,7 +1073,7 @@ export async function loadDashboard(
     (d) => d.status === "offline",
   ).length;
   const dispatchableDriverCount = driversView.rows.filter(
-    (d) => d.dispatchEligible ?? (d.status === "available"),
+    (d) => d.dispatchEligible ?? d.status === "available",
   ).length;
   const completedTripsCount = tripsView.rows.filter(
     (t) => t.status === "completed",
@@ -1083,8 +1108,7 @@ export async function loadDashboard(
       errors.push(aggregateError);
     }
   }
-  const readError =
-    errors.length > 0 ? [...new Set(errors)].join("; ") : null;
+  const readError = errors.length > 0 ? [...new Set(errors)].join("; ") : null;
 
   const isLive =
     (driversView.source === "live" ||
@@ -1103,7 +1127,9 @@ export async function loadDashboard(
   const supply =
     driversError === null
       ? services.map((svc) => {
-          const count = driversView.rows.filter((d) => d.svc.includes(svc)).length;
+          const count = driversView.rows.filter((d) =>
+            d.svc.includes(svc),
+          ).length;
           const pct =
             activeDriverCount > 0
               ? Math.round((count / activeDriverCount) * 100)
@@ -1170,8 +1196,7 @@ export async function loadDashboard(
       (sum, t) => sum + (t.shareAmountMinor ?? parseMoneyToMinor(t.commission)),
       0,
     );
-    const currency =
-      completedTrips.find((t) => t.currency)?.currency ?? "TWD";
+    const currency = completedTrips.find((t) => t.currency)?.currency ?? "TWD";
 
     shareMoney = formatMoney({
       amountMinor: totalShareMinor,
@@ -1194,27 +1219,14 @@ export async function loadDashboard(
   let dispatchable: string;
 
   if (driversError === null) {
-    driverCount = (
-      dashboardRecord
-        ? dashboardRecord.activeDriverCount
-        : activeDriverCount
-    ).toLocaleString("en-US");
-
+    // Use the same mapDriverStatus projection as the list, over the complete
+    // partner-scoped affiliation roster, before any page-local q/tab filters.
+    // The aggregate's workState !== offline count includes held drivers; it is
+    // only a fallback when the authoritative list cannot be read.
+    driverCount = activeDriverCount.toLocaleString("en-US");
     driverStatusSummary = {
-      online: (
-        dashboardRecord
-          ? dashboardRecord.onlineDriverCount
-          : onlineDriverCount
-      ).toLocaleString("en-US"),
-      offline: (
-        dashboardRecord
-          ? Math.max(
-              dashboardRecord.activeDriverCount -
-                dashboardRecord.onlineDriverCount,
-              0,
-            )
-          : offlineDriverCount
-      ).toLocaleString("en-US"),
+      online: onlineDriverCount.toLocaleString("en-US"),
+      offline: offlineDriverCount.toLocaleString("en-US"),
     };
 
     dispatchable = (
@@ -1227,8 +1239,7 @@ export async function loadDashboard(
     driverStatusSummary = {
       online: dashboardRecord.onlineDriverCount.toLocaleString("en-US"),
       offline: Math.max(
-        dashboardRecord.activeDriverCount -
-          dashboardRecord.onlineDriverCount,
+        dashboardRecord.activeDriverCount - dashboardRecord.onlineDriverCount,
         0,
       ).toLocaleString("en-US"),
     };
@@ -1244,9 +1255,7 @@ export async function loadDashboard(
   let completedTrips: string;
   if (tripsError === null) {
     completedTrips = (
-      dashboardRecord
-        ? dashboardRecord.completedTripCount
-        : completedTripsCount
+      dashboardRecord ? dashboardRecord.completedTripCount : completedTripsCount
     ).toLocaleString("en-US");
   } else if (dashboardRecord) {
     completedTrips = dashboardRecord.completedTripCount.toLocaleString("en-US");
@@ -1640,13 +1649,11 @@ export async function loadCases(): Promise<CasesView> {
         r.severity === "high"
           ? "high"
           : r.severity === "normal" || r.severity === "medium"
-          ? "medium"
-          : "low",
+            ? "medium"
+            : "low",
       responsibility: r.responsibility,
-      status:
-        r.status === "resolved" || r.status === "closed"
-          ? "pending"
-          : "in_review",
+      status: r.status,
+      ...(r.actionDescriptor ? { actionDescriptor: r.actionDescriptor } : {}),
       sla: r.slaBreach ? "breached" : "on_track",
       date: r.openedAt ? r.openedAt.slice(0, 10) : "",
     }));

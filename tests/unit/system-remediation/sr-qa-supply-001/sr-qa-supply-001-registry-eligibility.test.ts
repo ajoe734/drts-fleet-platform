@@ -184,7 +184,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     // Recovery path: activating a fresh, currently-valid policy for the same
     // vehicle clears the expired block (selectPrimaryPolicy picks the
     // highest-priority "active" lifecycle over the stale "expired" one).
-    regService.createInsurancePolicy({
+    await regService.createInsurancePolicy({
       vehicleId,
       policyNo: "QA-POL-NEW-1",
       insuranceType: "passenger_liability",
@@ -197,7 +197,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
       .listPolicies()
       .find((p) => p.policyNo === "QA-POL-NEW-1");
     expect(activated).toBeDefined();
-    regService.activateInsurancePolicy(activated!.policyId, {
+    await regService.activateInsurancePolicy(activated!.policyId, {
       activatedAt: "2026-01-03T00:00:00.000Z",
     });
 
@@ -226,7 +226,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     });
     const vehicleId = result.canonicalVehicleId as string;
 
-    regService.createContract({
+    await regService.createContract({
       vehicleId,
       partnerId: "partner-qa-001",
       partnerType: "fleet_partner",
@@ -239,7 +239,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
       .listContracts()
       .find((c) => c.vehicleId === vehicleId);
     expect(draftContract).toBeDefined();
-    regService.activateContract(draftContract!.contractId, {
+    await regService.activateContract(draftContract!.contractId, {
       approvedBy: "reviewer-qa",
       approvedAt: "2026-01-03T00:00:00.000Z",
     });
@@ -256,7 +256,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     // Recovery: a currently-valid contract restores dispatch eligibility for
     // the contract dimension specifically (insurance/exclusivity remain
     // separately gated — this isolates the contract check).
-    regService.createContract({
+    await regService.createContract({
       vehicleId,
       partnerId: "partner-qa-001",
       partnerType: "fleet_partner",
@@ -269,7 +269,7 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
       .listContracts()
       .filter((c) => c.vehicleId === vehicleId)
       .find((c) => c.endAt === "2099-01-01T00:00:00.000Z");
-    regService.activateContract(freshContract!.contractId, {
+    await regService.activateContract(freshContract!.contractId, {
       approvedBy: "reviewer-qa",
       approvedAt: "2026-01-04T00:00:00.000Z",
     });
@@ -294,13 +294,13 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     });
     const vehicleId = result.canonicalVehicleId as string;
 
-    regService.submitExclusivityReview(vehicleId, {
+    await regService.submitExclusivityReview(vehicleId, {
       declarationFileId: "decl-provider-a",
       exclusiveProviderName: "Provider A",
       effectiveStart: "2026-01-01T00:00:00.000Z",
       effectiveEnd: "2099-01-01T00:00:00.000Z",
     });
-    regService.approveExclusivity(vehicleId, {
+    await regService.approveExclusivity(vehicleId, {
       reviewerId: "reviewer-qa",
       reviewedAt: "2026-01-02T00:00:00.000Z",
     });
@@ -317,13 +317,13 @@ describe("SR-QA-SUPPLY-001 — C072 保險、證照、委託合約與排他性�
     ).toBe("Provider A");
 
     // Fleet partner re-declares exclusivity to a different provider.
-    regService.submitExclusivityReview(vehicleId, {
+    await regService.submitExclusivityReview(vehicleId, {
       declarationFileId: "decl-provider-b",
       exclusiveProviderName: "Provider B",
       effectiveStart: "2026-02-01T00:00:00.000Z",
       effectiveEnd: "2099-01-01T00:00:00.000Z",
     });
-    regService.approveExclusivity(vehicleId, {
+    await regService.approveExclusivity(vehicleId, {
       reviewerId: "reviewer-qa",
       reviewedAt: "2026-02-02T00:00:00.000Z",
     });
@@ -383,13 +383,13 @@ describe("SR-QA-SUPPLY-001 — C073 終止委託、下架與 debranding 閉環",
     });
     const vehicleId = result.canonicalVehicleId as string;
     // Exclusivity is still required for full dispatch eligibility.
-    regService.submitExclusivityReview(vehicleId, {
+    await regService.submitExclusivityReview(vehicleId, {
       declarationFileId: "decl-a",
       exclusiveProviderName: "Provider A",
       effectiveStart: "2026-01-01T00:00:00.000Z",
       effectiveEnd: "2099-01-01T00:00:00.000Z",
     });
-    regService.approveExclusivity(vehicleId, {
+    await regService.approveExclusivity(vehicleId, {
       reviewerId: "reviewer-qa",
       reviewedAt: "2026-01-02T00:00:00.000Z",
     });
@@ -402,7 +402,7 @@ describe("SR-QA-SUPPLY-001 — C073 終止委託、下架與 debranding 閉環",
 
     expect(regService.getVehicleDispatchability(vehicleId)).toBe(true);
 
-    regService.initiateVehicleOffboarding(vehicleId, {
+    await regService.initiateVehicleOffboarding(vehicleId, {
       reason: "fleet_partner_exit",
       requestedBy: "ops-admin-qa",
       debrandingRequired: true,
@@ -438,10 +438,10 @@ describe("SR-QA-SUPPLY-001 — C073 終止委託、下架與 debranding 閉環",
     expect(publishedEvents).toContain(vehicleId);
   });
 
-  it("completing debranding closes out the offboarding work order with evidence (ticket id + completedAt) and restores dispatch eligibility so the vehicle can re-enter candidates (debranding 閉環後恢復候選)", async () => {
+  it("completing debranding closes out the offboarding work order with evidence (ticket id + completedAt) but the vehicle stays permanently retired from dispatch and candidates — this is a final exit, not a recoverable hold (C073 正式退場: debranding 閉環後仍不得回候選)", async () => {
     const { regService } = setupRegistry();
     const vehicleId = await provisionEligibleVehicle(regService);
-    regService.initiateVehicleOffboarding(vehicleId, {
+    await regService.initiateVehicleOffboarding(vehicleId, {
       reason: "fleet_partner_exit",
       requestedBy: "ops-admin-qa",
       debrandingRequired: true,
@@ -449,10 +449,13 @@ describe("SR-QA-SUPPLY-001 — C073 終止委託、下架與 debranding 閉環",
     });
     expect(regService.getVehicleDispatchability(vehicleId)).toBe(false);
 
-    const debrandResult = regService.completeVehicleDebranding(vehicleId, {
-      completedAt: "2026-02-01T00:00:00.000Z",
-      notes: "debranding photos verified by field ops",
-    });
+    const debrandResult = await regService.completeVehicleDebranding(
+      vehicleId,
+      {
+        completedAt: "2026-02-01T00:00:00.000Z",
+        notes: "debranding photos verified by field ops",
+      },
+    );
     expect(debrandResult).toBeDefined();
 
     const vehicle = regService
@@ -469,19 +472,31 @@ describe("SR-QA-SUPPLY-001 — C073 終止委託、下架與 debranding 閉環",
     expect(vehicle?.supplyLifecycle.offboarding.debrandingTicketId).toBe(
       "TCK-DEBRAND-002",
     );
-    expect(vehicle?.supplyLifecycle.dispatch.blockedReasons).not.toContain(
+    // C073 final-exit authority supersedes the prior Source QA restoration
+    // note that used to sit here: closing out debranding ends a *final
+    // exit*, not a reversible hold, so the vehicle must stay blocked and
+    // excluded for good. (Previously this asserted the opposite — that the
+    // reason cleared and dispatchability returned — which was the exact bug
+    // this task closes; see the sibling "no-debranding" test below for the
+    // other final-exit branch, and the "SR-QA-SUPPLY-001 — C072" /
+    // manual-hold coverage elsewhere in this file for the still-reversible,
+    // nonretired guards this fix must not weaken.)
+    expect(vehicle?.supplyLifecycle.dispatch.blockedReasons).toContain(
       "offboarding_pending_debranding",
     );
-    expect(regService.getVehicleDispatchability(vehicleId)).toBe(true);
+    expect(vehicle?.dispatchableFlag).toBe(false);
+    expect(regService.getVehicleDispatchability(vehicleId)).toBe(false);
 
     const candidates = regService.getEligibleCandidates("standard_taxi");
     // NOTE: getEligibleCandidates() is keyed off the pre-seeded
     // `supplyPairs`/driver roster, not an arbitrary provisioned vehicleId, so
     // a freshly provisioned vehicle never appears there regardless of
-    // eligibility (no driver pairing exists for it in-memory). The
-    // authoritative signal for "may this vehicle be dispatched again" is
-    // `getVehicleDispatchability`, asserted above; this call only confirms it
-    // does not error and returns no false-positive entry for the new id.
+    // eligibility (no driver pairing exists for it in-memory); this call
+    // only confirms it does not error and returns no false-positive entry
+    // for the new id. The authoritative, real-paired-vehicle proof that a
+    // completed final exit excludes a vehicle from
+    // getEligibleCandidates/real assignment consumers lives in
+    // tests/unit/c073-final-offboarding-eligibility-20261015/.
     expect(candidates.some((c) => c.vehicleId === vehicleId)).toBe(false);
   });
 
@@ -489,18 +504,20 @@ describe("SR-QA-SUPPLY-001 — C073 終止委託、下架與 debranding 閉環",
     const { regService } = setupRegistry();
     const vehicleId = await provisionEligibleVehicle(regService);
 
-    expect(() =>
+    await expect(
       regService.completeVehicleDebranding(vehicleId, {
         completedAt: "2026-02-01T00:00:00.000Z",
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  it("offboarding without debranding required completes immediately and does not block dispatch by itself (下架但免 debranding 直接完成)", async () => {
+  it("offboarding without debranding required completes immediately but is still a final exit, so it remains excluded from dispatch (C073 正式退場: 下架但免 debranding 仍不得回候選)", async () => {
     const { regService } = setupRegistry();
     const vehicleId = await provisionEligibleVehicle(regService);
 
-    regService.initiateVehicleOffboarding(vehicleId, {
+    expect(regService.getVehicleDispatchability(vehicleId)).toBe(true);
+
+    await regService.initiateVehicleOffboarding(vehicleId, {
       reason: "fleet_partner_exit_no_branding",
       requestedBy: "ops-admin-qa",
       debrandingRequired: false,
@@ -513,8 +530,16 @@ describe("SR-QA-SUPPLY-001 — C073 終止委託、下架與 debranding 閉環",
     expect(vehicle?.supplyLifecycle.offboarding.debrandingStatus).toBe(
       "completed",
     );
-    expect(vehicle?.supplyLifecycle.dispatch.blockedReasons).not.toContain(
+    // No debranding work was ever required, but offboarding itself is the
+    // final exit: completing it immediately must still permanently exclude
+    // the vehicle, exactly like the pending->complete debranding branch
+    // above. (Previously this asserted the opposite — "does not block
+    // dispatch by itself" — which was the no-debranding half of the same
+    // bug C073 closes.)
+    expect(vehicle?.supplyLifecycle.dispatch.blockedReasons).toContain(
       "offboarding_pending_debranding",
     );
+    expect(vehicle?.dispatchableFlag).toBe(false);
+    expect(regService.getVehicleDispatchability(vehicleId)).toBe(false);
   });
 });
