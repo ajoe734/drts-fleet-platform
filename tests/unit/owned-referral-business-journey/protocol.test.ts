@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import PDFDocument from "pdfkit";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import {
   Evidence,
+  consumeNativeReceiptPdfDownload,
+  captureOriginalUiCancellation,
+  validateActualReceiptPdfBytes,
   JourneyFailure,
   NativeTransport,
   assertNoForeignActive,
@@ -814,4 +822,310 @@ describe("native fetch failure diagnostics", () => {
     expect((failure as JourneyFailure).transportFacts).toBeUndefined();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("actual native receipt PDF bytes without user routing", () => {
+  const orderId = "synthetic-completed-order";
+  const expected = {
+    url: `https://referral.example.test/api/referral/receipt/${orderId}/pdf`,
+    filename: `receipt-${orderId}.pdf`,
+  };
+  const expectedText = [
+    "乘車明細（非正式稅務憑證）",
+    `行程 ID：${orderId}`,
+    "訂單編號：R-TEST-1",
+    "新北市板橋區縣民大道二段7號",
+    "臺北市信義區市府路1號",
+    "實際車資合計：NT$ 120",
+    "起步價：NT$ 85",
+    "里程費：NT$ 20",
+    "時間費：NT$ 10",
+    "夜間費：NT$ 5",
+    "付款及結算狀態未提供",
+    "02-2944-0985",
+    "1999",
+  ];
+  async function realPdf(lines = expectedText): Promise<Buffer> {
+    const doc = new PDFDocument({ compress: false });
+    const chunks: Buffer[] = [];
+    const complete = new Promise<Buffer>((resolve, reject) => {
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+    });
+    doc.font(path.resolve("apps/api/assets/fonts/NotoSansCJKtc-Regular.otf"));
+    doc.fontSize(12).text(lines.join("\n"));
+    doc.end();
+    return complete;
+  }
+  async function fixture(bytes: Buffer) {
+    const dir = await mkdtemp(path.join(tmpdir(), "owned-native-pdf-"));
+    const file = path.join(dir, "actual-downloaded-file.pdf");
+    await writeFile(file, bytes);
+    let release!: (value: {
+      url(): string;
+      suggestedFilename(): string;
+      failure(): Promise<string | null>;
+      path(): Promise<string | null>;
+    }) => void;
+    const pending = new Promise<Parameters<typeof release>[0]>((resolve) => {
+      release = resolve;
+    });
+    const download = {
+      url: () => expected.url,
+      suggestedFilename: () => expected.filename,
+      failure: async (): Promise<string | null> => null,
+      path: async (): Promise<string | null> => file,
+    };
+    const actions: string[] = [];
+    const ports = {
+      waitForDownload: vi.fn(() => {
+        actions.push("wait");
+        return pending;
+      }),
+      click: vi.fn(async () => {
+        actions.push("click");
+        // Simulate the native Download event, with no userRoute callback at all.
+        release(download);
+      }),
+      readFile: vi.fn((filePath: string) => readFile(filePath)),
+    };
+    return {
+      ports,
+      download,
+      actions,
+      file,
+      cleanup: () => rm(dir, { recursive: true, force: true }),
+    };
+  }
+  const validate = (bytes: Buffer) =>
+    validateActualReceiptPdfBytes(bytes, expectedText, parsePdf);
+
+  it("consumes the real downloaded file when native download bypasses userRoute", async () => {
+    const bytes = await realPdf();
+    const f = await fixture(bytes);
+    try {
+      const actual = await consumeNativeReceiptPdfDownload(
+        f.ports,
+        expected,
+        validate,
+      );
+      expect(f.actions).toEqual(["wait", "click"]);
+      expect(f.ports.readFile).toHaveBeenCalledExactlyOnceWith(f.file);
+      expect(actual).toEqual(bytes);
+      expect(hash(actual)).toBe(hash(bytes));
+      // The independent real parser, including Chinese font text, is the gate.
+      expect((await parsePdf(actual)).text).toContain(orderId);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it.each(["order", "fare", "nonPDF"] as const)(
+    "rejects a downloaded %s mismatch using its actual bytes",
+    async (mismatch) => {
+      const lines = expectedText.map((line) =>
+        mismatch === "order"
+          ? line.replace(orderId, "foreign-order")
+          : line.replace("實際車資合計：NT$ 120", "實際車資合計：NT$ 999"),
+      );
+      const bytes =
+        mismatch === "nonPDF" ? Buffer.from("not a PDF") : await realPdf(lines);
+      const f = await fixture(bytes);
+      try {
+        await expect(
+          consumeNativeReceiptPdfDownload(f.ports, expected, validate),
+        ).rejects.toBeInstanceOf(JourneyFailure);
+        expect(f.ports.readFile).toHaveBeenCalledExactlyOnceWith(f.file);
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+
+  it.each(["url", "filename", "failure", "path"] as const)(
+    "rejects native Download %s mismatch without accepting bytes",
+    async (mismatch) => {
+      const f = await fixture(await realPdf());
+      if (mismatch === "url") f.download.url = () => expected.url + "-foreign";
+      if (mismatch === "filename")
+        f.download.suggestedFilename = () => "foreign.pdf";
+      if (mismatch === "failure") f.download.failure = async () => "synthetic";
+      if (mismatch === "path") f.download.path = async () => null;
+      try {
+        await expect(
+          consumeNativeReceiptPdfDownload(f.ports, expected, validate),
+        ).rejects.toBeInstanceOf(JourneyFailure);
+        expect(f.ports.readFile).not.toHaveBeenCalled();
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+});
+
+describe("original UI cancellation response capture before navigation release", () => {
+  const expected = {
+    url: "https://referral.example.test/api/referral/cancel/owned-case",
+    orderId: "owned-case",
+    runtime: SHA,
+  };
+  function fixture() {
+    let released = false;
+    const readBeforeRelease = () => {
+      if (released) throw new Error("synthetic response resource released");
+    };
+    const command: Record<string, unknown> = {
+      idempotencyKey: "synthetic-key",
+    };
+    const payload = {
+      ok: true,
+      data: {
+        orderId: expected.orderId,
+        status: "cancelled",
+        cancelledAt: "2026-10-21T01:00:00.000Z",
+      },
+    };
+    let bytes: Buffer = Buffer.from(JSON.stringify(payload));
+    const response = {
+      url: vi.fn(() => {
+        readBeforeRelease();
+        return expected.url;
+      }),
+      status: vi.fn(() => {
+        readBeforeRelease();
+        return 200;
+      }),
+      headers: vi.fn(() => {
+        readBeforeRelease();
+        return {
+          "x-drts-candidate-sha": SHA,
+          "content-type": "application/json",
+        };
+      }),
+      body: vi.fn(async () => {
+        readBeforeRelease();
+        return bytes;
+      }),
+    };
+    const request = {
+      method: () => "POST",
+      url: () => expected.url,
+      postDataJSON: vi.fn(() => {
+        readBeforeRelease();
+        return command;
+      }),
+    };
+    const route = {
+      request: () => request,
+      fetch: vi.fn(async () => response),
+      fulfill: vi.fn(
+        async (options: { response: typeof response; body: Buffer }) => {
+          expect(options.response).toBe(response);
+          expect(options.body).toBe(bytes);
+          released = true;
+        },
+      ),
+    };
+    return {
+      route,
+      response,
+      request,
+      payload,
+      command,
+      setBytes: (value: Buffer) => {
+        bytes = value;
+      },
+      get bytes() {
+        return bytes;
+      },
+    };
+  }
+
+  it("reads the one original POST bytes, headers and command before unchanged fulfill", async () => {
+    const f = fixture();
+    const snapshot = await captureOriginalUiCancellation(f.route, expected);
+    expect(f.route.fetch).toHaveBeenCalledExactlyOnceWith({
+      maxRedirects: 0,
+      maxRetries: 0,
+      timeout: 15000,
+    });
+    expect(f.route.fulfill).toHaveBeenCalledTimes(1);
+    expect(f.response.body).toHaveBeenCalledTimes(1);
+    expect(f.request.postDataJSON).toHaveBeenCalledTimes(1);
+    expect(snapshot.bytes).toBe(f.bytes);
+    expect(snapshot.command).toBe(f.command);
+    expect(snapshot.status).toBe(200);
+    expect(snapshot.data).toEqual(f.payload.data);
+    expect(snapshot.headers.get("x-drts-candidate-sha")).toBe(SHA);
+    // A post-release body read really fails; the returned original RAM bytes work.
+    await expect(f.response.body()).rejects.toThrow(
+      "synthetic response resource released",
+    );
+    expect(JSON.parse(Buffer.from(snapshot.bytes).toString("utf8"))).toEqual(
+      f.payload,
+    );
+  });
+
+  it.each([
+    "order",
+    "runtime",
+    "responseURL",
+    "oversize",
+    "JSON",
+    "command",
+  ] as const)(
+    "rejects a %s mismatch before release and never sends a second POST",
+    async (mismatch) => {
+      const f = fixture();
+      if (mismatch === "order") f.payload.data.orderId = "foreign-case";
+      if (mismatch === "runtime")
+        f.response.headers.mockReturnValue({
+          "x-drts-candidate-sha": "b".repeat(40),
+          "content-type": "application/json",
+        });
+      if (mismatch === "responseURL")
+        f.response.url.mockReturnValue(expected.url + "-foreign");
+      if (mismatch === "oversize") f.setBytes(Buffer.alloc(1024 * 1024 + 1));
+      if (mismatch === "JSON") f.setBytes(Buffer.from("invalid JSON"));
+      if (mismatch === "command") delete f.command.idempotencyKey;
+      if (mismatch === "order")
+        f.setBytes(Buffer.from(JSON.stringify(f.payload)));
+      await expect(
+        captureOriginalUiCancellation(f.route, expected),
+      ).rejects.toBeInstanceOf(Error);
+      expect(f.route.fetch).toHaveBeenCalledTimes(
+        mismatch === "command" ? 0 : 1,
+      );
+      expect(f.route.fulfill).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a real 409 denial status, code and original body independent from successful cancellation", async () => {
+    const f = fixture();
+    const payload = { ok: false, error: { code: "ORDER_NOT_CANCELABLE" } };
+    f.setBytes(Buffer.from(JSON.stringify(payload)));
+    f.response.status.mockReturnValue(409);
+    const snapshot = await captureOriginalUiCancellation(f.route, expected);
+    expect(snapshot.status).toBe(409);
+    expect(snapshot.data).toEqual(payload);
+    expect(snapshot.bytes).toBe(f.bytes);
+    expect(f.route.fetch).toHaveBeenCalledTimes(1);
+    expect(f.route.fulfill).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["fetch", "fulfill"] as const)(
+    "rethrows the original %s failure without retry or a fabricated ACK",
+    async (phase) => {
+      const f = fixture();
+      const failure = new TypeError("synthetic controlled failure");
+      if (phase === "fetch") f.route.fetch.mockRejectedValue(failure);
+      else f.route.fulfill.mockRejectedValue(failure);
+      await expect(
+        captureOriginalUiCancellation(f.route, expected),
+      ).rejects.toBe(failure);
+      expect(f.route.fetch).toHaveBeenCalledTimes(1);
+      expect(f.route.fulfill).toHaveBeenCalledTimes(phase === "fetch" ? 0 : 1);
+    },
+  );
 });

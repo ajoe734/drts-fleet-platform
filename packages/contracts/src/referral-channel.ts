@@ -465,6 +465,7 @@ export interface ReferralPassengerHistoryItem {
   dropoffAddress: string;
   fareTotal: number | null;
   formattedFare: string;
+  cancelledAt?: string | null;
   completedAt: string | null;
   createdAt: string;
   quote?: ReferralPassengerFareQuote | null;

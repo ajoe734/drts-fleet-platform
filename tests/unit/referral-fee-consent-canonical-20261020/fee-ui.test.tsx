@@ -19,6 +19,9 @@ import {
   PASSENGER_FEE_DISCLOSURE_VERSION as version,
   PASSENGER_FEE_CONTENT_HASH as contentHash,
   PASSENGER_FEE_ROWS,
+  PASSENGER_FREE_CANCELLATION_NOTICE,
+  type ReferralPassengerHistoryItem,
+  type ReferralPassengerReceipt,
 } from "@drts/contracts";
 const context = {
   entry: {
@@ -584,3 +587,98 @@ it.each(["business_vehicle", "unrecognized_vehicle_code"])(
     expect(s.bookings).toHaveLength(0);
   },
 );
+
+const cancelledHistory: ReferralPassengerHistoryItem = {
+  orderId: "own-cancelled-time",
+  orderNo: "CANCEL-TIME-1",
+  status: "cancelled",
+  pickupAddress: "合成上車",
+  dropoffAddress: "合成下車",
+  fareTotal: 999,
+  formattedFare: "NT$ 999",
+  createdAt: "2026-10-19T01:01:00.000Z",
+  completedAt: "2026-10-20T06:02:00.000Z",
+  cancelledAt: "2026-10-20T16:00:15.000Z",
+};
+function renderHistoryScreen(
+  item: ReferralPassengerHistoryItem,
+  screen: "cancelled" | "trips" | "receipt" = "cancelled",
+  receipt: ReferralPassengerReceipt | null = null,
+) {
+  const host = document.createElement("div");
+  host.innerHTML = renderToString(
+    <PassengerEmbed
+      context={{ ...context, screen } as never}
+      liveData={{
+        activeTrip: null,
+        history: { items: [item] },
+        receipt,
+        selectedOrderId: item.orderId,
+      }}
+    />,
+  );
+  return host;
+}
+function detailText(host: HTMLElement, label: string) {
+  const row = getByText(host, label, { exact: true }).parentElement;
+  expect(row).not.toBeNull();
+  return row?.textContent ?? "";
+}
+it("renders SSOT free cancellation and only actual cancelledAt across a Taipei date boundary", () => {
+  const host = renderHistoryScreen(cancelledHistory);
+  expect(host.textContent).toContain(PASSENGER_FREE_CANCELLATION_NOTICE);
+  expect(host.textContent).not.toContain("酌收費用");
+  expect(detailText(host, "取消費")).toBe("取消費不收");
+  expect(detailText(host, "取消費")).not.toContain("999");
+  expect(detailText(host, "取消時間")).toBe("取消時間10-21 00:00");
+  expect(detailText(host, "取消時間")).not.toContain("10-19");
+  expect(detailText(host, "取消時間")).not.toContain("14:02");
+});
+it("does not substitute createdAt or completedAt for missing cancellation metadata", () => {
+  const host = renderHistoryScreen({ ...cancelledHistory, cancelledAt: null });
+  expect(detailText(host, "取消時間")).toBe("取消時間時間待更新");
+  expect(detailText(host, "取消時間")).not.toContain("10-");
+  expect(detailText(host, "取消費")).toBe("取消費不收");
+});
+it.each(["no_supply", "dispatch_failed", "dispatch_timeout"])(
+  "does not label a %s outcome with a fabricated cancellation time",
+  (status) => {
+    const host = renderHistoryScreen({ ...cancelledHistory, status });
+    expect(host.textContent).not.toContain("取消時間");
+    expect(host.textContent).not.toContain("此行程已取消");
+  },
+);
+it("shows history cancellation time and completed receipt time in Taipei without changing the underlying timestamps", () => {
+  const history = renderHistoryScreen(cancelledHistory, "trips");
+  expect(history.textContent).toContain("10-21 00:00");
+  expect(history.textContent).not.toContain("10-20 14:02");
+  const receipt: ReferralPassengerReceipt = {
+    orderId: "own-completed-receipt",
+    orderNo: "RECEIPT-TPE",
+    status: "completed",
+    completedAt: "2026-10-20T16:05:00.000Z",
+    passengerNameMasked: "測○○",
+    passengerPhoneMasked: "0912***678",
+    driverName: null,
+    plateNumber: null,
+    vehicleType: "standard",
+    pickupAddress: "合成上車",
+    dropoffAddress: "合成下車",
+    fareBase: 85,
+    fareDistance: 20,
+    fareTime: 10,
+    fareNight: 5,
+    totalFare: 120,
+    formattedTotal: "NT$ 120",
+    paymentChannel: "付款及結算狀態未提供",
+  };
+  const completed = {
+    ...cancelledHistory,
+    orderId: receipt.orderId,
+    status: "completed",
+  };
+  const host = renderHistoryScreen(completed, "receipt", receipt);
+  expect(host.textContent).toContain("10-21 00:05");
+  expect(host.textContent).not.toContain("10-20 16:05");
+  expect(receipt.completedAt).toBe("2026-10-20T16:05:00.000Z");
+});

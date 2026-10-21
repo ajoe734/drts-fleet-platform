@@ -16784,6 +16784,7 @@ export class OwnedMobilityService
           feeConfirmation:
             o.referralPassengerLifecycle?.feeConfirmation ?? null,
           rating: this.referralRatingResult(o),
+          cancelledAt: o.cancelledAt ?? null,
           completedAt: completedAt ?? details.task?.completedAt ?? null,
           createdAt: o.createdAt ?? new Date().toISOString(),
         };

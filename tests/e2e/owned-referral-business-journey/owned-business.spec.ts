@@ -12,6 +12,7 @@ import {
   type Route,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { parsePdf } from "../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   prepareOperationalFleetSession,
@@ -24,6 +25,9 @@ import {
   NativeTransport,
   JourneyFailure,
   requireFact,
+  validateActualReceiptPdfBytes,
+  consumeNativeReceiptPdfDownload,
+  captureOriginalUiCancellation,
   object,
   text,
   integer,
@@ -80,6 +84,67 @@ const future = () =>
   new Date(Date.now() + 366 * 86_400_000).toISOString().slice(0, 10);
 const start = () =>
   new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+
+function closedPdfFailureFacts(error: unknown) {
+  let nativeFailureClass = "UNKNOWN";
+  let nativeCauseCode = "UNKNOWN";
+  try {
+    const name = (error as { name?: unknown } | null)?.name;
+    if (
+      typeof name === "string" &&
+      [
+        "Error",
+        "ReferenceError",
+        "TypeError",
+        "RangeError",
+        "SyntaxError",
+        "TimeoutError",
+        "AbortError",
+      ].includes(name)
+    )
+      nativeFailureClass = name;
+  } catch {
+    // Accessor failures remain unknown; no message or stack is inspected.
+  }
+  try {
+    const codes = [
+      (error as { code?: unknown } | null)?.code,
+      (error as { cause?: { code?: unknown } } | null)?.cause?.code,
+    ];
+    for (const code of codes) {
+      if (
+        typeof code === "string" &&
+        [
+          "ENOENT",
+          "EACCES",
+          "ECONNRESET",
+          "ECONNREFUSED",
+          "ETIMEDOUT",
+          "ENOTFOUND",
+          "EAI_AGAIN",
+          "ERR_MODULE_NOT_FOUND",
+          "MODULE_NOT_FOUND",
+          "ERR_REQUIRE_ASYNC_MODULE",
+          "ERR_REQUIRE_ESM",
+          "ERR_UNKNOWN_FILE_EXTENSION",
+          "ERR_INVALID_ARG_TYPE",
+          "ERR_INVALID_ARG_VALUE",
+          "ERR_OUT_OF_RANGE",
+          "UND_ERR_CONNECT_TIMEOUT",
+          "UND_ERR_HEADERS_TIMEOUT",
+          "UND_ERR_BODY_TIMEOUT",
+          "UND_ERR_SOCKET",
+        ].includes(code)
+      ) {
+        nativeCauseCode = code;
+        break;
+      }
+    }
+  } catch {
+    // Never serialize an unknown code or a nested cause.
+  }
+  return { nativeFailureClass, nativeCauseCode };
+}
 
 async function cookieHeader(
   context: BrowserContext,
@@ -1670,207 +1735,252 @@ test(journeyName, async ({ browser, request }) => {
         result: "observed",
       });
 
-      const pdfRegion = page.getByRole("region", {
-        name: "PDF乘車明細與分享",
-        exact: true,
-      });
-      await expect(pdfRegion).toBeVisible();
-      const pdfUrl = `${origins.referral}/api/referral/receipt/${encodeURIComponent(completedOrderId)}/pdf`;
-      const pdfFilename = `receipt-${completedOrderId}.pdf`;
-      const { parsePdf } =
-        await import("../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser");
-      const observePdfAction = async (action: () => Promise<void>) => {
-        let resolveResponse!: (bytes: Buffer) => void;
-        let rejectResponse!: (error: unknown) => void;
-        const responseObserved = new Promise<Buffer>((resolve, reject) => {
-          resolveResponse = resolve;
-          rejectResponse = reject;
+      type PdfPhase =
+        | "browser-pdf-consumer"
+        | "browser-pdf-region"
+        | "browser-pdf-response-fetch"
+        | "browser-pdf-response-body"
+        | "browser-pdf-content-parse"
+        | "browser-pdf-download-action"
+        | "browser-pdf-download-event"
+        | "browser-pdf-download-file"
+        | "browser-pdf-prepare-action"
+        | "browser-pdf-share-capability"
+        | "browser-pdf-share-action";
+      const pdfPhase = async <T>(stage: PdfPhase, action: () => Promise<T>) => {
+        evidence.record({
+          stage,
+          orderId: completedOrderId,
+          result: "observed",
         });
-        void responseObserved.catch(() => undefined);
-        const observe = async (route: Route) => {
-          try {
-            // Fetch this browser request once and release the original server
-            // bytes unchanged. Attachment downloads do not reliably expose a
-            // readable Playwright Response after the browser consumes them.
-            const response = await route.fetch({ maxRedirects: 0 });
-            const bytes = await response.body();
-            const headers = response.headers();
-            await route.fulfill({ response, body: bytes });
-            requireFact(
-              route.request().method() === "GET" &&
-                route.request().url() === pdfUrl &&
-                response.url() === pdfUrl &&
-                response.status() === 200 &&
-                headers["x-drts-candidate-sha"] === runtime,
-              "browser same-order PDF response and runtime",
-            );
-            requireFact(
-              headers["content-type"]?.split(";")[0]?.trim() ===
-                "application/pdf" &&
-                headers["content-disposition"] ===
-                  `attachment; filename="${pdfFilename}"` &&
-                /(?:^|,)\s*no-store\s*(?:,|$)/i.test(
-                  headers["cache-control"] ?? "",
-                ) &&
-                bytes.length > 0 &&
-                bytes.subarray(0, 5).toString("ascii") === "%PDF-",
-              "actual nonformal PDF headers and bytes",
-            );
-            const declaredLength = headers["content-length"];
-            if (declaredLength !== undefined)
-              requireFact(
-                /^[0-9]+$/.test(declaredLength) &&
-                  Number(declaredLength) === bytes.length,
-                "actual PDF declared byte length",
-              );
-            const parsed = await parsePdf(bytes);
-            const compact = (value: string) => value.replace(/\s+/g, "");
-            const pdfText = compact(parsed.text);
-            for (const expectedText of [
-              "乘車明細（非正式稅務憑證）",
-              `行程 ID：${completedOrderId}`,
-              `訂單編號：${text(receipt.orderNo)}`,
-              pickupAddress,
-              dropoffAddress,
-              `實際車資合計：${text(receipt.formattedTotal)}`,
-              `起步價：NT$ ${completion.actualFareBreakdown.startMinor / 100}`,
-              `里程費：NT$ ${completion.actualFareBreakdown.distanceMinor / 100}`,
-              `時間費：NT$ ${completion.actualFareBreakdown.delayMinor / 100}`,
-              `夜間費：NT$ ${completion.actualFareBreakdown.nightMinor / 100}`,
-              "付款及結算狀態未提供",
-              "02-2944-0985",
-              "1999",
-            ])
-              requireFact(
-                pdfText.includes(compact(expectedText)),
-                "PDF contains the same completed order and actual recorded fare",
-              );
-            resolveResponse(bytes);
-          } catch (error) {
-            rejectResponse(error);
-            await route.abort("failed").catch(() => undefined);
-          }
-        };
-        await page.route(pdfUrl, observe, { times: 1 });
-        let responseDeadline: ReturnType<typeof setTimeout> | undefined;
         try {
-          await action();
-          // Match the hosted action timeout; a successful click without its GET
-          // must reach owned cleanup instead of waiting for the whole journey.
-          responseDeadline = setTimeout(
-            () =>
-              rejectResponse(
-                new JourneyFailure("browser-pdf-response-timeout"),
-              ),
-            15_000,
-          );
-          return await responseObserved;
-        } finally {
-          clearTimeout(responseDeadline);
-          await page.unroute(pdfUrl, observe);
+          return await action();
+        } catch (error) {
+          evidence.record({
+            stage,
+            orderId: completedOrderId,
+            ...closedPdfFailureFacts(error),
+            result: "failed",
+          });
+          throw error;
         }
       };
-      const pdfLink = pdfRegion.getByRole("link", {
-        name: "下載 PDF 明細",
-        exact: true,
-      });
-      requireFact(
-        new URL(text(await pdfLink.getAttribute("href")), origins.referral)
-          .href === pdfUrl &&
-          (await pdfLink.getAttribute("download")) === pdfFilename,
-        "mounted PDF link retains the exact completed order",
-      );
-      const pdfDownloadPromise = page.waitForEvent("download");
-      void pdfDownloadPromise.catch(() => undefined);
-      const downloadedResponse = await observePdfAction(() => pdfLink.click());
-      const pdfDownload = await pdfDownloadPromise;
-      requireFact(
-        pdfDownload.url() === pdfUrl &&
-          pdfDownload.suggestedFilename() === pdfFilename &&
-          (await pdfDownload.failure()) === null,
-        "actual browser same-order PDF download",
-      );
-      const pdfDownloadBytes = await readFile(
-        text(await pdfDownload.path(), "browser PDF download file required"),
-      );
-      requireFact(
-        pdfDownloadBytes.length === downloadedResponse.length &&
-          hash(pdfDownloadBytes) === hash(downloadedResponse),
-        "downloaded file equals its original BFF PDF response",
-      );
-      evidence.record({
-        stage: "browser-same-order-nonformal-PDF-download",
-        orderId: completedOrderId,
-        bytes: pdfDownloadBytes.length,
-        sha256: hash(pdfDownloadBytes),
-        result: "observed",
-      });
-
-      const preparedResponse = await observePdfAction(() =>
-        pdfRegion
-          .getByRole("button", { name: "準備分享 PDF", exact: true })
-          .click(),
-      );
-      // Capability uses the actual prepared response bytes and browser APIs,
-      // without replacing navigator.share/canShare or creating a fake success.
-      const canSharePdf = await page.evaluate(
-        ({ bytes, filename }) => {
-          const file = new File([Uint8Array.from(bytes)], filename, {
-            type: "application/pdf",
-          });
-          return (
-            typeof navigator.share === "function" &&
-            typeof navigator.canShare === "function" &&
-            navigator.canShare({ files: [file] })
+      await pdfPhase("browser-pdf-consumer", async () => {
+        const pdfRegion = page.getByRole("region", {
+          name: "PDF乘車明細與分享",
+          exact: true,
+        });
+        await pdfPhase("browser-pdf-region", () =>
+          expect(pdfRegion).toBeVisible(),
+        );
+        const pdfUrl = `${origins.referral}/api/referral/receipt/${encodeURIComponent(completedOrderId)}/pdf`;
+        const pdfFilename = `receipt-${completedOrderId}.pdf`;
+        const expectedPdfText = [
+          "乘車明細（非正式稅務憑證）",
+          `行程 ID：${completedOrderId}`,
+          `訂單編號：${text(receipt.orderNo)}`,
+          pickupAddress,
+          dropoffAddress,
+          `實際車資合計：${text(receipt.formattedTotal)}`,
+          `起步價：NT$ ${completion.actualFareBreakdown.startMinor / 100}`,
+          `里程費：NT$ ${completion.actualFareBreakdown.distanceMinor / 100}`,
+          `時間費：NT$ ${completion.actualFareBreakdown.delayMinor / 100}`,
+          `夜間費：NT$ ${completion.actualFareBreakdown.nightMinor / 100}`,
+          "付款及結算狀態未提供",
+          "02-2944-0985",
+          "1999",
+        ];
+        const validatePdfBytes = (bytes: Buffer) =>
+          validateActualReceiptPdfBytes(bytes, expectedPdfText, (actual) =>
+            pdfPhase("browser-pdf-content-parse", () => parsePdf(actual)),
           );
-        },
-        { bytes: Array.from(preparedResponse), filename: pdfFilename },
-      );
-      const pdfStatus = pdfRegion.getByRole("status");
-      if (canSharePdf) {
-        await expect(pdfStatus).toHaveText("PDF 已準備完成，請按分享。");
-        await pdfRegion
-          .getByRole("button", { name: "分享 PDF 明細", exact: true })
-          .click();
-        await expect(pdfStatus).toHaveText(
-          /^(已完成分享操作。|已取消分享，可重新準備。|尚未完成分享，請重試或下載 PDF。)$/,
+        const observePreparedPdfAction = async (
+          action: () => Promise<void>,
+        ) => {
+          let resolveResponse!: (bytes: Buffer) => void;
+          let rejectResponse!: (error: unknown) => void;
+          const responseObserved = new Promise<Buffer>((resolve, reject) => {
+            resolveResponse = resolve;
+            rejectResponse = reject;
+          });
+          void responseObserved.catch(() => undefined);
+          const observe = async (route: Route) => {
+            try {
+              // Fetch this browser request once and release the original server
+              // bytes unchanged. Attachment downloads do not reliably expose a
+              // readable Playwright Response after the browser consumes them.
+              const response = await pdfPhase(
+                "browser-pdf-response-fetch",
+                () => route.fetch({ maxRedirects: 0 }),
+              );
+              const bytes = await pdfPhase("browser-pdf-response-body", () =>
+                response.body(),
+              );
+              const headers = response.headers();
+              await route.fulfill({ response, body: bytes });
+              requireFact(
+                route.request().method() === "GET" &&
+                  route.request().url() === pdfUrl &&
+                  response.url() === pdfUrl &&
+                  response.status() === 200 &&
+                  headers["x-drts-candidate-sha"] === runtime,
+                "browser same-order PDF response and runtime",
+              );
+              requireFact(
+                headers["content-type"]?.split(";")[0]?.trim() ===
+                  "application/pdf" &&
+                  headers["content-disposition"] ===
+                    `attachment; filename="${pdfFilename}"` &&
+                  /(?:^|,)\s*no-store\s*(?:,|$)/i.test(
+                    headers["cache-control"] ?? "",
+                  ) &&
+                  bytes.length > 0,
+                "actual nonformal PDF headers and bytes",
+              );
+              const declaredLength = headers["content-length"];
+              if (declaredLength !== undefined)
+                requireFact(
+                  /^[0-9]+$/.test(declaredLength) &&
+                    Number(declaredLength) === bytes.length,
+                  "actual PDF declared byte length",
+                );
+              await validatePdfBytes(bytes);
+              resolveResponse(bytes);
+            } catch (error) {
+              rejectResponse(error);
+              await route.abort("failed").catch(() => undefined);
+            }
+          };
+          await page.route(pdfUrl, observe, { times: 1 });
+          let responseDeadline: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await action();
+            // Match the hosted action timeout; a successful click without its GET
+            // must reach owned cleanup instead of waiting for the whole journey.
+            responseDeadline = setTimeout(
+              () =>
+                rejectResponse(
+                  new JourneyFailure("browser-pdf-response-timeout"),
+                ),
+              15_000,
+            );
+            return await responseObserved;
+          } finally {
+            clearTimeout(responseDeadline);
+            await page.unroute(pdfUrl, observe);
+          }
+        };
+        const pdfLink = pdfRegion.getByRole("link", {
+          name: "下載 PDF 明細",
+          exact: true,
+        });
+        requireFact(
+          new URL(text(await pdfLink.getAttribute("href")), origins.referral)
+            .href === pdfUrl &&
+            (await pdfLink.getAttribute("download")) === pdfFilename,
+          "mounted PDF link retains the exact completed order",
         );
-        const status = await pdfStatus.textContent();
+        const pdfDownloadBytes = await consumeNativeReceiptPdfDownload(
+          {
+            waitForDownload: () =>
+              pdfPhase("browser-pdf-download-event", () =>
+                page.waitForEvent("download", { timeout: 15_000 }),
+              ),
+            click: () =>
+              pdfPhase("browser-pdf-download-action", () =>
+                pdfLink.click({ timeout: 15_000 }),
+              ),
+            readFile: (path) =>
+              pdfPhase("browser-pdf-download-file", () => readFile(path)),
+          },
+          { url: pdfUrl, filename: pdfFilename },
+          validatePdfBytes,
+        );
         evidence.record({
-          stage:
-            status === "已完成分享操作。"
-              ? "browser-pdf-native-share-resolved"
-              : status === "已取消分享，可重新準備。"
-                ? "browser-pdf-native-share-cancelled"
-                : "browser-pdf-native-share-refused",
+          stage: "browser-same-order-nonformal-PDF-download",
           orderId: completedOrderId,
+          bytes: pdfDownloadBytes.length,
+          sha256: hash(pdfDownloadBytes),
           result: "observed",
         });
-      } else {
-        await expect(pdfStatus).toHaveText(
-          "此瀏覽器不支援檔案分享；您可以下載 PDF 後再分享。",
+
+        const preparedResponse = await pdfPhase(
+          "browser-pdf-prepare-action",
+          () =>
+            observePreparedPdfAction(() =>
+              pdfRegion
+                .getByRole("button", { name: "準備分享 PDF", exact: true })
+                .click(),
+            ),
         );
-        await expect(pdfLink).toBeVisible();
-        await expect(
-          pdfRegion.getByRole("button", { name: "分享 PDF 明細", exact: true }),
-        ).toHaveCount(0);
+        // Capability uses the actual prepared response bytes and browser APIs,
+        // without replacing navigator.share/canShare or creating a fake success.
+        const canSharePdf = await pdfPhase("browser-pdf-share-capability", () =>
+          page.evaluate(
+            ({ bytes, filename }) => {
+              const file = new File([Uint8Array.from(bytes)], filename, {
+                type: "application/pdf",
+              });
+              return (
+                typeof navigator.share === "function" &&
+                typeof navigator.canShare === "function" &&
+                navigator.canShare({ files: [file] })
+              );
+            },
+            { bytes: Array.from(preparedResponse), filename: pdfFilename },
+          ),
+        );
+        const pdfStatus = pdfRegion.getByRole("status");
+        if (canSharePdf) {
+          await expect(pdfStatus).toHaveText("PDF 已準備完成，請按分享。");
+          await pdfPhase("browser-pdf-share-action", () =>
+            pdfRegion
+              .getByRole("button", { name: "分享 PDF 明細", exact: true })
+              .click(),
+          );
+          await expect(pdfStatus).toHaveText(
+            /^(已完成分享操作。|已取消分享，可重新準備。|尚未完成分享，請重試或下載 PDF。)$/,
+          );
+          const status = await pdfStatus.textContent();
+          evidence.record({
+            stage:
+              status === "已完成分享操作。"
+                ? "browser-pdf-native-share-resolved"
+                : status === "已取消分享，可重新準備。"
+                  ? "browser-pdf-native-share-cancelled"
+                  : "browser-pdf-native-share-refused",
+            orderId: completedOrderId,
+            result: "observed",
+          });
+        } else {
+          await expect(pdfStatus).toHaveText(
+            "此瀏覽器不支援檔案分享；您可以下載 PDF 後再分享。",
+          );
+          await expect(pdfLink).toBeVisible();
+          await expect(
+            pdfRegion.getByRole("button", {
+              name: "分享 PDF 明細",
+              exact: true,
+            }),
+          ).toHaveCount(0);
+          evidence.record({
+            stage: "browser-pdf-native-share-unsupported",
+            orderId: completedOrderId,
+            result: "observed",
+          });
+        }
         evidence.record({
-          stage: "browser-pdf-native-share-unsupported",
+          stage: "browser-same-order-nonformal-PDF-prepared-response",
           orderId: completedOrderId,
+          bytes: preparedResponse.length,
+          sha256: hash(preparedResponse),
           result: "observed",
         });
-      }
-      evidence.record({
-        stage: "browser-same-order-nonformal-PDF-prepared-response",
-        orderId: completedOrderId,
-        bytes: preparedResponse.length,
-        sha256: hash(preparedResponse),
-        result: "observed",
-      });
-      evidence.record({
-        stage: "physical-OS-PDF-delivery-unverified",
-        orderId: completedOrderId,
-        result: "unexecuted",
+        evidence.record({
+          stage: "physical-OS-PDF-delivery-unverified",
+          orderId: completedOrderId,
+          result: "unexecuted",
+        });
       });
       // Preserve the minimum main journey above, then observe four independent
       // owned orders. Immediate quote timing still creates reservation semantics.
@@ -1956,101 +2066,148 @@ test(journeyName, async ({ browser, request }) => {
                 uiDisabled: true,
               };
             }
-            // Unknown legacy metadata does not fabricate a window or add a new
-            // cancellation gate; the original active button and POST still apply.
-            await expect(button).toBeEnabled();
-            // Start reading this original response as soon as it arrives;
-            // the successful UI is allowed to navigate while click completes.
-            const waiting = page
-              .waitForResponse(
-                (response) =>
-                  response.request().method() === "POST" &&
-                  response.url() ===
-                    `${origins.referral}/api/referral/cancel/${encodeURIComponent(id)}`,
-              )
-              .then(async (response) => ({
-                response,
-                bytes: await response.body(),
-              }));
-            void waiting.catch(() => undefined);
-            await button.click();
-            const { response, bytes } = await waiting;
-            requireFact(
-              (await response.headerValue("x-drts-candidate-sha")) === runtime,
-              "actual UI cancellation response runtime binding",
-            );
-            requireFact(
-              bytes.length <= 1024 * 1024,
-              "bounded actual UI cancellation response",
-            );
-            const payload = object(JSON.parse(bytes.toString("utf8")));
-            const command = object(response.request().postDataJSON());
-            requireFact(
-              typeof command.idempotencyKey === "string",
-              "actual UI cancellation command key",
-            );
-            if (response.status() === 200) {
-              requireFact(
-                payload.ok === true,
-                "actual UI cancellation success envelope",
-              );
-              await page.waitForURL(
-                (url) =>
-                  url.searchParams.get("screen") === "cancelled" &&
-                  url.searchParams.get("orderId") === id,
-              );
-            } else {
-              requireFact(payload.ok === false, "actual UI denial envelope");
-              const afterDenial = object(
-                (await referral("/api/referral/active")).data,
-              );
-              const deniedTrip = object(afterDenial.trip);
-              requireFact(
-                deniedTrip.orderId === id,
-                "UI denial retains exact active order",
-              );
-              const deniedWindow = readCancellationWindowSnapshot(
-                deniedTrip.cancellationWindow,
-              );
-              const hasWindowUI =
-                (await page
-                  .locator(
-                    '[data-drt-operation="referral-cancellation-window"]',
-                  )
-                  .count()) === 1;
-              const rejectedByPolicy =
-                payload.error &&
-                object(payload.error).code === "ORDER_NOT_CANCELABLE";
-              // The window-aware UI closes this same snapshot after its real 409,
-              // including an originally unknown/rolling snapshot. Legacy UI keeps
-              // its original error Banner and enabled retry behavior.
-              if (
-                (hasWindowUI && rejectedByPolicy) ||
-                deniedWindow?.canCancel === false
-              )
-                await expect(button).toBeDisabled();
-              else await expect(button).toBeEnabled();
-              await expect(
-                page.getByText(text(object(payload.error).message), {
-                  exact: true,
-                }),
-              ).toBeVisible();
-              requireFact(
-                new URL(page.url()).searchParams.get("orderId") === id &&
-                  new URL(page.url()).searchParams.get("screen") === "trip",
-                "denial retains selected trip URL",
-              );
-            }
-            return {
-              status: response.status(),
-              data: response.status() >= 400 ? payload : payload.data,
-              headers: new Headers(await response.allHeaders()),
-              bytes,
-              command,
-              requestSource: "actual-ui" as const,
-              uiDisabled:
-                response.status() === 200 ? false : await button.isDisabled(),
+            const cancelPhase = async <T>(
+              stage:
+                | "browser-cancel-consumer"
+                | "browser-cancel-response-capture"
+                | "browser-cancel-route-fetch"
+                | "browser-cancel-response-release"
+                | "browser-cancel-action"
+                | "browser-cancel-terminal-ui",
+              action: () => Promise<T>,
+            ) => {
+              evidence.record({ stage, orderId: id, result: "observed" });
+              try {
+                return await action();
+              } catch (error) {
+                evidence.record({
+                  stage,
+                  orderId: id,
+                  ...closedPdfFailureFacts(error),
+                  result: "failed",
+                });
+                throw error;
+              }
             };
+            return cancelPhase("browser-cancel-consumer", async () => {
+              // Unknown legacy metadata keeps the original enabled UI action.
+              await expect(button).toBeEnabled();
+              const cancelUrl = `${origins.referral}/api/referral/cancel/${encodeURIComponent(id)}`;
+              type Captured = Awaited<
+                ReturnType<typeof captureOriginalUiCancellation>
+              >;
+              let resolveResponse!: (value: Captured) => void;
+              let rejectResponse!: (error: unknown) => void;
+              const waiting = new Promise<Captured>((resolve, reject) => {
+                resolveResponse = resolve;
+                rejectResponse = reject;
+              });
+              void waiting.catch(() => undefined);
+              const observe = async (route: Route) => {
+                try {
+                  const captured = await cancelPhase(
+                    "browser-cancel-response-capture",
+                    () =>
+                      captureOriginalUiCancellation(
+                        {
+                          request: () => route.request(),
+                          fetch: (options) =>
+                            cancelPhase("browser-cancel-route-fetch", () =>
+                              route.fetch(options),
+                            ),
+                          fulfill: (options) =>
+                            cancelPhase("browser-cancel-response-release", () =>
+                              route.fulfill(options),
+                            ),
+                        },
+                        { url: cancelUrl, orderId: id, runtime },
+                      ),
+                  );
+                  resolveResponse(captured);
+                } catch (error) {
+                  rejectResponse(error);
+                  await route.abort("failed").catch(() => undefined);
+                }
+              };
+              await page.route(cancelUrl, observe, { times: 1 });
+              const deadline = setTimeout(
+                () =>
+                  rejectResponse(
+                    new JourneyFailure("browser-cancel-response-timeout"),
+                  ),
+                15_000,
+              );
+              try {
+                await cancelPhase("browser-cancel-action", () =>
+                  button.click({ timeout: 15_000 }),
+                );
+                const captured = await waiting;
+                const { payload } = captured;
+                await cancelPhase("browser-cancel-terminal-ui", async () => {
+                  if (captured.status === 200) {
+                    await page.waitForURL(
+                      (url) =>
+                        url.searchParams.get("screen") === "cancelled" &&
+                        url.searchParams.get("orderId") === id,
+                    );
+                  } else {
+                    const afterDenial = object(
+                      (await referral("/api/referral/active")).data,
+                    );
+                    const deniedTrip = object(afterDenial.trip);
+                    requireFact(
+                      deniedTrip.orderId === id,
+                      "UI denial retains exact active order",
+                    );
+                    const deniedWindow = readCancellationWindowSnapshot(
+                      deniedTrip.cancellationWindow,
+                    );
+                    const hasWindowUI =
+                      (await page
+                        .locator(
+                          '[data-drt-operation="referral-cancellation-window"]',
+                        )
+                        .count()) === 1;
+                    const rejectedByPolicy =
+                      payload.error &&
+                      object(payload.error).code === "ORDER_NOT_CANCELABLE";
+                    // The window-aware UI closes this same snapshot after its real 409,
+                    // including an originally unknown/rolling snapshot. Legacy UI keeps
+                    // its original error Banner and enabled retry behavior.
+                    if (
+                      (hasWindowUI && rejectedByPolicy) ||
+                      deniedWindow?.canCancel === false
+                    )
+                      await expect(button).toBeDisabled();
+                    else await expect(button).toBeEnabled();
+                    await expect(
+                      page.getByText(text(object(payload.error).message), {
+                        exact: true,
+                      }),
+                    ).toBeVisible();
+                    requireFact(
+                      new URL(page.url()).searchParams.get("orderId") === id &&
+                        new URL(page.url()).searchParams.get("screen") ===
+                          "trip",
+                      "denial retains selected trip URL",
+                    );
+                  }
+                });
+                return {
+                  status: captured.status,
+                  data: captured.data,
+                  headers: captured.headers,
+                  bytes: captured.bytes,
+                  command: captured.command,
+                  requestSource: "actual-ui" as const,
+                  uiDisabled:
+                    captured.status === 200 ? false : await button.isDisabled(),
+                };
+              } finally {
+                clearTimeout(deadline);
+                await page.unroute(cancelUrl, observe);
+              }
+            });
           },
           capture: async (name, id, screen) => {
             // Keep the denied page intact: navigating would clear its real error Banner.

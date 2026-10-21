@@ -125,6 +125,142 @@ function nativeTransportFailureFacts(
 export function requireFact(value: unknown, stage: string): asserts value {
   if (!value) throw new JourneyFailure(stage);
 }
+export type ReceiptPdfParser = (bytes: Buffer) => Promise<{ text: string }>;
+
+/** Validate each actual file independently; PDF creation metadata may differ. */
+export async function validateActualReceiptPdfBytes(
+  bytes: Buffer,
+  expectedText: readonly string[],
+  parse: ReceiptPdfParser,
+): Promise<void> {
+  requireFact(
+    bytes.length > 0 && bytes.subarray(0, 5).toString("ascii") === "%PDF-",
+    "actual nonformal PDF bytes",
+  );
+  const parsed = await parse(bytes);
+  const compact = (value: string) => value.replace(/\s+/g, "");
+  const pdfText = compact(parsed.text);
+  for (const expected of expectedText)
+    requireFact(
+      pdfText.includes(compact(expected)),
+      "PDF contains the same completed order and actual recorded fare",
+    );
+}
+
+type NativeReceiptPdfDownload = {
+  url(): string;
+  suggestedFilename(): string;
+  failure(): Promise<string | null>;
+  path(): Promise<string | null>;
+};
+
+/** Native attachment downloads can bypass Playwright's user routing entirely. */
+export async function consumeNativeReceiptPdfDownload(
+  ports: {
+    waitForDownload(): Promise<NativeReceiptPdfDownload>;
+    click(): Promise<void>;
+    readFile(path: string): Promise<Buffer>;
+  },
+  expected: { url: string; filename: string },
+  validateBytes: (bytes: Buffer) => Promise<void>,
+): Promise<Buffer> {
+  // Attach the rejection handler before the action; a failed click cannot leave
+  // an unhandled waiter while the normal owned-resource cleanup runs.
+  const pending = ports.waitForDownload();
+  void pending.catch(() => undefined);
+  await ports.click();
+  const download = await pending;
+  requireFact(
+    download.url() === expected.url &&
+      download.suggestedFilename() === expected.filename &&
+      (await download.failure()) === null,
+    "actual browser same-order PDF download",
+  );
+  const path = text(
+    await download.path(),
+    "browser PDF download file required",
+  );
+  const bytes = await ports.readFile(path);
+  await validateBytes(bytes);
+  return bytes;
+}
+
+type OriginalUiCancellationResponse = {
+  url(): string;
+  status(): number;
+  headers(): Record<string, string>;
+  body(): Promise<Buffer>;
+};
+
+/** Read the one original UI POST before releasing its navigation-causing ACK. */
+export async function captureOriginalUiCancellation<
+  Response extends OriginalUiCancellationResponse,
+>(
+  route: {
+    request(): {
+      method(): string;
+      url(): string;
+      postDataJSON(): unknown;
+    };
+    fetch(options: {
+      maxRedirects: 0;
+      maxRetries: 0;
+      timeout: 15000;
+    }): Promise<Response>;
+    fulfill(options: { response: Response; body: Buffer }): Promise<void>;
+  },
+  expected: { url: string; orderId: string; runtime: string },
+): Promise<CallResult & { command: ObjectData; payload: ObjectData }> {
+  const request = route.request();
+  requireFact(
+    request.method() === "POST" && request.url() === expected.url,
+    "actual UI cancellation exact original POST",
+  );
+  const command = object(request.postDataJSON());
+  requireFact(
+    typeof command.idempotencyKey === "string",
+    "actual UI cancellation command key",
+  );
+  // Explicitly no request retries or replacement business command.
+  const response = await route.fetch({
+    maxRedirects: 0,
+    maxRetries: 0,
+    timeout: 15000,
+  });
+  const bytes = await response.body();
+  const headers = response.headers();
+  const status = response.status();
+  requireFact(
+    response.url() === expected.url &&
+      headers["x-drts-candidate-sha"] === expected.runtime,
+    "actual UI cancellation response runtime binding",
+  );
+  requireFact(
+    bytes.length <= 1024 * 1024,
+    "bounded actual UI cancellation response",
+  );
+  const payload = object(JSON.parse(bytes.toString("utf8")));
+  if (status === 200) {
+    requireFact(payload.ok === true, "actual UI cancellation success envelope");
+    requireFact(
+      object(payload.data).orderId === expected.orderId,
+      "actual UI cancellation same owned order",
+    );
+  } else requireFact(payload.ok === false, "actual UI denial envelope");
+  const captured = {
+    status,
+    data: status >= 400 ? payload : payload.data,
+    headers: new Headers(headers),
+    bytes,
+    command,
+    payload,
+  };
+  // After this release the product may perform full-page navigation. Never read
+  // a response/request method again; only the captured RAM values are returned.
+  await route.fulfill({ response, body: bytes });
+  return captured;
+}
+
 export function object(value: unknown): ObjectData {
   requireFact(
     value && typeof value === "object" && !Array.isArray(value),
