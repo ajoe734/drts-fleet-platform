@@ -547,5 +547,595 @@
       "baseUrlEnv": "DRTS_DEV_CONCIERGE_BASE_URL",
       "path": "/"
     }
-  ]
+  ],
+  "documentAcceptance": {
+    "id": "c125-document-storage-scan-readback-role-matrix",
+    "surface": "fleet-and-platform-admin",
+    "baseUrlEnv": "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+    "actorScope": "fleet_partner_and_platform_reviewer",
+    "setup": [
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+        "method": "POST",
+        "body": {
+          "name": "C125 full family driver",
+          "mobile": "0912345679",
+          "professionalDriverLicenseNo": "C125-PDL-{{runId}}",
+          "professionalDriverLicenseExpiry": "2029-12-31",
+          "taxiDriverRegistrationNo": "C125-TAXI-{{runId}}",
+          "taxiDriverRegistrationArea": "taipei",
+          "taxiDriverRegistrationExpiry": "2029-12-31",
+          "supportedServiceProductCodes": ["business_dispatch"],
+          "preferredVehicleSubmissionId": null
+        },
+        "capture": {
+          "c125DriverSubmissionId": "data.submission.submission_id",
+          "c125DriverRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "professional_driver_license",
+          "contentType": "application/pdf",
+          "originalFileName": "driver-license.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "professional_driver_license",
+          "contentType": "application/pdf",
+          "originalFileName": "driver-license.pdf"
+        },
+        "capture": {
+          "c125DriverLicenseDocId": "documentId",
+          "c125DriverLicenseObjectKey": "objectKey"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125DriverRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "taxi_driver_registration",
+          "contentType": "application/pdf",
+          "originalFileName": "taxi-registration.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "taxi_driver_registration",
+          "contentType": "application/pdf",
+          "originalFileName": "taxi-registration.pdf"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125DriverRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "fleet_participation_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "driver-fleet-participation-contract.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "fleet_participation_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "driver-fleet-participation-contract.pdf"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125DriverRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "driver_management_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "driver-management-contract.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "driver_management_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "driver-management-contract.pdf"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125DriverRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "other",
+          "contentType": "image/png",
+          "originalFileName": "driver-photo.png"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "other",
+          "contentType": "image/png",
+          "originalFileName": "driver-photo.png"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125DriverRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "other",
+          "contentType": "image/jpeg",
+          "originalFileName": "driver-photo.jpg"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "other",
+          "contentType": "image/jpeg",
+          "originalFileName": "driver-photo.jpg"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125DriverRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "own_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/upload-url",
+        "method": "POST",
+        "body": {
+          "expectedRevisionNo": "{{c125DriverRevision}}",
+          "documentType": "vehicle_management_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "invalid-driver-vehicle-contract.pdf"
+        },
+        "expectedStatus": [400, 422]
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/submit",
+        "method": "POST",
+        "body": {
+          "expectedRevisionNo": "{{c125DriverRevision}}"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/vehicles",
+        "method": "POST",
+        "body": {
+          "plateNo": "TDC-{{runId}}",
+          "brand": "Toyota",
+          "model": "Camry",
+          "manufactureYear": 2024,
+          "seatCount": 4,
+          "wheelchairAccessible": false,
+          "insuranceExpiry": "2029-12-31",
+          "inspectionExpiry": "2029-12-31",
+          "supportedServiceProductCodes": ["business_dispatch"]
+        },
+        "capture": {
+          "c125VehicleSubmissionId": "data.submission.submission_id",
+          "c125VehicleRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "vehicle_registration",
+          "contentType": "application/pdf",
+          "originalFileName": "vehicle-registration.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "vehicle_registration",
+          "contentType": "application/pdf",
+          "originalFileName": "vehicle-registration.pdf"
+        },
+        "capture": {
+          "c125VehicleRegDocId": "documentId",
+          "c125VehicleRegObjectKey": "objectKey"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125VehicleRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "insurance_policy",
+          "contentType": "application/pdf",
+          "originalFileName": "insurance-policy.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "insurance_policy",
+          "contentType": "application/pdf",
+          "originalFileName": "insurance-policy.pdf"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125VehicleRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "fleet_participation_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "vehicle-fleet-participation-contract.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "fleet_participation_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "vehicle-fleet-participation-contract.pdf"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125VehicleRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "vehicle_management_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "vehicle-management-contract.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "vehicle_management_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "vehicle-management-contract.pdf"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125VehicleRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "other",
+          "contentType": "image/png",
+          "originalFileName": "vehicle-photo.png"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "other",
+          "contentType": "image/png",
+          "originalFileName": "vehicle-photo.png"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125VehicleRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/upload-url",
+        "intentBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "other",
+          "contentType": "image/jpeg",
+          "originalFileName": "vehicle-photo.jpg"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/confirm",
+        "confirmBody": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "other",
+          "contentType": "image/jpeg",
+          "originalFileName": "vehicle-photo.jpg"
+        }
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}",
+        "method": "GET",
+        "capture": {
+          "c125VehicleRevision": "data.submission.revision_no"
+        }
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "own_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/documents/upload-url",
+        "method": "POST",
+        "body": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}",
+          "documentType": "driver_management_contract",
+          "contentType": "application/pdf",
+          "originalFileName": "invalid-vehicle-driver-contract.pdf"
+        },
+        "expectedStatus": [400, 422]
+      },
+      {
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125VehicleSubmissionId}}/submit",
+        "method": "POST",
+        "body": {
+          "expectedRevisionNo": "{{c125VehicleRevision}}"
+        }
+      },
+      {
+        "kind": "fleet-editable-case",
+        "expectedFleetPartnerId": "fleet-demo-001",
+        "periodMonths": ["2026-03", "2026-06"],
+        "capture": {
+          "c125CaseId": "caseId",
+          "c125CaseFleetId": "fleetPartnerId"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/upload-url",
+        "intentBody": {
+          "expectedFleetPartnerId": "{{c125CaseFleetId}}",
+          "contentType": "application/pdf",
+          "originalFileName": "case-evidence.pdf"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/confirm",
+        "confirmBody": {
+          "contentType": "application/pdf",
+          "originalFileName": "case-evidence.pdf"
+        },
+        "capture": {
+          "c125CasePdfAttachmentId": "attachmentId",
+          "c125CasePdfObjectKey": "objectKey",
+          "c125CasePdfSignedDownloadUrl": "signedDownloadUrl"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/upload-url",
+        "intentBody": {
+          "expectedFleetPartnerId": "{{c125CaseFleetId}}",
+          "contentType": "image/png",
+          "originalFileName": "case-evidence.png"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/confirm",
+        "confirmBody": {
+          "contentType": "image/png",
+          "originalFileName": "case-evidence.png"
+        },
+        "capture": {
+          "c125CasePngAttachmentId": "attachmentId",
+          "c125CasePngObjectKey": "objectKey"
+        }
+      },
+      {
+        "kind": "document-upload",
+        "reviewerBaseUrlEnv": "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        "intentPath": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/upload-url",
+        "intentBody": {
+          "expectedFleetPartnerId": "{{c125CaseFleetId}}",
+          "contentType": "image/jpeg",
+          "originalFileName": "case-evidence.jpg"
+        },
+        "confirmPath": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/confirm",
+        "confirmBody": {
+          "contentType": "image/jpeg",
+          "originalFileName": "case-evidence.jpg"
+        },
+        "capture": {
+          "c125CaseJpegAttachmentId": "attachmentId",
+          "c125CaseJpegObjectKey": "objectKey"
+        }
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "foreign_fleet",
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}",
+        "method": "GET",
+        "expectedStatus": [403, 404]
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "foreign_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": [403, 404]
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "foreign_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}",
+        "method": "GET",
+        "expectedStatus": [403, 404]
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "foreign_fleet",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": [403, 404]
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "foreign_fleet",
+        "verifySession": false,
+        "path": "{{c125CasePdfSignedDownloadUrl}}",
+        "method": "GET",
+        "expectedStatus": [403, 404]
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "tenant_admin",
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "tenant_admin",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "tenant_ops",
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "tenant_ops",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "driver",
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "driver",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "ops_non_reviewer",
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "ops_non_reviewer",
+        "verifySession": false,
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 403
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "unauthenticated",
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 401
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "unauthenticated",
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 401
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "invalid_session",
+        "path": "/control-plane-proxy/fleet-partner/supply-submissions/{{c125DriverSubmissionId}}/documents/{{c125DriverLicenseDocId}}/download",
+        "method": "GET",
+        "expectedStatus": 401
+      },
+      {
+        "kind": "role-access-probe",
+        "role": "invalid_session",
+        "path": "/control-plane-proxy/fleet-partner/cases/{{c125CaseId}}/attachments/{{c125CasePdfAttachmentId}}/read-url",
+        "method": "GET",
+        "expectedStatus": 401
+      }
+    ]
+  }
 }

@@ -8,11 +8,13 @@ import { expect, test, type Page } from "@playwright/test";
 import { createOperationalEvidenceJournal } from "./operational-evidence-journal";
 import {
   runSetup,
+  runOperationalDocumentAcceptance,
   requiredOrigin,
   operationalRequestHeaders,
   fetchOperationalSurface,
   installOperationalBrowserHeaders,
   prepareOperationalFleetSession,
+  type DocumentAcceptanceManifest,
   type FleetApplicationSetup,
   type PreparedOperationalFleetSession,
   valueAtPath,
@@ -94,6 +96,7 @@ type Manifest = {
   fleetApplicationSetup: FleetApplicationSetup;
   journeys: Journey[];
   retiredSurfaces: RetiredSurface[];
+  documentAcceptance: DocumentAcceptanceManifest;
 };
 
 const manifestPath =
@@ -432,6 +435,15 @@ test("requires a single immutable candidate SHA and complete formal journey mani
       expect(operation.readback?.expectedState).not.toBeUndefined();
     }
   }
+
+  expect(manifest.documentAcceptance).toBeDefined();
+  expect(manifest.documentAcceptance.id).toBe(
+    "c125-document-storage-scan-readback-role-matrix",
+  );
+  expect(manifest.documentAcceptance.baseUrlEnv).toBe(
+    "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+  );
+  expect(manifest.documentAcceptance.setup.length).toBeGreaterThan(0);
 });
 
 for (const journey of manifest.journeys) {
@@ -685,6 +697,14 @@ for (const journey of manifest.journeys) {
         response.url(),
         resultId,
         operation.readback as Readback,
+        variables,
+      );
+    }
+
+    if (journey.id === "admin-review-approve-readback") {
+      await runOperationalDocumentAcceptance(
+        { request: page.context().request, record },
+        manifest.documentAcceptance,
         variables,
       );
     }
