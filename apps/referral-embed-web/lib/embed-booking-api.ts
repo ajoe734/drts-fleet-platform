@@ -213,3 +213,15 @@ export function acknowledgeReferralFeesServer(
 ) {
   return request<ReferralFeeStatus>("fees", "POST", command);
 }
+/** Dev demo only: advance an own trip with the synthetic business test driver. */
+export function runReferralDemoTripServer(
+  orderId: string,
+  action: "assign" | "complete",
+) {
+  return request<{
+    orderId: string;
+    status: OwnedOrderRecord["status"];
+    driverId: string | null;
+    simulated: true;
+  }>(`orders/${encodeURIComponent(orderId)}/demo-trip/${action}`, "POST", {});
+}
