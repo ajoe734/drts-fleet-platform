@@ -1292,7 +1292,7 @@ export class PlatformAdminService implements OnModuleInit {
       email: normalizedEmail,
       realm,
       membershipId: membership.membershipId,
-      roleCode: command.roleCode,
+      roleCode: this.toInternalRoleCode(command.roleCode),
       actorPrincipalId: auditActorId,
       createdAt: now,
       updatedAt: now,
@@ -2591,6 +2591,8 @@ export class PlatformAdminService implements OnModuleInit {
   ): PlatformAdminUserRecord {
     return {
       userId: snapshot.membership.membershipId,
+      canonicalPrincipalId: snapshot.principal.principalId,
+      canonicalRealm: snapshot.membership.realm,
       email:
         snapshot.principal.email?.trim().toLowerCase() ??
         snapshot.principal.subject,
@@ -2666,7 +2668,7 @@ export class PlatformAdminService implements OnModuleInit {
     email: string;
     realm: ControlPlaneRealm;
     membershipId: string;
-    roleCode: PlatformAdminUserRole;
+    roleCode: InternalPlatformUserRoleCode;
     actorPrincipalId: string | null;
     createdAt: string;
     updatedAt: string;
@@ -2682,7 +2684,7 @@ export class PlatformAdminService implements OnModuleInit {
         input.realm,
       ),
       membershipId: input.membershipId,
-      roleCode: this.toInternalRoleCode(input.roleCode),
+      roleCode: input.roleCode,
       grantedByPrincipalId: input.actorPrincipalId,
       approvalId: null,
       validFrom: input.validFrom,
@@ -2703,7 +2705,7 @@ export class PlatformAdminService implements OnModuleInit {
   private toInternalRoleCode(
     roleCode: PlatformAdminUserRole,
   ): InternalPlatformUserRoleCode {
-    return roleCode;
+    return roleCode === "operator" ? "ops_user" : roleCode;
   }
 
   private toExternalRoleCode(roleCode: string): PlatformAdminUserRole | null {

@@ -36,7 +36,9 @@ export function persistenceHarness() {
           throw new Error("COMMIT ACK lost");
         }
       }
-      const table = /(?:INSERT INTO|FROM)\s+([\w.]+)/.exec(sql)?.[1];
+      const table = /(?:INSERT INTO|DELETE FROM|FROM)\s+([\w.]+)/.exec(
+        sql,
+      )?.[1];
       if (table && sql.includes("INSERT INTO")) {
         if (++session.insertCount === rejectInsert) {
           rejectInsert = undefined;
@@ -55,10 +57,28 @@ export function persistenceHarness() {
         rows.set(key, record);
         state.set(table, rows);
       }
+      if (table && sql.includes("DELETE FROM")) {
+        if (++session.insertCount === rejectInsert) {
+          rejectInsert = undefined;
+          throw new Error("SQL rejected");
+        }
+        const state = session.transaction ?? records;
+        const rows = state.get(table);
+        const key = String(values[0]);
+        if (rows) {
+          rows.delete(key);
+          for (const [rowKey, value] of rows.entries()) {
+            if ((value as { tenantId?: string })?.tenantId === key) {
+              rows.delete(rowKey);
+            }
+          }
+        }
+      }
+      const state = session.transaction ?? records;
       return {
         rows:
           table && sql.includes("SELECT")
-            ? [...(records.get(table)?.values() ?? [])].map((record) => ({
+            ? [...(state.get(table)?.values() ?? [])].map((record) => ({
                 record: structuredClone(record),
               }))
             : [],

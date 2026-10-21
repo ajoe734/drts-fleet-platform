@@ -1,4 +1,8 @@
 import type {
+  SubmitReferralPassengerComplaintCommand,
+  ReferralPassengerComplaintRecord,
+} from "@drts/contracts";
+import type {
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
   OwnedOrderRecord,
@@ -8,6 +12,9 @@ import type {
   SubmitReferralPassengerRatingCommand,
   ReferralPassengerQuoteCommand,
   ReferralPassengerFareQuote,
+  ReferralFeeStatus,
+  ReferralOrderFeeConfirmation,
+  AcknowledgeReferralFeesCommand,
   ReferralPassengerRatingResult,
 } from "@drts/contracts";
 import {
@@ -114,6 +121,29 @@ async function request<T>(
     );
   return deepCamelize(body.data) as T;
 }
+export function submitReferralComplaintServer(
+  orderId: string,
+  command: SubmitReferralPassengerComplaintCommand,
+) {
+  return request<ReferralPassengerComplaintRecord>(
+    `orders/${encodeURIComponent(orderId)}/complaints`,
+    "POST",
+    { ...command, orderId },
+    command.idempotencyKey,
+  );
+}
+export function listReferralComplaintsServer(orderId: string) {
+  return request<{
+    orderId: string;
+    items: ReferralPassengerComplaintRecord[];
+  }>(`orders/${encodeURIComponent(orderId)}/complaints`);
+}
+export function getReferralComplaintServer(orderId: string, caseNo: string) {
+  return request<ReferralPassengerComplaintRecord>(
+    `orders/${encodeURIComponent(orderId)}/complaints/${encodeURIComponent(caseNo)}`,
+  );
+}
+
 export function quoteReferralFareServer(
   command: ReferralPassengerQuoteCommand,
 ) {
@@ -129,6 +159,7 @@ export function createReferralBookingServer(
     replayed: boolean;
     quote: ReferralPassengerFareQuote;
     confirmedAt: string;
+    feeConfirmation: ReferralOrderFeeConfirmation | null;
   }>("bookings", "POST", command, command.idempotencyKey);
 }
 export function getReferralActiveTripServer() {
@@ -142,6 +173,11 @@ export function getReferralActiveTripServer() {
 }
 export function getReferralTripHistoryServer() {
   return request<{ items: ReferralPassengerHistoryItem[] }>("history");
+}
+export function getReferralTripReceiptPdfServer(orderId: string) {
+  return request<import("@drts/contracts").ReferralPassengerReceiptPdfDocument>(
+    `orders/${encodeURIComponent(orderId)}/receipt/pdf`,
+  );
 }
 export function getReferralTripReceiptServer(orderId: string) {
   return request<ReferralPassengerReceipt>(
@@ -167,4 +203,25 @@ export function submitReferralTripRatingServer(
     "POST",
     { ...command, orderId },
   );
+}
+
+export function getReferralFeesServer() {
+  return request<ReferralFeeStatus>("fees");
+}
+export function acknowledgeReferralFeesServer(
+  command: AcknowledgeReferralFeesCommand,
+) {
+  return request<ReferralFeeStatus>("fees", "POST", command);
+}
+/** Dev demo only: advance an own trip with the synthetic business test driver. */
+export function runReferralDemoTripServer(
+  orderId: string,
+  action: "assign" | "heartbeat" | "complete",
+) {
+  return request<{
+    orderId: string;
+    status: OwnedOrderRecord["status"];
+    driverId: string | null;
+    simulated: true;
+  }>(`orders/${encodeURIComponent(orderId)}/demo-trip/${action}`, "POST", {});
 }

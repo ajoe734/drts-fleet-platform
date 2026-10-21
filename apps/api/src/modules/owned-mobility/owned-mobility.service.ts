@@ -1,3 +1,14 @@
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+  type ReferralFeeOwner,
+  type ReferralFeeStatus,
+  type AcknowledgeReferralFeesCommand,
+} from "@drts/contracts";
+import type {
+  SubmitReferralPassengerComplaintCommand,
+  ReferralPassengerComplaintSubmission,
+} from "@drts/contracts";
 import { PassengerFareRepository } from "../passenger-app/fare/passenger-fare.repository";
 import { estimateFare } from "../passenger-app/fare/fare.engine";
 import { ComplaintService } from "../complaint/complaint.service";
@@ -135,6 +146,7 @@ import type {
   ReferralBookingIntent,
   ReferralPassengerRatingResult,
   ReferralPassengerActiveTripResult,
+  ReferralPassengerCancellationWindow,
   ReferralPassengerHistoryItem,
   ReferralPassengerReceipt,
   SubmitReferralPassengerRatingCommand,
@@ -183,6 +195,7 @@ import {
   type DriverCompletionOutboxRecord,
   type DriverTaskCompletionBundleRecord,
   type OwnedMobilityQueryExecutor,
+  type OwnedOrderActionContext,
 } from "./owned-mobility.repository";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { SandboxDispatchGateService } from "../sandbox-dispatch-gate/sandbox-dispatch-gate.service";
@@ -231,6 +244,9 @@ type TenantBookingResult = {
   dispatchSemantics: "reservation";
   status: OwnedOrderRecord["status"];
   replayed: boolean;
+  feeConfirmation?:
+    | import("@drts/contracts").ReferralOrderFeeConfirmation
+    | null;
 };
 
 const REFERRAL_PASSENGER_CANCEL_WINDOW_MS = 2 * 60_000;
@@ -2169,7 +2185,10 @@ export class OwnedMobilityService
       this.refreshPassengerDisclosureSnapshot(order, false, {
         channel: this.resolvePassengerDisclosureChannel(order, identity),
       });
-    const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
+    const applyGovernance = (
+      tx?: OwnedMobilityQueryExecutor | null,
+      afterCommit?: Array<() => void | Promise<void>>,
+    ) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
           tx: tx ?? null,
@@ -2182,6 +2201,7 @@ export class OwnedMobilityService
             this.resolveApprovalStateFromEvaluation(evaluation);
           return this.createApprovalRequestForOrder({
             tx: tx ?? null,
+            ...(afterCommit ? { afterCommit } : {}),
             order,
             evaluation,
             ...(requestId ? { requestId } : {}),
@@ -2196,6 +2216,7 @@ export class OwnedMobilityService
         (options?.writeReferralNotificationRoute &&
           this.partnerUserIdentityLinkRepository))
     ) {
+      const afterCommit: Array<() => void | Promise<void>> = [];
       return (
         this.ownedMobilityRepository
           .withTransaction(async (tx) => {
@@ -2234,15 +2255,51 @@ export class OwnedMobilityService
                   order.orderId,
                   tx,
                 );
+              const acknowledgement = await this.requireReferralFeeAgreement(
+                claimed,
+                claimed,
+                tx,
+              );
+              const feeClock = await tx.query<{ now: Date | string }>(
+                "SELECT clock_timestamp() AS now",
+              );
+              const feeConfirmation = {
+                tenantId: claimed.tenantId,
+                partnerId: claimed.partnerId,
+                partnerProgramId: claimed.partnerProgramId,
+                entrySlug: claimed.entrySlug,
+                drtsPassengerId: claimed.drtsPassengerId,
+                orderId: order.orderId,
+                quoteId: claimed.quoteId,
+                disclosureVersion: acknowledgement.disclosureVersion,
+                contentHash: acknowledgement.contentHash,
+                quotedFareRuleVersion: claimed.quotedFareRuleVersion,
+                acknowledgedAt: acknowledgement.acknowledgedAt,
+                feeConfirmedAt: new Date(feeClock.rows[0]!.now).toISOString(),
+                summary: {
+                  pickupAddress: claimed.pickupAddress,
+                  dropoffAddress: claimed.dropoffAddress,
+                  requestedScheduledAt: claimed.requestedScheduledAt,
+                  vehicleType: claimed.vehicleType,
+                  estimatedMin: claimed.estimatedMin,
+                  estimatedMax: claimed.estimatedMax,
+                },
+              };
+              await this.ownedMobilityRepository!.insertReferralOrderFeeConfirmation(
+                feeConfirmation,
+                tx,
+              );
               order.referralPassengerLifecycle = {
                 ...order.referralPassengerLifecycle,
                 quote: claimed,
                 confirmedAt: claimed.consumedAt!,
+                feeConfirmation,
               };
             }
             await applyPassengerDisclosure();
             const approvalRequest = await applyGovernance(
               this.tenantPartnerService?.isPersistenceEnabled() ? tx : null,
+              afterCommit,
             );
             await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
               orders: [this.cloneOrder(order)],
@@ -2276,9 +2333,17 @@ export class OwnedMobilityService
           })
           // Publish into the in-memory order feed and dispatch events only after
           // commit: readers must not race the frozen route/sequence setup.
-          .then((approvalRequest) =>
-            finalizeCreation(previousApprovalState, approvalRequest, false),
-          )
+          .then(async (approvalRequest) => {
+            const result = await finalizeCreation(
+              previousApprovalState,
+              approvalRequest,
+              false,
+            );
+            for (const effect of afterCommit) {
+              await effect();
+            }
+            return result;
+          })
       );
     }
 
@@ -15492,6 +15557,8 @@ export class OwnedMobilityService
             "passengerPhone",
             "partnerUserRef",
             "idempotencyKey",
+            "feeDisclosureVersion",
+            "feeConfirmed",
           ]
         : []),
     ];
@@ -15534,8 +15601,20 @@ export class OwnedMobilityService
       requestedScheduledAt = new Date(rawTime).toISOString();
     }
     const c = command as CreateReferralPassengerBookingCommand;
-    if (create) text(c.idempotencyKey, false, 255);
+    if (create) {
+      text(c.idempotencyKey, false, 255);
+      if (c.feeConfirmed !== undefined && typeof c.feeConfirmed !== "boolean")
+        invalid();
+      if (c.feeDisclosureVersion !== undefined)
+        text(c.feeDisclosureVersion, true, 100);
+    }
     return {
+      ...(create && c.feeDisclosureVersion !== undefined
+        ? { feeDisclosureVersion: text(c.feeDisclosureVersion, true, 100) }
+        : {}),
+      ...(create && c.feeConfirmed !== undefined
+        ? { feeConfirmed: c.feeConfirmed }
+        : {}),
       entrySlug: text(command.entrySlug, true, 150),
       quoteId: create ? text(c.quoteId, true, 100) : "",
       pickupAddress: text(command.pickupAddress, true),
@@ -15629,11 +15708,107 @@ export class OwnedMobilityService
       isGuaranteed: quote.isGuaranteed,
       quotedFareSource: quote.quotedFareSource,
       quotedFareRuleVersion: quote.quotedFareRuleVersion,
+      ...(quote.feeDisclosureVersion
+        ? { feeDisclosureVersion: quote.feeDisclosureVersion }
+        : {}),
+      ...(quote.feeContentHash ? { feeContentHash: quote.feeContentHash } : {}),
       createdAt: quote.createdAt,
       expiresAt: quote.expiresAt,
       consumedByOrderId: quote.consumedByOrderId,
       consumedAt: quote.consumedAt,
     };
+  }
+
+  async getReferralFeeStatus(
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralFeeStatus> {
+    const { owner } = await this.referralAuthority(identity);
+    const ack =
+      await this.ownedMobilityRepository!.findReferralFeeAcknowledgement(
+        owner,
+        PASSENGER_FEE_DISCLOSURE_VERSION,
+      );
+    if (ack && ack.contentHash !== PASSENGER_FEE_CONTENT_HASH)
+      throw new ApiRequestError(
+        503,
+        "FEE_DISCLOSURE_UNAVAILABLE",
+        "Fee disclosure version/content conflict.",
+      );
+    return {
+      disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      contentHash: PASSENGER_FEE_CONTENT_HASH,
+      acknowledgedAt: ack?.acknowledgedAt ?? null,
+    };
+  }
+
+  async acknowledgeReferralFees(
+    command: AcknowledgeReferralFeesCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralFeeStatus> {
+    const { owner } = await this.referralAuthority(identity);
+    if (
+      !command ||
+      typeof command !== "object" ||
+      Array.isArray(command) ||
+      Object.keys(command).some(
+        (key) => !["disclosureVersion", "acknowledged"].includes(key),
+      ) ||
+      command.acknowledged !== true
+    )
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Explicit fee acknowledgement is required.",
+      );
+    if (command.disclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION)
+      throw new ApiRequestError(
+        409,
+        "FEE_DISCLOSURE_CHANGED",
+        "Read the current fee disclosure.",
+      );
+    const ack = await this.ownedMobilityRepository!.acknowledgeReferralFees(
+      owner,
+      PASSENGER_FEE_DISCLOSURE_VERSION,
+      PASSENGER_FEE_CONTENT_HASH,
+    );
+    return {
+      disclosureVersion: ack.disclosureVersion,
+      contentHash: ack.contentHash,
+      acknowledgedAt: ack.acknowledgedAt,
+    };
+  }
+
+  private async requireReferralFeeAgreement(
+    quote: ReferralPassengerFareQuoteRecord,
+    owner: ReferralFeeOwner,
+    tx?: OwnedMobilityQueryExecutor,
+  ) {
+    if (
+      quote.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+      quote.feeContentHash !== PASSENGER_FEE_CONTENT_HASH
+    )
+      throw new ApiRequestError(
+        409,
+        "FEE_DISCLOSURE_CHANGED",
+        "Refresh the quote after reading the current fees.",
+      );
+    const ack =
+      await this.ownedMobilityRepository!.findReferralFeeAcknowledgement(
+        owner,
+        PASSENGER_FEE_DISCLOSURE_VERSION,
+        tx,
+      );
+    if (
+      !ack ||
+      ack.contentHash !== PASSENGER_FEE_CONTENT_HASH ||
+      !Number.isFinite(Date.parse(ack.acknowledgedAt))
+    )
+      throw new ApiRequestError(
+        403,
+        "FEE_DISCLOSURE_REQUIRED",
+        "A canonical fee agreement is required.",
+      );
+    return ack;
   }
 
   async quoteReferralPassengerFare(
@@ -15768,6 +15943,8 @@ export class OwnedMobilityService
       quotedFareSource: "platform_pricing_rule",
       quotedFareRuleVersion: tariff.version,
       tariffSnapshot: { ...tariff },
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeContentHash: PASSENGER_FEE_CONTENT_HASH,
       route: { ...route },
       breakdown: { ...estimate.breakdown },
       serviceAreaEvaluation: { ...serviceAreaEvaluation },
@@ -15795,6 +15972,8 @@ export class OwnedMobilityService
       replayed,
       quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
       confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+      feeConfirmation:
+        order.referralPassengerLifecycle?.feeConfirmation ?? null,
     };
   }
 
@@ -15842,9 +16021,11 @@ export class OwnedMobilityService
       !life?.quote ||
       life.bookingIdempotencyKey !== key ||
       !life.bookingIntent ||
-      (Object.keys(intent) as Array<keyof ReferralBookingIntent>).some(
-        (k) => life.bookingIntent![k] !== intent[k],
-      )
+      (
+        Object.keys({ ...life.bookingIntent, ...intent }) as Array<
+          keyof ReferralBookingIntent
+        >
+      ).some((k) => life.bookingIntent![k] !== intent[k])
     )
       throw new ApiRequestError(
         409,
@@ -15913,6 +16094,18 @@ export class OwnedMobilityService
     const prior = await recover();
     if (prior) return prior;
     const fresh = async () => {
+      if (command.feeConfirmed !== true)
+        throw new ApiRequestError(
+          400,
+          "FEE_CONFIRMATION_REQUIRED",
+          "Confirm the fees for this order.",
+        );
+      if (command.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION)
+        throw new ApiRequestError(
+          409,
+          "FEE_DISCLOSURE_CHANGED",
+          "Read and confirm the current fees.",
+        );
       const quote = await repo.findReferralFareQuoteSnapshotById(
         intent.quoteId,
       );
@@ -15923,6 +16116,7 @@ export class OwnedMobilityService
           "Quote not found.",
         );
       this.assertReferralQuoteOwner(quote, owner);
+      await this.requireReferralFeeAgreement(quote, owner);
       if (quote.consumedByOrderId) {
         const existing = await recover();
         if (existing) return existing;
@@ -16157,6 +16351,238 @@ export class OwnedMobilityService
     };
   }
 
+  private referralCancellationWindow(
+    order: OwnedOrderRecord,
+  ): ReferralPassengerCancellationWindow {
+    // The command remains the authority. Do not duplicate its status allowlist
+    // or turn unrelated errors into a fabricated cancellation decision.
+    let canCancel = true;
+    try {
+      this.assertOrderCancelable(order);
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.getStatus() === HttpStatus.CONFLICT &&
+        error.code === "ORDER_NOT_CANCELABLE"
+      ) {
+        canCancel = false;
+      } else {
+        throw error;
+      }
+    }
+    let deadline: number | null = null;
+    if (order.dispatchSemantics === "reservation") {
+      const cutoff = order.cancelableUntil
+        ? Date.parse(order.cancelableUntil)
+        : Number.NaN;
+      // Missing/invalid cutoffs do not close the original reservation command.
+      // A finite grace date alone cannot invent an expiry for that branch.
+      if (Number.isFinite(cutoff)) {
+        deadline = cutoff;
+        const created = Date.parse(order.createdAt);
+        const grace = created + REFERRAL_PASSENGER_CANCEL_WINDOW_MS;
+        if (
+          order.partnerEntrySlug &&
+          order.status === "created" &&
+          Number.isFinite(created) &&
+          Number.isFinite(new Date(grace).getTime())
+        ) {
+          deadline = Math.max(deadline, grace);
+        }
+      }
+    }
+    return {
+      canCancel,
+      cancelableUntil:
+        deadline === null ? null : new Date(deadline).toISOString(),
+      asOf: new Date().toISOString(),
+    };
+  }
+
+  private async resolveReferralPassengerLiveTracking(
+    order: OwnedOrderRecord,
+    context: OwnedOrderActionContext | null,
+  ): Promise<import("@drts/contracts").ReferralPassengerLiveTracking | null> {
+    const activeStatuses = [
+      "assigned",
+      "driver_accepted",
+      "enroute_pickup",
+      "arrived_pickup",
+      "on_trip",
+    ];
+    if (!activeStatuses.includes(order.status) || !context) return null;
+    const assignment = context.dispatchAssignments.find(
+      (a) =>
+        a.orderId === order.orderId &&
+        ["assigned", "accepted"].includes(a.status),
+    );
+    const task =
+      assignment &&
+      context.driverTasks.find(
+        (t) =>
+          t.orderId === order.orderId &&
+          t.assignmentId === assignment.assignmentId &&
+          t.driverId === assignment.driverId &&
+          t.vehicleId === assignment.vehicleId &&
+          !["completed", "cancelled", "rejected"].includes(t.status),
+      );
+    if (!assignment || !task || !this.regulatoryRegistryService) return null;
+    if (order.status === "on_trip" && task.status !== "on_trip") return null;
+    const result: import("@drts/contracts").ReferralPassengerLiveTracking = {
+      assignmentId: assignment.assignmentId,
+      driverId: assignment.driverId,
+      vehicleId: assignment.vehicleId,
+      observedAt: new Date().toISOString(),
+      locationFreshness: "missing",
+      location: null,
+      pickupEta: null,
+      dropoffRoute: null,
+    };
+    try {
+      const current =
+        await this.regulatoryRegistryService.getDriverTrackingStatus(
+          assignment.driverId,
+        );
+      if (
+        !current ||
+        current.driverId !== assignment.driverId ||
+        current.currentVehicleId !== assignment.vehicleId ||
+        (current.currentTaskId && current.currentTaskId !== task.taskId)
+      )
+        return result;
+      const point = current.currentLocation;
+      result.locationFreshness = current.locationFreshness;
+      result.location = point
+        ? {
+            lat: point.lat,
+            lng: point.lng,
+            accuracyM: point.accuracyM,
+            recordedAt: point.recordedAt,
+          }
+        : null;
+      if (current.locationFreshness !== "fresh" || !point) return result;
+      if (
+        ["assigned", "driver_accepted", "enroute_pickup"].includes(
+          order.status,
+        ) &&
+        order.pickup.lat != null &&
+        order.pickup.lng != null
+      ) {
+        // The existing Driver ETA is a Haversine/average-speed estimate.
+        // Bind its actual producer inputs to this observed assignment/point,
+        // rather than relabeling another observation or destination.
+        const eta = await this.regulatoryRegistryService
+          .getDriverEta(assignment.driverId, order.pickup.lat, order.pickup.lng)
+          .catch(() => null);
+        if (
+          eta &&
+          eta.driverId === assignment.driverId &&
+          eta.driverLocation?.driverId === assignment.driverId &&
+          eta.driverLocation.lat === point.lat &&
+          eta.driverLocation.lng === point.lng &&
+          eta.driverLocation.accuracyM === point.accuracyM &&
+          eta.driverLocation.recordedAt === point.recordedAt &&
+          eta.driverLocation.updatedAt === point.updatedAt &&
+          eta.destination?.lat === order.pickup.lat &&
+          eta.destination.lng === order.pickup.lng &&
+          Number.isFinite(eta.etaMinutes) &&
+          eta.etaMinutes >= 0 &&
+          isIso8601InstantWithTimezone(eta.calculatedAt) &&
+          Date.now() - Date.parse(eta.calculatedAt) >= -5000 &&
+          Date.now() - Date.parse(eta.calculatedAt) < 60_000
+        ) {
+          result.pickupEta = {
+            minutes: eta.etaMinutes,
+            calculatedAt: eta.calculatedAt,
+            estimatedArrivalAt: new Date(
+              Date.parse(eta.calculatedAt) + eta.etaMinutes * 60_000,
+            ).toISOString(),
+          };
+        }
+      } else if (
+        order.status === "on_trip" &&
+        current.currentTaskId === task.taskId &&
+        this.passengerRouteGeoService &&
+        order.dropoff.lat != null &&
+        order.dropoff.lng != null
+      ) {
+        const route = await this.passengerRouteGeoService
+          .route({
+            origin: { lat: point.lat, lng: point.lng },
+            destination: { lat: order.dropoff.lat, lng: order.dropoff.lng },
+            travelMode: "drive",
+            locale: "zh-TW",
+          })
+          .catch(() => null);
+        if (
+          route &&
+          Number.isFinite(route.distanceMeters) &&
+          route.distanceMeters >= 0 &&
+          Number.isFinite(route.durationSeconds) &&
+          route.durationSeconds >= 0 &&
+          isIso8601InstantWithTimezone(route.generatedAt) &&
+          Date.now() - Date.parse(route.generatedAt) >= -5000 &&
+          Date.now() - Date.parse(route.generatedAt) < 60_000
+        ) {
+          result.dropoffRoute = {
+            remainingDistanceMeters: route.distanceMeters,
+            remainingDurationSeconds: route.durationSeconds,
+            generatedAt: route.generatedAt,
+            estimatedArrivalAt: new Date(
+              Date.parse(route.generatedAt) + route.durationSeconds * 1000,
+            ).toISOString(),
+            provider: route.provider,
+          };
+        }
+      }
+      // A newer assignment, completed task or newer GPS observation must not
+      // relabel an advisory response obtained while awaiting the route provider.
+      const latest = await this.ownedMobilityRepository!.loadOrderActionContext(
+        { orderId: order.orderId },
+      );
+      const latestOrder = latest?.orders.find(
+        (o) => o.orderId === order.orderId,
+      );
+      const sameAssignment = latest?.dispatchAssignments.some(
+        (a) =>
+          a.assignmentId === assignment.assignmentId &&
+          a.driverId === assignment.driverId &&
+          a.vehicleId === assignment.vehicleId &&
+          ["assigned", "accepted"].includes(a.status),
+      );
+      const sameTask = latest?.driverTasks.some(
+        (t) =>
+          t.taskId === task.taskId &&
+          t.orderId === order.orderId &&
+          t.assignmentId === assignment.assignmentId &&
+          t.driverId === assignment.driverId &&
+          t.vehicleId === assignment.vehicleId &&
+          !["completed", "cancelled", "rejected"].includes(t.status),
+      );
+      const latestCurrent =
+        await this.regulatoryRegistryService.getDriverTrackingStatus(
+          assignment.driverId,
+        );
+      if (
+        !latestOrder ||
+        latestOrder.status !== order.status ||
+        !sameAssignment ||
+        !sameTask ||
+        latestCurrent.currentVehicleId !== assignment.vehicleId ||
+        latestCurrent.currentTaskId !== current.currentTaskId ||
+        latestCurrent.locationFreshness !== "fresh" ||
+        latestCurrent.currentLocation?.recordedAt !== point.recordedAt ||
+        latestCurrent.currentLocation?.lat !== point.lat ||
+        latestCurrent.currentLocation?.lng !== point.lng
+      )
+        return null;
+      return result;
+    } catch {
+      // Tracking is advisory; the canonical same-order trip remains readable.
+      return { ...result, pickupEta: null, dropoffRoute: null };
+    }
+  }
+
   async getReferralPassengerActiveTrip(
     identity?: BootstrapRequestIdentity | null,
   ): Promise<ReferralPassengerActiveTripResult> {
@@ -16227,6 +16653,11 @@ export class OwnedMobilityService
       context?.dispatchAssignments ?? [],
     );
     const isRated = Boolean(this.getReferralLifecycle(activeOrder)?.rating);
+    const liveTracking = await this.resolveReferralPassengerLiveTracking(
+      activeOrder,
+      context,
+    );
+    const cancellationWindow = this.referralCancellationWindow(activeOrder);
 
     return {
       active: true,
@@ -16235,8 +16666,20 @@ export class OwnedMobilityService
         orderNo: activeOrder.orderNo,
         status: activeOrder.status,
         statusCode: activeOrder.status,
-        etaMin: activeOrder.etaSnapshot?.etaMinutes ?? null,
-        cancelWindowMin: 2,
+        etaMin: liveTracking?.pickupEta?.minutes ?? null,
+        liveTracking,
+        cancelWindowMin:
+          cancellationWindow.canCancel && cancellationWindow.cancelableUntil
+            ? Math.max(
+                0,
+                Math.ceil(
+                  (Date.parse(cancellationWindow.cancelableUntil) -
+                    Date.parse(cancellationWindow.asOf)) /
+                    60_000,
+                ),
+              )
+            : 0,
+        cancellationWindow,
         pickupAddress: activeOrder.pickup.address,
         dropoffAddress: activeOrder.dropoff.address,
         driverName: details.driverName,
@@ -16256,6 +16699,8 @@ export class OwnedMobilityService
         ),
         confirmedAt:
           activeOrder.referralPassengerLifecycle?.confirmedAt ?? null,
+        feeConfirmation:
+          activeOrder.referralPassengerLifecycle?.feeConfirmation ?? null,
         rating: this.referralRatingResult(activeOrder),
       },
     };
@@ -16336,12 +16781,25 @@ export class OwnedMobilityService
               : `NT$ ${details.fareTotal}`,
           quote: this.referralQuoteView(o.referralPassengerLifecycle?.quote),
           confirmedAt: o.referralPassengerLifecycle?.confirmedAt ?? null,
+          feeConfirmation:
+            o.referralPassengerLifecycle?.feeConfirmation ?? null,
           rating: this.referralRatingResult(o),
+          cancelledAt: o.cancelledAt ?? null,
           completedAt: completedAt ?? details.task?.completedAt ?? null,
           createdAt: o.createdAt ?? new Date().toISOString(),
         };
       }),
     };
+  }
+
+  async getReferralPassengerReceiptPdf(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<import("@drts/contracts").ReferralPassengerReceiptPdfDocument> {
+    const receipt = await this.getReferralPassengerReceipt(orderId, identity);
+    const { renderReferralReceiptDocument } =
+      await import("./referral-receipt-document");
+    return renderReferralReceiptDocument(receipt);
   }
 
   async getReferralPassengerReceipt(
@@ -16449,8 +16907,44 @@ export class OwnedMobilityService
       paymentChannel: "付款及結算狀態未提供",
       quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
       confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+      feeConfirmation:
+        order.referralPassengerLifecycle?.feeConfirmation ?? null,
       downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
     };
+  }
+
+  /** The persisted order, only when it belongs to this referral passenger. */
+  async requireOwnedReferralPassengerOrder(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<OwnedOrderRecord> {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "This action requires an active referral_passenger identity.",
+      );
+    }
+    await this.referralAuthority(identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    await this.assertPartnerOrderIdentityAsync(identity, order);
+    if (
+      order.passenger?.passengerId !==
+      (identity.drtsPassengerId ?? identity.actorId)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "The order belongs to another referral passenger.",
+      );
+    }
+    return order;
   }
 
   async cancelReferralPassengerTrip(
@@ -16716,6 +17210,204 @@ export class OwnedMobilityService
       ...this.orders.filter((o) => o.orderId !== orderId),
     ];
     return this.referralRatingResult(committed)!;
+  }
+
+  private normalizeReferralComplaint(
+    orderId: string,
+    command: SubmitReferralPassengerComplaintCommand,
+  ): SubmitReferralPassengerComplaintCommand {
+    const validText = (value: unknown, max: number): value is string =>
+      typeof value === "string" &&
+      Boolean(value.trim()) &&
+      Array.from(value.trim()).length <= max;
+    if (
+      !command ||
+      command.orderId !== orderId ||
+      !["service", "fare", "lost_item"].includes(command.category) ||
+      !validText(command.content, 2000) ||
+      typeof command.contactRequested !== "boolean" ||
+      !validText(command.idempotencyKey, 255) ||
+      (command.category === "lost_item"
+        ? !validText(command.lostItemDescription, 1000)
+        : command.lostItemDescription !== undefined) ||
+      Object.keys(command).some(
+        (k) =>
+          ![
+            "orderId",
+            "category",
+            "content",
+            "lostItemDescription",
+            "contactRequested",
+            "idempotencyKey",
+          ].includes(k),
+      )
+    ) {
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Invalid referral complaint.",
+      );
+    }
+    return {
+      orderId,
+      category: command.category,
+      content: command.content.trim(),
+      contactRequested: command.contactRequested,
+      idempotencyKey: command.idempotencyKey.trim(),
+      ...(command.lostItemDescription === undefined
+        ? {}
+        : { lostItemDescription: command.lostItemDescription.trim() }),
+    };
+  }
+
+  private assertReferralComplaintOwner(
+    order: OwnedOrderRecord,
+    owner: {
+      tenantId: string;
+      partnerId: string;
+      partnerProgramId: string;
+      entrySlug: string;
+      drtsPassengerId: string;
+    },
+  ) {
+    if (
+      order.tenantId !== owner.tenantId ||
+      order.partnerId !== owner.partnerId ||
+      order.partnerProgramId !== owner.partnerProgramId ||
+      order.partnerEntrySlug !== owner.entrySlug ||
+      order.passenger?.passengerId !== owner.drtsPassengerId
+    ) {
+      throw new ApiRequestError(
+        403,
+        "PARTNER_SCOPE_MISMATCH",
+        "Complaint belongs to another referral passenger.",
+      );
+    }
+  }
+
+  async submitReferralPassengerComplaint(
+    orderId: string,
+    input: SubmitReferralPassengerComplaintCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { owner } = await this.referralAuthority(identity);
+    const command = this.normalizeReferralComplaint(orderId, input);
+    if (!this.referralComplaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Complaint service is unavailable.",
+      );
+    // No optimistic accepted state or catch-and-success: a failed/unknown ACK
+    // retains the caller command. A later identical retry reads committed linkage.
+    const submitted = await this.ownedMobilityRepository!.withTransaction(
+      async (tx) => {
+        const current = await this.ownedMobilityRepository!.findOrderForUpdate(
+          tx,
+          orderId,
+        );
+        if (!current)
+          throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+        const order = current.order;
+        this.assertReferralComplaintOwner(order, owner);
+        const previous = order.referralPassengerLifecycle?.complaints ?? [];
+        const same = previous.find(
+          (item) => item.command.idempotencyKey === command.idempotencyKey,
+        );
+        if (same) {
+          if (JSON.stringify(same.command) !== JSON.stringify(command))
+            throw new ApiRequestError(
+              409,
+              "IDEMPOTENCY_PAYLOAD_MISMATCH",
+              "The original complaint command has different content.",
+            );
+          return same;
+        }
+        const hook =
+          this.referralComplaintService!.prepareReferralComplaintHook(
+            orderId,
+            command,
+          );
+        const record: ReferralPassengerComplaintSubmission = {
+          caseNo: hook.caseNo,
+          createdTimelineId: hook.createdTimelineId,
+          command,
+          submittedAt: new Date().toISOString(),
+        };
+        const next: OwnedOrderRecord = {
+          ...order,
+          referralPassengerLifecycle: {
+            ...order.referralPassengerLifecycle,
+            complaints: [...previous, record],
+          },
+        };
+        await hook.execute(tx);
+        await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
+          orders: [next],
+        });
+        return record;
+      },
+    );
+    return this.referralComplaintService.publishReferralComplaintCase(
+      {
+        orderId,
+        passengerId: owner.drtsPassengerId,
+        tenantId: owner.tenantId,
+      },
+      submitted,
+    );
+  }
+
+  async listReferralPassengerComplaints(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { owner } = await this.referralAuthority(identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    this.assertReferralComplaintOwner(order, owner);
+    if (!this.referralComplaintService)
+      throw new ApiRequestError(
+        503,
+        "PASSENGER_COMPLAINT_STORAGE_UNAVAILABLE",
+        "Complaint service is unavailable.",
+      );
+    const items = await Promise.all(
+      (order.referralPassengerLifecycle?.complaints ?? []).map((record) =>
+        this.referralComplaintService!.readReferralComplaintCase(
+          orderId,
+          record,
+        ),
+      ),
+    );
+    return {
+      orderId,
+      items: items.sort(
+        (a, b) =>
+          b.submittedAt.localeCompare(a.submittedAt) ||
+          a.caseNo.localeCompare(b.caseNo),
+      ),
+    };
+  }
+
+  async getReferralPassengerComplaint(
+    orderId: string,
+    caseNo: string,
+    identity?: BootstrapRequestIdentity | null,
+  ) {
+    const { items } = await this.listReferralPassengerComplaints(
+      orderId,
+      identity,
+    );
+    const found = items.find((item) => item.caseNo === caseNo);
+    if (!found)
+      throw new ApiRequestError(
+        404,
+        "COMPLAINT_NOT_FOUND",
+        "Complaint not found for this order.",
+      );
+    return found;
   }
 
   private cloneOrder(order: OwnedOrderRecord): OwnedOrderRecord {

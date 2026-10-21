@@ -202,7 +202,11 @@ class ParallelImageBuildTests(unittest.TestCase):
                 self.assertEqual(enabled(action, 8, {"matrix.image": "api", "steps.existing.outputs.api": present}), not exists)
 
     def test_parallelism_is_bounded_and_migration_waits_for_all_images(self) -> None:
-        self.assertEqual(scalar(self.build, "max-parallel", 6), "3")
+        images = self.build.split("matrix:", 1)[1].split("]", 1)[0]
+        image_count = len([line for line in images.splitlines() if line.strip().rstrip(",") and line.strip() != "["
+                           and not line.strip().startswith("image:")])
+        # Bounded by the matrix itself: every image builds in a single wave.
+        self.assertEqual(scalar(self.build, "max-parallel", 6), str(image_count))
         self.assertEqual(scalar(self.build, "fail-fast", 6), "false")
         self.assertNotIn("continue-on-error", self.build)
         self.assertEqual(scalar(job_block(DEPLOY, "migrate"), "needs", 4), "[prepare, build-push]")

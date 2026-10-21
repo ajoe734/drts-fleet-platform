@@ -33,6 +33,7 @@ import type {
 } from "./phase2-tesla-fsd-sandbox";
 
 export * from "./referral-channel";
+export * from "./passenger-fee-disclosure";
 export type {
   RequestSandboxRegulatorCaseExportCommand,
   SandboxFulfillmentProjectionView,
@@ -3651,6 +3652,8 @@ export interface OwnedOrderRecord {
     bookingIntent?: import("./referral-channel").ReferralBookingIntent;
     quote?: import("./referral-channel").ReferralPassengerFareQuoteRecord;
     confirmedAt?: string;
+    feeConfirmation?: import("./referral-channel").ReferralOrderFeeConfirmation;
+    complaints?: import("./referral-channel").ReferralPassengerComplaintSubmission[];
     rating?: {
       orderId: string;
       score: 1 | 2 | 3 | 4 | 5;
@@ -7430,6 +7433,8 @@ export type PlatformAdminUserStatus = "active" | "suspended" | "invited";
 
 export interface PlatformAdminUserRecord {
   userId: string;
+  readonly canonicalPrincipalId?: string;
+  readonly canonicalRealm?: CanonicalIdentityMembershipRecord["realm"];
   email: string;
   displayName: string;
   roleCode: PlatformAdminUserRole;
@@ -7798,3 +7803,5 @@ export * from "./passenger-push-delivery";
 export * from "./partner-passenger-notification";
 export * from "./passenger-notification-channel";
 export * from "./passenger-app";
+
+export * from "./referral-monthly-ratings";

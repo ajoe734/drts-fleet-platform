@@ -724,4 +724,289 @@ describe("SR-MAIL-RETRY-SCHEDULE-20261001 approval-timeout reminder trigger", ()
       controller.runApprovalTimeoutReminders(systemIdentity()),
     ).rejects.toMatchObject({ code: "APPROVAL_TIMEOUT_SWEEP_FAILED" });
   });
+
+  it("APPROVAL-BACKGROUND-SWEEP-REJECTION-FLOW-20261020: handles a repository read failure during the fire-and-forget post-create background sweep without an unhandledRejection, preserves the created request and notifications, and retains explicit 502 scheduler failures before succeeding once the repository recovers", async () => {
+    // Boundary doubles disclosed:
+    // 1. MailTransport double (`provider: "test-provider"`, `send`) backed by real FileMailOutbox(directory),
+    //    NotificationDeliveryService, AuditNotificationEmailAdapter, and AuditNotificationService.
+    // 2. TenantPartnerRepository persistence ACK / read failure port double (`persistChanges` acknowledges writes;
+    //    `loadState` rejects on the post-create background sweep and first explicit scheduler sweep, then resolves
+    //    with the persisted approval request and active user roles on retry).
+    const send = vi.fn(async () => acknowledgement());
+    const deliveryService = new NotificationDeliveryService(
+      new FileMailOutbox(directory),
+      { provider: "test-provider", send },
+      { maxAttempts: 5, retryDelayMs: 1_000, leaseMs: 60_000 },
+    );
+    const emailAdapter = new AuditNotificationEmailAdapter(deliveryService);
+    const auditNotificationService = new AuditNotificationService(
+      undefined,
+      emailAdapter,
+    );
+    const service = new TenantPartnerService(auditNotificationService);
+    const tenantId = "tenant-demo-001";
+
+    service.upsertApprovalRule(tenantId, {
+      ruleName: "Post-create background sweep rejection regression rule",
+      priority: 10,
+      conditions: [{ field: "booking.amount_minor", op: "gte", value: 1 }],
+      action: "require_approval",
+      approvalMode: "any_of",
+      approvers: [{ kind: "tenant_admin" }],
+      // 2h timeout is inside the 12h approaching-timeout reminder lead window.
+      timeoutHoursOverride: 2,
+    });
+    const evaluation = service.evaluateApprovalRules(tenantId, {
+      subject: {
+        subjectType: "booking",
+        bookingId: "booking-bg-sweep-001",
+        draftId: null,
+        operation: "create",
+      },
+      inputSnapshot: {
+        costCenterCode: "CC-FIN-04",
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+        passengerId: "passenger-demo-001",
+        passengerRole: "employee",
+        amountMinor: 200_000,
+        currency: "TWD",
+        vehiclePreference: "standard_taxi",
+        direction: "pickup",
+        flightNoPresent: false,
+        flightNo: null,
+      },
+    });
+
+    let writeAcknowledgements = 0;
+    let repositoryReadAttempts = 0;
+    let persistedRequests: TenantBookingApprovalRequestRecord[] = [];
+    const activeUserRoles = [
+      ...(
+        service as unknown as {
+          userRoles: readonly TenantUserRoleRecord[];
+        }
+      ).userRoles,
+    ];
+    (
+      service as unknown as {
+        tenantPartnerRepository: Partial<TenantPartnerRepository>;
+      }
+    ).tenantPartnerRepository = {
+      isEnabled: () => true,
+      persistChanges: async (changes) => {
+        writeAcknowledgements += 1;
+        if (changes.approvalRequests) {
+          persistedRequests = [...changes.approvalRequests];
+        }
+      },
+      loadState: async () => {
+        repositoryReadAttempts += 1;
+        if (repositoryReadAttempts <= 2) {
+          throw new Error("injected_repository_read_failure");
+        }
+        return {
+          ...emptyRepositoryState(),
+          approvalRequests: persistedRequests,
+          userRoles: activeUserRoles,
+        };
+      },
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const loggerErrorSpy = vi.spyOn(
+      (
+        service as unknown as {
+          logger: { error: (...args: unknown[]) => void };
+        }
+      ).logger,
+      "error",
+    );
+    const unhandledRejections: Array<{
+      code?: unknown;
+      status?: unknown;
+      message?: unknown;
+    }> = [];
+    const onUnhandled = (error: unknown) => {
+      const record = error as {
+        code?: unknown;
+        status?: unknown;
+        message?: unknown;
+      };
+      unhandledRejections.push({
+        code: record?.code,
+        status: record?.status,
+        message: record?.message,
+      });
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const created = await service.createBookingApprovalRequest({
+        tenantId,
+        bookingId: "booking-bg-sweep-001",
+        orderId: "order-bg-sweep-001",
+        evaluationSnapshot: evaluation,
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(created.approvalRequestId).toMatch(/^approval-request-/);
+      expect(created.status).toBe("pending");
+      expect(
+        service.getApprovalRequest(tenantId, created.approvalRequestId).status,
+      ).toBe("pending");
+      expect(writeAcknowledgements).toBe(1);
+      expect(repositoryReadAttempts).toBe(1);
+      expect(unhandledRejections).toEqual([]);
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        "Failed to poll pending approval timeout notifications: injected_repository_read_failure",
+      );
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        "Background approval timeout notification poll failed: Api Request Error",
+      );
+
+      const newRequestDeliveries = auditNotificationService
+        .listEmailDeliveries()
+        .filter((delivery) => delivery.templateKey === "new_request");
+      expect(newRequestDeliveries).toHaveLength(1);
+      expect(newRequestDeliveries[0]?.status).toBe("sent");
+      expect(newRequestDeliveries[0]?.deliveryId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(
+        auditNotificationService
+          .listNotifications()
+          .filter((notification) => notification.channel === "tenant_approval"),
+      ).toHaveLength(1);
+      expect(send).toHaveBeenCalledTimes(1);
+
+      const controller = buildController(service);
+      await expect(
+        controller.runApprovalTimeoutReminders(systemIdentity()),
+      ).rejects.toMatchObject({
+        status: 502,
+        code: "APPROVAL_TIMEOUT_SWEEP_FAILED",
+      });
+      expect(repositoryReadAttempts).toBe(2);
+      expect(unhandledRejections).toEqual([]);
+
+      const recovered = (await controller.runApprovalTimeoutReminders(
+        systemIdentity(),
+      )) as { data: { evaluated: number; dispatched: number } };
+      expect(recovered.data).toEqual({ evaluated: 1, dispatched: 1 });
+      expect(repositoryReadAttempts).toBe(3);
+      expect(send).toHaveBeenCalledTimes(2);
+      const approachingTimeoutDeliveries = auditNotificationService
+        .listEmailDeliveries()
+        .filter((delivery) => delivery.templateKey === "approaching_timeout");
+      expect(approachingTimeoutDeliveries).toHaveLength(1);
+      expect(approachingTimeoutDeliveries[0]?.status).toBe("sent");
+      expect(approachingTimeoutDeliveries[0]?.deliveryId).toMatch(
+        /^[0-9a-f-]{36}$/,
+      );
+    } finally {
+      service.onModuleDestroy();
+      process.removeListener("unhandledRejection", onUnhandled);
+    }
+  });
+
+  it("APPROVAL-BACKGROUND-SWEEP-REJECTION-FLOW-20261020: preserves in-flight sweep coalescing so an explicit scheduler call overlapping a rejecting post-create background poll still rejects with 502 without emitting an unhandledRejection", async () => {
+    const auditNotificationService = new AuditNotificationService();
+    const service = new TenantPartnerService(auditNotificationService);
+    const tenantId = "tenant-demo-001";
+
+    service.upsertApprovalRule(tenantId, {
+      ruleName: "Coalesced post-create sweep failure rule",
+      priority: 10,
+      conditions: [{ field: "booking.amount_minor", op: "gte", value: 1 }],
+      action: "require_approval",
+      approvalMode: "any_of",
+      approvers: [{ kind: "tenant_admin" }],
+      timeoutHoursOverride: 2,
+    });
+    const evaluation = service.evaluateApprovalRules(tenantId, {
+      subject: {
+        subjectType: "booking",
+        bookingId: "booking-bg-coalesce-001",
+        draftId: null,
+        operation: "create",
+      },
+      inputSnapshot: {
+        costCenterCode: "CC-FIN-04",
+        businessDispatchSubtype: "enterprise_dispatch",
+        reservationWindowStart: "2026-05-13T10:00:00.000Z",
+        passengerId: "passenger-demo-001",
+        passengerRole: "employee",
+        amountMinor: 200_000,
+        currency: "TWD",
+        vehiclePreference: "standard_taxi",
+        direction: "pickup",
+        flightNoPresent: false,
+        flightNo: null,
+      },
+    });
+
+    let rejectLoadState!: (reason?: unknown) => void;
+    const loadState = vi.fn(
+      () =>
+        new Promise<TenantPartnerState>((_resolve, reject) => {
+          rejectLoadState = reject;
+        }),
+    );
+    (
+      service as unknown as {
+        tenantPartnerRepository: Partial<TenantPartnerRepository>;
+      }
+    ).tenantPartnerRepository = {
+      isEnabled: () => true,
+      persistChanges: async () => undefined,
+      loadState,
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const loggerErrorSpy = vi.spyOn(
+      (
+        service as unknown as {
+          logger: { error: (...args: unknown[]) => void };
+        }
+      ).logger,
+      "error",
+    );
+    const unhandledRejections: unknown[] = [];
+    const onUnhandled = (error: unknown) => {
+      unhandledRejections.push(error);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    try {
+      const created = await service.createBookingApprovalRequest({
+        tenantId,
+        bookingId: "booking-bg-coalesce-001",
+        orderId: "order-bg-coalesce-001",
+        evaluationSnapshot: evaluation,
+      });
+      expect(created.status).toBe("pending");
+      expect(loadState).toHaveBeenCalledTimes(1);
+
+      const overlappingExplicitSweep =
+        service.runApprovalTimeoutNotificationSweep();
+      expect(loadState).toHaveBeenCalledTimes(1);
+
+      rejectLoadState(new Error("coalesced_repository_read_failure"));
+      await expect(overlappingExplicitSweep).rejects.toMatchObject({
+        status: 502,
+        code: "APPROVAL_TIMEOUT_SWEEP_FAILED",
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandledRejections).toEqual([]);
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        "Failed to poll pending approval timeout notifications: coalesced_repository_read_failure",
+      );
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        "Background approval timeout notification poll failed: Api Request Error",
+      );
+    } finally {
+      service.onModuleDestroy();
+      process.removeListener("unhandledRejection", onUnhandled);
+    }
+  });
 });

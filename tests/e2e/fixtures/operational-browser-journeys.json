@@ -44,6 +44,10 @@
           "control": "[data-drt-operation='referral-create']",
           "before": [
             {
+              "kind": "referral-fees",
+              "control": "[data-drt-operation='referral-fee-agree']"
+            },
+            {
               "kind": "fill",
               "control": "input[name='pickupAddress']",
               "value": "新北市板橋區縣民大道二段7號"
@@ -52,6 +56,10 @@
               "kind": "fill",
               "control": "input[name='dropoffAddress']",
               "value": "臺北市信義區市府路1號"
+            },
+            {
+              "kind": "click",
+              "control": "[data-drt-operation='referral-fee-confirm']"
             }
           ],
           "requestUrlIncludes": "/api/referral/booking",

@@ -146,6 +146,12 @@ async function applyUpstreamAuth(
     headers.set(CONTROL_PLANE_REQUEST_AUTH_HEADER, suppliedInner);
   } else {
     const controlPlaneAuth = await issueControlPlaneRequestAuth({
+      ...(devSessionMode
+        ? {
+            devCanonicalPrincipalId:
+              process.env.DRTS_DEV_WORKFORCE_PRINCIPAL_ID?.trim() || "",
+          }
+        : {}),
       actorType: "ops_user",
       headers: request.headers,
       defaultEmail: CONTROL_PLANE_DEFAULT_EMAILS.ops_user,

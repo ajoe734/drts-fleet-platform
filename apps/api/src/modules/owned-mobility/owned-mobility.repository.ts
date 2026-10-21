@@ -14,6 +14,9 @@ import type {
   ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
   ReferralPassengerFareQuoteRecord,
+  ReferralFeeOwner,
+  ReferralFeeAcknowledgement,
+  ReferralOrderFeeConfirmation,
   OrderPartnerNotificationRoute,
   PassengerDispatchDisclosureSnapshot,
   TenantBookingListQuery,
@@ -273,6 +276,107 @@ export class OwnedMobilityRepository {
         "FARE_QUOTE_UNAVAILABLE",
         "Referral storage is unavailable.",
       );
+  }
+
+  async findReferralFeeAcknowledgement(
+    owner: ReferralFeeOwner,
+    version: string,
+    executor: OwnedMobilityQueryExecutor = this.databaseService!,
+  ): Promise<ReferralFeeAcknowledgement | null> {
+    this.requireReferralStorage();
+    const result = await executor.query<JsonRecordRow>(
+      `SELECT record FROM ops.phase1_referral_passenger_fee_acknowledgements
+       WHERE tenant_id=$1 AND partner_id=$2 AND partner_program_id=$3
+       AND entry_slug=$4 AND drts_passenger_id=$5 AND disclosure_version=$6`,
+      [
+        owner.tenantId,
+        owner.partnerId,
+        owner.partnerProgramId,
+        owner.entrySlug,
+        owner.drtsPassengerId,
+        version,
+      ],
+    );
+    return result.rows[0]
+      ? this.parseRecord<ReferralFeeAcknowledgement>(
+          result.rows[0].record,
+          "referral fee acknowledgement",
+        )
+      : null;
+  }
+
+  async acknowledgeReferralFees(
+    owner: ReferralFeeOwner,
+    version: string,
+    contentHash: string,
+  ) {
+    this.requireReferralStorage();
+    return this.withTransaction(async (tx) => {
+      const clock = await tx.query<{ now: Date | string }>(
+        "SELECT clock_timestamp() AS now",
+      );
+      const record: ReferralFeeAcknowledgement = {
+        ...owner,
+        disclosureVersion: version,
+        contentHash,
+        acknowledgedAt: new Date(clock.rows[0]!.now).toISOString(),
+      };
+      await tx.query(
+        `INSERT INTO ops.phase1_referral_passenger_fee_acknowledgements
+         (tenant_id,partner_id,partner_program_id,entry_slug,drts_passenger_id,disclosure_version,content_hash,acknowledged_at,record)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)
+         ON CONFLICT (tenant_id,partner_id,partner_program_id,entry_slug,drts_passenger_id,disclosure_version) DO NOTHING`,
+        [
+          owner.tenantId,
+          owner.partnerId,
+          owner.partnerProgramId,
+          owner.entrySlug,
+          owner.drtsPassengerId,
+          version,
+          contentHash,
+          record.acknowledgedAt,
+          JSON.stringify(record),
+        ],
+      );
+      // Read the concurrent winner's original time, never overwrite it on retry.
+      const stored = await this.findReferralFeeAcknowledgement(
+        owner,
+        version,
+        tx,
+      );
+      if (!stored || stored.contentHash !== contentHash)
+        throw new ApiRequestError(
+          503,
+          "FEE_DISCLOSURE_UNAVAILABLE",
+          "Fee acknowledgement readback is unavailable.",
+        );
+      return stored;
+    });
+  }
+
+  async insertReferralOrderFeeConfirmation(
+    record: ReferralOrderFeeConfirmation,
+    tx: OwnedMobilityQueryExecutor,
+  ) {
+    this.requireReferralStorage();
+    await tx.query(
+      `INSERT INTO ops.phase1_referral_order_fee_confirmations
+       (order_id,quote_id,tenant_id,partner_id,partner_program_id,entry_slug,drts_passenger_id,disclosure_version,content_hash,fee_confirmed_at,record)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
+      [
+        record.orderId,
+        record.quoteId,
+        record.tenantId,
+        record.partnerId,
+        record.partnerProgramId,
+        record.entrySlug,
+        record.drtsPassengerId,
+        record.disclosureVersion,
+        record.contentHash,
+        record.feeConfirmedAt,
+        JSON.stringify(record),
+      ],
+    );
   }
 
   async insertReferralFareQuoteSnapshot(

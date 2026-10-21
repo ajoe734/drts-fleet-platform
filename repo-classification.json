@@ -173,6 +173,12 @@
       "status": "active"
     },
     {
+      "id": "dev-ops-enablement-tools",
+      "pattern": "^tools/dev-ops-enablement/",
+      "classification": "development_tool",
+      "status": "active"
+    },
+    {
       "id": "development-tools",
       "pattern": "^tools/(?:development-orchestrator|local-development|task-dispatch|system-remediation)/",
       "classification": "development_tool",

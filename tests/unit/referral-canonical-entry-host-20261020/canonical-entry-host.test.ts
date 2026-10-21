@@ -242,7 +242,9 @@ describe("current canonical Referral entry deployment and original setup", () =>
     expect(ports.issue).toHaveBeenCalledWith({
       entrySlug,
       entryHost: canonicalHost,
-      partnerUserRef: `referral-demo-${entrySlug}`,
+      partnerUserRef: expect.stringMatching(
+        new RegExp(`^referral-demo-${entrySlug}-[0-9a-f-]{36}$`),
+      ),
       consentBundle: null,
     });
     expect(ports.consume).toHaveBeenCalledWith({

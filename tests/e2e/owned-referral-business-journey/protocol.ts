@@ -7,6 +7,7 @@ export type Role =
   | "api"
   | "publicApi"
   | "referralApi"
+  | "opsApi"
   | "admin"
   | "ops"
   | "fleet"
@@ -17,7 +18,10 @@ export type Origins = Record<
   string
 >;
 const originRole = (role: Role) =>
-  role === "driver" || role === "publicApi" || role === "referralApi"
+  role === "driver" ||
+  role === "publicApi" ||
+  role === "referralApi" ||
+  role === "opsApi"
     ? "api"
     : role;
 
@@ -26,15 +30,237 @@ export class JourneyFailure extends Error {
     public readonly stage: string,
     public readonly status?: number,
     public readonly code?: string,
+    public readonly transportFacts?: NativeTransportFailureFacts,
   ) {
     super(
       `${stage}${status ? `: HTTP ${status}` : ""}${code ? ` ${code}` : ""}`,
     );
   }
 }
+
+type NativeTransportFailureFacts = {
+  nativeFailureClass: string;
+  nativeCauseCode: string;
+  requestAborted: boolean;
+  requestDurationMs: number;
+  requestMethod: string;
+  requestRoute: "/" | "OTHER";
+};
+
+function nativeTransportFailureFacts(
+  error: unknown,
+  signal: AbortSignal,
+  startedAt: number,
+  method: string,
+  path: string,
+): NativeTransportFailureFacts {
+  let nativeFailureClass = "UNKNOWN";
+  let nativeCauseCode = "UNKNOWN";
+  // Fetch errors can retain credentials in their message, URL, stack or cause.
+  // Read only standard names/codes; even an accessor throwing is just unknown.
+  try {
+    const name = (error as { name?: unknown } | null)?.name;
+    if (
+      typeof name === "string" &&
+      [
+        "Error",
+        "TypeError",
+        "RangeError",
+        "SyntaxError",
+        "AbortError",
+        "TimeoutError",
+        "AggregateError",
+      ].includes(name)
+    )
+      nativeFailureClass = name;
+  } catch {
+    /* unknown native class */
+  }
+  try {
+    const code = (error as { cause?: { code?: unknown } } | null)?.cause?.code;
+    if (
+      typeof code === "string" &&
+      [
+        "ECONNRESET",
+        "ECONNREFUSED",
+        "ETIMEDOUT",
+        "ENOTFOUND",
+        "EAI_AGAIN",
+        "UND_ERR_CONNECT_TIMEOUT",
+        "UND_ERR_HEADERS_TIMEOUT",
+        "UND_ERR_BODY_TIMEOUT",
+        "UND_ERR_SOCKET",
+        "CERT_HAS_EXPIRED",
+        "ERR_TLS_CERT_ALTNAME_INVALID",
+        "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+      ].includes(code)
+    )
+      nativeCauseCode = code;
+  } catch {
+    /* unknown native cause */
+  }
+  const elapsed = performance.now() - startedAt;
+  return {
+    nativeFailureClass,
+    nativeCauseCode,
+    requestAborted: signal.aborted,
+    requestDurationMs:
+      Number.isFinite(elapsed) && elapsed >= 0
+        ? Math.min(Math.floor(elapsed), 86_400_000)
+        : 0,
+    requestMethod: [
+      "GET",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "HEAD",
+      "OPTIONS",
+    ].includes(method)
+      ? method
+      : "OTHER",
+    requestRoute: path === "/" ? "/" : "OTHER",
+  };
+}
 export function requireFact(value: unknown, stage: string): asserts value {
   if (!value) throw new JourneyFailure(stage);
 }
+export type ReceiptPdfParser = (bytes: Buffer) => Promise<{ text: string }>;
+
+/** Validate each actual file independently; PDF creation metadata may differ. */
+export async function validateActualReceiptPdfBytes(
+  bytes: Buffer,
+  expectedText: readonly string[],
+  parse: ReceiptPdfParser,
+): Promise<void> {
+  requireFact(
+    bytes.length > 0 && bytes.subarray(0, 5).toString("ascii") === "%PDF-",
+    "actual nonformal PDF bytes",
+  );
+  const parsed = await parse(bytes);
+  const compact = (value: string) => value.replace(/\s+/g, "");
+  const pdfText = compact(parsed.text);
+  for (const expected of expectedText)
+    requireFact(
+      pdfText.includes(compact(expected)),
+      "PDF contains the same completed order and actual recorded fare",
+    );
+}
+
+type NativeReceiptPdfDownload = {
+  url(): string;
+  suggestedFilename(): string;
+  failure(): Promise<string | null>;
+  path(): Promise<string | null>;
+};
+
+/** Native attachment downloads can bypass Playwright's user routing entirely. */
+export async function consumeNativeReceiptPdfDownload(
+  ports: {
+    waitForDownload(): Promise<NativeReceiptPdfDownload>;
+    click(): Promise<void>;
+    readFile(path: string): Promise<Buffer>;
+  },
+  expected: { url: string; filename: string },
+  validateBytes: (bytes: Buffer) => Promise<void>,
+): Promise<Buffer> {
+  // Attach the rejection handler before the action; a failed click cannot leave
+  // an unhandled waiter while the normal owned-resource cleanup runs.
+  const pending = ports.waitForDownload();
+  void pending.catch(() => undefined);
+  await ports.click();
+  const download = await pending;
+  requireFact(
+    download.url() === expected.url &&
+      download.suggestedFilename() === expected.filename &&
+      (await download.failure()) === null,
+    "actual browser same-order PDF download",
+  );
+  const path = text(
+    await download.path(),
+    "browser PDF download file required",
+  );
+  const bytes = await ports.readFile(path);
+  await validateBytes(bytes);
+  return bytes;
+}
+
+type OriginalUiCancellationResponse = {
+  url(): string;
+  status(): number;
+  headers(): Record<string, string>;
+  body(): Promise<Buffer>;
+};
+
+/** Read the one original UI POST before releasing its navigation-causing ACK. */
+export async function captureOriginalUiCancellation<
+  Response extends OriginalUiCancellationResponse,
+>(
+  route: {
+    request(): {
+      method(): string;
+      url(): string;
+      postDataJSON(): unknown;
+    };
+    fetch(options: {
+      maxRedirects: 0;
+      maxRetries: 0;
+      timeout: 15000;
+    }): Promise<Response>;
+    fulfill(options: { response: Response; body: Buffer }): Promise<void>;
+  },
+  expected: { url: string; orderId: string; runtime: string },
+): Promise<CallResult & { command: ObjectData; payload: ObjectData }> {
+  const request = route.request();
+  requireFact(
+    request.method() === "POST" && request.url() === expected.url,
+    "actual UI cancellation exact original POST",
+  );
+  const command = object(request.postDataJSON());
+  requireFact(
+    typeof command.idempotencyKey === "string",
+    "actual UI cancellation command key",
+  );
+  // Explicitly no request retries or replacement business command.
+  const response = await route.fetch({
+    maxRedirects: 0,
+    maxRetries: 0,
+    timeout: 15000,
+  });
+  const bytes = await response.body();
+  const headers = response.headers();
+  const status = response.status();
+  requireFact(
+    response.url() === expected.url &&
+      headers["x-drts-candidate-sha"] === expected.runtime,
+    "actual UI cancellation response runtime binding",
+  );
+  requireFact(
+    bytes.length <= 1024 * 1024,
+    "bounded actual UI cancellation response",
+  );
+  const payload = object(JSON.parse(bytes.toString("utf8")));
+  if (status === 200) {
+    requireFact(payload.ok === true, "actual UI cancellation success envelope");
+    requireFact(
+      object(payload.data).orderId === expected.orderId,
+      "actual UI cancellation same owned order",
+    );
+  } else requireFact(payload.ok === false, "actual UI denial envelope");
+  const captured = {
+    status,
+    data: status >= 400 ? payload : payload.data,
+    headers: new Headers(headers),
+    bytes,
+    command,
+    payload,
+  };
+  // After this release the product may perform full-page navigation. Never read
+  // a response/request method again; only the captured RAM values are returned.
+  await route.fulfill({ response, body: bytes });
+  return captured;
+}
+
 export function object(value: unknown): ObjectData {
   requireFact(
     value && typeof value === "object" && !Array.isArray(value),
@@ -178,6 +404,7 @@ export type BookingJournalContext = {
   passengerName: string;
   passengerPhone: string;
   vehicleType: string | null;
+  feeDisclosureVersion?: string;
 };
 export type BookingJournalSnapshot = Readonly<{
   version: 1;
@@ -206,6 +433,8 @@ const bookingBusinessFields = new Set([
   "partnerUserRef",
   "idempotencyKey",
   "scheduledAt",
+  "feeDisclosureVersion",
+  "feeConfirmed",
 ]);
 export class BookingWriteJournal {
   private attempted = false;
@@ -251,10 +480,22 @@ export class BookingWriteJournal {
       "booking journal forbids credential or unknown fields",
     );
     requireFact(
-      Object.values(body).every(
-        (item) => typeof item === "string" && item.length <= 2048,
+      Object.entries(body).every(([key, item]) =>
+        key === "feeConfirmed"
+          ? typeof item === "boolean"
+          : typeof item === "string" && item.length <= 2048,
       ),
       "booking business fields must be bounded strings",
+    );
+    // Historical original journals omit both fields; never upgrade their body/key.
+    // Every new caller supplies an expected version from its actual quote.
+    requireFact(
+      this.expected.feeDisclosureVersion === undefined
+        ? body.feeDisclosureVersion === undefined &&
+            body.feeConfirmed === undefined
+        : body.feeDisclosureVersion === this.expected.feeDisclosureVersion &&
+            body.feeConfirmed === true,
+      "booking exact explicit fee confirmation",
     );
     for (const key of [
       "entrySlug",
@@ -328,6 +569,234 @@ export class BookingWriteJournal {
     this.snapshot = acknowledged;
   }
 }
+
+type BookingObservationPhase =
+  | "booking-ui-click"
+  | "booking-response-wait"
+  | "booking-response-request"
+  | "booking-response-json"
+  | "booking-response-body"
+  | "booking-response-release"
+  | "booking-original-route"
+  | "booking-ack-persist";
+
+function bookingObservationFailure(
+  phase: BookingObservationPhase,
+  error: unknown,
+): JourneyFailure {
+  if (error instanceof JourneyFailure) return error;
+  const name = error instanceof Error ? error.name : "";
+  const safeClass = [
+    "TimeoutError",
+    "SyntaxError",
+    "TypeError",
+    "Error",
+  ].includes(name)
+    ? name
+    : "UnknownError";
+  // Native messages/stacks can contain URLs, request bodies or authority.
+  return new JourneyFailure(`${phase}:${safeClass}`);
+}
+
+export function originalBookingRouteFailure(error: unknown): JourneyFailure {
+  return bookingObservationFailure("booking-original-route", error);
+}
+
+export type BookingAckResponse = {
+  url(): string;
+  status(): number;
+  headers(): Record<string, string>;
+  json(): Promise<unknown>;
+  request(): {
+    url(): string;
+    method(): string;
+    headers(): Record<string, string>;
+    postData(): string | null;
+  };
+};
+
+/** Attach before clicking; consume ACK bytes while the UI action can still run. */
+export async function observeOriginalBookingAck(
+  responsePromise: Promise<BookingAckResponse>,
+  frozen: () => {
+    url: string;
+    runtimeSha: string;
+    journal: BookingWriteJournal | undefined;
+    quote: ObjectData | undefined;
+  },
+  claim: (orderId: string) => void,
+  evidence: Evidence,
+): Promise<{ orderId: string; quoteId: string }> {
+  let phase: BookingObservationPhase = "booking-response-wait";
+  try {
+    const response = await responsePromise;
+    const status = response.status();
+    evidence.record({ stage: "booking-response-observed", status });
+    phase = "booking-response-request";
+    const current = frozen();
+    const journal = current.journal;
+    const quote = current.quote;
+    requireFact(
+      journal && quote,
+      "frozen current booking proposal required before ACK",
+    );
+    const pending = journal.current;
+    requireFact(
+      pending?.state === "ack_unknown",
+      "original pending booking journal required",
+    );
+    const request = response.request();
+    requireFact(
+      response.url() === current.url &&
+        request.url() === current.url &&
+        request.method() === "POST",
+      "booking ACK exact original endpoint",
+    );
+    requireFact(
+      response.headers()["x-drts-candidate-sha"] === current.runtimeSha,
+      "booking ACK exact served runtime",
+    );
+    requireFact(
+      current.runtimeSha === pending.runtimeSha,
+      "booking ACK original journal runtime binding",
+    );
+    const raw = text(
+      request.postData(),
+      "booking ACK original request body required",
+    );
+    requireFact(
+      raw === pending.body &&
+        hash(Buffer.from(raw, "utf8")) === pending.bodySha256 &&
+        request.headers()["idempotency-key"] === pending.idempotencyKey,
+      "booking ACK exact frozen bytes and header key",
+    );
+    const command = object(JSON.parse(raw));
+    requireFact(
+      command.quoteId === quote.quoteId &&
+        command.quoteId === pending.quoteId &&
+        command.idempotencyKey === pending.idempotencyKey,
+      "one actual UI quote/idempotency binding",
+    );
+    phase = "booking-response-json";
+    const payload = object(await response.json());
+    if (status < 200 || status >= 300 || payload.ok !== true) {
+      const error = payload.error;
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? error.code
+          : undefined;
+      throw new JourneyFailure(
+        "booking-response-http",
+        status,
+        typeof code === "string" && /^[A-Z0-9_]{1,100}$/.test(code)
+          ? code
+          : undefined,
+      );
+    }
+    const created = object(payload.data);
+    const orderId = text(created.orderId);
+    const quoteId = text(object(created.quote).quoteId);
+    requireFact(quoteId === pending.quoteId, "create consumed exact quote");
+    if (command.feeConfirmed === true) {
+      const confirmation = object(created.feeConfirmation);
+      requireFact(
+        confirmation.orderId === orderId &&
+          confirmation.quoteId === quoteId &&
+          confirmation.disclosureVersion === command.feeDisclosureVersion &&
+          confirmation.contentHash === quote.feeContentHash &&
+          typeof confirmation.feeConfirmedAt === "string" &&
+          Number.isFinite(Date.parse(confirmation.feeConfirmedAt)),
+        "actual server per-order fee confirmation",
+      );
+    }
+    // Recognition follows all ownership bindings. Even a disk ACK failure leaves
+    // this known own ID available to the normal same-subject cleanup readback.
+    claim(orderId);
+    phase = "booking-ack-persist";
+    await journal.acknowledge(orderId, quoteId);
+    evidence.record({
+      stage: "booking-ack-durable",
+      status,
+      orderId,
+      quoteId,
+      result: "observed",
+    });
+    return { orderId, quoteId };
+  } catch (error) {
+    const failure = bookingObservationFailure(phase, error);
+    evidence.failure(failure);
+    throw failure;
+  }
+}
+
+/** Keep the real server ACK available until durable recognition precedes UI navigation. */
+export async function settleRoutedOriginalBookingAck<T>(
+  response: {
+    url(): string;
+    status(): number;
+    headers(): Record<string, string>;
+    body(): Promise<Buffer>;
+  },
+  request: ReturnType<BookingAckResponse["request"]>,
+  observe: (original: BookingAckResponse) => Promise<T>,
+  release: (bytes: Buffer) => Promise<void>,
+): Promise<T> {
+  let bytes: Buffer;
+  try {
+    bytes = await response.body();
+    requireFact(bytes.length <= 1024 * 1024, "bounded booking ACK required");
+  } catch (error) {
+    throw bookingObservationFailure("booking-response-body", error);
+  }
+  // The response is from this route's one real network fetch. There is no
+  // replacement request, response, credential, payload or inferred order ID.
+  const result = await observe({
+    url: () => response.url(),
+    status: () => response.status(),
+    headers: () => response.headers(),
+    json: async () => JSON.parse(bytes.toString("utf8")),
+    request: () => request,
+  }).then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  let releaseError: unknown;
+  try {
+    // Deliver those exact server bytes even if the observer rejected them.
+    // A refused or malformed ACK must not become a fabricated browser success.
+    await release(bytes);
+  } catch (error) {
+    releaseError = error;
+  }
+  if (!result.ok) throw result.error;
+  if (releaseError)
+    throw bookingObservationFailure("booking-response-release", releaseError);
+  return result.value;
+}
+
+/** A failed click stays failed; settle its one observer before owned cleanup. */
+export async function clickAndSettleOriginalBookingAck<T>(
+  click: () => Promise<void>,
+  observation: Promise<T>,
+): Promise<T> {
+  // Attach the rejection handler immediately, before waiting for the UI action.
+  // Keep the failure as data until this same observation is awaited below.
+  const settled = observation.then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
+  let clickFailure: JourneyFailure | undefined;
+  try {
+    await click();
+  } catch (error) {
+    clickFailure = bookingObservationFailure("booking-ui-click", error);
+  }
+  const result = await settled;
+  if (clickFailure) throw clickFailure;
+  if (!result.ok) throw result.error;
+  return result.value;
+}
+
 export type SafeEvent = {
   stage: string;
   status?: number;
@@ -349,6 +818,12 @@ export type SafeEvent = {
   quoteId?: string;
   estimatedMinMinor?: number;
   estimatedMaxMinor?: number;
+  nativeFailureClass?: string;
+  nativeCauseCode?: string;
+  requestAborted?: boolean;
+  requestDurationMs?: number;
+  requestMethod?: string;
+  requestRoute?: "/" | "OTHER";
   result?: "observed" | "retained" | "unexecuted" | "failed" | "cleaned";
 };
 const eventFields = new Set([
@@ -372,6 +847,12 @@ const eventFields = new Set([
   "quoteId",
   "estimatedMinMinor",
   "estimatedMaxMinor",
+  "nativeFailureClass",
+  "nativeCauseCode",
+  "requestAborted",
+  "requestDurationMs",
+  "requestMethod",
+  "requestRoute",
   "result",
 ]);
 export class Evidence {
@@ -394,6 +875,7 @@ export class Evidence {
             stage: error.stage.replace(/[^a-z0-9_.:-]/gi, "-").slice(0, 100),
             ...(error.status === undefined ? {} : { status: error.status }),
             ...(error.code === undefined ? {} : { code: error.code }),
+            ...error.transportFacts,
             result: "failed",
           }
         : { stage: "unexpected-consumer-failure", result: "failed" },
@@ -494,12 +976,14 @@ export class NativeTransport {
       !Object.keys(extra).some((key) => key.toLowerCase() === "origin"),
       "caller cannot replace browser origin",
     );
+    const requestSignal = AbortSignal.timeout(15_000);
+    const requestStartedAt = performance.now();
     let response: Response;
     try {
       response = await this.fetcher(url, {
         method: options.method ?? "GET",
         redirect: "manual",
-        signal: AbortSignal.timeout(15_000),
+        signal: requestSignal,
         headers: {
           "Content-Type": "application/json",
           ...credentials,
@@ -510,8 +994,19 @@ export class NativeTransport {
           ? {}
           : { body: JSON.stringify(options.body) }),
       });
-    } catch {
-      throw new JourneyFailure(`${role}:transport`);
+    } catch (error) {
+      throw new JourneyFailure(
+        `${role}:transport`,
+        undefined,
+        undefined,
+        nativeTransportFailureFacts(
+          error,
+          requestSignal,
+          requestStartedAt,
+          options.method ?? "GET",
+          path,
+        ),
+      );
     }
     const reader = response.body?.getReader();
     const chunks: Uint8Array[] = [];
@@ -549,6 +1044,14 @@ export class NativeTransport {
         code && typeof code === "object"
           ? (code as ObjectData).code
           : undefined;
+      // Only this explicit application denial can authorize the retained-order
+      // recovery's next normal dispatch action. An edge/mixed-version response
+      // must never be interpreted as that application's cancellation decision.
+      if (value === "ORDER_NOT_CANCELABLE")
+        requireFact(
+          response.headers.get("x-drts-candidate-sha") === this.expectedRuntime,
+          `${role}:runtime SHA mismatch`,
+        );
       throw new JourneyFailure(
         `${role}:request`,
         response.status,
@@ -563,6 +1066,10 @@ export class NativeTransport {
             "NOT_FOUND",
             "FORBIDDEN",
             "VALIDATION_ERROR",
+            "ORDER_NOT_CANCELABLE",
+            "AUTH_REALM_DENIED",
+            "AUTH_SCOPE_DENIED",
+            "DEV_WORKFORCE_SESSION_EXCHANGE_DENIED",
           ].includes(value)
           ? value
           : undefined,
@@ -581,7 +1088,7 @@ export class NativeTransport {
       requireFact(
         data !== undefined ||
           object(payload).ok !== undefined ||
-          (role === "admin" &&
+          ((role === "admin" || role === "ops") &&
             new URL(url).pathname === "/control-plane-proxy/auth/token" &&
             options.method?.toUpperCase() === "POST" &&
             typeof object(payload).token === "string" &&
@@ -598,6 +1105,33 @@ export class NativeTransport {
     };
   }
 }
+export function assertBusinessOrderProduct(
+  order: ObjectData,
+  expectedQuoteId: string,
+) {
+  // OwnedOrderRecord permits an absent/null precise code. Its existing
+  // compatibility contract derives that code from the bucket/subtype only.
+  // An explicit contradictory code must still fail, including falsy values.
+  requireFact(
+    order.serviceBucket === "business_dispatch" &&
+      order.businessDispatchSubtype === "enterprise_dispatch" &&
+      (order.serviceProductCode == null ||
+        order.serviceProductCode === "enterprise_dispatch"),
+    "actual business order qualification",
+  );
+  const quote = object(object(order.referralPassengerLifecycle).quote);
+  requireFact(
+    typeof expectedQuoteId === "string" &&
+      expectedQuoteId.trim().length > 0 &&
+      quote.quoteId === expectedQuoteId &&
+      quote.businessDispatchSubtype === "enterprise_dispatch" &&
+      quote.serviceProductCode === "enterprise_dispatch" &&
+      (order.serviceProductCode ?? order.businessDispatchSubtype) ===
+        quote.serviceProductCode,
+    "same committed business quote qualification",
+  );
+}
+
 export function assertOwnPair(
   candidate: ObjectData,
   own: { driverId: string; vehicleId: string },

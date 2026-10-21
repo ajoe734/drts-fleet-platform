@@ -1,3 +1,4 @@
+import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import { randomUUID } from "node:crypto";
 import { vi } from "vitest";
 import type {
@@ -113,6 +114,28 @@ export class ReferralSqlPort {
       return result(this.tariffs);
     if (sql === "SELECT clock_timestamp() AS now")
       return result([{ now: this.clock ?? new Date().toISOString() }]);
+    if (
+      sql.startsWith(
+        "SELECT record FROM ops.phase1_referral_passenger_fee_acknowledgements",
+      )
+    ) {
+      const record = this.table(
+        "ops.phase1_referral_passenger_fee_acknowledgements",
+      ).get(JSON.stringify(v.slice(0, 6)));
+      return result(record ? [{ record }] : []);
+    }
+    if (
+      sql.startsWith(
+        "INSERT INTO ops.phase1_referral_passenger_fee_acknowledgements",
+      )
+    ) {
+      const table = this.table(
+        "ops.phase1_referral_passenger_fee_acknowledgements",
+      );
+      const key = JSON.stringify(v.slice(0, 6));
+      if (!table.has(key)) table.set(key, JSON.parse(String(v[8])));
+      return result();
+    }
     const quotes = this.table("ops.phase1_referral_fare_quote_snapshots");
     if (
       sql.startsWith(
@@ -539,10 +562,19 @@ export async function domainFixture() {
     overrides: Record<string, unknown> = {},
   ) {
     who ??= await identity();
+    await service.acknowledgeReferralFees(
+      {
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        acknowledged: true,
+      },
+      who,
+    );
     const quote = await service.quoteReferralPassengerFare(route, who);
     return {
       ...route,
       quoteId: quote.quoteId,
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeConfirmed: true,
       passengerName: "Unit passenger",
       passengerPhone: "0912345678",
       idempotencyKey: randomUUID(),

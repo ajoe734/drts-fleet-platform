@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
+import PDFDocument from "pdfkit";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import {
   Evidence,
+  consumeNativeReceiptPdfDownload,
+  captureOriginalUiCancellation,
+  validateActualReceiptPdfBytes,
   JourneyFailure,
   NativeTransport,
   assertNoForeignActive,
@@ -55,42 +63,103 @@ function setup() {
 }
 
 describe("owned hosted journey transport", () => {
-  it("accepts the real top-level Admin auth ACK only at the exact POST exchange", async () => {
+  it.each(["admin", "ops"] as const)(
+    "accepts the real top-level %s auth ACK only at the exact POST exchange",
+    async (role) => {
+      const { tx, fetcher } = setup();
+      const ack = {
+        token: "synthetic-platform",
+        sessionId: "synthetic-sid",
+        expiresIn: 300,
+      };
+      const topLevel = () =>
+        new Response(JSON.stringify(ack), {
+          headers: { "x-drts-candidate-sha": SHA },
+        });
+      fetcher.mockImplementation(async () => topLevel());
+      expect(
+        (
+          await tx.call(role, "/control-plane-proxy/auth/token", {
+            method: "POST",
+            body: {},
+          })
+        ).data,
+      ).toEqual(ack);
+      for (const [invalidRole, path, method] of [
+        ["api", "/control-plane-proxy/auth/token", "POST"],
+        ["opsApi", "/control-plane-proxy/auth/token", "POST"],
+        [role, "/control-plane-proxy/other", "POST"],
+        [role, "/control-plane-proxy/auth/token", "GET"],
+      ] as const)
+        await expect(tx.call(invalidRole, path, { method })).rejects.toThrow(
+          "response envelope",
+        );
+      fetcher.mockResolvedValueOnce(
+        new Response(JSON.stringify({ ...ack, sessionId: "" }), {
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+      );
+      await expect(
+        tx.call(role, "/control-plane-proxy/auth/token", { method: "POST" }),
+      ).rejects.toThrow("response envelope");
+    },
+  );
+
+  it("keeps distinct Ops and Admin sessions with the API invocation proof", async () => {
     const { tx, fetcher } = setup();
-    const ack = {
-      token: "synthetic-platform",
-      sessionId: "synthetic-sid",
-      expiresIn: 300,
-    };
-    const topLevel = () =>
+    tx.setSession("api", "synthetic-admin");
+    tx.setSession("opsApi", "synthetic-ops");
+    tx.setSession("ops", "synthetic-ops");
+    await tx.call("api", "/api/auth/session");
+    await tx.call("opsApi", "/api/auth/session");
+    await tx.call("ops", "/control-plane-proxy/auth/session");
+    const headers = fetcher.mock.calls.map(
+      ([, options]) => new Headers(options?.headers),
+    );
+    expect(at(headers, 0).get("authorization")).toBe("Bearer synthetic-admin");
+    expect(at(headers, 1).get("authorization")).toBe("Bearer synthetic-ops");
+    expect(at(headers, 0).get("x-serverless-authorization")).toBe(
+      "Bearer cloud-api",
+    );
+    expect(at(headers, 1).get("x-serverless-authorization")).toBe(
+      "Bearer cloud-api",
+    );
+    expect(at(headers, 1).has("x-drts-authorization")).toBe(false);
+    expect(at(headers, 2).get("x-drts-authorization")).toBe(
+      "Bearer synthetic-ops",
+    );
+    expect(at(headers, 2).get("x-serverless-authorization")).toBe(
+      "Bearer cloud-ops",
+    );
+    expect(() => tx.headers("opsApi", `${origins.ops}/api/orders/own`)).toThrow(
+      "role origin isolation",
+    );
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("starts a fresh Ops exchange without carrying a supplied Admin identity", async () => {
+    const { tx, fetcher } = setup();
+    tx.setSession("api", "synthetic-admin");
+    tx.setSession("admin", "synthetic-admin");
+    const ack = { token: "synthetic-ops", sessionId: "synthetic-ops-sid" };
+    fetcher.mockResolvedValueOnce(
       new Response(JSON.stringify(ack), {
         headers: { "x-drts-candidate-sha": SHA },
-      });
-    fetcher.mockImplementation(async () => topLevel());
+      }),
+    );
     expect(
       (
-        await tx.call("admin", "/control-plane-proxy/auth/token", {
+        await tx.call("ops", "/control-plane-proxy/auth/token", {
           method: "POST",
           body: {},
         })
       ).data,
     ).toEqual(ack);
-    for (const [role, path, method] of [
-      ["api", "/control-plane-proxy/auth/token", "POST"],
-      ["admin", "/control-plane-proxy/other", "POST"],
-      ["admin", "/control-plane-proxy/auth/token", "GET"],
-    ] as const)
-      await expect(tx.call(role, path, { method })).rejects.toThrow(
-        "response envelope",
-      );
-    fetcher.mockResolvedValueOnce(
-      new Response(JSON.stringify({ ...ack, sessionId: "" }), {
-        headers: { "x-drts-candidate-sha": SHA },
-      }),
-    );
-    await expect(
-      tx.call("admin", "/control-plane-proxy/auth/token", { method: "POST" }),
-    ).rejects.toThrow("response envelope");
+    const headers = new Headers(at(fetcher.mock.calls, 0)[1]?.headers);
+    expect(headers.has("x-drts-authorization")).toBe(false);
+    expect(headers.has("authorization")).toBe(false);
+    expect(headers.get("x-serverless-authorization")).toBe("Bearer cloud-ops");
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the own Partner bearer on canonical API without borrowing Admin or public authority", async () => {
@@ -260,25 +329,33 @@ describe("owned hosted journey transport", () => {
     ).toBe("Bearer genuine-fleet");
   });
 
-  it("preserves a genuine denial status and safe code without exporting secret response bodies", async () => {
-    const { tx, fetcher } = setup();
-    fetcher.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          error: { code: "SCOPE_REQUIRED", message: "secret_token" },
-        }),
-        { status: 403 },
-      ),
-    );
-    const failure = await tx
-      .call("ops", "/control-plane-proxy/dispatch/assign")
-      .catch((error) => error);
-    expect(failure).toBeInstanceOf(JourneyFailure);
-    expect(failure.status).toBe(403);
-    expect(failure.code).toBe("SCOPE_REQUIRED");
-    expect(String(failure)).not.toContain("secret_token");
-    expect(fetcher).toHaveBeenCalledTimes(1);
-  });
+  it.each([
+    "SCOPE_REQUIRED",
+    "AUTH_REALM_DENIED",
+    "AUTH_SCOPE_DENIED",
+    "DEV_WORKFORCE_SESSION_EXCHANGE_DENIED",
+  ])(
+    "preserves genuine denial %s without exporting secret response bodies",
+    async (code) => {
+      const { tx, fetcher } = setup();
+      fetcher.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code, message: "secret_token" },
+          }),
+          { status: 403 },
+        ),
+      );
+      const failure = await tx
+        .call("ops", "/control-plane-proxy/dispatch/assign")
+        .catch((error) => error);
+      expect(failure).toBeInstanceOf(JourneyFailure);
+      expect(failure.status).toBe(403);
+      expect(failure.code).toBe(code);
+      expect(String(failure)).not.toContain("secret_token");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("requires the served runtime SHA even on explicitly expected conflicts", async () => {
     const { tx, fetcher } = setup();
@@ -302,6 +379,43 @@ describe("owned hosted journey transport", () => {
       ).status,
     ).toBe(409);
   });
+
+  it.each([SHA, "b".repeat(40), undefined])(
+    "trusts the cancellation denial for recovery only from its exact served runtime (%s)",
+    async (served) => {
+      const { tx, fetcher } = setup();
+      fetcher.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code: "ORDER_NOT_CANCELABLE", message: "private detail" },
+          }),
+          {
+            status: 409,
+            headers: served ? { "x-drts-candidate-sha": served } : {},
+          },
+        ),
+      );
+      const failure = await tx
+        .call("api", "/api/passenger/orders/own/cancel", {
+          method: "POST",
+          body: { reason: "synthetic own cleanup" },
+        })
+        .catch((error: unknown) => error);
+      expect(failure).toBeInstanceOf(JourneyFailure);
+      if (served === SHA)
+        expect(failure).toMatchObject({
+          status: 409,
+          code: "ORDER_NOT_CANCELABLE",
+        });
+      else
+        expect(failure).toMatchObject({
+          stage: "api:runtime SHA mismatch",
+          code: undefined,
+        });
+      expect(String(failure)).not.toContain("private detail");
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
 
   it("rejects redirects and oversized responses without retrying", async () => {
     const { tx, fetcher } = setup();
@@ -511,4 +625,507 @@ describe("owned identity and actual evidence invariants", () => {
     expect(() => origin("https://user:secret@api.example.test")).toThrow();
     expect(() => origin("https://api.example.test/path")).toThrow();
   });
+});
+
+describe("native fetch failure diagnostics", () => {
+  it("retains a native connect code and root context without exposing authority or retrying", async () => {
+    const { tx, fetcher } = setup();
+    const privateValue = "synthetic-private-url-body-header";
+    fetcher.mockRejectedValueOnce(
+      new TypeError(privateValue, {
+        cause: { code: "UND_ERR_CONNECT_TIMEOUT", message: privateValue },
+      }),
+    );
+    const failure = await tx
+      .call("fleet", "/", { raw: true })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(JourneyFailure);
+    const evidence = new Evidence();
+    evidence.failure(failure);
+    expect(evidence.events).toEqual([
+      expect.objectContaining({
+        stage: "fleet:transport",
+        result: "failed",
+        nativeFailureClass: "TypeError",
+        nativeCauseCode: "UND_ERR_CONNECT_TIMEOUT",
+        requestAborted: false,
+        requestMethod: "GET",
+        requestRoute: "/",
+      }),
+    ]);
+    const event = at(evidence.events, 0);
+    expect(event.requestDurationMs).toBeGreaterThanOrEqual(0);
+    expect(event.status).toBeUndefined();
+    expect(event.code).toBeUndefined();
+    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
+    expect(JSON.stringify(failure)).not.toContain(privateValue);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(at(fetcher.mock.calls, 0)[1]).toMatchObject({
+      method: "GET",
+      redirect: "manual",
+    });
+    expect(
+      new Headers(at(fetcher.mock.calls, 0)[1]?.headers).get(
+        "x-drts-authorization",
+      ),
+    ).toBe("Bearer genuine-fleet");
+  });
+
+  it.each(["AbortError", "TimeoutError"])(
+    "keeps observed %s and the original 15s signal without inferring an HTTP status",
+    async (name) => {
+      const { tx, fetcher } = setup();
+      const controller = new AbortController();
+      const timeout = vi
+        .spyOn(AbortSignal, "timeout")
+        .mockReturnValueOnce(controller.signal);
+      try {
+        fetcher.mockImplementationOnce(async (_url, options) => {
+          expect(options?.signal).toBe(controller.signal);
+          controller.abort(
+            new DOMException("synthetic-sensitive-reason", name),
+          );
+          throw new DOMException("synthetic-sensitive-message", name);
+        });
+        const failure = await tx
+          .call("fleet", "/")
+          .catch((error: unknown) => error);
+        const evidence = new Evidence();
+        evidence.failure(failure);
+        expect(evidence.events).toEqual([
+          expect.objectContaining({
+            stage: "fleet:transport",
+            nativeFailureClass: name,
+            nativeCauseCode: "UNKNOWN",
+            requestAborted: true,
+            requestMethod: "GET",
+            requestRoute: "/",
+            result: "failed",
+          }),
+        ]);
+        expect(timeout).toHaveBeenCalledExactlyOnceWith(15_000);
+        expect(at(evidence.events, 0).status).toBeUndefined();
+        expect(JSON.stringify(evidence.events)).not.toContain(
+          "synthetic-sensitive",
+        );
+        expect(fetcher).toHaveBeenCalledTimes(1);
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
+  it("keeps unknown class/code and nonroot path private while preserving the original POST body", async () => {
+    const { tx, fetcher } = setup();
+    const privateValue = "synthetic-secret-payload-and-path";
+    const error = Object.assign(new Error(privateValue), {
+      name: privateValue,
+      cause: { code: privateValue },
+    });
+    fetcher.mockRejectedValueOnce(error);
+    const body = { originalIntent: privateValue };
+    const failure = await tx
+      .call("fleet", `/private/${privateValue}?key=${privateValue}`, {
+        method: "POST",
+        body,
+      })
+      .catch((error: unknown) => error);
+    const evidence = new Evidence();
+    evidence.failure(failure);
+    expect(evidence.events).toEqual([
+      expect.objectContaining({
+        stage: "fleet:transport",
+        nativeFailureClass: "UNKNOWN",
+        nativeCauseCode: "UNKNOWN",
+        requestMethod: "POST",
+        requestRoute: "OTHER",
+        requestAborted: false,
+      }),
+    ]);
+    expect(at(fetcher.mock.calls, 0)[1]?.body).toBe(JSON.stringify(body));
+    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replace the original transport failure when native metadata accessors throw", async () => {
+    const { tx, fetcher } = setup();
+    const native = Object.defineProperties(
+      {},
+      {
+        name: {
+          get() {
+            throw new Error("synthetic-private-name-getter");
+          },
+        },
+        cause: {
+          get() {
+            throw new Error("synthetic-private-cause-getter");
+          },
+        },
+      },
+    );
+    fetcher.mockRejectedValueOnce(native);
+    const failure = await tx
+      .call("fleet", "/")
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(JourneyFailure);
+    const evidence = new Evidence();
+    evidence.failure(failure);
+    expect(evidence.events).toEqual([
+      expect.objectContaining({
+        stage: "fleet:transport",
+        result: "failed",
+        nativeFailureClass: "UNKNOWN",
+        nativeCauseCode: "UNKNOWN",
+      }),
+    ]);
+    expect(JSON.stringify(evidence.events)).not.toContain("synthetic-private");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses elapsed monotonic time and leaves HTTP response failures on their original rail", async () => {
+    const { tx, fetcher } = setup();
+    const clock = vi
+      .spyOn(performance, "now")
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(137.9);
+    try {
+      fetcher.mockRejectedValueOnce(
+        new TypeError("synthetic-sensitive-message", {
+          cause: { code: "ECONNRESET" },
+        }),
+      );
+      const evidence = new Evidence();
+      evidence.failure(
+        await tx.call("fleet", "/").catch((error: unknown) => error),
+      );
+      expect(at(evidence.events, 0)).toMatchObject({
+        requestDurationMs: 37,
+        nativeCauseCode: "ECONNRESET",
+      });
+    } finally {
+      clock.mockRestore();
+    }
+    fetcher.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: "SERVICE_UNAVAILABLE" } }), {
+        status: 503,
+      }),
+    );
+    const failure = await tx
+      .call("fleet", "/")
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      stage: "fleet:request",
+      status: 503,
+      code: undefined,
+    });
+    expect((failure as JourneyFailure).transportFacts).toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("actual native receipt PDF bytes without user routing", () => {
+  const orderId = "synthetic-completed-order";
+  const expected = {
+    url: `https://referral.example.test/api/referral/receipt/${orderId}/pdf`,
+    filename: `receipt-${orderId}.pdf`,
+  };
+  const expectedText = [
+    "乘車明細（非正式稅務憑證）",
+    `行程 ID：${orderId}`,
+    "訂單編號：R-TEST-1",
+    "新北市板橋區縣民大道二段7號",
+    "臺北市信義區市府路1號",
+    "實際車資合計：NT$ 120",
+    "起步價：NT$ 85",
+    "里程費：NT$ 20",
+    "時間費：NT$ 10",
+    "夜間費：NT$ 5",
+    "付款及結算狀態未提供",
+    "02-2944-0985",
+    "1999",
+  ];
+  async function realPdf(lines = expectedText): Promise<Buffer> {
+    const doc = new PDFDocument({ compress: false });
+    const chunks: Buffer[] = [];
+    const complete = new Promise<Buffer>((resolve, reject) => {
+      doc.on("data", (chunk: Buffer) => chunks.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(chunks)));
+      doc.on("error", reject);
+    });
+    doc.font(path.resolve("apps/api/assets/fonts/NotoSansCJKtc-Regular.otf"));
+    doc.fontSize(12).text(lines.join("\n"));
+    doc.end();
+    return complete;
+  }
+  async function fixture(bytes: Buffer) {
+    const dir = await mkdtemp(path.join(tmpdir(), "owned-native-pdf-"));
+    const file = path.join(dir, "actual-downloaded-file.pdf");
+    await writeFile(file, bytes);
+    let release!: (value: {
+      url(): string;
+      suggestedFilename(): string;
+      failure(): Promise<string | null>;
+      path(): Promise<string | null>;
+    }) => void;
+    const pending = new Promise<Parameters<typeof release>[0]>((resolve) => {
+      release = resolve;
+    });
+    const download = {
+      url: () => expected.url,
+      suggestedFilename: () => expected.filename,
+      failure: async (): Promise<string | null> => null,
+      path: async (): Promise<string | null> => file,
+    };
+    const actions: string[] = [];
+    const ports = {
+      waitForDownload: vi.fn(() => {
+        actions.push("wait");
+        return pending;
+      }),
+      click: vi.fn(async () => {
+        actions.push("click");
+        // Simulate the native Download event, with no userRoute callback at all.
+        release(download);
+      }),
+      readFile: vi.fn((filePath: string) => readFile(filePath)),
+    };
+    return {
+      ports,
+      download,
+      actions,
+      file,
+      cleanup: () => rm(dir, { recursive: true, force: true }),
+    };
+  }
+  const validate = (bytes: Buffer) =>
+    validateActualReceiptPdfBytes(bytes, expectedText, parsePdf);
+
+  it("consumes the real downloaded file when native download bypasses userRoute", async () => {
+    const bytes = await realPdf();
+    const f = await fixture(bytes);
+    try {
+      const actual = await consumeNativeReceiptPdfDownload(
+        f.ports,
+        expected,
+        validate,
+      );
+      expect(f.actions).toEqual(["wait", "click"]);
+      expect(f.ports.readFile).toHaveBeenCalledExactlyOnceWith(f.file);
+      expect(actual).toEqual(bytes);
+      expect(hash(actual)).toBe(hash(bytes));
+      // The independent real parser, including Chinese font text, is the gate.
+      expect((await parsePdf(actual)).text).toContain(orderId);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+  it.each(["order", "fare", "nonPDF"] as const)(
+    "rejects a downloaded %s mismatch using its actual bytes",
+    async (mismatch) => {
+      const lines = expectedText.map((line) =>
+        mismatch === "order"
+          ? line.replace(orderId, "foreign-order")
+          : line.replace("實際車資合計：NT$ 120", "實際車資合計：NT$ 999"),
+      );
+      const bytes =
+        mismatch === "nonPDF" ? Buffer.from("not a PDF") : await realPdf(lines);
+      const f = await fixture(bytes);
+      try {
+        await expect(
+          consumeNativeReceiptPdfDownload(f.ports, expected, validate),
+        ).rejects.toBeInstanceOf(JourneyFailure);
+        expect(f.ports.readFile).toHaveBeenCalledExactlyOnceWith(f.file);
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+
+  it.each(["url", "filename", "failure", "path"] as const)(
+    "rejects native Download %s mismatch without accepting bytes",
+    async (mismatch) => {
+      const f = await fixture(await realPdf());
+      if (mismatch === "url") f.download.url = () => expected.url + "-foreign";
+      if (mismatch === "filename")
+        f.download.suggestedFilename = () => "foreign.pdf";
+      if (mismatch === "failure") f.download.failure = async () => "synthetic";
+      if (mismatch === "path") f.download.path = async () => null;
+      try {
+        await expect(
+          consumeNativeReceiptPdfDownload(f.ports, expected, validate),
+        ).rejects.toBeInstanceOf(JourneyFailure);
+        expect(f.ports.readFile).not.toHaveBeenCalled();
+      } finally {
+        await f.cleanup();
+      }
+    },
+  );
+});
+
+describe("original UI cancellation response capture before navigation release", () => {
+  const expected = {
+    url: "https://referral.example.test/api/referral/cancel/owned-case",
+    orderId: "owned-case",
+    runtime: SHA,
+  };
+  function fixture() {
+    let released = false;
+    const readBeforeRelease = () => {
+      if (released) throw new Error("synthetic response resource released");
+    };
+    const command: Record<string, unknown> = {
+      idempotencyKey: "synthetic-key",
+    };
+    const payload = {
+      ok: true,
+      data: {
+        orderId: expected.orderId,
+        status: "cancelled",
+        cancelledAt: "2026-10-21T01:00:00.000Z",
+      },
+    };
+    let bytes: Buffer = Buffer.from(JSON.stringify(payload));
+    const response = {
+      url: vi.fn(() => {
+        readBeforeRelease();
+        return expected.url;
+      }),
+      status: vi.fn(() => {
+        readBeforeRelease();
+        return 200;
+      }),
+      headers: vi.fn(() => {
+        readBeforeRelease();
+        return {
+          "x-drts-candidate-sha": SHA,
+          "content-type": "application/json",
+        };
+      }),
+      body: vi.fn(async () => {
+        readBeforeRelease();
+        return bytes;
+      }),
+    };
+    const request = {
+      method: () => "POST",
+      url: () => expected.url,
+      postDataJSON: vi.fn(() => {
+        readBeforeRelease();
+        return command;
+      }),
+    };
+    const route = {
+      request: () => request,
+      fetch: vi.fn(async () => response),
+      fulfill: vi.fn(
+        async (options: { response: typeof response; body: Buffer }) => {
+          expect(options.response).toBe(response);
+          expect(options.body).toBe(bytes);
+          released = true;
+        },
+      ),
+    };
+    return {
+      route,
+      response,
+      request,
+      payload,
+      command,
+      setBytes: (value: Buffer) => {
+        bytes = value;
+      },
+      get bytes() {
+        return bytes;
+      },
+    };
+  }
+
+  it("reads the one original POST bytes, headers and command before unchanged fulfill", async () => {
+    const f = fixture();
+    const snapshot = await captureOriginalUiCancellation(f.route, expected);
+    expect(f.route.fetch).toHaveBeenCalledExactlyOnceWith({
+      maxRedirects: 0,
+      maxRetries: 0,
+      timeout: 15000,
+    });
+    expect(f.route.fulfill).toHaveBeenCalledTimes(1);
+    expect(f.response.body).toHaveBeenCalledTimes(1);
+    expect(f.request.postDataJSON).toHaveBeenCalledTimes(1);
+    expect(snapshot.bytes).toBe(f.bytes);
+    expect(snapshot.command).toBe(f.command);
+    expect(snapshot.status).toBe(200);
+    expect(snapshot.data).toEqual(f.payload.data);
+    expect(snapshot.headers.get("x-drts-candidate-sha")).toBe(SHA);
+    // A post-release body read really fails; the returned original RAM bytes work.
+    await expect(f.response.body()).rejects.toThrow(
+      "synthetic response resource released",
+    );
+    expect(JSON.parse(Buffer.from(snapshot.bytes).toString("utf8"))).toEqual(
+      f.payload,
+    );
+  });
+
+  it.each([
+    "order",
+    "runtime",
+    "responseURL",
+    "oversize",
+    "JSON",
+    "command",
+  ] as const)(
+    "rejects a %s mismatch before release and never sends a second POST",
+    async (mismatch) => {
+      const f = fixture();
+      if (mismatch === "order") f.payload.data.orderId = "foreign-case";
+      if (mismatch === "runtime")
+        f.response.headers.mockReturnValue({
+          "x-drts-candidate-sha": "b".repeat(40),
+          "content-type": "application/json",
+        });
+      if (mismatch === "responseURL")
+        f.response.url.mockReturnValue(expected.url + "-foreign");
+      if (mismatch === "oversize") f.setBytes(Buffer.alloc(1024 * 1024 + 1));
+      if (mismatch === "JSON") f.setBytes(Buffer.from("invalid JSON"));
+      if (mismatch === "command") delete f.command.idempotencyKey;
+      if (mismatch === "order")
+        f.setBytes(Buffer.from(JSON.stringify(f.payload)));
+      await expect(
+        captureOriginalUiCancellation(f.route, expected),
+      ).rejects.toBeInstanceOf(Error);
+      expect(f.route.fetch).toHaveBeenCalledTimes(
+        mismatch === "command" ? 0 : 1,
+      );
+      expect(f.route.fulfill).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a real 409 denial status, code and original body independent from successful cancellation", async () => {
+    const f = fixture();
+    const payload = { ok: false, error: { code: "ORDER_NOT_CANCELABLE" } };
+    f.setBytes(Buffer.from(JSON.stringify(payload)));
+    f.response.status.mockReturnValue(409);
+    const snapshot = await captureOriginalUiCancellation(f.route, expected);
+    expect(snapshot.status).toBe(409);
+    expect(snapshot.data).toEqual(payload);
+    expect(snapshot.bytes).toBe(f.bytes);
+    expect(f.route.fetch).toHaveBeenCalledTimes(1);
+    expect(f.route.fulfill).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["fetch", "fulfill"] as const)(
+    "rethrows the original %s failure without retry or a fabricated ACK",
+    async (phase) => {
+      const f = fixture();
+      const failure = new TypeError("synthetic controlled failure");
+      if (phase === "fetch") f.route.fetch.mockRejectedValue(failure);
+      else f.route.fulfill.mockRejectedValue(failure);
+      await expect(
+        captureOriginalUiCancellation(f.route, expected),
+      ).rejects.toBe(failure);
+      expect(f.route.fetch).toHaveBeenCalledTimes(1);
+      expect(f.route.fulfill).toHaveBeenCalledTimes(phase === "fetch" ? 0 : 1);
+    },
+  );
 });

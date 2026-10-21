@@ -1,3 +1,4 @@
+import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import { describe, expect, it } from "vitest";
 
 import { domainFixture } from "../../referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
@@ -21,6 +22,10 @@ async function book(service: OwnedMobilityService, command: any, who: any) {
     command.entrySlug !== who.partnerEntrySlug
   )
     return service.createReferralPassengerBooking(command, who);
+  await service.acknowledgeReferralFees(
+    { disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION, acknowledged: true },
+    who,
+  );
   const quote = await service.quoteReferralPassengerFare(
     {
       entrySlug: command.entrySlug,
@@ -41,6 +46,8 @@ async function book(service: OwnedMobilityService, command: any, who: any) {
     {
       ...command,
       quoteId,
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeConfirmed: true,
       passengerName: "C022 synthetic passenger",
       passengerPhone: "0912345678",
     },
