@@ -16912,6 +16912,40 @@ export class OwnedMobilityService
     };
   }
 
+  /** The persisted order, only when it belongs to this referral passenger. */
+  async requireOwnedReferralPassengerOrder(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<OwnedOrderRecord> {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "This action requires an active referral_passenger identity.",
+      );
+    }
+    await this.referralAuthority(identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    await this.assertPartnerOrderIdentityAsync(identity, order);
+    if (
+      order.passenger?.passengerId !==
+      (identity.drtsPassengerId ?? identity.actorId)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "The order belongs to another referral passenger.",
+      );
+    }
+    return order;
+  }
+
   async cancelReferralPassengerTrip(
     orderId: string,
     command: CancelReferralPassengerTripCommand,

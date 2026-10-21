@@ -2376,6 +2376,124 @@ const tripStateLabel: Record<
   cancelled: { zh: "已取消", tone: "neutral" },
 };
 
+const DEMO_TRIP_DISPATCHABLE = [
+  "created",
+  "ready_for_dispatch",
+  "redispatch_required",
+  "matching",
+];
+
+function demoTripMessage(code: unknown) {
+  switch (code) {
+    case "REFERRAL_DEMO_TRIP_SUPPLY_BUSY":
+      return "測試司機都在服務其他展示行程，請稍後再試。";
+    case "REFERRAL_DEMO_TRIP_SUPPLY_UNAVAILABLE":
+      return "測試司機暫時無法使用，請稍後再試。";
+    case "REFERRAL_DEMO_TRIP_NOT_DISPATCHABLE":
+      return "這筆行程目前無法指派測試司機。";
+    case "REFERRAL_DEMO_TRIP_NOT_ASSIGNED":
+      return "這筆行程不是由測試司機承接，無法用測試按鈕完成。";
+    case "not_found":
+      return "測試功能目前未開啟。";
+    default:
+      return "測試操作沒有完成，請重試。";
+  }
+}
+
+/** Dev demo only: drive this trip with the synthetic business test driver. */
+function ReferralDemoTripControls({
+  context,
+  orderId,
+  status,
+  onAssigned,
+}: {
+  context: EmbedContext;
+  orderId: string;
+  status: string;
+  onAssigned: () => void;
+}) {
+  const theme = buildEmbedTheme(context.accent);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const action = DEMO_TRIP_DISPATCHABLE.includes(status)
+    ? "assign"
+    : "complete";
+
+  async function run() {
+    setPending(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/referral/demo-trip/${encodeURIComponent(orderId)}/${action}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok)
+        throw new Error(demoTripMessage(payload?.error?.code));
+      if (action === "complete") {
+        window.location.assign(
+          buildHref(context, {
+            screen: "completed",
+            state: "handoff",
+            orderId,
+          }),
+        );
+        return;
+      }
+      onAssigned();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : demoTripMessage(null));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div
+      data-drt-operation="referral-demo-trip"
+      style={{
+        display: "grid",
+        gap: 9,
+        padding: "12px 13px",
+        borderRadius: 12,
+        background: theme.warnBg,
+        border: `1px dashed ${theme.warnFg}`,
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 800, color: theme.ink }}>
+        測試模式（僅供展示）
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.6, color: theme.ink2 }}>
+        {action === "assign"
+          ? "按下後由虛構的商務測試司機承接這筆行程，用來展示派車後的畫面；不是實際派車。"
+          : "按下後以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。"}
+      </div>
+      <ActionButton
+        label={
+          pending
+            ? "處理中…"
+            : action === "assign"
+              ? "測試：指派測試司機"
+              : "測試：完成行程"
+        }
+        theme={theme}
+        onClick={() => void run()}
+        disabled={pending}
+        dataDrtOperation={`referral-demo-trip-${action}`}
+      />
+      {error ? (
+        <Banner theme={theme} tone="danger" icon="alert">
+          {error}
+        </Banner>
+      ) : null}
+    </div>
+  );
+}
+
 function TripScreen({
   context,
   liveData,
@@ -2667,6 +2785,15 @@ function TripScreen({
           </div>
         </div>
       </Card>
+
+      {context.demoTrip ? (
+        <ReferralDemoTripControls
+          context={context}
+          orderId={trip.orderId}
+          status={trip.state}
+          onAssigned={live.refresh}
+        />
+      ) : null}
 
       <div
         data-drt-operation="referral-cancellation-window"

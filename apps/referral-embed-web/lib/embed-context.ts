@@ -62,6 +62,8 @@ export type EmbedContext = {
   };
   issues: string[];
   fallbackEntry: FallbackEntry | null;
+  /** Dev demo: show the test-driver controls on the trip screen. */
+  demoTrip?: boolean;
 };
 
 function resolveDisplayName(entry: PartnerChannelEntryRecord) {
@@ -190,6 +192,11 @@ export async function resolveEmbedContext(input: {
   });
 
   return {
+    demoTrip:
+      demoMode &&
+      ["development", "test"].includes(
+        process.env.DRTS_ENV?.trim().toLowerCase() ?? "",
+      ),
     entry,
     session: session ? toPublicReferralEmbedSession(session) : null,
     state,

@@ -1085,6 +1085,8 @@ jobs:
           env_vars="${env_vars}@OIDC_ENABLED=${{ steps.api_secrets.outputs.oidc_enabled }}@DRTS_DEV_MFA_WAIVED=true"
           env_vars="${env_vars}@OAUTH_REDIRECT_ALLOWLIST=${oauth_redirect_allowlist}@REQUIRE_SMS_VERIFICATION=false"
           env_vars="${env_vars}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}"
+          # Dev-only test-driver buttons on the referral embed demo (bureau inspection).
+          env_vars="${env_vars}@REFERRAL_DEMO_TRIP_ENABLED=true"
           env_vars="${env_vars}@VOICE_BACKGROUND_RUNNER_ENABLED=true"
           if [[ "${DEV_PAX_REVIEW_DEMO_ENABLED:-false}" == "true" ]]; then
             env_vars="${env_vars}@VOICE_BOOKING_RESULT_DELIVERY=simulation"

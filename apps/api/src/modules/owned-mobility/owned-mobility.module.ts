@@ -31,6 +31,8 @@ import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.serv
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
+import { ReferralDemoTripController } from "./referral-demo-trip.controller";
+import { ReferralDemoTripService } from "./referral-demo-trip.service";
 
 @Module({
   imports: [
@@ -51,7 +53,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     forwardRef(() => TenantPartnerModule),
     forwardRef(() => PlatformPresenceModule),
   ],
-  controllers: [OwnedMobilityController],
+  controllers: [OwnedMobilityController, ReferralDemoTripController],
   providers: [
     { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
     // Stateless DB adapter only; importing MultiTaxiModule would add a cycle.
@@ -64,6 +66,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     OwnedMobilityTaskEventsService,
     ReferralBindingScaffoldService,
     OwnedAutonomousDispatchExecutorService,
+    ReferralDemoTripService,
   ],
   exports: [
     OwnedMobilityService,
