@@ -682,8 +682,8 @@ describe("FLEET-MASTER-CANONICAL-READBACK-20261021: cross-instance canonical Fle
     ).toBe(created.fleetPartnerId);
   });
 
-  it("supports immediate update/get/list of an ACKed master on partial SQL ports while canonical DB rows still win when present", async () => {
-    const partialRepo = new FleetPartnerRepository({
+  it("does not fall back to stale in-memory cache when enabled repository returns empty list or null row", async () => {
+    const emptyRepo = new FleetPartnerRepository({
       isEnabled: () => true,
       query: async () => ({ rows: [], rowCount: 0 }),
     } as unknown as DatabaseService);
@@ -691,33 +691,16 @@ describe("FLEET-MASTER-CANONICAL-READBACK-20261021: cross-instance canonical Fle
       {} as never,
       {} as never,
       {} as never,
-      partialRepo,
+      emptyRepo,
     );
-    const created = await service.createFleetPartner({
-      legalName: "Rehearsal Dispatch Operator",
-      displayName: "Rehearsal Fleet",
-      businessRegistrationNo: "SIMULATED-REG",
-      contactName: "Rehearsal Contact",
-      contactPhone: "SIMULATED-PHONE",
-      partnershipType: "business_dispatch_fleet",
-    });
-    const updated = await service.updateFleetPartner(created.fleetPartnerId, {
-      multiTaxiOperatorIds: ["review-synthetic-operator"],
-    });
-    expect(updated).toMatchObject({
-      fleetPartnerId: created.fleetPartnerId,
-      multiTaxiOperatorIds: ["review-synthetic-operator"],
-    });
-    expect(await service.getFleetPartner(created.fleetPartnerId)).toEqual(
-      updated,
-    );
-    expect(
-      (await service.listFleetPartners()).some(
-        (partner) => partner.fleetPartnerId === created.fleetPartnerId,
-      ),
-    ).toBe(true);
+    expect(await service.listFleetPartners()).toEqual([]);
     await expect(
-      service.getFleetPartner("fleet-missing-999"),
+      service.getFleetPartner("fleet-demo-001"),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      service.updateFleetPartner("fleet-demo-001", {
+        displayName: "Should fail 404",
+      }),
     ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
