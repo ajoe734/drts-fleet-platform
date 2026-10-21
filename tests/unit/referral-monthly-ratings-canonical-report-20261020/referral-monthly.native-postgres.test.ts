@@ -15,6 +15,7 @@ import { ComplaintRepository } from "../../../apps/api/src/modules/complaint/com
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { RegulatoryRegistryRepository } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import { ReportingRepository } from "../../../apps/api/src/modules/reporting/reporting.repository";
+import type { MonthlyOperationsSummaryRecord } from "../../../apps/api/src/modules/reporting/reporting.repository";
 import { ReferralMonthlyRatingService } from "../../../apps/api/src/modules/reporting/referral-monthly-rating.service";
 import { ReferralMonthlyRatingController } from "../../../apps/api/src/modules/reporting/referral-monthly-rating.controller";
 import { buildOrderFixture } from "../../../apps/api/tests/integration/voice-order-fixture";
@@ -28,8 +29,8 @@ const requireApi = createRequire(
 );
 requireApi("reflect-metadata");
 
-// Candidate monthly reader only. The original four atomic monthly-replacement
-// cases remain preserved in their original task; no atomic writer is adopted.
+// Canonical monthly rating reader (17 expanded cases) plus four atomic
+// monthly-summary replacement cases on native PostgreSQL.
 // These imports resolve to this candidate Source, never artifact loader/cache.
 // Same hosted-only harness as existing Referral native6: native psql/db-apply,
 // all production migrations, a fresh owned database clone per case and only
@@ -543,6 +544,155 @@ describe.skipIf(!hostedPaymentEnabled)(
         drivers: [],
         rows: [],
       });
+    });
+
+    function monthlyRow(
+      businessArea = "NTP",
+      extra: Partial<MonthlyOperationsSummaryRecord> = {},
+    ): MonthlyOperationsSummaryRecord {
+      return {
+        periodMonth: "2026-08",
+        businessArea,
+        serviceProductCode: "taxi_reservation",
+        demandRequestCount: 1,
+        actualDispatchCount: 1,
+        completedTripCount: 1,
+        cancelledOrderCount: 0,
+        averageDispatchableVehicleCount: 0,
+        validSnapshotCount: 0,
+        expectedSnapshotCount: 8928,
+        snapshotCoverageRate: 0,
+        complaintCount: 1,
+        complaintsByCategory: { driver_service: 1 },
+        generatedAt: "2026-10-20T00:00:00.000Z",
+        ...extra,
+      };
+    }
+
+    function monthlyWriter() {
+      // Only the existing native Pool and real production repository. Neither
+      // PostgreSQL statements, commit/rollback nor aggregation are simulated.
+      const database: Pick<DatabaseService, "isEnabled" | "query" | "connect"> =
+        {
+          isEnabled: () => true,
+          query: <Row extends QueryResultRow>(
+            sql: string,
+            values?: readonly unknown[],
+          ) => h.pool!.query<Row>(sql, values ? [...values] : undefined),
+          connect: () => h.pool!.connect(),
+        };
+      return new ReportingRepository(database as DatabaseService);
+    }
+
+    it("replaces an obsolete monthly area on native PostgreSQL, replays without accumulation and preserves canonical order/CRM rows", async () => {
+      await persist(trip());
+      const canonicalBefore = await snapshot();
+      const repository = monthlyWriter();
+      await repository.upsertMonthlyOperationsSummaries([monthlyRow()]);
+      await repository.replaceMonthlyOperationsSummaries(
+        [monthlyRow("TPE")],
+        ["2026-08"],
+      );
+      await repository.replaceMonthlyOperationsSummaries(
+        [monthlyRow("TPE")],
+        ["2026-08"],
+      );
+      const rows = await repository.listMonthlyOperationsSummaries({
+        periodMonth: "2026-08",
+      });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ businessArea: "TPE", complaintCount: 1 });
+      expect(await snapshot()).toEqual(canonicalBefore);
+    });
+
+    it("binds period/area/product replacement to the selected native SQL slice and clears an empty slice without deleting other dimensions", async () => {
+      const repository = monthlyWriter();
+      const selected = monthlyRow();
+      const untouched = [
+        monthlyRow("NTP", { periodMonth: "2026-07" }),
+        monthlyRow("TPE"),
+        monthlyRow("NTP", { serviceProductCode: "taxi_realtime" }),
+      ];
+      await repository.upsertMonthlyOperationsSummaries([
+        selected,
+        ...untouched,
+      ]);
+      const before = await repository.listMonthlyOperationsSummaries({});
+      await repository.replaceMonthlyOperationsSummaries([], ["2026-08"], {
+        businessArea: "NTP",
+        serviceProductCode: "taxi_reservation",
+      });
+      const after = await repository.listMonthlyOperationsSummaries({});
+      expect(after).toEqual(
+        before.filter(
+          (row) =>
+            !(
+              row.periodMonth === "2026-08" &&
+              row.businessArea === "NTP" &&
+              row.serviceProductCode === "taxi_reservation"
+            ),
+        ),
+      );
+      expect(after).toHaveLength(3);
+    });
+
+    it("rolls back the preceding native DELETE and INSERT when actual production NOT NULL enforcement rejects a replacement row", async () => {
+      const repository = monthlyWriter();
+      await repository.upsertMonthlyOperationsSummaries([
+        monthlyRow(),
+        monthlyRow("TPE"),
+      ]);
+      const before = await repository.listMonthlyOperationsSummaries({});
+      // Deliberately invalid DB fixture uses the actual V0034 NOT NULL column.
+      // No fake query error, schema modification or weakened assertion.
+      const invalid = {
+        ...monthlyRow("bad"),
+        demandRequestCount: null,
+      } as unknown as MonthlyOperationsSummaryRecord;
+      await expect(
+        repository.replaceMonthlyOperationsSummaries(
+          [monthlyRow("new"), invalid],
+          ["2026-08"],
+        ),
+      ).rejects.toMatchObject({ code: "23502" });
+      expect(await repository.listMonthlyOperationsSummaries({})).toEqual(
+        before,
+      );
+      await repository.replaceMonthlyOperationsSummaries(
+        [monthlyRow("retried")],
+        ["2026-08"],
+      );
+      expect(
+        (await repository.listMonthlyOperationsSummaries({})).map(
+          (row) => row.businessArea,
+        ),
+      ).toEqual(["retried"]);
+    });
+
+    it("commits concurrent native replacement writers as one complete report instead of a union of both writers", async () => {
+      const first = monthlyWriter();
+      const second = monthlyWriter();
+      await Promise.all([
+        first.replaceMonthlyOperationsSummaries(
+          [monthlyRow("A1"), monthlyRow("A2")],
+          ["2026-08"],
+        ),
+        second.replaceMonthlyOperationsSummaries(
+          [monthlyRow("B1"), monthlyRow("B2")],
+          ["2026-08"],
+        ),
+      ]);
+      const rows = await first.listMonthlyOperationsSummaries({
+        periodMonth: "2026-08",
+      });
+      expect(rows).toHaveLength(2);
+      expect([
+        ["A1", "A2"],
+        ["B1", "B2"],
+      ]).toContainEqual(rows.map((row) => row.businessArea).sort());
+      expect(rows.reduce((total, row) => total + row.complaintCount, 0)).toBe(
+        2,
+      );
     });
   },
 );

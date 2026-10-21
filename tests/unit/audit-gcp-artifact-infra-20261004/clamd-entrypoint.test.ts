@@ -216,6 +216,21 @@ async function waitUntil(
   return predicate();
 }
 
+// touch -r creates the marker before applying the reference timestamps.
+// Observe the complete publication before checking its exact provenance.
+function hasPublishedMarker(
+  harness: Pick<Harness, "readyMarker" | "readyVersionFile">,
+  version: string,
+  mtimeSec: number,
+): boolean {
+  return (
+    existsSync(harness.readyMarker) &&
+    existsSync(harness.readyVersionFile) &&
+    readFileSync(harness.readyVersionFile, "utf8").trim() === version &&
+    Math.floor(statSync(harness.readyMarker).mtimeMs / 1000) === mtimeSec
+  );
+}
+
 let activeHarness: Harness | undefined;
 
 afterEach(() => {
@@ -238,7 +253,7 @@ describe("clamd-entrypoint.sh freshness provenance (R8, round 3)", () => {
     activeHarness = harness;
 
     const appeared = await waitUntil(
-      () => existsSync(harness.readyMarker),
+      () => hasPublishedMarker(harness, "27315", pastMtimeSec),
       5000,
     );
     expect(appeared).toBe(true);
@@ -287,7 +302,10 @@ describe("clamd-entrypoint.sh freshness provenance (R8, round 3)", () => {
     });
     activeHarness = harness;
 
-    await waitUntil(() => existsSync(harness.readyMarker), 5000);
+    await waitUntil(
+      () => hasPublishedMarker(harness, "27315", pastMtimeSec),
+      5000,
+    );
     const firstMarkerMtimeSec = Math.floor(
       statSync(harness.readyMarker).mtimeMs / 1000,
     );
@@ -426,7 +444,7 @@ describe("clamd-entrypoint.sh daily-specific version identity (R8a, round 4/5)",
     activeHarness = harness;
 
     const appeared = await waitUntil(
-      () => existsSync(harness.readyMarker),
+      () => hasPublishedMarker(harness, "27315", nowSec - 10),
       5000,
     );
     expect(appeared).toBe(true);
@@ -454,7 +472,7 @@ describe("clamd-entrypoint.sh daily-specific version identity (R8a, round 4/5)",
     activeHarness = harness;
 
     const appeared = await waitUntil(
-      () => existsSync(harness.readyMarker),
+      () => hasPublishedMarker(harness, "27316", nowSec - 100),
       5000,
     );
     expect(appeared).toBe(true);
@@ -481,7 +499,7 @@ describe("clamd-entrypoint.sh daily-specific version identity (R8a, round 4/5)",
     activeHarness = harness;
 
     const appeared = await waitUntil(
-      () => existsSync(harness.readyMarker),
+      () => hasPublishedMarker(harness, "27315", nowSec - 100),
       5000,
     );
     expect(appeared).toBe(true);
@@ -643,7 +661,7 @@ describe("clamd-entrypoint.sh verified-current freshness, composed with real rea
     activeHarness = harness;
 
     const appeared = await waitUntil(
-      () => existsSync(harness.readyMarker),
+      () => hasPublishedMarker(harness, "27316", staleSec),
       5000,
     );
     expect(appeared).toBe(true);

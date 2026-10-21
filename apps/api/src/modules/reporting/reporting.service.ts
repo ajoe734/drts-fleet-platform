@@ -5,6 +5,7 @@ import {
   OnModuleInit,
   Optional,
 } from "@nestjs/common";
+import { ApiRequestError } from "../../common/api-envelope";
 
 import type {
   DispatchAssignmentRecord,
@@ -296,18 +297,35 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
 
     if (this.reportingRepository?.isEnabled()) {
       try {
-        await this.reportingRepository.upsertMonthlyOperationsSummaries(
+        await this.reportingRepository.replaceMonthlyOperationsSummaries(
           records,
+          periods,
+          query,
         );
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
-          "upsert monthly operations summaries",
+          "replace monthly operations summaries",
+        );
+        throw new ApiRequestError(
+          503,
+          "REPORT_REBUILD_FAILED",
+          "Monthly operations summaries could not be rebuilt.",
         );
       }
     } else {
+      const retained = this.monthlyOperationsSummaries.filter(
+        (record) =>
+          !periods.includes(record.periodMonth) ||
+          (query.businessArea
+            ? record.businessArea !== query.businessArea
+            : false) ||
+          (query.serviceProductCode
+            ? record.serviceProductCode !== query.serviceProductCode
+            : false),
+      );
       this.monthlyOperationsSummaries = this.mergeMonthlyOperationsSummaries(
-        this.monthlyOperationsSummaries,
+        retained,
         records,
       );
     }
