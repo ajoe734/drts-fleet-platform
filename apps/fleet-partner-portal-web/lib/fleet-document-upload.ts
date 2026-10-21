@@ -16,6 +16,7 @@ export interface FleetStagedUploadSession<
   scopeKey: string;
   intent: TIntent;
   stage: FleetUploadStage;
+  invalidIntentError?: unknown;
 }
 
 export interface FleetDocumentRequestError extends Error {
@@ -156,6 +157,7 @@ export async function executeStagedFleetUpload<
     const confirmedSession: FleetStagedUploadSession<TIntent> = {
       ...activeSession,
       stage: "confirm_completed",
+      invalidIntentError: undefined,
     };
     options.setSession(confirmedSession);
     if (options.finalizeResult) {
@@ -166,6 +168,17 @@ export async function executeStagedFleetUpload<
     return { aborted: false, result };
   };
 
+  if (session.invalidIntentError !== undefined) {
+    const canonical = await options.readCanonical(session.intent);
+    if (!ensureActive()) return { aborted: true };
+    if (canonical !== null) {
+      return completeWithCanonical(canonical, session);
+    }
+    const expiredError = session.invalidIntentError;
+    options.setSession(undefined);
+    throw expiredError;
+  }
+
   if (session.stage === "intent_created") {
     try {
       await (options.putContent ?? putFleetDocument)(
@@ -175,9 +188,9 @@ export async function executeStagedFleetUpload<
     } catch (putError) {
       if (!ensureActive()) return { aborted: true };
       if (isFleetUploadIntentExpiredError(putError)) {
-        const canonical = await options
-          .readCanonical(session.intent)
-          .catch(() => null);
+        session = { ...session, invalidIntentError: putError };
+        options.setSession(session);
+        const canonical = await options.readCanonical(session.intent);
         if (!ensureActive()) return { aborted: true };
         if (canonical !== null) {
           return completeWithCanonical(canonical, session);
@@ -191,7 +204,11 @@ export async function executeStagedFleetUpload<
       throw putError;
     }
     if (!ensureActive()) return { aborted: true };
-    session = { ...session, stage: "put_completed" };
+    session = {
+      ...session,
+      stage: "put_completed",
+      invalidIntentError: undefined,
+    };
     options.setSession(session);
   }
 
@@ -213,9 +230,9 @@ export async function executeStagedFleetUpload<
         throw confirmError;
       }
       if (isFleetUploadIntentExpiredError(confirmError)) {
-        const canonical = await options
-          .readCanonical(session.intent)
-          .catch(() => null);
+        session = { ...session, invalidIntentError: confirmError };
+        options.setSession(session);
+        const canonical = await options.readCanonical(session.intent);
         if (!ensureActive()) return { aborted: true };
         if (canonical !== null) {
           return completeWithCanonical(canonical, session);

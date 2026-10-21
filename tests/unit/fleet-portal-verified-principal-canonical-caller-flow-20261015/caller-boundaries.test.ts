@@ -412,7 +412,7 @@ it("real SupplySubmissionDetailView staged retry/resume reuses the same intent o
   apiCalls.length = 0;
   requests.length = 0;
 
-  const { container } = render(
+  const { container, rerender } = render(
     createElement(SupplySubmissionDetailView, {
       initialDetail: created,
       source: "live",
@@ -615,7 +615,36 @@ it("real SupplySubmissionDetailView staged retry/resume reuses the same intent o
     apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
   ).toHaveLength(1);
 
-  // Explicit user retry: checks GET /api/fleet-partner/supply-submissions/:id first,
+  // Explicit user retry 1 after CONFIRM_RESPONSE_LOST: when canonical GET itself transiently fails with 503,
+  // the session must be retained (not dropped) and the 503 readback error must surface explicitly.
+  const getDetailAfterLostAckSpy = vi
+    .spyOn(fixture.supplySubmissionService, "getSupplySubmissionDetail")
+    .mockRejectedValueOnce(
+      new ApiRequestError(
+        503,
+        "CANONICAL_READBACK_UNAVAILABLE",
+        "Supply detail GET transiently unavailable after lost confirm ACK.",
+      ),
+    );
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      screen.getByText(
+        /Supply detail GET transiently unavailable after lost confirm ACK/i,
+      ),
+    ).toBeTruthy(),
+  );
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/upload-url")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+  ).toHaveLength(1);
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(1);
+
+  // Explicit user retry 2: checks GET /api/fleet-partner/supply-submissions/:id first,
   // discovers taxi-reg.pdf via fileObjectKey, and completes without a second confirm (which would 409 UPLOAD_URL_INVALID) or second upload-url.
   fireEvent.click(uploadButton);
   await waitFor(() =>
@@ -630,10 +659,219 @@ it("real SupplySubmissionDetailView staged retry/resume reuses the same intent o
   expect(
     apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
   ).toHaveLength(1);
+  getDetailAfterLostAckSpy.mockRestore();
   confirmSpy.mockRestore();
 
   const finalDetail = await fleetDocumentRequest<SupplySubmissionDetail>(root);
   expect(finalDetail.documents).toHaveLength(2);
+
+  // Stage 3: Changing docType, clearing file, or replacing File while PUT is still in-flight (deferred)
+  // immediately resets busy="upload" so the real ActionButton is clickable again, and resolving the stale PUT
+  // neither fires confirm for the abandoned operation nor clears the busy state of a newer in-flight operation.
+  apiCalls.length = 0;
+  const realUploadContent = fixture.supplyDocumentService.uploadContent.bind(
+    fixture.supplyDocumentService,
+  );
+  let releaseAbandonedPut!: () => void;
+  let releaseReplacementPut!: () => void;
+  const uploadContentSpy = vi
+    .spyOn(fixture.supplyDocumentService, "uploadContent")
+    .mockImplementationOnce(
+      async (...args) =>
+        new Promise((resolve, reject) => {
+          releaseAbandonedPut = () => {
+            realUploadContent(...args).then(resolve, reject);
+          };
+        }),
+    )
+    .mockImplementationOnce(
+      async (...args) =>
+        new Promise((resolve, reject) => {
+          releaseReplacementPut = () => {
+            realUploadContent(...args).then(resolve, reject);
+          };
+        }),
+    );
+
+  const abandonedFile = new File(
+    [Buffer.from("abandoned-in-flight-put-bytes")],
+    "abandoned-id.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(fileInput, { target: { files: [abandonedFile] } });
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+    ).toHaveLength(1),
+  );
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
+
+  // Clear file selection and change docType while the first PUT is still pending.
+  fireEvent.change(fileInput, { target: { files: [] } });
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.change(typeSelect, { target: { value: "driver_national_id" } });
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(false);
+  const replacementFile = new File(
+    [Buffer.from("replacement-national-id-bytes")],
+    "replacement-id.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(fileInput, { target: { files: [replacementFile] } });
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(false);
+
+  // Start the second upload (deferred PUT #2) BEFORE resolving the stale PUT #1.
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+    ).toHaveLength(2),
+  );
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
+
+  // Resolve the stale in-flight PUT #1 while PUT #2 is still in-flight:
+  // PUT #1 must not confirm the abandoned file AND must not clear PUT #2's busy state.
+  releaseAbandonedPut();
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(0);
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
+
+  // Now resolve PUT #2: replacement-id.pdf completes end-to-end and confirms once.
+  releaseReplacementPut();
+  await waitFor(() =>
+    expect(screen.getAllByText("replacement-id.pdf").length).toBeGreaterThan(0),
+  );
+  expect(screen.queryByText("abandoned-id.pdf")).toBeNull();
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(1);
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(false);
+
+  // Stage 4: Rerendering the SAME mounted SupplySubmissionDetailView instance from submission A to submission B
+  // while submission A has an in-flight PUT stops A before confirm, resets busy, and preserves B's state.
+  const createdB = await fleetDocumentRequest<SupplySubmissionDetail>(
+    "/api/fleet-partner/supply-submissions/drivers",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...driver,
+        name: "Second Submission Driver",
+        professionalDriverLicenseNo: "LICENSE-2",
+        taxiDriverRegistrationNo: "TAXI-2",
+      }),
+    },
+  );
+  const idB = createdB.submission.submissionId;
+  apiCalls.length = 0;
+
+  let releaseSubmissionAPut!: () => void;
+  uploadContentSpy.mockImplementationOnce(
+    async (...args) =>
+      new Promise((resolve, reject) => {
+        releaseSubmissionAPut = () => {
+          realUploadContent(...args).then(resolve, reject);
+        };
+      }),
+  );
+
+  const staleSubmissionAFile = new File(
+    [Buffer.from("stale-submission-a-inflight-bytes")],
+    "stale-sub-a.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(fileInput, { target: { files: [staleSubmissionAFile] } });
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+    ).toHaveLength(1),
+  );
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
+
+  // Rerender the SAME component instance with createdB while A's PUT is still unresolved.
+  rerender(
+    createElement(SupplySubmissionDetailView, {
+      initialDetail: createdB,
+      source: "live",
+    }),
+  );
+  expect(screen.getByText(new RegExp(idB))).toBeTruthy();
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(false);
+
+  // Release A's PUT: must not confirm A or overwrite B's detail view.
+  releaseSubmissionAPut();
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(0);
+  expect(screen.getByText(new RegExp(idB))).toBeTruthy();
+  expect(screen.queryByText("replacement-id.pdf")).toBeNull();
+
+  // Upload a document on B in the same instance: succeeds and confirms on B.
+  const subBFile = new File(
+    [Buffer.from("submission-b-fresh-license-bytes")],
+    "sub-b-license.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(fileInput, { target: { files: [subBFile] } });
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(screen.getAllByText("sub-b-license.pdf").length).toBeGreaterThan(0),
+  );
+  expect(
+    apiCalls.filter((call) =>
+      call.path.endsWith(`/supply-submissions/${idB}/documents/confirm`),
+    ),
+  ).toHaveLength(1);
+
+  // Rerendering the SAME instance with B becoming non-editable ("submitted") while PUT is in-flight stops before confirm.
+  apiCalls.length = 0;
+  let releaseNonEditablePut!: () => void;
+  uploadContentSpy.mockImplementationOnce(
+    async (...args) =>
+      new Promise((resolve, reject) => {
+        releaseNonEditablePut = () => {
+          realUploadContent(...args).then(resolve, reject);
+        };
+      }),
+  );
+  const subBLateFile = new File(
+    [Buffer.from("submission-b-late-taxi-reg-bytes")],
+    "sub-b-late-taxi.pdf",
+    { type: "application/pdf" },
+  );
+  fireEvent.change(typeSelect, {
+    target: { value: "taxi_driver_registration" },
+  });
+  fireEvent.change(fileInput, { target: { files: [subBFile, subBLateFile] } });
+  fireEvent.change(fileInput, { target: { files: [subBLateFile] } });
+  fireEvent.click(uploadButton);
+  await waitFor(() =>
+    expect(
+      apiCalls.filter((call) => call.path.endsWith("/documents/content")),
+    ).toHaveLength(1),
+  );
+  const refreshedB = await fleetDocumentRequest<SupplySubmissionDetail>(
+    `/api/fleet-partner/supply-submissions/${idB}`,
+  );
+  rerender(
+    createElement(SupplySubmissionDetailView, {
+      initialDetail: {
+        ...refreshedB,
+        submission: { ...refreshedB.submission, status: "submitted" },
+      },
+      source: "live",
+    }),
+  );
+  releaseNonEditablePut();
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  expect(
+    apiCalls.filter((call) => call.path.endsWith("/documents/confirm")),
+  ).toHaveLength(0);
+  expect((uploadButton as HTMLButtonElement).disabled).toBe(true);
+  uploadContentSpy.mockRestore();
 });
 
 it("real CaseReplyComposer staged retry/resume reuses the same intent on scanner 503, resumes confirm without re-PUT, and reconciles persisted attachment via canonical GET readback", async () => {
@@ -742,8 +980,37 @@ it("real CaseReplyComposer staged retry/resume reuses the same intent on scanner
     apiCalls.filter((call) => call.path.endsWith("/attachments/confirm")),
   ).toHaveLength(1);
 
-  // Second retry click: checks canonical GET /api/fleet-partner/cases/cmp_0908 first,
-  // finds the already-confirmed attachment by attachmentId/objectKey, marks it 已上傳 without re-PUT or re-confirm!
+  // Second retry click: when canonical GET /api/fleet-partner/cases/cmp_0908 transiently fails with 503,
+  // retains staged session and surfaces the failure; third retry click reconciles from canonical GET without re-PUT or re-confirm!
+  const getCaseDetailSpy = vi
+    .spyOn(
+      caseService as unknown as {
+        getCaseDetail: (...args: unknown[]) => Promise<unknown>;
+      },
+      "getCaseDetail",
+    )
+    .mockRejectedValueOnce(
+      new ApiRequestError(
+        503,
+        "CASE_READBACK_UNAVAILABLE",
+        "Case detail GET transiently unavailable after lost confirm ACK.",
+      ),
+    );
+  fireEvent.click(screen.getByRole("button", { name: /重試/ }));
+  await waitFor(() =>
+    expect(
+      apiCalls.filter(
+        (call) => call.path === "/api/fleet-partner/cases/cmp_0908",
+      ),
+    ).toHaveLength(1),
+  );
+  await waitFor(() =>
+    expect(
+      apiCalls.filter((call) => call.path.endsWith("/attachments/confirm")),
+    ).toHaveLength(1),
+  );
+  expect(screen.queryByText("已上傳")).toBeNull();
+
   fireEvent.click(screen.getByRole("button", { name: /重試/ }));
   await waitFor(() => expect(screen.getByText("已上傳")).toBeTruthy());
   expect(
@@ -755,6 +1022,7 @@ it("real CaseReplyComposer staged retry/resume reuses the same intent on scanner
   expect(
     apiCalls.filter((call) => call.path.endsWith("/attachments/confirm")),
   ).toHaveLength(1);
+  getCaseDetailSpy.mockRestore();
   confirmSpy.mockRestore();
 
   const detail = await fixture.controller.getPortalCaseDetail(

@@ -1751,6 +1751,7 @@ export function SupplySubmissionDetailView({
     : VEHICLE_DOC_TYPES;
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
 
+  const prevInitialDetailRef = useRef(initialDetail);
   const uploadSessionRef = useRef<
     | FleetStagedUploadSession<
         FleetDocumentUploadIntent & { submissionId: string; objectKey: string }
@@ -1770,16 +1771,79 @@ export function SupplySubmissionDetailView({
   const docTypeRef = useRef<string>(docType);
   docTypeRef.current = docType;
 
+  if (prevInitialDetailRef.current !== initialDetail) {
+    const prevDetail = prevInitialDetailRef.current;
+    prevInitialDetailRef.current = initialDetail;
+    const switchedSubmission =
+      prevDetail.submission.submissionId !==
+        initialDetail.submission.submissionId ||
+      activeSubmissionIdRef.current !== initialDetail.submission.submissionId;
+    const nextEditable = isEditableStatus(initialDetail.submission.status);
+    activeSubmissionIdRef.current = initialDetail.submission.submissionId;
+    revisionNoRef.current = initialDetail.submission.revisionNo;
+    editableRef.current = nextEditable;
+    setDetail(initialDetail);
+    setDriverForm(
+      initialDetail.driverDraft
+        ? {
+            ...initialDetail.driverDraft,
+            preferredVehicleSubmissionId:
+              initialDetail.driverDraft.preferredVehicleSubmissionId ?? null,
+          }
+        : null,
+    );
+    setVehicleForm(
+      initialDetail.vehicleDraft
+        ? {
+            ...initialDetail.vehicleDraft,
+            currentDriverSubmissionId:
+              initialDetail.vehicleDraft.currentDriverSubmissionId ?? null,
+          }
+        : null,
+    );
+    if (switchedSubmission) {
+      const nextDocType = initialDetail.driverDraft
+        ? DRIVER_DOC_TYPES[0]
+        : VEHICLE_DOC_TYPES[0];
+      uploadEpochRef.current += 1;
+      uploadSessionRef.current = undefined;
+      uploadInFlightRef.current = false;
+      docTypeRef.current = nextDocType;
+      docFileRef.current = null;
+      setBusy(null);
+      setError(null);
+      setDocType(nextDocType);
+      setDocFrom("");
+      setDocUntil("");
+      setDocFile(null);
+    } else if (!nextEditable) {
+      uploadEpochRef.current += 1;
+      uploadSessionRef.current = undefined;
+      uploadInFlightRef.current = false;
+      setBusy((current) => (current === "upload" ? null : current));
+    }
+  }
   if (activeSubmissionIdRef.current !== detail.submission.submissionId) {
     activeSubmissionIdRef.current = detail.submission.submissionId;
     uploadEpochRef.current += 1;
     uploadSessionRef.current = undefined;
     uploadInFlightRef.current = false;
+    if (busy === "upload") {
+      setBusy(null);
+    }
   }
-  if (!editable && (uploadInFlightRef.current || uploadSessionRef.current)) {
+  if (
+    !editable &&
+    (uploadInFlightRef.current ||
+      uploadSessionRef.current !== undefined ||
+      busy === "upload")
+  ) {
     uploadEpochRef.current += 1;
     uploadSessionRef.current = undefined;
     uploadInFlightRef.current = false;
+    if (busy === "upload") {
+      setBusy(null);
+    }
   }
 
   useEffect(() => {
@@ -1819,9 +1883,16 @@ export function SupplySubmissionDetailView({
   };
 
   async function refreshDetail() {
+    const targetSubmissionId = activeSubmissionIdRef.current;
     const next = await apiRequest<SupplySubmissionDetail>(
-      `fleet-partner/supply-submissions/${detail.submission.submissionId}`,
+      `fleet-partner/supply-submissions/${targetSubmissionId}`,
     );
+    if (
+      !mountedRef.current ||
+      activeSubmissionIdRef.current !== targetSubmissionId
+    ) {
+      return;
+    }
     revisionNoRef.current = next.submission.revisionNo;
     setDetail(next);
     setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
@@ -1854,7 +1925,7 @@ export function SupplySubmissionDetailView({
         mountedRef.current &&
         (label !== "upload" || uploadEpochRef.current === startEpoch)
       ) {
-        setBusy(null);
+        setBusy((current) => (current === label ? null : current));
       }
     }
   }
@@ -1984,10 +2055,12 @@ export function SupplySubmissionDetailView({
           editableRef.current = false;
           uploadEpochRef.current += 1;
           uploadSessionRef.current = undefined;
+          uploadInFlightRef.current = false;
           if (
             mountedRef.current &&
             activeSubmissionIdRef.current === targetSubmissionId
           ) {
+            setBusy((current) => (current === "upload" ? null : current));
             setDetail(next);
             setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
             setVehicleForm(next.vehicleDraft ? { ...next.vehicleDraft } : null);
@@ -2323,6 +2396,9 @@ export function SupplySubmissionDetailView({
                     uploadEpochRef.current += 1;
                     uploadSessionRef.current = undefined;
                     uploadInFlightRef.current = false;
+                    setBusy((current) =>
+                      current === "upload" ? null : current,
+                    );
                   }
                   setDocType(nextType);
                 }}
@@ -2342,11 +2418,14 @@ export function SupplySubmissionDetailView({
                 type="file"
                 onChange={(e) => {
                   const nextFile = e.currentTarget.files?.[0] ?? null;
-                  if (nextFile !== docFileRef.current) {
+                  if (nextFile !== docFileRef.current || nextFile === null) {
                     docFileRef.current = nextFile;
                     uploadEpochRef.current += 1;
                     uploadSessionRef.current = undefined;
                     uploadInFlightRef.current = false;
+                    setBusy((current) =>
+                      current === "upload" ? null : current,
+                    );
                   }
                   setDocFile(nextFile);
                 }}

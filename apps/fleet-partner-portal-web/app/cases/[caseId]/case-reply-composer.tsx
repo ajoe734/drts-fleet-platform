@@ -79,8 +79,17 @@ export function CaseReplyComposer({
     uploadFiles.current.clear();
     inFlightUploads.current.clear();
     operationEpochs.current.clear();
+    retryTarget.current = null;
+    setAttachments(initialAttachments);
+    setContent("");
+    setReplyState("idle");
+    setErrorMessage(null);
+    setDownloadNotice(null);
   }
-  if (!isEditable && inFlightUploads.current.size > 0) {
+  if (
+    !isEditable &&
+    (inFlightUploads.current.size > 0 || uploadSessions.current.size > 0)
+  ) {
     composerEpoch.current += 1;
     uploadSessions.current.clear();
     inFlightUploads.current.clear();
@@ -286,15 +295,17 @@ export function CaseReplyComposer({
   };
 
   const handleSubmit = async () => {
-    if (!content.trim()) return;
+    if (!content.trim() || !editableRef.current) return;
+    const targetCaseId = caseDetail.id;
+    const startComposerEpoch = composerEpoch.current;
     setReplyState("submitting");
     setErrorMessage(null);
 
     startTransition(async () => {
       try {
-        const idempotencyKey = `idem-${caseDetail.id}-${Date.now()}`;
+        const idempotencyKey = `idem-${targetCaseId}-${Date.now()}`;
         const res = await fetch(
-          `/control-plane-proxy/fleet-partner/cases/${caseDetail.id}/reply`,
+          `/control-plane-proxy/fleet-partner/cases/${targetCaseId}/reply`,
           {
             method: "POST",
             headers: fleetMutationHeaders({
@@ -314,6 +325,13 @@ export function CaseReplyComposer({
             }),
           },
         );
+        if (
+          !mountedRef.current ||
+          activeCaseIdRef.current !== targetCaseId ||
+          composerEpoch.current !== startComposerEpoch
+        ) {
+          return;
+        }
 
         if (!res.ok) {
           const errData = await res.json().catch(() => null);
@@ -325,6 +343,13 @@ export function CaseReplyComposer({
         setReplyState("sent");
         router.refresh();
       } catch (err) {
+        if (
+          !mountedRef.current ||
+          activeCaseIdRef.current !== targetCaseId ||
+          composerEpoch.current !== startComposerEpoch
+        ) {
+          return;
+        }
         setErrorMessage(
           err instanceof Error ? err.message : "網路錯誤，無法連線",
         );
