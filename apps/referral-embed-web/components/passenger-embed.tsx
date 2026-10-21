@@ -2369,7 +2369,16 @@ const tripStateLabel: Record<
   { zh: string; tone: "warn" | "primary" | "info" | "success" | "neutral" }
 > = {
   matching: { zh: "媒合中", tone: "warn" },
+  created: { zh: "媒合中", tone: "warn" },
+  ready_for_dispatch: { zh: "媒合中", tone: "warn" },
+  preassigned: { zh: "媒合中", tone: "warn" },
+  redispatch_required: { zh: "重新媒合中", tone: "warn" },
   assigned: { zh: "已派車", tone: "primary" },
+  driver_accepted: { zh: "已派車", tone: "primary" },
+  enroute_pickup: { zh: "前往上車", tone: "info" },
+  arrived_pickup: { zh: "司機已抵達", tone: "info" },
+  on_trip: { zh: "行程中", tone: "info" },
+  proof_pending: { zh: "行程中", tone: "info" },
   enroute: { zh: "前往上車", tone: "info" },
   inprogress: { zh: "行程中", tone: "info" },
   completed: { zh: "已完成", tone: "success" },
@@ -2418,6 +2427,31 @@ function ReferralDemoTripControls({
   const action = DEMO_TRIP_DISPATCHABLE.includes(status)
     ? "assign"
     : "complete";
+  // Like the driver app, report the test driver's location every 30 s so the
+  // live tracking and pickup ETA stay fresh while this demo trip is open.
+  useEffect(() => {
+    if (action !== "complete") return;
+    let active = true;
+    const beat = () =>
+      void fetch(
+        `/api/referral/demo-trip/${encodeURIComponent(orderId)}/heartbeat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      )
+        .then((response) => {
+          if (active && response.ok) onAssigned();
+        })
+        .catch(() => undefined);
+    beat();
+    const timer = globalThis.setInterval(beat, 30_000);
+    return () => {
+      active = false;
+      globalThis.clearInterval(timer);
+    };
+  }, [action, orderId, onAssigned]);
 
   async function run() {
     setPending(true);
@@ -2597,7 +2631,13 @@ function TripScreen({
         from: activeTrip.pickupAddress,
         to: activeTrip.dropoffAddress,
         win: referralLiveArrival(activeTrip, t("referralLive.pending")),
-        vehicle: activeTrip.vehicleType,
+        vehicle:
+          activeTrip.quote?.vehicleType &&
+          embedVehicles.some(
+            (vehicle) => vehicle.code === activeTrip.quote?.vehicleType,
+          )
+            ? t(`embed.vehicle.${activeTrip.quote.vehicleType}.name`)
+            : activeTrip.vehicleType,
         driver: activeTrip.driverName || "媒合中",
         plate: activeTrip.plateNumber || "待更新",
         rating: 0,
@@ -2733,11 +2773,21 @@ function TripScreen({
             marginBottom: 14,
           }}
         >
-          <Pill theme={theme} tone={state.tone} dot>
-            {state.zh}
-          </Pill>
+          <span style={{ flexShrink: 0 }}>
+            <Pill theme={theme} tone={state.tone} dot>
+              {state.zh}
+            </Pill>
+          </span>
           <span
-            style={{ fontSize: 11, color: theme.faint, fontFamily: theme.mono }}
+            style={{
+              fontSize: 11,
+              color: theme.faint,
+              fontFamily: theme.mono,
+              minWidth: 0,
+              marginLeft: 10,
+              textAlign: "right",
+              wordBreak: "break-all",
+            }}
           >
             {trip.id} · {trip.orderId}
           </span>
@@ -2884,7 +2934,11 @@ function TripScreen({
         >
           <DetailRow
             theme={theme}
-            label={trip.state === "inprogress" ? "預計抵達" : "預計上車"}
+            label={
+              ["inprogress", "on_trip", "proof_pending"].includes(trip.state)
+                ? "預計抵達"
+                : "預計上車"
+            }
             value={trip.win}
             mono
             last

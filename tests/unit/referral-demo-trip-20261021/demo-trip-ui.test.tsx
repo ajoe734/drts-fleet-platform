@@ -60,7 +60,10 @@ function trip(status: string, driverName: string | null = null) {
     statusCode: status,
     pickupAddress: "新北市板橋區縣民大道二段7號",
     dropoffAddress: "臺北市信義區市府路1號",
-    vehicleType: "comfort",
+    // The API reports the service product here; the passenger's choice is
+    // on the quote.
+    vehicleType: "enterprise_dispatch",
+    quote: { quoteId: "q-1", vehicleType: "comfort" },
     driverName,
     plateNumber: driverName ? "TEST-B001" : null,
   };
@@ -185,4 +188,49 @@ it("explains a busy test driver pool without leaving the trip", async () => {
   expect(
     await screen.findByText("測試司機都在服務其他展示行程，請稍後再試。"),
   ).toBeTruthy();
+});
+
+it("labels an accepted trip as dispatched with the chosen vehicle and reports the test location", async () => {
+  const calls = stubFetch(
+    () =>
+      Response.json({
+        ok: true,
+        data: {
+          orderId,
+          status: "driver_accepted",
+          driverId: "d",
+          simulated: true,
+        },
+      }),
+    trip("driver_accepted", "商務測試司機 1（虛構）"),
+  );
+  render(
+    <PassengerEmbed
+      context={context(true) as never}
+      liveData={live("driver_accepted", "商務測試司機 1（虛構）") as never}
+    />,
+  );
+  expect(screen.getByText("已派車")).toBeTruthy();
+  expect(screen.queryByText("媒合中")).toBeNull();
+  expect(screen.getByText(/舒適車 · TEST-B001/)).toBeTruthy();
+  expect(screen.queryByText(/enterprise_dispatch/)).toBeNull();
+  await waitFor(() =>
+    expect(
+      calls.some(
+        (c) => c.url === `/api/referral/demo-trip/${orderId}/heartbeat`,
+      ),
+    ).toBe(true),
+  );
+});
+
+it("sends no test location before a test driver is assigned", async () => {
+  const calls = stubFetch(() => Response.json({ ok: true, data: {} }));
+  render(
+    <PassengerEmbed
+      context={context(true) as never}
+      liveData={live("created") as never}
+    />,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(calls.some((c) => c.url.endsWith("/heartbeat"))).toBe(false);
 });

@@ -48,6 +48,20 @@ const OPEN_TASK_STATUSES = [
   "on_trip",
   "proof_pending",
 ];
+// Simulated approach: start ~1.3 km north of the pickup, arrive in 6 minutes.
+const APPROACH_START_LAT_OFFSET = 0.012;
+const APPROACH_MS = 6 * 60_000;
+const HEARTBEAT_WORK_STATE: Record<
+  string,
+  "assigned" | "enroute" | "arrived" | "on_trip"
+> = {
+  pending_acceptance: "assigned",
+  accepted: "assigned",
+  enroute_pickup: "enroute",
+  arrived_pickup: "arrived",
+  on_trip: "on_trip",
+  proof_pending: "on_trip",
+};
 // An abandoned demo trip holds its test pair; release it after this long.
 const STALE_DEMO_TRIP_MS = 20 * 60_000;
 
@@ -191,6 +205,10 @@ export class ReferralDemoTripService {
         { acceptedAt: new Date().toISOString() },
         requestId,
       );
+      await this.recordSimulatedLocation(
+        order,
+        this.orders.getDriverTask(task.taskId),
+      );
       return this.result(orderId, assigned.driverId);
     } finally {
       for (const pair of idle)
@@ -228,6 +246,82 @@ export class ReferralDemoTripService {
       );
     await this.finishTask(order, task, requestId);
     return this.result(orderId, task.driverId);
+  }
+
+  /**
+   * The simulated driver app's periodic location heartbeat, bound to the demo
+   * task as the real app's is, so the passenger's live tracking and pickup
+   * ETA have a fresh position (freshness lapses after 90 s without one).
+   */
+  async heartbeat(
+    orderId: string,
+    identity: BootstrapRequestIdentity | null,
+  ): Promise<ReferralDemoTripResult> {
+    this.requireEnabled();
+    const order = await this.orders.requireOwnedReferralPassengerOrder(
+      orderId,
+      identity,
+    );
+    this.requireReferralBusinessOrder(order);
+    const task = await this.openDemoTask(orderId);
+    if (!task)
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REFERRAL_DEMO_TRIP_NOT_ASSIGNED",
+        "Only a trip served by a test driver reports a test location.",
+      );
+    await this.recordSimulatedLocation(order, task);
+    return this.result(orderId, task.driverId);
+  }
+
+  /**
+   * North of the pickup by about 1.3 km at acceptance, closing in over six
+   * minutes; at the pickup once arrived.
+   */
+  simulatedPosition(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+    now = Date.now(),
+  ) {
+    const pickup = this.point(order.pickup, "pickup");
+    if (
+      !["pending_acceptance", "accepted", "enroute_pickup"].includes(
+        task.status,
+      )
+    )
+      return pickup;
+    const since = Date.parse(task.acceptedAt ?? "") || now;
+    const progress = Math.min(0.95, Math.max(0, (now - since) / APPROACH_MS));
+    return {
+      lat: pickup.lat + APPROACH_START_LAT_OFFSET * (1 - progress),
+      lng: pickup.lng,
+    };
+  }
+
+  private async recordSimulatedLocation(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+  ) {
+    const position = this.simulatedPosition(order, task);
+    await this.registry.recordDriverLocationBatch({
+      items: [
+        {
+          eventId: randomUUID(),
+          deviceId: `referral-demo-device-${task.driverId}`,
+          driverId: task.driverId,
+          vehicleId: task.vehicleId,
+          taskId: task.taskId,
+          sequenceNo: Date.now(),
+          recordedAt: new Date().toISOString(),
+          ...position,
+          accuracyM: 5,
+          workState: HEARTBEAT_WORK_STATE[task.status] ?? "assigned",
+          appState: "foreground",
+          transportMode: "foreground",
+          networkType: "wifi",
+        },
+      ],
+    });
   }
 
   /** Accept → depart → arrive → start → complete, skipping steps already done. */

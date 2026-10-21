@@ -25,6 +25,18 @@ export class ReferralDemoTripController {
     );
   }
 
+  @Post("heartbeat")
+  async heartbeat(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.demoTrips.heartbeat(orderId, identity),
+      requestId,
+    );
+  }
+
   @Post("complete")
   async complete(
     @Param("orderId") orderId: string,
