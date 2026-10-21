@@ -181,6 +181,8 @@ export type PersistTenantPartnerChanges = {
   deletedPartnerIngressCredentialIds?: readonly string[];
   deletedApprovalRequestIds?: readonly string[];
   deletedApprovalDecisionIds?: readonly string[];
+  deletedWebhookEndpointIds?: readonly string[];
+  requireExistingWebhookEndpoints?: boolean;
 };
 
 /**
@@ -275,8 +277,12 @@ export class TenantPartnerRepository {
       [tenantId, webhookId],
     );
     return (
-      (result.rows[0]?.record as StoredWebhookEndpointRecord | undefined) ??
-      null
+      result.rows
+        .map((row) => row.record as StoredWebhookEndpointRecord | undefined)
+        .find(
+          (record) =>
+            record?.tenantId === tenantId && record?.webhookId === webhookId,
+        ) ?? null
     );
   }
 
@@ -879,6 +885,15 @@ export class TenantPartnerRepository {
       );
     }
 
+    for (const webhookId of changes.deletedWebhookEndpointIds ?? []) {
+      writes.push(
+        target.query(
+          `DELETE FROM admin.phase1_tenant_webhook_endpoints WHERE webhook_id = $1`,
+          [webhookId],
+        ),
+      );
+    }
+
     for (const preferences of changes.notificationPreferences ?? []) {
       writes.push(
         target.query(
@@ -1149,6 +1164,7 @@ export class TenantPartnerRepository {
         this.persistWebhookEndpointsWithExecutor(
           target,
           changes.webhookEndpoints ?? [],
+          Boolean(changes.requireExistingWebhookEndpoints),
         ),
       );
     }
@@ -2082,10 +2098,28 @@ export class TenantPartnerRepository {
   private async persistWebhookEndpointsWithExecutor(
     executor: TenantPartnerQueryExecutor,
     endpoints: readonly StoredWebhookEndpointRecord[],
+    requireExisting = false,
   ) {
     await Promise.all(
-      endpoints.map((endpoint) =>
-        executor.query(
+      endpoints.map(async (endpoint) => {
+        if (requireExisting) {
+          const existing = await executor.query<JsonRecordRow>(
+            `SELECT record FROM admin.phase1_tenant_webhook_endpoints
+             WHERE webhook_id = $1 FOR UPDATE`,
+            [endpoint.webhookId],
+          );
+          const match = existing.rows
+            .map((row) => row.record as StoredWebhookEndpointRecord | undefined)
+            .find(
+              (record) =>
+                record?.webhookId === endpoint.webhookId &&
+                record?.tenantId === endpoint.tenantId,
+            );
+          if (!match) {
+            return;
+          }
+        }
+        await executor.query(
           `
             INSERT INTO admin.phase1_tenant_webhook_endpoints (
               webhook_id,
@@ -2112,8 +2146,8 @@ export class TenantPartnerRepository {
             endpoint.updatedAt,
             JSON.stringify(endpoint),
           ],
-        ),
-      ),
+        );
+      }),
     );
   }
 }
