@@ -2185,7 +2185,10 @@ export class OwnedMobilityService
       this.refreshPassengerDisclosureSnapshot(order, false, {
         channel: this.resolvePassengerDisclosureChannel(order, identity),
       });
-    const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
+    const applyGovernance = (
+      tx?: OwnedMobilityQueryExecutor | null,
+      afterCommit?: Array<() => void | Promise<void>>,
+    ) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
           tx: tx ?? null,
@@ -2198,6 +2201,7 @@ export class OwnedMobilityService
             this.resolveApprovalStateFromEvaluation(evaluation);
           return this.createApprovalRequestForOrder({
             tx: tx ?? null,
+            ...(afterCommit ? { afterCommit } : {}),
             order,
             evaluation,
             ...(requestId ? { requestId } : {}),
@@ -2212,6 +2216,7 @@ export class OwnedMobilityService
         (options?.writeReferralNotificationRoute &&
           this.partnerUserIdentityLinkRepository))
     ) {
+      const afterCommit: Array<() => void | Promise<void>> = [];
       return (
         this.ownedMobilityRepository
           .withTransaction(async (tx) => {
@@ -2294,6 +2299,7 @@ export class OwnedMobilityService
             await applyPassengerDisclosure();
             const approvalRequest = await applyGovernance(
               this.tenantPartnerService?.isPersistenceEnabled() ? tx : null,
+              afterCommit,
             );
             await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
               orders: [this.cloneOrder(order)],
@@ -2327,9 +2333,17 @@ export class OwnedMobilityService
           })
           // Publish into the in-memory order feed and dispatch events only after
           // commit: readers must not race the frozen route/sequence setup.
-          .then((approvalRequest) =>
-            finalizeCreation(previousApprovalState, approvalRequest, false),
-          )
+          .then(async (approvalRequest) => {
+            const result = await finalizeCreation(
+              previousApprovalState,
+              approvalRequest,
+              false,
+            );
+            for (const effect of afterCommit) {
+              await effect();
+            }
+            return result;
+          })
       );
     }
 
