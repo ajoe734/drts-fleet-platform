@@ -1784,7 +1784,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   isPersistenceEnabled() {
-    return this.tenantPartnerRepository?.isEnabled() ?? false;
+    return this.tenantPartnerRepository?.isEnabled?.() ?? false;
   }
 
   async getTenantDashboardSummary(
@@ -5144,8 +5144,27 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((entry) => this.clonePartnerEntry(entry));
   }
 
+  async resolvePartnerEntries(
+    entrySlug?: string,
+  ): Promise<PartnerChannelEntryRecord[]> {
+    const slug = entrySlug?.trim();
+    const entries = await this.loadCanonicalPartnerEntries();
+    return entries
+      .filter(
+        (entry) =>
+          entry.activeFlag &&
+          entry.status === "active" &&
+          (!slug || entry.entrySlug === slug || entry.partnerId === slug),
+      )
+      .map((entry) => this.clonePartnerEntry(entry));
+  }
+
   listPlatformPartnerEntries() {
     return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+  }
+
+  async resolvePlatformPartnerEntries(): Promise<PartnerChannelEntryRecord[]> {
+    return await this.loadCanonicalPartnerEntries();
   }
 
   // ── Referral revenue-share rate config (CRC-BE-006) ──────────────────────
@@ -5361,6 +5380,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((credential) => this.toPartnerIngressCredentialResponse(credential));
   }
 
+  async resolvePlatformPartnerIngressCredentials(
+    entrySlug: string,
+  ): Promise<PartnerIngressCredentialRecord[]> {
+    const entry = await this.requireCanonicalPlatformPartnerEntry(entrySlug);
+    await this.loadCanonicalPartnerIngressCredentials(entry.entrySlug);
+    return this.listPlatformPartnerIngressCredentials(entry.entrySlug);
+  }
+
   async resolvePartnerEligibilityReviewQueue(
     requestId?: string,
     identity?: IdentityContext | null,
@@ -5453,6 +5480,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   getPartnerEntry(entrySlug: string) {
     return this.clonePartnerEntry(this.requirePublicPartnerEntry(entrySlug));
+  }
+
+  async resolvePartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord> {
+    return this.clonePartnerEntry(
+      await this.requireCanonicalAccessiblePartnerEntry(
+        entrySlug,
+        undefined,
+        "public",
+      ),
+    );
   }
 
   async getPartnerReferralDashboard(
@@ -5551,6 +5590,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       const partnerCode = this.normalizePartnerCode(command.partnerCode);
       const programId = this.requireNonBlank(command.programId, "programId");
 
+      await this.loadCanonicalPartnerEntry(entrySlug);
       if (this.partnerEntries.some((entry) => entry.entrySlug === entrySlug)) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -5686,7 +5726,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
   ) {
     return this.runWithEntryMutex(entrySlug, async () => {
-      const originalEntry = this.requirePlatformPartnerEntry(entrySlug);
+      const originalEntry =
+        await this.requireCanonicalPlatformPartnerEntry(entrySlug);
       const before = this.clonePartnerEntry(originalEntry);
       const entry = this.clonePartnerEntry(originalEntry);
 
@@ -5838,7 +5879,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   async revokePlatformPartnerEntry(entrySlug: string, requestId?: string) {
     return this.runWithEntryMutex(entrySlug, async () => {
-      const originalEntry = this.requirePlatformPartnerEntry(entrySlug);
+      const originalEntry =
+        await this.requireCanonicalPlatformPartnerEntry(entrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(
+        originalEntry.entrySlug,
+      );
       const before = this.clonePartnerEntry(originalEntry);
       const entry = this.clonePartnerEntry(originalEntry);
       const revokedAt = new Date().toISOString();
@@ -5923,7 +5968,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
   ): Promise<PartnerIngressCredentialIssued> {
     return this.runWithEntryMutex(entrySlug, async () => {
-      const entry = this.requirePlatformPartnerEntry(entrySlug);
+      const entry = await this.requireCanonicalPlatformPartnerEntry(entrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(entry.entrySlug);
       if (entry.status === "revoked") {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -6060,7 +6106,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
   ): Promise<PartnerIngressCredentialRecord> {
     return this.runWithEntryMutex(entrySlug, async () => {
-      const entry = this.requirePlatformPartnerEntry(entrySlug);
+      const entry = await this.requireCanonicalPlatformPartnerEntry(entrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(entry.entrySlug);
       const originalCredential = this.requirePartnerIngressCredential(
         entry.entrySlug,
         keyId,
@@ -6112,6 +6159,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
       return this.toPartnerIngressCredentialResponse(credential);
     });
+  }
+
+  async resolvePartnerBootstrapAuthentication(
+    command: CreatePartnerBootstrapSessionCommand,
+    requestId?: string,
+  ): Promise<PartnerIngressResolution> {
+    const normalizedEntrySlug = command.entrySlug?.trim();
+    if (normalizedEntrySlug) {
+      await this.loadCanonicalPartnerEntry(normalizedEntrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(normalizedEntrySlug);
+    }
+    return this.authenticatePartnerBootstrap(command, requestId);
   }
 
   authenticatePartnerBootstrap(
@@ -6286,6 +6345,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async resolvePartnerBootstrapWithResolvedCredential(
+    entrySlug: string,
+    requestId?: string,
+  ): Promise<PartnerIngressResolution> {
+    const normalizedEntrySlug = entrySlug?.trim();
+    if (normalizedEntrySlug) {
+      await this.loadCanonicalPartnerEntry(normalizedEntrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(normalizedEntrySlug);
+    }
+    return this.authenticatePartnerBootstrapWithResolvedCredential(
+      entrySlug,
+      requestId,
+    );
+  }
+
   private authenticatePartnerBootstrapWithResolvedCredential(
     entrySlug: string,
     requestId?: string,
@@ -6390,7 +6464,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     },
   ): Promise<PartnerIngressHandoffResolution> {
     const bootstrap = command.apiKey?.trim()
-      ? this.authenticatePartnerBootstrap(
+      ? await this.resolvePartnerBootstrapAuthentication(
           {
             entrySlug: command.entrySlug,
             apiKey: command.apiKey,
@@ -6398,11 +6472,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           requestId,
         )
       : options?.allowInternalBootstrap
-        ? this.authenticatePartnerBootstrapWithResolvedCredential(
+        ? await this.resolvePartnerBootstrapWithResolvedCredential(
             command.entrySlug,
             requestId,
           )
-        : this.authenticatePartnerBootstrap(
+        : await this.resolvePartnerBootstrapAuthentication(
             {
               entrySlug: command.entrySlug,
               apiKey: command.apiKey ?? "",
@@ -6539,7 +6613,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (result.outcome === "consumed") {
-      const entry = await this.getPartnerEntry(result.session.partnerEntrySlug);
+      const entry = await this.resolvePartnerEntry(
+        result.session.partnerEntrySlug,
+      );
       if (!entry || entry.status !== "active") {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -6630,7 +6706,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.assertExactReferralEmbedConsentBundle(command.consentBundle);
 
     const validateFn = async (session: ReferralEmbedSession) => {
-      const entry = await this.getPartnerEntry(session.partnerEntrySlug);
+      const entry = await this.resolvePartnerEntry(session.partnerEntrySlug);
       if (!entry || entry.status !== "active") {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -6789,7 +6865,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: PartnerEligibilityIdentity | null,
   ) {
-    const entry = this.requireAccessiblePartnerEntry(
+    const entry = await this.requireCanonicalAccessiblePartnerEntry(
       command.entrySlug,
       requestId,
       "eligibility",
@@ -13020,6 +13096,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return entry;
   }
 
+  private async requireCanonicalAccessiblePartnerEntry(
+    entrySlug: string,
+    requestId: string | undefined,
+    mode: "authenticate" | "eligibility" | "public",
+  ) {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_REQUIRED",
+        "entrySlug is required.",
+        {},
+      );
+    }
+    await this.loadCanonicalPartnerEntry(normalizedSlug);
+    return this.requireAccessiblePartnerEntry(normalizedSlug, requestId, mode);
+  }
+
   private requirePlatformPartnerEntry(entrySlug: string) {
     const normalizedSlug = entrySlug?.trim();
     if (!normalizedSlug) {
@@ -13046,6 +13140,131 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return entry;
+  }
+
+  private async requireCanonicalPlatformPartnerEntry(entrySlug: string) {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_REQUIRED",
+        "entrySlug is required.",
+        {},
+      );
+    }
+    await this.loadCanonicalPartnerEntry(normalizedSlug);
+    return this.requirePlatformPartnerEntry(normalizedSlug);
+  }
+
+  private async loadCanonicalPartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord | null> {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      return null;
+    }
+    if (
+      this.tenantPartnerRepository?.isEnabled?.() &&
+      typeof this.tenantPartnerRepository.findPartnerEntry === "function"
+    ) {
+      const persisted =
+        await this.tenantPartnerRepository.findPartnerEntry(normalizedSlug);
+      if (persisted) {
+        if (
+          isStrictAuthEnvironment() &&
+          persisted.tenantId === DEMO_TENANT_ID
+        ) {
+          this.partnerEntries = this.partnerEntries.filter(
+            (candidate) => candidate.entrySlug !== normalizedSlug,
+          );
+          return null;
+        }
+        const cloned = this.clonePartnerEntry(persisted);
+        const existingIndex = this.partnerEntries.findIndex(
+          (candidate) => candidate.entrySlug === cloned.entrySlug,
+        );
+        if (existingIndex >= 0) {
+          this.partnerEntries[existingIndex] = cloned;
+        } else {
+          this.partnerEntries = [cloned, ...this.partnerEntries];
+        }
+        return this.clonePartnerEntry(cloned);
+      }
+    }
+    return this.findPartnerEntryBySlug(normalizedSlug);
+  }
+
+  private async loadCanonicalPartnerEntries(): Promise<
+    PartnerChannelEntryRecord[]
+  > {
+    if (
+      this.tenantPartnerRepository?.isEnabled?.() &&
+      typeof this.tenantPartnerRepository.listPartnerEntries === "function"
+    ) {
+      const persistedEntries =
+        await this.tenantPartnerRepository.listPartnerEntries();
+      const sanitizedPersisted = isStrictAuthEnvironment()
+        ? persistedEntries.filter((entry) => entry.tenantId !== DEMO_TENANT_ID)
+        : persistedEntries;
+      if (sanitizedPersisted.length > 0) {
+        const persistedBySlug = new Map(
+          sanitizedPersisted.map((entry) => [
+            entry.entrySlug,
+            this.clonePartnerEntry(entry),
+          ]),
+        );
+        const retainedLocal = this.partnerEntries
+          .filter(
+            (entry) =>
+              !persistedBySlug.has(entry.entrySlug) &&
+              (!isStrictAuthEnvironment() || entry.tenantId !== DEMO_TENANT_ID),
+          )
+          .map((entry) => this.clonePartnerEntry(entry));
+        this.partnerEntries = [
+          ...Array.from(persistedBySlug.values()),
+          ...retainedLocal,
+        ];
+      }
+    }
+    return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+  }
+
+  private async loadCanonicalPartnerIngressCredentials(
+    entrySlug: string,
+  ): Promise<StoredPartnerIngressCredentialRecord[]> {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      return [];
+    }
+    if (
+      this.tenantPartnerRepository?.isEnabled?.() &&
+      typeof this.tenantPartnerRepository.listPartnerIngressCredentials ===
+        "function"
+    ) {
+      const persistedCredentials =
+        await this.tenantPartnerRepository.listPartnerIngressCredentials(
+          normalizedSlug,
+        );
+      if (persistedCredentials.length > 0) {
+        const persistedCloned = persistedCredentials.map((credential) =>
+          this.cloneStoredPartnerIngressCredential(credential),
+        );
+        const persistedKeyIds = new Set(
+          persistedCloned.map((credential) => credential.keyId),
+        );
+        const retainedOther = this.partnerIngressCredentials.filter(
+          (credential) =>
+            credential.entrySlug !== normalizedSlug ||
+            (!persistedKeyIds.has(credential.keyId) &&
+              credential.source === "env_bootstrap" &&
+              !isStrictAuthEnvironment()),
+        );
+        this.partnerIngressCredentials = [...persistedCloned, ...retainedOther];
+      }
+    }
+    return this.partnerIngressCredentials.filter(
+      (credential) => credential.entrySlug === normalizedSlug,
+    );
   }
 
   private reconcilePartnerEntrySeeds() {
