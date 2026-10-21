@@ -57,6 +57,40 @@ export class FleetPartnerRepository {
     return this.databaseService?.isEnabled() ?? false;
   }
 
+  async findFleetPartnerById(
+    fleetPartnerId: string,
+  ): Promise<FleetPartnerRecord | null> {
+    if (!this.isEnabled()) return null;
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_fleet_partners
+       WHERE fleet_partner_id = $1`,
+      [fleetPartnerId],
+    );
+    return result.rows[0]
+      ? this.parseRecord<FleetPartnerRecord>(
+          result.rows[0].record,
+          "admin.phase1_fleet_partners",
+        )
+      : null;
+  }
+
+  async loadFleetPartners(): Promise<FleetPartnerRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM admin.phase1_fleet_partners
+        ORDER BY updated_at DESC
+      `,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<FleetPartnerRecord>(
+        row.record,
+        "admin.phase1_fleet_partners",
+      ),
+    );
+  }
+
   async findActiveFleetPartnerById(
     fleetPartnerId: string,
   ): Promise<FleetPartnerRecord | null> {
