@@ -12,6 +12,7 @@ import {
   type Route,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { parsePdf } from "../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
   prepareOperationalFleetSession,
@@ -1734,7 +1735,6 @@ test(journeyName, async ({ browser, request }) => {
       type PdfPhase =
         | "browser-pdf-consumer"
         | "browser-pdf-region"
-        | "browser-pdf-parser-import"
         | "browser-pdf-response-fetch"
         | "browser-pdf-response-body"
         | "browser-pdf-content-parse"
@@ -1772,11 +1772,6 @@ test(journeyName, async ({ browser, request }) => {
         );
         const pdfUrl = `${origins.referral}/api/referral/receipt/${encodeURIComponent(completedOrderId)}/pdf`;
         const pdfFilename = `receipt-${completedOrderId}.pdf`;
-        const { parsePdf } = await pdfPhase(
-          "browser-pdf-parser-import",
-          () =>
-            import("../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser"),
-        );
         const observePdfAction = async (action: () => Promise<void>) => {
           let resolveResponse!: (bytes: Buffer) => void;
           let rejectResponse!: (error: unknown) => void;
