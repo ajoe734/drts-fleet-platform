@@ -54,12 +54,10 @@ import type {
   CreateFleetPartnerCommand,
   CreatePartnerBootstrapSessionCommand,
   CreatePartnerChannelEntryCommand,
-  FleetPartnerRecord,
   IssuePartnerIngressCredentialCommand,
   RevokePartnerIngressCredentialCommand,
   UpdateFleetPartnerCommand,
 } from "@drts/contracts";
-import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import {
   BootstrapAuthGuard,
   JwtAuthService,
@@ -163,11 +161,9 @@ function gitBlobSha1Hex(content: Buffer | string): string {
 }
 
 function hasLocalBaselineCommit(commitSha: string): boolean {
-  const probe = spawnSync(
-    "git",
-    ["cat-file", "-e", `${commitSha}^{commit}`],
-    { encoding: "utf8" },
-  );
+  const probe = spawnSync("git", ["cat-file", "-e", `${commitSha}^{commit}`], {
+    encoding: "utf8",
+  });
   return probe.status === 0;
 }
 
@@ -263,7 +259,7 @@ function reconstructImmutable337CallerSources(): {
         "load_operational_role_session_exports() {",
         '  [[ -f "$ROLE_SESSIONS_ENV_FILE" ]] || return 0',
         "  local env_key env_value",
-        '  while IFS=\'=\' read -r env_key env_value || [[ -n "$env_key" ]]; do',
+        "  while IFS='=' read -r env_key env_value || [[ -n \"$env_key\" ]]; do",
         '    [[ -n "$env_key" ]] || continue',
         '    case "$env_key" in',
         "      DRTS_OPERATIONAL_*|DRTS_LIVE_MAP_*)",
@@ -550,7 +546,9 @@ function createStandardMockFetch(
 
     if (
       method === "GET" &&
-      url.startsWith(`${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/`)
+      url.startsWith(
+        `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/`,
+      )
     ) {
       expect(headers.authorization).toBe(
         `Bearer ${SIM_PLATFORM_ADMIN_ID_TOKEN}`,
@@ -798,8 +796,7 @@ function createStandardMockFetch(
               ...(options.foreignPartnerType === null
                 ? {}
                 : {
-                    partnerType:
-                      options.foreignPartnerType ?? "fleet_partner",
+                    partnerType: options.foreignPartnerType ?? "fleet_partner",
                   }),
               status: options.foreignPartnerStatus ?? "active",
               activeFlag: options.foreignPartnerActiveFlag ?? true,
@@ -902,7 +899,10 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       if (hasLocalBaselineCommit(IMMUTABLE_BASELINE_REF)) {
         const gitWorkflow = execFileSync(
           "git",
-          ["show", `${IMMUTABLE_BASELINE_REF}:.github/workflows/deploy-dev.yml`],
+          [
+            "show",
+            `${IMMUTABLE_BASELINE_REF}:.github/workflows/deploy-dev.yml`,
+          ],
           { encoding: "utf8" },
         );
         const gitRunner = execFileSync(
@@ -1504,8 +1504,10 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
         DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: undefined,
         DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY: undefined,
       });
-      const { fetchImpl: providedCanonicalFetch, calls: providedCanonicalCalls } =
-        createStandardMockFetch();
+      const {
+        fetchImpl: providedCanonicalFetch,
+        calls: providedCanonicalCalls,
+      } = createStandardMockFetch();
       const canonicalEvidence = await prepareOperationalRoleSessions(
         providedCanonicalFleetEnv,
         {
@@ -2102,9 +2104,7 @@ process.exit(99);
           sqlEvents.push({ verb: "INSERT_UPSERT", table, id: key });
           return { rows: [], rowCount: 1 };
         }
-        if (
-          (match = s.match(/^SELECT\b.*?\bFROM ([a-z0-9_.]+)/i)) !== null
-        ) {
+        if ((match = s.match(/^SELECT\b.*?\bFROM ([a-z0-9_.]+)/i)) !== null) {
           const table = match[1]!;
           const rows = sqlTables.get(table);
           if (!rows) {
@@ -2133,8 +2133,15 @@ process.exit(99);
         withTransaction: async <T>(
           work: (client: { query: typeof sqlQuery }) => Promise<T>,
         ) => {
-          const before = structuredClone(
-            [...sqlTables.entries()].map(([k, v]) => [k, [...v.entries()]]),
+          const before: Array<
+            [string, Array<[string, Record<string, unknown>]>]
+          > = structuredClone(
+            [...sqlTables.entries()].map(
+              ([k, v]): [string, Array<[string, Record<string, unknown>]>] => [
+                k,
+                [...v.entries()],
+              ],
+            ),
           );
           try {
             const result = await work({ query: sqlQuery });
@@ -2166,14 +2173,13 @@ process.exit(99);
         {} as never,
       );
       for (const seeded of fleetPartnerService.listFleetPartners()) {
-        sqlTables.get("admin.phase1_fleet_partners")!.set(
-          seeded.fleetPartnerId,
-          {
+        sqlTables
+          .get("admin.phase1_fleet_partners")!
+          .set(seeded.fleetPartnerId, {
             fleet_partner_id: seeded.fleetPartnerId,
             active: seeded.active,
             record: structuredClone(seeded),
-          },
-        );
+          });
       }
 
       const tenantPartnerRepository = new TenantPartnerRepository(
@@ -2209,17 +2215,16 @@ process.exit(99);
       );
       tenantPartnerService.onModuleDestroy();
       for (const seededEntry of tenantPartnerService.listPlatformPartnerEntries()) {
-        sqlTables.get("admin.phase1_partner_channel_entries")!.set(
-          seededEntry.entrySlug,
-          {
+        sqlTables
+          .get("admin.phase1_partner_channel_entries")!
+          .set(seededEntry.entrySlug, {
             entry_slug: seededEntry.entrySlug,
             tenant_id: seededEntry.tenantId,
             partner_id: seededEntry.partnerId,
             program_id: seededEntry.programId,
             status: seededEntry.status,
             record: structuredClone(seededEntry),
-          },
-        );
+          });
       }
       const jwtAuthService = new JwtAuthService(
         identityRepository,
@@ -2363,12 +2368,11 @@ process.exit(99);
             },
           );
           const issued = await authController.issueToken(req as never);
-          const data = (
+          const data =
             issued && typeof issued === "object" && "data" in issued
               ? (issued as { data?: { token?: string; sessionId?: string } })
                   .data
-              : (issued as { token?: string; sessionId?: string })
-          );
+              : (issued as { token?: string; sessionId?: string });
           if (optionsOverride?.trackAsHelperIssued && data?.sessionId) {
             issuedAdminSessionIds.push(data.sessionId);
           }
@@ -2485,7 +2489,8 @@ process.exit(99);
           // 3B. Platform Admin BFF step-up proof issuance -> real BootstrapAuthGuard + IdentityController.createStepUpProof
           if (
             method === "POST" &&
-            url === `${ADMIN_ORIGIN}/control-plane-proxy/identity/step-up-proofs`
+            url ===
+              `${ADMIN_ORIGIN}/control-plane-proxy/identity/step-up-proofs`
           ) {
             expect(headers.authorization).toBe(
               `Bearer ${SIM_PLATFORM_ADMIN_ID_TOKEN}`,
@@ -2600,7 +2605,8 @@ process.exit(99);
               }
               const createdRecord =
                 created && typeof created === "object" && "data" in created
-                  ? (created as { data: Record<string, unknown> }).data
+                  ? (created as unknown as { data: Record<string, unknown> })
+                      .data
                   : (created as unknown as Record<string, unknown>);
               return jsonResponse(
                 deepToSnakeCase({
@@ -2773,13 +2779,15 @@ process.exit(99);
               ) {
                 droppedEntryCreateOnce = true;
                 if (options.injectUnrelatedEntryCollisionOnLostResponse) {
-                  const cmd = body as CreatePartnerChannelEntryCommand;
-                  await tenantPartnerService.createPlatformPartnerEntry({
-                    ...cmd,
-                    fleetPartnerId: undefined,
+                  const collisionCmd: CreatePartnerChannelEntryCommand = {
+                    ...(body as CreatePartnerChannelEntryCommand),
                     partnerType: "referral_channel",
                     partnerCode: "UNRELATED_COLLISION_CODE",
-                  });
+                  };
+                  delete collisionCmd.fleetPartnerId;
+                  await tenantPartnerService.createPlatformPartnerEntry(
+                    collisionCmd,
+                  );
                 }
                 return jsonResponse(
                   { error: "gateway_timeout_before_entry_write" },
@@ -3269,15 +3277,19 @@ process.exit(99);
                 },
               },
             );
+            const principalIdParam = parsedUrl.searchParams.get("principalId");
+            const realmParam = parsedUrl.searchParams.get("realm") as
+              | "partner"
+              | null;
+            const tenantIdParam = parsedUrl.searchParams.get("tenantId");
             const result = await identityController.listAdminSessions(
               req.identity,
               {
-                principalId:
-                  parsedUrl.searchParams.get("principalId") ?? undefined,
-                realm:
-                  (parsedUrl.searchParams.get("realm") as "partner" | null) ??
-                  undefined,
-                tenantId: parsedUrl.searchParams.get("tenantId") ?? undefined,
+                ...(principalIdParam !== null
+                  ? { principalId: principalIdParam }
+                  : {}),
+                ...(realmParam !== null ? { realm: realmParam } : {}),
+                ...(tenantIdParam !== null ? { tenantId: tenantIdParam } : {}),
               },
             );
             return jsonResponse(deepToSnakeCase(result));
@@ -3327,17 +3339,6 @@ process.exit(99);
                 ? deepToSnakeCase(raw)
                 : { error: { code: "HTTP_ERROR", message: String(raw) } };
             return jsonResponse(errBody, { status });
-          }
-          if (err instanceof ApiRequestError) {
-            return jsonResponse(
-              deepToSnakeCase({
-                error: {
-                  code: err.code,
-                  message: err.message,
-                },
-              }),
-              { status: err.statusCode },
-            );
           }
           throw err;
         }
@@ -3431,9 +3432,9 @@ process.exit(99);
           c.url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token`,
       );
       expect(adminTokenCalls).toHaveLength(1);
-      expect(
-        exported.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS,
-      ).toBe("pending");
+      expect(exported.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS).toBe(
+        "pending",
+      );
 
       // Exercise unchanged C125 consumers against the real issued foreign Fleet session
       for (const [k, v] of Object.entries(env)) {
@@ -3557,7 +3558,8 @@ process.exit(99);
         .filter(
           (c) =>
             c.method === "POST" &&
-            c.url === `${ADMIN_ORIGIN}/control-plane-proxy/identity/step-up-proofs`,
+            c.url ===
+              `${ADMIN_ORIGIN}/control-plane-proxy/identity/step-up-proofs`,
         )
         .map((c) => (c.body as { actionId?: string })?.actionId);
       expect(stepUpActions).toEqual([
@@ -3567,9 +3569,9 @@ process.exit(99);
         "platform:partner-entries:deactivate",
         "platform:partner-entries:revoke",
       ]);
-      expect(masked.filter((m) => m.startsWith("stepup_")).length).toBeGreaterThanOrEqual(
-        5,
-      );
+      expect(
+        masked.filter((m) => m.startsWith("stepup_")).length,
+      ).toBeGreaterThanOrEqual(5);
 
       // Owned Fleet is now inactive, owned entry and key are revoked, while pre-existing Fleet and entries remain active
       expect(
@@ -3595,8 +3597,8 @@ process.exit(99);
     it("preserves provided-first precedence and never creates, mutates, or revokes borrowed external Fleet/entry/key/Admin fixtures", async () => {
       const harness = createOwnedForeignFleetRealServiceHarness();
       // Seed an external foreign Fleet + entry + key in the real services
-      const externalFleet = await harness.fleetPartnerService.createFleetPartner(
-        {
+      const externalFleet =
+        await harness.fleetPartnerService.createFleetPartner({
           legalName: "External Provided Foreign Fleet",
           displayName: "External Foreign Fleet",
           businessRegistrationNo: "EXT-FF-002",
@@ -3604,8 +3606,7 @@ process.exit(99);
           contactPhone: "+886-2-5550-0002",
           partnershipType: "fleet_management",
           active: true,
-        },
-      );
+        });
       await harness.tenantPartnerService.createPlatformPartnerEntry({
         tenantId: "tenant-demo-001",
         fleetPartnerId: externalFleet.fleetPartnerId,
@@ -3945,7 +3946,8 @@ process.exit(99);
         recoverableHarness.calls.filter(
           (c) =>
             c.method === "POST" &&
-            c.url === `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners`,
+            c.url ===
+              `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners`,
         ),
       ).toHaveLength(1);
       expect(
@@ -4112,9 +4114,7 @@ process.exit(99);
         env.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID!;
 
       // First teardown attempt fails when PUT /admin/fleet-partners/:id returns 503
-      let firstCleanupSaved:
-        | OperationalRoleSessionsCleanupEvidence
-        | undefined;
+      let firstCleanupSaved: OperationalRoleSessionsCleanupEvidence | undefined;
       await expect(
         teardownOperationalRoleSessions(env, {
           fetch: retryHarness.fetchImpl,
