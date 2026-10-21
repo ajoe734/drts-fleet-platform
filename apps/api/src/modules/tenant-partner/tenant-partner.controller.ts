@@ -415,6 +415,35 @@ export class TenantPartnerController {
     };
   }
 
+  private toCanonicalEnvelopePromise<T>(
+    canonicalPromise: Promise<T>,
+    snapshotFactory: () => T,
+    requestId?: string,
+  ): Promise<ApiSuccessEnvelope<T>> & ApiSuccessEnvelope<T> {
+    let resolvedEnvelope: ApiSuccessEnvelope<T> | null = null;
+    const envelopePromise = canonicalPromise.then((data) => {
+      resolvedEnvelope = toApiSuccessEnvelope(data, requestId);
+      return resolvedEnvelope;
+    });
+    envelopePromise.catch(() => {});
+    const getSnapshotEnvelope = () => {
+      if (!resolvedEnvelope) {
+        resolvedEnvelope = toApiSuccessEnvelope(snapshotFactory(), requestId);
+      }
+      return resolvedEnvelope;
+    };
+    return Object.defineProperties(envelopePromise, {
+      data: {
+        enumerable: true,
+        get: () => getSnapshotEnvelope().data,
+      },
+      meta: {
+        enumerable: true,
+        get: () => getSnapshotEnvelope().meta,
+      },
+    }) as Promise<ApiSuccessEnvelope<T>> & ApiSuccessEnvelope<T>;
+  }
+
   private async issueJwtSession(
     identity: Parameters<JwtAuthService["issueSessionToken"]>[0],
     options?: Parameters<JwtAuthService["issueSessionToken"]>[1],
@@ -586,9 +615,14 @@ export class TenantPartnerController {
     requestId?: string,
   ) {
     if (!session.identityActive) return session;
-    const entry = await this.tenantPartnerService.getPartnerEntry(
-      session.partnerEntrySlug,
-    );
+    const entry =
+      typeof this.tenantPartnerService.resolvePartnerEntry === "function"
+        ? await this.tenantPartnerService.resolvePartnerEntry(
+            session.partnerEntrySlug,
+          )
+        : await this.tenantPartnerService.getPartnerEntry(
+            session.partnerEntrySlug,
+          );
     const identity = session.identity;
     const grantedAt = Date.parse(session.consent.grantedAt ?? "");
     if (
@@ -834,6 +868,18 @@ export class TenantPartnerController {
   @OpenRoute()
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listPartnerEntries(@Headers("x-request-id") requestId?: string) {
+    if (
+      this.tenantPartnerService.isPersistenceEnabled?.() &&
+      typeof this.tenantPartnerService.resolvePartnerEntries === "function"
+    ) {
+      return this.toCanonicalEnvelopePromise(
+        this.tenantPartnerService
+          .resolvePartnerEntries()
+          .then((items) => toApiListData(items)),
+        () => toApiListData(this.tenantPartnerService.listPartnerEntries()),
+        requestId,
+      );
+    }
     const items: PartnerChannelEntryRecord[] =
       this.tenantPartnerService.listPartnerEntries();
     return toApiSuccessEnvelope(toApiListData(items), requestId);
@@ -846,6 +892,16 @@ export class TenantPartnerController {
     @Param("entrySlug") entrySlug: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (
+      this.tenantPartnerService.isPersistenceEnabled?.() &&
+      typeof this.tenantPartnerService.resolvePartnerEntry === "function"
+    ) {
+      return this.toCanonicalEnvelopePromise(
+        this.tenantPartnerService.resolvePartnerEntry(entrySlug),
+        () => this.tenantPartnerService.getPartnerEntry(entrySlug),
+        requestId,
+      );
+    }
     return toApiSuccessEnvelope(
       this.tenantPartnerService.getPartnerEntry(entrySlug),
       requestId,
@@ -999,6 +1055,20 @@ export class TenantPartnerController {
   @Get("platform-admin/partner-entries")
   @Throttle(READ_HEAVY_RATE_LIMIT)
   listPlatformPartnerEntries(@Headers("x-request-id") requestId?: string) {
+    if (
+      this.tenantPartnerService.isPersistenceEnabled?.() &&
+      typeof this.tenantPartnerService.resolvePlatformPartnerEntries ===
+        "function"
+    ) {
+      return this.toCanonicalEnvelopePromise(
+        this.tenantPartnerService
+          .resolvePlatformPartnerEntries()
+          .then((items) => toApiListData(items)),
+        () =>
+          toApiListData(this.tenantPartnerService.listPlatformPartnerEntries()),
+        requestId,
+      );
+    }
     return toApiSuccessEnvelope(
       toApiListData(this.tenantPartnerService.listPlatformPartnerEntries()),
       requestId,
@@ -1114,6 +1184,24 @@ export class TenantPartnerController {
     @Param("entrySlug") entrySlug: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (
+      this.tenantPartnerService.isPersistenceEnabled?.() &&
+      typeof this.tenantPartnerService
+        .resolvePlatformPartnerIngressCredentials === "function"
+    ) {
+      return this.toCanonicalEnvelopePromise(
+        this.tenantPartnerService
+          .resolvePlatformPartnerIngressCredentials(entrySlug)
+          .then((items) => toApiListData(items)),
+        () =>
+          toApiListData(
+            this.tenantPartnerService.listPlatformPartnerIngressCredentials(
+              entrySlug,
+            ),
+          ),
+        requestId,
+      );
+    }
     const items: PartnerIngressCredentialRecord[] =
       this.tenantPartnerService.listPlatformPartnerIngressCredentials(
         entrySlug,
@@ -2628,16 +2716,31 @@ export class TenantPartnerController {
         );
       } else {
         const partnerEntry =
-          await this.tenantPartnerService.getPartnerEntry(entrySlug);
+          typeof this.tenantPartnerService.resolvePartnerEntry === "function"
+            ? await this.tenantPartnerService.resolvePartnerEntry(entrySlug)
+            : await this.tenantPartnerService.getPartnerEntry(entrySlug);
         if (!partnerEntry) throw new Error("Entry not found");
 
-        this.tenantPartnerService.authenticatePartnerBootstrap(
-          {
-            entrySlug,
-            apiKey: apiKey ?? "",
-          },
-          requestId,
-        );
+        if (
+          typeof this.tenantPartnerService
+            .resolvePartnerBootstrapAuthentication === "function"
+        ) {
+          await this.tenantPartnerService.resolvePartnerBootstrapAuthentication(
+            {
+              entrySlug,
+              apiKey: apiKey ?? "",
+            },
+            requestId,
+          );
+        } else {
+          this.tenantPartnerService.authenticatePartnerBootstrap(
+            {
+              entrySlug,
+              apiKey: apiKey ?? "",
+            },
+            requestId,
+          );
+        }
       }
 
       if (!this.partnerNotificationNavigationRepository) {
@@ -2655,7 +2758,9 @@ export class TenantPartnerController {
       }
 
       const partnerEntry =
-        await this.tenantPartnerService.getPartnerEntry(entrySlug);
+        typeof this.tenantPartnerService.resolvePartnerEntry === "function"
+          ? await this.tenantPartnerService.resolvePartnerEntry(entrySlug)
+          : await this.tenantPartnerService.getPartnerEntry(entrySlug);
       if (!partnerEntry) throw new Error("Entry not found");
 
       // Cross-tenant bounds check

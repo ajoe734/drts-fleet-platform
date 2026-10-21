@@ -1441,10 +1441,16 @@ export class AuthController {
     const sourceIp = this.resolveSourceIp(forwardedFor, realIp);
 
     try {
-      const resolved = this.tenantPartnerService.authenticatePartnerBootstrap(
-        command,
-        requestId,
-      );
+      const resolved = await (this.tenantPartnerService
+        .resolvePartnerBootstrapAuthentication
+        ? this.tenantPartnerService.resolvePartnerBootstrapAuthentication(
+            command,
+            requestId,
+          )
+        : this.tenantPartnerService.authenticatePartnerBootstrap(
+            command,
+            requestId,
+          ));
       const issuedAt = new Date().toISOString();
       const issued = await this.issueJwtSession(
         {
