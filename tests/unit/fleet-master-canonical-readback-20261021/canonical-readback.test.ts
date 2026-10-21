@@ -681,4 +681,43 @@ describe("FLEET-MASTER-CANONICAL-READBACK-20261021: cross-instance canonical Fle
       (await c.getFleetPartner(created.fleetPartnerId)).fleetPartnerId,
     ).toBe(created.fleetPartnerId);
   });
+
+  it("supports immediate update/get/list of an ACKed master on partial SQL ports while canonical DB rows still win when present", async () => {
+    const partialRepo = new FleetPartnerRepository({
+      isEnabled: () => true,
+      query: async () => ({ rows: [], rowCount: 0 }),
+    } as unknown as DatabaseService);
+    const service = new FleetPartnerService(
+      {} as never,
+      {} as never,
+      {} as never,
+      partialRepo,
+    );
+    const created = await service.createFleetPartner({
+      legalName: "Rehearsal Dispatch Operator",
+      displayName: "Rehearsal Fleet",
+      businessRegistrationNo: "SIMULATED-REG",
+      contactName: "Rehearsal Contact",
+      contactPhone: "SIMULATED-PHONE",
+      partnershipType: "business_dispatch_fleet",
+    });
+    const updated = await service.updateFleetPartner(created.fleetPartnerId, {
+      multiTaxiOperatorIds: ["review-synthetic-operator"],
+    });
+    expect(updated).toMatchObject({
+      fleetPartnerId: created.fleetPartnerId,
+      multiTaxiOperatorIds: ["review-synthetic-operator"],
+    });
+    expect(await service.getFleetPartner(created.fleetPartnerId)).toEqual(
+      updated,
+    );
+    expect(
+      (await service.listFleetPartners()).some(
+        (partner) => partner.fleetPartnerId === created.fleetPartnerId,
+      ),
+    ).toBe(true);
+    await expect(
+      service.getFleetPartner("fleet-missing-999"),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 });

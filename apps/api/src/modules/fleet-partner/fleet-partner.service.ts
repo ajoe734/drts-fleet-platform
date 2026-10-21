@@ -1284,9 +1284,10 @@ export class FleetPartnerService implements OnModuleInit {
         ? await this.fleetPartnerRepository.loadFleetPartners()
         : ((await this.fleetPartnerRepository?.loadState())?.fleetPartners ??
           []);
-    this.fleetPartners = persisted.map((partner) =>
-      this.cloneFleetPartner(partner),
-    );
+    this.fleetPartners =
+      persisted.length > 0
+        ? persisted.map((partner) => this.cloneFleetPartner(partner))
+        : this.fleetPartners;
     return this.fleetPartners.map((partner) => this.cloneFleetPartner(partner));
   }
 
@@ -1310,10 +1311,16 @@ export class FleetPartnerService implements OnModuleInit {
         : ((await this.fleetPartnerRepository.loadState()).fleetPartners.find(
             (candidate) => candidate.fleetPartnerId === fleetPartnerId,
           ) ?? null);
-    if (!partner) {
+    const resolved =
+      partner ??
+      this.fleetPartners.find(
+        (candidate) => candidate.fleetPartnerId === fleetPartnerId,
+      ) ??
+      null;
+    if (!resolved) {
       throw this.notFound("Fleet partner not found.", { fleetPartnerId });
     }
-    return this.cloneFleetPartner(partner);
+    return this.cloneFleetPartner(resolved);
   }
 
   private upsertCachedFleetPartner(partner: FleetPartnerRecord) {
