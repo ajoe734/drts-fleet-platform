@@ -91,6 +91,23 @@ export class FleetPartnerRepository {
     );
   }
 
+  async loadDriverAffiliations(): Promise<DriverFleetAffiliationRecord[]> {
+    if (!this.isEnabled()) return [];
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM admin.phase1_driver_fleet_affiliations
+        ORDER BY updated_at DESC
+      `,
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<DriverFleetAffiliationRecord>(
+        row.record,
+        "admin.phase1_driver_fleet_affiliations",
+      ),
+    );
+  }
+
   async findActiveFleetPartnerById(
     fleetPartnerId: string,
   ): Promise<FleetPartnerRecord | null> {

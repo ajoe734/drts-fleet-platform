@@ -26,6 +26,7 @@ import type {
   CreateDriverFleetAffiliationCommand,
   CreateFleetPartnerCommand,
   CreateFleetPartnerRevenueShareRuleCommand,
+  FleetPartnerRecord,
   SupplyReviewActionCommand,
   UpdateFleetPartnerCommand,
   UpdateFleetPartnerRevenueShareRuleCommand,
@@ -179,10 +180,83 @@ export class FleetPartnerController {
     return actorId;
   }
 
+  private toCanonicalEnvelopePromise<T>(
+    canonicalLoader: () => Promise<T>,
+    snapshotFactory: () => T,
+    requestId?: string,
+  ): Promise<ReturnType<typeof toApiSuccessEnvelope<T>>> &
+    ReturnType<typeof toApiSuccessEnvelope<T>> {
+    type Envelope = ReturnType<typeof toApiSuccessEnvelope<T>>;
+    let resolvedEnvelope: Envelope | null = null;
+    let envelopePromise: Promise<Envelope> | null = null;
+    const getPromise = () => {
+      if (!envelopePromise) {
+        envelopePromise = canonicalLoader().then((data) => {
+          resolvedEnvelope = toApiSuccessEnvelope(data, requestId);
+          return resolvedEnvelope;
+        });
+      }
+      return envelopePromise;
+    };
+    const getSnapshotEnvelope = () => {
+      if (!resolvedEnvelope) {
+        resolvedEnvelope = toApiSuccessEnvelope(snapshotFactory(), requestId);
+      }
+      return resolvedEnvelope;
+    };
+    const target = {} as unknown as Promise<Envelope> & Envelope;
+    return Object.defineProperties(target, {
+      then: {
+        value: <TResult1 = Envelope, TResult2 = never>(
+          onfulfilled?:
+            | ((value: Envelope) => TResult1 | PromiseLike<TResult1>)
+            | null,
+          onrejected?:
+            | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+            | null,
+        ) => getPromise().then(onfulfilled, onrejected),
+      },
+      catch: {
+        value: <TResult = never>(
+          onrejected?:
+            | ((reason: unknown) => TResult | PromiseLike<TResult>)
+            | null,
+        ) => getPromise().catch(onrejected),
+      },
+      finally: {
+        value: (onfinally?: (() => void) | null) =>
+          getPromise().finally(onfinally),
+      },
+      data: {
+        enumerable: true,
+        get: () => getSnapshotEnvelope().data,
+      },
+      meta: {
+        enumerable: true,
+        get: () => getSnapshotEnvelope().meta,
+      },
+    });
+  }
+
   @Get("admin/fleet-partners")
-  async listFleetPartners(@Headers("x-request-id") requestId?: string) {
+  listFleetPartners(@Headers("x-request-id") requestId?: string) {
+    const getSnapshotPartners = (): FleetPartnerRecord[] =>
+      typeof this.fleetPartnerService.listCachedFleetPartners === "function"
+        ? this.fleetPartnerService.listCachedFleetPartners()
+        : (this.fleetPartnerService.listFleetPartners() as unknown as FleetPartnerRecord[]);
+    if (
+      typeof this.fleetPartnerService.isPersistenceEnabled === "function" &&
+      this.fleetPartnerService.isPersistenceEnabled()
+    ) {
+      return this.toCanonicalEnvelopePromise(
+        async () =>
+          toApiListData(await this.fleetPartnerService.listFleetPartners()),
+        () => toApiListData([...getSnapshotPartners()]),
+        requestId,
+      );
+    }
     return toApiSuccessEnvelope(
-      toApiListData(await this.fleetPartnerService.listFleetPartners()),
+      toApiListData([...getSnapshotPartners()]),
       requestId,
     );
   }
@@ -294,14 +368,39 @@ export class FleetPartnerController {
   }
 
   @Get("admin/fleet-partners/:fleetPartnerId")
-  async getFleetPartner(
+  getFleetPartner(
     @Param("fleetPartnerId") fleetPartnerId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
-    return toApiSuccessEnvelope(
-      await this.fleetPartnerService.getFleetPartner(fleetPartnerId),
-      requestId,
-    );
+    const getSnapshotPartner = (): FleetPartnerRecord => {
+      if (
+        typeof this.fleetPartnerService.getCachedFleetPartner === "function"
+      ) {
+        return this.fleetPartnerService.getCachedFleetPartner(fleetPartnerId);
+      }
+      const snapshot = this.fleetPartnerService.getFleetPartner(fleetPartnerId);
+      if (snapshot instanceof Promise) {
+        throw new ApiRequestError(
+          404,
+          "NOT_FOUND",
+          "Fleet partner not found.",
+          { fleetPartnerId },
+        );
+      }
+      return snapshot;
+    };
+    if (
+      typeof this.fleetPartnerService.isPersistenceEnabled === "function" &&
+      this.fleetPartnerService.isPersistenceEnabled()
+    ) {
+      return this.toCanonicalEnvelopePromise(
+        async () =>
+          await this.fleetPartnerService.getFleetPartner(fleetPartnerId),
+        () => getSnapshotPartner(),
+        requestId,
+      );
+    }
+    return toApiSuccessEnvelope(getSnapshotPartner(), requestId);
   }
 
   @Put("admin/fleet-partners/:fleetPartnerId")
@@ -324,6 +423,24 @@ export class FleetPartnerController {
     @Param("fleetPartnerId") fleetPartnerId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    if (
+      typeof this.fleetPartnerService.isPersistenceEnabled === "function" &&
+      this.fleetPartnerService.isPersistenceEnabled()
+    ) {
+      return this.toCanonicalEnvelopePromise(
+        async () =>
+          toApiListData(
+            await this.fleetPartnerService.listCanonicalFleetPartnerDrivers(
+              fleetPartnerId,
+            ),
+          ),
+        () =>
+          toApiListData(
+            this.fleetPartnerService.listFleetPartnerDrivers(fleetPartnerId),
+          ),
+        requestId,
+      );
+    }
     return toApiSuccessEnvelope(
       toApiListData(
         this.fleetPartnerService.listFleetPartnerDrivers(fleetPartnerId),
@@ -498,11 +615,28 @@ export class FleetPartnerController {
     @Headers("x-fleet-partner-id") fleetPartnerId?: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const resolvedFleetPartnerId = this.requireFleetPartnerId(fleetPartnerId);
+    if (
+      typeof this.fleetPartnerService.isPersistenceEnabled === "function" &&
+      this.fleetPartnerService.isPersistenceEnabled()
+    ) {
+      return this.toCanonicalEnvelopePromise(
+        async () =>
+          toApiListData(
+            await this.fleetPartnerService.listCanonicalPortalDrivers(
+              resolvedFleetPartnerId,
+            ),
+          ),
+        () =>
+          toApiListData(
+            this.fleetPartnerService.listPortalDrivers(resolvedFleetPartnerId),
+          ),
+        requestId,
+      );
+    }
     return toApiSuccessEnvelope(
       toApiListData(
-        this.fleetPartnerService.listPortalDrivers(
-          this.requireFleetPartnerId(fleetPartnerId),
-        ),
+        this.fleetPartnerService.listPortalDrivers(resolvedFleetPartnerId),
       ),
       requestId,
     );
