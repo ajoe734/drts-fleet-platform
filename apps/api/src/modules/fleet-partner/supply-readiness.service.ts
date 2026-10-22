@@ -165,11 +165,18 @@ export class SupplyReadinessService {
     const fleetPartner =
       await this.fleetPartnerService.getFleetPartner(fleetPartnerId);
     const submissionState = await this.loadSubmissionState();
-    const partnerDriverAffiliations = this.fleetPartnerService
-      .listFleetPartnerDrivers(fleetPartnerId)
-      .filter((affiliation) =>
-        this.isAffiliationActive(affiliation, evaluatedAt),
-      );
+    const rawDriverAffiliations =
+      typeof this.fleetPartnerService.listCanonicalFleetPartnerDrivers ===
+      "function"
+        ? await this.fleetPartnerService.listCanonicalFleetPartnerDrivers(
+            fleetPartnerId,
+          )
+        : await this.fleetPartnerService.listFleetPartnerDrivers(
+            fleetPartnerId,
+          );
+    const partnerDriverAffiliations = rawDriverAffiliations.filter(
+      (affiliation) => this.isAffiliationActive(affiliation, evaluatedAt),
+    );
     const partnerVehicleAffiliations =
       submissionState.vehicleAffiliations.filter(
         (affiliation) =>
