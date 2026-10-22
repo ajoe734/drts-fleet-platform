@@ -180,9 +180,9 @@ export class FleetPartnerController {
   }
 
   @Get("admin/fleet-partners")
-  listFleetPartners(@Headers("x-request-id") requestId?: string) {
+  async listFleetPartners(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
-      toApiListData(this.fleetPartnerService.listFleetPartners()),
+      toApiListData(await this.fleetPartnerService.listFleetPartners()),
       requestId,
     );
   }
@@ -294,12 +294,12 @@ export class FleetPartnerController {
   }
 
   @Get("admin/fleet-partners/:fleetPartnerId")
-  getFleetPartner(
+  async getFleetPartner(
     @Param("fleetPartnerId") fleetPartnerId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      this.fleetPartnerService.getFleetPartner(fleetPartnerId),
+      await this.fleetPartnerService.getFleetPartner(fleetPartnerId),
       requestId,
     );
   }

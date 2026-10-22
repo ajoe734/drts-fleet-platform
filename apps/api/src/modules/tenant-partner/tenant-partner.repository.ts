@@ -401,6 +401,92 @@ export class TenantPartnerRepository {
     );
   }
 
+  async findPartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord | null> {
+    if (!this.isEnabled()) {
+      return null;
+    }
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      return null;
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1`,
+      [normalizedSlug],
+    );
+    return (
+      result.rows
+        .map((row) =>
+          row?.record
+            ? this.parseRecord<PartnerChannelEntryRecord>(
+                row.record,
+                "admin.phase1_partner_channel_entries",
+              )
+            : undefined,
+        )
+        .find((record) => record?.entrySlug === normalizedSlug) ?? null
+    );
+  }
+
+  async listPartnerEntries(
+    entrySlug?: string,
+  ): Promise<PartnerChannelEntryRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const normalizedSlug = entrySlug?.trim();
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      normalizedSlug
+        ? `SELECT record FROM admin.phase1_partner_channel_entries WHERE entry_slug = $1`
+        : `SELECT record FROM admin.phase1_partner_channel_entries ORDER BY updated_at DESC, created_at DESC`,
+      normalizedSlug ? [normalizedSlug] : [],
+    );
+    return result.rows
+      .map((row) =>
+        row?.record
+          ? this.parseRecord<PartnerChannelEntryRecord>(
+              row.record,
+              "admin.phase1_partner_channel_entries",
+            )
+          : undefined,
+      )
+      .filter((record): record is PartnerChannelEntryRecord =>
+        Boolean(
+          record && (!normalizedSlug || record.entrySlug === normalizedSlug),
+        ),
+      );
+  }
+
+  async listPartnerIngressCredentials(
+    entrySlug?: string,
+  ): Promise<StoredPartnerIngressCredentialRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+    const normalizedSlug = entrySlug?.trim();
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      normalizedSlug
+        ? `SELECT record FROM admin.phase1_partner_ingress_credentials WHERE entry_slug = $1 ORDER BY created_at DESC`
+        : `SELECT record FROM admin.phase1_partner_ingress_credentials ORDER BY created_at DESC`,
+      normalizedSlug ? [normalizedSlug] : [],
+    );
+    return result.rows
+      .map((row) =>
+        row?.record
+          ? this.parseRecord<StoredPartnerIngressCredentialRecord>(
+              row.record,
+              "admin.phase1_partner_ingress_credentials",
+            )
+          : undefined,
+      )
+      .filter((record): record is StoredPartnerIngressCredentialRecord =>
+        Boolean(
+          record && (!normalizedSlug || record.entrySlug === normalizedSlug),
+        ),
+      );
+  }
+
   async findNotificationWebhookEndpoint(tenantId: string, webhookId: string) {
     const result = await this.databaseService!.query<JsonRecordRow>(
       `SELECT record FROM admin.phase1_tenant_webhook_endpoints

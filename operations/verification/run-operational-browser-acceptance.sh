@@ -93,9 +93,44 @@ done
 [[ -f "$SOURCE_MANIFEST" ]] || { echo "::error::journey manifest not found: $SOURCE_MANIFEST" >&2; exit 1; }
 [[ -f "$CANDIDATE_SURFACE_MANIFEST" ]] || { echo "::error::candidate surface manifest not found: $CANDIDATE_SURFACE_MANIFEST" >&2; exit 1; }
 
+umask 077
 MATERIALIZED_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/drts-operational-journeys.XXXXXX.json")"
 MATERIALIZED_SURFACE_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/drts-candidate-surfaces.XXXXXX.json")"
-trap 'rm -f "$MATERIALIZED_MANIFEST" "$MATERIALIZED_SURFACE_MANIFEST"' EXIT
+ROLE_SESSIONS_ENV_FILE="$(mktemp "${TMPDIR:-/tmp}/drts-operational-role-sessions.XXXXXX.env")"
+ROLE_SESSIONS_BOOTSTRAP_INVOKED=0
+
+load_operational_role_session_exports() {
+  [[ -f "$ROLE_SESSIONS_ENV_FILE" ]] || return 0
+  local env_key env_value
+  while IFS='=' read -r env_key env_value || [[ -n "$env_key" ]]; do
+    [[ -n "$env_key" ]] || continue
+    case "$env_key" in
+      DRTS_OPERATIONAL_*|DRTS_LIVE_MAP_*)
+        if [[ "$env_key" =~ ^(DRTS_OPERATIONAL_|DRTS_LIVE_MAP_)[A-Z0-9_]+$ ]]; then
+          export "${env_key}=${env_value}"
+        fi
+        ;;
+    esac
+  done < "$ROLE_SESSIONS_ENV_FILE"
+}
+
+cleanup_operational_acceptance() {
+  local exit_code=$?
+  set +e
+  load_operational_role_session_exports
+  if [[ "$ROLE_SESSIONS_BOOTSTRAP_INVOKED" -eq 1 && "${DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS:-}" != "passed" ]]; then
+    npx tsx operations/verification/prepare-operational-role-sessions.ts \
+      --teardown --env-file "$ROLE_SESSIONS_ENV_FILE"
+    local teardown_code=$?
+    load_operational_role_session_exports
+    if [[ "$teardown_code" -ne 0 && "$exit_code" -eq 0 ]]; then
+      exit_code="$teardown_code"
+    fi
+  fi
+  rm -f "$MATERIALIZED_MANIFEST" "$MATERIALIZED_SURFACE_MANIFEST" "$ROLE_SESSIONS_ENV_FILE"
+  exit "$exit_code"
+}
+trap cleanup_operational_acceptance EXIT
 sed "s/__SET_DRTS_CANDIDATE_SHA__/${CANDIDATE_SHA}/g" "$SOURCE_MANIFEST" > "$MATERIALIZED_MANIFEST"
 sed "s/__DRTS_CANDIDATE_SHA__/${CANDIDATE_SHA}/g" "$CANDIDATE_SURFACE_MANIFEST" > "$MATERIALIZED_SURFACE_MANIFEST"
 export DRTS_CANDIDATE_SHA="$CANDIDATE_SHA"
@@ -143,6 +178,19 @@ export DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN="${DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TO
 export DRTS_DEV_OPS_CONSOLE_ID_TOKEN="${DRTS_OPERATIONAL_OPS_CONSOLE_ID_TOKEN}"
 export DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN="${DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_ID_TOKEN}"
 export DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN="${DRTS_OPERATIONAL_CHANNEL_PARTNER_PORTAL_ID_TOKEN}"
+export DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN="${DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN:-${DRTS_OPERATIONAL_GOOGLE_PROVISIONING_ID_TOKEN:-}}"
+export DRTS_OPERATIONAL_GOOGLE_PROVISIONING_ID_TOKEN="${DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN}"
+
+ROLE_SESSIONS_BOOTSTRAP_INVOKED=1
+npx tsx operations/verification/prepare-operational-role-sessions.ts \
+  --env-file "$ROLE_SESSIONS_ENV_FILE"
+load_operational_role_session_exports
+
+: "${DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN:?missing ops_non_reviewer operational session token}"
+: "${DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN:?missing system operational session token}"
+: "${DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN:?missing driver operational session token}"
+: "${DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN:?missing foreign_fleet operational session token}"
+export DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN="${DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN:-${DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN}}"
 
 # First prove every active API/BFF response serves this exact candidate. Then
 # execute the higher-level browser mutations and readbacks against those same URLs.

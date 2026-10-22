@@ -163,7 +163,7 @@ export class SupplyReadinessService {
   ): Promise<PartnerReadinessContext> {
     const evaluatedAt = new Date().toISOString();
     const fleetPartner =
-      this.fleetPartnerService.getFleetPartner(fleetPartnerId);
+      await this.fleetPartnerService.getFleetPartner(fleetPartnerId);
     const submissionState = await this.loadSubmissionState();
     const partnerDriverAffiliations = this.fleetPartnerService
       .listFleetPartnerDrivers(fleetPartnerId)

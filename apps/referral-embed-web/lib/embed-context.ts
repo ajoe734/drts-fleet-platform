@@ -11,6 +11,8 @@ import {
   type PublicReferralEmbedSession,
 } from "./embed-partner-session";
 import { resolveAccent } from "./embed-presentation";
+import { resolveReferralMapConfig } from "./embed-map-config";
+import type { ReferralMapConfig } from "../components/referral-place-field";
 import { getPartnerEntry } from "./embed-api";
 import {
   EMBED_TRIP_FALLBACK_SCREENS,
@@ -64,6 +66,8 @@ export type EmbedContext = {
   fallbackEntry: FallbackEntry | null;
   /** Dev demo: show the test-driver controls on the trip screen. */
   demoTrip?: boolean;
+  /** Google map for the place fields, when allowed for this origin. */
+  map?: ReferralMapConfig;
 };
 
 function resolveDisplayName(entry: PartnerChannelEntryRecord) {
@@ -192,6 +196,7 @@ export async function resolveEmbedContext(input: {
   });
 
   return {
+    map: resolveReferralMapConfig(process.env, `https://${host}`),
     demoTrip:
       demoMode &&
       ["development", "test"].includes(
