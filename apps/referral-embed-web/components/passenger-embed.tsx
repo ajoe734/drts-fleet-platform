@@ -2920,6 +2920,8 @@ function TripScreen({
         trip={activeTrip!}
         error={live.error}
         refresh={live.refresh}
+        theme={theme}
+        mapConfig={context.map}
       />
 
       {error ? (
