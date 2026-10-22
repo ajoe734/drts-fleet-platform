@@ -15,6 +15,7 @@ import { ReferralComplaintPanel } from "./referral-complaint-panel";
 import { ReferralPlaceField } from "./referral-place-field";
 import { ReferralReceiptDocumentActions } from "./referral-receipt-document-actions";
 import { useReferralLiveTrip } from "./use-referral-live-trip";
+import { displayOrderNo } from "../lib/order-display";
 import {
   ReferralLiveTrackingPanel,
   referralLiveArrival,
@@ -1086,7 +1087,18 @@ function AppShell({
           </span>
         </div>
 
-        <div style={{ flex: 1, display: "grid", gap: 13, padding: 16 }}>
+        <div
+          style={{
+            flex: 1,
+            display: "grid",
+            // One column that long content cannot widen, packed at the top
+            // instead of spreading spare height between short screens' rows.
+            gridTemplateColumns: "minmax(0, 1fr)",
+            alignContent: "start",
+            gap: 13,
+            padding: 16,
+          }}
+        >
           {children}
         </div>
 
@@ -1194,7 +1206,7 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
         安全帶入叫車身分；首次使用仍須確認同意事項。內嵌頁不會要求輸入帳號密碼。
       </Banner>
       <Card theme={theme}>
-        <ReferralFeeDisclosureReader />
+        <ReferralFeeDisclosureReader theme={theme} />
       </Card>
     </AppShell>
   );
@@ -2068,6 +2080,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
       {!feeReady && !pendingCommand ? (
         <Card theme={theme}>
           <ReferralFirstFeeDisclosure
+            theme={theme}
             status={feeStatus}
             busy={feeBusy}
             error={feeError}
@@ -2076,18 +2089,22 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             }}
           />
           {feeError ? (
-            <button type="button" onClick={() => setFeeRefresh((n) => n + 1)}>
-              重新讀取費用同意紀錄
-            </button>
+            <ActionButton
+              label="重新讀取費用同意紀錄"
+              theme={theme}
+              variant="ghost"
+              onClick={() => setFeeRefresh((n) => n + 1)}
+            />
           ) : null}
         </Card>
       ) : null}
       <Card theme={theme}>
-        <ReferralFeeDisclosureReader />
+        <ReferralFeeDisclosureReader theme={theme} />
       </Card>
       {feeReady && quote && !pendingCommand ? (
         <Card theme={theme}>
           <ReferralOrderFeeDisclosure
+            theme={theme}
             quote={quote}
             pickupTimeLabel={
               quote.requestedScheduledAt
@@ -2835,7 +2852,7 @@ function TripScreen({
               wordBreak: "break-all",
             }}
           >
-            {trip.id} · {trip.orderId}
+            {t("embed.orderNo", { no: displayOrderNo(trip.id) })}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
@@ -3145,9 +3162,11 @@ function TripsScreen({
                       marginTop: 2,
                     }}
                   >
-                    {trip.date} · {trip.id}
+                    {trip.date} · {displayOrderNo(trip.id)}
                   </div>
-                  <div>
+                  <div
+                    style={{ fontSize: 11, color: theme.muted, marginTop: 2 }}
+                  >
                     費用確認時間：
                     {trip.feeConfirmedAt
                       ? formatShortDateTime(trip.feeConfirmedAt, "Asia/Taipei")
@@ -3252,7 +3271,7 @@ function ReceiptScreen({
           marginTop: -6,
         }}
       >
-        {receipt.id} · {receipt.orderId}
+        {t("embed.orderNo", { no: displayOrderNo(receipt.id) })}
       </div>
       <Card theme={theme} title="行程" subtitle={receipt.date}>
         <div style={{ display: "flex", gap: 11 }}>
@@ -3313,7 +3332,7 @@ function ReceiptScreen({
           last
         />
       </Card>
-      <Card theme={theme} title="乘客與車輛" subtitle="PII 已遮罩">
+      <Card theme={theme} title="乘客與車輛" subtitle="個資已遮罩">
         <DetailRow theme={theme} label="乘客" value={receipt.passenger} />
         <DetailRow
           theme={theme}
@@ -3373,6 +3392,7 @@ function ReceiptScreen({
       <ReferralReceiptDocumentActions
         key={`referral-pdf:${receipt.orderId}`}
         orderId={receipt.orderId}
+        theme={theme}
       />
       <ExternalPaymentSim
         key={receipt.orderId}

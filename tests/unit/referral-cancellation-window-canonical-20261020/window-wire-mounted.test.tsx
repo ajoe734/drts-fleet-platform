@@ -57,6 +57,7 @@ import { OwnedMobilityController } from "../../../apps/api/src/modules/owned-mob
 import { SnakeCaseInterceptor } from "../../../apps/api/src/common/snake-case.interceptor";
 import Page from "../../../apps/referral-embed-web/app/embed/[entrySlug]/page";
 import { PassengerEmbed } from "../../../apps/referral-embed-web/components/passenger-embed";
+import { displayOrderNo } from "../../../apps/referral-embed-web/lib/order-display";
 import { GET as activeGET } from "../../../apps/referral-embed-web/app/api/referral/active/route";
 import { POST as cancelPOST } from "../../../apps/referral-embed-web/app/api/referral/cancel/[orderId]/route";
 const { of, lastValueFrom } = requireApi("rxjs");
@@ -306,7 +307,10 @@ it("a post-read state change keeps actual409 Banner, same UUID, and closes stale
     ).toBeTruthy(),
   );
   await waitFor(() => expect(button().disabled).toBe(true));
-  expect(document.body.textContent).toContain(f.orderId);
+  // Still the same order: riders see its short order number, not the UUID.
+  expect(document.body.textContent).toContain(
+    `訂單 ${displayOrderNo(before!.orderNo)}`,
+  );
   expect(await f.stored()).toEqual(before);
   expect(
     f.calls.filter(
