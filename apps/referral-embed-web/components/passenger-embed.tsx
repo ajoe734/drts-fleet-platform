@@ -495,6 +495,9 @@ function Card({
     <section
       style={{
         display: "grid",
+        // Content such as a no-wrap trip line ellipsizes instead of widening
+        // the card past the phone width.
+        gridTemplateColumns: "minmax(0, 1fr)",
         gap: 10,
         padding: 15,
         borderRadius: 16,
