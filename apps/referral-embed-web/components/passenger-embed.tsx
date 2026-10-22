@@ -2239,7 +2239,11 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         </div>
       </Card>
 
-      <Card theme={theme} title="車種" subtitle="owned mobility">
+      <Card
+        theme={theme}
+        title={t("embed.card.vehicles")}
+        subtitle={t("embed.card.vehiclesSubtitle")}
+      >
         <div style={{ display: "grid", gap: 8 }}>
           {embedVehicles.map((vehicle) => {
             const selected = form.vehicleType === vehicle.code;
