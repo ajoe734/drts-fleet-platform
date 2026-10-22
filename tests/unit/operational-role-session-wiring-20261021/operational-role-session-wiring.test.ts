@@ -2172,7 +2172,16 @@ process.exit(99);
         {} as never,
         {} as never,
       );
-      for (const seeded of fleetPartnerService.listFleetPartners()) {
+      // With a repository the service reads Fleet masters from the table being
+      // seeded here, so take the default seed from a repository-less instance.
+      const seedFleetPartners = new FleetPartnerService(
+        billingSettlementService,
+        ownedMobilityService,
+        regulatoryRegistryService,
+      ).listFleetPartners() as Awaited<
+        ReturnType<FleetPartnerService["listFleetPartners"]>
+      >;
+      for (const seeded of seedFleetPartners) {
         sqlTables
           .get("admin.phase1_fleet_partners")!
           .set(seeded.fleetPartnerId, {
@@ -2560,7 +2569,9 @@ process.exit(99);
                 },
               );
               return jsonResponse(
-                deepToSnakeCase(fleetPartnerController.listFleetPartners()),
+                deepToSnakeCase(
+                  await fleetPartnerController.listFleetPartners(),
+                ),
               );
             }
             if (method === "POST") {
@@ -2669,7 +2680,7 @@ process.exit(99);
                 );
               }
               const found =
-                fleetPartnerController.getFleetPartner(fleetPartnerId);
+                await fleetPartnerController.getFleetPartner(fleetPartnerId);
               return jsonResponse(deepToSnakeCase(found));
             }
             if (method === "PUT") {
@@ -3364,9 +3375,9 @@ process.exit(99);
       const savedEvidence: Record<string, OperationalRoleSessionsEvidence> = {};
       const harness = createOwnedForeignFleetRealServiceHarness();
 
-      const preExistingFleetIds = harness.fleetPartnerService
-        .listFleetPartners()
-        .map((f) => f.fleetPartnerId);
+      const preExistingFleetIds = (
+        await harness.fleetPartnerService.listFleetPartners()
+      ).map((f) => f.fleetPartnerId);
       const preExistingEntrySlugs = harness.tenantPartnerService
         .listPlatformPartnerEntries()
         .map((e) => e.entrySlug);
@@ -3575,11 +3586,14 @@ process.exit(99);
 
       // Owned Fleet is now inactive, owned entry and key are revoked, while pre-existing Fleet and entries remain active
       expect(
-        harness.fleetPartnerService.getFleetPartner(createdFleetId).active,
+        (await harness.fleetPartnerService.getFleetPartner(createdFleetId))
+          .active,
       ).toBe(false);
       expect(
-        harness.fleetPartnerService.getFleetPartner(
-          OPERATIONAL_OWN_FLEET_PARTNER_ID,
+        (
+          await harness.fleetPartnerService.getFleetPartner(
+            OPERATIONAL_OWN_FLEET_PARTNER_ID,
+          )
         ).active,
       ).toBe(true);
       const revokedEntry = harness.tenantPartnerService
@@ -3683,8 +3697,10 @@ process.exit(99);
 
       // External Fleet, entry, and key must remain active and untouched; provided Admin token is never revoked
       expect(
-        harness.fleetPartnerService.getFleetPartner(
-          externalFleet.fleetPartnerId,
+        (
+          await harness.fleetPartnerService.getFleetPartner(
+            externalFleet.fleetPartnerId,
+          )
         ).active,
       ).toBe(true);
       const externalEntryAfter = harness.tenantPartnerService
@@ -3809,8 +3825,10 @@ process.exit(99);
         ),
       ).toBe(false);
       expect(
-        sameOwnFleetHarness.fleetPartnerService.getFleetPartner(
-          OPERATIONAL_OWN_FLEET_PARTNER_ID,
+        (
+          await sameOwnFleetHarness.fleetPartnerService.getFleetPartner(
+            OPERATIONAL_OWN_FLEET_PARTNER_ID,
+          )
         ).active,
       ).toBe(true);
     });
@@ -3839,8 +3857,11 @@ process.exit(99);
         entryFailEnv.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID!;
       expect(createdFleetId1).toMatch(/^fleet-/);
       expect(
-        entryFailHarness.fleetPartnerService.getFleetPartner(createdFleetId1)
-          .active,
+        (
+          await entryFailHarness.fleetPartnerService.getFleetPartner(
+            createdFleetId1,
+          )
+        ).active,
       ).toBe(false);
       expect(
         entryFailEnv.DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS,
@@ -3874,8 +3895,11 @@ process.exit(99);
       const createdEntrySlug2 =
         keyFailEnv.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_ENTRY_SLUG!;
       expect(
-        keyFailHarness.fleetPartnerService.getFleetPartner(createdFleetId2)
-          .active,
+        (
+          await keyFailHarness.fleetPartnerService.getFleetPartner(
+            createdFleetId2,
+          )
+        ).active,
       ).toBe(false);
       const entryAfterKeyFail = keyFailHarness.tenantPartnerService
         .listPlatformPartnerEntries()
@@ -4152,7 +4176,8 @@ process.exit(99);
       expect(retryResult.admin_session_revoked).toBe(true);
       expect(secondCleanupSaved?.status).toBe("passed");
       expect(
-        retryHarness.fleetPartnerService.getFleetPartner(createdFleetId).active,
+        (await retryHarness.fleetPartnerService.getFleetPartner(createdFleetId))
+          .active,
       ).toBe(false);
     });
 
@@ -4193,8 +4218,11 @@ process.exit(99);
       const strictCreatedFleetId =
         strictEnv.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID!;
       expect(
-        strictHarness.fleetPartnerService.getFleetPartner(strictCreatedFleetId)
-          .active,
+        (
+          await strictHarness.fleetPartnerService.getFleetPartner(
+            strictCreatedFleetId,
+          )
+        ).active,
       ).toBe(false);
 
       // 2. CROSS-INSTANCE-REFERENCE-OBSERVATION: step-up proof issued on instance A's StepUpProofService Map, write delivered to instance B's BootstrapAuthGuard (separate StepUpProofService Map) -> 403 STEP_UP_REQUIRED, helper fails closed and cleans up already-created Fleet/Driver/Ops/Admin resources.
@@ -4222,8 +4250,10 @@ process.exit(99);
       const crossCreatedFleetId =
         crossEnv.DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID!;
       expect(
-        crossInstanceHarness.fleetPartnerService.getFleetPartner(
-          crossCreatedFleetId,
+        (
+          await crossInstanceHarness.fleetPartnerService.getFleetPartner(
+            crossCreatedFleetId,
+          )
         ).active,
       ).toBe(false);
     });
