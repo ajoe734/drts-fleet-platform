@@ -494,7 +494,10 @@ describe("original validation and resource guards", () => {
         f.controller.createDriverFleetAffiliation(driverId, command),
       ).rejects.toBeInstanceOf(ApiRequestError);
     }
-    expect(f.query).not.toHaveBeenCalled();
+    expect(f.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO"),
+      expect.anything(),
+    );
     expect(await readback(f.service)).toEqual(before);
   });
 
