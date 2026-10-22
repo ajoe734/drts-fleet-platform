@@ -16437,6 +16437,14 @@ export class OwnedMobilityService
       location: null,
       pickupEta: null,
       dropoffRoute: null,
+      pickupPoint:
+        order.pickup.lat != null && order.pickup.lng != null
+          ? { lat: order.pickup.lat, lng: order.pickup.lng }
+          : null,
+      dropoffPoint:
+        order.dropoff.lat != null && order.dropoff.lng != null
+          ? { lat: order.dropoff.lat, lng: order.dropoff.lng }
+          : null,
     };
     try {
       const current =

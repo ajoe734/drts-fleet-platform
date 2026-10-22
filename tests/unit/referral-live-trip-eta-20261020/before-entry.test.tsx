@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { getByText } from "@testing-library/dom";
+import { getByRole, getByText } from "@testing-library/dom";
 import { liveWire } from "./fixture";
 let root: Root | undefined, host: HTMLDivElement | undefined;
 beforeEach(() => {
@@ -25,6 +25,11 @@ it("the real same-order controller read includes the current assigned Driver pic
     minutes: 3,
     estimatedArrivalAt: "2026-10-20T08:03:00.000Z",
   });
+  // The order's own pickup point, which the trip map heads the vehicle to.
+  expect(data.trip?.liveTracking?.pickupPoint).toEqual({
+    lat: 25.06,
+    lng: 121.52,
+  });
 });
 it("the real SSR trip screen shows the actual estimated pickup clock instead of the creation clock", async () => {
   const f = await liveWire();
@@ -34,5 +39,8 @@ it("the real SSR trip screen shows the actual estimated pickup clock instead of 
   root = createRoot(host);
   await act(async () => root!.render(page));
   expect(getByText(host, "16:03")).toBeTruthy();
-  expect(getByText(host, /25.06100, 121.52100/)).toBeTruthy();
+  const link = getByRole(host, "link", {
+    name: "在地圖開啟司機位置",
+  }) as HTMLAnchorElement;
+  expect(new URL(link.href).searchParams.get("query")).toBe("25.061,121.521");
 });

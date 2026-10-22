@@ -18,17 +18,32 @@ interface LatLngLike {
   lng(): number;
 }
 
+export interface MapsLatLngBoundsLike {
+  extend(point: LatLngLiteral): void;
+}
+
 export interface MapsMapLike {
   setCenter(point: LatLngLiteral): void;
   panTo(point: LatLngLiteral): void;
+  fitBounds(bounds: MapsLatLngBoundsLike, padding?: number): void;
   addListener(
     event: "click",
     handler: (event: { latLng?: LatLngLike | null }) => void,
   ): unknown;
+  addListener(event: "dragstart", handler: () => void): unknown;
+}
+
+export interface MapsMarkerLabel {
+  text: string;
+  color?: string;
+  fontSize?: string;
+  fontWeight?: string;
 }
 
 export interface MapsMarkerLike {
   setPosition(point: LatLngLiteral): void;
+  setVisible(visible: boolean): void;
+  setLabel(label: MapsMarkerLabel): void;
   addListener(event: "dragend", handler: () => void): unknown;
   getPosition(): LatLngLike | null | undefined;
 }
@@ -39,6 +54,8 @@ export interface MapsApiLike {
     options: Record<string, unknown>,
   ) => MapsMapLike;
   Marker: new (options: Record<string, unknown>) => MapsMarkerLike;
+  LatLngBounds: new () => MapsLatLngBoundsLike;
+  SymbolPath: { CIRCLE: unknown };
 }
 
 type MapsWindow = Window & {
