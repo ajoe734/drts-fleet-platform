@@ -59,10 +59,13 @@ const DRIVER_TASK_TRANSITION_RACE_CODES = new Set([
   "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
 ]);
 // Simulated drive: depart ~1.3 km north of the pickup and arrive in three
-// minutes; once the passenger boards, reach the destination in three more.
+// minutes; once the passenger boards, drive to the destination in the quoted
+// route's own duration, so the live ETA (from the same route provider) counts
+// down in step with the map. Testers can complete the trip at any time.
 const APPROACH_START_LAT_OFFSET = 0.012;
 const APPROACH_MS = 3 * 60_000;
-const RIDE_MS = 3 * 60_000;
+const DEFAULT_RIDE_MS = 3 * 60_000;
+const MAX_RIDE_MS = 90 * 60_000;
 const HEARTBEAT_WORK_STATE: Record<
   string,
   "assigned" | "enroute" | "arrived" | "on_trip"
@@ -333,6 +336,16 @@ export class ReferralDemoTripService {
     return this.result(orderId, task.driverId);
   }
 
+  /** The quoted route's driving time, or three minutes when unknown. */
+  private rideMs(order: OwnedOrderRecord) {
+    const seconds = Number(
+      order.referralPassengerLifecycle?.quote?.route?.durationSeconds,
+    );
+    return Number.isFinite(seconds) && seconds > 0
+      ? Math.min(seconds * 1000, MAX_RIDE_MS)
+      : DEFAULT_RIDE_MS;
+  }
+
   private approachDriven(task: DriverTaskRecord, now = Date.now()) {
     const since = Date.parse(task.departedAt ?? task.acceptedAt ?? "");
     return Number.isFinite(since) && now - since >= APPROACH_MS;
@@ -362,7 +375,7 @@ export class ReferralDemoTripService {
     }
     if (["on_trip", "proof_pending"].includes(task.status)) {
       const dropoff = this.point(order.dropoff, "dropoff");
-      const done = progress(task.startedAt, RIDE_MS);
+      const done = progress(task.startedAt, this.rideMs(order));
       return {
         lat: pickup.lat + (dropoff.lat - pickup.lat) * done,
         lng: pickup.lng + (dropoff.lng - pickup.lng) * done,
@@ -471,8 +484,7 @@ export class ReferralDemoTripService {
         // caller, not be reported as a successful arrival/boarding/
         // completion.
         const code = this.errorCode(error);
-        if (!code || !DRIVER_TASK_TRANSITION_RACE_CODES.has(code))
-          throw error;
+        if (!code || !DRIVER_TASK_TRANSITION_RACE_CODES.has(code)) throw error;
         // Reload the authoritative task before trusting that race: the
         // in-memory copy can be stale, and only a reload-confirmed advance
         // proves the other request's step was actually completed.

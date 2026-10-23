@@ -624,6 +624,28 @@ describe("ReferralDemoTripService", () => {
       lat: 25.04,
       lng: 121.56,
     });
+
+    // With the quoted route's 20-minute drive, halfway takes ten minutes, so
+    // the live ETA from the same route provider counts down with the map.
+    const quoted = harness({
+      order: order({
+        referralPassengerLifecycle: {
+          quote: {
+            pricingAt: DAY,
+            route: { distanceMeters: 14_000, durationSeconds: 1200 },
+          },
+        },
+      }),
+    });
+    const quotedAt = (now: number) =>
+      quoted.service.simulatedPosition(
+        quoted.current as never,
+        task("on_trip"),
+        now,
+      );
+    expect(quotedAt(ride + 90_000).lat).toBeCloseTo(25.01 + 0.03 * 0.075, 6);
+    expect(quotedAt(ride + 10 * 60_000).lat).toBeCloseTo(25.025, 6);
+    expect(quotedAt(ride + 20 * 60_000)).toEqual({ lat: 25.04, lng: 121.56 });
   });
 
   const demoTask = (status: string, extra: Partial<Task> = {}): Task => ({
@@ -742,9 +764,9 @@ describe("ReferralDemoTripService", () => {
       h.tasks[0]!.status = "arrived_pickup";
       throw new Error("order repository write rejected");
     });
-    await expect(
-      h.service.board("order-1", identity, "req-1"),
-    ).rejects.toThrow("order repository write rejected");
+    await expect(h.service.board("order-1", identity, "req-1")).rejects.toThrow(
+      "order repository write rejected",
+    );
     expect(h.orders.startDriverTask).not.toHaveBeenCalled();
   });
 
@@ -763,9 +785,9 @@ describe("ReferralDemoTripService", () => {
       h.tasks[0]!.status = "arrived_pickup";
       throw new Error("driver-task audit log write failed");
     });
-    await expect(
-      h.service.board("order-1", identity, "req-1"),
-    ).rejects.toThrow("driver-task audit log write failed");
+    await expect(h.service.board("order-1", identity, "req-1")).rejects.toThrow(
+      "driver-task audit log write failed",
+    );
     expect(h.orders.startDriverTask).not.toHaveBeenCalled();
   });
 

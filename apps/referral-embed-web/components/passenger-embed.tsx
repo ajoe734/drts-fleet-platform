@@ -426,7 +426,15 @@ function ActionButton({
   type?: "button" | "submit" | "reset";
   dataDrtOperation?: string;
 }) {
-  const palette = buttonPalette(theme, variant);
+  // A disabled action reads as unavailable in every variant, not as a
+  // slightly faded but still tappable-looking button.
+  const palette = disabled
+    ? {
+        background: theme.surfaceLo,
+        color: theme.faint,
+        border: `1px solid ${theme.line}`,
+      }
+    : buttonPalette(theme, variant);
   const content = (
     <>
       {icon ? <Icon name={icon} size={14} /> : null}
@@ -447,7 +455,6 @@ function ActionButton({
     fontSize: 14,
     fontWeight: 700,
     textDecoration: "none",
-    opacity: disabled ? 0.75 : 1,
     ...palette,
   } as const;
 
@@ -460,7 +467,7 @@ function ActionButton({
         data-drt-operation={dataDrtOperation}
         style={{
           ...style,
-          cursor: disabled ? "progress" : "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
         }}
       >
         {content}
@@ -2481,12 +2488,12 @@ const DEMO_TRIP_STEP: Record<
   },
   board: {
     description:
-      "測試司機已抵達上車地點。按下後模擬乘客上車並開始行程，車輛會駛向目的地（約 3 分鐘）。",
+      "測試司機已抵達上車地點。按下後模擬乘客上車並開始行程，車輛會依實際路程時間駛向目的地。",
     label: "測試：乘客已上車",
   },
   complete: {
     description:
-      "行程進行中，車輛正駛向目的地。按下後以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。",
+      "行程進行中，車輛依實際路程時間駛向目的地，到達時間與地圖同步更新。展示時不必等到抵達，可隨時按下按鈕，以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。",
     label: "測試：完成行程",
   },
 };
