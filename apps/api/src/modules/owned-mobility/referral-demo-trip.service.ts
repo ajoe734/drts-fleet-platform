@@ -48,9 +48,11 @@ const OPEN_TASK_STATUSES = [
   "on_trip",
   "proof_pending",
 ];
-// Simulated approach: start ~1.3 km north of the pickup, arrive in 6 minutes.
+// Simulated drive: depart ~1.3 km north of the pickup and arrive in three
+// minutes; once the passenger boards, reach the destination in three more.
 const APPROACH_START_LAT_OFFSET = 0.012;
-const APPROACH_MS = 6 * 60_000;
+const APPROACH_MS = 3 * 60_000;
+const RIDE_MS = 3 * 60_000;
 const HEARTBEAT_WORK_STATE: Record<
   string,
   "assigned" | "enroute" | "arrived" | "on_trip"
@@ -197,18 +199,16 @@ export class ReferralDemoTripService {
           "REFERRAL_DEMO_TRIP_SUPPLY_BUSY",
           "No test driver could be assigned. Try again shortly.",
         );
-      // Accept at once: an assignment left unaccepted times out after 60 s.
+      // Accept at once (an assignment left unaccepted times out after 60 s)
+      // and set off for the pickup, as a driver would.
       const task = await this.requireOpenDemoTask(orderId);
-      await this.orders.prepareOrderAction({ taskId: task.taskId });
-      await this.orders.acceptDriverTask(
-        task.taskId,
-        { acceptedAt: new Date().toISOString() },
+      const enroute = await this.advanceTo(
+        order,
+        task,
+        "enroute_pickup",
         requestId,
       );
-      await this.recordSimulatedLocation(
-        order,
-        this.orders.getDriverTask(task.taskId),
-      );
+      await this.recordSimulatedLocation(order, enroute);
       return this.result(orderId, assigned.driverId);
     } finally {
       for (const pair of idle)
@@ -248,14 +248,62 @@ export class ReferralDemoTripService {
     return this.result(orderId, task.driverId);
   }
 
+  /** Tester shortcut: the test driver reaches the pickup now. */
+  async arrive(
+    orderId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReferralDemoTripResult> {
+    return this.moveTo(orderId, identity, "arrived_pickup", requestId);
+  }
+
+  /** The passenger boards at the pickup and the trip starts. */
+  async board(
+    orderId: string,
+    identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReferralDemoTripResult> {
+    return this.moveTo(orderId, identity, "on_trip", requestId);
+  }
+
   /**
    * The simulated driver app's periodic location heartbeat, bound to the demo
-   * task as the real app's is, so the passenger's live tracking and pickup
-   * ETA have a fresh position (freshness lapses after 90 s without one).
+   * task as the real app's is, so the passenger's live tracking and ETA have
+   * a fresh position (freshness lapses after 90 s without one). The driver
+   * also reports arrival once the approach has been driven; boarding waits
+   * for the tester.
    */
   async heartbeat(
     orderId: string,
     identity: BootstrapRequestIdentity | null,
+    requestId?: string,
+  ): Promise<ReferralDemoTripResult> {
+    this.requireEnabled();
+    const order = await this.orders.requireOwnedReferralPassengerOrder(
+      orderId,
+      identity,
+    );
+    this.requireReferralBusinessOrder(order);
+    let task = await this.openDemoTask(orderId);
+    if (!task)
+      throw new ApiRequestError(
+        HttpStatus.CONFLICT,
+        "REFERRAL_DEMO_TRIP_NOT_ASSIGNED",
+        "Only a trip served by a test driver reports a test location.",
+      );
+    if (["pending_acceptance", "accepted"].includes(task.status))
+      task = await this.advanceTo(order, task, "enroute_pickup", requestId);
+    if (task.status === "enroute_pickup" && this.approachDriven(task))
+      task = await this.advanceTo(order, task, "arrived_pickup", requestId);
+    await this.recordSimulatedLocation(order, task);
+    return this.result(orderId, task.driverId);
+  }
+
+  private async moveTo(
+    orderId: string,
+    identity: BootstrapRequestIdentity | null,
+    until: "arrived_pickup" | "on_trip",
+    requestId?: string,
   ): Promise<ReferralDemoTripResult> {
     this.requireEnabled();
     const order = await this.orders.requireOwnedReferralPassengerOrder(
@@ -268,15 +316,22 @@ export class ReferralDemoTripService {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "REFERRAL_DEMO_TRIP_NOT_ASSIGNED",
-        "Only a trip served by a test driver reports a test location.",
+        "Only a trip served by a test driver can be moved along here.",
       );
-    await this.recordSimulatedLocation(order, task);
+    const moved = await this.advanceTo(order, task, until, requestId);
+    await this.recordSimulatedLocation(order, moved);
     return this.result(orderId, task.driverId);
   }
 
+  private approachDriven(task: DriverTaskRecord, now = Date.now()) {
+    const since = Date.parse(task.departedAt ?? task.acceptedAt ?? "");
+    return Number.isFinite(since) && now - since >= APPROACH_MS;
+  }
+
   /**
-   * North of the pickup by about 1.3 km at acceptance, closing in over six
-   * minutes; at the pickup once arrived.
+   * About 1.3 km north of the pickup on departure, closing in over the
+   * approach; at the pickup once arrived; then along the straight line to the
+   * destination over the ride once the passenger is on board.
    */
   simulatedPosition(
     order: OwnedOrderRecord,
@@ -284,18 +339,26 @@ export class ReferralDemoTripService {
     now = Date.now(),
   ) {
     const pickup = this.point(order.pickup, "pickup");
+    const progress = (since: string | null | undefined, span: number) =>
+      Math.min(1, Math.max(0, (now - (Date.parse(since ?? "") || now)) / span));
     if (
-      !["pending_acceptance", "accepted", "enroute_pickup"].includes(
-        task.status,
-      )
-    )
-      return pickup;
-    const since = Date.parse(task.acceptedAt ?? "") || now;
-    const progress = Math.min(0.95, Math.max(0, (now - since) / APPROACH_MS));
-    return {
-      lat: pickup.lat + APPROACH_START_LAT_OFFSET * (1 - progress),
-      lng: pickup.lng,
-    };
+      ["pending_acceptance", "accepted", "enroute_pickup"].includes(task.status)
+    ) {
+      const done = progress(task.departedAt ?? task.acceptedAt, APPROACH_MS);
+      return {
+        lat: pickup.lat + APPROACH_START_LAT_OFFSET * (1 - done),
+        lng: pickup.lng,
+      };
+    }
+    if (["on_trip", "proof_pending"].includes(task.status)) {
+      const dropoff = this.point(order.dropoff, "dropoff");
+      const done = progress(task.startedAt, RIDE_MS);
+      return {
+        lat: pickup.lat + (dropoff.lat - pickup.lat) * done,
+        lng: pickup.lng + (dropoff.lng - pickup.lng) * done,
+      };
+    }
+    return pickup;
   }
 
   private async recordSimulatedLocation(
@@ -324,13 +387,17 @@ export class ReferralDemoTripService {
     });
   }
 
-  /** Accept → depart → arrive → start → complete, skipping steps already done. */
-  private async finishTask(
+  /**
+   * Runs the normal driver steps (accept → depart → arrive → start) until the
+   * task reaches `until`, skipping steps already done. A step that another
+   * request (the heartbeat or a second tap) completed first is not an error.
+   */
+  private async advanceTo(
     order: OwnedOrderRecord,
     task: DriverTaskRecord,
+    until: "enroute_pickup" | "arrived_pickup" | "on_trip",
     requestId?: string,
-  ) {
-    const pickup = this.point(order.pickup, "pickup");
+  ): Promise<DriverTaskRecord> {
     const steps: Array<[string, () => Promise<unknown>]> = [
       [
         "pending_acceptance",
@@ -346,7 +413,10 @@ export class ReferralDemoTripService {
         () =>
           this.orders.departDriverTask(
             task.taskId,
-            { departedAt: new Date().toISOString(), currentLocation: pickup },
+            {
+              departedAt: new Date().toISOString(),
+              currentLocation: this.simulatedPosition(order, task),
+            },
             requestId,
           ),
       ],
@@ -369,13 +439,37 @@ export class ReferralDemoTripService {
           ),
       ],
     ];
-    let status = task.status;
+    const sequence = [
+      ...steps.map(([from]) => from),
+      "on_trip",
+      "proof_pending",
+    ];
+    let current = task;
     for (const [from, run] of steps) {
-      if (status !== from) continue;
+      if (current.status === until) break;
+      if (current.status !== from) continue;
       await this.orders.prepareOrderAction({ taskId: task.taskId });
-      await run();
-      status = this.orders.getDriverTask(task.taskId).status;
+      try {
+        await run();
+      } catch (error) {
+        // Another request took this step first: carry on from where it is.
+        const latest = this.orders.getDriverTask(task.taskId);
+        if (sequence.indexOf(latest.status) <= sequence.indexOf(from))
+          throw error;
+      }
+      current = this.orders.getDriverTask(task.taskId);
     }
+    return current;
+  }
+
+  /** Accept → depart → arrive → start → complete, skipping steps already done. */
+  private async finishTask(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+    requestId?: string,
+  ) {
+    const status = (await this.advanceTo(order, task, "on_trip", requestId))
+      .status;
     if (status !== "on_trip" && status !== "proof_pending")
       throw new ApiRequestError(
         HttpStatus.CONFLICT,

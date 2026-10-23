@@ -2453,6 +2453,43 @@ const DEMO_TRIP_DISPATCHABLE = [
   "redispatch_required",
   "matching",
 ];
+const DEMO_TRIP_ON_BOARD = ["on_trip", "proof_pending", "inprogress"];
+
+type DemoTripAction = "assign" | "arrive" | "board" | "complete";
+
+/** Which test step comes next for the trip's current state. */
+function demoTripAction(status: string): DemoTripAction {
+  if (DEMO_TRIP_DISPATCHABLE.includes(status)) return "assign";
+  if (status === "arrived_pickup") return "board";
+  if (DEMO_TRIP_ON_BOARD.includes(status)) return "complete";
+  return "arrive";
+}
+
+const DEMO_TRIP_STEP: Record<
+  DemoTripAction,
+  { description: string; label: string }
+> = {
+  assign: {
+    description:
+      "按下後由虛構的商務測試司機承接這筆行程，用來展示派車後的畫面；不是實際派車。",
+    label: "測試：指派測試司機",
+  },
+  arrive: {
+    description:
+      "測試司機正從約 1.3 公里外駛向上車地點，約 3 分鐘抵達，地圖上的車輛會跟著移動。不想等候可按下按鈕，讓司機立即抵達。",
+    label: "測試：司機立即抵達",
+  },
+  board: {
+    description:
+      "測試司機已抵達上車地點。按下後模擬乘客上車並開始行程，車輛會駛向目的地（約 3 分鐘）。",
+    label: "測試：乘客已上車",
+  },
+  complete: {
+    description:
+      "行程進行中，車輛正駛向目的地。按下後以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。",
+    label: "測試：完成行程",
+  },
+};
 
 function demoTripMessage(code: unknown) {
   switch (code) {
@@ -2463,7 +2500,7 @@ function demoTripMessage(code: unknown) {
     case "REFERRAL_DEMO_TRIP_NOT_DISPATCHABLE":
       return "這筆行程目前無法指派測試司機。";
     case "REFERRAL_DEMO_TRIP_NOT_ASSIGNED":
-      return "這筆行程不是由測試司機承接，無法用測試按鈕完成。";
+      return "這筆行程不是由測試司機承接，無法用測試按鈕操作。";
     case "not_found":
       return "測試功能目前未開啟。";
     default:
@@ -2486,9 +2523,7 @@ function ReferralDemoTripControls({
   const theme = buildEmbedTheme(context.accent);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const action = DEMO_TRIP_DISPATCHABLE.includes(status)
-    ? "assign"
-    : "complete";
+  const action = demoTripAction(status);
   // live.refresh is a new function on every render; keep the latest one in a
   // ref so the heartbeat timer below depends only on the trip, or each
   // refresh-triggered render would restart it and send another heartbeat.
@@ -2496,10 +2531,12 @@ function ReferralDemoTripControls({
   useEffect(() => {
     onAssignedRef.current = onAssigned;
   }, [onAssigned]);
-  // Like the driver app, report the test driver's location every 30 s so the
-  // live tracking and pickup ETA stay fresh while this demo trip is open.
+  // Like the driver app, report the test driver's location every 10 s so the
+  // map and ETA move smoothly while this demo trip is open; the server also
+  // reports arrival through this heartbeat once the approach is driven.
+  const driverAssigned = action !== "assign";
   useEffect(() => {
-    if (action !== "complete") return;
+    if (!driverAssigned) return;
     let active = true;
     const beat = () =>
       void fetch(
@@ -2515,12 +2552,12 @@ function ReferralDemoTripControls({
         })
         .catch(() => undefined);
     beat();
-    const timer = globalThis.setInterval(beat, 30_000);
+    const timer = globalThis.setInterval(beat, 10_000);
     return () => {
       active = false;
       globalThis.clearInterval(timer);
     };
-  }, [action, orderId]);
+  }, [driverAssigned, orderId]);
 
   async function run() {
     setPending(true);
@@ -2571,18 +2608,10 @@ function ReferralDemoTripControls({
         測試模式（僅供展示）
       </div>
       <div style={{ fontSize: 12, lineHeight: 1.6, color: theme.ink2 }}>
-        {action === "assign"
-          ? "按下後由虛構的商務測試司機承接這筆行程，用來展示派車後的畫面；不是實際派車。"
-          : "按下後以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。"}
+        {DEMO_TRIP_STEP[action].description}
       </div>
       <ActionButton
-        label={
-          pending
-            ? "處理中…"
-            : action === "assign"
-              ? "測試：指派測試司機"
-              : "測試：完成行程"
-        }
+        label={pending ? "處理中…" : DEMO_TRIP_STEP[action].label}
         theme={theme}
         onClick={() => void run()}
         disabled={pending}

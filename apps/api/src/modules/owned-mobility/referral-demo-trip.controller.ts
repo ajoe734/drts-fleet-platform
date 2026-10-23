@@ -32,7 +32,31 @@ export class ReferralDemoTripController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.demoTrips.heartbeat(orderId, identity),
+      await this.demoTrips.heartbeat(orderId, identity, requestId),
+      requestId,
+    );
+  }
+
+  @Post("arrive")
+  async arrive(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.demoTrips.arrive(orderId, identity, requestId),
+      requestId,
+    );
+  }
+
+  @Post("board")
+  async board(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.demoTrips.board(orderId, identity, requestId),
       requestId,
     );
   }
