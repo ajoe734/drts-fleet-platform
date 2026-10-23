@@ -624,6 +624,28 @@ describe("ReferralDemoTripService", () => {
       lat: 25.04,
       lng: 121.56,
     });
+
+    // With the quoted route's 20-minute drive, halfway takes ten minutes, so
+    // the live ETA from the same route provider counts down with the map.
+    const quoted = harness({
+      order: order({
+        referralPassengerLifecycle: {
+          quote: {
+            pricingAt: DAY,
+            route: { distanceMeters: 14_000, durationSeconds: 1200 },
+          },
+        },
+      }),
+    });
+    const quotedAt = (now: number) =>
+      quoted.service.simulatedPosition(
+        quoted.current as never,
+        task("on_trip"),
+        now,
+      );
+    expect(quotedAt(ride + 90_000).lat).toBeCloseTo(25.01 + 0.03 * 0.075, 6);
+    expect(quotedAt(ride + 10 * 60_000).lat).toBeCloseTo(25.025, 6);
+    expect(quotedAt(ride + 20 * 60_000)).toEqual({ lat: 25.04, lng: 121.56 });
   });
 
   const demoTask = (status: string, extra: Partial<Task> = {}): Task => ({
@@ -665,6 +687,50 @@ describe("ReferralDemoTripService", () => {
     expect(
       driven.registry.recordDriverLocationBatch.mock.calls[0]![0].items[0],
     ).toMatchObject({ lat: 25.01, lng: 121.46, workState: "arrived" });
+  });
+
+  it("ends the trip through the heartbeat once the ride reaches the destination", async () => {
+    const onBoard = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [demoTask("on_trip", { startedAt: new Date().toISOString() })],
+    });
+    await onBoard.service.heartbeat("order-1", identity, "req-1");
+    expect(onBoard.orders.completeDriverTask).not.toHaveBeenCalled();
+    expect(onBoard.registry.recordDriverLocationBatch).toHaveBeenCalledTimes(1);
+
+    const arrived = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [
+        demoTask("on_trip", {
+          // Past the 3-minute ride used when the quote has no route time.
+          startedAt: new Date(Date.now() - 3 * 60_000 - 1_000).toISOString(),
+        }),
+      ],
+    });
+    const result = await arrived.service.heartbeat(
+      "order-1",
+      identity,
+      "req-1",
+    );
+    expect(arrived.orders.completeDriverTask).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ orderId: "order-1", status: "completed" });
+    // A completed task reports no further location.
+    expect(arrived.registry.recordDriverLocationBatch).not.toHaveBeenCalled();
+  });
+
+  it("lets a tap and the destination heartbeat both end the trip once", async () => {
+    const h = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [demoTask("on_trip")],
+    });
+    h.orders.completeDriverTask.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "completed";
+      h.current.status = "completed";
+      throw new ApiRequestError(409, "INVALID_TASK_TRANSITION", "already");
+    });
+    await expect(
+      h.service.complete("order-1", identity, "req-1"),
+    ).resolves.toMatchObject({ status: "completed" });
   });
 
   it("lets the tester skip the approach and board the passenger", async () => {
@@ -742,9 +808,9 @@ describe("ReferralDemoTripService", () => {
       h.tasks[0]!.status = "arrived_pickup";
       throw new Error("order repository write rejected");
     });
-    await expect(
-      h.service.board("order-1", identity, "req-1"),
-    ).rejects.toThrow("order repository write rejected");
+    await expect(h.service.board("order-1", identity, "req-1")).rejects.toThrow(
+      "order repository write rejected",
+    );
     expect(h.orders.startDriverTask).not.toHaveBeenCalled();
   });
 
@@ -763,9 +829,9 @@ describe("ReferralDemoTripService", () => {
       h.tasks[0]!.status = "arrived_pickup";
       throw new Error("driver-task audit log write failed");
     });
-    await expect(
-      h.service.board("order-1", identity, "req-1"),
-    ).rejects.toThrow("driver-task audit log write failed");
+    await expect(h.service.board("order-1", identity, "req-1")).rejects.toThrow(
+      "driver-task audit log write failed",
+    );
     expect(h.orders.startDriverTask).not.toHaveBeenCalled();
   });
 

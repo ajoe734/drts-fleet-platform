@@ -59,10 +59,13 @@ const DRIVER_TASK_TRANSITION_RACE_CODES = new Set([
   "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
 ]);
 // Simulated drive: depart ~1.3 km north of the pickup and arrive in three
-// minutes; once the passenger boards, reach the destination in three more.
+// minutes; once the passenger boards, drive to the destination in the quoted
+// route's own duration, so the live ETA (from the same route provider) counts
+// down in step with the map. Testers can complete the trip at any time.
 const APPROACH_START_LAT_OFFSET = 0.012;
 const APPROACH_MS = 3 * 60_000;
-const RIDE_MS = 3 * 60_000;
+const DEFAULT_RIDE_MS = 3 * 60_000;
+const MAX_RIDE_MS = 90 * 60_000;
 const HEARTBEAT_WORK_STATE: Record<
   string,
   "assigned" | "enroute" | "arrived" | "on_trip"
@@ -280,8 +283,8 @@ export class ReferralDemoTripService {
    * The simulated driver app's periodic location heartbeat, bound to the demo
    * task as the real app's is, so the passenger's live tracking and ETA have
    * a fresh position (freshness lapses after 90 s without one). The driver
-   * also reports arrival once the approach has been driven; boarding waits
-   * for the tester.
+   * also reports arrival once the approach has been driven, and ends the trip
+   * once the ride has reached the destination; boarding waits for the tester.
    */
   async heartbeat(
     orderId: string,
@@ -305,6 +308,14 @@ export class ReferralDemoTripService {
       task = await this.advanceTo(order, task, "enroute_pickup", requestId);
     if (task.status === "enroute_pickup" && this.approachDriven(task))
       task = await this.advanceTo(order, task, "arrived_pickup", requestId);
+    if (
+      ["on_trip", "proof_pending"].includes(task.status) &&
+      this.rideDriven(order, task)
+    ) {
+      // At the destination the driver ends the trip, as a real one would.
+      await this.finishTask(order, task, requestId);
+      return this.result(orderId, task.driverId);
+    }
     await this.recordSimulatedLocation(order, task);
     return this.result(orderId, task.driverId);
   }
@@ -331,6 +342,25 @@ export class ReferralDemoTripService {
     const moved = await this.advanceTo(order, task, until, requestId);
     await this.recordSimulatedLocation(order, moved);
     return this.result(orderId, task.driverId);
+  }
+
+  /** The quoted route's driving time, or three minutes when unknown. */
+  private rideMs(order: OwnedOrderRecord) {
+    const seconds = Number(
+      order.referralPassengerLifecycle?.quote?.route?.durationSeconds,
+    );
+    return Number.isFinite(seconds) && seconds > 0
+      ? Math.min(seconds * 1000, MAX_RIDE_MS)
+      : DEFAULT_RIDE_MS;
+  }
+
+  private rideDriven(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+    now = Date.now(),
+  ) {
+    const since = Date.parse(task.startedAt ?? "");
+    return Number.isFinite(since) && now - since >= this.rideMs(order);
   }
 
   private approachDriven(task: DriverTaskRecord, now = Date.now()) {
@@ -362,7 +392,7 @@ export class ReferralDemoTripService {
     }
     if (["on_trip", "proof_pending"].includes(task.status)) {
       const dropoff = this.point(order.dropoff, "dropoff");
-      const done = progress(task.startedAt, RIDE_MS);
+      const done = progress(task.startedAt, this.rideMs(order));
       return {
         lat: pickup.lat + (dropoff.lat - pickup.lat) * done,
         lng: pickup.lng + (dropoff.lng - pickup.lng) * done,
@@ -471,8 +501,7 @@ export class ReferralDemoTripService {
         // caller, not be reported as a successful arrival/boarding/
         // completion.
         const code = this.errorCode(error);
-        if (!code || !DRIVER_TASK_TRANSITION_RACE_CODES.has(code))
-          throw error;
+        if (!code || !DRIVER_TASK_TRANSITION_RACE_CODES.has(code)) throw error;
         // Reload the authoritative task before trusting that race: the
         // in-memory copy can be stale, and only a reload-confirmed advance
         // proves the other request's step was actually completed.
@@ -514,18 +543,25 @@ export class ReferralDemoTripService {
       );
     const actual = await this.simulatedActuals(order);
     await this.orders.prepareOrderAction({ taskId: task.taskId });
-    await this.orders.completeDriverTask(
-      task.taskId,
-      {
-        completedAt: new Date().toISOString(),
-        actualDistanceKm: actual.distanceKm,
-        actualDurationSec: actual.durationSec,
-        ...(order.fixedPrice ? {} : { fare: actual.fare }),
-        actualFareBreakdown: actual.breakdown,
-        proof: { photos: [REFERRAL_DEMO_PROOF_PHOTO] },
-      },
-      requestId,
-    );
+    try {
+      await this.orders.completeDriverTask(
+        task.taskId,
+        {
+          completedAt: new Date().toISOString(),
+          actualDistanceKm: actual.distanceKm,
+          actualDurationSec: actual.durationSec,
+          ...(order.fixedPrice ? {} : { fare: actual.fare }),
+          actualFareBreakdown: actual.breakdown,
+          proof: { photos: [REFERRAL_DEMO_PROOF_PHOTO] },
+        },
+        requestId,
+      );
+    } catch (error) {
+      // The heartbeat at the destination and a tap can both end the trip;
+      // the first one to complete it wins.
+      if (this.orders.getDriverTask(task.taskId).status !== "completed")
+        throw error;
+    }
     await this.registry
       .updateDriverWorkStateFromPersistence(task.driverId, {
         workState: "offline",
