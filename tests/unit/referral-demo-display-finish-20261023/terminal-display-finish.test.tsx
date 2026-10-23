@@ -139,6 +139,35 @@ describe("UI-01 terminal fare truthfulness", () => {
     // The free-cancellation row always reads the fee-disclosure value, never the actual fare.
     expect(screen.getByText("不收")).toBeTruthy();
   });
+
+  it("never claims 'no fare was generated' for a no_supply/dispatch_failed order that actually has a recorded fare", () => {
+    for (const status of ["no_supply", "dispatch_failed"]) {
+      const { unmount } = render(
+        <PassengerEmbed
+          context={baseContext({ screen: "cancelled" }) as never}
+          liveData={
+            {
+              activeTrip: null,
+              receipt: null,
+              selectedOrderId: "ord_1",
+              history: {
+                items: [
+                  historyItem({
+                    status,
+                    fareTotal: 999,
+                    formattedFare: "NT$ 999",
+                  }),
+                ],
+              },
+            } as never
+          }
+        />,
+      );
+      expect(screen.queryByText(/未產生車資/)).toBeNull();
+      expect(screen.getAllByText("NT$ 999").length).toBeGreaterThan(0);
+      unmount();
+    }
+  });
 });
 
 describe("UI-02 localized outcome/negative state badges", () => {
@@ -246,8 +275,31 @@ describe("UI-07 negative-screen action targets", () => {
       <PassengerEmbed context={baseContext({ screen: "degraded" }) as never} />,
     );
     const viewStatusLink = screen.getByRole("link", { name: "查看狀態" });
-    expect(viewStatusLink.getAttribute("href")).toContain("screen=trip");
+    // The history/status list (not the single-trip screen, which silently
+    // falls back to the booking form with no active trip) and never the phone.
+    expect(viewStatusLink.getAttribute("href")).toContain("screen=trips");
+    expect(viewStatusLink.getAttribute("href")).not.toContain("screen=book");
     expect(viewStatusLink.getAttribute("href")).not.toContain("tel:");
+  });
+});
+
+describe("fallback-to-web screen uses prospective wording", () => {
+  it("never claims the rider has already switched to the standalone site before they navigate", () => {
+    render(
+      <PassengerEmbed
+        context={
+          baseContext({
+            state: "fallback",
+            fallbackEntry: {
+              url: "https://standalone.example",
+              hostLabel: "standalone.example",
+            },
+          }) as never
+        }
+      />,
+    );
+    expect(screen.queryByText("已改用網站")).toBeNull();
+    expect(screen.getByText("可改用網站")).toBeTruthy();
   });
 });
 

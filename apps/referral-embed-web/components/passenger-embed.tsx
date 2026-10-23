@@ -1487,7 +1487,7 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
         tone="neutral"
         icon="ext"
         title="內嵌服務暫時無法使用"
-        posture={fallbackEntry ? "已改用網站" : "尚無替代入口"}
+        posture={fallbackEntry ? "可改用網站" : "尚無替代入口"}
       />
       {fallbackEntry ? (
         <>
@@ -2325,7 +2325,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
   );
 }
 
-type NegativeScreenAction = "book" | "tel" | "trip";
+type NegativeScreenAction = "book" | "tel" | "trips";
 
 /** Resolves a negative-screen button's actual destination; never a uniform book/tel guess. */
 function negativeScreenHref(
@@ -2335,8 +2335,11 @@ function negativeScreenHref(
   switch (action) {
     case "tel":
       return toPhoneHref(REFERRAL_SUPPORT_PHONE);
-    case "trip":
-      return buildHref(context, { screen: "trip", state: "handoff" });
+    case "trips":
+      // The single-trip screen silently falls back to the booking form when
+      // there is no active trip; the history list shows the rider's actual
+      // status (including the empty state) instead.
+      return buildHref(context, { screen: "trips", state: "handoff" });
     case "book":
       return buildHref(context, { screen: "book", state: "handoff" });
   }
@@ -2385,7 +2388,7 @@ const negativeScreens = {
     primary: "重試",
     primaryAction: "book" as NegativeScreenAction,
     secondary: "查看狀態",
-    secondaryAction: "trip" as NegativeScreenAction,
+    secondaryAction: "trips" as NegativeScreenAction,
   },
 };
 
@@ -3973,12 +3976,25 @@ function OutcomeScreen({
               marginBottom: 10,
             }}
           >
-            {trip?.status === "no_supply"
-              ? "目前無可用車輛，未產生車資，請稍後再試或重新叫車。"
-              : trip?.status === "dispatch_failed" ||
-                  trip?.status === "dispatch_timeout"
-                ? "本次派車失敗，未產生車資，請重新叫車。"
-                : `此行程已取消。${PASSENGER_FREE_CANCELLATION_NOTICE}`}
+            {(() => {
+              const hasRecordedFare =
+                typeof trip?.fareTotal === "number" &&
+                Number.isFinite(trip.fareTotal);
+              if (trip?.status === "no_supply") {
+                return hasRecordedFare
+                  ? "目前無可用車輛，本次行程費用如下所列。"
+                  : "目前無可用車輛，未產生車資，請稍後再試或重新叫車。";
+              }
+              if (
+                trip?.status === "dispatch_failed" ||
+                trip?.status === "dispatch_timeout"
+              ) {
+                return hasRecordedFare
+                  ? "本次派車失敗，本次行程費用如下所列。"
+                  : "本次派車失敗，未產生車資，請重新叫車。";
+              }
+              return `此行程已取消。${PASSENGER_FREE_CANCELLATION_NOTICE}`;
+            })()}
           </div>
           {trip?.status === "cancelled" ? (
             <DetailRow
