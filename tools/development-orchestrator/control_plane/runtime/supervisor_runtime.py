@@ -7206,7 +7206,12 @@ def create_chair_unblock_task(
     if unblock_kind not in {"history_repair", "planning_decision", "manual_unblock"}:
         unblock_kind = blocked_task_triage_kind(parent)
     unblock_id = chair_unblock_task_id(parent_id, unblock_kind)
-    if open_unblock_task_for_parent(status, parent_id, unblock_kind) is not None or task_map.get(unblock_id) is not None:
+    archived = status.get("archived_task_ids", []) or []
+    if (
+        open_unblock_task_for_parent(status, parent_id, unblock_kind) is not None
+        or task_map.get(unblock_id) is not None
+        or (isinstance(archived, list) and unblock_id in {str(item) for item in archived})
+    ):
         return False
 
     requested_owner = str(action.get("target_agent") or "").strip()

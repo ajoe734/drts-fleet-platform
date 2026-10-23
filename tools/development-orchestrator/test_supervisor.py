@@ -2420,6 +2420,69 @@ class GovernanceRecursionGuardTests(unittest.TestCase):
         logged_types = [call.args[1].get("type") for call in logged.call_args_list if len(call.args) > 1]
         self.assertIn("governance_recursion_blocked", logged_types)
 
+    def _blocked_parent(self) -> dict[str, Any]:
+        return {
+            "id": "INVOICES-BILLING",
+            "status": "blocked",
+            "owner": "Codex",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+
+    def _unblock_config(self) -> dict[str, Any]:
+        return {
+            "agents": {
+                "codex": {"display_name": "Codex", "provider": "codex"},
+                "codex2": {"display_name": "Codex2", "provider": "codex2"},
+            }
+        }
+
+    def test_create_chair_unblock_task_refuses_archived_helper_id(self) -> None:
+        """An archived completed helper must not be resurrected as a new task."""
+        parent = self._blocked_parent()
+        helper_id = supervisor.chair_unblock_task_id(parent["id"], "history_repair")
+        status = {"tasks": [parent], "archived_task_ids": [helper_id]}
+        config = self._unblock_config()
+        state: dict[str, Any] = {}
+        action = {
+            "task_id": parent["id"],
+            "unblock_kind": "history_repair",
+            "reason": "archive guard regression",
+        }
+        with mock.patch.object(supervisor, "load_status", return_value=status), mock.patch.object(
+            supervisor, "write_activity_log"
+        ) as logged, mock.patch.object(supervisor, "run_task_board_command") as command:
+            result = supervisor.create_chair_unblock_task(config, state, action, {})
+
+        self.assertFalse(result)
+        self.assertEqual([task["id"] for task in status["tasks"]], [parent["id"]])
+        logged.assert_not_called()
+        command.assert_not_called()
+
+    def test_create_chair_unblock_task_allows_unarchived_helper_id(self) -> None:
+        """A positive control: an unrelated/unarchived id must still be creatable."""
+        parent = self._blocked_parent()
+        status = {"tasks": [parent], "archived_task_ids": ["SOME-OTHER-TASK-UNBLOCK-HISTORY-REPAIR"]}
+        config = self._unblock_config()
+        state: dict[str, Any] = {}
+        action = {
+            "task_id": parent["id"],
+            "unblock_kind": "history_repair",
+            "reason": "history repair still blocked",
+        }
+        board_result = mock.MagicMock(ok=True)
+        with mock.patch.object(
+            supervisor, "load_status", return_value=status
+        ), mock.patch.object(supervisor, "write_activity_log") as logged, mock.patch.object(
+            supervisor, "run_task_board_command", return_value=board_result
+        ) as command:
+            result = supervisor.create_chair_unblock_task(config, state, action, {})
+
+        self.assertTrue(result)
+        command.assert_called_once()
+        logged_types = [call.args[1].get("type") for call in logged.call_args_list if len(call.args) > 1]
+        self.assertIn("chair_unblock_task_created", logged_types)
+
 
 class ProactiveReassignmentAntiFlapTests(unittest.TestCase):
     """Stop the duplicate-empty-branch thrash without blocking the first claim.
