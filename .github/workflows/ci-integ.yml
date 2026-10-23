@@ -1369,14 +1369,23 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # The real scheduled journeys need their own existing 25-minute envelope;
-  # the legacy route suites consumed half of it before this case could start.
-  # Both jobs remain required by the original E2E aggregate below.
+  # The real scheduled journeys need their own execution envelope, separate
+  # from the legacy route suites that used to consume half of it. Repeated
+  # hosted runs (57b attempts 1/2) show the apt-get mirror transfer for
+  # Playwright's Chromium dependencies alone can take ~5-8 real minutes on
+  # top of a normal ~21m preparation+main+additional run (320s/461s archive
+  # fetch observed across the two attempts), pushing the total past the
+  # prior 25-minute cap even though every real journey assertion still
+  # passed. timeout-minutes is raised 25->40, mirroring the same
+  # transfer-latency accommodation already used below for
+  # ui-bureau-acceptance-e2e, to absorb that measured preparation variance;
+  # this does not fix the underlying mirror/network transfer speed. Both
+  # jobs remain required by the original E2E aggregate below.
   ui-shared-order-e2e:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     services:
       postgres:
         image: postgis/postgis:16-3.4
