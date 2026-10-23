@@ -2870,10 +2870,10 @@ export class OwnedMobilityService
             .getDriverEta?.(assignment.driver.driverId, pickup.lat, pickup.lng)
             .catch(() => null)
         : null;
-    const dropoffRoute =
-      order.status === "on_trip"
-        ? await this.resolvePassengerDropoffRoute(order, assignment, current)
-        : null;
+    const isOnTripOrder = order.status === "on_trip";
+    const dropoffRoute = isOnTripOrder
+      ? await this.resolvePassengerDropoffRoute(order, assignment, current)
+      : null;
     // getDriverEta or resolvePassengerDropoffRoute above can each block long
     // enough (an authority storage lock or route provider call) for this same
     // GPS fix to age past the observation window between the freshness check
@@ -2908,7 +2908,7 @@ export class OwnedMobilityService
         eta && isLocationObservationStillCurrent
           ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
           : null,
-      ...(order.status === "on_trip"
+      ...(isOnTripOrder
         ? {
             dropoffRoute,
           }
