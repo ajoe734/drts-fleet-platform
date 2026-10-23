@@ -704,6 +704,7 @@ describe("C125 full document family, Case attachment, and cross-role manifest co
     );
 
     const setup = acceptance.setup as Array<Record<string, any>>;
+    expect(setup.length).toBe(69);
     const docUploads = setup.filter((item) => item.kind === "document-upload");
     expect(docUploads.length).toBe(15);
 
@@ -782,6 +783,17 @@ describe("C125 full document family, Case attachment, and cross-role manifest co
     const roleProbes = setup.filter(
       (item) => item.kind === "role-access-probe",
     );
+    expect(roleProbes.length).toBe(37);
+    const ownFleetUploadUrlProbes = roleProbes.filter(
+      (item) =>
+        item.role === "own_fleet" &&
+        String(item.path).endsWith("/documents/upload-url"),
+    );
+    expect(ownFleetUploadUrlProbes.length).toBe(2);
+    for (const probe of ownFleetUploadUrlProbes) {
+      expect(probe.expectedStatus).toEqual([400, 422]);
+      expect(String(probe.body?.originalFileName ?? "").trim()).toBe("");
+    }
     const probedRoles = new Set(roleProbes.map((item) => item.role));
     expect(probedRoles).toEqual(
       new Set([

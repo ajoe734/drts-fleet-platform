@@ -735,9 +735,9 @@
         "method": "POST",
         "body": {
           "expectedRevisionNo": "{{c125DriverRevision}}",
-          "documentType": "vehicle_management_contract",
+          "documentType": "professional_driver_license",
           "contentType": "application/pdf",
-          "originalFileName": "invalid-driver-vehicle-contract.pdf"
+          "originalFileName": " "
         },
         "expectedStatus": [400, 422]
       },
@@ -929,9 +929,9 @@
         "method": "POST",
         "body": {
           "expectedRevisionNo": "{{c125VehicleRevision}}",
-          "documentType": "driver_management_contract",
+          "documentType": "vehicle_registration",
           "contentType": "application/pdf",
-          "originalFileName": "invalid-vehicle-driver-contract.pdf"
+          "originalFileName": " "
         },
         "expectedStatus": [400, 422]
       },
