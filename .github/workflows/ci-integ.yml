@@ -1370,17 +1370,20 @@ jobs:
           retention-days: 14
 
   # The real scheduled journeys need their own execution envelope, separate
-  # from the legacy route suites that used to consume half of it. Repeated
-  # hosted runs (57b attempts 1/2) show the apt-get mirror transfer for
-  # Playwright's Chromium dependencies alone can take ~5-8 real minutes on
-  # top of a normal ~21m preparation+main+additional run (320s/461s archive
-  # fetch observed across the two attempts), pushing the total past the
-  # prior 25-minute cap even though every real journey assertion still
-  # passed. timeout-minutes is raised 25->40, mirroring the same
-  # transfer-latency accommodation already used below for
-  # ui-bureau-acceptance-e2e, to absorb that measured preparation variance;
-  # this does not fix the underlying mirror/network transfer speed. Both
-  # jobs remain required by the original E2E aggregate below.
+  # from the legacy route suites that used to consume half of it. Hosted
+  # 57b attempts 1/2 show preparation plus the main three-role journey
+  # already using roughly 21m of the prior 25-minute cap (the apt-get
+  # mirror transfer for Playwright's Chromium deps took 320s/461s within
+  # that total across the two attempts, not on top of it); main passed
+  # both times, but the additional suite was then cancelled mid real
+  # scheduled-time wait before it could reach a pass or fail, with too
+  # little of the cap left for it. timeout-minutes is raised 25->40
+  # (~21m preparation+main plus ~14-15m headroom for slow-mirror
+  # variance and the additional suite's own required real waits),
+  # mirroring the same accommodation already used below for
+  # ui-bureau-acceptance-e2e; this does not fix the underlying
+  # mirror/network transfer speed. Both jobs remain required by the
+  # original E2E aggregate below.
   ui-shared-order-e2e:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
