@@ -182,9 +182,13 @@ describe("createPlaywrightRideListFetcher", () => {
       // like /rides/<id> would not match this pathname.
       expect(new URL(requested).pathname).toBe("/api/passenger-app/rides");
     }
-    expect(new URL(requestedUrls[0]).searchParams.get("limit")).toBe("50");
-    expect(new URL(requestedUrls[0]).searchParams.has("cursor")).toBe(false);
-    expect(new URL(requestedUrls[1]).searchParams.get("cursor")).toBe(
+    const [firstRequestedUrl, secondRequestedUrl] = requestedUrls as [
+      string,
+      string,
+    ];
+    expect(new URL(firstRequestedUrl).searchParams.get("limit")).toBe("50");
+    expect(new URL(firstRequestedUrl).searchParams.has("cursor")).toBe(false);
+    expect(new URL(secondRequestedUrl).searchParams.get("cursor")).toBe(
       "cursor-1",
     );
     expect(second.body?.rides).toEqual([]);
