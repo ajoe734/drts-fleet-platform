@@ -373,7 +373,7 @@ async function reloadComplaintList(
 // Exactly one synthetic command, never resent: the actual request body/key is
 // persisted before the ACK is awaited, so a lost response still leaves a
 // recoverable unknown-ACK journal instead of silently losing it in cleanup.
-async function submitSyntheticComplaint(
+export async function submitSyntheticComplaint(
   p: DisplayObservationsParams,
   orderId: string,
 ): Promise<{ caseNo: string }> {
