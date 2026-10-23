@@ -13,6 +13,7 @@ import type {
 } from "@drts/contracts";
 import { buildEmbedTheme } from "../lib/embed-presentation";
 import { useTranslation } from "../lib/i18n";
+import type { Locale } from "../lib/translations";
 const labels = {
   service: "manualComplaint.category.service",
   fare: "manualComplaint.category.fare",
@@ -41,6 +42,28 @@ function complaintFailure(
     : cause instanceof Error
       ? { text: cause.message }
       : { key: fallbackKey };
+}
+/** Taipei-local "unknown" for a missing/invalid timestamp; never shows raw ISO or "Invalid Date". */
+function formatTaipeiTimestamp(
+  value: string | null | undefined,
+  locale: Locale,
+): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  const stamp = `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+  return locale === "zh" ? `${stamp}（臺北時間）` : `${stamp} (Taipei time)`;
 }
 function savedCommand(
   value: unknown,
@@ -73,7 +96,7 @@ export function ReferralComplaintPanel({
   recoveryScope: string;
   accent: string;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const statusLabel = (status: string) => {
     const key = statuses[status];
     return key ? t(key) : status;
@@ -275,6 +298,40 @@ export function ReferralComplaintPanel({
     background: theme.surface,
     color: theme.ink,
   };
+  const controlButtonStyle = {
+    display: "inline-flex",
+    alignItems: "center",
+    minHeight: 44,
+    padding: "10px 14px",
+    border: `1px solid ${theme.line}`,
+    borderRadius: theme.radiusSm,
+    background: theme.surface,
+    color: theme.ink,
+    fontFamily: theme.sans,
+    fontSize: 13.5,
+    fontWeight: 700,
+    cursor: "pointer",
+  };
+  const caseButtonStyle = {
+    ...controlButtonStyle,
+    display: "block",
+    width: "100%",
+    textAlign: "left" as const,
+    fontWeight: 600,
+    overflowWrap: "anywhere" as const,
+    wordBreak: "break-word" as const,
+  };
+  const detailCardStyle = {
+    display: "grid",
+    gap: 6,
+    marginTop: 10,
+    padding: 12,
+    border: `1px solid ${theme.line}`,
+    borderRadius: theme.radiusSm,
+    background: theme.surface,
+    color: theme.ink,
+    overflowWrap: "anywhere" as const,
+  };
   return (
     <section
       aria-label={t("manualComplaint.section")}
@@ -290,7 +347,7 @@ export function ReferralComplaintPanel({
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        style={{ padding: 10, color: theme.ink }}
+        style={controlButtonStyle}
       >
         {t("manualComplaint.toggle")}
       </button>
@@ -392,6 +449,7 @@ export function ReferralComplaintPanel({
             type="button"
             onClick={() => void refresh()}
             disabled={loading}
+            style={{ ...controlButtonStyle, opacity: loading ? 0.7 : 1 }}
           >
             {t("manualComplaint.reload")}
           </button>
@@ -400,7 +458,15 @@ export function ReferralComplaintPanel({
           ) : items === null ? null : items.length === 0 ? (
             <p>{t("manualComplaint.empty")}</p>
           ) : (
-            <ul>
+            <ul
+              style={{
+                listStyle: "none",
+                margin: "10px 0 0",
+                padding: 0,
+                display: "grid",
+                gap: 8,
+              }}
+            >
               {items.map((item) => (
                 <li key={item.caseNo}>
                   <button
@@ -409,6 +475,7 @@ export function ReferralComplaintPanel({
                     aria-label={t("manualComplaint.viewCase", {
                       caseNo: item.caseNo,
                     })}
+                    style={caseButtonStyle}
                   >
                     {item.caseNo} · {t(labels[item.category])} ·{" "}
                     {statusLabel(item.status)}
@@ -418,7 +485,10 @@ export function ReferralComplaintPanel({
             </ul>
           )}
           {detail ? (
-            <article aria-label={t("manualComplaint.detail")}>
+            <article
+              aria-label={t("manualComplaint.detail")}
+              style={detailCardStyle}
+            >
               <h4>{detail.caseNo}</h4>
               <p>{t("manualComplaint.order", { orderId: detail.orderId })}</p>
               <p>
@@ -445,9 +515,19 @@ export function ReferralComplaintPanel({
                   : t("manualComplaint.contactNo")}
               </p>
               <p>
-                {t("manualComplaint.submitted", { time: detail.submittedAt })}
+                {t("manualComplaint.submitted", {
+                  time:
+                    formatTaipeiTimestamp(detail.submittedAt, locale) ??
+                    t("manualComplaint.timeUnknown"),
+                })}
               </p>
-              <p>{t("manualComplaint.updated", { time: detail.updatedAt })}</p>
+              <p>
+                {t("manualComplaint.updated", {
+                  time:
+                    formatTaipeiTimestamp(detail.updatedAt, locale) ??
+                    t("manualComplaint.timeUnknown"),
+                })}
+              </p>
             </article>
           ) : null}
         </div>
