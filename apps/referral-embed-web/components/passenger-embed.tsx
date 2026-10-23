@@ -728,7 +728,16 @@ function DetailRow({
         borderBottom: last ? "none" : `1px solid ${theme.lineSoft}`,
       }}
     >
-      <span style={{ fontSize: 12.5, color: theme.muted }}>{label}</span>
+      <span
+        style={{
+          fontSize: 12.5,
+          color: theme.muted,
+          flexShrink: 0,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
       <span
         style={{
           fontSize: 12.5,
@@ -736,6 +745,8 @@ function DetailRow({
           fontWeight: strong ? 700 : 500,
           fontFamily: mono ? theme.mono : theme.sans,
           textAlign: "right",
+          minWidth: 0,
+          overflowWrap: "anywhere",
         }}
       >
         {value}
@@ -3834,12 +3845,27 @@ function OutcomeScreen({
             ))}
           </div>
           {submitted ? (
-            <div aria-label="已送出評分內容">
-              <p>
+            <div
+              aria-label="已送出評分內容"
+              style={{
+                display: "grid",
+                gap: 4,
+                fontSize: 12.5,
+                color: theme.ink2,
+                lineHeight: 1.6,
+              }}
+            >
+              <p style={{ margin: 0 }}>
                 評價標籤：
                 {submitted.tags?.length ? submitted.tags.join("、") : "未選擇"}
               </p>
-              <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+              <p
+                style={{
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                }}
+              >
                 意見：{submitted.comment || "未填寫"}
               </p>
             </div>
@@ -3848,13 +3874,22 @@ function OutcomeScreen({
               disabled={isPending || Boolean(originalRating)}
               style={{ border: 0, margin: "12px 0", padding: 0 }}
             >
-              <legend>評價標籤（可複選）</legend>
+              <legend
+                style={{
+                  padding: 0,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: theme.ink2,
+                }}
+              >
+                評價標籤（可複選）
+              </legend>
               <div
                 style={{
                   display: "flex",
                   flexWrap: "wrap",
-                  gap: 10,
-                  margin: "8px 0",
+                  gap: 8,
+                  margin: "8px 0 14px",
                 }}
               >
                 {REFERRAL_RATING_TAG_OPTIONS.map((tag) => (
@@ -3863,11 +3898,31 @@ function OutcomeScreen({
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: 4,
+                      gap: 6,
+                      padding: "6px 11px",
+                      borderRadius: 999,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      color: selectedTags.includes(tag)
+                        ? theme.primary
+                        : theme.ink2,
+                      background: selectedTags.includes(tag)
+                        ? theme.primaryBg
+                        : theme.surface,
+                      border: `1px solid ${
+                        selectedTags.includes(tag) ? theme.primary : theme.line
+                      }`,
                     }}
                   >
                     <input
                       type="checkbox"
+                      style={{
+                        width: 14,
+                        height: 14,
+                        margin: 0,
+                        accentColor: theme.primary,
+                      }}
                       checked={selectedTags.includes(tag)}
                       onChange={() =>
                         setSelectedTags((current) =>
@@ -3881,7 +3936,15 @@ function OutcomeScreen({
                   </label>
                 ))}
               </div>
-              <label style={{ display: "block" }}>
+              <label
+                style={{
+                  display: "grid",
+                  gap: 6,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: theme.ink2,
+                }}
+              >
                 意見（最多200字）
                 <textarea
                   aria-describedby="referral-rating-comment-count"
@@ -3895,16 +3958,43 @@ function OutcomeScreen({
                     width: "100%",
                     minHeight: 80,
                     boxSizing: "border-box",
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: `1px solid ${theme.line}`,
+                    background: theme.surface,
+                    color: theme.ink,
+                    fontFamily: theme.sans,
+                    fontSize: 13.5,
+                    fontWeight: 400,
+                    lineHeight: 1.6,
+                    resize: "vertical",
                   }}
                 />
               </label>
-              <p id="referral-rating-comment-count" aria-live="polite">
+              <p
+                id="referral-rating-comment-count"
+                aria-live="polite"
+                style={{
+                  margin: "4px 0 0",
+                  fontSize: 11.5,
+                  color: theme.muted,
+                  textAlign: "right",
+                }}
+              >
                 {comment.length}/200 字
               </p>
             </fieldset>
           )}
           {(submitted?.score ?? score ?? 5) <= 2 ? (
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                fontSize: 13,
+                color: theme.ink2,
+              }}
+            >
               {submitted?.contactRequested === null ? (
                 <span>原評分未記錄聯絡偏好</span>
               ) : (
@@ -3954,7 +4044,16 @@ function OutcomeScreen({
             />
           ) : null}
           {submitted?.complaintCaseNo ? (
-            <p role="status">
+            <p
+              role="status"
+              style={{
+                margin: 0,
+                fontSize: 12.5,
+                color: theme.ink2,
+                lineHeight: 1.6,
+                overflowWrap: "anywhere",
+              }}
+            >
               客訴案件：{submitted.complaintCaseNo}；
               {submitted.contactRequested
                 ? "同意客服聯絡"
