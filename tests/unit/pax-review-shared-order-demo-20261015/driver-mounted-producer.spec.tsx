@@ -89,6 +89,7 @@ async function headersFor(url: string) {
       getItem: async () => ({ type: "appFile" }),
     },
     runtimeConfig,
+    () => "",
     { dir: root, dev: false, minimalMode: false },
   );
   const request = Object.assign(new PassThrough(), {
