@@ -251,12 +251,20 @@ export class ReferralDemoTripService {
     this.requireReferralBusinessOrder(order);
     if (order.status === "completed") return this.result(orderId, null);
     const task = await this.openDemoTask(orderId);
-    if (!task)
+    if (!task) {
+      // No open demo task survived `openDemoTask`'s own canonical reload --
+      // a concurrent heartbeat or tap may have already completed this
+      // exact task between this call's stale `order` read and that reload.
+      // That is the only benign reason; any other (cancelled, reassigned to
+      // a real driver, never dispatched) must still fail as before.
+      const reconciled = await this.reconcileAlreadyCompletedOrder(orderId);
+      if (reconciled) return reconciled;
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "REFERRAL_DEMO_TRIP_NOT_ASSIGNED",
         "Only a trip served by a test driver can be completed here.",
       );
+    }
     await this.finishTask(order, task, requestId);
     return this.result(orderId, task.driverId);
   }
@@ -298,12 +306,15 @@ export class ReferralDemoTripService {
     );
     this.requireReferralBusinessOrder(order);
     let task = await this.openDemoTask(orderId);
-    if (!task)
+    if (!task) {
+      const reconciled = await this.reconcileAlreadyCompletedOrder(orderId);
+      if (reconciled) return reconciled;
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "REFERRAL_DEMO_TRIP_NOT_ASSIGNED",
         "Only a trip served by a test driver reports a test location.",
       );
+    }
     if (["pending_acceptance", "accepted"].includes(task.status))
       task = await this.advanceTo(order, task, "enroute_pickup", requestId);
     if (task.status === "enroute_pickup" && this.approachDriven(task))
@@ -521,8 +532,26 @@ export class ReferralDemoTripService {
     task: DriverTaskRecord,
     requestId?: string,
   ) {
-    const status = (await this.advanceTo(order, task, "on_trip", requestId))
-      .status;
+    let advanced: DriverTaskRecord;
+    try {
+      advanced = await this.advanceTo(order, task, "on_trip", requestId);
+    } catch (error) {
+      // `advanceTo` itself already reload-checked this code and found the
+      // task no further along than the step it was retrying -- but
+      // "completed" is deliberately not part of its own allowed sequence
+      // (letting arrive/board treat a completed trip as a successful
+      // advance would let them keep sending GPS after completion). Only
+      // here, for the completion caller specifically, does a reload-
+      // confirmed `completed` on the SAME order/task mean a concurrent
+      // heartbeat or tap already finished this trip -- not that our own
+      // pending step (which never mutated anything, by the same guarantee
+      // `advanceTo` relies on) succeeded.
+      const code = this.errorCode(error);
+      if (!code || !DRIVER_TASK_TRANSITION_RACE_CODES.has(code)) throw error;
+      if (!(await this.reloadConfirmsCompleted(order, task))) throw error;
+      return;
+    }
+    const status = advanced.status;
     if (status !== "on_trip" && status !== "proof_pending")
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
@@ -557,10 +586,22 @@ export class ReferralDemoTripService {
         requestId,
       );
     } catch (error) {
-      // The heartbeat at the destination and a tap can both end the trip;
-      // the first one to complete it wins.
-      if (this.orders.getDriverTask(task.taskId).status !== "completed")
-        throw error;
+      // The heartbeat at the destination and a tap can both end the trip,
+      // including from separate service instances that each hold their own
+      // local task cache. The real completion command raises this exact
+      // code before mutating anything, so it never hides our own failed
+      // mutation, persistence, audit or outbox step -- but this instance's
+      // local cache may never have heard about the other instance's write,
+      // so only a reload of the authoritative task (never the possibly
+      // stale local copy) can confirm the SAME task/order genuinely reached
+      // `completed`. Any other code, an unrelated task/order, or a reload
+      // that does not confirm completion is a real failure and must reach
+      // the caller.
+      if (this.errorCode(error) !== "TASK_ALREADY_COMPLETED") throw error;
+      if (!(await this.reloadConfirmsCompleted(order, task))) throw error;
+      // Another request already finished the completion this call would
+      // have made, so its own offline step would be a duplicate.
+      return;
     }
     await this.registry
       .updateDriverWorkStateFromPersistence(task.driverId, {
@@ -820,6 +861,39 @@ export class ReferralDemoTripService {
             OPEN_TASK_STATUSES.includes(task.status),
         ) ?? null
     );
+  }
+
+  /**
+   * `openDemoTask` found no open demo task after its own canonical reload.
+   * A concurrent heartbeat or tap may simply have completed the SAME task
+   * first, between this call's earlier (now stale) order read and that
+   * reload -- the only benign reason a referral business order's demo task
+   * can vanish from the open set. Any other reason (cancelled, reassigned
+   * to a real driver, never dispatched) leaves the order not `completed`
+   * and must still fail as before.
+   */
+  private async reconcileAlreadyCompletedOrder(orderId: string) {
+    const order = await this.orders.getOrderForRead(orderId);
+    if (order.status !== "completed") return null;
+    const completedTask = this.orders
+      .getDriverTasksForOrder(orderId)
+      .find((t) => DEMO_DRIVER_IDS.has(t.driverId) && t.status === "completed");
+    if (!completedTask) return null;
+    return this.result(orderId, completedTask.driverId);
+  }
+
+  /**
+   * True only once a reload of the authoritative task -- never this
+   * instance's possibly-stale local copy -- confirms the exact SAME
+   * order/task genuinely reached `completed`.
+   */
+  private async reloadConfirmsCompleted(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+  ) {
+    await this.orders.prepareOrderAction({ taskId: task.taskId });
+    const latest = this.orders.getDriverTask(task.taskId);
+    return latest.orderId === order.orderId && latest.status === "completed";
   }
 
   private async requireOpenDemoTask(orderId: string) {
