@@ -141,6 +141,73 @@ it("stale or inaccurate Driver location has no live pickup ETA", async () => {
   expect(f.registry.getDriverEta).not.toHaveBeenCalled();
 });
 
+it("a GPS fix buffered minutes ago has no live pickup ETA even though it was just received", async () => {
+  const f = fixture();
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "fresh",
+    currentLocation: {
+      ...current.currentLocation,
+      recordedAt: new Date(NOW - 600_000).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("stale");
+  expect(result.tracking?.pickupEta).toBeNull();
+  expect(result.tracking?.location?.lat).toBe(current.currentLocation.lat);
+  expect(result.assignment).toEqual(f.original);
+  expect(f.registry.getDriverEta).not.toHaveBeenCalled();
+});
+
+it("a GPS fix recorded seconds ago keeps the live pickup ETA (fresh control)", async () => {
+  const f = fixture();
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "fresh",
+    currentLocation: {
+      ...current.currentLocation,
+      recordedAt: new Date(NOW - 5_000).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("fresh");
+  expect(result.tracking?.pickupEta).toEqual({
+    minutes: 3,
+    calculatedAt: new Date(NOW).toISOString(),
+  });
+});
+
+it("an old receipt with an old GPS fix stays stale (old receipt control)", async () => {
+  const f = fixture();
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "stale",
+    currentLocation: {
+      ...current.currentLocation,
+      recordedAt: new Date(NOW - 600_000).toISOString(),
+      updatedAt: new Date(NOW - 100_000).toISOString(),
+    },
+  });
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("stale");
+  expect(result.tracking?.pickupEta).toBeNull();
+  expect(f.registry.getDriverEta).not.toHaveBeenCalled();
+});
+
 it("redispatch with no current assignment stops tracking the old Driver", async () => {
   const f = fixture("redispatch_required");
   f.owned.resolvePersistedPassengerAssignmentDisclosure = vi.fn(
