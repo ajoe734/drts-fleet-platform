@@ -1,4 +1,9 @@
-import { expect, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Request,
+} from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import {
   EMBED_TRIP_FALLBACK_SCREENS,
@@ -376,92 +381,112 @@ async function submitSyntheticComplaint(
     .getByLabel("申訴內容", { exact: true })
     .fill(`display-observations ${p.nonce}`);
   const submitUrl = `${p.referralOrigin}/api/referral/complaints/${encodeURIComponent(orderId)}`;
-  const requestPromise = p.page.waitForRequest(
-    (request) => request.url() === submitUrl && request.method() === "POST",
-    { timeout: 15_000 },
-  );
-  void requestPromise.catch(() => undefined);
-  const responsePromise = p.page.waitForResponse(
-    (response) =>
-      response.url() === submitUrl && response.request().method() === "POST",
-    { timeout: 15_000 },
-  );
-  void responsePromise.catch(() => undefined);
-  await p.page.getByRole("button", { name: "送出申訴", exact: true }).click();
-  const request = await requestPromise;
-  const requestBody = object(request.postDataJSON());
-  requireFact(
-    requestBody.orderId === orderId && requestBody.contactRequested === false,
-    "synthetic manual complaint command is same-order and contactfalse",
-  );
-  const idempotencyKey = text(
-    requestBody.idempotencyKey,
-    "synthetic manual complaint idempotency key required",
-  );
-  const bodySha256 = hash(
-    new TextEncoder().encode(JSON.stringify(requestBody)),
-  );
-  // The -facts.json suffix matches the existing cancellations/*-facts.json
-  // glob already in ci-integ.yml's artifact allowlist, so this is genuinely
-  // retained, not just written to a path nobody uploads. The actual request
-  // body is persisted (not only its hash/key): a hash alone cannot
-  // reconstruct the original command for recovery.
-  await mkdir(`${p.directory}/cancellations`, { recursive: true });
-  const journalPath = `${p.directory}/cancellations/manual-complaint-command-facts.json`;
-  await persistPrivateJson(journalPath, {
-    state: "ack_unknown",
-    orderId,
-    idempotencyKey,
-    bodySha256,
-    definitionSha: p.definitionSha,
-    runtimeSha: p.runtimeSha,
-    requestBody,
-    recovery:
-      "Possible own write. Preserve this exact body/key; do not resend a replacement command or key.",
-  });
-
-  const response = await responsePromise.catch((error: unknown) => {
-    p.evidence.record({
-      stage: "display-manual-complaint-ACK-unknown",
+  // A same-URL response filter alone cannot tell the original POST apart from
+  // a stray duplicate that happens to echo the same orderId/idempotencyKey,
+  // so every matching request is tracked by object identity and the ACK is
+  // bound to the exact captured Request via request.response() rather than
+  // to "any POST response for this URL".
+  const matchingRequests: Request[] = [];
+  const onRequest = (candidate: Request): void => {
+    if (candidate.url() === submitUrl && candidate.method() === "POST") {
+      matchingRequests.push(candidate);
+    }
+  };
+  p.page.on("request", onRequest);
+  try {
+    const requestPromise = p.page.waitForRequest(
+      (request) => request.url() === submitUrl && request.method() === "POST",
+      { timeout: 15_000 },
+    );
+    void requestPromise.catch(() => undefined);
+    await p.page.getByRole("button", { name: "送出申訴", exact: true }).click();
+    const request = await requestPromise;
+    const requestBody = object(request.postDataJSON());
+    requireFact(
+      requestBody.orderId === orderId && requestBody.contactRequested === false,
+      "synthetic manual complaint command is same-order and contactfalse",
+    );
+    const idempotencyKey = text(
+      requestBody.idempotencyKey,
+      "synthetic manual complaint idempotency key required",
+    );
+    const bodySha256 = hash(
+      new TextEncoder().encode(JSON.stringify(requestBody)),
+    );
+    // The -facts.json suffix matches the existing cancellations/*-facts.json
+    // glob already in ci-integ.yml's artifact allowlist, so this is genuinely
+    // retained, not just written to a path nobody uploads. The actual request
+    // body is persisted (not only its hash/key): a hash alone cannot
+    // reconstruct the original command for recovery.
+    await mkdir(`${p.directory}/cancellations`, { recursive: true });
+    const journalPath = `${p.directory}/cancellations/manual-complaint-command-facts.json`;
+    await persistPrivateJson(journalPath, {
+      state: "ack_unknown",
       orderId,
-      sha256: bodySha256,
-      result: "retained",
+      idempotencyKey,
+      bodySha256,
+      definitionSha: p.definitionSha,
+      runtimeSha: p.runtimeSha,
+      requestBody,
+      recovery:
+        "Possible own write. Preserve this exact body/key; do not resend a replacement command or key.",
     });
-    throw error;
-  });
-  requireFact(response.ok(), "synthetic manual complaint submit must succeed");
-  const payload = object(await response.json());
-  requireFact(
-    payload.ok === true,
-    "synthetic manual complaint submit envelope",
-  );
-  const data = object(payload.data);
-  requireFact(
-    data.orderId === orderId &&
-      typeof data.caseNo === "string" &&
-      Boolean(data.caseNo) &&
-      data.idempotencyKey === idempotencyKey,
-    "synthetic manual complaint ACK matches the same request",
-  );
-  const caseNo = text(data.caseNo);
-  await persistPrivateJson(journalPath, {
-    state: "acknowledged",
-    orderId,
-    idempotencyKey,
-    bodySha256,
-    definitionSha: p.definitionSha,
-    runtimeSha: p.runtimeSha,
-    requestBody,
-    caseNo,
-  });
-  p.evidence.record({
-    stage: "display-manual-complaint-synthetic-submitted",
-    orderId,
-    caseNo,
-    sha256: bodySha256,
-    result: "observed",
-  });
-  return { caseNo };
+
+    const response = await request.response().catch(() => null);
+    if (response === null) {
+      p.evidence.record({
+        stage: "display-manual-complaint-ACK-unknown",
+        orderId,
+        sha256: bodySha256,
+        result: "retained",
+      });
+      throw new Error(
+        "synthetic manual complaint request produced no response",
+      );
+    }
+    requireFact(
+      matchingRequests.length === 1 && matchingRequests[0] === request,
+      "exactly one same-order manual complaint POST was observed",
+    );
+    requireFact(
+      response.ok(),
+      "synthetic manual complaint submit must succeed",
+    );
+    const payload = object(await response.json());
+    requireFact(
+      payload.ok === true,
+      "synthetic manual complaint submit envelope",
+    );
+    const data = object(payload.data);
+    requireFact(
+      data.orderId === orderId &&
+        typeof data.caseNo === "string" &&
+        Boolean(data.caseNo) &&
+        data.idempotencyKey === idempotencyKey,
+      "synthetic manual complaint ACK matches the same request",
+    );
+    const caseNo = text(data.caseNo);
+    await persistPrivateJson(journalPath, {
+      state: "acknowledged",
+      orderId,
+      idempotencyKey,
+      bodySha256,
+      definitionSha: p.definitionSha,
+      runtimeSha: p.runtimeSha,
+      requestBody,
+      caseNo,
+    });
+    p.evidence.record({
+      stage: "display-manual-complaint-synthetic-submitted",
+      orderId,
+      caseNo,
+      sha256: bodySha256,
+      result: "observed",
+    });
+    return { caseNo };
+  } finally {
+    p.page.off("request", onRequest);
+  }
 }
 
 async function assertTaipeiTimestampLine(
