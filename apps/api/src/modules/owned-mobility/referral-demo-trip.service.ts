@@ -283,8 +283,8 @@ export class ReferralDemoTripService {
    * The simulated driver app's periodic location heartbeat, bound to the demo
    * task as the real app's is, so the passenger's live tracking and ETA have
    * a fresh position (freshness lapses after 90 s without one). The driver
-   * also reports arrival once the approach has been driven; boarding waits
-   * for the tester.
+   * also reports arrival once the approach has been driven, and ends the trip
+   * once the ride has reached the destination; boarding waits for the tester.
    */
   async heartbeat(
     orderId: string,
@@ -308,6 +308,14 @@ export class ReferralDemoTripService {
       task = await this.advanceTo(order, task, "enroute_pickup", requestId);
     if (task.status === "enroute_pickup" && this.approachDriven(task))
       task = await this.advanceTo(order, task, "arrived_pickup", requestId);
+    if (
+      ["on_trip", "proof_pending"].includes(task.status) &&
+      this.rideDriven(order, task)
+    ) {
+      // At the destination the driver ends the trip, as a real one would.
+      await this.finishTask(order, task, requestId);
+      return this.result(orderId, task.driverId);
+    }
     await this.recordSimulatedLocation(order, task);
     return this.result(orderId, task.driverId);
   }
@@ -344,6 +352,15 @@ export class ReferralDemoTripService {
     return Number.isFinite(seconds) && seconds > 0
       ? Math.min(seconds * 1000, MAX_RIDE_MS)
       : DEFAULT_RIDE_MS;
+  }
+
+  private rideDriven(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord,
+    now = Date.now(),
+  ) {
+    const since = Date.parse(task.startedAt ?? "");
+    return Number.isFinite(since) && now - since >= this.rideMs(order);
   }
 
   private approachDriven(task: DriverTaskRecord, now = Date.now()) {
@@ -526,18 +543,25 @@ export class ReferralDemoTripService {
       );
     const actual = await this.simulatedActuals(order);
     await this.orders.prepareOrderAction({ taskId: task.taskId });
-    await this.orders.completeDriverTask(
-      task.taskId,
-      {
-        completedAt: new Date().toISOString(),
-        actualDistanceKm: actual.distanceKm,
-        actualDurationSec: actual.durationSec,
-        ...(order.fixedPrice ? {} : { fare: actual.fare }),
-        actualFareBreakdown: actual.breakdown,
-        proof: { photos: [REFERRAL_DEMO_PROOF_PHOTO] },
-      },
-      requestId,
-    );
+    try {
+      await this.orders.completeDriverTask(
+        task.taskId,
+        {
+          completedAt: new Date().toISOString(),
+          actualDistanceKm: actual.distanceKm,
+          actualDurationSec: actual.durationSec,
+          ...(order.fixedPrice ? {} : { fare: actual.fare }),
+          actualFareBreakdown: actual.breakdown,
+          proof: { photos: [REFERRAL_DEMO_PROOF_PHOTO] },
+        },
+        requestId,
+      );
+    } catch (error) {
+      // The heartbeat at the destination and a tap can both end the trip;
+      // the first one to complete it wins.
+      if (this.orders.getDriverTask(task.taskId).status !== "completed")
+        throw error;
+    }
     await this.registry
       .updateDriverWorkStateFromPersistence(task.driverId, {
         workState: "offline",

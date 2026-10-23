@@ -148,10 +148,16 @@ it("completes a trip in progress and opens the completed screen", async () => {
   const assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, assign });
   const calls = stubFetch(
-    () =>
+    (url) =>
       Response.json({
         ok: true,
-        data: { orderId, status: "completed", driverId: "d", simulated: true },
+        data: {
+          orderId,
+          // Still driving when the heartbeat reports; the tap completes it.
+          status: url.endsWith("/complete") ? "completed" : "on_trip",
+          driverId: "d",
+          simulated: true,
+        },
       }),
     trip("on_trip", "商務測試司機 1（虛構）"),
   );
@@ -161,7 +167,7 @@ it("completes a trip in progress and opens the completed screen", async () => {
       liveData={live("on_trip", "商務測試司機 1（虛構）") as never}
     />,
   );
-  fireEvent.click(screen.getByText("測試：完成行程"));
+  fireEvent.click(screen.getByText("測試：立即抵達目的地"));
   await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
   expect(
     calls.some((c) => c.url === `/api/referral/demo-trip/${orderId}/complete`),
@@ -286,7 +292,7 @@ for (const [status, label, action] of [
         liveData={live(status, "商務測試司機 1（虛構）") as never}
       />,
     );
-    expect(screen.queryByText("測試：完成行程")).toBeNull();
+    expect(screen.queryByText("測試：立即抵達目的地")).toBeNull();
     fireEvent.click(screen.getByText(label));
     await waitFor(() =>
       expect(
@@ -304,3 +310,27 @@ for (const [status, label, action] of [
     expect(assign).not.toHaveBeenCalled();
   });
 }
+
+it("opens the completed screen when the test driver ends the trip at the destination", async () => {
+  const assign = vi.fn();
+  vi.stubGlobal("location", { ...window.location, assign });
+  stubFetch(
+    () =>
+      Response.json({
+        ok: true,
+        data: { orderId, status: "completed", driverId: "d", simulated: true },
+      }),
+    trip("on_trip", "商務測試司機 1（虛構）"),
+  );
+  render(
+    <PassengerEmbed
+      context={context(true) as never}
+      liveData={live("on_trip", "商務測試司機 1（虛構）") as never}
+    />,
+  );
+  // No tap: the first heartbeat reports the trip completed.
+  await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+  const target = new URL(String(assign.mock.calls[0]![0]), "https://x.test");
+  expect(target.searchParams.get("screen")).toBe("completed");
+  expect(target.searchParams.get("orderId")).toBe(orderId);
+});

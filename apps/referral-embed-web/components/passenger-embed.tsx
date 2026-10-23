@@ -2493,8 +2493,8 @@ const DEMO_TRIP_STEP: Record<
   },
   complete: {
     description:
-      "行程進行中，車輛依實際路程時間駛向目的地，到達時間與地圖同步更新。展示時不必等到抵達，可隨時按下按鈕，以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。",
-    label: "測試：完成行程",
+      "行程進行中，車輛依實際路程時間駛向目的地，到達時間與地圖同步更新；抵達後司機結束行程，畫面會轉到行程完成、車資與評分。不想等候可按下按鈕立即抵達。完程資料為模擬（車資依試算下限、合成完程照片），不是實際載客。",
+    label: "測試：立即抵達目的地",
   },
 };
 
@@ -2535,6 +2535,9 @@ function ReferralDemoTripControls({
   // ref so the heartbeat timer below depends only on the trip, or each
   // refresh-triggered render would restart it and send another heartbeat.
   const onAssignedRef = useRef(onAssigned);
+  const completedHref = useRef(
+    buildHref(context, { screen: "completed", state: "handoff", orderId }),
+  );
   useEffect(() => {
     onAssignedRef.current = onAssigned;
   }, [onAssigned]);
@@ -2554,7 +2557,15 @@ function ReferralDemoTripControls({
           body: "{}",
         },
       )
-        .then((response) => {
+        .then(async (response) => {
+          const payload = await response.json().catch(() => null);
+          // The test driver ended the trip at the destination: show the
+          // passenger its completion, even if the trip screen already
+          // switched to its ended state and unmounted this card.
+          if (response.ok && payload?.data?.status === "completed") {
+            window.location.assign(completedHref.current);
+            return;
+          }
           if (active && response.ok) onAssignedRef.current();
         })
         .catch(() => undefined);
