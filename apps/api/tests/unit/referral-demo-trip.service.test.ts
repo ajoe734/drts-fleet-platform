@@ -696,9 +696,17 @@ describe("ReferralDemoTripService", () => {
       order: order({ status: "enroute_pickup" }),
       tasks: [demoTask("enroute_pickup")],
     });
+    // This is the exact code (and pre-mutation timing) `assertDriverTaskTransition`
+    // in `OwnedMobilityService` actually raises; the task mutates to look
+    // "arrived" because another request (the heartbeat) genuinely got there
+    // and persisted it first, not because of this call.
     h.orders.arrivedPickup.mockImplementationOnce(async () => {
       h.tasks[0]!.status = "arrived_pickup";
-      throw new ApiRequestError(409, "INVALID_TASK_TRANSITION", "already");
+      throw new ApiRequestError(
+        409,
+        "DRIVER_TASK_TRANSITION_INVALID",
+        "already",
+      );
     });
     await expect(
       h.service.board("order-1", identity, "req-1"),
@@ -709,12 +717,14 @@ describe("ReferralDemoTripService", () => {
       order: order({ status: "enroute_pickup" }),
       tasks: [demoTask("enroute_pickup")],
     });
+    // Same conflict code, but the task never actually advanced -- a refused
+    // transition, not a race -- so it must still reach the caller.
     stuck.orders.arrivedPickup.mockRejectedValueOnce(
-      new ApiRequestError(409, "INVALID_TASK_TRANSITION", "refused"),
+      new ApiRequestError(409, "DRIVER_TASK_TRANSITION_INVALID", "refused"),
     );
     await expect(
       stuck.service.board("order-1", identity, "req-1"),
-    ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
+    ).rejects.toMatchObject({ code: "DRIVER_TASK_TRANSITION_INVALID" });
   });
 
   it("propagates its own persistence failure instead of treating the local mutation as a completed race", async () => {
@@ -724,24 +734,38 @@ describe("ReferralDemoTripService", () => {
     });
     // The real driver command mutates its in-memory task before awaiting the
     // required write, so a rejected write still leaves the task looking
-    // "arrived" locally even though nothing was actually persisted.
+    // "arrived" locally even though nothing was actually persisted. The
+    // error is a generic repository failure, not the driver task's own
+    // transition-conflict code, so it must propagate without even reaching
+    // the reload check.
     h.orders.arrivedPickup.mockImplementationOnce(async () => {
       h.tasks[0]!.status = "arrived_pickup";
       throw new Error("order repository write rejected");
     });
-    // `openDemoTask` and the pre-run refresh inside `advanceTo` both resolve
-    // as no-ops (the two calls that precede the failing command); the
-    // post-failure reload reports the authoritative task, which never
-    // actually advanced because the write was rejected.
-    h.orders.prepareOrderAction
-      .mockImplementationOnce(async () => undefined)
-      .mockImplementationOnce(async () => undefined)
-      .mockImplementationOnce(async () => {
-        h.tasks[0]!.status = "enroute_pickup";
-      });
     await expect(
       h.service.board("order-1", identity, "req-1"),
     ).rejects.toThrow("order repository write rejected");
+    expect(h.orders.startDriverTask).not.toHaveBeenCalled();
+  });
+
+  it("propagates a genuine audit/outbox failure even though its own write already persisted the advance", async () => {
+    const h = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    // The write itself committed (the real `departDriverTask`/`arrivedPickup`
+    // persist before their later audit/event steps), so a reload would
+    // confirm the task genuinely reached `arrived_pickup`. The failure here
+    // is a later audit/outbox step, not a transition conflict, so the
+    // generic error must still reach the caller instead of being read as a
+    // benign race once the status looks advanced.
+    h.orders.arrivedPickup.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "arrived_pickup";
+      throw new Error("driver-task audit log write failed");
+    });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).rejects.toThrow("driver-task audit log write failed");
     expect(h.orders.startDriverTask).not.toHaveBeenCalled();
   });
 });
