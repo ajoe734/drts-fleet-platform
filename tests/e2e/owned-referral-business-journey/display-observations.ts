@@ -62,9 +62,10 @@ const FORBIDDEN_RECOVERY_PROMISES = [
   "恢復後會自動繼續",
 ] as const;
 
-// The exact disclosure phrase the fixture fallback scenes must carry, not a
+// The exact disclosure phrases the fixture fallback scenes must carry, not a
 // broad synonym match that a baseline screen could coincidentally pass.
 const DEMO_SCENARIO_DISCLOSURE = "情境示範";
+const DEMO_SCENARIO_NOT_REAL_TRIP_DISCLOSURE = "非您目前的真實行程";
 const TAIPEI_ZONE_WORDING = /台北|臺北|taipei|utc\+8|gmt\+8|\+08:00/i;
 
 type NegativeActionDestination = "book" | "trips" | "tel-support";
@@ -168,40 +169,37 @@ async function observeTerminalFareAndBadges(
     historyRecord !== undefined,
     "same owned unassigned-cancellation history record required",
   );
+  requireFact(
+    historyRecord.orderId === orderId && historyRecord.status === "cancelled",
+    "same source order/cancelled status required before comparing its fare",
+  );
   const fareTotal = historyRecord.fareTotal;
   const hasFiniteFare =
     typeof fareTotal === "number" && Number.isFinite(fareTotal);
-  const expectedFormattedFare = hasFiniteFare
+  const expectedFareValue = hasFiniteFare
     ? text(
         historyRecord.formattedFare,
         "finite fare must carry an actual formatted representation",
       )
-    : null;
+    : "—";
 
   await gotoEmbed({ screen: "cancelled", orderId });
   await expect(p.page.getByText("行程已取消", { exact: true })).toBeVisible();
 
-  const genericFareRow = p.page
+  // The exact value span, not the whole label+value row: other rows on the
+  // same card can contain "—" or digits that a substring match would accept.
+  const genericFareValue = p.page
     .getByText("車資", { exact: true })
-    .locator("..")
+    .locator("xpath=following-sibling::span[1]")
     .first();
-  await expect(genericFareRow).toBeVisible();
-  const genericFareText = text(
-    await genericFareRow.innerText(),
-    "unassigned-cancellation generic fare row text required",
-  );
+  await expect(genericFareValue).toBeVisible();
+  const genericFareValueText = text(
+    await genericFareValue.innerText(),
+    "unassigned-cancellation top fare value required",
+  ).trim();
   requireFact(
-    !genericFareText.includes("實際車資待確認"),
-    "unassigned-cancellation top fare row must not claim a pending real fare",
-  );
-  // Compare against the same BFF history record, not just the absence of a
-  // forbidden phrase: an unknown fare must show the dash placeholder, never
-  // an inferred zero/refund; a finite fare must preserve its actual value.
-  requireFact(
-    hasFiniteFare
-      ? genericFareText.includes(expectedFormattedFare!)
-      : genericFareText.includes("—"),
-    "unassigned-cancellation top fare row must match the same history record's actual fare",
+    genericFareValueText === expectedFareValue,
+    "unassigned-cancellation top fare value must exactly match the same history record's actual fare",
   );
 
   const feeRow = p.page
@@ -214,23 +212,24 @@ async function observeTerminalFareAndBadges(
   await expect(p.page.getByText("我的行程", { exact: true })).toBeVisible();
   const historyLink = p.page.locator(`a[href*="orderId=${orderId}"]`).first();
   await expect(historyLink).toBeVisible();
-  const badgeText = text(
-    await historyLink.innerText(),
-    "own cancelled history card text required",
+  // getByText with exact:true already requires the localized "已取消" label,
+  // not a raw status code, to be present as this element's full text.
+  const historyBadge = historyLink.getByText("已取消", { exact: true });
+  await expect(historyBadge).toBeVisible();
+  // The fare value div is the badge's own next sibling in the same
+  // right-aligned column (TripsScreen), not an includes() over the whole
+  // card, which other fields (dates, dashes) could coincidentally satisfy.
+  const historyFareValue = historyBadge.locator(
+    "xpath=following-sibling::div[1]",
   );
+  await expect(historyFareValue).toBeVisible();
+  const historyFareValueText = text(
+    await historyFareValue.innerText(),
+    "own cancelled history card fare value required",
+  ).trim();
   requireFact(
-    badgeText.includes("已取消"),
-    "own cancelled history card must show the localized cancelled badge, not a raw status code",
-  );
-  requireFact(
-    !badgeText.includes("實際車資待確認"),
-    "own cancelled history card fare cell must not claim a pending real fare",
-  );
-  requireFact(
-    hasFiniteFare
-      ? badgeText.includes(expectedFormattedFare!)
-      : badgeText.includes("—"),
-    "own cancelled history card fare cell must match the same history record's actual fare",
+    historyFareValueText === expectedFareValue,
+    "own cancelled history card fare value must exactly match the same history record's actual fare",
   );
 
   p.evidence.record({
@@ -611,20 +610,14 @@ async function observeNoUnsupportedPromises(
 }
 
 // UI06: the four fixture fallback scenes must visibly identify themselves as
-// a demonstration; message codes/routes stay intact. The exact disclosure
-// phrase is required (not a broad synonym match); the own trips screen is
-// read first as a baseline defense so the same phrase appearing there too
-// (a generic app-wide banner, not a scenario-specific disclosure) would
-// still reject every fallback scene rather than let a coincidence pass.
+// a demonstration, including that the data is not the rider's real trip;
+// message codes/routes stay intact. Both exact disclosure phrases are
+// required (not a broad synonym match); there is no baseline-screen veto,
+// since the rider's own history can legitimately contain arbitrary text.
 async function observeFallbackScenesLabelled(
   p: DisplayObservationsParams,
   gotoEmbed: GotoEmbed,
 ): Promise<DisplayObservations["fallbackScenesLabelled"]> {
-  await gotoEmbed({ screen: "trips" });
-  const baselineHasDisclosure = text(
-    await p.page.locator("body").innerText(),
-    "baseline own trips body text required",
-  ).includes(DEMO_SCENARIO_DISCLOSURE);
   for (const screen of EMBED_TRIP_FALLBACK_SCREENS) {
     await gotoEmbed({ screen });
     const expectedCode = embedTripFallbackStates[screen].titleCode;
@@ -636,8 +629,9 @@ async function observeFallbackScenesLabelled(
       `fallback scene ${screen} body text required`,
     );
     requireFact(
-      bodyText.includes(DEMO_SCENARIO_DISCLOSURE) && !baselineHasDisclosure,
-      `fallback scene ${screen} must carry the "${DEMO_SCENARIO_DISCLOSURE}" demonstration disclosure, not a pre-existing generic marker`,
+      bodyText.includes(DEMO_SCENARIO_DISCLOSURE) &&
+        bodyText.includes(DEMO_SCENARIO_NOT_REAL_TRIP_DISCLOSURE),
+      `fallback scene ${screen} must carry both the "${DEMO_SCENARIO_DISCLOSURE}" and "${DEMO_SCENARIO_NOT_REAL_TRIP_DISCLOSURE}" disclosures`,
     );
   }
   p.evidence.record({
@@ -696,6 +690,7 @@ async function observeNegativeActionDestinations(
       requireFact(
         landed.origin === expectedOrigin &&
           landed.pathname === `/embed/${p.entrySlug}` &&
+          landed.searchParams.get("entryHost") === p.entryHost &&
           landed.searchParams.get("screen") ===
             (destination === "trips" ? "trips" : "book"),
         `${screen} "${label}" must land on the same entry's ${destination === "trips" ? "own trips" : "booking"} screen, not a different origin/entry`,
