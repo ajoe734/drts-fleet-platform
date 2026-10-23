@@ -696,9 +696,17 @@ describe("ReferralDemoTripService", () => {
       order: order({ status: "enroute_pickup" }),
       tasks: [demoTask("enroute_pickup")],
     });
+    // This is the exact code (and pre-mutation timing) `assertDriverTaskTransition`
+    // in `OwnedMobilityService` actually raises; the task mutates to look
+    // "arrived" because another request (the heartbeat) genuinely got there
+    // and persisted it first, not because of this call.
     h.orders.arrivedPickup.mockImplementationOnce(async () => {
       h.tasks[0]!.status = "arrived_pickup";
-      throw new ApiRequestError(409, "INVALID_TASK_TRANSITION", "already");
+      throw new ApiRequestError(
+        409,
+        "DRIVER_TASK_TRANSITION_INVALID",
+        "already",
+      );
     });
     await expect(
       h.service.board("order-1", identity, "req-1"),
@@ -709,11 +717,77 @@ describe("ReferralDemoTripService", () => {
       order: order({ status: "enroute_pickup" }),
       tasks: [demoTask("enroute_pickup")],
     });
+    // Same conflict code, but the task never actually advanced -- a refused
+    // transition, not a race -- so it must still reach the caller.
     stuck.orders.arrivedPickup.mockRejectedValueOnce(
-      new ApiRequestError(409, "INVALID_TASK_TRANSITION", "refused"),
+      new ApiRequestError(409, "DRIVER_TASK_TRANSITION_INVALID", "refused"),
     );
     await expect(
       stuck.service.board("order-1", identity, "req-1"),
-    ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
+    ).rejects.toMatchObject({ code: "DRIVER_TASK_TRANSITION_INVALID" });
+  });
+
+  it("propagates its own persistence failure instead of treating the local mutation as a completed race", async () => {
+    const h = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    // The real driver command mutates its in-memory task before awaiting the
+    // required write, so a rejected write still leaves the task looking
+    // "arrived" locally even though nothing was actually persisted. The
+    // error is a generic repository failure, not the driver task's own
+    // transition-conflict code, so it must propagate without even reaching
+    // the reload check.
+    h.orders.arrivedPickup.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "arrived_pickup";
+      throw new Error("order repository write rejected");
+    });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).rejects.toThrow("order repository write rejected");
+    expect(h.orders.startDriverTask).not.toHaveBeenCalled();
+  });
+
+  it("propagates a genuine audit/outbox failure even though its own write already persisted the advance", async () => {
+    const h = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    // The write itself committed (the real `departDriverTask`/`arrivedPickup`
+    // persist before their later audit/event steps), so a reload would
+    // confirm the task genuinely reached `arrived_pickup`. The failure here
+    // is a later audit/outbox step, not a transition conflict, so the
+    // generic error must still reach the caller instead of being read as a
+    // benign race once the status looks advanced.
+    h.orders.arrivedPickup.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "arrived_pickup";
+      throw new Error("driver-task audit log write failed");
+    });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).rejects.toThrow("driver-task audit log write failed");
+    expect(h.orders.startDriverTask).not.toHaveBeenCalled();
+  });
+
+  it("carries on when a concurrent accept already closed the assignment", async () => {
+    const h = harness({
+      order: order({ status: "assigned" }),
+      tasks: [demoTask("pending_acceptance")],
+    });
+    // The DB-backed `acceptDriverTask` locks the assignment row and re-checks
+    // it before touching anything; a second instance committing the accept
+    // first raises this exact code, pre-mutation.
+    h.orders.acceptDriverTask.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "accepted";
+      throw new ApiRequestError(
+        409,
+        "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+        "already",
+      );
+    });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).resolves.toMatchObject({ orderId: "order-1" });
+    expect(h.tasks[0]!.status).toBe("on_trip");
   });
 });

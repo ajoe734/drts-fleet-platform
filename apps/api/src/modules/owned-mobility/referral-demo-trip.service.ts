@@ -48,6 +48,16 @@ const OPEN_TASK_STATUSES = [
   "on_trip",
   "proof_pending",
 ];
+// Codes `OwnedMobilityService` raises when a transition is rejected because
+// the task is no longer in the expected `from` state -- always thrown before
+// that command mutates anything. Any other error (including one raised after
+// this command's own mutation, persistence, audit or outbox step) is a real
+// failure, not a sign that a concurrent request already finished the step.
+const DRIVER_TASK_TRANSITION_RACE_CODES = new Set([
+  "DRIVER_TASK_TRANSITION_INVALID",
+  "PICKUP_NOT_ARRIVED",
+  "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+]);
 // Simulated drive: depart ~1.3 km north of the pickup and arrive in three
 // minutes; once the passenger boards, reach the destination in three more.
 const APPROACH_START_LAT_OFFSET = 0.012;
@@ -452,7 +462,21 @@ export class ReferralDemoTripService {
       try {
         await run();
       } catch (error) {
-        // Another request took this step first: carry on from where it is.
+        // Only an identified transition-conflict error can mean another
+        // request already finished this step -- the driver command raises
+        // that error before it mutates anything, so it never hides our own
+        // failed mutation, persistence, audit or outbox step. Any other
+        // error (including one raised after this command advanced and
+        // persisted local state) is a real failure and must reach the
+        // caller, not be reported as a successful arrival/boarding/
+        // completion.
+        const code = this.errorCode(error);
+        if (!code || !DRIVER_TASK_TRANSITION_RACE_CODES.has(code))
+          throw error;
+        // Reload the authoritative task before trusting that race: the
+        // in-memory copy can be stale, and only a reload-confirmed advance
+        // proves the other request's step was actually completed.
+        await this.orders.prepareOrderAction({ taskId: task.taskId });
         const latest = this.orders.getDriverTask(task.taskId);
         if (sequence.indexOf(latest.status) <= sequence.indexOf(from))
           throw error;
