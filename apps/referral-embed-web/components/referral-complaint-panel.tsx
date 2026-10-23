@@ -13,7 +13,6 @@ import type {
 } from "@drts/contracts";
 import { buildEmbedTheme } from "../lib/embed-presentation";
 import { useTranslation } from "../lib/i18n";
-import type { Locale } from "../lib/translations";
 const labels = {
   service: "manualComplaint.category.service",
   fare: "manualComplaint.category.fare",
@@ -43,11 +42,8 @@ function complaintFailure(
       ? { text: cause.message }
       : { key: fallbackKey };
 }
-/** Taipei-local "unknown" for a missing/invalid timestamp; never shows raw ISO or "Invalid Date". */
-function formatTaipeiTimestamp(
-  value: string | null | undefined,
-  locale: Locale,
-): string | null {
+/** Taipei-local stamp for a missing/invalid timestamp; never shows raw ISO or "Invalid Date". Caller applies the localized "Taipei time" wording via translations.ts. */
+function formatTaipeiTimestamp(value: string | null | undefined): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
@@ -62,8 +58,7 @@ function formatTaipeiTimestamp(
   }).formatToParts(date);
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((p) => p.type === type)?.value ?? "";
-  const stamp = `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
-  return locale === "zh" ? `${stamp}（臺北時間）` : `${stamp} (Taipei time)`;
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
 }
 function savedCommand(
   value: unknown,
@@ -96,11 +91,20 @@ export function ReferralComplaintPanel({
   recoveryScope: string;
   accent: string;
 }) {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
   const statusLabel = (status: string) => {
     const key = statuses[status];
     return key ? t(key) : status;
   };
+  const taipeiTime = useCallback(
+    (value: string | null | undefined) => {
+      const stamp = formatTaipeiTimestamp(value);
+      return stamp
+        ? t("manualComplaint.taipeiStamp", { stamp })
+        : t("manualComplaint.timeUnknown");
+    },
+    [t],
+  );
   const theme = buildEmbedTheme(accent),
     [open, setOpen] = useState(false);
   const [category, setCategory] =
@@ -516,16 +520,12 @@ export function ReferralComplaintPanel({
               </p>
               <p>
                 {t("manualComplaint.submitted", {
-                  time:
-                    formatTaipeiTimestamp(detail.submittedAt, locale) ??
-                    t("manualComplaint.timeUnknown"),
+                  time: taipeiTime(detail.submittedAt),
                 })}
               </p>
               <p>
                 {t("manualComplaint.updated", {
-                  time:
-                    formatTaipeiTimestamp(detail.updatedAt, locale) ??
-                    t("manualComplaint.timeUnknown"),
+                  time: taipeiTime(detail.updatedAt),
                 })}
               </p>
             </article>
