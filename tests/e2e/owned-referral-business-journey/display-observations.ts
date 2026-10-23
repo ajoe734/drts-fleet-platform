@@ -8,6 +8,7 @@ import {
   Evidence,
   hash,
   object,
+  persistPrivateJson,
   requireFact,
   text,
   type CallOptions,
@@ -61,16 +62,29 @@ const FORBIDDEN_RECOVERY_PROMISES = [
 ] as const;
 
 const DEMO_SCENARIO_MARKER = /示範|模擬|測試|僅供展示|demo/i;
-const TAIPEI_ZONE_WORDING = /台北|taipei|utc\+8|gmt\+8|\+08:00/i;
+const TAIPEI_ZONE_WORDING = /台北|臺北|taipei|utc\+8|gmt\+8|\+08:00/i;
 
-const NEGATIVE_SECONDARY_LINKS: Record<
+type NegativeActionDestination = "book" | "trips" | "tel-support" | "tel-any";
+const NEGATIVE_SCREEN_ACTIONS: Record<
   "nosupply" | "degraded" | "ineligible" | "denied",
-  { label: string; destination: "entry" | "trips" | "tel" }
+  Array<{ label: string; destination: NegativeActionDestination }>
 > = {
-  nosupply: { label: "改約時間", destination: "entry" },
-  degraded: { label: "查看狀態", destination: "trips" },
-  ineligible: { label: "返回", destination: "entry" },
-  denied: { label: "聯絡社區客服", destination: "tel" },
+  denied: [
+    { label: "聯絡社區客服", destination: "tel-support" },
+    { label: "重新叫車", destination: "book" },
+  ],
+  ineligible: [
+    { label: "洽社區管理中心", destination: "tel-any" },
+    { label: "返回", destination: "book" },
+  ],
+  nosupply: [
+    { label: "改約時間", destination: "book" },
+    { label: "稍後重試", destination: "book" },
+  ],
+  degraded: [
+    { label: "查看狀態", destination: "trips" },
+    { label: "重試", destination: "book" },
+  ],
 };
 
 type GotoEmbed = (params: Record<string, string>) => Promise<unknown>;
@@ -145,16 +159,15 @@ async function observeTerminalFareAndBadges(
     .getByText("車資", { exact: true })
     .locator("..")
     .first();
-  if (await genericFareRow.count()) {
-    const genericFareText = text(
-      await genericFareRow.innerText(),
-      "unassigned-cancellation generic fare row text required",
-    );
-    requireFact(
-      !genericFareText.includes("實際車資待確認"),
-      "unassigned-cancellation top fare row must not claim a pending real fare",
-    );
-  }
+  await expect(genericFareRow).toBeVisible();
+  const genericFareText = text(
+    await genericFareRow.innerText(),
+    "unassigned-cancellation generic fare row text required",
+  );
+  requireFact(
+    !genericFareText.includes("實際車資待確認"),
+    "unassigned-cancellation top fare row must not claim a pending real fare",
+  );
 
   const feeRow = p.page
     .getByText("取消費", { exact: true })
@@ -173,6 +186,10 @@ async function observeTerminalFareAndBadges(
   requireFact(
     badgeText.includes("已取消"),
     "own cancelled history card must show the localized cancelled badge, not a raw status code",
+  );
+  requireFact(
+    !badgeText.includes("實際車資待確認"),
+    "own cancelled history card fare cell must not claim a pending real fare",
   );
 
   p.evidence.record({
@@ -262,7 +279,15 @@ async function observeManualComplaintPanel(
     text(detail.updatedAt, "case updatedAt required"),
   );
 
-  const mobileScreenshot = await observeMobileComplaintRendering(p, toggle);
+  const viewCaseButton = p.page.getByRole("button", {
+    name: `查看案件 ${caseNo}`,
+    exact: true,
+  });
+  const mobileScreenshot = await observeMobileComplaintRendering(p, [
+    { label: "toggle", locator: toggle },
+    { label: "reload", locator: reload },
+    { label: "view-case", locator: viewCaseButton },
+  ]);
 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -300,8 +325,9 @@ async function reloadComplaintList(
   return (data.items as unknown[]).map(object);
 }
 
-// Exactly one synthetic command, never resent: an unresolved ACK must fail
-// the parent test rather than trigger a second submission.
+// Exactly one synthetic command, never resent: the actual request body/key is
+// persisted before the ACK is awaited, so a lost response still leaves a
+// recoverable unknown-ACK journal instead of silently losing it in cleanup.
 async function submitSyntheticComplaint(
   p: DisplayObservationsParams,
   orderId: string,
@@ -314,20 +340,48 @@ async function submitSyntheticComplaint(
     (request) => request.url() === submitUrl && request.method() === "POST",
     { timeout: 15_000 },
   );
+  void requestPromise.catch(() => undefined);
   const responsePromise = p.page.waitForResponse(
     (response) =>
       response.url() === submitUrl && response.request().method() === "POST",
     { timeout: 15_000 },
   );
+  void responsePromise.catch(() => undefined);
   await p.page.getByRole("button", { name: "送出申訴", exact: true }).click();
   const request = await requestPromise;
-  const response = await responsePromise;
-  requireFact(response.ok(), "synthetic manual complaint submit must succeed");
   const requestBody = object(request.postDataJSON());
   requireFact(
     requestBody.orderId === orderId && requestBody.contactRequested === false,
     "synthetic manual complaint command is same-order and contactfalse",
   );
+  const idempotencyKey = text(
+    requestBody.idempotencyKey,
+    "synthetic manual complaint idempotency key required",
+  );
+  const bodySha256 = hash(
+    new TextEncoder().encode(JSON.stringify(requestBody)),
+  );
+  await mkdir(`${p.directory}/display-observations`, { recursive: true });
+  const journalPath = `${p.directory}/display-observations/manual-complaint-unknown-ack.json`;
+  await persistPrivateJson(journalPath, {
+    state: "ack_unknown",
+    orderId,
+    idempotencyKey,
+    bodySha256,
+    recovery:
+      "Possible own write. Preserve this exact body/key; do not resend a replacement command or key.",
+  });
+
+  const response = await responsePromise.catch((error: unknown) => {
+    p.evidence.record({
+      stage: "display-manual-complaint-ACK-unknown",
+      orderId,
+      sha256: bodySha256,
+      result: "retained",
+    });
+    throw error;
+  });
+  requireFact(response.ok(), "synthetic manual complaint submit must succeed");
   const payload = object(await response.json());
   requireFact(
     payload.ok === true,
@@ -338,17 +392,25 @@ async function submitSyntheticComplaint(
     data.orderId === orderId &&
       typeof data.caseNo === "string" &&
       Boolean(data.caseNo) &&
-      data.idempotencyKey === requestBody.idempotencyKey,
+      data.idempotencyKey === idempotencyKey,
     "synthetic manual complaint ACK matches the same request",
   );
+  const caseNo = text(data.caseNo);
+  await persistPrivateJson(journalPath, {
+    state: "acknowledged",
+    orderId,
+    idempotencyKey,
+    bodySha256,
+    caseNo,
+  });
   p.evidence.record({
     stage: "display-manual-complaint-synthetic-submitted",
     orderId,
-    caseNo: text(data.caseNo),
-    sha256: hash(new TextEncoder().encode(JSON.stringify(requestBody))),
+    caseNo,
+    sha256: bodySha256,
     result: "observed",
   });
-  return { caseNo: text(data.caseNo) };
+  return { caseNo };
 }
 
 async function assertTaipeiTimestampLine(
@@ -376,6 +438,7 @@ async function assertTaipeiTimestampLine(
   );
   const taipeiParts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Taipei",
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -384,24 +447,35 @@ async function assertTaipeiTimestampLine(
   }).formatToParts(new Date(sourceIso));
   const part = (type: string) =>
     taipeiParts.find((entry) => entry.type === type)?.value ?? "";
-  for (const expected of [
-    part("month"),
-    part("day"),
-    part("hour"),
-    part("minute"),
-  ]) {
-    requireFact(
-      expected !== "" && value.includes(expected),
-      `${prefix} must derive from the same Asia/Taipei source timestamp`,
-    );
-  }
+  const year = part("year"),
+    month = part("month"),
+    day = part("day"),
+    hour = part("hour"),
+    minute = part("minute");
+  requireFact(
+    [year, month, day, hour, minute].every((fragment) => fragment !== ""),
+    `${prefix} requires a resolvable Asia/Taipei source timestamp`,
+  );
+  // Match the full contiguous digit sequence (year optional), not independent
+  // fragments; a lone coincidental repeated digit must not pass.
+  const renderedDigits = value.replace(/[^0-9]/g, "");
+  const withYear = `${year}${month}${day}${hour}${minute}`;
+  const withoutYear = `${month}${day}${hour}${minute}`;
+  requireFact(
+    renderedDigits.includes(withYear) || renderedDigits.includes(withoutYear),
+    `${prefix} must derive from the same complete Asia/Taipei source timestamp`,
+  );
 }
 
+const MOBILE_TOUCH_TARGET_PX = 44;
+
 // Mobile layout only; avoid brittle exact-color assertions. The viewport is
-// restored afterwards.
+// restored afterwards. Checks all three controls the panel actually changes
+// (toggle, reload, view-case), not just the toggle, so pre-fix default
+// browser button styling cannot pass by accident on the untested ones.
 async function observeMobileComplaintRendering(
   p: DisplayObservationsParams,
-  toggle: Locator,
+  controls: Array<{ label: string; locator: Locator }>,
 ): Promise<string> {
   const previousViewport = p.page.viewportSize();
   await p.page.setViewportSize({ width: 390, height: 844 });
@@ -415,12 +489,29 @@ async function observeMobileComplaintRendering(
       !overflow,
       "mobile viewport must not introduce horizontal overflow on the completed-order screen",
     );
-    await expect(toggle).toBeVisible();
-    const box = await toggle.boundingBox();
-    requireFact(
-      box !== null && box.height >= 32 && box.width >= 32,
-      "mobile complaint toggle must remain a visible touchable control",
-    );
+    for (const { label, locator } of controls) {
+      await expect(locator).toBeVisible();
+      const box = await locator.boundingBox();
+      requireFact(
+        box !== null &&
+          box.height >= MOBILE_TOUCH_TARGET_PX &&
+          box.width >= MOBILE_TOUCH_TARGET_PX,
+        `mobile complaint ${label} control must be a usable ${MOBILE_TOUCH_TARGET_PX}px touch target`,
+      );
+      const boundary = await locator.evaluate((node) => {
+        const computed = getComputedStyle(node as HTMLElement);
+        return {
+          hasBorder:
+            computed.borderStyle !== "none" &&
+            parseFloat(computed.borderWidth) > 0,
+          hasBackground: computed.backgroundColor !== "rgba(0, 0, 0, 0)",
+        };
+      });
+      requireFact(
+        boundary.hasBorder || boundary.hasBackground,
+        `mobile complaint ${label} control must show a themed visible boundary or background`,
+      );
+    }
     await mkdir(`${p.directory}/display-observations`, { recursive: true });
     const screenshotPath = `${p.directory}/display-observations/manual-complaint-mobile.png`;
     await p.page.screenshot({ path: screenshotPath, fullPage: true });
@@ -431,14 +522,22 @@ async function observeMobileComplaintRendering(
 }
 
 // UI05: no_supply/degraded copy must not promise an automatic ACK/redispatch
-// the canonical order never issued.
+// the canonical order never issued. The scene title is verified first so a
+// forbidden-copy check can never pass by landing on the wrong page.
 async function observeNoUnsupportedPromises(
   p: DisplayObservationsParams,
   gotoEmbed: GotoEmbed,
 ): Promise<DisplayObservations["noUnsupportedPromises"]> {
   const screens = ["nosupply", "degraded"] as const;
+  const expectedTitle: Record<(typeof screens)[number], string> = {
+    nosupply: "附近暫無可派車輛",
+    degraded: "服務暫時不穩定",
+  };
   for (const screen of screens) {
     await gotoEmbed({ screen });
+    await expect(
+      p.page.getByText(expectedTitle[screen], { exact: true }),
+    ).toBeVisible();
     const bodyText = text(
       await p.page.locator("body").innerText(),
       `${screen} scene body text required`,
@@ -457,11 +556,22 @@ async function observeNoUnsupportedPromises(
 }
 
 // UI06: the four fixture fallback scenes must visibly identify themselves as
-// a demonstration; message codes/routes stay intact.
+// a demonstration; message codes/routes stay intact. The own trips screen is
+// read first as a baseline: if it already carries the same marker text, a
+// generic app-wide banner (not a scenario-specific disclosure) would let
+// every fallback scene pass without proving anything, so the check is
+// rejected for all four screens in that case.
 async function observeFallbackScenesLabelled(
   p: DisplayObservationsParams,
   gotoEmbed: GotoEmbed,
 ): Promise<DisplayObservations["fallbackScenesLabelled"]> {
+  await gotoEmbed({ screen: "trips" });
+  const baselineHasMarker = DEMO_SCENARIO_MARKER.test(
+    text(
+      await p.page.locator("body").innerText(),
+      "baseline own trips body text required",
+    ),
+  );
   for (const screen of EMBED_TRIP_FALLBACK_SCREENS) {
     await gotoEmbed({ screen });
     const expectedCode = embedTripFallbackStates[screen].titleCode;
@@ -473,8 +583,8 @@ async function observeFallbackScenesLabelled(
       `fallback scene ${screen} body text required`,
     );
     requireFact(
-      DEMO_SCENARIO_MARKER.test(bodyText),
-      `fallback scene ${screen} must visibly identify itself as a scenario demonstration with a synthetic order/ETA`,
+      DEMO_SCENARIO_MARKER.test(bodyText) && !baselineHasMarker,
+      `fallback scene ${screen} must carry a scenario-specific demonstration disclosure, not a pre-existing generic marker`,
     );
   }
   p.evidence.record({
@@ -486,44 +596,64 @@ async function observeFallbackScenesLabelled(
 
 // UI07: change-time/return land back on the same entry's booking screen,
 // view-status opens the own trips history, support dials the normalized
-// number. Query selectors here are presentation proof only.
+// number. Both primary and secondary actions on all four negative screens
+// are exercised, so a contact-labelled action wired to the wrong
+// destination (e.g. a label implying a phone call that instead opens the
+// booking form) fails genuinely. Query selectors here are presentation
+// proof only.
 async function observeNegativeActionDestinations(
   p: DisplayObservationsParams,
   gotoEmbed: GotoEmbed,
 ): Promise<DisplayObservations["negativeActionDestinations"]> {
-  const screens = Object.keys(NEGATIVE_SECONDARY_LINKS) as Array<
-    keyof typeof NEGATIVE_SECONDARY_LINKS
+  const screens = Object.keys(NEGATIVE_SCREEN_ACTIONS) as Array<
+    keyof typeof NEGATIVE_SCREEN_ACTIONS
   >;
   for (const screen of screens) {
-    const { label, destination } = NEGATIVE_SECONDARY_LINKS[screen];
-    await gotoEmbed({ screen });
-    const link = p.page.getByRole("link", { name: label, exact: true });
-    await expect(link).toBeVisible();
-    const href = text(
-      await link.getAttribute("href"),
-      `${screen} "${label}" link href required`,
-    );
-    if (destination === "tel") {
-      requireFact(
-        href === "tel:0229440985",
-        `${screen} support link must dial the normalized 02-2944-0985 number`,
+    for (const { label, destination } of NEGATIVE_SCREEN_ACTIONS[screen]) {
+      await gotoEmbed({ screen });
+      const link = p.page.getByRole("link", { name: label, exact: true });
+      await expect(link).toBeVisible();
+      const href = text(
+        await link.getAttribute("href"),
+        `${screen} "${label}" link href required`,
       );
-      continue;
+      if (destination === "tel-support") {
+        requireFact(
+          href === "tel:0229440985",
+          `${screen} "${label}" support link must dial the normalized 02-2944-0985 number`,
+        );
+        continue;
+      }
+      if (destination === "tel-any") {
+        requireFact(
+          /^tel:\+?\d+$/.test(href),
+          `${screen} "${label}" is a contact action and must dial a phone number, not navigate in-app`,
+        );
+        continue;
+      }
+      requireFact(
+        !href.startsWith("tel:"),
+        `${screen} "${label}" must not dial the phone`,
+      );
+      await link.click();
+      if (destination === "trips") {
+        await expect(
+          p.page.getByText("我的行程", { exact: true }),
+        ).toBeVisible();
+        requireFact(
+          new URL(p.page.url()).searchParams.get("screen") === "trips",
+          `${screen} "${label}" must land on the own trips history`,
+        );
+      } else {
+        await expect(
+          p.page.getByText("上車地點", { exact: true }),
+        ).toBeVisible();
+        requireFact(
+          new URL(p.page.url()).searchParams.get("screen") === "book",
+          `${screen} "${label}" must land on the same entry's booking screen`,
+        );
+      }
     }
-    requireFact(
-      !href.startsWith("tel:"),
-      `${screen} "${label}" must not dial the phone`,
-    );
-    const expectedScreen = destination === "trips" ? "trips" : "book";
-    await link.click();
-    await p.page.waitForURL(
-      (url) => url.searchParams.get("screen") === expectedScreen,
-      { timeout: 15_000 },
-    );
-    requireFact(
-      new URL(p.page.url()).searchParams.get("screen") === expectedScreen,
-      `${screen} "${label}" must land on the expected ${destination === "trips" ? "own trips" : "same entry booking"} screen`,
-    );
   }
   p.evidence.record({
     stage: "display-ui07-negative-action-destinations",
