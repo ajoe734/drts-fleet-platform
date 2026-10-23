@@ -2910,7 +2910,9 @@ export class OwnedMobilityService
           : null,
       ...(isOnTripOrder
         ? {
-            dropoffRoute,
+            dropoffRoute: isLocationObservationStillCurrent
+              ? dropoffRoute
+              : null,
           }
         : {}),
     };

@@ -296,6 +296,53 @@ it("an on_trip observation that ages past the window during the dropoff route lo
   expect(result.assignment).toEqual(f.original);
 });
 
+it("the final observation-age gate also nulls a dropoff route the lookup already computed, mirroring the pickup ETA gate", async () => {
+  const f = fixture("on_trip");
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "fresh",
+    currentLocation: {
+      ...current.currentLocation!,
+      recordedAt: new Date(NOW - 61_000).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+  // Even if the dropoff route lookup itself returns what looks like a valid
+  // leg (its own internal recheck can race the same way getDriverEta's did
+  // above), the same final observation-age recheck that gates pickupEta must
+  // also gate dropoffRoute; a GPS fix already outside the window cannot carry
+  // a live route just because the lookup resolved before noticing.
+  (
+    f.owned as unknown as {
+      resolvePassengerDropoffRoute: () => Promise<unknown>;
+    }
+  ).resolvePassengerDropoffRoute = vi.fn(async () => ({
+    leg: "dropoff",
+    source: "geo_route",
+    provider: "existing-road-provider",
+    assignmentId: "ETA-ASSIGNMENT",
+    assignmentVersion: 1,
+    taskId: "ETA-TASK",
+    origin: {
+      lat: current.currentLocation!.lat,
+      lng: current.currentLocation!.lng,
+    },
+    destination: { lat: 25.1, lng: 121.1 },
+    locationRecordedAt: new Date(NOW - 61_000).toISOString(),
+    generatedAt: new Date(NOW).toISOString(),
+    remainingDistanceMeters: 1000,
+    remainingDurationSeconds: 300,
+  }));
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("stale");
+  expect(result.tracking).toHaveProperty("dropoffRoute", null);
+  expect(result.assignment).toEqual(f.original);
+});
+
 it("an old receipt with an old GPS fix stays stale (old receipt control)", async () => {
   const f = fixture();
   const current = await f.registry.getDriverTrackingStatus();
