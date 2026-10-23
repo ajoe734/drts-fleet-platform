@@ -557,10 +557,25 @@ export class ReferralDemoTripService {
         requestId,
       );
     } catch (error) {
-      // The heartbeat at the destination and a tap can both end the trip;
-      // the first one to complete it wins.
-      if (this.orders.getDriverTask(task.taskId).status !== "completed")
+      // The heartbeat at the destination and a tap can both end the trip,
+      // including from separate service instances that each hold their own
+      // local task cache. The real completion command raises this exact
+      // code before mutating anything, so it never hides our own failed
+      // mutation, persistence, audit or outbox step -- but this instance's
+      // local cache may never have heard about the other instance's write,
+      // so only a reload of the authoritative task (never the possibly
+      // stale local copy) can confirm the SAME task/order genuinely reached
+      // `completed`. Any other code, an unrelated task/order, or a reload
+      // that does not confirm completion is a real failure and must reach
+      // the caller.
+      if (this.errorCode(error) !== "TASK_ALREADY_COMPLETED") throw error;
+      await this.orders.prepareOrderAction({ taskId: task.taskId });
+      const latest = this.orders.getDriverTask(task.taskId);
+      if (latest.orderId !== order.orderId || latest.status !== "completed")
         throw error;
+      // Another request already finished the completion this call would
+      // have made, so its own offline step would be a duplicate.
+      return;
     }
     await this.registry
       .updateDriverWorkStateFromPersistence(task.driverId, {
