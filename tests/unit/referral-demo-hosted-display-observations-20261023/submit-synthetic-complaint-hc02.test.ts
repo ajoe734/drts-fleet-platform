@@ -20,11 +20,16 @@ class FakeResponse {
   constructor(
     private readonly payload: unknown,
     private readonly okValue = true,
+    private readonly duringJson?: () => void,
   ) {}
   ok(): boolean {
     return this.okValue;
   }
   async json(): Promise<unknown> {
+    this.duringJson?.();
+    // Yield a microtask so a request emitted by duringJson() reaches the
+    // page's "request" listeners before this promise settles.
+    await Promise.resolve();
     return this.payload;
   }
 }
@@ -197,6 +202,54 @@ describe("submitSyntheticComplaint (HC02 request/response binding)", () => {
                 idempotencyKey: "key-original",
               },
             }),
+          );
+        });
+      });
+      await expect(
+        submitSyntheticComplaint(await makeParams(page, directory), orderId),
+      ).rejects.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects when a duplicate POST arrives while awaiting the JSON body (late-duplicate case)", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "hc02-late-"));
+    try {
+      const orderId = "order-late-dup";
+      const submitUrl = `https://referral.example.test/api/referral/complaints/${orderId}`;
+      const page = new FakePage(() => {
+        const original = new FakeRequest(submitUrl, {
+          orderId,
+          contactRequested: false,
+          idempotencyKey: "key-late",
+        });
+        page.emit(original);
+        queueMicrotask(() => {
+          original.resolveResponse(
+            new FakeResponse(
+              {
+                ok: true,
+                data: {
+                  orderId,
+                  caseNo: "CASE-LATE",
+                  idempotencyKey: "key-late",
+                },
+              },
+              true,
+              () => {
+                // The single-POST invariant must still be checked after this
+                // point: a duplicate arriving mid-read of the body must not
+                // slip past a check that only ran before response.json().
+                page.emit(
+                  new FakeRequest(submitUrl, {
+                    orderId,
+                    contactRequested: false,
+                    idempotencyKey: "key-late",
+                  }),
+                );
+              },
+            ),
           );
         });
       });

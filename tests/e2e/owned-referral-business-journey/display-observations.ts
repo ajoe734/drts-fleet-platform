@@ -445,10 +445,6 @@ export async function submitSyntheticComplaint(
       );
     }
     requireFact(
-      matchingRequests.length === 1 && matchingRequests[0] === request,
-      "exactly one same-order manual complaint POST was observed",
-    );
-    requireFact(
       response.ok(),
       "synthetic manual complaint submit must succeed",
     );
@@ -466,6 +462,14 @@ export async function submitSyntheticComplaint(
       "synthetic manual complaint ACK matches the same request",
     );
     const caseNo = text(data.caseNo);
+    // Re-checked here, after every await that could race with a late-arriving
+    // duplicate, not before response.json(): a second matching POST observed
+    // while awaiting the body must still block the ACK from being recorded,
+    // not just one observed before the body was read.
+    requireFact(
+      matchingRequests.length === 1 && matchingRequests[0] === request,
+      "exactly one same-order manual complaint POST was observed",
+    );
     await persistPrivateJson(journalPath, {
       state: "acknowledged",
       orderId,
