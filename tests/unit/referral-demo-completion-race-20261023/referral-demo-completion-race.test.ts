@@ -76,7 +76,17 @@ type DemoMethod = "complete" | "heartbeat";
  */
 function buildServices(options: {
   failAt?: ExternalFailure;
-  race?: { loserMethod: DemoMethod; winnerMethod: DemoMethod };
+  initialStatus?: "on_trip" | "arrived_pickup";
+  race?: {
+    loserMethod: DemoMethod;
+    winnerMethod: DemoMethod;
+    // "completionBundle" (default) reproduces the two transaction-read
+    // races at the final `completeDriverTask` write itself.orderAction
+    // reproduces an earlier canonical reload winning before that --
+    // `atReload` picks which `loadOrderActionContext` call that is.
+    hook?: "completionBundle" | "orderActionContext";
+    atReload?: number;
+  };
 }) {
   const error = new Error(`EXTERNAL_${options.failAt ?? "none"}_FAILURE`);
   let persistCalls = 0;
@@ -84,11 +94,14 @@ function buildServices(options: {
   let eventCalls = 0;
   let completionOutbox = 0;
   let offlineCalls = 0;
+  let orderActionReloads = 0;
   let raceStarted = false;
+  const hook = options.race?.hook ?? "completionBundle";
+  const initialStatus = options.initialStatus ?? "on_trip";
 
   const order = {
     orderId: "probe-order",
-    status: "on_trip",
+    status: initialStatus as string,
     tenantId: identity.tenantId,
     partnerId: identity.partnerId,
     partnerProgramId: identity.partnerProgramId,
@@ -121,9 +134,10 @@ function buildServices(options: {
     orderId: "probe-order",
     driverId: "referral-demo-driver-1",
     vehicleId: "referral-demo-vehicle-1",
-    status: "on_trip",
+    status: initialStatus as string,
     // Past the 3-minute ride fallback used when the quote has no route
-    // time, so the destination heartbeat auto-completes without waiting.
+    // time, so a destination heartbeat from `on_trip` auto-completes
+    // without waiting; harmless when `initialStatus` is `arrived_pickup`.
     startedAt: new Date(Date.now() - 4 * 60_000).toISOString(),
     proof: { photos: [], expenseItems: [] },
   };
@@ -176,7 +190,19 @@ function buildServices(options: {
       changes: Record<string, unknown[]>,
     ) => commit(changes),
     occupyDispatchResourceReservations: async () => undefined,
-    loadOrderActionContext: async () => structuredClone(persisted),
+    loadOrderActionContext: async () => {
+      orderActionReloads++;
+      if (
+        options.race &&
+        hook === "orderActionContext" &&
+        !raceStarted &&
+        orderActionReloads === (options.race.atReload ?? 1)
+      ) {
+        raceStarted = true;
+        await runWinner();
+      }
+      return structuredClone(persisted);
+    },
     persistChanges: async (changes: Record<string, unknown[]>) =>
       commit(changes),
     reportPersistenceFailure: () => undefined,
@@ -189,7 +215,7 @@ function buildServices(options: {
     claimNextRecoverableDriverCompletionOutbox: async () => null,
     hasDriverTaskTraceRequestId: async () => false,
     loadDriverTaskCompletionBundleForUpdate: async () => {
-      if (options.race && !raceStarted) {
+      if (options.race && hook === "completionBundle" && !raceStarted) {
         raceStarted = true;
         await runWinner();
       }
@@ -331,6 +357,63 @@ describe("ReferralDemoTripService completion: real cross-instance tap/heartbeat 
     expect(persisted.orders[0]!.status).toBe("completed");
     expect(counts()).toMatchObject({
       persistCalls: 1,
+      completionOutbox: 5,
+      offlineCalls: 1,
+    });
+  });
+});
+
+describe("ReferralDemoTripService completion: earlier real precompletion reload windows", () => {
+  it("(A) reconciles to completed when a winning heartbeat finishes before the loser's own openDemoTask reload", async () => {
+    const { loserDemo, persisted, counts } = buildServices({
+      race: {
+        loserMethod: "complete",
+        winnerMethod: "heartbeat",
+        hook: "orderActionContext",
+        atReload: 1,
+      },
+    });
+    const result = await loserDemo.complete(
+      "probe-order",
+      identity,
+      "loser-request",
+    );
+    expect(result).toMatchObject({
+      orderId: "probe-order",
+      status: "completed",
+    });
+    expect(persisted.driverTasks[0]!.status).toBe("completed");
+    expect(counts()).toMatchObject({
+      persistCalls: 1,
+      completionOutbox: 5,
+      offlineCalls: 1,
+    });
+  });
+
+  it("(B) reconciles to completed when a winning complete finishes during the loser's own finishTask/advanceTo pre-start reload", async () => {
+    const { loserDemo, persisted, counts } = buildServices({
+      initialStatus: "arrived_pickup",
+      race: {
+        loserMethod: "complete",
+        winnerMethod: "complete",
+        hook: "orderActionContext",
+        atReload: 2,
+      },
+    });
+    const result = await loserDemo.complete(
+      "probe-order",
+      identity,
+      "loser-request",
+    );
+    expect(result).toMatchObject({
+      orderId: "probe-order",
+      status: "completed",
+    });
+    expect(persisted.driverTasks[0]!.status).toBe("completed");
+    // The winner alone made both the legitimate start write and the one
+    // completion write; the loser's own rejected start never persisted.
+    expect(counts()).toMatchObject({
+      persistCalls: 2,
       completionOutbox: 5,
       offlineCalls: 1,
     });
