@@ -5,7 +5,7 @@ import {
   runReferralDemoTripServer,
 } from "../../../../../../lib/embed-booking-api";
 
-const ACTIONS = new Set(["assign", "heartbeat", "complete"]);
+const ACTIONS = new Set(["assign", "heartbeat", "arrive", "board", "complete"]);
 
 function demoTripEnabled() {
   return (
@@ -16,7 +16,7 @@ function demoTripEnabled() {
   );
 }
 
-/** Dev demo: assign the synthetic test driver to, or complete, an own trip. */
+/** Dev demo: assign the synthetic test driver to an own trip, move it along, or complete it. */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ orderId: string; action: string }> },
@@ -32,7 +32,7 @@ export async function POST(
     return referralResult(
       await runReferralDemoTripServer(
         orderId,
-        action as "assign" | "heartbeat" | "complete",
+        action as "assign" | "heartbeat" | "arrive" | "board" | "complete",
       ),
     );
   } catch (error) {

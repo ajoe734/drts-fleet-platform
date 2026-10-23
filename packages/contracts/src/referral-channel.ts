@@ -423,6 +423,12 @@ export interface ReferralPassengerLiveTracking {
     estimatedArrivalAt: string;
     provider: string;
   } | null;
+  /**
+   * This order's own resolved pickup and drop-off points, so the trip map can
+   * show where the vehicle is heading. Optional during rolling releases.
+   */
+  pickupPoint?: { lat: number; lng: number } | null;
+  dropoffPoint?: { lat: number; lng: number } | null;
 }
 
 export interface ReferralPassengerTripSnapshot {

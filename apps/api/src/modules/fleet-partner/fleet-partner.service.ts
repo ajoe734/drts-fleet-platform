@@ -177,12 +177,47 @@ export class FleetPartnerService implements OnModuleInit {
     }
   }
 
-  listFleetPartners() {
+  isPersistenceEnabled(): boolean {
+    return this.fleetPartnerRepository?.isEnabled() ?? false;
+  }
+
+  listCachedFleetPartners(): FleetPartnerRecord[] {
     return this.fleetPartners.map((partner) => this.cloneFleetPartner(partner));
   }
 
-  getFleetPartner(fleetPartnerId: string) {
+  getCachedFleetPartner(fleetPartnerId: string): FleetPartnerRecord {
     return this.cloneFleetPartner(this.requireFleetPartner(fleetPartnerId));
+  }
+
+  listFleetPartners(): Promise<FleetPartnerRecord[]> & FleetPartnerRecord[] {
+    const snapshot = this.listCachedFleetPartners();
+    if (this.fleetPartnerRepository?.isEnabled()) {
+      return this.withLazyPromise(snapshot, () =>
+        this.loadCanonicalFleetPartners(),
+      );
+    }
+    return snapshot as Promise<FleetPartnerRecord[]> & FleetPartnerRecord[];
+  }
+
+  getFleetPartner(
+    fleetPartnerId: string,
+  ): Promise<FleetPartnerRecord> & FleetPartnerRecord {
+    if (this.fleetPartnerRepository?.isEnabled()) {
+      const cached = this.fleetPartners.find(
+        (candidate) => candidate.fleetPartnerId === fleetPartnerId,
+      );
+      if (cached) {
+        return this.withLazyPromise(this.cloneFleetPartner(cached), () =>
+          this.getCanonicalFleetPartner(fleetPartnerId),
+        );
+      }
+      return this.getCanonicalFleetPartner(
+        fleetPartnerId,
+      ) as Promise<FleetPartnerRecord> & FleetPartnerRecord;
+    }
+    return this.getCachedFleetPartner(
+      fleetPartnerId,
+    ) as Promise<FleetPartnerRecord> & FleetPartnerRecord;
   }
 
   async findFleetPartnerForMultiTaxiOperator(operatorId: string) {
@@ -238,7 +273,7 @@ export class FleetPartnerService implements OnModuleInit {
       { fleetPartners: [this.cloneFleetPartner(partner)] },
       "create fleet partner",
     );
-    this.fleetPartners = [partner, ...this.fleetPartners];
+    this.upsertCachedFleetPartner(partner);
     return this.cloneFleetPartner(partner);
   }
 
@@ -247,31 +282,22 @@ export class FleetPartnerService implements OnModuleInit {
     command: UpdateFleetPartnerCommand,
   ) {
     return this.serializeFleetPartnerUpdate(fleetPartnerId, async () => {
-      const partner = this.cloneFleetPartner(
-        this.requireFleetPartner(fleetPartnerId),
-      );
+      this.validateUpdateFleetPartnerInput(command);
+      const partner = await this.readCanonicalFleetPartner(fleetPartnerId);
 
       if (command.legalName !== undefined) {
-        this.assertNonBlank(command.legalName, "legalName");
         partner.legalName = command.legalName.trim();
       }
       if (command.displayName !== undefined) {
-        this.assertNonBlank(command.displayName, "displayName");
         partner.displayName = command.displayName.trim();
       }
       if (command.businessRegistrationNo !== undefined) {
-        this.assertNonBlank(
-          command.businessRegistrationNo,
-          "businessRegistrationNo",
-        );
         partner.businessRegistrationNo = command.businessRegistrationNo.trim();
       }
       if (command.contactName !== undefined) {
-        this.assertNonBlank(command.contactName, "contactName");
         partner.contactName = command.contactName.trim();
       }
       if (command.contactPhone !== undefined) {
-        this.assertNonBlank(command.contactPhone, "contactPhone");
         partner.contactPhone = command.contactPhone.trim();
       }
       if (command.active !== undefined) {
@@ -290,21 +316,30 @@ export class FleetPartnerService implements OnModuleInit {
         { fleetPartners: [this.cloneFleetPartner(partner)] },
         "update fleet partner",
       );
-      this.fleetPartners = this.fleetPartners.map((current) =>
-        current.fleetPartnerId === fleetPartnerId ? partner : current,
-      );
+      this.upsertCachedFleetPartner(partner);
       return this.cloneFleetPartner(partner);
     });
   }
 
-  listFleetPartnerDrivers(fleetPartnerId: string) {
+  listFleetPartnerDrivers(
+    fleetPartnerId: string,
+  ): DriverFleetAffiliationRecord[] {
     this.requireFleetPartner(fleetPartnerId);
-    return this.driverAffiliations
-      .filter((affiliation) => affiliation.fleetPartnerId === fleetPartnerId)
-      .sort((left, right) =>
-        right.effectiveFrom.localeCompare(left.effectiveFrom),
-      )
-      .map((affiliation) => this.cloneAffiliation(affiliation));
+    return this.filterFleetPartnerDrivers(
+      this.driverAffiliations,
+      fleetPartnerId,
+    );
+  }
+
+  async listCanonicalFleetPartnerDrivers(
+    fleetPartnerId: string,
+  ): Promise<DriverFleetAffiliationRecord[]> {
+    if (!this.isPersistenceEnabled()) {
+      return this.listFleetPartnerDrivers(fleetPartnerId);
+    }
+    await this.getCanonicalFleetPartner(fleetPartnerId);
+    const affiliations = await this.loadCanonicalDriverAffiliations();
+    return this.filterFleetPartnerDrivers(affiliations, fleetPartnerId);
   }
 
   async createDriverFleetAffiliation(
@@ -312,11 +347,11 @@ export class FleetPartnerService implements OnModuleInit {
     command: CreateDriverFleetAffiliationCommand,
   ) {
     this.assertNonBlank(driverId, "driverId");
-    this.requireFleetPartner(command.fleetPartnerId);
     this.assertIsoDate(command.effectiveFrom, "effectiveFrom");
     if (command.effectiveUntil) {
       this.assertIsoDate(command.effectiveUntil, "effectiveUntil");
     }
+    await this.getCanonicalFleetPartner(command.fleetPartnerId);
 
     const affiliation: DriverFleetAffiliationRecord = {
       affiliationId: `fleet-aff-${randomUUID()}`,
@@ -331,7 +366,7 @@ export class FleetPartnerService implements OnModuleInit {
       { driverAffiliations: [this.cloneAffiliation(affiliation)] },
       "create driver fleet affiliation",
     );
-    this.driverAffiliations = [affiliation, ...this.driverAffiliations];
+    this.upsertCachedDriverAffiliation(affiliation);
     return this.cloneAffiliation(affiliation);
   }
 
@@ -536,9 +571,9 @@ export class FleetPartnerService implements OnModuleInit {
     periodMonth?: string,
   ): Promise<FleetPartnerPortalDashboardRecord> {
     const normalizedPeriodMonth = await this.resolvePeriodMonth(periodMonth);
-    const [drivers, vehicles, trips, statements, orders, orderDriverMap] =
+    const drivers = await this.listCanonicalPortalDrivers(fleetPartnerId);
+    const [vehicles, trips, statements, orders, orderDriverMap] =
       await Promise.all([
-        this.listPortalDrivers(fleetPartnerId),
         this.listPortalVehicles(fleetPartnerId),
         this.listPortalTrips(fleetPartnerId, normalizedPeriodMonth),
         this.listFleetPartnerStatements(fleetPartnerId, normalizedPeriodMonth),
@@ -582,40 +617,18 @@ export class FleetPartnerService implements OnModuleInit {
   }
 
   listPortalDrivers(fleetPartnerId: string): FleetPartnerPortalDriverRecord[] {
-    this.requireFleetPartner(fleetPartnerId);
-    const driversById = new Map(
-      this.regulatoryRegistryService
-        .listDrivers()
-        .map((driver) => [driver.driverId, driver] as const),
-    );
-    const vehicleByDriverId = this.buildVehicleByDriverId();
+    return this.mapPortalDrivers(this.listFleetPartnerDrivers(fleetPartnerId));
+  }
 
-    return this.driverAffiliations
-      .filter((affiliation) => affiliation.fleetPartnerId === fleetPartnerId)
-      .sort((left, right) =>
-        right.effectiveFrom.localeCompare(left.effectiveFrom),
-      )
-      .map((affiliation) => {
-        const driver = driversById.get(affiliation.driverId);
-        const currentVehicle = vehicleByDriverId.get(affiliation.driverId);
-        return {
-          affiliationId: affiliation.affiliationId,
-          driverId: affiliation.driverId,
-          fleetPartnerId: affiliation.fleetPartnerId,
-          driverGroupId: affiliation.driverGroupId ?? null,
-          affiliationType: affiliation.affiliationType,
-          effectiveFrom: affiliation.effectiveFrom,
-          effectiveUntil: affiliation.effectiveUntil ?? null,
-          name: driver?.name ?? affiliation.driverId,
-          workState: driver?.workState ?? "offline",
-          licensesValid: driver?.licensesValid ?? false,
-          lifecycleStatus: driver?.lifecycleStatus ?? "draft",
-          dispatchEligible: driver?.dispatchEligible ?? false,
-          supportedServiceBuckets: [...(driver?.supportedServiceBuckets ?? [])],
-          currentVehicleId: currentVehicle?.vehicle.vehicleId ?? null,
-          currentVehiclePlateNo: currentVehicle?.vehicle.plateNo ?? null,
-        };
-      });
+  async listCanonicalPortalDrivers(
+    fleetPartnerId: string,
+  ): Promise<FleetPartnerPortalDriverRecord[]> {
+    if (!this.isPersistenceEnabled()) {
+      return this.listPortalDrivers(fleetPartnerId);
+    }
+    const affiliations =
+      await this.listCanonicalFleetPartnerDrivers(fleetPartnerId);
+    return this.mapPortalDrivers(affiliations);
   }
 
   listPortalVehicles(
@@ -747,9 +760,9 @@ export class FleetPartnerService implements OnModuleInit {
     periodMonth?: string,
   ): Promise<FleetPartnerPortalQualityMetricsRecord> {
     const normalizedPeriodMonth = await this.resolvePeriodMonth(periodMonth);
-    const [drivers, vehicles, trips, statements, orders, orderDriverMap] =
+    const drivers = await this.listCanonicalPortalDrivers(fleetPartnerId);
+    const [vehicles, trips, statements, orders, orderDriverMap] =
       await Promise.all([
-        Promise.resolve(this.listPortalDrivers(fleetPartnerId)),
         Promise.resolve(this.listPortalVehicles(fleetPartnerId)),
         this.listPortalTrips(fleetPartnerId, normalizedPeriodMonth),
         this.listFleetPartnerStatements(fleetPartnerId, normalizedPeriodMonth),
@@ -1255,6 +1268,189 @@ export class FleetPartnerService implements OnModuleInit {
         "driverGroupId is required when appliesTo is driver_group.",
       );
     }
+  }
+
+  private validateUpdateFleetPartnerInput(command: UpdateFleetPartnerCommand) {
+    if (command.legalName !== undefined) {
+      this.assertNonBlank(command.legalName, "legalName");
+    }
+    if (command.displayName !== undefined) {
+      this.assertNonBlank(command.displayName, "displayName");
+    }
+    if (command.businessRegistrationNo !== undefined) {
+      this.assertNonBlank(
+        command.businessRegistrationNo,
+        "businessRegistrationNo",
+      );
+    }
+    if (command.contactName !== undefined) {
+      this.assertNonBlank(command.contactName, "contactName");
+    }
+    if (command.contactPhone !== undefined) {
+      this.assertNonBlank(command.contactPhone, "contactPhone");
+    }
+    if (command.multiTaxiOperatorIds !== undefined) {
+      this.normalizeMultiTaxiOperatorIds(command.multiTaxiOperatorIds);
+    }
+  }
+
+  private withLazyPromise<T extends object>(
+    snapshot: T,
+    loader: () => Promise<T>,
+  ): Promise<T> & T {
+    let promise: Promise<T> | undefined;
+    const getPromise = () => {
+      if (!promise) {
+        promise = loader();
+      }
+      return promise;
+    };
+    return Object.defineProperties(snapshot, {
+      then: {
+        value: <TResult1 = T, TResult2 = never>(
+          onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+          onrejected?:
+            | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+            | null,
+        ) => getPromise().then(onfulfilled, onrejected),
+      },
+      catch: {
+        value: <TResult = never>(
+          onrejected?:
+            | ((reason: unknown) => TResult | PromiseLike<TResult>)
+            | null,
+        ) => getPromise().catch(onrejected),
+      },
+      finally: {
+        value: (onfinally?: (() => void) | null) =>
+          getPromise().finally(onfinally),
+      },
+    }) as Promise<T> & T;
+  }
+
+  private async loadCanonicalFleetPartners(): Promise<FleetPartnerRecord[]> {
+    const persisted =
+      typeof this.fleetPartnerRepository?.loadFleetPartners === "function"
+        ? await this.fleetPartnerRepository.loadFleetPartners()
+        : ((await this.fleetPartnerRepository?.loadState())?.fleetPartners ??
+          []);
+    this.fleetPartners = persisted.map((partner) =>
+      this.cloneFleetPartner(partner),
+    );
+    return this.fleetPartners.map((partner) => this.cloneFleetPartner(partner));
+  }
+
+  private async getCanonicalFleetPartner(
+    fleetPartnerId: string,
+  ): Promise<FleetPartnerRecord> {
+    const partner = await this.readCanonicalFleetPartner(fleetPartnerId);
+    this.upsertCachedFleetPartner(partner);
+    return this.cloneFleetPartner(partner);
+  }
+
+  private async readCanonicalFleetPartner(
+    fleetPartnerId: string,
+  ): Promise<FleetPartnerRecord> {
+    if (!this.fleetPartnerRepository?.isEnabled()) {
+      return this.cloneFleetPartner(this.requireFleetPartner(fleetPartnerId));
+    }
+    const partner =
+      typeof this.fleetPartnerRepository.findFleetPartnerById === "function"
+        ? await this.fleetPartnerRepository.findFleetPartnerById(fleetPartnerId)
+        : ((await this.fleetPartnerRepository.loadState()).fleetPartners.find(
+            (candidate) => candidate.fleetPartnerId === fleetPartnerId,
+          ) ?? null);
+    if (!partner) {
+      throw this.notFound("Fleet partner not found.", { fleetPartnerId });
+    }
+    return this.cloneFleetPartner(partner);
+  }
+
+  private upsertCachedFleetPartner(partner: FleetPartnerRecord) {
+    const cloned = this.cloneFleetPartner(partner);
+    const exists = this.fleetPartners.some(
+      (current) => current.fleetPartnerId === cloned.fleetPartnerId,
+    );
+    this.fleetPartners = exists
+      ? this.fleetPartners.map((current) =>
+          current.fleetPartnerId === cloned.fleetPartnerId ? cloned : current,
+        )
+      : [cloned, ...this.fleetPartners];
+  }
+
+  private async loadCanonicalDriverAffiliations(): Promise<
+    DriverFleetAffiliationRecord[]
+  > {
+    const persisted =
+      typeof this.fleetPartnerRepository?.loadDriverAffiliations === "function"
+        ? await this.fleetPartnerRepository.loadDriverAffiliations()
+        : ((await this.fleetPartnerRepository?.loadState())
+            ?.driverAffiliations ?? []);
+    this.driverAffiliations = persisted.map((affiliation) =>
+      this.cloneAffiliation(affiliation),
+    );
+    return this.driverAffiliations.map((affiliation) =>
+      this.cloneAffiliation(affiliation),
+    );
+  }
+
+  private upsertCachedDriverAffiliation(
+    affiliation: DriverFleetAffiliationRecord,
+  ) {
+    const cloned = this.cloneAffiliation(affiliation);
+    const exists = this.driverAffiliations.some(
+      (current) => current.affiliationId === cloned.affiliationId,
+    );
+    this.driverAffiliations = exists
+      ? this.driverAffiliations.map((current) =>
+          current.affiliationId === cloned.affiliationId ? cloned : current,
+        )
+      : [cloned, ...this.driverAffiliations];
+  }
+
+  private filterFleetPartnerDrivers(
+    affiliations: readonly DriverFleetAffiliationRecord[],
+    fleetPartnerId: string,
+  ): DriverFleetAffiliationRecord[] {
+    return affiliations
+      .filter((affiliation) => affiliation.fleetPartnerId === fleetPartnerId)
+      .sort((left, right) =>
+        right.effectiveFrom.localeCompare(left.effectiveFrom),
+      )
+      .map((affiliation) => this.cloneAffiliation(affiliation));
+  }
+
+  private mapPortalDrivers(
+    affiliations: readonly DriverFleetAffiliationRecord[],
+  ): FleetPartnerPortalDriverRecord[] {
+    const driversById = new Map(
+      this.regulatoryRegistryService
+        .listDrivers()
+        .map((driver) => [driver.driverId, driver] as const),
+    );
+    const vehicleByDriverId = this.buildVehicleByDriverId();
+
+    return affiliations.map((affiliation) => {
+      const driver = driversById.get(affiliation.driverId);
+      const currentVehicle = vehicleByDriverId.get(affiliation.driverId);
+      return {
+        affiliationId: affiliation.affiliationId,
+        driverId: affiliation.driverId,
+        fleetPartnerId: affiliation.fleetPartnerId,
+        driverGroupId: affiliation.driverGroupId ?? null,
+        affiliationType: affiliation.affiliationType,
+        effectiveFrom: affiliation.effectiveFrom,
+        effectiveUntil: affiliation.effectiveUntil ?? null,
+        name: driver?.name ?? affiliation.driverId,
+        workState: driver?.workState ?? "offline",
+        licensesValid: driver?.licensesValid ?? false,
+        lifecycleStatus: driver?.lifecycleStatus ?? "draft",
+        dispatchEligible: driver?.dispatchEligible ?? false,
+        supportedServiceBuckets: [...(driver?.supportedServiceBuckets ?? [])],
+        currentVehicleId: currentVehicle?.vehicle.vehicleId ?? null,
+        currentVehiclePlateNo: currentVehicle?.vehicle.plateNo ?? null,
+      };
+    });
   }
 
   private requireFleetPartner(fleetPartnerId: string) {

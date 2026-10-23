@@ -7781,7 +7781,20 @@ def create_chair_unblock_task(
     if unblock_kind not in {"history_repair", "planning_decision", "manual_unblock"}:
         unblock_kind = blocked_task_triage_kind(parent)
     unblock_id = chair_unblock_task_id(parent_id, unblock_kind)
-    if open_unblock_task_for_parent(status, parent_id, unblock_kind) is not None or task_map.get(unblock_id) is not None:
+    # Completed helpers leave the live task map when archived. Their stable IDs
+    # must remain reserved, otherwise each chair tick can resurrect the same work.
+    archived_task_ids = status.get("archived_task_ids", []) or []
+    if isinstance(archived_task_ids, dict):
+        archived_ids = {str(task_id) for task_id, archived in archived_task_ids.items() if archived}
+    elif isinstance(archived_task_ids, (list, tuple, set)):
+        archived_ids = {str(task_id) for task_id in archived_task_ids}
+    else:
+        archived_ids = set()
+    if (
+        open_unblock_task_for_parent(status, parent_id, unblock_kind) is not None
+        or task_map.get(unblock_id) is not None
+        or unblock_id in archived_ids
+    ):
         return False
 
     requested_owner = str(action.get("target_agent") or "").strip()

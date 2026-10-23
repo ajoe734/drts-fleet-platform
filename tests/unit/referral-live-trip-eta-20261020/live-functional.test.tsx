@@ -170,7 +170,10 @@ it("an explicit refresh shows later same-order coordinates, new ETA and the real
   });
   await refresh(h);
   expect(getByText(h, "16:01")).toBeTruthy();
-  expect(getByText(h, /25.06100, 121.55000/)).toBeTruthy();
+  const link = getByRole(h, "link", {
+    name: "在地圖開啟司機位置",
+  }) as HTMLAnchorElement;
+  expect(new URL(link.href).searchParams.get("query")).toBe("25.061,121.55");
   expect(queryByText(h, "16:03")).toBeNull();
 });
 it("failed refresh retains the last same-order snapshot, announces stale readback and supports explicit retry", async () => {

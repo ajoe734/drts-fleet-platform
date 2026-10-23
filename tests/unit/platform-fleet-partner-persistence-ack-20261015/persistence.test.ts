@@ -70,18 +70,34 @@ function makeService(repository?: FleetPartnerRepository) {
 // parses loadState; the real service and controller produce the response.
 async function fixture() {
   const records = new Map<string, Map<string, unknown>>();
-  let nextWrite: ReturnType<typeof deferred> | undefined;
+  let nextWrite:
+    | { gate: ReturnType<typeof deferred>; targetId?: string }
+    | undefined;
   const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
     const insertTable = /INSERT INTO\s+(\S+)/.exec(sql)?.[1];
     if (insertTable) {
-      const gate = nextWrite;
-      nextWrite = undefined;
+      const matchesTarget =
+        !nextWrite?.targetId ||
+        String(values?.[0]) === nextWrite.targetId ||
+        String(values?.[1]) === nextWrite.targetId;
+      const gate = matchesTarget ? nextWrite?.gate : undefined;
+      if (matchesTarget) nextWrite = undefined;
       if (gate) await gate.promise;
       const rows = records.get(insertTable) ?? new Map<string, unknown>();
       rows.set(String(values![0]), JSON.parse(String(values!.at(-1))));
       records.set(insertTable, rows);
     }
     const selectTable = /FROM\s+(\S+)/.exec(sql)?.[1];
+    if (sql.includes("WHERE fleet_partner_id = $1")) {
+      if (nextWrite && !nextWrite.targetId) {
+        nextWrite.targetId = String(values?.[0]);
+      }
+      const row = records.get(selectTable ?? "")?.get(String(values?.[0]));
+      return {
+        rows: row ? [{ record: row }] : [],
+        rowCount: row ? 1 : 0,
+      };
+    }
     return {
       rows: [...(records.get(selectTable ?? "")?.values() ?? [])].map(
         (record) => ({ record }),
@@ -105,8 +121,9 @@ async function fixture() {
     query,
     report,
     delay() {
-      nextWrite = deferred();
-      return nextWrite;
+      const gate = deferred();
+      nextWrite = { gate };
+      return gate;
     },
     async restart() {
       const restarted = makeService(repository).service;
@@ -116,10 +133,10 @@ async function fixture() {
   };
 }
 
-function readback(service: FleetPartnerService) {
-  const partners = service
-    .listFleetPartners()
-    .sort((a, b) => a.fleetPartnerId.localeCompare(b.fleetPartnerId));
+async function readback(service: FleetPartnerService) {
+  const partners = (await service.listFleetPartners()).sort((a, b) =>
+    a.fleetPartnerId.localeCompare(b.fleetPartnerId),
+  );
   return {
     partners,
     affiliations: partners
@@ -189,7 +206,7 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
   for (const entry of ["service", "controller"] as const) {
     it(`${entry} remains pending with prior readback until the actual SQL write resolves`, async () => {
       const f = await fixture();
-      const before = readback(f.service);
+      const before = await readback(f.service);
       const recordAudit = vi.spyOn(f.audit, "recordAuditLog");
       const gate = f.delay();
       let settled = false;
@@ -206,8 +223,8 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
           expect.any(Array),
         );
         expect(settled).toBe(false);
-        expect(readback(f.service)).toEqual(before);
-        expect(readback(await f.restart())).toEqual(before);
+        expect(await readback(f.service)).toEqual(before);
+        expect(await readback(await f.restart())).toEqual(before);
         expect(recordAudit).not.toHaveBeenCalled();
       } finally {
         gate.resolve();
@@ -223,13 +240,15 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
       } else {
         expect(response).toMatchObject(mutation.expected);
       }
-      expect(readback(f.service)).not.toEqual(before);
-      expect(readback(await f.restart())).toEqual(readback(f.service));
+      expect(await readback(f.service)).not.toEqual(before);
+      expect(await readback(await f.restart())).toEqual(
+        await readback(f.service),
+      );
     });
 
     it(`${entry} propagates SQL rejection, retains prior readback, and allows retry`, async () => {
       const f = await fixture();
-      const before = readback(f.service);
+      const before = await readback(f.service);
       const recordAudit = vi.spyOn(f.audit, "recordAuditLog");
       const error = new Error(`canonical ${mutation.name} rejected`);
       const gate = f.delay();
@@ -243,13 +262,15 @@ describe.each(mutations)("canonical ACK: $name", (mutation) => {
       await tick();
       gate.reject(error);
       expect(await call).toEqual({ reason: error });
-      expect(readback(f.service)).toEqual(before);
-      expect(readback(await f.restart())).toEqual(before);
+      expect(await readback(f.service)).toEqual(before);
+      expect(await readback(await f.restart())).toEqual(before);
       expect(recordAudit).not.toHaveBeenCalled();
 
       await mutation[entry](f);
-      expect(readback(f.service)).not.toEqual(before);
-      expect(readback(await f.restart())).toEqual(readback(f.service));
+      expect(await readback(f.service)).not.toEqual(before);
+      expect(await readback(await f.restart())).toEqual(
+        await readback(f.service),
+      );
     });
   }
 });
@@ -259,7 +280,7 @@ describe("acknowledged updates and recovery", () => {
     "serializes partial edits of one partner and releases after rejection=%s while other partners proceed",
     async (rejectFirst) => {
       const f = await fixture();
-      const before = f.service.getFleetPartner(partnerId);
+      const before = await f.service.getFleetPartner(partnerId);
       const gate = f.delay();
       const error = new Error("first edit rejected");
       const first = f.service
@@ -282,10 +303,10 @@ describe("acknowledged updates and recovery", () => {
       try {
         await tick();
         expect(secondSettled).toBe(false);
-        expect(f.service.getFleetPartner(partnerId)).toEqual(before);
-        expect(f.service.getFleetPartner(unrelated.fleetPartnerId)).toEqual(
-          unrelated,
-        );
+        expect(await f.service.getFleetPartner(partnerId)).toEqual(before);
+        expect(
+          await f.service.getFleetPartner(unrelated.fleetPartnerId),
+        ).toEqual(unrelated);
       } finally {
         if (rejectFirst) gate.reject(error);
         else gate.resolve();
@@ -301,10 +322,12 @@ describe("acknowledged updates and recovery", () => {
         displayName: rejectFirst ? before.displayName : "First edit",
         contactName: "Second edit",
       });
-      expect(f.service.getFleetPartner(unrelated.fleetPartnerId)).toEqual(
+      expect(await f.service.getFleetPartner(unrelated.fleetPartnerId)).toEqual(
         unrelated,
       );
-      expect(readback(await f.restart())).toEqual(readback(f.service));
+      expect(await readback(await f.restart())).toEqual(
+        await readback(f.service),
+      );
     },
   );
 
@@ -326,18 +349,25 @@ describe("acknowledged updates and recovery", () => {
     gate.reject(error);
     expect(await failed).toBe(error);
     expect(
-      f.service.listFleetPartners().map((partner) => partner.displayName),
+      (await f.service.listFleetPartners()).map(
+        (partner) => partner.displayName,
+      ),
     ).not.toContain("ACK Fleet");
-    expect(f.service.getFleetPartner(other.fleetPartnerId)).toEqual(other);
+    expect(await f.service.getFleetPartner(other.fleetPartnerId)).toEqual(
+      other,
+    );
     expect(f.service.listFleetPartnerDrivers(other.fleetPartnerId)).toEqual([
       affiliation,
     ]);
-    expect(readback(await f.restart())).toEqual(readback(f.service));
+    expect(await readback(await f.restart())).toEqual(
+      await readback(f.service),
+    );
   });
 
   it("rejects invalid partial edits without publishing earlier fields or calling SQL", async () => {
     const f = await fixture();
-    const before = readback(f.service);
+    const before = await readback(f.service);
+    f.query.mockClear();
     await expect(
       f.service.updateFleetPartner(partnerId, {
         displayName: "Must not leak",
@@ -345,11 +375,13 @@ describe("acknowledged updates and recovery", () => {
       }),
     ).rejects.toBeInstanceOf(ApiRequestError);
     expect(f.query).not.toHaveBeenCalled();
-    expect(readback(f.service)).toEqual(before);
+    expect(await readback(f.service)).toEqual(before);
     await expect(
       f.service.updateFleetPartner(partnerId, { displayName: "Retry" }),
     ).resolves.toMatchObject({ displayName: "Retry" });
-    expect(readback(await f.restart())).toEqual(readback(f.service));
+    expect(await readback(await f.restart())).toEqual(
+      await readback(f.service),
+    );
   });
 });
 
@@ -392,7 +424,7 @@ describe.each(["absent", "disabled"] as const)(
         partnershipType: "vehicle_owner_group",
         active: false,
       });
-      expect(service.getFleetPartner(created.data.fleetPartnerId)).toEqual(
+      expect(await service.getFleetPartner(created.data.fleetPartnerId)).toEqual(
         updated.data,
       );
       // Existing reference rules require a master, and allow a disabled master.
@@ -410,11 +442,14 @@ describe.each(["absent", "disabled"] as const)(
         controller.listFleetPartnerDrivers(created.data.fleetPartnerId).data
           .items,
       ).toEqual([linked.data]);
-      expect(service.getFleetPartner(other.fleetPartnerId)).toEqual(other);
+      expect(await service.getFleetPartner(other.fleetPartnerId)).toEqual(
+        other,
+      );
       updated.data.displayName = "caller mutation";
       linked.data.driverId = "caller mutation";
       expect(
-        service.getFleetPartner(created.data.fleetPartnerId).displayName,
+        (await service.getFleetPartner(created.data.fleetPartnerId))
+          .displayName,
       ).toBe("Updated");
       expect(
         service.listFleetPartnerDrivers(created.data.fleetPartnerId)[0]
@@ -427,7 +462,8 @@ describe.each(["absent", "disabled"] as const)(
 describe("original validation and resource guards", () => {
   it("refuses blank partner fields, missing masters and invalid affiliation dates before SQL", async () => {
     const f = await fixture();
-    const before = readback(f.service);
+    const before = await readback(f.service);
+    f.query.mockClear();
     for (const field of [
       "legalName",
       "displayName",
@@ -439,9 +475,15 @@ describe("original validation and resource guards", () => {
         f.controller.createFleetPartner({ ...createCommand, [field]: " " }),
       ).rejects.toBeInstanceOf(ApiRequestError);
     }
+    expect(f.query).not.toHaveBeenCalled();
     await expect(
       f.controller.updateFleetPartner("missing-master", { active: false }),
     ).rejects.toBeInstanceOf(ApiRequestError);
+    expect(f.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO"),
+      expect.anything(),
+    );
+    f.query.mockClear();
     for (const [driverId, command] of [
       [" ", affiliationCommand],
       ["driver", { ...affiliationCommand, fleetPartnerId: "missing-master" }],
@@ -452,8 +494,11 @@ describe("original validation and resource guards", () => {
         f.controller.createDriverFleetAffiliation(driverId, command),
       ).rejects.toBeInstanceOf(ApiRequestError);
     }
-    expect(f.query).not.toHaveBeenCalled();
-    expect(readback(f.service)).toEqual(before);
+    expect(f.query).not.toHaveBeenCalledWith(
+      expect.stringContaining("INSERT INTO"),
+      expect.anything(),
+    );
+    expect(await readback(f.service)).toEqual(before);
   });
 
   for (const route of [

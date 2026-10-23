@@ -12,6 +12,7 @@ import {
   type Route,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { displayOrderNo } from "../../../apps/referral-embed-web/lib/order-display";
 import { parsePdf } from "../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
@@ -1641,8 +1642,10 @@ test(journeyName, async ({ browser, request }) => {
       );
       await receiptLink.click();
       await expect(page).toHaveURL((url) => url.href === receiptHref.href);
+      // The receipt header shows the original order's short order number; the
+      // full number is on the receipt download and PDF.
       await expect(
-        page.getByText(`${text(receipt.orderNo)} · ${completedOrderId}`, {
+        page.getByText(`訂單 ${displayOrderNo(text(receipt.orderNo))}`, {
           exact: true,
         }),
       ).toBeVisible();

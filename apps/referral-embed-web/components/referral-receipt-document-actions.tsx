@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import type { buildEmbedTheme } from "../lib/embed-presentation";
 import { useTranslation } from "../lib/i18n";
 type ShareState = {
   kind:
@@ -15,8 +16,10 @@ type ShareState = {
 };
 export function ReferralReceiptDocumentActions({
   orderId,
+  theme,
 }: {
   orderId: string;
+  theme: ReturnType<typeof buildEmbedTheme>;
 }) {
   const { t } = useTranslation();
   const url = `/api/referral/receipt/${encodeURIComponent(orderId)}/pdf`;
@@ -115,26 +118,51 @@ export function ReferralReceiptDocumentActions({
                 : state.kind === "failed"
                   ? t("receiptDocument.failed")
                   : null;
+  const button = (disabled: boolean) =>
+    ({
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      width: "100%",
+      minHeight: 42,
+      borderRadius: 12,
+      padding: "10px 14px",
+      border: `1px solid ${theme.line}`,
+      background: theme.surface,
+      color: theme.primary,
+      fontFamily: theme.sans,
+      fontSize: 13.5,
+      fontWeight: 700,
+      textDecoration: "none",
+      opacity: disabled ? 0.6 : 1,
+      cursor: disabled ? "default" : "pointer",
+    }) as const;
   return (
     <section
       aria-label={t("receiptDocument.section")}
       style={{
         display: "grid",
         gap: 10,
-        padding: 16,
-        border: "1px solid #d4d4d4",
-        borderRadius: 12,
+        padding: 15,
+        borderRadius: 16,
+        background: theme.surface,
+        border: `1px solid ${theme.line}`,
       }}
     >
-      <a href={url} download={`receipt-${orderId}.pdf`}>
+      <a href={url} download={`receipt-${orderId}.pdf`} style={button(false)}>
         {t("receiptDocument.download")}
       </a>
-      {message ? <div role="status">{message}</div> : null}
+      {message ? (
+        <div role="status" style={{ fontSize: 12, color: theme.muted }}>
+          {message}
+        </div>
+      ) : null}
       {state.kind === "ready" || state.kind === "sharing" ? (
         <button
           type="button"
           disabled={state.kind === "sharing"}
           onClick={share}
+          style={button(state.kind === "sharing")}
         >
           {t("receiptDocument.share")}
         </button>
@@ -143,6 +171,7 @@ export function ReferralReceiptDocumentActions({
           type="button"
           disabled={state.kind === "preparing"}
           onClick={prepare}
+          style={button(state.kind === "preparing")}
         >
           {state.kind === "failed" || state.kind === "cancelled"
             ? t("receiptDocument.prepareAgain")

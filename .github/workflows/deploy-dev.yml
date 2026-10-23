@@ -837,6 +837,9 @@ jobs:
           if [[ "$map_secret_count" -eq 3 ]]; then
             secret_args="${secret_args},GOOGLE_MAPS_GEOCODING_API_KEY=${geocoding_secret}:latest,GOOGLE_MAPS_ROUTES_API_KEY=${routes_secret}:latest"
             ops_secret_args="${ops_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
+            # The referral embed's pickup/drop-off map uses the same browser key;
+            # its route hands it only to origins on MAP_PROVIDER_ALLOWED_ORIGINS.
+            referral_embed_secret_args="${referral_embed_secret_args},GOOGLE_MAPS_BROWSER_KEY=${browser_secret}:latest"
             map_provider_mode="external"
           elif [[ "$map_secret_count" -ne 0 ]]; then
             echo "::error::Google Maps configuration is partial. Geocoding, Routes, and Browser secrets must be provisioned together."
@@ -1012,7 +1015,9 @@ jobs:
           export GOOGLE_MAPS_GEOCODING_API_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-geocoding-api-key" --project="$project_id")"
           export GOOGLE_MAPS_ROUTES_API_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-routes-api-key" --project="$project_id")"
           export GOOGLE_MAPS_BROWSER_KEY="$(gcloud secrets versions access latest --secret="${secret_prefix}-google-maps-browser-key" --project="$project_id")"
-          export MAP_PROVIDER_SMOKE_ORIGIN="${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+          # The allow-list may name several browser origins (Ops console, referral
+          # embed); the live key check probes the first one.
+          export MAP_PROVIDER_SMOKE_ORIGIN="${DEV_MAP_PROVIDER_ALLOWED_ORIGINS%%,*}"
           echo "::add-mask::${GOOGLE_MAPS_GEOCODING_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_ROUTES_API_KEY}"
           echo "::add-mask::${GOOGLE_MAPS_BROWSER_KEY}"
@@ -1252,13 +1257,13 @@ jobs:
             echo "::warning::No Platform Admin origin available yet; the web apps ship with NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN empty, which disables their cross-app links until a later deploy fills it in."
           fi
 
-          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }},JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }},DRTS_API_URL=${api_origin},NEXT_PUBLIC_API_URL=/control-plane-proxy,NEXT_PUBLIC_OPS_CONSOLE_ORIGIN=${ops_console_origin},NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN=${platform_admin_origin},DRTS_FLEET_PARTNER_ID=fleet-demo-001,DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201,MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }},MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
+          env_vars="^@^NODE_ENV=production@DRTS_ENV=development@DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@NEXT_PUBLIC_DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }}@JWT_ISSUER=${{ steps.api_secrets.outputs.jwt_issuer }}@JWT_AUDIENCE=${{ steps.api_secrets.outputs.jwt_audience }}@DRTS_API_URL=${api_origin}@NEXT_PUBLIC_API_URL=/control-plane-proxy@NEXT_PUBLIC_OPS_CONSOLE_ORIGIN=${ops_console_origin}@NEXT_PUBLIC_PLATFORM_ADMIN_ORIGIN=${platform_admin_origin}@DRTS_FLEET_PARTNER_ID=fleet-demo-001@DRTS_ENTERPRISE_DISPATCH_TENANT_ID=10000000-0000-0000-0000-000000000201@MAP_PROVIDER_MODE=${{ steps.api_secrets.outputs.map_provider_mode }}@MAP_PROVIDER_NAME=${{ steps.api_secrets.outputs.map_provider_mode == 'external' && 'google' || 'mock' }}"
           if [[ -n "${DEV_MAP_PROVIDER_ALLOWED_ORIGINS:-}" ]]; then
-            env_vars="${env_vars},MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
+            env_vars="${env_vars}@MAP_PROVIDER_ALLOWED_ORIGINS=${DEV_MAP_PROVIDER_ALLOWED_ORIGINS}"
           fi
 
           if [[ -n "${DEV_IAP_CLIENT_ID:-}" ]]; then
-            env_vars="${env_vars},DRTS_API_AUTH_AUDIENCE=${DEV_IAP_CLIENT_ID}"
+            env_vars="${env_vars}@DRTS_API_AUTH_AUDIENCE=${DEV_IAP_CLIENT_ID}"
           fi
 
           echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
@@ -1274,7 +1279,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.web }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,DRTS_DEV_WORKFORCE_PRINCIPAL_ID=principal_platform_admin_default,NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}@DRTS_DEV_MFA_WAIVED=true@DRTS_DEV_WORKFORCE_PRINCIPAL_ID=principal_platform_admin_default@NEXT_PUBLIC_PLATFORM_ADMIN_ASSISTANT_ENABLED=true" \
             ${{ needs.prepare.outputs.platform_admin_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1313,7 +1318,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.ops }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_DEV_MFA_WAIVED=true,DRTS_DEV_WORKFORCE_PRINCIPAL_ID=${DEV_OPS_WORKFORCE_PRINCIPAL_ID:-},PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false},PAX_PUBLIC_PASSENGER_ONLY=false" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}@DRTS_DEV_MFA_WAIVED=true@DRTS_DEV_WORKFORCE_PRINCIPAL_ID=${DEV_OPS_WORKFORCE_PRINCIPAL_ID:-}@PAX_REVIEW_DEMO_ENABLED=${DEV_PAX_REVIEW_DEMO_ENABLED:-false}@PAX_PUBLIC_PASSENGER_ONLY=false" \
             ${{ needs.prepare.outputs.ops_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1392,7 +1397,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.bank_console }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},BANK_CONSOLE_DEMO_LOGIN=true" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}@BANK_CONSOLE_DEMO_LOGIN=true" \
             ${{ needs.prepare.outputs.bank_console_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -1413,7 +1418,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "${{ steps.api_secrets.outputs.referral_embed }}" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},REFERRAL_EMBED_ALLOWED_HOSTS=app.fabrikam-living.example app-stg.fabrikam-living.example ${{ steps.referral_entry_host.outputs.host }},REFERRAL_EMBED_DEMO=true,REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}@REFERRAL_EMBED_DEMO=true@REFERRAL_EMBED_DEFAULT_ENTRY_SLUG=${{ needs.prepare.outputs.referral_embed_entry_slug }}@REFERRAL_EMBED_ALLOWED_HOSTS=app.fabrikam-living.example app-stg.fabrikam-living.example ${{ steps.referral_entry_host.outputs.host }}" \
             --allow-unauthenticated \
             --cpu 1 \
             --concurrency 80 \
@@ -1455,7 +1460,7 @@ jobs:
             --ingress all \
             --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
             --set-secrets "JWT_SECRET=${{ needs.prepare.outputs.secret_prefix }}-jwt-secret:latest" \
-            --set-env-vars "${{ steps.web_env.outputs.vars }},DRTS_PARTNER_ID=partner_ead6bf3d-e858-47cc-bfe1-5a3742524118,DRTS_TENANT_ID=tenant-demo-001,DRTS_PARTNER_PROGRAM_ID=program-referral-community,DRTS_PARTNER_ENTRY_SLUG=yuhe-residence" \
+            --set-env-vars "${{ steps.web_env.outputs.vars }}@DRTS_PARTNER_ID=partner_ead6bf3d-e858-47cc-bfe1-5a3742524118@DRTS_TENANT_ID=tenant-demo-001@DRTS_PARTNER_PROGRAM_ID=program-referral-community@DRTS_PARTNER_ENTRY_SLUG=yuhe-residence" \
             ${{ needs.prepare.outputs.channel_partner_portal_exposure_flag }} \
             --cpu 1 \
             --concurrency 80 \
@@ -2433,6 +2438,19 @@ jobs:
           id_token_audience: ${{ needs.health-check.outputs.channel_partner_portal }}
           id_token_include_email: true
 
+      - name: Mint identity token — driver provisioning (operational candidate)
+        id: id_token_driver_provisioning
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: drts-dev-live-map@${{ needs.prepare.outputs.project_id }}.iam.gserviceaccount.com
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ format('{0}/driver-provisioning', needs.health-check.outputs.api) }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+
       - uses: pnpm/action-setup@v4
         with: { version: 10.33.0, run_install: false }
       - uses: actions/setup-node@v4
@@ -2462,6 +2480,19 @@ jobs:
           DRTS_DEV_OPS_CONSOLE_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
           DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_fleet_partner_portal.outputs.id_token }}
           DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_channel_partner_portal.outputs.id_token }}
+          DEV_GCP_PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+          DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.id_token_driver_provisioning.outputs.id_token }}
+          DRTS_OPERATIONAL_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.id_token_driver_provisioning.outputs.id_token }}
+          DRTS_LIVE_MAP_TEST_DRIVER_ID: drv-demo-002
+          DRTS_OPERATIONAL_OWN_FLEET_PARTNER_ID: fleet-demo-001
+          DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN }}
+          DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN }}
+          DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN }}
+          DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN }}
+          DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN: ${{ secrets.DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN }}
+          DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG: ${{ vars.DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG || secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_ENTRY_SLUG }}
+          DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY: ${{ secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_API_KEY }}
+          DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID: ${{ vars.DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID || secrets.DRTS_OPERATIONAL_FOREIGN_FLEET_PARTNER_ID }}
         run: |
           set -euo pipefail
           # Deleted Cloud Run services retain their service hostname; the control
@@ -2473,6 +2504,31 @@ jobs:
           export DRTS_DEV_PASSENGER_BASE_URL="https://drts-dev-passenger-web-${cloud_run_suffix}"
           operations/verification/run-operational-browser-acceptance.sh \
             --sha "${{ needs.build-push.outputs.candidate_sha }}"
+      - name: Refresh identity token — driver provisioning cleanup (operational candidate)
+        if: always() && env.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS != 'passed'
+        id: id_token_driver_provisioning_cleanup
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: drts-dev-live-map@${{ needs.prepare.outputs.project_id }}.iam.gserviceaccount.com
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ format('{0}/driver-provisioning', needs.health-check.outputs.api) }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Revoke operational role sessions and driver device invitation
+        if: always() && env.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS != 'passed'
+        env:
+          DRTS_CANDIDATE_SHA: ${{ needs.build-push.outputs.candidate_sha }}
+          DEV_GCP_PROJECT_ID: ${{ needs.prepare.outputs.project_id }}
+          DRTS_OPERATIONAL_API_URL: ${{ needs.health-check.outputs.api }}
+          DRTS_OPERATIONAL_OPS_CONSOLE_URL: ${{ needs.health-check.outputs.ops_console }}
+          DRTS_LIVE_MAP_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.id_token_driver_provisioning_cleanup.outputs.id_token }}
+          DRTS_OPERATIONAL_GOOGLE_PROVISIONING_ID_TOKEN: ${{ steps.id_token_driver_provisioning_cleanup.outputs.id_token }}
+          DRTS_LIVE_MAP_TEST_DRIVER_ID: drv-demo-002
+          DRTS_OPERATIONAL_OWN_FLEET_PARTNER_ID: fleet-demo-001
+        run: npx tsx operations/verification/prepare-operational-role-sessions.ts --teardown
       - name: Upload operational evidence
         if: always()
         uses: actions/upload-artifact@v4

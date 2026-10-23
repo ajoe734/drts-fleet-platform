@@ -686,3 +686,126 @@ describe("actual hosted PDF closed failure facts", () => {
     });
   });
 });
+
+describe("C125 full document family, Case attachment, and cross-role manifest contract", () => {
+  it("declares driver/vehicle supply families, contracts, PNG/JPEG photos via other, canonical Case resolution, and cross-role denial probes", () => {
+    const manifestPath = path.join(
+      process.cwd(),
+      "tests/e2e/fixtures/operational-browser-journeys.json",
+    );
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const acceptance = manifest.documentAcceptance;
+    expect(acceptance).toBeDefined();
+    expect(acceptance.id).toBe(
+      "c125-document-storage-scan-readback-role-matrix",
+    );
+    expect(acceptance.baseUrlEnv).toBe(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+    );
+
+    const setup = acceptance.setup as Array<Record<string, any>>;
+    const docUploads = setup.filter((item) => item.kind === "document-upload");
+    expect(docUploads.length).toBe(15);
+
+    for (const upload of docUploads) {
+      expect(upload.reviewerBaseUrlEnv).toBe(
+        "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+      );
+      expect(upload.intentBody?.documentType).not.toBe("photo");
+      expect(upload.confirmBody?.documentType).not.toBe("photo");
+    }
+
+    const driverUploads = docUploads.filter((item) =>
+      String(item.intentPath).includes("{{c125DriverSubmissionId}}"),
+    );
+    expect(driverUploads.map((item) => item.intentBody.documentType)).toEqual([
+      "professional_driver_license",
+      "taxi_driver_registration",
+      "fleet_participation_contract",
+      "driver_management_contract",
+      "other",
+      "other",
+    ]);
+    expect(driverUploads.map((item) => item.intentBody.contentType)).toEqual([
+      "application/pdf",
+      "application/pdf",
+      "application/pdf",
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+    ]);
+
+    const vehicleUploads = docUploads.filter((item) =>
+      String(item.intentPath).includes("{{c125VehicleSubmissionId}}"),
+    );
+    expect(vehicleUploads.map((item) => item.intentBody.documentType)).toEqual([
+      "vehicle_registration",
+      "insurance_policy",
+      "fleet_participation_contract",
+      "vehicle_management_contract",
+      "other",
+      "other",
+    ]);
+    expect(vehicleUploads.map((item) => item.intentBody.contentType)).toEqual([
+      "application/pdf",
+      "application/pdf",
+      "application/pdf",
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+    ]);
+
+    const caseResolution = setup.find(
+      (item) => item.kind === "fleet-editable-case",
+    );
+    expect(caseResolution).toEqual({
+      kind: "fleet-editable-case",
+      expectedFleetPartnerId: "fleet-demo-001",
+      periodMonths: ["2026-03", "2026-06"],
+      capture: {
+        c125CaseId: "caseId",
+        c125CaseFleetId: "fleetPartnerId",
+      },
+    });
+    expect(JSON.stringify(acceptance)).not.toContain("CASE-CP-20260301-001");
+    expect(JSON.stringify(acceptance)).not.toContain("METRO_FLEET");
+
+    const caseUploads = docUploads.filter((item) =>
+      String(item.intentPath).includes("/cases/{{c125CaseId}}/attachments/"),
+    );
+    expect(caseUploads.map((item) => item.intentBody.contentType)).toEqual([
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+    ]);
+
+    const roleProbes = setup.filter(
+      (item) => item.kind === "role-access-probe",
+    );
+    const probedRoles = new Set(roleProbes.map((item) => item.role));
+    expect(probedRoles).toEqual(
+      new Set([
+        "own_fleet",
+        "foreign_fleet",
+        "tenant_admin",
+        "tenant_ops",
+        "driver",
+        "ops_non_reviewer",
+        "system",
+        "unauthenticated",
+        "invalid_session",
+      ]),
+    );
+    const adminReviewerProbes = roleProbes.filter((item) =>
+      String(item.path).startsWith(
+        "/control-plane-proxy/admin/fleet-partners/",
+      ),
+    );
+    expect(adminReviewerProbes.length).toBeGreaterThanOrEqual(14);
+    expect(
+      adminReviewerProbes.every(
+        (item) => item.baseUrlEnv === "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+      ),
+    ).toBe(true);
+  });
+});

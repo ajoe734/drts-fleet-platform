@@ -479,6 +479,8 @@ describe("C125 actual portal file interactions", () => {
 
   it("retains staged session when canonical GET fails during invalid-intent reconciliation and resets target-owned state on same-instance case switch", async () => {
     let resolveCase1InFlightPut!: (value: Response) => void;
+    let resolveCase1HeldGet!: (value: Response) => void;
+    let resolveCase2InFlightPut!: (value: Response) => void;
     const case2Detail = {
       id: "case-2",
       fleetPartnerId: "fleet-1",
@@ -580,7 +582,38 @@ describe("C125 actual portal file interactions", () => {
           },
         }),
       )
-      // 6. Third file on case-1 starts upload-url + deferred PUT before rerendering to case-2
+      // 6. Held canonical GET on case-1: upload-url + PUT clean + confirm 503, then retry starts held GET on case-1
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            upload_url:
+              "/api/fleet-partner/cases/case-1/attachments/content?objectKey=key-case1-held-get",
+            method: "PUT",
+            headers: intent.headers,
+            attachment_id: "att-case1-held-get",
+            object_key: "key-case1-held-get",
+          },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ data: { scan_state: "clean" } }))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "CONFIRM_PRE_COMMIT_UNAVAILABLE",
+              message: "case-1 confirm 503",
+            },
+          },
+          { status: 503 },
+        ),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveCase1HeldGet = resolve;
+          }),
+      )
+      // 7. Fourth file on case-1 starts upload-url + deferred PUT before rerendering to case-2
       .mockResolvedValueOnce(
         Response.json({
           data: {
@@ -599,7 +632,41 @@ describe("C125 actual portal file interactions", () => {
             resolveCase1InFlightPut = resolve;
           }),
       )
-      // 7. Submitting reply on case-2 must only include case-2's attachmentIds
+      // 8. On case-2: upload-url + deferred PUT + confirm while case-1's held closed GET resolves mid-flight
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            upload_url:
+              "/api/fleet-partner/cases/case-2/attachments/content?objectKey=key-case2-fresh",
+            method: "PUT",
+            headers: intent.headers,
+            attachment_id: "att-case2-fresh",
+            object_key: "key-case2-fresh",
+          },
+        }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveCase2InFlightPut = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            attachment_id: "att-case2-fresh",
+            case_id: "case-2",
+            fleet_partner_id: "fleet-1",
+            name: "case2-fresh.pdf",
+            size: "10 B",
+            file_size: 10,
+            content_type: "application/pdf",
+            state: "done",
+            object_key: "key-case2-fresh",
+          },
+        }),
+      )
+      // 9. Submitting reply on case-2 must only include case-2's attachmentIds
       .mockResolvedValueOnce(Response.json({ data: { ok: true } }));
 
     vi.stubGlobal("fetch", fetcher);
@@ -659,6 +726,21 @@ describe("C125 actual portal file interactions", () => {
     );
     expect(screen.getAllByText("已上傳")).toHaveLength(2);
 
+    // Start an upload on case-1 that fails confirm (503), then click retry so its canonical GET is held in-flight.
+    const fileHeldGet = new File(["heldget"], "case1-held-get.pdf", {
+      type: "application/pdf",
+    });
+    fireEvent.change(screen.getByLabelText("檔名"), {
+      target: { files: [fileHeldGet] },
+    });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(12));
+    await waitFor(() => expect(screen.getByText("重試")).toBeDefined());
+    fireEvent.click(screen.getByText("重試"));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(13));
+    expect(fetcher.mock.calls[12][0]).toBe(
+      "/control-plane-proxy/fleet-partner/cases/case-1",
+    );
+
     // Start another attachment upload on case-1 and hold its PUT in-flight.
     const file2 = new File(["inflight"], "case1-inflight.pdf", {
       type: "application/pdf",
@@ -666,7 +748,7 @@ describe("C125 actual portal file interactions", () => {
     fireEvent.change(screen.getByLabelText("檔名"), {
       target: { files: [file2] },
     });
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(11));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(15));
     expect(screen.getByText("case1-inflight.pdf")).toBeDefined();
 
     // Rerender the SAME CaseReplyComposer instance to case-2 with case-2's initialAttachments.
@@ -678,13 +760,41 @@ describe("C125 actual portal file interactions", () => {
     );
     expect(screen.queryByText("evidence.pdf")).toBeNull();
     expect(screen.queryByText("confirm-409-recovered.pdf")).toBeNull();
+    expect(screen.queryByText("case1-held-get.pdf")).toBeNull();
     expect(screen.queryByText("case1-inflight.pdf")).toBeNull();
     expect(screen.getByText("case2-existing.pdf")).toBeDefined();
 
-    // Release case-1's held PUT: must not confirm or write into case-2 state.
+    // Start an upload on case-2 and hold its PUT in-flight while case-1's held canonical GET resolves as closed.
+    const fileCase2 = new File(["case2fresh"], "case2-fresh.pdf", {
+      type: "application/pdf",
+    });
+    fireEvent.change(screen.getByLabelText("檔名"), {
+      target: { files: [fileCase2] },
+    });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(17));
+
+    // Deliver case-1's held canonical GET with status="closed" and release case-1's held PUT:
+    // neither may poison case-2's editableRef/composerEpoch or cancel case-2's in-flight upload.
+    resolveCase1HeldGet(
+      Response.json({
+        data: {
+          case_detail: { ...caseDetail, status: "closed" },
+          attachments: [],
+        },
+      }),
+    );
     resolveCase1InFlightPut(Response.json({ data: { scan_state: "clean" } }));
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(fetcher).toHaveBeenCalledTimes(11);
+    expect(fetcher).toHaveBeenCalledTimes(17);
+
+    // Release case-2's PUT: must confirm case-2's attachment and mark it done.
+    resolveCase2InFlightPut(Response.json({ data: { scan_state: "clean" } }));
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(18));
+    expect(fetcher.mock.calls[17][0]).toBe(
+      "/control-plane-proxy/fleet-partner/cases/case-2/attachments/confirm",
+    );
+    await waitFor(() => expect(screen.getAllByText("已上傳")).toHaveLength(2));
+    expect(screen.getByText("case2-fresh.pdf")).toBeDefined();
     expect(screen.queryByText("case1-inflight.pdf")).toBeNull();
 
     // Submitting a reply on case-2 sends only case-2's attachment IDs, never case-1's old completed IDs.
@@ -692,13 +802,13 @@ describe("C125 actual portal file interactions", () => {
       target: { value: "Case 2 reply body" },
     });
     fireEvent.click(screen.getByText("送出回覆"));
-    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(12));
-    expect(fetcher.mock.calls[11][0]).toBe(
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(19));
+    expect(fetcher.mock.calls[18][0]).toBe(
       "/control-plane-proxy/fleet-partner/cases/case-2/reply",
     );
-    expect(JSON.parse(fetcher.mock.calls[11][1].body)).toMatchObject({
+    expect(JSON.parse(fetcher.mock.calls[18][1].body)).toMatchObject({
       content: "Case 2 reply body",
-      attachmentIds: ["att-case2-init"],
+      attachmentIds: ["att-case2-init", "att-case2-fresh"],
     });
   });
 });

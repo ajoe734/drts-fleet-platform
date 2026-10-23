@@ -12,8 +12,11 @@ import {
   type ReferralFeeStatus,
 } from "@drts/contracts";
 import { ReferralComplaintPanel } from "./referral-complaint-panel";
+import { ReferralPlaceField } from "./referral-place-field";
 import { ReferralReceiptDocumentActions } from "./referral-receipt-document-actions";
 import { useReferralLiveTrip } from "./use-referral-live-trip";
+import { displayOrderNo } from "../lib/order-display";
+import { ReferralSupportContactPanel } from "./referral-support-contact";
 import {
   ReferralLiveTrackingPanel,
   referralLiveArrival,
@@ -493,6 +496,9 @@ function Card({
     <section
       style={{
         display: "grid",
+        // Content such as a no-wrap trip line ellipsizes instead of widening
+        // the card past the phone width.
+        gridTemplateColumns: "minmax(0, 1fr)",
         gap: 10,
         padding: 15,
         borderRadius: 16,
@@ -1085,7 +1091,18 @@ function AppShell({
           </span>
         </div>
 
-        <div style={{ flex: 1, display: "grid", gap: 13, padding: 16 }}>
+        <div
+          style={{
+            flex: 1,
+            display: "grid",
+            // One column that long content cannot widen, packed at the top
+            // instead of spreading spare height between short screens' rows.
+            gridTemplateColumns: "minmax(0, 1fr)",
+            alignContent: "start",
+            gap: 13,
+            padding: 16,
+          }}
+        >
           {children}
         </div>
 
@@ -1193,7 +1210,7 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
         安全帶入叫車身分；首次使用仍須確認同意事項。內嵌頁不會要求輸入帳號密碼。
       </Banner>
       <Card theme={theme}>
-        <ReferralFeeDisclosureReader />
+        <ReferralFeeDisclosureReader theme={theme} />
       </Card>
     </AppShell>
   );
@@ -1584,6 +1601,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
   const [isMounted, setIsMounted] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(false);
   const [quote, setQuote] = useState<ReferralPassengerFareQuote | null>(null);
+  const mapConfig = context.map ?? null;
   const [quoteState, setQuoteState] = useState<
     "idle" | "loading" | "quoted" | "expired" | "error"
   >("idle");
@@ -1850,6 +1868,14 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     return () => clearTimeout(timer);
   }, [quote, quoteState]);
 
+  function setAddressField(
+    name: "pickupAddress" | "dropoffAddress",
+    value: string,
+  ) {
+    setQuote(null);
+    setQuoteState("idle");
+    setForm((current) => ({ ...current, [name]: value }));
+  }
   function updateField(event: ChangeEvent<HTMLInputElement>) {
     const { name, value } = event.currentTarget;
     if (["pickupAddress", "dropoffAddress", "scheduledAt"].includes(name)) {
@@ -2058,6 +2084,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
       {!feeReady && !pendingCommand ? (
         <Card theme={theme}>
           <ReferralFirstFeeDisclosure
+            theme={theme}
             status={feeStatus}
             busy={feeBusy}
             error={feeError}
@@ -2066,18 +2093,22 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             }}
           />
           {feeError ? (
-            <button type="button" onClick={() => setFeeRefresh((n) => n + 1)}>
-              重新讀取費用同意紀錄
-            </button>
+            <ActionButton
+              label="重新讀取費用同意紀錄"
+              theme={theme}
+              variant="ghost"
+              onClick={() => setFeeRefresh((n) => n + 1)}
+            />
           ) : null}
         </Card>
       ) : null}
       <Card theme={theme}>
-        <ReferralFeeDisclosureReader />
+        <ReferralFeeDisclosureReader theme={theme} />
       </Card>
       {feeReady && quote && !pendingCommand ? (
         <Card theme={theme}>
           <ReferralOrderFeeDisclosure
+            theme={theme}
             quote={quote}
             pickupTimeLabel={
               quote.requestedScheduledAt
@@ -2148,23 +2179,26 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
 
       <Card theme={theme} title="行程" subtitle="上車 · 下車 · 時間">
         <div style={{ display: "grid", gap: 10 }}>
-          <EditableField
+          <ReferralPlaceField
             theme={theme}
             label="上車地點"
-            icon="pin"
+            icon={<Icon name="pin" size={15} />}
             name="pickupAddress"
             value={form.pickupAddress}
-            onChange={updateField}
+            onChange={(value) => setAddressField("pickupAddress", value)}
             disabled={bookingControlsDisabled}
+            allowCurrentLocation
+            mapConfig={mapConfig}
           />
-          <EditableField
+          <ReferralPlaceField
             theme={theme}
             label="下車地點"
-            icon="pin"
+            icon={<Icon name="pin" size={15} />}
             name="dropoffAddress"
             value={form.dropoffAddress}
-            onChange={updateField}
+            onChange={(value) => setAddressField("dropoffAddress", value)}
             disabled={bookingControlsDisabled}
+            mapConfig={mapConfig}
           />
           <div
             style={{
@@ -2226,7 +2260,11 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         </div>
       </Card>
 
-      <Card theme={theme} title="車種" subtitle="owned mobility">
+      <Card
+        theme={theme}
+        title={t("embed.card.vehicles")}
+        subtitle={t("embed.card.vehiclesSubtitle")}
+      >
         <div style={{ display: "grid", gap: 8 }}>
           {embedVehicles.map((vehicle) => {
             const selected = form.vehicleType === vehicle.code;
@@ -2415,6 +2453,43 @@ const DEMO_TRIP_DISPATCHABLE = [
   "redispatch_required",
   "matching",
 ];
+const DEMO_TRIP_ON_BOARD = ["on_trip", "proof_pending", "inprogress"];
+
+type DemoTripAction = "assign" | "arrive" | "board" | "complete";
+
+/** Which test step comes next for the trip's current state. */
+function demoTripAction(status: string): DemoTripAction {
+  if (DEMO_TRIP_DISPATCHABLE.includes(status)) return "assign";
+  if (status === "arrived_pickup") return "board";
+  if (DEMO_TRIP_ON_BOARD.includes(status)) return "complete";
+  return "arrive";
+}
+
+const DEMO_TRIP_STEP: Record<
+  DemoTripAction,
+  { description: string; label: string }
+> = {
+  assign: {
+    description:
+      "按下後由虛構的商務測試司機承接這筆行程，用來展示派車後的畫面；不是實際派車。",
+    label: "測試：指派測試司機",
+  },
+  arrive: {
+    description:
+      "測試司機正從約 1.3 公里外駛向上車地點，約 3 分鐘抵達，地圖上的車輛會跟著移動。不想等候可按下按鈕，讓司機立即抵達。",
+    label: "測試：司機立即抵達",
+  },
+  board: {
+    description:
+      "測試司機已抵達上車地點。按下後模擬乘客上車並開始行程，車輛會駛向目的地（約 3 分鐘）。",
+    label: "測試：乘客已上車",
+  },
+  complete: {
+    description:
+      "行程進行中，車輛正駛向目的地。按下後以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。",
+    label: "測試：完成行程",
+  },
+};
 
 function demoTripMessage(code: unknown) {
   switch (code) {
@@ -2425,7 +2500,7 @@ function demoTripMessage(code: unknown) {
     case "REFERRAL_DEMO_TRIP_NOT_DISPATCHABLE":
       return "這筆行程目前無法指派測試司機。";
     case "REFERRAL_DEMO_TRIP_NOT_ASSIGNED":
-      return "這筆行程不是由測試司機承接，無法用測試按鈕完成。";
+      return "這筆行程不是由測試司機承接，無法用測試按鈕操作。";
     case "not_found":
       return "測試功能目前未開啟。";
     default:
@@ -2448,9 +2523,7 @@ function ReferralDemoTripControls({
   const theme = buildEmbedTheme(context.accent);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const action = DEMO_TRIP_DISPATCHABLE.includes(status)
-    ? "assign"
-    : "complete";
+  const action = demoTripAction(status);
   // live.refresh is a new function on every render; keep the latest one in a
   // ref so the heartbeat timer below depends only on the trip, or each
   // refresh-triggered render would restart it and send another heartbeat.
@@ -2458,10 +2531,12 @@ function ReferralDemoTripControls({
   useEffect(() => {
     onAssignedRef.current = onAssigned;
   }, [onAssigned]);
-  // Like the driver app, report the test driver's location every 30 s so the
-  // live tracking and pickup ETA stay fresh while this demo trip is open.
+  // Like the driver app, report the test driver's location every 10 s so the
+  // map and ETA move smoothly while this demo trip is open; the server also
+  // reports arrival through this heartbeat once the approach is driven.
+  const driverAssigned = action !== "assign";
   useEffect(() => {
-    if (action !== "complete") return;
+    if (!driverAssigned) return;
     let active = true;
     const beat = () =>
       void fetch(
@@ -2477,12 +2552,12 @@ function ReferralDemoTripControls({
         })
         .catch(() => undefined);
     beat();
-    const timer = globalThis.setInterval(beat, 30_000);
+    const timer = globalThis.setInterval(beat, 10_000);
     return () => {
       active = false;
       globalThis.clearInterval(timer);
     };
-  }, [action, orderId]);
+  }, [driverAssigned, orderId]);
 
   async function run() {
     setPending(true);
@@ -2533,18 +2608,10 @@ function ReferralDemoTripControls({
         測試模式（僅供展示）
       </div>
       <div style={{ fontSize: 12, lineHeight: 1.6, color: theme.ink2 }}>
-        {action === "assign"
-          ? "按下後由虛構的商務測試司機承接這筆行程，用來展示派車後的畫面；不是實際派車。"
-          : "按下後以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。"}
+        {DEMO_TRIP_STEP[action].description}
       </div>
       <ActionButton
-        label={
-          pending
-            ? "處理中…"
-            : action === "assign"
-              ? "測試：指派測試司機"
-              : "測試：完成行程"
-        }
+        label={pending ? "處理中…" : DEMO_TRIP_STEP[action].label}
         theme={theme}
         onClick={() => void run()}
         disabled={pending}
@@ -2570,6 +2637,7 @@ function TripScreen({
   const theme = buildEmbedTheme(context.accent);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [supportOpen, setSupportOpen] = useState(false);
   const requestedOrderId = liveData?.selectedOrderId;
   const live = useReferralLiveTrip(
     liveData?.activeTrip?.trip,
@@ -2739,12 +2807,20 @@ function TripScreen({
       badgeTone="live"
       footer={
         <>
+          {supportOpen ? (
+            <ReferralSupportContactPanel
+              theme={theme}
+              phone={REFERRAL_SUPPORT_PHONE}
+              orderNo={displayOrderNo(trip.id)}
+              onClose={() => setSupportOpen(false)}
+            />
+          ) : null}
           <ActionButton
-            href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
             label="客服協助聯絡司機"
             theme={theme}
             variant="default"
             icon="phone"
+            onClick={() => setSupportOpen((open) => !open)}
           />
           <ActionButton
             label={isPending ? "取消中…" : "取消行程"}
@@ -2818,7 +2894,7 @@ function TripScreen({
               wordBreak: "break-all",
             }}
           >
-            {trip.id} · {trip.orderId}
+            {t("embed.orderNo", { no: displayOrderNo(trip.id) })}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
@@ -2903,6 +2979,8 @@ function TripScreen({
         trip={activeTrip!}
         error={live.error}
         refresh={live.refresh}
+        theme={theme}
+        mapConfig={context.map}
       />
 
       {error ? (
@@ -3126,9 +3204,11 @@ function TripsScreen({
                       marginTop: 2,
                     }}
                   >
-                    {trip.date} · {trip.id}
+                    {trip.date} · {displayOrderNo(trip.id)}
                   </div>
-                  <div>
+                  <div
+                    style={{ fontSize: 11, color: theme.muted, marginTop: 2 }}
+                  >
                     費用確認時間：
                     {trip.feeConfirmedAt
                       ? formatShortDateTime(trip.feeConfirmedAt, "Asia/Taipei")
@@ -3233,7 +3313,7 @@ function ReceiptScreen({
           marginTop: -6,
         }}
       >
-        {receipt.id} · {receipt.orderId}
+        {t("embed.orderNo", { no: displayOrderNo(receipt.id) })}
       </div>
       <Card theme={theme} title="行程" subtitle={receipt.date}>
         <div style={{ display: "flex", gap: 11 }}>
@@ -3294,7 +3374,7 @@ function ReceiptScreen({
           last
         />
       </Card>
-      <Card theme={theme} title="乘客與車輛" subtitle="PII 已遮罩">
+      <Card theme={theme} title="乘客與車輛" subtitle="個資已遮罩">
         <DetailRow theme={theme} label="乘客" value={receipt.passenger} />
         <DetailRow
           theme={theme}
@@ -3354,6 +3434,7 @@ function ReceiptScreen({
       <ReferralReceiptDocumentActions
         key={`referral-pdf:${receipt.orderId}`}
         orderId={receipt.orderId}
+        theme={theme}
       />
       <ExternalPaymentSim
         key={receipt.orderId}
@@ -3986,16 +4067,28 @@ function FallbackTripScreen({
   screen: EmbedTripFallbackScreen;
 }) {
   const theme = buildEmbedTheme(context.accent);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const supportPanel = supportOpen ? (
+    <ReferralSupportContactPanel
+      theme={theme}
+      phone={REFERRAL_SUPPORT_PHONE}
+      orderNo={displayOrderNo(embedTrip.id)}
+      onClose={() => setSupportOpen(false)}
+    />
+  ) : null;
   const fallback = embedTripFallbackStates[screen];
   const footer =
     screen === "vehicle_change_in_progress" ? (
-      <ActionButton
-        href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
-        label="聯絡客服"
-        theme={theme}
-        variant="default"
-        icon="phone"
-      />
+      <>
+        {supportPanel}
+        <ActionButton
+          label="聯絡客服"
+          theme={theme}
+          variant="default"
+          icon="phone"
+          onClick={() => setSupportOpen((open) => !open)}
+        />
+      </>
     ) : screen === "human_fallback_assigned" ? (
       <>
         <ActionButton
@@ -4004,12 +4097,13 @@ function FallbackTripScreen({
           theme={theme}
           icon="car"
         />
+        {supportPanel}
         <ActionButton
-          href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
           label="客服協助聯絡司機"
           theme={theme}
           variant="default"
           icon="phone"
+          onClick={() => setSupportOpen((open) => !open)}
         />
       </>
     ) : screen === "service_continuing" ? (
