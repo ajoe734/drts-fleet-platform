@@ -361,8 +361,11 @@ async function submitSyntheticComplaint(
   const bodySha256 = hash(
     new TextEncoder().encode(JSON.stringify(requestBody)),
   );
-  await mkdir(`${p.directory}/display-observations`, { recursive: true });
-  const journalPath = `${p.directory}/display-observations/manual-complaint-unknown-ack.json`;
+  // The -facts.json suffix matches the existing cancellations/*-facts.json
+  // glob already in ci-integ.yml's artifact allowlist, so this is genuinely
+  // retained, not just written to a path nobody uploads.
+  await mkdir(`${p.directory}/cancellations`, { recursive: true });
+  const journalPath = `${p.directory}/cancellations/manual-complaint-unknown-ack-facts.json`;
   await persistPrivateJson(journalPath, {
     state: "ack_unknown",
     orderId,
@@ -512,8 +515,11 @@ async function observeMobileComplaintRendering(
         `mobile complaint ${label} control must show a themed visible boundary or background`,
       );
     }
-    await mkdir(`${p.directory}/display-observations`, { recursive: true });
-    const screenshotPath = `${p.directory}/display-observations/manual-complaint-mobile.png`;
+    // Matches the existing cancellations/*.png glob already in the ci-integ.yml
+    // artifact allowlist, so the screenshot is genuinely retained, not just
+    // written to a path nobody uploads.
+    await mkdir(`${p.directory}/cancellations`, { recursive: true });
+    const screenshotPath = `${p.directory}/cancellations/manual-complaint-mobile.png`;
     await p.page.screenshot({ path: screenshotPath, fullPage: true });
     return screenshotPath;
   } finally {
