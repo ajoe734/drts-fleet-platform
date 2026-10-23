@@ -452,7 +452,14 @@ export class ReferralDemoTripService {
       try {
         await run();
       } catch (error) {
-        // Another request took this step first: carry on from where it is.
+        // The driver command can mutate its in-memory task before its
+        // required persistence/audit/outbox write is awaited, so a failure
+        // from our own call can look like "the step already happened". Reload
+        // the authoritative task before deciding: a genuine race from another
+        // request already completed and persisted the step, while our own
+        // failed write leaves the authoritative task unchanged -- only the
+        // former is safe to carry on from.
+        await this.orders.prepareOrderAction({ taskId: task.taskId });
         const latest = this.orders.getDriverTask(task.taskId);
         if (sequence.indexOf(latest.status) <= sequence.indexOf(from))
           throw error;

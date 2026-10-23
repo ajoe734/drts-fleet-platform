@@ -716,4 +716,32 @@ describe("ReferralDemoTripService", () => {
       stuck.service.board("order-1", identity, "req-1"),
     ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
   });
+
+  it("propagates its own persistence failure instead of treating the local mutation as a completed race", async () => {
+    const h = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    // The real driver command mutates its in-memory task before awaiting the
+    // required write, so a rejected write still leaves the task looking
+    // "arrived" locally even though nothing was actually persisted.
+    h.orders.arrivedPickup.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "arrived_pickup";
+      throw new Error("order repository write rejected");
+    });
+    // `openDemoTask` and the pre-run refresh inside `advanceTo` both resolve
+    // as no-ops (the two calls that precede the failing command); the
+    // post-failure reload reports the authoritative task, which never
+    // actually advanced because the write was rejected.
+    h.orders.prepareOrderAction
+      .mockImplementationOnce(async () => undefined)
+      .mockImplementationOnce(async () => undefined)
+      .mockImplementationOnce(async () => {
+        h.tasks[0]!.status = "enroute_pickup";
+      });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).rejects.toThrow("order repository write rejected");
+    expect(h.orders.startDriverTask).not.toHaveBeenCalled();
+  });
 });
