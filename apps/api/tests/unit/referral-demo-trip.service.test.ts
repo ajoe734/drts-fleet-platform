@@ -68,6 +68,9 @@ type Task = {
   driverId: string;
   vehicleId: string;
   status: string;
+  acceptedAt?: string;
+  departedAt?: string;
+  startedAt?: string;
 };
 
 function harness(
@@ -308,14 +311,19 @@ describe("ReferralDemoTripService", () => {
       expect.objectContaining({ acceptedAt: expect.any(String) }),
       "req-1",
     );
-    // The first simulated driver-app heartbeat is bound to the accepted task.
+    // The driver sets off at once from about 1.3 km north of the pickup.
+    const [, depart] = h.orders.departDriverTask.mock.calls[0]!;
+    expect(depart.currentLocation.lat).toBeCloseTo(25.01 + 0.012, 6);
+    expect(depart.currentLocation.lng).toBe(121.46);
+    expect(h.orders.arrivedPickup).not.toHaveBeenCalled();
+    // The first simulated driver-app heartbeat is bound to the moving task.
     const [heartbeat] =
       h.registry.recordDriverLocationBatch.mock.calls[0]![0].items;
     expect(heartbeat).toMatchObject({
       driverId: "referral-demo-driver-2",
       vehicleId: "referral-demo-vehicle-2",
       taskId: "task-1",
-      workState: "assigned",
+      workState: "enroute",
       appState: "foreground",
     });
     // Only the pair that was not chosen goes back offline.
@@ -392,13 +400,12 @@ describe("ReferralDemoTripService", () => {
 
     expect(result).toMatchObject({ orderId: "order-1", status: "completed" });
     expect(h.orders.acceptDriverTask).not.toHaveBeenCalled();
-    expect(h.orders.departDriverTask).toHaveBeenCalledWith(
-      "task-1",
-      expect.objectContaining({
-        currentLocation: { lat: 25.01, lng: 121.46 },
-      }),
-      "req-2",
-    );
+    // Departs from the simulated approach start, as on assignment.
+    const [taskId, depart, requestId] =
+      h.orders.departDriverTask.mock.calls[0]!;
+    expect([taskId, requestId]).toEqual(["task-1", "req-2"]);
+    expect(depart.currentLocation.lat).toBeCloseTo(25.01 + 0.012, 6);
+    expect(depart.currentLocation.lng).toBe(121.46);
     expect(h.orders.arrivedPickup).toHaveBeenCalledTimes(1);
     expect(h.orders.startDriverTask).toHaveBeenCalledTimes(1);
     const [, command] = h.orders.completeDriverTask.mock.calls[0]!;
@@ -584,36 +591,129 @@ describe("ReferralDemoTripService", () => {
     expect(real.registry.recordDriverLocationBatch).not.toHaveBeenCalled();
   });
 
-  it("closes in on the pickup over the approach and stays there once arrived", () => {
+  it("closes in on the pickup, waits there, then drives to the destination", () => {
     const h = harness();
-    const acceptedAt = "2026-10-21T02:00:00.000Z";
-    const base = Date.parse(acceptedAt);
+    const departedAt = "2026-10-21T02:00:00.000Z";
+    const startedAt = "2026-10-21T02:05:00.000Z";
+    const base = Date.parse(departedAt);
+    const ride = Date.parse(startedAt);
     const task = (status: string) =>
       ({
         taskId: "t",
         driverId: "d",
         vehicleId: "v",
         status,
-        acceptedAt,
+        departedAt,
+        startedAt,
       }) as never;
-    const start = h.service.simulatedPosition(
-      h.current as never,
-      task("accepted"),
-      base,
-    );
-    const later = h.service.simulatedPosition(
-      h.current as never,
-      task("enroute_pickup"),
-      base + 3 * 60_000,
-    );
-    const arrived = h.service.simulatedPosition(
-      h.current as never,
-      task("arrived_pickup"),
-      base + 3 * 60_000,
-    );
+    const at = (status: string, now: number) =>
+      h.service.simulatedPosition(h.current as never, task(status), now);
+    const start = at("enroute_pickup", base);
+    const halfway = at("enroute_pickup", base + 90_000);
+    const driven = at("enroute_pickup", base + 10 * 60_000);
     expect(start.lat).toBeCloseTo(25.01 + 0.012, 6);
-    expect(later.lat).toBeLessThan(start.lat);
-    expect(later.lat).toBeGreaterThan(25.01);
-    expect(arrived).toEqual({ lat: 25.01, lng: 121.46 });
+    expect(halfway.lat).toBeCloseTo(25.01 + 0.006, 6);
+    // Never past the pickup, however long the approach takes to be reported.
+    expect(driven).toEqual({ lat: 25.01, lng: 121.46 });
+    expect(at("arrived_pickup", ride)).toEqual({ lat: 25.01, lng: 121.46 });
+    // On board: along the line to the destination (25.04, 121.56) in 3 min.
+    const onBoard = at("on_trip", ride + 90_000);
+    expect(onBoard.lat).toBeCloseTo(25.025, 6);
+    expect(onBoard.lng).toBeCloseTo(121.51, 6);
+    expect(at("on_trip", ride + 5 * 60_000)).toEqual({
+      lat: 25.04,
+      lng: 121.56,
+    });
+  });
+
+  const demoTask = (status: string, extra: Partial<Task> = {}): Task => ({
+    taskId: "task-1",
+    orderId: "order-1",
+    driverId: "referral-demo-driver-1",
+    vehicleId: "referral-demo-vehicle-1",
+    status,
+    ...extra,
+  });
+
+  it("reports arrival through the heartbeat once the approach has been driven", async () => {
+    const early = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [
+        demoTask("enroute_pickup", { departedAt: new Date().toISOString() }),
+      ],
+    });
+    await early.service.heartbeat("order-1", identity, "req-1");
+    expect(early.orders.arrivedPickup).not.toHaveBeenCalled();
+
+    const driven = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [
+        demoTask("enroute_pickup", {
+          departedAt: new Date(Date.now() - 3 * 60_000 - 1_000).toISOString(),
+        }),
+      ],
+    });
+    await driven.service.heartbeat("order-1", identity, "req-1");
+    expect(driven.orders.arrivedPickup).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ arrivedAt: expect.any(String) }),
+      "req-1",
+    );
+    expect(driven.tasks[0]!.status).toBe("arrived_pickup");
+    // Boarding is the tester's step, never the heartbeat's.
+    expect(driven.orders.startDriverTask).not.toHaveBeenCalled();
+    expect(
+      driven.registry.recordDriverLocationBatch.mock.calls[0]![0].items[0],
+    ).toMatchObject({ lat: 25.01, lng: 121.46, workState: "arrived" });
+  });
+
+  it("lets the tester skip the approach and board the passenger", async () => {
+    const h = harness({
+      order: order({ status: "driver_accepted" }),
+      tasks: [demoTask("accepted")],
+    });
+    await h.service.arrive("order-1", identity, "req-1");
+    expect(h.orders.departDriverTask).toHaveBeenCalledTimes(1);
+    expect(h.orders.arrivedPickup).toHaveBeenCalledTimes(1);
+    expect(h.tasks[0]!.status).toBe("arrived_pickup");
+    expect(h.orders.startDriverTask).not.toHaveBeenCalled();
+
+    await h.service.board("order-1", identity, "req-1");
+    expect(h.orders.startDriverTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ startedAt: expect.any(String) }),
+      "req-1",
+    );
+    expect(h.tasks[0]!.status).toBe("on_trip");
+    expect(h.orders.completeDriverTask).not.toHaveBeenCalled();
+    // A repeated tap is harmless once the passenger is on board.
+    await h.service.board("order-1", identity, "req-1");
+    expect(h.orders.startDriverTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries on when the heartbeat already reported the arrival a tap asks for", async () => {
+    const h = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    h.orders.arrivedPickup.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "arrived_pickup";
+      throw new ApiRequestError(409, "INVALID_TASK_TRANSITION", "already");
+    });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).resolves.toMatchObject({ orderId: "order-1" });
+    expect(h.tasks[0]!.status).toBe("on_trip");
+
+    const stuck = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    stuck.orders.arrivedPickup.mockRejectedValueOnce(
+      new ApiRequestError(409, "INVALID_TASK_TRANSITION", "refused"),
+    );
+    await expect(
+      stuck.service.board("order-1", identity, "req-1"),
+    ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
   });
 });
