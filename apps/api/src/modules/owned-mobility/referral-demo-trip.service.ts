@@ -56,6 +56,7 @@ const OPEN_TASK_STATUSES = [
 const DRIVER_TASK_TRANSITION_RACE_CODES = new Set([
   "DRIVER_TASK_TRANSITION_INVALID",
   "PICKUP_NOT_ARRIVED",
+  "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
 ]);
 // Simulated drive: depart ~1.3 km north of the pickup and arrive in three
 // minutes; once the passenger boards, reach the destination in three more.

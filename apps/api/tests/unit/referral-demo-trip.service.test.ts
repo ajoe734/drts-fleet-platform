@@ -768,4 +768,26 @@ describe("ReferralDemoTripService", () => {
     ).rejects.toThrow("driver-task audit log write failed");
     expect(h.orders.startDriverTask).not.toHaveBeenCalled();
   });
+
+  it("carries on when a concurrent accept already closed the assignment", async () => {
+    const h = harness({
+      order: order({ status: "assigned" }),
+      tasks: [demoTask("pending_acceptance")],
+    });
+    // The DB-backed `acceptDriverTask` locks the assignment row and re-checks
+    // it before touching anything; a second instance committing the accept
+    // first raises this exact code, pre-mutation.
+    h.orders.acceptDriverTask.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "accepted";
+      throw new ApiRequestError(
+        409,
+        "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+        "already",
+      );
+    });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).resolves.toMatchObject({ orderId: "order-1" });
+    expect(h.tasks[0]!.status).toBe("on_trip");
+  });
 });
