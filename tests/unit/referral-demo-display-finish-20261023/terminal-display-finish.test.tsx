@@ -92,7 +92,7 @@ describe("UI-01 terminal fare truthfulness", () => {
     expect(screen.getByText("不收")).toBeTruthy();
   });
 
-  it("never shows the fare-pending placeholder for no_supply/dispatch_failed orders and states no fare was generated", () => {
+  it("never claims no fare was generated (or implies zero) for a no_supply/dispatch_failed order with an unknown fare", () => {
     for (const status of ["no_supply", "dispatch_failed", "dispatch_timeout"]) {
       const { unmount } = render(
         <PassengerEmbed
@@ -108,7 +108,9 @@ describe("UI-01 terminal fare truthfulness", () => {
         />,
       );
       expect(screen.queryByText("實際車資待確認")).toBeNull();
-      expect(screen.getByText(/未產生車資|本次派車失敗/)).toBeTruthy();
+      // Missing/invalid fare is unknown, not evidence of a zero charge.
+      expect(screen.queryByText(/未產生車資/)).toBeNull();
+      expect(screen.getByText(/費用狀態未提供/)).toBeTruthy();
       unmount();
     }
   });

@@ -3983,7 +3983,7 @@ function OutcomeScreen({
               if (trip?.status === "no_supply") {
                 return hasRecordedFare
                   ? "目前無可用車輛，本次行程費用如下所列。"
-                  : "目前無可用車輛，未產生車資，請稍後再試或重新叫車。";
+                  : "目前無可用車輛，本次行程費用狀態未提供，請稍後再試或重新叫車。";
               }
               if (
                 trip?.status === "dispatch_failed" ||
@@ -3991,7 +3991,7 @@ function OutcomeScreen({
               ) {
                 return hasRecordedFare
                   ? "本次派車失敗，本次行程費用如下所列。"
-                  : "本次派車失敗，未產生車資，請重新叫車。";
+                  : "本次派車失敗，本次行程費用狀態未提供，請重新叫車。";
               }
               return `此行程已取消。${PASSENGER_FREE_CANCELLATION_NOTICE}`;
             })()}
