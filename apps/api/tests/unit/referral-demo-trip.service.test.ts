@@ -718,19 +718,75 @@ describe("ReferralDemoTripService", () => {
     expect(arrived.registry.recordDriverLocationBatch).not.toHaveBeenCalled();
   });
 
-  it("lets a tap and the destination heartbeat both end the trip once", async () => {
+  it("lets a tap and the destination heartbeat both end the trip once, even from a separate instance's cache", async () => {
     const h = harness({
       order: order({ status: "on_trip" }),
       tasks: [demoTask("on_trip")],
     });
+    // The real `completeDriverTask` reloads the canonical task inside its
+    // own transaction, not this caller's local cache -- a separate service
+    // instance's cache never hears about the other instance's write. Model
+    // that by raising the task's own completion-conflict code, exactly as
+    // `OwnedMobilityService` does, before this instance's local task (and
+    // the reload the fix relies on) are told about the other write.
+    let won = false;
     h.orders.completeDriverTask.mockImplementationOnce(async () => {
+      won = true;
+      throw new ApiRequestError(409, "TASK_ALREADY_COMPLETED", "already");
+    });
+    // Only the reload after the conflict -- not the pre-write reload, and
+    // not this instance's unrelated earlier reloads -- observes the other
+    // instance's write, exactly as a real repository read would.
+    h.orders.prepareOrderAction.mockImplementation(async () => {
+      if (!won) return;
       h.tasks[0]!.status = "completed";
       h.current.status = "completed";
-      throw new ApiRequestError(409, "INVALID_TASK_TRANSITION", "already");
+    });
+    const result = await h.service.complete("order-1", identity, "req-1");
+    expect(result).toMatchObject({ status: "completed" });
+    // The winner already took the driver offline; this loser does not.
+    expect(
+      h.registry.updateDriverWorkStateFromPersistence,
+    ).not.toHaveBeenCalledWith("referral-demo-driver-1", {
+      workState: "offline",
+    });
+  });
+
+  it("still fails the completion-conflict code when the reload does not confirm the same task completed", async () => {
+    const h = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [demoTask("on_trip")],
+    });
+    // The code looks like the benign race, but the reload shows the
+    // canonical task is not actually completed -- e.g. it was cancelled
+    // instead -- so this must still fail rather than assume success.
+    h.orders.completeDriverTask.mockImplementationOnce(async () => {
+      throw new ApiRequestError(409, "TASK_ALREADY_COMPLETED", "already");
+    });
+    h.orders.getDriverTask.mockReturnValueOnce({
+      ...h.tasks[0]!,
+      status: "cancelled",
     });
     await expect(
       h.service.complete("order-1", identity, "req-1"),
-    ).resolves.toMatchObject({ status: "completed" });
+    ).rejects.toMatchObject({ code: "TASK_ALREADY_COMPLETED" });
+  });
+
+  it("does not infer completion from this instance's own locally completed cache", async () => {
+    const h = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [demoTask("on_trip")],
+    });
+    // A generic failure that happens to leave the local cache looking
+    // completed (e.g. a stale read from an earlier call) is not the
+    // driver task's own completion-conflict code and must still fail.
+    h.orders.completeDriverTask.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "completed";
+      throw new Error("driver-task audit log write failed");
+    });
+    await expect(
+      h.service.complete("order-1", identity, "req-1"),
+    ).rejects.toThrow("driver-task audit log write failed");
   });
 
   it("lets the tester skip the approach and board the passenger", async () => {
