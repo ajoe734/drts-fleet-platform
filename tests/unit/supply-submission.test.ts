@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import * as path from "node:path";
+
+import type { SupplyDocumentRecord } from "@drts/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
@@ -5,6 +10,7 @@ import { AuditNotificationService } from "../../apps/api/src/modules/audit-notif
 import { SupplySubmissionRepository } from "../../apps/api/src/modules/fleet-partner/supply-submission.repository";
 import { SupplySubmissionService } from "../../apps/api/src/modules/fleet-partner/supply-submission.service";
 import type { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { materializeValue } from "../e2e/operational-document-upload";
 
 function createService() {
   const repository = new SupplySubmissionRepository();
@@ -189,6 +195,136 @@ describe("SupplySubmissionService", () => {
         }),
       }),
     );
+  });
+
+  it("C125-VEHICLE-SUBMISSION-FIXTURE-CONTRACT-20261023: reproduces the manifest vehicle-create 400 on the pre-fix shape and completes create+submit on the corrected manifest payload", async () => {
+    const { service, repository } = createService();
+
+    const manifestPath = path.join(
+      process.cwd(),
+      "tests/e2e/fixtures/operational-browser-journeys.json",
+    );
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const acceptanceSetup = manifest.documentAcceptance.setup as Array<
+      Record<string, unknown>
+    >;
+    const driverSetup = acceptanceSetup.find(
+      (item) =>
+        item.path ===
+        "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+    );
+    const vehicleSetup = acceptanceSetup.find(
+      (item) =>
+        item.path ===
+        "/control-plane-proxy/fleet-partner/supply-submissions/vehicles",
+    );
+    expect(driverSetup).toBeDefined();
+    expect(vehicleSetup).toBeDefined();
+
+    const variables: Record<string, unknown> = {
+      runId: "unit-c125-vehicle-fixture",
+    };
+    const driverBody = materializeValue(
+      (driverSetup as Record<string, unknown>).body,
+      variables,
+    ) as Record<string, unknown>;
+    const createdDriver = await service.createDriverDraft(
+      "fleet-demo-001",
+      "actor-demo-001",
+      driverBody as never,
+    );
+    variables.c125DriverSubmissionId = createdDriver.submission.submissionId;
+
+    // The real manifest body, with {{runId}}/{{c125DriverSubmissionId}}
+    // resolved to concrete values the same way the live browser journey
+    // resolves them.
+    const correctedVehicleBody = materializeValue(
+      (vehicleSetup as Record<string, unknown>).body,
+      variables,
+    ) as Record<string, unknown>;
+
+    // Pre-fix manifest shape diagnosed by the 15b hosted run: missing
+    // licenseType/luggageCapacity/businessArea and manufactureYear instead
+    // of modelYear, which made the real service reject vehicle creation
+    // with 400 right after a successful driver submission. Built by keeping
+    // only the fields the pre-fix manifest body had (sourced from the
+    // corrected body, not a hand-copied duplicate), so it tracks whatever
+    // the manifest actually contains.
+    const brokenVehicleBody = {
+      plateNo: correctedVehicleBody.plateNo,
+      brand: correctedVehicleBody.brand,
+      model: correctedVehicleBody.model,
+      manufactureYear: correctedVehicleBody.modelYear,
+      seatCount: correctedVehicleBody.seatCount,
+      supportedServiceProductCodes:
+        correctedVehicleBody.supportedServiceProductCodes,
+    };
+
+    await expect(
+      service.createVehicleDraft(
+        "fleet-demo-001",
+        "actor-demo-001",
+        brokenVehicleBody as never,
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+
+    const createdVehicle = await service.createVehicleDraft(
+      "fleet-demo-001",
+      "actor-demo-001",
+      correctedVehicleBody as never,
+    );
+    expect(createdVehicle.submission.status).toBe("draft");
+    expect(createdVehicle.vehicleDraft).toMatchObject({
+      licenseType: "taxi",
+      luggageCapacity: 2,
+      businessArea: "TPE",
+      modelYear: 2024,
+      doorCount: 4,
+      color: "yellow",
+      airportTransferEligible: false,
+      fixedFareAllowed: false,
+      currentDriverSubmissionId: createdDriver.submission.submissionId,
+    });
+    const vehicleSubmissionId = createdVehicle.submission.submissionId;
+
+    // Document upload/scan is handled by the separate storage-backed
+    // SupplyDocumentService, which this socket-free unit suite does not
+    // invoke. Seed the confirmed document records through the same
+    // repository persistence contract the service reads from (the external
+    // storage/scan boundary is mocked here; the completeness logic under
+    // test — assertSubmissionComplete reading real repository state — is
+    // not).
+    const uploadedAt = new Date().toISOString();
+    const seededDocuments: SupplyDocumentRecord[] = [
+      "vehicle_registration",
+      "insurance_policy",
+      "fleet_participation_contract",
+    ].map((documentType) => ({
+      documentId: randomUUID(),
+      fleetPartnerId: "fleet-demo-001",
+      submissionId: vehicleSubmissionId,
+      documentType: documentType as SupplyDocumentRecord["documentType"],
+      fileObjectKey: `unit-test/${vehicleSubmissionId}/${documentType}`,
+      originalFileName: `${documentType}.pdf`,
+      contentType: "application/pdf",
+      fileSize: 1,
+      checksumSha256: "a".repeat(64),
+      effectiveFrom: null,
+      effectiveUntil: null,
+      reviewStatus: "pending",
+      reviewComment: null,
+      uploadedBy: "actor-demo-001",
+      uploadedAt,
+    }));
+    await repository.persistChanges({ documents: seededDocuments });
+
+    const submitted = await service.submitSupplySubmission(
+      "fleet-demo-001",
+      vehicleSubmissionId,
+      "actor-demo-001",
+      { expectedRevisionNo: 1 },
+    );
+    expect(submitted.submission.status).toBe("submitted");
   });
 
   it("performs idempotent in-memory backfill of incomplete vehicle submissions to needs_revision", async () => {
