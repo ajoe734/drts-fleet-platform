@@ -100,7 +100,24 @@ const OPS_ORIGIN = "https://drts-dev-ops-console-web-uc.a.run.app";
 const ADMIN_ORIGIN = "https://drts-dev-platform-admin-web-uc.a.run.app";
 const GCP_PROJECT_ID = "drts-dev-devcc-20260825";
 
-const C125_PRESERVED_FILES = [
+// Of the five files the original C125 task accepted at commit 348b7d3c, only this one
+// has never been touched by a later authorized functional correction: it must remain
+// byte-for-byte identical to that historical snapshot forever.
+const C125_UNCHANGED_FILES = [
+  {
+    path: "tests/e2e/operational-browser-acceptance.spec.ts",
+    bytes: 23626,
+    blob: "83926082888a8140246a96a9de080429f7685200",
+    sha256: "6ad1b38cfd921a36866eca9844a504b552676d530afb30dddfca7dc38d1c46b2",
+  },
+] as const;
+
+// These four were later authorized (C125-EXISTING-UPLOAD-PROBE-CONTRACT-20261023) to move past
+// their 348b7d3c snapshot to correct own_fleet upload probes that the diagnosed existing API
+// contract actually accepted. The recorded blob/bytes/sha256 below are kept only as immutable
+// historical evidence that the pre-correction state is still reachable in git history — they are
+// intentionally NOT asserted against the current working tree, which is expected to differ.
+const C125_HISTORICALLY_CORRECTED_FILES = [
   {
     path: "tests/e2e/operational-document-upload.ts",
     bytes: 111023,
@@ -112,12 +129,6 @@ const C125_PRESERVED_FILES = [
     bytes: 49995,
     blob: "d8be0523a7fe38834e3b398bbead2ffa5ead289e",
     sha256: "0bd7312b43629bd6b0b0be5dfc81ad87934c3ae7420c94114cfc29edf129d6ad",
-  },
-  {
-    path: "tests/e2e/operational-browser-acceptance.spec.ts",
-    bytes: 23626,
-    blob: "83926082888a8140246a96a9de080429f7685200",
-    sha256: "6ad1b38cfd921a36866eca9844a504b552676d530afb30dddfca7dc38d1c46b2",
   },
   {
     path: "tests/unit/operational-document-upload.test.ts",
@@ -933,9 +944,9 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       );
     });
 
-    it("preserves all five accepted C125 files byte-for-byte and keeps 7 journeys / 16 browser tests / 69 steps / 15 uploads / 37 role probes / 16 lineage checks intact", () => {
+    it("preserves the unchanged C125 file byte-for-byte, keeps the four later-corrected C125 files' pre-correction evidence reachable without reverting to it, and keeps 7 journeys / 16 browser tests / 69 steps / 15 uploads / 37 role probes / 16 lineage checks intact", () => {
       const hasCommit = hasLocalBaselineCommit(IMMUTABLE_BASELINE_REF);
-      for (const spec of C125_PRESERVED_FILES) {
+      for (const spec of C125_UNCHANGED_FILES) {
         const currentBytes = readFileSync(path.join(process.cwd(), spec.path));
         expect(currentBytes.byteLength).toBe(spec.bytes);
         expect(gitBlobSha1Hex(currentBytes)).toBe(spec.blob);
@@ -952,6 +963,23 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
           ]);
           expect(sha256Hex(currentBytes)).toBe(sha256Hex(baselineBytes));
         }
+      }
+
+      for (const spec of C125_HISTORICALLY_CORRECTED_FILES) {
+        // The pre-correction snapshot stays reachable as immutable gap-proof evidence even
+        // though the working tree has intentionally moved past it.
+        const historicalBlobBytes = execFileSync("git", [
+          "cat-file",
+          "blob",
+          spec.blob,
+        ]);
+        expect(historicalBlobBytes.byteLength).toBe(spec.bytes);
+        expect(sha256Hex(historicalBlobBytes)).toBe(spec.sha256);
+
+        // The authorized correction must not have been silently reverted back to the
+        // diagnosed pre-correction contents.
+        const currentBytes = readFileSync(path.join(process.cwd(), spec.path));
+        expect(sha256Hex(currentBytes)).not.toBe(spec.sha256);
       }
 
       const manifest = JSON.parse(
