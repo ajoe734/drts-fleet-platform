@@ -9,6 +9,7 @@ import {
   hash,
   object,
   persistPrivateJson,
+  records,
   requireFact,
   text,
   type CallOptions,
@@ -61,10 +62,15 @@ const FORBIDDEN_RECOVERY_PROMISES = [
   "恢復後會自動繼續",
 ] as const;
 
-const DEMO_SCENARIO_MARKER = /示範|模擬|測試|僅供展示|demo/i;
+// The exact disclosure phrase the fixture fallback scenes must carry, not a
+// broad synonym match that a baseline screen could coincidentally pass.
+const DEMO_SCENARIO_DISCLOSURE = "情境示範";
 const TAIPEI_ZONE_WORDING = /台北|臺北|taipei|utc\+8|gmt\+8|\+08:00/i;
 
-type NegativeActionDestination = "book" | "trips" | "tel-support" | "tel-any";
+type NegativeActionDestination = "book" | "trips" | "tel-support";
+// Mirrors negativeScreens/negativeScreenHref in passenger-embed.tsx: every
+// action resolves through an explicit per-kind primaryAction/secondaryAction,
+// never a uniform book/tel guess.
 const NEGATIVE_SCREEN_ACTIONS: Record<
   "nosupply" | "degraded" | "ineligible" | "denied",
   Array<{ label: string; destination: NegativeActionDestination }>
@@ -74,7 +80,7 @@ const NEGATIVE_SCREEN_ACTIONS: Record<
     { label: "重新叫車", destination: "book" },
   ],
   ineligible: [
-    { label: "洽社區管理中心", destination: "tel-any" },
+    { label: "聯絡社區客服", destination: "tel-support" },
     { label: "返回", destination: "book" },
   ],
   nosupply: [
@@ -152,6 +158,26 @@ async function observeTerminalFareAndBadges(
   const orderId = p.unassignedCancelledOrderId;
   if (!orderId) return { result: "unexecuted" };
 
+  const historyPayload = object(
+    (await p.referral("/api/referral/history")).data,
+  );
+  const historyRecord = records(historyPayload.items).find(
+    (item) => item.orderId === orderId,
+  );
+  requireFact(
+    historyRecord !== undefined,
+    "same owned unassigned-cancellation history record required",
+  );
+  const fareTotal = historyRecord.fareTotal;
+  const hasFiniteFare =
+    typeof fareTotal === "number" && Number.isFinite(fareTotal);
+  const expectedFormattedFare = hasFiniteFare
+    ? text(
+        historyRecord.formattedFare,
+        "finite fare must carry an actual formatted representation",
+      )
+    : null;
+
   await gotoEmbed({ screen: "cancelled", orderId });
   await expect(p.page.getByText("行程已取消", { exact: true })).toBeVisible();
 
@@ -167,6 +193,15 @@ async function observeTerminalFareAndBadges(
   requireFact(
     !genericFareText.includes("實際車資待確認"),
     "unassigned-cancellation top fare row must not claim a pending real fare",
+  );
+  // Compare against the same BFF history record, not just the absence of a
+  // forbidden phrase: an unknown fare must show the dash placeholder, never
+  // an inferred zero/refund; a finite fare must preserve its actual value.
+  requireFact(
+    hasFiniteFare
+      ? genericFareText.includes(expectedFormattedFare!)
+      : genericFareText.includes("—"),
+    "unassigned-cancellation top fare row must match the same history record's actual fare",
   );
 
   const feeRow = p.page
@@ -190,6 +225,12 @@ async function observeTerminalFareAndBadges(
   requireFact(
     !badgeText.includes("實際車資待確認"),
     "own cancelled history card fare cell must not claim a pending real fare",
+  );
+  requireFact(
+    hasFiniteFare
+      ? badgeText.includes(expectedFormattedFare!)
+      : badgeText.includes("—"),
+    "own cancelled history card fare cell must match the same history record's actual fare",
   );
 
   p.evidence.record({
@@ -363,14 +404,19 @@ async function submitSyntheticComplaint(
   );
   // The -facts.json suffix matches the existing cancellations/*-facts.json
   // glob already in ci-integ.yml's artifact allowlist, so this is genuinely
-  // retained, not just written to a path nobody uploads.
+  // retained, not just written to a path nobody uploads. The actual request
+  // body is persisted (not only its hash/key): a hash alone cannot
+  // reconstruct the original command for recovery.
   await mkdir(`${p.directory}/cancellations`, { recursive: true });
-  const journalPath = `${p.directory}/cancellations/manual-complaint-unknown-ack-facts.json`;
+  const journalPath = `${p.directory}/cancellations/manual-complaint-command-facts.json`;
   await persistPrivateJson(journalPath, {
     state: "ack_unknown",
     orderId,
     idempotencyKey,
     bodySha256,
+    definitionSha: p.definitionSha,
+    runtimeSha: p.runtimeSha,
+    requestBody,
     recovery:
       "Possible own write. Preserve this exact body/key; do not resend a replacement command or key.",
   });
@@ -404,6 +450,9 @@ async function submitSyntheticComplaint(
     orderId,
     idempotencyKey,
     bodySha256,
+    definitionSha: p.definitionSha,
+    runtimeSha: p.runtimeSha,
+    requestBody,
     caseNo,
   });
   p.evidence.record({
@@ -459,14 +508,14 @@ async function assertTaipeiTimestampLine(
     [year, month, day, hour, minute].every((fragment) => fragment !== ""),
     `${prefix} requires a resolvable Asia/Taipei source timestamp`,
   );
-  // Match the full contiguous digit sequence (year optional), not independent
-  // fragments; a lone coincidental repeated digit must not pass.
+  // Match the full contiguous year+month+day+hour+minute digit sequence, not
+  // independent fragments; a lone coincidental repeated digit must not pass,
+  // and the year is mandatory, not an optional fallback.
   const renderedDigits = value.replace(/[^0-9]/g, "");
-  const withYear = `${year}${month}${day}${hour}${minute}`;
-  const withoutYear = `${month}${day}${hour}${minute}`;
+  const expectedDigits = `${year}${month}${day}${hour}${minute}`;
   requireFact(
-    renderedDigits.includes(withYear) || renderedDigits.includes(withoutYear),
-    `${prefix} must derive from the same complete Asia/Taipei source timestamp`,
+    renderedDigits.includes(expectedDigits),
+    `${prefix} must derive from the same complete Asia/Taipei source timestamp, including the year`,
   );
 }
 
@@ -562,22 +611,20 @@ async function observeNoUnsupportedPromises(
 }
 
 // UI06: the four fixture fallback scenes must visibly identify themselves as
-// a demonstration; message codes/routes stay intact. The own trips screen is
-// read first as a baseline: if it already carries the same marker text, a
-// generic app-wide banner (not a scenario-specific disclosure) would let
-// every fallback scene pass without proving anything, so the check is
-// rejected for all four screens in that case.
+// a demonstration; message codes/routes stay intact. The exact disclosure
+// phrase is required (not a broad synonym match); the own trips screen is
+// read first as a baseline defense so the same phrase appearing there too
+// (a generic app-wide banner, not a scenario-specific disclosure) would
+// still reject every fallback scene rather than let a coincidence pass.
 async function observeFallbackScenesLabelled(
   p: DisplayObservationsParams,
   gotoEmbed: GotoEmbed,
 ): Promise<DisplayObservations["fallbackScenesLabelled"]> {
   await gotoEmbed({ screen: "trips" });
-  const baselineHasMarker = DEMO_SCENARIO_MARKER.test(
-    text(
-      await p.page.locator("body").innerText(),
-      "baseline own trips body text required",
-    ),
-  );
+  const baselineHasDisclosure = text(
+    await p.page.locator("body").innerText(),
+    "baseline own trips body text required",
+  ).includes(DEMO_SCENARIO_DISCLOSURE);
   for (const screen of EMBED_TRIP_FALLBACK_SCREENS) {
     await gotoEmbed({ screen });
     const expectedCode = embedTripFallbackStates[screen].titleCode;
@@ -589,8 +636,8 @@ async function observeFallbackScenesLabelled(
       `fallback scene ${screen} body text required`,
     );
     requireFact(
-      DEMO_SCENARIO_MARKER.test(bodyText) && !baselineHasMarker,
-      `fallback scene ${screen} must carry a scenario-specific demonstration disclosure, not a pre-existing generic marker`,
+      bodyText.includes(DEMO_SCENARIO_DISCLOSURE) && !baselineHasDisclosure,
+      `fallback scene ${screen} must carry the "${DEMO_SCENARIO_DISCLOSURE}" demonstration disclosure, not a pre-existing generic marker`,
     );
   }
   p.evidence.record({
@@ -630,13 +677,6 @@ async function observeNegativeActionDestinations(
         );
         continue;
       }
-      if (destination === "tel-any") {
-        requireFact(
-          /^tel:\+?\d+$/.test(href),
-          `${screen} "${label}" is a contact action and must dial a phone number, not navigate in-app`,
-        );
-        continue;
-      }
       requireFact(
         !href.startsWith("tel:"),
         `${screen} "${label}" must not dial the phone`,
@@ -646,19 +686,20 @@ async function observeNegativeActionDestinations(
         await expect(
           p.page.getByText("我的行程", { exact: true }),
         ).toBeVisible();
-        requireFact(
-          new URL(p.page.url()).searchParams.get("screen") === "trips",
-          `${screen} "${label}" must land on the own trips history`,
-        );
       } else {
         await expect(
           p.page.getByText("上車地點", { exact: true }),
         ).toBeVisible();
-        requireFact(
-          new URL(p.page.url()).searchParams.get("screen") === "book",
-          `${screen} "${label}" must land on the same entry's booking screen`,
-        );
       }
+      const landed = new URL(p.page.url());
+      const expectedOrigin = new URL(p.referralOrigin).origin;
+      requireFact(
+        landed.origin === expectedOrigin &&
+          landed.pathname === `/embed/${p.entrySlug}` &&
+          landed.searchParams.get("screen") ===
+            (destination === "trips" ? "trips" : "book"),
+        `${screen} "${label}" must land on the same entry's ${destination === "trips" ? "own trips" : "booking"} screen, not a different origin/entry`,
+      );
     }
   }
   p.evidence.record({
