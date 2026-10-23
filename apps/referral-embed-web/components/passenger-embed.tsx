@@ -16,6 +16,7 @@ import { ReferralPlaceField } from "./referral-place-field";
 import { ReferralReceiptDocumentActions } from "./referral-receipt-document-actions";
 import { useReferralLiveTrip } from "./use-referral-live-trip";
 import { displayOrderNo } from "../lib/order-display";
+import { ReferralSupportContactPanel } from "./referral-support-contact";
 import {
   ReferralLiveTrackingPanel,
   referralLiveArrival,
@@ -2607,6 +2608,7 @@ function TripScreen({
   const theme = buildEmbedTheme(context.accent);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [supportOpen, setSupportOpen] = useState(false);
   const requestedOrderId = liveData?.selectedOrderId;
   const live = useReferralLiveTrip(
     liveData?.activeTrip?.trip,
@@ -2776,12 +2778,20 @@ function TripScreen({
       badgeTone="live"
       footer={
         <>
+          {supportOpen ? (
+            <ReferralSupportContactPanel
+              theme={theme}
+              phone={REFERRAL_SUPPORT_PHONE}
+              orderNo={displayOrderNo(trip.id)}
+              onClose={() => setSupportOpen(false)}
+            />
+          ) : null}
           <ActionButton
-            href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
             label="客服協助聯絡司機"
             theme={theme}
             variant="default"
             icon="phone"
+            onClick={() => setSupportOpen((open) => !open)}
           />
           <ActionButton
             label={isPending ? "取消中…" : "取消行程"}
@@ -4028,16 +4038,28 @@ function FallbackTripScreen({
   screen: EmbedTripFallbackScreen;
 }) {
   const theme = buildEmbedTheme(context.accent);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const supportPanel = supportOpen ? (
+    <ReferralSupportContactPanel
+      theme={theme}
+      phone={REFERRAL_SUPPORT_PHONE}
+      orderNo={displayOrderNo(embedTrip.id)}
+      onClose={() => setSupportOpen(false)}
+    />
+  ) : null;
   const fallback = embedTripFallbackStates[screen];
   const footer =
     screen === "vehicle_change_in_progress" ? (
-      <ActionButton
-        href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
-        label="聯絡客服"
-        theme={theme}
-        variant="default"
-        icon="phone"
-      />
+      <>
+        {supportPanel}
+        <ActionButton
+          label="聯絡客服"
+          theme={theme}
+          variant="default"
+          icon="phone"
+          onClick={() => setSupportOpen((open) => !open)}
+        />
+      </>
     ) : screen === "human_fallback_assigned" ? (
       <>
         <ActionButton
@@ -4046,12 +4068,13 @@ function FallbackTripScreen({
           theme={theme}
           icon="car"
         />
+        {supportPanel}
         <ActionButton
-          href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
           label="客服協助聯絡司機"
           theme={theme}
           variant="default"
           icon="phone"
+          onClick={() => setSupportOpen((open) => !open)}
         />
       </>
     ) : screen === "service_continuing" ? (
