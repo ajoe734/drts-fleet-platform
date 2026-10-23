@@ -753,14 +753,19 @@
         "method": "POST",
         "body": {
           "plateNo": "TDC-{{runId}}",
+          "licenseType": "taxi",
           "brand": "Toyota",
           "model": "Camry",
-          "manufactureYear": 2024,
+          "modelYear": 2024,
           "seatCount": 4,
-          "wheelchairAccessible": false,
-          "insuranceExpiry": "2029-12-31",
-          "inspectionExpiry": "2029-12-31",
-          "supportedServiceProductCodes": ["business_dispatch"]
+          "luggageCapacity": 2,
+          "businessArea": "TPE",
+          "supportedServiceProductCodes": ["business_dispatch"],
+          "airportTransferEligible": false,
+          "fixedFareAllowed": false,
+          "currentDriverSubmissionId": "{{c125DriverSubmissionId}}",
+          "doorCount": 4,
+          "color": "yellow"
         },
         "capture": {
           "c125VehicleSubmissionId": "data.submission.submission_id",
