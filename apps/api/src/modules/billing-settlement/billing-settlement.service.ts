@@ -2051,7 +2051,15 @@ export class BillingSettlementService implements OnModuleInit {
     // rejected immediately, instead of racing a refresh that would
     // overwrite `driverFeePlans` with a pre-ACK canonical snapshot and miss
     // the in-memory duplicate-version check below.
-    const pendingPublicationKey = `${command.planName}::${command.version}`;
+    // JSON-encode the pair rather than joining with a separator: planName
+    // and version are arbitrary caller-supplied strings, so a literal
+    // "::" join lets (`a::b`, `c`) collide with (`a`, `b::c`) under the
+    // same pending key. JSON.stringify's quoting/escaping keeps the two
+    // fields unambiguous regardless of their contents.
+    const pendingPublicationKey = JSON.stringify([
+      command.planName,
+      command.version,
+    ]);
     if (this.pendingDriverFeePlanPublications.has(pendingPublicationKey)) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,

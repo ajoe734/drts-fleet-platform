@@ -390,6 +390,71 @@ describe("C125-F1: same-instance pending-publication immutability", () => {
     expect(publishWrites).toHaveLength(1);
     expect(store.feePlans).toHaveLength(1);
   });
+
+  it("does not reject two distinct name/version pairs whose literal `::` join happens to coincide", async () => {
+    // (planName="Night::Plan", version="v1") and (planName="Night",
+    // version="Plan::v1") both join to the literal string
+    // "Night::Plan::v1" under a naive `${planName}::${version}` key. They
+    // are a genuinely different pair and must both be allowed to publish
+    // concurrently, not have the second one rejected as a duplicate of the
+    // first.
+    const store = createCanonicalStore();
+    const instance = createWarmInstance(store);
+    await instance.service.onModuleInit();
+
+    const [first, second] = await Promise.all([
+      instance.service
+        .publishDriverFeePlan({
+          planName: "Night::Plan",
+          version: "v1",
+          serviceFeeBps: 1000,
+          reimbursementMode: "platform_funded",
+        })
+        .then(
+          (value) => ({ status: "fulfilled" as const, value }),
+          (error: unknown) => ({ status: "rejected" as const, error }),
+        ),
+      instance.service
+        .publishDriverFeePlan({
+          planName: "Night",
+          version: "Plan::v1",
+          serviceFeeBps: 2000,
+          reimbursementMode: "mixed",
+        })
+        .then(
+          (value) => ({ status: "fulfilled" as const, value }),
+          (error: unknown) => ({ status: "rejected" as const, error }),
+        ),
+    ]);
+
+    expect(first.status).toBe("fulfilled");
+    expect(second.status).toBe("fulfilled");
+    expect(instance.service.listDriverFeePlans()).toHaveLength(2);
+  });
+
+  it("still rejects a genuine same name/version duplicate once the collision-free key is in place", async () => {
+    const store = createCanonicalStore();
+    const instance = createWarmInstance(store);
+    await instance.service.onModuleInit();
+
+    await instance.service.publishDriverFeePlan({
+      planName: "Night::Plan",
+      version: "v1",
+      serviceFeeBps: 1000,
+      reimbursementMode: "platform_funded",
+    });
+
+    await expect(
+      instance.service.publishDriverFeePlan({
+        planName: "Night::Plan",
+        version: "v1",
+        serviceFeeBps: 9999,
+        reimbursementMode: "mixed",
+      }),
+    ).rejects.toMatchObject({
+      getResponse: expect.any(Function),
+    });
+  });
 });
 
 describe("C125-F1: a failed canonical fee-plan read must not fall through to a stale financial decision", () => {
