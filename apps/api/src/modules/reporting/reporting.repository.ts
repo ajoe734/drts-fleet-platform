@@ -271,6 +271,7 @@ export class ReportingRepository {
 
   async upsertMonthlyOperationsSummaries(
     records: readonly MonthlyOperationsSummaryRecord[],
+    execute?: (sql: string, values: unknown[]) => Promise<unknown>,
   ) {
     if (!this.isEnabled() || records.length === 0) {
       return;
@@ -278,7 +279,11 @@ export class ReportingRepository {
 
     await Promise.all(
       records.map((record) =>
-        this.databaseService!.query(
+        (
+          execute ??
+          ((sql: string, values: unknown[]) =>
+            this.databaseService!.query(sql, values))
+        )(
           `
             INSERT INTO reporting.monthly_operations_summaries (
               period_month,
@@ -394,6 +399,51 @@ export class ReportingRepository {
       throw new Error("Invalid canonical Referral monthly rating source.");
     }
     return record;
+  }
+
+  async replaceMonthlyOperationsSummaries(
+    records: readonly MonthlyOperationsSummaryRecord[],
+    periods: readonly string[],
+    query: MonthlyOperationsSummaryQuery = {},
+  ) {
+    if (!this.isEnabled() || periods.length === 0) return;
+    const values: unknown[] = [[...periods]];
+    const where = ["period_month = ANY($1::text[])"];
+    if (query.businessArea) {
+      values.push(query.businessArea);
+      where.push("business_area = $" + values.length);
+    }
+    if (query.serviceProductCode) {
+      values.push(query.serviceProductCode);
+      where.push("service_product_code = $" + values.length);
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      // Serialize replacement writers of this derived read model. Readers keep
+      // the previous committed report until the complete replacement commits.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+        ["reporting.monthly_operations_summaries:rebuild"],
+      );
+      await client.query(
+        `DELETE FROM reporting.monthly_operations_summaries WHERE ${where.join(" AND ")}`,
+        values,
+      );
+      await this.upsertMonthlyOperationsSummaries(records, (sql, bound) =>
+        client.query(sql, bound),
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* Keep the original rebuild failure. */
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async loadDailyDispatchRecordSource(): Promise<DispatchDailyRecordSource> {

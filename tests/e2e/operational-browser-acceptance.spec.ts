@@ -1,14 +1,20 @@
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { createOperationalEvidenceJournal } from "./operational-evidence-journal";
 import {
   runSetup,
+  runOperationalDocumentAcceptance,
   requiredOrigin,
   operationalRequestHeaders,
   fetchOperationalSurface,
   installOperationalBrowserHeaders,
   prepareOperationalFleetSession,
+  type DocumentAcceptanceManifest,
   type FleetApplicationSetup,
   type PreparedOperationalFleetSession,
   valueAtPath,
@@ -18,6 +24,7 @@ import {
   type SetupRequest,
 } from "./operational-document-upload";
 type JourneyStep =
+  | { kind: "referral-fees"; control: string }
   | { kind: "navigate"; path: string }
   | { kind: "click"; control: string }
   | { kind: "fill"; control: string; value: string };
@@ -89,6 +96,7 @@ type Manifest = {
   fleetApplicationSetup: FleetApplicationSetup;
   journeys: Journey[];
   retiredSurfaces: RetiredSurface[];
+  documentAcceptance: DocumentAcceptanceManifest;
 };
 
 const manifestPath =
@@ -229,6 +237,33 @@ async function runSteps(
   variables: TemplateVariables,
 ) {
   for (const step of steps) {
+    if (step.kind === "referral-fees") {
+      const url = new URL("/api/referral/fees", origin).toString();
+      const response = await page.request.get(url);
+      expect(response.ok()).toBe(true);
+      const body = await response.json();
+      expect(body.data).toMatchObject({
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        contentHash: PASSENGER_FEE_CONTENT_HASH,
+      });
+      if (body.data.acknowledgedAt === null) {
+        const submitted = page.waitForResponse(
+          (item) => item.url() === url && item.request().method() === "POST",
+        );
+        await page.locator(step.control).click();
+        expect((await submitted).ok()).toBe(true);
+      }
+      const read = await page.request.get(url);
+      expect(read.ok()).toBe(true);
+      const ack = (await read.json()).data;
+      expect(ack).toMatchObject({
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        contentHash: PASSENGER_FEE_CONTENT_HASH,
+      });
+      expect(typeof ack.acknowledgedAt).toBe("string");
+      expect(Number.isFinite(Date.parse(ack.acknowledgedAt))).toBe(true);
+      continue;
+    }
     if (step.kind === "navigate") {
       await navigate(
         page,
@@ -400,6 +435,15 @@ test("requires a single immutable candidate SHA and complete formal journey mani
       expect(operation.readback?.expectedState).not.toBeUndefined();
     }
   }
+
+  expect(manifest.documentAcceptance).toBeDefined();
+  expect(manifest.documentAcceptance.id).toBe(
+    "c125-document-storage-scan-readback-role-matrix",
+  );
+  expect(manifest.documentAcceptance.baseUrlEnv).toBe(
+    "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+  );
+  expect(manifest.documentAcceptance.setup.length).toBeGreaterThan(0);
 });
 
 for (const journey of manifest.journeys) {
@@ -653,6 +697,14 @@ for (const journey of manifest.journeys) {
         response.url(),
         resultId,
         operation.readback as Readback,
+        variables,
+      );
+    }
+
+    if (journey.id === "admin-review-approve-readback") {
+      await runOperationalDocumentAcceptance(
+        { request: page.context().request, record },
+        manifest.documentAcceptance,
         variables,
       );
     }

@@ -662,5 +662,328 @@ class AdminRootFailureReadbackTests(unittest.TestCase):
         admin.assert_not_called()
 
 
+# New-profile controls only; all original Fleet/Admin tests above are preserved.
+INSTANCE = "synthetic-observed-instance_9"
+REQUEST_REASONS = (
+    ("The request was aborted because there was no available instance",
+     "CLOUD_RUN_NO_AVAILABLE_INSTANCE", [500]),
+    ("The request failed because the instance could not start successfully.",
+     "CLOUD_RUN_INSTANCE_START_FAILED", [500]),
+    ("The request failed because either the HTTP response was malformed or "
+     "connection to the instance had an error.",
+     "CLOUD_RUN_MALFORMED_RESPONSE_OR_INSTANCE_CONNECTION", [503]),
+)
+
+
+def instance_request(instance=INSTANCE, text=None, trace=TRACE):
+    row = admin_request(trace)
+    row["labels"] = {"instanceId": instance}
+    if text is not None:
+        row["textPayload"] = text
+    return row
+
+
+def instance_context(instance=INSTANCE, stream="stderr", trace=None):
+    row = instance_request(instance, trace=trace)
+    del row["httpRequest"]
+    row["logName"] = MODULE.ADMIN_INSTANCE_STREAMS[stream]
+    return row
+
+
+class AdminObservedInstanceReadbackTests(unittest.TestCase):
+    def test_all_three_exact_request_reasons_without_instance_need_one_query(self):
+        for text, reason, statuses in REQUEST_REASONS:
+            with self.subTest(reason=reason):
+                port = Port(success([instance_request(None, text)]))
+                actual = MODULE.collect_admin_root_instance(ENV, port)
+                request = actual["requests"][0]
+                self.assertEqual(request["requestPlatformReason"], reason)
+                self.assertEqual(request["status"], 500)
+                self.assertEqual(actual["requestReasonDocumentation"][reason]
+                                 ["documentedHTTPStatuses"], tuple(statuses))
+                self.assertIsNone(request["instanceFingerprint"])
+                self.assertEqual(actual["instanceAssociationStatus"], "UNOBSERVED")
+                self.assertEqual(actual["queryCount"], 1)
+                self.assertEqual(len(port.calls), 1)
+                self.assertNotIn(text, json.dumps(actual))
+
+    def test_documented_503_category_never_rewrites_actual_500_or_claims_cause(self):
+        actual = MODULE.collect_admin_root_instance(
+            ENV, Port(success([instance_request(None, REQUEST_REASONS[2][0])]))
+        )
+        self.assertEqual(actual["requests"][0]["status"], 500)
+        self.assertIn("documented for HTTP503", actual["qualification"])
+        self.assertIn("do not identify this caller", actual["qualification"])
+        self.assertNotIn("rootCause", actual)
+
+    def test_only_first_exact_request_text_line_is_classified(self):
+        text = REQUEST_REASONS[0][0]
+        for candidate in [text + ".", text + " private-suffix", "prefix " + text,
+                          "body\n" + text, "Error: " + text, "unknown",
+                          {"message": text}, None]:
+            with self.subTest(candidate=candidate):
+                actual = MODULE.collect_admin_root_instance(
+                    ENV, Port(success([instance_request(None, candidate)]))
+                )
+                self.assertEqual(actual["requests"][0]["requestPlatformReason"],
+                                 "UNOBSERVED")
+                self.assertEqual(actual["queryCount"], 1)
+
+    def test_known_request_reason_allows_only_sgr_crlf_and_surrounding_whitespace(self):
+        text = "\r\n\x1b[31m  " + REQUEST_REASONS[0][0] + " \x1b[0m\r\n"
+        actual = MODULE.collect_admin_root_instance(
+            ENV, Port(success([instance_request(None, text)]))
+        )
+        self.assertEqual(actual["requests"][0]["requestPlatformReason"],
+                         REQUEST_REASONS[0][1])
+        for prefix in ["\x1b]0;title\x07", "\x1b[2J", "\x00", "\x85"]:
+            with self.subTest(prefix=prefix):
+                actual = MODULE.collect_admin_root_instance(
+                    ENV, Port(success([instance_request(None, prefix + REQUEST_REASONS[0][0])]))
+                )
+                self.assertEqual(actual["requests"][0]["requestPlatformReason"], "UNOBSERVED")
+
+    def test_same_instance_stdout_and_stderr_are_only_context_without_trace(self):
+        stdout = instance_context(stream="stdout")
+        stderr = instance_context()
+        stderr["textPayload"] = "\x1b[31m⨯ Error: " + next(
+            iter(MODULE.ADMIN_EXCEPTION_SIGNATURES)
+        ) + "\x1b[0m\n    at synthetic-stack"
+        stderr["jsonPayload"] = {"error": {"name": "TypeError", "code": "ECONNRESET"}}
+        port = Port(success([instance_request()]), success([stdout, stderr]))
+        actual = MODULE.collect_admin_root_instance(ENV, port)
+        self.assertIsNone(actual["readFailureCode"])
+        self.assertEqual(actual["instanceAssociationStatus"], "same-instance-context-observed")
+        context = actual["instanceContext"]
+        self.assertEqual([row["containerStream"] for row in context], ["stdout", "stderr"])
+        self.assertTrue(all(row["association"] == "same-instance-context-only" for row in context))
+        self.assertTrue(all(row["sameObservedRequestTrace"] == "UNOBSERVED" for row in context))
+        self.assertEqual(context[1]["exceptionSignatures"], ["CONTROL_PLANE_ASSERTION_REQUIRED"])
+        self.assertEqual(context[1]["errorClasses"], ["TypeError"])
+        self.assertEqual(context[1]["errorCodes"], ["ECONNRESET"])
+        self.assertEqual(context[0]["instanceFingerprint"], actual["requests"][0]["instanceFingerprint"])
+        self.assertNotIn(INSTANCE, json.dumps(actual))
+
+    def test_exact_observed_trace_is_separate_from_same_instance_context(self):
+        foreign_trace = TRACE[:-1] + "c"
+        port = Port(success([instance_request()]), success([
+            instance_context(trace=TRACE), instance_context(trace=foreign_trace),
+        ]))
+        actual = MODULE.collect_admin_root_instance(ENV, port)
+        self.assertEqual([row["sameObservedRequestTrace"] for row in actual["instanceContext"]],
+                         [True, False])
+        self.assertTrue(all(row["association"] == "same-instance-context-only"
+                            for row in actual["instanceContext"]))
+        self.assertNotIn(TRACE, json.dumps(actual))
+        self.assertNotIn(foreign_trace, json.dumps(actual))
+
+    def test_missing_invalid_and_injected_instance_never_start_second_query(self):
+        for value in [None, "", 1, [], {}, " a", "a ", "a\nb", "a\x00b", "é",
+                      'a" OR severity="ERROR', "a/b", "a.b", "a" * 513]:
+            with self.subTest(value=value):
+                port = Port(success([instance_request(value)]))
+                actual = MODULE.collect_admin_root_instance(ENV, port)
+                self.assertEqual(actual["queryCount"], 1)
+                self.assertEqual(len(port.calls), 1)
+                self.assertIsNone(actual["requests"][0]["instanceFingerprint"])
+        row = instance_request()
+        del row["labels"]
+        port = Port(success([row]))
+        self.assertEqual(MODULE.collect_admin_root_instance(ENV, port)["queryCount"], 1)
+
+    def test_valid_opaque_instance_uses_no_assumed_google_hex_width(self):
+        for value in ["x", "A_-z9", "a" * 512]:
+            with self.subTest(length=len(value)):
+                port = Port(success([instance_request(value)]), success([instance_context(value)]))
+                actual = MODULE.collect_admin_root_instance(ENV, port)
+                self.assertIsNone(actual["readFailureCode"])
+                self.assertEqual(actual["queryCount"], 2)
+                self.assertNotEqual(actual["requests"][0]["instanceFingerprint"], value)
+
+    def test_all_observed_candidates_are_kept_and_second_query_is_a_finite_or_set(self):
+        rows = [instance_request("second"), instance_request("first"), instance_request("first")]
+        port = Port(success(rows), success([instance_context("second"), instance_context("first")]))
+        actual = MODULE.collect_admin_root_instance(ENV, port)
+        self.assertEqual(len(actual["requests"]), 3)
+        query = port.calls[1][0][3]
+        self.assertEqual(re.findall(r'labels.instanceId=("[^"]*")', query),
+                         [json.dumps("first"), json.dumps("second")])
+        self.assertNotIn("trace=", query)
+        self.assertEqual(len(port.calls), 2)
+
+    def test_queries_keep_fixed_resource_window_stream_and_all_budgets(self):
+        port = Port(success([instance_request()]), success([]))
+        actual = MODULE.collect_admin_root_instance(ENV, port)
+        self.assertEqual(port.calls[0][0][3], MODULE.admin_request_query())
+        for index, (command, kwargs) in enumerate(port.calls):
+            self.assertEqual(command[:3], ["gcloud", "logging", "read"])
+            for value in [MODULE.PROJECT, MODULE.REGION, MODULE.ADMIN_SERVICE,
+                          MODULE.ADMIN_REVISION, MODULE.ADMIN_START, MODULE.ADMIN_END]:
+                self.assertIn(value, command[3])
+            self.assertEqual(command[command.index("--limit") + 1], "40" if index == 0 else "100")
+            self.assertEqual(kwargs, {"capture_output": True, "text": True, "timeout": 90})
+            self.assertNotIn("--page-token", command)
+        self.assertEqual(re.findall(r'logName=("[^"]*")', port.calls[1][0][3]),
+                         [json.dumps(value) for value in MODULE.ADMIN_INSTANCE_STREAMS.values()])
+        self.assertNotIn("varlog", port.calls[1][0][3])
+        self.assertEqual(actual["instanceAssociationStatus"], "UNOBSERVED")
+
+    def test_foreign_missing_or_injected_container_instance_is_rejected(self):
+        for value in [None, "foreign", 'a" OR severity="ERROR', "", 7]:
+            with self.subTest(value=value):
+                port = Port(success([instance_request()]), success([instance_context(value)]))
+                actual = MODULE.collect_admin_root_instance(ENV, port)
+                self.assertEqual(actual["readFailureCode"], "LOG_OUTSIDE_OBSERVED_REQUEST_INSTANCES")
+                self.assertEqual(actual["instanceContext"], [])
+                self.assertEqual(len(port.calls), 2)
+
+    def test_container_resource_time_stream_and_trace_are_revalidated(self):
+        changes = [
+            ("resource", None, "INVALID_LOG_RESOURCE"),
+            ("resource", {"type": "global"}, "LOG_OUTSIDE_FIXED_RESOURCE"),
+            ("timestamp", "2026-10-20T20:08:51Z", "LOG_OUTSIDE_FIXED_WINDOW"),
+            ("logName", MODULE.ADMIN_REQUEST_LOG, "LOG_OUTSIDE_FIXED_STREAM"),
+            ("logName", f"projects/{MODULE.PROJECT}/logs/run.googleapis.com%2Fvarlog%2Fsystem",
+             "LOG_OUTSIDE_FIXED_STREAM"),
+            ("trace", "foreign", "INVALID_LOG_TRACE"),
+        ]
+        for key, value, code in changes:
+            with self.subTest(key=key, value=value):
+                row = instance_context()
+                row[key] = value
+                actual = MODULE.collect_admin_root_instance(
+                    ENV, Port(success([instance_request()]), success([row]))
+                )
+                self.assertEqual(actual["readFailureCode"], code)
+                self.assertEqual(actual["instanceAssociationStatus"], "UNOBSERVED")
+        for label in ["project_id", "location", "service_name", "revision_name"]:
+            with self.subTest(label=label):
+                row = instance_context()
+                row["resource"]["labels"][label] = "foreign"
+                actual = MODULE.collect_admin_root_instance(
+                    ENV, Port(success([instance_request()]), success([row]))
+                )
+                self.assertEqual(actual["readFailureCode"], "LOG_OUTSIDE_FIXED_RESOURCE")
+
+    def test_new_application_classifier_never_scans_a_later_error_or_hidden_suffix(self):
+        line = "Error: " + next(iter(MODULE.ADMIN_EXCEPTION_SIGNATURES))
+        for text in ["body\n" + line, line + " private-tail", "prefix " + line,
+                     "\x1b[2J" + line, line + "\x00private"]:
+            with self.subTest(text=text):
+                row = instance_context()
+                row["textPayload"] = text
+                actual = MODULE.collect_admin_root_instance(
+                    ENV, Port(success([instance_request()]), success([row]))
+                )
+                self.assertEqual(actual["instanceContext"][0]["exceptionSignatures"], [])
+
+    def test_no_requests_or_no_instance_context_is_unknown_without_fallback(self):
+        for responses, count in [([success([])], 1),
+                                 ([success([instance_request()]), success([])], 2)]:
+            with self.subTest(count=count):
+                port = Port(*responses)
+                actual = MODULE.collect_admin_root_instance(ENV, port)
+                self.assertEqual(actual["instanceAssociationStatus"], "UNOBSERVED")
+                self.assertEqual(actual["instanceContext"], [])
+                self.assertEqual(len(port.calls), count)
+
+    def test_first_query_boundaries_errors_and_denials_never_retry_or_fallback(self):
+        errors = [
+            (success([instance_request()] * 40), "LOGGING_RESULT_LIMIT_REACHED"),
+            (subprocess.CompletedProcess([], 0, "{}", ""), "INVALID_LOGGING_ROWS"),
+            (subprocess.CompletedProcess([], 0, "[invalid", ""), "MALFORMED_LOGGING_RESPONSE"),
+            (subprocess.CompletedProcess([], 0, "x" * (MODULE.MAX_RESPONSE_BYTES + 1), ""),
+             "LOGGING_RESPONSE_TOO_LARGE"),
+            (subprocess.TimeoutExpired("private", 90), "LOGGING_READ_TIMEOUT"),
+            (OSError("private"), "LOGGING_TOOL_UNAVAILABLE"),
+            (subprocess.CompletedProcess([], 1, "private", "PERMISSION_DENIED private"),
+             "PERMISSION_DENIED"),
+        ]
+        for response, code in errors:
+            with self.subTest(code=code):
+                port = Port(response)
+                actual = MODULE.collect_admin_root_instance(ENV, port)
+                self.assertEqual(actual["readFailureCode"], code)
+                self.assertEqual(actual["queryCount"], 1)
+                self.assertEqual(len(port.calls), 1)
+                self.assertNotIn("private", json.dumps(actual))
+
+    def test_second_query_boundaries_errors_and_denials_never_make_a_third_read(self):
+        errors = [
+            (success([instance_context()] * 100), "LOGGING_RESULT_LIMIT_REACHED"),
+            (subprocess.CompletedProcess([], 0, "{}", ""), "INVALID_LOGGING_ROWS"),
+            (subprocess.CompletedProcess([], 0, "[invalid", ""), "MALFORMED_LOGGING_RESPONSE"),
+            (subprocess.CompletedProcess([], 0, "x" * (MODULE.MAX_RESPONSE_BYTES + 1), ""),
+             "LOGGING_RESPONSE_TOO_LARGE"),
+            (subprocess.TimeoutExpired("private", 90), "LOGGING_READ_TIMEOUT"),
+            (subprocess.CompletedProcess([], 1, "private", "PERMISSION_DENIED private"),
+             "PERMISSION_DENIED"),
+        ]
+        for response, code in errors:
+            with self.subTest(code=code):
+                port = Port(success([instance_request()]), response)
+                actual = MODULE.collect_admin_root_instance(ENV, port)
+                self.assertEqual(actual["readFailureCode"], code)
+                self.assertEqual(actual["queryCount"], 2)
+                self.assertEqual(len(port.calls), 2)
+                self.assertEqual(actual["instanceAssociationStatus"], "UNOBSERVED")
+                self.assertNotIn("private", json.dumps(actual))
+
+    def test_maximum_nonfull_responses_remain_bounded_without_discarding_candidates(self):
+        requests = [instance_request("instance_" + str(i)) for i in range(39)]
+        context = [instance_context("instance_" + str(i % 39)) for i in range(99)]
+        port = Port(success(requests), success(context))
+        actual = MODULE.collect_admin_root_instance(ENV, port)
+        self.assertIsNone(actual["readFailureCode"])
+        self.assertEqual(len(actual["requests"]), 39)
+        self.assertEqual(len(actual["instanceContext"]), 99)
+        self.assertEqual(len(port.calls), 2)
+
+    def test_wrong_definition_or_target_makes_no_logging_request(self):
+        for key, value in [("EXPECTED_DEFINITION_SHA", "dev"), ("GITHUB_SHA", "b" * 40),
+                           ("DEV_GCP_PROJECT_ID", "foreign"), ("DEV_GCP_REGION", "foreign")]:
+            with self.subTest(key=key):
+                port = Port()
+                actual = MODULE.collect_admin_root_instance({**ENV, key: value}, port)
+                self.assertIsNotNone(actual["readFailureCode"])
+                self.assertEqual(port.calls, [])
+
+    def test_private_text_ids_headers_queries_and_traces_never_cross_cli_artifact_boundary(self):
+        marker = "synthetic-private-value-not-a-credential"
+        request = instance_request(marker, REQUEST_REASONS[0][0])
+        request["httpRequest"]["requestUrl"] += "&token=" + marker
+        row = instance_context(marker)
+        row["textPayload"] = marker
+        row["jsonPayload"] = {"headers": {"authorization": marker}, "body": marker}
+        port = Port(success([request]), success([row]))
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "snapshot.json"
+            stdout, stderr = StringIO(), StringIO()
+            with mock.patch.dict("os.environ", ENV, clear=True), \
+                    mock.patch.object(MODULE, "collect_admin_root_instance",
+                                      side_effect=lambda env: MODULE_COLLECT_INSTANCE(env, port)), \
+                    mock.patch("sys.argv", ["readback", "--output", str(output), "--profile",
+                                            MODULE.ADMIN_INSTANCE_PROFILE]), \
+                    redirect_stdout(stdout), redirect_stderr(stderr):
+                self.assertEqual(MODULE.main_with_instance_profile(), 0)
+            data = output.read_text() + stdout.getvalue() + stderr.getvalue()
+            for value in [marker, TRACE, "private-api.example", "objectKey", "authorization"]:
+                self.assertNotIn(value, data)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(list(Path(directory).iterdir()), [output])
+            self.assertEqual(len(port.calls), 2)
+
+    def test_new_cli_delegates_each_old_profile_to_the_unchanged_main(self):
+        for args in [[], ["--profile", "fleet-original-v2"], ["--profile", MODULE.ADMIN_PROFILE]]:
+            with self.subTest(args=args), \
+                    mock.patch("sys.argv", ["readback", "--output", "unused", *args]), \
+                    mock.patch.object(MODULE, "main", return_value=7) as legacy:
+                self.assertEqual(MODULE.main_with_instance_profile(), 7)
+                legacy.assert_called_once_with()
+
+
+MODULE_COLLECT_INSTANCE = MODULE.collect_admin_root_instance
+
+
 if __name__ == "__main__":
     unittest.main()

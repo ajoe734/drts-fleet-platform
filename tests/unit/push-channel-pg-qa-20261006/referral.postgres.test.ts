@@ -1,3 +1,4 @@
+import { PASSENGER_FEE_DISCLOSURE_VERSION } from "@drts/contracts";
 import { randomUUID } from "node:crypto";
 import { domainFixture } from "../referral-embed-verified-session-canonical-journey-20261015/domain-fixture";
 import { ReferralEmbedHandoffRepository } from "../../../apps/api/src/modules/tenant-partner/referral-embed-handoff.repository";
@@ -121,10 +122,19 @@ describe.skipIf(!databaseUrl)(
         pickupAddress: "Synthetic pickup",
         dropoffAddress: "Synthetic dropoff",
       };
+      await service.acknowledgeReferralFees(
+        {
+          disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+          acknowledged: true,
+        },
+        identity,
+      );
       const quote = await service.quoteReferralPassengerFare(input, identity);
       const command = {
         ...input,
         quoteId: quote.quoteId,
+        feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        feeConfirmed: true,
         passengerName: "Synthetic PG rider",
         passengerPhone: "0912345678",
         idempotencyKey: "pg-referral",

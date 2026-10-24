@@ -1,9 +1,19 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OpsDispatchEventsService } from "../../../../apps/api/src/common/ops-dispatch-events.service";
+import { AuditNotificationEmailAdapter } from "../../../../apps/api/src/modules/audit-notification/audit-notification.email-adapter";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { CallcenterService } from "../../../../apps/api/src/modules/callcenter/callcenter.service";
+import { FileMailOutbox } from "../../../../apps/api/src/modules/notification-delivery/file-mail-outbox";
+import { NotificationDeliveryService } from "../../../../apps/api/src/modules/notification-delivery/notification-delivery.service";
 import { OwnedMobilityTaskEventsService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility-task-events.service";
+import { OwnedMobilityRepository } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityService } from "../../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import { TenantPartnerRepository } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.repository";
 import { TenantPartnerService } from "../../../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 
 // SR-QA-BOOKING-001 / C025: 送審→核准／駁回／升級→訂單狀態一致性驗收。
@@ -296,6 +306,408 @@ describe("SR-QA-BOOKING-001 / C025: 租戶送審與核准／駁回／升級的�
           {},
         ),
       ).rejects.toThrow();
+    });
+  });
+
+  describe("3. 持久層交易邊界與簽核通知時序 (Transactional Create & After-Commit Notification Boundary)", () => {
+    type TransactionBoundaryMode =
+      | "reject_on_order_persist"
+      | "reject_on_commit"
+      | "held_then_successful_commit";
+
+    async function createTransactionalApprovalHarness(
+      mode: TransactionBoundaryMode,
+    ) {
+      const outboxDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), `c025-after-commit-${mode}-`),
+      );
+      const timeline: string[] = [];
+      let transportSendCalls = 0;
+      let releaseCommit!: () => void;
+      let reachedCommit!: () => void;
+      const commitReached = new Promise<void>((resolve) => {
+        reachedCommit = resolve;
+      });
+      const commitRelease = new Promise<void>((resolve) => {
+        releaseCommit = resolve;
+      });
+
+      const outbox = new FileMailOutbox(outboxDir);
+      const notificationDeliveryService = new NotificationDeliveryService(
+        outbox,
+        {
+          provider: "smtp",
+          send: async () => {
+            transportSendCalls += 1;
+            timeline.push("mail_transport:send(new_request)");
+            return {
+              provider: "smtp",
+              providerMessageId: `<c025-${mode}-${transportSendCalls}@drts.local>`,
+              response: "250 OK",
+              acceptedAt: "2026-07-01T00:00:01.000Z",
+            };
+          },
+        },
+      );
+      const auditNotificationService = new AuditNotificationService(
+        undefined,
+        new AuditNotificationEmailAdapter(notificationDeliveryService),
+      );
+      const tenantPartnerService = new TenantPartnerService(
+        auditNotificationService,
+      );
+      const costCenter = tenantPartnerService
+        .listCostCenters(TENANT_ID)
+        .find((row) => row.activeFlag)!.code;
+
+      await tenantPartnerService.upsertTenantQuotaPolicy(TENANT_ID, {
+        period: "monthly",
+        limit: {
+          bookingCountLimit: 10,
+          amountMinorLimit: 5_000_000,
+          currency: "TWD",
+          enforcementMode: "require_approval",
+        },
+      });
+      await tenantPartnerService.upsertApprovalRule(TENANT_ID, {
+        ruleName: "Cost-center approval boundary rule",
+        priority: 1,
+        conditions: [
+          { field: "cost_center.code", op: "eq", value: costCenter },
+        ],
+        action: "require_approval",
+        approvalMode: "any_of",
+        approvers: [{ kind: "tenant_finance_admin" }],
+      });
+
+      const committedOrders: number[] = [];
+      let pendingOrders: number[] = [];
+      const databaseBoundary = {
+        isEnabled: () => true,
+        query: async () => ({ rows: [], rowCount: 0 }),
+        connect: async () => ({
+          query: async (sql: string) => {
+            const normalized = sql.trim();
+            if (normalized === "BEGIN") {
+              pendingOrders = [];
+              timeline.push("sql:BEGIN");
+              return { rows: [], rowCount: 0 };
+            }
+            if (normalized === "COMMIT") {
+              timeline.push("sql:COMMIT-entered");
+              reachedCommit();
+              if (mode === "reject_on_commit") {
+                throw new Error("synthetic_known_commit_rejected");
+              }
+              if (mode === "held_then_successful_commit") {
+                await commitRelease;
+              }
+              committedOrders.push(...pendingOrders);
+              timeline.push("sql:COMMIT-acknowledged");
+              return { rows: [], rowCount: 0 };
+            }
+            if (normalized === "ROLLBACK") {
+              pendingOrders = [];
+              timeline.push("sql:ROLLBACK");
+              return { rows: [], rowCount: 0 };
+            }
+            if (/INSERT INTO core\.phase1_tenant_approval_requests/.test(sql)) {
+              timeline.push("sql:INSERT-approval-request");
+              return { rows: [], rowCount: 1 };
+            }
+            if (/(?:INSERT INTO|UPDATE) ops\.phase1_owned_orders/.test(sql)) {
+              timeline.push("sql:PERSIST-order");
+              if (mode === "reject_on_order_persist") {
+                throw new Error("synthetic_known_order_persist_rejected");
+              }
+              pendingOrders.push(1);
+              return { rows: [{ aggregate_version: 1 }], rowCount: 1 };
+            }
+            return { rows: [], rowCount: 0 };
+          },
+          release: () => {
+            timeline.push("sql:release");
+          },
+        }),
+      };
+
+      Object.assign(tenantPartnerService, {
+        tenantPartnerRepository: new TenantPartnerRepository(
+          databaseBoundary as never,
+        ),
+        notificationDeliveryService,
+      });
+      const stubEmitter = { emit: () => {} } as never;
+      const service = new OwnedMobilityService(
+        {
+          getEligibleCandidates: () => [],
+          getVehicleDispatchability: () => true,
+          getDriverAvailability: () => true,
+        } as never,
+        auditNotificationService,
+        new CallcenterService(auditNotificationService),
+        new OwnedMobilityTaskEventsService(stubEmitter),
+        new OpsDispatchEventsService(stubEmitter),
+        new OwnedMobilityRepository(databaseBoundary as never),
+        tenantPartnerService,
+      );
+
+      const createBookingWithApproval = () =>
+        Promise.resolve(
+          service.createTenantBooking(
+            {
+              businessDispatchSubtype: "enterprise_dispatch",
+              costCenter,
+              reservationWindowStart: new Date(
+                Date.now() + 3 * 3600_000,
+              ).toISOString(),
+              reservationWindowEnd: new Date(
+                Date.now() + 4 * 3600_000,
+              ).toISOString(),
+              pickup: { address: "Pickup Boundary" },
+              dropoff: { address: "Dropoff Boundary" },
+              passenger: { name: "Boundary Rider", phone: "0912000000" },
+            } as never,
+            TENANT_ID,
+            ADMIN_IDENTITY,
+            `req-c025-${mode}`,
+          ),
+        );
+
+      const cleanup = () => {
+        releaseCommit();
+        tenantPartnerService.onModuleDestroy();
+        fs.rmSync(outboxDir, { recursive: true, force: true });
+      };
+
+      return {
+        service,
+        tenantPartnerService,
+        auditNotificationService,
+        timeline,
+        getTransportSendCalls: () => transportSendCalls,
+        getCommittedOrderCount: () => committedOrders.length,
+        commitReached,
+        releaseCommit,
+        createBookingWithApproval,
+        cleanup,
+      };
+    }
+
+    it("3.1 persistOrderWorkflow 寫入失敗並 ROLLBACK 時，不得寄出或排入 new_request 通知，且治理與訂單／簽核狀態完整回滾", async () => {
+      const h = await createTransactionalApprovalHarness(
+        "reject_on_order_persist",
+      );
+      try {
+        await expect(h.createBookingWithApproval()).rejects.toThrow(
+          "synthetic_known_order_persist_rejected",
+        );
+
+        expect(h.timeline).toEqual([
+          "sql:BEGIN",
+          "sql:INSERT-approval-request",
+          "sql:PERSIST-order",
+          "sql:ROLLBACK",
+          "sql:release",
+        ]);
+        expect(h.getTransportSendCalls()).toBe(0);
+        expect(h.getCommittedOrderCount()).toBe(0);
+        expect(h.auditNotificationService.listEmailDeliveries()).toEqual([]);
+        expect(
+          h.tenantPartnerService
+            .listTenantNotifications(TENANT_ID)
+            .filter((item) => item.channel === "tenant_approval"),
+        ).toEqual([]);
+        expect(
+          h.auditNotificationService
+            .listAuditLogs()
+            .find(
+              (log) => log.actionName === "approval_notification.new_request",
+            ),
+        ).toBeUndefined();
+        expect(
+          h.auditNotificationService
+            .listAuditLogs()
+            .find(
+              (log) => log.actionName === "booking.approval_request.created",
+            ),
+        ).toBeUndefined();
+        expect((await h.service.listTenantBookings(TENANT_ID)).items).toEqual(
+          [],
+        );
+        expect(h.tenantPartnerService.listApprovalRequests(TENANT_ID)).toEqual(
+          [],
+        );
+        expect(h.tenantPartnerService.listTenantQuotaLedger(TENANT_ID)).toEqual(
+          [],
+        );
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    it("3.2 交易於 COMMIT 明確遭拒並 ROLLBACK 時，不得寄出或排入 new_request 通知，且無幽靈訂單或簽核殘留", async () => {
+      const h = await createTransactionalApprovalHarness("reject_on_commit");
+      try {
+        await expect(h.createBookingWithApproval()).rejects.toThrow(
+          "synthetic_known_commit_rejected",
+        );
+
+        expect(h.timeline).toEqual([
+          "sql:BEGIN",
+          "sql:INSERT-approval-request",
+          "sql:PERSIST-order",
+          "sql:COMMIT-entered",
+          "sql:ROLLBACK",
+          "sql:release",
+        ]);
+        expect(h.getTransportSendCalls()).toBe(0);
+        expect(h.getCommittedOrderCount()).toBe(0);
+        expect(h.auditNotificationService.listEmailDeliveries()).toEqual([]);
+        expect(
+          h.tenantPartnerService
+            .listTenantNotifications(TENANT_ID)
+            .filter((item) => item.channel === "tenant_approval"),
+        ).toEqual([]);
+        expect(
+          h.auditNotificationService
+            .listAuditLogs()
+            .find(
+              (log) => log.actionName === "approval_notification.new_request",
+            ),
+        ).toBeUndefined();
+        expect((await h.service.listTenantBookings(TENANT_ID)).items).toEqual(
+          [],
+        );
+        expect(h.tenantPartnerService.listApprovalRequests(TENANT_ID)).toEqual(
+          [],
+        );
+        expect(h.tenantPartnerService.listTenantQuotaLedger(TENANT_ID)).toEqual(
+          [],
+        );
+      } finally {
+        h.cleanup();
+      }
+    });
+
+    it("3.3 COMMIT 尚未完成前不提前寄信；COMMIT 成功後才觸發單次 new_request 通知並維持完整關聯與讀回一致", async () => {
+      const h = await createTransactionalApprovalHarness(
+        "held_then_successful_commit",
+      );
+      try {
+        let settled = false;
+        const creationPromise = h.createBookingWithApproval().then(
+          (value) => {
+            settled = true;
+            return value;
+          },
+          (error) => {
+            settled = true;
+            throw error;
+          },
+        );
+
+        await h.commitReached;
+        expect(settled).toBe(false);
+        expect(h.getCommittedOrderCount()).toBe(0);
+        expect(h.getTransportSendCalls()).toBe(0);
+        expect(h.auditNotificationService.listEmailDeliveries()).toEqual([]);
+        expect(h.tenantPartnerService.listApprovalRequests(TENANT_ID)).toEqual(
+          [],
+        );
+        expect((await h.service.listTenantBookings(TENANT_ID)).items).toEqual(
+          [],
+        );
+        expect(h.timeline).toEqual([
+          "sql:BEGIN",
+          "sql:INSERT-approval-request",
+          "sql:PERSIST-order",
+          "sql:COMMIT-entered",
+        ]);
+
+        h.releaseCommit();
+        const created = await creationPromise;
+
+        expect(h.timeline).toEqual([
+          "sql:BEGIN",
+          "sql:INSERT-approval-request",
+          "sql:PERSIST-order",
+          "sql:COMMIT-entered",
+          "sql:COMMIT-acknowledged",
+          "sql:release",
+          "mail_transport:send(new_request)",
+        ]);
+        expect(
+          h.timeline.indexOf("mail_transport:send(new_request)"),
+        ).toBeGreaterThan(h.timeline.indexOf("sql:COMMIT-acknowledged"));
+        expect(h.getTransportSendCalls()).toBe(1);
+        expect(h.getCommittedOrderCount()).toBe(1);
+
+        const booking = h.service.getTenantBooking(
+          TENANT_ID,
+          created.bookingId,
+        );
+        expect(booking.approvalState).toBe("pending");
+        const approvalRequests = h.tenantPartnerService.listApprovalRequests(
+          TENANT_ID,
+          { bookingId: created.bookingId },
+        );
+        expect(approvalRequests).toHaveLength(1);
+        const approvalRequest = approvalRequests[0]!;
+        expect(approvalRequest.orderId).toBe(created.orderId);
+        expect(approvalRequest.resolvedApproverUserIds).toEqual([
+          FINANCE_APPROVER_ID,
+        ]);
+        expect(booking.approvalRequestIds).toEqual([
+          approvalRequest.approvalRequestId,
+        ]);
+
+        const notificationAudit = h.auditNotificationService
+          .listAuditLogs()
+          .find(
+            (log) => log.actionName === "approval_notification.new_request",
+          );
+        expect(notificationAudit?.resourceId).toBe(
+          approvalRequest.approvalRequestId,
+        );
+        expect(notificationAudit?.newValuesSummary).toMatchObject({
+          bookingId: created.bookingId,
+          orderId: created.orderId,
+          templateKey: "new_request",
+          deliveredToUserIds: [FINANCE_APPROVER_ID],
+          inApp: { delivered: 1 },
+          email: {
+            attempted: 1,
+            sent: 1,
+            failed: 0,
+            unavailable: 0,
+            recipients: [
+              expect.objectContaining({
+                userId: FINANCE_APPROVER_ID,
+                status: "sent",
+                deliveryId: expect.any(String),
+              }),
+            ],
+          },
+        });
+
+        const deliveryId = (
+          notificationAudit?.newValuesSummary as {
+            email: { recipients: Array<{ deliveryId: string }> };
+          }
+        ).email.recipients[0]!.deliveryId;
+        const receipt = await h.tenantPartnerService.getMailDeliveryReceipt(
+          TENANT_ID,
+          deliveryId,
+        );
+        expect(receipt).toMatchObject({
+          deliveryId,
+          tenantId: TENANT_ID,
+          status: "sent",
+        });
+      } finally {
+        h.cleanup();
+      }
     });
   });
 });

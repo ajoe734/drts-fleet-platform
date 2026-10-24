@@ -169,6 +169,7 @@ from control_plane.usecases.dispatch_runtime import (
     task_phase_priority,
 )
 from control_plane.usecases.chair_review_policy import (
+    blocked_task_holds_delivery,
     blocked_task_triage_kind,
     chair_provider_pause_reason_is_actionable,
     chair_task_action_index,
@@ -7416,7 +7417,7 @@ def blocked_task_triage_action(
     status: dict[str, Any],
     task: dict[str, Any],
 ) -> tuple[str, str | None]:
-    if task.get("external_gate"):
+    if task.get("external_gate") or blocked_task_holds_delivery(task):
         return "wait_for_parent_resolution", None
     task_id = str(task.get("id") or "").strip()
     if not task_id:
@@ -7759,7 +7760,7 @@ def create_chair_unblock_task(
     parent = task_map.get(parent_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
         return False
-    if parent.get("external_gate"):
+    if parent.get("external_gate") or blocked_task_holds_delivery(parent):
         return False
     # Recursion base case: a blocked unblock/repair task or auto-generated helper
     # must NOT spawn another governance
@@ -7781,7 +7782,20 @@ def create_chair_unblock_task(
     if unblock_kind not in {"history_repair", "planning_decision", "manual_unblock"}:
         unblock_kind = blocked_task_triage_kind(parent)
     unblock_id = chair_unblock_task_id(parent_id, unblock_kind)
-    if open_unblock_task_for_parent(status, parent_id, unblock_kind) is not None or task_map.get(unblock_id) is not None:
+    # Completed helpers leave the live task map when archived. Their stable IDs
+    # must remain reserved, otherwise each chair tick can resurrect the same work.
+    archived_task_ids = status.get("archived_task_ids", []) or []
+    if isinstance(archived_task_ids, dict):
+        archived_ids = {str(task_id) for task_id, archived in archived_task_ids.items() if archived}
+    elif isinstance(archived_task_ids, (list, tuple, set)):
+        archived_ids = {str(task_id) for task_id in archived_task_ids}
+    else:
+        archived_ids = set()
+    if (
+        open_unblock_task_for_parent(status, parent_id, unblock_kind) is not None
+        or task_map.get(unblock_id) is not None
+        or unblock_id in archived_ids
+    ):
         return False
 
     requested_owner = str(action.get("target_agent") or "").strip()
@@ -7909,7 +7923,7 @@ def apply_chair_parent_resume_action(
     parent = task_map.get(task_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
         return False
-    if parent.get("external_gate"):
+    if parent.get("external_gate") or blocked_task_holds_delivery(parent):
         return False
 
     dependency_done_statuses = {

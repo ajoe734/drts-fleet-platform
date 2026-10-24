@@ -1,3 +1,10 @@
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+  type ReferralFeeOwner,
+  type ReferralFeeStatus,
+  type AcknowledgeReferralFeesCommand,
+} from "@drts/contracts";
 import type {
   SubmitReferralPassengerComplaintCommand,
   ReferralPassengerComplaintSubmission,
@@ -237,6 +244,9 @@ type TenantBookingResult = {
   dispatchSemantics: "reservation";
   status: OwnedOrderRecord["status"];
   replayed: boolean;
+  feeConfirmation?:
+    | import("@drts/contracts").ReferralOrderFeeConfirmation
+    | null;
 };
 
 const REFERRAL_PASSENGER_CANCEL_WINDOW_MS = 2 * 60_000;
@@ -2175,7 +2185,10 @@ export class OwnedMobilityService
       this.refreshPassengerDisclosureSnapshot(order, false, {
         channel: this.resolvePassengerDisclosureChannel(order, identity),
       });
-    const applyGovernance = (tx?: OwnedMobilityQueryExecutor | null) =>
+    const applyGovernance = (
+      tx?: OwnedMobilityQueryExecutor | null,
+      afterCommit?: Array<() => void | Promise<void>>,
+    ) =>
       this.afterMaybePromise(
         this.evaluateTenantBookingGovernance({
           tx: tx ?? null,
@@ -2188,6 +2201,7 @@ export class OwnedMobilityService
             this.resolveApprovalStateFromEvaluation(evaluation);
           return this.createApprovalRequestForOrder({
             tx: tx ?? null,
+            ...(afterCommit ? { afterCommit } : {}),
             order,
             evaluation,
             ...(requestId ? { requestId } : {}),
@@ -2202,6 +2216,7 @@ export class OwnedMobilityService
         (options?.writeReferralNotificationRoute &&
           this.partnerUserIdentityLinkRepository))
     ) {
+      const afterCommit: Array<() => void | Promise<void>> = [];
       return (
         this.ownedMobilityRepository
           .withTransaction(async (tx) => {
@@ -2240,15 +2255,51 @@ export class OwnedMobilityService
                   order.orderId,
                   tx,
                 );
+              const acknowledgement = await this.requireReferralFeeAgreement(
+                claimed,
+                claimed,
+                tx,
+              );
+              const feeClock = await tx.query<{ now: Date | string }>(
+                "SELECT clock_timestamp() AS now",
+              );
+              const feeConfirmation = {
+                tenantId: claimed.tenantId,
+                partnerId: claimed.partnerId,
+                partnerProgramId: claimed.partnerProgramId,
+                entrySlug: claimed.entrySlug,
+                drtsPassengerId: claimed.drtsPassengerId,
+                orderId: order.orderId,
+                quoteId: claimed.quoteId,
+                disclosureVersion: acknowledgement.disclosureVersion,
+                contentHash: acknowledgement.contentHash,
+                quotedFareRuleVersion: claimed.quotedFareRuleVersion,
+                acknowledgedAt: acknowledgement.acknowledgedAt,
+                feeConfirmedAt: new Date(feeClock.rows[0]!.now).toISOString(),
+                summary: {
+                  pickupAddress: claimed.pickupAddress,
+                  dropoffAddress: claimed.dropoffAddress,
+                  requestedScheduledAt: claimed.requestedScheduledAt,
+                  vehicleType: claimed.vehicleType,
+                  estimatedMin: claimed.estimatedMin,
+                  estimatedMax: claimed.estimatedMax,
+                },
+              };
+              await this.ownedMobilityRepository!.insertReferralOrderFeeConfirmation(
+                feeConfirmation,
+                tx,
+              );
               order.referralPassengerLifecycle = {
                 ...order.referralPassengerLifecycle,
                 quote: claimed,
                 confirmedAt: claimed.consumedAt!,
+                feeConfirmation,
               };
             }
             await applyPassengerDisclosure();
             const approvalRequest = await applyGovernance(
               this.tenantPartnerService?.isPersistenceEnabled() ? tx : null,
+              afterCommit,
             );
             await this.ownedMobilityRepository!.persistOrderWorkflow(tx, {
               orders: [this.cloneOrder(order)],
@@ -2282,9 +2333,17 @@ export class OwnedMobilityService
           })
           // Publish into the in-memory order feed and dispatch events only after
           // commit: readers must not race the frozen route/sequence setup.
-          .then((approvalRequest) =>
-            finalizeCreation(previousApprovalState, approvalRequest, false),
-          )
+          .then(async (approvalRequest) => {
+            const result = await finalizeCreation(
+              previousApprovalState,
+              approvalRequest,
+              false,
+            );
+            for (const effect of afterCommit) {
+              await effect();
+            }
+            return result;
+          })
       );
     }
 
@@ -2779,6 +2838,21 @@ export class OwnedMobilityService
       .catch(() => null);
     if (!current) return missing;
     const location = current.currentLocation;
+    // Prefer the actual GPS observation time over server receive time, matching
+    // the same -5s..60s window the dropoff route binding already enforces via
+    // passengerDropoffObservationKey; a buffered-upload fix stays "fresh" by
+    // receipt time alone but must not pass a live ETA to the passenger.
+    const locationObservationAgeMs = location
+      ? Date.now() - Date.parse(location.recordedAt)
+      : NaN;
+    const isLocationObservationCurrent =
+      Number.isFinite(locationObservationAgeMs) &&
+      locationObservationAgeMs >= -5_000 &&
+      locationObservationAgeMs < 60_000;
+    const passengerLocationFreshness =
+      current.locationFreshness === "fresh" && !isLocationObservationCurrent
+        ? "stale"
+        : current.locationFreshness;
     const waitingForPickup = [
       "assigned",
       "driver_accepted",
@@ -2787,7 +2861,7 @@ export class OwnedMobilityService
     const pickup = assignment.routeFare?.pickup;
     const eta =
       waitingForPickup &&
-      current.locationFreshness === "fresh" &&
+      passengerLocationFreshness === "fresh" &&
       location &&
       pickup &&
       Number.isFinite(pickup.lat) &&
@@ -2796,11 +2870,32 @@ export class OwnedMobilityService
             .getDriverEta?.(assignment.driver.driverId, pickup.lat, pickup.lng)
             .catch(() => null)
         : null;
+    const isOnTripOrder = order.status === "on_trip";
+    const dropoffRoute = isOnTripOrder
+      ? await this.resolvePassengerDropoffRoute(order, assignment, current)
+      : null;
+    // getDriverEta or resolvePassengerDropoffRoute above can each block long
+    // enough (an authority storage lock or route provider call) for this same
+    // GPS fix to age past the observation window between the freshness check
+    // and this return; recheck the observation age after both awaits, not
+    // just the pre-await classification.
+    const finalLocationAgeMs = location
+      ? Date.now() - Date.parse(location.recordedAt)
+      : NaN;
+    const isLocationObservationStillCurrent =
+      Number.isFinite(finalLocationAgeMs) &&
+      finalLocationAgeMs >= -5_000 &&
+      finalLocationAgeMs < 60_000;
+    const finalLocationFreshness =
+      passengerLocationFreshness === "fresh" &&
+      !isLocationObservationStillCurrent
+        ? "stale"
+        : passengerLocationFreshness;
     return {
       assignmentId: assignment.assignmentId,
       driverId: assignment.driver.driverId,
       vehicleId: assignment.vehicle.vehicleId,
-      locationFreshness: current.locationFreshness,
+      locationFreshness: finalLocationFreshness,
       location: location
         ? {
             lat: location.lat,
@@ -2809,16 +2904,15 @@ export class OwnedMobilityService
             recordedAt: location.recordedAt,
           }
         : null,
-      pickupEta: eta
-        ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
-        : null,
-      ...(order.status === "on_trip"
+      pickupEta:
+        eta && isLocationObservationStillCurrent
+          ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
+          : null,
+      ...(isOnTripOrder
         ? {
-            dropoffRoute: await this.resolvePassengerDropoffRoute(
-              order,
-              assignment,
-              current,
-            ),
+            dropoffRoute: isLocationObservationStillCurrent
+              ? dropoffRoute
+              : null,
           }
         : {}),
     };
@@ -15498,6 +15592,8 @@ export class OwnedMobilityService
             "passengerPhone",
             "partnerUserRef",
             "idempotencyKey",
+            "feeDisclosureVersion",
+            "feeConfirmed",
           ]
         : []),
     ];
@@ -15540,8 +15636,20 @@ export class OwnedMobilityService
       requestedScheduledAt = new Date(rawTime).toISOString();
     }
     const c = command as CreateReferralPassengerBookingCommand;
-    if (create) text(c.idempotencyKey, false, 255);
+    if (create) {
+      text(c.idempotencyKey, false, 255);
+      if (c.feeConfirmed !== undefined && typeof c.feeConfirmed !== "boolean")
+        invalid();
+      if (c.feeDisclosureVersion !== undefined)
+        text(c.feeDisclosureVersion, true, 100);
+    }
     return {
+      ...(create && c.feeDisclosureVersion !== undefined
+        ? { feeDisclosureVersion: text(c.feeDisclosureVersion, true, 100) }
+        : {}),
+      ...(create && c.feeConfirmed !== undefined
+        ? { feeConfirmed: c.feeConfirmed }
+        : {}),
       entrySlug: text(command.entrySlug, true, 150),
       quoteId: create ? text(c.quoteId, true, 100) : "",
       pickupAddress: text(command.pickupAddress, true),
@@ -15635,11 +15743,107 @@ export class OwnedMobilityService
       isGuaranteed: quote.isGuaranteed,
       quotedFareSource: quote.quotedFareSource,
       quotedFareRuleVersion: quote.quotedFareRuleVersion,
+      ...(quote.feeDisclosureVersion
+        ? { feeDisclosureVersion: quote.feeDisclosureVersion }
+        : {}),
+      ...(quote.feeContentHash ? { feeContentHash: quote.feeContentHash } : {}),
       createdAt: quote.createdAt,
       expiresAt: quote.expiresAt,
       consumedByOrderId: quote.consumedByOrderId,
       consumedAt: quote.consumedAt,
     };
+  }
+
+  async getReferralFeeStatus(
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralFeeStatus> {
+    const { owner } = await this.referralAuthority(identity);
+    const ack =
+      await this.ownedMobilityRepository!.findReferralFeeAcknowledgement(
+        owner,
+        PASSENGER_FEE_DISCLOSURE_VERSION,
+      );
+    if (ack && ack.contentHash !== PASSENGER_FEE_CONTENT_HASH)
+      throw new ApiRequestError(
+        503,
+        "FEE_DISCLOSURE_UNAVAILABLE",
+        "Fee disclosure version/content conflict.",
+      );
+    return {
+      disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      contentHash: PASSENGER_FEE_CONTENT_HASH,
+      acknowledgedAt: ack?.acknowledgedAt ?? null,
+    };
+  }
+
+  async acknowledgeReferralFees(
+    command: AcknowledgeReferralFeesCommand,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<ReferralFeeStatus> {
+    const { owner } = await this.referralAuthority(identity);
+    if (
+      !command ||
+      typeof command !== "object" ||
+      Array.isArray(command) ||
+      Object.keys(command).some(
+        (key) => !["disclosureVersion", "acknowledged"].includes(key),
+      ) ||
+      command.acknowledged !== true
+    )
+      throw new ApiRequestError(
+        400,
+        "VALIDATION_ERROR",
+        "Explicit fee acknowledgement is required.",
+      );
+    if (command.disclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION)
+      throw new ApiRequestError(
+        409,
+        "FEE_DISCLOSURE_CHANGED",
+        "Read the current fee disclosure.",
+      );
+    const ack = await this.ownedMobilityRepository!.acknowledgeReferralFees(
+      owner,
+      PASSENGER_FEE_DISCLOSURE_VERSION,
+      PASSENGER_FEE_CONTENT_HASH,
+    );
+    return {
+      disclosureVersion: ack.disclosureVersion,
+      contentHash: ack.contentHash,
+      acknowledgedAt: ack.acknowledgedAt,
+    };
+  }
+
+  private async requireReferralFeeAgreement(
+    quote: ReferralPassengerFareQuoteRecord,
+    owner: ReferralFeeOwner,
+    tx?: OwnedMobilityQueryExecutor,
+  ) {
+    if (
+      quote.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+      quote.feeContentHash !== PASSENGER_FEE_CONTENT_HASH
+    )
+      throw new ApiRequestError(
+        409,
+        "FEE_DISCLOSURE_CHANGED",
+        "Refresh the quote after reading the current fees.",
+      );
+    const ack =
+      await this.ownedMobilityRepository!.findReferralFeeAcknowledgement(
+        owner,
+        PASSENGER_FEE_DISCLOSURE_VERSION,
+        tx,
+      );
+    if (
+      !ack ||
+      ack.contentHash !== PASSENGER_FEE_CONTENT_HASH ||
+      !Number.isFinite(Date.parse(ack.acknowledgedAt))
+    )
+      throw new ApiRequestError(
+        403,
+        "FEE_DISCLOSURE_REQUIRED",
+        "A canonical fee agreement is required.",
+      );
+    return ack;
   }
 
   async quoteReferralPassengerFare(
@@ -15774,6 +15978,8 @@ export class OwnedMobilityService
       quotedFareSource: "platform_pricing_rule",
       quotedFareRuleVersion: tariff.version,
       tariffSnapshot: { ...tariff },
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeContentHash: PASSENGER_FEE_CONTENT_HASH,
       route: { ...route },
       breakdown: { ...estimate.breakdown },
       serviceAreaEvaluation: { ...serviceAreaEvaluation },
@@ -15801,6 +16007,8 @@ export class OwnedMobilityService
       replayed,
       quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
       confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+      feeConfirmation:
+        order.referralPassengerLifecycle?.feeConfirmation ?? null,
     };
   }
 
@@ -15848,9 +16056,11 @@ export class OwnedMobilityService
       !life?.quote ||
       life.bookingIdempotencyKey !== key ||
       !life.bookingIntent ||
-      (Object.keys(intent) as Array<keyof ReferralBookingIntent>).some(
-        (k) => life.bookingIntent![k] !== intent[k],
-      )
+      (
+        Object.keys({ ...life.bookingIntent, ...intent }) as Array<
+          keyof ReferralBookingIntent
+        >
+      ).some((k) => life.bookingIntent![k] !== intent[k])
     )
       throw new ApiRequestError(
         409,
@@ -15919,6 +16129,18 @@ export class OwnedMobilityService
     const prior = await recover();
     if (prior) return prior;
     const fresh = async () => {
+      if (command.feeConfirmed !== true)
+        throw new ApiRequestError(
+          400,
+          "FEE_CONFIRMATION_REQUIRED",
+          "Confirm the fees for this order.",
+        );
+      if (command.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION)
+        throw new ApiRequestError(
+          409,
+          "FEE_DISCLOSURE_CHANGED",
+          "Read and confirm the current fees.",
+        );
       const quote = await repo.findReferralFareQuoteSnapshotById(
         intent.quoteId,
       );
@@ -15929,6 +16151,7 @@ export class OwnedMobilityService
           "Quote not found.",
         );
       this.assertReferralQuoteOwner(quote, owner);
+      await this.requireReferralFeeAgreement(quote, owner);
       if (quote.consumedByOrderId) {
         const existing = await recover();
         if (existing) return existing;
@@ -16249,6 +16472,14 @@ export class OwnedMobilityService
       location: null,
       pickupEta: null,
       dropoffRoute: null,
+      pickupPoint:
+        order.pickup.lat != null && order.pickup.lng != null
+          ? { lat: order.pickup.lat, lng: order.pickup.lng }
+          : null,
+      dropoffPoint:
+        order.dropoff.lat != null && order.dropoff.lng != null
+          ? { lat: order.dropoff.lat, lng: order.dropoff.lng }
+          : null,
     };
     try {
       const current =
@@ -16263,7 +16494,22 @@ export class OwnedMobilityService
       )
         return result;
       const point = current.currentLocation;
-      result.locationFreshness = current.locationFreshness;
+      // Prefer the actual GPS observation time over server receive time, matching
+      // the same -5s..60s window the dropoff/route validation below already
+      // enforces; a buffered-upload fix stays "fresh" by receipt time alone but
+      // must not pass a live pickup/dropoff ETA to the referral passenger.
+      const pointObservationAgeMs = point
+        ? Date.now() - Date.parse(point.recordedAt)
+        : NaN;
+      const isPointObservationCurrent =
+        Number.isFinite(pointObservationAgeMs) &&
+        pointObservationAgeMs >= -5_000 &&
+        pointObservationAgeMs < 60_000;
+      const passengerLocationFreshness =
+        current.locationFreshness === "fresh" && !isPointObservationCurrent
+          ? "stale"
+          : current.locationFreshness;
+      result.locationFreshness = passengerLocationFreshness;
       result.location = point
         ? {
             lat: point.lat,
@@ -16272,7 +16518,7 @@ export class OwnedMobilityService
             recordedAt: point.recordedAt,
           }
         : null;
-      if (current.locationFreshness !== "fresh" || !point) return result;
+      if (passengerLocationFreshness !== "fresh" || !point) return result;
       if (
         ["assigned", "driver_accepted", "enroute_pickup"].includes(
           order.status,
@@ -16375,6 +16621,10 @@ export class OwnedMobilityService
         await this.regulatoryRegistryService.getDriverTrackingStatus(
           assignment.driverId,
         );
+      // The provider await above can take long enough for this same GPS fix to
+      // age past the observation window; recheck recordedAt age here too, not
+      // just whether the receipt-time classification or identity changed.
+      const finalPointAgeMs = Date.now() - Date.parse(point.recordedAt);
       if (
         !latestOrder ||
         latestOrder.status !== order.status ||
@@ -16383,6 +16633,9 @@ export class OwnedMobilityService
         latestCurrent.currentVehicleId !== assignment.vehicleId ||
         latestCurrent.currentTaskId !== current.currentTaskId ||
         latestCurrent.locationFreshness !== "fresh" ||
+        !Number.isFinite(finalPointAgeMs) ||
+        finalPointAgeMs < -5_000 ||
+        finalPointAgeMs >= 60_000 ||
         latestCurrent.currentLocation?.recordedAt !== point.recordedAt ||
         latestCurrent.currentLocation?.lat !== point.lat ||
         latestCurrent.currentLocation?.lng !== point.lng
@@ -16511,6 +16764,8 @@ export class OwnedMobilityService
         ),
         confirmedAt:
           activeOrder.referralPassengerLifecycle?.confirmedAt ?? null,
+        feeConfirmation:
+          activeOrder.referralPassengerLifecycle?.feeConfirmation ?? null,
         rating: this.referralRatingResult(activeOrder),
       },
     };
@@ -16591,12 +16846,25 @@ export class OwnedMobilityService
               : `NT$ ${details.fareTotal}`,
           quote: this.referralQuoteView(o.referralPassengerLifecycle?.quote),
           confirmedAt: o.referralPassengerLifecycle?.confirmedAt ?? null,
+          feeConfirmation:
+            o.referralPassengerLifecycle?.feeConfirmation ?? null,
           rating: this.referralRatingResult(o),
+          cancelledAt: o.cancelledAt ?? null,
           completedAt: completedAt ?? details.task?.completedAt ?? null,
           createdAt: o.createdAt ?? new Date().toISOString(),
         };
       }),
     };
+  }
+
+  async getReferralPassengerReceiptPdf(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<import("@drts/contracts").ReferralPassengerReceiptPdfDocument> {
+    const receipt = await this.getReferralPassengerReceipt(orderId, identity);
+    const { renderReferralReceiptDocument } =
+      await import("./referral-receipt-document");
+    return renderReferralReceiptDocument(receipt);
   }
 
   async getReferralPassengerReceipt(
@@ -16704,8 +16972,44 @@ export class OwnedMobilityService
       paymentChannel: "付款及結算狀態未提供",
       quote: this.referralQuoteView(order.referralPassengerLifecycle?.quote),
       confirmedAt: order.referralPassengerLifecycle?.confirmedAt ?? null,
+      feeConfirmation:
+        order.referralPassengerLifecycle?.feeConfirmation ?? null,
       downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
     };
+  }
+
+  /** The persisted order, only when it belongs to this referral passenger. */
+  async requireOwnedReferralPassengerOrder(
+    orderId: string,
+    identity?: BootstrapRequestIdentity | null,
+  ): Promise<OwnedOrderRecord> {
+    if (
+      !identity ||
+      identity.realm !== "partner" ||
+      identity.actorType !== "referral_passenger"
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "REFERRAL_PASSENGER_IDENTITY_REQUIRED",
+        "This action requires an active referral_passenger identity.",
+      );
+    }
+    await this.referralAuthority(identity);
+    const order = await this.ownedMobilityRepository!.findOrderById(orderId);
+    if (!order)
+      throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order not found.");
+    await this.assertPartnerOrderIdentityAsync(identity, order);
+    if (
+      order.passenger?.passengerId !==
+      (identity.drtsPassengerId ?? identity.actorId)
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "PASSENGER_SCOPE_MISMATCH",
+        "The order belongs to another referral passenger.",
+      );
+    }
+    return order;
   }
 
   async cancelReferralPassengerTrip(

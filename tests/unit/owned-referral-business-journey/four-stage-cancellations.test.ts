@@ -1,3 +1,7 @@
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -209,6 +213,12 @@ async function fixture(options: Options = {}) {
     return clone(task);
   };
   const referral: Ports["referral"] = async (path, call = {}) => {
+    if (path === "/api/referral/fees")
+      return response({
+        disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        contentHash: PASSENGER_FEE_CONTENT_HASH,
+        acknowledgedAt: "2026-10-20T00:00:00.000Z",
+      });
     event("referral", path, call);
     if (path === "/api/referral/active") {
       if (options.foreignActive)
@@ -224,6 +234,8 @@ async function fixture(options: Options = {}) {
       quotes.push(id);
       return response({
         quoteId: id,
+        feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+        feeContentHash: PASSENGER_FEE_CONTENT_HASH,
         fixedPrice: false,
         isGuaranteed: false,
         timingMode: "immediate",
@@ -275,6 +287,13 @@ async function fixture(options: Options = {}) {
         orderId: id,
         quote: {
           quoteId: options.wrongBookingQuote ? "different-quote" : body.quoteId,
+        },
+        feeConfirmation: {
+          orderId: id,
+          quoteId: body.quoteId,
+          disclosureVersion: body.feeDisclosureVersion,
+          contentHash: PASSENGER_FEE_CONTENT_HASH,
+          feeConfirmedAt: new Date().toISOString(),
         },
       });
     }

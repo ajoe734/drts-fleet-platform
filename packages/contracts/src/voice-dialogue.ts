@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { voiceDatetimeUtcRegex } from "./voice-datetime";
 
 const text = z.string().min(1).max(500);
 export const voiceDialogueSlotFieldSchema = z.enum([
@@ -146,7 +147,7 @@ export const voiceToolResultSchemas = {
           readbackScriptHash: label,
           templateVersion: z.literal("zh-TW-booking-v1"),
           expectedDigit: z.literal("1"),
-          expiresAt: z.string().datetime(),
+          expiresAt: z.string().regex(voiceDatetimeUtcRegex),
         })
         .strict()
         .optional(),
@@ -189,7 +190,7 @@ export const voiceDialogueSnapshotSlotEvidenceSchema = z
     sourceSegmentIds: z.array(z.string().max(200)).max(50),
     providerConfidence: z.number().min(0).max(1).nullable(),
     validationState: z.enum(["unvalidated", "validated"]),
-    confirmedByCustomerAt: z.string().datetime().nullable(),
+    confirmedByCustomerAt: z.string().regex(voiceDatetimeUtcRegex).nullable(),
   })
   .strict();
 export type VoiceDialogueSnapshotSlotEvidence = z.infer<
@@ -209,7 +210,7 @@ export const voiceDialogueSnapshotContentSchema = z
   .object({
     draftVersion: z.number().int().nonnegative(),
     confirmationId: z.string().max(200).nullable(),
-    slots: z.record(voiceDialogueSnapshotSlotEvidenceSchema),
+    slots: z.record(z.string(), voiceDialogueSnapshotSlotEvidenceSchema),
     slotHistory: z
       .array(
         z
@@ -260,7 +261,7 @@ export const voiceRecordingManifestRefSchema = z
     objectVersion: label,
     checksum: z.string().regex(/^[a-f0-9]{64}$/),
     byteLength: z.number().int().positive(),
-    durableAt: z.string().datetime(),
+    durableAt: z.string().regex(voiceDatetimeUtcRegex),
   })
   .strict();
 export const voiceRecordingSegmentSchema = voiceRecordingScopeSchema
@@ -268,15 +269,15 @@ export const voiceRecordingSegmentSchema = voiceRecordingScopeSchema
     channel: z.enum(["inbound", "outbound"]),
     startMs: z.number().int().nonnegative(),
     endMs: z.number().int().positive(),
-    utcStart: z.string().datetime(),
-    utcEnd: z.string().datetime(),
+    utcStart: z.string().regex(voiceDatetimeUtcRegex),
+    utcEnd: z.string().regex(voiceDatetimeUtcRegex),
     ...voiceRecordingManifestRefSchema.shape,
   })
   .strict();
 export const voiceRecordingClosureSchema = z
   .object({
     closedEventId: label,
-    endedAt: z.string().datetime(),
+    endedAt: z.string().regex(voiceDatetimeUtcRegex),
     endMs: z.number().int().positive(),
     checkpointRefs: z.array(voiceRecordingManifestRefSchema),
   })
@@ -292,10 +293,10 @@ export const voiceRecordingFinalizationSchema = z
         endMs: z.number().int().positive(),
         channels: z.tuple([z.literal("inbound"), z.literal("outbound")]),
         closedEventId: label,
-        endedAt: z.string().datetime(),
+        endedAt: z.string().regex(voiceDatetimeUtcRegex),
       })
       .strict(),
-    verifiedAt: z.string().datetime(),
+    verifiedAt: z.string().regex(voiceDatetimeUtcRegex),
   })
   .strict();
 export const voiceRecordingAdmissionSchema = z

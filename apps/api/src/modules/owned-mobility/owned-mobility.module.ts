@@ -27,10 +27,11 @@ import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibi
 import { VoiceBookingModule } from "../voice-booking/voice-booking.module";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
-import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
+import { ReferralDemoTripController } from "./referral-demo-trip.controller";
+import { ReferralDemoTripService } from "./referral-demo-trip.service";
 
 @Module({
   imports: [
@@ -51,7 +52,7 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     forwardRef(() => TenantPartnerModule),
     forwardRef(() => PlatformPresenceModule),
   ],
-  controllers: [OwnedMobilityController],
+  controllers: [OwnedMobilityController, ReferralDemoTripController],
   providers: [
     { provide: MASKED_CALL_PORT, useClass: UnavailableMaskedCallPort },
     // Stateless DB adapter only; importing MultiTaxiModule would add a cycle.
@@ -62,14 +63,10 @@ import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispa
     PassengerFareRepository,
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
-    ReferralBindingScaffoldService,
     OwnedAutonomousDispatchExecutorService,
+    ReferralDemoTripService,
   ],
-  exports: [
-    OwnedMobilityService,
-    ReferralBindingScaffoldService,
-    OwnedAutonomousDispatchExecutorService,
-  ],
+  exports: [OwnedMobilityService, OwnedAutonomousDispatchExecutorService],
 })
 export class OwnedMobilityModule implements OnModuleInit {
   constructor(

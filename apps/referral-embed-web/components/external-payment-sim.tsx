@@ -32,7 +32,9 @@ export function ExternalPaymentSim({
     padding: "11px 14px",
     background: theme.primaryBg,
     color: theme.primary,
-    font: "inherit",
+    fontFamily: theme.sans,
+    fontSize: 13.5,
+    fontWeight: 700,
     cursor: "pointer",
   };
 
@@ -42,15 +44,15 @@ export function ExternalPaymentSim({
       style={{
         background: theme.surface,
         border: `1px solid ${theme.line}`,
-        borderRadius: theme.radius,
-        padding: 18,
+        borderRadius: 16,
+        padding: 15,
         color: theme.ink,
       }}
     >
-      <h2 style={{ margin: "0 0 8px", fontSize: 16 }}>
+      <h2 style={{ margin: "0 0 4px", fontSize: 14, fontWeight: 700 }}>
         {t("embed.paymentSim.title")}
       </h2>
-      <p style={{ color: theme.muted, fontSize: 12 }}>
+      <p style={{ margin: "0 0 10px", color: theme.muted, fontSize: 12 }}>
         {t("embed.paymentSim.disclaimer")}
       </p>
       {expanded ? (

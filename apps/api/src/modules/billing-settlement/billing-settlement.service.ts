@@ -675,6 +675,15 @@ export class BillingSettlementService implements OnModuleInit {
 
   private driverFeePlans: DriverFeePlanRecord[] = [];
 
+  // A publish in flight on this instance registers its name/version here
+  // before awaiting the canonical refresh and persistence ACK. Without this,
+  // a second same-instance publish of the same name/version that starts
+  // while the first is still pending would refresh `driverFeePlans` from a
+  // canonical source that does not yet contain the first write, miss the
+  // duplicate-version check against the (now overwritten) in-memory list,
+  // and reach persistence a second time.
+  private readonly pendingDriverFeePlanPublications = new Set<string>();
+
   private driverStatements: DriverStatementRecord[] = [];
 
   private reimbursementBatches: ReimbursementBatchRecord[] = [];
@@ -1989,6 +1998,47 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice));
   }
 
+  // The in-memory `driverFeePlans` cache is only ever populated from the
+  // database in `onModuleInit`. A plan published on another already-warm
+  // API instance is persisted canonically but this instance never reloads
+  // it, so list/generate/duplicate-version checks would otherwise keep
+  // reading stale data for the lifetime of the process. Re-reading the
+  // canonical source here (cheap: one indexed table scan, no joins) is what
+  // makes a publish on instance A visible to instance B.
+  async refreshDriverFeePlansFromCanonicalSource(): Promise<void> {
+    if (
+      !this.billingSettlementRepository ||
+      typeof this.billingSettlementRepository.isEnabled !== "function" ||
+      typeof this.billingSettlementRepository.loadDriverFeePlans !==
+        "function" ||
+      !this.billingSettlementRepository.isEnabled()
+    ) {
+      return;
+    }
+    try {
+      const canonicalPlans =
+        await this.billingSettlementRepository.loadDriverFeePlans();
+      this.driverFeePlans = canonicalPlans.map((plan) => ({ ...plan }));
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "driver_fee_plans_refresh",
+      );
+      // A failed canonical read must not let a caller fall through to the
+      // stale in-memory list: that list could then pass a duplicate-version
+      // check that the canonical data would have failed, or hand generation
+      // a fee plan that is no longer the active one. Stop before any list
+      // response or financial decision is made on it.
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "DRIVER_FEE_PLANS_CANONICAL_READ_UNAVAILABLE",
+        "Driver fee plan canonical read could not be completed.",
+        {},
+        true,
+      );
+    }
+  }
+
   async publishDriverFeePlan(
     command: PublishDriverFeePlanCommand,
     requestId?: string,
@@ -1996,11 +2046,21 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.planName, "planName");
     this.assertNonBlank(command.version, "version");
 
-    const duplicatePlan = this.driverFeePlans.find(
-      (plan) =>
-        plan.planName === command.planName && plan.version === command.version,
-    );
-    if (duplicatePlan) {
+    // Registered before the canonical refresh/ACK so a same-instance
+    // duplicate publish that starts while this one is still pending is
+    // rejected immediately, instead of racing a refresh that would
+    // overwrite `driverFeePlans` with a pre-ACK canonical snapshot and miss
+    // the in-memory duplicate-version check below.
+    // JSON-encode the pair rather than joining with a separator: planName
+    // and version are arbitrary caller-supplied strings, so a literal
+    // "::" join lets (`a::b`, `c`) collide with (`a`, `b::c`) under the
+    // same pending key. JSON.stringify's quoting/escaping keeps the two
+    // fields unambiguous regardless of their contents.
+    const pendingPublicationKey = JSON.stringify([
+      command.planName,
+      command.version,
+    ]);
+    if (this.pendingDriverFeePlanPublications.has(pendingPublicationKey)) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "FEE_PLAN_IMMUTABLE",
@@ -2011,45 +2071,67 @@ export class BillingSettlementService implements OnModuleInit {
         },
       );
     }
+    this.pendingDriverFeePlanPublications.add(pendingPublicationKey);
+    try {
+      await this.refreshDriverFeePlansFromCanonicalSource();
+      const duplicatePlan = this.driverFeePlans.find(
+        (plan) =>
+          plan.planName === command.planName &&
+          plan.version === command.version,
+      );
+      if (duplicatePlan) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "FEE_PLAN_IMMUTABLE",
+          "Published driver fee plan versions are immutable.",
+          {
+            planName: command.planName,
+            version: command.version,
+          },
+        );
+      }
 
-    const feePlan: DriverFeePlanRecord = {
-      feePlanId: `fee-plan-${randomUUID()}`,
-      planName: command.planName,
-      version: command.version,
-      serviceFeeBps: command.serviceFeeBps,
-      reimbursementMode: command.reimbursementMode,
-      status: "published",
-      publishedAt: new Date().toISOString(),
-    };
+      const feePlan: DriverFeePlanRecord = {
+        feePlanId: `fee-plan-${randomUUID()}`,
+        planName: command.planName,
+        version: command.version,
+        serviceFeeBps: command.serviceFeeBps,
+        reimbursementMode: command.reimbursementMode,
+        status: "published",
+        publishedAt: new Date().toISOString(),
+      };
 
-    this.driverFeePlans = [{ ...feePlan }, ...this.driverFeePlans];
-    await this.persistChanges(
-      {
-        driverFeePlans: [{ ...feePlan }],
-      },
-      "publish_driver_fee_plan",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "billing-settlement",
-        actionName: "publish_driver_fee_plan",
-        resourceType: "driver_fee_plan",
-        resourceId: feePlan.feePlanId,
-        newValuesSummary: {
-          version: feePlan.version,
-          serviceFeeBps: feePlan.serviceFeeBps,
-          reimbursementMode: feePlan.reimbursementMode,
+      this.driverFeePlans = [{ ...feePlan }, ...this.driverFeePlans];
+      await this.persistChanges(
+        {
+          driverFeePlans: [{ ...feePlan }],
         },
-      },
-      requestId,
-    );
+        "publish_driver_fee_plan",
+      );
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "billing-settlement",
+          actionName: "publish_driver_fee_plan",
+          resourceType: "driver_fee_plan",
+          resourceId: feePlan.feePlanId,
+          newValuesSummary: {
+            version: feePlan.version,
+            serviceFeeBps: feePlan.serviceFeeBps,
+            reimbursementMode: feePlan.reimbursementMode,
+          },
+        },
+        requestId,
+      );
 
-    return {
-      ...feePlan,
-    };
+      return {
+        ...feePlan,
+      };
+    } finally {
+      this.pendingDriverFeePlanPublications.delete(pendingPublicationKey);
+    }
   }
 
   listDriverFeePlans() {
@@ -2073,6 +2155,7 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
     this.getPeriodMonthRange(command.periodMonth);
+    await this.refreshDriverFeePlansFromCanonicalSource();
     const activeFeePlan = this.driverFeePlans[0];
     if (!activeFeePlan) {
       throw new ApiRequestError(

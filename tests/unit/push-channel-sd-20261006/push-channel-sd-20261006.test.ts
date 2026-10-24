@@ -392,6 +392,7 @@ describe("PUSH-CHANNEL-SD-20261006: Passenger notification channel routing contr
         ...(content.sos_duty_allocations || []),
         ...(content.passenger_push_channel_allocations || []),
         ...(content.complaint_command_allocations || []),
+        ...(content.referral_passenger_fee_consent_allocations || []),
       ].map((a: any) => a.version);
       expect(new Set(allVersionsEverywhere).size).toBe(
         allVersionsEverywhere.length,

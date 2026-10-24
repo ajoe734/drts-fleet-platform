@@ -1,4 +1,9 @@
 // @vitest-environment jsdom
+import { getByRole } from "@testing-library/dom";
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+} from "@drts/contracts";
 
 import { fireEvent, waitFor } from "@testing-library/dom";
 import { flushSync } from "react-dom";
@@ -120,6 +125,8 @@ function quoteResponse() {
     ok: true,
     data: {
       quoteId: "owned-hydration-quote",
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeContentHash: PASSENGER_FEE_CONTENT_HASH,
       fixedPrice: false,
       isGuaranteed: false,
       estimatedMin: 265,
@@ -133,7 +140,7 @@ function quoteResponse() {
 describe("referral embed booking hydration readiness", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    vi.stubGlobal(
+    stubFeeAwareFetch(
       "fetch",
       vi.fn(async (url) => {
         if (url === "/api/referral/quote") return quoteResponse();
@@ -211,6 +218,7 @@ describe("referral embed booking hydration readiness", () => {
     renderBookScreen();
 
     const mountedButton = submitButton();
+    await confirmCurrentOrder(document.body);
     await waitFor(() => expect(mountedButton.disabled).toBe(false));
     expect(getInput("上車地點").disabled).toBe(false);
     expect(getInput("下車地點").disabled).toBe(false);
@@ -229,8 +237,19 @@ describe("referral embed booking hydration readiness", () => {
               orderId: "ord-returned-001",
               orderNo: "DRTS-20261009-001",
               status: "pending",
-              quote: { quoteId: "owned-hydration-quote" },
+              quote: {
+                quoteId: "owned-hydration-quote",
+                feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+                feeContentHash: PASSENGER_FEE_CONTENT_HASH,
+              },
               confirmedAt: "2026-10-20T02:00:00Z",
+              feeConfirmation: {
+                orderId: "ord-returned-001",
+                quoteId: "owned-hydration-quote",
+                disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+                contentHash: PASSENGER_FEE_CONTENT_HASH,
+                feeConfirmedAt: "2026-10-20T02:00:01Z",
+              },
             },
           }),
     );
@@ -239,11 +258,12 @@ describe("referral embed booking hydration readiness", () => {
     vi.stubGlobal("crypto", {
       randomUUID: vi.fn(() => "referral-booking-idempotency-001"),
     });
-    vi.stubGlobal("fetch", fetchSpy);
+    stubFeeAwareFetch("fetch", fetchSpy);
 
     renderBookScreen();
 
     const submit = submitButton();
+    await confirmCurrentOrder(document.body);
     await waitFor(() => expect(submit.disabled).toBe(false));
 
     flushSync(() => {
@@ -279,6 +299,7 @@ describe("referral embed booking hydration readiness", () => {
     });
     vi.stubGlobal("window", testWindow);
 
+    await confirmCurrentOrder(document.body);
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
 
@@ -310,6 +331,8 @@ describe("referral embed booking hydration readiness", () => {
     expect(command).toEqual({
       entrySlug: "referral-demo-community",
       quoteId: "owned-hydration-quote",
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeConfirmed: true,
       pickupAddress: "測試社區大廳",
       dropoffAddress: "台北醫院急診入口",
       vehicleType: "xl",
@@ -322,3 +345,36 @@ describe("referral embed booking hydration readiness", () => {
     );
   });
 });
+
+function stubFeeAwareFetch(_name: "fetch", port: unknown) {
+  if (typeof port !== "function")
+    throw new Error("controlled original transport required");
+  vi.stubGlobal(
+    "fetch",
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/referral/fees")
+        return Response.json({
+          ok: true,
+          data: {
+            disclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+            contentHash: PASSENGER_FEE_CONTENT_HASH,
+            acknowledgedAt: "2026-10-20T00:00:00Z",
+          },
+        });
+      return Reflect.apply(port, undefined, [input, init]);
+    },
+  );
+}
+async function confirmCurrentOrder(host: HTMLElement) {
+  await waitFor(() => {
+    if (host.textContent?.includes("重送原叫車要求")) return;
+    const checkbox = getByRole(host, "checkbox", {
+      name: "我已確認費用與優惠說明",
+    }) as HTMLInputElement;
+    expect(checkbox.disabled).toBe(false);
+  });
+  const checkbox = host.querySelector<HTMLInputElement>(
+    '[data-drt-operation="referral-fee-confirm"]',
+  );
+  if (checkbox && !checkbox.checked) fireEvent.click(checkbox);
+}

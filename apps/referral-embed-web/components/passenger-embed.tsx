@@ -1,6 +1,22 @@
 "use client";
+import {
+  ReferralFirstFeeDisclosure,
+  ReferralOrderFeeDisclosure,
+  ReferralFeeDisclosureReader,
+} from "./referral-fee-disclosure";
+import {
+  PASSENGER_FEE_DISCLOSURE_VERSION,
+  PASSENGER_FEE_CONTENT_HASH,
+  PASSENGER_FEE_ROWS,
+  PASSENGER_FREE_CANCELLATION_NOTICE,
+  type ReferralFeeStatus,
+} from "@drts/contracts";
 import { ReferralComplaintPanel } from "./referral-complaint-panel";
+import { ReferralPlaceField } from "./referral-place-field";
+import { ReferralReceiptDocumentActions } from "./referral-receipt-document-actions";
 import { useReferralLiveTrip } from "./use-referral-live-trip";
+import { displayOrderNo } from "../lib/order-display";
+import { ReferralSupportContactPanel } from "./referral-support-contact";
 import {
   ReferralLiveTrackingPanel,
   referralLiveArrival,
@@ -56,6 +72,8 @@ type BookingFormState = {
   vehicleType: string;
 };
 
+const [REFERRAL_CANCELLATION_FEE_LABEL, REFERRAL_CANCELLATION_FEE_VALUE] =
+  PASSENGER_FEE_ROWS[2];
 const REFERRAL_SUPPORT_PHONE = "02-2944-0985";
 const REFERRAL_AUTHORITY_PHONE = "1999";
 const DEMO_PASSENGER_PHONE = "0912345820";
@@ -127,6 +145,11 @@ function validRecovery(saved: any, scope: string, entrySlug: string) {
         command[k] === undefined ||
         (typeof command[k] === "string" && command[k].length <= 500),
     ) &&
+    (command.feeDisclosureVersion === undefined ||
+      (typeof command.feeDisclosureVersion === "string" &&
+        command.feeDisclosureVersion.length <= 100)) &&
+    (command.feeConfirmed === undefined ||
+      typeof command.feeConfirmed === "boolean") &&
     Object.keys(command).every((k) =>
       [
         "entrySlug",
@@ -139,6 +162,8 @@ function validRecovery(saved: any, scope: string, entrySlug: string) {
         "passengerName",
         "passengerPhone",
         "partnerUserRef",
+        "feeDisclosureVersion",
+        "feeConfirmed",
       ].includes(k),
     )
   );
@@ -155,10 +180,26 @@ function createInitialBookingForm(): BookingFormState {
   };
 }
 
-function formatShortDateTime(value: string | null | undefined) {
+function formatShortDateTime(
+  value: string | null | undefined,
+  timeZone?: "Asia/Taipei",
+) {
   if (!value) return "時間待更新";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  if (timeZone) {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((value) => value.type === type)!.value;
+    return `${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+  }
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   const hours = String(date.getHours()).padStart(2, "0");
@@ -168,6 +209,26 @@ function formatShortDateTime(value: string | null | undefined) {
 
 function formatFare(amount: number | null | undefined) {
   return amount === null || amount === undefined ? "—" : `NT$ ${amount}`;
+}
+
+/**
+ * The passenger's chosen vehicle class (from the trip's quote) rather than
+ * the service product code the trip APIs report as vehicleType.
+ */
+function vehicleClassLabel(
+  t: (key: string) => string,
+  reported: string | null | undefined,
+  quoted: string | null | undefined,
+) {
+  const known = (code: string | null | undefined) =>
+    code && embedVehicles.some((vehicle) => vehicle.code === code)
+      ? t(`embed.vehicle.${code}.name`)
+      : null;
+  return (
+    known(quoted) ??
+    known(reported) ??
+    (reported === "enterprise_dispatch" ? "商務派車" : (reported ?? ""))
+  );
 }
 
 function normalizeTripState(state: string | null | undefined) {
@@ -365,7 +426,15 @@ function ActionButton({
   type?: "button" | "submit" | "reset";
   dataDrtOperation?: string;
 }) {
-  const palette = buttonPalette(theme, variant);
+  // A disabled action reads as unavailable in every variant, not as a
+  // slightly faded but still tappable-looking button.
+  const palette = disabled
+    ? {
+        background: theme.surfaceLo,
+        color: theme.faint,
+        border: `1px solid ${theme.line}`,
+      }
+    : buttonPalette(theme, variant);
   const content = (
     <>
       {icon ? <Icon name={icon} size={14} /> : null}
@@ -386,7 +455,6 @@ function ActionButton({
     fontSize: 14,
     fontWeight: 700,
     textDecoration: "none",
-    opacity: disabled ? 0.75 : 1,
     ...palette,
   } as const;
 
@@ -399,7 +467,7 @@ function ActionButton({
         data-drt-operation={dataDrtOperation}
         style={{
           ...style,
-          cursor: disabled ? "progress" : "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
         }}
       >
         {content}
@@ -435,6 +503,9 @@ function Card({
     <section
       style={{
         display: "grid",
+        // Content such as a no-wrap trip line ellipsizes instead of widening
+        // the card past the phone width.
+        gridTemplateColumns: "minmax(0, 1fr)",
         gap: 10,
         padding: 15,
         borderRadius: 16,
@@ -657,7 +728,16 @@ function DetailRow({
         borderBottom: last ? "none" : `1px solid ${theme.lineSoft}`,
       }}
     >
-      <span style={{ fontSize: 12.5, color: theme.muted }}>{label}</span>
+      <span
+        style={{
+          fontSize: 12.5,
+          color: theme.muted,
+          flexShrink: 0,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
       <span
         style={{
           fontSize: 12.5,
@@ -665,6 +745,8 @@ function DetailRow({
           fontWeight: strong ? 700 : 500,
           fontFamily: mono ? theme.mono : theme.sans,
           textAlign: "right",
+          minWidth: 0,
+          overflowWrap: "anywhere",
         }}
       >
         {value}
@@ -1027,7 +1109,18 @@ function AppShell({
           </span>
         </div>
 
-        <div style={{ flex: 1, display: "grid", gap: 13, padding: 16 }}>
+        <div
+          style={{
+            flex: 1,
+            display: "grid",
+            // One column that long content cannot widen, packed at the top
+            // instead of spreading spare height between short screens' rows.
+            gridTemplateColumns: "minmax(0, 1fr)",
+            alignContent: "start",
+            gap: 13,
+            padding: 16,
+          }}
+        >
           {children}
         </div>
 
@@ -1134,6 +1227,9 @@ function HandoffScreen({ context }: { context: EmbedContext }) {
         由 {context.strings.appName}{" "}
         安全帶入叫車身分；首次使用仍須確認同意事項。內嵌頁不會要求輸入帳號密碼。
       </Banner>
+      <Card theme={theme}>
+        <ReferralFeeDisclosureReader theme={theme} />
+      </Card>
     </AppShell>
   );
 }
@@ -1165,7 +1261,7 @@ function ReauthScreen({ context }: { context: EmbedContext }) {
         tone="warn"
         icon="clock"
         title="登入狀態已逾時"
-        posture="reauth_required"
+        posture="需重新驗證身分"
       />
       <Card theme={theme} title="連線狀態">
         <TokenRow
@@ -1211,7 +1307,7 @@ function UnsupportedScreen({ context }: { context: EmbedContext }) {
         tone="danger"
         icon="ban"
         title="無法在此環境開啟"
-        posture="unsupported_host · 已封鎖"
+        posture="不支援的來源 · 已封鎖"
       />
       <Card theme={theme} title="原因">
         <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
@@ -1409,11 +1505,7 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
         tone="neutral"
         icon="ext"
         title="內嵌服務暫時無法使用"
-        posture={
-          fallbackEntry
-            ? "fallback_to_web · 改用網站"
-            : "fallback_unavailable · 尚無替代入口"
-        }
+        posture={fallbackEntry ? "可改用網站" : "尚無替代入口"}
       />
       {fallbackEntry ? (
         <>
@@ -1501,6 +1593,7 @@ export function BookScreen({ context }: { context: EmbedContext }) {
 
 function ReferralBookingForm({ context }: { context: EmbedContext }) {
   const theme = buildEmbedTheme(context.accent);
+  const { t } = useTranslation();
   const scope =
     context.session?.recoveryScope ??
     context.session?.handoffId ??
@@ -1522,10 +1615,21 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
   const [isMounted, setIsMounted] = useState(false);
   const [recoveryReady, setRecoveryReady] = useState(false);
   const [quote, setQuote] = useState<ReferralPassengerFareQuote | null>(null);
+  const mapConfig = context.map ?? null;
   const [quoteState, setQuoteState] = useState<
     "idle" | "loading" | "quoted" | "expired" | "error"
   >("idle");
   const [refreshQuote, setRefreshQuote] = useState(0);
+  const [feeStatus, setFeeStatus] = useState<ReferralFeeStatus | null>(null);
+  const [feeError, setFeeError] = useState<string | null>(null);
+  const [feeBusy, setFeeBusy] = useState(false);
+  const [feeRefresh, setFeeRefresh] = useState(0);
+  const [confirmedQuoteId, setConfirmedQuoteId] = useState<string | null>(null);
+  const feeReady =
+    feeStatus?.disclosureVersion === PASSENGER_FEE_DISCLOSURE_VERSION &&
+    feeStatus.contentHash === PASSENGER_FEE_CONTENT_HASH &&
+    !!feeStatus.acknowledgedAt;
+
   const [recovery, setRecovery] = useState<{
     scope: string;
     command: CreateReferralPassengerBookingCommand;
@@ -1605,8 +1709,90 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     };
   }, [bootstrapped, context, scope]);
   useEffect(() => {
+    if (!bootstrapped) return;
+    let current = true;
+    const controller = new AbortController();
+    void fetch("/api/referral/fees", {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const body = await response.json();
+        const status = body?.data;
+        if (
+          !response.ok ||
+          !body?.ok ||
+          status?.disclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+          status?.contentHash !== PASSENGER_FEE_CONTENT_HASH ||
+          !(
+            status.acknowledgedAt === null ||
+            (typeof status.acknowledgedAt === "string" &&
+              Number.isFinite(Date.parse(status.acknowledgedAt)))
+          )
+        )
+          throw new Error("無法讀取目前費用同意紀錄，請重新讀取。");
+        if (current) {
+          setFeeStatus(status);
+          setFeeError(null);
+        }
+      })
+      .catch(() => {
+        if (current) setFeeError("無法讀取目前費用同意紀錄，請重新讀取。");
+      });
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [bootstrapped, scope, feeRefresh]);
+
+  async function agreeFees() {
+    if (!feeStatus || feeBusy) return;
+    setFeeBusy(true);
+    setFeeError(null);
+    try {
+      const response = await fetch("/api/referral/fees", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          disclosureVersion: feeStatus.disclosureVersion,
+          acknowledged: true,
+        }),
+      });
+      const ack = await response.json();
+      if (
+        !response.ok ||
+        !ack?.ok ||
+        ack.data?.disclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+        ack.data?.contentHash !== PASSENGER_FEE_CONTENT_HASH ||
+        !Number.isFinite(Date.parse(ack.data?.acknowledgedAt))
+      )
+        throw new Error("費用同意尚未確認，請以原版本重新確認。");
+      const read = await fetch("/api/referral/fees", { cache: "no-store" });
+      const body = await read.json();
+      if (
+        !read.ok ||
+        !body?.ok ||
+        body.data?.disclosureVersion !== ack.data.disclosureVersion ||
+        body.data?.contentHash !== ack.data.contentHash ||
+        body.data?.acknowledgedAt !== ack.data.acknowledgedAt
+      )
+        throw new Error("費用同意回讀尚未確認，請重新讀取。");
+      if (mountedUi.current) setFeeStatus(body.data);
+    } catch (cause) {
+      if (mountedUi.current)
+        setFeeError(
+          cause instanceof Error ? cause.message : "費用同意尚未確認。",
+        );
+    } finally {
+      if (mountedUi.current) setFeeBusy(false);
+    }
+  }
+
+  useEffect(() => {
     setQuote(null);
+    setConfirmedQuoteId(null);
     if (
+      !feeReady ||
       !bootstrapped ||
       !recoveryReady ||
       pendingCommand ||
@@ -1646,6 +1832,8 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         if (!active) return;
         if (
           !result?.quoteId ||
+          result.feeDisclosureVersion !== PASSENGER_FEE_DISCLOSURE_VERSION ||
+          result.feeContentHash !== PASSENGER_FEE_CONTENT_HASH ||
           result.fixedPrice !== false ||
           result.isGuaranteed !== false ||
           !Number.isSafeInteger(result.estimatedMin) ||
@@ -1683,6 +1871,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     recoveryReady,
     pendingCommand,
     refreshQuote,
+    feeReady,
   ]);
   useEffect(() => {
     if (!quote || quoteState !== "quoted") return;
@@ -1693,6 +1882,14 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     return () => clearTimeout(timer);
   }, [quote, quoteState]);
 
+  function setAddressField(
+    name: "pickupAddress" | "dropoffAddress",
+    value: string,
+  ) {
+    setQuote(null);
+    setQuoteState("idle");
+    setForm((current) => ({ ...current, [name]: value }));
+  }
   function updateField(event: ChangeEvent<HTMLInputElement>) {
     const { name, value } = event.currentTarget;
     if (["pickupAddress", "dropoffAddress", "scheduledAt"].includes(name)) {
@@ -1707,7 +1904,9 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
       !recoveryReady ||
       inFlightForScope.current ||
       (!pendingCommand &&
-        (!quote ||
+        (!feeReady ||
+          !quote ||
+          confirmedQuoteId !== quote.quoteId ||
           quoteState !== "quoted" ||
           quotedIntent.current !== quoteIntent ||
           quotedScope.current !== scope ||
@@ -1717,6 +1916,8 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     const command = pendingCommand ?? {
       ...buildBookingCommand(context, form, intentKey.current),
       quoteId: quote!.quoteId,
+      feeDisclosureVersion: PASSENGER_FEE_DISCLOSURE_VERSION,
+      feeConfirmed: true,
     };
     const saved = { scope, command, form };
     setRecovery(saved);
@@ -1749,6 +1950,9 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             [
               "FARE_QUOTE_EXPIRED",
               "FARE_QUOTE_MISMATCH",
+              "FEE_DISCLOSURE_CHANGED",
+              "FEE_CONFIRMATION_REQUIRED",
+              "FEE_DISCLOSURE_REQUIRED",
               "VALIDATION_ERROR",
             ].includes(code)
           ) {
@@ -1766,7 +1970,25 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         if (
           typeof payload.data?.orderId !== "string" ||
           payload.data?.quote?.quoteId !== command.quoteId ||
-          !payload.data.confirmedAt
+          !payload.data.confirmedAt ||
+          (command.feeConfirmed === true &&
+            (payload.data.quote?.feeDisclosureVersion !==
+              command.feeDisclosureVersion ||
+              typeof payload.data.quote?.feeContentHash !== "string" ||
+              !/^[a-f0-9]{64}$/.test(payload.data.quote.feeContentHash) ||
+              (command.feeDisclosureVersion ===
+                PASSENGER_FEE_DISCLOSURE_VERSION &&
+                payload.data.quote.feeContentHash !==
+                  PASSENGER_FEE_CONTENT_HASH) ||
+              payload.data.feeConfirmation?.orderId !== payload.data.orderId ||
+              payload.data.feeConfirmation?.quoteId !== command.quoteId ||
+              payload.data.feeConfirmation?.disclosureVersion !==
+                command.feeDisclosureVersion ||
+              payload.data.feeConfirmation?.contentHash !==
+                payload.data.quote.feeContentHash ||
+              !Number.isFinite(
+                Date.parse(payload.data.feeConfirmation?.feeConfirmedAt),
+              )))
         )
           throw new ReferralUiError(referralUiMessage(null, true));
         try {
@@ -1802,7 +2024,10 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
     !recoveryReady ||
     isPending ||
     (!pendingCommand &&
-      (quoteState !== "quoted" ||
+      (!feeReady ||
+        !quote ||
+        confirmedQuoteId !== quote.quoteId ||
+        quoteState !== "quoted" ||
         quotedIntent.current !== quoteIntent ||
         quotedScope.current !== scope));
   const estimateLabel =
@@ -1870,6 +2095,64 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         </>
       }
     >
+      {!feeReady && !pendingCommand ? (
+        <Card theme={theme}>
+          <ReferralFirstFeeDisclosure
+            theme={theme}
+            status={feeStatus}
+            busy={feeBusy}
+            error={feeError}
+            onAgree={() => {
+              void agreeFees();
+            }}
+          />
+          {feeError ? (
+            <ActionButton
+              label="重新讀取費用同意紀錄"
+              theme={theme}
+              variant="ghost"
+              onClick={() => setFeeRefresh((n) => n + 1)}
+            />
+          ) : null}
+        </Card>
+      ) : null}
+      <Card theme={theme}>
+        <ReferralFeeDisclosureReader theme={theme} />
+      </Card>
+      {feeReady && quote && !pendingCommand ? (
+        <Card theme={theme}>
+          <ReferralOrderFeeDisclosure
+            theme={theme}
+            quote={quote}
+            pickupTimeLabel={
+              quote.requestedScheduledAt
+                ? Number.isFinite(Date.parse(quote.requestedScheduledAt))
+                  ? t("fees.scheduledTaipei", {
+                      time: formatShortDateTime(
+                        quote.requestedScheduledAt,
+                        "Asia/Taipei",
+                      ),
+                    })
+                  : t("fees.timePending")
+                : t("fees.now")
+            }
+            vehicleLabel={
+              quote.vehicleType
+                ? embedVehicles.some(
+                    (vehicle) => vehicle.code === quote.vehicleType,
+                  )
+                  ? t(`embed.vehicle.${quote.vehicleType}.name`)
+                  : t("fees.vehiclePending")
+                : t("fees.unspecified")
+            }
+            checked={confirmedQuoteId === quote.quoteId}
+            disabled={isPending || quoteState !== "quoted"}
+            onChange={(checked) =>
+              setConfirmedQuoteId(checked ? quote.quoteId : null)
+            }
+          />
+        </Card>
+      ) : null}
       <div
         style={{
           display: "flex",
@@ -1910,23 +2193,26 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
 
       <Card theme={theme} title="行程" subtitle="上車 · 下車 · 時間">
         <div style={{ display: "grid", gap: 10 }}>
-          <EditableField
+          <ReferralPlaceField
             theme={theme}
             label="上車地點"
-            icon="pin"
+            icon={<Icon name="pin" size={15} />}
             name="pickupAddress"
             value={form.pickupAddress}
-            onChange={updateField}
+            onChange={(value) => setAddressField("pickupAddress", value)}
             disabled={bookingControlsDisabled}
+            allowCurrentLocation
+            mapConfig={mapConfig}
           />
-          <EditableField
+          <ReferralPlaceField
             theme={theme}
             label="下車地點"
-            icon="pin"
+            icon={<Icon name="pin" size={15} />}
             name="dropoffAddress"
             value={form.dropoffAddress}
-            onChange={updateField}
+            onChange={(value) => setAddressField("dropoffAddress", value)}
             disabled={bookingControlsDisabled}
+            mapConfig={mapConfig}
           />
           <div
             style={{
@@ -1988,7 +2274,11 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         </div>
       </Card>
 
-      <Card theme={theme} title="車種" subtitle="owned mobility">
+      <Card
+        theme={theme}
+        title={t("embed.card.vehicles")}
+        subtitle={t("embed.card.vehiclesSubtitle")}
+      >
         <div style={{ display: "grid", gap: 8 }}>
           {embedVehicles.map((vehicle) => {
             const selected = form.vehicleType === vehicle.code;
@@ -2053,42 +2343,70 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
   );
 }
 
+type NegativeScreenAction = "book" | "tel" | "trips";
+
+/** Resolves a negative-screen button's actual destination; never a uniform book/tel guess. */
+function negativeScreenHref(
+  context: EmbedContext,
+  action: NegativeScreenAction,
+) {
+  switch (action) {
+    case "tel":
+      return toPhoneHref(REFERRAL_SUPPORT_PHONE);
+    case "trips":
+      // The single-trip screen silently falls back to the booking form when
+      // there is no active trip; the history list shows the rider's actual
+      // status (including the empty state) instead.
+      return buildHref(context, { screen: "trips", state: "handoff" });
+    case "book":
+      return buildHref(context, { screen: "book", state: "handoff" });
+  }
+}
+
 const negativeScreens = {
   denied: {
     icon: "x",
     tone: "danger" as const,
     title: "叫車未能建立",
-    posture: "denied",
+    posture: "未能受理",
     body: "此次叫車請求未通過。請確認上下車地點是否在服務範圍內，或稍後再試。",
     primary: "重新叫車",
+    primaryAction: "book" as NegativeScreenAction,
     secondary: "聯絡社區客服",
+    secondaryAction: "tel" as NegativeScreenAction,
   },
   ineligible: {
     icon: "ban",
     tone: "warn" as const,
     title: "目前不符叫車資格",
-    posture: "ineligible",
-    body: "您的住戶身分目前未開通叫車服務，可能因社區方案尚未生效。請洽社區管理中心確認。",
-    primary: "洽社區管理中心",
+    posture: "資格未開通",
+    body: "您的住戶身分目前未開通叫車服務，可能因社區方案尚未生效。請洽社區客服確認。",
+    primary: "聯絡社區客服",
+    primaryAction: "tel" as NegativeScreenAction,
     secondary: "返回",
+    secondaryAction: "book" as NegativeScreenAction,
   },
   nosupply: {
     icon: "car",
     tone: "warn" as const,
     title: "附近暫無可派車輛",
-    posture: "no_supply",
-    body: "此時段與地點暫無可派車。請稍後重試或改約時間，系統也會嘗試自動為您補派。",
+    posture: "無可派車",
+    body: "此時段與地點暫無可派車。請稍後重試，或改約其他時段再送出叫車。",
     primary: "稍後重試",
+    primaryAction: "book" as NegativeScreenAction,
     secondary: "改約時間",
+    secondaryAction: "book" as NegativeScreenAction,
   },
   degraded: {
     icon: "alert",
     tone: "warn" as const,
     title: "服務暫時不穩定",
-    posture: "degraded",
-    body: "叫車服務目前回應較慢。您的請求已安全受理，恢復後會自動繼續，無需重複送出。",
+    posture: "服務不穩定",
+    body: "叫車服務目前回應較慢。請先查看目前行程狀態，確認本次請求是否已送出成功，再決定是否重新嘗試，避免重複叫車。",
     primary: "重試",
+    primaryAction: "book" as NegativeScreenAction,
     secondary: "查看狀態",
+    secondaryAction: "trips" as NegativeScreenAction,
   },
 };
 
@@ -2108,12 +2426,12 @@ function NegativeScreen({
       footer={
         <>
           <ActionButton
-            href={buildHref(context, { screen: "book", state: "handoff" })}
+            href={negativeScreenHref(context, screen.primaryAction)}
             label={screen.primary}
             theme={theme}
           />
           <ActionButton
-            href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
+            href={negativeScreenHref(context, screen.secondaryAction)}
             label={screen.secondary}
             theme={theme}
             variant="ghost"
@@ -2155,12 +2473,214 @@ const tripStateLabel: Record<
   { zh: string; tone: "warn" | "primary" | "info" | "success" | "neutral" }
 > = {
   matching: { zh: "媒合中", tone: "warn" },
+  created: { zh: "媒合中", tone: "warn" },
+  ready_for_dispatch: { zh: "媒合中", tone: "warn" },
+  preassigned: { zh: "媒合中", tone: "warn" },
+  redispatch_required: { zh: "重新媒合中", tone: "warn" },
   assigned: { zh: "已派車", tone: "primary" },
+  driver_accepted: { zh: "已派車", tone: "primary" },
+  enroute_pickup: { zh: "前往上車", tone: "info" },
+  arrived_pickup: { zh: "司機已抵達", tone: "info" },
+  on_trip: { zh: "行程中", tone: "info" },
+  proof_pending: { zh: "行程中", tone: "info" },
   enroute: { zh: "前往上車", tone: "info" },
   inprogress: { zh: "行程中", tone: "info" },
   completed: { zh: "已完成", tone: "success" },
   cancelled: { zh: "已取消", tone: "neutral" },
+  no_supply: { zh: "無可用車輛", tone: "neutral" },
+  dispatch_failed: { zh: "派車失敗", tone: "neutral" },
+  dispatch_timeout: { zh: "派車失敗", tone: "neutral" },
 };
+
+const DEMO_TRIP_DISPATCHABLE = [
+  "created",
+  "ready_for_dispatch",
+  "redispatch_required",
+  "matching",
+];
+const DEMO_TRIP_ON_BOARD = ["on_trip", "proof_pending", "inprogress"];
+
+type DemoTripAction = "assign" | "arrive" | "board" | "complete";
+
+/** Which test step comes next for the trip's current state. */
+function demoTripAction(status: string): DemoTripAction {
+  if (DEMO_TRIP_DISPATCHABLE.includes(status)) return "assign";
+  if (status === "arrived_pickup") return "board";
+  if (DEMO_TRIP_ON_BOARD.includes(status)) return "complete";
+  return "arrive";
+}
+
+const DEMO_TRIP_STEP: Record<
+  DemoTripAction,
+  { description: string; label: string }
+> = {
+  assign: {
+    description:
+      "按下後由虛構的商務測試司機承接這筆行程，用來展示派車後的畫面；不是實際派車。",
+    label: "測試：指派測試司機",
+  },
+  arrive: {
+    description:
+      "測試司機正從約 1.3 公里外駛向上車地點，約 3 分鐘抵達，地圖上的車輛會跟著移動。不想等候可按下按鈕，讓司機立即抵達。",
+    label: "測試：司機立即抵達",
+  },
+  board: {
+    description:
+      "測試司機已抵達上車地點。按下後模擬乘客上車並開始行程，車輛會依實際路程時間駛向目的地。",
+    label: "測試：乘客已上車",
+  },
+  complete: {
+    description:
+      "行程進行中，車輛依實際路程時間駛向目的地，到達時間與地圖同步更新；抵達後司機結束行程，畫面會轉到行程完成、車資與評分。不想等候可按下按鈕立即抵達。完程資料為模擬（車資依試算下限、合成完程照片），不是實際載客。",
+    label: "測試：立即抵達目的地",
+  },
+};
+
+function demoTripMessage(code: unknown) {
+  switch (code) {
+    case "REFERRAL_DEMO_TRIP_SUPPLY_BUSY":
+      return "測試司機都在服務其他展示行程，請稍後再試。";
+    case "REFERRAL_DEMO_TRIP_SUPPLY_UNAVAILABLE":
+      return "測試司機暫時無法使用，請稍後再試。";
+    case "REFERRAL_DEMO_TRIP_NOT_DISPATCHABLE":
+      return "這筆行程目前無法指派測試司機。";
+    case "REFERRAL_DEMO_TRIP_NOT_ASSIGNED":
+      return "這筆行程不是由測試司機承接，無法用測試按鈕操作。";
+    case "not_found":
+      return "測試功能目前未開啟。";
+    default:
+      return "測試操作沒有完成，請重試。";
+  }
+}
+
+/** Dev demo only: drive this trip with the synthetic business test driver. */
+function ReferralDemoTripControls({
+  context,
+  orderId,
+  status,
+  onAssigned,
+}: {
+  context: EmbedContext;
+  orderId: string;
+  status: string;
+  onAssigned: () => void;
+}) {
+  const theme = buildEmbedTheme(context.accent);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const action = demoTripAction(status);
+  // live.refresh is a new function on every render; keep the latest one in a
+  // ref so the heartbeat timer below depends only on the trip, or each
+  // refresh-triggered render would restart it and send another heartbeat.
+  const onAssignedRef = useRef(onAssigned);
+  const completedHref = useRef(
+    buildHref(context, { screen: "completed", state: "handoff", orderId }),
+  );
+  useEffect(() => {
+    onAssignedRef.current = onAssigned;
+  }, [onAssigned]);
+  // Like the driver app, report the test driver's location every 10 s so the
+  // map and ETA move smoothly while this demo trip is open; the server also
+  // reports arrival through this heartbeat once the approach is driven.
+  const driverAssigned = action !== "assign";
+  useEffect(() => {
+    if (!driverAssigned) return;
+    let active = true;
+    const beat = () =>
+      void fetch(
+        `/api/referral/demo-trip/${encodeURIComponent(orderId)}/heartbeat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      )
+        .then(async (response) => {
+          const payload = await response.json().catch(() => null);
+          // The test driver ended the trip at the destination: show the
+          // passenger its completion, even if the trip screen already
+          // switched to its ended state and unmounted this card.
+          if (response.ok && payload?.data?.status === "completed") {
+            window.location.assign(completedHref.current);
+            return;
+          }
+          if (active && response.ok) onAssignedRef.current();
+        })
+        .catch(() => undefined);
+    beat();
+    const timer = globalThis.setInterval(beat, 10_000);
+    return () => {
+      active = false;
+      globalThis.clearInterval(timer);
+    };
+  }, [driverAssigned, orderId]);
+
+  async function run() {
+    setPending(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/referral/demo-trip/${encodeURIComponent(orderId)}/${action}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok)
+        throw new Error(demoTripMessage(payload?.error?.code));
+      if (action === "complete") {
+        window.location.assign(
+          buildHref(context, {
+            screen: "completed",
+            state: "handoff",
+            orderId,
+          }),
+        );
+        return;
+      }
+      onAssigned();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : demoTripMessage(null));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div
+      data-drt-operation="referral-demo-trip"
+      style={{
+        display: "grid",
+        gap: 9,
+        padding: "12px 13px",
+        borderRadius: 12,
+        background: theme.warnBg,
+        border: `1px dashed ${theme.warnFg}`,
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 800, color: theme.ink }}>
+        測試模式（僅供展示）
+      </div>
+      <div style={{ fontSize: 12, lineHeight: 1.6, color: theme.ink2 }}>
+        {DEMO_TRIP_STEP[action].description}
+      </div>
+      <ActionButton
+        label={pending ? "處理中…" : DEMO_TRIP_STEP[action].label}
+        theme={theme}
+        onClick={() => void run()}
+        disabled={pending}
+        dataDrtOperation={`referral-demo-trip-${action}`}
+      />
+      {error ? (
+        <Banner theme={theme} tone="danger" icon="alert">
+          {error}
+        </Banner>
+      ) : null}
+    </div>
+  );
+}
 
 function TripScreen({
   context,
@@ -2173,6 +2693,7 @@ function TripScreen({
   const theme = buildEmbedTheme(context.accent);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [supportOpen, setSupportOpen] = useState(false);
   const requestedOrderId = liveData?.selectedOrderId;
   const live = useReferralLiveTrip(
     liveData?.activeTrip?.trip,
@@ -2265,7 +2786,11 @@ function TripScreen({
         from: activeTrip.pickupAddress,
         to: activeTrip.dropoffAddress,
         win: referralLiveArrival(activeTrip, t("referralLive.pending")),
-        vehicle: activeTrip.vehicleType,
+        vehicle: vehicleClassLabel(
+          t,
+          activeTrip.vehicleType,
+          activeTrip.quote?.vehicleType,
+        ),
         driver: activeTrip.driverName || "媒合中",
         plate: activeTrip.plateNumber || "待更新",
         rating: 0,
@@ -2338,12 +2863,20 @@ function TripScreen({
       badgeTone="live"
       footer={
         <>
+          {supportOpen ? (
+            <ReferralSupportContactPanel
+              theme={theme}
+              phone={REFERRAL_SUPPORT_PHONE}
+              orderNo={displayOrderNo(trip.id)}
+              onClose={() => setSupportOpen(false)}
+            />
+          ) : null}
           <ActionButton
-            href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
             label="客服協助聯絡司機"
             theme={theme}
             variant="default"
             icon="phone"
+            onClick={() => setSupportOpen((open) => !open)}
           />
           <ActionButton
             label={isPending ? "取消中…" : "取消行程"}
@@ -2377,6 +2910,21 @@ function TripScreen({
         </span>
       </div>
 
+      <Card theme={theme}>
+        <DetailRow
+          theme={theme}
+          label="費用確認時間"
+          value={
+            activeTrip?.feeConfirmation?.feeConfirmedAt
+              ? formatShortDateTime(
+                  activeTrip.feeConfirmation.feeConfirmedAt,
+                  "Asia/Taipei",
+                )
+              : "未提供確認紀錄"
+          }
+          last
+        />
+      </Card>
       <Card theme={theme} accent={theme.primary}>
         <div
           style={{
@@ -2386,13 +2934,23 @@ function TripScreen({
             marginBottom: 14,
           }}
         >
-          <Pill theme={theme} tone={state.tone} dot>
-            {state.zh}
-          </Pill>
+          <span style={{ flexShrink: 0 }}>
+            <Pill theme={theme} tone={state.tone} dot>
+              {state.zh}
+            </Pill>
+          </span>
           <span
-            style={{ fontSize: 11, color: theme.faint, fontFamily: theme.mono }}
+            style={{
+              fontSize: 11,
+              color: theme.faint,
+              fontFamily: theme.mono,
+              minWidth: 0,
+              marginLeft: 10,
+              textAlign: "right",
+              wordBreak: "break-all",
+            }}
           >
-            {trip.id} · {trip.orderId}
+            {t("embed.orderNo", { no: displayOrderNo(trip.id) })}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 13 }}>
@@ -2439,6 +2997,15 @@ function TripScreen({
         </div>
       </Card>
 
+      {context.demoTrip ? (
+        <ReferralDemoTripControls
+          context={context}
+          orderId={trip.orderId}
+          status={trip.state}
+          onAssigned={live.refresh}
+        />
+      ) : null}
+
       <div
         data-drt-operation="referral-cancellation-window"
         style={{ fontSize: 12, color: theme.muted, lineHeight: 1.6 }}
@@ -2468,6 +3035,8 @@ function TripScreen({
         trip={activeTrip!}
         error={live.error}
         refresh={live.refresh}
+        theme={theme}
+        mapConfig={context.map}
       />
 
       {error ? (
@@ -2528,7 +3097,11 @@ function TripScreen({
         >
           <DetailRow
             theme={theme}
-            label={trip.state === "inprogress" ? "預計抵達" : "預計上車"}
+            label={
+              ["inprogress", "on_trip", "proof_pending"].includes(trip.state)
+                ? "預計抵達"
+                : "預計上車"
+            }
             value={trip.win}
             mono
             last
@@ -2557,6 +3130,26 @@ const NON_COMPLETED_TERMINAL_STATUSES = [
   "no_supply",
 ];
 
+/**
+ * A non-completed terminal order (cancelled/no_supply/dispatch_failed/
+ * dispatch_timeout) never shows the backend's "fare pending confirmation"
+ * placeholder: that text implies the ride is still active. Any finite
+ * recorded fare is still shown as-is.
+ */
+function formatTerminalFare(
+  status: string | null | undefined,
+  fareTotal: number | null | undefined,
+  formattedFare: string | null | undefined,
+) {
+  if (typeof fareTotal === "number" && Number.isFinite(fareTotal)) {
+    return formattedFare || formatFare(fareTotal);
+  }
+  if (status && NON_COMPLETED_TERMINAL_STATUSES.includes(status)) {
+    return "—";
+  }
+  return formattedFare ?? "—";
+}
+
 function TripsScreen({
   context,
   liveData,
@@ -2569,11 +3162,17 @@ function TripsScreen({
     liveData?.history?.items.map((trip) => ({
       id: trip.orderNo,
       orderId: trip.orderId,
-      date: formatShortDateTime(trip.completedAt || trip.createdAt),
+      date: formatShortDateTime(
+        trip.status === "cancelled"
+          ? trip.cancelledAt
+          : trip.completedAt || trip.createdAt,
+        "Asia/Taipei",
+      ),
+      feeConfirmedAt: trip.feeConfirmation?.feeConfirmedAt ?? null,
       from: trip.pickupAddress,
       to: trip.dropoffAddress,
       state: normalizeTripState(trip.status),
-      fare: trip.formattedFare || formatFare(trip.fareTotal),
+      fare: formatTerminalFare(trip.status, trip.fareTotal, trip.formattedFare),
     })) ?? [];
   return (
     <AppShell context={context} badgeTone="live">
@@ -2611,7 +3210,7 @@ function TripsScreen({
       ) : null}
       {historyItems.map((trip) => {
         const tripState = tripStateLabel[trip.state] || {
-          zh: trip.state,
+          zh: "狀態未知",
           tone: "neutral" as const,
         };
         const tone =
@@ -2681,7 +3280,15 @@ function TripsScreen({
                       marginTop: 2,
                     }}
                   >
-                    {trip.date} · {trip.id}
+                    {trip.date} · {displayOrderNo(trip.id)}
+                  </div>
+                  <div
+                    style={{ fontSize: 11, color: theme.muted, marginTop: 2 }}
+                  >
+                    費用確認時間：
+                    {trip.feeConfirmedAt
+                      ? formatShortDateTime(trip.feeConfirmedAt, "Asia/Taipei")
+                      : "未提供確認紀錄"}
                   </div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -2716,6 +3323,7 @@ function ReceiptScreen({
   context: EmbedContext;
   liveData: PassengerEmbedLiveData;
 }) {
+  const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
   // Only a genuinely completed trip gets the "trip completed" receipt: the
   // API returns whatever the order's current status is, and this screen must
@@ -2726,10 +3334,17 @@ function ReceiptScreen({
       ? {
           id: liveData.receipt.orderNo,
           orderId: liveData.receipt.orderId,
-          date: formatShortDateTime(liveData.receipt.completedAt),
+          date: formatShortDateTime(
+            liveData.receipt.completedAt,
+            "Asia/Taipei",
+          ),
           from: liveData.receipt.pickupAddress,
           to: liveData.receipt.dropoffAddress,
-          vehicle: liveData.receipt.vehicleType,
+          vehicle: vehicleClassLabel(
+            t,
+            liveData.receipt.vehicleType,
+            liveData.receipt.quote?.vehicleType,
+          ),
           driver: liveData.receipt.driverName || "資料未提供",
           plate: liveData.receipt.plateNumber || "待更新",
           passenger: liveData.receipt.passengerNameMasked,
@@ -2774,7 +3389,7 @@ function ReceiptScreen({
           marginTop: -6,
         }}
       >
-        {receipt.id} · {receipt.orderId}
+        {t("embed.orderNo", { no: displayOrderNo(receipt.id) })}
       </div>
       <Card theme={theme} title="行程" subtitle={receipt.date}>
         <div style={{ display: "flex", gap: 11 }}>
@@ -2820,7 +3435,22 @@ function ReceiptScreen({
           </div>
         </div>
       </Card>
-      <Card theme={theme} title="乘客與車輛" subtitle="PII 已遮罩">
+      <Card theme={theme}>
+        <DetailRow
+          theme={theme}
+          label="費用確認時間"
+          value={
+            liveData?.receipt?.feeConfirmation?.feeConfirmedAt
+              ? formatShortDateTime(
+                  liveData.receipt.feeConfirmation.feeConfirmedAt,
+                  "Asia/Taipei",
+                )
+              : "未提供確認紀錄"
+          }
+          last
+        />
+      </Card>
+      <Card theme={theme} title="乘客與車輛" subtitle="個資已遮罩">
         <DetailRow theme={theme} label="乘客" value={receipt.passenger} />
         <DetailRow
           theme={theme}
@@ -2877,6 +3507,11 @@ function ReceiptScreen({
           </Banner>
         </div>
       </Card>
+      <ReferralReceiptDocumentActions
+        key={`referral-pdf:${receipt.orderId}`}
+        orderId={receipt.orderId}
+        theme={theme}
+      />
       <ExternalPaymentSim
         key={receipt.orderId}
         orderId={receipt.orderId}
@@ -3123,7 +3758,16 @@ function OutcomeScreen({
                 ? "派車失敗"
                 : "行程已取消"
         }
-        posture={completed ? "completed" : "cancelled"}
+        posture={
+          completed
+            ? "已完成"
+            : trip?.status === "no_supply"
+              ? "無可用車輛"
+              : trip?.status === "dispatch_failed" ||
+                  trip?.status === "dispatch_timeout"
+                ? "派車失敗"
+                : "已取消"
+        }
       />
       <Card theme={theme}>
         <DetailRow
@@ -3138,7 +3782,11 @@ function OutcomeScreen({
         <DetailRow
           theme={theme}
           label="車資"
-          value={trip?.formattedFare ?? "—"}
+          value={formatTerminalFare(
+            trip?.status,
+            trip?.fareTotal,
+            trip?.formattedFare,
+          )}
           strong
         />
         <DetailRow
@@ -3197,12 +3845,27 @@ function OutcomeScreen({
             ))}
           </div>
           {submitted ? (
-            <div aria-label="已送出評分內容">
-              <p>
+            <div
+              aria-label="已送出評分內容"
+              style={{
+                display: "grid",
+                gap: 4,
+                fontSize: 12.5,
+                color: theme.ink2,
+                lineHeight: 1.6,
+              }}
+            >
+              <p style={{ margin: 0 }}>
                 評價標籤：
                 {submitted.tags?.length ? submitted.tags.join("、") : "未選擇"}
               </p>
-              <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+              <p
+                style={{
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                }}
+              >
                 意見：{submitted.comment || "未填寫"}
               </p>
             </div>
@@ -3211,13 +3874,22 @@ function OutcomeScreen({
               disabled={isPending || Boolean(originalRating)}
               style={{ border: 0, margin: "12px 0", padding: 0 }}
             >
-              <legend>評價標籤（可複選）</legend>
+              <legend
+                style={{
+                  padding: 0,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: theme.ink2,
+                }}
+              >
+                評價標籤（可複選）
+              </legend>
               <div
                 style={{
                   display: "flex",
                   flexWrap: "wrap",
-                  gap: 10,
-                  margin: "8px 0",
+                  gap: 8,
+                  margin: "8px 0 14px",
                 }}
               >
                 {REFERRAL_RATING_TAG_OPTIONS.map((tag) => (
@@ -3226,11 +3898,31 @@ function OutcomeScreen({
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: 4,
+                      gap: 6,
+                      padding: "6px 11px",
+                      borderRadius: 999,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      color: selectedTags.includes(tag)
+                        ? theme.primary
+                        : theme.ink2,
+                      background: selectedTags.includes(tag)
+                        ? theme.primaryBg
+                        : theme.surface,
+                      border: `1px solid ${
+                        selectedTags.includes(tag) ? theme.primary : theme.line
+                      }`,
                     }}
                   >
                     <input
                       type="checkbox"
+                      style={{
+                        width: 14,
+                        height: 14,
+                        margin: 0,
+                        accentColor: theme.primary,
+                      }}
                       checked={selectedTags.includes(tag)}
                       onChange={() =>
                         setSelectedTags((current) =>
@@ -3244,7 +3936,15 @@ function OutcomeScreen({
                   </label>
                 ))}
               </div>
-              <label style={{ display: "block" }}>
+              <label
+                style={{
+                  display: "grid",
+                  gap: 6,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: theme.ink2,
+                }}
+              >
                 意見（最多200字）
                 <textarea
                   aria-describedby="referral-rating-comment-count"
@@ -3258,16 +3958,43 @@ function OutcomeScreen({
                     width: "100%",
                     minHeight: 80,
                     boxSizing: "border-box",
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: `1px solid ${theme.line}`,
+                    background: theme.surface,
+                    color: theme.ink,
+                    fontFamily: theme.sans,
+                    fontSize: 13.5,
+                    fontWeight: 400,
+                    lineHeight: 1.6,
+                    resize: "vertical",
                   }}
                 />
               </label>
-              <p id="referral-rating-comment-count" aria-live="polite">
+              <p
+                id="referral-rating-comment-count"
+                aria-live="polite"
+                style={{
+                  margin: "4px 0 0",
+                  fontSize: 11.5,
+                  color: theme.muted,
+                  textAlign: "right",
+                }}
+              >
                 {comment.length}/200 字
               </p>
             </fieldset>
           )}
           {(submitted?.score ?? score ?? 5) <= 2 ? (
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                fontSize: 13,
+                color: theme.ink2,
+              }}
+            >
               {submitted?.contactRequested === null ? (
                 <span>原評分未記錄聯絡偏好</span>
               ) : (
@@ -3317,7 +4044,16 @@ function OutcomeScreen({
             />
           ) : null}
           {submitted?.complaintCaseNo ? (
-            <p role="status">
+            <p
+              role="status"
+              style={{
+                margin: 0,
+                fontSize: 12.5,
+                color: theme.ink2,
+                lineHeight: 1.6,
+                overflowWrap: "anywhere",
+              }}
+            >
               客訴案件：{submitted.complaintCaseNo}；
               {submitted.contactRequested
                 ? "同意客服聯絡"
@@ -3357,23 +4093,50 @@ function OutcomeScreen({
               marginBottom: 10,
             }}
           >
-            {trip?.status === "no_supply"
-              ? "目前無可用車輛，未產生車資，請稍後再試或重新叫車。"
-              : trip?.status === "dispatch_failed" ||
-                  trip?.status === "dispatch_timeout"
-                ? "本次派車失敗，未產生車資，請重新叫車。"
-                : "此行程已取消，未產生車資。若於司機抵達後取消可能酌收費用，詳見社區叫車條款。"}
+            {(() => {
+              const hasRecordedFare =
+                typeof trip?.fareTotal === "number" &&
+                Number.isFinite(trip.fareTotal);
+              if (trip?.status === "no_supply") {
+                return hasRecordedFare
+                  ? "目前無可用車輛，本次行程費用如下所列。"
+                  : "目前無可用車輛，本次行程費用狀態未提供，請稍後再試或重新叫車。";
+              }
+              if (
+                trip?.status === "dispatch_failed" ||
+                trip?.status === "dispatch_timeout"
+              ) {
+                return hasRecordedFare
+                  ? "本次派車失敗，本次行程費用如下所列。"
+                  : "本次派車失敗，本次行程費用狀態未提供，請重新叫車。";
+              }
+              return `此行程已取消。${PASSENGER_FREE_CANCELLATION_NOTICE}`;
+            })()}
           </div>
+          {trip?.status === "cancelled" ? (
+            <DetailRow
+              theme={theme}
+              label="取消時間"
+              value={formatShortDateTime(trip.cancelledAt, "Asia/Taipei")}
+              mono
+            />
+          ) : null}
           <DetailRow
             theme={theme}
-            label="取消時間"
-            value={formatShortDateTime(trip?.completedAt || trip?.createdAt)}
-            mono
-          />
-          <DetailRow
-            theme={theme}
-            label="費用"
-            value={trip?.formattedFare ?? "—"}
+            label={
+              trip?.status === "cancelled"
+                ? REFERRAL_CANCELLATION_FEE_LABEL
+                : "費用"
+            }
+            value={
+              trip?.status === "cancelled"
+                ? REFERRAL_CANCELLATION_FEE_VALUE
+                : formatTerminalFare(
+                    trip?.status,
+                    trip?.fareTotal,
+                    trip?.formattedFare,
+                  )
+            }
             strong
             last
           />
@@ -3498,16 +4261,28 @@ function FallbackTripScreen({
   screen: EmbedTripFallbackScreen;
 }) {
   const theme = buildEmbedTheme(context.accent);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const supportPanel = supportOpen ? (
+    <ReferralSupportContactPanel
+      theme={theme}
+      phone={REFERRAL_SUPPORT_PHONE}
+      orderNo={displayOrderNo(embedTrip.id)}
+      onClose={() => setSupportOpen(false)}
+    />
+  ) : null;
   const fallback = embedTripFallbackStates[screen];
   const footer =
     screen === "vehicle_change_in_progress" ? (
-      <ActionButton
-        href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
-        label="聯絡客服"
-        theme={theme}
-        variant="default"
-        icon="phone"
-      />
+      <>
+        {supportPanel}
+        <ActionButton
+          label="聯絡客服"
+          theme={theme}
+          variant="default"
+          icon="phone"
+          onClick={() => setSupportOpen((open) => !open)}
+        />
+      </>
     ) : screen === "human_fallback_assigned" ? (
       <>
         <ActionButton
@@ -3516,12 +4291,13 @@ function FallbackTripScreen({
           theme={theme}
           icon="car"
         />
+        {supportPanel}
         <ActionButton
-          href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
           label="客服協助聯絡司機"
           theme={theme}
           variant="default"
           icon="phone"
+          onClick={() => setSupportOpen((open) => !open)}
         />
       </>
     ) : screen === "service_continuing" ? (
@@ -3556,6 +4332,11 @@ function FallbackTripScreen({
           </span>
         }
       />
+
+      <Banner theme={theme} tone="neutral" icon="info">
+        情境示範畫面 ·
+        以下行程編號、目的地與費用為示範資料，非您目前的真實行程。
+      </Banner>
 
       {fallback.progressStage ? (
         <Card theme={theme}>

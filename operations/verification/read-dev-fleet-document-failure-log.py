@@ -487,5 +487,177 @@ def main():
     return 1 if document["readFailureCode"] else 0
 
 
+# Separate opt-in profile: the original main, collectors and classifiers above
+# remain unchanged. These hashes identify exact documented first lines, not
+# keywords, a caller, or a unique underlying cause.
+ADMIN_INSTANCE_PROFILE = "admin-root-87ea-b1b-instance-v1"
+ADMIN_REQUEST_REASONS = {
+    "b88d209f6469e56b72715ae295d8c2c16f44ae249150e614c1bbd0d83e55685a":
+        ("CLOUD_RUN_NO_AVAILABLE_INSTANCE", (500,)),
+    "3076e7fb6fce199e0e21818bf2232c5e5d6cc5df1c372348bbba8f93e01ab221":
+        ("CLOUD_RUN_INSTANCE_START_FAILED", (500,)),
+    "02c082423fdb0c39c78fea6d3a267c6d222cea9d40609cbf9942d872b95015a5":
+        ("CLOUD_RUN_MALFORMED_RESPONSE_OR_INSTANCE_CONNECTION", (503,)),
+}
+ADMIN_INSTANCE_STREAMS = {
+    "stdout": f"projects/{PROJECT}/logs/run.googleapis.com%2Fstdout",
+    "stderr": ADMIN_STDERR_LOG,
+}
+ADMIN_INSTANCE_ID = re.compile(r"[A-Za-z0-9_-]{1,512}")
+ADMIN_SGR = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def admin_normalized_first_line(text):
+    if not isinstance(text, str):
+        return ""
+    text = ADMIN_SGR.sub("", text.replace("\r\n", "\n"))
+    # Do not turn OSC, control characters or an unknown escape into a match.
+    if any((ord(char) < 32 and char not in "\n\t")
+           or 127 <= ord(char) < 160 for char in text):
+        return ""
+    return next((line.strip() for line in text.split("\n") if line.strip()), "")
+
+
+def admin_request_reason(row):
+    line = admin_normalized_first_line(row.get("textPayload"))
+    match = ADMIN_REQUEST_REASONS.get(hashlib.sha256(line.encode()).hexdigest())
+    return match[0] if match else "UNOBSERVED"
+
+
+def admin_observed_instance(row):
+    labels = row.get("labels")
+    value = labels.get("instanceId") if isinstance(labels, dict) else None
+    return (value if isinstance(value, str) and ADMIN_INSTANCE_ID.fullmatch(value)
+            else None)
+
+
+def admin_instance_query(instances):
+    require(bool(instances) and len(instances) < REQUEST_LIMIT
+            and all(isinstance(value, str) and ADMIN_INSTANCE_ID.fullmatch(value)
+                    for value in instances), "INVALID_OBSERVED_INSTANCES")
+    # Even the conservative opaque-ID grammar is serialized, never interpolated.
+    instance_filter = " OR ".join(
+        "labels.instanceId=" + json.dumps(value) for value in sorted(instances)
+    )
+    streams = " OR ".join("logName=" + json.dumps(value)
+                          for value in ADMIN_INSTANCE_STREAMS.values())
+    return admin_scope_query() + f" AND ({instance_filter}) AND ({streams})"
+
+
+def project_admin_instance_context(row, instances, traces):
+    require(isinstance(row, dict), "INVALID_LOG_ROW")
+    stream = next((name for name, value in ADMIN_INSTANCE_STREAMS.items()
+                   if row.get("logName") == value), None)
+    require(stream is not None, "LOG_OUTSIDE_FIXED_STREAM")
+    safe, trace = check_admin_row(row, ADMIN_INSTANCE_STREAMS[stream])
+    instance = admin_observed_instance(row)
+    require(instance is not None and instance in instances,
+            "LOG_OUTSIDE_OBSERVED_REQUEST_INSTANCES")
+    # A temporary normalized view is used only by the unchanged closed error
+    # classifier. Neither the original nor normalized text crosses this boundary.
+    view = dict(row)
+    view["textPayload"] = admin_normalized_first_line(row.get("textPayload"))
+    safe.update(admin_error_facts(view))
+    safe.update({
+        "instanceFingerprint": hashlib.sha256(instance.encode()).hexdigest(),
+        "containerStream": stream,
+        "association": "same-instance-context-only",
+        "sameObservedRequestTrace": (trace in traces if traces and trace
+                                     else "UNOBSERVED"),
+    })
+    return safe
+
+
+def collect_admin_root_instance(environ, runner=subprocess.run):
+    document = {
+        "schema": "dev-admin-root-instance-failure-readback-v1",
+        "profile": ADMIN_INSTANCE_PROFILE,
+        "observedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "failedSourceSha": ADMIN_SOURCE_SHA, "project": PROJECT, "region": REGION,
+        "service": ADMIN_SERVICE, "revision": ADMIN_REVISION,
+        "start": ADMIN_START, "end": ADMIN_END,
+        "exceptionSignatureSource": ADMIN_SIGNATURE_SOURCE,
+        "requestReasonSource": "https://docs.cloud.google.com/run/docs/troubleshooting",
+        "requestReasonDocumentation": {
+            name: {"firstLineSha256": digest, "documentedHTTPStatuses": statuses}
+            for digest, (name, statuses) in ADMIN_REQUEST_REASONS.items()
+        },
+        "definitionSha": None, "readStatus": "unobserved", "readFailureCode": None,
+        "requests": [], "instanceContext": [], "queryCount": 0,
+        "instanceAssociationStatus": "UNOBSERVED",
+        "qualification": (
+            "Historical Admin GET / HTTP500 only. Exact request reason categories "
+            "and same-instance/window context do not identify this caller, a unique "
+            "cause, or a repair. A message documented for HTTP503 never changes "
+            "the observed HTTP500. Missing/invalid instances, empty context and "
+            "unclassified messages remain UNKNOWN. No trace fallback, paging, "
+            "product replay, authority change or full-journey PASS is implied."
+        ),
+    }
+    try:
+        definition = environ.get("EXPECTED_DEFINITION_SHA", "")
+        require(re.fullmatch(r"[a-f0-9]{40}", definition)
+                and definition == environ.get("GITHUB_SHA"),
+                "IMMUTABLE_DEFINITION_MISMATCH")
+        require(environ.get("DEV_GCP_PROJECT_ID") == PROJECT
+                and environ.get("DEV_GCP_REGION") == REGION, "DEV_TARGET_MISMATCH")
+        document["definitionSha"] = definition
+        document["queryCount"] += 1
+        requests = query_rows(admin_request_query(), REQUEST_LIMIT, runner)
+        instances, traces = set(), set()
+        for row in requests:
+            safe, trace = project_admin_request(row)
+            instance = admin_observed_instance(row)
+            safe.update({
+                "requestPlatformReason": admin_request_reason(row),
+                "instanceFingerprint": (hashlib.sha256(instance.encode()).hexdigest()
+                                        if instance else None),
+            })
+            document["requests"].append(safe)
+            if instance:
+                instances.add(instance)
+            if trace:
+                traces.add(trace)
+        if instances:
+            document["queryCount"] += 1
+            rows = query_rows(admin_instance_query(instances), CORRELATED_LIMIT, runner)
+            for row in rows:
+                document["instanceContext"].append(
+                    project_admin_instance_context(row, instances, traces)
+                )
+            if rows:
+                document["instanceAssociationStatus"] = "same-instance-context-observed"
+        document["readStatus"] = (
+            "request-metadata-observed" if requests else "no-matching-request-logs"
+        )
+    except DiagnosticFailure as error:
+        document["readFailureCode"] = str(error)
+    return document
+
+
+def main_with_instance_profile():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--profile", choices=("fleet-original-v2", ADMIN_PROFILE,
+                                             ADMIN_INSTANCE_PROFILE),
+                        default="fleet-original-v2")
+    args = parser.parse_args()
+    if args.profile != ADMIN_INSTANCE_PROFILE:
+        return main()
+    os.umask(0o077)
+    document = collect_admin_root_instance(os.environ)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = args.output.with_suffix(".tmp")
+    temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n")
+    temporary.chmod(0o600)
+    os.replace(temporary, args.output)
+    print(json.dumps({
+        "readStatus": document["readStatus"],
+        "readFailureCode": document["readFailureCode"],
+        "requestCount": len(document["requests"]),
+    }))
+    return 1 if document["readFailureCode"] else 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main_with_instance_profile())

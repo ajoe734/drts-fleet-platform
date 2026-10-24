@@ -58,7 +58,7 @@ describe("workflow registration security prerequisite", () => {
   it("pins the four advisory repairs without touching the security gate", () => {
     const manifest = JSON.parse(readFileSync("package.json", "utf8"));
     expect(manifest.pnpm.overrides).toMatchObject({
-      "@modelcontextprotocol/sdk@<1.31.0": "1.31.0",
+      "@modelcontextprotocol/sdk@<1.32.1": "1.32.1",
       "js-yaml@3.15.2>argparse": "2.0.1",
       "proxy-addr@<2.0.8": "2.0.8",
       "source-map-js@<1.2.2": "1.2.2",
@@ -73,7 +73,7 @@ describe("workflow registration security prerequisite", () => {
     ]) {
       expect(lock).not.toContain(vulnerable);
     }
-    expect(lock).toContain("@modelcontextprotocol/sdk@1.31.0");
+    expect(lock).toContain("@modelcontextprotocol/sdk@1.32.1");
   });
 
   it("does not send issuer-bound client credentials to an MCP-selected foreign server", async () => {

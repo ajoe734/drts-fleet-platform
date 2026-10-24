@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ApiRequestError } from "../../../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { PlatformAdminService } from "../../../../apps/api/src/modules/platform-admin/platform-admin.service";
-import { ReferralSettlementScaffoldService } from "../../../../apps/api/src/modules/billing-settlement/referral-settlement.scaffold.service";
+import { BillingSettlementService } from "../../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import {
   PARTNER_REFERRAL_CHANNEL_KEY,
   REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
@@ -130,18 +130,22 @@ describe("C103: 合作夥伴方案、入口、價格發布、來源歸屬與結�
     expect(archivedV1?.effectiveTo).toBeDefined();
   });
 
-  it("轉介通路歸屬與結算協議一致性：結算方向嚴格為 drts_pays_partner，通路代碼對齊權威常數", () => {
-    const scaffoldService = new ReferralSettlementScaffoldService();
-    const scaffold = scaffoldService.getReferralSettlementScaffold();
+  it("轉介通路歸屬與結算協議一致性：結算方向嚴格為 drts_pays_partner，通路代碼對齊權威常數", async () => {
+    const service = new BillingSettlementService(
+      new AuditNotificationService(),
+    );
+    const statement = await service.getReferralStatement(
+      "referral-demo-community",
+      "2026-06",
+    );
 
-    expect(scaffold.channelKey).toBe(PARTNER_REFERRAL_CHANNEL_KEY);
-    expect(scaffold.channelKey).toBe("partner_referral");
-    expect(scaffold.direction).toBe(
+    expect(statement.channelKey).toBe(PARTNER_REFERRAL_CHANNEL_KEY);
+    expect(statement.direction).toBe(
       REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
     );
-    expect(scaffold.direction).toBe("drts_pays_partner");
-    expect(scaffold.payer).toBe("drts_platform");
-    expect(scaffold.payee).toBe("partner");
+    expect(statement.totals.tripCount).toBe(2);
+    expect(statement.totals.gmv.amountMinor).toBe(150000);
+    expect(statement.totals.shareTotal.amountMinor).toBe(22500);
   });
 
   it("通路轉介收益分配計算模型驗證：支援百分比比例與單趟固定分潤，不合法負值即時拒絕", () => {

@@ -249,6 +249,7 @@ import {
 } from "./referral-embed-handoff.repository";
 import {
   TenantPartnerRepository,
+  mergeCanonicalTenantApiKeyRecord,
   type IdentityGovernanceChanges,
   type PersistTenantPartnerChanges,
   type StoredPartnerIngressCredentialRecord,
@@ -1783,7 +1784,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
   }
 
   isPersistenceEnabled() {
-    return this.tenantPartnerRepository?.isEnabled() ?? false;
+    return this.tenantPartnerRepository?.isEnabled?.() ?? false;
   }
 
   async getTenantDashboardSummary(
@@ -3714,7 +3715,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         request,
         params.requestId ? { requestId: params.requestId } : undefined,
       );
-      void this.pollPendingApprovalTimeoutNotifications();
+      this.pollPendingApprovalTimeoutNotifications().catch((error) => {
+        const message =
+          error instanceof Error ? error.message : "unknown polling failure";
+        this.logger.error(
+          `Background approval timeout notification poll failed: ${message}`,
+        );
+      });
       return this.cloneApprovalRequest(request);
     };
 
@@ -5137,8 +5144,27 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((entry) => this.clonePartnerEntry(entry));
   }
 
+  async resolvePartnerEntries(
+    entrySlug?: string,
+  ): Promise<PartnerChannelEntryRecord[]> {
+    const slug = entrySlug?.trim();
+    const entries = await this.loadCanonicalPartnerEntries();
+    return entries
+      .filter(
+        (entry) =>
+          entry.activeFlag &&
+          entry.status === "active" &&
+          (!slug || entry.entrySlug === slug || entry.partnerId === slug),
+      )
+      .map((entry) => this.clonePartnerEntry(entry));
+  }
+
   listPlatformPartnerEntries() {
     return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+  }
+
+  async resolvePlatformPartnerEntries(): Promise<PartnerChannelEntryRecord[]> {
+    return await this.loadCanonicalPartnerEntries();
   }
 
   // ── Referral revenue-share rate config (CRC-BE-006) ──────────────────────
@@ -5354,6 +5380,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       .map((credential) => this.toPartnerIngressCredentialResponse(credential));
   }
 
+  async resolvePlatformPartnerIngressCredentials(
+    entrySlug: string,
+  ): Promise<PartnerIngressCredentialRecord[]> {
+    const entry = await this.requireCanonicalPlatformPartnerEntry(entrySlug);
+    await this.loadCanonicalPartnerIngressCredentials(entry.entrySlug);
+    return this.listPlatformPartnerIngressCredentials(entry.entrySlug);
+  }
+
   async resolvePartnerEligibilityReviewQueue(
     requestId?: string,
     identity?: IdentityContext | null,
@@ -5446,6 +5480,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   getPartnerEntry(entrySlug: string) {
     return this.clonePartnerEntry(this.requirePublicPartnerEntry(entrySlug));
+  }
+
+  async resolvePartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord> {
+    return this.clonePartnerEntry(
+      await this.requireCanonicalAccessiblePartnerEntry(
+        entrySlug,
+        undefined,
+        "public",
+      ),
+    );
   }
 
   async getPartnerReferralDashboard(
@@ -5544,6 +5590,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       const partnerCode = this.normalizePartnerCode(command.partnerCode);
       const programId = this.requireNonBlank(command.programId, "programId");
 
+      await this.loadCanonicalPartnerEntry(entrySlug);
       if (this.partnerEntries.some((entry) => entry.entrySlug === entrySlug)) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -5679,7 +5726,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
   ) {
     return this.runWithEntryMutex(entrySlug, async () => {
-      const originalEntry = this.requirePlatformPartnerEntry(entrySlug);
+      const originalEntry =
+        await this.requireCanonicalPlatformPartnerEntry(entrySlug);
       const before = this.clonePartnerEntry(originalEntry);
       const entry = this.clonePartnerEntry(originalEntry);
 
@@ -5831,7 +5879,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
   async revokePlatformPartnerEntry(entrySlug: string, requestId?: string) {
     return this.runWithEntryMutex(entrySlug, async () => {
-      const originalEntry = this.requirePlatformPartnerEntry(entrySlug);
+      const originalEntry =
+        await this.requireCanonicalPlatformPartnerEntry(entrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(
+        originalEntry.entrySlug,
+      );
       const before = this.clonePartnerEntry(originalEntry);
       const entry = this.clonePartnerEntry(originalEntry);
       const revokedAt = new Date().toISOString();
@@ -5916,7 +5968,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
   ): Promise<PartnerIngressCredentialIssued> {
     return this.runWithEntryMutex(entrySlug, async () => {
-      const entry = this.requirePlatformPartnerEntry(entrySlug);
+      const entry = await this.requireCanonicalPlatformPartnerEntry(entrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(entry.entrySlug);
       if (entry.status === "revoked") {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -6053,7 +6106,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
   ): Promise<PartnerIngressCredentialRecord> {
     return this.runWithEntryMutex(entrySlug, async () => {
-      const entry = this.requirePlatformPartnerEntry(entrySlug);
+      const entry = await this.requireCanonicalPlatformPartnerEntry(entrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(entry.entrySlug);
       const originalCredential = this.requirePartnerIngressCredential(
         entry.entrySlug,
         keyId,
@@ -6105,6 +6159,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
 
       return this.toPartnerIngressCredentialResponse(credential);
     });
+  }
+
+  async resolvePartnerBootstrapAuthentication(
+    command: CreatePartnerBootstrapSessionCommand,
+    requestId?: string,
+  ): Promise<PartnerIngressResolution> {
+    const normalizedEntrySlug = command.entrySlug?.trim();
+    if (normalizedEntrySlug) {
+      await this.loadCanonicalPartnerEntry(normalizedEntrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(normalizedEntrySlug);
+    }
+    return this.authenticatePartnerBootstrap(command, requestId);
   }
 
   authenticatePartnerBootstrap(
@@ -6279,6 +6345,21 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async resolvePartnerBootstrapWithResolvedCredential(
+    entrySlug: string,
+    requestId?: string,
+  ): Promise<PartnerIngressResolution> {
+    const normalizedEntrySlug = entrySlug?.trim();
+    if (normalizedEntrySlug) {
+      await this.loadCanonicalPartnerEntry(normalizedEntrySlug);
+      await this.loadCanonicalPartnerIngressCredentials(normalizedEntrySlug);
+    }
+    return this.authenticatePartnerBootstrapWithResolvedCredential(
+      entrySlug,
+      requestId,
+    );
+  }
+
   private authenticatePartnerBootstrapWithResolvedCredential(
     entrySlug: string,
     requestId?: string,
@@ -6383,7 +6464,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     },
   ): Promise<PartnerIngressHandoffResolution> {
     const bootstrap = command.apiKey?.trim()
-      ? this.authenticatePartnerBootstrap(
+      ? await this.resolvePartnerBootstrapAuthentication(
           {
             entrySlug: command.entrySlug,
             apiKey: command.apiKey,
@@ -6391,11 +6472,11 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           requestId,
         )
       : options?.allowInternalBootstrap
-        ? this.authenticatePartnerBootstrapWithResolvedCredential(
+        ? await this.resolvePartnerBootstrapWithResolvedCredential(
             command.entrySlug,
             requestId,
           )
-        : this.authenticatePartnerBootstrap(
+        : await this.resolvePartnerBootstrapAuthentication(
             {
               entrySlug: command.entrySlug,
               apiKey: command.apiKey ?? "",
@@ -6532,7 +6613,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
     if (result.outcome === "consumed") {
-      const entry = await this.getPartnerEntry(result.session.partnerEntrySlug);
+      const entry = await this.resolvePartnerEntry(
+        result.session.partnerEntrySlug,
+      );
       if (!entry || entry.status !== "active") {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -6623,7 +6706,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     this.assertExactReferralEmbedConsentBundle(command.consentBundle);
 
     const validateFn = async (session: ReferralEmbedSession) => {
-      const entry = await this.getPartnerEntry(session.partnerEntrySlug);
+      const entry = await this.resolvePartnerEntry(session.partnerEntrySlug);
       if (!entry || entry.status !== "active") {
         throw new ApiRequestError(
           HttpStatus.FORBIDDEN,
@@ -6782,7 +6865,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: PartnerEligibilityIdentity | null,
   ) {
-    const entry = this.requireAccessiblePartnerEntry(
+    const entry = await this.requireCanonicalAccessiblePartnerEntry(
       command.entrySlug,
       requestId,
       "eligibility",
@@ -8143,8 +8226,78 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    this.reconcileStoredApiKey(matchingKey);
+    if (this.tenantPartnerRepository?.isEnabled()) {
+      return this.authenticateTenantApiKeyWithCanonicalState(
+        matchingKey,
+        options,
+      );
+    }
 
+    return this.completeAuthenticateTenantApiKey(matchingKey, options);
+  }
+
+  private async loadCanonicalTenantApiKey(
+    tenantId: string,
+    apiKeyId: string,
+  ): Promise<StoredTenantApiKeyRecord | null> {
+    const repository = this.tenantPartnerRepository;
+    if (!repository?.isEnabled()) {
+      return null;
+    }
+    if (typeof (repository as any).findTenantApiKey === "function") {
+      return await (repository as any).findTenantApiKey(apiKeyId, tenantId);
+    }
+    if (typeof repository.loadState === "function") {
+      const state = await repository.loadState();
+      return (
+        (state.apiKeys ?? []).find(
+          (candidate) =>
+            candidate.apiKeyId === apiKeyId && candidate.tenantId === tenantId,
+        ) ?? null
+      );
+    }
+    return null;
+  }
+
+  private async authenticateTenantApiKeyWithCanonicalState(
+    matchingKey: StoredTenantApiKeyRecord,
+    options?: AuthenticateTenantApiKeyOptions,
+  ): Promise<TenantApiKeyResolution> {
+    const canonicalKey = await this.loadCanonicalTenantApiKey(
+      matchingKey.tenantId,
+      matchingKey.apiKeyId,
+    );
+    if (canonicalKey) {
+      const merged = mergeCanonicalTenantApiKeyRecord(
+        canonicalKey,
+        matchingKey,
+      );
+      Object.assign(matchingKey, this.cloneStoredApiKey(merged));
+    }
+    const changed = this.reconcileStoredApiKey(matchingKey);
+    if (
+      (changed ||
+        (canonicalKey &&
+          canonicalKey.status !== "auto_revoked" &&
+          !canonicalKey.autoRevokedAt)) &&
+      (matchingKey.autoRevokedAt ||
+        matchingKey.status === "auto_revoked" ||
+        matchingKey.revokeReason === "rotation_overlap_elapsed")
+    ) {
+      await Promise.resolve(
+        this.persistChanges(
+          {
+            apiKeys: [this.cloneStoredApiKey(matchingKey)],
+          },
+          "auto_revoke_tenant_api_key",
+        ),
+      );
+    }
+
+    return await this.completeAuthenticateTenantApiKey(matchingKey, options);
+  }
+
+  private assertTenantApiKeyNotRevoked(matchingKey: StoredTenantApiKeyRecord) {
     if (
       matchingKey.autoRevokedAt ||
       matchingKey.status === "auto_revoked" ||
@@ -8176,6 +8329,14 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         },
       );
     }
+  }
+
+  private completeAuthenticateTenantApiKey(
+    matchingKey: StoredTenantApiKeyRecord,
+    options?: AuthenticateTenantApiKeyOptions,
+  ): MaybePromise<TenantApiKeyResolution> {
+    this.reconcileStoredApiKey(matchingKey);
+    this.assertTenantApiKeyNotRevoked(matchingKey);
 
     const now = Date.now();
     const expiresAtMs = matchingKey.expiresAt
@@ -8232,38 +8393,10 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       nowIso,
     );
 
-    this.maybeRecordDormantCredentialUse({
-      tenantId: matchingKey.tenantId,
-      channel: "ops_notice",
-      title: "Dormant tenant API key used",
-      message: `Tenant API key ${matchingKey.apiKeyId} (${matchingKey.keyName}) was used after dormancy.`,
-      previousLastUsedAt,
-      createdAt: matchingKey.createdAt,
-    });
-
-    this.recordTenantAudit(
-      {
-        actorId: matchingKey.ownerRef ?? matchingKey.apiKeyId,
-        actorType: "tenant_admin",
-        tenantId: matchingKey.tenantId,
-        moduleName: "tenant-partner",
-        actionName: "use_api_key",
-        resourceType: "tenant_api_key",
-        resourceId: matchingKey.apiKeyId,
-        newValuesSummary: {
-          apiKeyId: matchingKey.apiKeyId,
-          keyName: matchingKey.keyName,
-          lastUsedAt: matchingKey.lastUsedAt,
-          lastUsedWorkload: matchingKey.lastUsedWorkload,
-          workload: matchingKey.lastUsedWorkload,
-        },
-      },
-      options?.requestId,
-    );
-
+    const persistedKey = this.cloneStoredApiKey(matchingKey);
     const persisted = this.persistChanges(
       {
-        apiKeys: [this.cloneStoredApiKey(matchingKey)],
+        apiKeys: [persistedKey],
       },
       "authenticate_tenant_api_key",
     );
@@ -8285,10 +8418,50 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       ],
     };
 
-    return this.afterPersistence(persisted, () => ({
-      apiKey: this.cloneStoredApiKey(matchingKey),
-      identity,
-    }));
+    return this.afterPersistence(persisted, () => {
+      Object.assign(
+        matchingKey,
+        this.cloneStoredApiKey(
+          mergeCanonicalTenantApiKeyRecord(persistedKey, matchingKey),
+        ),
+      );
+      this.reconcileStoredApiKey(matchingKey);
+      this.assertTenantApiKeyNotRevoked(matchingKey);
+
+      this.maybeRecordDormantCredentialUse({
+        tenantId: matchingKey.tenantId,
+        channel: "ops_notice",
+        title: "Dormant tenant API key used",
+        message: `Tenant API key ${matchingKey.apiKeyId} (${matchingKey.keyName}) was used after dormancy.`,
+        previousLastUsedAt,
+        createdAt: matchingKey.createdAt,
+      });
+
+      this.recordTenantAudit(
+        {
+          actorId: matchingKey.ownerRef ?? matchingKey.apiKeyId,
+          actorType: "tenant_admin",
+          tenantId: matchingKey.tenantId,
+          moduleName: "tenant-partner",
+          actionName: "use_api_key",
+          resourceType: "tenant_api_key",
+          resourceId: matchingKey.apiKeyId,
+          newValuesSummary: {
+            apiKeyId: matchingKey.apiKeyId,
+            keyName: matchingKey.keyName,
+            lastUsedAt: matchingKey.lastUsedAt,
+            lastUsedWorkload: matchingKey.lastUsedWorkload,
+            workload: matchingKey.lastUsedWorkload,
+          },
+        },
+        options?.requestId,
+      );
+
+      return {
+        apiKey: this.cloneStoredApiKey(matchingKey),
+        identity,
+      };
+    });
   }
 
   issueApiKey(
@@ -8466,6 +8639,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       currentApiKey.autoRevokedAt ?? null,
       rotatedAt,
     );
+    this.reconcileStoredApiKey(currentApiKey, rotatedAt);
     const retiredApiKeys = this.apiKeys
       .filter(
         (apiKey) =>
@@ -8615,56 +8789,95 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private clearWebhookRetriesForEndpoint(tenantId: string, webhookId: string) {
+    for (const delivery of this.webhookDeliveries) {
+      if (delivery.tenantId === tenantId && delivery.webhookId === webhookId) {
+        this.clearWebhookRetry(delivery.deliveryId);
+      }
+    }
+  }
+
+  private resolveLiveWebhookEndpoint(
+    tenantId: string,
+    webhookId: string,
+  ): MaybePromise<StoredWebhookEndpoint | null> {
+    const inMemory = this.webhookEndpoints.find(
+      (candidate) =>
+        candidate.tenantId === tenantId && candidate.webhookId === webhookId,
+    );
+    const repository = this.tenantPartnerRepository;
+    if (
+      !repository?.isEnabled() ||
+      typeof repository.findNotificationWebhookEndpoint !== "function"
+    ) {
+      if (!inMemory) {
+        this.clearWebhookRetriesForEndpoint(tenantId, webhookId);
+        return null;
+      }
+      return this.cloneStoredWebhookEndpoint(inMemory);
+    }
+    return repository
+      .findNotificationWebhookEndpoint(tenantId, webhookId)
+      .then((persisted) => {
+        if (!persisted) {
+          this.clearWebhookRetriesForEndpoint(tenantId, webhookId);
+          this.webhookEndpoints = this.webhookEndpoints.filter(
+            (candidate) => candidate.webhookId !== webhookId,
+          );
+          return null;
+        }
+        return this.cloneStoredWebhookEndpoint(inMemory ?? persisted);
+      });
+  }
+
   deleteWebhookEndpoint(
     tenantId: string,
     webhookId: string,
     command?: DeleteTenantWebhookEndpointCommand,
     requestId?: string,
   ) {
-    const removed = this.webhookEndpoints.find(
-      (endpoint) =>
-        endpoint.tenantId === tenantId && endpoint.webhookId === webhookId,
-    );
-    if (!removed) {
-      return null;
-    }
-
-    for (const delivery of this.webhookDeliveries) {
-      if (
-        delivery.tenantId === tenantId &&
-        delivery.webhookId === removed.webhookId
-      ) {
-        this.clearWebhookRetry(delivery.deliveryId);
+    return this.runConfigurationCommand(tenantId, () => {
+      const removed = this.webhookEndpoints.find(
+        (endpoint) =>
+          endpoint.tenantId === tenantId && endpoint.webhookId === webhookId,
+      );
+      if (!removed) {
+        return null;
       }
-    }
 
-    this.webhookEndpoints = this.webhookEndpoints.filter(
-      (endpoint) => endpoint.webhookId !== removed.webhookId,
-    );
-    this.persistChanges(
-      {
-        webhookEndpoints: [this.cloneStoredWebhookEndpoint(removed)],
-      },
-      "delete_webhook_endpoint",
-    );
-    this.recordTenantAudit(
-      {
-        actorId: null,
-        actorType: "tenant_admin",
-        tenantId,
-        moduleName: "tenant-partner",
-        actionName: "delete_webhook_endpoint",
-        resourceType: "webhook_endpoint",
-        resourceId: removed.webhookId,
-        oldValuesSummary: this.toWebhookResponse(removed),
-        newValuesSummary: {
-          deleted: true,
-          reason: command?.reason?.trim() || null,
+      const snapshot = this.cloneStoredWebhookEndpoint(removed);
+      const persisted = this.persistConfigurationChanges(
+        {
+          deletedWebhookEndpointIds: [removed.webhookId],
         },
-      },
-      requestId,
-    );
-    return { status: "deleted", webhookId };
+        "delete_webhook_endpoint",
+        tenantId,
+      );
+      return this.afterPersistence(persisted, () => {
+        this.clearWebhookRetriesForEndpoint(tenantId, removed.webhookId);
+        this.webhookEndpoints = this.webhookEndpoints.filter(
+          (endpoint) => endpoint.webhookId !== removed.webhookId,
+        );
+        this.recordTenantAudit(
+          {
+            actorId: null,
+            actorType: "tenant_admin",
+            tenantId,
+            moduleName: "tenant-partner",
+            actionName: "delete_webhook_endpoint",
+            resourceType: "webhook_endpoint",
+            resourceId: snapshot.webhookId,
+            oldValuesSummary: this.toWebhookResponse(snapshot),
+            newValuesSummary: {
+              deleted: true,
+              reason: command?.reason?.trim() || null,
+            },
+          },
+          requestId,
+        );
+        return { status: "deleted", webhookId };
+      });
+    });
   }
 
   createWebhookEndpoint(
@@ -9129,9 +9342,17 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     data: Record<string, unknown> = {},
   ): Promise<StoredWebhookDelivery | null> {
     return this.runConfigurationCommand(endpoint.tenantId, async () => {
-      endpoint = this.cloneStoredWebhookEndpoint(
-        this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+      const liveEndpoint = await this.resolveLiveWebhookEndpoint(
+        endpoint.tenantId,
+        endpoint.webhookId,
       );
+      if (!liveEndpoint) {
+        if (eventType !== "tenant.webhook.test") {
+          return null;
+        }
+        this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId);
+      }
+      endpoint = liveEndpoint!;
       this.reconcileStoredWebhookEndpoint(endpoint, createdAt);
       // The publisher's initial cache selection can predate a metadata COMMIT.
       // Reapply the original live-event predicate under the configuration lock
@@ -9197,10 +9418,29 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         {
           webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
           webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+          requireExistingWebhookEndpoints: true,
         },
         context,
         endpoint.tenantId,
       );
+      if (
+        this.tenantPartnerRepository?.isEnabled() &&
+        typeof this.tenantPartnerRepository.findNotificationWebhookEndpoint ===
+          "function" &&
+        !(await this.tenantPartnerRepository.findNotificationWebhookEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
+        ))
+      ) {
+        this.clearWebhookRetriesForEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
+        );
+        this.webhookEndpoints = this.webhookEndpoints.filter(
+          (item) => item.webhookId !== endpoint.webhookId,
+        );
+        return null;
+      }
       this.webhookDeliveries = [delivery, ...this.webhookDeliveries];
       this.webhookEndpoints = this.webhookEndpoints.map((item) =>
         item.webhookId === endpoint.webhookId ? endpoint : item,
@@ -9230,9 +9470,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       retryPolicySnapshot?: WebhookRetryPolicyRecord;
     },
   ): Promise<WebhookDispatchAttemptResult> {
-    endpoint = this.cloneStoredWebhookEndpoint(
-      this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+    const initialEndpoint = this.webhookEndpoints.find(
+      (candidate) =>
+        candidate.tenantId === endpoint.tenantId &&
+        candidate.webhookId === endpoint.webhookId,
     );
+    if (!initialEndpoint) {
+      this.clearWebhookRetry(delivery.deliveryId);
+      return {
+        ...this.cloneStoredWebhookDelivery(delivery),
+        nextAttemptAt: null,
+      };
+    }
+    endpoint = this.cloneStoredWebhookEndpoint(initialEndpoint);
     // An edit can also commit after enqueue or before a process resumes its
     // first interrupted attempt. Recheck the original live-event predicate
     // before sending; leave the original identity/payload/key/policy intact.
@@ -9269,9 +9519,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         signingSecret.status !== "overlap_active")
     ) {
       return this.runConfigurationCommand(endpoint.tenantId, async () => {
-        endpoint = this.cloneStoredWebhookEndpoint(
-          this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+        const liveEndpoint = await this.resolveLiveWebhookEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
         );
+        if (!liveEndpoint) {
+          this.clearWebhookRetry(delivery.deliveryId);
+          return {
+            ...this.cloneStoredWebhookDelivery(delivery),
+            nextAttemptAt: null,
+          };
+        }
+        endpoint = liveEndpoint;
         const attemptedAt = new Date().toISOString();
         delivery.attempt += 1;
         delivery.status = "delivery_failed";
@@ -9325,10 +9584,40 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           {
             webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
             webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+            requireExistingWebhookEndpoints: true,
           },
           "webhook_dispatch_secret_unavailable",
           endpoint.tenantId,
         );
+        if (
+          this.tenantPartnerRepository?.isEnabled() &&
+          typeof this.tenantPartnerRepository
+            .findNotificationWebhookEndpoint === "function" &&
+          !(await this.tenantPartnerRepository.findNotificationWebhookEndpoint(
+            endpoint.tenantId,
+            endpoint.webhookId,
+          ))
+        ) {
+          this.clearWebhookRetriesForEndpoint(
+            endpoint.tenantId,
+            endpoint.webhookId,
+          );
+          this.webhookEndpoints = this.webhookEndpoints.filter(
+            (item) => item.webhookId !== endpoint.webhookId,
+          );
+          return {
+            attempt: delivery.attempt,
+            status: delivery.status,
+            httpStatus: null,
+            signature: "",
+            attemptedAt,
+            nextAttemptAt: null,
+            signatureHeader: "",
+            signatureVersion: delivery.secretVersion,
+            secretVersion: delivery.secretVersion,
+            rawBody: { ...delivery.rawBody },
+          };
+        }
         publish();
         this.clearWebhookRetry(delivery.deliveryId);
         return {
@@ -9372,9 +9661,18 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       // Configuration may have changed while HTTP was in flight. Apply the
       // outcome to the current committed configuration; an old test nonce must
       // never restore an earlier URL/secret or activate the replacement.
-      endpoint = this.cloneStoredWebhookEndpoint(
-        this.requireWebhookEndpoint(endpoint.tenantId, endpoint.webhookId),
+      const liveEndpoint = await this.resolveLiveWebhookEndpoint(
+        endpoint.tenantId,
+        endpoint.webhookId,
       );
+      if (!liveEndpoint) {
+        this.clearWebhookRetry(delivery.deliveryId);
+        return {
+          ...result,
+          nextAttemptAt: null,
+        };
+      }
+      endpoint = liveEndpoint;
       const currentSigningSecret = this.resolveWebhookSecretMaterial(
         endpoint,
         delivery.secretVersion,
@@ -9400,10 +9698,32 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         {
           webhookEndpoints: [this.cloneStoredWebhookEndpoint(endpoint)],
           webhookDeliveries: [this.cloneStoredWebhookDelivery(delivery)],
+          requireExistingWebhookEndpoints: true,
         },
         "webhook_dispatch_attempt",
         endpoint.tenantId,
       );
+      if (
+        this.tenantPartnerRepository?.isEnabled() &&
+        typeof this.tenantPartnerRepository.findNotificationWebhookEndpoint ===
+          "function" &&
+        !(await this.tenantPartnerRepository.findNotificationWebhookEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
+        ))
+      ) {
+        this.clearWebhookRetriesForEndpoint(
+          endpoint.tenantId,
+          endpoint.webhookId,
+        );
+        this.webhookEndpoints = this.webhookEndpoints.filter(
+          (item) => item.webhookId !== endpoint.webhookId,
+        );
+        return {
+          ...result,
+          nextAttemptAt: null,
+        };
+      }
       publish();
 
       if (
@@ -10101,24 +10421,43 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     requestId?: string,
     identity?: IdentityContext | null,
   ) {
-    const endpoint = this.webhookEndpoints.find(
+    const initialEndpoint = this.webhookEndpoints.find(
       (candidate) => candidate.webhookId === webhookId,
     );
     const delivery = this.webhookDeliveries.find(
       (candidate) => candidate.deliveryId === deliveryId,
     );
 
-    if (!endpoint || !delivery || delivery.status !== "queued") {
+    if (!initialEndpoint || !delivery || delivery.status !== "queued") {
       this.clearWebhookRetry(deliveryId);
-      if (!endpoint || !delivery) {
+      if (!initialEndpoint || !delivery) {
         return undefined;
       }
       return this.toDeliveryResponse(delivery, identity);
     }
 
+    const endpoint = await this.resolveLiveWebhookEndpoint(
+      initialEndpoint.tenantId,
+      webhookId,
+    );
+    if (!endpoint) {
+      this.clearWebhookRetry(deliveryId);
+      return undefined;
+    }
+
     // Passenger deliveries are owned exclusively by the consumer outbox, including after restart/manual retry.
     if (delivery.eventType.startsWith("passenger.")) return;
     await this.dispatchWebhookAttempt(endpoint, delivery, delivery.rawBody);
+    if (
+      !this.webhookEndpoints.some(
+        (candidate) =>
+          candidate.tenantId === endpoint.tenantId &&
+          candidate.webhookId === webhookId,
+      )
+    ) {
+      this.clearWebhookRetry(deliveryId);
+      return undefined;
+    }
     // Dispatch publishes a staged delivery only after its durable outcome ACK.
     // The pre-dispatch object still describes the queued attempt.
     const committedDelivery =
@@ -10689,8 +11028,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       apiKey.revokeReason = "manual_revoke";
       apiKey.status = "revoked";
       apiKey.overlapEndsAt = null;
+      const persistedApiKey = this.cloneStoredApiKey(apiKey);
       const persisted = this.persistIdentityGovernanceMutation({
-        changes: { apiKeys: [this.cloneStoredApiKey(apiKey)] },
+        changes: { apiKeys: [persistedApiKey] },
         context: "revoke_api_key",
         rollback: () => {
           this.apiKeys = previousApiKeys.map((entry) =>
@@ -10730,6 +11070,13 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       });
 
       return this.afterPersistence(persisted, () => {
+        Object.assign(
+          apiKey,
+          this.cloneStoredApiKey(
+            mergeCanonicalTenantApiKeyRecord(persistedApiKey, apiKey),
+          ),
+        );
+        this.reconcileStoredApiKey(apiKey);
         this.recordTenantAudit(
           {
             actorId: null,
@@ -11320,8 +11667,8 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const event = params.event;
 
     if (!this.securityEventsService || !event) {
-      this.persistChanges(params.changes, params.context);
-      return;
+      const persisted = this.persistChanges(params.changes, params.context);
+      return this.tenantPartnerRepository?.isEnabled() ? persisted : undefined;
     }
 
     const canUseTransaction =
@@ -11335,10 +11682,20 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
             executor,
             params.changes,
           );
+          if (
+            params.context === "revoke_api_key" &&
+            params.changes.apiKeys?.[0]
+          ) {
+            const mergedKey = params.changes.apiKeys[0];
+            event.afterSummary = this.toApiKeyResponse(mergedKey);
+          }
           await this.securityEventsService!.recordEventRequired(
             event,
             executor,
           );
+        })
+        .then(() => {
+          this.applyMergedApiKeysToCache(params.changes.apiKeys);
         })
         .catch((error) => {
           this.tenantPartnerRepository?.reportPersistenceFailure(
@@ -11353,7 +11710,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return this.securityEventsService
       .recordEventRequired(event)
       .then(() => {
-        this.persistChanges(params.changes, params.context);
+        return this.persistChanges(params.changes, params.context);
       })
       .catch((error) => {
         params.rollback();
@@ -12739,6 +13096,24 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     return entry;
   }
 
+  private async requireCanonicalAccessiblePartnerEntry(
+    entrySlug: string,
+    requestId: string | undefined,
+    mode: "authenticate" | "eligibility" | "public",
+  ) {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_REQUIRED",
+        "entrySlug is required.",
+        {},
+      );
+    }
+    await this.loadCanonicalPartnerEntry(normalizedSlug);
+    return this.requireAccessiblePartnerEntry(normalizedSlug, requestId, mode);
+  }
+
   private requirePlatformPartnerEntry(entrySlug: string) {
     const normalizedSlug = entrySlug?.trim();
     if (!normalizedSlug) {
@@ -12765,6 +13140,131 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     }
 
     return entry;
+  }
+
+  private async requireCanonicalPlatformPartnerEntry(entrySlug: string) {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "PARTNER_ENTRY_REQUIRED",
+        "entrySlug is required.",
+        {},
+      );
+    }
+    await this.loadCanonicalPartnerEntry(normalizedSlug);
+    return this.requirePlatformPartnerEntry(normalizedSlug);
+  }
+
+  private async loadCanonicalPartnerEntry(
+    entrySlug: string,
+  ): Promise<PartnerChannelEntryRecord | null> {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      return null;
+    }
+    if (
+      this.tenantPartnerRepository?.isEnabled?.() &&
+      typeof this.tenantPartnerRepository.findPartnerEntry === "function"
+    ) {
+      const persisted =
+        await this.tenantPartnerRepository.findPartnerEntry(normalizedSlug);
+      if (persisted) {
+        if (
+          isStrictAuthEnvironment() &&
+          persisted.tenantId === DEMO_TENANT_ID
+        ) {
+          this.partnerEntries = this.partnerEntries.filter(
+            (candidate) => candidate.entrySlug !== normalizedSlug,
+          );
+          return null;
+        }
+        const cloned = this.clonePartnerEntry(persisted);
+        const existingIndex = this.partnerEntries.findIndex(
+          (candidate) => candidate.entrySlug === cloned.entrySlug,
+        );
+        if (existingIndex >= 0) {
+          this.partnerEntries[existingIndex] = cloned;
+        } else {
+          this.partnerEntries = [cloned, ...this.partnerEntries];
+        }
+        return this.clonePartnerEntry(cloned);
+      }
+    }
+    return this.findPartnerEntryBySlug(normalizedSlug);
+  }
+
+  private async loadCanonicalPartnerEntries(): Promise<
+    PartnerChannelEntryRecord[]
+  > {
+    if (
+      this.tenantPartnerRepository?.isEnabled?.() &&
+      typeof this.tenantPartnerRepository.listPartnerEntries === "function"
+    ) {
+      const persistedEntries =
+        await this.tenantPartnerRepository.listPartnerEntries();
+      const sanitizedPersisted = isStrictAuthEnvironment()
+        ? persistedEntries.filter((entry) => entry.tenantId !== DEMO_TENANT_ID)
+        : persistedEntries;
+      if (sanitizedPersisted.length > 0) {
+        const persistedBySlug = new Map(
+          sanitizedPersisted.map((entry) => [
+            entry.entrySlug,
+            this.clonePartnerEntry(entry),
+          ]),
+        );
+        const retainedLocal = this.partnerEntries
+          .filter(
+            (entry) =>
+              !persistedBySlug.has(entry.entrySlug) &&
+              (!isStrictAuthEnvironment() || entry.tenantId !== DEMO_TENANT_ID),
+          )
+          .map((entry) => this.clonePartnerEntry(entry));
+        this.partnerEntries = [
+          ...Array.from(persistedBySlug.values()),
+          ...retainedLocal,
+        ];
+      }
+    }
+    return this.partnerEntries.map((entry) => this.clonePartnerEntry(entry));
+  }
+
+  private async loadCanonicalPartnerIngressCredentials(
+    entrySlug: string,
+  ): Promise<StoredPartnerIngressCredentialRecord[]> {
+    const normalizedSlug = entrySlug?.trim();
+    if (!normalizedSlug) {
+      return [];
+    }
+    if (
+      this.tenantPartnerRepository?.isEnabled?.() &&
+      typeof this.tenantPartnerRepository.listPartnerIngressCredentials ===
+        "function"
+    ) {
+      const persistedCredentials =
+        await this.tenantPartnerRepository.listPartnerIngressCredentials(
+          normalizedSlug,
+        );
+      if (persistedCredentials.length > 0) {
+        const persistedCloned = persistedCredentials.map((credential) =>
+          this.cloneStoredPartnerIngressCredential(credential),
+        );
+        const persistedKeyIds = new Set(
+          persistedCloned.map((credential) => credential.keyId),
+        );
+        const retainedOther = this.partnerIngressCredentials.filter(
+          (credential) =>
+            credential.entrySlug !== normalizedSlug ||
+            (!persistedKeyIds.has(credential.keyId) &&
+              credential.source === "env_bootstrap" &&
+              !isStrictAuthEnvironment()),
+        );
+        this.partnerIngressCredentials = [...persistedCloned, ...retainedOther];
+      }
+    }
+    return this.partnerIngressCredentials.filter(
+      (credential) => credential.entrySlug === normalizedSlug,
+    );
   }
 
   private reconcilePartnerEntrySeeds() {
@@ -16682,10 +17182,19 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       if (profile)
         this.slaProfiles.set(tenantId, this.cloneSlaProfile(profile));
     }
-    if (changes.webhookEndpoints) {
-      const ids = new Set(
-        changes.webhookEndpoints.map((item) => item.webhookId),
+    if (changes.webhookEndpoints || changes.deletedWebhookEndpointIds) {
+      const ids = new Set([
+        ...(changes.webhookEndpoints?.map((item) => item.webhookId) ?? []),
+        ...(changes.deletedWebhookEndpointIds ?? []),
+      ]);
+      const canonicalIds = new Set(
+        canonical.webhookEndpoints.map((item) => item.webhookId),
       );
+      for (const deletedId of changes.deletedWebhookEndpointIds ?? []) {
+        if (!canonicalIds.has(deletedId)) {
+          this.clearWebhookRetriesForEndpoint(tenantId, deletedId);
+        }
+      }
       this.webhookEndpoints = [
         ...this.webhookEndpoints.filter((item) => !ids.has(item.webhookId)),
         ...canonical.webhookEndpoints
@@ -16726,6 +17235,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
         };
         for (const key of [
           "webhookEndpoints",
+          "deletedWebhookEndpointIds",
           "webhookDeliveries",
           "quotaPolicies",
           "slaProfiles",
@@ -16750,6 +17260,30 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
       });
   }
 
+  private applyMergedApiKeysToCache(
+    apiKeys: readonly StoredTenantApiKeyRecord[] | undefined,
+  ) {
+    if (!apiKeys || apiKeys.length === 0) {
+      return;
+    }
+    for (const updated of apiKeys) {
+      const target = this.apiKeys.find(
+        (candidate) =>
+          candidate.apiKeyId === updated.apiKeyId &&
+          candidate.tenantId === updated.tenantId,
+      );
+      if (target) {
+        Object.assign(
+          target,
+          this.cloneStoredApiKey(
+            mergeCanonicalTenantApiKeyRecord(updated, target),
+          ),
+        );
+        this.reconcileStoredApiKey(target);
+      }
+    }
+  }
+
   private persistChanges(
     changes: PersistTenantPartnerChanges,
     context: string,
@@ -16764,7 +17298,9 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
     const result = this.tenantPartnerRepository.persistChanges(changes);
     if (result && typeof (result as any).catch === "function") {
       return (result as Promise<unknown>)
-        .then(() => undefined)
+        .then(() => {
+          this.applyMergedApiKeysToCache(changes.apiKeys);
+        })
         .catch((error: unknown) => {
           if (
             typeof (this.tenantPartnerRepository as any)
@@ -16777,6 +17313,7 @@ export class TenantPartnerService implements OnModuleInit, OnModuleDestroy {
           }
         });
     }
+    this.applyMergedApiKeysToCache(changes.apiKeys);
   }
 
   private syncIdentityTenantUserRoles(context: string) {

@@ -8,7 +8,6 @@ import {
 
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../src/modules/billing-settlement/billing-settlement.service";
-import { ReferralSettlementScaffoldService } from "../../src/modules/billing-settlement/referral-settlement.scaffold.service";
 import { settlementChannelKeyForTrip } from "../../src/modules/billing-settlement/settlement-matrix";
 import type { OwnedMobilityTripCompletedEvent } from "../../src/modules/owned-mobility/owned-mobility-events";
 
@@ -64,19 +63,18 @@ describe("BillingSettlementService settlement matrix", () => {
 
   it("keeps partner referral matrix semantics consistent with referral settlement contracts", () => {
     const service = createService();
-    const scaffold = new ReferralSettlementScaffoldService();
     const row = service
       .listSettlementMatrix()
       .find((entry) => entry.channelKey === PARTNER_REFERRAL_CHANNEL_KEY);
 
     expect(row).toMatchObject({
-      channelKey: scaffold.getReferralSettlementScaffold().channelKey,
+      channelKey: PARTNER_REFERRAL_CHANNEL_KEY,
       payerType: "DRTS platform",
       invoicePath: "referral settlement statement",
       reconciliationPath: "referral settlement statement + attribution audit",
     });
     expect(row?.reimbursementRule).toContain(
-      scaffold.getReferralSettlementScaffold().direction,
+      REFERRAL_SETTLEMENT_DIRECTION_DRTS_PAYS_PARTNER,
     );
   });
 

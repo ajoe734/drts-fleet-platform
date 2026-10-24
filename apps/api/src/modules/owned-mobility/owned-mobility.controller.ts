@@ -42,6 +42,7 @@ import type {
   UpdateTenantBookingCommand,
   CancelReferralPassengerTripCommand,
   CreateReferralPassengerBookingCommand,
+  AcknowledgeReferralFeesCommand,
   ReferralPassengerQuoteCommand,
   SubmitReferralPassengerRatingCommand,
   TenantBookingListQuery,
@@ -405,6 +406,33 @@ export class OwnedMobilityController {
     );
   }
 
+  @Get("partner/referral/passenger/fees")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  @RequireRealms("partner")
+  @RequireScopes("partner:book")
+  async getReferralFees(
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getReferralFeeStatus(identity),
+    );
+  }
+
+  @Post("partner/referral/passenger/fees")
+  @RequireRealms("partner")
+  @RequireScopes("partner:book")
+  async recordReferralFeeAcknowledgement(
+    @Body() command: AcknowledgeReferralFeesCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.acknowledgeReferralFees(
+        command,
+        identity,
+      ),
+    );
+  }
+
   @Post("partner/referral/passenger/quote")
   @RequireRealms("partner")
   @RequireScopes("partner:book")
@@ -477,6 +505,22 @@ export class OwnedMobilityController {
   ) {
     return toApiSuccessEnvelope(
       await this.ownedMobilityService.getReferralPassengerReceipt(
+        orderId,
+        identity,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("partner/referral/passenger/orders/:orderId/receipt/pdf")
+  @Throttle(READ_HEAVY_RATE_LIMIT)
+  async getReferralPassengerReceiptPdf(
+    @Param("orderId") orderId: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.ownedMobilityService.getReferralPassengerReceiptPdf(
         orderId,
         identity,
       ),
