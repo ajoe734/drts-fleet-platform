@@ -3,6 +3,7 @@ import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import type {
   ComplaintCaseRecord,
   ComplaintCaseStatus,
+  ComplaintTimelineEntry,
   ResourceActionDescriptor,
 } from "@drts/contracts";
 
@@ -25,17 +26,12 @@ export interface FleetCaseItem {
   driver: string;
   driverId: string;
   severity: "high" | "normal" | "medium" | "low" | "critical";
-  // The existing Ops/Fleet consumer contract only has these three wire
-  // values, and only "platform" yields its read-only (no fleet reply)
-  // behavior. Projecting an unattributed ordinary complaint onto
-  // "platform" to get that same read-only handling does NOT mean a
-  // canonical platform business responsibility was ever determined for
-  // it -- see mapComplaintToFleetCase. A dedicated consumer-contract value
-  // for "no fleet identified" (distinct from a genuine platform-owned
-  // case) would need the Fleet portal consumer (apps/fleet-partner-portal-web,
-  // outside this task's write_scopes) updated too; that is a seam to
-  // coordinate, not invent unilaterally here.
-  responsibility: "fleet" | "shared" | "platform";
+  // "unattributed" is the honest value for an ordinary complaint whose
+  // real source order/driver/vehicle fleet attribution is missing or
+  // ambiguous: no fleet and no platform responsibility has been
+  // determined. Like "platform" and closed cases it is read-only (no fleet
+  // reply), but it is never presented as platform-owned.
+  responsibility: "fleet" | "shared" | "platform" | "unattributed";
   fleetPartnerId: string;
   status: ComplaintCaseStatus;
   slaDueAt: string;
@@ -125,55 +121,48 @@ const READBACK_SECRET =
   process.env.DRTS_READBACK_SECRET || "drts-fleet-case-attachment-secret-2026";
 const MAX_ATTACHMENT_SIZE = MAX_FLEET_DOCUMENT_BYTES;
 
-// A committed Complaint note is the only channel another already-warm
-// instance (which never ran this reply's createReply locally) can read the
-// reply back from. This marker lets that instance recover the real
-// structured attachment relation instead of only the human-readable
-// filenames already appended to the note text. A plain `\n` + ASCII token
-// (no control bytes) keeps the note a normal Postgres text value.
-const FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER =
-  "\n<<fleet-reply-attachments>>";
+// Replies written before the structured ComplaintTimelineEntry
+// fleetReplyAttachments relation existed embedded their attachment manifest
+// in the note text behind this marker. Current replies never write it; it is
+// only read back as a narrowly-checked legacy fallback (see
+// splitLegacyAttachmentManifest).
+const FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER = "\n<<fleet-reply-attachments>>";
 
-function appendAttachmentManifest(
-  note: string,
-  attachments: readonly FleetCaseTimelineAttachment[],
+function fleetReplyNotePrefix(fleetPartnerId: string): string {
+  return `[車行回覆 · ${fleetPartnerId}] `;
+}
+
+function formatAttachmentNamesSuffix(
+  attachments: readonly { name: string }[],
 ): string {
-  if (!attachments.length) {
-    return note;
-  }
-  const manifest = attachments.map((attachment) => ({
-    attachmentId: attachment.attachmentId,
-    name: attachment.name,
-    size: attachment.size,
-    fileSize: attachment.fileSize,
-  }));
-  return `${note}${FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER}${JSON.stringify(manifest)}`;
+  return attachments.length
+    ? ` (附件: ${attachments.map((a) => a.name).join(", ")})`
+    : "";
 }
 
 /**
- * A legitimate human reply body can itself contain this literal marker
- * string (quoted, pasted, or coincidentally typed), with or without
- * trailing text that merely looks like JSON, and never have had a real
- * manifest appended. A real manifest is always appended last (see
- * appendAttachmentManifest), so only the *last* occurrence is a truncation
- * candidate. Even then, the suffix is trusted as a real attachment
- * relation only when every attachmentId it names is verified against this
- * same case's actual confirmed stored attachments (verifyAttachment) --
- * never from JSON shape alone, since a human can type a convincing but
- * never-uploaded manifest. Anything that fails verification leaves the
- * note untouched: no truncation, no fabricated attachment relation.
+ * Legacy-only reader for an entry that carries no structured
+ * fleetReplyAttachments relation. Text shape alone can never establish a
+ * relation, so the suffix is trusted only when the whole note is exactly
+ * what the old server-side reply writer produced for this case's own fleet
+ * (`[車行回覆 · <fleet>] <content> (附件: <names>)` + marker + manifest, with
+ * the names matching the manifest) and every attachmentId is verified
+ * against this same case's confirmed stored attachments. Anything else is
+ * literal human text and is returned untouched.
  */
-function splitAttachmentManifest(
+function splitLegacyAttachmentManifest(
   note: string,
+  fleetPartnerId: string,
   verifyAttachment: (attachmentId: string) => boolean,
 ): {
   body: string;
   attachments: FleetCaseTimelineAttachment[];
 } {
+  const literal = { body: note, attachments: [] };
+  if (!fleetPartnerId || !note.startsWith(fleetReplyNotePrefix(fleetPartnerId)))
+    return literal;
   const markerIndex = note.lastIndexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
-  if (markerIndex === -1) {
-    return { body: note, attachments: [] };
-  }
+  if (markerIndex === -1) return literal;
   const body = note.slice(0, markerIndex);
   const raw = note.slice(
     markerIndex + FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER.length,
@@ -182,11 +171,9 @@ function splitAttachmentManifest(
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { body: note, attachments: [] };
+    return literal;
   }
-  if (!Array.isArray(parsed) || parsed.length === 0) {
-    return { body: note, attachments: [] };
-  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return literal;
   const attachments: FleetCaseTimelineAttachment[] = [];
   for (const item of parsed) {
     if (
@@ -194,12 +181,11 @@ function splitAttachmentManifest(
       typeof item !== "object" ||
       typeof (item as Record<string, unknown>).attachmentId !== "string" ||
       typeof (item as Record<string, unknown>).name !== "string" ||
-      !verifyAttachment((item as Record<string, unknown>).attachmentId as string)
+      !verifyAttachment(
+        (item as Record<string, unknown>).attachmentId as string,
+      )
     ) {
-      // All-or-nothing: a single unverifiable entry means this suffix is
-      // not actually a server-appended manifest, so the whole note
-      // (marker included) is literal text.
-      return { body: note, attachments: [] };
+      return literal;
     }
     const record = item as Record<string, unknown>;
     attachments.push({
@@ -211,6 +197,7 @@ function splitAttachmentManifest(
         : {}),
     });
   }
+  if (!body.endsWith(formatAttachmentNamesSuffix(attachments))) return literal;
   return { body, attachments };
 }
 
@@ -701,9 +688,7 @@ export class FleetPartnerCaseService {
     if (!orderId) {
       return null;
     }
-    return this.fleetPartnerService.resolveOrderDriverFleetAttribution(
-      orderId,
-    );
+    return this.fleetPartnerService.resolveOrderDriverFleetAttribution(orderId);
   }
 
   /**
@@ -745,30 +730,28 @@ export class FleetPartnerCaseService {
     const attribution = isSettlement
       ? null
       : await this.resolveComplaintFleetAttribution(complaint);
+    const isUnattributed = !isSettlement && !attribution;
     return {
       id: complaint.caseNo,
       caseNo: complaint.caseNo,
       type: "complaint",
       cat: complaint.category,
       desc: complaint.description,
-      driver: isSettlement ? "—" : attribution?.driverName ?? "未歸屬",
-      driverId: isSettlement ? "" : attribution?.driverId ?? "",
+      driver: isSettlement ? "—" : (attribution?.driverName ?? "未歸屬"),
+      driverId: isSettlement ? "" : (attribution?.driverId ?? ""),
       severity: complaint.severity,
       // Fleet responsibility can only be asserted when a real driver/fleet
-      // attribution is resolved. An unresolved ordinary complaint is NOT a
-      // determined platform business responsibility -- it is simply not
-      // attributable to any specific fleet right now -- but is projected
-      // onto the existing "platform" wire value anyway (see the field
-      // comment above), since that is the only value the current Fleet/Ops
-      // consumer contract has for read-only, no-fleet-reply handling.
+      // attribution is resolved. An unresolved ordinary complaint is not a
+      // determined platform responsibility either; it is reported as
+      // honestly unattributed.
       responsibility: isSettlement
         ? "shared"
         : attribution
           ? "fleet"
-          : "platform",
+          : "unattributed",
       fleetPartnerId: isSettlement
         ? (complaint.fleetPartnerId ?? "")
-        : attribution?.fleetPartnerId ?? "",
+        : (attribution?.fleetPartnerId ?? ""),
       status: complaint.status,
       slaDueAt: complaint.slaDueAt,
       slaBreachedAt: complaint.slaBreach ? complaint.updatedAt : null,
@@ -792,10 +775,16 @@ export class FleetPartnerCaseService {
       assignee: complaint.assigneeId || "—",
       openedAt: complaint.createdAt,
       updatedAt: complaint.updatedAt,
+      // An unattributed case has no fleet to reply on its behalf, so it is
+      // read-only for that honest reason, alongside the existing closed rule.
       actionDescriptor: {
         action: "respond",
-        enabled: !isClosed,
-        ...(isClosed ? { disabledReasonCode: "case_closed" } : {}),
+        enabled: !isClosed && !isUnattributed,
+        ...(isClosed
+          ? { disabledReasonCode: "case_closed" }
+          : isUnattributed
+            ? { disabledReasonCode: "case_unattributed" }
+            : {}),
         riskLevel: "medium",
       },
     };
@@ -891,11 +880,11 @@ export class FleetPartnerCaseService {
       this.timelines.get(caseItem.caseNo) ||
       [];
 
-    // A parsed attachment manifest is only ever trusted once it is tied to
-    // this same case's real confirmed stored attachments (see
-    // splitAttachmentManifest). Only load them when some note actually
-    // contains the marker: most notes have no attachments at all, and
-    // this stays a no-op for callers whose storage is not configured.
+    // A legacy text manifest is only ever trusted once it is tied to this
+    // same case's real confirmed stored attachments (see
+    // splitLegacyAttachmentManifest). Only load them when a legacy entry
+    // actually contains the marker: current entries carry the structured
+    // fleetReplyAttachments relation instead.
     let attachmentsLoaded = false;
     const verifyAttachment = (attachmentId: string): boolean => {
       const att = this.attachments.get(attachmentId);
@@ -914,8 +903,7 @@ export class FleetPartnerCaseService {
     if (this.complaintService) {
       try {
         const compTl =
-          typeof this.complaintService.getComplaintTimelineForOps ===
-          "function"
+          typeof this.complaintService.getComplaintTimelineForOps === "function"
             ? await this.complaintService.getComplaintTimelineForOps(
                 caseItem.caseNo,
                 { includeAttachmentManifest: true },
@@ -925,8 +913,10 @@ export class FleetPartnerCaseService {
               });
         if (
           !attachmentsLoaded &&
-          compTl.some((entry) =>
-            entry.note.includes(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER),
+          compTl.some(
+            (entry) =>
+              entry.fleetReplyAttachments === undefined &&
+              entry.note.includes(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER),
           )
         ) {
           attachmentsLoaded = true;
@@ -941,10 +931,20 @@ export class FleetPartnerCaseService {
                 entry.action === "case_created"))
           ) {
             const isFleetReply = entry.note.includes("[車行回覆");
-            const { body, attachments } = splitAttachmentManifest(
-              entry.note,
-              verifyAttachment,
-            );
+            // The server-created structured relation is authoritative; the
+            // note text is shown exactly as written.
+            const { body, attachments } = entry.fleetReplyAttachments
+              ? {
+                  body: entry.note,
+                  attachments: entry.fleetReplyAttachments.map(
+                    (attachment) => ({ ...attachment }),
+                  ),
+                }
+              : splitLegacyAttachmentManifest(
+                  entry.note,
+                  caseItem.fleetPartnerId,
+                  verifyAttachment,
+                );
             tl.push({
               entryId: entry.entryId,
               caseId: caseItem.id,
@@ -1000,6 +1000,18 @@ export class FleetPartnerCaseService {
         HttpStatus.CONFLICT,
         "CASE_PLATFORM_OWNED",
         "案件責任歸屬 platform，唯讀檢視；回覆按鈕停用，車行無法處理。",
+        { caseId, responsibility: caseItem.responsibility },
+      );
+    }
+
+    // An unattributed case is not scoped to any fleet (no real
+    // source-order/driver/vehicle fleet was resolved), so no fleet caller
+    // may reply on its behalf -- even one whose own id is blank.
+    if (caseItem.responsibility === "unattributed") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "CASE_NOT_FLEET_SCOPED",
+        "案件尚未歸屬任何車行：車行無法回覆此案件。",
         { caseId, responsibility: caseItem.responsibility },
       );
     }
@@ -1079,6 +1091,9 @@ export class FleetPartnerCaseService {
 
     // Resolve attachments for timeline
     const resolvedAttachments: FleetCaseTimelineAttachment[] = [];
+    const fleetReplyAttachments: NonNullable<
+      ComplaintTimelineEntry["fleetReplyAttachments"]
+    > = [];
     if (command.attachmentIds?.length) {
       await this.loadStoredAttachments(caseItem.id);
       for (const attId of command.attachmentIds) {
@@ -1102,6 +1117,12 @@ export class FleetPartnerCaseService {
             size: att.size,
             fileSize: att.fileSize,
           });
+          fleetReplyAttachments.push({
+            attachmentId: att.attachmentId,
+            name: att.name,
+            size: att.size,
+            fileSize: att.fileSize,
+          });
         }
       }
     }
@@ -1118,17 +1139,14 @@ export class FleetPartnerCaseService {
       deduplicated: false,
     };
 
-    const attsNote = resolvedAttachments.length
-      ? ` (附件: ${resolvedAttachments.map((a) => a.name).join(", ")})`
-      : "";
-    // The attachment manifest is embedded (not just human-readable names) so
-    // another already-warm instance, which only has this committed
-    // Complaint note to read back, can still reconstruct the same
-    // structured attachment relation for this reply event.
-    const notePayload = appendAttachmentManifest(
-      `[車行回覆 · ${fleetPartnerId}] ${content}${attsNote}`,
-      resolvedAttachments,
-    );
+    // The note keeps only the human-readable reply text and attachment
+    // names. The relation itself travels as the structured, server-created
+    // fleetReplyAttachments field on the same canonical timeline entry, so
+    // another already-warm instance reads it back without parsing any text.
+    // An empty array is still set: it records that this reply has no
+    // attachments, so its text is never re-read as a legacy manifest.
+    const notePayload = `${fleetReplyNotePrefix(fleetPartnerId)}${content}${formatAttachmentNamesSuffix(resolvedAttachments)}`;
+
     let settlementTimelineEntryId: string | undefined;
     let ordinaryReplyTimelineEntryId: string | undefined;
     if (caseItem.cat === "settlement_dispute") {
@@ -1143,6 +1161,7 @@ export class FleetPartnerCaseService {
         caseItem.caseNo,
         { note: notePayload },
         requestId,
+        { fleetReplyAttachments },
       );
       settlementTimelineEntryId = this.complaintService
         .getComplaintTimeline(caseItem.caseNo)
@@ -1160,6 +1179,7 @@ export class FleetPartnerCaseService {
           requestId,
           {
             captureAudit: true,
+            fleetReplyAttachments,
             ...(idempotencyKey
               ? {
                   commandIdentity: {
@@ -1202,7 +1222,9 @@ export class FleetPartnerCaseService {
     // Append to timeline
     const timelineEntry: FleetCaseTimelineEvent = {
       entryId:
-        settlementTimelineEntryId ?? ordinaryReplyTimelineEntryId ?? `tl-${replyId}`,
+        settlementTimelineEntryId ??
+        ordinaryReplyTimelineEntryId ??
+        `tl-${replyId}`,
       caseId: caseItem.id,
       at: now,
       tone: "accent",

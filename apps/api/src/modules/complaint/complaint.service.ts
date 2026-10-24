@@ -58,6 +58,10 @@ type ComplaintActionOptions<Capture extends boolean> = {
   commandIdentity?: ComplaintCommandIdentity;
   /** Original caller payload when domain preparation adds generated IDs. */
   commandPayload?: unknown;
+  /** Server-verified Fleet reply attachment relation for this note. Only
+   * server-side callers (the Fleet reply path) set it; it is stored on the
+   * timeline entry itself, never decoded from the note text. */
+  fleetReplyAttachments?: ComplaintTimelineEntry["fleetReplyAttachments"];
 };
 type IdentifiedComplaintPayload = {
   complaintCommandIdentity: ComplaintCommandIdentity;
@@ -143,56 +147,6 @@ type PendingUncertainComplaintCommit = {
   /** A missing read cannot disprove this process's ambiguous COMMIT. */
   locallyUncertain?: boolean;
 };
-
-// A Fleet reply's structured attachment relation is embedded in the
-// canonical note text behind this marker (see
-// fleet-partner-case.service.ts's appendAttachmentManifest/
-// splitAttachmentManifest) so a different already-warm instance can recover
-// it without a shared in-process cache. The literal must match that file's
-// own marker exactly; it is duplicated here rather than imported because
-// fleet-partner already depends on this module, and importing back would
-// create a module cycle. Any Ops-facing note (timeline, export, assistant
-// read tools) must never show this raw marker/JSON to a human; only the
-// Fleet-side caller that explicitly asks for it may see the untouched note.
-const FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER = "\n<<fleet-reply-attachments>>";
-
-/** A legitimate human note can itself contain this literal marker string
- * (quoted, pasted, or coincidentally typed) without a real manifest ever
- * having been appended after it. Blindly truncating at the first
- * occurrence would then silently drop genuine trailing text. A real
- * manifest is always appended last (see appendAttachmentManifest), so only
- * the *last* occurrence is a truncation candidate, and only once the text
- * after it actually parses as the known manifest shape; otherwise the note
- * is literal and must be returned untouched. */
-function stripFleetReplyAttachmentManifest(note: string): string {
-  const markerIndex = note.lastIndexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
-  if (markerIndex === -1) return note;
-  const raw = note.slice(
-    markerIndex + FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER.length,
-  );
-  if (!isFleetReplyAttachmentManifestShape(raw)) return note;
-  return note.slice(0, markerIndex);
-}
-
-function isFleetReplyAttachmentManifestShape(raw: string): boolean {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return false;
-  }
-  return (
-    Array.isArray(parsed) &&
-    parsed.length > 0 &&
-    parsed.every(
-      (item) =>
-        !!item &&
-        typeof item === "object" &&
-        typeof (item as Record<string, unknown>).attachmentId === "string" &&
-        typeof (item as Record<string, unknown>).name === "string",
-    )
-  );
-}
 
 @Injectable()
 export class ComplaintService implements OnModuleInit {
@@ -1462,18 +1416,27 @@ export class ComplaintService implements OnModuleInit {
     return this.cloneComplaintCase(this.requireComplaintCase(caseNo));
   }
 
+  /** The human note text is always returned exactly as written. Only the
+   * structured fleetReplyAttachments relation is internal metadata, and it
+   * is omitted unless an internal reader (the Fleet case timeline)
+   * explicitly asks for it. */
   getComplaintTimeline(
     caseNo: string,
     opts?: { includeAttachmentManifest?: boolean },
-  ) {
+  ): ComplaintTimelineEntry[] {
     this.requireComplaintCase(caseNo);
     const includeAttachmentManifest = opts?.includeAttachmentManifest ?? false;
-    return (this.complaintTimelines.get(caseNo) ?? []).map((entry) => ({
-      ...entry,
-      note: includeAttachmentManifest
-        ? entry.note
-        : stripFleetReplyAttachmentManifest(entry.note),
-    }));
+    return (this.complaintTimelines.get(caseNo) ?? []).map((entry) => {
+      const { fleetReplyAttachments, ...publicEntry } = entry;
+      return includeAttachmentManifest && fleetReplyAttachments
+        ? {
+            ...publicEntry,
+            fleetReplyAttachments: fleetReplyAttachments.map((item) => ({
+              ...item,
+            })),
+          }
+        : publicEntry;
+    });
   }
 
   assignComplaintCase<Capture extends boolean = false>(
@@ -1568,6 +1531,7 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     command: AddComplaintCaseNoteCommand,
     requestId?: string,
+    options?: Pick<ComplaintActionOptions<false>, "fleetReplyAttachments">,
   ) {
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.category !== "settlement_dispute") {
@@ -1578,7 +1542,13 @@ export class ComplaintService implements OnModuleInit {
         { caseNo },
       );
     }
-    return this.addComplaintCaseNoteInternal(caseNo, command, requestId, true);
+    return this.addComplaintCaseNoteInternal(
+      caseNo,
+      command,
+      requestId,
+      true,
+      options,
+    );
   }
 
   private addComplaintCaseNoteInternal<Capture extends boolean = false>(
@@ -1619,6 +1589,8 @@ export class ComplaintService implements OnModuleInit {
       caseNo,
       TIMELINE_ACTIONS.noteAdded,
       command.note.trim(),
+      undefined,
+      options?.fleetReplyAttachments,
     );
     const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
     const persistence = this.persistChanges(
@@ -2349,9 +2321,20 @@ export class ComplaintService implements OnModuleInit {
     action: ComplaintTimelineEntry["action"],
     note: string,
     createdAt = new Date().toISOString(),
+    fleetReplyAttachments?: ComplaintTimelineEntry["fleetReplyAttachments"],
   ) {
     const currentTimeline = this.complaintTimelines.get(caseNo) ?? [];
     const entry = this.createTimelineEntry(caseNo, action, note, createdAt);
+    if (fleetReplyAttachments) {
+      entry.fleetReplyAttachments = fleetReplyAttachments.map((item) => ({
+        attachmentId: item.attachmentId,
+        name: item.name,
+        size: item.size,
+        ...(typeof item.fileSize === "number"
+          ? { fileSize: item.fileSize }
+          : {}),
+      }));
+    }
     this.complaintTimelines.set(caseNo, [...currentTimeline, entry]);
     return entry;
   }

@@ -22,7 +22,10 @@ import { FleetPartnerCaseService } from "../../../apps/api/src/modules/fleet-par
 import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 import type { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import type { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
-import { byteStream, fleetStorageFixture } from "../helpers/fleet-document-fixture";
+import {
+  byteStream,
+  fleetStorageFixture,
+} from "../helpers/fleet-document-fixture";
 
 /**
  * Old defect reproduced here: FleetPartnerCaseService.mapComplaintToFleetCase
@@ -65,8 +68,7 @@ function fakeOwnedMobilityService(
               orderId,
               driverId: task.driverId,
               status: task.status ?? "completed",
-              completedAt:
-                task.completedAt ?? "2026-01-02T00:00:00.000Z",
+              completedAt: task.completedAt ?? "2026-01-02T00:00:00.000Z",
             },
           ]
         : [];
@@ -76,7 +78,11 @@ function fakeOwnedMobilityService(
     prepareOrderAction: async ({ orderId }: { orderId: string }) => {
       prepareOrderActionCalls.push(orderId);
       if (opts.absentOrderIds?.includes(orderId)) {
-        throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order was not found.");
+        throw new ApiRequestError(
+          404,
+          "ORDER_NOT_FOUND",
+          "Order was not found.",
+        );
       }
       const pending = opts.hydratedTasksByOrder?.[orderId];
       if (pending) hydrated.set(orderId, pending);
@@ -358,9 +364,9 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
       const detailA = await cases.getCaseDetail(fleetAId, caseA.caseNo);
       expect(detailA.caseDetail.fleetPartnerId).toBe(fleetAId);
 
-      await expect(cases.getCaseDetail(fleetBId, caseA.caseNo)).rejects.toMatchObject(
-        { code: "CASE_NOT_FLEET_SCOPED" },
-      );
+      await expect(
+        cases.getCaseDetail(fleetBId, caseA.caseNo),
+      ).rejects.toMatchObject({ code: "CASE_NOT_FLEET_SCOPED" });
     });
 
     it("resolves a call-only complaint's fleet attribution through its persisted call's own canonical order linkage, when the complaint itself has no direct related order", async () => {
@@ -440,9 +446,9 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
       );
 
       const list = await cases.listCases("any-fleet");
-      expect(
-        list.some((item) => item.caseNo === callOnlyCase.caseNo),
-      ).toBe(false);
+      expect(list.some((item) => item.caseNo === callOnlyCase.caseNo)).toBe(
+        false,
+      );
       const detail = await complaints.getComplaintCase(callOnlyCase.caseNo);
       expect(detail.relatedOrderId).toBeNull();
     });
@@ -528,12 +534,12 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
       );
 
       const fleetAList = await cases.listCases(fleetAId);
-      expect(fleetAList.some((item) => item.caseNo === noDriverCase.caseNo)).toBe(
-        false,
-      );
-      expect(fleetAList.some((item) => item.caseNo === noOrderCase.caseNo)).toBe(
-        false,
-      );
+      expect(
+        fleetAList.some((item) => item.caseNo === noDriverCase.caseNo),
+      ).toBe(false);
+      expect(
+        fleetAList.some((item) => item.caseNo === noOrderCase.caseNo),
+      ).toBe(false);
 
       await expect(
         cases.getCaseDetail(fleetAId, noDriverCase.caseNo),
@@ -1052,9 +1058,8 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
           complaintTimelines: [],
         }),
         loadCaseState: async (requestedCaseNo: string) => ({
-          complaintCases: persistedCase.caseNo === requestedCaseNo
-            ? [persistedCase]
-            : [],
+          complaintCases:
+            persistedCase.caseNo === requestedCaseNo ? [persistedCase] : [],
           complaintTimelines:
             persistedCase.caseNo === requestedCaseNo ? persistedTimeline : [],
         }),
@@ -1091,10 +1096,7 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
         storage,
       );
 
-      const detail = await casesOnInstanceB.getCaseDetail(
-        fleetCrossId,
-        caseNo,
-      );
+      const detail = await casesOnInstanceB.getCaseDetail(fleetCrossId, caseNo);
       expect(detail.caseDetail).toEqual(
         expect.objectContaining({
           caseNo,
@@ -1297,8 +1299,9 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
       // stay human-readable: the structured attachment manifest marker/
       // JSON that Fleet-side readback above just relied on must never leak
       // into what Ops sees as the note body.
-      const opsTimelineOnB =
-        await complaintsB.getComplaintTimelineForOps(created.caseNo);
+      const opsTimelineOnB = await complaintsB.getComplaintTimelineForOps(
+        created.caseNo,
+      );
       const opsReplyEntry = opsTimelineOnB.find(
         (entry) => entry.entryId === replyEntry!.entryId,
       );
@@ -1362,7 +1365,8 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
         caseSource: "ops",
         category: "driver_service",
         severity: "normal",
-        description: "Uncertain-commit create, cross-instance list guard regression",
+        description:
+          "Uncertain-commit create, cross-instance list guard regression",
       }) as ComplaintCaseRecord;
       const outcomeA = complaintsA
         .awaitSettlementPersistence(created.caseNo)
@@ -1416,9 +1420,9 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
       await complaintsB.refreshSettlementCases();
 
       // Control: the Ops list already honestly rejects.
-      await expect(complaintsB.listComplaintCasesForOps()).rejects.toMatchObject(
-        { code: "IDEMPOTENCY_IN_PROGRESS" },
-      );
+      await expect(
+        complaintsB.listComplaintCasesForOps(),
+      ).rejects.toMatchObject({ code: "IDEMPOTENCY_IN_PROGRESS" });
 
       // The fix: the Fleet ordinary-case readback seam applies the exact
       // same guard, not an optimistic success.
@@ -1471,6 +1475,327 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
           responsibility: "shared",
         }),
       ]);
+    });
+  });
+
+  /** Fifth-round defects reproduced here. (1) The Ops projection stripped
+   * any trailing text that merely had the attachment-manifest JSON shape,
+   * truncating a legitimate human note that quoted such JSON. (2) The Fleet
+   * reader trusted a quoted manifest naming a real, confirmed attachment of
+   * the same case even though that reply was never submitted with it --
+   * text shape plus storage existence cannot prove a server-created
+   * relation. (3) An unattributed ordinary complaint was projected onto the
+   * "platform" responsibility wire value. The fix carries the relation on
+   * the canonical ComplaintTimelineEntry.fleetReplyAttachments field, keeps
+   * every note lossless, and reports "unattributed" honestly (read-only). */
+  describe("structured fleet reply attachment relation and honest unattributed responsibility", () => {
+    const MARKER = "\n<<fleet-reply-attachments>>";
+
+    async function buildCrossInstanceCase() {
+      const orderId = "ord-structured-relation";
+      const { service: fleetPartnerService, fleetIdByDisplayName } =
+        await buildFleetPartnerService({
+          tasksByOrder: { [orderId]: { driverId: "drv-structured" } },
+          drivers: [{ driverId: "drv-structured", name: "司機結構" }],
+          affiliations: [
+            {
+              driverId: "drv-structured",
+              fleetDisplayName: "Fleet Structured",
+              effectiveFrom: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        });
+      const fleetId = fleetIdByDisplayName.get("Fleet Structured")!;
+      const repository = sharedComplaintRepository();
+      const { store } = fleetStorageFixture();
+      const complaintsA = new ComplaintService(
+        new AuditNotificationService(),
+        repository,
+      );
+      const casesA = new FleetPartnerCaseService(
+        complaintsA,
+        fleetPartnerService,
+        undefined,
+        fleetStorageFixture("clean", store).storage,
+      );
+      const created = complaintsA.createComplaintCase({
+        caseSource: "ops",
+        relatedOrderId: orderId,
+        category: "driver_service",
+        severity: "normal",
+        description: "結構化附件關係回歸測試案件",
+      }) as ComplaintCaseRecord;
+      await complaintsA.awaitSettlementPersistence(created.caseNo);
+      const confirmAttachment = async (fileName: string) => {
+        const bytes = Buffer.from(`bytes of ${fileName}`);
+        const intent = await casesA.createAttachmentUploadUrl(
+          fleetId,
+          created.caseNo,
+          "fleet-manager-structured",
+          {
+            fileName,
+            fileSize: bytes.length,
+            contentType: "application/pdf",
+          },
+        );
+        const uploaded = await casesA.uploadAttachmentContent(
+          fleetId,
+          created.caseNo,
+          intent.objectKey,
+          byteStream(bytes),
+          "application/octet-stream",
+        );
+        return casesA.confirmAttachmentUpload(
+          fleetId,
+          created.caseNo,
+          "fleet-manager-structured",
+          {
+            attachmentId: intent.attachmentId,
+            objectKey: intent.objectKey,
+            fileName,
+            fileSize: bytes.length,
+            contentType: "application/pdf",
+            checksumSha256: uploaded.checksumSha256,
+          },
+        );
+      };
+      const warmB = () => {
+        const complaintsB = new ComplaintService(
+          new AuditNotificationService(),
+          repository,
+        );
+        const casesB = new FleetPartnerCaseService(
+          complaintsB,
+          fleetPartnerService,
+          undefined,
+          fleetStorageFixture("clean", store).storage,
+        );
+        return { complaintsB, casesB };
+      };
+      return {
+        repository,
+        complaintsA,
+        casesA,
+        created,
+        fleetId,
+        confirmAttachment,
+        warmB,
+      };
+    }
+
+    it("returns a legitimate Ops note quoting manifest-shaped JSON losslessly through the real public Ops timeline", async () => {
+      const complaints = new ComplaintService(new AuditNotificationService());
+      const created = complaints.createComplaintCase({
+        caseSource: "ops",
+        category: "driver_service",
+        severity: "normal",
+        description: "引用 JSON 的人工備註",
+      }) as ComplaintCaseRecord;
+      const originalNote = `原樣引用附件JSON${MARKER}[{"attachmentId":"never-uploaded-real-human-text","name":"quoted.json"}]`;
+      complaints.addComplaintCaseNote(created.caseNo, { note: originalNote });
+
+      const timeline = await complaints.getComplaintTimelineForOps(
+        created.caseNo,
+      );
+      const noteEntry = timeline.find(
+        (entry) => entry.action === "case_note_added",
+      );
+      expect(noteEntry?.note).toBe(originalNote);
+      expect(
+        complaints.getComplaintExportView(created.caseNo).timeline,
+      ).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ note: originalNote }),
+        ]),
+      );
+    });
+
+    it("never derives an attachment relation from a reply that quotes another real confirmed attachment of the same case, and keeps that quoted text lossless on a different warm instance", async () => {
+      const { casesA, created, fleetId, confirmAttachment, warmB } =
+        await buildCrossInstanceCase();
+      const realAttachment = await confirmAttachment("real-evidence.pdf");
+      await casesA.submitReply(
+        fleetId,
+        created.caseNo,
+        "fleet-manager-structured",
+        {
+          content: "第一筆回覆，真的附上附件",
+          idempotencyKey: "structured-relation-real-1",
+          attachmentIds: [realAttachment.attachmentId],
+        },
+      );
+      const quoted = `引用上一筆附件清單${MARKER}${JSON.stringify([
+        {
+          attachmentId: realAttachment.attachmentId,
+          name: "real-evidence.pdf",
+        },
+      ])}`;
+      await casesA.submitReply(
+        fleetId,
+        created.caseNo,
+        "fleet-manager-structured",
+        {
+          content: quoted,
+          idempotencyKey: "structured-relation-quoted-2",
+        },
+      );
+
+      const { complaintsB, casesB } = warmB();
+      const timeline = await casesB.getCaseTimeline(fleetId, created.caseNo);
+      const replies = timeline.filter((entry) => entry.t === "車行回覆");
+      expect(replies).toHaveLength(2);
+      const realReply = replies.find((entry) =>
+        entry.body.includes("第一筆回覆"),
+      );
+      const quotedReply = replies.find((entry) =>
+        entry.body.includes("引用上一筆附件清單"),
+      );
+      expect(realReply!.attachments).toEqual([
+        expect.objectContaining({
+          attachmentId: realAttachment.attachmentId,
+          name: "real-evidence.pdf",
+        }),
+      ]);
+      expect(quotedReply!.body).toBe(`[車行回覆 · ${fleetId}] ${quoted}`);
+      expect(quotedReply!.attachments ?? []).toEqual([]);
+
+      const opsTimeline = await complaintsB.getComplaintTimelineForOps(
+        created.caseNo,
+      );
+      const opsQuoted = opsTimeline.find((entry) =>
+        entry.note.includes("引用上一筆附件清單"),
+      );
+      expect(opsQuoted!.note).toBe(`[車行回覆 · ${fleetId}] ${quoted}`);
+    });
+
+    it("persists the relation on the canonical timeline entry itself and keeps it out of every default public/Ops projection", async () => {
+      const { repository, casesA, created, fleetId, confirmAttachment, warmB } =
+        await buildCrossInstanceCase();
+      const attachment = await confirmAttachment("evidence.pdf");
+      await casesA.submitReply(
+        fleetId,
+        created.caseNo,
+        "fleet-manager-structured",
+        {
+          content: "附上截圖",
+          idempotencyKey: "structured-relation-persist-1",
+          attachmentIds: [attachment.attachmentId],
+        },
+      );
+
+      const durable = await repository.loadState();
+      const durableReply = durable.complaintTimelines.find((entry) =>
+        entry.note.includes("附上截圖"),
+      );
+      expect(durableReply!.note).toBe(
+        `[車行回覆 · ${fleetId}] 附上截圖 (附件: evidence.pdf)`,
+      );
+      expect(durableReply!.fleetReplyAttachments).toEqual([
+        expect.objectContaining({
+          attachmentId: attachment.attachmentId,
+          name: "evidence.pdf",
+        }),
+      ]);
+
+      const { complaintsB } = warmB();
+      const opsTimeline = await complaintsB.getComplaintTimelineForOps(
+        created.caseNo,
+      );
+      for (const entry of opsTimeline) {
+        expect(entry).not.toHaveProperty("fleetReplyAttachments");
+      }
+      for (const entry of complaintsB.getComplaintExportView(created.caseNo)
+        .timeline) {
+        expect(entry).not.toHaveProperty("fleetReplyAttachments");
+      }
+      const internal = complaintsB.getComplaintTimeline(created.caseNo, {
+        includeAttachmentManifest: true,
+      });
+      expect(
+        internal.find((entry) => entry.entryId === durableReply!.entryId)
+          ?.fleetReplyAttachments,
+      ).toEqual(durableReply!.fleetReplyAttachments);
+    });
+
+    it("still reads back a legacy reply entry written before the structured field existed, only when it is exactly the old server-written shape for this case's fleet", async () => {
+      const { complaintsA, created, fleetId, confirmAttachment, warmB } =
+        await buildCrossInstanceCase();
+      const attachment = await confirmAttachment("legacy-evidence.pdf");
+      const manifest = JSON.stringify([
+        {
+          attachmentId: attachment.attachmentId,
+          name: "legacy-evidence.pdf",
+          size: attachment.size,
+          fileSize: attachment.fileSize,
+        },
+      ]);
+      const legacyBody = `[車行回覆 · ${fleetId}] 舊版回覆 (附件: legacy-evidence.pdf)`;
+      complaintsA.addComplaintCaseNote(created.caseNo, {
+        note: `${legacyBody}${MARKER}${manifest}`,
+      });
+      // Same marker/manifest, but not the exact old server-written shape
+      // (no "(附件: ...)" names suffix matching the manifest): literal text.
+      const notLegacy = `[車行回覆 · ${fleetId}] 人工引用${MARKER}${manifest}`;
+      complaintsA.addComplaintCaseNote(created.caseNo, { note: notLegacy });
+      await complaintsA.awaitSettlementPersistence(created.caseNo);
+
+      const { casesB } = warmB();
+      const timeline = await casesB.getCaseTimeline(fleetId, created.caseNo);
+      const legacy = timeline.find((entry) => entry.body.includes("舊版回覆"));
+      expect(legacy!.body).toBe(legacyBody);
+      expect(legacy!.attachments).toEqual([
+        expect.objectContaining({
+          attachmentId: attachment.attachmentId,
+          name: "legacy-evidence.pdf",
+        }),
+      ]);
+      const literal = timeline.find((entry) => entry.body.includes("人工引用"));
+      expect(literal!.body).toBe(notLegacy);
+      expect(literal!.attachments ?? []).toEqual([]);
+    });
+
+    it("reports an unattributed ordinary complaint honestly as read-only 'unattributed', never as platform, and refuses any reply on it", async () => {
+      const { service: fleetPartnerService } = await buildFleetPartnerService({
+        tasksByOrder: {},
+        drivers: [],
+        affiliations: [],
+      });
+      const complaints = new ComplaintService(new AuditNotificationService());
+      const unattributed = complaints.createComplaintCase({
+        caseSource: "ops",
+        category: "driver_service",
+        severity: "normal",
+        description: "沒有來源訂單、無法歸屬的案件",
+      }) as ComplaintCaseRecord;
+      const cases = new FleetPartnerCaseService(
+        complaints,
+        fleetPartnerService,
+        undefined,
+        fleetStorageFixture().storage,
+      );
+
+      // A blank fleet id is the only id that scope-matches the blank
+      // fleetPartnerId of an unattributed case; use it to observe the
+      // mapped item and to prove replying is still refused.
+      const { caseDetail } = await cases.getCaseDetail("", unattributed.caseNo);
+      expect(caseDetail.responsibility).toBe("unattributed");
+      expect(caseDetail.fleetPartnerId).toBe("");
+      expect(caseDetail.actionDescriptor).toMatchObject({
+        action: "respond",
+        enabled: false,
+        disabledReasonCode: "case_unattributed",
+      });
+      const timelineBefore = complaints.getComplaintTimeline(
+        unattributed.caseNo,
+      ).length;
+      await expect(
+        cases.submitReply("", unattributed.caseNo, "anyone", {
+          content: "不應被接受的回覆",
+        }),
+      ).rejects.toMatchObject({ code: "CASE_NOT_FLEET_SCOPED" });
+      expect(complaints.getComplaintTimeline(unattributed.caseNo)).toHaveLength(
+        timelineBefore,
+      );
     });
   });
 });

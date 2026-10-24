@@ -24,11 +24,13 @@ export function CaseResponseAction({
   const reason =
     responsibility === "platform"
       ? t("actions.reason.casePlatformOwned")
-      : status === "closed"
-        ? t("actions.reason.caseClosed")
-        : availability?.enabled === false
-          ? t("actions.reason.caseUnavailable")
-          : null;
+      : responsibility === "unattributed"
+        ? t("actions.reason.caseUnattributed")
+        : status === "closed"
+          ? t("actions.reason.caseClosed")
+          : availability?.enabled === false
+            ? t("actions.reason.caseUnavailable")
+            : null;
   if (reason)
     return (
       <FleetActionButton
