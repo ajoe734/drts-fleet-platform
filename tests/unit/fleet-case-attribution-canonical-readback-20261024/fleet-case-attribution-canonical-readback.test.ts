@@ -188,9 +188,12 @@ async function buildFleetPartnerService(opts: {
   }>;
   fleetPartnerRepository?: FleetPartnerRepository;
 }) {
-  const mobility = fakeOwnedMobilityService(opts.tasksByOrder, {
-    hydratedTasksByOrder: opts.hydratedTasksByOrder,
-  });
+  const mobility = fakeOwnedMobilityService(
+    opts.tasksByOrder,
+    opts.hydratedTasksByOrder !== undefined
+      ? { hydratedTasksByOrder: opts.hydratedTasksByOrder }
+      : {},
+  );
   const service = new FleetPartnerService(
     new BillingSettlementService(new AuditNotificationService()),
     mobility,
