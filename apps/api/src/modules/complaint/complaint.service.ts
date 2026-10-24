@@ -1329,6 +1329,24 @@ export class ComplaintService implements OnModuleInit {
     return this.listComplaintCases();
   }
 
+  /** Read every committed non-settlement case on each call, the same
+   * canonical-refresh guarantee refreshSettlementCases already gives
+   * settlement_dispute cases, so a warm instance that never itself created
+   * or updated a given ordinary case still lists it. */
+  async listComplaintCasesForFleetOps(): Promise<ComplaintCaseRecord[]> {
+    if (
+      this.complaintRepository?.isEnabled() &&
+      typeof this.complaintRepository.loadState === "function"
+    ) {
+      const state = await this.complaintRepository.loadState();
+      for (const durableCase of state.complaintCases) {
+        if (durableCase.category === "settlement_dispute") continue;
+        this.reconcileComplaintCaseIntoCache(durableCase);
+      }
+    }
+    return this.listComplaintCases();
+  }
+
   async getComplaintCaseForOps(caseNo: string) {
     // Legacy/definitely rejected commands can leave no retained identity.
     // Actual ordinary GET still reads this case's canonical full snapshot.
