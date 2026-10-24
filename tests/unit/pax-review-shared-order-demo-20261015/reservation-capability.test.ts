@@ -102,7 +102,7 @@ function peers() {
     if (sql.includes("DELETE FROM admin.phase1_vehicle_eligibility_matrix"))
       currentMatrix.clear();
     const inserted =
-      /INSERT INTO ((?:reg\.phase1_registry_\w+)|ops\.phase1_(?:driver_profiles|service_products|multi_taxi_[a-z_]+))/.exec(
+      /INSERT INTO ((?:reg\.phase1_registry_\w+)|admin\.phase1_(?:fleet_partners|driver_fleet_affiliations)|ops\.phase1_(?:driver_profiles|service_products|multi_taxi_[a-z_]+))/.exec(
         sql,
       )?.[1];
     if (inserted) {
@@ -160,7 +160,20 @@ function peers() {
                   .serviceProductType === values[0]
               : table === "reg.phase1_registry_drivers"
                 ? (record as { driverId: string }).driverId === values[0]
-                : true),
+                : table === "admin.phase1_fleet_partners"
+                  ? sql.includes("multiTaxiOperatorIds")
+                    ? Boolean(
+                        (
+                          record as { multiTaxiOperatorIds?: string[] }
+                        ).multiTaxiOperatorIds?.includes(
+                          JSON.parse(String(values[0]))[0],
+                        ),
+                      )
+                    : (record as { fleetPartnerId: string }).fleetPartnerId ===
+                        values[0] &&
+                      (!sql.includes("active = true") ||
+                        (record as { active?: boolean }).active === true)
+                  : true),
         ),
       };
     }

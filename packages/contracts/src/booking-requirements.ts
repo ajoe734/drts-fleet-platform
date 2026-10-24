@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { voiceDatetimeOffsetRegex } from "./voice-datetime";
 import type {
   ResolvedAddressPayload,
   ServiceAreaEvaluationResult,
@@ -49,7 +50,9 @@ export interface BookingQualification {
   validUntil: string;
 }
 
-export const voiceAbsoluteTimeSchema = z.string().datetime({ offset: true });
+export const voiceAbsoluteTimeSchema = z
+  .string()
+  .regex(voiceDatetimeOffsetRegex);
 export const voiceOrdinaryRuntimeMappingSchema = z
   .object({
     runtimeProfileCode: z.literal("ordinary_taxi"),

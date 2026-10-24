@@ -2,12 +2,24 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   uploadOperationalDocument,
   runSetup,
+  runOperationalDocumentAcceptance,
   operationalRequestHeaders,
+  operationalReviewerRequestHeaders,
+  downloadOperationalDocumentAsReviewer,
+  operationalRoleRequestHeaders,
+  verifyOperationalRoleSession,
+  probeOperationalDocumentRoleAccess,
+  resolveOperationalEditableCase,
+  getOperationalDocumentFixture,
+  OPERATIONAL_PDF_BYTES,
+  OPERATIONAL_PNG_BYTES,
+  OPERATIONAL_JPEG_BYTES,
   installOperationalBrowserHeaders,
   fetchOperationalSurface,
   prepareOperationalFleetSession,
   type PreparedOperationalFleetSession,
   type Journey,
+  type DocumentAcceptanceManifest,
 } from "../e2e/operational-document-upload";
 import {
   type APIRequestContext,
@@ -17,6 +29,11 @@ import {
 import { createHash } from "node:crypto";
 import journeysData from "../e2e/fixtures/operational-browser-journeys.json";
 import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
+import { SupplyDocumentService } from "../../apps/api/src/modules/fleet-partner/supply-document.service";
+import { SupplySubmissionService } from "../../apps/api/src/modules/fleet-partner/supply-submission.service";
+import { SupplySubmissionRepository } from "../../apps/api/src/modules/fleet-partner/supply-submission.repository";
+import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { fleetStorageFixture } from "./helpers/fleet-document-fixture";
 
 function checkActualPdf(bytes: Buffer) {
   const text = bytes.toString("ascii");
@@ -2673,5 +2690,1227 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
           (c) => c.origin === api || c.path.includes(String(entry.entrySlug)),
         ),
     ).toBe(true);
+  });
+});
+
+function checkActualPng(bytes: Buffer) {
+  expect(bytes.subarray(0, 8)).toEqual(
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  );
+  const chunks: string[] = [];
+  let offset = 8;
+  while (offset < bytes.length) {
+    expect(offset + 8).toBeLessThanOrEqual(bytes.length);
+    const length = bytes.readUInt32BE(offset);
+    const type = bytes.subarray(offset + 4, offset + 8).toString("ascii");
+    chunks.push(type);
+    offset += 12 + length;
+  }
+  expect(offset).toBe(bytes.length);
+  expect(chunks[0]).toBe("IHDR");
+  expect(chunks).toContain("IDAT");
+  expect(chunks.at(-1)).toBe("IEND");
+  return {
+    length: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    chunks,
+  };
+}
+
+function checkActualJpeg(bytes: Buffer) {
+  expect(bytes[0]).toBe(0xff);
+  expect(bytes[1]).toBe(0xd8);
+  expect(bytes[bytes.length - 2]).toBe(0xff);
+  expect(bytes[bytes.length - 1]).toBe(0xd9);
+  expect(bytes.subarray(6, 11).toString("ascii")).toBe("JFIF\0");
+  return {
+    length: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
+describe("C125 full document families, Case attachments, Reviewer readback, and Cross-Role access matrix", () => {
+  const origin = "https://fleet.example.invalid";
+  const adminOrigin = "https://admin.example.invalid";
+  const mockRequest = {} as APIRequestContext;
+  let originalFetch: typeof global.fetch;
+
+  beforeEach(() => {
+    originalFetch = global.fetch;
+    vi.stubEnv("DRTS_CANDIDATE_SHA", "c125abc");
+    vi.stubEnv("DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL", origin);
+    vi.stubEnv(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_ID_TOKEN",
+      "fleet-cloud-run-invocation-token",
+    );
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+      "own-fleet-session-token",
+    );
+    vi.stubEnv("DRTS_DEV_PLATFORM_ADMIN_BASE_URL", adminOrigin);
+    vi.stubEnv(
+      "DRTS_DEV_PLATFORM_ADMIN_ID_TOKEN",
+      "admin-cloud-run-invocation-token",
+    );
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN",
+      "platform-reviewer-session-token",
+    );
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.unstubAllEnvs();
+  });
+
+  it("verifies structurally valid PDF, PNG, and JPEG binary fixtures and rejects unsupported MIME types", () => {
+    const pdf = getOperationalDocumentFixture("application/pdf");
+    const pdfFacts = checkActualPdf(pdf.bytes);
+    expect(pdf.bytes).toEqual(OPERATIONAL_PDF_BYTES);
+    expect(pdf.fileSize).toBe(327);
+    expect(pdf.sha256).toBe(pdfFacts.sha256);
+    expect(pdf.originalFileName).toBe("harmless-upload.pdf");
+
+    const png = getOperationalDocumentFixture("image/png", "evidence.png");
+    const pngFacts = checkActualPng(png.bytes);
+    expect(png.bytes).toEqual(OPERATIONAL_PNG_BYTES);
+    expect(png.fileSize).toBe(69);
+    expect(png.sha256).toBe(
+      "2128be2646bad332aa1e97b2676d9f960a43ff1a9d80bc6baf42c2d131034b83",
+    );
+    expect(png.sha256).toBe(pngFacts.sha256);
+    expect(png.originalFileName).toBe("evidence.png");
+
+    const jpeg = getOperationalDocumentFixture("image/jpeg", "evidence.jpg");
+    const jpegFacts = checkActualJpeg(jpeg.bytes);
+    expect(jpeg.bytes).toEqual(OPERATIONAL_JPEG_BYTES);
+    expect(jpeg.fileSize).toBe(332);
+    expect(jpeg.sha256).toBe(
+      "2873aca24970d8ab5f392f0d694229e3b14cf65c9425cadd92a8295399576288",
+    );
+    expect(jpeg.sha256).toBe(jpegFacts.sha256);
+    expect(jpeg.originalFileName).toBe("evidence.jpg");
+
+    expect(() => getOperationalDocumentFixture("image/gif")).toThrow(
+      /Unsupported operational document contentType/,
+    );
+  });
+
+  it("executes Supply vehicle, contract, and PNG/JPEG other uploads and rejects invented photo enum or mismatched parent contracts", async () => {
+    const uploadedObjects = new Map<
+      string,
+      { bytes: Buffer; contentType: string; documentType: string }
+    >();
+
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method || "GET";
+
+        if (
+          method === "GET" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/supply-submissions/sub-veh-001"
+        ) {
+          return jsonResponse({
+            data: {
+              submission: {
+                submission_id: "sub-veh-001",
+                fleet_id: "fleet-demo-001",
+                submission_type: "vehicle_onboarding",
+                revision_no: 1,
+              },
+            },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/supply-submissions/sub-drv-001"
+        ) {
+          return jsonResponse({
+            data: {
+              submission: {
+                submission_id: "sub-drv-001",
+                fleet_id: "fleet-demo-001",
+                submission_type: "driver_onboarding",
+                revision_no: 1,
+              },
+            },
+          });
+        }
+        if (
+          method === "POST" &&
+          url.pathname.endsWith("/documents/upload-url")
+        ) {
+          const subId = url.pathname.split("/")[4]!;
+          const body = JSON.parse(String(init?.body || "{}"));
+          const objKey = `fleet-partner/fleet-demo-001/supply-submissions/${subId}/${body.documentType}/${body.originalFileName}`;
+          uploadedObjects.set(objKey, {
+            bytes: Buffer.alloc(0),
+            contentType: body.contentType,
+            documentType: body.documentType,
+          });
+          return jsonResponse({
+            data: {
+              submission_id: subId,
+              fleet_partner_id: "fleet-demo-001",
+              object_key: objKey,
+              upload_url: `${origin}/control-plane-proxy/fleet-partner/supply-submissions/${subId}/documents/content?objectKey=${encodeURIComponent(objKey)}`,
+              method: "PUT",
+              headers: { "Content-Type": "application/octet-stream" },
+            },
+          });
+        }
+        if (method === "PUT" && url.pathname.endsWith("/documents/content")) {
+          const objKey = url.searchParams.get("objectKey")!;
+          const buf = Buffer.from(init?.body as Uint8Array);
+          const existing = uploadedObjects.get(objKey)!;
+          existing.bytes = buf;
+          return jsonResponse({
+            data: {
+              checksum_sha256: createHash("sha256").update(buf).digest("hex"),
+              file_size: buf.length,
+              scan_state: "clean",
+            },
+          });
+        }
+        if (method === "POST" && url.pathname.endsWith("/documents/confirm")) {
+          const subId = url.pathname.split("/")[4]!;
+          const body = JSON.parse(String(init?.body || "{}"));
+          const stored = uploadedObjects.get(body.objectKey)!;
+          const docId = `doc-${body.documentType}`;
+          uploadedObjects.set(`${subId}:${docId}`, stored);
+          return jsonResponse({
+            data: {
+              document_id: docId,
+              submission_id: subId,
+              fleet_partner_id: "fleet-demo-001",
+              document_type: body.documentType,
+              file_object_key: body.objectKey,
+              checksum_sha256: body.checksumSha256,
+              file_size: body.fileSize,
+              content_type: body.contentType,
+            },
+          });
+        }
+        if (method === "GET" && url.pathname.endsWith("/download")) {
+          const adminMatch = url.pathname.match(
+            /^\/control-plane-proxy\/admin\/fleet-partners\/supply-documents\/([^/]+)\/([^/]+)\/download$/,
+          );
+          const parts = url.pathname.split("/");
+          const subId = adminMatch ? adminMatch[1]! : parts[4]!;
+          const docId = adminMatch ? adminMatch[2]! : parts[6]!;
+          const stored = uploadedObjects.get(`${subId}:${docId}`)!;
+          return new Response(new Uint8Array(stored.bytes), {
+            status: 200,
+            headers: {
+              "content-type": stored.contentType,
+              "x-drts-candidate-sha": "c125abc",
+            },
+          });
+        }
+        return jsonResponse({ error: { code: "NOT_FOUND" } }, 404);
+      },
+    );
+
+    for (const spec of [
+      {
+        subId: "sub-veh-001",
+        documentType: "vehicle_registration",
+        contentType: "application/pdf",
+        originalFileName: "veh-reg.pdf",
+      },
+      {
+        subId: "sub-veh-001",
+        documentType: "insurance_policy",
+        contentType: "application/pdf",
+        originalFileName: "insurance.pdf",
+      },
+      {
+        subId: "sub-veh-001",
+        documentType: "fleet_participation_contract",
+        contentType: "application/pdf",
+        originalFileName: "veh-participation.pdf",
+      },
+      {
+        subId: "sub-veh-001",
+        documentType: "vehicle_management_contract",
+        contentType: "application/pdf",
+        originalFileName: "veh-mgmt.pdf",
+      },
+      {
+        subId: "sub-veh-001",
+        documentType: "other",
+        contentType: "image/png",
+        originalFileName: "veh-photo.png",
+      },
+      {
+        subId: "sub-veh-001",
+        documentType: "other",
+        contentType: "image/jpeg",
+        originalFileName: "veh-photo.jpg",
+      },
+      {
+        subId: "sub-drv-001",
+        documentType: "driver_management_contract",
+        contentType: "application/pdf",
+        originalFileName: "drv-mgmt.pdf",
+      },
+    ]) {
+      const ev = await uploadOperationalDocument(
+        mockRequest,
+        origin,
+        `/control-plane-proxy/fleet-partner/supply-submissions/${spec.subId}/documents/upload-url`,
+        {
+          expectedRevisionNo: 1,
+          documentType: spec.documentType,
+          contentType: spec.contentType,
+          originalFileName: spec.originalFileName,
+        },
+        `/control-plane-proxy/fleet-partner/supply-submissions/${spec.subId}/documents/confirm`,
+        {
+          expectedRevisionNo: 1,
+          documentType: spec.documentType,
+          contentType: spec.contentType,
+          originalFileName: spec.originalFileName,
+        },
+        { Authorization: "Bearer tok" },
+      );
+      expect(ev.confirmDocumentType).toBe(spec.documentType);
+      expect(ev.readbackContentType).toBe(spec.contentType);
+      expect(ev.readbackSha256).toBe(ev.sha256);
+      const reviewerSupplyReadback =
+        await downloadOperationalDocumentAsReviewer(
+          adminOrigin,
+          "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+          {
+            kind: "supply",
+            submissionId: spec.subId,
+            documentId: ev.documentId!,
+          },
+          {
+            sha256: ev.sha256,
+            fileSize: ev.fileSize,
+            contentType: spec.contentType as any,
+          },
+        );
+      expect(reviewerSupplyReadback.downloadStatus).toBe(200);
+      expect(reviewerSupplyReadback.readbackSha256).toBe(ev.sha256);
+    }
+
+    // Reject invented photo enum
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        "/control-plane-proxy/fleet-partner/supply-submissions/sub-veh-001/documents/upload-url",
+        { expectedRevisionNo: 1, documentType: "photo" },
+        "/control-plane-proxy/fleet-partner/supply-submissions/sub-veh-001/documents/confirm",
+        { expectedRevisionNo: 1, documentType: "photo" },
+        { Authorization: "Bearer tok" },
+      ),
+    ).rejects.toThrow(/no invented photo enum/);
+
+    // Reject vehicle_management_contract on driver submission
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        "/control-plane-proxy/fleet-partner/supply-submissions/sub-drv-001/documents/upload-url",
+        { expectedRevisionNo: 1, documentType: "vehicle_management_contract" },
+        "/control-plane-proxy/fleet-partner/supply-submissions/sub-drv-001/documents/confirm",
+        { expectedRevisionNo: 1, documentType: "vehicle_management_contract" },
+        { Authorization: "Bearer tok" },
+      ),
+    ).rejects.toThrow(/driver supply submission sub-drv-001 does not allow/);
+
+    // Reject driver_management_contract on vehicle submission
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        "/control-plane-proxy/fleet-partner/supply-submissions/sub-veh-001/documents/upload-url",
+        { expectedRevisionNo: 1, documentType: "driver_management_contract" },
+        "/control-plane-proxy/fleet-partner/supply-submissions/sub-veh-001/documents/confirm",
+        { expectedRevisionNo: 1, documentType: "driver_management_contract" },
+        { Authorization: "Bearer tok" },
+      ),
+    ).rejects.toThrow(/vehicle supply submission sub-veh-001 does not allow/);
+  });
+
+  it("confirms the actual SupplyDocumentService rejects the revised own_fleet invalid-metadata probes with zero intent writes and accepts the matching valid controls", async () => {
+    const { storage, store } = fleetStorageFixture("clean");
+    const repository = new SupplySubmissionRepository();
+    const submissions = new SupplySubmissionService(
+      repository,
+      new RegulatoryRegistryService(
+        undefined as never,
+        undefined as never,
+        undefined as never,
+      ),
+    );
+    const service = new SupplyDocumentService(submissions, repository, storage);
+    const driverDraft = await submissions.createDriverDraft(
+      "fleet-demo-001",
+      "owner",
+      {
+        name: "Probe Driver",
+        mobile: "+886900111222",
+        professionalDriverLicenseNo: "PROBE-LICENSE",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "PROBE-REG",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+    );
+    const vehicleDraft = await submissions.createVehicleDraft(
+      "fleet-demo-001",
+      "owner",
+      {
+        plateNo: "PROBE-9999",
+        licenseType: "taxi",
+        brand: "Toyota",
+        model: "Camry",
+        modelYear: 2024,
+        seatCount: 4,
+        luggageCapacity: 2,
+        businessArea: "TPE",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        currentDriverSubmissionId: null,
+        doorCount: null,
+        color: null,
+        fixedFareAllowed: false,
+        airportTransferEligible: false,
+      },
+    );
+
+    const putIfAbsentSpy = vi.spyOn(store, "putIfAbsent");
+
+    await expect(
+      service.createUploadUrl(
+        "fleet-demo-001",
+        driverDraft.submission.submissionId,
+        "owner",
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          contentType: "application/pdf",
+          originalFileName: " ",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(
+      service.createUploadUrl(
+        "fleet-demo-001",
+        vehicleDraft.submission.submissionId,
+        "owner",
+        {
+          expectedRevisionNo: 1,
+          documentType: "vehicle_registration",
+          contentType: "application/pdf",
+          originalFileName: " ",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(putIfAbsentSpy).not.toHaveBeenCalled();
+
+    const driverIntent = await service.createUploadUrl(
+      "fleet-demo-001",
+      driverDraft.submission.submissionId,
+      "owner",
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        contentType: "application/pdf",
+        originalFileName: "driver-license.pdf",
+      },
+    );
+    expect(driverIntent.method).toBe("PUT");
+    const vehicleIntent = await service.createUploadUrl(
+      "fleet-demo-001",
+      vehicleDraft.submission.submissionId,
+      "owner",
+      {
+        expectedRevisionNo: 1,
+        documentType: "vehicle_registration",
+        contentType: "application/pdf",
+        originalFileName: "vehicle-registration.pdf",
+      },
+    );
+    expect(vehicleIntent.method).toBe("PUT");
+  });
+
+  it("executes Case attachment 7-hop lifecycle across PDF/PNG/JPEG, reviewer readback, and rejects closed/foreign/corrupt cases", async () => {
+    let caseStatus = "open";
+    let caseResponsibility = "shared";
+    let caseFleetId = "fleet-demo-001";
+    let transientScanner503Remaining = 1;
+    let attachmentCounter = 0;
+    const caseAttachments = new Map<
+      string,
+      {
+        attachment_id: string;
+        object_key: string;
+        file_size: number;
+        content_type: string;
+        name: string;
+        state: string;
+        bytes: Buffer;
+      }
+    >();
+
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method || "GET";
+
+        if (
+          method === "GET" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001"
+        ) {
+          return jsonResponse({
+            data: {
+              case_detail: {
+                id: "CASE-STL-202603-001",
+                fleet_partner_id: caseFleetId,
+                status: caseStatus,
+                responsibility: caseResponsibility,
+              },
+              attachments: Array.from(caseAttachments.values()).map((a) => ({
+                attachment_id: a.attachment_id,
+                case_id: "CASE-STL-202603-001",
+                fleet_partner_id: caseFleetId,
+                object_key: a.object_key,
+                file_size: a.file_size,
+                content_type: a.content_type,
+                name: a.name,
+                state: a.state,
+              })),
+            },
+          });
+        }
+        if (
+          method === "POST" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/upload-url"
+        ) {
+          const body = JSON.parse(String(init?.body || "{}"));
+          attachmentCounter += 1;
+          const attachmentId = `att_c125_${attachmentCounter}`;
+          const objectKey = `fleet-partner/${caseFleetId}/cases/CASE-STL-202603-001/${attachmentId}-${body.fileName}`;
+          caseAttachments.set(attachmentId, {
+            attachment_id: attachmentId,
+            object_key: objectKey,
+            file_size: body.fileSize,
+            content_type: body.contentType,
+            name: body.fileName,
+            state: "pending",
+            bytes: Buffer.alloc(0),
+          });
+          return jsonResponse({
+            data: {
+              attachment_id: attachmentId,
+              case_id: "CASE-STL-202603-001",
+              fleet_partner_id: caseFleetId,
+              object_key: objectKey,
+              upload_url: `${origin}/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/content?objectKey=${encodeURIComponent(objectKey)}`,
+              method: "PUT",
+              headers: { "Content-Type": "application/octet-stream" },
+            },
+          });
+        }
+        if (
+          method === "PUT" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/content"
+        ) {
+          if (transientScanner503Remaining > 0) {
+            transientScanner503Remaining -= 1;
+            return jsonResponse(
+              { error: { code: "DOCUMENT_SCANNER_UNAVAILABLE" } },
+              503,
+            );
+          }
+          const objectKey = url.searchParams.get("objectKey")!;
+          const record = Array.from(caseAttachments.values()).find(
+            (a) => a.object_key === objectKey,
+          )!;
+          const buf = Buffer.from(init?.body as Uint8Array);
+          record.bytes = buf;
+          return jsonResponse({
+            data: {
+              attachment_id: record.attachment_id,
+              case_id: "CASE-STL-202603-001",
+              checksum_sha256: createHash("sha256").update(buf).digest("hex"),
+              file_size: buf.length,
+              scan_state: "clean",
+            },
+          });
+        }
+        if (
+          method === "POST" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/confirm"
+        ) {
+          const body = JSON.parse(String(init?.body || "{}"));
+          const record = caseAttachments.get(body.attachmentId)!;
+          record.state = "done";
+          return jsonResponse({
+            data: {
+              attachment_id: record.attachment_id,
+              case_id: "CASE-STL-202603-001",
+              fleet_partner_id: caseFleetId,
+              object_key: record.object_key,
+              file_size: record.file_size,
+              content_type: record.content_type,
+              name: record.name,
+              state: "done",
+            },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname.match(
+            /^\/control-plane-proxy\/fleet-partner\/cases\/CASE-STL-202603-001\/attachments\/([^/]+)\/read-url$/,
+          )
+        ) {
+          const attachmentId = url.pathname.split("/")[6]!;
+          const record = caseAttachments.get(attachmentId)!;
+          return jsonResponse({
+            data: {
+              authorized: true,
+              attachment_id: attachmentId,
+              name: record.name,
+              expires_at: "2026-12-31T00:00:00.000Z",
+              download_url: `${url.origin}/api/fleet-partner/cases/CASE-STL-202603-001/attachments/${attachmentId}/download?expiresAt=1798675200000&sig=valid_hmac_sig`,
+            },
+          });
+        }
+        if (
+          method === "GET" &&
+          (url.pathname.match(
+            /^\/control-plane-proxy\/fleet-partner\/cases\/CASE-STL-202603-001\/attachments\/([^/]+)\/download$/,
+          ) ||
+            url.pathname.match(
+              /^\/control-plane-proxy\/admin\/fleet-partners\/case-attachments\/CASE-STL-202603-001\/([^/]+)\/download$/,
+            ))
+        ) {
+          const adminMatch = url.pathname.match(
+            /^\/control-plane-proxy\/admin\/fleet-partners\/case-attachments\/CASE-STL-202603-001\/([^/]+)\/download$/,
+          );
+          const attachmentId = adminMatch
+            ? adminMatch[1]!
+            : url.pathname.split("/")[6]!;
+          const record = caseAttachments.get(attachmentId)!;
+          return new Response(new Uint8Array(record.bytes), {
+            status: 200,
+            headers: {
+              "content-type": record.content_type,
+              "x-drts-candidate-sha": "c125abc",
+            },
+          });
+        }
+        return jsonResponse({ error: { code: "NOT_FOUND" } }, 404);
+      },
+    );
+
+    for (const mime of [
+      "application/pdf",
+      "image/png",
+      "image/jpeg",
+    ] as const) {
+      const ext =
+        mime === "application/pdf"
+          ? "pdf"
+          : mime === "image/png"
+            ? "png"
+            : "jpg";
+      const ev = await uploadOperationalDocument(
+        mockRequest,
+        origin,
+        "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/upload-url",
+        {
+          expectedFleetPartnerId: "fleet-demo-001",
+          contentType: mime,
+          originalFileName: `case-file.${ext}`,
+        },
+        "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/confirm",
+        {
+          contentType: mime,
+          originalFileName: `case-file.${ext}`,
+        },
+        { Authorization: "Bearer tok" },
+      );
+      expect(ev.confirmCaseId).toBe("CASE-STL-202603-001");
+      expect(ev.confirmFleetPartnerId).toBe("fleet-demo-001");
+      expect(ev.confirmAttachmentState).toBe("done");
+      expect(ev.canonicalReadbackStatus).toBe(200);
+      expect(ev.readUrlStatus).toBe(200);
+      expect(ev.readbackContentType).toBe(mime);
+      expect(ev.readbackSha256).toBe(ev.sha256);
+
+      const reviewerReadback = await downloadOperationalDocumentAsReviewer(
+        adminOrigin,
+        "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+        {
+          kind: "case",
+          caseId: "CASE-STL-202603-001",
+          attachmentId: ev.attachmentId!,
+        },
+        {
+          sha256: ev.sha256,
+          fileSize: ev.fileSize,
+          contentType: mime,
+        },
+      );
+      expect(reviewerReadback.downloadStatus).toBe(200);
+      expect(reviewerReadback.readbackSha256).toBe(ev.sha256);
+    }
+
+    // Closed case rejected before intent
+    caseStatus = "closed";
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/upload-url",
+        { expectedFleetPartnerId: "fleet-demo-001" },
+        "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/confirm",
+        {},
+        { Authorization: "Bearer tok" },
+      ),
+    ).rejects.toThrow(/must be editable/);
+    caseStatus = "open";
+
+    // Platform responsibility rejected before intent
+    caseResponsibility = "platform";
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/upload-url",
+        { expectedFleetPartnerId: "fleet-demo-001" },
+        "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/confirm",
+        {},
+        { Authorization: "Bearer tok" },
+      ),
+    ).rejects.toThrow(/must be fleet-editable/);
+    caseResponsibility = "shared";
+
+    // Foreign fleet case rejected before intent
+    caseFleetId = "METRO_FLEET";
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/upload-url",
+        { expectedFleetPartnerId: "fleet-demo-001" },
+        "/control-plane-proxy/fleet-partner/cases/CASE-STL-202603-001/attachments/confirm",
+        {},
+        { Authorization: "Bearer tok" },
+      ),
+    ).rejects.toThrow(/must match expectedFleetPartnerId/);
+  });
+
+  it("resolves canonical editable Case for fleet-demo-001 and creates statement dispute case when none exists", async () => {
+    let casesList: Array<Record<string, unknown>> = [
+      {
+        id: "CASE-CP-20260301-001",
+        fleet_partner_id: "METRO_FLEET",
+        status: "open",
+        responsibility: "fleet",
+      },
+      {
+        id: "CASE-CLOSED-001",
+        fleet_partner_id: "fleet-demo-001",
+        status: "closed",
+        responsibility: "fleet",
+      },
+      {
+        id: "CASE-OPEN-OWN-001",
+        fleet_partner_id: "fleet-demo-001",
+        status: "open",
+        responsibility: "shared",
+      },
+    ];
+
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method || "GET";
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/cases"
+        ) {
+          return jsonResponse({
+            data: {
+              items: casesList,
+              page_info: {
+                page: 1,
+                page_size: Math.max(casesList.length, 20),
+                total_items: casesList.length,
+                total_pages: casesList.length > 0 ? 1 : 0,
+              },
+            },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/statements"
+        ) {
+          return jsonResponse({
+            data: {
+              items: [
+                {
+                  statement_id: "STL-2026-03-fleet-demo-001",
+                  fleet_partner_id: "fleet-demo-001",
+                },
+              ],
+              page_info: {
+                page: 1,
+                page_size: 20,
+                total_items: 1,
+                total_pages: 1,
+              },
+            },
+          });
+        }
+        if (
+          method === "POST" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/statements/STL-2026-03-fleet-demo-001/dispute"
+        ) {
+          return jsonResponse({
+            data: {
+              dispute_case_id: "CASE-STL-2026-03-fleet-demo-001",
+            },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/cases/CASE-STL-2026-03-fleet-demo-001"
+        ) {
+          return jsonResponse({
+            data: {
+              case_detail: {
+                id: "CASE-STL-2026-03-fleet-demo-001",
+                fleet_partner_id: "fleet-demo-001",
+                status: "open",
+                responsibility: "shared",
+              },
+            },
+          });
+        }
+        return jsonResponse({ error: { code: "NOT_FOUND" } }, 404);
+      },
+    );
+
+    const existing = await resolveOperationalEditableCase(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      "fleet-demo-001",
+    );
+    expect(existing).toEqual({
+      caseId: "CASE-OPEN-OWN-001",
+      fleetPartnerId: "fleet-demo-001",
+      status: "open",
+      responsibility: "shared",
+      resolution: "existing",
+    });
+
+    // When only foreign or closed cases exist, creates dispute case from fleet statement
+    casesList = [
+      {
+        id: "CASE-CP-20260301-001",
+        fleet_partner_id: "METRO_FLEET",
+        status: "open",
+        responsibility: "fleet",
+      },
+    ];
+    const created = await resolveOperationalEditableCase(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      "fleet-demo-001",
+    );
+    expect(created).toEqual({
+      caseId: "CASE-STL-2026-03-fleet-demo-001",
+      fleetPartnerId: "fleet-demo-001",
+      status: "open",
+      responsibility: "shared",
+      resolution: "created_from_statement_dispute",
+      statementId: "STL-2026-03-fleet-demo-001",
+    });
+  });
+
+  it("verifies backend role sessions, rejects spoofed identity headers, and executes cross-role denial probes", async () => {
+    const apiOrigin = "https://api.example.invalid";
+    vi.stubEnv("DRTS_OPERATIONAL_API_URL", apiOrigin);
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_API_ID_TOKEN",
+      "api-cloud-run-invocation-token",
+    );
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN",
+      "foreign-fleet-session-token",
+    );
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+      "tenant-admin-session-token",
+    );
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_DISPATCH_SESSION_TOKEN",
+      "tenant-ops-session-token",
+    );
+    vi.stubEnv("DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN", "driver-session-token");
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN",
+      "ops-non-reviewer-session-token",
+    );
+    vi.stubEnv("DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN", "system-session-token");
+
+    // Reject spoofed headers on both standard and role header builders
+    for (const spoofHeader of [
+      "x-realm",
+      "x-roles",
+      "x-role-families",
+      "x-actor-id",
+      "x-actor-type",
+      "x-scopes",
+      "x-auth-mode",
+    ]) {
+      expect(() =>
+        operationalRequestHeaders(
+          "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          origin,
+          { [spoofHeader]: "spoofed" },
+        ),
+      ).toThrow(/Spoofed identity header/);
+      expect(() =>
+        operationalReviewerRequestHeaders(
+          "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+          adminOrigin,
+          { [spoofHeader]: "spoofed" },
+        ),
+      ).toThrow(/Spoofed identity header/);
+      expect(() =>
+        operationalRoleRequestHeaders(
+          "foreign_fleet",
+          "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+          origin,
+          { [spoofHeader]: "spoofed" },
+        ),
+      ).toThrow(/Spoofed identity header/);
+    }
+
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const headers = new Headers(init?.headers);
+        const appAuth = headers.get("x-drts-authorization") || "";
+
+        if (
+          url.origin === origin &&
+          url.pathname === "/control-plane-proxy/auth/session" &&
+          appAuth !== "Bearer own-fleet-session-token"
+        ) {
+          return jsonResponse(
+            { error: { code: "FLEET_PARTNER_AUTHORITY_REQUIRED" } },
+            403,
+          );
+        }
+
+        if (
+          (url.origin === apiOrigin && url.pathname === "/api/auth/session") ||
+          (url.origin === origin &&
+            url.pathname === "/control-plane-proxy/auth/session")
+        ) {
+          if (appAuth === "Bearer own-fleet-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "partner",
+                  actorType: "partner_user",
+                  partnerId: "fleet-demo-001",
+                  roles: ["fleet_admin"],
+                },
+              },
+            });
+          }
+          if (appAuth === "Bearer foreign-fleet-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "partner",
+                  actorType: "partner_user",
+                  partnerId: "METRO_FLEET",
+                  roles: ["fleet_admin"],
+                },
+              },
+            });
+          }
+          if (appAuth === "Bearer platform-reviewer-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "platform",
+                  actorType: "platform_admin",
+                  roles: ["platform_reviewer"],
+                },
+              },
+            });
+          }
+          if (appAuth === "Bearer tenant-admin-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "tenant",
+                  actorType: "tenant_admin",
+                  roles: ["tenant_admin"],
+                },
+              },
+            });
+          }
+          if (appAuth === "Bearer tenant-ops-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "tenant",
+                  actorType: "tenant_admin",
+                  roles: ["tenant_ops_admin"],
+                },
+              },
+            });
+          }
+          if (appAuth === "Bearer driver-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "driver",
+                  actorType: "driver",
+                  roles: ["driver"],
+                },
+              },
+            });
+          }
+          if (appAuth === "Bearer ops-non-reviewer-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "ops",
+                  actorType: "ops_user",
+                  roles: ["ops_user"],
+                },
+              },
+            });
+          }
+          if (appAuth === "Bearer system-session-token") {
+            return jsonResponse({
+              data: {
+                active: true,
+                identity: {
+                  realm: "system",
+                  actorType: "system",
+                  roles: ["system"],
+                },
+              },
+            });
+          }
+          return jsonResponse({ error: { code: "UNAUTHENTICATED" } }, 401);
+        }
+
+        // Business endpoints: only own_fleet on fleet-partner routes or platform_reviewer on admin routes allowed
+        if (
+          !appAuth ||
+          appAuth === "Bearer invalid.operational.session.token"
+        ) {
+          return jsonResponse(
+            { error: { code: "AUTHENTICATION_REQUIRED" } },
+            401,
+          );
+        }
+        const isAdminReviewerRoute = url.pathname.startsWith(
+          "/control-plane-proxy/admin/fleet-partners/",
+        );
+        if (isAdminReviewerRoute) {
+          if (appAuth === "Bearer platform-reviewer-session-token") {
+            return jsonResponse({ data: { ok: true } }, 200);
+          }
+          return jsonResponse(
+            { error: { code: "DOCUMENT_REVIEW_DENIED" } },
+            403,
+          );
+        }
+        if (appAuth === "Bearer foreign-fleet-session-token") {
+          return jsonResponse(
+            { error: { code: "SUPPLY_SUBMISSION_NOT_FOUND" } },
+            404,
+          );
+        }
+        if (appAuth === "Bearer own-fleet-session-token") {
+          return jsonResponse({ data: { ok: true } }, 200);
+        }
+        return jsonResponse({ error: { code: "FORBIDDEN" } }, 403);
+      },
+    );
+
+    const recorded: Array<Record<string, unknown>> = [];
+    const acceptance: DocumentAcceptanceManifest = {
+      id: "role-matrix-unit",
+      surface: "fleet",
+      baseUrlEnv: "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      actorScope: "cross-role",
+      setup: [
+        {
+          kind: "role-access-probe",
+          role: "own_fleet",
+          path: "/control-plane-proxy/fleet-partner/supply-submissions/sub-1",
+          method: "GET",
+          expectedStatus: 200,
+        },
+        {
+          kind: "role-access-probe",
+          baseUrlEnv: "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+          role: "own_fleet",
+          verifySession: false,
+          path: "/control-plane-proxy/admin/fleet-partners/supply-documents/sub-1/doc-1/download",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "DOCUMENT_REVIEW_DENIED",
+        },
+        {
+          kind: "role-access-probe",
+          baseUrlEnv: "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+          role: "platform_reviewer",
+          path: "/control-plane-proxy/admin/fleet-partners/supply-documents/sub-1/doc-1/download",
+          method: "GET",
+          expectedStatus: 200,
+        },
+        {
+          kind: "role-access-probe",
+          role: "foreign_fleet",
+          path: "/control-plane-proxy/fleet-partner/supply-submissions/sub-1/documents/doc-1/download",
+          method: "GET",
+          expectedStatus: [403, 404],
+          expectedErrorCode: "SUPPLY_SUBMISSION_NOT_FOUND",
+        },
+        {
+          kind: "role-access-probe",
+          role: "tenant_admin",
+          path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "FORBIDDEN",
+        },
+        {
+          kind: "role-access-probe",
+          role: "tenant_ops",
+          path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "FORBIDDEN",
+        },
+        {
+          kind: "role-access-probe",
+          role: "driver",
+          path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "FORBIDDEN",
+        },
+        {
+          kind: "role-access-probe",
+          role: "ops_non_reviewer",
+          path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "FORBIDDEN",
+        },
+        {
+          kind: "role-access-probe",
+          baseUrlEnv: "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
+          role: "ops_non_reviewer",
+          verifySession: false,
+          path: "/control-plane-proxy/admin/fleet-partners/case-attachments/CASE-1/att-1/download",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "DOCUMENT_REVIEW_DENIED",
+        },
+        {
+          kind: "role-access-probe",
+          role: "system",
+          path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
+          method: "GET",
+          expectedStatus: 403,
+          expectedErrorCode: "FORBIDDEN",
+        },
+        {
+          kind: "role-access-probe",
+          role: "unauthenticated",
+          path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
+          method: "GET",
+          expectedStatus: 401,
+          expectedErrorCode: "AUTHENTICATION_REQUIRED",
+        },
+        {
+          kind: "role-access-probe",
+          role: "invalid_session",
+          path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/att-1/read-url",
+          method: "GET",
+          expectedStatus: 401,
+          expectedErrorCode: "AUTHENTICATION_REQUIRED",
+        },
+      ],
+    };
+
+    await runOperationalDocumentAcceptance(
+      { request: mockRequest, record: (entry) => recorded.push(entry) },
+      acceptance,
+      {},
+    );
+    expect(recorded).toHaveLength(12);
+    expect(recorded.map((r) => r.role)).toEqual([
+      "own_fleet",
+      "own_fleet",
+      "platform_reviewer",
+      "foreign_fleet",
+      "tenant_admin",
+      "tenant_ops",
+      "driver",
+      "ops_non_reviewer",
+      "ops_non_reviewer",
+      "system",
+      "unauthenticated",
+      "invalid_session",
+    ]);
+
+    const directProbe = await probeOperationalDocumentRoleAccess({
+      kind: "role-access-probe",
+      role: "foreign_fleet",
+      verifySession: false,
+      path: "/control-plane-proxy/fleet-partner/cases/CASE-1/attachments/content?objectKey=fleet-partner/fleet-demo-001/cases/CASE-1/att-1-file.pdf",
+      method: "PUT",
+      rawBodyContentType: "application/pdf",
+      expectedStatus: [403, 404],
+    });
+    expect(directProbe.status).toBe(404);
+
+    // Missing session token fails closed without faking success
+    vi.stubEnv("DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN", "");
+    await expect(
+      verifyOperationalRoleSession(
+        "driver",
+        "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      ),
+    ).rejects.toThrow(/requires a verified backend session token/);
   });
 });

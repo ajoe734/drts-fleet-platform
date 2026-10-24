@@ -41,6 +41,10 @@ async function fixture(transactional: boolean) {
       return { rows: [] };
     }
     if (sql.includes("FROM admin.phase1_fleet_partners")) {
+      if (sql.includes("WHERE fleet_partner_id = $1")) {
+        const record = masters.get(String(values[0]));
+        return { rows: record ? [{ record: structuredClone(record) }] : [] };
+      }
       const ids = JSON.parse(String(values[0])) as string[];
       return {
         rows: [...masters.values()]
@@ -312,7 +316,8 @@ it("Fleet explicit mapping is detached and becomes visible only after write ACK;
   const f = await fixture(false);
   f.partner.multiTaxiOperatorIds!.push("cannot-mutate-master");
   expect(
-    f.fleets.getFleetPartner(f.partner.fleetPartnerId).multiTaxiOperatorIds,
+    (await f.fleets.getFleetPartner(f.partner.fleetPartnerId))
+      .multiTaxiOperatorIds,
   ).toEqual(["unit-authority-operator"]);
   const gate = f.holdWrite();
   const update = f.fleets.updateFleetPartner(f.partner.fleetPartnerId, {
@@ -320,7 +325,8 @@ it("Fleet explicit mapping is detached and becomes visible only after write ACK;
   });
   await gate.ready;
   expect(
-    f.fleets.getFleetPartner(f.partner.fleetPartnerId).multiTaxiOperatorIds,
+    (await f.fleets.getFleetPartner(f.partner.fleetPartnerId))
+      .multiTaxiOperatorIds,
   ).toEqual(["unit-authority-operator"]);
   gate.release();
   await update;
@@ -335,6 +341,7 @@ it("Fleet explicit mapping is detached and becomes visible only after write ACK;
     }),
   ).rejects.toBeDefined();
   expect(
-    f.fleets.getFleetPartner(f.partner.fleetPartnerId).multiTaxiOperatorIds,
+    (await f.fleets.getFleetPartner(f.partner.fleetPartnerId))
+      .multiTaxiOperatorIds,
   ).toEqual(["new-operator"]);
 });

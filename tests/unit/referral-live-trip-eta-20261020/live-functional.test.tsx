@@ -77,6 +77,16 @@ it.each(["stale", "low_accuracy", "missing"])(
     expect(getByRole(h, "region", { name: "同單行程即時更新" })).toBeTruthy();
   },
 );
+it("a GPS fix buffered minutes ago has no live pickup ETA even though it was just received", async () => {
+  const f = await liveWire();
+  f.telemetry.currentLocation.recordedAt = new Date(
+    Date.now() - 600_000,
+  ).toISOString();
+  const h = await mount(f);
+  expect(f.eta).not.toHaveBeenCalled();
+  expect(queryByText(h, "16:03")).toBeNull();
+  expect(getByRole(h, "region", { name: "同單行程即時更新" })).toBeTruthy();
+});
 it("a real route-provider rejection leaves the canonical ongoing trip readable and the distance unknown", async () => {
   const f = await liveWire("on_trip");
   f.route.mockRejectedValueOnce(new Error("controlled route unavailable"));
@@ -135,6 +145,40 @@ it("does not use stale provider metrics even when the Driver location is fresh",
       ?.liveTracking?.dropoffRoute,
   ).toBeNull();
 });
+it("a GPS fix buffered minutes ago shows no dropoff route on-trip and never calls the route provider", async () => {
+  const f = await liveWire("on_trip");
+  f.telemetry.currentLocation.recordedAt = new Date(
+    Date.now() - 600_000,
+  ).toISOString();
+  const result = await f.service.getReferralPassengerActiveTrip(f.identity);
+  expect(result.trip?.orderId).toBe(f.orderId);
+  expect(result.trip?.liveTracking).toMatchObject({
+    locationFreshness: "stale",
+    dropoffRoute: null,
+    pickupEta: null,
+  });
+  expect(result.trip?.liveTracking?.location).toMatchObject({
+    lat: f.telemetry.currentLocation.lat,
+    lng: f.telemetry.currentLocation.lng,
+    recordedAt: f.telemetry.currentLocation.recordedAt,
+  });
+  expect(f.route).not.toHaveBeenCalled();
+});
+it("rejects a dropoff route when the same GPS fix ages past the observation window while awaiting the provider", async () => {
+  const f = await liveWire("on_trip");
+  f.route.mockImplementationOnce(async () => {
+    vi.setSystemTime(new Date(Date.now() + 65_000));
+    return {
+      distanceMeters: 4200,
+      durationSeconds: 720,
+      provider: "controlled-existing-route-port",
+      generatedAt: new Date().toISOString(),
+    };
+  });
+  const result = await f.service.getReferralPassengerActiveTrip(f.identity);
+  expect(result.trip?.orderId).toBe(f.orderId);
+  expect(result.trip?.liveTracking).toBeNull();
+});
 it("an absent same-order assignment leaves tracking null without reading another Driver", async () => {
   const f = await liveWire();
   f.db.table("ops.phase1_dispatch_assignments").clear();
@@ -170,7 +214,10 @@ it("an explicit refresh shows later same-order coordinates, new ETA and the real
   });
   await refresh(h);
   expect(getByText(h, "16:01")).toBeTruthy();
-  expect(getByText(h, /25.06100, 121.55000/)).toBeTruthy();
+  const link = getByRole(h, "link", {
+    name: "在地圖開啟司機位置",
+  }) as HTMLAnchorElement;
+  expect(new URL(link.href).searchParams.get("query")).toBe("25.061,121.55");
   expect(queryByText(h, "16:03")).toBeNull();
 });
 it("failed refresh retains the last same-order snapshot, announces stale readback and supports explicit retry", async () => {

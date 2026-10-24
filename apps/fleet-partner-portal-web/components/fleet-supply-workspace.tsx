@@ -1752,6 +1752,7 @@ export function SupplySubmissionDetailView({
   const subject = useMemo(() => formatSupplySubject(detail), [detail]);
 
   const prevInitialDetailRef = useRef(initialDetail);
+  const prevDetailRef = useRef(detail);
   const uploadSessionRef = useRef<
     | FleetStagedUploadSession<
         FleetDocumentUploadIntent & { submissionId: string; objectKey: string }
@@ -1763,9 +1764,14 @@ export function SupplySubmissionDetailView({
   const mountedRef = useRef(true);
   const activeSubmissionIdRef = useRef(detail.submission.submissionId);
   const revisionNoRef = useRef(detail.submission.revisionNo);
-  revisionNoRef.current = detail.submission.revisionNo;
   const editableRef = useRef(editable);
-  editableRef.current = editable;
+  if (prevDetailRef.current !== detail) {
+    prevDetailRef.current = detail;
+    revisionNoRef.current = detail.submission.revisionNo;
+    editableRef.current = editable;
+  } else if (!editable) {
+    editableRef.current = false;
+  }
   const docFileRef = useRef<File | null>(docFile);
   docFileRef.current = docFile;
   const docTypeRef = useRef<string>(docType);
@@ -1774,6 +1780,7 @@ export function SupplySubmissionDetailView({
   if (prevInitialDetailRef.current !== initialDetail) {
     const prevDetail = prevInitialDetailRef.current;
     prevInitialDetailRef.current = initialDetail;
+    prevDetailRef.current = initialDetail;
     const switchedSubmission =
       prevDetail.submission.submissionId !==
         initialDetail.submission.submissionId ||
@@ -2017,6 +2024,7 @@ export function SupplySubmissionDetailView({
       scopeKey,
       getSession: () => uploadSessionRef.current,
       setSession: (nextSession) => {
+        if (!isOperationActive()) return;
         uploadSessionRef.current = nextSession;
       },
       isActive: isOperationActive,
@@ -2043,6 +2051,9 @@ export function SupplySubmissionDetailView({
         const next = await apiRequest<SupplySubmissionDetail>(
           `fleet-partner/supply-submissions/${targetSubmissionId}`,
         );
+        if (!isOperationActive()) {
+          return null;
+        }
         revisionNoRef.current = next.submission.revisionNo;
         const matched = next.documents.find(
           (doc) => doc.fileObjectKey === intent.objectKey,
@@ -2056,15 +2067,10 @@ export function SupplySubmissionDetailView({
           uploadEpochRef.current += 1;
           uploadSessionRef.current = undefined;
           uploadInFlightRef.current = false;
-          if (
-            mountedRef.current &&
-            activeSubmissionIdRef.current === targetSubmissionId
-          ) {
-            setBusy((current) => (current === "upload" ? null : current));
-            setDetail(next);
-            setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
-            setVehicleForm(next.vehicleDraft ? { ...next.vehicleDraft } : null);
-          }
+          setBusy((current) => (current === "upload" ? null : current));
+          setDetail(next);
+          setDriverForm(next.driverDraft ? { ...next.driverDraft } : null);
+          setVehicleForm(next.vehicleDraft ? { ...next.vehicleDraft } : null);
         }
         return null;
       },

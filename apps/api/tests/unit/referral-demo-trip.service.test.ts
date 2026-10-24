@@ -68,6 +68,9 @@ type Task = {
   driverId: string;
   vehicleId: string;
   status: string;
+  acceptedAt?: string;
+  departedAt?: string;
+  startedAt?: string;
 };
 
 function harness(
@@ -308,14 +311,19 @@ describe("ReferralDemoTripService", () => {
       expect.objectContaining({ acceptedAt: expect.any(String) }),
       "req-1",
     );
-    // The first simulated driver-app heartbeat is bound to the accepted task.
+    // The driver sets off at once from about 1.3 km north of the pickup.
+    const [, depart] = h.orders.departDriverTask.mock.calls[0]!;
+    expect(depart.currentLocation.lat).toBeCloseTo(25.01 + 0.012, 6);
+    expect(depart.currentLocation.lng).toBe(121.46);
+    expect(h.orders.arrivedPickup).not.toHaveBeenCalled();
+    // The first simulated driver-app heartbeat is bound to the moving task.
     const [heartbeat] =
       h.registry.recordDriverLocationBatch.mock.calls[0]![0].items;
     expect(heartbeat).toMatchObject({
       driverId: "referral-demo-driver-2",
       vehicleId: "referral-demo-vehicle-2",
       taskId: "task-1",
-      workState: "assigned",
+      workState: "enroute",
       appState: "foreground",
     });
     // Only the pair that was not chosen goes back offline.
@@ -392,13 +400,12 @@ describe("ReferralDemoTripService", () => {
 
     expect(result).toMatchObject({ orderId: "order-1", status: "completed" });
     expect(h.orders.acceptDriverTask).not.toHaveBeenCalled();
-    expect(h.orders.departDriverTask).toHaveBeenCalledWith(
-      "task-1",
-      expect.objectContaining({
-        currentLocation: { lat: 25.01, lng: 121.46 },
-      }),
-      "req-2",
-    );
+    // Departs from the simulated approach start, as on assignment.
+    const [taskId, depart, requestId] =
+      h.orders.departDriverTask.mock.calls[0]!;
+    expect([taskId, requestId]).toEqual(["task-1", "req-2"]);
+    expect(depart.currentLocation.lat).toBeCloseTo(25.01 + 0.012, 6);
+    expect(depart.currentLocation.lng).toBe(121.46);
     expect(h.orders.arrivedPickup).toHaveBeenCalledTimes(1);
     expect(h.orders.startDriverTask).toHaveBeenCalledTimes(1);
     const [, command] = h.orders.completeDriverTask.mock.calls[0]!;
@@ -584,36 +591,325 @@ describe("ReferralDemoTripService", () => {
     expect(real.registry.recordDriverLocationBatch).not.toHaveBeenCalled();
   });
 
-  it("closes in on the pickup over the approach and stays there once arrived", () => {
+  it("closes in on the pickup, waits there, then drives to the destination", () => {
     const h = harness();
-    const acceptedAt = "2026-10-21T02:00:00.000Z";
-    const base = Date.parse(acceptedAt);
+    const departedAt = "2026-10-21T02:00:00.000Z";
+    const startedAt = "2026-10-21T02:05:00.000Z";
+    const base = Date.parse(departedAt);
+    const ride = Date.parse(startedAt);
     const task = (status: string) =>
       ({
         taskId: "t",
         driverId: "d",
         vehicleId: "v",
         status,
-        acceptedAt,
+        departedAt,
+        startedAt,
       }) as never;
-    const start = h.service.simulatedPosition(
-      h.current as never,
-      task("accepted"),
-      base,
-    );
-    const later = h.service.simulatedPosition(
-      h.current as never,
-      task("enroute_pickup"),
-      base + 3 * 60_000,
-    );
-    const arrived = h.service.simulatedPosition(
-      h.current as never,
-      task("arrived_pickup"),
-      base + 3 * 60_000,
-    );
+    const at = (status: string, now: number) =>
+      h.service.simulatedPosition(h.current as never, task(status), now);
+    const start = at("enroute_pickup", base);
+    const halfway = at("enroute_pickup", base + 90_000);
+    const driven = at("enroute_pickup", base + 10 * 60_000);
     expect(start.lat).toBeCloseTo(25.01 + 0.012, 6);
-    expect(later.lat).toBeLessThan(start.lat);
-    expect(later.lat).toBeGreaterThan(25.01);
-    expect(arrived).toEqual({ lat: 25.01, lng: 121.46 });
+    expect(halfway.lat).toBeCloseTo(25.01 + 0.006, 6);
+    // Never past the pickup, however long the approach takes to be reported.
+    expect(driven).toEqual({ lat: 25.01, lng: 121.46 });
+    expect(at("arrived_pickup", ride)).toEqual({ lat: 25.01, lng: 121.46 });
+    // On board: along the line to the destination (25.04, 121.56) in 3 min.
+    const onBoard = at("on_trip", ride + 90_000);
+    expect(onBoard.lat).toBeCloseTo(25.025, 6);
+    expect(onBoard.lng).toBeCloseTo(121.51, 6);
+    expect(at("on_trip", ride + 5 * 60_000)).toEqual({
+      lat: 25.04,
+      lng: 121.56,
+    });
+
+    // With the quoted route's 20-minute drive, halfway takes ten minutes, so
+    // the live ETA from the same route provider counts down with the map.
+    const quoted = harness({
+      order: order({
+        referralPassengerLifecycle: {
+          quote: {
+            pricingAt: DAY,
+            route: { distanceMeters: 14_000, durationSeconds: 1200 },
+          },
+        },
+      }),
+    });
+    const quotedAt = (now: number) =>
+      quoted.service.simulatedPosition(
+        quoted.current as never,
+        task("on_trip"),
+        now,
+      );
+    expect(quotedAt(ride + 90_000).lat).toBeCloseTo(25.01 + 0.03 * 0.075, 6);
+    expect(quotedAt(ride + 10 * 60_000).lat).toBeCloseTo(25.025, 6);
+    expect(quotedAt(ride + 20 * 60_000)).toEqual({ lat: 25.04, lng: 121.56 });
+  });
+
+  const demoTask = (status: string, extra: Partial<Task> = {}): Task => ({
+    taskId: "task-1",
+    orderId: "order-1",
+    driverId: "referral-demo-driver-1",
+    vehicleId: "referral-demo-vehicle-1",
+    status,
+    ...extra,
+  });
+
+  it("reports arrival through the heartbeat once the approach has been driven", async () => {
+    const early = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [
+        demoTask("enroute_pickup", { departedAt: new Date().toISOString() }),
+      ],
+    });
+    await early.service.heartbeat("order-1", identity, "req-1");
+    expect(early.orders.arrivedPickup).not.toHaveBeenCalled();
+
+    const driven = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [
+        demoTask("enroute_pickup", {
+          departedAt: new Date(Date.now() - 3 * 60_000 - 1_000).toISOString(),
+        }),
+      ],
+    });
+    await driven.service.heartbeat("order-1", identity, "req-1");
+    expect(driven.orders.arrivedPickup).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ arrivedAt: expect.any(String) }),
+      "req-1",
+    );
+    expect(driven.tasks[0]!.status).toBe("arrived_pickup");
+    // Boarding is the tester's step, never the heartbeat's.
+    expect(driven.orders.startDriverTask).not.toHaveBeenCalled();
+    expect(
+      driven.registry.recordDriverLocationBatch.mock.calls[0]![0].items[0],
+    ).toMatchObject({ lat: 25.01, lng: 121.46, workState: "arrived" });
+  });
+
+  it("ends the trip through the heartbeat once the ride reaches the destination", async () => {
+    const onBoard = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [demoTask("on_trip", { startedAt: new Date().toISOString() })],
+    });
+    await onBoard.service.heartbeat("order-1", identity, "req-1");
+    expect(onBoard.orders.completeDriverTask).not.toHaveBeenCalled();
+    expect(onBoard.registry.recordDriverLocationBatch).toHaveBeenCalledTimes(1);
+
+    const arrived = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [
+        demoTask("on_trip", {
+          // Past the 3-minute ride used when the quote has no route time.
+          startedAt: new Date(Date.now() - 3 * 60_000 - 1_000).toISOString(),
+        }),
+      ],
+    });
+    const result = await arrived.service.heartbeat(
+      "order-1",
+      identity,
+      "req-1",
+    );
+    expect(arrived.orders.completeDriverTask).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ orderId: "order-1", status: "completed" });
+    // A completed task reports no further location.
+    expect(arrived.registry.recordDriverLocationBatch).not.toHaveBeenCalled();
+  });
+
+  it("lets a tap and the destination heartbeat both end the trip once, even from a separate instance's cache", async () => {
+    const h = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [demoTask("on_trip")],
+    });
+    // The real `completeDriverTask` reloads the canonical task inside its
+    // own transaction, not this caller's local cache -- a separate service
+    // instance's cache never hears about the other instance's write. Model
+    // that by raising the task's own completion-conflict code, exactly as
+    // `OwnedMobilityService` does, before this instance's local task (and
+    // the reload the fix relies on) are told about the other write.
+    let won = false;
+    h.orders.completeDriverTask.mockImplementationOnce(async () => {
+      won = true;
+      throw new ApiRequestError(409, "TASK_ALREADY_COMPLETED", "already");
+    });
+    // Only the reload after the conflict -- not the pre-write reload, and
+    // not this instance's unrelated earlier reloads -- observes the other
+    // instance's write, exactly as a real repository read would.
+    h.orders.prepareOrderAction.mockImplementation(async () => {
+      if (!won) return;
+      h.tasks[0]!.status = "completed";
+      h.current.status = "completed";
+    });
+    const result = await h.service.complete("order-1", identity, "req-1");
+    expect(result).toMatchObject({ status: "completed" });
+    // The winner already took the driver offline; this loser does not.
+    expect(
+      h.registry.updateDriverWorkStateFromPersistence,
+    ).not.toHaveBeenCalledWith("referral-demo-driver-1", {
+      workState: "offline",
+    });
+  });
+
+  it("still fails the completion-conflict code when the reload does not confirm the same task completed", async () => {
+    const h = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [demoTask("on_trip")],
+    });
+    // The code looks like the benign race, but the reload shows the
+    // canonical task is not actually completed -- e.g. it was cancelled
+    // instead -- so this must still fail rather than assume success.
+    h.orders.completeDriverTask.mockImplementationOnce(async () => {
+      throw new ApiRequestError(409, "TASK_ALREADY_COMPLETED", "already");
+    });
+    h.orders.getDriverTask.mockReturnValueOnce({
+      ...h.tasks[0]!,
+      status: "cancelled",
+    });
+    await expect(
+      h.service.complete("order-1", identity, "req-1"),
+    ).rejects.toMatchObject({ code: "TASK_ALREADY_COMPLETED" });
+  });
+
+  it("does not infer completion from this instance's own locally completed cache", async () => {
+    const h = harness({
+      order: order({ status: "on_trip" }),
+      tasks: [demoTask("on_trip")],
+    });
+    // A generic failure that happens to leave the local cache looking
+    // completed (e.g. a stale read from an earlier call) is not the
+    // driver task's own completion-conflict code and must still fail.
+    h.orders.completeDriverTask.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "completed";
+      throw new Error("driver-task audit log write failed");
+    });
+    await expect(
+      h.service.complete("order-1", identity, "req-1"),
+    ).rejects.toThrow("driver-task audit log write failed");
+  });
+
+  it("lets the tester skip the approach and board the passenger", async () => {
+    const h = harness({
+      order: order({ status: "driver_accepted" }),
+      tasks: [demoTask("accepted")],
+    });
+    await h.service.arrive("order-1", identity, "req-1");
+    expect(h.orders.departDriverTask).toHaveBeenCalledTimes(1);
+    expect(h.orders.arrivedPickup).toHaveBeenCalledTimes(1);
+    expect(h.tasks[0]!.status).toBe("arrived_pickup");
+    expect(h.orders.startDriverTask).not.toHaveBeenCalled();
+
+    await h.service.board("order-1", identity, "req-1");
+    expect(h.orders.startDriverTask).toHaveBeenCalledWith(
+      "task-1",
+      expect.objectContaining({ startedAt: expect.any(String) }),
+      "req-1",
+    );
+    expect(h.tasks[0]!.status).toBe("on_trip");
+    expect(h.orders.completeDriverTask).not.toHaveBeenCalled();
+    // A repeated tap is harmless once the passenger is on board.
+    await h.service.board("order-1", identity, "req-1");
+    expect(h.orders.startDriverTask).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries on when the heartbeat already reported the arrival a tap asks for", async () => {
+    const h = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    // This is the exact code (and pre-mutation timing) `assertDriverTaskTransition`
+    // in `OwnedMobilityService` actually raises; the task mutates to look
+    // "arrived" because another request (the heartbeat) genuinely got there
+    // and persisted it first, not because of this call.
+    h.orders.arrivedPickup.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "arrived_pickup";
+      throw new ApiRequestError(
+        409,
+        "DRIVER_TASK_TRANSITION_INVALID",
+        "already",
+      );
+    });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).resolves.toMatchObject({ orderId: "order-1" });
+    expect(h.tasks[0]!.status).toBe("on_trip");
+
+    const stuck = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    // Same conflict code, but the task never actually advanced -- a refused
+    // transition, not a race -- so it must still reach the caller.
+    stuck.orders.arrivedPickup.mockRejectedValueOnce(
+      new ApiRequestError(409, "DRIVER_TASK_TRANSITION_INVALID", "refused"),
+    );
+    await expect(
+      stuck.service.board("order-1", identity, "req-1"),
+    ).rejects.toMatchObject({ code: "DRIVER_TASK_TRANSITION_INVALID" });
+  });
+
+  it("propagates its own persistence failure instead of treating the local mutation as a completed race", async () => {
+    const h = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    // The real driver command mutates its in-memory task before awaiting the
+    // required write, so a rejected write still leaves the task looking
+    // "arrived" locally even though nothing was actually persisted. The
+    // error is a generic repository failure, not the driver task's own
+    // transition-conflict code, so it must propagate without even reaching
+    // the reload check.
+    h.orders.arrivedPickup.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "arrived_pickup";
+      throw new Error("order repository write rejected");
+    });
+    await expect(h.service.board("order-1", identity, "req-1")).rejects.toThrow(
+      "order repository write rejected",
+    );
+    expect(h.orders.startDriverTask).not.toHaveBeenCalled();
+  });
+
+  it("propagates a genuine audit/outbox failure even though its own write already persisted the advance", async () => {
+    const h = harness({
+      order: order({ status: "enroute_pickup" }),
+      tasks: [demoTask("enroute_pickup")],
+    });
+    // The write itself committed (the real `departDriverTask`/`arrivedPickup`
+    // persist before their later audit/event steps), so a reload would
+    // confirm the task genuinely reached `arrived_pickup`. The failure here
+    // is a later audit/outbox step, not a transition conflict, so the
+    // generic error must still reach the caller instead of being read as a
+    // benign race once the status looks advanced.
+    h.orders.arrivedPickup.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "arrived_pickup";
+      throw new Error("driver-task audit log write failed");
+    });
+    await expect(h.service.board("order-1", identity, "req-1")).rejects.toThrow(
+      "driver-task audit log write failed",
+    );
+    expect(h.orders.startDriverTask).not.toHaveBeenCalled();
+  });
+
+  it("carries on when a concurrent accept already closed the assignment", async () => {
+    const h = harness({
+      order: order({ status: "assigned" }),
+      tasks: [demoTask("pending_acceptance")],
+    });
+    // The DB-backed `acceptDriverTask` locks the assignment row and re-checks
+    // it before touching anything; a second instance committing the accept
+    // first raises this exact code, pre-mutation.
+    h.orders.acceptDriverTask.mockImplementationOnce(async () => {
+      h.tasks[0]!.status = "accepted";
+      throw new ApiRequestError(
+        409,
+        "ASSIGNMENT_NOT_AWAITING_ACCEPTANCE",
+        "already",
+      );
+    });
+    await expect(
+      h.service.board("order-1", identity, "req-1"),
+    ).resolves.toMatchObject({ orderId: "order-1" });
+    expect(h.tasks[0]!.status).toBe("on_trip");
   });
 });

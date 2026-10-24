@@ -1,17 +1,18 @@
 import { z } from "zod";
+import { voiceDatetimeOffsetRegex } from "./voice-datetime";
 import {
   VoiceCallbackStatusSchema,
   type VoiceCallbackStatus,
   type VoiceCallbackAttemptOutcome,
 } from "./unattended-voice";
 
-export const VoiceCallbackTaskIdSchema = z.string().uuid();
+export const VoiceCallbackTaskIdSchema = z.string().guid();
 export const VoiceCallbackActionKeySchema = z.string().trim().min(1).max(255);
 export const VoiceCallbackReceiptLookupSchema = z.string().min(1);
 export const VoiceCallbackQueueFilterSchema = z.object({
-  resourceScopeId: z.string().uuid(),
+  resourceScopeId: z.string().guid(),
   status: VoiceCallbackStatusSchema.optional(),
-  voiceSessionId: z.string().uuid().optional(),
+  voiceSessionId: z.string().guid().optional(),
 });
 export const VoiceContactCorrectionSchema = z
   .object({
@@ -29,11 +30,15 @@ export const VoiceCallbackCreateRequestSchema = z
     consentSnapshotHash: z.string().min(1).optional(),
     contactRevisionNumber: z.number().int().positive().optional(),
     consentRef: z.string().trim().min(1).optional(),
-    replacesTaskId: z.string().uuid().optional(),
+    replacesTaskId: z.string().guid().optional(),
     reason: z.string().optional(),
     priority: z.enum(["normal", "urgent", "emergency"]).optional(),
-    scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
-    dueAt: z.string().datetime({ offset: true }).nullable().optional(),
+    scheduledAt: z
+      .string()
+      .regex(voiceDatetimeOffsetRegex)
+      .nullable()
+      .optional(),
+    dueAt: z.string().regex(voiceDatetimeOffsetRegex).nullable().optional(),
   })
   .strict()
   .refine(

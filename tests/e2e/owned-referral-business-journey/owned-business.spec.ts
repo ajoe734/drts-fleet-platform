@@ -12,6 +12,7 @@ import {
   type Route,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { displayOrderNo } from "../../../apps/referral-embed-web/lib/order-display";
 import { parsePdf } from "../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import {
@@ -60,6 +61,10 @@ import {
   cancellationResults,
   runFourStageOwnedCancellations,
 } from "./four-stage-cancellations";
+import {
+  runDisplayObservations,
+  type DisplayObservations,
+} from "./display-observations";
 import {
   RETAINED_REFERRAL_ORDER,
   recoverRetainedReferralOrder,
@@ -225,6 +230,7 @@ test(journeyName, async ({ browser, request }) => {
   let referralSessionId: string | undefined;
   let completed = false;
   let recoveryResolved = false;
+  let displayObservations: DisplayObservations | undefined;
   let retainedRecovery: Readonly<{
     originalRun: number;
     orderId: string;
@@ -1641,8 +1647,10 @@ test(journeyName, async ({ browser, request }) => {
       );
       await receiptLink.click();
       await expect(page).toHaveURL((url) => url.href === receiptHref.href);
+      // The receipt header shows the original order's short order number; the
+      // full number is on the receipt download and PDF.
       await expect(
-        page.getByText(`${text(receipt.orderNo)} · ${completedOrderId}`, {
+        page.getByText(`訂單 ${displayOrderNo(text(receipt.orderNo))}`, {
           exact: true,
         }),
       ).toBeVisible();
@@ -2264,6 +2272,25 @@ test(journeyName, async ({ browser, request }) => {
         },
         cancellations,
       );
+      // Supplemental observations on the same completed order/session; see
+      // REFERRAL-DEMO-HOSTED-DISPLAY-OBSERVATIONS-20261023. No extra booking.
+      const unassignedCancellation = cancellations.find(
+        (stage) => stage.stage === "unassigned",
+      );
+      displayObservations = await runDisplayObservations({
+        page,
+        referral,
+        evidence,
+        referralOrigin: origins.referral,
+        entrySlug: ENTRY,
+        entryHost: host,
+        completedOrderId,
+        unassignedCancelledOrderId: unassignedCancellation?.orderId,
+        nonce,
+        directory: DIRECTORY,
+        definitionSha: definition,
+        runtimeSha: runtime,
+      });
     }
   } catch (error) {
     mainError = bookingState.routeError ?? error;
@@ -2445,6 +2472,7 @@ test(journeyName, async ({ browser, request }) => {
                   : "Minimum same-order completion scenario; no cancellation pass borrowed.",
               }))
             : cancellations,
+          displayObservations: displayObservations ?? null,
         },
         null,
         2,

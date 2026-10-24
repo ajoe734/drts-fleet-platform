@@ -62,6 +62,7 @@ export function CaseReplyComposer({
   const operationEpochs = useRef(new Map<string, number>());
   const composerEpoch = useRef(0);
   const mountedRef = useRef(true);
+  const prevCaseDetailRef = useRef(caseDetail);
   const activeCaseIdRef = useRef(caseDetail.id);
   const retryTarget = useRef<string | null>(null);
 
@@ -70,10 +71,16 @@ export function CaseReplyComposer({
   const isPlatform = caseDetail.responsibility === "platform";
   const isEditable = !isClosed && !isPlatform && !responseUnavailable;
   const editableRef = useRef(isEditable);
-  editableRef.current = isEditable;
+  if (prevCaseDetailRef.current !== caseDetail) {
+    prevCaseDetailRef.current = caseDetail;
+    editableRef.current = isEditable;
+  } else if (!isEditable) {
+    editableRef.current = false;
+  }
 
   if (activeCaseIdRef.current !== caseDetail.id) {
     activeCaseIdRef.current = caseDetail.id;
+    editableRef.current = isEditable;
     composerEpoch.current += 1;
     uploadSessions.current.clear();
     uploadFiles.current.clear();
@@ -184,6 +191,7 @@ export function CaseReplyComposer({
         scopeKey,
         getSession: () => uploadSessions.current.get(temporaryId),
         setSession: (nextSession) => {
+          if (!isOperationActive()) return;
           if (nextSession) uploadSessions.current.set(temporaryId, nextSession);
           else uploadSessions.current.delete(temporaryId);
         },
@@ -205,6 +213,9 @@ export function CaseReplyComposer({
             caseDetail?: FleetCaseItem;
             attachments?: FleetCaseAttachmentRecord[];
           }>(`/api/fleet-partner/cases/${targetCaseId}`);
+          if (!isOperationActive()) {
+            return null;
+          }
           const matched = (detail.attachments ?? []).find(
             (item) =>
               (item.attachmentId === intent.attachmentId ||
@@ -221,6 +232,8 @@ export function CaseReplyComposer({
           ) {
             editableRef.current = false;
             composerEpoch.current += 1;
+            uploadSessions.current.clear();
+            inFlightUploads.current.clear();
           }
           return null;
         },
