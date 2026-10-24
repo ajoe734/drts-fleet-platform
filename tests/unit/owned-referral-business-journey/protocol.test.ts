@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import PDFDocument from "pdfkit";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import * as ts from "typescript";
 import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
 import {
@@ -19,7 +21,6 @@ import {
   camelWire,
   hash,
   origin,
-  originalBookingRouteFailure,
   simulationCompletion,
   terminalizeOwnOrder,
   requireFact,
@@ -825,6 +826,39 @@ describe("native fetch failure diagnostics", () => {
   });
 });
 
+// Reads the real production classifier straight from the actual e2e consumer
+// source (the same AST-extraction technique already used by
+// tests/unit/operational-browser-manifest.test.ts for the same function), so
+// this exercises the genuine history-restore/PDF closed-facts path instead of
+// a second reimplementation. That function is not exported/importable here:
+// the e2e spec file registers a Playwright test() at module load, which must
+// not run under vitest.
+function actualClosedPdfFailureFacts(): (
+  error: unknown,
+) => { nativeFailureClass: string; nativeCauseCode: string } {
+  const filename = path.join(
+    process.cwd(),
+    "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+  );
+  const source = ts.createSourceFile(
+    filename,
+    readFileSync(filename, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const declaration = source.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "closedPdfFailureFacts",
+  );
+  if (!declaration)
+    throw new Error("Actual history/PDF failure classifier is missing");
+  const { outputText } = ts.transpileModule(declaration.getText(source), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  });
+  return new Function(`${outputText}\nreturn closedPdfFailureFacts;`)();
+}
+
 describe("closed phase/native-class evidence survives a non-JourneyFailure error", () => {
   it("loses the phase and native identity when a native error reaches Evidence.failure unwrapped", () => {
     const evidence = new Evidence();
@@ -838,53 +872,77 @@ describe("closed phase/native-class evidence survives a non-JourneyFailure error
     expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
   });
 
-  it("preserves a closed phase and safe native class when the same error is wrapped by the existing production path first", () => {
+  it("preserves the real history-restore phase and safe native class when the actual production closed-facts classifier wraps the same error first", () => {
     const evidence = new Evidence();
     const privateValue = "synthetic-private-message-stack-url-body-20261024";
     const native = new TypeError(privateValue);
     native.stack = `${native.stack ?? ""}\n    at https://referral.example.test/private/${privateValue}`;
-    const wrapped = originalBookingRouteFailure(native);
-    expect(wrapped).toBeInstanceOf(JourneyFailure);
-    expect(wrapped.stage).toBe("booking-original-route:TypeError");
-    expect(wrapped.status).toBeUndefined();
-    expect(wrapped.code).toBeUndefined();
-    evidence.failure(wrapped);
+    const classify = actualClosedPdfFailureFacts();
+    // Mirrors the actual owned-business.spec.ts historyPhase/pdfPhase catch:
+    // the fixed last-reached phase plus the closed class/code, never the raw
+    // native message or stack.
+    evidence.record({
+      stage: "browser-history-restore-assert",
+      ...classify(native),
+      result: "failed",
+    });
     expect(evidence.events).toEqual([
-      { stage: "booking-original-route:TypeError", result: "failed" },
+      {
+        stage: "browser-history-restore-assert",
+        nativeFailureClass: "TypeError",
+        nativeCauseCode: "UNKNOWN",
+        result: "failed",
+      },
     ]);
     expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
-    expect(JSON.stringify(wrapped)).not.toContain(privateValue);
   });
 
-  it("keeps an unrecognized native class as UnknownError (still a recorded failure) and leaves an original JourneyFailure's stage/status/code unchanged", () => {
+  it("keeps an unrecognized native class as UNKNOWN (still a recorded failure) and never mutates an original JourneyFailure's stage/status/code", () => {
     const evidence = new Evidence();
     const privateValue = "synthetic-private-reason-20261024";
     const exotic = Object.assign(new Error(privateValue), {
       name: privateValue,
+      code: privateValue,
     });
-    const wrappedExotic = originalBookingRouteFailure(exotic);
-    expect(wrappedExotic.stage).toBe("booking-original-route:UnknownError");
-    evidence.failure(wrappedExotic);
+    const classify = actualClosedPdfFailureFacts();
+    evidence.record({
+      stage: "browser-history-restore-goto",
+      ...classify(exotic),
+      result: "failed",
+    });
+    expect(evidence.events).toEqual([
+      {
+        stage: "browser-history-restore-goto",
+        nativeFailureClass: "UNKNOWN",
+        nativeCauseCode: "UNKNOWN",
+        result: "failed",
+      },
+    ]);
+    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
 
+    // The classifier only reads the error for display-safe facts; it must not
+    // alter the original JourneyFailure that the production catch rethrows
+    // unchanged after recording.
     const original = new JourneyFailure(
       "booking-response-http",
       409,
       "CONFLICT",
     );
-    const wrappedOriginal = originalBookingRouteFailure(original);
-    expect(wrappedOriginal).toBe(original);
-    evidence.failure(wrappedOriginal);
-
-    expect(evidence.events).toEqual([
-      { stage: "booking-original-route:UnknownError", result: "failed" },
-      {
-        stage: "booking-response-http",
-        status: 409,
-        code: "CONFLICT",
-        result: "failed",
-      },
-    ]);
-    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
+    const facts = classify(original);
+    expect(facts).toEqual({
+      nativeFailureClass: "Error",
+      nativeCauseCode: "UNKNOWN",
+    });
+    expect(original.stage).toBe("booking-response-http");
+    expect(original.status).toBe(409);
+    expect(original.code).toBe("CONFLICT");
+    evidence.failure(original);
+    expect(evidence.events[1]).toEqual({
+      stage: "booking-response-http",
+      status: 409,
+      code: "CONFLICT",
+      result: "failed",
+    });
   });
 });
 
