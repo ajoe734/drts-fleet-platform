@@ -156,9 +156,42 @@ type PendingUncertainComplaintCommit = {
 // Fleet-side caller that explicitly asks for it may see the untouched note.
 const FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER = "\n<<fleet-reply-attachments>>";
 
+/** A legitimate human note can itself contain this literal marker string
+ * (quoted, pasted, or coincidentally typed) without a real manifest ever
+ * having been appended after it. Blindly truncating at the first
+ * occurrence would then silently drop genuine trailing text. A real
+ * manifest is always appended last (see appendAttachmentManifest), so only
+ * the *last* occurrence is a truncation candidate, and only once the text
+ * after it actually parses as the known manifest shape; otherwise the note
+ * is literal and must be returned untouched. */
 function stripFleetReplyAttachmentManifest(note: string): string {
-  const markerIndex = note.indexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
-  return markerIndex === -1 ? note : note.slice(0, markerIndex);
+  const markerIndex = note.lastIndexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
+  if (markerIndex === -1) return note;
+  const raw = note.slice(
+    markerIndex + FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER.length,
+  );
+  if (!isFleetReplyAttachmentManifestShape(raw)) return note;
+  return note.slice(0, markerIndex);
+}
+
+function isFleetReplyAttachmentManifestShape(raw: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  return (
+    Array.isArray(parsed) &&
+    parsed.length > 0 &&
+    parsed.every(
+      (item) =>
+        !!item &&
+        typeof item === "object" &&
+        typeof (item as Record<string, unknown>).attachmentId === "string" &&
+        typeof (item as Record<string, unknown>).name === "string",
+    )
+  );
 }
 
 @Injectable()
@@ -1349,8 +1382,13 @@ export class ComplaintService implements OnModuleInit {
   /** Read every committed non-settlement case on each call, the same
    * canonical-refresh guarantee refreshSettlementCases already gives
    * settlement_dispute cases, so a warm instance that never itself created
-   * or updated a given ordinary case still lists it. */
+   * or updated a given ordinary case still lists it. Applies the same
+   * pending-commit readback guard as listComplaintCasesForOps: an ordinary
+   * case whose COMMIT outcome is still unconfirmed must reject this list
+   * the same way it already rejects the Ops list/detail, never resolve as
+   * an optimistic success that silently omits it. */
   async listComplaintCasesForFleetOps(): Promise<ComplaintCaseRecord[]> {
+    this.ensureComplaintReadbackAvailable();
     if (
       this.complaintRepository?.isEnabled() &&
       typeof this.complaintRepository.loadState === "function"

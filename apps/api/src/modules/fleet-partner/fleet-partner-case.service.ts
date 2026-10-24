@@ -25,6 +25,16 @@ export interface FleetCaseItem {
   driver: string;
   driverId: string;
   severity: "high" | "normal" | "medium" | "low" | "critical";
+  // The existing Ops/Fleet consumer contract only has these three wire
+  // values, and only "platform" yields its read-only (no fleet reply)
+  // behavior. Projecting an unattributed ordinary complaint onto
+  // "platform" to get that same read-only handling does NOT mean a
+  // canonical platform business responsibility was ever determined for
+  // it -- see mapComplaintToFleetCase. A dedicated consumer-contract value
+  // for "no fleet identified" (distinct from a genuine platform-owned
+  // case) would need the Fleet portal consumer (apps/fleet-partner-portal-web,
+  // outside this task's write_scopes) updated too; that is a seam to
+  // coordinate, not invent unilaterally here.
   responsibility: "fleet" | "shared" | "platform";
   fleetPartnerId: string;
   status: ComplaintCaseStatus;
@@ -140,11 +150,27 @@ function appendAttachmentManifest(
   return `${note}${FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER}${JSON.stringify(manifest)}`;
 }
 
-function splitAttachmentManifest(note: string): {
+/**
+ * A legitimate human reply body can itself contain this literal marker
+ * string (quoted, pasted, or coincidentally typed), with or without
+ * trailing text that merely looks like JSON, and never have had a real
+ * manifest appended. A real manifest is always appended last (see
+ * appendAttachmentManifest), so only the *last* occurrence is a truncation
+ * candidate. Even then, the suffix is trusted as a real attachment
+ * relation only when every attachmentId it names is verified against this
+ * same case's actual confirmed stored attachments (verifyAttachment) --
+ * never from JSON shape alone, since a human can type a convincing but
+ * never-uploaded manifest. Anything that fails verification leaves the
+ * note untouched: no truncation, no fabricated attachment relation.
+ */
+function splitAttachmentManifest(
+  note: string,
+  verifyAttachment: (attachmentId: string) => boolean,
+): {
   body: string;
   attachments: FleetCaseTimelineAttachment[];
 } {
-  const markerIndex = note.indexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
+  const markerIndex = note.lastIndexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
   if (markerIndex === -1) {
     return { body: note, attachments: [] };
   }
@@ -152,31 +178,40 @@ function splitAttachmentManifest(note: string): {
   const raw = note.slice(
     markerIndex + FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER.length,
   );
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return { body, attachments: [] };
-    }
-    const attachments: FleetCaseTimelineAttachment[] = parsed
-      .filter(
-        (item): item is Record<string, unknown> =>
-          !!item &&
-          typeof item === "object" &&
-          typeof (item as Record<string, unknown>).attachmentId === "string" &&
-          typeof (item as Record<string, unknown>).name === "string",
-      )
-      .map((item) => ({
-        attachmentId: item.attachmentId as string,
-        name: item.name as string,
-        size: typeof item.size === "string" ? item.size : "",
-        ...(typeof item.fileSize === "number"
-          ? { fileSize: item.fileSize }
-          : {}),
-      }));
-    return { body, attachments };
+    parsed = JSON.parse(raw);
   } catch {
-    return { body, attachments: [] };
+    return { body: note, attachments: [] };
   }
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    return { body: note, attachments: [] };
+  }
+  const attachments: FleetCaseTimelineAttachment[] = [];
+  for (const item of parsed) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof (item as Record<string, unknown>).attachmentId !== "string" ||
+      typeof (item as Record<string, unknown>).name !== "string" ||
+      !verifyAttachment((item as Record<string, unknown>).attachmentId as string)
+    ) {
+      // All-or-nothing: a single unverifiable entry means this suffix is
+      // not actually a server-appended manifest, so the whole note
+      // (marker included) is literal text.
+      return { body: note, attachments: [] };
+    }
+    const record = item as Record<string, unknown>;
+    attachments.push({
+      attachmentId: record.attachmentId as string,
+      name: record.name as string,
+      size: typeof record.size === "string" ? record.size : "",
+      ...(typeof record.fileSize === "number"
+        ? { fileSize: record.fileSize }
+        : {}),
+    });
+  }
+  return { body, attachments };
 }
 
 function formatFileSize(bytes: number): string {
@@ -720,9 +755,12 @@ export class FleetPartnerCaseService {
       driverId: isSettlement ? "" : attribution?.driverId ?? "",
       severity: complaint.severity,
       // Fleet responsibility can only be asserted when a real driver/fleet
-      // attribution is resolved; otherwise the case is not attributable to
-      // any specific fleet and stays platform-owned (read-only) rather than
-      // guessed.
+      // attribution is resolved. An unresolved ordinary complaint is NOT a
+      // determined platform business responsibility -- it is simply not
+      // attributable to any specific fleet right now -- but is projected
+      // onto the existing "platform" wire value anyway (see the field
+      // comment above), since that is the only value the current Fleet/Ops
+      // consumer contract has for read-only, no-fleet-reply handling.
       responsibility: isSettlement
         ? "shared"
         : attribution
@@ -853,6 +891,22 @@ export class FleetPartnerCaseService {
       this.timelines.get(caseItem.caseNo) ||
       [];
 
+    // A parsed attachment manifest is only ever trusted once it is tied to
+    // this same case's real confirmed stored attachments (see
+    // splitAttachmentManifest). Only load them when some note actually
+    // contains the marker: most notes have no attachments at all, and
+    // this stays a no-op for callers whose storage is not configured.
+    let attachmentsLoaded = false;
+    const verifyAttachment = (attachmentId: string): boolean => {
+      const att = this.attachments.get(attachmentId);
+      return (
+        !!att &&
+        att.state === "done" &&
+        (att.caseId === caseItem.id || att.caseId === caseItem.caseNo) &&
+        this.isFleetScopeMatch(att.fleetPartnerId, fleetPartnerId)
+      );
+    };
+
     // If complaint service has entries, synthesize any notes. Prefers the
     // canonical (repository-backed) Ops readback so a case created or
     // updated on a different warm instance still surfaces its real
@@ -869,6 +923,15 @@ export class FleetPartnerCaseService {
             : this.complaintService.getComplaintTimeline(caseItem.caseNo, {
                 includeAttachmentManifest: true,
               });
+        if (
+          !attachmentsLoaded &&
+          compTl.some((entry) =>
+            entry.note.includes(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER),
+          )
+        ) {
+          attachmentsLoaded = true;
+          await this.loadStoredAttachments(caseItem.id);
+        }
         for (const entry of compTl) {
           const exists = tl.some((t) => t.entryId === entry.entryId);
           if (
@@ -880,6 +943,7 @@ export class FleetPartnerCaseService {
             const isFleetReply = entry.note.includes("[車行回覆");
             const { body, attachments } = splitAttachmentManifest(
               entry.note,
+              verifyAttachment,
             );
             tl.push({
               entryId: entry.entryId,

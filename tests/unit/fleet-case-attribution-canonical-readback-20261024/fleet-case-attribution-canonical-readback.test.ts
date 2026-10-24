@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   ComplaintCaseRecord,
@@ -9,7 +9,11 @@ import type {
 import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
-import { ComplaintRepository } from "../../../apps/api/src/modules/complaint/complaint.repository";
+import {
+  ComplaintCommitOutcomeUnknownError,
+  ComplaintRepository,
+  type ComplaintPendingCommitRecord,
+} from "../../../apps/api/src/modules/complaint/complaint.repository";
 import type { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { buildSettlementDisputeCase } from "../../../apps/api/src/modules/complaint/settlement-dispute";
@@ -767,6 +771,231 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
     });
   });
 
+  /** Old defect reproduced here: splitAttachmentManifest/
+   * stripFleetReplyAttachmentManifest used the *first* occurrence of the
+   * literal marker string and trusted whatever followed it as a real
+   * manifest purely by JSON shape. A legitimate human reply that happened
+   * to contain that same literal substring (quoted, pasted, or
+   * coincidentally typed) therefore lost real trailing text, and a human
+   * typing a convincing-looking (but never-uploaded) manifest got a
+   * fabricated attachment relation. The fix finds the *last* occurrence
+   * (a real manifest is always appended last) and, for the Fleet-side
+   * reconstruction, verifies every attachmentId against this case's actual
+   * confirmed stored attachments before trusting it at all. */
+  describe("attachment-manifest marker/plaintext/JSON collision", () => {
+    const MARKER = "\n<<fleet-reply-attachments>>";
+
+    /** `cases` (the writer) and `reader` (a second, cold FleetPartnerCaseService
+     * sharing the same ComplaintService and the same backing document store)
+     * are deliberately separate instances: `cases`'s own in-memory
+     * `this.timelines` cache already holds the literal `content` it just
+     * wrote, which would make assertions pass trivially without ever
+     * exercising splitAttachmentManifest's marker/JSON parsing at all. The
+     * `reader` has nothing in its own cache for this case, so its
+     * getCaseTimeline must actually reconstruct the entry from the
+     * canonical Complaint note -- the same real seam a different already-
+     * warm API instance would use. */
+    async function buildAttributedCase() {
+      const { service: fleetPartnerService, fleetIdByDisplayName } =
+        await buildFleetPartnerService({
+          tasksByOrder: { "ord-marker-collision": { driverId: "drv-mc" } },
+          drivers: [{ driverId: "drv-mc", name: "司機馬可" }],
+          affiliations: [
+            {
+              driverId: "drv-mc",
+              fleetDisplayName: "Fleet Marker Collision",
+              effectiveFrom: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        });
+      const fleetId = fleetIdByDisplayName.get("Fleet Marker Collision")!;
+      const complaints = new ComplaintService(new AuditNotificationService());
+      const caseItem = complaints.createComplaintCase({
+        caseSource: "ops",
+        relatedOrderId: "ord-marker-collision",
+        category: "driver_service",
+        severity: "normal",
+        description: "附件 marker 碰撞回歸測試案件",
+      }) as ComplaintCaseRecord;
+      const { store } = fleetStorageFixture();
+      const cases = new FleetPartnerCaseService(
+        complaints,
+        fleetPartnerService,
+        undefined,
+        fleetStorageFixture("clean", store).storage,
+      );
+      const reader = new FleetPartnerCaseService(
+        complaints,
+        fleetPartnerService,
+        undefined,
+        fleetStorageFixture("clean", store).storage,
+      );
+      return { complaints, cases, reader, fleetId, caseItem };
+    }
+
+    it("keeps a legitimate reply body intact, with no fabricated attachment, when it merely contains the marker literal followed by plain non-JSON text and no attachment was ever submitted", async () => {
+      const { cases, reader, fleetId, caseItem } = await buildAttributedCase();
+      const legitBody = `客戶原文引用：${MARKER} 這不是附件清單，只是巧合出現的文字。`;
+
+      await cases.submitReply(fleetId, caseItem.caseNo, "fleet-manager-mc", {
+        content: legitBody,
+        idempotencyKey: "marker-collision-plain-1",
+      });
+
+      const timeline = await reader.getCaseTimeline(fleetId, caseItem.caseNo);
+      const replyEntry = timeline.find((entry) => entry.t === "車行回覆");
+      expect(replyEntry).toBeDefined();
+      expect(replyEntry!.body).toContain(legitBody);
+      expect(replyEntry!.attachments ?? []).toEqual([]);
+    });
+
+    it("does not fabricate an attachment relation from reply text that merely looks like a manifest, since its attachmentId was never actually uploaded for this case", async () => {
+      const { cases, reader, fleetId, caseItem } = await buildAttributedCase();
+      const fakeManifest = JSON.stringify([
+        { attachmentId: "att-never-uploaded", name: "fake-evidence.pdf" },
+      ]);
+      const legitBody = `補充說明：${MARKER}${fakeManifest}`;
+
+      await cases.submitReply(fleetId, caseItem.caseNo, "fleet-manager-mc", {
+        content: legitBody,
+        idempotencyKey: "marker-collision-fake-json-1",
+      });
+
+      const timeline = await reader.getCaseTimeline(fleetId, caseItem.caseNo);
+      const replyEntry = timeline.find((entry) => entry.t === "車行回覆");
+      expect(replyEntry).toBeDefined();
+      // The whole literal text is preserved: no truncation, and critically
+      // no attachment relation was fabricated from the never-uploaded
+      // "att-never-uploaded" id.
+      expect(replyEntry!.body).toContain(legitBody);
+      expect(replyEntry!.attachments ?? []).toEqual([]);
+    });
+
+    it("recovers the real appended attachment manifest and keeps the preceding legitimate text intact, even when that text itself contains the marker literal", async () => {
+      const { cases, reader, fleetId, caseItem } = await buildAttributedCase();
+      const attachmentBytes = Buffer.from("evidence bytes");
+      const intent = await cases.createAttachmentUploadUrl(
+        fleetId,
+        caseItem.caseNo,
+        "fleet-manager-mc",
+        {
+          fileName: "real-evidence.pdf",
+          fileSize: attachmentBytes.length,
+          contentType: "application/pdf",
+        },
+      );
+      const uploaded = await cases.uploadAttachmentContent(
+        fleetId,
+        caseItem.caseNo,
+        intent.objectKey,
+        byteStream(attachmentBytes),
+        "application/octet-stream",
+      );
+      const attachment = await cases.confirmAttachmentUpload(
+        fleetId,
+        caseItem.caseNo,
+        "fleet-manager-mc",
+        {
+          attachmentId: intent.attachmentId,
+          objectKey: intent.objectKey,
+          fileName: "real-evidence.pdf",
+          fileSize: attachmentBytes.length,
+          contentType: "application/pdf",
+          checksumSha256: uploaded.checksumSha256,
+        },
+      );
+
+      const legitBody = `先前紀錄節錄：${MARKER} 這段純文字恰好也包含同樣字串，但後面沒有接 JSON。`;
+      await cases.submitReply(fleetId, caseItem.caseNo, "fleet-manager-mc", {
+        content: legitBody,
+        idempotencyKey: "marker-collision-real-manifest-1",
+        attachmentIds: [attachment.attachmentId],
+      });
+
+      const timeline = await reader.getCaseTimeline(fleetId, caseItem.caseNo);
+      const replyEntry = timeline.find((entry) => entry.t === "車行回覆");
+      expect(replyEntry).toBeDefined();
+      // The legitimate literal-marker text ahead of the real appended
+      // manifest survives untouched...
+      expect(replyEntry!.body).toContain(legitBody);
+      // ...and the real, actually-uploaded attachment is still recovered.
+      expect(replyEntry!.attachments).toEqual([
+        expect.objectContaining({
+          attachmentId: attachment.attachmentId,
+          name: "real-evidence.pdf",
+        }),
+      ]);
+    });
+
+    it("keeps a legitimate Ops note intact when it merely contains the marker literal with no real trailing manifest, while still hiding a real Fleet-appended manifest from the default Ops projection", async () => {
+      const { complaints, cases, fleetId, caseItem } =
+        await buildAttributedCase();
+
+      // A plain Ops note that happens to contain the literal marker
+      // substring, with no real manifest ever appended after it.
+      const legitOpsNote = `內部備註：${MARKER} 純屬巧合的文字，不是附件。`;
+      complaints.addComplaintCaseNote(caseItem.caseNo, {
+        note: legitOpsNote,
+      });
+      const opsTimelineAfterNote = complaints.getComplaintTimeline(
+        caseItem.caseNo,
+      );
+      const noteEntry = opsTimelineAfterNote.find(
+        (entry) => entry.note === legitOpsNote,
+      );
+      expect(noteEntry).toBeDefined();
+
+      // A genuine Fleet reply with a real attachment still has its raw
+      // manifest hidden from the same default (Ops) projection.
+      const attachmentBytes = Buffer.from("evidence bytes");
+      const intent = await cases.createAttachmentUploadUrl(
+        fleetId,
+        caseItem.caseNo,
+        "fleet-manager-mc",
+        {
+          fileName: "ops-hidden-evidence.pdf",
+          fileSize: attachmentBytes.length,
+          contentType: "application/pdf",
+        },
+      );
+      const uploaded = await cases.uploadAttachmentContent(
+        fleetId,
+        caseItem.caseNo,
+        intent.objectKey,
+        byteStream(attachmentBytes),
+        "application/octet-stream",
+      );
+      const attachment = await cases.confirmAttachmentUpload(
+        fleetId,
+        caseItem.caseNo,
+        "fleet-manager-mc",
+        {
+          attachmentId: intent.attachmentId,
+          objectKey: intent.objectKey,
+          fileName: "ops-hidden-evidence.pdf",
+          fileSize: attachmentBytes.length,
+          contentType: "application/pdf",
+          checksumSha256: uploaded.checksumSha256,
+        },
+      );
+      await cases.submitReply(fleetId, caseItem.caseNo, "fleet-manager-mc", {
+        content: "已附上真實附件",
+        idempotencyKey: "marker-collision-ops-hide-1",
+        attachmentIds: [attachment.attachmentId],
+      });
+
+      const opsTimelineAfterReply = complaints.getComplaintTimeline(
+        caseItem.caseNo,
+      );
+      const replyNoteEntry = opsTimelineAfterReply.find((entry) =>
+        entry.note.includes("已附上真實附件"),
+      );
+      expect(replyNoteEntry).toBeDefined();
+      expect(replyNoteEntry!.note).not.toContain(MARKER);
+      expect(replyNoteEntry!.note).not.toContain(attachment.attachmentId);
+    });
+  });
+
   describe("canonical readback across two already-warm API instances", () => {
     it("lets a service instance that never created the case read it back from the durable repository, with correct attribution and timeline", async () => {
       const caseNo = "C-20261024-900001";
@@ -1077,6 +1306,139 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
       expect(opsReplyEntry!.note).toContain("已附上行車記錄器截圖");
       expect(opsReplyEntry!.note).not.toContain("<<fleet-reply-attachments>>");
       expect(opsReplyEntry!.note).not.toContain(attachment.attachmentId);
+    });
+
+    /** Old defect reproduced here: listComplaintCasesForOps()/
+     * getComplaintCaseForOps() already reject IDEMPOTENCY_IN_PROGRESS via
+     * ensureComplaintReadbackAvailable() when this instance's pending-commit
+     * reconciliation has marked a case's ordinary commit outcome as still
+     * unconfirmed, but listComplaintCasesForFleetOps() (and therefore the
+     * whole Fleet ordinary-case list) never called that same guard, so it
+     * could resolve with an optimistic (and here, silently incomplete)
+     * success while Ops honestly refuses to serve the same case. */
+    it("rejects the Fleet ordinary-case list with the same pending-commit guard the Ops list/detail already use, instead of an optimistic success, when another already-warm instance's create COMMIT outcome is unknown", async () => {
+      function deferred() {
+        let resolve!: () => void;
+        let reject!: (error: Error) => void;
+        const promise = new Promise<void>((done, fail) => {
+          resolve = done;
+          reject = fail;
+        });
+        return { promise, resolve, reject };
+      }
+
+      // --- Instance A: the original create, whose COMMIT outcome is left
+      // unknown (e.g. a dropped connection after issuing COMMIT). ---
+      const writeGates: ReturnType<typeof deferred>[] = [];
+      let recordedPendingRow: ComplaintPendingCommitRecord | undefined;
+      const repositoryA = {
+        isEnabled: () => true,
+        persistChanges: vi.fn(async () => {
+          const gate = writeGates.shift();
+          if (gate) await gate.promise;
+        }),
+        reportPersistenceFailure: vi.fn(),
+        loadSettlementState: vi.fn(async () => ({
+          complaintCases: [],
+          complaintTimelines: [],
+        })),
+        recordPendingCommit: vi.fn(
+          async (record: ComplaintPendingCommitRecord) => {
+            recordedPendingRow = record;
+          },
+        ),
+        loadPendingCommits: vi.fn(async () => []),
+        clearPendingCommit: vi.fn(async () => {}),
+        markPendingCommitFailed: vi.fn(async () => {}),
+      } as unknown as ComplaintRepository;
+
+      const complaintsA = new ComplaintService(
+        new AuditNotificationService(),
+        repositoryA,
+      );
+      const gate = deferred();
+      writeGates.push(gate);
+      const created = complaintsA.createComplaintCase({
+        caseSource: "ops",
+        category: "driver_service",
+        severity: "normal",
+        description: "Uncertain-commit create, cross-instance list guard regression",
+      }) as ComplaintCaseRecord;
+      const outcomeA = complaintsA
+        .awaitSettlementPersistence(created.caseNo)
+        .catch((error: unknown) => error);
+      await vi.waitFor(() =>
+        expect(repositoryA.persistChanges).toHaveBeenCalledTimes(1),
+      );
+      const failure = new ComplaintCommitOutcomeUnknownError(
+        new Error("create COMMIT outcome unknown"),
+      );
+      gate.reject(failure);
+      expect(await outcomeA).toBe(failure);
+      expect(recordedPendingRow).toBeDefined();
+
+      // --- Instance B: a different already-warm replica that never ran A's
+      // create locally. Its only knowledge of the durably-prepared identity
+      // comes from loadPendingCommits; its own per-case canonical read for
+      // that caseNo then genuinely faults (a real read error, not a
+      // not-found), which is what actually marks the readback unavailable. ---
+      const repositoryB = {
+        isEnabled: () => true,
+        loadSettlementState: vi.fn(async () => ({
+          complaintCases: [],
+          complaintTimelines: [],
+        })),
+        loadState: vi.fn(async () => ({
+          complaintCases: [],
+          complaintTimelines: [],
+        })),
+        loadPendingCommits: vi.fn(async () => [recordedPendingRow!]),
+        loadCaseState: vi.fn(async (caseNo: string) => {
+          if (caseNo === created.caseNo) {
+            throw new Error("transient canonical read fault");
+          }
+          return { complaintCases: [], complaintTimelines: [] };
+        }),
+        recordPendingCommit: vi.fn(async () => {}),
+        clearPendingCommit: vi.fn(async () => {}),
+        markPendingCommitFailed: vi.fn(async () => {}),
+        reportPersistenceFailure: vi.fn(),
+      } as unknown as ComplaintRepository;
+
+      const complaintsB = new ComplaintService(
+        new AuditNotificationService(),
+        repositoryB,
+      );
+      await complaintsB.onModuleInit();
+
+      // Every real controller endpoint calls refreshSettlementCases() first;
+      // this is where B's pending-commit guard actually gets armed.
+      await complaintsB.refreshSettlementCases();
+
+      // Control: the Ops list already honestly rejects.
+      await expect(complaintsB.listComplaintCasesForOps()).rejects.toMatchObject(
+        { code: "IDEMPOTENCY_IN_PROGRESS" },
+      );
+
+      // The fix: the Fleet ordinary-case readback seam applies the exact
+      // same guard, not an optimistic success.
+      await expect(
+        complaintsB.listComplaintCasesForFleetOps(),
+      ).rejects.toMatchObject({ code: "IDEMPOTENCY_IN_PROGRESS" });
+
+      // And through the real Fleet stack a Fleet Ops list request actually
+      // calls, the failure must propagate rather than silently resolve as a
+      // seed-only (or otherwise incomplete) list.
+      const { storage } = fleetStorageFixture();
+      const casesOnInstanceB = new FleetPartnerCaseService(
+        complaintsB,
+        undefined,
+        undefined,
+        storage,
+      );
+      await expect(
+        casesOnInstanceB.listCases("any-fleet-id"),
+      ).rejects.toMatchObject({ code: "IDEMPOTENCY_IN_PROGRESS" });
     });
   });
 
