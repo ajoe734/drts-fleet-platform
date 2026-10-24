@@ -169,6 +169,7 @@ from control_plane.usecases.dispatch_runtime import (
     task_phase_priority,
 )
 from control_plane.usecases.chair_review_policy import (
+    blocked_task_holds_delivery,
     blocked_task_triage_kind,
     chair_provider_pause_reason_is_actionable,
     chair_task_action_index,
@@ -7416,7 +7417,7 @@ def blocked_task_triage_action(
     status: dict[str, Any],
     task: dict[str, Any],
 ) -> tuple[str, str | None]:
-    if task.get("external_gate"):
+    if task.get("external_gate") or blocked_task_holds_delivery(task):
         return "wait_for_parent_resolution", None
     task_id = str(task.get("id") or "").strip()
     if not task_id:
@@ -7759,7 +7760,7 @@ def create_chair_unblock_task(
     parent = task_map.get(parent_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
         return False
-    if parent.get("external_gate"):
+    if parent.get("external_gate") or blocked_task_holds_delivery(parent):
         return False
     # Recursion base case: a blocked unblock/repair task or auto-generated helper
     # must NOT spawn another governance
@@ -7922,7 +7923,7 @@ def apply_chair_parent_resume_action(
     parent = task_map.get(task_id)
     if parent is None or str(parent.get("status") or "").lower() != "blocked":
         return False
-    if parent.get("external_gate"):
+    if parent.get("external_gate") or blocked_task_holds_delivery(parent):
         return False
 
     dependency_done_statuses = {

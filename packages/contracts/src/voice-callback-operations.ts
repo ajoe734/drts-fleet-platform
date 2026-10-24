@@ -1,18 +1,10 @@
 import { z } from "zod";
+import { voiceDatetimeOffsetRegex } from "./voice-datetime";
 import {
   VoiceCallbackStatusSchema,
   type VoiceCallbackStatus,
   type VoiceCallbackAttemptOutcome,
 } from "./unattended-voice";
-
-/**
- * zod v4's `.datetime()` tightened the default ISO grammar (mandatory
- * seconds, colon-delimited range-checked offset); this reproduces the
- * exact v3.25 grammar callers and consumers of these fields were built
- * against (minute precision allowed, basic "+HHMM" offset accepted).
- */
-const voiceDatetimeOffsetRegex =
-  /^((\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\d|3[01])|(0[469]|11)-(0[1-9]|[12]\d|30)|(02)-(0[1-9]|1\d|2[0-8])))T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|([+-]\d{2}:?\d{2}))$/;
 
 export const VoiceCallbackTaskIdSchema = z.string().guid();
 export const VoiceCallbackActionKeySchema = z.string().trim().min(1).max(255);
