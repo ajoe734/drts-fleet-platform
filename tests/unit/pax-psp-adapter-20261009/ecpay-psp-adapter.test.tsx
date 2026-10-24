@@ -1,9 +1,23 @@
 // @vitest-environment jsdom
+import React from "react";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { join, resolve } from "node:path";
+import {
+  cleanup,
+  fireEvent,
+  render as renderComponent,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PassengerAccount, PassengerPaymentMethod } from "@drts/contracts";
 import type {
@@ -21,13 +35,47 @@ import {
   MAX_BOUND_CARDS,
   PaymentMethodsScreen,
 } from "../../../apps/passenger-app-web/components/payment/payment-methods-screen";
+import PaymentMethodsPage from "../../../apps/passenger-app-web/app/account/payment-methods/page";
+import {
+  isEcpayHostedFieldsRuntime,
+  paymentFieldsForRuntime,
+} from "../../../apps/passenger-app-web/lib/payment/runtime-fields";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-}));
+vi.mock(
+  "@drts/passenger-client",
+  async () => import("../../../packages/passenger-client/src/index"),
+);
+vi.mock(
+  "@drts/ui-web",
+  async () => import("../../../packages/ui-web/src/index"),
+);
+
+const navigation = {
+  push: vi.fn(),
+  replace: vi.fn(),
+  back: vi.fn(),
+  forward: vi.fn(),
+  refresh: vi.fn(),
+  prefetch: vi.fn(),
+};
+const appRequire = createRequire(
+  resolve("apps/passenger-app-web/package.json"),
+);
+const { AppRouterContext } = appRequire(
+  "next/dist/shared/lib/app-router-context.shared-runtime",
+) as typeof import("next/dist/shared/lib/app-router-context.shared-runtime");
+const render = (element: React.ReactElement) =>
+  renderComponent(
+    <AppRouterContext.Provider value={navigation}>
+      {element}
+    </AppRouterContext.Provider>,
+  );
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  delete window.ECPay;
 });
 
 const ACTIVE_ACCOUNT: PassengerAccount = {
@@ -158,6 +206,115 @@ describe("PaymentMethodsScreen 5-card limit & ECPay Hosted Fields flow", () => {
 
     const addBtn = screen.getByRole("button", { name: "新增信用卡" });
     expect(addBtn).toHaveProperty("disabled", true);
+  });
+
+  it("wires PaymentMethodsPage and runtime-fields to EcpayHostedFields when NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER=ecpay", async () => {
+    vi.stubEnv("NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER", "ecpay");
+    expect(isEcpayHostedFieldsRuntime({ reviewDemo: false })).toBe(true);
+    expect(isEcpayHostedFieldsRuntime({ reviewDemo: true })).toBe(false);
+    expect(paymentFieldsForRuntime({ reviewDemo: false })).toEqual({
+      status: "unavailable",
+    });
+
+    const mockSdk: EcpaySdkGlobal = {
+      initialize: vi.fn((_serverType, _isLoading, cb) => cb()),
+      addBindingCard: vi.fn((_token, _lang, cb) => cb()),
+      getBindCardPayToken: vi.fn((cb) =>
+        cb({
+          RtnCode: 1,
+          RtnMsg: "Success",
+          BindCardPayToken: "ecpay_page_bind_card_pay_token_001",
+        }),
+      ),
+    };
+    window.ECPay = mockSdk;
+    expect(
+      paymentFieldsForRuntime({ reviewDemo: false, ecpaySdk: mockSdk }).status,
+    ).toBe("ready");
+
+    let boundMethods: PassengerPaymentMethod[] = [];
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+        const method = (init?.method ?? "GET").toUpperCase();
+        if (url.endsWith("/api/passenger-app/me")) {
+          return new Response(
+            JSON.stringify({ data: { account: ACTIVE_ACCOUNT } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          method === "GET" &&
+          url.endsWith("/api/passenger-app/payment-methods?binding_session=1")
+        ) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                provider: "ecpay",
+                merchantToken: "ecpay_page_session_token_001",
+                tokenExpireDate: "2026/10/24 12:30:00",
+                sandbox: true,
+                serverType: "Stage",
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          method === "GET" &&
+          url.endsWith("/api/passenger-app/payment-methods")
+        ) {
+          return new Response(
+            JSON.stringify({ data: { methods: boundMethods } }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (
+          method === "POST" &&
+          url.endsWith("/api/passenger-app/payment-methods")
+        ) {
+          const payload = JSON.parse(String(init?.body ?? "{}")) as {
+            providerToken?: string;
+          };
+          expect(payload).toEqual({
+            providerToken: "ecpay_page_bind_card_pay_token_001",
+          });
+          const created = makeCard(1);
+          boundMethods = [created];
+          return new Response(
+            JSON.stringify({
+              data: { status: "completed", method: created },
+            }),
+            { status: 201, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        throw new Error(`Unexpected fetch: ${method} ${url}`);
+      });
+
+    const { container } = render(<PaymentMethodsPage />);
+    const addBtn = await screen.findByRole("button", { name: "新增信用卡" });
+    await waitFor(() => {
+      expect((addBtn as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(addBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("ecpay-hosted-fields-container").getAttribute("id"),
+      ).toBe("ECPayPayment");
+    });
+    expect(container.querySelectorAll("input")).toHaveLength(0);
+
+    const bindBtn = screen.getByRole("button", { name: "綁定卡片" });
+    await waitFor(() => {
+      expect((bindBtn as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(bindBtn);
+
+    await screen.findByText("VISA •••• 1001");
+    expect(mockSdk.getBindCardPayToken).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalled();
   });
 });
 

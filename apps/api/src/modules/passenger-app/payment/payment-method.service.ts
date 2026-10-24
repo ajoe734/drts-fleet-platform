@@ -116,12 +116,11 @@ export class PaymentMethodService {
     }
     let result;
     try {
-      result =
-        this.runtime.provider.name === "ecpay"
-          ? await this.runtime.provider.bind(credential, claim.idempotencyKey, {
-              passengerId,
-            })
-          : await this.runtime.provider.bind(credential, claim.idempotencyKey);
+      result = await this.runtime.provider.bind(
+        credential,
+        claim.idempotencyKey,
+        { passengerId },
+      );
     } catch {
       // Retain the committed pending claim for the same owner's replay. Do not
       // erase it and do not expose provider exceptions/credentials in errors.
@@ -288,13 +287,19 @@ export class PaymentMethodService {
     }
   }
 
-  async verifyNotification(body: unknown): Promise<{
+  async verifyNotification(
+    body: unknown,
+    context?: { passengerId?: string; idempotencyKey?: string },
+  ): Promise<{
     verified: true;
     kind: "bind" | "payment";
     rtnCode: number;
     merchantTradeNo: string | null;
     tradeNo: string | null;
     status: "completed" | "failed" | "pending" | "action_required" | "unknown";
+    method?: PaymentMethodResponse extends { status: "completed"; method: infer M }
+      ? M
+      : never;
     card?: {
       last4: string;
       cardType: string;
@@ -323,6 +328,69 @@ export class PaymentMethodService {
       );
     }
     if (result.kind === "bind" && result.bindResult) {
+      const ownerId =
+        context?.passengerId?.trim() || result.passengerId?.trim() || "";
+      if (
+        ownerId &&
+        result.merchantMemberId &&
+        typeof this.runtime.provider.deriveMerchantMemberId === "function"
+      ) {
+        const expectedMemberId =
+          this.runtime.provider.deriveMerchantMemberId(ownerId);
+        if (expectedMemberId !== result.merchantMemberId) {
+          throw new ApiRequestError(
+            400,
+            "invalid_credential",
+            "Payment notification member identity does not match passenger.",
+          );
+        }
+      }
+      let completedMethod:
+        | (PaymentMethodResponse extends { status: "completed"; method: infer M }
+            ? M
+            : never)
+        | undefined;
+      if (
+        ownerId &&
+        this.runtime.cipher &&
+        typeof this.repository.findActionRequiredBinding === "function"
+      ) {
+        const claim = await this.repository.findActionRequiredBinding(
+          ownerId,
+          context?.idempotencyKey ?? result.idempotencyKey ?? undefined,
+        );
+        if (claim) {
+          if (result.bindResult.status === "completed") {
+            const card = result.bindResult.card;
+            completedMethod = await this.repository.completeBinding(
+              ownerId,
+              claim.idempotencyKey,
+              {
+                paymentMethodId: claim.methodId,
+                drtsPassengerId: ownerId,
+                provider: this.runtime.provider.name,
+                tokenEnvelope: this.runtime.cipher.encrypt(
+                  card.token,
+                  ownerId,
+                  claim.methodId,
+                ),
+                last4: card.last4,
+                cardType: card.cardType,
+                expiryMonth: card.expiryMonth,
+                expiryYear: card.expiryYear,
+                isDefault: false,
+              },
+            );
+          } else if (result.bindResult.status === "failed") {
+            await this.repository.bindingOutcome(
+              ownerId,
+              claim.idempotencyKey,
+              "failed",
+              result.bindResult.error,
+            );
+          }
+        }
+      }
       return {
         verified: true,
         kind: "bind",
@@ -330,6 +398,7 @@ export class PaymentMethodService {
         merchantTradeNo: result.merchantTradeNo,
         tradeNo: result.tradeNo,
         status: result.bindResult.status,
+        ...(completedMethod ? { method: completedMethod } : {}),
         ...(result.bindResult.status === "completed"
           ? {
               card: {

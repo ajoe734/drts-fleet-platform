@@ -223,11 +223,12 @@ export function deriveEcpayMerchantMemberId(
   if (
     !cleanPassenger ||
     !cleanMerchant ||
+    cleanPassenger.startsWith("pax:bind:") ||
     cleanPassenger.includes("@") ||
     /^\+?[0-9-]{8,15}$/.test(cleanPassenger)
   ) {
     throw new Error(
-      "MerchantMemberID source must be an account identifier, never phone or email.",
+      "MerchantMemberID source must be an account identifier, never phone, email, or an operation idempotency key.",
     );
   }
   const digest = createHash("sha256")

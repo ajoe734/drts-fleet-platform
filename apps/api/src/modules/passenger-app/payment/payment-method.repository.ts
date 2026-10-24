@@ -267,6 +267,34 @@ export class PaymentMethodRepository {
     });
   }
 
+  async findActionRequiredBinding(
+    passengerId: string,
+    idempotencyKey?: string,
+  ): Promise<{ idempotencyKey: string; methodId: string } | null> {
+    return this.withAccount(passengerId, async (client) => {
+      const result = idempotencyKey
+        ? await client.query(
+            `SELECT idempotency_key,entity_id FROM passenger.payment_idempotency_keys
+             WHERE drts_passenger_id=$1 AND idempotency_key=$2 AND operation='bind'
+               AND outcome IN ('action_required','pending') FOR UPDATE`,
+            [passengerId, idempotencyKey],
+          )
+        : await client.query(
+            `SELECT idempotency_key,entity_id FROM passenger.payment_idempotency_keys
+             WHERE drts_passenger_id=$1 AND operation='bind'
+               AND outcome IN ('action_required','pending')
+             ORDER BY updated_at DESC,created_at DESC LIMIT 1 FOR UPDATE`,
+            [passengerId],
+          );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        idempotencyKey: String(row.idempotency_key),
+        methodId: String(row.entity_id),
+      };
+    });
+  }
+
   async setDefault(
     passengerId: string,
     id: string,

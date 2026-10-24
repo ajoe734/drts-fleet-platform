@@ -60,6 +60,9 @@ export interface VerifiedEcpayNotification {
   rtnMsg: string;
   merchantTradeNo: string | null;
   tradeNo: string | null;
+  merchantMemberId?: string | null;
+  passengerId?: string | null;
+  idempotencyKey?: string | null;
   bindResult?: PaymentBindResult;
   paymentResult?: MoneyResult;
 }
@@ -239,7 +242,11 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
 
   private readonly bindings = new Map<
     string,
-    { credential: string; result: PaymentBindResult }
+    { credential: string; passengerId: string; memberId: string; result: PaymentBindResult }
+  >();
+  private readonly pendingMemberBindings = new Map<
+    string,
+    { passengerId: string; idempotencyKey: string }
   >();
   private readonly captures = new Map<
     string,
@@ -307,6 +314,10 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
 
   isBindCardIdDeclined(bindCardId: string): boolean {
     return this.declinedBindCardIds.has(bindCardId);
+  }
+
+  deriveMerchantMemberId(passengerId: string): string {
+    return deriveEcpayMerchantMemberId(passengerId, this.merchantId);
   }
 
   private async postEncrypted(
@@ -421,16 +432,24 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       orderResultUrl?: string;
     },
   ): Promise<PaymentBindResult> {
+    const passengerId = context?.passengerId?.trim();
+    if (!passengerId || passengerId.startsWith("pax:bind:")) {
+      throw new Error(
+        "ECPay CreateBindCard requires a formally validated passengerId in context.",
+      );
+    }
     const existing = this.bindings.get(idempotencyKey);
     if (existing) {
-      if (existing.credential !== credential) {
+      if (
+        existing.credential !== credential ||
+        existing.passengerId !== passengerId
+      ) {
         throw new Error("ECPay binding idempotency conflict.");
       }
       return structuredClone(existing.result);
     }
 
-    const memberSource = context?.passengerId?.trim() || idempotencyKey;
-    const memberId = deriveEcpayMerchantMemberId(memberSource, this.merchantId);
+    const memberId = deriveEcpayMerchantMemberId(passengerId, this.merchantId);
     const data = await this.postEncrypted(
       `${this.baseUrl}/Merchant/CreateBindCard`,
       {
@@ -463,6 +482,10 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
         status: "action_required",
         nextActionUrl: threeDUrl,
       };
+      this.pendingMemberBindings.set(memberId, {
+        passengerId,
+        idempotencyKey,
+      });
     } else if (rtnCode === 1) {
       const bound = parseBoundCard(data);
       if (!bound) {
@@ -477,6 +500,8 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
 
     this.bindings.set(idempotencyKey, {
       credential,
+      passengerId,
+      memberId,
       result: structuredClone(result),
     });
     return result;
@@ -520,6 +545,23 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
           ? String(data.TradeNo)
           : null;
 
+    const consumerInfo =
+      data.ConsumerInfo &&
+      typeof data.ConsumerInfo === "object" &&
+      !Array.isArray(data.ConsumerInfo)
+        ? (data.ConsumerInfo as Record<string, unknown>)
+        : null;
+    const merchantMemberId =
+      typeof data.MerchantMemberID === "string" && data.MerchantMemberID.trim()
+        ? data.MerchantMemberID.trim()
+        : typeof consumerInfo?.MerchantMemberID === "string" &&
+            consumerInfo.MerchantMemberID.trim()
+          ? consumerInfo.MerchantMemberID.trim()
+          : null;
+    const pendingBinding = merchantMemberId
+      ? this.pendingMemberBindings.get(merchantMemberId)
+      : undefined;
+
     const bound = parseBoundCard(data);
     if (bound || data.CardInfo !== undefined || data.BindCardID !== undefined) {
       const bindResult: PaymentBindResult =
@@ -534,6 +576,13 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
         rtnMsg,
         merchantTradeNo,
         tradeNo,
+        ...(merchantMemberId ? { merchantMemberId } : {}),
+        ...(pendingBinding?.passengerId
+          ? { passengerId: pendingBinding.passengerId }
+          : {}),
+        ...(pendingBinding?.idempotencyKey
+          ? { idempotencyKey: pendingBinding.idempotencyKey }
+          : {}),
         bindResult,
       };
     }

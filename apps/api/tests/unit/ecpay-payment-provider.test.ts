@@ -160,6 +160,9 @@ describe("ECPay 站內付 2.0 cipher & envelope verification", () => {
     expect(() =>
       deriveEcpayMerchantMemberId("+886-912-345-678", SYNTHETIC_MERCHANT_ID),
     ).toThrow();
+    expect(() =>
+      deriveEcpayMerchantMemberId("pax:bind:deadbeef1234", SYNTHETIC_MERCHANT_ID),
+    ).toThrow(/never phone, email, or an operation idempotency key/);
   });
 
   it("derives deterministic 20-char alphanumeric MerchantTradeNo per idempotencyKey", () => {
@@ -673,5 +676,138 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
       status: 409,
       code: "card_limit_exceeded",
     });
+  });
+
+  it("requires formally validated passengerId on EcpayPaymentProvider.bind and reconciles 3DS callback into encrypted completeBinding", async () => {
+    const now = new Date("2026-10-24T10:00:00Z");
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+    const provider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      now: () => now,
+      fetchFn: vi.fn(async () =>
+        buildMockResponse(
+          {
+            RtnCode: 1,
+            RtnMsg: "Need 3DS",
+            ThreeDInfo: {
+              ThreeDURL: "https://payment-stage.ecpay.com.tw/3ds/verify-bind-001",
+            },
+          },
+          now,
+        ),
+      ) as unknown as typeof fetch,
+    });
+
+    await expect(
+      provider.bind("pay_token_missing_subject", "pax:bind:missing_subject"),
+    ).rejects.toThrow(/formally validated passengerId/);
+    await expect(
+      provider.bind("pay_token_pseudo_subject", "pax:bind:pseudo_subject", {
+        passengerId: "pax:bind:pseudo_subject",
+      }),
+    ).rejects.toThrow(/formally validated passengerId/);
+
+    const methodId = "00000000-0000-4000-8000-000000000099";
+    const idempotencyKey = "pax:bind:3ds_flow_001";
+    const owner = "pax_3ds_verified_owner_001";
+    const cipher = new PaymentTokenCipher(syntheticEncryptionKeysJson());
+    const repository = {
+      claimBinding: vi.fn().mockResolvedValue({
+        idempotencyKey,
+        methodId,
+        completed: null,
+      }),
+      bindingOutcome: vi.fn().mockResolvedValue(undefined),
+      findActionRequiredBinding: vi.fn().mockResolvedValue({
+        idempotencyKey,
+        methodId,
+      }),
+      completeBinding: vi.fn().mockImplementation(async (_pax, _key, stored) => ({
+        paymentMethodId: stored.paymentMethodId,
+        last4: stored.last4,
+        cardType: stored.cardType,
+        expiryMonth: stored.expiryMonth,
+        expiryYear: stored.expiryYear,
+        isDefault: true,
+      })),
+      list: vi.fn().mockResolvedValue([]),
+      setDefault: vi.fn(),
+      remove: vi.fn(),
+    };
+    const service = new PaymentMethodService(
+      repository as unknown as PaymentMethodRepository,
+      { provider, cipher },
+    );
+
+    const initial = await service.bind(owner, {
+      providerToken: "ecpay_pay_token_3ds_challenge_001",
+    });
+    expect(initial).toEqual({
+      status: "action_required",
+      nextActionUrl: "https://payment-stage.ecpay.com.tw/3ds/verify-bind-001",
+    });
+    expect(repository.bindingOutcome).toHaveBeenCalledWith(
+      owner,
+      idempotencyKey,
+      "action_required",
+    );
+
+    const callbackEnvelope = {
+      ...buildEcpayEnvelope({
+        ...SYNTHETIC_CREDENTIALS,
+        timestamp: nowSeconds,
+        data: {
+          MerchantID: SYNTHETIC_MERCHANT_ID,
+          MerchantMemberID: deriveEcpayMerchantMemberId(
+            owner,
+            SYNTHETIC_MERCHANT_ID,
+          ),
+          RtnCode: 1,
+          RtnMsg: "3DS Bind Success",
+          CardInfo: {
+            BindCardID: "ECPAY_3DS_COMPLETED_CARD_ID_99",
+            Card6No: "431195",
+            Card4No: "2222",
+            ExpireDate: "3112",
+          },
+          OrderInfo: {
+            MerchantTradeNo: "DR3DSBIND00000000001",
+            TradeNo: "26102400000099",
+          },
+        },
+      }),
+      RpHeader: { Timestamp: nowSeconds },
+      TransCode: 1,
+      TransMsg: "Success",
+    };
+
+    await expect(
+      service.verifyNotification(callbackEnvelope, {
+        passengerId: "pax_foreign_attacker_999",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "invalid_credential",
+    });
+    expect(repository.completeBinding).not.toHaveBeenCalled();
+
+    const completed = await service.verifyNotification(callbackEnvelope, {
+      passengerId: owner,
+    });
+    expect(completed.status).toBe("completed");
+    expect(completed.method).toEqual({
+      paymentMethodId: methodId,
+      last4: "2222",
+      cardType: "VISA",
+      expiryMonth: "12",
+      expiryYear: "2031",
+      isDefault: true,
+    });
+    expect(repository.completeBinding).toHaveBeenCalledTimes(1);
+    const storedArg = repository.completeBinding.mock.calls[0]![2];
+    expect(
+      cipher.decrypt(storedArg.tokenEnvelope, owner, methodId),
+    ).toBe("ECPAY_3DS_COMPLETED_CARD_ID_99");
   });
 });

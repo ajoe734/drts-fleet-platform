@@ -57,6 +57,17 @@ export class PaymentMethodController {
   async verifyNotification(@Body() body: unknown) {
     return toApiSuccessEnvelope(await this.methods.verifyNotification(body));
   }
+  @Post("3ds-complete")
+  async complete3dsBinding(
+    @CurrentIdentity() identity: RequestIdentity | null,
+    @Body() body: unknown,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.methods.verifyNotification(body, {
+        passengerId: await this.owner(identity),
+      }),
+    );
+  }
   @Post()
   async bind(
     @CurrentIdentity() identity: RequestIdentity | null,

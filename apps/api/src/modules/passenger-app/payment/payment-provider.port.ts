@@ -95,9 +95,13 @@ export interface PaymentProviderPort {
     rtnMsg: string;
     merchantTradeNo: string | null;
     tradeNo: string | null;
+    merchantMemberId?: string | null;
+    passengerId?: string | null;
+    idempotencyKey?: string | null;
     bindResult?: BindResult;
     paymentResult?: MoneyResult;
   };
+  deriveMerchantMemberId?(passengerId: string): string;
   capture(command: CaptureCommand): Promise<MoneyResult>;
   readCapture(idempotencyKey: string): Promise<MoneyResult>;
   refund(command: RefundCommand): Promise<MoneyResult>;
