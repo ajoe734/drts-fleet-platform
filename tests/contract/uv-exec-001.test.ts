@@ -45,6 +45,9 @@ import {
   VoiceCommitStatusSchema,
   VoiceDtmfEvidenceSchema,
 } from "../../packages/contracts/src/unattended-voice";
+import { voiceDialogueSnapshotContentSchema } from "../../packages/contracts/src/voice-dialogue";
+import { VoiceCallbackCreateRequestSchema } from "../../packages/contracts/src/voice-callback-operations";
+import { voiceAbsoluteTimeSchema } from "../../packages/contracts/src/booking-requirements";
 
 const OPENAPI_PATH = resolve(process.cwd(), "docs/04-api/openapi-spec.yaml");
 const requireMod = createRequire(resolve(process.cwd(), "package.json"));
@@ -607,6 +610,49 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       };
       const result = VoiceScopeProfileSchema.safeParse(profile);
       expect(result.success).toBe(false);
+    });
+
+    it("accepts a legacy non-RFC-4122 UUID-shaped identifier (zod v4's stricter .uuid() would reject this; .guid() keeps the v3 shape check)", () => {
+      const profile = {
+        resourceScopeId: "33333333-3333-3333-3333-333333333333",
+        brandId: "drts-metro",
+        operatingProfileId: "tw-metro-standard",
+        operatingProfileVersion: 2,
+      };
+      const result = VoiceScopeProfileSchema.safeParse(profile);
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe("datetime grammar compatibility (zod v4 tightened .datetime() defaults; these fields use an explicit regex to keep the v3.25 grammar)", () => {
+    it("voiceAbsoluteTimeSchema still accepts a basic (non-colon) +HHMM offset", () => {
+      const result = voiceAbsoluteTimeSchema.safeParse(
+        "2026-09-08T16:00:00+0800",
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it("voiceAbsoluteTimeSchema still rejects a non-datetime string", () => {
+      const result = voiceAbsoluteTimeSchema.safeParse("not-a-datetime");
+      expect(result.success).toBe(false);
+    });
+
+    it("VoiceCallbackCreateRequestSchema's scheduledAt still accepts minute precision with a basic +HHMM offset", () => {
+      const result = VoiceCallbackCreateRequestSchema.safeParse({
+        contactRevisionNumber: 2,
+        consentRef: "consent-A",
+        scheduledAt: "2026-09-08T16:00:00+0800",
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("VoiceCallbackCreateRequestSchema's dueAt still accepts minute precision with a colonized +HH:MM offset", () => {
+      const result = VoiceCallbackCreateRequestSchema.safeParse({
+        contactRevisionNumber: 2,
+        consentRef: "consent-A",
+        dueAt: "2026-09-08T16:00+08:00",
+      });
+      expect(result.success).toBe(true);
     });
   });
 
@@ -3039,6 +3085,57 @@ describe("UV-EXEC-001 Voice Contracts", () => {
       expect(vActor(validHuman)).toBe(true);
       expect(vHuman({ ...validHuman, agentId: "" })).toBe(false);
       expect(vActor({ ...validHuman, agentId: "" })).toBe(false);
+    });
+  });
+
+  describe("voiceDialogueSnapshotContentSchema", () => {
+    const validSlotEvidence = {
+      rawText: "near the north gate",
+      normalizedValue: "near the north gate",
+      candidate: "near the north gate",
+      sourceTurnIds: [],
+      sourceSegmentIds: [],
+      providerConfidence: null,
+      validationState: "unvalidated" as const,
+      confirmedByCustomerAt: null,
+    };
+    const validContent = {
+      draftVersion: 1,
+      confirmationId: null,
+      slots: { pickup: validSlotEvidence },
+      slotHistory: [],
+      addressRepairs: { pickup: 0, dropoff: 0 },
+      addressHistory: [],
+      handoff: null,
+    };
+
+    it("accepts a slots record keyed by arbitrary string field identifiers", () => {
+      const result = voiceDialogueSnapshotContentSchema.safeParse({
+        ...validContent,
+        slots: { pickup: validSlotEvidence, dropoff: validSlotEvidence },
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it("still rejects a slot evidence value that fails its own schema", () => {
+      const result = voiceDialogueSnapshotContentSchema.safeParse({
+        ...validContent,
+        slots: { pickup: { ...validSlotEvidence, validationState: "bogus" } },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("caps an oversized bounded array at its own size-check issue instead of one issue per element (GHSA-mrhx-c7xc-m3w5)", () => {
+      const oversizedSlotHistory = Array.from({ length: 201 }, () => ({}));
+      const result = voiceDialogueSnapshotContentSchema.safeParse({
+        ...validContent,
+        slotHistory: oversizedSlotHistory,
+      });
+      if (result.success) {
+        throw new Error("expected an oversized slotHistory to be rejected");
+      }
+      expect(result.error.issues).toHaveLength(1);
+      expect(result.error.issues[0].path).toEqual(["slotHistory"]);
     });
   });
 });
