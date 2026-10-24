@@ -2838,6 +2838,21 @@ export class OwnedMobilityService
       .catch(() => null);
     if (!current) return missing;
     const location = current.currentLocation;
+    // Prefer the actual GPS observation time over server receive time, matching
+    // the same -5s..60s window the dropoff route binding already enforces via
+    // passengerDropoffObservationKey; a buffered-upload fix stays "fresh" by
+    // receipt time alone but must not pass a live ETA to the passenger.
+    const locationObservationAgeMs = location
+      ? Date.now() - Date.parse(location.recordedAt)
+      : NaN;
+    const isLocationObservationCurrent =
+      Number.isFinite(locationObservationAgeMs) &&
+      locationObservationAgeMs >= -5_000 &&
+      locationObservationAgeMs < 60_000;
+    const passengerLocationFreshness =
+      current.locationFreshness === "fresh" && !isLocationObservationCurrent
+        ? "stale"
+        : current.locationFreshness;
     const waitingForPickup = [
       "assigned",
       "driver_accepted",
@@ -2846,7 +2861,7 @@ export class OwnedMobilityService
     const pickup = assignment.routeFare?.pickup;
     const eta =
       waitingForPickup &&
-      current.locationFreshness === "fresh" &&
+      passengerLocationFreshness === "fresh" &&
       location &&
       pickup &&
       Number.isFinite(pickup.lat) &&
@@ -2855,11 +2870,32 @@ export class OwnedMobilityService
             .getDriverEta?.(assignment.driver.driverId, pickup.lat, pickup.lng)
             .catch(() => null)
         : null;
+    const isOnTripOrder = order.status === "on_trip";
+    const dropoffRoute = isOnTripOrder
+      ? await this.resolvePassengerDropoffRoute(order, assignment, current)
+      : null;
+    // getDriverEta or resolvePassengerDropoffRoute above can each block long
+    // enough (an authority storage lock or route provider call) for this same
+    // GPS fix to age past the observation window between the freshness check
+    // and this return; recheck the observation age after both awaits, not
+    // just the pre-await classification.
+    const finalLocationAgeMs = location
+      ? Date.now() - Date.parse(location.recordedAt)
+      : NaN;
+    const isLocationObservationStillCurrent =
+      Number.isFinite(finalLocationAgeMs) &&
+      finalLocationAgeMs >= -5_000 &&
+      finalLocationAgeMs < 60_000;
+    const finalLocationFreshness =
+      passengerLocationFreshness === "fresh" &&
+      !isLocationObservationStillCurrent
+        ? "stale"
+        : passengerLocationFreshness;
     return {
       assignmentId: assignment.assignmentId,
       driverId: assignment.driver.driverId,
       vehicleId: assignment.vehicle.vehicleId,
-      locationFreshness: current.locationFreshness,
+      locationFreshness: finalLocationFreshness,
       location: location
         ? {
             lat: location.lat,
@@ -2868,16 +2904,15 @@ export class OwnedMobilityService
             recordedAt: location.recordedAt,
           }
         : null,
-      pickupEta: eta
-        ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
-        : null,
-      ...(order.status === "on_trip"
+      pickupEta:
+        eta && isLocationObservationStillCurrent
+          ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
+          : null,
+      ...(isOnTripOrder
         ? {
-            dropoffRoute: await this.resolvePassengerDropoffRoute(
-              order,
-              assignment,
-              current,
-            ),
+            dropoffRoute: isLocationObservationStillCurrent
+              ? dropoffRoute
+              : null,
           }
         : {}),
     };
@@ -16459,7 +16494,22 @@ export class OwnedMobilityService
       )
         return result;
       const point = current.currentLocation;
-      result.locationFreshness = current.locationFreshness;
+      // Prefer the actual GPS observation time over server receive time, matching
+      // the same -5s..60s window the dropoff/route validation below already
+      // enforces; a buffered-upload fix stays "fresh" by receipt time alone but
+      // must not pass a live pickup/dropoff ETA to the referral passenger.
+      const pointObservationAgeMs = point
+        ? Date.now() - Date.parse(point.recordedAt)
+        : NaN;
+      const isPointObservationCurrent =
+        Number.isFinite(pointObservationAgeMs) &&
+        pointObservationAgeMs >= -5_000 &&
+        pointObservationAgeMs < 60_000;
+      const passengerLocationFreshness =
+        current.locationFreshness === "fresh" && !isPointObservationCurrent
+          ? "stale"
+          : current.locationFreshness;
+      result.locationFreshness = passengerLocationFreshness;
       result.location = point
         ? {
             lat: point.lat,
@@ -16468,7 +16518,7 @@ export class OwnedMobilityService
             recordedAt: point.recordedAt,
           }
         : null;
-      if (current.locationFreshness !== "fresh" || !point) return result;
+      if (passengerLocationFreshness !== "fresh" || !point) return result;
       if (
         ["assigned", "driver_accepted", "enroute_pickup"].includes(
           order.status,
@@ -16571,6 +16621,10 @@ export class OwnedMobilityService
         await this.regulatoryRegistryService.getDriverTrackingStatus(
           assignment.driverId,
         );
+      // The provider await above can take long enough for this same GPS fix to
+      // age past the observation window; recheck recordedAt age here too, not
+      // just whether the receipt-time classification or identity changed.
+      const finalPointAgeMs = Date.now() - Date.parse(point.recordedAt);
       if (
         !latestOrder ||
         latestOrder.status !== order.status ||
@@ -16579,6 +16633,9 @@ export class OwnedMobilityService
         latestCurrent.currentVehicleId !== assignment.vehicleId ||
         latestCurrent.currentTaskId !== current.currentTaskId ||
         latestCurrent.locationFreshness !== "fresh" ||
+        !Number.isFinite(finalPointAgeMs) ||
+        finalPointAgeMs < -5_000 ||
+        finalPointAgeMs >= 60_000 ||
         latestCurrent.currentLocation?.recordedAt !== point.recordedAt ||
         latestCurrent.currentLocation?.lat !== point.lat ||
         latestCurrent.currentLocation?.lng !== point.lng

@@ -735,9 +735,9 @@
         "method": "POST",
         "body": {
           "expectedRevisionNo": "{{c125DriverRevision}}",
-          "documentType": "vehicle_management_contract",
+          "documentType": "professional_driver_license",
           "contentType": "application/pdf",
-          "originalFileName": "invalid-driver-vehicle-contract.pdf"
+          "originalFileName": " "
         },
         "expectedStatus": [400, 422]
       },
@@ -753,14 +753,19 @@
         "method": "POST",
         "body": {
           "plateNo": "TDC-{{runId}}",
+          "licenseType": "taxi",
           "brand": "Toyota",
           "model": "Camry",
-          "manufactureYear": 2024,
+          "modelYear": 2024,
           "seatCount": 4,
-          "wheelchairAccessible": false,
-          "insuranceExpiry": "2029-12-31",
-          "inspectionExpiry": "2029-12-31",
-          "supportedServiceProductCodes": ["business_dispatch"]
+          "luggageCapacity": 2,
+          "businessArea": "TPE",
+          "supportedServiceProductCodes": ["business_dispatch"],
+          "airportTransferEligible": false,
+          "fixedFareAllowed": false,
+          "currentDriverSubmissionId": "{{c125DriverSubmissionId}}",
+          "doorCount": 4,
+          "color": "yellow"
         },
         "capture": {
           "c125VehicleSubmissionId": "data.submission.submission_id",
@@ -929,9 +934,9 @@
         "method": "POST",
         "body": {
           "expectedRevisionNo": "{{c125VehicleRevision}}",
-          "documentType": "driver_management_contract",
+          "documentType": "vehicle_registration",
           "contentType": "application/pdf",
-          "originalFileName": "invalid-vehicle-driver-contract.pdf"
+          "originalFileName": " "
         },
         "expectedStatus": [400, 422]
       },

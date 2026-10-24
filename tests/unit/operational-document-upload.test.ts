@@ -29,6 +29,11 @@ import {
 import { createHash } from "node:crypto";
 import journeysData from "../e2e/fixtures/operational-browser-journeys.json";
 import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
+import { SupplyDocumentService } from "../../apps/api/src/modules/fleet-partner/supply-document.service";
+import { SupplySubmissionService } from "../../apps/api/src/modules/fleet-partner/supply-submission.service";
+import { SupplySubmissionRepository } from "../../apps/api/src/modules/fleet-partner/supply-submission.repository";
+import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { fleetStorageFixture } from "./helpers/fleet-document-fixture";
 
 function checkActualPdf(bytes: Buffer) {
   const text = bytes.toString("ascii");
@@ -2812,7 +2817,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
               submission: {
                 submission_id: "sub-veh-001",
                 fleet_id: "fleet-demo-001",
-                submission_type: "vehicle",
+                submission_type: "vehicle_onboarding",
                 revision_no: 1,
               },
             },
@@ -2828,7 +2833,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
               submission: {
                 submission_id: "sub-drv-001",
                 fleet_id: "fleet-demo-001",
-                submission_type: "driver",
+                submission_type: "driver_onboarding",
                 revision_no: 1,
               },
             },
@@ -3032,6 +3037,110 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         { Authorization: "Bearer tok" },
       ),
     ).rejects.toThrow(/vehicle supply submission sub-veh-001 does not allow/);
+  });
+
+  it("confirms the actual SupplyDocumentService rejects the revised own_fleet invalid-metadata probes with zero intent writes and accepts the matching valid controls", async () => {
+    const { storage, store } = fleetStorageFixture("clean");
+    const repository = new SupplySubmissionRepository();
+    const submissions = new SupplySubmissionService(
+      repository,
+      new RegulatoryRegistryService(
+        undefined as never,
+        undefined as never,
+        undefined as never,
+      ),
+    );
+    const service = new SupplyDocumentService(submissions, repository, storage);
+    const driverDraft = await submissions.createDriverDraft(
+      "fleet-demo-001",
+      "owner",
+      {
+        name: "Probe Driver",
+        mobile: "+886900111222",
+        professionalDriverLicenseNo: "PROBE-LICENSE",
+        professionalDriverLicenseExpiry: "2027-12-31",
+        taxiDriverRegistrationNo: "PROBE-REG",
+        taxiDriverRegistrationArea: "TPE",
+        taxiDriverRegistrationExpiry: "2027-12-31",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        preferredVehicleSubmissionId: null,
+      },
+    );
+    const vehicleDraft = await submissions.createVehicleDraft(
+      "fleet-demo-001",
+      "owner",
+      {
+        plateNo: "PROBE-9999",
+        licenseType: "taxi",
+        brand: "Toyota",
+        model: "Camry",
+        modelYear: 2024,
+        seatCount: 4,
+        luggageCapacity: 2,
+        businessArea: "TPE",
+        supportedServiceProductCodes: ["taxi_realtime"],
+        currentDriverSubmissionId: null,
+        doorCount: null,
+        color: null,
+        fixedFareAllowed: false,
+        airportTransferEligible: false,
+      },
+    );
+
+    const putIfAbsentSpy = vi.spyOn(store, "putIfAbsent");
+
+    await expect(
+      service.createUploadUrl(
+        "fleet-demo-001",
+        driverDraft.submission.submissionId,
+        "owner",
+        {
+          expectedRevisionNo: 1,
+          documentType: "professional_driver_license",
+          contentType: "application/pdf",
+          originalFileName: " ",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(
+      service.createUploadUrl(
+        "fleet-demo-001",
+        vehicleDraft.submission.submissionId,
+        "owner",
+        {
+          expectedRevisionNo: 1,
+          documentType: "vehicle_registration",
+          contentType: "application/pdf",
+          originalFileName: " ",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(putIfAbsentSpy).not.toHaveBeenCalled();
+
+    const driverIntent = await service.createUploadUrl(
+      "fleet-demo-001",
+      driverDraft.submission.submissionId,
+      "owner",
+      {
+        expectedRevisionNo: 1,
+        documentType: "professional_driver_license",
+        contentType: "application/pdf",
+        originalFileName: "driver-license.pdf",
+      },
+    );
+    expect(driverIntent.method).toBe("PUT");
+    const vehicleIntent = await service.createUploadUrl(
+      "fleet-demo-001",
+      vehicleDraft.submission.submissionId,
+      "owner",
+      {
+        expectedRevisionNo: 1,
+        documentType: "vehicle_registration",
+        contentType: "application/pdf",
+        originalFileName: "vehicle-registration.pdf",
+      },
+    );
+    expect(vehicleIntent.method).toBe("PUT");
   });
 
   it("executes Case attachment 7-hop lifecycle across PDF/PNG/JPEG, reviewer readback, and rejects closed/foreign/corrupt cases", async () => {

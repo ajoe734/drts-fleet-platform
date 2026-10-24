@@ -935,8 +935,16 @@ export async function uploadOperationalDocument(
     authoritativeSubmissionId,
     "authoritative submission ID must match intent URL",
   ).toBe(expectedSubmissionId);
+  const authoritativeParentCategory =
+    authoritativeSubmissionType === "driver" ||
+    authoritativeSubmissionType === "driver_onboarding"
+      ? "driver"
+      : authoritativeSubmissionType === "vehicle" ||
+          authoritativeSubmissionType === "vehicle_onboarding"
+        ? "vehicle"
+        : undefined;
   if (
-    authoritativeSubmissionType === "driver" &&
+    authoritativeParentCategory === "driver" &&
     !(DRIVER_SUPPLY_DOCUMENT_TYPES as readonly string[]).includes(
       requestedSupplyDocumentType,
     )
@@ -945,7 +953,7 @@ export async function uploadOperationalDocument(
       `driver supply submission ${expectedSubmissionId} does not allow documentType ${requestedSupplyDocumentType}`,
     );
   } else if (
-    authoritativeSubmissionType === "vehicle" &&
+    authoritativeParentCategory === "vehicle" &&
     !(VEHICLE_SUPPLY_DOCUMENT_TYPES as readonly string[]).includes(
       requestedSupplyDocumentType,
     )

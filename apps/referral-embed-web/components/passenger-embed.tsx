@@ -426,7 +426,15 @@ function ActionButton({
   type?: "button" | "submit" | "reset";
   dataDrtOperation?: string;
 }) {
-  const palette = buttonPalette(theme, variant);
+  // A disabled action reads as unavailable in every variant, not as a
+  // slightly faded but still tappable-looking button.
+  const palette = disabled
+    ? {
+        background: theme.surfaceLo,
+        color: theme.faint,
+        border: `1px solid ${theme.line}`,
+      }
+    : buttonPalette(theme, variant);
   const content = (
     <>
       {icon ? <Icon name={icon} size={14} /> : null}
@@ -447,7 +455,6 @@ function ActionButton({
     fontSize: 14,
     fontWeight: 700,
     textDecoration: "none",
-    opacity: disabled ? 0.75 : 1,
     ...palette,
   } as const;
 
@@ -460,7 +467,7 @@ function ActionButton({
         data-drt-operation={dataDrtOperation}
         style={{
           ...style,
-          cursor: disabled ? "progress" : "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
         }}
       >
         {content}
@@ -721,7 +728,16 @@ function DetailRow({
         borderBottom: last ? "none" : `1px solid ${theme.lineSoft}`,
       }}
     >
-      <span style={{ fontSize: 12.5, color: theme.muted }}>{label}</span>
+      <span
+        style={{
+          fontSize: 12.5,
+          color: theme.muted,
+          flexShrink: 0,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
       <span
         style={{
           fontSize: 12.5,
@@ -729,6 +745,8 @@ function DetailRow({
           fontWeight: strong ? 700 : 500,
           fontFamily: mono ? theme.mono : theme.sans,
           textAlign: "right",
+          minWidth: 0,
+          overflowWrap: "anywhere",
         }}
       >
         {value}
@@ -1243,7 +1261,7 @@ function ReauthScreen({ context }: { context: EmbedContext }) {
         tone="warn"
         icon="clock"
         title="登入狀態已逾時"
-        posture="reauth_required"
+        posture="需重新驗證身分"
       />
       <Card theme={theme} title="連線狀態">
         <TokenRow
@@ -1289,7 +1307,7 @@ function UnsupportedScreen({ context }: { context: EmbedContext }) {
         tone="danger"
         icon="ban"
         title="無法在此環境開啟"
-        posture="unsupported_host · 已封鎖"
+        posture="不支援的來源 · 已封鎖"
       />
       <Card theme={theme} title="原因">
         <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
@@ -1487,11 +1505,7 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
         tone="neutral"
         icon="ext"
         title="內嵌服務暫時無法使用"
-        posture={
-          fallbackEntry
-            ? "fallback_to_web · 改用網站"
-            : "fallback_unavailable · 尚無替代入口"
-        }
+        posture={fallbackEntry ? "可改用網站" : "尚無替代入口"}
       />
       {fallbackEntry ? (
         <>
@@ -2329,42 +2343,70 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
   );
 }
 
+type NegativeScreenAction = "book" | "tel" | "trips";
+
+/** Resolves a negative-screen button's actual destination; never a uniform book/tel guess. */
+function negativeScreenHref(
+  context: EmbedContext,
+  action: NegativeScreenAction,
+) {
+  switch (action) {
+    case "tel":
+      return toPhoneHref(REFERRAL_SUPPORT_PHONE);
+    case "trips":
+      // The single-trip screen silently falls back to the booking form when
+      // there is no active trip; the history list shows the rider's actual
+      // status (including the empty state) instead.
+      return buildHref(context, { screen: "trips", state: "handoff" });
+    case "book":
+      return buildHref(context, { screen: "book", state: "handoff" });
+  }
+}
+
 const negativeScreens = {
   denied: {
     icon: "x",
     tone: "danger" as const,
     title: "叫車未能建立",
-    posture: "denied",
+    posture: "未能受理",
     body: "此次叫車請求未通過。請確認上下車地點是否在服務範圍內，或稍後再試。",
     primary: "重新叫車",
+    primaryAction: "book" as NegativeScreenAction,
     secondary: "聯絡社區客服",
+    secondaryAction: "tel" as NegativeScreenAction,
   },
   ineligible: {
     icon: "ban",
     tone: "warn" as const,
     title: "目前不符叫車資格",
-    posture: "ineligible",
-    body: "您的住戶身分目前未開通叫車服務，可能因社區方案尚未生效。請洽社區管理中心確認。",
-    primary: "洽社區管理中心",
+    posture: "資格未開通",
+    body: "您的住戶身分目前未開通叫車服務，可能因社區方案尚未生效。請洽社區客服確認。",
+    primary: "聯絡社區客服",
+    primaryAction: "tel" as NegativeScreenAction,
     secondary: "返回",
+    secondaryAction: "book" as NegativeScreenAction,
   },
   nosupply: {
     icon: "car",
     tone: "warn" as const,
     title: "附近暫無可派車輛",
-    posture: "no_supply",
-    body: "此時段與地點暫無可派車。請稍後重試或改約時間，系統也會嘗試自動為您補派。",
+    posture: "無可派車",
+    body: "此時段與地點暫無可派車。請稍後重試，或改約其他時段再送出叫車。",
     primary: "稍後重試",
+    primaryAction: "book" as NegativeScreenAction,
     secondary: "改約時間",
+    secondaryAction: "book" as NegativeScreenAction,
   },
   degraded: {
     icon: "alert",
     tone: "warn" as const,
     title: "服務暫時不穩定",
-    posture: "degraded",
-    body: "叫車服務目前回應較慢。您的請求已安全受理，恢復後會自動繼續，無需重複送出。",
+    posture: "服務不穩定",
+    body: "叫車服務目前回應較慢。請先查看目前行程狀態，確認本次請求是否已送出成功，再決定是否重新嘗試，避免重複叫車。",
     primary: "重試",
+    primaryAction: "book" as NegativeScreenAction,
     secondary: "查看狀態",
+    secondaryAction: "trips" as NegativeScreenAction,
   },
 };
 
@@ -2384,12 +2426,12 @@ function NegativeScreen({
       footer={
         <>
           <ActionButton
-            href={buildHref(context, { screen: "book", state: "handoff" })}
+            href={negativeScreenHref(context, screen.primaryAction)}
             label={screen.primary}
             theme={theme}
           />
           <ActionButton
-            href={toPhoneHref(REFERRAL_SUPPORT_PHONE)}
+            href={negativeScreenHref(context, screen.secondaryAction)}
             label={screen.secondary}
             theme={theme}
             variant="ghost"
@@ -2445,6 +2487,9 @@ const tripStateLabel: Record<
   inprogress: { zh: "行程中", tone: "info" },
   completed: { zh: "已完成", tone: "success" },
   cancelled: { zh: "已取消", tone: "neutral" },
+  no_supply: { zh: "無可用車輛", tone: "neutral" },
+  dispatch_failed: { zh: "派車失敗", tone: "neutral" },
+  dispatch_timeout: { zh: "派車失敗", tone: "neutral" },
 };
 
 const DEMO_TRIP_DISPATCHABLE = [
@@ -2481,13 +2526,13 @@ const DEMO_TRIP_STEP: Record<
   },
   board: {
     description:
-      "測試司機已抵達上車地點。按下後模擬乘客上車並開始行程，車輛會駛向目的地（約 3 分鐘）。",
+      "測試司機已抵達上車地點。按下後模擬乘客上車並開始行程，車輛會依實際路程時間駛向目的地。",
     label: "測試：乘客已上車",
   },
   complete: {
     description:
-      "行程進行中，車輛正駛向目的地。按下後以模擬的完程資料（車資依試算下限、合成完程照片）完成這筆行程，接著可展示評分與收據；不是實際載客。",
-    label: "測試：完成行程",
+      "行程進行中，車輛依實際路程時間駛向目的地，到達時間與地圖同步更新；抵達後司機結束行程，畫面會轉到行程完成、車資與評分。不想等候可按下按鈕立即抵達。完程資料為模擬（車資依試算下限、合成完程照片），不是實際載客。",
+    label: "測試：立即抵達目的地",
   },
 };
 
@@ -2528,6 +2573,9 @@ function ReferralDemoTripControls({
   // ref so the heartbeat timer below depends only on the trip, or each
   // refresh-triggered render would restart it and send another heartbeat.
   const onAssignedRef = useRef(onAssigned);
+  const completedHref = useRef(
+    buildHref(context, { screen: "completed", state: "handoff", orderId }),
+  );
   useEffect(() => {
     onAssignedRef.current = onAssigned;
   }, [onAssigned]);
@@ -2547,7 +2595,15 @@ function ReferralDemoTripControls({
           body: "{}",
         },
       )
-        .then((response) => {
+        .then(async (response) => {
+          const payload = await response.json().catch(() => null);
+          // The test driver ended the trip at the destination: show the
+          // passenger its completion, even if the trip screen already
+          // switched to its ended state and unmounted this card.
+          if (response.ok && payload?.data?.status === "completed") {
+            window.location.assign(completedHref.current);
+            return;
+          }
           if (active && response.ok) onAssignedRef.current();
         })
         .catch(() => undefined);
@@ -3074,6 +3130,26 @@ const NON_COMPLETED_TERMINAL_STATUSES = [
   "no_supply",
 ];
 
+/**
+ * A non-completed terminal order (cancelled/no_supply/dispatch_failed/
+ * dispatch_timeout) never shows the backend's "fare pending confirmation"
+ * placeholder: that text implies the ride is still active. Any finite
+ * recorded fare is still shown as-is.
+ */
+function formatTerminalFare(
+  status: string | null | undefined,
+  fareTotal: number | null | undefined,
+  formattedFare: string | null | undefined,
+) {
+  if (typeof fareTotal === "number" && Number.isFinite(fareTotal)) {
+    return formattedFare || formatFare(fareTotal);
+  }
+  if (status && NON_COMPLETED_TERMINAL_STATUSES.includes(status)) {
+    return "—";
+  }
+  return formattedFare ?? "—";
+}
+
 function TripsScreen({
   context,
   liveData,
@@ -3096,7 +3172,7 @@ function TripsScreen({
       from: trip.pickupAddress,
       to: trip.dropoffAddress,
       state: normalizeTripState(trip.status),
-      fare: trip.formattedFare || formatFare(trip.fareTotal),
+      fare: formatTerminalFare(trip.status, trip.fareTotal, trip.formattedFare),
     })) ?? [];
   return (
     <AppShell context={context} badgeTone="live">
@@ -3134,7 +3210,7 @@ function TripsScreen({
       ) : null}
       {historyItems.map((trip) => {
         const tripState = tripStateLabel[trip.state] || {
-          zh: trip.state,
+          zh: "狀態未知",
           tone: "neutral" as const,
         };
         const tone =
@@ -3682,7 +3758,16 @@ function OutcomeScreen({
                 ? "派車失敗"
                 : "行程已取消"
         }
-        posture={completed ? "completed" : "cancelled"}
+        posture={
+          completed
+            ? "已完成"
+            : trip?.status === "no_supply"
+              ? "無可用車輛"
+              : trip?.status === "dispatch_failed" ||
+                  trip?.status === "dispatch_timeout"
+                ? "派車失敗"
+                : "已取消"
+        }
       />
       <Card theme={theme}>
         <DetailRow
@@ -3697,7 +3782,11 @@ function OutcomeScreen({
         <DetailRow
           theme={theme}
           label="車資"
-          value={trip?.formattedFare ?? "—"}
+          value={formatTerminalFare(
+            trip?.status,
+            trip?.fareTotal,
+            trip?.formattedFare,
+          )}
           strong
         />
         <DetailRow
@@ -3756,12 +3845,27 @@ function OutcomeScreen({
             ))}
           </div>
           {submitted ? (
-            <div aria-label="已送出評分內容">
-              <p>
+            <div
+              aria-label="已送出評分內容"
+              style={{
+                display: "grid",
+                gap: 4,
+                fontSize: 12.5,
+                color: theme.ink2,
+                lineHeight: 1.6,
+              }}
+            >
+              <p style={{ margin: 0 }}>
                 評價標籤：
                 {submitted.tags?.length ? submitted.tags.join("、") : "未選擇"}
               </p>
-              <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+              <p
+                style={{
+                  margin: 0,
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                }}
+              >
                 意見：{submitted.comment || "未填寫"}
               </p>
             </div>
@@ -3770,13 +3874,22 @@ function OutcomeScreen({
               disabled={isPending || Boolean(originalRating)}
               style={{ border: 0, margin: "12px 0", padding: 0 }}
             >
-              <legend>評價標籤（可複選）</legend>
+              <legend
+                style={{
+                  padding: 0,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: theme.ink2,
+                }}
+              >
+                評價標籤（可複選）
+              </legend>
               <div
                 style={{
                   display: "flex",
                   flexWrap: "wrap",
-                  gap: 10,
-                  margin: "8px 0",
+                  gap: 8,
+                  margin: "8px 0 14px",
                 }}
               >
                 {REFERRAL_RATING_TAG_OPTIONS.map((tag) => (
@@ -3785,11 +3898,31 @@ function OutcomeScreen({
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: 4,
+                      gap: 6,
+                      padding: "6px 11px",
+                      borderRadius: 999,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      color: selectedTags.includes(tag)
+                        ? theme.primary
+                        : theme.ink2,
+                      background: selectedTags.includes(tag)
+                        ? theme.primaryBg
+                        : theme.surface,
+                      border: `1px solid ${
+                        selectedTags.includes(tag) ? theme.primary : theme.line
+                      }`,
                     }}
                   >
                     <input
                       type="checkbox"
+                      style={{
+                        width: 14,
+                        height: 14,
+                        margin: 0,
+                        accentColor: theme.primary,
+                      }}
                       checked={selectedTags.includes(tag)}
                       onChange={() =>
                         setSelectedTags((current) =>
@@ -3803,7 +3936,15 @@ function OutcomeScreen({
                   </label>
                 ))}
               </div>
-              <label style={{ display: "block" }}>
+              <label
+                style={{
+                  display: "grid",
+                  gap: 6,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  color: theme.ink2,
+                }}
+              >
                 意見（最多200字）
                 <textarea
                   aria-describedby="referral-rating-comment-count"
@@ -3817,16 +3958,43 @@ function OutcomeScreen({
                     width: "100%",
                     minHeight: 80,
                     boxSizing: "border-box",
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: `1px solid ${theme.line}`,
+                    background: theme.surface,
+                    color: theme.ink,
+                    fontFamily: theme.sans,
+                    fontSize: 13.5,
+                    fontWeight: 400,
+                    lineHeight: 1.6,
+                    resize: "vertical",
                   }}
                 />
               </label>
-              <p id="referral-rating-comment-count" aria-live="polite">
+              <p
+                id="referral-rating-comment-count"
+                aria-live="polite"
+                style={{
+                  margin: "4px 0 0",
+                  fontSize: 11.5,
+                  color: theme.muted,
+                  textAlign: "right",
+                }}
+              >
                 {comment.length}/200 字
               </p>
             </fieldset>
           )}
           {(submitted?.score ?? score ?? 5) <= 2 ? (
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label
+              style={{
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                fontSize: 13,
+                color: theme.ink2,
+              }}
+            >
               {submitted?.contactRequested === null ? (
                 <span>原評分未記錄聯絡偏好</span>
               ) : (
@@ -3876,7 +4044,16 @@ function OutcomeScreen({
             />
           ) : null}
           {submitted?.complaintCaseNo ? (
-            <p role="status">
+            <p
+              role="status"
+              style={{
+                margin: 0,
+                fontSize: 12.5,
+                color: theme.ink2,
+                lineHeight: 1.6,
+                overflowWrap: "anywhere",
+              }}
+            >
               客訴案件：{submitted.complaintCaseNo}；
               {submitted.contactRequested
                 ? "同意客服聯絡"
@@ -3916,12 +4093,25 @@ function OutcomeScreen({
               marginBottom: 10,
             }}
           >
-            {trip?.status === "no_supply"
-              ? "目前無可用車輛，未產生車資，請稍後再試或重新叫車。"
-              : trip?.status === "dispatch_failed" ||
-                  trip?.status === "dispatch_timeout"
-                ? "本次派車失敗，未產生車資，請重新叫車。"
-                : `此行程已取消。${PASSENGER_FREE_CANCELLATION_NOTICE}`}
+            {(() => {
+              const hasRecordedFare =
+                typeof trip?.fareTotal === "number" &&
+                Number.isFinite(trip.fareTotal);
+              if (trip?.status === "no_supply") {
+                return hasRecordedFare
+                  ? "目前無可用車輛，本次行程費用如下所列。"
+                  : "目前無可用車輛，本次行程費用狀態未提供，請稍後再試或重新叫車。";
+              }
+              if (
+                trip?.status === "dispatch_failed" ||
+                trip?.status === "dispatch_timeout"
+              ) {
+                return hasRecordedFare
+                  ? "本次派車失敗，本次行程費用如下所列。"
+                  : "本次派車失敗，本次行程費用狀態未提供，請重新叫車。";
+              }
+              return `此行程已取消。${PASSENGER_FREE_CANCELLATION_NOTICE}`;
+            })()}
           </div>
           {trip?.status === "cancelled" ? (
             <DetailRow
@@ -3941,7 +4131,11 @@ function OutcomeScreen({
             value={
               trip?.status === "cancelled"
                 ? REFERRAL_CANCELLATION_FEE_VALUE
-                : (trip?.formattedFare ?? "—")
+                : formatTerminalFare(
+                    trip?.status,
+                    trip?.fareTotal,
+                    trip?.formattedFare,
+                  )
             }
             strong
             last
@@ -4138,6 +4332,11 @@ function FallbackTripScreen({
           </span>
         }
       />
+
+      <Banner theme={theme} tone="neutral" icon="info">
+        情境示範畫面 ·
+        以下行程編號、目的地與費用為示範資料，非您目前的真實行程。
+      </Banner>
 
       {fallback.progressStage ? (
         <Card theme={theme}>

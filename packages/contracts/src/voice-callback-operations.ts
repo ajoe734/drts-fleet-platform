@@ -5,13 +5,22 @@ import {
   type VoiceCallbackAttemptOutcome,
 } from "./unattended-voice";
 
-export const VoiceCallbackTaskIdSchema = z.string().uuid();
+/**
+ * zod v4's `.datetime()` tightened the default ISO grammar (mandatory
+ * seconds, colon-delimited range-checked offset); this reproduces the
+ * exact v3.25 grammar callers and consumers of these fields were built
+ * against (minute precision allowed, basic "+HHMM" offset accepted).
+ */
+const voiceDatetimeOffsetRegex =
+  /^((\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\d|3[01])|(0[469]|11)-(0[1-9]|[12]\d|30)|(02)-(0[1-9]|1\d|2[0-8])))T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d+)?)?(Z|([+-]\d{2}:?\d{2}))$/;
+
+export const VoiceCallbackTaskIdSchema = z.string().guid();
 export const VoiceCallbackActionKeySchema = z.string().trim().min(1).max(255);
 export const VoiceCallbackReceiptLookupSchema = z.string().min(1);
 export const VoiceCallbackQueueFilterSchema = z.object({
-  resourceScopeId: z.string().uuid(),
+  resourceScopeId: z.string().guid(),
   status: VoiceCallbackStatusSchema.optional(),
-  voiceSessionId: z.string().uuid().optional(),
+  voiceSessionId: z.string().guid().optional(),
 });
 export const VoiceContactCorrectionSchema = z
   .object({
@@ -29,11 +38,15 @@ export const VoiceCallbackCreateRequestSchema = z
     consentSnapshotHash: z.string().min(1).optional(),
     contactRevisionNumber: z.number().int().positive().optional(),
     consentRef: z.string().trim().min(1).optional(),
-    replacesTaskId: z.string().uuid().optional(),
+    replacesTaskId: z.string().guid().optional(),
     reason: z.string().optional(),
     priority: z.enum(["normal", "urgent", "emergency"]).optional(),
-    scheduledAt: z.string().datetime({ offset: true }).nullable().optional(),
-    dueAt: z.string().datetime({ offset: true }).nullable().optional(),
+    scheduledAt: z
+      .string()
+      .regex(voiceDatetimeOffsetRegex)
+      .nullable()
+      .optional(),
+    dueAt: z.string().regex(voiceDatetimeOffsetRegex).nullable().optional(),
   })
   .strict()
   .refine(
