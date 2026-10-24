@@ -35,7 +35,7 @@ env:
 
 jobs:
   real-dispatch-timeout:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The original60second reservation-offer acceptance deadline is unchanged.
     timeout-minutes: 25
     services:
