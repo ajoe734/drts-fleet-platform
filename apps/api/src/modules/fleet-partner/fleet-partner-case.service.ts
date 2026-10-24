@@ -8,6 +8,7 @@ import type {
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { CallcenterService } from "../callcenter/callcenter.service";
 import { ComplaintService } from "../complaint/complaint.service";
 import {
   FleetDocumentStorageService,
@@ -240,6 +241,7 @@ export class FleetPartnerCaseService {
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional()
     private readonly storage: FleetDocumentStorageService = new FleetDocumentStorageService(),
+    @Optional() private readonly callcenterService?: CallcenterService,
   ) {
     this.seedCases();
   }
@@ -655,12 +657,49 @@ export class FleetPartnerCaseService {
     driverName: string;
     fleetPartnerId: string;
   } | null> {
-    if (!complaint.relatedOrderId || !this.fleetPartnerService) {
+    if (!this.fleetPartnerService) {
+      return null;
+    }
+    const orderId =
+      complaint.relatedOrderId ||
+      (await this.resolveOrderIdFromRelatedCall(complaint.relatedCallId));
+    if (!orderId) {
       return null;
     }
     return this.fleetPartnerService.resolveOrderDriverFleetAttribution(
-      complaint.relatedOrderId,
+      orderId,
     );
+  }
+
+  /**
+   * A legitimate case can carry only a `relatedCallId` (no direct
+   * `relatedOrderId` of its own) while the persisted call it came from
+   * already has a canonical `linkedOrderId` — e.g. when the complaint was
+   * created through a path other than `transferCallToComplaint`'s own
+   * `command.relatedOrderId ?? session.linkedOrderId` resolution. Fall back
+   * to that call's canonical linkage rather than leaving it unattributed.
+   * A missing call/order is honest non-attribution; any other read failure
+   * propagates.
+   */
+  private async resolveOrderIdFromRelatedCall(
+    relatedCallId: string | null | undefined,
+  ): Promise<string | null> {
+    if (!relatedCallId || !this.callcenterService) {
+      return null;
+    }
+    try {
+      const session =
+        await this.callcenterService.getCallSessionForRead(relatedCallId);
+      return session.linkedOrderId ?? null;
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.code === "CALL_SESSION_NOT_FOUND"
+      ) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private async mapComplaintToFleetCase(
@@ -709,13 +748,10 @@ export class FleetPartnerCaseService {
       reopenCount: complaint.reopenCount ?? 0,
       relatedOrder: complaint.relatedOrderId,
       relatedCall: complaint.relatedCallId,
-      assignee:
-        complaint.assigneeId ||
-        (isSettlement
-          ? "—"
-          : attribution
-            ? "陳維 (ops_compliance)"
-            : "—"),
+      // A resolved fleet attribution says nothing about who is actually
+      // assigned to work the case; project the real assigneeId honestly
+      // rather than inventing a named owner when none is assigned.
+      assignee: complaint.assigneeId || "—",
       openedAt: complaint.createdAt,
       updatedAt: complaint.updatedAt,
       actionDescriptor: {
@@ -828,8 +864,11 @@ export class FleetPartnerCaseService {
           "function"
             ? await this.complaintService.getComplaintTimelineForOps(
                 caseItem.caseNo,
+                { includeAttachmentManifest: true },
               )
-            : this.complaintService.getComplaintTimeline(caseItem.caseNo);
+            : this.complaintService.getComplaintTimeline(caseItem.caseNo, {
+                includeAttachmentManifest: true,
+              });
         for (const entry of compTl) {
           const exists = tl.some((t) => t.entryId === entry.entryId);
           if (
@@ -853,7 +892,12 @@ export class FleetPartnerCaseService {
                   : isFleetReply
                     ? "車行回覆"
                     : "評論",
-              actor: isFleetReply ? "車行負責人" : "陳維",
+              // The canonical ComplaintTimelineEntry contract has no
+              // per-note actor field; the case's real current assignee is
+              // the same honest signal already used as this action's audit
+              // actorId (see addComplaintCaseNoteInternal). Project that
+              // instead of inventing a named ops owner.
+              actor: isFleetReply ? "車行負責人" : caseItem.assignee,
               actorRealm: isFleetReply ? "tenant" : "ops",
               body,
               ...(attachments.length ? { attachments } : {}),

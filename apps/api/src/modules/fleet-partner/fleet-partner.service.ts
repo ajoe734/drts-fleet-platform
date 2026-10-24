@@ -1121,6 +1121,12 @@ export class FleetPartnerService implements OnModuleInit {
           // must not be disguised as an unattributed case.
           throw error;
         }
+        // prepareOrderAction throws ORDER_NOT_FOUND before replacing any
+        // cached task/assignment rows for this order, so an authoritative
+        // "absent" leaves a possibly-stale local cache untouched. Honor the
+        // authoritative absence directly rather than falling through to
+        // that stale cache, which could still name a driver/fleet.
+        return null;
       }
     }
 
