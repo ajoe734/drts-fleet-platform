@@ -675,6 +675,15 @@ export class BillingSettlementService implements OnModuleInit {
 
   private driverFeePlans: DriverFeePlanRecord[] = [];
 
+  // A publish in flight on this instance registers its name/version here
+  // before awaiting the canonical refresh and persistence ACK. Without this,
+  // a second same-instance publish of the same name/version that starts
+  // while the first is still pending would refresh `driverFeePlans` from a
+  // canonical source that does not yet contain the first write, miss the
+  // duplicate-version check against the (now overwritten) in-memory list,
+  // and reach persistence a second time.
+  private readonly pendingDriverFeePlanPublications = new Set<string>();
+
   private driverStatements: DriverStatementRecord[] = [];
 
   private reimbursementBatches: ReimbursementBatchRecord[] = [];
@@ -2037,12 +2046,13 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.planName, "planName");
     this.assertNonBlank(command.version, "version");
 
-    await this.refreshDriverFeePlansFromCanonicalSource();
-    const duplicatePlan = this.driverFeePlans.find(
-      (plan) =>
-        plan.planName === command.planName && plan.version === command.version,
-    );
-    if (duplicatePlan) {
+    // Registered before the canonical refresh/ACK so a same-instance
+    // duplicate publish that starts while this one is still pending is
+    // rejected immediately, instead of racing a refresh that would
+    // overwrite `driverFeePlans` with a pre-ACK canonical snapshot and miss
+    // the in-memory duplicate-version check below.
+    const pendingPublicationKey = `${command.planName}::${command.version}`;
+    if (this.pendingDriverFeePlanPublications.has(pendingPublicationKey)) {
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "FEE_PLAN_IMMUTABLE",
@@ -2053,45 +2063,67 @@ export class BillingSettlementService implements OnModuleInit {
         },
       );
     }
+    this.pendingDriverFeePlanPublications.add(pendingPublicationKey);
+    try {
+      await this.refreshDriverFeePlansFromCanonicalSource();
+      const duplicatePlan = this.driverFeePlans.find(
+        (plan) =>
+          plan.planName === command.planName &&
+          plan.version === command.version,
+      );
+      if (duplicatePlan) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "FEE_PLAN_IMMUTABLE",
+          "Published driver fee plan versions are immutable.",
+          {
+            planName: command.planName,
+            version: command.version,
+          },
+        );
+      }
 
-    const feePlan: DriverFeePlanRecord = {
-      feePlanId: `fee-plan-${randomUUID()}`,
-      planName: command.planName,
-      version: command.version,
-      serviceFeeBps: command.serviceFeeBps,
-      reimbursementMode: command.reimbursementMode,
-      status: "published",
-      publishedAt: new Date().toISOString(),
-    };
+      const feePlan: DriverFeePlanRecord = {
+        feePlanId: `fee-plan-${randomUUID()}`,
+        planName: command.planName,
+        version: command.version,
+        serviceFeeBps: command.serviceFeeBps,
+        reimbursementMode: command.reimbursementMode,
+        status: "published",
+        publishedAt: new Date().toISOString(),
+      };
 
-    this.driverFeePlans = [{ ...feePlan }, ...this.driverFeePlans];
-    await this.persistChanges(
-      {
-        driverFeePlans: [{ ...feePlan }],
-      },
-      "publish_driver_fee_plan",
-    );
-    this.recordAudit(
-      {
-        actorId: null,
-        actorType: "platform_admin",
-        tenantId: null,
-        moduleName: "billing-settlement",
-        actionName: "publish_driver_fee_plan",
-        resourceType: "driver_fee_plan",
-        resourceId: feePlan.feePlanId,
-        newValuesSummary: {
-          version: feePlan.version,
-          serviceFeeBps: feePlan.serviceFeeBps,
-          reimbursementMode: feePlan.reimbursementMode,
+      this.driverFeePlans = [{ ...feePlan }, ...this.driverFeePlans];
+      await this.persistChanges(
+        {
+          driverFeePlans: [{ ...feePlan }],
         },
-      },
-      requestId,
-    );
+        "publish_driver_fee_plan",
+      );
+      this.recordAudit(
+        {
+          actorId: null,
+          actorType: "platform_admin",
+          tenantId: null,
+          moduleName: "billing-settlement",
+          actionName: "publish_driver_fee_plan",
+          resourceType: "driver_fee_plan",
+          resourceId: feePlan.feePlanId,
+          newValuesSummary: {
+            version: feePlan.version,
+            serviceFeeBps: feePlan.serviceFeeBps,
+            reimbursementMode: feePlan.reimbursementMode,
+          },
+        },
+        requestId,
+      );
 
-    return {
-      ...feePlan,
-    };
+      return {
+        ...feePlan,
+      };
+    } finally {
+      this.pendingDriverFeePlanPublications.delete(pendingPublicationKey);
+    }
   }
 
   listDriverFeePlans() {

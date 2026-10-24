@@ -291,6 +291,107 @@ describe("C125-F1: canonical driver fee plan readback across already-warm API in
   });
 });
 
+describe("C125-F1: same-instance pending-publication immutability", () => {
+  it("rejects a same name/version publish that arrives while an earlier publish's persistence ACK is still pending, without a second canonical write", async () => {
+    const store = createCanonicalStore();
+    const publishWrites: Array<Record<string, unknown>>[] = [];
+    const firstPersistStarted = (() => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    })();
+    const releasePersist = (() => {
+      let resolve!: () => void;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    })();
+    let firstWriteObserved = false;
+
+    const auditService = new AuditNotificationService();
+    const repository = {
+      isEnabled: () => true,
+      loadState: async () => ({
+        tenantBillingProfiles: [],
+        tenantInvoices: [],
+        driverFeePlans: store.feePlans.map((plan) => ({ ...plan })),
+        driverStatements: [],
+        reimbursementBatches: [],
+        reconciliationIssues: [],
+        fulfillmentSegments: [],
+        sandboxBillingTreatments: [],
+      }),
+      // While the first publish's persistence ACK is held pending, a
+      // canonical read reflects what has actually committed so far: nothing.
+      // This is what used to let a same-instance duplicate publish's refresh
+      // overwrite `driverFeePlans` and miss the first publish's own
+      // not-yet-committed in-memory entry.
+      loadDriverFeePlans: async () =>
+        store.feePlans.map((plan) => ({ ...plan })),
+      persistChanges: async (changes: {
+        driverFeePlans?: ReadonlyArray<Record<string, unknown>>;
+      }) => {
+        if (changes.driverFeePlans?.length) {
+          publishWrites.push(changes.driverFeePlans.map((plan) => ({ ...plan })));
+          if (!firstWriteObserved) {
+            firstWriteObserved = true;
+            firstPersistStarted.resolve();
+            await releasePersist.promise;
+          }
+          for (const plan of changes.driverFeePlans) {
+            store.feePlans = [{ ...plan }, ...store.feePlans];
+          }
+        }
+      },
+      reportPersistenceFailure: vi.fn(),
+    } as unknown as BillingSettlementRepository;
+
+    const service = new BillingSettlementService(auditService, repository);
+    await service.onModuleInit();
+
+    const command = {
+      planName: "Pending Publication Control",
+      version: "pending-publication-v1",
+      serviceFeeBps: 1000,
+      reimbursementMode: "platform_funded" as const,
+    };
+
+    const first = service.publishDriverFeePlan(command).then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    await firstPersistStarted.promise;
+
+    // The second publish of the exact same name/version starts here, while
+    // the first is still awaiting its persistence ACK inside persistChanges.
+    const second = await service
+      .publishDriverFeePlan({ ...command, serviceFeeBps: 2000 })
+      .then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
+    releasePersist.resolve();
+    const first_ = await first;
+
+    expect(first_.status).toBe("fulfilled");
+    expect(second.status).toBe("rejected");
+    if (second.status === "rejected") {
+      const response = (
+        second.error as {
+          getResponse?: () => { error?: { code?: string } };
+        }
+      ).getResponse?.();
+      expect(response?.error?.code).toBe("FEE_PLAN_IMMUTABLE");
+    }
+    // Only the first publish ever reached the external persistence adapter.
+    expect(publishWrites).toHaveLength(1);
+    expect(store.feePlans).toHaveLength(1);
+  });
+});
+
 describe("C125-F1: a failed canonical fee-plan read must not fall through to a stale financial decision", () => {
   it("refreshDriverFeePlansFromCanonicalSource propagates the read failure instead of resolving silently", async () => {
     const store = createCanonicalStore();

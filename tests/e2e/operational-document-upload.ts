@@ -2940,10 +2940,39 @@ export async function resolveOperationalEditableCase(
       redirect: "manual",
       signal: AbortSignal.timeout(30_000),
     });
-    expect(
-      [200, 201].includes(disputeResponse.status),
-      `POST statement dispute ${disputeUrl} must succeed, got ${disputeResponse.status}`,
-    ).toBe(true);
+    if (![200, 201].includes(disputeResponse.status)) {
+      const disputeRawBody = await disputeResponse.text();
+      let disputeErrorCode: string | undefined;
+      let disputeErrorMessage: string | undefined;
+      try {
+        const parsedDisputeError = JSON.parse(disputeRawBody) as {
+          error?: { code?: string; message?: string };
+          code?: string;
+          message?: string;
+        };
+        disputeErrorCode = parsedDisputeError?.error?.code ?? parsedDisputeError?.code;
+        disputeErrorMessage =
+          parsedDisputeError?.error?.message ?? parsedDisputeError?.message;
+      } catch {
+        // Non-JSON error body; the status code remains the only signal.
+      }
+      // STATEMENT_DECISION_CONFLICT means this statement already carries a
+      // different decision (e.g. a previously confirmed period) and is not
+      // eligible for a new dispute; that is an expected outcome of trying a
+      // real, already-decided period, not a setup failure, so fall through
+      // to the next candidate period instead of aborting the whole helper.
+      if (
+        disputeResponse.status === 409 &&
+        disputeErrorCode === "STATEMENT_DECISION_CONFLICT"
+      ) {
+        continue;
+      }
+      throw new Error(
+        `POST statement dispute ${disputeUrl} must succeed, got ${disputeResponse.status}` +
+          (disputeErrorCode ? ` code=${disputeErrorCode}` : "") +
+          (disputeErrorMessage ? ` message=${disputeErrorMessage}` : ""),
+      );
+    }
     expectCandidateRevision(
       disputeResponse.headers,
       `POST statement dispute ${disputeUrl}`,
