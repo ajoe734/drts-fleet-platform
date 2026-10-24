@@ -21,7 +21,6 @@ import { PartnerNotificationDispatchFacade } from "./partner-notification-dispat
 import { PartnerUserIdentityLinkRepository } from "./partner-user-identity-link.repository";
 import { PartnerNotificationNavigationRepository } from "./partner-notification-navigation.repository";
 import { ReferralEmbedHandoffRepository } from "./referral-embed-handoff.repository";
-import { ReferralChannelScaffoldService } from "./referral-channel.scaffold.service";
 import { TenantPartnerController } from "./tenant-partner.controller";
 import { TenantPartnerRepository } from "./tenant-partner.repository";
 import { TenantInvitationDeliveryService } from "./tenant-invitation-delivery.service";
@@ -68,7 +67,6 @@ export function createTenantInvitationNotificationDeliveryService(
     PartnerUserIdentityLinkRepository,
     ReferralEmbedHandoffRepository,
     PartnerNotificationNavigationRepository,
-    ReferralChannelScaffoldService,
     WebhookDispatchService,
     PartnerNotificationDispatchFacade,
     PartnerEntryNotificationBindingRepository,
@@ -97,7 +95,6 @@ export function createTenantInvitationNotificationDeliveryService(
     PartnerUserIdentityLinkRepository,
     ReferralEmbedHandoffRepository,
     PartnerNotificationNavigationRepository,
-    ReferralChannelScaffoldService,
     PartnerNotificationDispatchFacade,
   ],
 })
