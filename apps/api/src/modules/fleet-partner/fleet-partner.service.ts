@@ -1088,6 +1088,71 @@ export class FleetPartnerService implements OnModuleInit {
       )[0];
   }
 
+  /**
+   * Resolves the actual fleet-partner attribution for an ordinary complaint
+   * from its real source order: order -> driver (owned-mobility dispatch
+   * assignment/driver task) -> fleet (driver-fleet affiliation effective at
+   * `asOf`). Returns null when the order, driver, or a current affiliation
+   * cannot be established — callers must treat that as unattributed rather
+   * than guessing a fleet.
+   */
+  resolveOrderDriverFleetAttribution(
+    orderId: string | null | undefined,
+    asOf: string,
+  ): { driverId: string; driverName: string; fleetPartnerId: string } | null {
+    if (!orderId) {
+      return null;
+    }
+
+    const driverId = this.resolveOrderDriverId(orderId);
+    if (!driverId) {
+      return null;
+    }
+
+    const affiliation = this.resolveAffiliation(driverId, asOf);
+    if (!affiliation) {
+      return null;
+    }
+
+    const driverRecord = this.regulatoryRegistryService
+      .listDrivers()
+      .find((driver) => driver.driverId === driverId);
+
+    return {
+      driverId,
+      driverName: driverRecord?.name ?? driverId,
+      fleetPartnerId: affiliation.fleetPartnerId,
+    };
+  }
+
+  private resolveOrderDriverId(orderId: string): string | null {
+    const activeTask = this.ownedMobilityService
+      .getDriverTasksForOrder(orderId)
+      .filter(
+        (task) => task.status !== "cancelled" && task.status !== "rejected",
+      )
+      .at(-1);
+    if (activeTask) {
+      return activeTask.driverId;
+    }
+
+    const assignment =
+      this.ownedMobilityService.getActiveDispatchAssignmentForOrder(
+        orderId,
+      ) ??
+      this.ownedMobilityService
+        .getDispatchAssignmentsForOrder(orderId)
+        .filter(
+          (candidate) =>
+            candidate.status !== "rejected" &&
+            candidate.status !== "cancelled",
+        )
+        .at(-1) ??
+      null;
+
+    return assignment?.driverId ?? null;
+  }
+
   private matchRevenueShareRule(
     affiliation: DriverFleetAffiliationRecord,
     trip: BillingSettlementTripRecord,
