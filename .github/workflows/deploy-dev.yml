@@ -998,7 +998,13 @@ jobs:
           optional_group facebook FACEBOOK_APP_ID FACEBOOK_APP_SECRET
           optional_group otp PASSENGER_OTP_PEPPER
           optional_group sms SMS_PROVIDER_API_KEY SMS_PROVIDER_SENDER_ID PASSENGER_OTP_PEPPER
-          optional_group payment PSP_MERCHANT_ID PSP_API_KEY PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
+          if gcloud secrets describe "${SECRET_PREFIX}-psp-hash-key" --project "$PROJECT_ID" >/dev/null 2>&1 \
+            || gcloud secrets describe "${SECRET_PREFIX}-psp-hash-iv" --project "$PROJECT_ID" >/dev/null 2>&1 \
+            || ! gcloud secrets describe "${SECRET_PREFIX}-psp-api-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            optional_group payment PSP_MERCHANT_ID PSP_HASH_KEY PSP_HASH_IV PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
+          else
+            optional_group payment PSP_MERCHANT_ID PSP_API_KEY PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
+          fi
           # The current BFF does not consume a cookie encryption/signing key.
           # Do not declare a secret until its reader and contract exist.
           # OTP pepper is shared by email and SMS. Keep one reference per slot.
@@ -1113,6 +1119,8 @@ jobs:
           )"
             env_vars="${env_vars}${review_simulation_env}"
             env_vars="${env_vars}@PSP_PROVIDER=fake@PAX_PAYMENT_CAPTURE_ENABLED=true@PAX_PAYMENT_CAPTURE_POLICY={\"retryDelaysMs\":[60000],\"retryDefinitiveDeclines\":false,\"unknownReadbackDelaysMs\":[1000,3000]}@MULTI_TAXI_DEFAULT_AUTHORIZATION_ID=bc39e4f3-72d8-4383-bdc1-2426c1330dfa@PAX_REVIEW_OPS_URL=${{ needs.prepare.outputs.ops_console_origin }}/review@SCHEDULED_BOOKING_MIN_LEAD_TIME_MINUTES=1"
+          elif [[ "${{ steps.passenger_secrets.outputs.payment_mounts_complete }}" == "true" ]]; then
+            env_vars="${env_vars}@PSP_PROVIDER=ecpay@PAX_PAYMENT_CAPTURE_ENABLED=true@PAX_PAYMENT_CAPTURE_POLICY={\"retryDelaysMs\":[60000],\"retryDefinitiveDeclines\":false,\"unknownReadbackDelaysMs\":[1000,3000]}"
           fi
           if [[ "${{ steps.api_secrets.outputs.oidc_enabled }}" == "true" ]]; then
             tenant_login_origin="${{ needs.prepare.outputs.tenant_console_origin }}"

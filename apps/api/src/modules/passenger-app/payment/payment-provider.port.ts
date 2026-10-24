@@ -25,6 +25,12 @@ export type BindResult =
   | { status: "pending" }
   | { status: "failed"; error: "card_declined" | "invalid_credential" };
 
+export type PaymentBindResult = BindResult;
+
+export interface PaymentBindContext {
+  passengerId?: string;
+}
+
 /** An unacknowledged request is unknown, not declined and not captured. */
 export type MoneyResult =
   | { status: "completed"; providerRef: string }
@@ -47,6 +53,8 @@ export interface CaptureCommand {
   attemptCount?: number;
 }
 
+export type PaymentCaptureCommand = CaptureCommand;
+
 export interface RefundCommand {
   idempotencyKey: string;
   captureRef: string;
@@ -54,11 +62,42 @@ export interface RefundCommand {
   currency: "TWD";
 }
 
+export type PaymentRefundCommand = RefundCommand;
+
 export interface PaymentProviderPort {
   readonly name: string;
   readonly available: boolean;
   readonly captureAttemptMetadata?: boolean;
-  bind(credential: string, idempotencyKey: string): Promise<BindResult>;
+  bind(
+    credential: string,
+    idempotencyKey: string,
+    context?: PaymentBindContext,
+  ): Promise<BindResult>;
+  createBindingSession?(
+    passengerId: string,
+    options?: {
+      idempotencyKey?: string;
+      returnUrl?: string;
+      orderResultUrl?: string;
+    },
+  ): Promise<{
+    provider: "ecpay";
+    merchantToken: string;
+    tokenExpireDate: string;
+    sandbox: boolean;
+    serverType: "Stage" | "Prod";
+    sdkScriptUrl: string;
+    approvedActionOrigins: readonly string[];
+  }>;
+  verifyNotification?(envelope: unknown): {
+    kind: "bind" | "payment";
+    rtnCode: number;
+    rtnMsg: string;
+    merchantTradeNo: string | null;
+    tradeNo: string | null;
+    bindResult?: BindResult;
+    paymentResult?: MoneyResult;
+  };
   capture(command: CaptureCommand): Promise<MoneyResult>;
   readCapture(idempotencyKey: string): Promise<MoneyResult>;
   refund(command: RefundCommand): Promise<MoneyResult>;

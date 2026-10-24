@@ -28,5 +28,12 @@ export function paymentCapturePolicyFromEnv(
   }
   if (!runtime.provider.available || !runtime.cipher)
     throw new Error("payment_capture_configuration_unavailable");
-  return value as PaymentCapturePolicy;
+  const validated = value as PaymentCapturePolicy;
+  if (
+    runtime.provider.name === "ecpay" &&
+    validated.retryDefinitiveDeclines
+  ) {
+    throw new Error("payment_capture_configuration_invalid");
+  }
+  return validated;
 }
