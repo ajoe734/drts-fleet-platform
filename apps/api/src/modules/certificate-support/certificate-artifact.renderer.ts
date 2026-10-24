@@ -1,3 +1,7 @@
+import {
+  E04_CERTIFICATE_FIELD_LABELS as LABELS,
+  formatE04MaskedSurname as formatMaskedSurname,
+} from "@drts/contracts";
 import type {
   CertificateArtifact,
   CertificateSupportView,
@@ -119,10 +123,10 @@ function certificateRows(
     certificate.actualFareBreakdown ?? certificate.e04Snapshot?.fareBreakdown;
   return [
     ["訂單 / 行程", `${certificate.orderId} / ${value(certificate.tripId)}`],
-    ["車牌", value(certificate.plateNo)],
+    [LABELS.plateNo, value(certificate.plateNo)],
     ...(certificate.e04Snapshot
       ? ([
-          ["車隊／派遣業者", certificate.e04Snapshot.fleetOperatorName],
+          [LABELS.fleetOperatorName, certificate.e04Snapshot.fleetOperatorName],
           [
             "駕駛（姓氏＋執登證號遮碼）",
             `${formatMaskedSurname(certificate.e04Snapshot.driverSurname)} ${certificate.e04Snapshot.driverRegistrationMasked}`,
@@ -142,10 +146,10 @@ function certificateRows(
           ],
         ] as Array<[string, string]>)
       : []),
-    ["上車時間", value(certificate.pickupAt)],
-    ["下車時間", value(certificate.dropoffAt)],
+    [LABELS.pickupAt, value(certificate.pickupAt)],
+    [LABELS.dropoffAt, value(certificate.dropoffAt)],
     ["行駛時間（秒）", value(certificate.travelDurationSeconds)],
-    ["路線", value(certificate.routeSummary)],
+    [LABELS.routeSummary, value(certificate.routeSummary)],
     ["里程（公尺）", value(certificate.distanceMeters)],
     [
       "車資",
@@ -157,17 +161,20 @@ function certificateRows(
     ],
     ...(fareBreakdown
       ? ([
-          ["起程", money(fareBreakdown.startMinor, certificate.currency, true)],
           [
-            "續程",
+            LABELS.fareStart,
+            money(fareBreakdown.startMinor, certificate.currency, true),
+          ],
+          [
+            LABELS.fareDistance,
             money(fareBreakdown.distanceMinor, certificate.currency, true),
           ],
           [
-            "延滯計時",
+            LABELS.fareDelay,
             money(fareBreakdown.delayMinor, certificate.currency, true),
           ],
           [
-            "夜間加成",
+            LABELS.fareNight,
             money(fareBreakdown.nightMinor, certificate.currency, true),
           ],
         ] as Array<[string, string]>)
@@ -175,10 +182,10 @@ function certificateRows(
     ...(certificate.e04Snapshot
       ? ([
           [
-            "車資合計",
+            LABELS.fareTotal,
             money(certificate.fareMinor, certificate.currency, true),
           ],
-          ["支付方式", certificate.e04Snapshot.paymentMethodDisplay],
+          [LABELS.paymentMethod, certificate.e04Snapshot.paymentMethodDisplay],
         ] as Array<[string, string]>)
       : []),
     [
@@ -189,25 +196,17 @@ function certificateRows(
         Boolean(certificate.e04Snapshot),
       ),
     ],
-    ["客服電話", value(certificate.consumerServicePhone)],
-    ["主管機關申訴電話", value(certificate.authorityComplaintPhone)],
+    [LABELS.consumerServicePhone, value(certificate.consumerServicePhone)],
+    [
+      LABELS.authorityComplaintPhone,
+      value(certificate.authorityComplaintPhone),
+    ],
     ["簽發時間", certificate.issuedAt],
   ];
 }
 
 function value(input: string | number | null) {
   return input === null || input === "" ? "未取得" : String(input);
-}
-
-const ALREADY_MASKED_SUFFIXES = ["○○", "**", "＊＊"];
-
-/** Fixed-length public redaction; not a claim about the real surname length. */
-function formatMaskedSurname(surname: string): string {
-  const trimmed = surname.trim();
-  if (!trimmed) return trimmed;
-  return ALREADY_MASKED_SUFFIXES.some((suffix) => trimmed.endsWith(suffix))
-    ? trimmed
-    : `${trimmed}○○`;
 }
 
 function money(input: number | null, currency: string, exact = false) {

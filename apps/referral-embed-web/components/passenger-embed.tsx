@@ -9,6 +9,8 @@ import {
   PASSENGER_FEE_CONTENT_HASH,
   PASSENGER_FEE_ROWS,
   PASSENGER_FREE_CANCELLATION_NOTICE,
+  REFERRAL_RECEIPT_MISSING_VALUE,
+  buildReferralReceiptE04Fields,
   type ReferralFeeStatus,
 } from "@drts/contracts";
 import { ReferralComplaintPanel } from "./referral-complaint-panel";
@@ -3345,8 +3347,8 @@ function ReceiptScreen({
             liveData.receipt.vehicleType,
             liveData.receipt.quote?.vehicleType,
           ),
-          driver: liveData.receipt.driverName || "資料未提供",
-          plate: liveData.receipt.plateNumber || "待更新",
+          driver: liveData.receipt.driverName || REFERRAL_RECEIPT_MISSING_VALUE,
+          plate: liveData.receipt.plateNumber || REFERRAL_RECEIPT_MISSING_VALUE,
           passenger: liveData.receipt.passengerNameMasked,
           maskedPhone: liveData.receipt.passengerPhoneMasked,
           fareBase: formatFare(liveData.receipt.fareBase),
@@ -3358,6 +3360,7 @@ function ReceiptScreen({
           payment: liveData.receipt.paymentChannel,
           channel: context.strings.appName,
           downloadUrl: liveData.receipt.downloadUrl,
+          e04Fields: buildReferralReceiptE04Fields(liveData.receipt),
         }
       : null;
   if (!receipt) {
@@ -3505,6 +3508,23 @@ function ReceiptScreen({
           <Banner theme={theme} tone="neutral" icon="building">
             {receipt.payment} · 經 {receipt.channel}
           </Banner>
+        </div>
+      </Card>
+      <Card
+        theme={theme}
+        title="E-04 乘車證明欄位"
+        subtitle="依實際行程紀錄；未核發或無資料者顯示未提供"
+      >
+        <div data-drt-receipt-e04="">
+          {receipt.e04Fields.map((field, index) => (
+            <DetailRow
+              key={field.key}
+              theme={theme}
+              label={field.label}
+              value={field.value}
+              last={index === receipt.e04Fields.length - 1}
+            />
+          ))}
         </div>
       </Card>
       <ReferralReceiptDocumentActions

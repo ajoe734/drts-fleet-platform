@@ -16949,6 +16949,7 @@ export class OwnedMobilityService
     const fareNight = hasComponents ? captured.nightMinor / 100 : null;
     const completedAt = (order as unknown as Record<string, unknown>)
       .completedAt as string | undefined;
+    const e04 = await this.referralReceiptE04Facts(order, details.task);
 
     return {
       orderId: order.orderId,
@@ -16975,6 +16976,84 @@ export class OwnedMobilityService
       feeConfirmation:
         order.referralPassengerLifecycle?.feeConfirmation ?? null,
       downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
+      ...e04,
+    };
+  }
+
+  /**
+   * E-04 fields for the informal Referral receipt, read from the same
+   * completed task, registry, operator and payment-method authorities that
+   * `captureMultiTaxiE04` uses. Read-only: this never issues a certificate,
+   * persists a snapshot or asserts payment. Absent authority stays null.
+   */
+  private async referralReceiptE04Facts(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord | undefined,
+  ): Promise<
+    Pick<
+      ReferralPassengerReceipt,
+      | "fleetOperatorName"
+      | "driverSurname"
+      | "driverSurnameSource"
+      | "driverRegistrationMasked"
+      | "pickupAt"
+      | "dropoffAt"
+      | "distanceMeters"
+      | "paymentMethodDisplay"
+      | "certificateNo"
+    >
+  > {
+    const completed = task?.status === "completed" ? task : undefined;
+    const instant = (value: string | null | undefined) =>
+      value && Number.isFinite(Date.parse(value)) ? value : null;
+    const operatorId = order.operatingAuthorizationId
+      ? await this.receiptRegistryRepository?.findCompletionOperatorId(
+          order.operatingAuthorizationId,
+        )
+      : null;
+    const fleetOperatorName = operatorId
+      ? await this.receiptFleetRepository?.findReceiptOperatorName(operatorId)
+      : null;
+    const paymentMethodDisplay = order.passenger?.passengerId
+      ? await this.receiptPaymentMethods?.getReceiptDisplay(
+          order.passenger.passengerId,
+          order.paymentMethodTokenRef,
+        )
+      : null;
+    const identity =
+      completed?.driverId &&
+      this.regulatoryRegistryService.getDriverCompletionReceiptIdentity
+        ? await this.regulatoryRegistryService.getDriverCompletionReceiptIdentity(
+            completed.driverId,
+          )
+        : null;
+    // The completion-time snapshot on the task wins over the live profile.
+    const surname = completed?.driverSurname?.trim()
+      ? {
+          driverSurname: completed.driverSurname,
+          driverSurnameSource: completed.driverSurnameSource ?? null,
+        }
+      : identity?.surname
+        ? {
+            driverSurname: identity.surname.driverSurname,
+            driverSurnameSource: identity.surname.driverSurnameSource,
+          }
+        : { driverSurname: null, driverSurnameSource: null };
+    const km = completed?.actualDistanceKm;
+    return {
+      fleetOperatorName: fleetOperatorName ?? null,
+      ...surname,
+      driverRegistrationMasked: identity?.driverRegistrationMasked ?? null,
+      pickupAt: instant(completed?.startedAt),
+      dropoffAt: instant(completed?.completedAt),
+      distanceMeters:
+        typeof km === "number" && Number.isFinite(km) && km >= 0
+          ? Math.round(km * 1000)
+          : null,
+      paymentMethodDisplay: paymentMethodDisplay ?? null,
+      // Formal E-04 issuance is multi_taxi_direct only and is not reachable
+      // from this projection; an order number is never presented as one.
+      certificateNo: null,
     };
   }
 
