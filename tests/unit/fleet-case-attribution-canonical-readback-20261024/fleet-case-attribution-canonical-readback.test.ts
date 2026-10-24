@@ -6,9 +6,11 @@ import type {
   DriverFleetAffiliationRecord,
   FleetPartnerRecord,
 } from "@drts/contracts";
+import { ApiRequestError } from "../../../apps/api/src/common/api-envelope";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { ComplaintRepository } from "../../../apps/api/src/modules/complaint/complaint.repository";
+import type { CallcenterService } from "../../../apps/api/src/modules/callcenter/callcenter.service";
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { buildSettlementDisputeCase } from "../../../apps/api/src/modules/complaint/settlement-dispute";
 import type { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
@@ -38,7 +40,14 @@ type FakeTask = { driverId: string; status?: string; completedAt?: string };
  * process's own cache. */
 function fakeOwnedMobilityService(
   tasksByOrder: Record<string, FakeTask>,
-  opts: { hydratedTasksByOrder?: Record<string, FakeTask> } = {},
+  opts: {
+    hydratedTasksByOrder?: Record<string, FakeTask>;
+    // Orders the authoritative canonical source reports as genuinely
+    // absent: prepareOrderAction throws ORDER_NOT_FOUND for these, same as
+    // the real OwnedMobilityService does, without touching `tasksByOrder`
+    // -- standing in for a stale local entry the real fix must not trust.
+    absentOrderIds?: readonly string[];
+  } = {},
 ): OwnedMobilityService & { prepareOrderActionCalls: string[] } {
   const hydrated = new Map<string, FakeTask>();
   const prepareOrderActionCalls: string[] = [];
@@ -62,6 +71,9 @@ function fakeOwnedMobilityService(
     getDispatchAssignmentsForOrder: () => [],
     prepareOrderAction: async ({ orderId }: { orderId: string }) => {
       prepareOrderActionCalls.push(orderId);
+      if (opts.absentOrderIds?.includes(orderId)) {
+        throw new ApiRequestError(404, "ORDER_NOT_FOUND", "Order was not found.");
+      }
       const pending = opts.hydratedTasksByOrder?.[orderId];
       if (pending) hydrated.set(orderId, pending);
     },
@@ -74,6 +86,28 @@ function fakeRegistryService(
   return {
     listDrivers: () => drivers,
   } as unknown as RegulatoryRegistryService;
+}
+
+/** Stands in for the persisted Callcenter call session a complaint's
+ * `relatedCallId` points to, carrying that call's own canonical
+ * `linkedOrderId` -- independent of whatever `relatedOrderId` (if any) the
+ * complaint itself was created with. */
+function fakeCallcenterService(
+  sessionsByCallId: Record<string, { linkedOrderId: string | null }>,
+): CallcenterService {
+  return {
+    getCallSessionForRead: async (callId: string) => {
+      const session = sessionsByCallId[callId];
+      if (!session) {
+        throw new ApiRequestError(
+          404,
+          "CALL_SESSION_NOT_FOUND",
+          "Call session was not found.",
+        );
+      }
+      return session;
+    },
+  } as unknown as CallcenterService;
 }
 
 /** Shared, in-memory stand-in for the durable `admin.phase1_fleet_partners`
@@ -179,6 +213,7 @@ function sharedComplaintRepository(): ComplaintRepository {
 async function buildFleetPartnerService(opts: {
   tasksByOrder: Record<string, FakeTask>;
   hydratedTasksByOrder?: Record<string, FakeTask>;
+  absentOrderIds?: readonly string[];
   drivers: ReadonlyArray<{ driverId: string; name: string }>;
   affiliations: ReadonlyArray<{
     driverId: string;
@@ -188,12 +223,14 @@ async function buildFleetPartnerService(opts: {
   }>;
   fleetPartnerRepository?: FleetPartnerRepository;
 }) {
-  const mobility = fakeOwnedMobilityService(
-    opts.tasksByOrder,
-    opts.hydratedTasksByOrder !== undefined
+  const mobility = fakeOwnedMobilityService(opts.tasksByOrder, {
+    ...(opts.hydratedTasksByOrder !== undefined
       ? { hydratedTasksByOrder: opts.hydratedTasksByOrder }
-      : {},
-  );
+      : {}),
+    ...(opts.absentOrderIds !== undefined
+      ? { absentOrderIds: opts.absentOrderIds }
+      : {}),
+  });
   const service = new FleetPartnerService(
     new BillingSettlementService(new AuditNotificationService()),
     mobility,
@@ -292,6 +329,10 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
           responsibility: "fleet",
         }),
       ]);
+      // A real fleet attribution says nothing about who is actually
+      // assigned to work the case; neither case has an assigneeId, so
+      // both must honestly show unassigned rather than a fabricated name.
+      expect(fleetAList[0]!.assignee).toBe("—");
       // Old defect: both cases were hardcoded to "METRO_FLEET"/"drv-affiliated"
       // and the list never filtered ordinary complaints by fleet at all.
       expect(fleetAList.some((item) => item.caseNo === caseB.caseNo)).toBe(
@@ -316,6 +357,129 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
       await expect(cases.getCaseDetail(fleetBId, caseA.caseNo)).rejects.toMatchObject(
         { code: "CASE_NOT_FLEET_SCOPED" },
       );
+    });
+
+    it("resolves a call-only complaint's fleet attribution through its persisted call's own canonical order linkage, when the complaint itself has no direct related order", async () => {
+      const { service: fleetPartnerService, fleetIdByDisplayName } =
+        await buildFleetPartnerService({
+          tasksByOrder: { "ord-from-call": { driverId: "drv-call" } },
+          drivers: [{ driverId: "drv-call", name: "司機庚" }],
+          affiliations: [
+            {
+              driverId: "drv-call",
+              fleetDisplayName: "Fleet Call",
+              effectiveFrom: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        });
+      const fleetId = fleetIdByDisplayName.get("Fleet Call")!;
+
+      const complaints = new ComplaintService(new AuditNotificationService());
+      const callOnlyCase = complaints.createComplaintCase({
+        caseSource: "phone",
+        relatedCallId: "call-001",
+        category: "driver_service",
+        severity: "normal",
+        description: "來電申訴，案件本身未直接記錄 order",
+      }) as ComplaintCaseRecord;
+      expect(callOnlyCase.relatedOrderId).toBeNull();
+
+      const callcenterService = fakeCallcenterService({
+        "call-001": { linkedOrderId: "ord-from-call" },
+      });
+      const { storage } = fleetStorageFixture();
+      const cases = new FleetPartnerCaseService(
+        complaints,
+        fleetPartnerService,
+        undefined,
+        storage,
+        callcenterService,
+      );
+
+      const list = await cases.listCases(fleetId);
+      expect(list).toEqual([
+        expect.objectContaining({
+          caseNo: callOnlyCase.caseNo,
+          driverId: "drv-call",
+          fleetPartnerId: fleetId,
+          responsibility: "fleet",
+        }),
+      ]);
+    });
+
+    it("leaves a call-only complaint unattributed when neither it nor its persisted call has any canonical order linkage", async () => {
+      const { service: fleetPartnerService } = await buildFleetPartnerService({
+        tasksByOrder: {},
+        drivers: [],
+        affiliations: [],
+      });
+
+      const complaints = new ComplaintService(new AuditNotificationService());
+      const callOnlyCase = complaints.createComplaintCase({
+        caseSource: "phone",
+        relatedCallId: "call-missing",
+        category: "driver_service",
+        severity: "normal",
+        description: "來電申訴，電話本身也沒有任何 order 關聯",
+      }) as ComplaintCaseRecord;
+
+      // No session at all for "call-missing": a genuinely missing call is
+      // honest non-attribution, not a crash.
+      const callcenterService = fakeCallcenterService({});
+      const { storage } = fleetStorageFixture();
+      const cases = new FleetPartnerCaseService(
+        complaints,
+        fleetPartnerService,
+        undefined,
+        storage,
+        callcenterService,
+      );
+
+      const list = await cases.listCases("any-fleet");
+      expect(
+        list.some((item) => item.caseNo === callOnlyCase.caseNo),
+      ).toBe(false);
+      const detail = await complaints.getComplaintCase(callOnlyCase.caseNo);
+      expect(detail.relatedOrderId).toBeNull();
+    });
+
+    it("propagates a genuine call-session read failure instead of disguising it as unattributed", async () => {
+      const { service: fleetPartnerService } = await buildFleetPartnerService({
+        tasksByOrder: {},
+        drivers: [],
+        affiliations: [],
+      });
+
+      const complaints = new ComplaintService(new AuditNotificationService());
+      const callOnlyCase = complaints.createComplaintCase({
+        caseSource: "phone",
+        relatedCallId: "call-broken",
+        category: "driver_service",
+        severity: "normal",
+        description: "來電申訴，callcenter 真正讀取失敗",
+      }) as ComplaintCaseRecord;
+
+      const callcenterService = {
+        getCallSessionForRead: async () => {
+          throw new ApiRequestError(
+            503,
+            "CALL_STORE_UNAVAILABLE",
+            "Call store is down.",
+          );
+        },
+      } as unknown as CallcenterService;
+      const { storage } = fleetStorageFixture();
+      const cases = new FleetPartnerCaseService(
+        complaints,
+        fleetPartnerService,
+        undefined,
+        storage,
+        callcenterService,
+      );
+
+      await expect(
+        cases.getCaseDetail("any-fleet", callOnlyCase.caseNo),
+      ).rejects.toMatchObject({ code: "CALL_STORE_UNAVAILABLE" });
     });
 
     it("leaves a complaint truly unattributed (and invisible to every fleet) when its order has no resolvable driver affiliation, instead of guessing a fleet", async () => {
@@ -416,6 +580,40 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
           fleetPartnerId: fleetId,
         }),
       );
+    });
+
+    it("stays unattributed when the authoritative canonical source reports the order genuinely absent, instead of falling back to a stale local task cache that still names a driver", async () => {
+      const orderId = "ord-stale-locally-cached";
+      const { service, mobility } = await buildFleetPartnerService({
+        // A driver task still sits in this process's own local cache for
+        // this order -- e.g. left over from before the canonical store was
+        // wiped, or a mistaken-identity row that was never cleaned up.
+        tasksByOrder: {
+          [orderId]: {
+            driverId: "drv-stale-cached",
+            completedAt: "2026-02-01T00:00:00.000Z",
+          },
+        },
+        // The authoritative repository reports this exact order as
+        // genuinely not found when asked to refresh it.
+        absentOrderIds: [orderId],
+        drivers: [{ driverId: "drv-stale-cached", name: "司機己" }],
+        affiliations: [
+          {
+            driverId: "drv-stale-cached",
+            fleetDisplayName: "Fleet Stale",
+            effectiveFrom: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      });
+
+      const attribution =
+        await service.resolveOrderDriverFleetAttribution(orderId);
+
+      expect(mobility.prepareOrderActionCalls).toContain(orderId);
+      // The authoritative absence must win: this case stays unattributed
+      // rather than trusting the stale local cache for a driver/fleet.
+      expect(attribution).toBeNull();
     });
 
     it("resolves a driver-fleet affiliation a genuinely different FleetPartnerService instance committed, neither instance ever sharing an in-process cache", async () => {
@@ -864,6 +1062,21 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
           name: "evidence.pdf",
         }),
       ]);
+
+      // The same canonical note, read back through the public Ops timeline
+      // (e.g. the Ops case detail page) on this same fresh instance, must
+      // stay human-readable: the structured attachment manifest marker/
+      // JSON that Fleet-side readback above just relied on must never leak
+      // into what Ops sees as the note body.
+      const opsTimelineOnB =
+        await complaintsB.getComplaintTimelineForOps(created.caseNo);
+      const opsReplyEntry = opsTimelineOnB.find(
+        (entry) => entry.entryId === replyEntry!.entryId,
+      );
+      expect(opsReplyEntry).toBeDefined();
+      expect(opsReplyEntry!.note).toContain("已附上行車記錄器截圖");
+      expect(opsReplyEntry!.note).not.toContain("<<fleet-reply-attachments>>");
+      expect(opsReplyEntry!.note).not.toContain(attachment.attachmentId);
     });
   });
 
