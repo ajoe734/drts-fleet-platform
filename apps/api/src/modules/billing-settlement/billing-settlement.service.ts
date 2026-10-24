@@ -1989,6 +1989,35 @@ export class BillingSettlementService implements OnModuleInit {
     return this.cloneInvoice(this.ensureTenantInvoiceArtifact(invoice));
   }
 
+  // The in-memory `driverFeePlans` cache is only ever populated from the
+  // database in `onModuleInit`. A plan published on another already-warm
+  // API instance is persisted canonically but this instance never reloads
+  // it, so list/generate/duplicate-version checks would otherwise keep
+  // reading stale data for the lifetime of the process. Re-reading the
+  // canonical source here (cheap: one indexed table scan, no joins) is what
+  // makes a publish on instance A visible to instance B.
+  async refreshDriverFeePlansFromCanonicalSource(): Promise<void> {
+    if (
+      !this.billingSettlementRepository ||
+      typeof this.billingSettlementRepository.isEnabled !== "function" ||
+      typeof this.billingSettlementRepository.loadDriverFeePlans !==
+        "function" ||
+      !this.billingSettlementRepository.isEnabled()
+    ) {
+      return;
+    }
+    try {
+      const canonicalPlans =
+        await this.billingSettlementRepository.loadDriverFeePlans();
+      this.driverFeePlans = canonicalPlans.map((plan) => ({ ...plan }));
+    } catch (error) {
+      this.billingSettlementRepository.reportPersistenceFailure(
+        error,
+        "driver_fee_plans_refresh",
+      );
+    }
+  }
+
   async publishDriverFeePlan(
     command: PublishDriverFeePlanCommand,
     requestId?: string,
@@ -1996,6 +2025,7 @@ export class BillingSettlementService implements OnModuleInit {
     this.assertNonBlank(command.planName, "planName");
     this.assertNonBlank(command.version, "version");
 
+    await this.refreshDriverFeePlansFromCanonicalSource();
     const duplicatePlan = this.driverFeePlans.find(
       (plan) =>
         plan.planName === command.planName && plan.version === command.version,
@@ -2073,6 +2103,7 @@ export class BillingSettlementService implements OnModuleInit {
       );
     }
     this.getPeriodMonthRange(command.periodMonth);
+    await this.refreshDriverFeePlansFromCanonicalSource();
     const activeFeePlan = this.driverFeePlans[0];
     if (!activeFeePlan) {
       throw new ApiRequestError(
