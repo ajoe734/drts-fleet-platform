@@ -3135,7 +3135,13 @@ describe("UV-EXEC-001 Voice Contracts", () => {
         throw new Error("expected an oversized slotHistory to be rejected");
       }
       expect(result.error.issues).toHaveLength(1);
-      expect(result.error.issues[0].path).toEqual(["slotHistory"]);
+      const [onlyIssue] = result.error.issues;
+      if (!onlyIssue) {
+        throw new Error(
+          "expected exactly one issue for the oversized slotHistory",
+        );
+      }
+      expect(onlyIssue.path).toEqual(["slotHistory"]);
     });
   });
 });
