@@ -91,6 +91,7 @@ import {
   RegulatoryCommandCommitUncertainError,
   PREEXPIRY_CREDENTIAL_FIELDS,
   parsePreexpiryCredentialFamily,
+  parsePreexpiryRecordFamily,
   type RegulatoryRegistryQueryExecutor,
   type RegulatoryVehicleCommandState,
   type DriverHeartbeatEventSnapshot,
@@ -574,6 +575,34 @@ export class RegulatoryRegistryService
   private readonly logger = new Logger(RegulatoryRegistryService.name);
   private expiryReconciliationTimer: NodeJS.Timeout | null = null;
   private expiryReconciliationInFlight: Promise<unknown> | null = null;
+  private reconciledEvaluationTime: string | null = null;
+
+  private getEffectiveEvaluationTime(explicit?: string): string {
+    if (explicit) return explicit;
+    if (this.reconciledEvaluationTime) {
+      return this.reconciledEvaluationTime;
+    }
+    return new Date().toISOString();
+  }
+
+  registerFleetPartnerContacts(
+    partnerId: string,
+    emails: readonly string[] | string,
+  ): string[] {
+    return (
+      this.regulatoryRegistryRepository?.setFleetPartnerContacts(
+        partnerId,
+        emails,
+      ) ?? []
+    );
+  }
+
+  getFleetPartnerContacts(partnerId: string): string[] {
+    return (
+      this.regulatoryRegistryRepository?.getFleetPartnerContacts(partnerId) ??
+      []
+    );
+  }
 
   private vehicles = VEHICLE_SEED.map((vehicle) => ({ ...vehicle }));
 
@@ -2052,10 +2081,28 @@ export class RegulatoryRegistryService
   }
 
   listContracts() {
-    const evaluatedAt = new Date().toISOString();
+    const evaluatedAt = this.getEffectiveEvaluationTime();
     return this.contracts.map((contract) =>
       this.cloneContract(this.applyContractLifecycle(contract, evaluatedAt)),
     );
+  }
+
+  listExpiringContracts(
+    windowDays = 30,
+    referenceDateMs: number = Date.parse(this.getEffectiveEvaluationTime()),
+  ): VehicleContractRecord[] {
+    const evaluatedAt = new Date(referenceDateMs).toISOString();
+    const cutoff = referenceDateMs + windowDays * 24 * 60 * 60 * 1000;
+
+    return this.contracts
+      .map((contract) =>
+        this.cloneContract(this.applyContractLifecycle(contract, evaluatedAt)),
+      )
+      .filter((contract) => contract.lifecycleStatus === "active")
+      .filter((contract) => {
+        const endAt = new Date(contract.endAt).getTime();
+        return endAt >= referenceDateMs && endAt <= cutoff;
+      });
   }
 
   async createContract(
@@ -2099,23 +2146,28 @@ export class RegulatoryRegistryService
   }
 
   listPolicies() {
-    const evaluatedAt = new Date().toISOString();
+    const evaluatedAt = this.getEffectiveEvaluationTime();
     return this.policies.map((policy) =>
       this.clonePolicy(this.applyPolicyLifecycle(policy, evaluatedAt)),
     );
   }
 
-  listExpiringPolicies(windowDays = 30) {
-    const now = Date.now();
-    const cutoff = now + windowDays * 24 * 60 * 60 * 1000;
+  listExpiringPolicies(
+    windowDays = 30,
+    referenceDateMs: number = Date.parse(this.getEffectiveEvaluationTime()),
+  ): InsurancePolicyRecord[] {
+    const evaluatedAt = new Date(referenceDateMs).toISOString();
+    const cutoff = referenceDateMs + windowDays * 24 * 60 * 60 * 1000;
 
     return this.policies
+      .map((policy) =>
+        this.clonePolicy(this.applyPolicyLifecycle(policy, evaluatedAt)),
+      )
       .filter((policy) => policy.lifecycleStatus === "active")
       .filter((policy) => {
         const endAt = new Date(policy.endAt).getTime();
-        return endAt >= now && endAt <= cutoff;
-      })
-      .map((policy) => this.clonePolicy(policy));
+        return endAt >= referenceDateMs && endAt <= cutoff;
+      });
   }
 
   listExpiringDriverLicenses(
@@ -2182,7 +2234,7 @@ export class RegulatoryRegistryService
   }
 
   listExclusivities() {
-    const evaluatedAt = new Date().toISOString();
+    const evaluatedAt = this.getEffectiveEvaluationTime();
     return this.exclusivities.map((exclusivity) =>
       this.cloneExclusivity(
         this.applyExclusivityLifecycle(exclusivity, evaluatedAt),
@@ -2282,7 +2334,24 @@ export class RegulatoryRegistryService
     state: RegulatoryVehicleCommandState,
   ): VehicleContractRecord {
     const contract = this.requireContract(contractId, state.contracts);
-    const approvedAt = command.approvedAt ?? new Date().toISOString();
+    const approvedAt =
+      command.approvedAt ?? this.getEffectiveEvaluationTime();
+    const renewalDates = command as ActivateVehicleContractCommand & {
+      startAt?: string;
+      endAt?: string;
+    };
+    if (renewalDates.startAt !== undefined) {
+      contract.startAt = renewalDates.startAt;
+    }
+    if (renewalDates.endAt !== undefined) {
+      contract.endAt = renewalDates.endAt;
+    }
+    if (
+      renewalDates.startAt !== undefined ||
+      renewalDates.endAt !== undefined
+    ) {
+      this.assertTimeRange(contract.startAt, contract.endAt);
+    }
     contract.status = "active";
     contract.approvedBy = this.normalizeNullableText(command.approvedBy);
     contract.approvedAt = approvedAt;
@@ -2362,7 +2431,24 @@ export class RegulatoryRegistryService
     state: RegulatoryVehicleCommandState,
   ): InsurancePolicyRecord {
     const policy = this.requirePolicy(policyId, state.policies);
-    const activatedAt = command.activatedAt ?? new Date().toISOString();
+    const activatedAt =
+      command.activatedAt ?? this.getEffectiveEvaluationTime();
+    const renewalDates = command as ActivateInsurancePolicyCommand & {
+      startAt?: string;
+      endAt?: string;
+    };
+    if (renewalDates.startAt !== undefined) {
+      policy.startAt = renewalDates.startAt;
+    }
+    if (renewalDates.endAt !== undefined) {
+      policy.endAt = renewalDates.endAt;
+    }
+    if (
+      renewalDates.startAt !== undefined ||
+      renewalDates.endAt !== undefined
+    ) {
+      this.assertTimeRange(policy.startAt, policy.endAt);
+    }
     policy.status =
       new Date(policy.endAt).getTime() < new Date(activatedAt).getTime()
         ? "expired"
@@ -2623,15 +2709,11 @@ export class RegulatoryRegistryService
           ),
         };
         const changes = apply(state);
-        if (
-          context === "activate_insurance_policy" &&
-          (result as InsurancePolicyRecord).status === "active"
-        )
-          await repository.supersedeActiveExpiryEventsForEntity?.(
-            "policy",
-            (result as InsurancePolicyRecord).policyId,
-            "insurance_policy",
-          );
+        await this.supersedeRenewedVehicleSourceEvents(
+          context,
+          result!,
+          state,
+        );
         this.publishVehicleSourceCommand(state, true);
         this.persistChanges(changes, context);
       } else {
@@ -2650,19 +2732,13 @@ export class RegulatoryRegistryService
               );
             await repository.persistChangesWithExecutor(client, apply(state));
             // Preserve the original B4 family and late-receipt semantics, in
-            // the same transaction as the actual acknowledged policy renewal.
-            if (
-              context === "activate_insurance_policy" &&
-              (result as InsurancePolicyRecord).status === "active"
-            ) {
-              await repository.supersedeActiveExpiryEventsForEntity(
-                "policy",
-                (result as InsurancePolicyRecord).policyId,
-                "insurance_policy",
-                undefined,
-                client,
-              );
-            }
+            // the same transaction as the actual acknowledged renewal.
+            await this.supersedeRenewedVehicleSourceEvents(
+              context,
+              result!,
+              state,
+              client,
+            );
           });
         } catch (error) {
           repository.reportPersistenceFailure(error, context);
@@ -3158,9 +3234,116 @@ export class RegulatoryRegistryService
     }
   }
 
+  private async supersedeRenewedVehicleSourceEvents(
+    context: string,
+    result:
+      | VehicleContractRecord
+      | InsurancePolicyRecord
+      | DispatchExclusivityRecord,
+    state: RegulatoryVehicleCommandState,
+    client?: import("pg").PoolClient,
+  ): Promise<void> {
+    const repository = this.regulatoryRegistryRepository;
+    if (!repository) return;
+    if (
+      context === "activate_insurance_policy" &&
+      (result as InsurancePolicyRecord).status === "active"
+    ) {
+      const policy = result as InsurancePolicyRecord;
+      const newEndAtMs = Date.parse(policy.endAt);
+      const vehiclePolicies = state.policies.filter(
+        (p) => p.vehicleId === policy.vehicleId,
+      );
+      for (const candidate of vehiclePolicies) {
+        const isCurrent = candidate.policyId === policy.policyId;
+        await repository.supersedeActiveExpiryEventsForEntity?.(
+          "policy",
+          candidate.policyId,
+          "insurance_policy",
+          undefined,
+          client,
+        );
+        for (const days of [30, 7] as const) {
+          const family = `preexpiry:insurance_policy:${days}`;
+          const active =
+            (await repository.findActiveExpiryEventsForEntity?.(
+              "policy",
+              candidate.policyId,
+              family,
+              client,
+            )) ?? [];
+          const obsoleteIds = active
+            .filter((e) => {
+              if (!isCurrent) return true;
+              const recorded =
+                e.source_expiry_at instanceof Date
+                  ? e.source_expiry_at.getTime()
+                  : Date.parse(e.source_expiry_at ?? "");
+              return recorded !== newEndAtMs;
+            })
+            .map((e) => e.event_id);
+          if (obsoleteIds.length > 0) {
+            await repository.supersedeExpiryEvents?.(
+              obsoleteIds,
+              undefined,
+              client,
+            );
+          }
+        }
+      }
+    } else if (
+      context === "activate_contract" &&
+      (result as VehicleContractRecord).status === "active"
+    ) {
+      const contract = result as VehicleContractRecord;
+      const newEndAtMs = Date.parse(contract.endAt);
+      const vehicleContracts = state.contracts.filter(
+        (c) => c.vehicleId === contract.vehicleId,
+      );
+      for (const candidate of vehicleContracts) {
+        const isCurrent = candidate.contractId === contract.contractId;
+        await repository.supersedeActiveExpiryEventsForEntity?.(
+          "policy",
+          candidate.contractId,
+          "vehicle_contract",
+          undefined,
+          client,
+        );
+        for (const days of [30, 7] as const) {
+          const family = `preexpiry:vehicle_contract:${days}`;
+          const active =
+            (await repository.findActiveExpiryEventsForEntity?.(
+              "policy",
+              candidate.contractId,
+              family,
+              client,
+            )) ?? [];
+          const obsoleteIds = active
+            .filter((e) => {
+              if (!isCurrent) return true;
+              const recorded =
+                e.source_expiry_at instanceof Date
+                  ? e.source_expiry_at.getTime()
+                  : Date.parse(e.source_expiry_at ?? "");
+              return recorded !== newEndAtMs;
+            })
+            .map((e) => e.event_id);
+          if (obsoleteIds.length > 0) {
+            await repository.supersedeExpiryEvents?.(
+              obsoleteIds,
+              undefined,
+              client,
+            );
+          }
+        }
+      }
+    }
+  }
+
   private reconcileSupplyLifecycleForAll(options?: {
     emitEvent?: boolean;
     persistContext?: string | null;
+    occurredAt?: string;
   }): void {
     const reconciledVehicles = this.vehicles.map((vehicle) =>
       this.reconcileVehicleLifecycle(vehicle.vehicleId, {
@@ -3168,6 +3351,9 @@ export class RegulatoryRegistryService
         ...(options?.emitEvent === undefined
           ? {}
           : { emitEvent: options.emitEvent }),
+        ...(options?.occurredAt === undefined
+          ? {}
+          : { occurredAt: options.occurredAt }),
         persistContext: null,
       }),
     );
@@ -3447,7 +3633,8 @@ export class RegulatoryRegistryService
     sources?: RegulatoryVehicleCommandState,
   ): VehicleRegistryRecord {
     const vehicle = stagedVehicle ?? this.requireVehicle(vehicleId);
-    const occurredAt = options?.occurredAt ?? new Date().toISOString();
+    const occurredAt =
+      options?.occurredAt ?? this.getEffectiveEvaluationTime();
     const previousLifecycle = this.cloneSupplyLifecycle(
       vehicle.supplyLifecycle,
     );
@@ -5201,54 +5388,180 @@ export class RegulatoryRegistryService
   ) {
     const repository = this.regulatoryRegistryRepository!;
     const asOfMs = Date.parse(asOf);
+    const isValidEmail = (value: string | undefined | null): value is string =>
+      Boolean(
+        value &&
+          value.length <= 254 &&
+          /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(value),
+      );
     const configured = process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim();
     // Same address syntax as existing NotificationDeliveryService, before freezing an intent.
-    const recipient =
-      configured &&
-      configured.length <= 254 &&
-      /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(configured)
-        ? configured
-        : null;
+    const platformRecipient = isValidEmail(configured) ? configured : null;
     const result: NonNullable<ReconcileExpiryResult["preexpiry"]> = {
       eventsCreated: 0,
       intentsCreated: 0,
-      recipientStatus: recipient ? "configured" : "unavailable",
+      recipientStatus: platformRecipient ? "configured" : "unavailable",
       deliveryStatus:
         this.notificationDeliveryService?.availability() ?? "unavailable",
     };
-    const memory = repository.isEnabled()
+
+    const resolveRecipients = async (
+      partnerIds: readonly (string | undefined | null)[],
+      directEmails: readonly (string | undefined | null)[] = [],
+    ): Promise<string[]> => {
+      const normalizedPartnerIds = [
+        ...new Set(
+          partnerIds
+            .map((id) => id?.trim())
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      const partnerEmails: string[] = [];
+      if (normalizedPartnerIds.length > 0) {
+        const repoEmails =
+          (await repository.findFleetPartnerContactEmails?.(
+            normalizedPartnerIds,
+          )) ?? [];
+        partnerEmails.push(...repoEmails);
+
+        const envPartnerContacts =
+          process.env.REGULATORY_FLEET_PARTNER_CONTACT_EMAILS?.trim();
+        if (envPartnerContacts) {
+          try {
+            const parsed = JSON.parse(envPartnerContacts) as Record<
+              string,
+              string | string[]
+            >;
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              for (const pid of normalizedPartnerIds) {
+                const entry = parsed[pid];
+                if (typeof entry === "string") partnerEmails.push(entry.trim());
+                else if (Array.isArray(entry)) {
+                  for (const addr of entry) {
+                    if (typeof addr === "string")
+                      partnerEmails.push(addr.trim());
+                  }
+                }
+              }
+            }
+          } catch {
+            for (const token of envPartnerContacts.split(/[,;]+/)) {
+              const trimmed = token.trim();
+              const eqIdx = trimmed.indexOf("=");
+              const colonIdx = trimmed.indexOf(":");
+              const sepIdx = eqIdx > 0 ? eqIdx : colonIdx;
+              if (sepIdx > 0) {
+                const pid = trimmed.slice(0, sepIdx).trim();
+                const addr = trimmed.slice(sepIdx + 1).trim();
+                if (normalizedPartnerIds.includes(pid)) {
+                  partnerEmails.push(addr);
+                }
+              }
+            }
+          }
+        }
+      }
+      for (const direct of directEmails) {
+        if (typeof direct === "string" && direct.trim()) {
+          partnerEmails.push(direct.trim());
+        }
+      }
+      const recipients = [
+        ...new Set([
+          ...partnerEmails.filter(isValidEmail),
+          ...(platformRecipient ? [platformRecipient] : []),
+        ]),
+      ];
+      if (recipients.length > 0) {
+        result.recipientStatus = "configured";
+      }
+      return recipients;
+    };
+
+    const vehiclePartnerIds = new Map<string, Set<string>>();
+    const registerVehiclePartner = (
+      vehicleId: string | undefined | null,
+      partnerId: string | undefined | null,
+    ) => {
+      const vId = vehicleId?.trim();
+      const pId = partnerId?.trim();
+      if (!vId || !pId) return;
+      const set = vehiclePartnerIds.get(vId) ?? new Set<string>();
+      set.add(pId);
+      vehiclePartnerIds.set(vId, set);
+    };
+    for (const contract of this.contracts) {
+      if (contract.status !== "terminated") {
+        registerVehiclePartner(contract.vehicleId, contract.partnerId);
+      }
+    }
+
+    const fromEmail =
+      process.env.NOTIFICATION_FROM_EMAIL?.trim() || "noreply@fleet.drts.local";
+
+    const enabled = repository.isEnabled();
+    const memoryDrivers = enabled
       ? []
       : [...this.drivers].sort((a, b) =>
           a.driverId < b.driverId ? -1 : a.driverId > b.driverId ? 1 : 0,
         );
-    const upper = repository.isEnabled()
-      ? (await repository.getExpiryScanUpperBounds()).driverId
-      : (memory.at(-1)?.driverId ?? null);
-    let afterId: string | undefined;
-    while (upper !== null) {
-      const page = repository.isEnabled()
+    const memoryContracts = enabled
+      ? []
+      : [...this.contracts].sort((a, b) =>
+          a.contractId < b.contractId ? -1 : a.contractId > b.contractId ? 1 : 0,
+        );
+    const memoryPolicies = enabled
+      ? []
+      : [...this.policies].sort((a, b) =>
+          a.policyId < b.policyId ? -1 : a.policyId > b.policyId ? 1 : 0,
+        );
+    const upperBounds = enabled
+      ? await repository.getExpiryScanUpperBounds()
+      : {
+          driverId: memoryDrivers.at(-1)?.driverId ?? null,
+          policyId: null,
+          preexpiryPolicyId: memoryPolicies.at(-1)?.policyId ?? null,
+          preexpiryContractId: memoryContracts.at(-1)?.contractId ?? null,
+        };
+
+    // 1. Driver credential pre-expiry reminders (T-30 and T-7)
+    const upperDriver = upperBounds.driverId;
+    let afterDriverId: string | undefined;
+    while (upperDriver !== null) {
+      const page = enabled
         ? await repository.scanPreexpiryDrivers(asOf, limit, {
-            ...(afterId ? { afterId } : {}),
-            throughId: upper,
+            ...(afterDriverId ? { afterId: afterDriverId } : {}),
+            throughId: upperDriver,
           })
-        : memory
-            .filter((d) => !afterId || d.driverId > afterId)
+        : memoryDrivers
+            .filter((d) => !afterDriverId || d.driverId > afterDriverId)
             .slice(0, limit);
       if (!page.length) break;
       await repository.withTransaction(async (client) => {
         for (const driverId of [
           ...new Set(page.map((d) => d.driverId)),
         ].sort()) {
-          const driver = repository.isEnabled()
+          const driver = enabled
             ? await repository.lockDriver(driverId, client)
             : this.drivers.find((d) => d.driverId === driverId);
           if (!driver) continue;
+          const driverPartnerIds: string[] = [];
+          const directPartnerId = (driver as { partnerId?: string }).partnerId;
+          if (directPartnerId) driverPartnerIds.push(directPartnerId);
+          for (const pair of this.supplyPairs) {
+            if (pair.driverId === driverId) {
+              for (const pid of vehiclePartnerIds.get(pair.vehicleId) ?? []) {
+                driverPartnerIds.push(pid);
+              }
+            }
+          }
+          const recipients = await resolveRecipients(driverPartnerIds);
           for (const [credential, field] of Object.entries(
             PREEXPIRY_CREDENTIAL_FIELDS,
           )) {
             const expiry = driver[field];
             const expiryMs = Date.parse(expiry ?? "");
-            for (const days of [30, 7]) {
+            for (const days of [30, 7] as const) {
               const family = `preexpiry:${credential}:${days}`;
               const prior = await repository.findActiveExpiryEventsForEntity(
                 "driver",
@@ -5316,11 +5629,181 @@ export class RegulatoryRegistryService
               }
               if (
                 event.status === "superseded" ||
-                !recipient ||
+                recipients.length === 0 ||
                 (await repository.getExpiryEventById(event.event_id, client))
                   ?.intent
               )
                 continue;
+              for (const recipientEmail of recipients) {
+                const intentId = randomUUID();
+                const intent = await repository.insertDeliveryIntent(
+                  {
+                    intentId,
+                    eventId: event.event_id,
+                    scope,
+                    tenantId: scope,
+                    idempotencyKey:
+                      "credential-preexpiry-mail/v1:" +
+                      createHash("sha256")
+                        .update(
+                          JSON.stringify([
+                            scope,
+                            event.event_id,
+                            recipientEmail,
+                          ]),
+                        )
+                        .digest("hex"),
+                    recipientEmail,
+                    fromEmail,
+                    subject: `[DRTS Reminder] Credential T-${days}: ${credential} for driver ${driverId}`,
+                    body: `Driver ${driverId}; credential ${credential}; source expiry ${new Date(expiryMs).toISOString()}; milestone T-${days}.`,
+                  },
+                  client,
+                );
+                if (intent.intent_id === intentId) result.intentsCreated++;
+              }
+            }
+          }
+        }
+      });
+      const next = page.at(-1)!.driverId;
+      if (afterDriverId !== undefined && next <= afterDriverId)
+        throw new Error("registry_preexpiry_scan_did_not_advance");
+      afterDriverId = next;
+      if (next === upperDriver) break;
+    }
+
+    // 2. Vehicle contract pre-expiry reminders (T-30 and T-7)
+    const upperContract = upperBounds.preexpiryContractId ?? null;
+    let afterContractId: string | undefined;
+    while (upperContract !== null) {
+      const page = enabled
+        ? await repository.scanPreexpiryContracts(asOf, limit, {
+            ...(afterContractId ? { afterId: afterContractId } : {}),
+            throughId: upperContract,
+          })
+        : memoryContracts
+            .filter(
+              (c) => !afterContractId || c.contractId > afterContractId,
+            )
+            .slice(0, limit);
+      if (!page.length) break;
+      for (const item of page) {
+        if (item.status !== "terminated") {
+          registerVehiclePartner(item.vehicleId, item.partnerId);
+        }
+      }
+      await repository.withTransaction(async (client) => {
+        for (const contractId of [
+          ...new Set(page.map((c) => c.contractId)),
+        ].sort()) {
+          const contract = enabled
+            ? await repository.lockContract(contractId, client)
+            : this.contracts.find((c) => c.contractId === contractId);
+          if (!contract) continue;
+          if (contract.status !== "terminated") {
+            registerVehiclePartner(contract.vehicleId, contract.partnerId);
+          }
+          const evaluatedContract = this.applyContractLifecycle(
+            this.cloneContract(contract),
+            asOf,
+          );
+          const expiry = contract.endAt;
+          const expiryMs = Date.parse(expiry ?? "");
+          const isContractActive =
+            contract.status === "active" &&
+            evaluatedContract.lifecycleStatus === "active";
+          const extraContractRecord = contract as VehicleContractRecord & {
+            partnerContactEmail?: string;
+            partnerContactEmails?: readonly string[];
+          };
+          const directContractEmails = [
+            extraContractRecord.partnerContactEmail,
+            ...(extraContractRecord.partnerContactEmails ?? []),
+          ];
+          const contractPartnerIds = [
+            contract.partnerId,
+            ...(vehiclePartnerIds.get(contract.vehicleId) ?? []),
+          ];
+          const recipients = await resolveRecipients(
+            contractPartnerIds,
+            directContractEmails,
+          );
+
+          for (const days of [30, 7] as const) {
+            const family = `preexpiry:vehicle_contract:${days}`;
+            const prior = await repository.findActiveExpiryEventsForEntity(
+              "policy",
+              contractId,
+              family,
+              client,
+            );
+            const obsolete = prior.filter((e) => {
+              const recorded =
+                e.source_expiry_at instanceof Date
+                  ? e.source_expiry_at.getTime()
+                  : Date.parse(e.source_expiry_at ?? "");
+              return (
+                recorded !== expiryMs ||
+                !isContractActive ||
+                (expiryMs <= asOfMs && e.status !== "completed")
+              );
+            });
+            await repository.supersedeExpiryEvents(
+              obsolete.map((e) => e.event_id),
+              undefined,
+              client,
+            );
+            if (
+              !expiry ||
+              !Number.isFinite(expiryMs) ||
+              !isContractActive ||
+              expiryMs <= asOfMs ||
+              expiryMs - days * 86400000 > asOfMs
+            )
+              continue;
+            const fingerprint = createHash("sha256")
+              .update(
+                JSON.stringify([
+                  "credential-preexpiry/v1",
+                  scope,
+                  "policy",
+                  contractId,
+                  "endAt",
+                  expiryMs,
+                  days,
+                ]),
+              )
+              .digest("hex");
+            let event = await repository.findExpiryEventByFingerprint(
+              fingerprint,
+              client,
+            );
+            if (!event) {
+              const eventId = randomUUID();
+              event = await repository.insertExpiryEvent(
+                {
+                  eventId,
+                  scope,
+                  entityType: "policy",
+                  entityId: contractId,
+                  credentialType: family,
+                  sourceFingerprint: fingerprint,
+                  sourceExpiryAt: expiry,
+                  status: "pending",
+                },
+                client,
+              );
+              if (event.event_id === eventId) result.eventsCreated++;
+            }
+            if (
+              event.status === "superseded" ||
+              recipients.length === 0 ||
+              (await repository.getExpiryEventById(event.event_id, client))
+                ?.intent
+            )
+              continue;
+            for (const recipientEmail of recipients) {
               const intentId = randomUUID();
               const intent = await repository.insertDeliveryIntent(
                 {
@@ -5332,15 +5815,17 @@ export class RegulatoryRegistryService
                     "credential-preexpiry-mail/v1:" +
                     createHash("sha256")
                       .update(
-                        JSON.stringify([scope, event.event_id, recipient]),
+                        JSON.stringify([
+                          scope,
+                          event.event_id,
+                          recipientEmail,
+                        ]),
                       )
                       .digest("hex"),
-                  recipientEmail: recipient,
-                  fromEmail:
-                    process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
-                    "noreply@fleet.drts.local",
-                  subject: `[DRTS Reminder] Credential T-${days}: ${credential} for driver ${driverId}`,
-                  body: `Driver ${driverId}; credential ${credential}; source expiry ${new Date(expiryMs).toISOString()}; milestone T-${days}.`,
+                  recipientEmail,
+                  fromEmail,
+                  subject: `[DRTS Reminder] Vehicle Contract T-${days}: ${contract.contractId} for vehicle ${contract.vehicleId}`,
+                  body: `Vehicle contract ${contract.contractId} (type: ${contract.contractType}, partner: ${contract.partnerId}) for vehicle ${contract.vehicleId}; source expiry ${new Date(expiryMs).toISOString()}; milestone T-${days}.`,
                 },
                 client,
               );
@@ -5349,12 +5834,173 @@ export class RegulatoryRegistryService
           }
         }
       });
-      const next = page.at(-1)!.driverId;
-      if (afterId !== undefined && next <= afterId)
-        throw new Error("registry_preexpiry_scan_did_not_advance");
-      afterId = next;
-      if (next === upper) break;
+      const next = page.at(-1)!.contractId;
+      if (afterContractId !== undefined && next <= afterContractId)
+        throw new Error("registry_preexpiry_contract_scan_did_not_advance");
+      afterContractId = next;
+      if (next === upperContract) break;
     }
+
+    // 3. Insurance policy pre-expiry reminders (T-30 and T-7)
+    const upperPolicy = upperBounds.preexpiryPolicyId ?? null;
+    let afterPolicyId: string | undefined;
+    while (upperPolicy !== null) {
+      const page = enabled
+        ? await repository.scanPreexpiryPolicies(asOf, limit, {
+            ...(afterPolicyId ? { afterId: afterPolicyId } : {}),
+            throughId: upperPolicy,
+          })
+        : memoryPolicies
+            .filter((p) => !afterPolicyId || p.policyId > afterPolicyId)
+            .slice(0, limit);
+      if (!page.length) break;
+      await repository.withTransaction(async (client) => {
+        for (const policyId of [
+          ...new Set(page.map((p) => p.policyId)),
+        ].sort()) {
+          const policy = enabled
+            ? await repository.lockPolicy(policyId, client)
+            : this.policies.find((p) => p.policyId === policyId);
+          if (!policy) continue;
+          const evaluatedPolicy = this.applyPolicyLifecycle(
+            this.clonePolicy(policy),
+            asOf,
+          );
+          const expiry = policy.endAt;
+          const expiryMs = Date.parse(expiry ?? "");
+          const isPolicyActive =
+            policy.status === "active" &&
+            evaluatedPolicy.lifecycleStatus === "active";
+          const extraPolicyRecord = policy as InsurancePolicyRecord & {
+            partnerId?: string;
+            partnerContactEmail?: string;
+            partnerContactEmails?: readonly string[];
+          };
+          const directPolicyEmails = [
+            extraPolicyRecord.partnerContactEmail,
+            ...(extraPolicyRecord.partnerContactEmails ?? []),
+          ];
+          const policyPartnerIds = [
+            extraPolicyRecord.partnerId,
+            ...(vehiclePartnerIds.get(policy.vehicleId) ?? []),
+          ];
+          const recipients = await resolveRecipients(
+            policyPartnerIds,
+            directPolicyEmails,
+          );
+
+          for (const days of [30, 7] as const) {
+            const family = `preexpiry:insurance_policy:${days}`;
+            const prior = await repository.findActiveExpiryEventsForEntity(
+              "policy",
+              policyId,
+              family,
+              client,
+            );
+            const obsolete = prior.filter((e) => {
+              const recorded =
+                e.source_expiry_at instanceof Date
+                  ? e.source_expiry_at.getTime()
+                  : Date.parse(e.source_expiry_at ?? "");
+              return (
+                recorded !== expiryMs ||
+                !isPolicyActive ||
+                (expiryMs <= asOfMs && e.status !== "completed")
+              );
+            });
+            await repository.supersedeExpiryEvents(
+              obsolete.map((e) => e.event_id),
+              undefined,
+              client,
+            );
+            if (
+              !expiry ||
+              !Number.isFinite(expiryMs) ||
+              !isPolicyActive ||
+              expiryMs <= asOfMs ||
+              expiryMs - days * 86400000 > asOfMs
+            )
+              continue;
+            const fingerprint = createHash("sha256")
+              .update(
+                JSON.stringify([
+                  "credential-preexpiry/v1",
+                  scope,
+                  "policy",
+                  policyId,
+                  "endAt",
+                  expiryMs,
+                  days,
+                ]),
+              )
+              .digest("hex");
+            let event = await repository.findExpiryEventByFingerprint(
+              fingerprint,
+              client,
+            );
+            if (!event) {
+              const eventId = randomUUID();
+              event = await repository.insertExpiryEvent(
+                {
+                  eventId,
+                  scope,
+                  entityType: "policy",
+                  entityId: policyId,
+                  credentialType: family,
+                  sourceFingerprint: fingerprint,
+                  sourceExpiryAt: expiry,
+                  status: "pending",
+                },
+                client,
+              );
+              if (event.event_id === eventId) result.eventsCreated++;
+            }
+            if (
+              event.status === "superseded" ||
+              recipients.length === 0 ||
+              (await repository.getExpiryEventById(event.event_id, client))
+                ?.intent
+            )
+              continue;
+            const policyNo = policy.policyNo || policyId;
+            for (const recipientEmail of recipients) {
+              const intentId = randomUUID();
+              const intent = await repository.insertDeliveryIntent(
+                {
+                  intentId,
+                  eventId: event.event_id,
+                  scope,
+                  tenantId: scope,
+                  idempotencyKey:
+                    "credential-preexpiry-mail/v1:" +
+                    createHash("sha256")
+                      .update(
+                        JSON.stringify([
+                          scope,
+                          event.event_id,
+                          recipientEmail,
+                        ]),
+                      )
+                      .digest("hex"),
+                  recipientEmail,
+                  fromEmail,
+                  subject: `[DRTS Reminder] Insurance Policy T-${days}: ${policyNo} for vehicle ${policy.vehicleId}`,
+                  body: `Insurance policy ${policyNo} (type: ${policy.insuranceType}, insurer: ${policy.insurerName}) for vehicle ${policy.vehicleId}; source expiry ${new Date(expiryMs).toISOString()}; milestone T-${days}.`,
+                },
+                client,
+              );
+              if (intent.intent_id === intentId) result.intentsCreated++;
+            }
+          }
+        }
+      });
+      const next = page.at(-1)!.policyId;
+      if (afterPolicyId !== undefined && next <= afterPolicyId)
+        throw new Error("registry_preexpiry_policy_scan_did_not_advance");
+      afterPolicyId = next;
+      if (next === upperPolicy) break;
+    }
+
     return result;
   }
 
@@ -5367,6 +6013,13 @@ export class RegulatoryRegistryService
     const asOfMs = Date.parse(asOf);
     const scope = command?.scope?.trim() || "default";
     const limit = command?.limit ?? 100;
+
+    this.reconciledEvaluationTime = asOf;
+    this.reconcileSupplyLifecycleForAll({
+      occurredAt: asOf,
+      emitEvent: false,
+      persistContext: null,
+    });
 
     let scannedDrivers = 0;
     let scannedPolicies = 0;
@@ -5785,10 +6438,14 @@ export class RegulatoryRegistryService
       }
 
       // The reminder's original source may have renewed since its intent commit.
-      if (parsePreexpiryCredentialFamily(eventWithIntent.credential_type)) {
-        const current = await repository.recordExpiryDeliveryOutcome(intent, {
-          deliveryStatus: "pending",
-        });
+      if (parsePreexpiryRecordFamily(eventWithIntent.credential_type)) {
+        const current = await repository.recordExpiryDeliveryOutcome(
+          intent,
+          {
+            deliveryStatus: "pending",
+          },
+          asOfMs,
+        );
         if (!current || current.delivery_status === "superseded") continue;
       }
       if (this.notificationDeliveryService) {
@@ -5806,10 +6463,14 @@ export class RegulatoryRegistryService
           deliveryIntentsEnqueued++;
           // Store the receipt before awaiting external send; lawful renewal can
           // supersede state without losing a real accepted outbox identity.
-          const linked = await repository.recordExpiryDeliveryOutcome(intent, {
-            deliveryStatus: "enqueued",
-            outboxDeliveryId,
-          });
+          const linked = await repository.recordExpiryDeliveryOutcome(
+            intent,
+            {
+              deliveryStatus: "enqueued",
+              outboxDeliveryId,
+            },
+            asOfMs,
+          );
           const current = await repository.getExpiryEventById(intent.event_id);
           if (
             linked &&

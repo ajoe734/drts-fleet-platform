@@ -12,7 +12,10 @@ import { NotificationDeliveryService } from "../notification-delivery/notificati
 import { ContractOperationalViewService } from "./contract-operational-view.service";
 import { DriverHeartbeatController } from "./driver-heartbeat.controller";
 import { OpsDriverTrackingController } from "./ops-driver-tracking.controller";
-import { RegulatoryRegistryController } from "./regulatory-registry.controller";
+import {
+  RegulatoryExpiryScheduledController,
+  RegulatoryRegistryController,
+} from "./regulatory-registry.controller";
 import { RegulatoryRegistryRepository } from "./regulatory-registry.repository";
 import { RegulatoryRegistryService } from "./regulatory-registry.service";
 
@@ -33,6 +36,7 @@ export function createRegistryNotificationDeliveryService(
   ],
   controllers: [
     RegulatoryRegistryController,
+    RegulatoryExpiryScheduledController,
     DriverHeartbeatController,
     OpsDriverTrackingController,
   ],
