@@ -19,6 +19,7 @@ import {
   camelWire,
   hash,
   origin,
+  originalBookingRouteFailure,
   simulationCompletion,
   terminalizeOwnOrder,
   requireFact,
@@ -821,6 +822,69 @@ describe("native fetch failure diagnostics", () => {
     });
     expect((failure as JourneyFailure).transportFacts).toBeUndefined();
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("closed phase/native-class evidence survives a non-JourneyFailure error", () => {
+  it("loses the phase and native identity when a native error reaches Evidence.failure unwrapped", () => {
+    const evidence = new Evidence();
+    const privateValue = "synthetic-private-message-stack-url-body-20261024";
+    const native = new TypeError(privateValue);
+    native.stack = `${native.stack ?? ""}\n    at https://referral.example.test/private/${privateValue}`;
+    evidence.failure(native);
+    expect(evidence.events).toEqual([
+      { stage: "unexpected-consumer-failure", result: "failed" },
+    ]);
+    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
+  });
+
+  it("preserves a closed phase and safe native class when the same error is wrapped by the existing production path first", () => {
+    const evidence = new Evidence();
+    const privateValue = "synthetic-private-message-stack-url-body-20261024";
+    const native = new TypeError(privateValue);
+    native.stack = `${native.stack ?? ""}\n    at https://referral.example.test/private/${privateValue}`;
+    const wrapped = originalBookingRouteFailure(native);
+    expect(wrapped).toBeInstanceOf(JourneyFailure);
+    expect(wrapped.stage).toBe("booking-original-route:TypeError");
+    expect(wrapped.status).toBeUndefined();
+    expect(wrapped.code).toBeUndefined();
+    evidence.failure(wrapped);
+    expect(evidence.events).toEqual([
+      { stage: "booking-original-route:TypeError", result: "failed" },
+    ]);
+    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
+    expect(JSON.stringify(wrapped)).not.toContain(privateValue);
+  });
+
+  it("keeps an unrecognized native class as UnknownError (still a recorded failure) and leaves an original JourneyFailure's stage/status/code unchanged", () => {
+    const evidence = new Evidence();
+    const privateValue = "synthetic-private-reason-20261024";
+    const exotic = Object.assign(new Error(privateValue), {
+      name: privateValue,
+    });
+    const wrappedExotic = originalBookingRouteFailure(exotic);
+    expect(wrappedExotic.stage).toBe("booking-original-route:UnknownError");
+    evidence.failure(wrappedExotic);
+
+    const original = new JourneyFailure(
+      "booking-response-http",
+      409,
+      "CONFLICT",
+    );
+    const wrappedOriginal = originalBookingRouteFailure(original);
+    expect(wrappedOriginal).toBe(original);
+    evidence.failure(wrappedOriginal);
+
+    expect(evidence.events).toEqual([
+      { stage: "booking-original-route:UnknownError", result: "failed" },
+      {
+        stage: "booking-response-http",
+        status: 409,
+        code: "CONFLICT",
+        result: "failed",
+      },
+    ]);
+    expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
   });
 });
 
