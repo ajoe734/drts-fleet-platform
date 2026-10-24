@@ -62,4 +62,49 @@ describe("billing settlement repository", () => {
       }),
     ]);
   });
+
+  it("loads driver fee plans from the canonical table for cross-instance readback (C125-F1)", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        {
+          record: {
+            feePlanId: "fee-plan-canonical-001",
+            planName: "Canonical Readback Plan",
+            version: "canonical-v1",
+            serviceFeeBps: 1300,
+            reimbursementMode: "platform_funded",
+            status: "published",
+            publishedAt: "2026-10-20T00:00:00.000Z",
+          },
+        },
+      ],
+    }));
+    const repository = new BillingSettlementRepository({
+      isEnabled: () => true,
+      query,
+    } as never);
+
+    const plans = await repository.loadDriverFeePlans();
+
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("billing.phase1_driver_fee_plans"),
+    );
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("published_at DESC"));
+    expect(plans).toEqual([
+      expect.objectContaining({
+        feePlanId: "fee-plan-canonical-001",
+        version: "canonical-v1",
+        status: "published",
+      }),
+    ]);
+  });
+
+  it("returns an empty driver fee plan list when persistence is disabled", async () => {
+    const repository = new BillingSettlementRepository({
+      isEnabled: () => false,
+      query: vi.fn(),
+    } as never);
+
+    expect(await repository.loadDriverFeePlans()).toEqual([]);
+  });
 });
