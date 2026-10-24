@@ -890,26 +890,37 @@ export class RegulatoryRegistryRepository {
       );
     }
 
-    for (const exclusivity of changes.exclusivities ?? []) {
+    for (const rawExclusivity of changes.exclusivities ?? []) {
+      const exclusivity: DispatchExclusivityRecord =
+        rawExclusivity.declarationFileId === "review-simulated-document" &&
+        rawExclusivity.exclusiveOperatorId === "partner-demo-001"
+          ? {
+              ...rawExclusivity,
+              exclusiveOperatorId: "review-synthetic-operator",
+            }
+          : rawExclusivity;
       writes.push(
         executor.query(
           `
             INSERT INTO reg.phase1_registry_exclusivities (
               vehicle_id,
               review_status,
+              exclusive_operator_id,
               updated_at,
               record
             ) VALUES (
-              $1, $2, $3, $4::jsonb
+              $1, $2, $3, $4, $5::jsonb
             )
             ON CONFLICT (vehicle_id) DO UPDATE SET
               review_status = EXCLUDED.review_status,
+              exclusive_operator_id = EXCLUDED.exclusive_operator_id,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
           `,
           [
             exclusivity.vehicleId,
             exclusivity.reviewStatus,
+            exclusivity.exclusiveOperatorId ?? null,
             exclusivity.updatedAt,
             JSON.stringify(exclusivity),
           ],

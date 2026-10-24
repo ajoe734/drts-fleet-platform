@@ -65,6 +65,10 @@ type EligibleSupplyContext = {
     lng: number;
   } | null;
   serviceBucketOverride?: Phase1ServiceBucket;
+  requestingOperatorId?: string | null;
+  operatingAuthorizationId?: string | null;
+  auditRefusal?: boolean;
+  requestId?: string;
 };
 
 type AuditActor = Pick<IdentityContext, "actorId" | "actorType" | "tenantId">;
@@ -531,9 +535,31 @@ export class VehicleEligibilityService implements OnModuleInit {
     const definition = this.requireActiveServiceProduct(serviceProduct);
     const serviceBucket =
       context?.serviceBucketOverride ?? definition.serviceBucket;
+    const hasOperatorContext = Boolean(
+      context?.requestingOperatorId?.trim() ||
+        context?.operatingAuthorizationId?.trim(),
+    );
 
-    return this.regulatoryRegistryService
-      .getEligibleCandidates(serviceBucket, context?.destination ?? null)
+    return (
+      hasOperatorContext
+        ? this.regulatoryRegistryService.getEligibleCandidates(
+            serviceBucket,
+            context?.destination ?? null,
+            {
+              requestingOperatorId: context?.requestingOperatorId ?? null,
+              operatingAuthorizationId:
+                context?.operatingAuthorizationId ?? null,
+              ...(context?.auditRefusal !== undefined
+                ? { auditRefusal: context.auditRefusal }
+                : {}),
+              ...(context?.requestId ? { requestId: context.requestId } : {}),
+            },
+          )
+        : this.regulatoryRegistryService.getEligibleCandidates(
+            serviceBucket,
+            context?.destination ?? null,
+          )
+    )
       .filter((candidate) =>
         this.isVehicleEligibleForServiceProduct(
           candidate.vehicleId,
@@ -620,19 +646,84 @@ export class VehicleEligibilityService implements OnModuleInit {
     order: Pick<
       OwnedOrderRecord,
       "serviceBucket" | "businessDispatchSubtype" | "serviceProductCode"
-    >,
+    > & {
+      operatingAuthorizationId?: string | null;
+      requestingOperatorId?: string | null;
+    },
     vehicleId: string,
     driverId: string,
+    options?: {
+      requestingOperatorId?: string | null;
+      operatingAuthorizationId?: string | null;
+      requestId?: string;
+    },
   ) {
     const serviceProduct = this.resolveServiceProductForOwnedOrder(order);
     const definition = this.requireActiveServiceProduct(serviceProduct);
     const capability = this.requireVehicleCapability(vehicleId);
+    const requestingOperatorId =
+      options?.requestingOperatorId ?? order.requestingOperatorId ?? null;
+    const operatingAuthorizationId =
+      options?.operatingAuthorizationId ??
+      order.operatingAuthorizationId ??
+      null;
+    const hasOperatorContext = Boolean(
+      requestingOperatorId?.trim() || operatingAuthorizationId?.trim(),
+    );
 
     if (
-      !this.regulatoryRegistryService.getVehicleDispatchability(
-        vehicleId,
-        definition.serviceBucket,
-      )
+      hasOperatorContext &&
+      typeof this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity ===
+        "function"
+    ) {
+      const exclusivityDecision =
+        this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity(
+          vehicleId,
+          {
+            requestingOperatorId,
+            operatingAuthorizationId,
+            auditRefusal: true,
+            ...(options?.requestId ? { requestId: options.requestId } : {}),
+          },
+        );
+      if (!exclusivityDecision.allowed) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          exclusivityDecision.reasonCode === "exclusivity_other_operator"
+            ? "VEHICLE_EXCLUSIVITY_OTHER_OPERATOR"
+            : "VEHICLE_EXCLUSIVITY_OPERATOR_UNBOUND",
+          exclusivityDecision.reasonCode === "exclusivity_other_operator"
+            ? "Vehicle is exclusively bound to another operator for the active period."
+            : "Vehicle exclusivity declaration is not yet bound to an operator ID.",
+          {
+            vehicleId,
+            driverId,
+            serviceProduct,
+            reasonCode: exclusivityDecision.reasonCode,
+            requestingOperatorId: exclusivityDecision.requestingOperatorId,
+            boundOperatorId: exclusivityDecision.boundOperatorId,
+            evaluatedAt: exclusivityDecision.evaluatedAt,
+          },
+        );
+      }
+    }
+
+    if (
+      !(hasOperatorContext
+        ? this.regulatoryRegistryService.getVehicleDispatchability(
+            vehicleId,
+            definition.serviceBucket,
+            {
+              requestingOperatorId,
+              operatingAuthorizationId,
+              auditRefusal: true,
+              ...(options?.requestId ? { requestId: options.requestId } : {}),
+            },
+          )
+        : this.regulatoryRegistryService.getVehicleDispatchability(
+            vehicleId,
+            definition.serviceBucket,
+          ))
     ) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,

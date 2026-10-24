@@ -4325,6 +4325,8 @@ export type SupplyDispatchBlockReason =
   | "exclusivity_expired"
   | "exclusivity_revoked"
   | "exclusivity_rejected"
+  | "exclusivity_operator_unbound"
+  | "exclusivity_other_operator"
   | "offboarding_pending_debranding";
 
 export type VehicleOffboardingStatus =
@@ -4369,6 +4371,7 @@ export interface VehicleSupplyLifecycleRecord {
     declarationStatus: "missing" | "submitted";
     declarationFileId: string | null;
     reviewStatus: "draft" | "pending" | "approved" | "rejected";
+    operatorId?: string | null;
     providerName: string | null;
     effectiveStart: string | null;
     effectiveEnd: string | null;
@@ -4592,6 +4595,7 @@ export interface DispatchExclusivityRecord {
   lifecycleStatus: DispatchExclusivityLifecycleStatus;
   reviewerId: string | null;
   reviewedAt: string | null;
+  exclusiveOperatorId?: string | null;
   exclusiveProviderName: string | null;
   effectiveStart: string | null;
   effectiveEnd: string | null;
@@ -4601,6 +4605,7 @@ export interface DispatchExclusivityRecord {
 
 export interface SubmitExclusivityReviewCommand {
   declarationFileId?: string | null;
+  exclusiveOperatorId?: string | null;
   exclusiveProviderName?: string | null;
   effectiveStart?: string | null;
   effectiveEnd?: string | null;
@@ -4609,6 +4614,7 @@ export interface SubmitExclusivityReviewCommand {
 export interface ApproveExclusivityCommand {
   reviewerId?: string | null;
   reviewedAt?: string;
+  exclusiveOperatorId?: string | null;
 }
 
 export interface RejectExclusivityCommand {

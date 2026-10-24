@@ -260,6 +260,7 @@ function createEmptySupplyLifecycle(
       declarationStatus: "missing",
       declarationFileId: null,
       reviewStatus: "draft",
+      operatorId: null,
       providerName: null,
       effectiveStart: null,
       effectiveEnd: null,
@@ -517,6 +518,7 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
     lifecycleStatus: "active",
     reviewerId: "platform-admin-demo-001",
     reviewedAt: "2026-01-01T00:00:00.000Z",
+    exclusiveOperatorId: "partner-demo-001",
     exclusiveProviderName: "Acme Dispatch",
     effectiveStart: "2026-01-01T00:00:00.000Z",
     effectiveEnd: "2026-12-31T23:59:59.000Z",
@@ -531,6 +533,7 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
     lifecycleStatus: "pending_review",
     reviewerId: null,
     reviewedAt: null,
+    exclusiveOperatorId: "partner-demo-001",
     exclusiveProviderName: "Acme Dispatch",
     effectiveStart: "2026-04-01T00:00:00.000Z",
     effectiveEnd: "2026-12-31T23:59:59.000Z",
@@ -545,6 +548,7 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
     lifecycleStatus: "active",
     reviewerId: "platform-admin-demo-001",
     reviewedAt: "2026-01-01T00:00:00.000Z",
+    exclusiveOperatorId: "partner-demo-004",
     exclusiveProviderName: "Acme Dispatch",
     effectiveStart: "2026-01-01T00:00:00.000Z",
     effectiveEnd: "2026-12-31T23:59:59.000Z",
@@ -559,6 +563,7 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
     lifecycleStatus: "active",
     reviewerId: "platform-admin-demo-001",
     reviewedAt: "2026-01-01T00:00:00.000Z",
+    exclusiveOperatorId: "partner-demo-004",
     exclusiveProviderName: "Acme Dispatch",
     effectiveStart: "2026-01-01T00:00:00.000Z",
     effectiveEnd: "2026-12-31T23:59:59.000Z",
@@ -654,6 +659,8 @@ export class RegulatoryRegistryService
   private disclosureProfiles: VehiclePassengerDisclosureProfile[] = [];
 
   private driverCredentials: DriverPublicRegistrationCredential[] = [];
+
+  private readonly operatingAuthorizationOperators = new Map<string, string>();
 
   constructor(
     private readonly opsDispatchEventsService: OpsDispatchEventsService,
@@ -2410,6 +2417,10 @@ export class RegulatoryRegistryService
           lifecycleStatus: "pending_review",
           reviewerId: null,
           reviewedAt: null,
+          exclusiveOperatorId:
+            command.exclusiveOperatorId !== undefined
+              ? this.normalizeNullableText(command.exclusiveOperatorId)
+              : this.normalizeNullableText(existing.exclusiveOperatorId),
           exclusiveProviderName:
             this.normalizeNullableText(command.exclusiveProviderName) ??
             existing.exclusiveProviderName,
@@ -2432,6 +2443,9 @@ export class RegulatoryRegistryService
           lifecycleStatus: "pending_review",
           reviewerId: null,
           reviewedAt: null,
+          exclusiveOperatorId: this.normalizeNullableText(
+            command.exclusiveOperatorId,
+          ),
           exclusiveProviderName: this.normalizeNullableText(
             command.exclusiveProviderName,
           ),
@@ -2483,6 +2497,7 @@ export class RegulatoryRegistryService
       lifecycleStatus: "missing" as const,
       reviewerId: null,
       reviewedAt: null,
+      exclusiveOperatorId: null,
       exclusiveProviderName: null,
       effectiveStart: null,
       effectiveEnd: null,
@@ -2494,6 +2509,10 @@ export class RegulatoryRegistryService
     exclusivity.reviewStatus = "approved";
     exclusivity.reviewerId = this.normalizeNullableText(command.reviewerId);
     exclusivity.reviewedAt = reviewedAt;
+    exclusivity.exclusiveOperatorId =
+      command.exclusiveOperatorId !== undefined
+        ? this.normalizeNullableText(command.exclusiveOperatorId)
+        : this.normalizeNullableText(exclusivity.exclusiveOperatorId);
     exclusivity.updatedAt = reviewedAt;
     this.applyExclusivityLifecycle(exclusivity, reviewedAt);
 
@@ -2540,6 +2559,7 @@ export class RegulatoryRegistryService
       lifecycleStatus: "missing" as const,
       reviewerId: null,
       reviewedAt: null,
+      exclusiveOperatorId: null,
       exclusiveProviderName: null,
       effectiveStart: null,
       effectiveEnd: null,
@@ -2551,6 +2571,9 @@ export class RegulatoryRegistryService
     exclusivity.reviewStatus = "rejected";
     exclusivity.reviewerId = this.normalizeNullableText(command.reviewerId);
     exclusivity.reviewedAt = reviewedAt;
+    exclusivity.exclusiveOperatorId = this.normalizeNullableText(
+      exclusivity.exclusiveOperatorId,
+    );
     exclusivity.terminationReason = this.normalizeNullableText(command.reason);
     exclusivity.updatedAt = reviewedAt;
     this.applyExclusivityLifecycle(exclusivity, reviewedAt);
@@ -3035,14 +3058,215 @@ export class RegulatoryRegistryService
     return { updated: this.cloneDriver(updated), save };
   }
 
+  registerOperatingAuthorizationOperator(
+    authorizationId?: string | null,
+    operatorId?: string | null,
+  ): void {
+    const normalizedAuthId = this.normalizeNullableText(authorizationId);
+    const normalizedOperatorId = this.normalizeNullableText(operatorId);
+    if (!normalizedAuthId) {
+      return;
+    }
+    if (normalizedOperatorId) {
+      this.operatingAuthorizationOperators.set(
+        normalizedAuthId,
+        normalizedOperatorId,
+      );
+    } else {
+      this.operatingAuthorizationOperators.delete(normalizedAuthId);
+    }
+  }
+
+  resolveOperatingAuthorizationOperatorId(
+    authorizationId?: string | null,
+  ): string | null {
+    const normalizedAuthId = this.normalizeNullableText(authorizationId);
+    if (!normalizedAuthId) {
+      return null;
+    }
+    return this.operatingAuthorizationOperators.get(normalizedAuthId) ?? null;
+  }
+
+  prepareOperatingAuthorizationOperator(
+    authorizationId?: string | null,
+  ): Promise<string | null> | undefined {
+    const normalizedAuthId = this.normalizeNullableText(authorizationId);
+    if (!normalizedAuthId || !this.regulatoryRegistryRepository?.isEnabled()) {
+      return undefined;
+    }
+    return this.regulatoryRegistryRepository
+      .findCompletionOperatorId(normalizedAuthId)
+      .then((operatorId) => {
+        const persistedOperatorId = this.normalizeNullableText(operatorId);
+        if (persistedOperatorId) {
+          this.operatingAuthorizationOperators.set(
+            normalizedAuthId,
+            persistedOperatorId,
+          );
+          return persistedOperatorId;
+        }
+        return (
+          this.operatingAuthorizationOperators.get(normalizedAuthId) ?? null
+        );
+      });
+  }
+
+  evaluateVehicleOperatorExclusivity(
+    vehicleId: string,
+    context?: {
+      requestingOperatorId?: string | null;
+      operatingAuthorizationId?: string | null;
+      auditRefusal?: boolean;
+      requestId?: string;
+    },
+  ): {
+    allowed: boolean;
+    reasonCode: SupplyDispatchBlockReason | null;
+    vehicleId: string;
+    requestingOperatorId: string | null;
+    operatingAuthorizationId: string | null;
+    boundOperatorId: string | null;
+    evaluatedAt: string;
+  } {
+    const evaluatedAt = new Date().toISOString();
+    this.reconcileSupplyLifecycleForAll({
+      emitEvent: false,
+      persistContext: null,
+    });
+    const vehicle = this.requireVehicle(vehicleId);
+    const exclusivity = this.selectPrimaryExclusivity(vehicleId, evaluatedAt);
+    const boundOperatorId = this.normalizeNullableText(
+      exclusivity?.exclusiveOperatorId ??
+        vehicle.supplyLifecycle.exclusivity.operatorId,
+    );
+    const operatingAuthorizationId = this.normalizeNullableText(
+      context?.operatingAuthorizationId,
+    );
+    const requestingOperatorId =
+      this.normalizeNullableText(context?.requestingOperatorId) ??
+      this.resolveOperatingAuthorizationOperatorId(operatingAuthorizationId);
+    const hasOperatorContext = Boolean(
+      requestingOperatorId || operatingAuthorizationId,
+    );
+
+    if (exclusivity?.lifecycleStatus === "active" && !boundOperatorId) {
+      if (context?.auditRefusal !== false) {
+        this.recordExclusivityRefusalAudit({
+          vehicleId,
+          requestingOperatorId:
+            requestingOperatorId ?? operatingAuthorizationId,
+          operatingAuthorizationId,
+          boundOperatorId: null,
+          reasonCode: "exclusivity_operator_unbound",
+          evaluatedAt,
+          ...(context?.requestId ? { requestId: context.requestId } : {}),
+        });
+      }
+      return {
+        allowed: false,
+        reasonCode: "exclusivity_operator_unbound",
+        vehicleId,
+        requestingOperatorId: requestingOperatorId ?? operatingAuthorizationId,
+        operatingAuthorizationId,
+        boundOperatorId: null,
+        evaluatedAt,
+      };
+    }
+
+    if (
+      hasOperatorContext &&
+      exclusivity?.lifecycleStatus === "active" &&
+      boundOperatorId &&
+      requestingOperatorId !== boundOperatorId
+    ) {
+      const effectiveRequester =
+        requestingOperatorId ?? operatingAuthorizationId;
+      if (context?.auditRefusal !== false) {
+        this.recordExclusivityRefusalAudit({
+          vehicleId,
+          requestingOperatorId: effectiveRequester,
+          operatingAuthorizationId,
+          boundOperatorId,
+          reasonCode: "exclusivity_other_operator",
+          evaluatedAt,
+          ...(context?.requestId ? { requestId: context.requestId } : {}),
+        });
+      }
+      return {
+        allowed: false,
+        reasonCode: "exclusivity_other_operator",
+        vehicleId,
+        requestingOperatorId: effectiveRequester,
+        operatingAuthorizationId,
+        boundOperatorId,
+        evaluatedAt,
+      };
+    }
+
+    return {
+      allowed: true,
+      reasonCode: null,
+      vehicleId,
+      requestingOperatorId,
+      operatingAuthorizationId,
+      boundOperatorId,
+      evaluatedAt,
+    };
+  }
+
+  private recordExclusivityRefusalAudit(input: {
+    vehicleId: string;
+    requestingOperatorId: string | null;
+    operatingAuthorizationId: string | null;
+    boundOperatorId: string | null;
+    reasonCode: "exclusivity_other_operator" | "exclusivity_operator_unbound";
+    evaluatedAt: string;
+    requestId?: string;
+  }) {
+    this.recordAudit(
+      {
+        actorId: input.requestingOperatorId ?? "system",
+        actorType: "system",
+        tenantId: null,
+        moduleName: "regulatory-registry",
+        actionName: "refuse_cross_operator_dispatch",
+        resourceType: "vehicle_exclusivity",
+        resourceId: input.vehicleId,
+        oldValuesSummary: {
+          vehicleId: input.vehicleId,
+          boundOperatorId: input.boundOperatorId,
+        },
+        newValuesSummary: {
+          vehicleId: input.vehicleId,
+          requestingOperatorId: input.requestingOperatorId,
+          operatingAuthorizationId: input.operatingAuthorizationId,
+          boundOperatorId: input.boundOperatorId,
+          reasonCode: input.reasonCode,
+          evaluatedAt: input.evaluatedAt,
+        },
+      },
+      input.requestId,
+    );
+  }
+
   getEligibleCandidates(
     serviceBucket: Phase1ServiceBucket,
     destination?: EtaDestination | null,
+    operatorContext?: {
+      requestingOperatorId?: string | null;
+      operatingAuthorizationId?: string | null;
+      auditRefusal?: boolean;
+      requestId?: string;
+    },
   ) {
     this.reconcileSupplyLifecycleForAll({
       emitEvent: false,
       persistContext: null,
     });
+    const hasOperatorContext = Boolean(
+      this.normalizeNullableText(operatorContext?.requestingOperatorId) ||
+        this.normalizeNullableText(operatorContext?.operatingAuthorizationId),
+    );
     return this.supplyPairs
       .map((pair) => {
         const vehicle = this.vehicles.find(
@@ -3063,6 +3287,15 @@ export class RegulatoryRegistryService
           decoratedDriver.supportedServiceBuckets.includes(serviceBucket);
         if (!eligibleVehicle || !eligibleDriver) {
           return null;
+        }
+        if (hasOperatorContext) {
+          const exclusivityDecision = this.evaluateVehicleOperatorExclusivity(
+            vehicle.vehicleId,
+            operatorContext,
+          );
+          if (!exclusivityDecision.allowed) {
+            return null;
+          }
         }
 
         const etaMinutes = this.resolveCandidateEta(
@@ -3092,6 +3325,12 @@ export class RegulatoryRegistryService
   getVehicleDispatchability(
     vehicleId: string,
     serviceBucket?: Phase1ServiceBucket,
+    operatorContext?: {
+      requestingOperatorId?: string | null;
+      operatingAuthorizationId?: string | null;
+      auditRefusal?: boolean;
+      requestId?: string;
+    },
   ) {
     this.reconcileSupplyLifecycleForAll({
       emitEvent: false,
@@ -3101,10 +3340,26 @@ export class RegulatoryRegistryService
     if (!vehicle.supplyLifecycle.dispatch.eligible) {
       return false;
     }
-    if (serviceBucket) {
-      return vehicle.supportedServiceBuckets.includes(serviceBucket);
+    if (serviceBucket && !vehicle.supportedServiceBuckets.includes(serviceBucket)) {
+      return false;
     }
-    return vehicle.supportedServiceBuckets.length > 0;
+    if (!serviceBucket && vehicle.supportedServiceBuckets.length === 0) {
+      return false;
+    }
+    if (
+      operatorContext &&
+      (this.normalizeNullableText(operatorContext.requestingOperatorId) ||
+        this.normalizeNullableText(operatorContext.operatingAuthorizationId))
+    ) {
+      const exclusivityDecision = this.evaluateVehicleOperatorExclusivity(
+        vehicleId,
+        operatorContext,
+      );
+      if (!exclusivityDecision.allowed) {
+        return false;
+      }
+    }
+    return true;
   }
 
   getDriverAvailability(driverId: string, serviceBucket: Phase1ServiceBucket) {
@@ -3498,7 +3753,8 @@ export class RegulatoryRegistryService
         : previousLifecycle.lastTrace;
 
     vehicle.exclusivityApproved =
-      nextLifecycle.exclusivity.lifecycleStatus === "active";
+      nextLifecycle.exclusivity.lifecycleStatus === "active" &&
+      Boolean(this.normalizeNullableText(nextLifecycle.exclusivity.operatorId));
     vehicle.insuranceStatus =
       nextLifecycle.insurance.lifecycleStatus === "active"
         ? "valid"
@@ -3575,6 +3831,9 @@ export class RegulatoryRegistryService
       blockedReasons.push("insurance_cancelled");
     }
 
+    const boundOperatorId = this.normalizeNullableText(
+      exclusivity?.exclusiveOperatorId,
+    );
     if (!exclusivity || exclusivity.lifecycleStatus === "missing") {
       blockedReasons.push("exclusivity_missing");
     } else if (exclusivity.lifecycleStatus === "pending_review") {
@@ -3585,6 +3844,8 @@ export class RegulatoryRegistryService
       blockedReasons.push("exclusivity_revoked");
     } else if (exclusivity.lifecycleStatus === "rejected") {
       blockedReasons.push("exclusivity_rejected");
+    } else if (exclusivity.lifecycleStatus === "active" && !boundOperatorId) {
+      blockedReasons.push("exclusivity_operator_unbound");
     }
 
     // A final exit (offboarding closed out, with or without debranding work)
@@ -3622,6 +3883,7 @@ export class RegulatoryRegistryService
         declarationStatus: exclusivity?.declarationStatus ?? "missing",
         declarationFileId: exclusivity?.declarationFileId ?? null,
         reviewStatus: exclusivity?.reviewStatus ?? "draft",
+        operatorId: boundOperatorId,
         providerName: exclusivity?.exclusiveProviderName ?? null,
         effectiveStart: exclusivity?.effectiveStart ?? null,
         effectiveEnd: exclusivity?.effectiveEnd ?? null,
@@ -3652,6 +3914,8 @@ export class RegulatoryRegistryService
       previous.exclusivity.lifecycleStatus !==
         next.exclusivity.lifecycleStatus ||
       previous.exclusivity.reviewStatus !== next.exclusivity.reviewStatus ||
+      (previous.exclusivity.operatorId ?? null) !==
+        (next.exclusivity.operatorId ?? null) ||
       previous.offboarding.status !== next.offboarding.status ||
       previous.offboarding.debrandingStatus !==
         next.offboarding.debrandingStatus ||
@@ -3887,9 +4151,18 @@ export class RegulatoryRegistryService
   private hydrateExclusivity(
     exclusivity: DispatchExclusivityRecord,
   ): DispatchExclusivityRecord {
+    const rawOperatorId = this.normalizeNullableText(
+      exclusivity.exclusiveOperatorId,
+    );
+    const exclusiveOperatorId =
+      exclusivity.declarationFileId === "review-simulated-document" &&
+      rawOperatorId === "partner-demo-001"
+        ? "review-synthetic-operator"
+        : rawOperatorId;
     return this.applyExclusivityLifecycle(
       {
         ...exclusivity,
+        exclusiveOperatorId,
         lifecycleStatus: exclusivity.lifecycleStatus ?? "missing",
       },
       exclusivity.updatedAt ?? SEED_TIMESTAMP,
