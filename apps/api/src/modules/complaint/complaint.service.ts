@@ -144,6 +144,23 @@ type PendingUncertainComplaintCommit = {
   locallyUncertain?: boolean;
 };
 
+// A Fleet reply's structured attachment relation is embedded in the
+// canonical note text behind this marker (see
+// fleet-partner-case.service.ts's appendAttachmentManifest/
+// splitAttachmentManifest) so a different already-warm instance can recover
+// it without a shared in-process cache. The literal must match that file's
+// own marker exactly; it is duplicated here rather than imported because
+// fleet-partner already depends on this module, and importing back would
+// create a module cycle. Any Ops-facing note (timeline, export, assistant
+// read tools) must never show this raw marker/JSON to a human; only the
+// Fleet-side caller that explicitly asks for it may see the untouched note.
+const FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER = "\n<<fleet-reply-attachments>>";
+
+function stripFleetReplyAttachmentManifest(note: string): string {
+  const markerIndex = note.indexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
+  return markerIndex === -1 ? note : note.slice(0, markerIndex);
+}
+
 @Injectable()
 export class ComplaintService implements OnModuleInit {
   private caseSequence = 1;
@@ -1329,6 +1346,24 @@ export class ComplaintService implements OnModuleInit {
     return this.listComplaintCases();
   }
 
+  /** Read every committed non-settlement case on each call, the same
+   * canonical-refresh guarantee refreshSettlementCases already gives
+   * settlement_dispute cases, so a warm instance that never itself created
+   * or updated a given ordinary case still lists it. */
+  async listComplaintCasesForFleetOps(): Promise<ComplaintCaseRecord[]> {
+    if (
+      this.complaintRepository?.isEnabled() &&
+      typeof this.complaintRepository.loadState === "function"
+    ) {
+      const state = await this.complaintRepository.loadState();
+      for (const durableCase of state.complaintCases) {
+        if (durableCase.category === "settlement_dispute") continue;
+        this.reconcileComplaintCaseIntoCache(durableCase);
+      }
+    }
+    return this.listComplaintCases();
+  }
+
   async getComplaintCaseForOps(caseNo: string) {
     // Legacy/definitely rejected commands can leave no retained identity.
     // Actual ordinary GET still reads this case's canonical full snapshot.
@@ -1348,10 +1383,13 @@ export class ComplaintService implements OnModuleInit {
     return this.getComplaintCase(caseNo);
   }
 
-  async getComplaintTimelineForOps(caseNo: string) {
+  async getComplaintTimelineForOps(
+    caseNo: string,
+    opts?: { includeAttachmentManifest?: boolean },
+  ) {
     if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo)) {
       await this.getComplaintCaseForOps(caseNo);
-      return this.getComplaintTimeline(caseNo);
+      return this.getComplaintTimeline(caseNo, opts);
     }
     this.ensureComplaintReadbackAvailable(caseNo);
     await this.getComplaintCaseForOps(caseNo);
@@ -1373,7 +1411,7 @@ export class ComplaintService implements OnModuleInit {
         ),
       );
     }
-    return this.getComplaintTimeline(caseNo);
+    return this.getComplaintTimeline(caseNo, opts);
   }
 
   listComplaintCases() {
@@ -1386,10 +1424,17 @@ export class ComplaintService implements OnModuleInit {
     return this.cloneComplaintCase(this.requireComplaintCase(caseNo));
   }
 
-  getComplaintTimeline(caseNo: string) {
+  getComplaintTimeline(
+    caseNo: string,
+    opts?: { includeAttachmentManifest?: boolean },
+  ) {
     this.requireComplaintCase(caseNo);
+    const includeAttachmentManifest = opts?.includeAttachmentManifest ?? false;
     return (this.complaintTimelines.get(caseNo) ?? []).map((entry) => ({
       ...entry,
+      note: includeAttachmentManifest
+        ? entry.note
+        : stripFleetReplyAttachmentManifest(entry.note),
     }));
   }
 
