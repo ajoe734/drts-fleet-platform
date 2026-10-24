@@ -37,6 +37,7 @@ import {
 } from "../../common/api-envelope";
 import {
   CurrentIdentity,
+  RequireRealms,
   RequireScopes,
 } from "../../common/auth/auth.decorators";
 import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
@@ -322,6 +323,22 @@ export class RegulatoryRegistryController {
     );
   }
 
+  @Get("contracts/expiring")
+  listExpiringContracts(
+    @Query("windowDays") windowDays?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const parsedDays = windowDays ? parseInt(windowDays, 10) : 30;
+    return toApiSuccessEnvelope(
+      {
+        items: this.regulatoryRegistryService.listExpiringContracts(
+          Number.isNaN(parsedDays) ? 30 : parsedDays,
+        ),
+      },
+      requestId,
+    );
+  }
+
   @Get("contracts")
   listContracts(@Headers("x-request-id") requestId?: string) {
     return toApiSuccessEnvelope(
@@ -442,10 +459,16 @@ export class RegulatoryRegistryController {
   }
 
   @Get("policies/expiring")
-  listExpiringPolicies(@Headers("x-request-id") requestId?: string) {
+  listExpiringPolicies(
+    @Query("windowDays") windowDays?: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const parsedDays = windowDays ? parseInt(windowDays, 10) : 30;
     return toApiSuccessEnvelope(
       {
-        items: this.regulatoryRegistryService.listExpiringPolicies(),
+        items: this.regulatoryRegistryService.listExpiringPolicies(
+          Number.isNaN(parsedDays) ? 30 : parsedDays,
+        ),
       },
       requestId,
     );
@@ -682,6 +705,42 @@ export class RegulatoryRegistryController {
     return toApiSuccessEnvelope(receipts, requestId);
   }
 
+  @Get("partners/:partnerId/contacts")
+  getFleetPartnerContacts(
+    @Param("partnerId") partnerId: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      {
+        partnerId,
+        emails: this.regulatoryRegistryService.getFleetPartnerContacts(
+          partnerId,
+        ),
+      },
+      requestId,
+    );
+  }
+
+  @Post("partners/:partnerId/contacts")
+  registerFleetPartnerContacts(
+    @Param("partnerId") partnerId: string,
+    @Body() body: { emails?: readonly string[] | string; email?: string },
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const input = body?.emails ?? (body?.email ? [body.email] : []);
+    const emails = this.regulatoryRegistryService.registerFleetPartnerContacts(
+      partnerId,
+      input,
+    );
+    return toApiSuccessEnvelope(
+      {
+        partnerId,
+        emails,
+      },
+      requestId,
+    );
+  }
+
   @Get("expiry-events/:eventId")
   async getExpiryEvent(
     @Param("eventId") eventId: string,
@@ -727,5 +786,49 @@ export class RegulatoryRegistryController {
     }
 
     return numericValue;
+  }
+}
+
+/**
+ * Scheduled reconciliation entry point for GCP Cloud Scheduler (WIF Entry C).
+ *
+ * Architectural choice (BUREAU-R14):
+ * Cloud Run scales to zero when idle, so an unmonitored in-process `setInterval`
+ * (`ENABLE_EXPIRY_RECONCILIATION_LOOP`) is not reliable on shared dev/prod.
+ * Instead, periodic expiry & pre-expiry reconciliation is wired identically to
+ * `drts-dev-mail-outbox-drain` and `drts-billing-monthly`: Cloud Scheduler sends
+ * an OIDC-authenticated POST request as `drts-dev-scheduler` (system realm,
+ * scope `regulatory:write`) to this internal route.
+ */
+@Controller()
+export class RegulatoryExpiryScheduledController {
+  constructor(
+    private readonly regulatoryRegistryService: RegulatoryRegistryService,
+  ) {}
+
+  @Post("internal/scheduled-tasks/regulatory-expiry/run")
+  @RequireRealms("system")
+  @RequireScopes("regulatory:write")
+  async run(
+    @Body() command: ReconcileExpiryCommand | undefined,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
+  ) {
+    if (
+      !identity ||
+      identity.realm !== "system" ||
+      identity.actorType !== "system" ||
+      !identity.scopes.includes("regulatory:write")
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "AUTHZ_SCOPE_DENIED",
+        "Only the authorized system regulatory expiry scheduler workload can run this reconciliation.",
+      );
+    }
+    const result =
+      await this.regulatoryRegistryService.reconcileExpiredCredentials(command);
+    return toApiSuccessEnvelope(result, requestId ?? idempotencyKey);
   }
 }
