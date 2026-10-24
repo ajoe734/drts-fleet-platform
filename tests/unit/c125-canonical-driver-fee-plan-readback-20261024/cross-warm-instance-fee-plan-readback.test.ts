@@ -32,7 +32,10 @@ function createCanonicalStore(): CanonicalStore {
   };
 }
 
-function createWarmInstance(store: CanonicalStore) {
+function createWarmInstance(
+  store: CanonicalStore,
+  options: { failCanonicalReadWith?: Error } = {},
+) {
   const auditService = new AuditNotificationService();
 
   const persistChanges = async (changes: {
@@ -77,7 +80,12 @@ function createWarmInstance(store: CanonicalStore) {
       fulfillmentSegments: [],
       sandboxBillingTreatments: [],
     }),
-    loadDriverFeePlans: async () => store.feePlans.map((plan) => ({ ...plan })),
+    loadDriverFeePlans: async () => {
+      if (options.failCanonicalReadWith) {
+        throw options.failCanonicalReadWith;
+      }
+      return store.feePlans.map((plan) => ({ ...plan }));
+    },
     persistChanges,
     reportPersistenceFailure: vi.fn(),
     listLiveDriverTripsInPeriod: async () => [],
@@ -280,5 +288,78 @@ describe("C125-F1: canonical driver fee plan readback across already-warm API in
       );
       expect(result.items.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("C125-F1: a failed canonical fee-plan read must not fall through to a stale financial decision", () => {
+  it("refreshDriverFeePlansFromCanonicalSource propagates the read failure instead of resolving silently", async () => {
+    const store = createCanonicalStore();
+    const readFailure = new Error("canonical read unavailable");
+    const instance = createWarmInstance(store, {
+      failCanonicalReadWith: readFailure,
+    });
+    await instance.service.onModuleInit();
+
+    await expect(
+      instance.service.refreshDriverFeePlansFromCanonicalSource(),
+    ).rejects.toMatchObject({
+      code: "DRIVER_FEE_PLANS_CANONICAL_READ_UNAVAILABLE",
+    });
+  });
+
+  it("publishDriverFeePlan stops before the duplicate-version check and never mutates on a failed canonical read", async () => {
+    const store = createCanonicalStore();
+    const readFailure = new Error("canonical read unavailable");
+    const instance = createWarmInstance(store, {
+      failCanonicalReadWith: readFailure,
+    });
+    await instance.service.onModuleInit();
+
+    await expect(
+      instance.service.publishDriverFeePlan({
+        planName: "F1 Read Failure Plan",
+        version: "f1-read-failure-v1",
+        serviceFeeBps: 1000,
+        reimbursementMode: "platform_funded",
+      }),
+    ).rejects.toMatchObject({
+      code: "DRIVER_FEE_PLANS_CANONICAL_READ_UNAVAILABLE",
+    });
+
+    // No stale-success publish: the canonical store was never written to,
+    // and the instance's own list is still empty, not a fabricated success.
+    expect(store.feePlans).toHaveLength(0);
+    expect(instance.service.listDriverFeePlans()).toHaveLength(0);
+  });
+
+  it("generateDriverStatements stops before selecting a stale/absent fee plan on a failed canonical read", async () => {
+    const store = createCanonicalStore();
+    const instanceA = createWarmInstance(store);
+    await instanceA.service.onModuleInit();
+    await instanceA.service.publishDriverFeePlan(
+      {
+        planName: "F1 Read Failure Generation Plan",
+        version: "f1-read-failure-gen-v1",
+        serviceFeeBps: 1000,
+        reimbursementMode: "platform_funded",
+      },
+      "publish-on-a",
+    );
+
+    const readFailure = new Error("canonical read unavailable");
+    const instanceB = createWarmInstance(store, {
+      failCanonicalReadWith: readFailure,
+    });
+    await instanceB.service.onModuleInit();
+
+    // Must surface the canonical-read failure, not the unrelated "no active
+    // fee plan" validation error that an empty-but-successfully-read stale
+    // list would have produced.
+    await expect(
+      instanceB.service.generateDriverStatements({ periodMonth: "2026-03" }),
+    ).rejects.toMatchObject({
+      code: "DRIVER_FEE_PLANS_CANONICAL_READ_UNAVAILABLE",
+    });
+    expect(store.statements).toHaveLength(0);
   });
 });

@@ -2015,6 +2015,18 @@ export class BillingSettlementService implements OnModuleInit {
         error,
         "driver_fee_plans_refresh",
       );
+      // A failed canonical read must not let a caller fall through to the
+      // stale in-memory list: that list could then pass a duplicate-version
+      // check that the canonical data would have failed, or hand generation
+      // a fee plan that is no longer the active one. Stop before any list
+      // response or financial decision is made on it.
+      throw new ApiRequestError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        "DRIVER_FEE_PLANS_CANONICAL_READ_UNAVAILABLE",
+        "Driver fee plan canonical read could not be completed.",
+        {},
+        true,
+      );
     }
   }
 
