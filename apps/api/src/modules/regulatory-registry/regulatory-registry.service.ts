@@ -90,7 +90,6 @@ import {
   RegulatoryRegistryRepository,
   RegulatoryCommandCommitUncertainError,
   PREEXPIRY_CREDENTIAL_FIELDS,
-  parsePreexpiryCredentialFamily,
   parsePreexpiryRecordFamily,
   type RegulatoryRegistryQueryExecutor,
   type RegulatoryVehicleCommandState,

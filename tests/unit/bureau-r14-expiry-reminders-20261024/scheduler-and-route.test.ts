@@ -6,7 +6,6 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { ExecutionContext } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -163,7 +162,7 @@ describe("BUREAU-R14: Scheduled Reconciliation Route & Provisioning Scripts", ()
           principalId: "dev-scheduler",
           allowedTokenAudiences: [API_ORIGIN],
           routeScopes: [REGULATORY_EXPIRY_ROUTE_SCOPE],
-          scopes: ["regulatory-registry:expiry-reconcile:run"],
+          scopes: ["regulatory:write"],
         },
       ]),
     );
@@ -215,7 +214,7 @@ describe("BUREAU-R14: Scheduled Reconciliation Route & Provisioning Scripts", ()
       switchToHttp: () => ({
         getRequest: () => req,
       }),
-    } as unknown as ExecutionContext;
+    } as unknown as Parameters<BootstrapAuthGuard["canActivate"]>[0];
 
     const allowed = await guard.canActivate(context);
     expect(allowed).toBe(true);
@@ -223,7 +222,7 @@ describe("BUREAU-R14: Scheduled Reconciliation Route & Provisioning Scripts", ()
       actorId: "dev-scheduler",
       actorType: "system",
       realm: "system",
-      scopes: ["regulatory-registry:expiry-reconcile:run"],
+      scopes: ["regulatory:write"],
     });
 
     const response = await scheduledController.run(
@@ -255,7 +254,7 @@ describe("BUREAU-R14: Scheduled Reconciliation Route & Provisioning Scripts", ()
           actorId: "ops-user-1",
           actorType: "ops_user",
           realm: "ops",
-          scopes: ["regulatory-registry:expiry-reconcile:run"],
+          scopes: ["regulatory:write"],
         } as never,
       ),
     ).rejects.toMatchObject({

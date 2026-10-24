@@ -798,7 +798,7 @@ export class RegulatoryRegistryController {
  * Instead, periodic expiry & pre-expiry reconciliation is wired identically to
  * `drts-dev-mail-outbox-drain` and `drts-billing-monthly`: Cloud Scheduler sends
  * an OIDC-authenticated POST request as `drts-dev-scheduler` (system realm,
- * scope `regulatory-registry:expiry-reconcile:run`) to this internal route.
+ * scope `regulatory:write`) to this internal route.
  */
 @Controller()
 export class RegulatoryExpiryScheduledController {
@@ -808,17 +808,18 @@ export class RegulatoryExpiryScheduledController {
 
   @Post("internal/scheduled-tasks/regulatory-expiry/run")
   @RequireRealms("system")
-  @RequireScopes("regulatory-registry:expiry-reconcile:run")
+  @RequireScopes("regulatory:write")
   async run(
     @Body() command: ReconcileExpiryCommand | undefined,
     @CurrentIdentity() identity: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
     if (
       !identity ||
       identity.realm !== "system" ||
       identity.actorType !== "system" ||
-      !identity.scopes.includes("regulatory-registry:expiry-reconcile:run")
+      !identity.scopes.includes("regulatory:write")
     ) {
       throw new ApiRequestError(
         HttpStatus.FORBIDDEN,
@@ -828,6 +829,6 @@ export class RegulatoryExpiryScheduledController {
     }
     const result =
       await this.regulatoryRegistryService.reconcileExpiredCredentials(command);
-    return toApiSuccessEnvelope(result, requestId);
+    return toApiSuccessEnvelope(result, requestId ?? idempotencyKey);
   }
 }
