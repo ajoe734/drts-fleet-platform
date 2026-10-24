@@ -2420,7 +2420,15 @@ export class RegulatoryRegistryService
           exclusiveOperatorId:
             command.exclusiveOperatorId !== undefined
               ? this.normalizeNullableText(command.exclusiveOperatorId)
-              : this.normalizeNullableText(existing.exclusiveOperatorId),
+              : existing.exclusiveOperatorId !== undefined
+                ? this.normalizeNullableText(existing.exclusiveOperatorId)
+                : this.normalizeNullableText(
+                    this.selectPrimaryContract(
+                      vehicleId,
+                      now,
+                      state.contracts,
+                    )?.partnerId,
+                  ),
           exclusiveProviderName:
             this.normalizeNullableText(command.exclusiveProviderName) ??
             existing.exclusiveProviderName,
@@ -2443,9 +2451,16 @@ export class RegulatoryRegistryService
           lifecycleStatus: "pending_review",
           reviewerId: null,
           reviewedAt: null,
-          exclusiveOperatorId: this.normalizeNullableText(
-            command.exclusiveOperatorId,
-          ),
+          exclusiveOperatorId:
+            command.exclusiveOperatorId !== undefined
+              ? this.normalizeNullableText(command.exclusiveOperatorId)
+              : this.normalizeNullableText(
+                  this.selectPrimaryContract(
+                    vehicleId,
+                    now,
+                    state.contracts,
+                  )?.partnerId,
+                ),
           exclusiveProviderName: this.normalizeNullableText(
             command.exclusiveProviderName,
           ),
@@ -3135,10 +3150,15 @@ export class RegulatoryRegistryService
     });
     const vehicle = this.requireVehicle(vehicleId);
     const exclusivity = this.selectPrimaryExclusivity(vehicleId, evaluatedAt);
-    const boundOperatorId = this.normalizeNullableText(
-      exclusivity?.exclusiveOperatorId ??
-        vehicle.supplyLifecycle.exclusivity.operatorId,
-    );
+    const boundOperatorId =
+      exclusivity && exclusivity.exclusiveOperatorId === undefined
+        ? this.normalizeNullableText(
+            this.selectPrimaryContract(vehicleId, evaluatedAt)?.partnerId,
+          )
+        : this.normalizeNullableText(
+            exclusivity?.exclusiveOperatorId ??
+              vehicle.supplyLifecycle.exclusivity.operatorId,
+          );
     const operatingAuthorizationId = this.normalizeNullableText(
       context?.operatingAuthorizationId,
     );
@@ -3831,9 +3851,10 @@ export class RegulatoryRegistryService
       blockedReasons.push("insurance_cancelled");
     }
 
-    const boundOperatorId = this.normalizeNullableText(
-      exclusivity?.exclusiveOperatorId,
-    );
+    const boundOperatorId =
+      exclusivity && exclusivity.exclusiveOperatorId === undefined
+        ? this.normalizeNullableText(contract?.partnerId)
+        : this.normalizeNullableText(exclusivity?.exclusiveOperatorId);
     if (!exclusivity || exclusivity.lifecycleStatus === "missing") {
       blockedReasons.push("exclusivity_missing");
     } else if (exclusivity.lifecycleStatus === "pending_review") {
@@ -4151,6 +4172,8 @@ export class RegulatoryRegistryService
   private hydrateExclusivity(
     exclusivity: DispatchExclusivityRecord,
   ): DispatchExclusivityRecord {
+    const hasExplicitOperatorField =
+      exclusivity.exclusiveOperatorId !== undefined;
     const rawOperatorId = this.normalizeNullableText(
       exclusivity.exclusiveOperatorId,
     );
@@ -4158,7 +4181,14 @@ export class RegulatoryRegistryService
       exclusivity.declarationFileId === "review-simulated-document" &&
       rawOperatorId === "partner-demo-001"
         ? "review-synthetic-operator"
-        : rawOperatorId;
+        : hasExplicitOperatorField
+          ? rawOperatorId
+          : this.normalizeNullableText(
+              this.selectPrimaryContract(
+                exclusivity.vehicleId,
+                exclusivity.updatedAt ?? SEED_TIMESTAMP,
+              )?.partnerId,
+            );
     return this.applyExclusivityLifecycle(
       {
         ...exclusivity,

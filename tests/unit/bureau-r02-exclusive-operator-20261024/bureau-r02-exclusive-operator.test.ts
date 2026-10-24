@@ -93,7 +93,6 @@ describe("BUREAU-R02: single-operator vehicle exclusivity binding & cross-operat
     });
     await registry.approveExclusivity("veh-demo-001", {
       reviewerId: "ops-reviewer-001",
-      exclusiveOperatorId: null,
     });
 
     const vehicle = registry
