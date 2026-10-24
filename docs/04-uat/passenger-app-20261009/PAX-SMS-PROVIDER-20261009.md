@@ -1,0 +1,30 @@
+# PAX-SMS-PROVIDER-20261009 — 實作與驗證紀錄
+
+Owner：`Gemini2`；Reviewer：`Claude`。
+
+## 1. 依據與規格對照
+
+- 任務規格：`.local/passenger-app-20261009/PAX-SMS-PROVIDER-20261009.md`（含 2026-10-15 使用者決定選用 Twilio Programmable Messaging 與 2026-10-24 dev 設定進度）、`.local/passenger-app-20261009/common.md` A4/A10/A12、`docs/02-architecture/passenger-app-20261009/01_system_sa_sd.md`。
+- 供應商與認證：
+  - 使用 Twilio Programmable Messaging REST API：`POST https://api.twilio.com/2010-04-01/Accounts/{AccountSid}/Messages.json`（不新增 Twilio SDK 依賴，使用既有 `fetch` 與可注入 `TwilioHttpTransport`）。
+  - HTTP Basic Auth 只使用 `TWILIO_API_KEY_SID` 與 `TWILIO_API_KEY_SECRET`；不讀取、不掛載管理用 `drts-dev-twilio-auth-token`。
+  - 表單參數：`To`（E.164）、`From`（同時接受 E.164 號碼如 `+15551234567` 與 1–11 字元英數字寄件者名稱如 `SmartTaxi`）、`Body`、以及選填 `StatusCallback`（當設定 HTTPS `TWILIO_STATUS_CALLBACK_URL` 時）。
+- 台灣簡訊規定：
+  - 簡訊內容固定為：`[智行叫車] 您的驗證碼是 {code}，{n} 分鐘內有效。請勿提供給他人。`
+  - 開頭為品牌名 `[智行叫車]`，不含任何網址，亦不承諾固定寄件號碼或寄件者名稱。
+- 錯誤分類與送達回報：
+  - `temporary_failure`：請求逾時（`AbortController` timeout）、網路錯誤、HTTP 429／5xx、Twilio 20429／30001–30008。
+  - `invalid_number`：Twilio 21211、21614（及 21408、21604、21608、21610、21612）或非 E.164 目標號碼。
+  - `credential_error`：Twilio 20003（含 Trust Hub KYC 尚未通過之權限拒絕）、20005、21212、21606 或 HTTP 401／403。
+  - 送達回報：`sendOtp` 解析同步回應 `sid`／`status`（`accepted`、`queued`、`sending`、`sent`、`delivered`）；`parseTwilioDeliveryReport` 解析 Twilio 狀態回呼並遮罩收件號碼（如 `+886 912-***-678`）。
+- 部署全有或全無（`.github/workflows/deploy-dev.yml`）：
+  - `optional_group sms` 更新為 `TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET TWILIO_FROM_NUMBER PASSENGER_OTP_PEPPER`。
+  - 當 `drts-dev-twilio-from-number` 尚未建立時（等待 Twilio Trust Hub Primary Customer Profile KYC 審核），`sms_mounts_complete=false`，不掛載任何 `TWILIO_*` secret，手機驗證碼登入維持關閉（`not_configured`），而 Email OTP 的 `PASSENGER_OTP_PEPPER` 仍由 `optional_group otp` 正常掛載。
+
+## 2. Finding／驗收證據對照表（AI_COLLABORATION_GUIDE.md §0.7）
+
+| Finding／驗收項 | 原始碼依據與修改位置 | 舊版重現 → 修正版結果 | 命令、退出碼、執行版本與證據位置 | 未驗項與具體限制 |
+| --- | --- | --- | --- | --- |
+| Twilio `SmsPort` adapter、台灣簡訊格式、錯誤分類與送達回報 | `apps/api/src/modules/passenger-app/otp/twilio-sms.adapter.ts`、`apps/api/src/modules/passenger-app/otp/sms.port.ts` | 舊版 `UnconfiguredSmsPort` 固定回傳 `not_configured` 且無 Twilio Messages API、錯誤分類與送達回報實作 → 修正版實作 `TwilioSmsAdapter`、`twilioSmsConfigFromEnv`、`classifyTwilioError`、`formatTaiwanOtpBody`、`parseTwilioDeliveryReport`，並讓 `PassengerAppModule` 在完整 `TWILIO_*` 環境變數下啟用 adapter，缺一則維持 `not_configured`。 | `pnpm exec vitest run tests/unit/pax-sms-provider-20261009/twilio-sms.adapter.test.ts apps/api/tests/unit/passenger-sms-provider.test.ts`（17 tests pass，exit 0） | 單元測試以 stub HTTP transport 驗證外部 Twilio 邊界，不宣稱真實簡訊送達。 |
+| `.github/workflows/deploy-dev.yml` SMS secret 全有或全無掛載 | `.github/workflows/deploy-dev.yml`（`Resolve passenger app optional secret mounts`） | 舊版 `optional_group sms` 使用未定案之 `SMS_PROVIDER_API_KEY SMS_PROVIDER_SENDER_ID PASSENGER_OTP_PEPPER` → 修正版改為 `TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET TWILIO_FROM_NUMBER PASSENGER_OTP_PEPPER`；5 個 secret 全齊才掛載，缺 `drts-dev-twilio-from-number` 時不掛載任何 `TWILIO_*` 且保留 `otp` pepper。 | `pnpm exec vitest run tests/unit/pax-sms-provider-20261009/twilio-sms.adapter.test.ts`（含實際執行 workflow step bash 腳本測試，exit 0） | 既有 `tests/unit/pax-web-deploy-20261009/deployment-contract.test.ts`（第 96–100 行）與 `docs/02-architecture/passenger-app-20261009/01_system_sa_sd.md`、`docs/03-runbooks/smarttransport-tw-custom-domains.md` 仍引用舊 `SMS_PROVIDER_*` 名稱，不在本 task `write_scopes` 內，已記錄請 Supervisor 擴充 `write_scopes` 或協調同步。 |
+| `pax-sms_provider_adapter_live_verified`（真實送達證據，遮罩 `+886 988-***-716`） | `.local/passenger-app-20261009/PAX-SMS-PROVIDER-20261009.md` | 等待外部 gate：Twilio Trust Hub Primary Customer Profile（KYC）審核通過並由互動 session 建立 `drts-dev-twilio-from-number` 後，才可由授權 hosted 方式發送真實簡訊至測試號碼（遮罩 `+886 988-***-716`）並保存證據。 | 尚未執行（blocked on Twilio KYC / `drts-dev-twilio-from-number`） | 外部 gate 尚未解除，依規範維持 `blocked`，不偽造送達證據。 |
