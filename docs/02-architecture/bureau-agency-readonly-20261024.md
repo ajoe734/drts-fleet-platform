@@ -235,52 +235,81 @@ BFF 實作：新 package `packages/agency-auth`（`createAgencyAuthHandlers`、
 
 ### 4.1 R11 行程紀錄（2 年保存檢視與匯出）
 
-權威來源：`MultiTaxiService.listTripOperationalRecords`（multi-taxi.service.ts:388-420）、
-`exportTripOperationalRecords`（422-452）；`retainUntil = generatedAt + 730 日`（2583）。
+權威來源：`MultiTaxiService.listTripOperationalRecords`（multi-taxi.service.ts:388-420，回傳
+`MultiTaxiTripOperationalAdminView[]`）、`exportTripOperationalRecords`（422-452，回傳
+`MultiTaxiTripOperationalExportRow[]`）。每筆的 `generatedAt` 等於完成時間（`const generatedAt = completedAt`，
+2552），`retainUntil = generatedAt + 730 日`（2583）；`reservedAt` 是 `order.reservationWindowStart ?? order.createdAt`（2562）。
 
-| API                                                        | scope                        | 重用                                                                                                                      |
-| ---------------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/agency/trip-records`                             | `agency:trip_records:read`   | `listTripOperationalRecords`，再套保存邊界、分頁與投影                                                                    |
-| `GET /api/agency/trip-records/:recordId`                   | `agency:trip_records:read`   | 同上，取單筆                                                                                                              |
-| `POST /api/agency/trip-records/export-jobs/preview`        | `agency:trip_records:export` | `ReportingFilingService.previewMultiTaxiTripExport`                                                                       |
-| `POST /api/agency/trip-records/export-jobs`                | `agency:trip_records:export` | `createMultiTaxiTripExportJobDurably`（需 `purpose`、`idempotencyKey`，`CreateMultiTaxiTripOperationalExportJobCommand`） |
-| `GET /api/agency/trip-records/export-jobs/:jobId`          | `agency:trip_records:export` | `getMultiTaxiTripExportJob`，只回本機關、本人建立的 job                                                                   |
-| `GET /api/agency/trip-records/export-jobs/:jobId/download` | `agency:trip_records:export` | `issueMultiTaxiTripExportDownload`（controlled download，簽章下載連結）                                                   |
+| API                                                        | scope                        | 重用                                                                                                                                                                                         |
+| ---------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/agency/trip-records`                             | `agency:trip_records:read`   | `listTripOperationalRecords`，再套保存邊界、分頁與列表投影                                                                                                                                   |
+| `GET /api/agency/trip-records/:recordId`                   | `agency:trip_records:read`   | 同上，以 `recordId` 取單筆（權威層沒有單筆 method）；保存邊界外或不存在一律 404                                                                                                              |
+| `POST /api/agency/trip-records/export-jobs/preview`        | `agency:trip_records:export` | `AgencyPortalService` 先呼叫 `exportTripOperationalRecords(scope)` 並套保存邊界，再以過濾後筆數呼叫 `ReportingFilingService.previewMultiTaxiTripExport(scope, recordCount, identity)`（513） |
+| `POST /api/agency/trip-records/export-jobs`                | `agency:trip_records:export` | 同上取得過濾後 rows，呼叫 `createMultiTaxiTripExportJobDurably(command, rows, identity)`（588；需 `purpose`、`idempotencyKey`，`CreateMultiTaxiTripOperationalExportJobCommand`）            |
+| `GET /api/agency/trip-records/export-jobs/:jobId`          | `agency:trip_records:export` | `getMultiTaxiTripExportJob`（765），只回本機關、本人建立的 job                                                                                                                               |
+| `GET /api/agency/trip-records/export-jobs/:jobId/download` | `agency:trip_records:export` | `issueMultiTaxiTripExportDownload`（792；controlled download，簽章下載連結），同上擁有者核對                                                                                                 |
+
+既有 `preview`／`create` 的 rows 與 `recordCount` 本來就由 caller 傳入（平台端是
+multi-taxi.controller.ts 先呼叫 `exportTripOperationalRecords`，489、509），所以機關的保存邊界
+在 `AgencyPortalService` 傳入前套用即可，不需改 `ReportingFilingService` 的列產生方式。
+
+機關查詢參數（列表與匯出 scope 相同）：`month`、`reservedFrom`、`reservedTo`、`legalHold`
+（列表）、`page`、`pageSize`。**不接受 `q`**：既有 `q` 會比對未遮罩的 `orderNo`、`plateNo`、
+`orderId`、`tripId`（multi-taxi.service.ts:405-414），開放給機關等於可用逐字猜測反查被遮罩或不回傳
+的值。匯出 scope 也不接受 `legalHold`：既有 `normalizeMultiTaxiTripExportScope`
+（reporting-filing.service.ts:2831-2858）只保留 `month`、`q`，`legalHold` 不會進入 job scope。
 
 必要的權威層調整（列入實作任務）：
 
 - `ReportingFilingService.assertMultiTaxiTripExportAccess`（reporting-filing.service.ts:2806-2829）
-  目前只允許 `platform_admin`；改為也接受 `realm === "agency"`、`actorType === "agency_user"`、
-  持有 `agency:trip_records:export`。job 讀取／下載必須核對 `requestedByActorId === identity.actorId`
-  且 job 的 `agencyId` 相同，機關不能讀平台或其他機關的 job。
+  目前只允許 `realm === "platform"`、`actorType === "platform_admin"` 且持有
+  `multi_taxi_records:export`；改為也接受 `realm === "agency"`、`actorType === "agency_user"`、
+  持有 `agency:trip_records:export`。
+- job 擁有者：`MultiTaxiTripExportJobMetadata`（`apps/api/src/modules/reporting-filing/reporting-filing.repository.ts:21-27`）
+  目前只有 `scope`/`purpose`/`idempotencyKey`/`requestedByActorId`/`recordCount`，沒有機關欄位；
+  `EvidenceAccessIdentity`（evidence-governance.ts:18-24）也不帶 `agencyId`。新增 optional
+  `agencyId`，由 `prepareMultiTaxiTripExportJob`（645-717）從 agency identity 寫入，
+  `toMultiTaxiTripExportView`（2772-2787）帶出 `MultiTaxiTripOperationalExportJobView.agencyId?`。
+  既有 `getMultiTaxiTripExportJob`／`issueMultiTaxiTripExportDownload` 不核對擁有者（平台端靠
+  `@RequireRealms("platform")`）；agency identity 呼叫時必須在 service 內核對
+  `requestedByActorId === identity.actorId` 且 `agencyId === identity.agencyId`，不符回 404，
+  機關不能讀平台或其他機關的 job。平台端行為不變。
+- `normalizeMultiTaxiTripExportScope` 加入 `reservedFrom`／`reservedTo` 的格式驗證與保留，否則
+  新參數不會進入 job scope、也不參與 idempotency 比對（`stableSerialize(existingMetadata.scope)`，677）。
 - `assertEvidenceAccess` 的 `report_artifact` 規則（`apps/api/src/common/evidence-governance.ts:111-138`）
   新增 `{ realms: ["agency"], actorTypes: ["agency_user"], requiredScopes: ["agency:trip_records:export"], tenantScoped: false }`。
 - `MultiTaxiTripOperationalRecordQuery`（`packages/contracts/src/phase1-p5-s3-multi-taxi.ts:825-829`）
-  目前只有 `month`/`q`/`legalHold`；新增 optional `reservedFrom`/`reservedTo`（ISO 日期），滿足
-  doc 08 的「日期區間」最小查詢。列表回應目前把全部結果當一頁（multi-taxi.controller.ts:455-464）；
-  機關 API 加 `page`/`pageSize`（上限 200）。
+  目前只有 `month`/`q`/`legalHold`；新增 optional `reservedFrom`/`reservedTo`（ISO 日期，比對
+  `reservedAt`，與既有 `month` 過濾同一欄位），滿足 doc 08 的「日期區間」最小查詢；
+  `listTripOperationalRecords` 加入對應過濾（未帶時平台端行為不變）。列表回應目前把全部結果當
+  一頁（multi-taxi.controller.ts:455-464）；機關 API 加 `page`/`pageSize`（上限 200）。
 
-**2 年保存邊界**：機關查詢與匯出只包含 `retainUntil >= now` 的紀錄，並把 `reservedFrom`
-下限夾到 `now - 730 日`。現有 service 只計算 `retainUntil`，不據此過濾；本設計不改平台端
-行為，只在機關投影套用。實際 purge 仍由後端保存政策負責，UI 只顯示「法定最低保存期間：
-各趟次至少二年」（doc 08:370）。
+**2 年保存邊界**：機關列表、詳情與匯出只包含 `retainUntil >= now` 的紀錄（等同完成時間
+`generatedAt >= now - 730 日`）。這是唯一的保存邊界判斷；`reservedFrom`／`reservedTo`／`month`
+只是使用者篩選條件，不另外以 `reservedAt` 推算保存期限（預約時間早於完成時間，若以
+`reservedAt` 夾下限會誤排除仍在保存期內的紀錄）。現有 service 只計算 `retainUntil`，不據此
+過濾；本設計不改平台端行為，只在機關路徑套用。實際 purge 仍由後端保存政策負責，UI 只顯示
+「法定最低保存期間：各趟次至少二年」（doc 08:370）。
 
-**欄位投影與遮罩**（列表、詳情、匯出一致；匯出沿用 `MultiTaxiTripOperationalExportRow`
-現有欄位與 CSV 格式 `multi-taxi-trip-records-<yyyymm|all>.csv`）：
+**欄位投影與遮罩**：列表與詳情使用下表（來源為 `MultiTaxiTripOperationalAdminView`，未列出的
+`route.pointCount`、`route.source` 等一律不回傳）。匯出**不另設欄位**，直接沿用既有
+`exportTripOperationalRecords` 產生的 `MultiTaxiTripOperationalExportRow` 13 欄與 CSV 檔名
+`multi-taxi-trip-records-<yyyymm|all>.csv`；該列型別本身沒有 `recordId`、`route.*`、`legalHold`，
+所以匯出比列表少這三類欄位，其餘欄位的遮罩規則與下表相同。
 
-| 欄位                                                           | 機關看到                                      | 規則／函式                                               |
-| -------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------- |
-| `orderNo`                                                      | `orderNoMasked`                               | `maskOpaqueToken(v, 3, 2)`（同現有匯出）                 |
-| `plateNo`                                                      | `plateNoMasked`（預設）                       | `maskOpaqueToken(v, 2, 2)`；是否改為全碼見 D4            |
-| `recordId`                                                     | 原值                                          | 系統產生的 `mtr-<orderId>`，作為詳情查詢 key             |
-| `orderId`、`tripId`、`assignmentId`、`vehicleId`               | 不回傳                                        | 內部識別碼                                               |
-| `reservedAt`、`pickupAt`、`dropoffAt`                          | 原值                                          | 法定欄位；`null` 顯示未提供                              |
-| `route.distanceMeters`、`route.durationSeconds`                | 原值                                          | 法定「行駛里程」                                         |
-| `route.encodedPolyline`                                        | 不回傳（預設）                                | 起訖點可推回住址；是否提供路線見 D4                      |
-| `payableFareMinor`、`actualFareMinor`、`tollMinor`、`currency` | 原值                                          | 法定車資欄位                                             |
-| `farePolicyVersion`、`chargingMode`                            | 原值                                          |                                                          |
-| `generatedAt`、`retainUntil`                                   | 原值                                          |                                                          |
-| `legalHold`                                                    | 只回 `state`（`active`/`none`/`unavailable`） | 不回 `activeHolds`（含 `placedByActorId`、`reasonNote`） |
+| 欄位                                                           | 列表／詳情                                    | 匯出（`MultiTaxiTripOperationalExportRow`） | 規則／函式                                                       |
+| -------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------- |
+| `orderNo`                                                      | `orderNoMasked`                               | `orderNoMasked`                             | `maskOpaqueToken(v, 3, 2)`（同現有匯出，437）                    |
+| `plateNo`                                                      | `plateNoMasked`（預設）                       | `plateNoMasked`                             | `maskOpaqueToken(v, 2, 2)`（同現有匯出，438）；是否改為全碼見 D4 |
+| `recordId`                                                     | 原值                                          | 無此欄                                      | 系統產生的 `mtr-<orderId>`，作為詳情查詢 key                     |
+| `orderId`、`tripId`、`assignmentId`、`vehicleId`               | 不回傳                                        | 無此欄                                      | 內部識別碼                                                       |
+| `reservedAt`、`pickupAt`、`dropoffAt`                          | 原值                                          | 原值                                        | 法定欄位；`null` 顯示未提供                                      |
+| `route.distanceMeters`、`route.durationSeconds`                | 原值                                          | 無此欄                                      | 法定「行駛里程」；匯出是否補欄位屬契約變更，本設計不做           |
+| `route.encodedPolyline`                                        | 不回傳（預設）                                | 無此欄                                      | 起訖點可推回住址；是否提供路線見 D4                              |
+| `payableFareMinor`、`actualFareMinor`、`tollMinor`、`currency` | 原值                                          | 原值                                        | 法定車資欄位                                                     |
+| `farePolicyVersion`、`chargingMode`                            | 原值                                          | 原值                                        |                                                                  |
+| `generatedAt`、`retainUntil`                                   | 原值                                          | 原值                                        |                                                                  |
+| `legalHold`                                                    | 只回 `state`（`active`/`none`/`unavailable`） | 無此欄                                      | 不回 `activeHolds`（含 `placedByActorId`、`reasonNote`）         |
 
 ### 4.2 R10 六個月營運統計
 
@@ -342,30 +371,43 @@ API：`GET /api/agency/reports/complaint-monthly-statistics?periodMonthFrom&peri
 ### 4.5 R14 車輛／駕駛資格與到期狀態
 
 權威來源：`RegulatoryRegistryService.listVehicles`（regulatory-registry.service.ts:874）、
-`listDrivers`（889）、`listExpiringDriverLicenses`（2121）、`listExpiringPolicies`（2108）；
-既有 route 在 `regulatory-registry.controller.ts:125-133、180-192、293-307、444`。
-型別 `VehicleRegistryRecord`（contracts index.ts:4400-4419）、`DriverRegistryRecord`（4421-4440）。
+`listDrivers`（889）、`listPolicies`（2101）；既有 route 在
+`regulatory-registry.controller.ts:125-133、180-192`。型別 `VehicleRegistryRecord`
+（contracts index.ts:4400-4419，保險日期在 `supplyLifecycle.insurance`，`VehicleSupplyLifecycleRecord`
+4352 起）、`DriverRegistryRecord`（4421-4440）、`InsurancePolicyRecord`（4558-4571）。
 
-| API                                                             | scope                        | 重用                                         |
-| --------------------------------------------------------------- | ---------------------------- | -------------------------------------------- |
-| `GET /api/agency/qualifications/vehicles?status&page`           | `agency:qualifications:read` | `listVehicles` + `listExpiringPolicies`      |
-| `GET /api/agency/qualifications/drivers?status&windowDays&page` | `agency:qualifications:read` | `listDrivers` + `listExpiringDriverLicenses` |
+**不使用** `listExpiringDriverLicenses`（2121）與 `listExpiringPolicies`（2108）：兩者只回傳
+「`lifecycleStatus === "active"` 且日期落在 `[now, now + windowDays]`」的資料（2113-2117、2128-2140），
+已過期、尚有長期效期或非 active 的駕駛／保單都不在結果內，無法據以算出 `expired`／`valid`。
+駕駛的三個證照日期本來就在 `listDrivers()` 回傳的 `DriverRegistryRecord` 上；車輛保險的
+`endAt`／`lifecycleStatus` 在 `listVehicles()` 回傳的 `supplyLifecycle.insurance` 上，所以到期狀態
+直接由這兩個 list 計算。只有遮罩後的 `policyNo` 需要 `listPolicies()`，以
+`supplyLifecycle.insurance.policyId === InsurancePolicyRecord.policyId` 對應。駕駛列表比照既有
+route（180-192）先等 `prepareMatchingSuppressions()` 完成再呼叫 `listDrivers()`。
 
-到期狀態計算（每個日期欄位各自計算）：`expired`（日期 < now）、`expiring`
-（now ≤ 日期 < now + `windowDays`，預設 30，與 `listExpiringDriverLicenses` 預設一致）、
-`valid`、`unavailable`（欄位為 `null`/不存在，顯示未提供）。
+| API                                                              | scope                        | 重用                            |
+| ---------------------------------------------------------------- | ---------------------------- | ------------------------------- |
+| `GET /api/agency/qualifications/vehicles?status&windowDays&page` | `agency:qualifications:read` | `listVehicles` + `listPolicies` |
+| `GET /api/agency/qualifications/drivers?status&windowDays&page`  | `agency:qualifications:read` | `listDrivers`                   |
 
-| 來源欄位                                                                                                                                                                | 機關看到                                             | 規則                               |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------- |
-| 車輛 `plateNo`                                                                                                                                                          | 遮罩                                                 | `maskOpaqueToken(v, 2, 2)`，同 D4  |
-| 車輛 `licenseType`、`operatingArea`、`dispatchableFlag`、`insuranceStatus`、`supplyLifecycle` 狀態                                                                      | 原值                                                 |                                    |
-| 車輛保險 `endAt`、`status`（policy）                                                                                                                                    | 原值                                                 | 計算到期狀態                       |
-| 保單 `policyNo`、`insurerName`、`coverageAmount`                                                                                                                        | `policyNo` 遮罩 `maskOpaqueToken(v,2,2)`；其餘不回傳 | 商業條件                           |
-| 車輛定期檢驗到期日                                                                                                                                                      | 未提供                                               | `VehicleRegistryRecord` 沒有此欄位 |
-| 駕駛 `name`                                                                                                                                                             | 遮罩                                                 | `maskName`                         |
-| 駕駛 `driverId`                                                                                                                                                         | 遮罩                                                 | `maskOpaqueToken(v, 3, 2)`         |
-| `licensesValid`、`licenseExpiry`、`professionalDriverLicenseExpiry`、`taxiDriverRegistrationExpiry`、`lifecycleStatus`、`dispatchEligible`、`eligibilityBlockedReasons` | 原值                                                 | 日期欄位計算到期狀態               |
-| `deviceBindings`、`workState`、駕駛位置                                                                                                                                 | 不回傳                                               | 與資格無關／即時位置               |
+`status` 篩選的是下列計算後的到期狀態（任一日期欄位符合即列入），不是權威層的 lifecycle 欄位。
+到期狀態計算（每個日期欄位各自計算，在投影層以同一個 `now` 計算）：`expired`（日期 < now）、
+`expiring`（now ≤ 日期 ≤ now + `windowDays`；`windowDays` 預設 30、上限 365，邊界含端點，與
+`listExpiringDriverLicenses`／`listExpiringPolicies` 的 `>= now && <= cutoff` 一致）、`valid`
+（日期 > now + `windowDays`）、`unavailable`（欄位為 `null`/不存在或無法解析，顯示未提供）。
+
+| 來源欄位                                                                                                                                                                | 機關看到                                             | 規則                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
+| 車輛 `plateNo`                                                                                                                                                          | 遮罩                                                 | `maskOpaqueToken(v, 2, 2)`，同 D4                                |
+| 車輛 `licenseType`、`operatingArea`、`dispatchableFlag`、`insuranceStatus`                                                                                              | 原值                                                 | `licenseType` 為 optional，缺值顯示未提供                        |
+| 車輛 `supplyLifecycle.dispatch.eligible`、`supplyLifecycle.dispatch.blockedReasons`、`supplyLifecycle.offboarding.status`                                               | 原值                                                 | `supplyLifecycle` 其他欄位（含 `offboarding.requestedBy`）不回傳 |
+| 車輛保險 `supplyLifecycle.insurance.endAt`、`supplyLifecycle.insurance.lifecycleStatus`                                                                                 | 原值                                                 | `endAt` 計算到期狀態；`null` 為 `unavailable`                    |
+| 保單 `policyNo`、`insurerName`、`coverageAmount`（`listPolicies`）                                                                                                      | `policyNo` 遮罩 `maskOpaqueToken(v,2,2)`；其餘不回傳 | 商業條件；對不到 policy 時 `policyNoMasked` 為 `null`            |
+| 車輛定期檢驗到期日                                                                                                                                                      | 未提供                                               | `VehicleRegistryRecord` 沒有此欄位                               |
+| 駕駛 `name`                                                                                                                                                             | 遮罩                                                 | `maskName`                                                       |
+| 駕駛 `driverId`                                                                                                                                                         | 遮罩                                                 | `maskOpaqueToken(v, 3, 2)`                                       |
+| `licensesValid`、`licenseExpiry`、`professionalDriverLicenseExpiry`、`taxiDriverRegistrationExpiry`、`lifecycleStatus`、`dispatchEligible`、`eligibilityBlockedReasons` | 原值                                                 | 三個 `*Expiry` 為 optional，各自計算到期狀態                     |
+| `deviceBindings`、`workState`、駕駛位置                                                                                                                                 | 不回傳                                               | 與資格無關／即時位置                                             |
 
 ### 4.6 資料範圍（機關轄區）
 
@@ -488,24 +530,25 @@ app、測試）與 **IMPL-B**（`deploy-dev.yml`、domain mapping、runbook，�
 
 ### 7.2 API 模組（IMPL-A）
 
-| 動作 | 路徑                                                                       | 內容                                                                                                 |
-| ---- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| 改   | `apps/api/src/modules/auth/auth.controller.ts`                             | `:realm/login` 允許 `agency`；`POST agency/invitation-login`、`POST agency/callback-session`         |
-| 改   | `apps/api/src/modules/auth/oidc-pkce.service.ts`                           | `exchangeAgencyCallbackSession`、state 的 `agencyId`／`invitationTokenHash`                          |
-| 改   | `apps/api/src/modules/identity/identity.repository.ts`                     | `acceptAgencyOidcInvitation`、`findAgencyMembershipForPrincipal`、agency invitation／membership 寫入 |
-| 新   | `apps/api/src/modules/agency-access/agency-access.module.ts`               | 模組                                                                                                 |
-| 新   | `apps/api/src/modules/agency-access/agency-portal.controller.ts`           | §4 全部 `agency/*` route                                                                             |
-| 新   | `apps/api/src/modules/agency-access/agency-portal.service.ts`              | 呼叫權威 service、保存邊界、分頁、投影與遮罩                                                         |
-| 新   | `apps/api/src/modules/agency-access/agency-projections.ts`                 | §4 各表的 allowlist 投影（純函式，便於單元測試）                                                     |
-| 新   | `apps/api/src/modules/agency-access/platform-admin-agencies.controller.ts` | §2.4 platform admin route、§5.4 稽核檢閱 route                                                       |
-| 新   | `apps/api/src/modules/agency-access/agency-directory.service.ts`           | 機關主檔、邀請、停用、期限                                                                           |
-| 新   | `apps/api/src/modules/agency-access/agency-directory.repository.ts`        | `core.regulatory_agencies`                                                                           |
-| 新   | `apps/api/src/modules/agency-access/agency-invitation-delivery.service.ts` | 比照 `TenantInvitationDeliveryService`                                                               |
-| 新   | `apps/api/src/modules/agency-access/agency-access-audit.service.ts`        | `recordOrDeny`                                                                                       |
-| 新   | `apps/api/src/modules/agency-access/agency-access-log.repository.ts`       | `admin.agency_access_logs` append／list                                                              |
-| 改   | `apps/api/src/modules/reporting-filing/reporting-filing.service.ts`        | `assertMultiTaxiTripExportAccess` 接受 agency，job 擁有者／agency 核對                               |
-| 改   | `apps/api/src/modules/multi-taxi/multi-taxi.service.ts`                    | `reservedFrom/reservedTo` 過濾（平台端行為不變）                                                     |
-| 改   | `apps/api/src/app.module.ts`                                               | 註冊 `AgencyAccessModule`（比照 `HostViewModule`，41、125 行）                                       |
+| 動作 | 路徑                                                                                 | 內容                                                                                                                                               |
+| ---- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 改   | `apps/api/src/modules/auth/auth.controller.ts`                                       | `:realm/login` 允許 `agency`；`POST agency/invitation-login`、`POST agency/callback-session`                                                       |
+| 改   | `apps/api/src/modules/auth/oidc-pkce.service.ts`                                     | `exchangeAgencyCallbackSession`、state 的 `agencyId`／`invitationTokenHash`                                                                        |
+| 改   | `apps/api/src/modules/identity/identity.repository.ts`                               | `acceptAgencyOidcInvitation`、`findAgencyMembershipForPrincipal`、agency invitation／membership 寫入                                               |
+| 新   | apps/api/src/modules/agency-access/agency-access.module.ts（尚未建立）               | 模組                                                                                                                                               |
+| 新   | apps/api/src/modules/agency-access/agency-portal.controller.ts（尚未建立）           | §4 全部 `agency/*` route                                                                                                                           |
+| 新   | apps/api/src/modules/agency-access/agency-portal.service.ts（尚未建立）              | 呼叫權威 service、保存邊界、分頁、投影與遮罩                                                                                                       |
+| 新   | apps/api/src/modules/agency-access/agency-projections.ts（尚未建立）                 | §4 各表的 allowlist 投影（純函式，便於單元測試）                                                                                                   |
+| 新   | apps/api/src/modules/agency-access/platform-admin-agencies.controller.ts（尚未建立） | §2.4 platform admin route、§5.4 稽核檢閱 route                                                                                                     |
+| 新   | apps/api/src/modules/agency-access/agency-directory.service.ts（尚未建立）           | 機關主檔、邀請、停用、期限                                                                                                                         |
+| 新   | apps/api/src/modules/agency-access/agency-directory.repository.ts（尚未建立）        | `core.regulatory_agencies`                                                                                                                         |
+| 新   | apps/api/src/modules/agency-access/agency-invitation-delivery.service.ts（尚未建立） | 比照 `TenantInvitationDeliveryService`                                                                                                             |
+| 新   | apps/api/src/modules/agency-access/agency-access-audit.service.ts（尚未建立）        | `recordOrDeny`                                                                                                                                     |
+| 新   | apps/api/src/modules/agency-access/agency-access-log.repository.ts（尚未建立）       | `admin.agency_access_logs` append／list                                                                                                            |
+| 改   | `apps/api/src/modules/reporting-filing/reporting-filing.service.ts`                  | `assertMultiTaxiTripExportAccess` 接受 agency，job 擁有者／agency 核對；`normalizeMultiTaxiTripExportScope` 保留 `reservedFrom/reservedTo`（§4.1） |
+| 改   | `apps/api/src/modules/reporting-filing/reporting-filing.repository.ts`               | `MultiTaxiTripExportJobMetadata.agencyId?`（§4.1）                                                                                                 |
+| 改   | `apps/api/src/modules/multi-taxi/multi-taxi.service.ts`                              | `reservedFrom/reservedTo` 過濾（平台端行為不變）                                                                                                   |
+| 改   | `apps/api/src/app.module.ts`                                                         | 註冊 `AgencyAccessModule`（比照 `HostViewModule`，41、125 行）                                                                                     |
 
 ### 7.3 Migrations（IMPL-A）
 
@@ -531,18 +574,18 @@ canonical identity 表不需改 schema。
 
 ### 7.5 Tests（IMPL-A）
 
-| 動作 | 路徑                                                                    | 必須證明（在 base SHA 失敗、實作後通過）                                                                                                                                                                  |
-| ---- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 新   | `tests/unit/bureau-r13-agency-readonly/iam-agency-catalog.test.ts`      | `agency_user` 為已知 actor、preset 非 undefined、機關 scope 不出現在任何既有 actor policy                                                                                                                 |
-| 新   | `tests/security/iam-route-agency-negative.test.ts`                      | agency session 打 `platform-admin/*`、`reports/*`、`regulatory-registry/*`、`complaints`、default-authenticated route 皆 403；所有非 GET（allowlist 外）403；tenant／ops／IAP viewer 打 `agency/*` 皆 403 |
-| 改   | `tests/security/iam-route-inventory.test.ts`                            | 新 route 全部已分類                                                                                                                                                                                       |
-| 新   | `tests/unit/bureau-r13-agency-readonly/agency-oidc-session.test.ts`     | 呼叫正式 `OidcPkceService`（只 mock Google HTTP 邊界）：未綁定 sub 拒絕、email 不符拒絕、tenant state 不能換 agency session、MFA 規則、dev waiver 必寫 event                                              |
-| 新   | `tests/unit/bureau-r13-agency-readonly/agency-durable-state.test.ts`    | `validateDurableState`：membership disabled、機關 suspended、`valid_to` 過期、tokenVersion 變更皆立即拒絕                                                                                                 |
-| 新   | `apps/api/tests/unit/agency-invitation.pg.test.ts`                      | 正式 migrations：並發接受一次性、錯 email／錯 agency 不耗 proof、`(issuer, sub)` 衝突全回滾                                                                                                               |
-| 新   | `apps/api/tests/unit/agency-access-log.pg.test.ts`                      | 正式 migrations：UPDATE／DELETE／TRUNCATE 皆被 trigger 拒絕；寫入失敗時 API 回 503 且不回資料                                                                                                             |
-| 新   | `tests/unit/bureau-r13-agency-readonly/agency-projections.test.ts`      | §4 每個投影只輸出 allowlist 欄位、遮罩函式結果、`null` 保持 `null`、2 年邊界外紀錄不出現                                                                                                                  |
-| 新   | `tests/unit/bureau-r13-agency-readonly/agency-export-ownership.test.ts` | 機關只能讀自己建立的 export job；平台 job 與他機關 job 403                                                                                                                                                |
-| 新   | `apps/agency-portal-web/tests/unit/auth-bff-routes.test.ts`             | 比照 tenant-console-web 同名測試：callback／session／logout／CSRF；`verifyAgencySession` 拒絕 tenant realm                                                                                                |
+| 動作 | 路徑                                                                              | 必須證明（在 base SHA 失敗、實作後通過）                                                                                                                                                                  |
+| ---- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 新   | tests/unit/bureau-r13-agency-readonly/iam-agency-catalog.test.ts（尚未建立）      | `agency_user` 為已知 actor、preset 非 undefined、機關 scope 不出現在任何既有 actor policy                                                                                                                 |
+| 新   | tests/security/iam-route-agency-negative.test.ts（尚未建立）                      | agency session 打 `platform-admin/*`、`reports/*`、`regulatory-registry/*`、`complaints`、default-authenticated route 皆 403；所有非 GET（allowlist 外）403；tenant／ops／IAP viewer 打 `agency/*` 皆 403 |
+| 改   | `tests/security/iam-route-inventory.test.ts`                                      | 新 route 全部已分類                                                                                                                                                                                       |
+| 新   | tests/unit/bureau-r13-agency-readonly/agency-oidc-session.test.ts（尚未建立）     | 呼叫正式 `OidcPkceService`（只 mock Google HTTP 邊界）：未綁定 sub 拒絕、email 不符拒絕、tenant state 不能換 agency session、MFA 規則、dev waiver 必寫 event                                              |
+| 新   | tests/unit/bureau-r13-agency-readonly/agency-durable-state.test.ts（尚未建立）    | `validateDurableState`：membership disabled、機關 suspended、`valid_to` 過期、tokenVersion 變更皆立即拒絕                                                                                                 |
+| 新   | apps/api/tests/unit/agency-invitation.pg.test.ts（尚未建立）                      | 正式 migrations：並發接受一次性、錯 email／錯 agency 不耗 proof、`(issuer, sub)` 衝突全回滾                                                                                                               |
+| 新   | apps/api/tests/unit/agency-access-log.pg.test.ts（尚未建立）                      | 正式 migrations：UPDATE／DELETE／TRUNCATE 皆被 trigger 拒絕；寫入失敗時 API 回 503 且不回資料                                                                                                             |
+| 新   | tests/unit/bureau-r13-agency-readonly/agency-projections.test.ts（尚未建立）      | §4 每個投影只輸出 allowlist 欄位、遮罩函式結果、`null` 保持 `null`、2 年邊界外紀錄不出現                                                                                                                  |
+| 新   | tests/unit/bureau-r13-agency-readonly/agency-export-ownership.test.ts（尚未建立） | 機關只能讀自己建立的 export job；平台 job 與他機關 job 403                                                                                                                                                |
+| 新   | apps/agency-portal-web/tests/unit/auth-bff-routes.test.ts（尚未建立）             | 比照 tenant-console-web 同名測試：callback／session／logout／CSRF；`verifyAgencySession` 拒絕 tenant realm                                                                                                |
 
 PG 測試在本 VM 只能 skip，由既有 CI Product smoke acceptance 在正式 migrations 後執行；
 不在本 VM 啟動 DB、browser 或 Compose。
