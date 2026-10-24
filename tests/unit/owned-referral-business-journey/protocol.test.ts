@@ -859,6 +859,64 @@ function actualClosedPdfFailureFacts(): (
   return new Function(`${outputText}\nreturn closedPdfFailureFacts;`)();
 }
 
+// Reads the real production historyPhase wrapper straight from the actual
+// e2e consumer source (same AST-extraction technique as
+// actualClosedPdfFailureFacts above and
+// tests/unit/operational-browser-manifest.test.ts's actualOperationalFeeSteps),
+// so the regression below executes the genuine before-action/catch/rethrow
+// closure instead of a hand-copied mirror of its record() calls. historyPhase
+// is a local const inside the Playwright test() callback rather than a
+// top-level declaration, so it is found by walking the whole file, and the
+// extracted closure is reconnected to real Evidence/order/case/classifier
+// values via a small injection factory (mirrors actualOperationalFeeSteps'
+// `new Function(paramNames..., body)` pattern).
+function actualHistoryPhase(): (
+  evidence: Evidence,
+  completedOrderId: string,
+  caseNo: string,
+  closedPdfFailureFacts: (
+    error: unknown,
+  ) => { nativeFailureClass: string; nativeCauseCode: string },
+) => <T>(stage: string, action: () => Promise<T>) => Promise<T> {
+  const filename = path.join(
+    process.cwd(),
+    "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+  );
+  const source = ts.createSourceFile(
+    filename,
+    readFileSync(filename, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  let declaration: ts.VariableDeclaration | undefined;
+  const visit = (node: ts.Node): void => {
+    if (
+      !declaration &&
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === "historyPhase"
+    ) {
+      declaration = node;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (!declaration?.initializer)
+    throw new Error("Actual historyPhase closure is missing");
+  const { outputText } = ts.transpileModule(
+    `const historyPhase = ${declaration.initializer.getText(source)};`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  );
+  return new Function(
+    "evidence",
+    "completedOrderId",
+    "caseNo",
+    "closedPdfFailureFacts",
+    `${outputText}\nreturn historyPhase;`,
+  ) as never;
+}
+
 describe("closed phase/native-class evidence survives a non-JourneyFailure error", () => {
   it("loses the phase and native identity when a native error reaches Evidence.failure unwrapped", () => {
     const evidence = new Evidence();
@@ -872,23 +930,47 @@ describe("closed phase/native-class evidence survives a non-JourneyFailure error
     expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
   });
 
-  it("preserves the real history-restore phase and safe native class when the actual production closed-facts classifier wraps the same error first", () => {
+  it("preserves distinct observed phases and the safe native class when the actual production historyPhase wrapper runs a faulting action", async () => {
     const evidence = new Evidence();
+    const completedOrderId = "synthetic-completed-order-20261024";
+    const caseNo = "synthetic-case-20261024";
+    const classify = actualClosedPdfFailureFacts();
+    const historyPhase = actualHistoryPhase()(
+      evidence,
+      completedOrderId,
+      caseNo,
+      classify,
+    );
     const privateValue = "synthetic-private-message-stack-url-body-20261024";
     const native = new TypeError(privateValue);
     native.stack = `${native.stack ?? ""}\n    at https://referral.example.test/private/${privateValue}`;
-    const classify = actualClosedPdfFailureFacts();
-    // Mirrors the actual owned-business.spec.ts historyPhase/pdfPhase catch:
-    // the fixed last-reached phase plus the closed class/code, never the raw
-    // native message or stack.
-    evidence.record({
-      stage: "browser-history-restore-assert",
-      ...classify(native),
-      result: "failed",
-    });
+    await expect(
+      historyPhase("browser-history-restore-goto", () =>
+        Promise.resolve("ok"),
+      ),
+    ).resolves.toBe("ok");
+    await expect(
+      historyPhase("browser-history-restore-assert", () => {
+        throw native;
+      }),
+    ).rejects.toBe(native);
     expect(evidence.events).toEqual([
       {
+        stage: "browser-history-restore-goto",
+        orderId: completedOrderId,
+        caseNo,
+        result: "observed",
+      },
+      {
         stage: "browser-history-restore-assert",
+        orderId: completedOrderId,
+        caseNo,
+        result: "observed",
+      },
+      {
+        stage: "browser-history-restore-assert",
+        orderId: completedOrderId,
+        caseNo,
         nativeFailureClass: "TypeError",
         nativeCauseCode: "UNKNOWN",
         result: "failed",
@@ -897,22 +979,38 @@ describe("closed phase/native-class evidence survives a non-JourneyFailure error
     expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
   });
 
-  it("keeps an unrecognized native class as UNKNOWN (still a recorded failure) and never mutates an original JourneyFailure's stage/status/code", () => {
+  it("keeps an unrecognized native class as UNKNOWN and never mutates an original JourneyFailure's stage/status/code when the real historyPhase wrapper rethrows it", async () => {
     const evidence = new Evidence();
+    const completedOrderId = "synthetic-completed-order-20261024-b";
+    const caseNo = "synthetic-case-20261024-b";
+    const classify = actualClosedPdfFailureFacts();
+    const historyPhase = actualHistoryPhase()(
+      evidence,
+      completedOrderId,
+      caseNo,
+      classify,
+    );
     const privateValue = "synthetic-private-reason-20261024";
     const exotic = Object.assign(new Error(privateValue), {
       name: privateValue,
       code: privateValue,
     });
-    const classify = actualClosedPdfFailureFacts();
-    evidence.record({
-      stage: "browser-history-restore-goto",
-      ...classify(exotic),
-      result: "failed",
-    });
+    await expect(
+      historyPhase("browser-history-restore-card-count", () => {
+        throw exotic;
+      }),
+    ).rejects.toBe(exotic);
     expect(evidence.events).toEqual([
       {
-        stage: "browser-history-restore-goto",
+        stage: "browser-history-restore-card-count",
+        orderId: completedOrderId,
+        caseNo,
+        result: "observed",
+      },
+      {
+        stage: "browser-history-restore-card-count",
+        orderId: completedOrderId,
+        caseNo,
         nativeFailureClass: "UNKNOWN",
         nativeCauseCode: "UNKNOWN",
         result: "failed",
@@ -920,27 +1018,28 @@ describe("closed phase/native-class evidence survives a non-JourneyFailure error
     ]);
     expect(JSON.stringify(evidence.events)).not.toContain(privateValue);
 
-    // The classifier only reads the error for display-safe facts; it must not
-    // alter the original JourneyFailure that the production catch rethrows
-    // unchanged after recording.
+    // The wrapper only reads the error for display-safe facts; it must not
+    // alter the original JourneyFailure it rethrows unchanged after
+    // recording.
     const original = new JourneyFailure(
       "booking-response-http",
       409,
       "CONFLICT",
     );
-    const facts = classify(original);
-    expect(facts).toEqual({
-      nativeFailureClass: "Error",
-      nativeCauseCode: "UNKNOWN",
-    });
+    await expect(
+      historyPhase("browser-history-restore-href", () => {
+        throw original;
+      }),
+    ).rejects.toBe(original);
     expect(original.stage).toBe("booking-response-http");
     expect(original.status).toBe(409);
     expect(original.code).toBe("CONFLICT");
-    evidence.failure(original);
-    expect(evidence.events[1]).toEqual({
-      stage: "booking-response-http",
-      status: 409,
-      code: "CONFLICT",
+    expect(evidence.events[3]).toEqual({
+      stage: "browser-history-restore-href",
+      orderId: completedOrderId,
+      caseNo,
+      nativeFailureClass: "Error",
+      nativeCauseCode: "UNKNOWN",
       result: "failed",
     });
   });
