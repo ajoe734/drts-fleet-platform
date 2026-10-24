@@ -198,9 +198,10 @@ describe("Twilio SmsPort adapter and Taiwan SMS rules", () => {
       TWILIO_FROM_NUMBER: VALID_E164_FROM,
     };
     expect(twilioSmsConfigFromEnv(legacyOrAuthTokenEnv)).toBeNull();
-    expect(new UnconfiguredSmsPort(legacyOrAuthTokenEnv).availability()).toBe(
+    expect(createSmsPortFromEnv(legacyOrAuthTokenEnv).availability()).toBe(
       "not_configured",
     );
+    expect(new UnconfiguredSmsPort().availability()).toBe("not_configured");
   });
 
   it("sends POST to Twilio Messages.json with Basic API Key auth and URL-encoded form parameters", async () => {
@@ -300,7 +301,10 @@ describe("Twilio SmsPort adapter and Taiwan SMS rules", () => {
     {
       name: "Twilio 21614 not a valid mobile number",
       httpStatus: 400,
-      payload: { code: 21614, message: "'To' number is not a valid mobile number" },
+      payload: {
+        code: 21614,
+        message: "'To' number is not a valid mobile number",
+      },
       expectedCategory: "invalid_number",
       expectedCode: 21614,
     },
@@ -344,7 +348,7 @@ describe("Twilio SmsPort adapter and Taiwan SMS rules", () => {
         maskedTarget: "+886 912-***-678",
       });
       expect(JSON.stringify(res)).not.toContain("987654");
-      expect(JSON.stringify(res)).not.toContain( TEST_RECIPIENT );
+      expect(JSON.stringify(res)).not.toContain(TEST_RECIPIENT);
       expect(JSON.stringify(res)).not.toContain(VALID_API_KEY_SECRET);
     },
   );

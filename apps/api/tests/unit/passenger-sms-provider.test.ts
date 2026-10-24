@@ -20,6 +20,7 @@ import {
   createSmsPortFromEnv,
   SMS_PORT,
   type SmsPort,
+  TwilioSmsAdapter,
 } from "../../src/modules/passenger-app/otp/sms.port";
 import type { PassengerAccountService } from "../../src/modules/passenger-app/account/passenger-account.service";
 
@@ -176,6 +177,19 @@ async function resolveModuleSmsPort(env: Record<string, string | undefined>) {
 }
 
 describe("PassengerAppModule SMS_PORT and PassengerOtpService Twilio integration", () => {
+  it("preserves the explicit ReviewSmsPort SIM branch when PAX_REVIEW_DEMO_ENABLED=true", async () => {
+    const sms = await resolveModuleSmsPort({
+      DRTS_ENV: "test",
+      PAX_REVIEW_DEMO_ENABLED: "true",
+      TWILIO_ACCOUNT_SID: undefined,
+      TWILIO_API_KEY_SID: undefined,
+      TWILIO_API_KEY_SECRET: undefined,
+      TWILIO_FROM_NUMBER: undefined,
+    });
+    expect(sms).toBeInstanceOf(ReviewSmsPort);
+    expect(sms.availability()).toBe("available");
+  });
+
   it("keeps phone login disabled in PassengerAppModule when TWILIO_FROM_NUMBER is missing (pre-KYC state)", async () => {
     const sms = await resolveModuleSmsPort({
       PAX_REVIEW_DEMO_ENABLED: "false",
@@ -185,6 +199,7 @@ describe("PassengerAppModule SMS_PORT and PassengerOtpService Twilio integration
       TWILIO_FROM_NUMBER: undefined,
       PASSENGER_OTP_PEPPER: VALID_PEPPER,
     });
+    expect(sms).toBeInstanceOf(TwilioSmsAdapter);
     expect(sms.availability()).toBe("not_configured");
 
     const store = new InMemoryOtpStore();
@@ -217,6 +232,7 @@ describe("PassengerAppModule SMS_PORT and PassengerOtpService Twilio integration
       TWILIO_FROM_NUMBER: "SmartTaxi",
       PASSENGER_OTP_PEPPER: VALID_PEPPER,
     });
+    expect(moduleSms).toBeInstanceOf(TwilioSmsAdapter);
     expect(moduleSms.availability()).toBe("available");
 
     let capturedBody = "";
@@ -261,7 +277,9 @@ describe("PassengerAppModule SMS_PORT and PassengerOtpService Twilio integration
     expect(capturedBody).toMatch(
       /^\[智行叫車\] 您的驗證碼是 ([0-9]{6})，5 分鐘內有效。請勿提供給他人。$/,
     );
-    const code = /^\[智行叫車\] 您的驗證碼是 ([0-9]{6})/.exec(capturedBody)![1]!;
+    const code = /^\[智行叫車\] 您的驗證碼是 ([0-9]{6})/.exec(
+      capturedBody,
+    )![1]!;
 
     const verifyRes = await otp.verify(
       {
@@ -293,7 +311,8 @@ describe("PassengerAppModule SMS_PORT and PassengerOtpService Twilio integration
       },
       async (_url, init) => {
         const body = new URLSearchParams(init.body).get("Body") ?? "";
-        sentCode = /^\[智行叫車\] 您的驗證碼是 ([0-9]{6})/.exec(body)?.[1] ?? "";
+        sentCode =
+          /^\[智行叫車\] 您的驗證碼是 ([0-9]{6})/.exec(body)?.[1] ?? "";
         return {
           status: 401,
           text: async () =>

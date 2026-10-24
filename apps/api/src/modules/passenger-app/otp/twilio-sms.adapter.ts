@@ -118,7 +118,8 @@ export function isValidTwilioSender(from: string): boolean {
   const trimmed = from.trim();
   if (!trimmed) return false;
   return (
-    E164_PHONE_PATTERN.test(trimmed) || ALPHANUMERIC_SENDER_PATTERN.test(trimmed)
+    E164_PHONE_PATTERN.test(trimmed) ||
+    ALPHANUMERIC_SENDER_PATTERN.test(trimmed)
   );
 }
 
@@ -182,7 +183,12 @@ export function classifyTwilioError(
   ) {
     return "temporary_failure";
   }
-  if (providerErrorCode === 20429 || (providerErrorCode !== null && providerErrorCode >= 30001 && providerErrorCode <= 30008)) {
+  if (
+    providerErrorCode === 20429 ||
+    (providerErrorCode !== null &&
+      providerErrorCode >= 30001 &&
+      providerErrorCode <= 30008)
+  ) {
     return "temporary_failure";
   }
   if (httpStatus === 400 || httpStatus === 404 || httpStatus === 422) {
