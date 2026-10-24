@@ -337,9 +337,24 @@ export class PaymentMethodService {
         "Payment provider is not configured.",
       );
     }
+    const bodyRecord =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : null;
+    const bodyKey =
+      typeof bodyRecord?.idempotencyKey === "string" &&
+      bodyRecord.idempotencyKey.trim()
+        ? bodyRecord.idempotencyKey.trim()
+        : undefined;
+    const headerKey = context?.idempotencyKey?.trim() || undefined;
+    if (headerKey && bodyKey && headerKey !== bodyKey) {
+      invalid();
+    }
+    const envelopePayload =
+      bodyRecord?.envelope !== undefined ? bodyRecord.envelope : body;
     let result;
     try {
-      result = this.runtime.provider.verifyNotification(body);
+      result = this.runtime.provider.verifyNotification(envelopePayload);
     } catch {
       throw new ApiRequestError(
         400,
@@ -353,7 +368,8 @@ export class PaymentMethodService {
       let resolvedClaim: { idempotencyKey: string; methodId: string } | null =
         null;
       const requestedKey =
-        context?.idempotencyKey ?? result.idempotencyKey ?? undefined;
+        headerKey ?? bodyKey ?? result.idempotencyKey ?? undefined;
+      const merchantTradeNo = result.merchantTradeNo?.trim() || undefined;
 
       if (
         !ownerId &&
@@ -366,6 +382,7 @@ export class PaymentMethodService {
             this.runtime.provider.deriveMerchantMemberId!(pid) ===
             result.merchantMemberId,
           requestedKey,
+          merchantTradeNo,
         );
         if (matched) {
           ownerId = matched.passengerId;
@@ -378,12 +395,14 @@ export class PaymentMethodService {
 
       if (
         ownerId &&
-        result.merchantMemberId &&
         typeof this.runtime.provider.deriveMerchantMemberId === "function"
       ) {
         const expectedMemberId =
           this.runtime.provider.deriveMerchantMemberId(ownerId);
-        if (expectedMemberId !== result.merchantMemberId) {
+        if (
+          !result.merchantMemberId ||
+          expectedMemberId !== result.merchantMemberId
+        ) {
           throw new ApiRequestError(
             400,
             "invalid_credential",
@@ -400,6 +419,7 @@ export class PaymentMethodService {
             ? await this.repository.findActionRequiredBinding(
                 ownerId,
                 requestedKey,
+                merchantTradeNo,
               )
             : null);
         if (claim) {
@@ -438,6 +458,33 @@ export class PaymentMethodService {
                 "Payment method could not be bound.",
               );
             }
+            if (
+              result.merchantTradeNo &&
+              result.tradeNo &&
+              result.authorizedAmountMinor &&
+              result.authorizedAmountMinor > 0 &&
+              typeof this.runtime.provider.cancelBindingAuthorization ===
+                "function"
+            ) {
+              const cancelled =
+                await this.runtime.provider.cancelBindingAuthorization({
+                  merchantTradeNo: result.merchantTradeNo,
+                  tradeNo: result.tradeNo,
+                  amountMinor: result.authorizedAmountMinor,
+                });
+              if (!cancelled) {
+                await this.repository.bindingOutcome(
+                  ownerId,
+                  claim.idempotencyKey,
+                  "pending",
+                );
+                throw new ApiRequestError(
+                  503,
+                  "payment_unavailable",
+                  "Payment provider did not confirm binding authorization cancellation.",
+                );
+              }
+            }
             completedMethod = await this.repository.completeBinding(
               ownerId,
               claim.idempotencyKey,
@@ -457,20 +504,6 @@ export class PaymentMethodService {
                 isDefault: false,
               },
             );
-            if (
-              result.merchantTradeNo &&
-              result.tradeNo &&
-              result.authorizedAmountMinor &&
-              result.authorizedAmountMinor > 0 &&
-              typeof this.runtime.provider.cancelBindingAuthorization ===
-                "function"
-            ) {
-              await this.runtime.provider.cancelBindingAuthorization({
-                merchantTradeNo: result.merchantTradeNo,
-                tradeNo: result.tradeNo,
-                amountMinor: result.authorizedAmountMinor,
-              });
-            }
           } else if (result.bindResult.status === "failed") {
             await this.repository.bindingOutcome(
               ownerId,
@@ -481,15 +514,21 @@ export class PaymentMethodService {
           }
         }
       }
+      const effectiveStatus =
+        result.bindResult.status === "completed"
+          ? completedMethod
+            ? "completed"
+            : "unknown"
+          : result.bindResult.status;
       return {
         verified: true,
         kind: "bind",
         rtnCode: result.rtnCode,
         merchantTradeNo: result.merchantTradeNo,
         tradeNo: result.tradeNo,
-        status: result.bindResult.status,
+        status: effectiveStatus,
         ...(completedMethod ? { method: completedMethod } : {}),
-        ...(result.bindResult.status === "completed"
+        ...(completedMethod && result.bindResult.status === "completed"
           ? {
               card: {
                 last4: result.bindResult.card.last4,

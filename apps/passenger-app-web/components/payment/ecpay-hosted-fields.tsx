@@ -12,7 +12,8 @@ import { P5 } from "../auth/ui";
 export const ECPAY_JQUERY_URL = "https://code.jquery.com/jquery-3.5.1.min.js";
 
 export const ECPAY_WEB_SDK_URLS = {
-  Stage: "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js?t=20210121100116",
+  Stage:
+    "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js?t=20210121100116",
   Prod: "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js?t=20210121100116",
 } as const;
 
@@ -24,10 +25,12 @@ export const ECPAY_ACTION_ORIGINS = [
 ] as const;
 
 export interface EcpayBindingSession {
+  provider?: "ecpay";
   merchantToken?: string;
   token: string;
   tokenExpireDate: string;
   serverType: "Stage" | "Prod";
+  approvedActionOrigins?: readonly string[];
 }
 
 export interface EcpayPayTokenCallbackResult {
@@ -129,7 +132,10 @@ export function createEcpayHostedFieldsPort(options: {
 }
 
 export async function fetchEcpayBindingSession(
-  fetchFn: (url: string, init?: RequestInit) => Promise<Response> = passengerFetch,
+  fetchFn: (
+    url: string,
+    init?: RequestInit,
+  ) => Promise<Response> = passengerFetch,
 ): Promise<EcpayBindingSession> {
   const response = await fetchFn(
     "/api/passenger-app/payment-methods?binding_session=1",
@@ -153,16 +159,27 @@ export async function fetchEcpayBindingSession(
         : "";
   if (
     !session ||
+    (session.provider !== undefined && session.provider !== "ecpay") ||
     !resolvedToken ||
     (session.serverType !== "Stage" && session.serverType !== "Prod")
   ) {
     throw new Error("ecpay_binding_session_invalid");
   }
+  const approvedActionOrigins =
+    Array.isArray(session.approvedActionOrigins) &&
+    session.approvedActionOrigins.length > 0
+      ? session.approvedActionOrigins.filter(
+          (origin): origin is string =>
+            typeof origin === "string" && origin.trim().length > 0,
+        )
+      : ECPAY_ACTION_ORIGINS;
   return {
+    provider: "ecpay",
     merchantToken: resolvedToken,
     token: resolvedToken,
     tokenExpireDate: String(session.tokenExpireDate ?? ""),
     serverType: session.serverType,
+    approvedActionOrigins,
   };
 }
 
@@ -190,6 +207,7 @@ export interface EcpayHostedFieldsProps {
   fetchSession?: () => Promise<EcpayBindingSession>;
   sdk?: EcpaySdkGlobal;
   onReady?: (availability: PassengerPaymentFieldsAvailability) => void;
+  onSessionLoaded?: (session: EcpayBindingSession) => void;
   onError?: (errorMessage: string) => void;
 }
 
@@ -199,6 +217,7 @@ export function EcpayHostedFields({
   fetchSession = fetchEcpayBindingSession,
   sdk: injectedSdk,
   onReady,
+  onSessionLoaded,
   onError,
 }: EcpayHostedFieldsProps) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
@@ -209,8 +228,10 @@ export function EcpayHostedFields({
   );
   const portRef = useRef<PassengerPaymentFieldsPort | null>(null);
   const onReadyRef = useRef(onReady);
+  const onSessionLoadedRef = useRef(onSessionLoaded);
   const onErrorRef = useRef(onError);
   onReadyRef.current = onReady;
+  onSessionLoadedRef.current = onSessionLoaded;
   onErrorRef.current = onError;
 
   useEffect(() => {
@@ -226,6 +247,7 @@ export function EcpayHostedFields({
           if (!active) return;
           token = session.token;
           serverType = session.serverType;
+          onSessionLoadedRef.current?.(session);
         }
 
         let sdk =

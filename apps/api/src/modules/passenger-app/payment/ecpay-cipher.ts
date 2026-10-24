@@ -123,8 +123,7 @@ export function buildEcpayEnvelope(params: {
   if (!merchantId || !/^[A-Za-z0-9_-]{1,20}$/.test(merchantId)) {
     throw new Error("ECPay MerchantID is invalid.");
   }
-  const timestamp =
-    params.timestamp ?? Math.floor(Date.now() / 1000);
+  const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
   if (!Number.isSafeInteger(timestamp) || timestamp <= 0) {
     throw new Error("ECPay Timestamp is invalid.");
   }
@@ -242,9 +241,7 @@ export function verifyAndUnwrapEcpayEnvelope(params: {
   if (!headerRaw || typeof headerRaw !== "object" || Array.isArray(headerRaw)) {
     cipherError();
   }
-  const timestamp = Number(
-    (headerRaw as Record<string, unknown>).Timestamp,
-  );
+  const timestamp = Number((headerRaw as Record<string, unknown>).Timestamp);
   if (
     !Number.isSafeInteger(timestamp) ||
     timestamp <= 0 ||
@@ -252,13 +249,18 @@ export function verifyAndUnwrapEcpayEnvelope(params: {
   ) {
     cipherError();
   }
-  const transCode =
-    record.TransCode === undefined ? 1 : Number(record.TransCode);
-  if (!Number.isSafeInteger(transCode)) {
+  const hasExplicitTransCode =
+    record.TransCode !== undefined &&
+    record.TransCode !== null &&
+    String(record.TransCode).trim() !== "";
+  if (
+    record.TransCode !== undefined &&
+    (!hasExplicitTransCode || !Number.isSafeInteger(Number(record.TransCode)))
+  ) {
     cipherError();
   }
-  const transMsg =
-    typeof record.TransMsg === "string" ? record.TransMsg : "";
+  const transCode = hasExplicitTransCode ? Number(record.TransCode) : 1;
+  const transMsg = typeof record.TransMsg === "string" ? record.TransMsg : "";
   const cipherText = record.Data ?? record.ResultData;
   const data = decryptEcpayData(cipherText, hashKey, hashIv);
   if (
@@ -335,4 +337,28 @@ export function formatEcpayTradeDate(date: Date = new Date()): string {
   const mi = pad(taipei.getUTCMinutes());
   const ss = pad(taipei.getUTCSeconds());
   return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
+
+/**
+ * Normalizes a canonical passenger phone number (which may include `+886` or `-`)
+ * to ECPay-compatible digits-only format (<= 20 digits, no `+` or `-`).
+ */
+export function normalizeEcpayPhone(rawPhone: string): string {
+  const compact = rawPhone.trim().replace(/[\s-]+/g, "");
+  if (!compact) return "";
+  const twMobileMatch = /^\+?8860?(9\d{8})$/.exec(compact);
+  if (twMobileMatch) {
+    return `0${twMobileMatch[1]}`;
+  }
+  const twLandlineMatch = /^\+?8860?([2-8]\d{7,8})$/.exec(compact);
+  if (twLandlineMatch) {
+    return `0${twLandlineMatch[1]}`;
+  }
+  const normalized = compact.startsWith("+") ? compact.slice(1) : compact;
+  if (!/^\d{8,20}$/.test(normalized)) {
+    throw new Error(
+      "ECPay ConsumerInfo.Phone must be 8 to 20 digits without '+'.",
+    );
+  }
+  return normalized;
 }

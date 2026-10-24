@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Header,
+  Headers,
   HttpCode,
   Param,
   Post,
@@ -91,10 +92,14 @@ export class PaymentMethodController {
   async complete3dsBinding(
     @CurrentIdentity() identity: RequestIdentity | null,
     @Body() body: unknown,
+    @Headers("Idempotency-Key") idempotencyKey?: string,
   ) {
     return toApiSuccessEnvelope(
       await this.methods.verifyNotification(body, {
         passengerId: await this.owner(identity),
+        ...(idempotencyKey?.trim()
+          ? { idempotencyKey: idempotencyKey.trim() }
+          : {}),
       }),
     );
   }

@@ -5,6 +5,7 @@ import type { PassengerPaymentMethod } from "@drts/contracts";
 import { DatabaseService } from "../../../common/db/database.service";
 import { ApiRequestError } from "../../../common/api-envelope";
 import type { EncryptedPaymentToken } from "./payment-token-cipher";
+import { deriveEcpayMerchantTradeNo } from "./ecpay-cipher";
 
 export const MAX_BOUND_CARDS_PER_MEMBER = 5;
 
@@ -270,35 +271,83 @@ export class PaymentMethodRepository {
   async findActionRequiredBinding(
     passengerId: string,
     idempotencyKey?: string,
+    merchantTradeNo?: string,
   ): Promise<{ idempotencyKey: string; methodId: string } | null> {
     return this.withAccount(passengerId, async (client) => {
-      const result = idempotencyKey
-        ? await client.query(
-            `SELECT idempotency_key,entity_id FROM passenger.payment_idempotency_keys
-             WHERE drts_passenger_id=$1 AND idempotency_key=$2 AND operation='bind'
-               AND outcome IN ('action_required','pending','completed') FOR UPDATE`,
-            [passengerId, idempotencyKey],
-          )
-        : await client.query(
-            `SELECT idempotency_key,entity_id FROM passenger.payment_idempotency_keys
-             WHERE drts_passenger_id=$1 AND operation='bind'
-               AND outcome IN ('action_required','pending','completed')
-             ORDER BY CASE WHEN outcome IN ('action_required','pending') THEN 0 ELSE 1 END,
-                      updated_at DESC,created_at DESC LIMIT 1 FOR UPDATE`,
-            [passengerId],
+      if (idempotencyKey) {
+        const exact = await client.query(
+          `SELECT idempotency_key,entity_id FROM passenger.payment_idempotency_keys
+           WHERE drts_passenger_id=$1 AND idempotency_key=$2 AND operation='bind'
+             AND outcome IN ('action_required','pending','completed') FOR UPDATE`,
+          [passengerId, idempotencyKey],
+        );
+        const row = exact.rows[0];
+        if (!row) return null;
+        return {
+          idempotencyKey: String(row.idempotency_key),
+          methodId: String(row.entity_id),
+        };
+      }
+      const result = await client.query(
+        `SELECT idempotency_key,entity_id,outcome FROM passenger.payment_idempotency_keys
+         WHERE drts_passenger_id=$1 AND operation='bind'
+           AND outcome IN ('action_required','pending','completed')
+         ORDER BY CASE WHEN outcome IN ('action_required','pending') THEN 0 ELSE 1 END,
+                  updated_at DESC,created_at DESC FOR UPDATE`,
+        [passengerId],
+      );
+      const cleanTradeNo = merchantTradeNo?.trim() ?? "";
+      if (cleanTradeNo) {
+        const tradeMatched = result.rows.filter((r) => {
+          const key = String(r.idempotency_key ?? "").trim();
+          if (!key) return false;
+          return (
+            deriveEcpayMerchantTradeNo(key) === cleanTradeNo ||
+            deriveEcpayMerchantTradeNo(`bind_token:${key}`) === cleanTradeNo
           );
-      const row = result.rows[0];
-      if (!row) return null;
-      return {
-        idempotencyKey: String(row.idempotency_key),
-        methodId: String(row.entity_id),
-      };
+        });
+        if (tradeMatched.length === 1) {
+          const row = tradeMatched[0]!;
+          return {
+            idempotencyKey: String(row.idempotency_key),
+            methodId: String(row.entity_id),
+          };
+        }
+      }
+      const pendingRows = result.rows.filter(
+        (r) =>
+          r.outcome === "action_required" ||
+          r.outcome === "pending" ||
+          r.outcome === undefined,
+      );
+      if (pendingRows.length > 1) {
+        return null;
+      }
+      if (pendingRows.length === 1) {
+        const row = pendingRows[0]!;
+        return {
+          idempotencyKey: String(row.idempotency_key),
+          methodId: String(row.entity_id),
+        };
+      }
+      const completedRows = result.rows.filter(
+        (r) => r.outcome === "completed",
+      );
+      if (completedRows.length === 1) {
+        const row = completedRows[0]!;
+        return {
+          idempotencyKey: String(row.idempotency_key),
+          methodId: String(row.entity_id),
+        };
+      }
+      return null;
     });
   }
 
   async findBindingByMerchantMember(
     matchPassengerId: (passengerId: string) => boolean,
     idempotencyKey?: string,
+    merchantTradeNo?: string,
   ): Promise<{
     passengerId: string;
     idempotencyKey: string;
@@ -307,11 +356,11 @@ export class PaymentMethodRepository {
     const result = await this.database
       .query(
         idempotencyKey
-          ? `SELECT idempotency_key,drts_passenger_id,entity_id
+          ? `SELECT idempotency_key,drts_passenger_id,entity_id,outcome
              FROM passenger.payment_idempotency_keys
              WHERE idempotency_key=$1 AND operation='bind'
                AND outcome IN ('action_required','pending','completed')`
-          : `SELECT idempotency_key,drts_passenger_id,entity_id
+          : `SELECT idempotency_key,drts_passenger_id,entity_id,outcome
              FROM passenger.payment_idempotency_keys
              WHERE operation='bind'
                AND outcome IN ('action_required','pending','completed')
@@ -320,18 +369,57 @@ export class PaymentMethodRepository {
         idempotencyKey ? [idempotencyKey] : [],
       )
       .catch(() => persistenceUnavailable());
+    const matchedRows: Array<{
+      passengerId: string;
+      idempotencyKey: string;
+      methodId: string;
+      outcome?: string;
+    }> = [];
     for (const row of result.rows) {
       const pid =
         typeof row.drts_passenger_id === "string"
           ? row.drts_passenger_id.trim()
           : "";
       if (pid && matchPassengerId(pid)) {
-        return {
+        matchedRows.push({
           passengerId: pid,
           idempotencyKey: String(row.idempotency_key),
           methodId: String(row.entity_id),
-        };
+          ...(typeof row.outcome === "string" ? { outcome: row.outcome } : {}),
+        });
       }
+    }
+    if (matchedRows.length === 0) return null;
+    if (idempotencyKey) {
+      return matchedRows.length === 1 ? matchedRows[0]! : null;
+    }
+    const cleanTradeNo = merchantTradeNo?.trim() ?? "";
+    if (cleanTradeNo) {
+      const tradeMatched = matchedRows.filter(
+        (r) =>
+          deriveEcpayMerchantTradeNo(r.idempotencyKey) === cleanTradeNo ||
+          deriveEcpayMerchantTradeNo(`bind_token:${r.idempotencyKey}`) ===
+            cleanTradeNo,
+      );
+      if (tradeMatched.length === 1) {
+        return tradeMatched[0]!;
+      }
+    }
+    const pendingRows = matchedRows.filter(
+      (r) =>
+        r.outcome === "action_required" ||
+        r.outcome === "pending" ||
+        r.outcome === undefined,
+    );
+    if (pendingRows.length > 1) {
+      return null;
+    }
+    if (pendingRows.length === 1) {
+      return pendingRows[0]!;
+    }
+    const completedRows = matchedRows.filter((r) => r.outcome === "completed");
+    if (completedRows.length === 1) {
+      return completedRows[0]!;
     }
     return null;
   }

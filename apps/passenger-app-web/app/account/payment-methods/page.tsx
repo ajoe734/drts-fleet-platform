@@ -28,6 +28,8 @@ export default function PaymentMethodsPage() {
   const [fields, setFields] = useState<PassengerPaymentFieldsAvailability>({
     status: "unavailable",
   });
+  const [sessionOrigins, setSessionOrigins] =
+    useState<readonly string[]>(ECPAY_ACTION_ORIGINS);
   useEffect(() => {
     if (useEcpayHosted) {
       setFields({ status: "unavailable" });
@@ -52,7 +54,7 @@ export default function PaymentMethodsPage() {
     configuredActionOrigins.length > 0
       ? configuredActionOrigins
       : useEcpayHosted
-        ? ECPAY_ACTION_ORIGINS
+        ? sessionOrigins
         : [];
   return (
     <>
@@ -76,7 +78,14 @@ export default function PaymentMethodsPage() {
         fields={fields}
         hostedFieldsView={
           useEcpayHosted ? (
-            <EcpayHostedFields onReady={setFields} />
+            <EcpayHostedFields
+              onReady={setFields}
+              onSessionLoaded={(session) =>
+                setSessionOrigins(
+                  session.approvedActionOrigins ?? ECPAY_ACTION_ORIGINS,
+                )
+              }
+            />
           ) : undefined
         }
         approvedActionOrigins={approvedActionOrigins}

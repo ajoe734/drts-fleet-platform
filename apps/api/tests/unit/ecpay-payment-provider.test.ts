@@ -6,6 +6,7 @@ import {
   deriveEcpayMerchantMemberId,
   deriveEcpayMerchantTradeNo,
   encryptEcpayData,
+  normalizeEcpayPhone,
   verifyAndUnwrapEcpayEnvelope,
 } from "../../src/modules/passenger-app/payment/ecpay-cipher";
 import { EcpayPaymentProvider } from "../../src/modules/passenger-app/payment/ecpay-payment-provider";
@@ -182,7 +183,10 @@ describe("ECPay 站內付 2.0 cipher & envelope verification", () => {
       deriveEcpayMerchantMemberId("+886-912-345-678", SYNTHETIC_MERCHANT_ID),
     ).toThrow();
     expect(() =>
-      deriveEcpayMerchantMemberId("pax:bind:deadbeef1234", SYNTHETIC_MERCHANT_ID),
+      deriveEcpayMerchantMemberId(
+        "pax:bind:deadbeef1234",
+        SYNTHETIC_MERCHANT_ID,
+      ),
     ).toThrow(/never phone, email, or an operation idempotency key/);
   });
 
@@ -379,7 +383,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
       rtnMsg: "Succeeded",
       merchantTradeNo: "DR3DSBIND00000000005",
       tradeNo: "26102400000055",
-      authorizedAmountMinor: 5,
+      authorizedAmountMinor: 500,
       bindResult: {
         status: "completed",
         card: {
@@ -470,7 +474,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
       provider.capture({
         idempotencyKey: "pax:capture:missing-pax",
         token: "ECPAY_BIND_CARD_ID_SYNTHETIC_OK",
-        amountMinor: 350,
+        amountMinor: 35_000,
         currency: "TWD",
       }),
     ).resolves.toEqual({
@@ -480,6 +484,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
     });
 
     // Verify PaymentChargeService passes claim.passengerId into EcpayPaymentProvider.capture
+    // and converts 35,000 minor units -> TotalAmount: 350 TWD
     const cipher = new PaymentTokenCipher(syntheticEncryptionKeysJson());
     const finishSpy = vi.fn().mockResolvedValue(undefined);
     const sessionMock = {
@@ -488,7 +493,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
         orderId: "00000000-0000-4000-8000-000000000111",
         passengerId: owner,
         methodId: "00000000-0000-4000-8000-000000000888",
-        amountMinor: 350,
+        amountMinor: 35_000,
         status: "not_selected",
         attemptCount: 0,
         readbackCount: 0,
@@ -508,7 +513,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
           owner,
           "00000000-0000-4000-8000-000000000888",
         ),
-        amountMinor: 350,
+        amountMinor: 35_000,
         attemptCount: 1,
         readbackCount: 0,
         key: "pax:capture:order-001",
@@ -541,11 +546,24 @@ describe("EcpayPaymentProvider adapter operations", () => {
       }),
     );
 
-    // Out-of-bounds amount (> 200,000 TWD) fails closed without network I/O
+    // Non-whole-TWD minor units (350.50 TWD) and out-of-bounds (> 200,000 TWD = 20,000,000 minor units) fail closed without network I/O
+    const fractional = await provider.capture({
+      idempotencyKey: "pax:capture:order-fractional",
+      token: "ECPAY_BIND_CARD_ID_SYNTHETIC_OK",
+      amountMinor: 35_050,
+      currency: "TWD",
+      passengerId: owner,
+    });
+    expect(fractional).toEqual({
+      status: "failed",
+      error: "card_declined",
+      retryable: false,
+    });
+
     const overLimit = await provider.capture({
       idempotencyKey: "pax:capture:order-over",
       token: "ECPAY_BIND_CARD_ID_SYNTHETIC_OK",
-      amountMinor: 200_001,
+      amountMinor: 20_000_100,
       currency: "TWD",
       passengerId: owner,
     });
@@ -556,11 +574,11 @@ describe("EcpayPaymentProvider adapter operations", () => {
     });
     expect(fetchFn).toHaveBeenCalledTimes(1);
 
-    // Definitive decline marks the BindCardID as non-reauthorizable
+    // Definitive decline marks the BindCardID as non-reauthorizable across instances
     const declined = await provider.capture({
       idempotencyKey: "pax:capture:order-002",
       token: "ECPAY_BIND_CARD_ID_DECLINED",
-      amountMinor: 250,
+      amountMinor: 25_000,
       currency: "TWD",
       passengerId: owner,
     });
@@ -571,11 +589,11 @@ describe("EcpayPaymentProvider adapter operations", () => {
     });
     expect(fetchFn).toHaveBeenCalledTimes(2);
 
-    // Attempting to re-authorize the same declined BindCardID is blocked before network I/O
+    // Attempting to re-authorize the same declined BindCardID on the same or a new provider instance is blocked before network I/O
     const reattempt = await provider.capture({
       idempotencyKey: "pax:capture:order-003",
       token: "ECPAY_BIND_CARD_ID_DECLINED",
-      amountMinor: 250,
+      amountMinor: 25_000,
       currency: "TWD",
       passengerId: owner,
     });
@@ -584,14 +602,32 @@ describe("EcpayPaymentProvider adapter operations", () => {
       error: "card_declined",
       retryable: false,
     });
+    const secondInstance = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      fetchFn: fetchFn as unknown as typeof fetch,
+      now: () => now,
+    });
+    const crossInstanceReattempt = await secondInstance.capture({
+      idempotencyKey: "pax:capture:order-004",
+      token: "ECPAY_BIND_CARD_ID_DECLINED",
+      amountMinor: 25_000,
+      currency: "TWD",
+      passengerId: owner,
+    });
+    expect(crossInstanceReattempt).toEqual({
+      status: "failed",
+      error: "card_declined",
+      retryable: false,
+    });
     expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 
-  it("queries QueryTrade for readCapture, executes state-dependent DoAction (R, N, E+N) for refund, and reconciles lost-ACK readRefund via QueryTrade across instances", async () => {
+  it("queries Cashier/QueryTrade for readCapture (requiring explicit TradeStatus), executes state-dependent Credit/DoAction (R, N, E+N) from CreditDetail/QueryTrade, and reconciles lost-ACK readRefund via CreditDetail/QueryTrade across instances", async () => {
     const expectedTradeNo = deriveEcpayMerchantTradeNo("pax:capture:order-999");
     const fetchFn = vi
       .fn()
-      // 1. readCapture -> QueryTrade
+      // 1. readCapture -> Cashier/QueryTrade
       .mockImplementationOnce(async (url: string | URL) => {
         expect(String(url)).toBe(
           "https://ecpayment-stage.ecpay.com.tw/1.0.0/Cashier/QueryTrade",
@@ -608,23 +644,25 @@ describe("EcpayPaymentProvider adapter operations", () => {
           now,
         );
       })
-      // 2. refund (closed trade: CloseStatus=1) -> QueryTrade
-      .mockResolvedValueOnce(
-        buildMockResponse(
+      // 2. refund (closed trade: RtnValue.Status="Closed") -> CreditDetail/QueryTrade
+      .mockImplementationOnce(async (url: string | URL) => {
+        expect(String(url)).toBe(
+          "https://ecpayment-stage.ecpay.com.tw/1.0.0/CreditDetail/QueryTrade",
+        );
+        return buildMockResponse(
           {
-            RtnCode: 1,
-            RtnMsg: "Success",
-            OrderInfo: {
-              TradeNo: "2610241000009999",
-              TradeStatus: 1,
-              CloseStatus: 1,
-              TotalAmount: 350,
+            RtnMsg: "",
+            RtnValue: {
+              credit_id: "2610241000009999",
+              amount: 350,
+              status: "Closed",
+              close_data: [{ status: "Closed", amount: 350 }],
             },
           },
           now,
-        ),
-      )
-      // 3. refund (closed trade) -> DoAction R
+        );
+      })
+      // 3. refund (closed trade) -> Credit/DoAction R
       .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
         expect(String(url)).toBe(
           "https://ecpayment-stage.ecpay.com.tw/1.0.0/Credit/DoAction",
@@ -646,81 +684,90 @@ describe("EcpayPaymentProvider adapter operations", () => {
           now,
         );
       })
-      // 4. refund (authorized/unclosed: CloseStatus=0) -> QueryTrade
+      // 4. refund (authorized/unclosed: RtnValue.Status="Authorized") -> CreditDetail/QueryTrade
       .mockResolvedValueOnce(
         buildMockResponse(
           {
-            RtnCode: 1,
-            RtnMsg: "Success",
-            OrderInfo: {
+            RtnMsg: "",
+            RtnValue: {
+              credit_id: "2610241000008888",
+              amount: 220,
+              status: "Authorized",
+              close_data: [],
+            },
+          },
+          now,
+        ),
+      )
+      // 5. refund (authorized/unclosed) -> Credit/DoAction N
+      .mockImplementationOnce(
+        async (_url: string | URL, init?: RequestInit) => {
+          const unwrapped = verifyAndUnwrapEcpayEnvelope({
+            envelope: JSON.parse(String(init?.body ?? "{}")),
+            ...SYNTHETIC_CREDENTIALS,
+            nowSeconds,
+          });
+          expect(unwrapped.data.Action).toBe("N");
+          expect(unwrapped.data.TradeNo).toBe("2610241000008888");
+          expect(unwrapped.data.TotalAmount).toBe(220);
+          return buildMockResponse(
+            {
+              RtnCode: 1,
+              RtnMsg: "Cancel Succeeded",
               TradeNo: "2610241000008888",
-              TradeStatus: 1,
-              CloseStatus: 0,
-              TotalAmount: 220,
             },
-          },
-          now,
-        ),
+            now,
+          );
+        },
       )
-      // 5. refund (authorized/unclosed) -> DoAction N
-      .mockImplementationOnce(async (_url: string | URL, init?: RequestInit) => {
-        const unwrapped = verifyAndUnwrapEcpayEnvelope({
-          envelope: JSON.parse(String(init?.body ?? "{}")),
-          ...SYNTHETIC_CREDENTIALS,
-          nowSeconds,
-        });
-        expect(unwrapped.data.Action).toBe("N");
-        expect(unwrapped.data.TradeNo).toBe("2610241000008888");
-        expect(unwrapped.data.TotalAmount).toBe(220);
-        return buildMockResponse(
-          {
-            RtnCode: 1,
-            RtnMsg: "Cancel Succeeded",
-            TradeNo: "2610241000008888",
-          },
-          now,
-        );
-      })
-      // 6. refund (pending close: CloseStatus=2) -> QueryTrade
+      // 6. refund (pending close: close_data status="ToBeClosed") -> CreditDetail/QueryTrade
       .mockResolvedValueOnce(
         buildMockResponse(
           {
-            RtnCode: 1,
-            RtnMsg: "Success",
-            OrderInfo: {
-              TradeNo: "2610241000007777",
-              TradeStatus: 1,
-              CloseStatus: 2,
-              TotalAmount: 180,
+            RtnMsg: "",
+            RtnValue: {
+              credit_id: "2610241000007777",
+              amount: 180,
+              status: "Authorized",
+              close_data: [{ status: "ToBeClosed", amount: 180 }],
             },
           },
           now,
         ),
       )
-      // 7. refund (pending close) -> DoAction E
-      .mockImplementationOnce(async (_url: string | URL, init?: RequestInit) => {
-        const unwrapped = verifyAndUnwrapEcpayEnvelope({
-          envelope: JSON.parse(String(init?.body ?? "{}")),
-          ...SYNTHETIC_CREDENTIALS,
-          nowSeconds,
-        });
-        expect(unwrapped.data.Action).toBe("E");
-        return buildMockResponse({ RtnCode: 1, RtnMsg: "Abandon Close OK" }, now);
-      })
-      // 8. refund (pending close) -> DoAction N
-      .mockImplementationOnce(async (_url: string | URL, init?: RequestInit) => {
-        const unwrapped = verifyAndUnwrapEcpayEnvelope({
-          envelope: JSON.parse(String(init?.body ?? "{}")),
-          ...SYNTHETIC_CREDENTIALS,
-          nowSeconds,
-        });
-        expect(unwrapped.data.Action).toBe("N");
-        return buildMockResponse({ RtnCode: 1, RtnMsg: "Cancel OK" }, now);
-      })
-      // 9. cross-instance readRefund -> QueryTrade using original capture idempotencyKey
+      // 7. refund (pending close) -> Credit/DoAction E
+      .mockImplementationOnce(
+        async (_url: string | URL, init?: RequestInit) => {
+          const unwrapped = verifyAndUnwrapEcpayEnvelope({
+            envelope: JSON.parse(String(init?.body ?? "{}")),
+            ...SYNTHETIC_CREDENTIALS,
+            nowSeconds,
+          });
+          expect(unwrapped.data.Action).toBe("E");
+          expect(unwrapped.data.TotalAmount).toBe(180);
+          return buildMockResponse(
+            { RtnCode: 1, RtnMsg: "Abandon Close OK" },
+            now,
+          );
+        },
+      )
+      // 8. refund (pending close) -> Credit/DoAction N
+      .mockImplementationOnce(
+        async (_url: string | URL, init?: RequestInit) => {
+          const unwrapped = verifyAndUnwrapEcpayEnvelope({
+            envelope: JSON.parse(String(init?.body ?? "{}")),
+            ...SYNTHETIC_CREDENTIALS,
+            nowSeconds,
+          });
+          expect(unwrapped.data.Action).toBe("N");
+          expect(unwrapped.data.TotalAmount).toBe(180);
+          return buildMockResponse({ RtnCode: 1, RtnMsg: "Cancel OK" }, now);
+        },
+      )
+      // 9. cross-instance readRefund -> CreditDetail/QueryTrade using original capture idempotencyKey
       .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
         expect(String(url)).toBe(
-          "https://ecpayment-stage.ecpay.com.tw/1.0.0/Cashier/QueryTrade",
+          "https://ecpayment-stage.ecpay.com.tw/1.0.0/CreditDetail/QueryTrade",
         );
         const unwrapped = verifyAndUnwrapEcpayEnvelope({
           envelope: JSON.parse(String(init?.body ?? "{}")),
@@ -730,13 +777,12 @@ describe("EcpayPaymentProvider adapter operations", () => {
         expect(unwrapped.data.MerchantTradeNo).toBe(expectedTradeNo);
         return buildMockResponse(
           {
-            RtnCode: 1,
-            RtnMsg: "Success",
-            OrderInfo: {
-              TradeNo: "2610241000009999",
-              TradeStatus: 1,
-              CloseStatus: 0,
-              CancelStatus: 1,
+            RtnMsg: "",
+            RtnValue: {
+              credit_id: "2610241000009999",
+              amount: 350,
+              status: "Cancelled",
+              close_data: [{ status: "Cancelled", amount: 350 }],
             },
           },
           now,
@@ -759,7 +805,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
     const refundedClosed = await provider.refund({
       idempotencyKey: "pax:refund:order-999",
       captureRef: `${expectedTradeNo}:2610241000009999`,
-      amountMinor: 350,
+      amountMinor: 35_000,
       currency: "TWD",
     });
     expect(refundedClosed).toEqual({
@@ -771,7 +817,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
     const refundedUnclosed = await provider.refund({
       idempotencyKey: "pax:refund:order-888",
       captureRef: `${unclosedTradeNo}:2610241000008888`,
-      amountMinor: 220,
+      amountMinor: 22_000,
       currency: "TWD",
     });
     expect(refundedUnclosed).toEqual({
@@ -785,7 +831,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
     const refundedPendingClose = await provider.refund({
       idempotencyKey: "pax:refund:order-777",
       captureRef: `${pendingCloseTradeNo}:2610241000007777`,
-      amountMinor: 180,
+      amountMinor: 18_000,
       currency: "TWD",
     });
     expect(refundedPendingClose).toEqual({
@@ -793,7 +839,7 @@ describe("EcpayPaymentProvider adapter operations", () => {
       providerRef: `ecpay_refund:${pendingCloseTradeNo}:2610241000007777`,
     });
 
-    // Cross-instance readRefund on a new provider instance resolves via QueryTrade without DoAction
+    // Cross-instance readRefund on a new provider instance resolves via CreditDetail/QueryTrade without DoAction
     const freshInstance = new EcpayPaymentProvider({
       ...SYNTHETIC_CREDENTIALS,
       sandbox: true,
@@ -806,6 +852,117 @@ describe("EcpayPaymentProvider adapter operations", () => {
     expect(lostAckReadback).toEqual({
       status: "completed",
       providerRef: `ecpay_refund:${expectedTradeNo}:2610241000009999`,
+    });
+  });
+
+  it("handles 10300066 pending capture without declining card, requires TradeStatus on readCapture, never defaults missing CloseStatus to DoAction R, and classifies payment callbacks with CardInfo", async () => {
+    const owner = "pax_uuid_0009_safe";
+    const fetchFn = vi
+      .fn()
+      // 1. capture returns 10300066 (交易結果待確認)
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          {
+            RtnCode: 10300066,
+            RtnMsg: "交易結果待確認",
+          },
+          now,
+        ),
+      )
+      // 2. readCapture queries QueryTrade when TradeStatus is omitted -> returns unknown
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          {
+            RtnCode: 1,
+            RtnMsg: "SuccessWithoutTradeStatus",
+            OrderInfo: {
+              TradeNo: "2610241000005555",
+            },
+          },
+          now,
+        ),
+      )
+      // 3. refund when QueryTrade response omits RtnValue/CloseStatus -> returns unknown without calling DoAction
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          {
+            RtnCode: 1,
+            RtnMsg: "SuccessWithoutCloseStatus",
+            OrderInfo: {
+              TradeNo: "2610241000005555",
+              TradeStatus: 1,
+              TotalAmount: 350,
+            },
+          },
+          now,
+        ),
+      );
+
+    const provider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      fetchFn: fetchFn as unknown as typeof fetch,
+      now: () => now,
+    });
+    expect(provider.bindingAuthAmountTwd).toBe(5);
+
+    const pendingCapture = await provider.capture({
+      idempotencyKey: "pax:capture:order-pending-10300066",
+      token: "ECPAY_BIND_CARD_ID_PENDING_OK",
+      amountMinor: 35_000,
+      currency: "TWD",
+      passengerId: owner,
+    });
+    expect(pendingCapture).toEqual({ status: "pending" });
+    expect(provider.isBindCardIdDeclined("ECPAY_BIND_CARD_ID_PENDING_OK")).toBe(
+      false,
+    );
+
+    const readWithoutStatus = await provider.readCapture(
+      "pax:capture:order-pending-10300066",
+    );
+    expect(readWithoutStatus).toEqual({ status: "unknown" });
+
+    const refundWithoutCloseState = await provider.refund({
+      idempotencyKey: "pax:refund:order-no-close",
+      captureRef: "DR1234567890ABCDEF12:2610241000005555",
+      amountMinor: 35_000,
+      currency: "TWD",
+    });
+    expect(refundWithoutCloseState).toEqual({ status: "unknown" });
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+
+    // Payment ReturnURL callback with CardInfo (no BindCardID) is classified as kind: "payment"
+    const paymentCallback = buildEcpayEnvelope({
+      ...SYNTHETIC_CREDENTIALS,
+      timestamp: nowSeconds,
+      data: {
+        RtnCode: 1,
+        RtnMsg: "Succeeded",
+        OrderInfo: {
+          MerchantTradeNo: "DRPAY000000000000001",
+          TradeNo: "26102400000888",
+          TradeStatus: 1,
+          TotalAmount: 350,
+        },
+        CardInfo: {
+          Card6No: "431195",
+          Card4No: "2222",
+          AuthCode: "777777",
+        },
+      },
+    });
+    expect(provider.verifyNotification(paymentCallback)).toEqual({
+      kind: "payment",
+      rtnCode: 1,
+      rtnMsg: "Succeeded",
+      merchantTradeNo: "DRPAY000000000000001",
+      tradeNo: "26102400000888",
+      authorizedAmountMinor: 35_000,
+      paymentResult: {
+        status: "completed",
+        providerRef: "DRPAY000000000000001:26102400000888",
+      },
     });
   });
 });
@@ -1027,7 +1184,8 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
             RtnCode: 1,
             RtnMsg: "Need 3DS",
             ThreeDInfo: {
-              ThreeDURL: "https://payment-stage.ecpay.com.tw/3ds/verify-bind-001",
+              ThreeDURL:
+                "https://payment-stage.ecpay.com.tw/3ds/verify-bind-001",
             },
           },
           now,
@@ -1107,20 +1265,22 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
             return null;
           },
         ),
-      completeBinding: vi.fn().mockImplementation(async (_pax, _key, stored) => {
-        persistedCard = {
-          paymentMethodId: stored.paymentMethodId,
-          last4: stored.last4,
-          cardType: stored.cardType,
-          expiryMonth: stored.expiryMonth,
-          expiryYear: stored.expiryYear,
-          isDefault: true,
-        };
-        return persistedCard;
-      }),
-      list: vi.fn().mockImplementation(async () =>
-        persistedCard ? [persistedCard] : [],
-      ),
+      completeBinding: vi
+        .fn()
+        .mockImplementation(async (_pax, _key, stored) => {
+          persistedCard = {
+            paymentMethodId: stored.paymentMethodId,
+            last4: stored.last4,
+            cardType: stored.cardType,
+            expiryMonth: stored.expiryMonth,
+            expiryYear: stored.expiryYear,
+            isDefault: true,
+          };
+          return persistedCard;
+        }),
+      list: vi
+        .fn()
+        .mockImplementation(async () => (persistedCard ? [persistedCard] : [])),
       setDefault: vi.fn(),
       remove: vi.fn(),
     };
@@ -1241,9 +1401,9 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
     expect(repository.findBindingByMerchantMember).toHaveBeenCalledTimes(1);
     expect(repository.completeBinding).toHaveBeenCalledTimes(1);
     const storedArg = repository.completeBinding.mock.calls[0]![2];
-    expect(
-      cipher.decrypt(storedArg.tokenEnvelope, owner, methodId),
-    ).toBe("ECPAY_3DS_COMPLETED_CARD_ID_99");
+    expect(cipher.decrypt(storedArg.tokenEnvelope, owner, methodId)).toBe(
+      "ECPAY_3DS_COMPLETED_CARD_ID_99",
+    );
 
     // Subsequent list() returns the newly bound card
     const listed = await service.list(owner);
@@ -1259,9 +1419,8 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
     ]);
 
     // Browser OrderResultURL return or callback replay is idempotent
-    const orderResultResp = await crossInstanceController.verifyOrderResult(
-      callbackEnvelope,
-    );
+    const orderResultResp =
+      await crossInstanceController.verifyOrderResult(callbackEnvelope);
     expect(orderResultResp.data).toMatchObject({
       status: "completed",
       method: {
@@ -1289,5 +1448,242 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
         isDefault: true,
       },
     });
+  });
+
+  it("normalizes +886 phone numbers, rejects null/empty TransCode and production SimulatePaid=1, disambiguates multi-claim 3DS bindings by MerchantTradeNo, forwards Idempotency-Key on complete3dsBinding, and blocks cross-instance retry of durably declined cards", async () => {
+    const now = new Date("2026-10-24T10:00:00Z");
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+
+    expect(normalizeEcpayPhone("+886-912-345-678")).toBe("0912345678");
+    expect(normalizeEcpayPhone("886987654321")).toBe("0987654321");
+
+    const baseEnvelope = buildEcpayEnvelope({
+      ...SYNTHETIC_CREDENTIALS,
+      timestamp: nowSeconds,
+      data: { RtnCode: 1, RtnMsg: "OK" },
+    });
+    expect(() =>
+      verifyAndUnwrapEcpayEnvelope({
+        envelope: { ...baseEnvelope, TransCode: null },
+        ...SYNTHETIC_CREDENTIALS,
+        nowSeconds,
+      }),
+    ).toThrow(/envelope verification failed/);
+    expect(() =>
+      verifyAndUnwrapEcpayEnvelope({
+        envelope: { ...baseEnvelope, TransCode: "" },
+        ...SYNTHETIC_CREDENTIALS,
+        nowSeconds,
+      }),
+    ).toThrow(/envelope verification failed/);
+
+    const prodProvider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: false,
+      now: () => now,
+      fetchFn: vi.fn() as unknown as typeof fetch,
+    });
+    const simulatePaidCallback = {
+      ...buildEcpayEnvelope({
+        ...SYNTHETIC_CREDENTIALS,
+        timestamp: nowSeconds,
+        data: {
+          RtnCode: 1,
+          RtnMsg: "Simulated",
+          SimulatePaid: 1,
+          OrderInfo: {
+            MerchantTradeNo: "DRSIM000000000000001",
+            TradeNo: "26102400000123",
+            TradeStatus: 1,
+            TotalAmount: 100,
+          },
+        },
+      }),
+      RpHeader: { Timestamp: nowSeconds },
+      TransCode: 1,
+    };
+    expect(prodProvider.verifyNotification(simulatePaidCallback)).toMatchObject(
+      {
+        kind: "payment",
+        paymentResult: {
+          status: "failed",
+          error: "invalid_method",
+          retryable: false,
+        },
+      },
+    );
+
+    // Multi-claim disambiguation in PaymentMethodRepository
+    const claimKeyA = "pax:bind:claim_A";
+    const claimKeyB = "pax:bind:claim_B";
+    const tradeNoB = deriveEcpayMerchantTradeNo(claimKeyB);
+    const mockClient = {
+      query: vi.fn(async (sql: string) => {
+        if (sql.startsWith("SELECT status FROM passenger.accounts")) {
+          return { rows: [{ status: "active" }] };
+        }
+        if (sql.includes("FROM passenger.payment_idempotency")) {
+          return {
+            rows: [
+              {
+                drts_passenger_id: "pax_multi_claim_owner",
+                idempotency_key: claimKeyA,
+                entity_id: "00000000-0000-4000-8000-000000000011",
+              },
+              {
+                drts_passenger_id: "pax_multi_claim_owner",
+                idempotency_key: claimKeyB,
+                entity_id: "00000000-0000-4000-8000-000000000022",
+              },
+            ],
+          };
+        }
+        return { rows: [], rowCount: 1 };
+      }),
+      release: vi.fn(),
+    };
+    const dbRepo = new PaymentMethodRepository({
+      connect: vi.fn().mockResolvedValue(mockClient),
+    } as unknown as DatabaseService);
+
+    // Ambiguous without matching MerchantTradeNo -> returns null (fails closed)
+    const ambiguous = await dbRepo.findActionRequiredBinding(
+      "pax_multi_claim_owner",
+      undefined,
+      "DRUNRELATED000000001",
+    );
+    expect(ambiguous).toBeNull();
+
+    // Disambiguated by deterministic MerchantTradeNo -> returns exact claim B
+    const matchedB = await dbRepo.findActionRequiredBinding(
+      "pax_multi_claim_owner",
+      undefined,
+      tradeNoB,
+    );
+    expect(matchedB).toEqual({
+      idempotencyKey: claimKeyB,
+      methodId: "00000000-0000-4000-8000-000000000022",
+    });
+
+    // complete3dsBinding controller forwards @Headers("Idempotency-Key")
+    const verifyNotificationSpy = vi.fn().mockResolvedValue({
+      status: "completed",
+      method: {
+        paymentMethodId: "00000000-0000-4000-8000-000000000022",
+        last4: "2222",
+        cardType: "VISA",
+        expiryMonth: "12",
+        expiryYear: "2031",
+        isDefault: true,
+      },
+    });
+    const controller = new PaymentMethodController(
+      {
+        verifyNotification: verifyNotificationSpy,
+      } as unknown as PaymentMethodService,
+      {
+        getMe: vi.fn().mockResolvedValue({
+          account: { drtsPassengerId: "pax_multi_claim_owner" },
+        }),
+      } as unknown as ConstructorParameters<typeof PaymentMethodController>[1],
+    );
+    await controller.complete3dsBinding(
+      {
+        authMode: "jwt_bearer",
+        actorType: "first_party_passenger",
+        actorId: "pax_multi_claim_owner",
+        subject: "pax_multi_claim_owner",
+        realm: "passenger",
+        tenantId: null,
+        drtsPassengerId: "pax_multi_claim_owner",
+        sessionId: "sess-2",
+        roleFamilies: [],
+        roles: [],
+        scopes: [],
+        requestId: "req-2",
+      },
+      { ResultData: "{}" },
+      claimKeyB,
+    );
+    expect(verifyNotificationSpy).toHaveBeenCalledWith(
+      { ResultData: "{}" },
+      { passengerId: "pax_multi_claim_owner", idempotencyKey: claimKeyB },
+    );
+
+    // Durable cross-instance declined-card prohibition in PaymentChargeService
+    const cipher = new PaymentTokenCipher(syntheticEncryptionKeysJson());
+    const freshProviderFetch = vi.fn();
+    const freshProvider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      now: () => now,
+      fetchFn: freshProviderFetch as unknown as typeof fetch,
+    });
+    const finishSpy = vi.fn().mockResolvedValue(undefined);
+    const sessionMock = {
+      load: vi.fn().mockResolvedValue({
+        paymentId: "00000000-0000-4000-8000-000000000088",
+        orderId: "00000000-0000-4000-8000-000000000099",
+        passengerId: "pax_declined_owner",
+        methodId: "00000000-0000-4000-8000-000000000077",
+        amountMinor: 35_000,
+        status: "not_selected",
+        attemptCount: 0,
+        readbackCount: 0,
+        nextOperation: "capture",
+        retryAt: null,
+        lastError: null,
+      }),
+      begin: vi.fn().mockResolvedValue({
+        paymentId: "00000000-0000-4000-8000-000000000088",
+        orderId: "00000000-0000-4000-8000-000000000099",
+        passengerId: "pax_declined_owner",
+        methodId: "00000000-0000-4000-8000-000000000077",
+        provider: "ecpay",
+        methodActive: true,
+        tokenEnvelope: cipher.encrypt(
+          "ECPAY_DURABLY_DECLINED_CARD",
+          "pax_declined_owner",
+          "00000000-0000-4000-8000-000000000077",
+        ),
+        amountMinor: 35_000,
+        attemptCount: 1,
+        readbackCount: 0,
+        key: "pax:capture:new_order_with_declined_card",
+      }),
+      hasPriorDeclineForMethod: vi.fn().mockResolvedValue(true),
+      finish: finishSpy,
+    };
+    const chargeRepo = {
+      withOrder: vi
+        .fn()
+        .mockImplementation(async (_orderId, cb) => cb(sessionMock)),
+    };
+    const chargeService = new PaymentChargeService(
+      chargeRepo as unknown as PaymentChargeRepository,
+      { provider: freshProvider, cipher },
+      {
+        retryDelaysMs: [],
+        retryDefinitiveDeclines: false,
+        unknownReadbackDelaysMs: [],
+      },
+    );
+    await chargeService.processOrder(
+      "00000000-0000-4000-8000-000000000099",
+      now,
+    );
+    expect(sessionMock.hasPriorDeclineForMethod).toHaveBeenCalledWith(
+      "pax_declined_owner",
+      "00000000-0000-4000-8000-000000000077",
+    );
+    expect(finishSpy).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        status: "manual_recovery",
+        error: "card_declined",
+        retryAt: null,
+      }),
+    );
+    expect(freshProviderFetch).not.toHaveBeenCalled();
   });
 });

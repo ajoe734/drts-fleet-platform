@@ -362,7 +362,7 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
           host: "ride.smarttransport.tw",
           "x-forwarded-proto": "https",
         },
-        body: 'ResultData=%7B%22MerchantID%22%3A%22SYNTHETIC_MID_01%22%2C%22Data%22%3A%22CIPHER%22%7D',
+        body: "ResultData=%7B%22MerchantID%22%3A%22SYNTHETIC_MID_01%22%2C%22Data%22%3A%22CIPHER%22%7D",
       },
     );
     const res = await bffPost(req, {
@@ -376,50 +376,93 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("accepts cross-origin 3DS form POST /api/passenger-app/payment-methods/ecpay/order-result and redirects browser 303 to /account/payment-methods?ecpay_3ds=completed", async () => {
+  it("accepts cross-origin 3DS form POST /api/passenger-app/payment-methods/ecpay/order-result and redirects browser 303 to /account/payment-methods?ecpay_3ds=completed|failed|unknown based on upstream data.status", async () => {
     vi.stubEnv("DRTS_API_URL", "http://api.internal:3000");
     vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
-    vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (input, init) => {
-      expect(String(input)).toBe(
-        "http://api.internal:3000/api/passenger-app/payment-methods/ecpay/order-result",
-      );
-      expect(init?.method).toBe("POST");
-      expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
-        MerchantID: "SYNTHETIC_MID_01",
-        Data: "CIPHER",
+    vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async (input, init) => {
+        expect(String(input)).toBe(
+          "http://api.internal:3000/api/passenger-app/payment-methods/ecpay/order-result",
+        );
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          MerchantID: "SYNTHETIC_MID_01",
+          Data: "CIPHER",
+        });
+        return new Response(
+          JSON.stringify({
+            data: {
+              status: "completed",
+              method: makeCard(1),
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      })
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            data: {
+              status: "failed",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      })
+      .mockImplementationOnce(async () => {
+        return new Response(
+          JSON.stringify({
+            data: {
+              status: "unknown",
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
       });
-      return new Response(
-        JSON.stringify({
-          data: {
-            status: "completed",
-            method: makeCard(1),
-          },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    });
 
-    const req = new NextRequest(
-      "https://ride.smarttransport.tw/api/passenger-app/payment-methods/ecpay/order-result",
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          origin: "https://ecpg-stage.ecpay.com.tw",
-          host: "ride.smarttransport.tw",
-          "x-forwarded-proto": "https",
+    const makeOrderResultReq = () =>
+      new NextRequest(
+        "https://ride.smarttransport.tw/api/passenger-app/payment-methods/ecpay/order-result",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            origin: "https://ecpg-stage.ecpay.com.tw",
+            host: "ride.smarttransport.tw",
+            "x-forwarded-proto": "https",
+          },
+          body: "ResultData=%7B%22MerchantID%22%3A%22SYNTHETIC_MID_01%22%2C%22Data%22%3A%22CIPHER%22%7D",
         },
-        body: 'ResultData=%7B%22MerchantID%22%3A%22SYNTHETIC_MID_01%22%2C%22Data%22%3A%22CIPHER%22%7D',
-      },
-    );
-    const res = await bffPost(req, {
+      );
+
+    const resCompleted = await bffPost(makeOrderResultReq(), {
       params: Promise.resolve({
         path: ["payment-methods", "ecpay", "order-result"],
       }),
     });
-    expect(res.status).toBe(303);
-    expect(res.headers.get("location")).toBe(
+    expect(resCompleted.status).toBe(303);
+    expect(resCompleted.headers.get("location")).toBe(
       "https://ride.smarttransport.tw/account/payment-methods?ecpay_3ds=completed",
+    );
+
+    const resFailed = await bffPost(makeOrderResultReq(), {
+      params: Promise.resolve({
+        path: ["payment-methods", "ecpay", "order-result"],
+      }),
+    });
+    expect(resFailed.status).toBe(303);
+    expect(resFailed.headers.get("location")).toBe(
+      "https://ride.smarttransport.tw/account/payment-methods?ecpay_3ds=failed",
+    );
+
+    const resUnknown = await bffPost(makeOrderResultReq(), {
+      params: Promise.resolve({
+        path: ["payment-methods", "ecpay", "order-result"],
+      }),
+    });
+    expect(resUnknown.status).toBe(303);
+    expect(resUnknown.headers.get("location")).toBe(
+      "https://ride.smarttransport.tw/account/payment-methods?ecpay_3ds=unknown",
     );
   });
 

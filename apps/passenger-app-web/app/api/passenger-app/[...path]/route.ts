@@ -334,7 +334,11 @@ async function forward(
                 typeof candidate.ResultData === "string"
               ) {
                 const inner = JSON.parse(candidate.ResultData.trim());
-                if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+                if (
+                  inner &&
+                  typeof inner === "object" &&
+                  !Array.isArray(inner)
+                ) {
                   parsedEnvelope = inner as Record<string, unknown>;
                 }
               } else {
@@ -376,7 +380,9 @@ async function forward(
       }
       const headers = new Headers({
         "Content-Type": "application/json",
-        Accept: isEcpayServerCallback ? "text/plain, application/json" : "application/json",
+        Accept: isEcpayServerCallback
+          ? "text/plain, application/json"
+          : "application/json",
       });
       await applyUpstreamAuth(headers, targetUrl);
       const upstream = await fetch(targetUrl.toString(), {
@@ -404,7 +410,10 @@ async function forward(
         );
       }
       const accept = request.headers.get("accept") ?? "";
-      if (accept.includes("application/json") && !accept.includes("text/html")) {
+      if (
+        accept.includes("application/json") &&
+        !accept.includes("text/html")
+      ) {
         const jsonText = await upstream.text();
         return withSecurityHeaders(
           new NextResponse(jsonText, {
@@ -425,8 +434,31 @@ async function forward(
       ) {
         baseRedirectUrl.protocol = "https:";
       }
+      let orderResultStatus: "completed" | "failed" | "unknown" = "failed";
+      if (upstream.ok) {
+        try {
+          const bodyJson = (await upstream.json()) as {
+            data?: { status?: string };
+            status?: string;
+          };
+          const rawStatus = bodyJson?.data?.status ?? bodyJson?.status;
+          if (rawStatus === "completed") {
+            orderResultStatus = "completed";
+          } else if (
+            rawStatus === "unknown" ||
+            rawStatus === "pending" ||
+            rawStatus === "action_required"
+          ) {
+            orderResultStatus = "unknown";
+          } else {
+            orderResultStatus = "failed";
+          }
+        } catch {
+          orderResultStatus = "unknown";
+        }
+      }
       const redirectTarget = new URL(
-        `/account/payment-methods?ecpay_3ds=${upstream.ok ? "completed" : "failed"}`,
+        `/account/payment-methods?ecpay_3ds=${orderResultStatus}`,
         baseRedirectUrl.origin,
       );
       return withSecurityHeaders(NextResponse.redirect(redirectTarget, 303));

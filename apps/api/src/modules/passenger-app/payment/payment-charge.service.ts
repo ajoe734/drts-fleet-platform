@@ -183,6 +183,21 @@ export class PaymentChargeService {
             error: "invalid_method",
             retryable: false,
           };
+        } else if (
+          claim.provider === "ecpay" &&
+          typeof session.hasPriorDeclineForMethod === "function" &&
+          (await session.hasPriorDeclineForMethod(
+            claim.passengerId,
+            claim.methodId,
+          ))
+        ) {
+          // Durable cross-instance ECPay prohibition: never re-authorize a
+          // bound card that has already failed authorization on a prior order.
+          result = {
+            status: "failed",
+            error: "card_declined",
+            retryable: false,
+          };
         } else {
           const token = this.runtime.cipher.decrypt(
             claim.tokenEnvelope,

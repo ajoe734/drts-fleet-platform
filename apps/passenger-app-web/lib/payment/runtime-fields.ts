@@ -15,13 +15,19 @@ export function assertPaymentFieldsRuntimeConfiguration(reviewDemo = false) {
 }
 
 export function isEcpayHostedFieldsRuntime(
-  options: { reviewDemo?: boolean } = {},
+  options: { reviewDemo?: boolean; serverProvider?: string } = {},
 ): boolean {
   assertPaymentFieldsRuntimeConfiguration(options.reviewDemo);
-  return (
-    !options.reviewDemo &&
-    process.env.NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER === "ecpay"
-  );
+  if (options.reviewDemo) return false;
+  const configured =
+    process.env.NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER?.trim() ?? "";
+  if (configured === "synthetic" || configured === "disabled") {
+    return false;
+  }
+  if (options.serverProvider && options.serverProvider !== "ecpay") {
+    return false;
+  }
+  return configured === "ecpay" || configured === "";
 }
 
 /** No configured contracted provider means unavailable, not an implicit fake. */
@@ -30,11 +36,17 @@ export function paymentFieldsForRuntime(
     reviewDemo?: boolean;
     captureResult?: "success" | "retry_once";
     ecpaySdk?: EcpaySdkGlobal;
+    serverProvider?: string;
   } = {},
 ): PassengerPaymentFieldsAvailability {
   assertPaymentFieldsRuntimeConfiguration(options.reviewDemo);
   if (!options.reviewDemo) {
-    if (process.env.NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER === "ecpay") {
+    const configured =
+      process.env.NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER?.trim() ?? "";
+    if (
+      configured === "ecpay" ||
+      (configured === "" && options.serverProvider === "ecpay")
+    ) {
       const sdk =
         options.ecpaySdk ??
         (typeof window !== "undefined" ? window.ECPay : undefined);
@@ -48,8 +60,7 @@ export function paymentFieldsForRuntime(
         }),
       };
     }
-    if (process.env.NEXT_PUBLIC_PAYMENT_FIELDS_PROVIDER !== "synthetic")
-      return { status: "unavailable" };
+    if (configured !== "synthetic") return { status: "unavailable" };
   }
   return {
     status: "ready",
