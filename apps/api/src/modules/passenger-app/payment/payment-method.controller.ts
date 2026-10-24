@@ -6,10 +6,12 @@ import {
   Param,
   Post,
   Put,
+  Query,
 } from "@nestjs/common";
 import { toApiSuccessEnvelope } from "../../../common/api-envelope";
 import {
   CurrentIdentity,
+  OpenRoute,
   RequireRealms,
 } from "../../../common/auth/auth.decorators";
 import type { RequestIdentity } from "../../../common/auth/auth.types";
@@ -29,10 +31,31 @@ export class PaymentMethodController {
     return account.drtsPassengerId;
   }
   @Get()
-  async list(@CurrentIdentity() identity: RequestIdentity | null) {
+  async list(
+    @CurrentIdentity() identity: RequestIdentity | null,
+    @Query("binding_session") bindingSession?: string,
+  ) {
+    if (bindingSession === "1" || bindingSession === "true") {
+      return toApiSuccessEnvelope(
+        await this.methods.createBindingSession(await this.owner(identity)),
+      );
+    }
     return toApiSuccessEnvelope(
       await this.methods.list(await this.owner(identity)),
     );
+  }
+  @Post("binding-session")
+  async createBindingSession(
+    @CurrentIdentity() identity: RequestIdentity | null,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.methods.createBindingSession(await this.owner(identity)),
+    );
+  }
+  @Post("ecpay/callback")
+  @OpenRoute()
+  async verifyNotification(@Body() body: unknown) {
+    return toApiSuccessEnvelope(await this.methods.verifyNotification(body));
   }
   @Post()
   async bind(

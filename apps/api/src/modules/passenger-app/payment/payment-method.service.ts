@@ -4,9 +4,13 @@ import type {
   PaymentMethodsResponse,
 } from "@drts/contracts";
 import { ApiRequestError } from "../../../common/api-envelope";
-import { PaymentMethodRepository } from "./payment-method.repository";
+import {
+  MAX_BOUND_CARDS_PER_MEMBER,
+  PaymentMethodRepository,
+} from "./payment-method.repository";
 import { type PaymentRuntime } from "./payment-runtime.config";
 
+export { MAX_BOUND_CARDS_PER_MEMBER };
 export const PAYMENT_RUNTIME = Symbol("PAYMENT_RUNTIME");
 
 function invalid(): never {
@@ -93,12 +97,31 @@ export class PaymentMethodService {
     );
     if (claim.completed)
       return { status: "completed", method: claim.completed };
+    const existing = await this.repository.list?.(passengerId);
+    if (
+      Array.isArray(existing) &&
+      existing.length >= MAX_BOUND_CARDS_PER_MEMBER
+    ) {
+      await this.repository.bindingOutcome(
+        passengerId,
+        claim.idempotencyKey,
+        "failed",
+        "card_limit_exceeded",
+      );
+      throw new ApiRequestError(
+        409,
+        "card_limit_exceeded",
+        "每個會員最多只能綁定 5 張信用卡，請先移除既有卡片後再新增。",
+      );
+    }
     let result;
     try {
-      result = await this.runtime.provider.bind(
-        credential,
-        claim.idempotencyKey,
-      );
+      result =
+        this.runtime.provider.name === "ecpay"
+          ? await this.runtime.provider.bind(credential, claim.idempotencyKey, {
+              passengerId,
+            })
+          : await this.runtime.provider.bind(credential, claim.idempotencyKey);
     } catch {
       // Retain the committed pending claim for the same owner's replay. Do not
       // erase it and do not expose provider exceptions/credentials in errors.
@@ -224,6 +247,109 @@ export class PaymentMethodService {
       },
     );
     return { status: "completed", method };
+  }
+
+  async createBindingSession(passengerId: string): Promise<{
+    provider: "ecpay";
+    merchantToken: string;
+    tokenExpireDate: string;
+    sandbox: boolean;
+    serverType: "Stage" | "Prod";
+    sdkScriptUrl: string;
+    approvedActionOrigins: readonly string[];
+  }> {
+    if (
+      !this.runtime.provider.available ||
+      !this.runtime.cipher ||
+      typeof this.runtime.provider.createBindingSession !== "function"
+    ) {
+      throw new ApiRequestError(
+        503,
+        "payment_unavailable",
+        "Payment provider is not configured.",
+      );
+    }
+    const existing = await this.repository.list(passengerId);
+    if (existing.length >= MAX_BOUND_CARDS_PER_MEMBER) {
+      throw new ApiRequestError(
+        409,
+        "card_limit_exceeded",
+        "每個會員最多只能綁定 5 張信用卡，請先移除既有卡片後再新增。",
+      );
+    }
+    try {
+      return await this.runtime.provider.createBindingSession(passengerId);
+    } catch {
+      throw new ApiRequestError(
+        503,
+        "payment_unavailable",
+        "Payment provider did not acknowledge binding session.",
+      );
+    }
+  }
+
+  async verifyNotification(body: unknown): Promise<{
+    verified: true;
+    kind: "bind" | "payment";
+    rtnCode: number;
+    merchantTradeNo: string | null;
+    tradeNo: string | null;
+    status: "completed" | "failed" | "pending" | "action_required" | "unknown";
+    card?: {
+      last4: string;
+      cardType: string;
+      expiryMonth: string;
+      expiryYear: string;
+    };
+  }> {
+    if (
+      !this.runtime.provider.available ||
+      typeof this.runtime.provider.verifyNotification !== "function"
+    ) {
+      throw new ApiRequestError(
+        503,
+        "payment_unavailable",
+        "Payment provider is not configured.",
+      );
+    }
+    let result;
+    try {
+      result = this.runtime.provider.verifyNotification(body);
+    } catch {
+      throw new ApiRequestError(
+        400,
+        "invalid_signature",
+        "Invalid payment provider notification.",
+      );
+    }
+    if (result.kind === "bind" && result.bindResult) {
+      return {
+        verified: true,
+        kind: "bind",
+        rtnCode: result.rtnCode,
+        merchantTradeNo: result.merchantTradeNo,
+        tradeNo: result.tradeNo,
+        status: result.bindResult.status,
+        ...(result.bindResult.status === "completed"
+          ? {
+              card: {
+                last4: result.bindResult.card.last4,
+                cardType: result.bindResult.card.cardType,
+                expiryMonth: result.bindResult.card.expiryMonth,
+                expiryYear: result.bindResult.card.expiryYear,
+              },
+            }
+          : {}),
+      };
+    }
+    return {
+      verified: true,
+      kind: result.kind,
+      rtnCode: result.rtnCode,
+      merchantTradeNo: result.merchantTradeNo,
+      tradeNo: result.tradeNo,
+      status: result.paymentResult?.status ?? "unknown",
+    };
   }
 
   async setDefault(

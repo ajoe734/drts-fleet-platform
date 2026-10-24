@@ -6,6 +6,8 @@ import { DatabaseService } from "../../../common/db/database.service";
 import { ApiRequestError } from "../../../common/api-envelope";
 import type { EncryptedPaymentToken } from "./payment-token-cipher";
 
+export const MAX_BOUND_CARDS_PER_MEMBER = 5;
+
 export interface StoredPaymentMethod extends PassengerPaymentMethod {
   drtsPassengerId: string;
   provider: string;
@@ -201,6 +203,21 @@ export class PaymentMethodRepository {
       // Concurrent PSP replay can finish first. Return its committed metadata,
       // without making a second method or overwriting another default.
       if (claim.rows[0].outcome !== "completed") {
+        const countResult = await client.query(
+          `SELECT COUNT(*)::int AS count FROM passenger.psp_tokens WHERE drts_passenger_id=$1 AND status='active'`,
+          [passengerId],
+        );
+        const activeCount = Number(countResult.rows[0]?.count ?? 0);
+        if (
+          Number.isFinite(activeCount) &&
+          activeCount >= MAX_BOUND_CARDS_PER_MEMBER
+        ) {
+          throw new ApiRequestError(
+            409,
+            "card_limit_exceeded",
+            "每個會員最多只能綁定 5 張信用卡，請先移除既有卡片後再新增。",
+          );
+        }
         // Both uses must infer varchar; leave the 100-character limit to the
         // column constraint instead of a length-qualified cast that truncates.
         await client.query(
