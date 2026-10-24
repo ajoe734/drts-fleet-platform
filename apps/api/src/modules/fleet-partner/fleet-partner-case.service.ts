@@ -114,6 +114,70 @@ const READBACK_SECRET =
   process.env.DRTS_READBACK_SECRET || "drts-fleet-case-attachment-secret-2026";
 const MAX_ATTACHMENT_SIZE = MAX_FLEET_DOCUMENT_BYTES;
 
+// A committed Complaint note is the only channel another already-warm
+// instance (which never ran this reply's createReply locally) can read the
+// reply back from. This marker lets that instance recover the real
+// structured attachment relation instead of only the human-readable
+// filenames already appended to the note text. A plain `\n` + ASCII token
+// (no control bytes) keeps the note a normal Postgres text value.
+const FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER =
+  "\n<<fleet-reply-attachments>>";
+
+function appendAttachmentManifest(
+  note: string,
+  attachments: readonly FleetCaseTimelineAttachment[],
+): string {
+  if (!attachments.length) {
+    return note;
+  }
+  const manifest = attachments.map((attachment) => ({
+    attachmentId: attachment.attachmentId,
+    name: attachment.name,
+    size: attachment.size,
+    fileSize: attachment.fileSize,
+  }));
+  return `${note}${FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER}${JSON.stringify(manifest)}`;
+}
+
+function splitAttachmentManifest(note: string): {
+  body: string;
+  attachments: FleetCaseTimelineAttachment[];
+} {
+  const markerIndex = note.indexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
+  if (markerIndex === -1) {
+    return { body: note, attachments: [] };
+  }
+  const body = note.slice(0, markerIndex);
+  const raw = note.slice(
+    markerIndex + FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER.length,
+  );
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return { body, attachments: [] };
+    }
+    const attachments: FleetCaseTimelineAttachment[] = parsed
+      .filter(
+        (item): item is Record<string, unknown> =>
+          !!item &&
+          typeof item === "object" &&
+          typeof (item as Record<string, unknown>).attachmentId === "string" &&
+          typeof (item as Record<string, unknown>).name === "string",
+      )
+      .map((item) => ({
+        attachmentId: item.attachmentId as string,
+        name: item.name as string,
+        size: typeof item.size === "string" ? item.size : "",
+        ...(typeof item.fileSize === "number"
+          ? { fileSize: item.fileSize }
+          : {}),
+      }));
+    return { body, attachments };
+  } catch {
+    return { body, attachments: [] };
+  }
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -522,21 +586,46 @@ export class FleetPartnerCaseService {
     }
   }
 
-  private resolveCase(caseId: string): FleetCaseItem {
+  private async resolveCase(caseId: string): Promise<FleetCaseItem> {
     const item = this.cases.get(caseId);
     if (item) {
       return item;
     }
 
-    // Check if complaintService has this case
+    // Check if complaintService has this case, preferring the canonical Ops
+    // readback: it reconciles against the durable repository when the case
+    // was created or updated on a different already-warm API instance and
+    // is therefore absent from this instance's optimistic in-memory cache.
     if (this.complaintService) {
+      let complaint: ComplaintCaseRecord | undefined;
       try {
-        const complaint = this.complaintService.getComplaintCase(caseId);
-        if (complaint) {
-          return this.mapComplaintToFleetCase(complaint);
+        complaint =
+          typeof this.complaintService.getComplaintCaseForOps === "function"
+            ? await this.complaintService.getComplaintCaseForOps(caseId)
+            : this.complaintService.getComplaintCase(caseId);
+      } catch (error) {
+        // A pending-commit/refresh failure is a real, distinct outcome from
+        // "case not found" and must not be disguised as either a 404 or a
+        // false success.
+        if (
+          error instanceof ApiRequestError &&
+          error.code === "IDEMPOTENCY_IN_PROGRESS"
+        ) {
+          throw error;
         }
-      } catch {
-        // Fall through to 404
+        if (!(error instanceof ApiRequestError && error.code === "NOT_FOUND")) {
+          // A genuine lookup failure (e.g. the durable store errored) is
+          // likewise distinct from "this case does not exist" and must
+          // propagate as itself rather than becoming a false 404.
+          throw error;
+        }
+        complaint = undefined;
+      }
+      if (complaint) {
+        // Deliberately outside the try block above: a real attribution
+        // refresh failure here must propagate as itself, not be disguised
+        // as "case not found".
+        return this.mapComplaintToFleetCase(complaint);
       }
     }
 
@@ -548,26 +637,61 @@ export class FleetPartnerCaseService {
     );
   }
 
-  private mapComplaintToFleetCase(
+  /**
+   * Derives the actual driver/fleet attribution for an ordinary (non
+   * settlement_dispute) complaint from its real source order, via the
+   * injected FleetPartnerService (order -> driver -> driver-fleet
+   * affiliation, refreshed from the canonical repository). Returns null
+   * when the complaint has no related order, no resolvable driver, or no
+   * single unambiguous current affiliation — callers must treat that as
+   * unattributed rather than guessing a fleet. A genuine refresh failure
+   * (not a mere absence) propagates instead, since it must not be
+   * disguised as an unattributed case.
+   */
+  private async resolveComplaintFleetAttribution(
     complaint: ComplaintCaseRecord,
-  ): FleetCaseItem {
+  ): Promise<{
+    driverId: string;
+    driverName: string;
+    fleetPartnerId: string;
+  } | null> {
+    if (!complaint.relatedOrderId || !this.fleetPartnerService) {
+      return null;
+    }
+    return this.fleetPartnerService.resolveOrderDriverFleetAttribution(
+      complaint.relatedOrderId,
+    );
+  }
+
+  private async mapComplaintToFleetCase(
+    complaint: ComplaintCaseRecord,
+  ): Promise<FleetCaseItem> {
     const isClosed = complaint.status === "closed";
+    const isSettlement = complaint.category === "settlement_dispute";
+    const attribution = isSettlement
+      ? null
+      : await this.resolveComplaintFleetAttribution(complaint);
     return {
       id: complaint.caseNo,
       caseNo: complaint.caseNo,
       type: "complaint",
       cat: complaint.category,
       desc: complaint.description,
-      driver: complaint.category === "settlement_dispute" ? "—" : "旗下司機",
-      driverId:
-        complaint.category === "settlement_dispute" ? "" : "drv-affiliated",
+      driver: isSettlement ? "—" : attribution?.driverName ?? "未歸屬",
+      driverId: isSettlement ? "" : attribution?.driverId ?? "",
       severity: complaint.severity,
-      responsibility:
-        complaint.category === "settlement_dispute" ? "shared" : "fleet",
-      fleetPartnerId:
-        complaint.category === "settlement_dispute"
-          ? (complaint.fleetPartnerId ?? "")
-          : "METRO_FLEET",
+      // Fleet responsibility can only be asserted when a real driver/fleet
+      // attribution is resolved; otherwise the case is not attributable to
+      // any specific fleet and stays platform-owned (read-only) rather than
+      // guessed.
+      responsibility: isSettlement
+        ? "shared"
+        : attribution
+          ? "fleet"
+          : "platform",
+      fleetPartnerId: isSettlement
+        ? (complaint.fleetPartnerId ?? "")
+        : attribution?.fleetPartnerId ?? "",
       status: complaint.status,
       slaDueAt: complaint.slaDueAt,
       slaBreachedAt: complaint.slaBreach ? complaint.updatedAt : null,
@@ -587,9 +711,11 @@ export class FleetPartnerCaseService {
       relatedCall: complaint.relatedCallId,
       assignee:
         complaint.assigneeId ||
-        (complaint.category === "settlement_dispute"
+        (isSettlement
           ? "—"
-          : "陳維 (ops_compliance)"),
+          : attribution
+            ? "陳維 (ops_compliance)"
+            : "—"),
       openedAt: complaint.createdAt,
       updatedAt: complaint.updatedAt,
       actionDescriptor: {
@@ -615,21 +741,29 @@ export class FleetPartnerCaseService {
     }
 
     if (this.complaintService) {
-      try {
-        const complaints = this.complaintService.listComplaintCases();
-        for (const c of complaints) {
-          if (
-            c.category === "settlement_dispute" &&
-            c.fleetPartnerId !== fleetPartnerId
-          )
-            continue;
-          if (!seen.has(c.caseNo)) {
-            seen.add(c.caseNo);
-            result.push(this.mapComplaintToFleetCase(c));
-          }
-        }
-      } catch {
-        // Ignore background list error
+      // Prefer the canonical ordinary-case refresh so a warm instance that
+      // never itself created or updated a given complaint still lists it
+      // (same guarantee refreshSettlementCases already gives settlement
+      // cases above). A real refresh failure here must propagate, not be
+      // disguised as "no ordinary complaints exist".
+      const complaints =
+        typeof this.complaintService.listComplaintCasesForFleetOps ===
+        "function"
+          ? await this.complaintService.listComplaintCasesForFleetOps()
+          : typeof this.complaintService.listComplaintCases === "function"
+            ? this.complaintService.listComplaintCases()
+            : [];
+      for (const c of complaints) {
+        if (seen.has(c.caseNo)) continue;
+        const mapped = await this.mapComplaintToFleetCase(c);
+        // Ordinary complaints must be isolated to their actually
+        // attributed fleet, same as settlement_dispute cases above; an
+        // unattributed or foreign-fleet complaint must not leak into
+        // this list.
+        if (!this.isFleetScopeMatch(mapped.fleetPartnerId, fleetPartnerId))
+          continue;
+        seen.add(c.caseNo);
+        result.push(mapped);
       }
     }
 
@@ -644,7 +778,7 @@ export class FleetPartnerCaseService {
     attachments: FleetCaseAttachmentRecord[];
   }> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     await this.loadStoredAttachments(caseItem.id);
@@ -675,7 +809,7 @@ export class FleetPartnerCaseService {
     caseId: string,
   ): Promise<FleetCaseTimelineEvent[]> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     const tl =
@@ -683,12 +817,19 @@ export class FleetPartnerCaseService {
       this.timelines.get(caseItem.caseNo) ||
       [];
 
-    // If complaint service has entries, synthesize any notes
+    // If complaint service has entries, synthesize any notes. Prefers the
+    // canonical (repository-backed) Ops readback so a case created or
+    // updated on a different warm instance still surfaces its real
+    // timeline here.
     if (this.complaintService) {
       try {
-        const compTl = this.complaintService.getComplaintTimeline(
-          caseItem.caseNo,
-        );
+        const compTl =
+          typeof this.complaintService.getComplaintTimelineForOps ===
+          "function"
+            ? await this.complaintService.getComplaintTimelineForOps(
+                caseItem.caseNo,
+              )
+            : this.complaintService.getComplaintTimeline(caseItem.caseNo);
         for (const entry of compTl) {
           const exists = tl.some((t) => t.entryId === entry.entryId);
           if (
@@ -698,6 +839,9 @@ export class FleetPartnerCaseService {
                 entry.action === "case_created"))
           ) {
             const isFleetReply = entry.note.includes("[車行回覆");
+            const { body, attachments } = splitAttachmentManifest(
+              entry.note,
+            );
             tl.push({
               entryId: entry.entryId,
               caseId: caseItem.id,
@@ -711,12 +855,19 @@ export class FleetPartnerCaseService {
                     : "評論",
               actor: isFleetReply ? "車行負責人" : "陳維",
               actorRealm: isFleetReply ? "tenant" : "ops",
-              body: entry.note,
+              body,
+              ...(attachments.length ? { attachments } : {}),
             });
           }
         }
-      } catch {
-        // Ignore
+      } catch (error) {
+        if (!(error instanceof ApiRequestError && error.code === "NOT_FOUND")) {
+          // This case has no corresponding ComplaintService record (e.g. a
+          // fleet seed case) is the only expected absence here; anything
+          // else is a genuine canonical-read failure and must not be
+          // silently returned as a (possibly incomplete) success.
+          throw error;
+        }
       }
     }
 
@@ -732,7 +883,7 @@ export class FleetPartnerCaseService {
     requestId?: string,
   ): Promise<FleetCaseReplyRecord> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     // Check responsibility: platform owned cannot be replied to by fleet
@@ -862,8 +1013,16 @@ export class FleetPartnerCaseService {
     const attsNote = resolvedAttachments.length
       ? ` (附件: ${resolvedAttachments.map((a) => a.name).join(", ")})`
       : "";
-    const notePayload = `[車行回覆 · ${fleetPartnerId}] ${content}${attsNote}`;
+    // The attachment manifest is embedded (not just human-readable names) so
+    // another already-warm instance, which only has this committed
+    // Complaint note to read back, can still reconstruct the same
+    // structured attachment relation for this reply event.
+    const notePayload = appendAttachmentManifest(
+      `[車行回覆 · ${fleetPartnerId}] ${content}${attsNote}`,
+      resolvedAttachments,
+    );
     let settlementTimelineEntryId: string | undefined;
+    let ordinaryReplyTimelineEntryId: string | undefined;
     if (caseItem.cat === "settlement_dispute") {
       if (!this.complaintService) {
         throw new ApiRequestError(
@@ -904,6 +1063,13 @@ export class FleetPartnerCaseService {
           },
         );
         await this.complaintService.awaitSettlementPersistence(caseItem.caseNo);
+        // Keep the local timeline entry's id aligned with the canonical
+        // Complaint note's entryId so a later reload on this same instance
+        // (or a fresh read on another warm instance) recognizes it as the
+        // same event instead of duplicating it.
+        ordinaryReplyTimelineEntryId = this.complaintService
+          .getComplaintTimeline(caseItem.caseNo)
+          .at(-1)?.entryId;
       } catch (error) {
         if (error instanceof ApiRequestError && error.code === "NOT_FOUND") {
           // ComplaintService has no record of this caseNo; the fleet-side
@@ -927,7 +1093,8 @@ export class FleetPartnerCaseService {
 
     // Append to timeline
     const timelineEntry: FleetCaseTimelineEvent = {
-      entryId: settlementTimelineEntryId ?? `tl-${replyId}`,
+      entryId:
+        settlementTimelineEntryId ?? ordinaryReplyTimelineEntryId ?? `tl-${replyId}`,
       caseId: caseItem.id,
       at: now,
       tone: "accent",
@@ -984,7 +1151,7 @@ export class FleetPartnerCaseService {
     contentType: string,
   ) {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
     if (caseItem.status === "closed")
       throw new ApiRequestError(
@@ -1003,7 +1170,7 @@ export class FleetPartnerCaseService {
 
   async downloadAttachmentForReview(caseId: string, attachmentId: string) {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     await this.loadStoredAttachments(caseItem.id);
     const attachment = this.attachments.get(attachmentId);
     if (
@@ -1041,7 +1208,7 @@ export class FleetPartnerCaseService {
     headers: Record<string, string>;
   }> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     // Closed cases cannot upload new attachments
@@ -1099,7 +1266,7 @@ export class FleetPartnerCaseService {
     command: ConfirmCaseAttachmentUploadCommand,
   ): Promise<FleetCaseAttachmentRecord> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     if (caseItem.status === "closed") {
@@ -1162,7 +1329,7 @@ export class FleetPartnerCaseService {
     authorized: boolean;
   }> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     await this.loadStoredAttachments(caseItem.id);
@@ -1210,7 +1377,7 @@ export class FleetPartnerCaseService {
     fileContent: Buffer;
   }> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     const valid = verifyAttachmentToken(
