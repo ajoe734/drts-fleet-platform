@@ -20,6 +20,42 @@ def _ago_iso(**delta) -> str:
 
 
 class ChairmanFlowTests(unittest.TestCase):
+    def test_read_only_release_gate_never_creates_or_resumes_source_helper(self) -> None:
+        parent = {
+            "id": "SHARED-DEV-DELIVERY", "status": "blocked",
+            "task_class": "release", "mutates_canonical": False,
+            "owner": "Pi", "reviewer": "Codex", "waiting_for": "Claude2",
+            "depends_on": [],
+            "next": "Wait for security CI and hosted consumer. Branch is behind; no local commit to push.",
+        }
+        status = {"tasks": [parent]}
+        self.assertEqual(supervisor.blocked_task_triage_action(status, parent),
+                         ("wait_for_parent_resolution", None))
+        self.assertEqual(supervisor.dependency_ready_blocked_task_records({}, status), [])
+        self.assertEqual(supervisor.dependency_ready_blocked_task_records({}, status, include_held=True)[0]["task_id"],
+                         parent["id"])
+        with mock.patch.object(supervisor, "load_status", return_value=status),              mock.patch.object(supervisor, "run_task_board_command") as writer:
+            for kind in ("history_repair", "planning_decision", "manual_unblock"):
+                action = {"task_id": parent["id"], "unblock_kind": kind, "reason": "Stale chair recovery request"}
+                self.assertFalse(supervisor.create_chair_unblock_task({}, {}, action, {}))
+                self.assertFalse(supervisor.apply_chair_parent_resume_action({}, {}, action))
+        writer.assert_not_called()
+
+    def test_history_triage_requires_recovery_evidence_not_historical_metadata(self) -> None:
+        task = {
+            "id": "COMMIT-HISTORY-REPORT", "title": "Review worktree branch history",
+            "summary_zh": "previous push succeeded",
+            "artifacts": ["support/task-scoped-commit-history.md"],
+            "next": "Wait for dependency security CI; branch has no new commit to push.",
+        }
+        self.assertEqual(supervisor.blocked_task_triage_kind(task), "manual_unblock")
+        for blocker in ("Closeout blocked because shared branch HEAD moved to a mixed commit.",
+                        "History repair audit still required.",
+                        "Push rejected: non-fast-forward.",
+                        "Pre-commit failed; repair the task-scoped candidate."):
+            with self.subTest(blocker=blocker):
+                self.assertEqual(supervisor.blocked_task_triage_kind({**task, "next": blocker}), "history_repair")
+
     def test_stale_or_blocked_helper_is_visible_but_cannot_resume_parent(self) -> None:
         for disposition, resolution in (("blocked", "2026-09-09T03:00:00Z"), ("todo", "2026-09-09T01:00:00Z"), ("todo", None), ("todo", "invalid")):
             with self.subTest(disposition=disposition, resolution=resolution):
