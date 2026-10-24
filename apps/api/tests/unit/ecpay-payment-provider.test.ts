@@ -1149,9 +1149,18 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
 
     // Controller passes authenticated email + phone to createBindingSession
     const sessionResp = await controller.createBindingSession({
-      realm: "passenger",
+      authMode: "jwt_bearer",
+      actorType: "first_party_passenger",
+      actorId: owner,
       subject: owner,
+      realm: "passenger",
+      tenantId: null,
+      drtsPassengerId: owner,
       sessionId: "sess-1",
+      roleFamilies: [],
+      roles: [],
+      scopes: [],
+      requestId: "req-1",
     });
     expect(sessionResp.data.merchantToken).toBe(
       "ecpay_binding_session_token_001",
