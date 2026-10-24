@@ -5,6 +5,11 @@ import json
 from pathlib import Path
 
 from adapters.base import DeliveryCapability, DeliveryRequest, DeliveryResult
+from adapters.claude_cloud_relay import (
+    build_cloud_relay_prompt,
+    cloud_execution_settings,
+    should_relay_to_cloud,
+)
 from adapters.claude_code import ClaudeCodeAdapter
 from common import (
     agent_config_for,
@@ -111,11 +116,20 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
                 result.notes = f"{result.notes}. Claude CLI provider `{provider_key}` is not authenticated, so inbox fallback was used."
             return result
 
+        run_id = new_runtime_id(provider_key)
+        cloud = cloud_execution_settings(runtime)
+        relay = should_relay_to_cloud(cloud, request)
+        message = (
+            build_cloud_relay_prompt(request, cloud, run_id=run_id, config=self.config)
+            if relay
+            else request.message
+        )
+
         output_format = runtime.get("output_format", "stream-json")
         command = [
             cli,
             "-p",
-            request.message,
+            message,
             "--output-format",
             output_format,
         ]
@@ -124,7 +138,7 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         if runtime.get("include_hook_events", True):
             command.append("--include-hook-events")
 
-        model = str(runtime.get("model") or "").strip()
+        model = (cloud["relay_model"] if relay else "") or str(runtime.get("model") or "").strip()
         if model:
             command.extend(["--model", model])
 
@@ -142,7 +156,6 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
         if permission_prompt_tool:
             command.extend(["--permission-prompt-tool", str(permission_prompt_tool)])
 
-        run_id = new_runtime_id(provider_key)
         log_path = runtime_log_path(provider_key, request.agent_id)
         workspace_root = delivery_workspace_root(self.config, request.metadata)
         env.update(
@@ -155,6 +168,14 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
                 "ORCH_TARGET_FILES": "\n".join(request.target_files),
             }
         )
+        # permission_broker allows RemoteTrigger, and refuses local edits, only
+        # for sessions started with this marker.
+        if relay:
+            env["ORCH_EXECUTION"] = "cloud_relay"
+            env["ORCH_CLOUD_ENVIRONMENT_ID"] = cloud["environment_id"]
+        else:
+            env.pop("ORCH_EXECUTION", None)
+            env.pop("ORCH_CLOUD_ENVIRONMENT_ID", None)
         apply_orchestrator_runtime_env(env, self.config, request.metadata)
         worker_unit = apply_worker_unit_env(env, self.config, run_id, request.metadata)
         process, _ = spawn_background_process(
@@ -170,10 +191,19 @@ class ClaudeCLIAdapter(ClaudeCodeAdapter):
             target=request.agent_id,
             auto_delivered=True,
             manual_confirmation_required=False,
-            notes=f"Claude CLI wake-up started in the background for provider `{provider_key}`.",
+            notes=(
+                f"Claude cloud relay started in the background for provider `{provider_key}`; "
+                "the task runs in a Claude Code cloud session."
+                if relay
+                else f"Claude CLI wake-up started in the background for provider `{provider_key}`."
+            ),
             command=command,
             log_path=str(log_path),
             pid=background_process_pid(process),
             run_id=run_id,
-            metadata={"shell_command": shell_quote(command), "worker_unit": worker_unit},
+            metadata={
+                "shell_command": shell_quote(command),
+                "worker_unit": worker_unit,
+                "execution": "cloud_relay" if relay else "local",
+            },
         )
