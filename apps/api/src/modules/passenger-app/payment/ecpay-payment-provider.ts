@@ -40,6 +40,7 @@ export interface EcpayProviderOptions {
   timeoutMs?: number;
   returnUrl?: string;
   orderResultUrl?: string;
+  bindingAuthAmountTwd?: number;
   fetchFn?: EcpayFetchFn;
   now?: () => Date;
 }
@@ -63,6 +64,7 @@ export interface VerifiedEcpayNotification {
   merchantMemberId?: string | null;
   passengerId?: string | null;
   idempotencyKey?: string | null;
+  authorizedAmountMinor?: number | null;
   bindResult?: PaymentBindResult;
   paymentResult?: MoneyResult;
 }
@@ -111,7 +113,29 @@ function inferCardBrand(cardInfo: Record<string, unknown>): string {
 function parseCardExpiry(cardInfo: Record<string, unknown>): {
   expiryMonth: string;
   expiryYear: string;
-} {
+} | null {
+  const rawValidMM =
+    typeof cardInfo.CardValidMM === "string" ||
+    typeof cardInfo.CardValidMM === "number"
+      ? String(cardInfo.CardValidMM).trim()
+      : "";
+  const rawValidYY =
+    typeof cardInfo.CardValidYY === "string" ||
+    typeof cardInfo.CardValidYY === "number"
+      ? String(cardInfo.CardValidYY).trim()
+      : "";
+  if (rawValidMM && rawValidYY) {
+    const mm = Number(rawValidMM);
+    if (Number.isSafeInteger(mm) && mm >= 1 && mm <= 12) {
+      const expiryMonth = String(mm).padStart(2, "0");
+      if (/^\d{2}$/.test(rawValidYY)) {
+        return { expiryMonth, expiryYear: `20${rawValidYY}` };
+      }
+      if (/^\d{4}$/.test(rawValidYY)) {
+        return { expiryMonth, expiryYear: rawValidYY };
+      }
+    }
+  }
   if (
     typeof cardInfo.ExpiryMonth === "string" &&
     typeof cardInfo.ExpiryYear === "string" &&
@@ -179,9 +203,7 @@ function parseCardExpiry(cardInfo: Record<string, unknown>): {
       };
     }
   }
-  // If ECPay does not return card expiry in a binding callback, default to a
-  // valid non-expired placeholder metadata while preserving BindCardID authority.
-  return { expiryMonth: "12", expiryYear: "2099" };
+  return null;
 }
 
 function parseBoundCard(
@@ -208,15 +230,18 @@ function parseBoundCard(
   if (!token || !last4 || /^[0-9 -]+$/.test(token)) {
     return null;
   }
-  const { expiryMonth, expiryYear } = parseCardExpiry(cardInfo);
+  const expiry = parseCardExpiry(cardInfo);
+  if (!expiry) {
+    return null;
+  }
   return {
     status: "completed",
     card: {
       token,
       last4,
       cardType: inferCardBrand(cardInfo),
-      expiryMonth,
-      expiryYear,
+      expiryMonth: expiry.expiryMonth,
+      expiryYear: expiry.expiryYear,
     },
   };
 }
@@ -224,12 +249,14 @@ function parseBoundCard(
 export class EcpayPaymentProvider implements PaymentProviderPort {
   readonly name = "ecpay";
   readonly available = true;
+  readonly capturePassengerContext = true;
   readonly sandbox: boolean;
   readonly baseUrl: string;
   readonly paymentBaseUrl: string;
   readonly sdkScriptUrl: string;
   readonly serverType: "Stage" | "Prod";
   readonly timeoutMs: number;
+  readonly bindingAuthAmountTwd: number;
   readonly approvedActionOrigins: readonly string[];
 
   private readonly merchantId: string;
@@ -248,9 +275,14 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
     string,
     { passengerId: string; idempotencyKey: string }
   >();
+  private readonly cancelledBindingAuthTrades = new Set<string>();
   private readonly captures = new Map<
     string,
     { command: PaymentCaptureCommand; result: MoneyResult }
+  >();
+  private readonly refundCommands = new Map<
+    string,
+    { merchantTradeNo: string; tradeNo: string; amountMinor: number }
   >();
   private readonly refunds = new Map<
     string,
@@ -278,11 +310,20 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
         `ECPay HTTP timeout must be at least ${ECPAY_MIN_TIMEOUT_MS}ms per official specification.`,
       );
     }
+    const bindingAuthAmountTwd = options.bindingAuthAmountTwd ?? 0;
+    if (
+      !Number.isSafeInteger(bindingAuthAmountTwd) ||
+      bindingAuthAmountTwd < 0 ||
+      bindingAuthAmountTwd > ECPAY_MAX_SINGLE_CHARGE_TWD
+    ) {
+      throw new Error("ECPay bindingAuthAmountTwd must be a non-negative integer.");
+    }
     this.merchantId = merchantId;
     this.hashKey = options.hashKey;
     this.hashIv = options.hashIv;
     this.sandbox = options.sandbox;
     this.timeoutMs = timeoutMs;
+    this.bindingAuthAmountTwd = bindingAuthAmountTwd;
     this.baseUrl = options.sandbox ? ECPAY_STAGE_BASE_URL : ECPAY_PROD_BASE_URL;
     this.paymentBaseUrl = options.sandbox
       ? ECPAY_STAGE_PAYMENT_BASE_URL
@@ -305,7 +346,7 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       "https://ride.smarttransport.tw/api/passenger-app/payment-methods/ecpay/callback";
     this.orderResultUrl =
       options.orderResultUrl?.trim() ||
-      "https://ride.smarttransport.tw/account/payment-methods";
+      "https://ride.smarttransport.tw/api/passenger-app/payment-methods/ecpay/order-result";
     this.fetchFn =
       options.fetchFn ??
       ((url, init) => fetch(url, init));
@@ -367,13 +408,32 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
   async createBindingSession(
     passengerId: string,
     options?: {
+      email?: string;
+      phone?: string;
       idempotencyKey?: string;
       returnUrl?: string;
       orderResultUrl?: string;
+      bindingAuthAmountTwd?: number;
     },
   ): Promise<EcpayBindingSession> {
     const nowDate = this.now();
     const memberId = deriveEcpayMerchantMemberId(passengerId, this.merchantId);
+    const email = options?.email?.trim() ?? "";
+    const phone = options?.phone?.trim() ?? "";
+    if (!email && !phone) {
+      throw new Error(
+        "ECPay GetTokenbyBindingCard requires at least one of ConsumerInfo.Email or ConsumerInfo.Phone.",
+      );
+    }
+    const authAmount =
+      options?.bindingAuthAmountTwd ?? this.bindingAuthAmountTwd;
+    if (
+      !Number.isSafeInteger(authAmount) ||
+      authAmount < 0 ||
+      authAmount > ECPAY_MAX_SINGLE_CHARGE_TWD
+    ) {
+      throw new Error("ECPay binding authorization amount is invalid.");
+    }
     const seed =
       options?.idempotencyKey ??
       `${passengerId}:${nowDate.getTime()}`;
@@ -385,16 +445,18 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
         MerchantID: this.merchantId,
         ConsumerInfo: {
           MerchantMemberID: memberId,
+          ...(email ? { Email: email } : {}),
+          ...(phone ? { Phone: phone } : {}),
         },
         OrderInfo: {
           MerchantTradeDate: formatEcpayTradeDate(nowDate),
           MerchantTradeNo: tradeNo,
-          TotalAmount: 0,
+          TotalAmount: authAmount,
           TradeDesc: "DRTS會員信用卡綁定",
           ItemName: "信用卡綁定驗證",
           ReturnURL: options?.returnUrl ?? this.returnUrl,
-          OrderResultURL: options?.orderResultUrl ?? this.orderResultUrl,
         },
+        OrderResultURL: options?.orderResultUrl ?? this.orderResultUrl,
       },
     );
     const rtnCode = Number(data.RtnCode);
@@ -415,6 +477,51 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       sdkScriptUrl: this.sdkScriptUrl,
       approvedActionOrigins: this.approvedActionOrigins,
     };
+  }
+
+  /**
+   * Cancels the verification authorization (`DoAction` with `Action: "N"`)
+   * created during `GetTokenbyBindingCard` after a binding succeeds.
+   */
+  async cancelBindingAuthorization(params: {
+    merchantTradeNo: string;
+    tradeNo: string;
+    amountMinor: number;
+  }): Promise<boolean> {
+    const merchantTradeNo = params.merchantTradeNo?.trim() ?? "";
+    const tradeNo = params.tradeNo?.trim() ?? "";
+    if (
+      !merchantTradeNo ||
+      !tradeNo ||
+      !Number.isSafeInteger(params.amountMinor) ||
+      params.amountMinor <= 0
+    ) {
+      return false;
+    }
+    const key = `${merchantTradeNo}:${tradeNo}`;
+    if (this.cancelledBindingAuthTrades.has(key)) {
+      return true;
+    }
+    try {
+      const data = await this.postEncrypted(
+        `${this.paymentBaseUrl}/1.0.0/Credit/DoAction`,
+        {
+          MerchantID: this.merchantId,
+          PlatformID: "",
+          MerchantTradeNo: merchantTradeNo,
+          TradeNo: tradeNo,
+          Action: "N",
+          TotalAmount: params.amountMinor,
+        },
+      );
+      if (Number(data.RtnCode) === 1) {
+        this.cancelledBindingAuthTrades.add(key);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -450,6 +557,10 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
     }
 
     const memberId = deriveEcpayMerchantMemberId(passengerId, this.merchantId);
+    this.pendingMemberBindings.set(memberId, {
+      passengerId,
+      idempotencyKey,
+    });
     const data = await this.postEncrypted(
       `${this.baseUrl}/Merchant/CreateBindCard`,
       {
@@ -482,14 +593,43 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
         status: "action_required",
         nextActionUrl: threeDUrl,
       };
-      this.pendingMemberBindings.set(memberId, {
-        passengerId,
-        idempotencyKey,
-      });
     } else if (rtnCode === 1) {
       const bound = parseBoundCard(data);
       if (!bound) {
         throw new Error("ECPay CreateBindCard response lacked valid CardInfo.");
+      }
+      const orderInfo =
+        data.OrderInfo &&
+        typeof data.OrderInfo === "object" &&
+        !Array.isArray(data.OrderInfo)
+          ? (data.OrderInfo as Record<string, unknown>)
+          : null;
+      const merchantTradeNo =
+        typeof orderInfo?.MerchantTradeNo === "string"
+          ? orderInfo.MerchantTradeNo.trim()
+          : typeof data.MerchantTradeNo === "string"
+            ? data.MerchantTradeNo.trim()
+            : "";
+      const tradeNo =
+        typeof orderInfo?.TradeNo === "string" ||
+        typeof orderInfo?.TradeNo === "number"
+          ? String(orderInfo.TradeNo).trim()
+          : typeof data.TradeNo === "string" || typeof data.TradeNo === "number"
+            ? String(data.TradeNo).trim()
+            : "";
+      const rawTotalAmount = orderInfo?.TotalAmount ?? data.TotalAmount;
+      const authAmount =
+        rawTotalAmount !== undefined &&
+        Number.isSafeInteger(Number(rawTotalAmount)) &&
+        Number(rawTotalAmount) > 0
+          ? Number(rawTotalAmount)
+          : this.bindingAuthAmountTwd;
+      if (merchantTradeNo && tradeNo && authAmount > 0) {
+        await this.cancelBindingAuthorization({
+          merchantTradeNo,
+          tradeNo,
+          amountMinor: authAmount,
+        });
       }
       result = bound;
     } else if (INVALID_CREDENTIAL_CODES.has(rtnCode)) {
@@ -544,6 +684,15 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
         : typeof data.TradeNo === "string" || typeof data.TradeNo === "number"
           ? String(data.TradeNo)
           : null;
+    const rawTotalAmount = orderInfo?.TotalAmount ?? data.TotalAmount;
+    const authorizedAmountMinor =
+      rawTotalAmount !== undefined &&
+      Number.isSafeInteger(Number(rawTotalAmount)) &&
+      Number(rawTotalAmount) > 0
+        ? Number(rawTotalAmount)
+        : this.bindingAuthAmountTwd > 0
+          ? this.bindingAuthAmountTwd
+          : null;
 
     const consumerInfo =
       data.ConsumerInfo &&
@@ -570,6 +719,13 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
           : INVALID_CREDENTIAL_CODES.has(rtnCode)
             ? { status: "failed", error: "invalid_credential" }
             : { status: "failed", error: "card_declined" };
+      if (merchantMemberId) {
+        for (const [, entry] of this.bindings.entries()) {
+          if (entry.memberId === merchantMemberId) {
+            entry.result = structuredClone(bindResult);
+          }
+        }
+      }
       return {
         kind: "bind",
         rtnCode,
@@ -582,6 +738,9 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
           : {}),
         ...(pendingBinding?.idempotencyKey
           ? { idempotencyKey: pendingBinding.idempotencyKey }
+          : {}),
+        ...(authorizedAmountMinor !== null
+          ? { authorizedAmountMinor }
           : {}),
         bindResult,
       };
@@ -610,7 +769,7 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
   /**
    * Trip Completion Charge:
    * Calls `CreatePaymentWithCardID` with `Need3D=0`, unique `MerchantTradeNo`,
-   * and `TotalAmount` in integer TWD (1 .. 200,000).
+   * `ConsumerInfo.MerchantMemberID`, and `TotalAmount` in integer TWD (1 .. 200,000).
    * Enforces the official ECPay rule: never re-authorize a BindCardID after failure.
    */
   async capture(command: PaymentCaptureCommand): Promise<MoneyResult> {
@@ -619,7 +778,8 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       if (
         existing.command.token !== command.token ||
         existing.command.amountMinor !== command.amountMinor ||
-        existing.command.currency !== command.currency
+        existing.command.currency !== command.currency ||
+        existing.command.passengerId !== command.passengerId
       ) {
         throw new Error("ECPay capture idempotency conflict.");
       }
@@ -632,6 +792,20 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       !command.token.trim() ||
       /^[0-9 -]+$/.test(command.token)
     ) {
+      return { status: "failed", error: "invalid_method", retryable: false };
+    }
+
+    const passengerId = command.passengerId?.trim();
+    if (!passengerId || passengerId.startsWith("pax:")) {
+      return { status: "failed", error: "invalid_method", retryable: false };
+    }
+    let merchantMemberId: string;
+    try {
+      merchantMemberId = deriveEcpayMerchantMemberId(
+        passengerId,
+        this.merchantId,
+      );
+    } catch {
       return { status: "failed", error: "invalid_method", retryable: false };
     }
 
@@ -659,6 +833,9 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
           MerchantID: this.merchantId,
           BindCardID: bindCardId,
           Need3D: 0,
+          ConsumerInfo: {
+            MerchantMemberID: merchantMemberId,
+          },
           OrderInfo: {
             MerchantTradeDate: formatEcpayTradeDate(nowDate),
             MerchantTradeNo: merchantTradeNo,
@@ -754,7 +931,9 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
   }
 
   /**
-   * Credit Card Refund (`DoAction` with `Action: "R"`).
+   * Credit Card Refund (`QueryTrade` detail check followed by state-appropriate
+   * `DoAction`: `N` for authorized/unclosed, `E` then `N` for pending-close full
+   * refund, `R` for closed).
    */
   async refund(command: PaymentRefundCommand): Promise<MoneyResult> {
     const existing = this.refunds.get(command.idempotencyKey);
@@ -784,28 +963,113 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
     const merchantTradeNo =
       parts.length >= 2 && parts[0]
         ? parts[0]
-        : deriveEcpayMerchantTradeNo(command.idempotencyKey);
+        : command.idempotencyKey.startsWith("pax:refund:")
+          ? deriveEcpayMerchantTradeNo(
+              `pax:capture:${command.idempotencyKey.slice("pax:refund:".length)}`,
+            )
+          : deriveEcpayMerchantTradeNo(command.idempotencyKey);
     const tradeNo =
       parts.length >= 2 ? parts.slice(1).join(":") : command.captureRef.trim();
 
-    let data: Record<string, unknown>;
+    this.refundCommands.set(command.idempotencyKey, {
+      merchantTradeNo,
+      tradeNo,
+      amountMinor: command.amountMinor,
+    });
+
+    let closeState = "CLOSED";
     try {
-      data = await this.postEncrypted(
-        `${this.paymentBaseUrl}/1.0.0/Credit/DoAction`,
+      const queryData = await this.postEncrypted(
+        `${this.paymentBaseUrl}/1.0.0/Cashier/QueryTrade`,
         {
           MerchantID: this.merchantId,
-          PlatformID: "",
           MerchantTradeNo: merchantTradeNo,
-          TradeNo: tradeNo,
-          Action: "R",
-          TotalAmount: command.amountMinor,
         },
       );
+      const queryRtnCode = Number(queryData.RtnCode);
+      if (queryRtnCode !== 1) {
+        if (UNAVAILABLE_CODES.has(queryRtnCode)) {
+          return { status: "failed", error: "unavailable", retryable: true };
+        }
+        return { status: "failed", error: "invalid_method", retryable: false };
+      }
+      const queryOrderInfo =
+        queryData.OrderInfo &&
+        typeof queryData.OrderInfo === "object" &&
+        !Array.isArray(queryData.OrderInfo)
+          ? (queryData.OrderInfo as Record<string, unknown>)
+          : null;
+      const queryCardInfo =
+        queryData.CardInfo &&
+        typeof queryData.CardInfo === "object" &&
+        !Array.isArray(queryData.CardInfo)
+          ? (queryData.CardInfo as Record<string, unknown>)
+          : null;
+      const rawStatus =
+        queryCardInfo?.CloseStatus ??
+        queryOrderInfo?.CloseStatus ??
+        queryData.CloseStatus ??
+        queryOrderInfo?.TradeState ??
+        queryData.TradeState;
+      if (rawStatus !== undefined && rawStatus !== null) {
+        closeState = String(rawStatus).trim().toUpperCase();
+      }
+      const refundedAmount = Number(
+        queryOrderInfo?.RefundAmount ??
+          queryCardInfo?.RefundAmount ??
+          queryData.RefundAmount ??
+          0,
+      );
+      if (
+        ["REFUNDED", "CANCELLED", "VOIDED"].includes(closeState) ||
+        (Number.isSafeInteger(refundedAmount) &&
+          refundedAmount >= command.amountMinor)
+      ) {
+        const alreadyDone: MoneyResult = {
+          status: "completed",
+          providerRef: `ecpay_refund:${merchantTradeNo}:${tradeNo}`,
+        };
+        this.refunds.set(command.idempotencyKey, {
+          command: structuredClone(command),
+          result: structuredClone(alreadyDone),
+        });
+        return alreadyDone;
+      }
     } catch {
       return { status: "unknown" };
     }
 
-    const rtnCode = Number(data.RtnCode);
+    const actions: Array<"E" | "N" | "R"> = ["E", "PENDING_CLOSE", "CLOSING", "2"].includes(
+      closeState,
+    )
+      ? ["E", "N"]
+      : ["N", "AUTHORIZED", "UNCLOSED", "0"].includes(closeState)
+        ? ["N"]
+        : ["R"];
+
+    let lastData: Record<string, unknown> = {};
+    try {
+      for (const action of actions) {
+        lastData = await this.postEncrypted(
+          `${this.paymentBaseUrl}/1.0.0/Credit/DoAction`,
+          {
+            MerchantID: this.merchantId,
+            PlatformID: "",
+            MerchantTradeNo: merchantTradeNo,
+            TradeNo: tradeNo,
+            Action: action,
+            TotalAmount: command.amountMinor,
+          },
+        );
+        if (Number(lastData.RtnCode) !== 1) {
+          break;
+        }
+      }
+    } catch {
+      return { status: "unknown" };
+    }
+
+    const rtnCode = Number(lastData.RtnCode);
     let result: MoneyResult;
     if (rtnCode === 1) {
       result = {
@@ -832,6 +1096,97 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
     if (cached) {
       return structuredClone(cached.result);
     }
-    return { status: "unknown" };
+    const recorded = this.refundCommands.get(idempotencyKey);
+    const merchantTradeNo =
+      recorded?.merchantTradeNo ??
+      (idempotencyKey.startsWith("pax:refund:")
+        ? deriveEcpayMerchantTradeNo(
+            `pax:capture:${idempotencyKey.slice("pax:refund:".length)}`,
+          )
+        : deriveEcpayMerchantTradeNo(idempotencyKey));
+    try {
+      const data = await this.postEncrypted(
+        `${this.paymentBaseUrl}/1.0.0/Cashier/QueryTrade`,
+        {
+          MerchantID: this.merchantId,
+          MerchantTradeNo: merchantTradeNo,
+        },
+      );
+      const rtnCode = Number(data.RtnCode);
+      if (rtnCode !== 1) {
+        return { status: "unknown" };
+      }
+      const orderInfo =
+        data.OrderInfo &&
+        typeof data.OrderInfo === "object" &&
+        !Array.isArray(data.OrderInfo)
+          ? (data.OrderInfo as Record<string, unknown>)
+          : data;
+      const cardInfo =
+        data.CardInfo &&
+        typeof data.CardInfo === "object" &&
+        !Array.isArray(data.CardInfo)
+          ? (data.CardInfo as Record<string, unknown>)
+          : null;
+      const tradeNo =
+        typeof orderInfo.TradeNo === "string" ||
+        typeof orderInfo.TradeNo === "number"
+          ? String(orderInfo.TradeNo).trim()
+          : (recorded?.tradeNo ?? "");
+      const closeStatus = String(
+        cardInfo?.CloseStatus ??
+          orderInfo.CloseStatus ??
+          data.CloseStatus ??
+          orderInfo.TradeState ??
+          data.TradeState ??
+          "",
+      )
+        .trim()
+        .toUpperCase();
+      const refundStatus = Number(
+        orderInfo.RefundStatus ??
+          cardInfo?.RefundStatus ??
+          data.RefundStatus ??
+          orderInfo.CancelStatus ??
+          cardInfo?.CancelStatus ??
+          data.CancelStatus ??
+          orderInfo.BackStatus ??
+          cardInfo?.BackStatus ??
+          data.BackStatus ??
+          NaN,
+      );
+      const refundAmount = Number(
+        orderInfo.RefundAmount ??
+          cardInfo?.RefundAmount ??
+          data.RefundAmount ??
+          0,
+      );
+      const action = String(
+        orderInfo.Action ?? cardInfo?.Action ?? data.Action ?? "",
+      )
+        .trim()
+        .toUpperCase();
+      const tradeStatus = Number(
+        orderInfo.TradeStatus ?? data.TradeStatus ?? NaN,
+      );
+      const isRefunded =
+        ["REFUNDED", "CANCELLED", "VOIDED", "N"].includes(closeStatus) ||
+        refundStatus === 1 ||
+        refundAmount > 0 ||
+        ["R", "N"].includes(action) ||
+        tradeStatus === 2;
+      if (isRefunded && tradeNo) {
+        return {
+          status: "completed",
+          providerRef: `ecpay_refund:${merchantTradeNo}:${tradeNo}`,
+        };
+      }
+      if (refundStatus === -1 || closeStatus === "REFUND_FAILED") {
+        return { status: "failed", error: "card_declined", retryable: false };
+      }
+      return { status: "unknown" };
+    } catch {
+      return { status: "unknown" };
+    }
   }
 }

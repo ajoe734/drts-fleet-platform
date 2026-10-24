@@ -9,6 +9,8 @@ import type {
 import { passengerFetch } from "../../lib/runtime-fetch";
 import { P5 } from "../auth/ui";
 
+export const ECPAY_JQUERY_URL = "https://code.jquery.com/jquery-3.5.1.min.js";
+
 export const ECPAY_WEB_SDK_URLS = {
   Stage: "https://ecpg-stage.ecpay.com.tw/Scripts/sdk-1.0.0.js?t=20210121100116",
   Prod: "https://ecpg.ecpay.com.tw/Scripts/sdk-1.0.0.js?t=20210121100116",
@@ -29,12 +31,17 @@ export interface EcpayBindingSession {
 }
 
 export interface EcpayPayTokenCallbackResult {
+  BindCardPayToken?: string;
+  MerchantTradeNo?: string;
   RtnCode?: number | string;
   RtnMsg?: string;
-  BindCardPayToken?: string;
 }
 
 export interface EcpaySdkGlobal {
+  Language?: {
+    zhTW?: string;
+    enUS?: string;
+  };
   initialize(
     serverType: "Stage" | "Prod",
     isLoading: number,
@@ -56,6 +63,7 @@ export interface EcpaySdkGlobal {
 declare global {
   interface Window {
     ECPay?: EcpaySdkGlobal;
+    jQuery?: unknown;
   }
 }
 
@@ -84,7 +92,11 @@ export function createEcpayHostedFieldsPort(options: {
               reject(new Error(`ecpay_pay_token_failed:${errorMessage}`));
               return;
             }
-            const rtnCode = Number(result?.RtnCode);
+            const hasExplicitRtnCode =
+              result?.RtnCode !== undefined &&
+              result?.RtnCode !== null &&
+              String(result.RtnCode).trim() !== "";
+            const rtnCode = hasExplicitRtnCode ? Number(result?.RtnCode) : 1;
             const payToken =
               typeof result?.BindCardPayToken === "string"
                 ? result.BindCardPayToken.trim()
@@ -220,6 +232,10 @@ export function EcpayHostedFields({
           injectedSdk ??
           (typeof window !== "undefined" ? window.ECPay : undefined);
         if (!sdk) {
+          if (typeof window !== "undefined" && !window.jQuery) {
+            await loadExternalScript(ECPAY_JQUERY_URL);
+            if (!active) return;
+          }
           await loadExternalScript(ECPAY_WEB_SDK_URLS[serverType]);
           if (!active) return;
           sdk = typeof window !== "undefined" ? window.ECPay : undefined;
@@ -244,8 +260,9 @@ export function EcpayHostedFields({
         });
         if (!active) return;
 
+        const sdkLanguage = sdk.Language?.zhTW ?? "zh-TW";
         await new Promise<void>((resolve, reject) => {
-          sdk!.addBindingCard(token, "zh-TW", (errMsg) => {
+          sdk!.addBindingCard(token, sdkLanguage, (errMsg) => {
             if (errMsg) {
               reject(new Error(errMsg));
               return;

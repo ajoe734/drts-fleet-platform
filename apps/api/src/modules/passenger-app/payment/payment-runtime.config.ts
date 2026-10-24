@@ -57,6 +57,11 @@ export function paymentRuntimeFromEnv(
 
   if (selection === "ecpay") {
     const cipher = new PaymentTokenCipher(env.PSP_TOKEN_ENCRYPTION_KEY_NAME!);
+    const rawBindingAuthAmount = env.PSP_BINDING_AUTH_AMOUNT_TWD?.trim();
+    const bindingAuthAmountTwd =
+      rawBindingAuthAmount !== undefined && rawBindingAuthAmount !== ""
+        ? Number(rawBindingAuthAmount)
+        : undefined;
     const provider = new EcpayPaymentProvider({
       merchantId: env.PSP_MERCHANT_ID!,
       hashKey: env.PSP_HASH_KEY!,
@@ -66,6 +71,7 @@ export function paymentRuntimeFromEnv(
       ...(env.PSP_ORDER_RESULT_URL
         ? { orderResultUrl: env.PSP_ORDER_RESULT_URL }
         : {}),
+      ...(bindingAuthAmountTwd !== undefined ? { bindingAuthAmountTwd } : {}),
       ...(options?.fetchFn ? { fetchFn: options.fetchFn } : {}),
       ...(options?.now ? { now: options.now } : {}),
     });

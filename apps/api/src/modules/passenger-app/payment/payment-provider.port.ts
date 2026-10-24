@@ -47,6 +47,8 @@ export interface CaptureCommand {
   token: string;
   amountMinor: number;
   currency: "TWD";
+  /** Authenticated/durable passenger account ID for member-scoped PSPs (ECPay). */
+  passengerId?: string;
   /** Durable attempt metadata for an explicitly selected external simulator.
    * It is not part of the PSP operation identity or a request to charge twice.
    */
@@ -68,6 +70,7 @@ export interface PaymentProviderPort {
   readonly name: string;
   readonly available: boolean;
   readonly captureAttemptMetadata?: boolean;
+  readonly capturePassengerContext?: boolean;
   bind(
     credential: string,
     idempotencyKey: string,
@@ -76,9 +79,12 @@ export interface PaymentProviderPort {
   createBindingSession?(
     passengerId: string,
     options?: {
+      email?: string;
+      phone?: string;
       idempotencyKey?: string;
       returnUrl?: string;
       orderResultUrl?: string;
+      bindingAuthAmountTwd?: number;
     },
   ): Promise<{
     provider: "ecpay";
@@ -98,9 +104,15 @@ export interface PaymentProviderPort {
     merchantMemberId?: string | null;
     passengerId?: string | null;
     idempotencyKey?: string | null;
+    authorizedAmountMinor?: number | null;
     bindResult?: BindResult;
     paymentResult?: MoneyResult;
   };
+  cancelBindingAuthorization?(params: {
+    merchantTradeNo: string;
+    tradeNo: string;
+    amountMinor: number;
+  }): Promise<boolean>;
   deriveMerchantMemberId?(passengerId: string): string;
   capture(command: CaptureCommand): Promise<MoneyResult>;
   readCapture(idempotencyKey: string): Promise<MoneyResult>;

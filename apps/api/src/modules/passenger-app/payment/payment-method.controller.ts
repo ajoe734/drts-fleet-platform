@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
+  HttpCode,
   Param,
   Post,
   Put,
@@ -30,15 +32,36 @@ export class PaymentMethodController {
     const { account } = await this.accounts.getMe(identity);
     return account.drtsPassengerId;
   }
+
+  private async ownerBindingSession(identity: RequestIdentity | null) {
+    const { account } = await this.accounts.getMe(identity);
+    const extended = account as {
+      email?: string | null;
+      phone?: string | null;
+      verifiedEmail?: string | null;
+      verifiedPhone?: string | null;
+      contactPhone?: string | null;
+    };
+    const email =
+      extended.email?.trim() || extended.verifiedEmail?.trim() || "";
+    const phone =
+      extended.phone?.trim() ||
+      extended.verifiedPhone?.trim() ||
+      extended.contactPhone?.trim() ||
+      "";
+    return this.methods.createBindingSession(account.drtsPassengerId, {
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+    });
+  }
+
   @Get()
   async list(
     @CurrentIdentity() identity: RequestIdentity | null,
     @Query("binding_session") bindingSession?: string,
   ) {
     if (bindingSession === "1" || bindingSession === "true") {
-      return toApiSuccessEnvelope(
-        await this.methods.createBindingSession(await this.owner(identity)),
-      );
+      return toApiSuccessEnvelope(await this.ownerBindingSession(identity));
     }
     return toApiSuccessEnvelope(
       await this.methods.list(await this.owner(identity)),
@@ -48,13 +71,20 @@ export class PaymentMethodController {
   async createBindingSession(
     @CurrentIdentity() identity: RequestIdentity | null,
   ) {
-    return toApiSuccessEnvelope(
-      await this.methods.createBindingSession(await this.owner(identity)),
-    );
+    return toApiSuccessEnvelope(await this.ownerBindingSession(identity));
   }
   @Post("ecpay/callback")
   @OpenRoute()
-  async verifyNotification(@Body() body: unknown) {
+  @HttpCode(200)
+  @Header("Content-Type", "text/plain; charset=utf-8")
+  async verifyNotification(@Body() body: unknown): Promise<string> {
+    await this.methods.verifyNotification(body);
+    return "1|OK";
+  }
+  @Post("ecpay/order-result")
+  @OpenRoute()
+  @HttpCode(200)
+  async verifyOrderResult(@Body() body: unknown) {
     return toApiSuccessEnvelope(await this.methods.verifyNotification(body));
   }
   @Post("3ds-complete")

@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
+  PassengerPaymentMethod,
   PaymentMethodResponse,
   PaymentMethodsResponse,
 } from "@drts/contracts";
@@ -106,7 +107,6 @@ export class PaymentMethodService {
         passengerId,
         claim.idempotencyKey,
         "failed",
-        "card_limit_exceeded",
       );
       throw new ApiRequestError(
         409,
@@ -116,11 +116,11 @@ export class PaymentMethodService {
     }
     let result;
     try {
-      result = await this.runtime.provider.bind(
-        credential,
-        claim.idempotencyKey,
-        { passengerId },
-      );
+      result = this.runtime.provider.capturePassengerContext
+        ? await this.runtime.provider.bind(credential, claim.idempotencyKey, {
+            passengerId,
+          })
+        : await this.runtime.provider.bind(credential, claim.idempotencyKey);
     } catch {
       // Retain the committed pending claim for the same owner's replay. Do not
       // erase it and do not expose provider exceptions/credentials in errors.
@@ -248,7 +248,17 @@ export class PaymentMethodService {
     return { status: "completed", method };
   }
 
-  async createBindingSession(passengerId: string): Promise<{
+  async createBindingSession(
+    passengerId: string,
+    options?: {
+      email?: string;
+      phone?: string;
+      idempotencyKey?: string;
+      returnUrl?: string;
+      orderResultUrl?: string;
+      bindingAuthAmountTwd?: number;
+    },
+  ): Promise<{
     provider: "ecpay";
     merchantToken: string;
     tokenExpireDate: string;
@@ -276,8 +286,20 @@ export class PaymentMethodService {
         "每個會員最多只能綁定 5 張信用卡，請先移除既有卡片後再新增。",
       );
     }
+    const email = options?.email?.trim() ?? "";
+    const phone = options?.phone?.trim() ?? "";
+    if (!email && !phone) {
+      throw new ApiRequestError(
+        400,
+        "validation_error",
+        "Binding session requires a verified passenger email or phone.",
+      );
+    }
     try {
-      return await this.runtime.provider.createBindingSession(passengerId);
+      return await this.runtime.provider.createBindingSession(
+        passengerId,
+        options,
+      );
     } catch {
       throw new ApiRequestError(
         503,
@@ -297,9 +319,7 @@ export class PaymentMethodService {
     merchantTradeNo: string | null;
     tradeNo: string | null;
     status: "completed" | "failed" | "pending" | "action_required" | "unknown";
-    method?: PaymentMethodResponse extends { status: "completed"; method: infer M }
-      ? M
-      : never;
+    method?: PassengerPaymentMethod;
     card?: {
       last4: string;
       cardType: string;
@@ -328,8 +348,34 @@ export class PaymentMethodService {
       );
     }
     if (result.kind === "bind" && result.bindResult) {
-      const ownerId =
+      let ownerId =
         context?.passengerId?.trim() || result.passengerId?.trim() || "";
+      let resolvedClaim: { idempotencyKey: string; methodId: string } | null =
+        null;
+      const requestedKey =
+        context?.idempotencyKey ?? result.idempotencyKey ?? undefined;
+
+      if (
+        !ownerId &&
+        result.merchantMemberId &&
+        typeof this.runtime.provider.deriveMerchantMemberId === "function" &&
+        typeof this.repository.findBindingByMerchantMember === "function"
+      ) {
+        const matched = await this.repository.findBindingByMerchantMember(
+          (pid) =>
+            this.runtime.provider.deriveMerchantMemberId!(pid) ===
+            result.merchantMemberId,
+          requestedKey,
+        );
+        if (matched) {
+          ownerId = matched.passengerId;
+          resolvedClaim = {
+            idempotencyKey: matched.idempotencyKey,
+            methodId: matched.methodId,
+          };
+        }
+      }
+
       if (
         ownerId &&
         result.merchantMemberId &&
@@ -345,23 +391,53 @@ export class PaymentMethodService {
           );
         }
       }
-      let completedMethod:
-        | (PaymentMethodResponse extends { status: "completed"; method: infer M }
-            ? M
-            : never)
-        | undefined;
-      if (
-        ownerId &&
-        this.runtime.cipher &&
-        typeof this.repository.findActionRequiredBinding === "function"
-      ) {
-        const claim = await this.repository.findActionRequiredBinding(
-          ownerId,
-          context?.idempotencyKey ?? result.idempotencyKey ?? undefined,
-        );
+
+      let completedMethod: PassengerPaymentMethod | undefined;
+      if (ownerId && this.runtime.cipher) {
+        const claim =
+          resolvedClaim ??
+          (typeof this.repository.findActionRequiredBinding === "function"
+            ? await this.repository.findActionRequiredBinding(
+                ownerId,
+                requestedKey,
+              )
+            : null);
         if (claim) {
           if (result.bindResult.status === "completed") {
             const card = result.bindResult.card;
+            if (
+              !card ||
+              typeof card.token !== "string" ||
+              !card.token ||
+              card.token.length > 4096 ||
+              /^[0-9 -]+$/.test(card.token) ||
+              typeof card.last4 !== "string" ||
+              typeof card.cardType !== "string" ||
+              typeof card.expiryMonth !== "string" ||
+              typeof card.expiryYear !== "string" ||
+              !/^[0-9]{4}$/.test(card.last4) ||
+              !/^[A-Za-z0-9 _-]{1,40}$/.test(card.cardType) ||
+              !/^(0[1-9]|1[0-2])$/.test(card.expiryMonth) ||
+              !/^[0-9]{4}$/.test(card.expiryYear)
+            ) {
+              throw new ApiRequestError(
+                502,
+                "payment_provider_invalid",
+                "Payment provider returned an invalid result.",
+              );
+            }
+            const now = new Date();
+            if (
+              Number(card.expiryYear) < now.getUTCFullYear() ||
+              (Number(card.expiryYear) === now.getUTCFullYear() &&
+                Number(card.expiryMonth) < now.getUTCMonth() + 1)
+            ) {
+              throw new ApiRequestError(
+                400,
+                "card_declined",
+                "Payment method could not be bound.",
+              );
+            }
             completedMethod = await this.repository.completeBinding(
               ownerId,
               claim.idempotencyKey,
@@ -381,6 +457,20 @@ export class PaymentMethodService {
                 isDefault: false,
               },
             );
+            if (
+              result.merchantTradeNo &&
+              result.tradeNo &&
+              result.authorizedAmountMinor &&
+              result.authorizedAmountMinor > 0 &&
+              typeof this.runtime.provider.cancelBindingAuthorization ===
+                "function"
+            ) {
+              await this.runtime.provider.cancelBindingAuthorization({
+                merchantTradeNo: result.merchantTradeNo,
+                tradeNo: result.tradeNo,
+                amountMinor: result.authorizedAmountMinor,
+              });
+            }
           } else if (result.bindResult.status === "failed") {
             await this.repository.bindingOutcome(
               ownerId,

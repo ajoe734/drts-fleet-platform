@@ -276,14 +276,15 @@ export class PaymentMethodRepository {
         ? await client.query(
             `SELECT idempotency_key,entity_id FROM passenger.payment_idempotency_keys
              WHERE drts_passenger_id=$1 AND idempotency_key=$2 AND operation='bind'
-               AND outcome IN ('action_required','pending') FOR UPDATE`,
+               AND outcome IN ('action_required','pending','completed') FOR UPDATE`,
             [passengerId, idempotencyKey],
           )
         : await client.query(
             `SELECT idempotency_key,entity_id FROM passenger.payment_idempotency_keys
              WHERE drts_passenger_id=$1 AND operation='bind'
-               AND outcome IN ('action_required','pending')
-             ORDER BY updated_at DESC,created_at DESC LIMIT 1 FOR UPDATE`,
+               AND outcome IN ('action_required','pending','completed')
+             ORDER BY CASE WHEN outcome IN ('action_required','pending') THEN 0 ELSE 1 END,
+                      updated_at DESC,created_at DESC LIMIT 1 FOR UPDATE`,
             [passengerId],
           );
       const row = result.rows[0];
@@ -293,6 +294,46 @@ export class PaymentMethodRepository {
         methodId: String(row.entity_id),
       };
     });
+  }
+
+  async findBindingByMerchantMember(
+    matchPassengerId: (passengerId: string) => boolean,
+    idempotencyKey?: string,
+  ): Promise<{
+    passengerId: string;
+    idempotencyKey: string;
+    methodId: string;
+  } | null> {
+    const result = await this.database
+      .query(
+        idempotencyKey
+          ? `SELECT idempotency_key,drts_passenger_id,entity_id
+             FROM passenger.payment_idempotency_keys
+             WHERE idempotency_key=$1 AND operation='bind'
+               AND outcome IN ('action_required','pending','completed')`
+          : `SELECT idempotency_key,drts_passenger_id,entity_id
+             FROM passenger.payment_idempotency_keys
+             WHERE operation='bind'
+               AND outcome IN ('action_required','pending','completed')
+             ORDER BY CASE WHEN outcome IN ('action_required','pending') THEN 0 ELSE 1 END,
+                      updated_at DESC,created_at DESC`,
+        idempotencyKey ? [idempotencyKey] : [],
+      )
+      .catch(() => persistenceUnavailable());
+    for (const row of result.rows) {
+      const pid =
+        typeof row.drts_passenger_id === "string"
+          ? row.drts_passenger_id.trim()
+          : "";
+      if (pid && matchPassengerId(pid)) {
+        return {
+          passengerId: pid,
+          idempotencyKey: String(row.idempotency_key),
+          methodId: String(row.entity_id),
+        };
+      }
+    }
+    return null;
   }
 
   async setDefault(

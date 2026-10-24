@@ -143,6 +143,75 @@ export interface VerifiedEcpayEnvelope {
 }
 
 /**
+ * Normalizes an incoming ECPay callback payload from either direct JSON
+ * (`{ MerchantID, RpHeader, TransCode, Data }`) or URL-encoded form post
+ * (`ResultData={"MerchantID":...}` as sent to OrderResultURL / ReturnURL).
+ */
+export function normalizeEcpayEnvelopeInput(
+  raw: unknown,
+): Record<string, unknown> {
+  let candidate: unknown = raw;
+  if (typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    if (!trimmed) cipherError();
+    if (trimmed.startsWith("{")) {
+      try {
+        candidate = JSON.parse(trimmed);
+      } catch {
+        cipherError();
+      }
+    } else {
+      const params = new URLSearchParams(trimmed);
+      const resultData = params.get("ResultData");
+      if (resultData) {
+        try {
+          candidate = JSON.parse(resultData);
+        } catch {
+          cipherError();
+        }
+      } else if (params.has("MerchantID")) {
+        const obj: Record<string, unknown> = {};
+        params.forEach((v, k) => {
+          obj[k] = v;
+        });
+        candidate = obj;
+      } else {
+        cipherError();
+      }
+    }
+  }
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    cipherError();
+  }
+  const record = candidate as Record<string, unknown>;
+  if (record.MerchantID === undefined && record.ResultData !== undefined) {
+    if (typeof record.ResultData === "string") {
+      try {
+        const unwrapped: unknown = JSON.parse(record.ResultData.trim());
+        if (
+          !unwrapped ||
+          typeof unwrapped !== "object" ||
+          Array.isArray(unwrapped)
+        ) {
+          cipherError();
+        }
+        return unwrapped as Record<string, unknown>;
+      } catch {
+        cipherError();
+      }
+    }
+    if (
+      record.ResultData &&
+      typeof record.ResultData === "object" &&
+      !Array.isArray(record.ResultData)
+    ) {
+      return record.ResultData as Record<string, unknown>;
+    }
+  }
+  return record;
+}
+
+/**
  * Verifies outer MerchantID, Timestamp freshness (<= 10 minutes), and AES-128-CBC
  * encrypted Data / ResultData payload integrity.
  */
@@ -162,10 +231,7 @@ export function verifyAndUnwrapEcpayEnvelope(params: {
     nowSeconds = Math.floor(Date.now() / 1000),
     maxSkewSeconds = ECPAY_TIMESTAMP_WINDOW_SECONDS,
   } = params;
-  if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) {
-    cipherError();
-  }
-  const record = envelope as Record<string, unknown>;
+  const record = normalizeEcpayEnvelopeInput(envelope);
   if (
     typeof record.MerchantID !== "string" ||
     record.MerchantID.trim() !== merchantId.trim()

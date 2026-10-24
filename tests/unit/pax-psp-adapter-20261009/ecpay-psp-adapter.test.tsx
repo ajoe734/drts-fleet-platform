@@ -36,6 +36,7 @@ import {
   PaymentMethodsScreen,
 } from "../../../apps/passenger-app-web/components/payment/payment-methods-screen";
 import PaymentMethodsPage from "../../../apps/passenger-app-web/app/account/payment-methods/page";
+import { POST as bffPost } from "../../../apps/passenger-app-web/app/api/passenger-app/[...path]/route";
 import {
   isEcpayHostedFieldsRuntime,
   paymentFieldsForRuntime,
@@ -64,6 +65,9 @@ const appRequire = createRequire(
 const { AppRouterContext } = appRequire(
   "next/dist/shared/lib/app-router-context.shared-runtime",
 ) as typeof import("next/dist/shared/lib/app-router-context.shared-runtime");
+const { NextRequest } = appRequire(
+  "next/server",
+) as typeof import("next/server");
 const render = (element: React.ReactElement) =>
   renderComponent(
     <AppRouterContext.Provider value={navigation}>
@@ -99,15 +103,15 @@ function makeCard(index: number): PassengerPaymentMethod {
 }
 
 describe("EcpayHostedFields & createEcpayHostedFieldsPort", () => {
-  it("mounts #ECPayPayment container with zero raw card input elements and collects opaque BindCardPayToken", async () => {
+  it("mounts #ECPayPayment container with zero raw card input elements and collects opaque BindCardPayToken from official PaymentInfo shape without RtnCode", async () => {
     const mockSdk: EcpaySdkGlobal = {
+      Language: { zhTW: "zh-TW", enUS: "en-US" },
       initialize: vi.fn((_serverType, _isLoading, cb) => cb()),
       addBindingCard: vi.fn((_token, _lang, cb) => cb()),
       getBindCardPayToken: vi.fn((cb) =>
         cb({
-          RtnCode: 1,
-          RtnMsg: "Success",
           BindCardPayToken: "ecpay_bind_card_pay_token_synthetic_abc123",
+          MerchantTradeNo: "DR202610240000000001",
         }),
       ),
     };
@@ -158,20 +162,30 @@ describe("EcpayHostedFields & createEcpayHostedFieldsPort", () => {
     expect(latestAvailability.status).toBe("unavailable");
   });
 
-  it("rejects digits-only PAN strings or disposed ports in createEcpayHostedFieldsPort", async () => {
+  it("rejects digits-only PAN strings, explicit SDK errors, or disposed ports in createEcpayHostedFieldsPort", async () => {
     const badSdk: EcpaySdkGlobal = {
       initialize: vi.fn(),
       addBindingCard: vi.fn(),
       getBindCardPayToken: vi.fn((cb) =>
         cb({
-          RtnCode: 1,
           BindCardPayToken: "4311952222222222",
+          MerchantTradeNo: "DR202610240000000002",
         }),
       ),
     };
     const port = createEcpayHostedFieldsPort({ getSdk: () => badSdk });
     await expect(port.collectCredential()).rejects.toThrow(
       /ecpay_pay_token_invalid/,
+    );
+
+    const errorSdk: EcpaySdkGlobal = {
+      initialize: vi.fn(),
+      addBindingCard: vi.fn(),
+      getBindCardPayToken: vi.fn((cb) => cb(undefined, "Card check failed")),
+    };
+    const errorPort = createEcpayHostedFieldsPort({ getSdk: () => errorSdk });
+    await expect(errorPort.collectCredential()).rejects.toThrow(
+      /ecpay_pay_token_failed/,
     );
 
     port.dispose();
@@ -217,13 +231,13 @@ describe("PaymentMethodsScreen 5-card limit & ECPay Hosted Fields flow", () => {
     });
 
     const mockSdk: EcpaySdkGlobal = {
+      Language: { zhTW: "zh-TW", enUS: "en-US" },
       initialize: vi.fn((_serverType, _isLoading, cb) => cb()),
       addBindingCard: vi.fn((_token, _lang, cb) => cb()),
       getBindCardPayToken: vi.fn((cb) =>
         cb({
-          RtnCode: 1,
-          RtnMsg: "Success",
           BindCardPayToken: "ecpay_page_bind_card_pay_token_001",
+          MerchantTradeNo: "DR202610240000000003",
         }),
       ),
     };
@@ -315,6 +329,140 @@ describe("PaymentMethodsScreen 5-card limit & ECPay Hosted Fields flow", () => {
     await screen.findByText("VISA •••• 1001");
     expect(mockSdk.getBindCardPayToken).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenCalled();
+  });
+});
+
+describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL browser return, and CSRF/session enforcement", () => {
+  it("accepts external unauthenticated POST /api/passenger-app/payment-methods/ecpay/callback (ResultData form or JSON) and returns plain text 1|OK", async () => {
+    vi.stubEnv("DRTS_API_URL", "http://api.internal:3000");
+    vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementationOnce(async (input, init) => {
+        expect(String(input)).toBe(
+          "http://api.internal:3000/api/passenger-app/payment-methods/ecpay/callback",
+        );
+        expect(init?.method).toBe("POST");
+        expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+          MerchantID: "SYNTHETIC_MID_01",
+          Data: "CIPHER",
+        });
+        return new Response("1|OK", {
+          status: 200,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        });
+      });
+
+    const req = new NextRequest(
+      "https://ride.smarttransport.tw/api/passenger-app/payment-methods/ecpay/callback",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          host: "ride.smarttransport.tw",
+          "x-forwarded-proto": "https",
+        },
+        body: 'ResultData=%7B%22MerchantID%22%3A%22SYNTHETIC_MID_01%22%2C%22Data%22%3A%22CIPHER%22%7D',
+      },
+    );
+    const res = await bffPost(req, {
+      params: Promise.resolve({
+        path: ["payment-methods", "ecpay", "callback"],
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    expect(await res.text()).toBe("1|OK");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts cross-origin 3DS form POST /api/passenger-app/payment-methods/ecpay/order-result and redirects browser 303 to /account/payment-methods?ecpay_3ds=completed", async () => {
+    vi.stubEnv("DRTS_API_URL", "http://api.internal:3000");
+    vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+    vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (input, init) => {
+      expect(String(input)).toBe(
+        "http://api.internal:3000/api/passenger-app/payment-methods/ecpay/order-result",
+      );
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body ?? "{}"))).toEqual({
+        MerchantID: "SYNTHETIC_MID_01",
+        Data: "CIPHER",
+      });
+      return new Response(
+        JSON.stringify({
+          data: {
+            status: "completed",
+            method: makeCard(1),
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const req = new NextRequest(
+      "https://ride.smarttransport.tw/api/passenger-app/payment-methods/ecpay/order-result",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: "https://ecpg-stage.ecpay.com.tw",
+          host: "ride.smarttransport.tw",
+          "x-forwarded-proto": "https",
+        },
+        body: 'ResultData=%7B%22MerchantID%22%3A%22SYNTHETIC_MID_01%22%2C%22Data%22%3A%22CIPHER%22%7D',
+      },
+    );
+    const res = await bffPost(req, {
+      params: Promise.resolve({
+        path: ["payment-methods", "ecpay", "order-result"],
+      }),
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(
+      "https://ride.smarttransport.tw/account/payment-methods?ecpay_3ds=completed",
+    );
+  });
+
+  it("enforces same-origin CSRF and pax_session cookie on ordinary passenger payment POST routes", async () => {
+    vi.stubEnv("DRTS_API_URL", "http://api.internal:3000");
+    vi.stubEnv("DRTS_API_AUTH_AUDIENCE", "");
+    const crossOriginReq = new NextRequest(
+      "https://ride.smarttransport.tw/api/passenger-app/payment-methods",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://evil.example.com",
+          host: "ride.smarttransport.tw",
+          "x-forwarded-proto": "https",
+        },
+        body: JSON.stringify({ providerToken: "tok_123" }),
+      },
+    );
+    const csrfRes = await bffPost(crossOriginReq, {
+      params: Promise.resolve({ path: ["payment-methods"] }),
+    });
+    expect(csrfRes.status).toBe(403);
+
+    const unauthReq = new NextRequest(
+      "https://ride.smarttransport.tw/api/passenger-app/payment-methods/binding-session",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "https://ride.smarttransport.tw",
+          host: "ride.smarttransport.tw",
+          "x-forwarded-proto": "https",
+        },
+        body: "{}",
+      },
+    );
+    const unauthRes = await bffPost(unauthReq, {
+      params: Promise.resolve({
+        path: ["payment-methods", "binding-session"],
+      }),
+    });
+    expect(unauthRes.status).toBe(401);
   });
 });
 
