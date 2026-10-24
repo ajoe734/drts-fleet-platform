@@ -20,7 +20,6 @@ import {
   REFERRAL_MONTHLY_TERMINATION_CONSECUTIVE_MONTHS,
   REFERRAL_MONTHLY_TERMINATION_THRESHOLD,
   type RecordReferralMonthlyGovernanceOutcomeCommand,
-  type ReferralMonthlyRatingGovernanceRecord,
 } from "@drts/contracts";
 import { ApiClient } from "@drts/api-client";
 import { getPlatformAdminClient } from "../../../apps/platform-admin-web/lib/platform-admin-client-factory";
@@ -348,7 +347,7 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
     const migrationSql = readFileSync(
       resolve(
         process.cwd(),
-        "infra/migrations/V0130__referral_monthly_rating_governance.sql",
+        "infra/migrations/V0129R04__referral_monthly_rating_governance.sql",
       ),
       "utf8",
     );

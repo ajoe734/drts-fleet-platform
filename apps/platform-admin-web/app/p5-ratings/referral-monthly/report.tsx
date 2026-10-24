@@ -4,17 +4,24 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   REFERRAL_MONTHLY_COACHING_THRESHOLD,
-  REFERRAL_MONTHLY_TERMINATION_CONSECUTIVE_MONTHS,
   REFERRAL_MONTHLY_TERMINATION_THRESHOLD,
   type RecordReferralMonthlyGovernanceOutcomeCommand,
   type ReferralMonthlyGovernanceOutcome,
-  type ReferralMonthlyGovernanceRuleType,
   type ReferralMonthlyRatingGovernanceRecord,
   type ReferralMonthlyRatingGovernanceReport,
   type ReferralMonthlyRatingReport,
 } from "@drts/contracts";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
+import {
+  formatGovernanceRuleLabel,
+  formatGovernanceStatusCell,
+  formatMonthlyBreakdownItem,
+  formatOutcomeSelectAriaLabel,
+  formatReasonInputAriaLabel,
+  formatSaveOutcomeAriaLabel,
+  referralMonthlyGovernanceCopy as govCopy,
+} from "./translations";
 
 function currentTaipeiMonth() {
   const parts = new Intl.DateTimeFormat("en", {
@@ -23,25 +30,6 @@ function currentTaipeiMonth() {
     month: "2-digit",
   }).formatToParts(new Date());
   return `${parts.find((part) => part.type === "year")!.value}-${parts.find((part) => part.type === "month")!.value}`;
-}
-
-function outcomeLabel(outcome: ReferralMonthlyGovernanceOutcome | null) {
-  switch (outcome) {
-    case "coached":
-      return "已輔導 (coached)";
-    case "terminated":
-      return "已終止 (terminated)";
-    case "dismissed":
-      return "不予處置 (dismissed)";
-    default:
-      return "待處理 (pending)";
-  }
-}
-
-function ruleLabel(ruleType: ReferralMonthlyGovernanceRuleType) {
-  return ruleType === "termination_review"
-    ? `連續 ${REFERRAL_MONTHLY_TERMINATION_CONSECUTIVE_MONTHS} 個月低於 ${REFERRAL_MONTHLY_TERMINATION_THRESHOLD.toFixed(1)} 要終止`
-    : `月平均低於 ${REFERRAL_MONTHLY_COACHING_THRESHOLD.toFixed(1)} 要輔導`;
 }
 
 export function ReferralMonthlyRatings() {
@@ -116,7 +104,7 @@ export function ReferralMonthlyRatings() {
       setSavedRecordsByKey((prev) => ({ ...prev, ...nextSaved }));
     } catch (err) {
       setGovernanceError(
-        err instanceof Error ? err.message : "無法載入輔導與終止紀錄。",
+        err instanceof Error ? err.message : govCopy.loadGovernanceFailed,
       );
     } finally {
       setGovernanceLoading(false);
@@ -204,7 +192,7 @@ export function ReferralMonthlyRatings() {
     ).trim();
 
     if (!reason) {
-      setGovernanceError("請輸入處置原因。");
+      setGovernanceError(govCopy.reasonRequiredError);
       return;
     }
 
@@ -230,7 +218,7 @@ export function ReferralMonthlyRatings() {
       }));
     } catch (err) {
       setGovernanceError(
-        err instanceof Error ? err.message : "處置結果儲存失敗。",
+        err instanceof Error ? err.message : govCopy.saveOutcomeFailed,
       );
     } finally {
       setSubmittingRecordKey(null);
@@ -335,36 +323,29 @@ export function ReferralMonthlyRatings() {
               ))}
             </tbody>
           </table>
-          <section aria-label="司機月評分輔導與連續低分終止處理">
-            <h3>司機月評分輔導與連續低分終止處理（R04）</h3>
-            <p>
-              規則門檻：月平均低於{" "}
-              {REFERRAL_MONTHLY_COACHING_THRESHOLD.toFixed(1)} 要輔導；連續{" "}
-              {REFERRAL_MONTHLY_TERMINATION_CONSECUTIVE_MONTHS} 個月低於{" "}
-              {REFERRAL_MONTHLY_TERMINATION_THRESHOLD.toFixed(1)}{" "}
-              要終止。無評價月份視為「無資料（no_data）」不計 0
-              分，並中斷連續低分月份計算。
-            </p>
+          <section aria-label={govCopy.sectionAriaLabel}>
+            <h3>{govCopy.sectionTitle}</h3>
+            <p>{govCopy.ruleSummary}</p>
             <button
               type="button"
               disabled={governanceLoading}
               onClick={() => void loadGovernance()}
             >
-              評估／載入跨月輔導與終止紀錄
+              {govCopy.evaluateButton}
             </button>
             {governanceError ? (
               <p role="alert">{governanceError}</p>
             ) : null}
             <table>
-              <caption>司機月評分輔導與終止處理紀錄</caption>
+              <caption>{govCopy.tableCaption}</caption>
               <thead>
                 <tr>
-                  <th>駕駛</th>
-                  <th>規則類型</th>
-                  <th>觸發月份</th>
-                  <th>跨月平均明細</th>
-                  <th>處置狀態與紀錄</th>
-                  <th>處置操作</th>
+                  <th>{govCopy.colDriver}</th>
+                  <th>{govCopy.colRuleType}</th>
+                  <th>{govCopy.colTriggeredMonths}</th>
+                  <th>{govCopy.colMonthlyBreakdown}</th>
+                  <th>{govCopy.colHandlingStatus}</th>
+                  <th>{govCopy.colActions}</th>
                 </tr>
               </thead>
               <tbody>
@@ -381,32 +362,24 @@ export function ReferralMonthlyRatings() {
                   return (
                     <tr key={key}>
                       <td>{record.driverId}</td>
-                      <td>{ruleLabel(record.ruleType)}</td>
-                      <td>{record.triggeredMonths.join("、")}</td>
+                      <td>{formatGovernanceRuleLabel(record.ruleType)}</td>
+                      <td>
+                        {record.triggeredMonths.join(govCopy.monthSeparator)}
+                      </td>
                       <td>
                         {record.monthlyBreakdown
-                          .map((m) =>
-                            m.status === "no_data" || m.averageRating === null
-                              ? `${m.periodMonth}: 無資料 (no_data)`
-                              : `${m.periodMonth}: ${m.averageRating.toFixed(2)} (${m.ratingCount}筆)`,
-                          )
-                          .join(" ／ ")}
+                          .map((m) => formatMonthlyBreakdownItem(m))
+                          .join(govCopy.breakdownSeparator)}
                       </td>
-                      <td>
-                        {outcomeLabel(record.outcome)}
-                        {record.outcomeReason
-                          ? `｜原因：${record.outcomeReason}`
-                          : ""}
-                        {record.handledByActorId
-                          ? `｜處理人：${record.handledByActorId}`
-                          : ""}
-                        {record.auditId ? `｜稽核：${record.auditId}` : ""}
-                      </td>
+                      <td>{formatGovernanceStatusCell(record)}</td>
                       <td>
                         <label>
-                          處置結果
+                          {govCopy.outcomeLabelText}
                           <select
-                            aria-label={`處置結果 ${record.driverId} ${record.ruleType}`}
+                            aria-label={formatOutcomeSelectAriaLabel(
+                              record.driverId,
+                              record.ruleType,
+                            )}
                             value={currentOutcome}
                             onChange={(e) =>
                               setDraftOutcomes((prev) => ({
@@ -417,21 +390,26 @@ export function ReferralMonthlyRatings() {
                               }))
                             }
                           >
-                            <option value="coached">已輔導 (coached)</option>
+                            <option value="coached">
+                              {govCopy.outcomeOptionCoached}
+                            </option>
                             <option value="terminated">
-                              已終止 (terminated)
+                              {govCopy.outcomeOptionTerminated}
                             </option>
                             <option value="dismissed">
-                              不予處置 (dismissed)
+                              {govCopy.outcomeOptionDismissed}
                             </option>
                           </select>
                         </label>
                         <label>
-                          處置原因
+                          {govCopy.reasonLabelText}
                           <input
-                            aria-label={`處置原因 ${record.driverId} ${record.ruleType}`}
+                            aria-label={formatReasonInputAriaLabel(
+                              record.driverId,
+                              record.ruleType,
+                            )}
                             value={currentReason}
-                            placeholder="請輸入處置原因"
+                            placeholder={govCopy.reasonPlaceholder}
                             onChange={(e) =>
                               setDraftReasons((prev) => ({
                                 ...prev,
@@ -442,11 +420,14 @@ export function ReferralMonthlyRatings() {
                         </label>
                         <button
                           type="button"
-                          aria-label={`儲存處置 ${record.driverId} ${record.ruleType}`}
+                          aria-label={formatSaveOutcomeAriaLabel(
+                            record.driverId,
+                            record.ruleType,
+                          )}
                           disabled={submittingRecordKey === key}
                           onClick={() => void submitOutcome(record)}
                         >
-                          儲存處置結果
+                          {govCopy.saveButtonText}
                         </button>
                       </td>
                     </tr>
@@ -455,7 +436,7 @@ export function ReferralMonthlyRatings() {
               </tbody>
             </table>
             {displayedGovernanceRecords.length === 0 ? (
-              <p>此月份無需輔導或終止檢討之駕駛。</p>
+              <p>{govCopy.emptyText}</p>
             ) : null}
           </section>
           <table>
