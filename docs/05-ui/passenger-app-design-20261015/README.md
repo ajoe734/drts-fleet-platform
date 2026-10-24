@@ -1,6 +1,6 @@
 # 乘客 App 設計稿 v2（2026-10-15）
 
-這是使用者在互動 session 以 Claude Design 重畫、於 2026-10-15 交付的 28 張乘客畫板，依 2026-10-10 設計規格整併。來源為 canonical machine root 下的 `.local/passenger-app-20261009/claude-design-20261015/project/`；`canvas.json` 與全部 `.dc.html` 逐位元組保留，包括原始檔名、時間 metadata、畫板尺寸與分頁。`Main.dc.html` 即 **AU-01**。
+這是使用者在互動 session 以 Claude Design 重畫、於 2026-10-15 交付（並於 2026-10-24 交付 `v2-20261024` 補齊 AU-04 狀態，線上畫布版本 35）的 28 張乘客畫板，依 2026-10-10 設計規格整併。來源為 canonical machine root 下的 `.local/passenger-app-20261009/claude-design-20261015/project/`（變更紀錄見同層 `CHANGELOG.md`，`v1-20261015` 舊版原檔保留於 `versions/v1-20261015/project/`）；`canvas.json` 與全部 `.dc.html` 逐位元組保留，包括原始檔名、時間 metadata、畫板尺寸與分頁。`Main.dc.html` 即 **AU-01**。
 
 [線上畫布](https://claude.ai/artifact/MwuW2r8LLfna7iCcYmYu2A) **只有使用者能開**。`.dc.html` 需要 Claude Design 的執行環境（含 `support.js`／`x-dc`）才能顯示；repo 內的檔案是存檔與對照用，不是可獨立預覽的網頁。本次不補寫執行環境，也不在 VM 啟動預覽。
 
@@ -17,7 +17,7 @@
 | AU-01   | [Main.dc.html](Main.dc.html)   | 登入入口               | 五種方式都可用；手機尚未開通（不顯示手機入口）；全部暫停                               | GET /api/passenger-app/auth/providers                                                                                                              | PAX-WEB-AUTH-UI-20261009    |
 | AU-02   | [AU-02.dc.html](AU-02.dc.html) | 輸入手機號碼           | 空白；格式錯誤；傳送中；傳送太頻繁                                                     | POST /api/passenger-app/auth/otp/request                                                                                                           | PAX-WEB-AUTH-UI-20261009    |
 | AU-03   | [AU-03.dc.html](AU-03.dc.html) | 輸入驗證碼             | 輸入中；驗證中；錯誤（顯示剩餘次數）；已過期；次數用完；可重新傳送                     | POST /api/passenger-app/auth/otp/verify；POST /api/passenger-app/auth/otp/request（重送）                                                          | PAX-WEB-AUTH-UI-20261009    |
-| AU-04   | [AU-04.dc.html](AU-04.dc.html) | 輸入 Email             | 已填寫；格式錯誤                                                                       | POST /api/passenger-app/auth/otp/request                                                                                                           | PAX-WEB-AUTH-UI-20261009    |
+| AU-04   | [AU-04.dc.html](AU-04.dc.html) | 輸入 Email             | 空白；已填寫；格式錯誤；傳送中；傳送太頻繁                                             | POST /api/passenger-app/auth/otp/request                                                                                                           | PAX-WEB-AUTH-UI-20261009    |
 | AU-05   | [AU-05.dc.html](AU-05.dc.html) | 第三方登入處理中       | 導向中；返回處理中；等待過久                                                           | POST /api/passenger-app/auth/oauth/:provider/start；POST /api/passenger-app/auth/oauth/:provider/callback                                          | PAX-WEB-AUTH-UI-20261009    |
 | AU-06   | [AU-06.dc.html](AU-06.dc.html) | 第三方登入失敗或取消   | 使用者取消；提供者錯誤；連結過期                                                       | OAuth start／callback 的錯誤或取消呈現（同 AU-05）                                                                                                 | PAX-WEB-AUTH-UI-20261009    |
 | AU-07   | [AU-07.dc.html](AU-07.dc.html) | 登入方式已屬於其他帳號 | 綁定衝突                                                                               | OAuth callback／OTP verify 的綁定衝突呈現（不自動合併）                                                                                            | PAX-WEB-AUTH-UI-20261009    |
@@ -54,12 +54,12 @@
 - **PM-04 補救缺口**：畫板含「更新卡片並重新扣款／重新扣款成功」，SA／SD §3 未提供乘客重扣 command；保留設計，實作前須補契約，不能挪用平台退款 API。
 - **Geo 邊界**：BK-02／03 對應既有 geo API，但 SA／SD §3 尚未明訂乘客 BFF 存取契約；沿用舊 contract 的未決註記，不據此新增授權。
 
-## 與設計規格的核對與缺口
+## 與設計規格的核對與補充說明
 
-來源規格為 canonical machine root 的 `.local/passenger-app-20261009/claude-design-20261015/design-spec-20261010.md`。28 個 ID 全部齊全；表中的狀態忠實反映來源，不能把規格要求當成已繪製狀態。
+來源規格為 canonical machine root 的 `.local/passenger-app-20261009/claude-design-20261015/design-spec-20261010.md`。28 個 ID 全部齊全，表中的狀態忠實反映來源畫板標籤：
 
-- **AU-04（未解設計缺口）**：規格要求同 AU-02 的空白、格式錯誤、傳送中、傳送太頻繁；來源實際只有「已填寫、格式錯誤」。缺空白、傳送中、傳送太頻繁，需原設計來源補稿後再匯入；本次禁止重畫或改動匯入檔。
+- **AU-04（`v2-20261024` 來源補稿已匯入，線上畫布版本 35）**：規格要求同 AU-02 的空白、格式錯誤、傳送中、傳送太頻繁；`v1-20261015` 初版僅有「已填寫、格式錯誤」，原互動設計來源於 2026-10-24 補齊「空白、傳送中、傳送太頻繁」三個實際 390×844 Email 畫框（`id="e0"`、`e3`、`e4`），既有「已填寫、格式錯誤」兩框原始碼逐字保留（`id="a"`、`b`），與 AU-03 銜接不變；`canvas.json` 僅將 `AU-04.dc.html` 寬度由 892 更新為 2158，其餘 27 張畫板未變。
 - PM-01 將卡片已過期與已失效合併為同一框；TR-01 在同一清單框呈現進行中、可評價、付款失敗與已取消，另有載入更多及登入已過期框，並非每個行程狀態獨立一框。
-- AC-03 多畫輸入驗證碼；AU-05 多畫等待過久以呈現返回選項；這些是來源既有內容，照原樣保留。
+- AC-03 多畫輸入驗證碼；AU-04 多畫已填寫；AU-05 多畫等待過久以呈現返回選項；這些是來源既有內容，照原樣保留。
 
-匯入 hash、逐項文字差異、靜態檢查與未驗項目見 [UAT 紀錄](../../04-uat/passenger-app-20261009/PAX-DESIGN-V2-20261015.md)。完整設計狀態符合性仍受上述 AU-04 缺口限制。
+匯入 hash、新舊版本對照、逐項文字差異、靜態檢查與未驗項目見 [UAT 紀錄](../../04-uat/passenger-app-20261009/PAX-DESIGN-V2-20261015.md)。
