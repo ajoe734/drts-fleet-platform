@@ -66,16 +66,19 @@ already-owned task — `DEPENDENCY-ZOD-1243066-REMEDIATION-20261023`,
 `status: in_progress`, owner **Claude2**, reviewer **Codex**. This helper
 must not duplicate or bypass that task.
 
-Current state on that task's own PR #2966
-(`claude2/dependency-zod-1243066-remediation-20261023`, head `854ee818`):
-`dependency-security` **pass** (job `120742480817`) — the security gate
-itself has cleared on this candidate — but `typecheck` **fail** (`TS2532`,
-job `120742480705`) and `ci-integ` **fail** (job `120747575362`). A fix for
-that typecheck guard from the same owner/author is reported underway toward
-a new candidate. (A separately-observed `Dependency security: skipping` on
-unrelated PR #2960 reflects that PR's own un-rerun check state and is **not**
-the current diagnosis for the zod-remediation gate — do not infer gate status
-from a different PR's stale check run.)
+State on that task's own PR #2966
+(`claude2/dependency-zod-1243066-remediation-20261023`) at the prior
+candidate head `854ee818`: `dependency-security` **pass** (job
+`120742480817`) but `typecheck` **fail** (`TS2532`, job `120742480705`) and
+`ci-integ` **fail** (job `120747575362`). That has since been superseded by
+a new candidate head `79d9acc4` (same owner/author), on which both
+`typecheck` (job `120750233444`) and `dependency-security` (job
+`120750233339`) now **pass**; the PR's full check set at this head is 35
+pass / 2 pending / 0 fail at time of writing — i.e. no terminal failure
+remains, full CI is still finishing. (A separately-observed `Dependency
+security: skipping` on unrelated PR #2960 reflects that PR's own un-rerun
+check state and is **not** the current diagnosis for the zod-remediation
+gate — do not infer gate status from a different PR's stale check run.)
 
 This is an external CI/typecheck/dependency-advisory chain, not a
 branch/worktree/commit problem, and it already has an owner and an active
@@ -105,7 +108,7 @@ the following to `SR-SHARED-DEV-CURRENT-FIXES-DELIVERY-20261015` via `assign`
 {
   "resolved_parent_status": "blocked",
   "resolved_parent_waiting_for": "Claude2",
-  "resolved_parent_next": "History audit found no branch/worktree/commit contamination requiring repair: local scratch branch pi/sr-shared-dev-current-fixes-delivery-20261015 has no commits of its own against dev, no PR, and no worktree reference at audit time. No rebase/reset/force-push action is indicated. DEPENDENCY-ZOD-1243066-REMEDIATION-20261023 (Claude2/Codex) remains in_progress: on its PR #2966 (854ee818) dependency-security now passes but typecheck (TS2532) and ci-integ fail; a follow-up candidate from the same owner is underway. Clearing that gate is necessary but not sufficient: resume this release task's own full-CI/normal-merge/immutable-publication path and the existing 7-key delivery/orders/roles/scanner/storage/cleanup acceptance evidence already tracked in its next notes once the dependency task's new candidate is green. No history repair action is needed or appropriate here."
+  "resolved_parent_next": "History audit found no branch/worktree/commit contamination requiring repair: local scratch branch pi/sr-shared-dev-current-fixes-delivery-20261015 has no commits of its own against dev, no PR, and no worktree reference at audit time. No rebase/reset/force-push action is indicated. DEPENDENCY-ZOD-1243066-REMEDIATION-20261023 (Claude2/Codex) remains in_progress: prior candidate 854ee818 passed dependency-security but failed typecheck (TS2532) and ci-integ; superseding candidate 79d9acc4 now passes both typecheck and dependency-security, with full CI still finishing (35 pass/2 pending/0 fail at time of writing). Clearing that gate is necessary but not sufficient: resume this release task's own full-CI/normal-merge/immutable-publication path and the existing 7-key delivery/orders/roles/scanner/storage/cleanup acceptance evidence already tracked in its next notes once the dependency task's candidate finishes CI, reviews, and merges. No history repair action is needed or appropriate here."
 }
 ```
 
