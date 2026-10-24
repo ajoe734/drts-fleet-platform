@@ -125,7 +125,7 @@ export class ReferralMonthlyRatingService {
       if (group) group.push(row);
       else groups.set(row.driverId, [row]);
     }
-    return {
+    const report: ReferralMonthlyRatingReport = {
       periodMonth: query.periodMonth,
       timeZone: "Asia/Taipei",
       ratingCount: rows.length,
@@ -142,6 +142,19 @@ export class ReferralMonthlyRatingService {
         .sort((a, b) => a.driverId.localeCompare(b.driverId)),
       rows,
     };
+    if (this.databaseService?.isEnabled()) {
+      report.governance = await this.readGovernance(query);
+    }
+    return report;
+  }
+
+  async readGovernance(
+    query: ReferralMonthlyRatingQuery,
+  ): Promise<ReferralMonthlyRatingGovernanceReport> {
+    return this.evaluateGovernance(query, {
+      persist: false,
+      auditEvaluation: false,
+    });
   }
 
   async evaluateGovernance(
@@ -150,9 +163,11 @@ export class ReferralMonthlyRatingService {
       identity?: BootstrapRequestIdentity | null;
       requestId?: string;
       auditEvaluation?: boolean;
+      persist?: boolean;
     },
   ): Promise<ReferralMonthlyRatingGovernanceReport> {
     this.validateQuery(query);
+    const shouldPersist = options?.persist !== false;
 
     const evaluatedWindowMonths: string[] = [];
     for (
@@ -223,14 +238,16 @@ export class ReferralMonthlyRatingService {
             };
           }
           const avg = this.average(items);
+          const exactSum = items.reduce((sum, row) => sum + row.score, 0);
           return {
             periodMonth: month,
             ratingCount: items.length,
             averageRating: avg,
             status: "rated",
-            belowCoachingThreshold: avg < REFERRAL_MONTHLY_COACHING_THRESHOLD,
+            belowCoachingThreshold:
+              exactSum < items.length * REFERRAL_MONTHLY_COACHING_THRESHOLD,
             belowTerminationThreshold:
-              avg < REFERRAL_MONTHLY_TERMINATION_THRESHOLD,
+              exactSum < items.length * REFERRAL_MONTHLY_TERMINATION_THRESHOLD,
           };
         });
 
@@ -280,17 +297,20 @@ export class ReferralMonthlyRatingService {
 
       const driverRecords: ReferralMonthlyRatingGovernanceRecord[] = [];
       if (coachingRequired && targetMonthScore.averageRating !== null) {
-        const coachingRecord = await this.upsertGovernanceRecord({
+        const coachingInput = {
           driverId,
           periodMonth: query.periodMonth,
-          ruleType: "coaching",
+          ruleType: "coaching" as const,
           threshold: REFERRAL_MONTHLY_COACHING_THRESHOLD,
           averageRating: targetMonthScore.averageRating,
           ratingCount: targetMonthScore.ratingCount,
           consecutiveLowMonths: consecutiveMonthsBelow35,
           triggeredMonths: [query.periodMonth],
           monthlyBreakdown,
-        });
+        };
+        const coachingRecord = shouldPersist
+          ? await this.upsertGovernanceRecord(coachingInput)
+          : await this.readExistingOrBuildGovernanceRecord(coachingInput);
         driverRecords.push(coachingRecord);
         allRecords.push(coachingRecord);
       }
@@ -299,17 +319,20 @@ export class ReferralMonthlyRatingService {
         terminationReviewRequired &&
         targetMonthScore.averageRating !== null
       ) {
-        const terminationRecord = await this.upsertGovernanceRecord({
+        const terminationInput = {
           driverId,
           periodMonth: query.periodMonth,
-          ruleType: "termination_review",
+          ruleType: "termination_review" as const,
           threshold: REFERRAL_MONTHLY_TERMINATION_THRESHOLD,
           averageRating: targetMonthScore.averageRating,
           ratingCount: targetMonthScore.ratingCount,
           consecutiveLowMonths: consecutiveMonthsBelow35,
           triggeredMonths: [...consecutiveLowMonthsList],
           monthlyBreakdown,
-        });
+        };
+        const terminationRecord = shouldPersist
+          ? await this.upsertGovernanceRecord(terminationInput)
+          : await this.readExistingOrBuildGovernanceRecord(terminationInput);
         driverRecords.push(terminationRecord);
         allRecords.push(terminationRecord);
       }
@@ -334,7 +357,7 @@ export class ReferralMonthlyRatingService {
     }
 
     if (options?.auditEvaluation && options.identity?.actorId) {
-      this.getAuditService().recordAuditLog({
+      await this.recordDurableAuditLog({
         actorId: options.identity.actorId,
         actorType:
           (options.identity.actorType as
@@ -469,13 +492,34 @@ export class ReferralMonthlyRatingService {
       preferredOutcome: command.outcome,
     });
 
-    if (!existing && driverId && periodMonth && this.repository.isEnabled()) {
-      await this.evaluateGovernance({ periodMonth, driverId });
+    const parsedFromRecordId = recordId
+      ? /^r04-gov:(.+):(\d{4}-\d{2}):(coaching|termination_review)$/.exec(
+          recordId,
+        )
+      : null;
+    const resolvedDriverId = driverId ?? parsedFromRecordId?.[1];
+    const resolvedPeriodMonth = periodMonth ?? parsedFromRecordId?.[2];
+    const resolvedRuleType =
+      command.ruleType ??
+      (parsedFromRecordId?.[3] as
+        | ReferralMonthlyGovernanceRuleType
+        | undefined);
+
+    if (
+      !existing &&
+      resolvedDriverId &&
+      resolvedPeriodMonth &&
+      this.repository.isEnabled()
+    ) {
+      await this.evaluateGovernance({
+        periodMonth: resolvedPeriodMonth,
+        driverId: resolvedDriverId,
+      });
       existing = await this.findGovernanceRecord({
         recordId,
-        driverId,
-        periodMonth,
-        ruleType: command.ruleType,
+        driverId: resolvedDriverId,
+        periodMonth: resolvedPeriodMonth,
+        ruleType: resolvedRuleType,
         preferredOutcome: command.outcome,
       });
     }
@@ -492,55 +536,8 @@ export class ReferralMonthlyRatingService {
     const handledAt = new Date().toISOString();
     const auditId = `audit-${randomUUID()}`;
 
-    const auditLog = this.getAuditService().recordAuditLog({
-      auditId,
-      actorId: identity.actorId,
-      actorType:
-        (identity.actorType as AuditLogRecord["actorType"] | undefined) ??
-        "platform_admin",
-      tenantId: identity.tenantId ?? null,
-      moduleName: "reporting",
-      actionName: `referral_monthly_rating_governance.${command.outcome}`,
-      resourceType: "referral_monthly_rating_governance_record",
-      resourceId: existing.recordId,
-      oldValuesSummary: {
-        driverId: existing.driverId,
-        periodMonth: existing.periodMonth,
-        ruleType: existing.ruleType,
-        status: existing.status,
-        outcome: existing.outcome,
-        outcomeReason: existing.outcomeReason,
-        handledByActorId: existing.handledByActorId,
-        handledAt: existing.handledAt,
-      },
-      newValuesSummary: {
-        driverId: existing.driverId,
-        periodMonth: existing.periodMonth,
-        ruleType: existing.ruleType,
-        threshold: existing.threshold,
-        averageRating: existing.averageRating,
-        triggeredMonths: existing.triggeredMonths,
-        status: command.outcome,
-        outcome: command.outcome,
-        outcomeReason: trimmedReason,
-        handledByActorId: identity.actorId,
-        handledAt,
-      },
-      ...(requestId ? { requestId } : {}),
-    });
-
-    const updated: ReferralMonthlyRatingGovernanceRecord = {
-      ...existing,
-      status: command.outcome,
-      outcome: command.outcome,
-      outcomeReason: trimmedReason,
-      handledByActorId: identity.actorId,
-      handledAt,
-      auditId: auditLog.auditId,
-      updatedAt: handledAt,
-    };
-
     const db = this.resolveDatabase();
+    let persistedRecord: ReferralMonthlyRatingGovernanceRecord | null = null;
     if (db?.isEnabled()) {
       const result = await db.query<GovernanceDbRow>(
         `
@@ -580,18 +577,81 @@ export class ReferralMonthlyRatingService {
           trimmedReason,
           identity.actorId,
           handledAt,
-          auditLog.auditId,
+          auditId,
         ],
       );
-      if (this.isGovernanceDbRow(result?.rows?.[0])) {
-        const mapped = this.mapGovernanceDbRow(result.rows[0]);
-        this.memoryGovernanceRecords.set(
-          this.memoryKey(mapped.driverId, mapped.periodMonth, mapped.ruleType),
-          mapped,
+      if (
+        !this.isGovernanceDbRow(result?.rows?.[0]) ||
+        (result?.rowCount !== undefined && result.rowCount === 0)
+      ) {
+        throw new ApiRequestError(
+          404,
+          "GOVERNANCE_RECORD_NOT_FOUND",
+          "Monthly rating governance record was not found in persistent storage.",
         );
-        return mapped;
       }
+      persistedRecord = this.mapGovernanceDbRow(result.rows[0]);
     }
+
+    const auditLog = await this.recordDurableAuditLog({
+      auditId,
+      actorId: identity.actorId,
+      actorType:
+        (identity.actorType as AuditLogRecord["actorType"] | undefined) ??
+        "platform_admin",
+      tenantId: identity.tenantId ?? null,
+      moduleName: "reporting",
+      actionName: `referral_monthly_rating_governance.${command.outcome}`,
+      resourceType: "referral_monthly_rating_governance_record",
+      resourceId: existing.recordId,
+      oldValuesSummary: {
+        driverId: existing.driverId,
+        periodMonth: existing.periodMonth,
+        ruleType: existing.ruleType,
+        status: existing.status,
+        outcome: existing.outcome,
+        outcomeReason: existing.outcomeReason,
+        handledByActorId: existing.handledByActorId,
+        handledAt: existing.handledAt,
+      },
+      newValuesSummary: {
+        driverId: existing.driverId,
+        periodMonth: existing.periodMonth,
+        ruleType: existing.ruleType,
+        threshold: existing.threshold,
+        averageRating: existing.averageRating,
+        triggeredMonths: existing.triggeredMonths,
+        status: command.outcome,
+        outcome: command.outcome,
+        outcomeReason: trimmedReason,
+        handledByActorId: identity.actorId,
+        handledAt,
+      },
+      ...(requestId ? { requestId } : {}),
+    });
+
+    if (persistedRecord) {
+      this.memoryGovernanceRecords.set(
+        this.memoryKey(
+          persistedRecord.driverId,
+          persistedRecord.periodMonth,
+          persistedRecord.ruleType,
+        ),
+        persistedRecord,
+      );
+      return persistedRecord;
+    }
+
+    const updated: ReferralMonthlyRatingGovernanceRecord = {
+      ...existing,
+      status: command.outcome,
+      outcome: command.outcome,
+      outcomeReason: trimmedReason,
+      handledByActorId: identity.actorId,
+      handledAt,
+      auditId: auditLog.auditId,
+      updatedAt: handledAt,
+    };
 
     this.memoryGovernanceRecords.set(
       this.memoryKey(updated.driverId, updated.periodMonth, updated.ruleType),
@@ -923,6 +983,73 @@ export class ReferralMonthlyRatingService {
     };
     this.memoryGovernanceRecords.set(key, nextRecord);
     return structuredClone(nextRecord);
+  }
+
+  private async readExistingOrBuildGovernanceRecord(input: {
+    driverId: string;
+    periodMonth: string;
+    ruleType: ReferralMonthlyGovernanceRuleType;
+    threshold: number;
+    averageRating: number;
+    ratingCount: number;
+    consecutiveLowMonths: number;
+    triggeredMonths: string[];
+    monthlyBreakdown: ReferralMonthlyDriverMonthScore[];
+  }): Promise<ReferralMonthlyRatingGovernanceRecord> {
+    const existing = await this.findGovernanceRecord({
+      driverId: input.driverId,
+      periodMonth: input.periodMonth,
+      ruleType: input.ruleType,
+    });
+    if (existing) {
+      return {
+        ...existing,
+        threshold: input.threshold,
+        averageRating: input.averageRating,
+        ratingCount: input.ratingCount,
+        consecutiveLowMonths: input.consecutiveLowMonths,
+        triggeredMonths: [...input.triggeredMonths],
+        monthlyBreakdown: structuredClone(input.monthlyBreakdown),
+      };
+    }
+    const now = new Date().toISOString();
+    return {
+      recordId: this.deterministicRecordId(
+        input.driverId,
+        input.periodMonth,
+        input.ruleType,
+      ),
+      driverId: input.driverId,
+      periodMonth: input.periodMonth,
+      ruleType: input.ruleType,
+      threshold: input.threshold,
+      averageRating: input.averageRating,
+      ratingCount: input.ratingCount,
+      consecutiveLowMonths: input.consecutiveLowMonths,
+      triggeredMonths: [...input.triggeredMonths],
+      monthlyBreakdown: structuredClone(input.monthlyBreakdown),
+      status: "pending",
+      outcome: null,
+      outcomeReason: null,
+      handledByActorId: null,
+      handledAt: null,
+      auditId: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  private async recordDurableAuditLog(
+    input: Omit<AuditLogRecord, "auditId" | "createdAt" | "requestId"> & {
+      auditId?: string;
+      requestId?: string;
+    },
+  ): Promise<AuditLogRecord> {
+    const auditService = this.getAuditService();
+    if (typeof auditService.recordAuditLogAsync === "function") {
+      return auditService.recordAuditLogAsync(input);
+    }
+    return auditService.recordAuditLog(input);
   }
 
   private async findGovernanceRecord(filter: {

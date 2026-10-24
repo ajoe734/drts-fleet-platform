@@ -347,7 +347,7 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
     const migrationSql = readFileSync(
       resolve(
         process.cwd(),
-        "infra/migrations/V0129R04__referral_monthly_rating_governance.sql",
+        "infra/migrations/V0130__referral_monthly_rating_governance.sql",
       ),
       "utf8",
     );
@@ -849,5 +849,115 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
       /已終止 \(terminated\)｜原因：連續三個月低於3.5分，經交通局規則審議終止合作｜處理人：ui-platform-admin/,
     );
     expect(h.service.getGovernanceAuditLogs()).toHaveLength(1);
+
+    // Reloading the same month via '查詢／重新整理' must immediately display the persisted handled state
+    // rather than fabricating a pending coaching/termination row
+    fireEvent.click(screen.getByRole("button", { name: "查詢／重新整理" }));
+    const reloadedGovTable = within(
+      await screen.findByRole("table", {
+        name: "司機月評分輔導與終止處理紀錄",
+      }),
+    );
+    await reloadedGovTable.findByText(
+      /已終止 \(terminated\)｜原因：連續三個月低於3.5分，經交通局規則審議終止合作｜處理人：ui-platform-admin/,
+    );
+  });
+
+  it("evaluates exact near-threshold averages (799/200 < 4.0 and 699/200 < 3.5) without round-before-threshold loss", async () => {
+    const near4Bundles = Array.from({ length: 200 }, (_, i) =>
+      ratingBundle(
+        `near4-${i}`,
+        i === 0 ? 3 : 4,
+        "2026-06-15T00:00:00.000Z",
+        "driver-near4",
+      ),
+    );
+    const near35Bundles = ["2026-04", "2026-05", "2026-06"].flatMap((m) =>
+      Array.from({ length: 200 }, (_, i) =>
+        ratingBundle(
+          `${m}-${i}`,
+          i < 99 ? 4 : 3,
+          `${m}-15T00:00:00.000Z`,
+          "driver-near35",
+        ),
+      ),
+    );
+
+    const h = createHarness(mergeSources(...near4Bundles, ...near35Bundles));
+    const r = await h.service.evaluateGovernance({ periodMonth: "2026-06" });
+
+    const near4Streak = r.driverStreaks.find(
+      (s) => s.driverId === "driver-near4",
+    )!;
+    expect(near4Streak.coachingRequired).toBe(true);
+    expect(near4Streak.terminationReviewRequired).toBe(false);
+
+    const near35Streak = r.driverStreaks.find(
+      (s) => s.driverId === "driver-near35",
+    )!;
+    expect(near35Streak.coachingRequired).toBe(true);
+    expect(near35Streak.terminationReviewRequired).toBe(true);
+    expect(near35Streak.consecutiveMonthsBelow35).toBe(3);
+  });
+
+  it("keeps reports:read governance GET read-only and rejects zero-row DB updates or failed persistent audit appends", async () => {
+    const source = ratingBundle(
+      "b-1",
+      3,
+      "2026-06-15T00:00:00.000Z",
+      "driver-boundary",
+    );
+    const h = createHarness(source);
+
+    // 1. reports:read GET must not issue INSERT INTO reporting.referral_monthly_rating_governance_records
+    await h.controller.readGovernance(
+      { periodMonth: "2026-06" },
+      makeIdentity({ scopes: ["reports:read"] }),
+      "req-readonly-get",
+    );
+    const insertCallsAfterGet = h.sqlCalls.filter((c) =>
+      c.sql.includes(
+        "INSERT INTO reporting.referral_monthly_rating_governance_records",
+      ),
+    );
+    expect(insertCallsAfterGet).toHaveLength(0);
+
+    // 2. Warm record with DB SELECT missing and UPDATE rowCount 0 must not acknowledge saved handling
+    const evaluated = await h.service.evaluateGovernance({
+      periodMonth: "2026-06",
+    });
+    h.persistedGovernanceRows.clear();
+    await expect(
+      h.service.recordOutcome(
+        {
+          recordId: evaluated.records[0]!.recordId,
+          outcome: "coached",
+          reason: "已完成輔導",
+        },
+        makeIdentity(),
+      ),
+    ).rejects.toMatchObject({
+      status: 404,
+      code: "GOVERNANCE_RECORD_NOT_FOUND",
+    });
+
+    // 3. Failed persistent audit append must reject and not acknowledge outcome
+    const hAuditFail = createHarness(source);
+    vi.spyOn(hAuditFail.auditService, "recordAuditLogAsync").mockRejectedValueOnce(
+      new Error("injected-audit-storage-unavailable"),
+    );
+    const evalForAudit = await hAuditFail.service.evaluateGovernance({
+      periodMonth: "2026-06",
+    });
+    await expect(
+      hAuditFail.service.recordOutcome(
+        {
+          recordId: evalForAudit.records[0]!.recordId,
+          outcome: "coached",
+          reason: "已完成輔導",
+        },
+        makeIdentity(),
+      ),
+    ).rejects.toThrow("injected-audit-storage-unavailable");
   });
 });

@@ -43,6 +43,7 @@ export interface ReferralMonthlyRatingReport {
   unattributedRatingCount: number;
   drivers: ReferralMonthlyRatingSummary[];
   rows: ReferralMonthlyRatingRow[];
+  governance?: ReferralMonthlyRatingGovernanceReport;
 }
 
 /** Bureau R04: monthly average rating below 4.0 requires driver coaching (月平均低於 4.0 要輔導). */

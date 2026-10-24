@@ -38,14 +38,11 @@ export class ReferralMonthlyRatingController {
   @RequireScopes("reports:read")
   async readGovernance(
     @Query() query: ReferralMonthlyRatingQuery,
-    @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
+    @CurrentIdentity() _identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.service.evaluateGovernance(query, {
-        identity: identity ?? null,
-        ...(requestId ? { requestId } : {}),
-      }),
+      await this.service.readGovernance(query),
       requestId,
     );
   }

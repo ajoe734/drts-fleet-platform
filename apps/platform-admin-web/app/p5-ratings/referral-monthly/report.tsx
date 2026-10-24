@@ -4,24 +4,17 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   REFERRAL_MONTHLY_COACHING_THRESHOLD,
+  REFERRAL_MONTHLY_TERMINATION_CONSECUTIVE_MONTHS,
   REFERRAL_MONTHLY_TERMINATION_THRESHOLD,
   type RecordReferralMonthlyGovernanceOutcomeCommand,
   type ReferralMonthlyGovernanceOutcome,
+  type ReferralMonthlyGovernanceRuleType,
   type ReferralMonthlyRatingGovernanceRecord,
   type ReferralMonthlyRatingGovernanceReport,
   type ReferralMonthlyRatingReport,
 } from "@drts/contracts";
 import { usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
-import {
-  formatGovernanceRuleLabel,
-  formatGovernanceStatusCell,
-  formatMonthlyBreakdownItem,
-  formatOutcomeSelectAriaLabel,
-  formatReasonInputAriaLabel,
-  formatSaveOutcomeAriaLabel,
-  referralMonthlyGovernanceCopy as govCopy,
-} from "./translations";
 
 function currentTaipeiMonth() {
   const parts = new Intl.DateTimeFormat("en", {
@@ -76,7 +69,21 @@ export function ReferralMonthlyRatings() {
         `/api/reports/referral-monthly-ratings?${query}`,
         { signal: controller.signal },
       );
-      if (!controller.signal.aborted) setReport(envelope.data);
+      if (!controller.signal.aborted) {
+        setReport(envelope.data);
+        if (envelope.data.governance) {
+          setGovernance(envelope.data.governance);
+          const nextSaved: Record<
+            string,
+            ReferralMonthlyRatingGovernanceRecord
+          > = {};
+          for (const rec of envelope.data.governance.records) {
+            nextSaved[`${rec.driverId}::${rec.periodMonth}::${rec.ruleType}`] =
+              rec;
+          }
+          setSavedRecordsByKey(nextSaved);
+        }
+      }
     } catch (error) {
       if (!controller.signal.aborted)
         setError({ message: error instanceof Error ? error.message : null });
@@ -104,7 +111,9 @@ export function ReferralMonthlyRatings() {
       setSavedRecordsByKey((prev) => ({ ...prev, ...nextSaved }));
     } catch (err) {
       setGovernanceError(
-        err instanceof Error ? err.message : govCopy.loadGovernanceFailed,
+        err instanceof Error
+          ? err.message
+          : t("referralMonthly.governanceLoadFailed"),
       );
     } finally {
       setGovernanceLoading(false);
@@ -115,60 +124,23 @@ export function ReferralMonthlyRatings() {
     currentReport: ReferralMonthlyRatingReport,
   ): ReferralMonthlyRatingGovernanceRecord[] {
     const byKey = new Map<string, ReferralMonthlyRatingGovernanceRecord>();
+    const activeGovernance =
+      governance && governance.periodMonth === currentReport.periodMonth
+        ? governance
+        : currentReport.governance &&
+            currentReport.governance.periodMonth === currentReport.periodMonth
+          ? currentReport.governance
+          : null;
 
-    if (governance && governance.periodMonth === currentReport.periodMonth) {
-      for (const rec of governance.records) {
+    if (activeGovernance) {
+      for (const rec of activeGovernance.records) {
         const key = `${rec.driverId}::${rec.periodMonth}::${rec.ruleType}`;
         byKey.set(key, savedRecordsByKey[key] ?? rec);
       }
-    } else {
-      for (const driver of currentReport.drivers) {
-        if (driver.averageRating < REFERRAL_MONTHLY_COACHING_THRESHOLD) {
-          const key = `${driver.driverId}::${currentReport.periodMonth}::coaching`;
-          const saved = savedRecordsByKey[key];
-          byKey.set(
-            key,
-            saved ?? {
-              recordId: `r04-gov:${driver.driverId}:${currentReport.periodMonth}:coaching`,
-              driverId: driver.driverId,
-              periodMonth: currentReport.periodMonth,
-              ruleType: "coaching",
-              threshold: REFERRAL_MONTHLY_COACHING_THRESHOLD,
-              averageRating: driver.averageRating,
-              ratingCount: driver.ratingCount,
-              consecutiveLowMonths:
-                driver.averageRating < REFERRAL_MONTHLY_TERMINATION_THRESHOLD
-                  ? 1
-                  : 0,
-              triggeredMonths: [currentReport.periodMonth],
-              monthlyBreakdown: [
-                {
-                  periodMonth: currentReport.periodMonth,
-                  ratingCount: driver.ratingCount,
-                  averageRating: driver.averageRating,
-                  status: "rated",
-                  belowCoachingThreshold: true,
-                  belowTerminationThreshold:
-                    driver.averageRating <
-                    REFERRAL_MONTHLY_TERMINATION_THRESHOLD,
-                },
-              ],
-              status: "pending",
-              outcome: null,
-              outcomeReason: null,
-              handledByActorId: null,
-              handledAt: null,
-              auditId: null,
-              createdAt: driver.lastRatedAt,
-              updatedAt: driver.lastRatedAt,
-            },
-          );
-        }
-      }
-      for (const [key, saved] of Object.entries(savedRecordsByKey)) {
-        if (saved.periodMonth === currentReport.periodMonth) {
-          byKey.set(key, saved);
-        }
+    }
+    for (const [key, saved] of Object.entries(savedRecordsByKey)) {
+      if (saved.periodMonth === currentReport.periodMonth) {
+        byKey.set(key, saved);
       }
     }
 
@@ -177,6 +149,42 @@ export function ReferralMonthlyRatings() {
         a.driverId.localeCompare(b.driverId) ||
         a.ruleType.localeCompare(b.ruleType),
     );
+  }
+
+  function formatRuleLabel(ruleType: ReferralMonthlyGovernanceRuleType) {
+    return ruleType === "termination_review"
+      ? t("referralMonthly.governanceRuleTermination", {
+          consecutiveMonths: REFERRAL_MONTHLY_TERMINATION_CONSECUTIVE_MONTHS,
+          threshold: REFERRAL_MONTHLY_TERMINATION_THRESHOLD.toFixed(1),
+        })
+      : t("referralMonthly.governanceRuleCoaching", {
+          threshold: REFERRAL_MONTHLY_COACHING_THRESHOLD.toFixed(1),
+        });
+  }
+
+  function formatOutcomeLabel(outcome: ReferralMonthlyGovernanceOutcome | null) {
+    switch (outcome) {
+      case "coached":
+        return t("referralMonthly.governanceOutcomeCoached");
+      case "terminated":
+        return t("referralMonthly.governanceOutcomeTerminated");
+      case "dismissed":
+        return t("referralMonthly.governanceOutcomeDismissed");
+      default:
+        return t("referralMonthly.governanceOutcomePending");
+    }
+  }
+
+  function formatStatusCell(record: ReferralMonthlyRatingGovernanceRecord) {
+    if (!record.outcome) {
+      return t("referralMonthly.governanceOutcomePending");
+    }
+    return t("referralMonthly.governanceStatusDetail", {
+      outcome: formatOutcomeLabel(record.outcome),
+      reason: record.outcomeReason ?? t("referralMonthly.notProvided"),
+      actor: record.handledByActorId ?? t("referralMonthly.notProvided"),
+      audit: record.auditId ?? t("referralMonthly.notProvided"),
+    });
   }
 
   async function submitOutcome(record: ReferralMonthlyRatingGovernanceRecord) {
@@ -192,7 +200,7 @@ export function ReferralMonthlyRatings() {
     ).trim();
 
     if (!reason) {
-      setGovernanceError(govCopy.reasonRequiredError);
+      setGovernanceError(t("referralMonthly.governanceReasonRequired"));
       return;
     }
 
@@ -218,7 +226,9 @@ export function ReferralMonthlyRatings() {
       }));
     } catch (err) {
       setGovernanceError(
-        err instanceof Error ? err.message : govCopy.saveOutcomeFailed,
+        err instanceof Error
+          ? err.message
+          : t("referralMonthly.governanceSaveFailed"),
       );
     } finally {
       setSubmittingRecordKey(null);
@@ -323,29 +333,36 @@ export function ReferralMonthlyRatings() {
               ))}
             </tbody>
           </table>
-          <section aria-label={govCopy.sectionAriaLabel}>
-            <h3>{govCopy.sectionTitle}</h3>
-            <p>{govCopy.ruleSummary}</p>
+          <section aria-label={t("referralMonthly.governanceSectionAria")}>
+            <h3>{t("referralMonthly.governanceTitle")}</h3>
+            <p>
+              {t("referralMonthly.governanceRuleSummary", {
+                coachingThreshold:
+                  REFERRAL_MONTHLY_COACHING_THRESHOLD.toFixed(1),
+                consecutiveMonths:
+                  REFERRAL_MONTHLY_TERMINATION_CONSECUTIVE_MONTHS,
+                terminationThreshold:
+                  REFERRAL_MONTHLY_TERMINATION_THRESHOLD.toFixed(1),
+              })}
+            </p>
             <button
               type="button"
               disabled={governanceLoading}
               onClick={() => void loadGovernance()}
             >
-              {govCopy.evaluateButton}
+              {t("referralMonthly.governanceEvaluateButton")}
             </button>
-            {governanceError ? (
-              <p role="alert">{governanceError}</p>
-            ) : null}
+            {governanceError ? <p role="alert">{governanceError}</p> : null}
             <table>
-              <caption>{govCopy.tableCaption}</caption>
+              <caption>{t("referralMonthly.governanceTableCaption")}</caption>
               <thead>
                 <tr>
-                  <th>{govCopy.colDriver}</th>
-                  <th>{govCopy.colRuleType}</th>
-                  <th>{govCopy.colTriggeredMonths}</th>
-                  <th>{govCopy.colMonthlyBreakdown}</th>
-                  <th>{govCopy.colHandlingStatus}</th>
-                  <th>{govCopy.colActions}</th>
+                  <th>{t("referralMonthly.driver")}</th>
+                  <th>{t("referralMonthly.governanceColRuleType")}</th>
+                  <th>{t("referralMonthly.governanceColTriggeredMonths")}</th>
+                  <th>{t("referralMonthly.governanceColMonthlyBreakdown")}</th>
+                  <th>{t("referralMonthly.governanceColHandlingStatus")}</th>
+                  <th>{t("referralMonthly.governanceColActions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -362,23 +379,40 @@ export function ReferralMonthlyRatings() {
                   return (
                     <tr key={key}>
                       <td>{record.driverId}</td>
-                      <td>{formatGovernanceRuleLabel(record.ruleType)}</td>
+                      <td>{formatRuleLabel(record.ruleType)}</td>
                       <td>
-                        {record.triggeredMonths.join(govCopy.monthSeparator)}
+                        {record.triggeredMonths.join(
+                          t("referralMonthly.tagSeparator"),
+                        )}
                       </td>
                       <td>
                         {record.monthlyBreakdown
-                          .map((m) => formatMonthlyBreakdownItem(m))
-                          .join(govCopy.breakdownSeparator)}
+                          .map((m) =>
+                            m.status === "no_data" || m.averageRating === null
+                              ? t("referralMonthly.governanceBreakdownNoData", {
+                                  month: m.periodMonth,
+                                })
+                              : t("referralMonthly.governanceBreakdownRated", {
+                                  month: m.periodMonth,
+                                  average: m.averageRating.toFixed(2),
+                                  count: m.ratingCount,
+                                }),
+                          )
+                          .join(
+                            t("referralMonthly.governanceBreakdownSeparator"),
+                          )}
                       </td>
-                      <td>{formatGovernanceStatusCell(record)}</td>
+                      <td>{formatStatusCell(record)}</td>
                       <td>
                         <label>
-                          {govCopy.outcomeLabelText}
+                          {t("referralMonthly.governanceOutcomeLabel")}
                           <select
-                            aria-label={formatOutcomeSelectAriaLabel(
-                              record.driverId,
-                              record.ruleType,
+                            aria-label={t(
+                              "referralMonthly.governanceOutcomeSelectAria",
+                              {
+                                driverId: record.driverId,
+                                ruleType: record.ruleType,
+                              },
                             )}
                             value={currentOutcome}
                             onChange={(e) =>
@@ -391,25 +425,30 @@ export function ReferralMonthlyRatings() {
                             }
                           >
                             <option value="coached">
-                              {govCopy.outcomeOptionCoached}
+                              {t("referralMonthly.governanceOutcomeCoached")}
                             </option>
                             <option value="terminated">
-                              {govCopy.outcomeOptionTerminated}
+                              {t("referralMonthly.governanceOutcomeTerminated")}
                             </option>
                             <option value="dismissed">
-                              {govCopy.outcomeOptionDismissed}
+                              {t("referralMonthly.governanceOutcomeDismissed")}
                             </option>
                           </select>
                         </label>
                         <label>
-                          {govCopy.reasonLabelText}
+                          {t("referralMonthly.governanceReasonLabel")}
                           <input
-                            aria-label={formatReasonInputAriaLabel(
-                              record.driverId,
-                              record.ruleType,
+                            aria-label={t(
+                              "referralMonthly.governanceReasonInputAria",
+                              {
+                                driverId: record.driverId,
+                                ruleType: record.ruleType,
+                              },
                             )}
                             value={currentReason}
-                            placeholder={govCopy.reasonPlaceholder}
+                            placeholder={t(
+                              "referralMonthly.governanceReasonPlaceholder",
+                            )}
                             onChange={(e) =>
                               setDraftReasons((prev) => ({
                                 ...prev,
@@ -420,14 +459,17 @@ export function ReferralMonthlyRatings() {
                         </label>
                         <button
                           type="button"
-                          aria-label={formatSaveOutcomeAriaLabel(
-                            record.driverId,
-                            record.ruleType,
+                          aria-label={t(
+                            "referralMonthly.governanceSaveButtonAria",
+                            {
+                              driverId: record.driverId,
+                              ruleType: record.ruleType,
+                            },
                           )}
                           disabled={submittingRecordKey === key}
                           onClick={() => void submitOutcome(record)}
                         >
-                          {govCopy.saveButtonText}
+                          {t("referralMonthly.governanceSaveButton")}
                         </button>
                       </td>
                     </tr>
@@ -436,7 +478,7 @@ export function ReferralMonthlyRatings() {
               </tbody>
             </table>
             {displayedGovernanceRecords.length === 0 ? (
-              <p>{govCopy.emptyText}</p>
+              <p>{t("referralMonthly.governanceEmpty")}</p>
             ) : null}
           </section>
           <table>
