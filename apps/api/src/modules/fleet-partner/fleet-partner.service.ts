@@ -1090,27 +1090,62 @@ export class FleetPartnerService implements OnModuleInit {
 
   /**
    * Resolves the actual fleet-partner attribution for an ordinary complaint
-   * from its real source order: order -> driver (owned-mobility dispatch
-   * assignment/driver task) -> fleet (driver-fleet affiliation effective at
-   * `asOf`). Returns null when the order, driver, or a current affiliation
-   * cannot be established — callers must treat that as unattributed rather
-   * than guessing a fleet.
+   * from its real source order: order -> driver task/dispatch assignment,
+   * refreshed from the canonical repository first so a warm instance that
+   * never itself handled this order still sees it -> driver-fleet
+   * affiliation effective at the order's own fulfillment event time (not the
+   * complaint's filing time). Returns null when the order, driver, or a
+   * single unambiguous effective affiliation cannot be established —
+   * callers must treat that as unattributed rather than guessing a fleet.
    */
-  resolveOrderDriverFleetAttribution(
+  async resolveOrderDriverFleetAttribution(
     orderId: string | null | undefined,
-    asOf: string,
-  ): { driverId: string; driverName: string; fleetPartnerId: string } | null {
+  ): Promise<{
+    driverId: string;
+    driverName: string;
+    fleetPartnerId: string;
+  } | null> {
     if (!orderId) {
       return null;
     }
 
-    const driverId = this.resolveOrderDriverId(orderId);
-    if (!driverId) {
-      return null;
+    if (typeof this.ownedMobilityService.prepareOrderAction === "function") {
+      try {
+        await this.ownedMobilityService.prepareOrderAction({ orderId });
+      } catch (error) {
+        if (
+          !(error instanceof ApiRequestError && error.code === "ORDER_NOT_FOUND")
+        ) {
+          // A genuine refresh failure (e.g. the durable store is down) is a
+          // distinct outcome from "this order has no canonical record" and
+          // must not be disguised as an unattributed case.
+          throw error;
+        }
+      }
     }
 
-    const affiliation = this.resolveAffiliation(driverId, asOf);
-    if (!affiliation) {
+    const sourceEvent = this.resolveOrderDriverEvent(orderId);
+    if (!sourceEvent) {
+      return null;
+    }
+    const { driverId, asOf } = sourceEvent;
+
+    const affiliations = this.isPersistenceEnabled()
+      ? await this.loadCanonicalDriverAffiliations()
+      : this.driverAffiliations;
+
+    const effective = affiliations.filter(
+      (affiliation) =>
+        affiliation.driverId === driverId &&
+        affiliation.effectiveFrom <= asOf &&
+        (!affiliation.effectiveUntil || affiliation.effectiveUntil >= asOf),
+    );
+    const distinctFleetIds = new Set(
+      effective.map((affiliation) => affiliation.fleetPartnerId),
+    );
+    // No effective affiliation, or more than one for the same driver at the
+    // same event time, is a genuine absence/ambiguity: never guess between them.
+    if (distinctFleetIds.size !== 1) {
       return null;
     }
 
@@ -1121,19 +1156,27 @@ export class FleetPartnerService implements OnModuleInit {
     return {
       driverId,
       driverName: driverRecord?.name ?? driverId,
-      fleetPartnerId: affiliation.fleetPartnerId,
+      fleetPartnerId: effective[0]!.fleetPartnerId,
     };
   }
 
-  private resolveOrderDriverId(orderId: string): string | null {
-    const activeTask = this.ownedMobilityService
+  /** The actual fulfillment event (driver + a credible historical event
+   * time) for an order: prefers its driver task's own lifecycle timestamp,
+   * falling back to the dispatch assignment's when no task exists yet. */
+  private resolveOrderDriverEvent(
+    orderId: string,
+  ): { driverId: string; asOf: string } | null {
+    const task = this.ownedMobilityService
       .getDriverTasksForOrder(orderId)
       .filter(
         (task) => task.status !== "cancelled" && task.status !== "rejected",
       )
       .at(-1);
-    if (activeTask) {
-      return activeTask.driverId;
+    if (task) {
+      const asOf = task.completedAt ?? task.startedAt ?? task.acceptedAt;
+      if (asOf) {
+        return { driverId: task.driverId, asOf };
+      }
     }
 
     const assignment =
@@ -1149,8 +1192,11 @@ export class FleetPartnerService implements OnModuleInit {
         )
         .at(-1) ??
       null;
-
-    return assignment?.driverId ?? null;
+    if (!assignment) {
+      return null;
+    }
+    const asOf = assignment.acceptedAt ?? assignment.createdAt;
+    return asOf ? { driverId: assignment.driverId, asOf } : null;
   }
 
   private matchRevenueShareRule(

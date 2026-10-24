@@ -3,17 +3,20 @@ import { describe, expect, it } from "vitest";
 import type {
   ComplaintCaseRecord,
   ComplaintTimelineEntry,
+  DriverFleetAffiliationRecord,
+  FleetPartnerRecord,
 } from "@drts/contracts";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { BillingSettlementService } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { ComplaintRepository } from "../../../apps/api/src/modules/complaint/complaint.repository";
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { buildSettlementDisputeCase } from "../../../apps/api/src/modules/complaint/settlement-dispute";
+import type { FleetPartnerRepository } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.repository";
 import { FleetPartnerCaseService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner-case.service";
 import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 import type { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
 import type { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
-import { fleetStorageFixture } from "../helpers/fleet-document-fixture";
+import { byteStream, fleetStorageFixture } from "../helpers/fleet-document-fixture";
 
 /**
  * Old defect reproduced here: FleetPartnerCaseService.mapComplaintToFleetCase
@@ -26,19 +29,43 @@ import { fleetStorageFixture } from "../helpers/fleet-document-fixture";
  * affiliation chain via the already-injected FleetPartnerService.
  */
 
+type FakeTask = { driverId: string; status?: string; completedAt?: string };
+
+/** `hydratedTasksByOrder` is only visible after `prepareOrderAction` runs —
+ * standing in for an order/task that was only committed by a different
+ * already-warm instance's OwnedMobilityRepository, so a real fix must call
+ * it before reading task data instead of only ever consulting this
+ * process's own cache. */
 function fakeOwnedMobilityService(
-  tasksByOrder: Record<string, { driverId: string; status?: string }>,
-): OwnedMobilityService {
+  tasksByOrder: Record<string, FakeTask>,
+  opts: { hydratedTasksByOrder?: Record<string, FakeTask> } = {},
+): OwnedMobilityService & { prepareOrderActionCalls: string[] } {
+  const hydrated = new Map<string, FakeTask>();
+  const prepareOrderActionCalls: string[] = [];
   return {
+    prepareOrderActionCalls,
     getDriverTasksForOrder: (orderId: string) => {
-      const task = tasksByOrder[orderId];
+      const task = tasksByOrder[orderId] ?? hydrated.get(orderId);
       return task
-        ? [{ orderId, driverId: task.driverId, status: task.status ?? "completed" }]
+        ? [
+            {
+              orderId,
+              driverId: task.driverId,
+              status: task.status ?? "completed",
+              completedAt:
+                task.completedAt ?? "2026-01-02T00:00:00.000Z",
+            },
+          ]
         : [];
     },
     getActiveDispatchAssignmentForOrder: () => null,
     getDispatchAssignmentsForOrder: () => [],
-  } as unknown as OwnedMobilityService;
+    prepareOrderAction: async ({ orderId }: { orderId: string }) => {
+      prepareOrderActionCalls.push(orderId);
+      const pending = opts.hydratedTasksByOrder?.[orderId];
+      if (pending) hydrated.set(orderId, pending);
+    },
+  } as unknown as OwnedMobilityService & { prepareOrderActionCalls: string[] };
 }
 
 function fakeRegistryService(
@@ -49,19 +76,126 @@ function fakeRegistryService(
   } as unknown as RegulatoryRegistryService;
 }
 
+/** Shared, in-memory stand-in for the durable `admin.phase1_fleet_partners`
+ * / `admin.phase1_driver_fleet_affiliations` tables: a second
+ * FleetPartnerService instance constructed against the same repository
+ * object sees writes the first instance committed, without either instance
+ * sharing any in-process cache. */
+function sharedFleetPartnerRepository(): FleetPartnerRepository {
+  const state: {
+    fleetPartners: FleetPartnerRecord[];
+    driverAffiliations: DriverFleetAffiliationRecord[];
+  } = { fleetPartners: [], driverAffiliations: [] };
+  return {
+    isEnabled: () => true,
+    loadState: async () => structuredClone(state),
+    loadFleetPartners: async () => structuredClone(state.fleetPartners),
+    loadDriverAffiliations: async () =>
+      structuredClone(state.driverAffiliations),
+    findFleetPartnerById: async (fleetPartnerId: string) =>
+      structuredClone(
+        state.fleetPartners.find(
+          (partner) => partner.fleetPartnerId === fleetPartnerId,
+        ) ?? null,
+      ),
+    persistChanges: async (changes: {
+      fleetPartners?: readonly FleetPartnerRecord[];
+      driverAffiliations?: readonly DriverFleetAffiliationRecord[];
+    }) => {
+      for (const partner of changes.fleetPartners ?? []) {
+        state.fleetPartners = [
+          ...state.fleetPartners.filter(
+            (candidate) => candidate.fleetPartnerId !== partner.fleetPartnerId,
+          ),
+          structuredClone(partner),
+        ];
+      }
+      for (const affiliation of changes.driverAffiliations ?? []) {
+        state.driverAffiliations = [
+          ...state.driverAffiliations.filter(
+            (candidate) =>
+              candidate.affiliationId !== affiliation.affiliationId,
+          ),
+          structuredClone(affiliation),
+        ];
+      }
+    },
+    reportPersistenceFailure: () => {},
+  } as unknown as FleetPartnerRepository;
+}
+
+/** Shared, in-memory stand-in for the durable `crm.phase1_complaint_cases` /
+ * `crm.phase1_complaint_timelines` tables: a second ComplaintService
+ * instance constructed against the same repository object can commit and
+ * read back a genuine create/reply the first instance made, with neither
+ * instance sharing any in-process cache. */
+function sharedComplaintRepository(): ComplaintRepository {
+  const state: {
+    complaintCases: ComplaintCaseRecord[];
+    complaintTimelines: ComplaintTimelineEntry[];
+  } = { complaintCases: [], complaintTimelines: [] };
+  const snapshotFor = (predicate: (item: ComplaintCaseRecord) => boolean) => {
+    const cases = state.complaintCases.filter(predicate);
+    const caseNos = new Set(cases.map((item) => item.caseNo));
+    return {
+      complaintCases: structuredClone(cases),
+      complaintTimelines: structuredClone(
+        state.complaintTimelines.filter((entry) => caseNos.has(entry.caseNo)),
+      ),
+    };
+  };
+  return {
+    isEnabled: () => true,
+    loadState: async () => structuredClone(state),
+    loadSettlementState: async () =>
+      snapshotFor((item) => item.category === "settlement_dispute"),
+    loadCaseState: async (caseNo: string) =>
+      snapshotFor((item) => item.caseNo === caseNo),
+    persistChanges: async (changes: {
+      complaintCases?: readonly ComplaintCaseRecord[];
+      complaintTimelines?: readonly ComplaintTimelineEntry[];
+    }) => {
+      for (const item of changes.complaintCases ?? []) {
+        state.complaintCases = [
+          ...state.complaintCases.filter(
+            (candidate) => candidate.caseNo !== item.caseNo,
+          ),
+          structuredClone(item),
+        ];
+      }
+      for (const entry of changes.complaintTimelines ?? []) {
+        state.complaintTimelines = [
+          ...state.complaintTimelines.filter(
+            (candidate) => candidate.entryId !== entry.entryId,
+          ),
+          structuredClone(entry),
+        ];
+      }
+    },
+    reportPersistenceFailure: () => {},
+  } as unknown as ComplaintRepository;
+}
+
 async function buildFleetPartnerService(opts: {
-  tasksByOrder: Record<string, { driverId: string; status?: string }>;
+  tasksByOrder: Record<string, FakeTask>;
+  hydratedTasksByOrder?: Record<string, FakeTask>;
   drivers: ReadonlyArray<{ driverId: string; name: string }>;
   affiliations: ReadonlyArray<{
     driverId: string;
     fleetDisplayName: string;
     effectiveFrom: string;
+    effectiveUntil?: string;
   }>;
+  fleetPartnerRepository?: FleetPartnerRepository;
 }) {
+  const mobility = fakeOwnedMobilityService(opts.tasksByOrder, {
+    hydratedTasksByOrder: opts.hydratedTasksByOrder,
+  });
   const service = new FleetPartnerService(
     new BillingSettlementService(new AuditNotificationService()),
-    fakeOwnedMobilityService(opts.tasksByOrder),
+    mobility,
     fakeRegistryService(opts.drivers),
+    opts.fleetPartnerRepository,
   );
 
   const fleetIdByDisplayName = new Map<string, string>();
@@ -83,10 +217,13 @@ async function buildFleetPartnerService(opts: {
       fleetPartnerId,
       affiliationType: "managed_by",
       effectiveFrom: affiliation.effectiveFrom,
+      ...(affiliation.effectiveUntil
+        ? { effectiveUntil: affiliation.effectiveUntil }
+        : {}),
     });
   }
 
-  return { service, fleetIdByDisplayName };
+  return { service, fleetIdByDisplayName, mobility };
 }
 
 describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
@@ -233,6 +370,139 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
       await expect(
         cases.getCaseDetail(fleetAId, noOrderCase.caseNo),
       ).rejects.toMatchObject({ code: "CASE_NOT_FLEET_SCOPED" });
+    });
+  });
+
+  describe("FleetPartnerService.resolveOrderDriverFleetAttribution refreshes canonical order/driver data and rejects ambiguity", () => {
+    it("hydrates the order's driver task from the canonical repository via prepareOrderAction before resolving, instead of only ever reading this process's own cache", async () => {
+      const orderId = "ord-never-seen-locally";
+      const { service, fleetIdByDisplayName, mobility } =
+        await buildFleetPartnerService({
+          // Empty: this instance never itself dispatched this order, so its
+          // own in-memory task/assignment cache has nothing for it.
+          tasksByOrder: {},
+          hydratedTasksByOrder: {
+            [orderId]: {
+              driverId: "drv-warm-b",
+              completedAt: "2026-02-01T00:00:00.000Z",
+            },
+          },
+          drivers: [{ driverId: "drv-warm-b", name: "司機戊" }],
+          affiliations: [
+            {
+              driverId: "drv-warm-b",
+              fleetDisplayName: "Fleet Warm B",
+              effectiveFrom: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        });
+      const fleetId = fleetIdByDisplayName.get("Fleet Warm B")!;
+
+      // Without a canonical refresh call, this must be null: the order is
+      // genuinely absent from this instance's own task/assignment cache.
+      expect(mobility.getDriverTasksForOrder(orderId)).toEqual([]);
+
+      const attribution =
+        await service.resolveOrderDriverFleetAttribution(orderId);
+
+      expect(mobility.prepareOrderActionCalls).toContain(orderId);
+      expect(attribution).toEqual(
+        expect.objectContaining({
+          driverId: "drv-warm-b",
+          driverName: "司機戊",
+          fleetPartnerId: fleetId,
+        }),
+      );
+    });
+
+    it("resolves a driver-fleet affiliation a genuinely different FleetPartnerService instance committed, neither instance ever sharing an in-process cache", async () => {
+      const orderId = "ord-affiliation-cross-instance";
+      const asOf = "2026-04-01T00:00:00.000Z";
+      const sharedRepository = sharedFleetPartnerRepository();
+
+      // Instance A creates the fleet partner and the driver affiliation;
+      // only the shared repository (standing in for the durable
+      // admin.phase1_* tables) ever sees this write.
+      const { service: instanceA } = await buildFleetPartnerService({
+        tasksByOrder: {},
+        drivers: [],
+        affiliations: [],
+        fleetPartnerRepository: sharedRepository,
+      });
+      const fleetPartner = await instanceA.createFleetPartner({
+        legalName: "Fleet Cross Instance Co., Ltd.",
+        displayName: "Fleet Cross Instance",
+        businessRegistrationNo: "REG-Fleet-Cross-Instance",
+        contactName: "Fleet Ops Lead",
+        contactPhone: "+886-2-5550-0005",
+        partnershipType: "fleet_management",
+      });
+      await instanceA.createDriverFleetAffiliation("drv-cross-instance", {
+        fleetPartnerId: fleetPartner.fleetPartnerId,
+        affiliationType: "managed_by",
+        effectiveFrom: "2026-01-01T00:00:00.000Z",
+      });
+
+      // Instance B is a brand-new FleetPartnerService: its own in-memory
+      // fleetPartners/driverAffiliations are seed-only. It only shares the
+      // durable repository and has its own order/driver task source.
+      const { service: instanceB } = await buildFleetPartnerService({
+        tasksByOrder: {
+          [orderId]: { driverId: "drv-cross-instance", completedAt: asOf },
+        },
+        drivers: [{ driverId: "drv-cross-instance", name: "司機甲乙" }],
+        affiliations: [],
+        fleetPartnerRepository: sharedRepository,
+      });
+
+      const attribution =
+        await instanceB.resolveOrderDriverFleetAttribution(orderId);
+      expect(attribution).toEqual(
+        expect.objectContaining({
+          driverId: "drv-cross-instance",
+          driverName: "司機甲乙",
+          fleetPartnerId: fleetPartner.fleetPartnerId,
+        }),
+      );
+    });
+
+    it("leaves a driver with two conflicting fleet affiliations effective at the same historical event time unattributed, instead of guessing between them", async () => {
+      const orderId = "ord-ambiguous-affiliation";
+      const asOf = "2026-03-01T00:00:00.000Z";
+      const { service } = await buildFleetPartnerService({
+        tasksByOrder: {
+          [orderId]: { driverId: "drv-ambiguous", completedAt: asOf },
+        },
+        drivers: [{ driverId: "drv-ambiguous", name: "司機己" }],
+        affiliations: [
+          {
+            driverId: "drv-ambiguous",
+            fleetDisplayName: "Fleet X",
+            effectiveFrom: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      });
+      // A second, overlapping affiliation to a *different* fleet, both
+      // genuinely effective at `asOf` -- a real-world data-integrity gap,
+      // not a normal supersession. The old code's "pick the latest
+      // effectiveFrom" would have silently chosen one; the fix must not.
+      const fleetY = await service.createFleetPartner({
+        legalName: "Fleet Y Co., Ltd.",
+        displayName: "Fleet Y",
+        businessRegistrationNo: "REG-Fleet-Y",
+        contactName: "Fleet Ops Lead",
+        contactPhone: "+886-2-5550-0003",
+        partnershipType: "fleet_management",
+      });
+      await service.createDriverFleetAffiliation("drv-ambiguous", {
+        fleetPartnerId: fleetY.fleetPartnerId,
+        affiliationType: "managed_by",
+        effectiveFrom: "2026-01-01T00:00:00.000Z",
+      });
+
+      const attribution =
+        await service.resolveOrderDriverFleetAttribution(orderId);
+      expect(attribution).toBeNull();
     });
   });
 
@@ -413,6 +683,184 @@ describe("FLEET-CASE-ATTRIBUTION-CANONICAL-READBACK-20261024", () => {
           expect.objectContaining({ body: "Ops 已初步確認案件歸屬。" }),
         ]),
       );
+    });
+
+    it("lists an ordinary case a different already-warm instance genuinely created, before this instance ever fetches its detail", async () => {
+      const orderId = "ord-list-first";
+      const { service: fleetPartnerService, fleetIdByDisplayName } =
+        await buildFleetPartnerService({
+          tasksByOrder: {
+            [orderId]: { driverId: "drv-list-first" },
+          },
+          drivers: [{ driverId: "drv-list-first", name: "司機庚" }],
+          affiliations: [
+            {
+              driverId: "drv-list-first",
+              fleetDisplayName: "Fleet List First",
+              effectiveFrom: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        });
+      const fleetId = fleetIdByDisplayName.get("Fleet List First")!;
+
+      const repository = sharedComplaintRepository();
+      const { storage } = fleetStorageFixture();
+
+      // Instance A genuinely creates the case and its write durably commits.
+      const complaintsA = new ComplaintService(
+        new AuditNotificationService(),
+        repository,
+      );
+      const created = complaintsA.createComplaintCase({
+        caseSource: "ops",
+        relatedOrderId: orderId,
+        category: "driver_service",
+        severity: "normal",
+        description: "Instance A 建立的案件",
+      }) as ComplaintCaseRecord;
+      await complaintsA.awaitSettlementPersistence(created.caseNo);
+
+      // Instance B never ran that create; its own in-memory cache has
+      // nothing for this case at all.
+      const complaintsB = new ComplaintService(
+        new AuditNotificationService(),
+        repository,
+      );
+      const casesOnInstanceB = new FleetPartnerCaseService(
+        complaintsB,
+        fleetPartnerService,
+        undefined,
+        storage,
+      );
+
+      // The list call itself -- not a detail/timeline fetch first -- is
+      // what must already see it.
+      const listOnB = await casesOnInstanceB.listCases(fleetId);
+      expect(listOnB).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            caseNo: created.caseNo,
+            fleetPartnerId: fleetId,
+            driverId: "drv-list-first",
+          }),
+        ]),
+      );
+    });
+
+    it("lets a fresh instance read back a reply's structured attachment relation, not just its note text, after a different warm instance genuinely created the case and submitted that reply", async () => {
+      const orderId = "ord-cross-instance-attachment";
+      const { service: fleetPartnerService, fleetIdByDisplayName } =
+        await buildFleetPartnerService({
+          tasksByOrder: {
+            [orderId]: { driverId: "drv-cross-attachment" },
+          },
+          drivers: [{ driverId: "drv-cross-attachment", name: "司機辛" }],
+          affiliations: [
+            {
+              driverId: "drv-cross-attachment",
+              fleetDisplayName: "Fleet Cross Attachment",
+              effectiveFrom: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        });
+      const fleetId = fleetIdByDisplayName.get("Fleet Cross Attachment")!;
+
+      const repository = sharedComplaintRepository();
+      // The SAME backing document-artifact store is shared across both
+      // instances' FleetDocumentStorageService wrappers, exactly as two
+      // warm API replicas would share one durable object store.
+      const { store } = fleetStorageFixture();
+
+      const complaintsA = new ComplaintService(
+        new AuditNotificationService(),
+        repository,
+      );
+      const casesOnInstanceA = new FleetPartnerCaseService(
+        complaintsA,
+        fleetPartnerService,
+        undefined,
+        fleetStorageFixture("clean", store).storage,
+      );
+      const created = complaintsA.createComplaintCase({
+        caseSource: "ops",
+        relatedOrderId: orderId,
+        category: "driver_service",
+        severity: "normal",
+        description: "Instance A 建立並即將回覆附件的案件",
+      }) as ComplaintCaseRecord;
+      await complaintsA.awaitSettlementPersistence(created.caseNo);
+
+      const attachmentBytes = Buffer.from("evidence bytes");
+      const intent = await casesOnInstanceA.createAttachmentUploadUrl(
+        fleetId,
+        created.caseNo,
+        "fleet-manager-a",
+        {
+          fileName: "evidence.pdf",
+          fileSize: attachmentBytes.length,
+          contentType: "application/pdf",
+        },
+      );
+      const uploaded = await casesOnInstanceA.uploadAttachmentContent(
+        fleetId,
+        created.caseNo,
+        intent.objectKey,
+        byteStream(attachmentBytes),
+        "application/octet-stream",
+      );
+      const attachment = await casesOnInstanceA.confirmAttachmentUpload(
+        fleetId,
+        created.caseNo,
+        "fleet-manager-a",
+        {
+          attachmentId: intent.attachmentId,
+          objectKey: intent.objectKey,
+          fileName: "evidence.pdf",
+          fileSize: attachmentBytes.length,
+          contentType: "application/pdf",
+          checksumSha256: uploaded.checksumSha256,
+        },
+      );
+
+      await casesOnInstanceA.submitReply(
+        fleetId,
+        created.caseNo,
+        "fleet-manager-a",
+        {
+          content: "已附上行車記錄器截圖",
+          idempotencyKey: "cross-instance-attachment-reply-1",
+          attachmentIds: [attachment.attachmentId],
+        },
+      );
+
+      // Instance B never ran any of the above locally.
+      const complaintsB = new ComplaintService(
+        new AuditNotificationService(),
+        repository,
+      );
+      const casesOnInstanceB = new FleetPartnerCaseService(
+        complaintsB,
+        fleetPartnerService,
+        undefined,
+        fleetStorageFixture("clean", store).storage,
+      );
+
+      const timelineOnB = await casesOnInstanceB.getCaseTimeline(
+        fleetId,
+        created.caseNo,
+      );
+      const replyEntry = timelineOnB.find((entry) => entry.t === "車行回覆");
+      expect(replyEntry).toBeDefined();
+      expect(replyEntry!.body).toContain("已附上行車記錄器截圖");
+      // The old behavior only let the note's human-readable filename text
+      // survive; the fix must carry the actual structured attachment
+      // relation (attachmentId/name) across to this fresh instance too.
+      expect(replyEntry!.attachments).toEqual([
+        expect.objectContaining({
+          attachmentId: attachment.attachmentId,
+          name: "evidence.pdf",
+        }),
+      ]);
     });
   });
 
