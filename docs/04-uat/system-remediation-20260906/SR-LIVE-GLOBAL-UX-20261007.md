@@ -23,6 +23,30 @@ Owner Codex2；獨立 reviewer Claude2。狀態：harness 候選準備／獨立�
 
 正式設計依據：`docs/05-ui/design-handoff-20260525-implementation-plan.md` §5、`packages/ui-web/src/management-*`／canvas primitives；正式 locale 依據為各 app `server-locale`／`i18n`／`translations`，共用 `drts-locale-v2`（zh/en），bank 另用 locale query。服務契約 §2.2 要求 UTC 儲存、按使用者／租戶 locale 顯示，format probes 必須明寫 timezone。
 
+### 既有四個 Enterprise /auth-required default cases：來源／設計準備（未驗）
+
+以下只補既有一個畫面、四個角色的對照說明，不新增案例或調整各版本 inventory／分母。既有 a852 草稿、approvalRef、expiresAt、applicability 與全部結果保持原值。來源核對 pin 在已接受的 `aa1b38d988c136cfbbdab6df169069c4a9f22954`；此處不是宣告 aa1 已部署或四例已實測：
+
+- `enterprise-dispatch-web:/auth-required|tenant_admin|default`
+- `enterprise-dispatch-web:/auth-required|tenant_ops_admin|default`
+- `enterprise-dispatch-web:/auth-required|tenant_finance_admin|default`
+- `enterprise-dispatch-web:/auth-required|tenant_viewer|default`
+
+採用設計依據為 `docs/05-ui/enterprise-dispatch-booking-screen-requirements-20260612.md` 的 adopted 狀態、§1.3、§4.2 與 §7 VQ-5；對應 `docs/05-ui/drts-design-canvas/Enterprise Dispatch.html` 的 `auth` artboard，以及 `docs/05-ui/drts-design-canvas/ent-states.jsx::ENT_GATES["auth-required"] / ENT_Gate`。不是僅因原始設計檔存在便認定一致。
+
+| 項目 | 採用 canvas | aa1 實際來源現況 | 目前資格 |
+| --- | --- | --- | --- |
+| 標題 | 「請先登入企業帳號」 | `apps/enterprise-dispatch-web/lib/translations.ts:347,1037` 為「需要重新登入」／“Sign-in required again”；`apps/enterprise-dispatch-web/lib/enterprise-route-config.ts:21–52` 提供給 `EnterpriseGatePage` | 有直接文案差異；設計一致性未驗 |
+| 主要動作 | 「以企業 SSO 登入」 | 「回到企業入口」／“Back to enterprise entry”，連至 `/api/auth/tenant/login` | 來源動作可定位；未執行真登入或採認文案差異 |
+| 次要動作 | 「聯絡 IT 支援」 | 「查看支援」／“View support”，連至 `/help` | 來源動作可定位；未執行導航、鍵盤或焦點核對 |
+| 說明與結構 | 獨立說明段落、key/value rows、鎖圖示、primary tone、540px gate card、兩個動作與企業客服 | `apps/enterprise-dispatch-web/components/enterprise-state-page.tsx:71–173` 保留鎖／primary／540px card／動作與 tenant support line；說明改以 subtitle pill 及原因／影響／下一步三列呈現 | 記錄結構與文案差異；未取得 pixel、對比、窄屏或讀屏結果 |
+
+`apps/enterprise-dispatch-web/app/auth-required/page.tsx:1–4` 固定呼叫 `EnterpriseGatePage kind="auth-required"`，可支持既有草稿的兩語 h1 來源定位，不能證明真實角色、HTTP 200、session expired／permission 行為或完整頁面已驗。四個 role code 仍沿原 IAM 契約，不把 design persona 或 fixture 顯示名稱當成已登入角色。
+
+**健康時間的 format 適用性。** gate 本體沒有日期／金額欄位，但 `apps/enterprise-dispatch-web/components/enterprise-app-frame.tsx:14–20` 會替非 `/embed` 路徑包上 `EnterpriseShell`。`apps/enterprise-dispatch-web/components/enterprise-shell.tsx::useApiHealth`（55–87）在未被中止的健康檢查結束時記錄 `new Date()`；`formatCheckedAt`（90–99）以 zh-TW／en-US 的 `toLocaleTimeString` 顯示時分秒，未指定 `timeZone`。該時間出現在健康標記的 `title`（197–201），初始 `lastCheckedAt=null` 時不含時間。後續原 format 證據須明記實際 browser 時區、locale 及這段 title 的適用範圍；不能把草稿對 gate body 的 `noFormatsReason` 擴成整頁無時間內容或整頁 N/A。這裡未執行健康請求、format probe、切換語系或修改 recipe。
+
+四例仍為 **unverified**：沒有以來源映射取代原 browser／鍵盤／視覺／人工設計證據，沒有將上述差異直接定為產品缺陷或已接受的設計決議。原 Codex2 owner 可沿本對照準備原審查；是否符合採用設計與同版實際結果，仍由原 Claude2 reviewer／原操作流程核對。
+
 ## Supervisor／Operator 執行契約
 
 PR 只執行 offline tests／typecheck／lint。Hosted workflow 使用 `ubuntu-latest`、`shared-dev-acceptance` environment，保留不同的 harness SHA、runtime SHA。Worker 不直接 dispatch。
@@ -39,6 +63,10 @@ PR 只執行 offline tests／typecheck／lint。Hosted workflow 使用 `ubuntu-l
    草稿含來源核對過的 Enterprise `/auth-required` 四角色 default recipes；approval 空白、期限已過，不能冒充已獲授權執行。其餘情境須依真實 fixture 編寫，缺少則輸出 blocked。
 
 2. Operator 準備同 repository 的 `global-ux-input` artifact：`plan.json`、`manual.json`、`artifacts/`，不含 credentials。workflow 輸入 artifact 的 `bundle_run_id` 及已審查 `plan_sha256`。正式型別為 `model.ts` 的 `Plan`、`Recipe`、`Step`、`ManualEvidence`；`guards.ts` 做 runtime validation。
+   - **非機密輸入包產生路徑（`mode=package-input`）**：GitHub Actions 官方 REST API 不支援直接以 PAT 上傳 artifact，且 `workflow_dispatch` 純文字欄位無法承載完整 `plan.json`、`manual.json` 與 `artifacts/` 二進位證據。Operator 將核准之非機密輸入目錄（僅允許 `plan.json`、`manual.json` 與 `artifacts/`，預設相對路徑 `tests/e2e/system-remediation/sr-live-global-ux-20261007/input`）置於同 repository 的 commit tree（可直接位於 `harness_sha`，或置於同 repo 另一完整 commit `input_ref` 以免改動已審查之 `harness_sha`），再從 `--ref <harness_sha>` 觸發 `.github/workflows/live-global-ux-acceptance.yml`：
+     - 指定 `mode=package-input`、`harness_sha=<H>`、`runtime_sha=<S>`、`plan_sha256=<sha256(plan.json)>`，及選填 `input_ref=<40-hex-commit>`、`input_dir=<repo-relative-dir>`（此時不填 `bundle_run_id`）。
+     - `package-input` job 執行 `tests/e2e/system-remediation/sr-live-global-ux-20261007/runner.ts` 的 `package-input`：若指定 `input_ref`，以 `git ls-tree -r -z` 與 `git cat-file blob` 讀取原位元組並拒絕 `120000` symlink／`160000` submodule；接著由 `guards.ts`（`validatePlan`、`validateInputManual`、`safeRelativePath`、`assertNonSecretBytes`）核對 `runtimeSha`、`harnessSha`、`plan_sha256`、`manual.json` 欄位與 `artifacts/` 雜湊，拒絕未核准草稿、路徑穿越、symlink、未引用檔案與任何 session／cookie／token／私鑰內容，並逐 byte 原樣寫入 `.local/global-ux-input-bundle` 後由 `actions/upload-artifact@v4` 上傳為 `name: global-ux-input`。
+     - 該次 producer run 的 `github.run_id` 即為後續 `mode=verify`（預設）hosted 驗收所需的 `bundle_run_id`；`.artifacts/live-global-ux/input-package.json` 明確標記 `status: "packaged-input-only"` 與 `liveAcceptance: "not-run"`，缺漏 recipes 或人工證據保持 missing／blocked，絕不合成假 PASS。
 
 3. Plan 必須有 runtime SHA、具體 approvalRef、有效期限、`sandboxOnly:true`；recipe key 為 `screen.id|role|state`。填真實 route／最終 path、document status、ready selector、精確中英文 state text／來源 path、鍵盤 steps、date/money probes、screenshot masks。動態 ID 使用隔離 sandbox data。僅 Tab／Enter／Space／Escape、向已聚焦欄位輸入、焦點／文字斷言；沒有 DOM 注入、假 API response 或假產品 state。validation 必須真鍵盤送出和核對錯誤焦點；dialog 必須真開啟、focus trap、Escape 與返回；loading 必須出現 busy／progressbar。無日期／金額須有 source rationale。
 
@@ -97,6 +125,14 @@ pnpm exec prettier --check tests/e2e/system-remediation/sr-live-global-ux-202610
 - 定位：`apps/api/tests/integration/uv-exec-006.integration.test.ts` 的 `redispatch is atomic across resource release: cancel`，第 2236 行 `expect(await readState()).toEqual(before)`。`readState` 對六張表 `UNION ALL`，沒有排序；hosted diff 顯示 `dispatch.assigned` 與 `order.ready_for_dispatch` trace records 的位置互換。這是排序不穩定的靜態線索，尚未證明唯一根因或產品原子性有缺陷。
 - 保留原始 log 於 `.local/sr-live-global-ux-20261007/dispatch-2/integration-old.log`。本任務未修改該測試／API，且 write scopes 不包含它；請 Supervisor 核對 ownership／衝突後安排 scoped repair 或 hosted 重現，保留正式 repository transaction／cancel 正反向驗證。本 VM 未執行 PG／產品 runtime；新候選 CI 必須另查，不能把本文修正當成整合測試已修好。
 
+### SR-LIVE-GLOBAL-UX-INPUT-DELIVERY-20261025：補齊既有 workflow 非機密 `global-ux-input` 封裝與上傳路徑
+
+- 背景缺口：`.github/workflows/live-global-ux-acceptance.yml` 原 `hosted` job 以 `actions/download-artifact@v4` 下載 `name: global-ux-input`（`run-id: ${{ inputs.bundle_run_id }}`），但全 repo 42 個 workflows／60 個 `actions/upload-artifact` 步驟均無 `name: global-ux-input` 的可執行 producer，GitHub Actions artifacts API 讀回 `total_count=0`。
+- 修正邊界（Child task `SR-LIVE-GLOBAL-UX-INPUT-DELIVERY-20261025`，`owner=Gemini2`、`reviewer=Gemini`；母任務 `SR-LIVE-GLOBAL-UX-20261007` 維持 `owner=Codex2`、`reviewer=Claude2`、已接受 harness tuple `555a7f697f1a8aad07c56ceab2b1d836f7903313`／`e572efdfbf13401087f3f9f95959f863`／`e7e6b85f98561e6b419d198c657018e038f2eefe` 與原四項 acceptance keys 不變）：
+  1. 在既有 `.github/workflows/live-global-ux-acceptance.yml` 新增 `package-input` 模式與 job，呼叫 `tests/e2e/system-remediation/sr-live-global-ux-20261007/runner.ts` 的 `package-input` 並以 `actions/upload-artifact@v4` 產出精確名稱 `global-ux-input`；預設 `mode=verify` 的 `hosted` job（`prepare -> Playwright -> gate` 及四項 `harness_sha`／`runtime_sha`／`bundle_run_id`／`plan_sha256` 契約）完整保留且 fail-closed。
+  2. 在 `tests/e2e/system-remediation/sr-live-global-ux-20261007/guards.ts` 與 `tests/e2e/system-remediation/sr-live-global-ux-20261007/runner.ts` 實作 `safeRelativePath`、`assertNonSecretBytes`、`validateInputManual`、`materializeGitInput`、`packageInput`：支援從 checkout 相對目錄或同 repo 指定 commit `input_ref` 讀取完整非機密輸入，保留 `plan.json`、`manual.json` 與 `artifacts/` 原始位元組 SHA256，拒絕 `scaffold` 未核准草稿、空或過期 `approvalRef`／`expiresAt`、路徑穿越、symlink、未引用檔案及任何 session／cookie／token／私鑰材料。
+  3. 在 `tests/unit/system-remediation/sr-live-global-ux-20261007/gates.test.ts` 新增 5 項 producer／consumer 相容性、部分輸入 fail-closed、雜湊保持、不安全輸入拒絕與 git tree 擷取測試（全套件 55 tests 通過），並納入既有 Enterprise `/auth-required` 四例未驗對照補丁。
+
 | Finding／驗收項                                  | 原始碼與修改位置                                                                         | 舊版重現 → 修正版結果                                                             | 命令／版本／證據                                              | 未驗與限制                                                                                                   |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | CI-DOC-01 外部報告引用                           | 本文「固定來源與邊界」；`tools/ci/git/check_canonical_consistency.py::check_cited_paths` | 舊候選退出 1 → 修正版同一命令退出 0；非產品行為回歸                               | 原 CI job 112690942623；本輪 before／verification 紀錄        | 文件檢查非產品 live；新候選 CI／獨立 review 仍須匹配新 SHA                                                   |
@@ -105,3 +141,6 @@ pnpm exec prettier --check tests/e2e/system-remediation/sr-live-global-ux-202610
 | same_release_role_screen_state_coverage          | deploy-dev、IAM catalog、正式 pages／Referral source、browser spec                       | 舊 synthetic suite 不驗 runtime；新 source/schema offline pass，不冒稱舊產品 fail | `.local/.../scaffold/`、unit logs；hosted 尚無                | 18 app-role sessions／權威 readback、核准 state recipes／動態 ID、同 release runtime、source-reviewed N/A 待 |
 | accessibility_keyboard_focus_responsive_evidence | browser-checks、keyboard/dialog recipes、manual gate                                     | 舊模擬非實測；新 DOM probes 編譯，browser 未跑                                    | offline tsc/lint；browser/manual 未執行                       | 真 AT/device、具名 tester、完整對比／鍵盤／三斷點待                                                          |
 | zh_tw_en_locale_content_and_design_mapping       | 正式 cookie/query、translations、format probes、source blobs                             | 舊 dictionary pass 非 live；新 timezone 跨日／currency gate unit pass             | source inventory/unit；live/design 未執行                     | 中英 state recipes、正式設計逐項對照待；raw ZIP 不替代                                                       |
+| reviewed_existing_workflow_input_producer        | `.github/workflows/live-global-ux-acceptance.yml`、`runner.ts`、`guards.ts`、`gates.test.ts` | 舊 workflow 僅下載 `global-ux-input` 無 producer → 新增 `package-input` 驗證並以 `actions/upload-artifact@v4` 產出 `global-ux-input` | `vitest` 55/55、`tsc --noEmit`、`eslint`、`check_canonical_consistency.py` 均 exit 0 | 待獨立 reviewer（Gemini）對 exact candidate SHA 審查與保護分支 CI／merge                                      |
+| real_nonsecret_global_ux_input_artifact_delivery | `.github/workflows/live-global-ux-acceptance.yml`（`mode=package-input`）、`runner.ts::packageInput`／`materializeGitInput` | 舊版無可執行交付路徑 → 修正版支援同 repo 目錄／`input_ref` 原位元組封裝，拒絕草稿、symlink、穿越與憑證 | 本機 55 項 unit tests 驗證 byte-exact 封裝與拒絕邊界；Worker 依規不 dispatch workflow | 待實際部署 runtime `S` 與核准輸入備妥後，由唯一 Operator 執行一次 reviewed producer 並核對實況 artifact run ID |
+| original_consumer_contract_preserved             | `.github/workflows/live-global-ux-acceptance.yml`（`mode=verify`）、`runner.ts::prepare`／`finish`、`guards.ts::gate` | 保留原 `prepare -> Playwright -> gate` 與四項 `harness_sha`／`runtime_sha`／`bundle_run_id`／`plan_sha256` fail-closed 契約 | `gates.test.ts` 原 50 項回歸＋5 項 producer/consumer 對接測試全數 exit 0 | 部分輸入維持 missing／blocked，不產生合成 PASS；母任務四項 live/manual 驗收仍待實況執行                       |
