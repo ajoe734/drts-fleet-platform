@@ -335,12 +335,26 @@ class ControlPlaneProxyHttpError extends Error {
     public readonly statusCode: number,
     public readonly errorCode: string | undefined,
     label: string,
+    public readonly candidateShaMatched: boolean = false,
   ) {
     super(
       `${label} request failed with HTTP ${statusCode}${errorCode ? ` (${errorCode})` : ""}`,
     );
     this.name = "ControlPlaneProxyHttpError";
   }
+}
+
+function isAuthoritativeInactiveControlPlaneSessionError(
+  error: unknown,
+): boolean {
+  return (
+    error instanceof ControlPlaneProxyHttpError &&
+    error.candidateShaMatched &&
+    error.statusCode === 401 &&
+    (error.errorCode === "JWT_INVALID" ||
+      error.errorCode === "SESSION_EXPIRED" ||
+      error.errorCode === "SESSION_REVOKED")
+  );
 }
 
 function extractSafeErrorCode(rawBody: unknown): string | undefined {
@@ -378,13 +392,20 @@ async function requestControlPlaneProxy<T>(
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {
+    const candidateShaMatched =
+      response.headers.get("x-drts-candidate-sha") === config.candidateSha;
     let errorCode: string | undefined;
     try {
       errorCode = extractSafeErrorCode(await response.json());
     } catch {
       errorCode = undefined;
     }
-    throw new ControlPlaneProxyHttpError(response.status, errorCode, label);
+    throw new ControlPlaneProxyHttpError(
+      response.status,
+      errorCode,
+      label,
+      candidateShaMatched,
+    );
   }
   assert.equal(
     response.headers.get("x-drts-candidate-sha"),
@@ -1329,6 +1350,8 @@ export async function prepareOperationalRoleSessions(
   let adminToken: string | undefined;
   let adminInvocationToken: string | undefined;
   let ownAdminSessionId: string | undefined;
+  const ownAdminSessionIds: string[] = [];
+  const revokedPrepareAdminSessionIds = new Set<string>();
   let adminBffIssued = false;
   let adminSessionRevoked = false;
 
@@ -1439,10 +1462,14 @@ export async function prepareOperationalRoleSessions(
       );
       deps.mask(issuedSessionId);
       ownAdminSessionId = issuedSessionId;
+      revokedPrepareAdminSessionIds.delete(issuedSessionId);
+      if (!ownAdminSessionIds.includes(issuedSessionId)) {
+        ownAdminSessionIds.push(issuedSessionId);
+      }
       evidence.cleanup = "required";
       deps.exportSession(
         "DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID",
-        ownAdminSessionId,
+        ownAdminSessionIds.join(","),
       );
 
       issuedAdminPrincipalId = assertOpaqueCredential(
@@ -1877,17 +1904,34 @@ export async function prepareOperationalRoleSessions(
     );
 
     if (
-      ownAdminSessionId &&
+      ownAdminSessionIds.length > 0 &&
       adminToken &&
       !adminSessionRevoked &&
       !hasPendingAdminManagedCleanup
     ) {
-      try {
-        await revokeOperationalApplicationSession(
-          apiRequest,
-          adminToken,
-          ownAdminSessionId,
-        );
+      const pendingPrepareAdminSids = ownAdminSessionIds.filter(
+        (sid) => !revokedPrepareAdminSessionIds.has(sid),
+      );
+      const orderedPrepareAdminSids = [
+        ...pendingPrepareAdminSids.filter((sid) => sid !== ownAdminSessionId),
+        ...pendingPrepareAdminSids.filter((sid) => sid === ownAdminSessionId),
+      ];
+      for (const adminSid of orderedPrepareAdminSids) {
+        try {
+          await revokeOperationalApplicationSession(
+            apiRequest,
+            adminToken,
+            adminSid,
+          );
+          revokedPrepareAdminSessionIds.add(adminSid);
+        } catch {
+          // Handled below via remainingPrepareAdminSids.
+        }
+      }
+      const remainingPrepareAdminSids = ownAdminSessionIds.filter(
+        (sid) => !revokedPrepareAdminSessionIds.has(sid),
+      );
+      if (remainingPrepareAdminSids.length === 0) {
         adminSessionRevoked = true;
         deps.exportSession(
           "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
@@ -1897,10 +1941,10 @@ export async function prepareOperationalRoleSessions(
           "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED",
           "true",
         );
-      } catch {
+      } else {
         cleanupFailures.push("admin_session");
       }
-    } else if (adminBffIssued && !ownAdminSessionId) {
+    } else if (adminBffIssued && ownAdminSessionIds.length === 0) {
       cleanupFailures.push("admin_session_unconfirmed");
     }
     if (cleanupFailures.length === 0) {
@@ -1911,7 +1955,7 @@ export async function prepareOperationalRoleSessions(
         ownForeignFleetEntrySlug ||
         ownForeignFleetPartnerIds.length > 0 ||
         ownOpsSessionId ||
-        ownAdminSessionId
+        ownAdminSessionIds.length > 0
       ) {
         evidence.cleanup = "passed";
         deps.exportSession(
@@ -1983,16 +2027,26 @@ export async function prepareOperationalRoleSessions(
     } finally {
       if (
         !options?.retainAdminSession &&
-        ownAdminSessionId &&
+        ownAdminSessionIds.length > 0 &&
         adminToken &&
         !adminSessionRevoked
       ) {
+        const pendingPrepareAdminSids = ownAdminSessionIds.filter(
+          (sid) => !revokedPrepareAdminSessionIds.has(sid),
+        );
+        const orderedPrepareAdminSids = [
+          ...pendingPrepareAdminSids.filter((sid) => sid !== ownAdminSessionId),
+          ...pendingPrepareAdminSids.filter((sid) => sid === ownAdminSessionId),
+        ];
         try {
-          await revokeOperationalApplicationSession(
-            apiRequest,
-            adminToken,
-            ownAdminSessionId,
-          );
+          for (const adminSid of orderedPrepareAdminSids) {
+            await revokeOperationalApplicationSession(
+              apiRequest,
+              adminToken,
+              adminSid,
+            );
+            revokedPrepareAdminSessionIds.add(adminSid);
+          }
           adminSessionRevoked = true;
           deps.exportSession(
             "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
@@ -3600,6 +3654,21 @@ export async function teardownOperationalRoleSessions(
     foreignKeyIssueAttempted ||
     foreignKeyAlreadyRevoked;
 
+  const ownAdminSessionIds = splitNonEmptyCsv(
+    env.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID,
+  );
+  let adminIssuedAttempted =
+    nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED) ===
+    "true";
+  let adminAlreadyRevoked =
+    nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS) ===
+      "passed" ||
+    nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED) ===
+      "true";
+  const hasUnrevokedOwnedAdminMarker =
+    (ownAdminSessionIds.length > 0 || adminIssuedAttempted) &&
+    !adminAlreadyRevoked;
+
   const evidence: OperationalRoleSessionsCleanupEvidence = {
     candidate_sha: config.candidateSha,
     status: "failed",
@@ -3619,7 +3688,10 @@ export async function teardownOperationalRoleSessions(
   };
 
   try {
-    if (env.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS === "passed") {
+    if (
+      env.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS === "passed" &&
+      !hasUnrevokedOwnedAdminMarker
+    ) {
       const hadInviteCode = Boolean(
         nonEmptyTrimmed(env.DRTS_LIVE_MAP_INVITE_CODE),
       );
@@ -3771,29 +3843,50 @@ export async function teardownOperationalRoleSessions(
       deps.mask(adminInvocation);
     }
 
-    let ownAdminSessionId = nonEmptyTrimmed(
-      env.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID,
-    );
-    let adminIssuedAttempted =
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED) ===
-      "true";
-    let adminAlreadyRevoked =
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS) ===
-        "passed" ||
-      nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED) ===
-        "true";
-    let activeAdminToken =
-      (!adminAlreadyRevoked
-        ? nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN)
-        : undefined) ??
+    const initialRecoveryAdminToken = !adminAlreadyRevoked
+      ? nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN)
+      : undefined;
+    if (initialRecoveryAdminToken) {
+      deps.mask(initialRecoveryAdminToken);
+    }
+    const suppliedAdminToken =
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN) ??
       nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_REVIEWER_SESSION_TOKEN);
-    if (activeAdminToken) {
-      deps.mask(activeAdminToken);
+    if (suppliedAdminToken) {
+      deps.mask(suppliedAdminToken);
+    }
+    let activeAdminToken = initialRecoveryAdminToken ?? suppliedAdminToken;
+    const adminTokenBySessionId = new Map<string, string>();
+    const authoritativelyInactiveAdminSessionIds = new Set<string>();
+    const revokedAdminSessionIds = new Set<string>();
+    let currentActiveAdminSessionId: string | undefined;
+
+    if (initialRecoveryAdminToken && ownAdminSessionIds.length > 0) {
+      const recoveryClaims = decodeJwtPayloadIfStructured(
+        initialRecoveryAdminToken,
+      );
+      const recoveryClaimSid = nonEmptyTrimmed(
+        recoveryClaims?.sid ?? recoveryClaims?.sessionId,
+      );
+      const mappedRecoverySid =
+        recoveryClaimSid && ownAdminSessionIds.includes(recoveryClaimSid)
+          ? recoveryClaimSid
+          : ownAdminSessionIds[ownAdminSessionIds.length - 1];
+      if (mappedRecoverySid) {
+        adminTokenBySessionId.set(mappedRecoverySid, initialRecoveryAdminToken);
+        if (activeAdminToken === initialRecoveryAdminToken) {
+          currentActiveAdminSessionId = mappedRecoverySid;
+        }
+      }
     }
 
     if (needsAdminAuthority && config.adminOrigin && adminInvocation) {
       if (activeAdminToken) {
+        const checkedToken = activeAdminToken;
+        const checkedOwnedSessionId =
+          checkedToken === initialRecoveryAdminToken
+            ? currentActiveAdminSessionId
+            : undefined;
         try {
           const rawAdminSession = await requestControlPlaneProxy<
             Record<string, unknown>
@@ -3806,7 +3899,7 @@ export async function teardownOperationalRoleSessions(
               method: "GET",
               headers: {
                 authorization: `Bearer ${adminInvocation}`,
-                "x-drts-authorization": `Bearer ${activeAdminToken}`,
+                "x-drts-authorization": `Bearer ${checkedToken}`,
               },
             },
             "Platform Admin BFF proxy",
@@ -3814,11 +3907,47 @@ export async function teardownOperationalRoleSessions(
           const adminSession = objectRecord(
             rawAdminSession.data ?? rawAdminSession,
           );
-          if (adminSession.active !== true) {
+          const adminIdentity = objectRecord(adminSession.identity);
+          const reportedSessionId =
+            nonEmptyTrimmed(adminIdentity.sessionId) ??
+            nonEmptyTrimmed(adminIdentity.session_id) ??
+            nonEmptyTrimmed(adminSession.sessionId) ??
+            nonEmptyTrimmed(adminSession.session_id);
+          if (adminSession.active === true) {
+            if (
+              checkedOwnedSessionId &&
+              reportedSessionId &&
+              reportedSessionId !== checkedOwnedSessionId
+            ) {
+              activeAdminToken = undefined;
+              currentActiveAdminSessionId = undefined;
+            } else if (reportedSessionId) {
+              currentActiveAdminSessionId = reportedSessionId;
+              if (ownAdminSessionIds.includes(reportedSessionId)) {
+                adminTokenBySessionId.set(reportedSessionId, checkedToken);
+              }
+            }
+          } else {
+            if (
+              adminSession.active === false &&
+              checkedOwnedSessionId &&
+              (!reportedSessionId ||
+                reportedSessionId === checkedOwnedSessionId)
+            ) {
+              authoritativelyInactiveAdminSessionIds.add(checkedOwnedSessionId);
+            }
             activeAdminToken = undefined;
+            currentActiveAdminSessionId = undefined;
           }
-        } catch {
+        } catch (err) {
+          if (
+            checkedOwnedSessionId &&
+            isAuthoritativeInactiveControlPlaneSessionError(err)
+          ) {
+            authoritativelyInactiveAdminSessionIds.add(checkedOwnedSessionId);
+          }
           activeAdminToken = undefined;
+          currentActiveAdminSessionId = undefined;
         }
       }
       if (!activeAdminToken) {
@@ -3829,6 +3958,16 @@ export async function teardownOperationalRoleSessions(
             "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
             "pending",
           );
+          if (
+            nonEmptyTrimmed(
+              env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED,
+            ) === "true"
+          ) {
+            deps.exportSession?.(
+              "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED",
+              "false",
+            );
+          }
           deps.exportSession?.(
             "DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED",
             "true",
@@ -3872,17 +4011,24 @@ export async function teardownOperationalRoleSessions(
           );
           deps.mask(issuedSessionId);
           activeAdminToken = issuedToken;
-          ownAdminSessionId = issuedSessionId;
+          currentActiveAdminSessionId = issuedSessionId;
+          adminTokenBySessionId.set(issuedSessionId, issuedToken);
+          authoritativelyInactiveAdminSessionIds.delete(issuedSessionId);
+          revokedAdminSessionIds.delete(issuedSessionId);
+          if (!ownAdminSessionIds.includes(issuedSessionId)) {
+            ownAdminSessionIds.push(issuedSessionId);
+          }
           deps.exportSession?.(
             "DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN",
             activeAdminToken,
           );
           deps.exportSession?.(
             "DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID",
-            ownAdminSessionId,
+            ownAdminSessionIds.join(","),
           );
         } catch {
           activeAdminToken = undefined;
+          currentActiveAdminSessionId = undefined;
         }
       }
     }
@@ -4291,31 +4437,72 @@ export async function teardownOperationalRoleSessions(
     );
 
     if (adminAlreadyRevoked) {
-      if (ownAdminSessionId) {
-        deps.mask(ownAdminSessionId);
+      for (const adminSid of ownAdminSessionIds) {
+        deps.mask(adminSid);
       }
       if (hadOwnedForeignFixture) {
         evidence.admin_session_revoked = true;
       }
-    } else if (!ownAdminSessionId) {
+    } else if (ownAdminSessionIds.length === 0) {
       if (adminIssuedAttempted) {
         teardownFailures.push("admin_session_unconfirmed");
       }
     } else if (!hasPendingAdminManagedTeardown) {
-      deps.mask(ownAdminSessionId);
-      const adminToken =
+      for (const adminSid of ownAdminSessionIds) {
+        deps.mask(adminSid);
+      }
+      const pendingAdminSessionIds = ownAdminSessionIds.filter(
+        (sid) =>
+          !authoritativelyInactiveAdminSessionIds.has(sid) &&
+          !revokedAdminSessionIds.has(sid),
+      );
+      const orderedPendingAdminSessionIds = [
+        ...pendingAdminSessionIds.filter(
+          (sid) => sid !== currentActiveAdminSessionId,
+        ),
+        ...pendingAdminSessionIds.filter(
+          (sid) => sid === currentActiveAdminSessionId,
+        ),
+      ];
+      const primaryAdminToken =
         activeAdminToken ??
+        initialRecoveryAdminToken ??
         nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN);
-      if (!adminToken) {
+      if (orderedPendingAdminSessionIds.length > 0 && !primaryAdminToken) {
         teardownFailures.push("admin_session_missing_token");
       } else {
-        deps.mask(adminToken);
-        try {
-          await revokeOperationalApplicationSession(
-            apiRequest,
-            adminToken,
-            ownAdminSessionId,
-          );
+        if (primaryAdminToken) {
+          deps.mask(primaryAdminToken);
+        }
+        for (const adminSid of orderedPendingAdminSessionIds) {
+          const tokenForSid =
+            (activeAdminToken &&
+            !revokedAdminSessionIds.has(currentActiveAdminSessionId ?? "")
+              ? activeAdminToken
+              : undefined) ??
+            adminTokenBySessionId.get(adminSid) ??
+            primaryAdminToken;
+          if (!tokenForSid) {
+            break;
+          }
+          deps.mask(tokenForSid);
+          try {
+            await revokeOperationalApplicationSession(
+              apiRequest,
+              tokenForSid,
+              adminSid,
+            );
+            revokedAdminSessionIds.add(adminSid);
+          } catch {
+            // Leave adminSid unrevoked so remainingOwnedAdminSessionIds fails closed below.
+          }
+        }
+        const remainingOwnedAdminSessionIds = ownAdminSessionIds.filter(
+          (sid) =>
+            !authoritativelyInactiveAdminSessionIds.has(sid) &&
+            !revokedAdminSessionIds.has(sid),
+        );
+        if (remainingOwnedAdminSessionIds.length === 0) {
           deps.exportSession?.(
             "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
             "passed",
@@ -4327,8 +4514,29 @@ export async function teardownOperationalRoleSessions(
           if (hadOwnedForeignFixture) {
             evidence.admin_session_revoked = true;
           }
-        } catch {
+        } else {
           teardownFailures.push("admin_session");
+          deps.exportSession?.(
+            "DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID",
+            remainingOwnedAdminSessionIds.join(","),
+          );
+          const remainingRecoveryToken = remainingOwnedAdminSessionIds
+            .map((sid) => adminTokenBySessionId.get(sid))
+            .find((tok): tok is string => Boolean(tok));
+          if (remainingRecoveryToken) {
+            deps.exportSession?.(
+              "DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN",
+              remainingRecoveryToken,
+            );
+          }
+          deps.exportSession?.(
+            "DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS",
+            "pending",
+          );
+          deps.exportSession?.(
+            "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED",
+            "false",
+          );
         }
       }
     }
