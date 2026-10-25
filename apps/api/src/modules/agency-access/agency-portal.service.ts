@@ -31,6 +31,7 @@ import type { EvidenceAccessIdentity } from "../../common/evidence-governance";
 import { MultiTaxiService } from "../multi-taxi/multi-taxi.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { ReportingFilingService } from "../reporting-filing/reporting-filing.service";
+import { toTaipeiMonth } from "../reporting/operations-metrics";
 import { ReportingService } from "../reporting/reporting.service";
 import type { DailyDispatchRecordQuery } from "../reporting/reporting.repository";
 import {
@@ -116,6 +117,41 @@ function parseDate(value: unknown, field: string): string | undefined {
   return text;
 }
 
+function parseMonthOrBoundaryDate(
+  value: unknown,
+  boundary: "from" | "to",
+): string | undefined {
+  const text = optionalText(value);
+  if (text === undefined) return undefined;
+  if (MONTH_PATTERN.test(text)) {
+    return text;
+  }
+  if (
+    !DATE_PATTERN.test(text) ||
+    !Number.isFinite(Date.parse(`${text}T00:00:00.000Z`))
+  ) {
+    throw badRequest(
+      "AGENCY_QUERY_INVALID",
+      `${boundary} must use YYYY-MM or full calendar-month boundary YYYY-MM-DD.`,
+    );
+  }
+  const periodMonth = text.slice(0, 7);
+  const [year, month] = periodMonth.split("-").map(Number) as [number, number];
+  const lastDay = String(new Date(Date.UTC(year, month, 0)).getUTCDate()).padStart(
+    2,
+    "0",
+  );
+  const expectedDate =
+    boundary === "from" ? `${periodMonth}-01` : `${periodMonth}-${lastDay}`;
+  if (text !== expectedDate) {
+    throw badRequest(
+      "AGENCY_QUERY_INVALID",
+      `${boundary} must be a calendar month (YYYY-MM) or the exact ${boundary === "from" ? "first" : "last"} day of that month (${expectedDate}); arbitrary day precision is not supported for monthly operations summaries.`,
+    );
+  }
+  return periodMonth;
+}
+
 function monthSpan(from: string, to: string): number {
   const [fromYear, fromMonth] = from.split("-").map(Number) as [number, number];
   const [toYear, toMonth] = to.split("-").map(Number) as [number, number];
@@ -129,7 +165,26 @@ function resolveMonthWindow(
   maxMonths: number,
 ): { from: string; to: string } {
   const now = new Date();
-  const to = toMonth ?? now.toISOString().slice(0, 7);
+  const latest =
+    toTaipeiMonth(now.toISOString()) ?? now.toISOString().slice(0, 7);
+  const to =
+    toMonth ??
+    (fromMonth && fromMonth > latest
+      ? fromMonth
+      : fromMonth
+        ? (() => {
+            const shifted = new Date(
+              Date.UTC(
+                Number(fromMonth.slice(0, 4)),
+                Number(fromMonth.slice(5, 7)) - 1 + (maxMonths - 1),
+                1,
+              ),
+            )
+              .toISOString()
+              .slice(0, 7);
+            return shifted <= latest ? shifted : latest;
+          })()
+        : latest);
   const from =
     fromMonth ??
     new Date(
@@ -374,7 +429,14 @@ export class AgencyPortalService {
 
   async previewOperationsSummary(
     identity: BootstrapRequestIdentity | null,
-    query: { from?: string; to?: string; businessArea?: string },
+    query: {
+      periodMonthFrom?: string;
+      periodMonthTo?: string;
+      from?: string;
+      to?: string;
+      businessArea?: string;
+      serviceProductCode?: string;
+    },
     meta: AgencyRequestMeta,
   ): Promise<AgencyOperationsSummaryView[]> {
     const raw = (query ?? {}) as Record<string, unknown>;
@@ -383,26 +445,43 @@ export class AgencyPortalService {
       resourceType: "operations_summary",
       routeKey: "agency:reports:operations-summary",
       filter: {
+        periodMonthFrom: auditText(raw.periodMonthFrom),
+        periodMonthTo: auditText(raw.periodMonthTo),
         from: auditText(raw.from),
         to: auditText(raw.to),
         businessArea: auditText(raw.businessArea),
+        serviceProductCode: auditText(raw.serviceProductCode),
       },
       execute: async () => {
-        const from = parseDate(raw.from, "from");
-        const to = parseDate(raw.to, "to");
+        const periodFrom = parseMonth(raw.periodMonthFrom, "periodMonthFrom");
+        const periodTo = parseMonth(raw.periodMonthTo, "periodMonthTo");
+        const fromMonth = parseMonthOrBoundaryDate(raw.from, "from");
+        const toMonth = parseMonthOrBoundaryDate(raw.to, "to");
+        if (periodFrom && fromMonth && periodFrom !== fromMonth) {
+          throw badRequest(
+            "AGENCY_QUERY_INVALID",
+            "from and periodMonthFrom must refer to the same calendar month.",
+          );
+        }
+        if (periodTo && toMonth && periodTo !== toMonth) {
+          throw badRequest(
+            "AGENCY_QUERY_INVALID",
+            "to and periodMonthTo must refer to the same calendar month.",
+          );
+        }
         const window = resolveMonthWindow(
-          from?.slice(0, 7),
-          to?.slice(0, 7),
+          periodFrom ?? fromMonth,
+          periodTo ?? toMonth,
           OPERATIONS_WINDOW_MAX_MONTHS,
         );
         const businessArea = optionalText(raw.businessArea);
+        const serviceProductCode = optionalText(raw.serviceProductCode);
         const summaries =
           await this.reportingService.previewSixMonthOperationsSummary({
             periodMonthFrom: window.from,
             periodMonthTo: window.to,
-            ...(from ? { from } : {}),
-            ...(to ? { to } : {}),
             ...(businessArea ? { businessArea } : {}),
+            ...(serviceProductCode ? { serviceProductCode } : {}),
           });
         const result = summaries.map(projectAgencyOperationsSummary);
         return { result, rowCount: result.length, totalCount: result.length };
@@ -412,7 +491,14 @@ export class AgencyPortalService {
 
   async listMonthlyOperationsSummaries(
     identity: BootstrapRequestIdentity | null,
-    query: { periodMonthFrom?: string; periodMonthTo?: string },
+    query: {
+      periodMonthFrom?: string;
+      periodMonthTo?: string;
+      from?: string;
+      to?: string;
+      businessArea?: string;
+      serviceProductCode?: string;
+    },
     meta: AgencyRequestMeta,
   ): Promise<AgencyMonthlyOperationsSummaryView[]> {
     const raw = (query ?? {}) as Record<string, unknown>;
@@ -423,17 +509,73 @@ export class AgencyPortalService {
       filter: {
         periodMonthFrom: auditText(raw.periodMonthFrom),
         periodMonthTo: auditText(raw.periodMonthTo),
+        from: auditText(raw.from),
+        to: auditText(raw.to),
+        businessArea: auditText(raw.businessArea),
+        serviceProductCode: auditText(raw.serviceProductCode),
       },
       execute: async () => {
+        const periodFrom = parseMonth(raw.periodMonthFrom, "periodMonthFrom");
+        const periodTo = parseMonth(raw.periodMonthTo, "periodMonthTo");
+        const fromMonth = parseMonthOrBoundaryDate(raw.from, "from");
+        const toMonth = parseMonthOrBoundaryDate(raw.to, "to");
+        if (periodFrom && fromMonth && periodFrom !== fromMonth) {
+          throw badRequest(
+            "AGENCY_QUERY_INVALID",
+            "from and periodMonthFrom must refer to the same calendar month.",
+          );
+        }
+        if (periodTo && toMonth && periodTo !== toMonth) {
+          throw badRequest(
+            "AGENCY_QUERY_INVALID",
+            "to and periodMonthTo must refer to the same calendar month.",
+          );
+        }
         const window = resolveMonthWindow(
-          parseMonth(raw.periodMonthFrom, "periodMonthFrom"),
-          parseMonth(raw.periodMonthTo, "periodMonthTo"),
+          periodFrom ?? fromMonth,
+          periodTo ?? toMonth,
           OPERATIONS_WINDOW_MAX_MONTHS,
         );
+        const businessArea = optionalText(raw.businessArea);
+        const serviceProductCode = optionalText(raw.serviceProductCode);
+        if (
+          typeof this.reportingService.previewSixMonthOperationsSummary ===
+          "function"
+        ) {
+          const summaries =
+            await this.reportingService.previewSixMonthOperationsSummary({
+              periodMonthFrom: window.from,
+              periodMonthTo: window.to,
+              ...(businessArea ? { businessArea } : {}),
+              ...(serviceProductCode ? { serviceProductCode } : {}),
+            });
+          if (summaries.some((s) => (s.monthlySummaries?.length ?? 0) > 0)) {
+            const result = summaries
+              .flatMap((summary) => summary.monthlySummaries ?? [])
+              .map(projectAgencyMonthlyOperationsSummary)
+              .sort(
+                (left, right) =>
+                  right.periodMonth.localeCompare(left.periodMonth) ||
+                  (left.businessArea ?? "").localeCompare(
+                    right.businessArea ?? "",
+                  ) ||
+                  (left.serviceProductCode ?? "").localeCompare(
+                    right.serviceProductCode ?? "",
+                  ),
+              );
+            return {
+              result,
+              rowCount: result.length,
+              totalCount: result.length,
+            };
+          }
+        }
         const result = (
           await this.reportingService.listMonthlyOperationsSummaries({
             periodMonthFrom: window.from,
             periodMonthTo: window.to,
+            ...(businessArea ? { businessArea } : {}),
+            ...(serviceProductCode ? { serviceProductCode } : {}),
           })
         ).map(projectAgencyMonthlyOperationsSummary);
         return { result, rowCount: result.length, totalCount: result.length };
@@ -462,17 +604,38 @@ export class AgencyPortalService {
           COMPLAINT_WINDOW_MAX_MONTHS,
         );
         // The accepted R09 preview is the only source of closed/overdue
-        // counts; it also refreshes the monthly read model read below.
+        // counts and also carries the same-batch monthly read model rows.
         const previews =
           await this.reportingService.previewSixMonthOperationsSummary({
             periodMonthFrom: window.from,
             periodMonthTo: window.to,
           });
+        const monthlyFromPreviews = previews.flatMap((summary) =>
+          (summary.monthlySummaries ?? []).map((item) => ({
+            periodMonth: item.periodMonth,
+            businessArea: item.businessArea ?? "unassigned",
+            serviceProductCode: item.serviceProductCode ?? "unknown",
+            demandRequestCount: item.demandRequestCount,
+            actualDispatchCount: item.actualDispatchCount,
+            completedTripCount: item.completedTripCount,
+            cancelledOrderCount: item.cancelledOrderCount,
+            averageDispatchableVehicleCount:
+              item.averageDispatchableVehicleCount ?? 0,
+            validSnapshotCount: item.validSnapshotCount,
+            expectedSnapshotCount: item.expectedSnapshotCount,
+            snapshotCoverageRate: item.snapshotCoverageRate,
+            complaintCount: item.complaintCount,
+            complaintsByCategory: { ...item.complaintsByCategory },
+            generatedAt: item.generatedAt,
+          })),
+        );
         const monthly =
-          await this.reportingService.listMonthlyOperationsSummaries({
-            periodMonthFrom: window.from,
-            periodMonthTo: window.to,
-          });
+          monthlyFromPreviews.length > 0
+            ? monthlyFromPreviews
+            : await this.reportingService.listMonthlyOperationsSummaries({
+                periodMonthFrom: window.from,
+                periodMonthTo: window.to,
+              });
         const items = projectAgencyComplaintMonthlyStatistics(
           monthly,
           previews,

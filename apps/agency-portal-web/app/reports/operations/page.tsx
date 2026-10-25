@@ -22,9 +22,15 @@ const FIGURE_COLUMNS = [
   { label: "實際派遣" },
   { label: "完成趟次" },
   { label: "取消" },
+  { label: "準時" },
+  { label: "未準時" },
+  { label: "未到" },
+  { label: "無法判定" },
   { label: "平均可派車輛" },
+  { label: "有效／預期快照" },
   { label: "快照涵蓋率" },
   { label: "投訴數" },
+  { label: "生成時間" },
 ];
 
 function FigureCells({
@@ -40,9 +46,15 @@ function FigureCells({
       <Td>{row.actualDispatchCount}</Td>
       <Td>{row.completedTripCount}</Td>
       <Td>{row.cancelledOrderCount}</Td>
-      <Td>{row.averageDispatchableVehicleCount}</Td>
+      <Td>{display(row.onTimeTripCount)}</Td>
+      <Td>{display(row.lateTripCount)}</Td>
+      <Td>{display(row.noShowTripCount)}</Td>
+      <Td>{display(row.punctualityUnknownTripCount)}</Td>
+      <Td>{display(row.averageDispatchableVehicleCount)}</Td>
+      <Td>{`${row.validSnapshotCount} / ${row.expectedSnapshotCount}`}</Td>
       <Td>{displayPercent(row.snapshotCoverageRate)}</Td>
       <Td>{row.complaintCount}</Td>
+      <Td>{display(row.generatedAt)}</Td>
     </>
   );
 }
@@ -53,45 +65,76 @@ export default async function OperationsReportPage({
   searchParams: SearchParams;
 }) {
   const params = await searchParams;
-  const from = firstParam(params.from);
-  const to = firstParam(params.to);
-  const [summary, monthly] = await Promise.all([
-    loadAgencyData<{ items: AgencyOperationsSummaryView[] }>(
-      "/reports/operations",
-      ["reports", "operations-summary"],
-      { from, to },
-    ),
-    loadAgencyData<{ items: AgencyMonthlyOperationsSummaryView[] }>(
-      "/reports/operations",
-      ["reports", "monthly-operations-summaries"],
-      {
-        periodMonthFrom: from?.slice(0, 7),
-        periodMonthTo: to?.slice(0, 7),
-      },
-    ),
-  ]);
+  const periodMonthFrom =
+    firstParam(params.periodMonthFrom) ?? firstParam(params.from);
+  const periodMonthTo =
+    firstParam(params.periodMonthTo) ?? firstParam(params.to);
+  const businessArea = firstParam(params.businessArea);
+  const summary = await loadAgencyData<{ items: AgencyOperationsSummaryView[] }>(
+    "/reports/operations",
+    ["reports", "operations-summary"],
+    {
+      periodMonthFrom,
+      periodMonthTo,
+      businessArea,
+    },
+  );
+  const sameBatchMonthly: AgencyMonthlyOperationsSummaryView[] | null =
+    summary.data
+      ? summary.data.items
+          .flatMap(
+            (row: AgencyOperationsSummaryView) => row.monthlySummaries ?? [],
+          )
+          .sort(
+            (
+              left: AgencyMonthlyOperationsSummaryView,
+              right: AgencyMonthlyOperationsSummaryView,
+            ) =>
+              right.periodMonth.localeCompare(left.periodMonth) ||
+              (left.businessArea ?? "").localeCompare(
+                right.businessArea ?? "",
+              ) ||
+              (left.serviceProductCode ?? "").localeCompare(
+                right.serviceProductCode ?? "",
+              ),
+          )
+      : null;
   const profile = await readAgencyProfile();
   return (
     <PortalShell agencyName={profile?.agencyDisplayName ?? null}>
       <PageHeader
         title="R10 六個月營運統計"
-        subtitle="區間上限 6 個曆月；彙總數字，不含個資。"
+        subtitle="以臺北曆月（Asia/Taipei）為統計單位，區間上限 6 個曆月；彙總與逐月明細共用同一生成批次，不含個資。"
       />
       <form method="get" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
         <label>
-          起日 <input type="date" name="from" defaultValue={from ?? ""} />
+          起始月份{" "}
+          <input
+            type="month"
+            name="periodMonthFrom"
+            defaultValue={periodMonthFrom ?? ""}
+          />
         </label>
         <label>
-          迄日 <input type="date" name="to" defaultValue={to ?? ""} />
+          結束月份{" "}
+          <input
+            type="month"
+            name="periodMonthTo"
+            defaultValue={periodMonthTo ?? ""}
+          />
         </label>
         <button type="submit">查詢</button>
       </form>
       {summary.data ? (
         <Card>
           <CardHeader>區間彙總</CardHeader>
-          <DataTable columns={FIGURE_COLUMNS} empty="查無資料">
-            {summary.data.items.map((row) => (
+          <DataTable
+            columns={[{ label: "月份區間" }, ...FIGURE_COLUMNS]}
+            empty="查無資料"
+          >
+            {summary.data.items.map((row: AgencyOperationsSummaryView) => (
               <Tr key={`${row.businessArea}:${row.serviceProductCode}`}>
+                <Td>{`${row.from.slice(0, 7)} ~ ${row.to.slice(0, 7)}`}</Td>
                 <FigureCells row={row} />
               </Tr>
             ))}
@@ -101,14 +144,14 @@ export default async function OperationsReportPage({
         <ErrorNotice status={summary.status} error={summary.error} />
       )}
       <div style={{ height: 16 }} />
-      {monthly.data ? (
+      {sameBatchMonthly ? (
         <Card>
-          <CardHeader>各月明細</CardHeader>
+          <CardHeader>各月明細（同批生成）</CardHeader>
           <DataTable
             columns={[{ label: "月份" }, ...FIGURE_COLUMNS]}
             empty="查無資料"
           >
-            {monthly.data.items.map((row) => (
+            {sameBatchMonthly.map((row: AgencyMonthlyOperationsSummaryView) => (
               <Tr
                 key={`${row.periodMonth}:${row.businessArea}:${row.serviceProductCode}`}
               >
@@ -119,7 +162,7 @@ export default async function OperationsReportPage({
           </DataTable>
         </Card>
       ) : (
-        <ErrorNotice status={monthly.status} error={monthly.error} />
+        <ErrorNotice status={summary.status} error={summary.error} />
       )}
     </PortalShell>
   );

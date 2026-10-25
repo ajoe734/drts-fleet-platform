@@ -6296,6 +6296,7 @@ export type ReportJobRowRecord =
   | DriverRosterRowRecord
   | InsuranceRosterRowRecord
   | import("./phase1-p5-s3-multi-taxi").MultiTaxiTripOperationalExportRow
+  | import("./phase1-delta-supply-eligibility").SixMonthMonthlyOperationsSummary
   | import("./phase1-delta-supply-eligibility").SixMonthOperationsSummary
   | TenantMonthlyTripReportRowRecord
   | VehicleMonthlyDeltaRowRecord
@@ -8084,18 +8085,24 @@ export interface AgencyOperationsSummaryView {
   actualDispatchCount: number;
   completedTripCount: number;
   cancelledOrderCount: number;
-  averageDispatchableVehicleCount: number;
+  averageDispatchableVehicleCount: number | null;
   validSnapshotCount: number;
   expectedSnapshotCount: number;
   snapshotCoverageRate: number | null;
   complaintCount: number;
   complaintsByCategory: Record<string, number>;
+  lateArrivalThresholdMinutes?: number;
+  onTimeTripCount?: number;
+  lateTripCount?: number;
+  noShowTripCount?: number;
+  punctualityUnknownTripCount?: number;
+  monthlySummaries?: AgencyMonthlyOperationsSummaryView[];
   generatedAt: string;
 }
 
 export interface AgencyMonthlyOperationsSummaryView extends Omit<
   AgencyOperationsSummaryView,
-  "from" | "to"
+  "from" | "to" | "monthlySummaries"
 > {
   periodMonth: string;
 }
