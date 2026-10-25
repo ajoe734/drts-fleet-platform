@@ -826,6 +826,9 @@ export interface MultiTaxiTripOperationalRecordQuery {
   month?: string;
   q?: string;
   legalHold?: MultiTaxiTripOperationalLegalHoldFilter;
+  /** BUREAU-R13: inclusive YYYY-MM-DD bounds compared against `reservedAt`. */
+  reservedFrom?: string;
+  reservedTo?: string;
 }
 
 export type MultiTaxiTripOperationalLegalHoldFilter = "all" | "active" | "none";
@@ -905,6 +908,8 @@ export interface MultiTaxiTripOperationalExportJobView {
   purpose: string;
   recordCount: number;
   requestedByActorId: string;
+  /** BUREAU-R13: set only for jobs created by an agency session. */
+  agencyId?: string;
   downloadAvailable: boolean;
   createdAt: string;
   updatedAt: string;

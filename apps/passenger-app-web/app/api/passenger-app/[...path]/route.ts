@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ECPAY_HOSTED_FIELDS_CSP } from "../../../../components/payment/ecpay-csp";
 import { applyUpstreamAuth } from "../../../../lib/api-upstream";
 import {
   readOAuthBinding,
@@ -147,6 +148,16 @@ function isAllowedPassengerPath(path: string[], method: string) {
   if (["GET", "POST"].includes(method) && fullPath === "payment-methods")
     return true;
   if (
+    method === "POST" &&
+    [
+      "payment-methods/binding-session",
+      "payment-methods/3ds-complete",
+      "payment-methods/ecpay/callback",
+      "payment-methods/ecpay/order-result",
+    ].includes(fullPath)
+  )
+    return true;
+  if (
     path[0] === "payment-methods" &&
     /^[A-Za-z0-9._:-]{1,128}$/.test(path[1] ?? "") &&
     ((method === "DELETE" && path.length === 2) ||
@@ -209,10 +220,7 @@ async function checkCSRF(request: NextRequest) {
 }
 
 function withSecurityHeaders(response: NextResponse) {
-  response.headers.set(
-    "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
-  );
+  response.headers.set("Content-Security-Policy", ECPAY_HOSTED_FIELDS_CSP);
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set(
@@ -264,7 +272,13 @@ async function forward(
       path[3] === "callback" &&
       method === "POST";
 
-    if (!(await checkCSRF(request))) {
+    const isEcpayServerCallback =
+      method === "POST" && fullPath === "payment-methods/ecpay/callback";
+    const isEcpayOrderResult =
+      method === "POST" && fullPath === "payment-methods/ecpay/order-result";
+    const isEcpayCallback = isEcpayServerCallback || isEcpayOrderResult;
+
+    if (!isEcpayCallback && !(await checkCSRF(request))) {
       return withSecurityHeaders(
         NextResponse.json({ error: "CSRF_CHECK_FAILED" }, { status: 403 }),
       );
@@ -297,6 +311,155 @@ async function forward(
     let initialBodyData: BodyInit | null = null;
     if (!["GET", "HEAD"].includes(method)) {
       initialBodyData = await request.arrayBuffer();
+    }
+
+    if (isEcpayCallback) {
+      const rawText = initialBodyData
+        ? new TextDecoder().decode(initialBodyData as ArrayBuffer).trim()
+        : "";
+      let parsedEnvelope: Record<string, unknown> | null = null;
+      if (rawText) {
+        try {
+          if (rawText.startsWith("{")) {
+            const candidate = JSON.parse(rawText);
+            if (
+              candidate &&
+              typeof candidate === "object" &&
+              !Array.isArray(candidate)
+            ) {
+              if (
+                candidate.MerchantID === undefined &&
+                typeof candidate.ResultData === "string"
+              ) {
+                const inner = JSON.parse(candidate.ResultData.trim());
+                if (
+                  inner &&
+                  typeof inner === "object" &&
+                  !Array.isArray(inner)
+                ) {
+                  parsedEnvelope = inner as Record<string, unknown>;
+                }
+              } else {
+                parsedEnvelope = candidate as Record<string, unknown>;
+              }
+            }
+          } else {
+            const formParams = new URLSearchParams(rawText);
+            const resultData = formParams.get("ResultData");
+            if (resultData) {
+              const inner = JSON.parse(resultData.trim());
+              if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+                parsedEnvelope = inner as Record<string, unknown>;
+              }
+            } else if (formParams.has("MerchantID")) {
+              const obj: Record<string, unknown> = {};
+              formParams.forEach((v, k) => {
+                obj[k] = v;
+              });
+              parsedEnvelope = obj;
+            }
+          }
+        } catch {
+          parsedEnvelope = null;
+        }
+      }
+      if (!parsedEnvelope) {
+        return withSecurityHeaders(
+          NextResponse.json(
+            {
+              error: {
+                code: "validation_error",
+                message: "Invalid ECPay notification payload.",
+              },
+            },
+            { status: 400 },
+          ),
+        );
+      }
+      const headers = new Headers({
+        "Content-Type": "application/json",
+        Accept: isEcpayServerCallback
+          ? "text/plain, application/json"
+          : "application/json",
+      });
+      await applyUpstreamAuth(headers, targetUrl);
+      const upstream = await fetch(targetUrl.toString(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify(parsedEnvelope),
+        cache: "no-store",
+        redirect: "manual",
+      });
+      if (isEcpayServerCallback) {
+        if (upstream.ok) {
+          return withSecurityHeaders(
+            new NextResponse("1|OK", {
+              status: 200,
+              headers: { "Content-Type": "text/plain; charset=utf-8" },
+            }),
+          );
+        }
+        const errBody = await upstream.text();
+        return withSecurityHeaders(
+          new NextResponse(errBody, {
+            status: upstream.status,
+            headers: copyHeaders(upstream.headers),
+          }),
+        );
+      }
+      const accept = request.headers.get("accept") ?? "";
+      if (
+        accept.includes("application/json") &&
+        !accept.includes("text/html")
+      ) {
+        const jsonText = await upstream.text();
+        return withSecurityHeaders(
+          new NextResponse(jsonText, {
+            status: upstream.status,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      const requestUrl = new URL(request.url);
+      const host = request.headers.get("host");
+      const baseRedirectUrl = host
+        ? new URL(`${requestUrl.protocol}//${host}`)
+        : new URL(requestUrl.origin);
+      if (
+        host &&
+        process.env.NODE_ENV === "production" &&
+        !["localhost", "127.0.0.1", "[::1]"].includes(baseRedirectUrl.hostname)
+      ) {
+        baseRedirectUrl.protocol = "https:";
+      }
+      let orderResultStatus: "completed" | "failed" | "unknown" = "failed";
+      if (upstream.ok) {
+        try {
+          const bodyJson = (await upstream.json()) as {
+            data?: { status?: string };
+            status?: string;
+          };
+          const rawStatus = bodyJson?.data?.status ?? bodyJson?.status;
+          if (rawStatus === "completed") {
+            orderResultStatus = "completed";
+          } else if (
+            rawStatus === "unknown" ||
+            rawStatus === "pending" ||
+            rawStatus === "action_required"
+          ) {
+            orderResultStatus = "unknown";
+          } else {
+            orderResultStatus = "failed";
+          }
+        } catch {
+          orderResultStatus = "unknown";
+        }
+      }
+      const redirectTarget = new URL(
+        `/account/payment-methods?ecpay_3ds=${orderResultStatus}`,
+        baseRedirectUrl.origin,
+      );
+      return withSecurityHeaders(NextResponse.redirect(redirectTarget, 303));
     }
 
     const isOAuthStart =

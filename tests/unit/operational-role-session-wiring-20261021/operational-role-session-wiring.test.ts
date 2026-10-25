@@ -2067,6 +2067,7 @@ process.exit(99);
         failCanonicalFleetVerifyStatus?: number;
         failFleetDeactivateOnce?: boolean;
         expireFirstAdminSessionBeforeTeardown?: boolean;
+        failAdminSessionVerifyWithTransientErrorOnTeardownOnce?: boolean;
         strictNoDevStepUpWaiver?: boolean;
         crossInstanceStepUpMismatch?: boolean;
       } = {},
@@ -2366,6 +2367,8 @@ process.exit(99);
       let droppedKeyIssueOnce = false;
       let droppedBootstrapOnce = false;
       let failedFleetDeactivateOnce = false;
+      let readyToFailAdminSessionVerifyOnTeardown = false;
+      let failedAdminSessionVerifyOnTeardownOnce = false;
 
       const guardRequest = async (
         controllerClass: Record<string, unknown>,
@@ -2541,6 +2544,16 @@ process.exit(99);
             expect(headers.authorization).toBe(
               `Bearer ${SIM_PLATFORM_ADMIN_ID_TOKEN}`,
             );
+            if (
+              options.failAdminSessionVerifyWithTransientErrorOnTeardownOnce &&
+              readyToFailAdminSessionVerifyOnTeardown &&
+              !failedAdminSessionVerifyOnTeardownOnce
+            ) {
+              failedAdminSessionVerifyOnTeardownOnce = true;
+              throw new TypeError(
+                "transient transport failure during Admin session verification; original session remains active",
+              );
+            }
             const req = await guardRequest(
               AuthController as unknown as Record<string, unknown>,
               "getAuthSession",
@@ -2767,6 +2780,7 @@ process.exit(99);
                 !failedFleetDeactivateOnce
               ) {
                 failedFleetDeactivateOnce = true;
+                readyToFailAdminSessionVerifyOnTeardown = true;
                 if (options.expireFirstAdminSessionBeforeTeardown) {
                   for (const sid of issuedAdminSessionIds) {
                     await identityRepository.revokeSession(
@@ -4246,6 +4260,690 @@ process.exit(99);
         (await retryHarness.fleetPartnerService.getFleetPartner(createdFleetId))
           .active,
       ).toBe(false);
+    });
+
+    it("preserves and revokes all issued owned Admin sessions when GET /control-plane-proxy/auth/session fails transiently or returns an unknown response while the initial owned Admin session remains active", async () => {
+      // 1. Exact 4-call boundary probe: initial owned Admin session remains active when GET /control-plane-proxy/auth/session throws transient TypeError
+      const oldId = "synthetic-original-owned-admin";
+      const newId = "synthetic-replacement-owned-admin";
+      const oldToken = "synthetic-original-token";
+      const newToken = "synthetic-replacement-token";
+      const fleetId = "synthetic-owned-foreign-fleet";
+      const probeEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const active = new Map<string, boolean>([[oldId, true]]);
+      const probeCalls: Array<{
+        method: string;
+        path: string;
+        sessionId?: string;
+      }> = [];
+      let probeSaved: OperationalRoleSessionsCleanupEvidence | undefined;
+      const probeFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const path = new URL(url).pathname;
+        const h = new Headers(init?.headers);
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          probeCalls.push({ method, path });
+          expect(h.get("x-drts-authorization")).toBe(`Bearer ${oldToken}`);
+          expect(active.get(oldId)).toBe(true);
+          throw new TypeError(
+            "synthetic transient transport failure; original session remains active",
+          );
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          probeCalls.push({ method, path });
+          active.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          probeCalls.push({ method, path });
+          expect(h.get("x-drts-authorization")).toBe(`Bearer ${newToken}`);
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          probeCalls.push({ method, path, sessionId });
+          expect(h.get("authorization")).toBe(`Bearer ${newToken}`);
+          expect(active.has(sessionId)).toBe(true);
+          active.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(`Unexpected probe HTTP call: ${method} ${path}`);
+      }) as typeof fetch;
+
+      const probeResult = await teardownOperationalRoleSessions(probeEnv, {
+        fetch: probeFetch,
+        mask: () => {},
+        exportSession: (name, value) => {
+          probeEnv[name] = value;
+        },
+        save: (data) => {
+          probeSaved = data;
+        },
+      });
+      const revokedIds = probeCalls
+        .filter((c) => c.path === "/api/auth/sessions/revoke")
+        .map((c) => c.sessionId);
+      expect(probeResult.status).toBe("passed");
+      expect(probeResult.admin_session_revoked).toBe(true);
+      expect(probeEnv.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS).toBe(
+        "passed",
+      );
+      expect(probeEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID).toBe(
+        `${oldId},${newId}`,
+      );
+      expect(revokedIds).toEqual([oldId, newId]);
+      expect(active.get(oldId)).toBe(false);
+      expect(active.get(newId)).toBe(false);
+      expect(probeSaved).toEqual(probeResult);
+
+      // 2. Fail-closed guard when GET /control-plane-proxy/auth/session returns an unknown payload and revoking the original session fails once
+      const failClosedEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const failClosedActive = new Map<string, boolean>([[oldId, true]]);
+      let failOldRevokeOnce = true;
+      let failClosedSaved: OperationalRoleSessionsCleanupEvidence | undefined;
+      const failClosedFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          return jsonResponse({ data: { status: "unknown" } });
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          failClosedActive.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          if (sessionId === oldId && failOldRevokeOnce) {
+            failOldRevokeOnce = false;
+            return jsonResponse(
+              { error: "transient_revoke_error" },
+              { status: 503 },
+            );
+          }
+          failClosedActive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(
+          `Unexpected failClosedFetch HTTP call: ${method} ${url}`,
+        );
+      }) as typeof fetch;
+
+      await expect(
+        teardownOperationalRoleSessions(failClosedEnv, {
+          fetch: failClosedFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            failClosedEnv[name] = value;
+          },
+          save: (data) => {
+            failClosedSaved = data;
+          },
+        }),
+      ).rejects.toThrow(/Operational role session cleanup failed/);
+      expect(failClosedSaved?.status).toBe("failed");
+      expect(failClosedSaved?.admin_session_revoked).toBe(false);
+      expect(failClosedEnv.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS).toBe(
+        "failed",
+      );
+      expect(failClosedEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS).toBe(
+        "pending",
+      );
+      expect(
+        failClosedEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED,
+      ).toBe("false");
+      expect(
+        failClosedEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID,
+      ).toBe(oldId);
+      expect(failClosedActive.get(oldId)).toBe(true);
+      expect(failClosedActive.get(newId)).toBe(false);
+
+      const retriedFailClosed = await teardownOperationalRoleSessions(
+        failClosedEnv,
+        {
+          fetch: failClosedFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            failClosedEnv[name] = value;
+          },
+          save: (data) => {
+            failClosedSaved = data;
+          },
+        },
+      );
+      expect(retriedFailClosed.status).toBe("passed");
+      expect(retriedFailClosed.admin_session_revoked).toBe(true);
+      expect(failClosedActive.get(oldId)).toBe(false);
+
+      // 3. Real-service harness: initial owned Admin session stays active across transient GET /control-plane-proxy/auth/session failure, replacement Admin session is minted, and both Admin sessions are revoked in IdentityRepository
+      const transientAdminHarness = createOwnedForeignFleetRealServiceHarness({
+        failFleetDeactivateOnce: true,
+        failAdminSessionVerifyWithTransientErrorOnTeardownOnce: true,
+      });
+      const env = createNoProvidedForeignFleetEnv();
+      const evidence = await prepareOperationalRoleSessions(env, {
+        fetch: transientAdminHarness.fetchImpl,
+        mask: () => {},
+        exportSession: (name, value) => {
+          env[name] = value;
+        },
+        save: () => {},
+      });
+      expect(evidence.status).toBe("passed");
+      const initialAdminSid =
+        env.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID!;
+      expect(initialAdminSid).toBeTruthy();
+
+      await expect(
+        teardownOperationalRoleSessions(env, {
+          fetch: transientAdminHarness.fetchImpl,
+          mask: () => {},
+          exportSession: (name, value) => {
+            env[name] = value;
+          },
+          save: () => {},
+        }),
+      ).rejects.toThrow(/Operational role session cleanup failed/);
+      expect(
+        (
+          await transientAdminHarness.identityRepository.getSession(
+            initialAdminSid,
+          )
+        )?.status,
+      ).toBe("active");
+
+      const retryResult = await teardownOperationalRoleSessions(env, {
+        fetch: transientAdminHarness.fetchImpl,
+        mask: () => {},
+        exportSession: (name, value) => {
+          env[name] = value;
+        },
+        save: () => {},
+      });
+      expect(retryResult.status).toBe("passed");
+      expect(retryResult.admin_session_revoked).toBe(true);
+      expect(transientAdminHarness.issuedAdminSessionIds.length).toBe(2);
+      const [firstIssuedSid, secondIssuedSid] =
+        transientAdminHarness.issuedAdminSessionIds;
+      expect(firstIssuedSid).toBe(initialAdminSid);
+      expect(secondIssuedSid).not.toBe(initialAdminSid);
+      expect(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID).toBe(
+        `${firstIssuedSid},${secondIssuedSid}`,
+      );
+      expect(
+        (
+          await transientAdminHarness.identityRepository.getSession(
+            firstIssuedSid!,
+          )
+        )?.status,
+      ).toBe("revoked");
+      expect(
+        (
+          await transientAdminHarness.identityRepository.getSession(
+            secondIssuedSid!,
+          )
+        )?.status,
+      ).toBe("revoked");
+
+      // 4. R1 regression: when known oldId exists, GET /control-plane-proxy/auth/session transiently fails, and POST /control-plane-proxy/auth/token persists replacement newId on the server but loses its ACK before returning, retry must NOT report passed after revoking only oldId while newId remains active (and must not blindly remint).
+      const lostAckEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const lostAckActive = new Map<string, boolean>([[oldId, true]]);
+      let lostAckGetCount = 0;
+      let lostAckMintCount = 0;
+      const lostAckRevokedIds: string[] = [];
+      let lostAckSaved: OperationalRoleSessionsCleanupEvidence | undefined;
+      const lostAckFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          lostAckGetCount += 1;
+          if (lostAckGetCount === 1) {
+            throw new TypeError("fetch failed: transient ECONNRESET");
+          }
+          return jsonResponse({
+            data: { active: true, identity: { sessionId: oldId } },
+          });
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          lostAckMintCount += 1;
+          lostAckActive.set(newId, true);
+          throw new TypeError(
+            "socket hang up after server persisted replacement admin session",
+          );
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          lostAckRevokedIds.push(sessionId);
+          lostAckActive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(`Unexpected lostAckFetch HTTP call: ${method} ${url}`);
+      }) as typeof fetch;
+
+      await expect(
+        teardownOperationalRoleSessions(lostAckEnv, {
+          fetch: lostAckFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            lostAckEnv[name] = value;
+          },
+          save: (data) => {
+            lostAckSaved = data;
+          },
+        }),
+      ).rejects.toThrow(/Operational role session cleanup failed/);
+      expect(lostAckSaved?.status).toBe("failed");
+      expect(lostAckSaved?.admin_session_revoked).toBe(false);
+      expect(
+        lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_UNCONFIRMED_ISSUANCE,
+      ).toBe("true");
+      expect(lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID).toBe(
+        oldId,
+      );
+      expect(lostAckActive.get(oldId)).toBe(true);
+      expect(lostAckActive.get(newId)).toBe(true);
+
+      await expect(
+        teardownOperationalRoleSessions(lostAckEnv, {
+          fetch: lostAckFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            lostAckEnv[name] = value;
+          },
+          save: (data) => {
+            lostAckSaved = data;
+          },
+        }),
+      ).rejects.toThrow(/Operational role session cleanup failed/);
+      expect(lostAckSaved?.status).toBe("failed");
+      expect(lostAckSaved?.admin_session_revoked).toBe(false);
+      expect(lostAckEnv.DRTS_OPERATIONAL_ROLE_SESSIONS_CLEANUP_STATUS).toBe(
+        "failed",
+      );
+      expect(lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS).toBe(
+        "pending",
+      );
+      expect(lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED).toBe(
+        "false",
+      );
+      expect(
+        lostAckEnv.DRTS_OPERATIONAL_PLATFORM_ADMIN_UNCONFIRMED_ISSUANCE,
+      ).toBe("true");
+      expect(lostAckMintCount).toBe(1);
+      expect(lostAckRevokedIds).toEqual([oldId]);
+      expect(lostAckActive.get(oldId)).toBe(false);
+      expect(lostAckActive.get(newId)).toBe(true);
+
+      // 5. R2 regression: candidate-SHA-matched HTTP 401 JWT_INVALID on GET /control-plane-proxy/auth/session is NOT authoritative session-ID inactivity; oldId must remain pending and be explicitly revoked via replacement authority, whereas ID-correlated 200 { active: false, identity: { sessionId: oldId } } is authoritative inactivity.
+      const jwtInvalidEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const jwtInvalidActive = new Map<string, boolean>([[oldId, true]]);
+      const jwtInvalidRevokedIds: string[] = [];
+      let jwtInvalidSaved: OperationalRoleSessionsCleanupEvidence | undefined;
+      const jwtInvalidFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          return jsonResponse(
+            {
+              code: "JWT_INVALID",
+              message:
+                "Access token rejected while durable session row remains active",
+            },
+            { status: 401 },
+          );
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          jwtInvalidActive.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const authHeader =
+            init?.headers instanceof Headers
+              ? init.headers.get("authorization")
+              : ((init?.headers as Record<string, string> | undefined)
+                  ?.authorization ??
+                (init?.headers as Record<string, string> | undefined)
+                  ?.Authorization);
+          if (authHeader !== `Bearer ${newToken}`) {
+            return jsonResponse(
+              { code: "JWT_INVALID", message: "Invalid bearer token" },
+              { status: 401 },
+            );
+          }
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          jwtInvalidRevokedIds.push(sessionId);
+          jwtInvalidActive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(
+          `Unexpected jwtInvalidFetch HTTP call: ${method} ${url}`,
+        );
+      }) as typeof fetch;
+
+      const jwtInvalidResult = await teardownOperationalRoleSessions(
+        jwtInvalidEnv,
+        {
+          fetch: jwtInvalidFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            jwtInvalidEnv[name] = value;
+          },
+          save: (data) => {
+            jwtInvalidSaved = data;
+          },
+        },
+      );
+      expect(jwtInvalidResult.status).toBe("passed");
+      expect(jwtInvalidResult.admin_session_revoked).toBe(true);
+      expect(jwtInvalidSaved).toEqual(jwtInvalidResult);
+      expect(jwtInvalidRevokedIds).toEqual([oldId, newId]);
+      expect(jwtInvalidActive.get(oldId)).toBe(false);
+      expect(jwtInvalidActive.get(newId)).toBe(false);
+
+      const correlatedInactiveEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "pending",
+      };
+      const correlatedInactive = new Map<string, boolean>([[oldId, false]]);
+      const correlatedRevokedIds: string[] = [];
+      const correlatedInactiveFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          return jsonResponse({
+            data: { active: false, identity: { sessionId: oldId } },
+          });
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          correlatedInactive.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url ===
+            `${ADMIN_ORIGIN}/control-plane-proxy/admin/fleet-partners/${fleetId}` &&
+          method === "PUT"
+        ) {
+          return jsonResponse({
+            data: { fleetPartnerId: fleetId, active: false },
+          });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          correlatedRevokedIds.push(sessionId);
+          correlatedInactive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(
+          `Unexpected correlatedInactiveFetch HTTP call: ${method} ${url}`,
+        );
+      }) as typeof fetch;
+
+      const correlatedInactiveResult = await teardownOperationalRoleSessions(
+        correlatedInactiveEnv,
+        {
+          fetch: correlatedInactiveFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            correlatedInactiveEnv[name] = value;
+          },
+          save: () => {},
+        },
+      );
+      expect(correlatedInactiveResult.status).toBe("passed");
+      expect(correlatedInactiveResult.admin_session_revoked).toBe(true);
+      expect(correlatedRevokedIds).toEqual([newId]);
+      expect(correlatedInactive.get(oldId)).toBe(false);
+      expect(correlatedInactive.get(newId)).toBe(false);
+
+      // 6. R3 regression: when foreign resources are already cleaned (passed/deactivated) and only owned Admin session cleanup remains pending with a recovery token that can no longer authorize revoke, teardown checks Admin session and mints replacement Admin authority to revoke [oldId, newId].
+      const adminOnlyEnv: Record<string, string | undefined> = {
+        DRTS_CANDIDATE_SHA: CANDIDATE_SHA,
+        DRTS_OPERATIONAL_API_URL: API_ORIGIN,
+        DRTS_OPERATIONAL_OPS_CONSOLE_URL: OPS_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_URL: ADMIN_ORIGIN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ID_TOKEN: SIM_PLATFORM_ADMIN_ID_TOKEN,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_OWNED_SESSION_ID: oldId,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_RECOVERY_TOKEN: oldToken,
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_ISSUED_ATTEMPTED: "true",
+        DRTS_OPERATIONAL_PLATFORM_ADMIN_CLEANUP_STATUS: "pending",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_OWNED_PARTNER_ID: fleetId,
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_CLEANUP_STATUS: "passed",
+        DRTS_OPERATIONAL_FOREIGN_FLEET_MASTER_DEACTIVATED: "true",
+      };
+      const adminOnlyActive = new Map<string, boolean>([[oldId, true]]);
+      let adminOnlyGetCount = 0;
+      let adminOnlyMintCount = 0;
+      const adminOnlyRevokedIds: string[] = [];
+      const adminOnlyFetch = (async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/session` &&
+          method === "GET"
+        ) {
+          adminOnlyGetCount += 1;
+          return jsonResponse({
+            data: { active: true, identity: { sessionId: oldId } },
+          });
+        }
+        if (
+          url === `${ADMIN_ORIGIN}/control-plane-proxy/auth/token` &&
+          method === "POST"
+        ) {
+          adminOnlyMintCount += 1;
+          adminOnlyActive.set(newId, true);
+          return jsonResponse({ data: { token: newToken, sessionId: newId } });
+        }
+        if (
+          url === `${API_ORIGIN}/api/auth/sessions/revoke` &&
+          method === "POST"
+        ) {
+          const authHeader =
+            init?.headers instanceof Headers
+              ? init.headers.get("authorization")
+              : ((init?.headers as Record<string, string> | undefined)
+                  ?.authorization ??
+                (init?.headers as Record<string, string> | undefined)
+                  ?.Authorization);
+          if (authHeader !== `Bearer ${newToken}`) {
+            return jsonResponse(
+              { code: "SESSION_EXPIRED", message: "Prior recovery token expired" },
+              { status: 401 },
+            );
+          }
+          const { sessionId } = JSON.parse(String(init?.body)) as {
+            sessionId: string;
+          };
+          adminOnlyRevokedIds.push(sessionId);
+          adminOnlyActive.set(sessionId, false);
+          return jsonResponse({ data: { sessionId, revoked: true } });
+        }
+        throw new Error(
+          `Unexpected adminOnlyFetch HTTP call: ${method} ${url}`,
+        );
+      }) as typeof fetch;
+
+      const adminOnlyResult = await teardownOperationalRoleSessions(
+        adminOnlyEnv,
+        {
+          fetch: adminOnlyFetch,
+          mask: () => {},
+          exportSession: (name, value) => {
+            adminOnlyEnv[name] = value;
+          },
+          save: () => {},
+        },
+      );
+      expect(adminOnlyResult.status).toBe("passed");
+      expect(adminOnlyResult.admin_session_revoked).toBe(true);
+      expect(adminOnlyGetCount).toBe(1);
+      expect(adminOnlyMintCount).toBe(1);
+      expect(adminOnlyRevokedIds).toEqual([oldId, newId]);
+      expect(adminOnlyActive.get(oldId)).toBe(false);
+      expect(adminOnlyActive.get(newId)).toBe(false);
     });
 
     it("enforces ACTUAL-ADMIN-PRECONDITION (403 MFA_REQUIRED without dev step-up waiver) and CROSS-INSTANCE-REFERENCE-OBSERVATION (403 STEP_UP_REQUIRED across process-local StepUpProofService Maps) while cleaning up already-created resources", async () => {

@@ -175,10 +175,16 @@
       "reason": "Registers the R04 monthly driver rating governance migration V0130__referral_monthly_rating_governance.sql at accepted protected dev 352d347e25cfcaecc2ab21f376b6976cc0944486, whose previous highest reserved migration is V0129 in referral_passenger_fee_consent_allocations."
     },
     {
+      "amended_by_task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "amended_at": "2026-10-25",
+      "scope": "Appended regulatory_agency_access_allocations V0132 and V0133 only; all previous allocations, amendments and task ownership entries remain unchanged. V0131 stays reserved for BUREAU-R02 (V0131__exclusivity_operator_binding.sql) and is not claimed here.",
+      "reason": "Registers the R13 agency read-only portal migrations V0132__regulatory_agencies.sql and V0133__agency_access_logs.sql at origin/dev a852615e5737b8bb47f90a95c0e1a1ae872c8cec, whose highest accepted migration is V0130 (R04); V0131 is the R02 reservation."
+    },
+    {
       "amended_by_task_id": "BUREAU-R02-EXCLUSIVE-OPERATOR-CHECK-20261024",
       "amended_at": "2026-10-25",
       "scope": "Appended exclusivity_operator_binding_allocations V0131 only; all previous allocations, amendments and task ownership entries remain unchanged",
-      "reason": "Registers the R02 vehicle dispatch exclusivity operator-binding migration V0131__exclusivity_operator_binding.sql after BUREAU-R04 (V0130) merged to origin/dev (a852615e5737b8bb47f90a95c0e1a1ae872c8cec) and 3-leaf migration_reservation_scope_coordination."
+      "reason": "Registers the R02 vehicle dispatch exclusivity operator-binding migration V0131__exclusivity_operator_binding.sql after BUREAU-R04 (V0130) and BUREAU-R13 (V0132, V0133) merged to origin/dev and 3-leaf migration_reservation_scope_coordination."
     }
   ],
   "voice_application_allocations": [
@@ -891,6 +897,47 @@
         "reg.dispatch_exclusivities and reg.phase1_registry_exclusivities gain exclusive_operator_id varchar(100) NULL; existing rows without an operator ID remain NULL (unbound) and are blocked by runtime dispatch eligibility (exclusivity_operator_unbound) until bound to an approved operator.",
         "Backfill copies non-empty trimmed record->>'exclusiveOperatorId' into reg.phase1_registry_exclusivities.exclusive_operator_id when exclusive_operator_id IS NULL without fabricating missing bindings.",
         "idx_phase1_registry_exclusivities_operator_status indexes (exclusive_operator_id, review_status) on reg.phase1_registry_exclusivities for operator-scoped exclusivity lookups."
+      ]
+    }
+  ],
+  "regulatory_agency_access_allocations": [
+    {
+      "task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "version": "V0132",
+      "migration_filename": "V0132__regulatory_agencies.sql",
+      "domain": "regulatory_agency_directory",
+      "target_schema": "core",
+      "primary_tables": ["core.regulatory_agencies"],
+      "referenced_tables": [
+        "iam.identity_memberships",
+        "iam.identity_role_bindings",
+        "iam.identity_invitations"
+      ],
+      "description": "Traffic Bureau R13 regulatory agency master record; agency memberships, role bindings and invitations reuse the canonical iam.identity_* tables with realm 'agency'.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "agency_code is UNIQUE; status IN ('active', 'suspended', 'retired'); display_name is non-blank.",
+        "No agency rows are seeded by the migration; platform admin creates agencies (open decision D1).",
+        "A suspended or retired agency denies every agency session on the next request (JwtAuthService durable-state check)."
+      ]
+    },
+    {
+      "task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "version": "V0133",
+      "migration_filename": "V0133__agency_access_logs.sql",
+      "domain": "regulatory_agency_access_audit",
+      "target_schema": "admin",
+      "primary_tables": ["admin.agency_access_logs"],
+      "referenced_tables": [
+        "core.regulatory_agencies",
+        "iam.identity_principals"
+      ],
+      "description": "Traffic Bureau R13 append-only per-access audit of every agency read, export and agency-route authorization denial.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "BEFORE UPDATE OR DELETE row trigger and BEFORE TRUNCATE statement trigger reject mutation; DELETE only under the existing audit_retention_operator role with audit.allow_retention_archival = on (V0080 contract).",
+        "action, resource_type and outcome are CHECK-constrained; a denied or error outcome never records row_count.",
+        "No retention period, default or purge scheduler is introduced (open decision D9)."
       ]
     }
   ]

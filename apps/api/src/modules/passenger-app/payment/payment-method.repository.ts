@@ -5,6 +5,19 @@ import type { PassengerPaymentMethod } from "@drts/contracts";
 import { DatabaseService } from "../../../common/db/database.service";
 import { ApiRequestError } from "../../../common/api-envelope";
 import type { EncryptedPaymentToken } from "./payment-token-cipher";
+import { deriveEcpayMerchantTradeNo } from "./ecpay-cipher";
+
+export const MAX_BOUND_CARDS_PER_MEMBER = 5;
+
+export const PAYMENT_IDEMPOTENCY_ERROR_CODES = [
+  "card_declined",
+  "invalid_credential",
+  "unavailable",
+  "invalid_method",
+] as const;
+
+export type PaymentIdempotencyErrorCode =
+  (typeof PAYMENT_IDEMPOTENCY_ERROR_CODES)[number];
 
 export interface StoredPaymentMethod extends PassengerPaymentMethod {
   drtsPassengerId: string;
@@ -201,6 +214,21 @@ export class PaymentMethodRepository {
       // Concurrent PSP replay can finish first. Return its committed metadata,
       // without making a second method or overwriting another default.
       if (claim.rows[0].outcome !== "completed") {
+        const countResult = await client.query(
+          `SELECT COUNT(*)::int AS count FROM passenger.psp_tokens WHERE drts_passenger_id=$1 AND status='active'`,
+          [passengerId],
+        );
+        const activeCount = Number(countResult.rows[0]?.count ?? 0);
+        if (
+          Number.isFinite(activeCount) &&
+          activeCount >= MAX_BOUND_CARDS_PER_MEMBER
+        ) {
+          throw new ApiRequestError(
+            409,
+            "card_limit_exceeded",
+            "每個會員最多只能綁定 5 張信用卡，請先移除既有卡片後再新增。",
+          );
+        }
         // Both uses must infer varchar; leave the 100-character limit to the
         // column constraint instead of a length-qualified cast that truncates.
         await client.query(
@@ -239,15 +267,176 @@ export class PaymentMethodRepository {
     passengerId: string,
     key: string,
     outcome: "pending" | "failed" | "action_required",
-    error?: string,
+    error?: string | null,
   ): Promise<void> {
+    const persistedError =
+      typeof error === "string" &&
+      (PAYMENT_IDEMPOTENCY_ERROR_CODES as readonly string[]).includes(error)
+        ? error
+        : null;
     await this.withAccount(passengerId, async (client) => {
       await client.query(
         `UPDATE passenger.payment_idempotency_keys SET outcome=$3,error_code=$4,updated_at=now()
          WHERE idempotency_key=$1 AND drts_passenger_id=$2 AND operation='bind' AND outcome<>'completed'`,
-        [key, passengerId, outcome, error ?? null],
+        [key, passengerId, outcome, persistedError],
       );
     });
+  }
+
+  async findActionRequiredBinding(
+    passengerId: string,
+    idempotencyKey?: string,
+    merchantTradeNo?: string,
+  ): Promise<{ idempotencyKey: string; methodId: string } | null> {
+    return this.withAccount(passengerId, async (client) => {
+      if (idempotencyKey) {
+        const exact = await client.query(
+          `SELECT idempotency_key,entity_id FROM passenger.payment_idempotency_keys
+           WHERE drts_passenger_id=$1 AND idempotency_key=$2 AND operation='bind'
+             AND outcome IN ('action_required','pending','completed') FOR UPDATE`,
+          [passengerId, idempotencyKey],
+        );
+        const row = exact.rows[0];
+        if (!row) return null;
+        return {
+          idempotencyKey: String(row.idempotency_key),
+          methodId: String(row.entity_id),
+        };
+      }
+      const result = await client.query(
+        `SELECT idempotency_key,entity_id,outcome FROM passenger.payment_idempotency_keys
+         WHERE drts_passenger_id=$1 AND operation='bind'
+           AND outcome IN ('action_required','pending','completed')
+         ORDER BY CASE WHEN outcome IN ('action_required','pending') THEN 0 ELSE 1 END,
+                  updated_at DESC,created_at DESC FOR UPDATE`,
+        [passengerId],
+      );
+      const cleanTradeNo = merchantTradeNo?.trim() ?? "";
+      if (cleanTradeNo) {
+        const tradeMatched = result.rows.filter((r) => {
+          const key = String(r.idempotency_key ?? "").trim();
+          if (!key) return false;
+          return (
+            deriveEcpayMerchantTradeNo(key) === cleanTradeNo ||
+            deriveEcpayMerchantTradeNo(`bind_token:${key}`) === cleanTradeNo
+          );
+        });
+        if (tradeMatched.length === 1) {
+          const row = tradeMatched[0]!;
+          return {
+            idempotencyKey: String(row.idempotency_key),
+            methodId: String(row.entity_id),
+          };
+        }
+      }
+      const pendingRows = result.rows.filter(
+        (r) =>
+          r.outcome === "action_required" ||
+          r.outcome === "pending" ||
+          r.outcome === undefined,
+      );
+      if (pendingRows.length > 1) {
+        return null;
+      }
+      if (pendingRows.length === 1) {
+        const row = pendingRows[0]!;
+        return {
+          idempotencyKey: String(row.idempotency_key),
+          methodId: String(row.entity_id),
+        };
+      }
+      const completedRows = result.rows.filter(
+        (r) => r.outcome === "completed",
+      );
+      if (completedRows.length === 1) {
+        const row = completedRows[0]!;
+        return {
+          idempotencyKey: String(row.idempotency_key),
+          methodId: String(row.entity_id),
+        };
+      }
+      return null;
+    });
+  }
+
+  async findBindingByMerchantMember(
+    matchPassengerId: (passengerId: string) => boolean,
+    idempotencyKey?: string,
+    merchantTradeNo?: string,
+  ): Promise<{
+    passengerId: string;
+    idempotencyKey: string;
+    methodId: string;
+  } | null> {
+    const result = await this.database
+      .query(
+        idempotencyKey
+          ? `SELECT idempotency_key,drts_passenger_id,entity_id,outcome
+             FROM passenger.payment_idempotency_keys
+             WHERE idempotency_key=$1 AND operation='bind'
+               AND outcome IN ('action_required','pending','completed')`
+          : `SELECT idempotency_key,drts_passenger_id,entity_id,outcome
+             FROM passenger.payment_idempotency_keys
+             WHERE operation='bind'
+               AND outcome IN ('action_required','pending','completed')
+             ORDER BY CASE WHEN outcome IN ('action_required','pending') THEN 0 ELSE 1 END,
+                      updated_at DESC,created_at DESC`,
+        idempotencyKey ? [idempotencyKey] : [],
+      )
+      .catch(() => persistenceUnavailable());
+    const matchedRows: Array<{
+      passengerId: string;
+      idempotencyKey: string;
+      methodId: string;
+      outcome?: string;
+    }> = [];
+    for (const row of result.rows) {
+      const pid =
+        typeof row.drts_passenger_id === "string"
+          ? row.drts_passenger_id.trim()
+          : "";
+      if (pid && matchPassengerId(pid)) {
+        matchedRows.push({
+          passengerId: pid,
+          idempotencyKey: String(row.idempotency_key),
+          methodId: String(row.entity_id),
+          ...(typeof row.outcome === "string" ? { outcome: row.outcome } : {}),
+        });
+      }
+    }
+    if (matchedRows.length === 0) return null;
+    if (idempotencyKey) {
+      return matchedRows.length === 1 ? matchedRows[0]! : null;
+    }
+    const cleanTradeNo = merchantTradeNo?.trim() ?? "";
+    if (cleanTradeNo) {
+      const tradeMatched = matchedRows.filter(
+        (r) =>
+          deriveEcpayMerchantTradeNo(r.idempotencyKey) === cleanTradeNo ||
+          deriveEcpayMerchantTradeNo(`bind_token:${r.idempotencyKey}`) ===
+            cleanTradeNo,
+      );
+      if (tradeMatched.length === 1) {
+        return tradeMatched[0]!;
+      }
+    }
+    const pendingRows = matchedRows.filter(
+      (r) =>
+        r.outcome === "action_required" ||
+        r.outcome === "pending" ||
+        r.outcome === undefined,
+    );
+    if (pendingRows.length > 1) {
+      return null;
+    }
+    if (pendingRows.length === 1) {
+      return pendingRows[0]!;
+    }
+    const completedRows = matchedRows.filter((r) => r.outcome === "completed");
+    if (completedRows.length === 1) {
+      return completedRows[0]!;
+    }
+    return null;
   }
 
   async setDefault(
@@ -269,8 +458,14 @@ export class PaymentMethodRepository {
     });
   }
 
-  async remove(passengerId: string, id: string): Promise<void> {
-    await this.withAccount(passengerId, async (client) => {
+  async findRemovableToken(
+    passengerId: string,
+    id: string,
+  ): Promise<{
+    provider: string;
+    tokenEnvelope: EncryptedPaymentToken | null;
+  }> {
+    return this.withAccount(passengerId, async (client) => {
       await this.requireActive(client, passengerId, id, true);
       const used = await client.query(
         `SELECT 1 FROM passenger.booking_histories h
@@ -286,6 +481,75 @@ export class PaymentMethodRepository {
           "pending_payment_block",
           "A ride still requires this payment method.",
         );
+      const tokenRow = await client.query(
+        `SELECT provider,token_envelope FROM passenger.psp_tokens
+         WHERE payment_method_id=$1 AND drts_passenger_id=$2 AND status='active' FOR UPDATE`,
+        [id, passengerId],
+      );
+      const row = tokenRow.rows[0];
+      if (!row) notFound();
+      const rawEnvelope = row.token_envelope;
+      const parsedEnvelope =
+        typeof rawEnvelope === "string"
+          ? (JSON.parse(rawEnvelope) as EncryptedPaymentToken)
+          : rawEnvelope && typeof rawEnvelope === "object"
+            ? (rawEnvelope as EncryptedPaymentToken)
+            : null;
+      return {
+        provider: typeof row.provider === "string" ? row.provider : "",
+        tokenEnvelope: parsedEnvelope,
+      };
+    });
+  }
+
+  async remove(
+    passengerId: string,
+    id: string,
+    beforeRemove?: (removable: {
+      provider: string;
+      tokenEnvelope: EncryptedPaymentToken | null;
+    }) => Promise<void>,
+  ): Promise<void> {
+    await this.withAccount(passengerId, async (client) => {
+      await this.requireActive(client, passengerId, id, true);
+      const assertNoUnsettledRides = async () => {
+        const used = await client.query(
+          `SELECT 1 FROM passenger.booking_histories h
+           JOIN ops.phase1_owned_orders o ON o.order_id=h.order_id::text
+           LEFT JOIN billing.multi_taxi_passenger_payments p ON p.order_id=h.order_id::text
+           WHERE h.drts_passenger_id=$1 AND lower(o.record->>'paymentMethodTokenRef')=lower($2)
+             AND o.status<>'cancelled' AND (p.status IS NULL OR p.status NOT IN ('captured','refunded')) LIMIT 1`,
+          [passengerId, id],
+        );
+        if (used.rows.length)
+          throw new ApiRequestError(
+            409,
+            "pending_payment_block",
+            "A ride still requires this payment method.",
+          );
+      };
+      await assertNoUnsettledRides();
+      if (beforeRemove) {
+        const tokenRow = await client.query(
+          `SELECT provider,token_envelope FROM passenger.psp_tokens
+           WHERE payment_method_id=$1 AND drts_passenger_id=$2 AND status='active' FOR UPDATE`,
+          [id, passengerId],
+        );
+        const row = tokenRow.rows[0];
+        if (!row) notFound();
+        const rawEnvelope = row.token_envelope;
+        const parsedEnvelope =
+          typeof rawEnvelope === "string"
+            ? (JSON.parse(rawEnvelope) as EncryptedPaymentToken)
+            : rawEnvelope && typeof rawEnvelope === "object"
+              ? (rawEnvelope as EncryptedPaymentToken)
+              : null;
+        await beforeRemove({
+          provider: typeof row.provider === "string" ? row.provider : "",
+          tokenEnvelope: parsedEnvelope,
+        });
+        await assertNoUnsettledRides();
+      }
       await client.query(
         `UPDATE passenger.psp_tokens SET status='removed',token_envelope=NULL,is_default=false,removed_at=now()
          WHERE payment_method_id=$1 AND drts_passenger_id=$2`,

@@ -390,6 +390,14 @@ export class MultiTaxiService implements OnModuleInit {
   ): Promise<MultiTaxiTripOperationalAdminView[]> {
     const month = this.normalizeMonthFilter(query.month);
     const legalHold = this.normalizeLegalHoldFilter(query.legalHold);
+    const reservedFrom = this.normalizeReservedDateFilter(
+      query.reservedFrom,
+      "reservedFrom",
+    );
+    const reservedTo = this.normalizeReservedDateFilter(
+      query.reservedTo,
+      "reservedTo",
+    );
     const needle = query.q?.trim().toLowerCase() ?? "";
     const records = await Promise.all(
       this.ownedMobilityService
@@ -398,9 +406,17 @@ export class MultiTaxiService implements OnModuleInit {
         .map((order) => this.mapOrderToOperationalRecord(order)),
     );
 
+    // BUREAU-R13: reservedFrom/reservedTo are an inclusive date range on the
+    // same reservedAt field as `month`; absent bounds change nothing.
     return records
       .filter((record) =>
         month ? record.reservedAt.slice(0, 7) === month : true,
+      )
+      .filter((record) =>
+        reservedFrom ? record.reservedAt.slice(0, 10) >= reservedFrom : true,
+      )
+      .filter((record) =>
+        reservedTo ? record.reservedAt.slice(0, 10) <= reservedTo : true,
       )
       .filter((record) =>
         needle.length === 0
@@ -2473,6 +2489,27 @@ export class MultiTaxiService implements OnModuleInit {
         HttpStatus.BAD_REQUEST,
         "MULTI_TAXI_RECORDS_MONTH_INVALID",
         "month must use YYYY-MM format.",
+      );
+    }
+    return normalized;
+  }
+
+  private normalizeReservedDateFilter(
+    value: string | undefined,
+    field: "reservedFrom" | "reservedTo",
+  ) {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return null;
+    }
+    if (
+      !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(normalized) ||
+      !Number.isFinite(Date.parse(`${normalized}T00:00:00.000Z`))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_RECORDS_DATE_INVALID",
+        `${field} must use YYYY-MM-DD format.`,
       );
     }
     return normalized;

@@ -530,6 +530,7 @@ describe("SR-PARTNER-NOTIFY-CON-20260917: Partner Passenger Notification Contrac
         ...(content.referral_passenger_fee_consent_allocations || []),
         ...(content.referral_monthly_rating_governance_allocations || []),
         ...(content.exclusivity_operator_binding_allocations || []),
+        ...(content.regulatory_agency_access_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,
