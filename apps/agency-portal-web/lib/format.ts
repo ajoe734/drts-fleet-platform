@@ -29,19 +29,7 @@ export function displayDateTime(
   if (!value) return notProvided(locale);
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return notProvided(locale);
-  if (locale === "en") {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone: "Asia/Taipei",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    }).format(new Date(parsed));
-  }
-  return new Date(parsed).toLocaleString("zh-TW", {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-TW" : "en-US", {
     timeZone: "Asia/Taipei",
     year: "numeric",
     month: "2-digit",
@@ -50,7 +38,7 @@ export function displayDateTime(
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  });
+  }).format(new Date(parsed));
 }
 
 export function displayPercent(

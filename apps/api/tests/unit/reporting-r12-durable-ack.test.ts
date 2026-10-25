@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { displayDateTime } from "../../../agency-portal-web/lib/format";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { projectAgencyDailyDispatchRecord } from "../../src/modules/agency-access/agency-projections";
 import { ReportingRepository } from "../../src/modules/reporting/reporting.repository";
@@ -585,25 +586,20 @@ describe("BUREAU-R12 ReportingService durable ACK and shared canonical source er
       reservationTime: "2026-10-24T17:00:00.000Z",
     });
 
-    const agencyFormatSource = readFileSync(
-      resolve(__dirname, "../../../agency-portal-web/lib/format.ts"),
-      "utf8",
-    );
-    const displayDateTimeMatch =
-      /export function displayDateTime\([\s\S]*?return new Date\(parsed\)\.toLocaleString\("zh-TW",\s*\{[\s\S]*?\}\);\s*\}/.exec(
-        agencyFormatSource,
-      );
-    expect(displayDateTimeMatch).not.toBeNull();
-    expect(displayDateTimeMatch![0]).toContain('timeZone: "Asia/Taipei"');
+    const agencyZhFormatted = displayDateTime(agencyView.requestedAt, "zh");
+    expect(agencyZhFormatted).toContain("2026/10/25");
+    expect(agencyZhFormatted).toContain("01:00:00");
+    expect(agencyZhFormatted).not.toContain("10/24");
 
-    const agencyFormatted = new Date(
-      Date.parse(agencyView.requestedAt),
-    ).toLocaleString("zh-TW", {
-      timeZone: "Asia/Taipei",
-      hour12: false,
-    });
-    expect(agencyFormatted).toContain("2026/10/25");
-    expect(agencyFormatted).toContain("01:00:00");
+    const agencyEnFormatted = displayDateTime(agencyView.requestedAt, "en");
+    expect(agencyEnFormatted).toContain("10/25/2026");
+    expect(agencyEnFormatted).toContain("01:00:00");
+    expect(agencyEnFormatted).not.toContain("10/24");
+
+    expect(displayDateTime(null, "zh")).toBe("未提供");
+    expect(displayDateTime(null, "en")).toBe("Not provided");
+    expect(displayDateTime("invalid-iso", "zh")).toBe("未提供");
+    expect(displayDateTime("invalid-iso", "en")).toBe("Not provided");
 
     const opsReportsPageSource = readFileSync(
       resolve(__dirname, "../../../ops-console-web/app/reports/page.tsx"),
