@@ -307,6 +307,81 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: Fleet & Platform Ren
     );
   });
 
+  it("recovers original renewal submission from NewSupplyRenewalForm when create ACK is lost and retry receives 409 ACTIVE_RENEWAL_SUBMISSION_EXISTS", async () => {
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new TypeError("Simulated response lost after actual service commit"),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            error: {
+              code: "ACTIVE_RENEWAL_SUBMISSION_EXISTS",
+              message:
+                "An active insurance_update submission already exists for this target (sub-veh-ren-ack-001).",
+              details: {
+                existingSubmissionId: "sub-veh-ren-ack-001",
+                existingStatus: "draft",
+              },
+            },
+          },
+          { status: 409 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetcher);
+
+    render(
+      <FleetLanguageProvider defaultLocale="zh">
+        <NewSupplyRenewalForm
+          draftScope="fleet-ui-001:actor-1"
+          initialTargets={sampleTargets}
+        />
+      </FleetLanguageProvider>,
+    );
+
+    const createBtn = screen.getByRole("button", { name: /建立草稿/ });
+    await act(async () => {
+      fireEvent.click(createBtn);
+    });
+
+    await waitFor(() => {
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByText(/Simulated response lost after actual service commit/),
+      ).toBeDefined();
+    });
+
+    const firstHeaders = new Headers(fetcher.mock.calls[0]?.[1]?.headers);
+    const firstKey = firstHeaders.get("idempotency-key");
+    expect(firstKey).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(createBtn);
+    });
+
+    await waitFor(() => {
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(
+        screen.getByText(
+          /An active insurance_update submission already exists for this target/,
+        ),
+      ).toBeDefined();
+    });
+
+    const secondHeaders = new Headers(fetcher.mock.calls[1]?.[1]?.headers);
+    expect(secondHeaders.get("idempotency-key")).toBe(firstKey);
+    expect(navMocks.push).toHaveBeenCalledWith(
+      "/supply/submissions/sub-veh-ren-ack-001",
+    );
+    const recoveryLink = screen.getByRole("link", {
+      name: /開啟送件 \(sub-veh-ren-ack-001\)/,
+    });
+    expect(recoveryLink.getAttribute("href")).toBe(
+      "/supply/submissions/sub-veh-ren-ack-001",
+    );
+  });
+
   it("saves renewal draft via /renewal endpoint, uploads proof via C125, and submits from SupplySubmissionDetailView", async () => {
     const initialDetail: SupplySubmissionDetail = {
       submission: {

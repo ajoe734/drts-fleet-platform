@@ -229,14 +229,27 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     headers,
   });
   const payload = camelizeDeep<
-    ApiEnvelope<T> | { error: { code?: string; message: string } }
+    | ApiEnvelope<T>
+    | {
+        error: {
+          code?: string;
+          message: string;
+          details?: Record<string, unknown>;
+        };
+      }
   >(await response.json());
   if (!response.ok || !("data" in payload)) {
-    throw createFleetDocumentError(
+    const error = createFleetDocumentError(
       "error" in payload ? payload.error.message : `HTTP ${response.status}`,
       response.status,
       "error" in payload ? payload.error.code : undefined,
-    );
+    ) as ReturnType<typeof createFleetDocumentError> & {
+      details?: Record<string, unknown>;
+    };
+    if ("error" in payload && payload.error.details) {
+      error.details = payload.error.details;
+    }
+    throw error;
   }
   return payload.data;
 }
@@ -1245,6 +1258,29 @@ function mapTargetDriverToForm(
   };
 }
 
+function buildRenewalCreateIdempotencyKey(
+  draftScope: string,
+  submissionType: SupplyRenewalSubmissionType,
+  targetId: string,
+  payloadJson: string,
+): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  const input = `${draftScope}|${submissionType}|${targetId}|${payloadJson}`;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193) >>> 0;
+    h2 ^= ch + ((i & 0xff) << 8);
+    h2 = Math.imul(h2, 0x85ebca6b) >>> 0;
+  }
+  const safeScope =
+    draftScope.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 32) || "fleet";
+  const safeTarget =
+    targetId.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 32) || "target";
+  return `supply-renewal-${safeScope}-${submissionType}-${safeTarget}-${h1.toString(16).padStart(8, "0")}${h2.toString(16).padStart(8, "0")}`;
+}
+
 export function NewSupplyRenewalForm({
   draftScope,
   initialTargets,
@@ -1267,6 +1303,9 @@ export function NewSupplyRenewalForm({
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [existingSubmissionId, setExistingSubmissionId] = useState<
+    string | null
+  >(null);
 
   const normalizedInitialType: SupplyRenewalSubmissionType =
     RENEWAL_SUBMISSION_TYPES.includes(initialSubmissionType)
@@ -1336,37 +1375,66 @@ export function NewSupplyRenewalForm({
     : hasUnsavedDraftChanges(vehicleForm, initialVehicleForm);
   const { confirmLeave } = useDraftGuard(dirty);
 
-  void draftScope;
-
   async function onCreate() {
     setSaving(true);
     setError(null);
+    setExistingSubmissionId(null);
     try {
+      const targetId = isDriverRenewal
+        ? (selectedDriver?.driverId ?? selectedDriverId)
+        : (selectedVehicle?.vehicleId ?? selectedVehicleId);
       const payload = isDriverRenewal
         ? {
             submissionType,
-            subjectDriverId: selectedDriver?.driverId ?? selectedDriverId,
+            subjectDriverId: targetId,
             driverDraft: driverForm,
           }
         : {
             submissionType,
-            subjectVehicleId: selectedVehicle?.vehicleId ?? selectedVehicleId,
+            subjectVehicleId: targetId,
             vehicleDraft: {
               ...vehicleForm,
               plateNo: selectedVehicle?.plateNo ?? vehicleForm.plateNo,
             },
           };
+      const bodyJson = JSON.stringify(payload);
+      const idempotencyKey = buildRenewalCreateIdempotencyKey(
+        draftScope,
+        submissionType,
+        targetId,
+        bodyJson,
+      );
       const created = await apiRequest<SupplySubmissionDetail>(
         "fleet-partner/supply-submissions/renewals",
         {
           method: "POST",
-          body: JSON.stringify(payload),
+          headers: {
+            "idempotency-key": idempotencyKey,
+          },
+          body: bodyJson,
         },
       );
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      const errWithMeta = err as {
+        code?: string;
+        details?: { existingSubmissionId?: unknown };
+      };
+      const detailExistingId =
+        typeof errWithMeta?.details?.existingSubmissionId === "string" &&
+        errWithMeta.details.existingSubmissionId.trim().length > 0
+          ? errWithMeta.details.existingSubmissionId.trim()
+          : null;
+      if (
+        errWithMeta?.code === "ACTIVE_RENEWAL_SUBMISSION_EXISTS" &&
+        detailExistingId
+      ) {
+        setExistingSubmissionId(detailExistingId);
+        router.push(`/supply/submissions/${detailExistingId}`);
+      }
+      setError(msg);
     } finally {
       setSaving(false);
     }
@@ -1420,6 +1488,16 @@ export function NewSupplyRenewalForm({
           icon="info"
           body={t("supply.renewal.requiredDocsHint")}
         />
+        {existingSubmissionId ? (
+          <div>
+            <Link
+              href={`/supply/submissions/${existingSubmissionId}`}
+              style={cardLinkStyle(theme)}
+            >
+              {t("supply.action.openSubmission")} ({existingSubmissionId})
+            </Link>
+          </div>
+        ) : null}
         <DraftFormFrame
           ready={true}
           title={t("supply.renewalNew.cardTitle")}
