@@ -247,9 +247,10 @@ export class SupplySubmissionService implements OnModuleInit {
         });
 
     const policiesById = new Map(
-      this.regulatoryRegistryService
-        .listPolicies()
-        .map((p) => [p.policyId, p]),
+      (this.regulatoryRegistryService.listPolicies?.() ?? []).map((p) => [
+        p.policyId,
+        p,
+      ]),
     );
     const vehicles: FleetSupplyRenewalTargetVehicle[] =
       this.regulatoryRegistryService

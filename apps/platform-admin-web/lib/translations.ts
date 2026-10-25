@@ -161,6 +161,9 @@ const supplyReviewEn = {
   "supplyReview.type.vehicle": "Vehicle",
   "supplyReview.type.insurance": "Insurance",
   "supplyReview.type.contract": "Contract",
+  "supplyReview.type.profile_correction": "Driver License Renewal",
+  "supplyReview.type.insurance_update": "Vehicle Insurance Renewal",
+  "supplyReview.type.contract_update": "Vehicle Contract Renewal",
   "supplyReview.type.object": "Item",
 
   // Reason Codes
@@ -188,12 +191,16 @@ const supplyReviewEn = {
   "supplyReview.diff.businessArea": "Business Area · business area",
   "supplyReview.diff.products": "Supported Products · products",
   "supplyReview.diff.insuranceUntil": "Insurance Expiry · insurance until",
+  "supplyReview.diff.contractUntil": "Contract Expiry · contract until",
   "supplyReview.diff.driverName": "Driver Name · name",
   "supplyReview.diff.mobile": "Mobile Phone · mobile",
   "supplyReview.diff.licenseNo": "Pro License No. · license no",
   "supplyReview.diff.licenseExpiry": "License Expiry · license expiry",
   "supplyReview.diff.registrationNo": "Taxi Reg. No. · registration no",
   "supplyReview.diff.registrationArea": "Taxi Reg. Area · registration area",
+  "supplyReview.diff.registrationExpiry":
+    "Taxi Reg. Expiry · registration expiry",
+  "supplyReview.diff.canonicalTargetId": "Canonical Target ID · target id",
   "supplyReview.diff.notCreated": "— (Not created)",
   "supplyReview.diff.expired": "Expired",
 
@@ -405,6 +412,9 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.type.vehicle": "車輛",
   "supplyReview.type.insurance": "保險",
   "supplyReview.type.contract": "合約",
+  "supplyReview.type.profile_correction": "司機證照續期",
+  "supplyReview.type.insurance_update": "同車續保更新",
+  "supplyReview.type.contract_update": "同車續約更新",
   "supplyReview.type.object": "物件",
 
   // Reason Codes
@@ -427,12 +437,15 @@ const supplyReviewZh: Record<keyof typeof supplyReviewEn, string> = {
   "supplyReview.diff.businessArea": "營業區域",
   "supplyReview.diff.products": "支援產品",
   "supplyReview.diff.insuranceUntil": "保險到期",
+  "supplyReview.diff.contractUntil": "合約到期",
   "supplyReview.diff.driverName": "司機姓名",
   "supplyReview.diff.mobile": "行動電話",
   "supplyReview.diff.licenseNo": "職業駕照號碼",
   "supplyReview.diff.licenseExpiry": "駕照到期日",
   "supplyReview.diff.registrationNo": "執照號碼",
   "supplyReview.diff.registrationArea": "執照區域",
+  "supplyReview.diff.registrationExpiry": "執照到期日",
+  "supplyReview.diff.canonicalTargetId": "主檔目標 ID",
   "supplyReview.diff.notCreated": "— (未建立)",
   "supplyReview.diff.expired": "已過期",
 

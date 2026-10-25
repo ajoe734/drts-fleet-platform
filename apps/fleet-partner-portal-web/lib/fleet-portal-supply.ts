@@ -1,12 +1,71 @@
 import type {
   DriverSupplyDraft,
+  FleetSupplyRenewalTargetsResponse,
   SupplyDocumentRecord,
+  SupplyDocumentType,
   SupplyReadinessReasonCode,
+  SupplyRenewalSubmissionType,
   SupplySubmissionRecord,
   SupplySubmissionStatus,
   SupplySubmissionType,
   VehicleSupplyDraft,
 } from "@drts/contracts";
+
+export type {
+  FleetSupplyRenewalTargetsResponse,
+  SupplyRenewalSubmissionType,
+} from "@drts/contracts";
+
+export const RENEWAL_SUBMISSION_TYPES: SupplyRenewalSubmissionType[] = [
+  "insurance_update",
+  "contract_update",
+  "profile_correction",
+];
+
+export function isRenewalSubmissionType(
+  submissionType: SupplySubmissionType,
+): submissionType is SupplyRenewalSubmissionType {
+  return (
+    submissionType === "insurance_update" ||
+    submissionType === "contract_update" ||
+    submissionType === "profile_correction"
+  );
+}
+
+export function isVehicleRenewalSubmissionType(
+  submissionType: SupplySubmissionType,
+): submissionType is "insurance_update" | "contract_update" {
+  return (
+    submissionType === "insurance_update" ||
+    submissionType === "contract_update"
+  );
+}
+
+export function isDriverBasedSubmissionType(
+  submissionType: SupplySubmissionType,
+): boolean {
+  return (
+    submissionType === "driver_onboarding" ||
+    submissionType === "profile_correction"
+  );
+}
+
+export function defaultDocumentTypeForSubmission(
+  submissionType: SupplySubmissionType,
+): SupplyDocumentType {
+  switch (submissionType) {
+    case "driver_onboarding":
+    case "profile_correction":
+      return "professional_driver_license";
+    case "insurance_update":
+      return "insurance_policy";
+    case "contract_update":
+      return "fleet_participation_contract";
+    case "vehicle_onboarding":
+    default:
+      return "vehicle_registration";
+  }
+}
 
 export type SupplyDataSource = "live" | "fallback";
 
