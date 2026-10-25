@@ -14,6 +14,7 @@ import type {
 } from "@drts/contracts";
 
 import { DatabaseService } from "../../common/db";
+import type { ComplaintStatisticsSource } from "./operations-metrics";
 
 type DispatchDailyRecordRow = {
   service_date: string;
@@ -95,9 +96,27 @@ export type DispatchableSupplySnapshotQuery = {
   sourceHealth?: DispatchableSupplySnapshotRecord["sourceHealth"];
 };
 
+// Punctuality and monthly complaint statistics are derived when the window is
+// previewed; the persisted monthly read model keeps its original columns.
 export type MonthlyOperationsSummaryRecord = Omit<
   SixMonthOperationsSummary,
-  "from" | "to" | "businessArea" | "serviceProductCode"
+  | "from"
+  | "to"
+  | "businessArea"
+  | "serviceProductCode"
+  | "lateArrivalThresholdMinutes"
+  | "onTimeTripCount"
+  | "lateTripCount"
+  | "noShowTripCount"
+  | "punctualityUnknownTripCount"
+  | "complaintCreatedLowRatingAutoCount"
+  | "complaintCreatedManualCount"
+  | "complaintClosedLowRatingAutoCount"
+  | "complaintClosedManualCount"
+  | "complaintOverdueLowRatingAutoCount"
+  | "complaintOverdueManualCount"
+  | "complaintStatisticsAsOf"
+  | "drilldown"
 > & {
   periodMonth: string;
   businessArea: string;
@@ -548,6 +567,61 @@ export class ReportingRepository {
         ),
       ),
     };
+  }
+
+  /**
+   * Closure events and low-rating provenance for the monthly complaint
+   * statistics. A low-rating case is one linked by an original rating writer:
+   * passenger account / ride-token rating consents or a Referral rating.
+   */
+  async loadComplaintStatisticsSource(): Promise<ComplaintStatisticsSource> {
+    if (!this.isEnabled()) {
+      return { closures: [], lowRatingCaseNos: [] };
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT jsonb_build_object(
+          'closures', coalesce((
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'caseNo', t.case_no,
+                'closedAt', coalesce(t.record ->> 'createdAt', to_jsonb(t.created_at) #>> '{}')
+              )
+              ORDER BY t.created_at, t.entry_id
+            )
+            FROM crm.phase1_complaint_timelines t
+            WHERE t.action = 'case_closed'
+          ), '[]'::jsonb),
+          'lowRatingCaseNos', coalesce((
+            SELECT jsonb_agg(DISTINCT s.case_no ORDER BY s.case_no)
+            FROM (
+              SELECT complaint_case_no AS case_no
+              FROM passenger.rating_consents
+              WHERE complaint_case_no IS NOT NULL
+              UNION
+              SELECT complaint_case_no AS case_no
+              FROM ops.passenger_ride_rating_consents
+              WHERE complaint_case_no IS NOT NULL
+              UNION
+              SELECT o.record #>> '{referralPassengerLifecycle,rating,complaintCaseNo}' AS case_no
+              FROM ops.phase1_owned_orders o
+              WHERE o.record #>> '{referralPassengerLifecycle,rating,complaintCaseNo}' IS NOT NULL
+            ) s
+          ), '[]'::jsonb)
+        ) AS record
+      `,
+    );
+    const record = this.parseRecord<ComplaintStatisticsSource>(
+      result.rows[0]?.record,
+      "complaint_statistics_source",
+    );
+    if (
+      !Array.isArray(record.closures) ||
+      !Array.isArray(record.lowRatingCaseNos)
+    ) {
+      throw new Error("Invalid canonical complaint statistics source.");
+    }
+    return record;
   }
 
   async listDailyDispatchRecords(
