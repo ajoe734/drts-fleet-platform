@@ -4,39 +4,25 @@ import { Card, CardBody, PageHeader } from "@drts/ui-web";
 import { ErrorNotice } from "@/components/error-notice";
 import { PortalShell } from "@/components/portal-shell";
 import { PrgMask } from "@/components/prg-mask";
-import { display, displayDateTime, displayMinor } from "@/lib/format";
+import {
+  display,
+  displayDateTime,
+  displayLegalHoldState,
+  displayMinor,
+  displayPaymentStatus,
+  displayRouteSource,
+  displayTollSource,
+} from "@/lib/format";
+import { getServerLocale } from "@/lib/server-locale";
 import { loadAgencyData, readAgencyProfile } from "@/lib/session.server";
-
-const ROUTE_SOURCE_LABELS: Record<string, string> = {
-  driver_gps: "司機 GPS 軌跡",
-  mixed: "混合軌跡（部分 GPS 取樣＋完單起訖摘要）",
-  pickup_dropoff_summary: "完單起訖與里程摘要",
-  provider_route: "派車預估路線",
-  unavailable: "未提供",
-};
-
-const PAYMENT_STATUS_LABELS: Record<string, string> = {
-  captured: "已請款實收",
-  refunded: "已退款（實收 0）",
-  authorized: "已授權待請款",
-  not_selected: "未選擇付款",
-  failed: "扣款失敗",
-  manual_recovery: "待人工追償",
-  unknown: "未提供收款狀態",
-};
-
-const TOLL_SOURCE_LABELS: Record<string, string> = {
-  driver_proof: "司機完單證明（通行費憑證）",
-  electronic_receipt: "電子乘車證明",
-  none: "無通行費（0 元）",
-  unavailable: "歷史未記錄",
-};
+import { t } from "@/lib/translations";
 
 export default async function TripRecordDetailPage({
   params,
 }: {
   params: Promise<{ recordId: string }>;
 }) {
+  const locale = await getServerLocale();
   const { recordId } = await params;
   const result = await loadAgencyData<AgencyTripRecordView>(
     `/trip-records/${encodeURIComponent(recordId)}`,
@@ -45,8 +31,11 @@ export default async function TripRecordDetailPage({
   const profile = await readAgencyProfile();
   const record = result.data;
   return (
-    <PortalShell agencyName={profile?.agencyDisplayName ?? null}>
-      <PageHeader title="R11 行程紀錄詳情" />
+    <PortalShell
+      agencyName={profile?.agencyDisplayName ?? null}
+      locale={locale}
+    >
+      <PageHeader title={t("tripRecordDetail.title", undefined, locale)} />
       {record ? (
         <Card>
           <CardBody>
@@ -58,82 +47,125 @@ export default async function TripRecordDetailPage({
                 margin: 0,
               }}
             >
-              <dt>紀錄編號</dt>
+              <dt>{t("tripRecordDetail.recordId", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>{record.recordId}</dd>
-              <dt>訂單 ID／趟次 ID</dt>
+              <dt>{t("tripRecordDetail.orderTripId", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {display(record.orderId)} / {display(record.tripId)}
+                {display(record.orderId, locale)} /{" "}
+                {display(record.tripId, locale)}
               </dd>
-              <dt>訂單編號</dt>
+              <dt>{t("tripRecordDetail.orderNo", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {display(record.orderNoMasked)} <PrgMask />
+                {display(record.orderNoMasked, locale)}{" "}
+                <PrgMask locale={locale} />
               </dd>
-              <dt>車號</dt>
+              <dt>{t("tripRecordDetail.plateNo", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {display(record.plateNo ?? record.plateNoMasked)}
+                {display(record.plateNo ?? record.plateNoMasked, locale)}
               </dd>
-              <dt>預約時間</dt>
+              <dt>{t("tripRecordDetail.reservedAt", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {displayDateTime(record.reservedAt)}
+                {displayDateTime(record.reservedAt, locale)}
               </dd>
-              <dt>上車時間</dt>
-              <dd style={{ margin: 0 }}>{displayDateTime(record.pickupAt)}</dd>
-              <dt>下車時間</dt>
-              <dd style={{ margin: 0 }}>{displayDateTime(record.dropoffAt)}</dd>
-              <dt>行駛路線</dt>
+              <dt>{t("tripRecordDetail.pickupAt", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {display(record.route.routeSummary)}
+                {displayDateTime(record.pickupAt, locale)}
               </dd>
-              <dt>路線來源（Provenance）</dt>
+              <dt>{t("tripRecordDetail.dropoffAt", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {ROUTE_SOURCE_LABELS[record.route.source] ??
-                  display(record.route.source)}
+                {displayDateTime(record.dropoffAt, locale)}
               </dd>
-              <dt>行駛里程（公尺）</dt>
+              <dt>{t("tripRecordDetail.route", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {display(record.route.distanceMeters)}
+                {display(record.route.routeSummary, locale)}
               </dd>
-              <dt>行駛時間（秒）</dt>
+              <dt>{t("tripRecordDetail.routeSource", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {display(record.route.durationSeconds)}
+                {displayRouteSource(record.route.source, locale)}
               </dd>
-              <dt>應付車資</dt>
+              <dt>{t("tripRecordDetail.distanceMeters", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {displayMinor(record.payableFareMinor, record.currency)}
+                {display(record.route.distanceMeters, locale)}
               </dd>
-              <dt>完單計費車資</dt>
+              <dt>
+                {t("tripRecordDetail.durationSeconds", undefined, locale)}
+              </dt>
               <dd style={{ margin: 0 }}>
-                {displayMinor(record.actualFareMinor, record.currency)}
+                {display(record.route.durationSeconds, locale)}
               </dd>
-              <dt>實收車資</dt>
+              <dt>{t("tripRecordDetail.payableFare", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {displayMinor(record.collectedFareMinor, record.currency)}（
-                {PAYMENT_STATUS_LABELS[record.paymentStatus] ??
-                  record.paymentStatus}
-                ）
+                {displayMinor(
+                  record.payableFareMinor,
+                  record.currency,
+                  locale,
+                )}
               </dd>
-              <dt>通行費</dt>
+              <dt>{t("tripRecordDetail.actualFare", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {displayMinor(record.tollMinor, record.currency)}（
-                {TOLL_SOURCE_LABELS[record.tollSource] ?? record.tollSource}）
+                {displayMinor(record.actualFareMinor, record.currency, locale)}
               </dd>
-              <dt>費率版本／計費方式</dt>
+              <dt>{t("tripRecordDetail.collectedFare", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {display(record.farePolicyVersion)} /{" "}
-                {display(record.chargingMode)}
+                {t(
+                  "tripRecordDetail.valueWithDetail",
+                  {
+                    value: displayMinor(
+                      record.collectedFareMinor,
+                      record.currency,
+                      locale,
+                    ),
+                    detail: displayPaymentStatus(record.paymentStatus, locale),
+                  },
+                  locale,
+                )}
               </dd>
-              <dt>紀錄產生／保存至</dt>
+              <dt>{t("tripRecordDetail.toll", undefined, locale)}</dt>
               <dd style={{ margin: 0 }}>
-                {displayDateTime(record.generatedAt)} /{" "}
-                {displayDateTime(record.retainUntil)}
+                {t(
+                  "tripRecordDetail.valueWithDetail",
+                  {
+                    value: displayMinor(
+                      record.tollMinor,
+                      record.currency,
+                      locale,
+                    ),
+                    detail: displayTollSource(record.tollSource, locale),
+                  },
+                  locale,
+                )}
               </dd>
-              <dt>法律保全</dt>
-              <dd style={{ margin: 0 }}>{display(record.legalHold.state)}</dd>
+              <dt>
+                {t(
+                  "tripRecordDetail.farePolicyChargingMode",
+                  undefined,
+                  locale,
+                )}
+              </dt>
+              <dd style={{ margin: 0 }}>
+                {display(record.farePolicyVersion, locale)} /{" "}
+                {display(record.chargingMode, locale)}
+              </dd>
+              <dt>
+                {t("tripRecordDetail.generatedRetainUntil", undefined, locale)}
+              </dt>
+              <dd style={{ margin: 0 }}>
+                {displayDateTime(record.generatedAt, locale)} /{" "}
+                {displayDateTime(record.retainUntil, locale)}
+              </dd>
+              <dt>{t("tripRecordDetail.legalHold", undefined, locale)}</dt>
+              <dd style={{ margin: 0 }}>
+                {displayLegalHoldState(record.legalHold.state, locale)}
+              </dd>
             </dl>
           </CardBody>
         </Card>
       ) : (
-        <ErrorNotice status={result.status} error={result.error} />
+        <ErrorNotice
+          status={result.status}
+          error={result.error}
+          locale={locale}
+        />
       )}
     </PortalShell>
   );

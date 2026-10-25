@@ -225,6 +225,25 @@ describe("Agency portal server and component rendering in zh and en", () => {
       searchParams: Promise<Record<string, string | string[] | undefined>>;
     }) => Promise<React.ReactElement>;
   };
+  const tripRecordsMod = loader.loadModule("@/app/trip-records/page") as {
+    default: (props: {
+      searchParams: Promise<Record<string, string | string[] | undefined>>;
+    }) => Promise<React.ReactElement>;
+  };
+  const tripRecordDetailMod = loader.loadModule(
+    "@/app/trip-records/[recordId]/page",
+  ) as {
+    default: (props: {
+      params: Promise<{ recordId: string }>;
+    }) => Promise<React.ReactElement>;
+  };
+  const tripExportsMod = loader.loadModule(
+    "@/app/trip-records/exports/page",
+  ) as {
+    default: (props: {
+      searchParams?: Promise<Record<string, string | string[] | undefined>>;
+    }) => Promise<React.ReactElement>;
+  };
 
   beforeEach(() => {
     mockedLocaleCookie = "zh";
@@ -484,6 +503,144 @@ describe("Agency portal server and component rendering in zh and en", () => {
     expect(
       /[\u4e00-\u9fff]/u.test(
         stripIntentionalLanguageToggleCopy(enDaily403Html),
+      ),
+    ).toBe(false);
+  });
+
+  it("renders R11 TripRecordsPage, TripRecordDetailPage, and TripExportsPage in zh and en while preserving statutory fields, provenance, and unknown vs 0 semantics", async () => {
+    const sampleRecord = {
+      recordId: "mtr-20261025-001",
+      orderId: "ord-20261025-001",
+      tripId: "trip-20261025-001",
+      orderNoMasked: "ORD-***001",
+      plateNo: "BKR-2208",
+      plateNoMasked: "BKR-**08",
+      reservedAt: "2026-10-31T16:15:00.000Z",
+      pickupAt: "2026-10-31T16:30:00.000Z",
+      dropoffAt: "2026-10-31T16:55:00.000Z",
+      route: {
+        routeSummary: "Taipei Main Station -> Songshan Airport",
+        source: "pickup_dropoff_summary",
+        distanceMeters: 6200,
+        durationSeconds: 1500,
+      },
+      payableFareMinor: 320,
+      actualFareMinor: 350,
+      collectedFareMinor: null,
+      paymentStatus: "authorized",
+      tollMinor: 0,
+      tollSource: "none",
+      currency: "TWD",
+      farePolicyVersion: "v2026.10",
+      chargingMode: "METERED",
+      generatedAt: "2026-10-31T17:00:00.000Z",
+      retainUntil: "2028-11-01T17:00:00.000Z",
+      legalHold: { state: "active" },
+    };
+
+    // R11 TripRecordsPage in zh
+    mockedLocaleCookie = "zh";
+    mockedAgencyDataQueue.push({
+      ok: true,
+      status: 200,
+      data: { items: [sampleRecord], page: 1, pageSize: 20, total: 1 },
+      error: null,
+    });
+    const zhListHtml = renderToStaticMarkup(
+      await tripRecordsMod.default({
+        searchParams: Promise.resolve({
+          month: "2026-11",
+          plateNo: "BKR-2208",
+          legalHold: "active",
+        }),
+      }),
+    );
+    expect(zhListHtml).toContain("R11 行程紀錄");
+    expect(zhListHtml).toContain("查詢結果：共 1 筆符合條件之行程紀錄");
+    expect(zhListHtml).toContain("完單起訖與里程摘要");
+    expect(zhListHtml).toContain("已授權待請款");
+    expect(zhListHtml).toContain("保全中");
+    expect(zhListHtml).toContain(
+      'href="/trip-records/exports?month=2026-11&amp;plateNo=BKR-2208"',
+    );
+
+    // R11 TripRecordsPage in en
+    mockedLocaleCookie = "en";
+    mockedAgencyDataQueue.push({
+      ok: true,
+      status: 200,
+      data: { items: [sampleRecord], page: 1, pageSize: 20, total: 1 },
+      error: null,
+    });
+    const enListHtml = renderToStaticMarkup(
+      await tripRecordsMod.default({
+        searchParams: Promise.resolve({
+          month: "2026-11",
+          plateNo: "BKR-2208",
+          legalHold: "active",
+        }),
+      }),
+    );
+    expect(enListHtml).toContain("R11 Trip Records");
+    expect(enListHtml).toContain("Query results: 1 matching trip records");
+    expect(enListHtml).toContain("Export Current Filter Scope CSV");
+    expect(enListHtml).toContain(
+      "Pickup/dropoff &amp; distance summary",
+    );
+    expect(enListHtml).toContain("Not provided");
+    expect(enListHtml).toContain("Authorized (pending capture)");
+    expect(enListHtml).toContain("0 TWD");
+    expect(enListHtml).toContain("Active hold");
+    expect(enListHtml).toContain("BKR-2208");
+    expect(enListHtml).toContain("ORD-***001");
+    expect(
+      /[\u4e00-\u9fff]/u.test(stripIntentionalLanguageToggleCopy(enListHtml)),
+    ).toBe(false);
+
+    // R11 TripRecordDetailPage in en
+    mockedLocaleCookie = "en";
+    mockedAgencyDataQueue.push({
+      ok: true,
+      status: 200,
+      data: sampleRecord,
+      error: null,
+    });
+    const enDetailHtml = renderToStaticMarkup(
+      await tripRecordDetailMod.default({
+        params: Promise.resolve({ recordId: "mtr-20261025-001" }),
+      }),
+    );
+    expect(enDetailHtml).toContain("R11 Trip Record Detail");
+    expect(enDetailHtml).toContain("Route Source (Provenance)");
+    expect(enDetailHtml).toContain("Metered Completion Fare");
+    expect(enDetailHtml).toContain(
+      "Not provided (Authorized (pending capture))",
+    );
+    expect(enDetailHtml).toContain("0 TWD (No toll (0))");
+    expect(enDetailHtml).toContain("Active hold");
+    expect(enDetailHtml).toContain("mtr-20261025-001");
+    expect(enDetailHtml).toContain("ord-20261025-001 / trip-20261025-001");
+    expect(
+      /[\u4e00-\u9fff]/u.test(stripIntentionalLanguageToggleCopy(enDetailHtml)),
+    ).toBe(false);
+
+    // R11 TripExportsPage in en
+    mockedLocaleCookie = "en";
+    const enExportsHtml = renderToStaticMarkup(
+      await tripExportsMod.default({
+        searchParams: Promise.resolve({
+          month: "2026-11",
+          plateNo: "BKR-2208",
+        }),
+      }),
+    );
+    expect(enExportsHtml).toContain("R11 Controlled Exports");
+    expect(enExportsHtml).toContain("Preview Record Count");
+    expect(enExportsHtml).toContain("Export Purpose (Required)");
+    expect(enExportsHtml).toContain("Create Export Job");
+    expect(
+      /[\u4e00-\u9fff]/u.test(
+        stripIntentionalLanguageToggleCopy(enExportsHtml),
       ),
     ).toBe(false);
   });

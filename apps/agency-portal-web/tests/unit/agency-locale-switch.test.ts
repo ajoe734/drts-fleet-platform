@@ -164,6 +164,14 @@ describe("Agency portal client language switch and logout/CSRF preservation", ()
       locale?: Locale;
     }>;
   };
+  const { TripExportPanel } = loader.loadModule(
+    "@/components/trip-export-panel",
+  ) as {
+    TripExportPanel: React.ComponentType<{
+      initialScope?: Record<string, string | undefined>;
+      locale?: Locale;
+    }>;
+  };
 
   beforeEach(() => {
     refreshMock.mockReset();
@@ -296,5 +304,104 @@ describe("Agency portal client language switch and logout/CSRF preservation", ()
       headers: { "x-csrf-token": "csrf-token-agency-99" },
       credentials: "same-origin",
     });
+  });
+
+  it("localizes R11 TripExportPanel preview, create, status refresh, download link, and 403 permission error across zh and en", async () => {
+    const fetchMock = vi
+      .fn()
+      // 1. preview ok
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { record_count: 7 } }), {
+          status: 200,
+        }),
+      )
+      // 2. create job ok
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: { job_id: "job-r11-001", status: "running" },
+          }),
+          { status: 200 },
+        ),
+      )
+      // 3. refresh status ok -> completed
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { status: "completed" } }), {
+          status: 200,
+        }),
+      )
+      // 4. get download link ok
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              download: {
+                download_url:
+                  "/downloads/multi-taxi-trip-exports/job-r11-001?expires=1&signature=abc",
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      // 5. preview 403 forbidden
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ error: { code: "FORBIDDEN", message: "Forbidden" } }),
+          { status: 403 },
+        ),
+      );
+    global.fetch = fetchMock;
+
+    render(
+      React.createElement(LanguageProvider, {
+        defaultLocale: "en",
+        children: React.createElement(TripExportPanel, {
+          initialScope: { month: "2026-11", plateNo: "BKR-2208" },
+        }),
+      }),
+    );
+
+    const previewBtn = screen.getByRole("button", {
+      name: "Preview Record Count",
+    });
+    fireEvent.click(previewBtn);
+    expect(
+      await screen.findByText("Retained records matching scope: 7"),
+    ).toBeTruthy();
+
+    const purposeBox = screen.getByRole("textbox", {
+      name: "Export Purpose (Required)",
+    });
+    fireEvent.change(purposeBox, {
+      target: { value: "Monthly statutory audit" },
+    });
+
+    const createBtn = screen.getByRole("button", { name: "Create Export Job" });
+    fireEvent.click(createBtn);
+    expect(await screen.findByText("job-r11-001")).toBeTruthy();
+    expect(screen.getByText(/Status: Running/)).toBeTruthy();
+
+    const refreshBtn = screen.getByRole("button", { name: "Refresh Status" });
+    fireEvent.click(refreshBtn);
+    expect(await screen.findByText(/Status: Completed/)).toBeTruthy();
+
+    const downloadBtn = screen.getByRole("button", {
+      name: "Get Download Link",
+    });
+    fireEvent.click(downloadBtn);
+    const link = await screen.findByRole("link", {
+      name: "Download (while signed link is valid)",
+    });
+    expect(link.getAttribute("href")).toContain(
+      "/downloads/multi-taxi-trip-exports/job-r11-001",
+    );
+
+    // 403 permission error localized in English
+    fireEvent.click(previewBtn);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
+      "This account lacks export permission (agency_exporter), or the requested data does not belong to this agency.",
+    );
   });
 });

@@ -131,6 +131,58 @@ export function displayLegalHoldState(
   return key ? t(key, undefined, locale) : state;
 }
 
+const ROUTE_SOURCE_KEYS: Record<string, TranslationKey> = {
+  driver_gps: "routeSource.driver_gps",
+  mixed: "routeSource.mixed",
+  pickup_dropoff_summary: "routeSource.pickup_dropoff_summary",
+  provider_route: "routeSource.provider_route",
+  unavailable: "routeSource.unavailable",
+};
+
+export function displayRouteSource(
+  source: string | null | undefined,
+  locale: Locale = "zh",
+): string {
+  if (!source || source.trim().length === 0) return notProvided(locale);
+  const key = ROUTE_SOURCE_KEYS[source];
+  return key ? t(key, undefined, locale) : source;
+}
+
+const PAYMENT_STATUS_KEYS: Record<string, TranslationKey> = {
+  captured: "paymentStatus.captured",
+  refunded: "paymentStatus.refunded",
+  authorized: "paymentStatus.authorized",
+  not_selected: "paymentStatus.not_selected",
+  failed: "paymentStatus.failed",
+  manual_recovery: "paymentStatus.manual_recovery",
+  unknown: "paymentStatus.unknown",
+};
+
+export function displayPaymentStatus(
+  status: string | null | undefined,
+  locale: Locale = "zh",
+): string {
+  if (!status || status.trim().length === 0) return notProvided(locale);
+  const key = PAYMENT_STATUS_KEYS[status];
+  return key ? t(key, undefined, locale) : status;
+}
+
+const TOLL_SOURCE_KEYS: Record<string, TranslationKey> = {
+  driver_proof: "tollSource.driver_proof",
+  electronic_receipt: "tollSource.electronic_receipt",
+  none: "tollSource.none",
+  unavailable: "tollSource.unavailable",
+};
+
+export function displayTollSource(
+  source: string | null | undefined,
+  locale: Locale = "zh",
+): string {
+  if (!source || source.trim().length === 0) return notProvided(locale);
+  const key = TOLL_SOURCE_KEYS[source];
+  return key ? t(key, undefined, locale) : source;
+}
+
 const STATUS_CODE_KEYS: Record<string, TranslationKey> = {
   active: "status.active",
   suspended: "status.suspended",

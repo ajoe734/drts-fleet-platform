@@ -7,9 +7,12 @@ import {
   displayExpiryStatus,
   displayLegalHoldState,
   displayMinor,
+  displayPaymentStatus,
   displayPercent,
   displayRoleCode,
+  displayRouteSource,
   displayStatusCode,
+  displayTollSource,
   errorMessage,
   notProvided,
 } from "@/lib/format";
@@ -178,6 +181,45 @@ describe("Agency portal locale catalog and formatters", () => {
     expect(displayLegalHoldState("none", "en")).toBe("None");
     expect(displayLegalHoldState("unavailable", "en")).toBe("Not provided");
     expect(rawQuery.legalHold).toBe("active");
+
+    expect(displayRouteSource("driver_gps", "zh")).toBe("司機 GPS 軌跡");
+    expect(displayRouteSource("driver_gps", "en")).toBe(
+      "Driver GPS trajectory",
+    );
+    expect(displayRouteSource("mixed", "en")).toBe(
+      "Mixed trajectory (partial GPS samples + pickup/dropoff summary)",
+    );
+    expect(displayRouteSource("pickup_dropoff_summary", "en")).toBe(
+      "Pickup/dropoff & distance summary",
+    );
+    expect(displayRouteSource("provider_route", "en")).toBe(
+      "Dispatch estimated route",
+    );
+    expect(displayRouteSource("unavailable", "en")).toBe("Not provided");
+    expect(displayRouteSource(null, "en")).toBe("Not provided");
+
+    expect(displayPaymentStatus("captured", "zh")).toBe("已請款實收");
+    expect(displayPaymentStatus("captured", "en")).toBe("Captured (collected)");
+    expect(displayPaymentStatus("refunded", "en")).toBe(
+      "Refunded (collected 0)",
+    );
+    expect(displayPaymentStatus("authorized", "en")).toBe(
+      "Authorized (pending capture)",
+    );
+    expect(displayPaymentStatus("unknown", "en")).toBe(
+      "Payment status not provided",
+    );
+
+    expect(displayTollSource("driver_proof", "zh")).toBe(
+      "司機完單證明（通行費憑證）",
+    );
+    expect(displayTollSource("driver_proof", "en")).toBe(
+      "Driver completion proof (toll receipt)",
+    );
+    expect(displayTollSource("none", "en")).toBe("No toll (0)");
+    expect(displayTollSource("unavailable", "en")).toBe(
+      "Not recorded (historical)",
+    );
 
     expect(displayRoleCode("agency_viewer", "zh")).toBe("唯讀查詢");
     expect(displayRoleCode("agency_viewer", "en")).toBe("Read-only viewer");
