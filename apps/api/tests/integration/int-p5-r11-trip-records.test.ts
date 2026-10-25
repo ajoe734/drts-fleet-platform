@@ -363,9 +363,9 @@ function createTransactionalDbHarness() {
       normalizedSql.includes(
         "FROM reporting.multi_taxi_trip_operational_records r",
       ) &&
-      normalizedSql.includes("<= $1::timestamptz")
+      normalizedSql.includes("<= LEAST($1::timestamptz, clock_timestamp())")
     ) {
-      const cutoffMs = Date.parse(String(values[0]));
+      const cutoffMs = Math.min(Date.parse(String(values[0])), Date.now());
       const rows = [...state.tripRecordsByOrderId.values()]
         .filter((row) => {
           const retainMs = Date.parse(String(row.retain_until));
@@ -407,7 +407,7 @@ function createTransactionalDbHarness() {
         allowPurge &&
         retentionNowIso &&
         Number.isFinite(Date.parse(retentionNowIso))
-          ? Date.parse(retentionNowIso)
+          ? Math.min(Date.parse(retentionNowIso), Date.now())
           : Date.now();
       if (effectiveFloorMs > referenceNowMs) {
         throw new Error(
@@ -1218,7 +1218,55 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
     expect(shortenAndTamperAttempt.pickupAt).toBe("2026-10-20T09:05:00.000Z");
     expect(shortenAndTamperAttempt.dropoffAt).toBe("2026-10-25T02:00:00.000Z");
 
-    // 3. After extended retention expiry (2031-02-01), an active legal hold blocks purge
+    // 3. Even if a future reference clock (2031-02-01T00:00:00.000Z) is supplied,
+    //    records whose retainUntil is still in the future relative to the actual DB clock
+    //    (2028-10-25 / 2030-03-01 / 2031-01-01) CANNOT be deleted early.
+    const futureClockAttempt =
+      await multiTaxiService.purgeExpiredTripOperationalRecords(
+        "2031-02-01T00:00:00.000Z",
+      );
+    expect(futureClockAttempt.purgedRecordIds).toEqual([]);
+    expect(
+      await multiTaxiService.getTripOperationalRecord("mtr-order-r11-tx-001"),
+    ).not.toBeNull();
+    expect(
+      await multiTaxiService.getTripOperationalRecord(
+        "mtr-order-r11-nonleap-ctrl",
+      ),
+    ).not.toBeNull();
+    expect(
+      await multiTaxiService.getTripOperationalRecord(
+        "mtr-order-r11-leapday-start",
+      ),
+    ).not.toBeNull();
+
+    // 4. Historical record spanning 2024 leap year (2022-10-25T02:00:00.000Z -> 2024-10-25T02:00:00.000Z):
+    //    - At 2024-10-24T02:00:00.000Z (fixed 730 days, 1 day short of 2 calendar years), it is NOT expired.
+    //    - At 2024-10-26T00:00:00.000Z (past 2 calendar years and <= actual clock), an active legal hold blocks purge,
+    //      and releasing the hold allows positive purge while leaving unexpired 2026/2028 records intact.
+    const historicalLeapRecord =
+      await env.multiTaxiRepository.upsertTripOperationalRecord({
+        ...committedRecord!,
+        recordId: "mtr-order-r11-hist-leap",
+        orderId: "order-r11-hist-leap",
+        orderNo: "MTX-R11-HIST-LEAP",
+        tripId: "task-r11-hist-leap",
+        generatedAt: "2022-10-25T02:00:00.000Z",
+        retainUntil: "2024-10-24T02:00:00.000Z",
+      });
+    expect(historicalLeapRecord.retainUntil).toBe("2024-10-25T02:00:00.000Z");
+
+    const hist730dSweep =
+      await multiTaxiService.purgeExpiredTripOperationalRecords(
+        "2024-10-24T02:00:00.000Z",
+      );
+    expect(hist730dSweep.purgedRecordIds).toEqual([]);
+    expect(
+      await multiTaxiService.getTripOperationalRecord(
+        "mtr-order-r11-hist-leap",
+      ),
+    ).not.toBeNull();
+
     const platformIdentity: BootstrapRequestIdentity = {
       authMode: "jwt_bearer",
       actorType: "platform_admin",
@@ -1233,7 +1281,7 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
     const hold = await env.auditNotificationService.placeEvidenceLegalHold(
       {
         family: "proof_bundle",
-        subjectId: env.order.orderId,
+        subjectId: "order-r11-hist-leap",
         caseNumber: "CASE-R11-2026-01",
         reasonCode: "regulatory_inquiry",
         reasonNote: "Traffic Bureau R11 investigation hold",
@@ -1243,15 +1291,15 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
     );
 
     const heldSweep = await multiTaxiService.purgeExpiredTripOperationalRecords(
-      "2031-02-01T00:00:00.000Z",
+      "2024-10-26T00:00:00.000Z",
     );
-    expect(heldSweep.purgedRecordIds).toEqual([
-      "mtr-order-r11-nonleap-ctrl",
-      "mtr-order-r11-leapday-start",
+    expect(heldSweep.purgedRecordIds).toEqual([]);
+    expect(heldSweep.skippedHeldRecordIds).toEqual([
+      "mtr-order-r11-hist-leap",
     ]);
-    expect(heldSweep.skippedHeldRecordIds).toEqual(["mtr-order-r11-tx-001"]);
 
-    // 4. Releasing the legal hold allows the expired record to be lawfully purged
+    // 5. Releasing the legal hold allows the expired historical record to be lawfully purged,
+    //    while still-unexpired 2026/2028 records remain protected even when a future cutoff is passed.
     await env.auditNotificationService.releaseEvidenceLegalHold(
       hold.holdId,
       { releaseReason: "Investigation closed" },
@@ -1263,10 +1311,17 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
       await multiTaxiService.purgeExpiredTripOperationalRecords(
         "2031-02-01T00:00:00.000Z",
       );
-    expect(releasedSweep.purgedRecordIds).toEqual(["mtr-order-r11-tx-001"]);
+    expect(releasedSweep.purgedRecordIds).toEqual([
+      "mtr-order-r11-hist-leap",
+    ]);
+    expect(
+      await multiTaxiService.getTripOperationalRecord(
+        "mtr-order-r11-hist-leap",
+      ),
+    ).toBeNull();
     expect(
       await multiTaxiService.getTripOperationalRecord("mtr-order-r11-tx-001"),
-    ).toBeNull();
+    ).not.toBeNull();
   });
 
   it("supports agency exact search, exposes all 9 statutory fields in list/detail/CSV, and enforces export permissions, ownership, and audit", async () => {
@@ -1860,6 +1915,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
     const nonLeapRecordId = `mtr-${nonLeapOrderId}`;
     const leapDayOrderId = `ord_r11_pg_ld_${suffix}`;
     const leapDayRecordId = `mtr-${leapDayOrderId}`;
+    const histOrderId = `ord_r11_pg_hist_${suffix}`;
+    const histRecordId = `mtr-${histOrderId}`;
     const paymentId = `pay_r11_pg_${suffix}`;
     const taskId = `task_r11_pg_${suffix}`;
     const driverId = `drv_r11_pg_${suffix}`;
@@ -1881,21 +1938,24 @@ describe.skipIf(!process.env.DATABASE_URL)(
           );
           await client.query(
             "DELETE FROM voice.legal_hold WHERE subject_ref = ANY($1::text[])",
-            [[orderId, nonLeapOrderId, leapDayOrderId]],
+            [[orderId, nonLeapOrderId, leapDayOrderId, histOrderId]],
           );
           await client.query(
             "DELETE FROM billing.multi_taxi_passenger_payments WHERE order_id = $1",
             [orderId],
           );
+          await client.query("COMMIT");
+        } catch {
+          await client.query("ROLLBACK");
+        }
+        try {
+          await client.query("BEGIN");
           await client.query(
             "SET LOCAL reporting.allow_trip_record_retention_purge = 'on'",
           );
           await client.query(
-            "SELECT set_config('reporting.trip_record_retention_now', '2099-01-01T00:00:00.000Z', true)",
-          );
-          await client.query(
-            "DELETE FROM reporting.multi_taxi_trip_operational_records WHERE record_id = ANY($1::text[])",
-            [[recordId, nonLeapRecordId, leapDayRecordId]],
+            "DELETE FROM reporting.multi_taxi_trip_operational_records WHERE record_id = $1",
+            [histRecordId],
           );
           await client.query("COMMIT");
         } catch {
@@ -2095,6 +2155,44 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(nonLeapPersisted?.tollMinor).toBeNull();
       expect(leapDayPersisted?.retainUntil).toBe("2030-03-01T02:00:00.000Z");
 
+      // Also persist a historical record spanning the 2024 leap year (2022-10-25T02:00:00.000Z -> 2024-10-25T02:00:00.000Z)
+      // to verify 730-day non-expiry at 2024-10-24T02:00:00.000Z and real-clock-expired positive purge/hold gating at 2024-10-26T00:00:00.000Z.
+      await repository.upsertTripOperationalRecord({
+        recordId: histRecordId,
+        orderId: histOrderId,
+        orderNo: `MTX-PG-HIST-${suffix}`,
+        tripId: `trip-hist-${suffix}`,
+        assignmentId: `asg-hist-${suffix}`,
+        driverId,
+        vehicleId,
+        plateNo: "TPE-7791",
+        reservedAt: "2022-10-25T01:50:00.000Z",
+        pickupAt: "2022-10-25T01:56:00.000Z",
+        dropoffAt: "2022-10-25T02:00:00.000Z",
+        route: {
+          encodedPolyline: null,
+          pointCount: 0,
+          distanceMeters: 5300,
+          durationSeconds: 240,
+          source: "pickup_dropoff_summary",
+          routeSummary: "Hist Start → Hist End",
+        },
+        payableFareMinor: 27000,
+        actualFareMinor: 27000,
+        collectedFareMinor: null,
+        paymentStatus: "unknown",
+        tollMinor: 0,
+        tollSource: "none",
+        currency: "TWD",
+        farePolicyVersion: "multi-taxi-v1",
+        chargingMode: "meter",
+        generatedAt: "2022-10-25T02:00:00.000Z",
+        retainUntil: "2024-10-24T02:00:00.000Z",
+      });
+      const histPersisted =
+        await repository.findTripOperationalRecordById(histRecordId);
+      expect(histPersisted?.retainUntil).toBe("2024-10-25T02:00:00.000Z");
+
       const initialPersisted =
         await repository.findTripOperationalRecordById(recordId);
       expect(initialPersisted?.retainUntil).toBe("2028-10-25T02:00:00.000Z");
@@ -2116,20 +2214,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // Collect any pre-existing unrelated record_ids in the shared CI DB so purge sweeps only affect our test rows
       const existingRows = await database.query<{ record_id: string }>(
         "SELECT record_id FROM reporting.multi_taxi_trip_operational_records WHERE record_id <> ALL($1::text[])",
-        [[recordId, nonLeapRecordId, leapDayRecordId]],
+        [[recordId, nonLeapRecordId, leapDayRecordId, histRecordId]],
       );
       const unrelatedHeldSet = new Set(
         existingRows.rows.map((r) => r.record_id),
       );
 
-      // At 2028-10-24T02:00:00.000Z (730 days after 2026-10-25T02:00:00.000Z),
-      // retention sweep must NOT consider the record expired, and record remains queryable.
+      // At 2024-10-24T02:00:00.000Z (730 days after 2022-10-25T02:00:00.000Z across 2024 leap year, 1 day short of 2 calendar years),
+      // retention sweep must NOT consider the historical record expired, and record remains queryable.
       const sweepAt730d = await repository.purgeExpiredTripOperationalRecords({
-        nowIso: "2028-10-24T02:00:00.000Z",
+        nowIso: "2024-10-24T02:00:00.000Z",
         heldSubjects: unrelatedHeldSet,
       });
-      expect(sweepAt730d.purgedRecordIds).not.toContain(recordId);
+      expect(sweepAt730d.purgedRecordIds).not.toContain(histRecordId);
       const allRecordsAt730d = await repository.listTripOperationalRecords();
+      expect(allRecordsAt730d.some((r) => r.recordId === histRecordId)).toBe(
+        true,
+      );
       expect(allRecordsAt730d.some((r) => r.recordId === recordId)).toBe(true);
 
       // Prune raw telemetry.driver_location_events and replay upsert -> retained R11 GPS snapshot survives!
@@ -2222,36 +2323,65 @@ describe.skipIf(!process.env.DATABASE_URL)(
         await repository.findTripOperationalRecordById(nonLeapRecordId);
       expect(preservedLonger?.retainUntil).toBe("2031-01-01T00:00:00.000Z");
 
-      // Active legal hold in voice.legal_hold blocks both purgeExpiredTripOperationalRecords and direct DELETE after 2-year expiry (2028-10-26T00:00:00.000Z)
+      // Even if a future reference clock (2031-02-01T00:00:00.000Z) is set in session config,
+      // PostgreSQL trigger caps v_reference_now at clock_timestamp() and rejects deleting unexpired 2026->2028 records.
+      const futureBypassClient = await database.connect();
+      try {
+        await futureBypassClient.query("BEGIN");
+        await futureBypassClient.query(
+          "SET LOCAL reporting.allow_trip_record_retention_purge = 'on'",
+        );
+        await futureBypassClient.query(
+          "SELECT set_config('reporting.trip_record_retention_now', '2031-02-01T00:00:00.000Z', true)",
+        );
+        await expect(
+          futureBypassClient.query(
+            `DELETE FROM reporting.multi_taxi_trip_operational_records WHERE record_id = $1`,
+            [recordId],
+          ),
+        ).rejects.toThrow();
+      } finally {
+        await futureBypassClient.query("ROLLBACK").catch(() => {});
+        futureBypassClient.release();
+      }
+
+      // Active legal hold in voice.legal_hold blocks both purgeExpiredTripOperationalRecords and direct DELETE after 2-year expiry (2024-10-26T00:00:00.000Z)
       await database.query(
         `
         INSERT INTO voice.legal_hold (
           case_number, evidence_family, subject_ref, reason_code, status, placed_by
         ) VALUES ($1, 'proof_bundle', $2, 'regulatory_inquiry', 'active', 'usr-admin-r11-pg')
         `,
-        [`CASE-R11-${suffix}`, orderId],
+        [`CASE-R11-${suffix}`, histOrderId],
       );
 
       const sweepUnderHold =
         await repository.purgeExpiredTripOperationalRecords({
-          nowIso: "2028-10-26T00:00:00.000Z",
+          nowIso: "2024-10-26T00:00:00.000Z",
           heldSubjects: unrelatedHeldSet,
         });
+      expect(sweepUnderHold.purgedRecordIds).not.toContain(histRecordId);
       expect(sweepUnderHold.purgedRecordIds).not.toContain(recordId);
-      expect(sweepUnderHold.skippedHeldRecordIds).toContain(recordId);
+      expect(sweepUnderHold.skippedHeldRecordIds).toContain(histRecordId);
 
-      // Releasing the legal hold allows controlled retention purge after expiry
+      // Releasing the legal hold allows controlled retention purge of the expired historical record while preserving unexpired 2026/2028 records
       await database.query(
         `UPDATE voice.legal_hold SET status = 'released', released_by = 'usr-admin-r11-pg', released_at = now() WHERE subject_ref = $1`,
-        [orderId],
+        [histOrderId],
       );
       const sweepAfterHoldRelease =
         await repository.purgeExpiredTripOperationalRecords({
-          nowIso: "2028-10-26T00:00:00.000Z",
+          nowIso: "2031-02-01T00:00:00.000Z",
           heldSubjects: unrelatedHeldSet,
         });
-      expect(sweepAfterHoldRelease.purgedRecordIds).toContain(recordId);
-      expect(await repository.findTripOperationalRecordById(recordId)).toBeNull();
+      expect(sweepAfterHoldRelease.purgedRecordIds).toContain(histRecordId);
+      expect(sweepAfterHoldRelease.purgedRecordIds).not.toContain(recordId);
+      expect(
+        await repository.findTripOperationalRecordById(histRecordId),
+      ).toBeNull();
+      expect(
+        await repository.findTripOperationalRecordById(recordId),
+      ).not.toBeNull();
     });
   },
 );

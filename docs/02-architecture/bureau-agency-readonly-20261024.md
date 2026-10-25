@@ -271,7 +271,7 @@ multi-taxi.controller.ts 先呼叫 `exportTripOperationalRecords`），所以機
 
 **2 年（兩曆年）保存邊界與持久保護**：
 - 資料庫層（`V0135`）透過 `reporting.multi_taxi_two_calendar_year_retention_floor(generated_at)` 強制 `retain_until >= max(generated_at + 2 calendar years in UTC, generated_at + 730 days)`（閏日 2/29 起算進位至 3/1，絕不提前屆滿），禁止 `TRUNCATE`、禁止將既有 `retain_until` 縮短、禁止竄改已寫入之核心趟次事實（`record_id`、`order_id`、`trip_id`、`vehicle_id`、非 `'UNRECORDED'` 之 `plate_no`、`reserved_at`、已非 NULL 之 `pickup_at`/`dropoff_at`、`generated_at`），且當 `GREATEST(retain_until, reporting.multi_taxi_two_calendar_year_retention_floor(generated_at)) > clock_timestamp()` 時拒絕任何 `DELETE`。
-- 超過兩曆年保存期後，仍須同時具備 `reporting.allow_trip_record_retention_purge = 'on'` 且該趟次無有效法律保留（`voice.legal_hold` 針對 `proof_bundle`／`multi_taxi_trip_record` 之 `active` hold）或刪除例外（`AuditNotificationService` deletion exception），才允許受控清理。
+- 超過兩曆年保存期後，仍須同時具備 `reporting.allow_trip_record_retention_purge = 'on'` 且該趟次無有效法律保留（`voice.legal_hold` 針對 `proof_bundle`／`multi_taxi_trip_record` 之 `active` hold）或刪除例外（`AuditNotificationService` deletion exception），才允許受控清理。任何選填參考時間（`nowIso`／`reporting.trip_record_retention_now`）均以真實當下時鐘封頂（`LEAST(..., clock_timestamp())`／`Math.min(..., Date.now())`），僅可作不高於真實 DB 時鐘之歷史保守篩選，絕不允許以未來參考時鐘提前刪除尚未屆滿真實兩曆年／更長 `retain_until` 之紀錄。
 - 機關列表、詳情與匯出只包含 `retainUntil >= now` 的紀錄（保存期限至少滿兩曆年，例如 `2026-10-25T02:00:00Z` 完成之紀錄於 `2028-10-24T02:00:00Z` 仍為有效可查且不可刪除，至少保存至 `2028-10-25T02:00:00Z`）。
 
 **D4 決議與九大法定欄位投影／來源誠實性**：

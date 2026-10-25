@@ -811,7 +811,10 @@ BEGIN
   v_reference_now := CASE
     WHEN current_setting('reporting.allow_trip_record_retention_purge', true) = 'on'
      AND NULLIF(current_setting('reporting.trip_record_retention_now', true), '') IS NOT NULL
-    THEN current_setting('reporting.trip_record_retention_now', true)::timestamptz
+    THEN LEAST(
+      current_setting('reporting.trip_record_retention_now', true)::timestamptz,
+      clock_timestamp()
+    )
     ELSE clock_timestamp()
   END;
   IF v_effective_retain_until > v_reference_now THEN

@@ -3789,8 +3789,14 @@ export class MultiTaxiRepository {
     purgedRecordIds: string[];
     skippedHeldRecordIds: string[];
   }> {
-    const nowIso = options.nowIso ?? new Date().toISOString();
-    const nowMs = Date.parse(nowIso);
+    const realNowMs = Date.now();
+    const requestedNowMs = options.nowIso
+      ? Date.parse(options.nowIso)
+      : realNowMs;
+    const nowMs = Number.isFinite(requestedNowMs)
+      ? Math.min(requestedNowMs, realNowMs)
+      : realNowMs;
+    const nowIso = new Date(nowMs).toISOString();
     const heldSubjects = options.heldSubjects ?? new Set<string>();
 
     if (!this.isEnabled()) {
@@ -3862,7 +3868,7 @@ export class MultiTaxiRepository {
               END
           ) AT TIME ZONE 'UTC',
           r.generated_at + interval '730 days'
-        ) <= $1::timestamptz
+        ) <= LEAST($1::timestamptz, clock_timestamp())
         ORDER BY r.retain_until ASC, r.record_id ASC
         FOR UPDATE
         `,
