@@ -187,6 +187,12 @@
       "reason": "Registers the R02 vehicle dispatch exclusivity operator-binding migration V0131__exclusivity_operator_binding.sql after BUREAU-R04 (V0130) and BUREAU-R13 (V0132, V0133) merged to origin/dev and 3-leaf migration_reservation_scope_coordination."
     },
     {
+      "amended_by_task_id": "BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025",
+      "amended_at": "2026-10-25",
+      "scope": "Append V0134 to normal_onboarding_supply_pair_allocations; original V0128 entry and all prior allocations, amendments and task ownership entries remain unchanged",
+      "reason": "Registers V0134__approved_supply_renewal.sql under the existing SA/SD supply eligibility and canonical registry submission family (docs/02-architecture/phase1_delta_sa_supply_eligibility_mobile_reporting_20260619.md, docs/02-architecture/phase1_delta_sd_supply_eligibility_mobile_reporting_20260619.md) at origin/dev 521dbbabd23799b7dd5e7b98cfe22ea921c6e68f after V0133__agency_access_logs.sql."
+    },
+    {
       "amended_by_task_id": "BUREAU-R11-EXISTING-TRIP-RECORD-SOURCE-FOLLOWTHROUGH-20261025",
       "amended_at": "2026-10-25",
       "scope": "Appended V0135__multi_taxi_trip_record_truth_retention.sql to regulatory_agency_access_allocations only; all previous allocations, amendments and task ownership entries remain unchanged. V0134 stays reserved for BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025 and is not claimed here.",
@@ -834,6 +840,33 @@
         "Pair, canonical vehicle and submission approval/document/event writes use the existing single transaction. Publish the new local pair only after successful COMMIT.",
         "Existing numeric legacy ETA values preserve their behavior; a new NULL estimate without driver observation/destination does not create a zero-minute candidate.",
         "All license, contract, insurance, exclusivity, workstate, product and location checks remain unchanged."
+      ]
+    },
+    {
+      "task_id": "BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025",
+      "version": "V0134",
+      "migration_filename": "V0134__approved_supply_renewal.sql",
+      "domain": "approved_supply_renewal",
+      "target_schema": "fleet, reg",
+      "primary_tables": [
+        "fleet.vehicle_supply_drafts",
+        "fleet.supply_submissions",
+        "reg.phase1_registry_expiry_events"
+      ],
+      "referenced_tables": [
+        "reg.phase1_registry_drivers",
+        "reg.phase1_registry_vehicles",
+        "reg.phase1_registry_policies",
+        "reg.phase1_registry_contracts",
+        "reg.phase1_registry_supply_pairs"
+      ],
+      "description": "Replaces the V0034 plate-only unique index on fleet.vehicle_supply_drafts with a non-unique lookup index so an approved canonical vehicle can receive subsequent insurance_update / contract_update submissions while preserving historical onboarding draft rows; adds canonical target and subject lookup indexes on fleet.supply_submissions; extends reg.phase1_registry_expiry_events.entity_type check constraint to permit 'contract' alongside 'driver' and 'policy' for R14 expiry reminder supersession.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Approved supply submissions remain immutable; subsequent vehicle insurance_update/contract_update and driver document_update create new fleet.supply_submissions rows bound to the authoritative canonical_vehicle_id/canonical_driver_id without overwriting historical onboarding draft rows.",
+        "Active pending/in-review uniqueness is enforced at the submission layer per partner and canonical target; duplicate onboarding of an already-approved plate is rejected and routed to the typed renewal workflow.",
+        "Approval of a typed renewal updates the existing canonical driver/vehicle record, creates a new linked policy/contract version while superseding prior active coverage and R14 expiry events, and aggregates readiness across applicable approved submissions inside the existing single transaction.",
+        "reg.phase1_registry_expiry_events.entity_type permits ('driver', 'policy', 'contract') so contract_update approval can supersede pending contract expiry alerts in the same transaction."
       ]
     }
   ],

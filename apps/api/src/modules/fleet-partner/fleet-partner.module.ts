@@ -4,6 +4,7 @@ import { Module } from "@nestjs/common";
 
 import { DriverAcademyModule } from "../driver-academy/driver-academy.module";
 import { DatabaseModule } from "../../common/db";
+import { IdempotencyModule } from "../../common/idempotency";
 import { BillingSettlementModule } from "../billing-settlement/billing-settlement.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
@@ -26,6 +27,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
   imports: [
     ControlledDownloadModule,
     DatabaseModule,
+    IdempotencyModule,
     DriverAcademyModule,
     BillingSettlementModule,
     OwnedMobilityModule,

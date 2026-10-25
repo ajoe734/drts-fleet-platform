@@ -18,7 +18,26 @@ export type SupplySubmissionType =
   | "insurance_update"
   | "contract_update"
   | "driver_affiliation"
-  | "vehicle_affiliation";
+  | "vehicle_affiliation"
+  | "profile_correction";
+
+export const SUPPLY_RENEWAL_SUBMISSION_TYPES = [
+  "insurance_update",
+  "contract_update",
+  "profile_correction",
+] as const;
+
+export type SupplyRenewalSubmissionType =
+  (typeof SUPPLY_RENEWAL_SUBMISSION_TYPES)[number];
+
+export function isSupplyRenewalSubmissionType(
+  value: unknown,
+): value is SupplyRenewalSubmissionType {
+  return (
+    typeof value === "string" &&
+    (SUPPLY_RENEWAL_SUBMISSION_TYPES as readonly string[]).includes(value)
+  );
+}
 
 export type SupplySubmissionStatus =
   | "draft"
@@ -62,6 +81,71 @@ export interface SupplyReviewActionCommand {
   expectedRevisionNo: number;
   reasonCode: string;
   comment?: string | null;
+}
+
+export interface CreateSupplyRenewalDraftCommand {
+  submissionType: SupplyRenewalSubmissionType;
+  subjectDriverId?: string | null;
+  subjectVehicleId?: string | null;
+  driverDraft?: Partial<Omit<DriverSupplyDraft, "submissionId">> | null;
+  vehicleDraft?: Partial<Omit<VehicleSupplyDraft, "submissionId">> | null;
+}
+
+export interface UpdateSupplyRenewalDraftCommand {
+  expectedRevisionNo: number;
+  driverDraft?: Partial<Omit<DriverSupplyDraft, "submissionId">> | null;
+  vehicleDraft?: Partial<Omit<VehicleSupplyDraft, "submissionId">> | null;
+}
+
+export interface FleetSupplyRenewalTargetDriver {
+  driverId: string;
+  fleetPartnerId: string;
+  name: string;
+  mobile: string;
+  professionalDriverLicenseNo: string;
+  professionalDriverLicenseExpiry: string;
+  taxiDriverRegistrationNo: string;
+  taxiDriverRegistrationArea: string;
+  taxiDriverRegistrationExpiry: string;
+  supportedServiceProductCodes: string[];
+  lifecycleStatus: string;
+  licensesValid: boolean;
+  ready: boolean;
+  reasonCodes: SupplyReadinessReasonCode[];
+}
+
+export interface FleetSupplyRenewalTargetVehicle {
+  vehicleId: string;
+  fleetPartnerId: string;
+  plateNo: string;
+  licenseType: string;
+  brand: string | null;
+  model: string | null;
+  modelYear: number | null;
+  seatCount: number;
+  luggageCapacity: number;
+  businessArea: string;
+  supportedServiceProductCodes: string[];
+  airportTransferEligible: boolean;
+  fixedFareAllowed: boolean;
+  doorCount: number | null;
+  color: string | null;
+  supplyLifecycle: string;
+  activeContractId: string | null;
+  activeContractStatus: string | null;
+  activeContractEndAt: string | null;
+  activePolicyId: string | null;
+  activePolicyNo: string | null;
+  activePolicyStatus: string | null;
+  activePolicyEndAt: string | null;
+  ready: boolean;
+  reasonCodes: SupplyReadinessReasonCode[];
+}
+
+export interface FleetSupplyRenewalTargetsResponse {
+  fleetPartnerId: string;
+  drivers: FleetSupplyRenewalTargetDriver[];
+  vehicles: FleetSupplyRenewalTargetVehicle[];
 }
 
 // ---------------------------------------------------------------------------

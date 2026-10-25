@@ -74,7 +74,10 @@ import type {
   DriverPublicRegistrationCredential,
 } from "@drts/contracts";
 
-import { PHASE1_SERVICE_BUCKETS } from "@drts/contracts";
+import {
+  PHASE1_SERVICE_BUCKETS,
+  isSupplyRenewalSubmissionType,
+} from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import {
@@ -125,6 +128,7 @@ type ProvisionFromSubmissionCommand = {
   documents: SupplyDocumentRecord[];
   approvedAt: string;
   reviewerId: string;
+  deferVolatileCommit?: boolean | undefined;
 };
 
 export type ProvisionedCanonicalRecordIds = {
@@ -137,6 +141,8 @@ export type ProvisionedCanonicalRecordIds = {
 export type SubmissionProvisioningResult = ProvisionedCanonicalRecordIds & {
   vehicleAffiliation: VehicleFleetAffiliationRecord | null;
   supplyPair: RegulatorySupplyPair | null;
+  stagedChanges?: PersistRegulatoryRegistryChanges | undefined;
+  commitVolatileRenewal?: (() => Promise<void>) | undefined;
 };
 
 export type ReconcileExpiryCommand = {
@@ -1120,6 +1126,10 @@ export class RegulatoryRegistryService
     command: ProvisionFromSubmissionCommand,
   ): Promise<SubmissionProvisioningResult> {
     const current = command.submission;
+    if (isSupplyRenewalSubmissionType(current.submissionType)) {
+      return this.provisionRenewalFromSubmission(executor, command);
+    }
+
     const pairedDriverId = await this.resolveApprovedSubmissionDriver(
       executor,
       command,
@@ -1406,6 +1416,691 @@ export class RegulatoryRegistryService
           current.driverId !== pair.driverId,
       ),
     ];
+  }
+
+  /** Publish staged canonical driver/vehicle/contract/policy/credential updates
+   * to in-memory state only after the approval transaction or volatile submission write has committed. */
+  async publishCommittedProvisioning(result: SubmissionProvisioningResult) {
+    this.publishCommittedSupplyPair(result.supplyPair);
+    const changes = result.stagedChanges;
+    if (changes) {
+      if (changes.drivers?.length) {
+        const updatedIds = new Set(changes.drivers.map((d) => d.driverId));
+        this.drivers = [
+          ...changes.drivers.map((d) => this.cloneDriver(d)),
+          ...this.drivers.filter((d) => !updatedIds.has(d.driverId)),
+        ];
+      }
+
+      if (changes.contracts?.length) {
+        const updatedIds = new Set(changes.contracts.map((c) => c.contractId));
+        this.contracts = [
+          ...changes.contracts.map((c) => this.cloneContract(c)),
+          ...this.contracts.filter((c) => !updatedIds.has(c.contractId)),
+        ];
+      }
+
+      if (changes.policies?.length) {
+        const updatedIds = new Set(changes.policies.map((p) => p.policyId));
+        this.policies = [
+          ...changes.policies.map((p) => this.clonePolicy(p)),
+          ...this.policies.filter((p) => !updatedIds.has(p.policyId)),
+        ];
+      }
+
+      if (changes.vehicles?.length) {
+        const updatedIds = new Set(changes.vehicles.map((v) => v.vehicleId));
+        const clonedVehicles = changes.vehicles.map((v) => this.cloneVehicle(v));
+        this.vehicles = [
+          ...clonedVehicles,
+          ...this.vehicles.filter((v) => !updatedIds.has(v.vehicleId)),
+        ];
+        for (const updatedVehicle of clonedVehicles) {
+          this.opsDispatchEventsService.publishSupplyLifecycleUpdated(
+            this.cloneVehicle(updatedVehicle),
+          );
+        }
+      }
+
+      if (changes.disclosureProfiles?.length) {
+        const updatedIds = new Set(
+          changes.disclosureProfiles.map((p) => p.vehicleId),
+        );
+        this.disclosureProfiles = [
+          ...this.disclosureProfiles.filter((p) => !updatedIds.has(p.vehicleId)),
+          ...changes.disclosureProfiles.map((p) => ({ ...p })),
+        ];
+      }
+
+      if (changes.driverCredentials?.length) {
+        const updatedIds = new Set(
+          changes.driverCredentials.map((c) => c.driverId),
+        );
+        this.driverCredentials = [
+          ...this.driverCredentials.filter((c) => !updatedIds.has(c.driverId)),
+          ...changes.driverCredentials.map((c) => ({ ...c })),
+        ];
+      }
+    }
+    if (result.commitVolatileRenewal) {
+      await result.commitVolatileRenewal();
+    }
+  }
+
+  private async provisionRenewalFromSubmission(
+    executor: RegulatoryRegistryQueryExecutor | null,
+    command: ProvisionFromSubmissionCommand,
+  ): Promise<SubmissionProvisioningResult> {
+    const current = command.submission;
+    if (current.status === "approved") {
+      return {
+        canonicalDriverId:
+          current.canonicalDriverId ?? current.subjectDriverId ?? null,
+        canonicalVehicleId:
+          current.canonicalVehicleId ?? current.subjectVehicleId ?? null,
+        canonicalContractId: current.canonicalContractId ?? null,
+        canonicalPolicyId: current.canonicalPolicyId ?? null,
+        vehicleAffiliation: null,
+        supplyPair: null,
+      };
+    }
+
+    const useDbTransaction = Boolean(
+      executor && this.regulatoryRegistryRepository?.isEnabled(),
+    );
+    const deferVolatileCommit =
+      !useDbTransaction && Boolean(command.deferVolatileCommit);
+    const stageInMemoryUpdates = useDbTransaction || deferVolatileCommit;
+    const changes: PersistRegulatoryRegistryChanges = {};
+
+    if (current.submissionType === "profile_correction") {
+      const driverId = current.subjectDriverId ?? current.canonicalDriverId;
+      if (!driverId) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "RENEWAL_TARGET_DRIVER_REQUIRED",
+          "profile_correction requires an existing canonical driver target.",
+        );
+      }
+
+      const dbDriver = useDbTransaction
+        ? await this.regulatoryRegistryRepository!.lockDriverForApproval(
+            driverId,
+            executor!,
+          )
+        : null;
+      const existingDriver =
+        dbDriver ??
+        this.drivers.find((candidate) => candidate.driverId === driverId) ??
+        null;
+      if (!existingDriver) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "DRIVER_NOT_FOUND",
+          "The target canonical driver could not be found.",
+          { driverId },
+        );
+      }
+
+      const licenseDoc = command.documents.find(
+        (doc) => doc.documentType === "professional_driver_license",
+      );
+      const regDoc = command.documents.find(
+        (doc) => doc.documentType === "taxi_driver_registration",
+      );
+      const nextProfExpiry =
+        command.driverDraft?.professionalDriverLicenseExpiry ??
+        licenseDoc?.effectiveUntil ??
+        existingDriver.professionalDriverLicenseExpiry ??
+        existingDriver.licenseExpiry ??
+        null;
+      const nextRegExpiry =
+        command.driverDraft?.taxiDriverRegistrationExpiry ??
+        regDoc?.effectiveUntil ??
+        existingDriver.taxiDriverRegistrationExpiry ??
+        null;
+      const nextLicenseExpiry =
+        nextProfExpiry ?? existingDriver.licenseExpiry ?? null;
+
+      const updatedDriver = this.decorateDriver(
+        {
+          ...existingDriver,
+          name: command.driverDraft?.name?.trim() || existingDriver.name,
+          supportedServiceBuckets:
+            command.driverDraft?.supportedServiceProductCodes?.length
+              ? this.mapServiceBuckets(
+                  command.driverDraft.supportedServiceProductCodes,
+                )
+              : [...existingDriver.supportedServiceBuckets],
+          licensesValid: true,
+          licenseExpiry: nextLicenseExpiry,
+          professionalDriverLicenseExpiry: nextProfExpiry,
+          taxiDriverRegistrationExpiry: nextRegExpiry,
+          lifecycleStatus:
+            existingDriver.lifecycleStatus === "draft"
+              ? "active"
+              : existingDriver.lifecycleStatus,
+          updatedAt: command.approvedAt,
+          profileUpdatedAt: command.approvedAt,
+        },
+        Date.parse(command.approvedAt),
+      );
+
+      changes.drivers = [this.cloneDriver(updatedDriver)];
+
+      const existingCred = useDbTransaction
+        ? ((await this.regulatoryRegistryRepository!.findDriverPublicRegistrationCredential(
+            driverId,
+            executor!,
+            true,
+          )) ?? this.getDriverPublicRegistrationCredential(driverId))
+        : this.getDriverPublicRegistrationCredential(driverId);
+
+      const registrationNo =
+        command.driverDraft?.taxiDriverRegistrationNo?.trim() ||
+        existingCred?.registrationNo ||
+        "REG-RENEWED";
+      const maskedDisplay =
+        registrationNo.length <= 4
+          ? "***"
+          : `${registrationNo.slice(0, 2)}***${registrationNo.slice(-2)}`;
+      const updatedCredential: DriverPublicRegistrationCredential = {
+        driverId,
+        registrationNo,
+        registrationArea:
+          command.driverDraft?.taxiDriverRegistrationArea?.trim() ||
+          existingCred?.registrationArea ||
+          null,
+        effectiveFrom:
+          regDoc?.effectiveFrom ?? existingCred?.effectiveFrom ?? null,
+        effectiveUntil: nextRegExpiry,
+        status:
+          existingCred?.status === "verified_active"
+            ? "verified_active"
+            : "unverified",
+        maskedDisplay,
+        verifiedByActorId: existingCred?.verifiedByActorId ?? command.reviewerId,
+        verifiedAt: existingCred?.verifiedAt ?? command.approvedAt,
+        sourceSubmissionId: current.submissionId,
+        version: (existingCred?.version ?? 0) + 1,
+        updatedAt: command.approvedAt,
+      };
+      changes.driverCredentials = [updatedCredential];
+
+      if (useDbTransaction) {
+        await this.regulatoryRegistryRepository!.persistChangesWithExecutor(
+          executor!,
+          changes,
+        );
+        await this.supersedeRenewedDriverSourceEvents(
+          driverId,
+          updatedDriver,
+          command.approvedAt,
+          executor!,
+        );
+      } else if (!deferVolatileCommit) {
+        this.drivers = [
+          this.cloneDriver(updatedDriver),
+          ...this.drivers.filter((d) => d.driverId !== driverId),
+        ];
+        this.driverCredentials = [
+          ...this.driverCredentials.filter((c) => c.driverId !== driverId),
+          { ...updatedCredential },
+        ];
+        this.persistChanges(changes, "provision_driver_renewal");
+        await this.supersedeRenewedDriverSourceEvents(
+          driverId,
+          updatedDriver,
+          command.approvedAt,
+          undefined,
+        );
+      }
+
+      return {
+        canonicalDriverId: driverId,
+        canonicalVehicleId: null,
+        canonicalContractId: null,
+        canonicalPolicyId: null,
+        vehicleAffiliation: null,
+        supplyPair: null,
+        stagedChanges: stageInMemoryUpdates ? changes : undefined,
+        commitVolatileRenewal: deferVolatileCommit
+          ? async () => {
+              this.persistChanges(changes, "provision_driver_renewal");
+              await this.supersedeRenewedDriverSourceEvents(
+                driverId,
+                updatedDriver,
+                command.approvedAt,
+                undefined,
+              );
+            }
+          : undefined,
+      };
+    }
+
+    // Vehicle renewal: insurance_update or contract_update
+    const vehicleId = current.subjectVehicleId ?? current.canonicalVehicleId;
+    if (!vehicleId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "RENEWAL_TARGET_VEHICLE_REQUIRED",
+        `${current.submissionType} requires an existing canonical vehicle target.`,
+      );
+    }
+
+    const dbVehicleState = useDbTransaction
+      ? await this.regulatoryRegistryRepository!.readVehicleCommandState(
+          vehicleId,
+          executor!,
+        )
+      : null;
+    const baseVehicle =
+      dbVehicleState?.vehicle ??
+      this.vehicles.find((v) => v.vehicleId === vehicleId) ??
+      null;
+    if (!baseVehicle) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "VEHICLE_NOT_FOUND",
+        "The target canonical vehicle could not be found.",
+        { vehicleId },
+      );
+    }
+
+    const state: RegulatoryVehicleCommandState = {
+      vehicle: this.cloneVehicle(baseVehicle),
+      contracts: (
+        dbVehicleState?.contracts ??
+        this.contracts.filter((c) => c.vehicleId === vehicleId)
+      ).map((c) => this.cloneContract(c)),
+      policies: (
+        dbVehicleState?.policies ??
+        this.policies.filter((p) => p.vehicleId === vehicleId)
+      ).map((p) => this.clonePolicy(p)),
+      exclusivities: (
+        dbVehicleState?.exclusivities ??
+        this.exclusivities.filter((e) => e.vehicleId === vehicleId)
+      ).map((e) => this.cloneExclusivity(e)),
+    };
+
+    let createdContract: VehicleContractRecord | null = null;
+    let createdPolicy: InsurancePolicyRecord | null = null;
+    let vehicleAffiliation: VehicleFleetAffiliationRecord | null = null;
+    let commitVolatileRenewal: (() => Promise<void>) | undefined;
+
+    if (current.submissionType === "insurance_update") {
+      const policyDocument = command.documents.find(
+        (doc) => doc.documentType === "insurance_policy",
+      );
+      if (!policyDocument) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "MISSING_REQUIRED_DOCUMENT",
+          "An insurance_policy document is required for insurance_update.",
+          { documentType: "insurance_policy" },
+        );
+      }
+
+      const startAt =
+        this.dateOnlyToIso(policyDocument.effectiveFrom) ?? command.approvedAt;
+      const endAt =
+        this.dateOnlyToInclusiveIso(policyDocument.effectiveUntil) ??
+        "2099-12-31T23:59:59.000Z";
+      this.assertTimeRange(startAt, endAt);
+
+      const newPolicyId = `policy_${randomUUID()}`;
+      createdPolicy = this.applyPolicyLifecycle(
+        {
+          policyId: newPolicyId,
+          vehicleId,
+          policyNo: policyDocument.documentId,
+          insuranceType: "passenger_liability",
+          insurerName: "submission_provisioned",
+          coverageAmount: 0,
+          startAt,
+          endAt,
+          status: "active",
+          lifecycleStatus: "pending",
+          sourceSubmissionId: current.submissionId,
+          supersededByPolicyId: null,
+          supersededAt: null,
+          createdAt: command.approvedAt,
+          updatedAt: command.approvedAt,
+        },
+        command.approvedAt,
+      );
+
+      const supersededPolicies: InsurancePolicyRecord[] = state.policies
+        .filter((p) => p.vehicleId === vehicleId && p.policyId !== newPolicyId)
+        .map((prior) => ({
+          ...prior,
+          ...(prior.status === "active" || prior.status === "pending"
+            ? { status: "expired" as const, lifecycleStatus: "expired" as const }
+            : {}),
+          supersededByPolicyId: prior.supersededByPolicyId ?? newPolicyId,
+          supersededAt: prior.supersededAt ?? command.approvedAt,
+          updatedAt: command.approvedAt,
+        }));
+
+      state.policies = [
+        this.clonePolicy(createdPolicy),
+        ...supersededPolicies.map((p) => this.clonePolicy(p)),
+      ];
+
+      const reconciledVehicle = this.reconcileVehicleLifecycle(
+        vehicleId,
+        {
+          entityType: "insurance_policy",
+          message:
+            "Vehicle insurance policy renewed from approved submission.",
+          occurredAt: command.approvedAt,
+          relatedEntityId: createdPolicy.policyId,
+          emitEvent: !stageInMemoryUpdates,
+          persistContext: null,
+          touchUpdatedAt: true,
+        },
+        state.vehicle,
+        state,
+      );
+
+      changes.policies = [
+        this.clonePolicy(createdPolicy),
+        ...supersededPolicies.map((p) => this.clonePolicy(p)),
+      ];
+      changes.vehicles = [this.cloneVehicle(reconciledVehicle)];
+
+      if (useDbTransaction) {
+        await this.regulatoryRegistryRepository!.persistChangesWithExecutor(
+          executor!,
+          changes,
+        );
+        await this.supersedeRenewedVehicleSourceEvents(
+          "activate_insurance_policy",
+          createdPolicy,
+          state,
+          executor!,
+        );
+      } else if (deferVolatileCommit) {
+        const policyForSupersession = createdPolicy;
+        commitVolatileRenewal = async () => {
+          this.persistChanges(changes, "provision_insurance_renewal");
+          await this.supersedeRenewedVehicleSourceEvents(
+            "activate_insurance_policy",
+            policyForSupersession,
+            state,
+            undefined,
+          );
+        };
+      } else {
+        const updatedPolicyIds = new Set(
+          changes.policies.map((p) => p.policyId),
+        );
+        this.policies = [
+          ...changes.policies.map((p) => this.clonePolicy(p)),
+          ...this.policies.filter((p) => !updatedPolicyIds.has(p.policyId)),
+        ];
+        this.vehicles = [
+          this.cloneVehicle(reconciledVehicle),
+          ...this.vehicles.filter((v) => v.vehicleId !== vehicleId),
+        ];
+        this.persistChanges(changes, "provision_insurance_renewal");
+        await this.supersedeRenewedVehicleSourceEvents(
+          "activate_insurance_policy",
+          createdPolicy,
+          state,
+          undefined,
+        );
+      }
+    } else if (current.submissionType === "contract_update") {
+      const contractDocument = command.documents.find((doc) =>
+        [
+          "fleet_participation_contract",
+          "driver_management_contract",
+          "vehicle_management_contract",
+        ].includes(doc.documentType),
+      );
+      if (!contractDocument) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          "MISSING_REQUIRED_DOCUMENT",
+          "A contract document is required for contract_update.",
+        );
+      }
+
+      const startAt =
+        this.dateOnlyToIso(contractDocument.effectiveFrom) ??
+        command.approvedAt;
+      const endAt =
+        this.dateOnlyToInclusiveIso(contractDocument.effectiveUntil) ??
+        "2099-12-31T23:59:59.000Z";
+      this.assertTimeRange(startAt, endAt);
+
+      const newContractId = `contract_${randomUUID()}`;
+      const priorContract = state.contracts[0] ?? null;
+      createdContract = this.applyContractLifecycle(
+        {
+          contractId: newContractId,
+          vehicleId,
+          partnerId: current.fleetPartnerId,
+          partnerType: "fleet_partner",
+          contractType: contractDocument.documentType,
+          operatingAreaId:
+            command.vehicleDraft?.businessArea ??
+            priorContract?.operatingAreaId ??
+            state.vehicle.operatingArea,
+          serviceScope:
+            command.vehicleDraft?.supportedServiceProductCodes?.length
+              ? this.mapServiceBuckets(
+                  command.vehicleDraft.supportedServiceProductCodes,
+                ).join(",")
+              : priorContract?.serviceScope ||
+                state.vehicle.supportedServiceBuckets.join(","),
+          startAt,
+          endAt,
+          status: "active",
+          lifecycleStatus: "draft",
+          approvedBy: command.reviewerId,
+          approvedAt: command.approvedAt,
+          sourceSubmissionId: current.submissionId,
+          supersededByContractId: null,
+          supersededAt: null,
+          createdAt: command.approvedAt,
+          updatedAt: command.approvedAt,
+        },
+        command.approvedAt,
+      );
+
+      const supersededContracts: VehicleContractRecord[] = state.contracts
+        .filter(
+          (c) => c.vehicleId === vehicleId && c.contractId !== newContractId,
+        )
+        .map((prior) => ({
+          ...prior,
+          ...(prior.status !== "terminated"
+            ? {
+                status: "terminated" as const,
+                lifecycleStatus: "expired" as const,
+              }
+            : {}),
+          supersededByContractId:
+            prior.supersededByContractId ?? newContractId,
+          supersededAt: prior.supersededAt ?? command.approvedAt,
+          updatedAt: command.approvedAt,
+        }));
+
+      state.contracts = [
+        this.cloneContract(createdContract),
+        ...supersededContracts.map((c) => this.cloneContract(c)),
+      ];
+
+      vehicleAffiliation = this.createVehicleFleetAffiliation(
+        vehicleId,
+        command,
+        command.approvedAt,
+      );
+
+      const reconciledVehicle = this.reconcileVehicleLifecycle(
+        vehicleId,
+        {
+          entityType: "contract",
+          message: "Vehicle contract renewed from approved submission.",
+          occurredAt: command.approvedAt,
+          relatedEntityId: createdContract.contractId,
+          emitEvent: !stageInMemoryUpdates,
+          persistContext: null,
+          touchUpdatedAt: true,
+        },
+        state.vehicle,
+        state,
+      );
+
+      changes.contracts = [
+        this.cloneContract(createdContract),
+        ...supersededContracts.map((c) => this.cloneContract(c)),
+      ];
+      changes.vehicles = [this.cloneVehicle(reconciledVehicle)];
+
+      if (useDbTransaction) {
+        await this.regulatoryRegistryRepository!.persistChangesWithExecutor(
+          executor!,
+          changes,
+        );
+        await this.supersedeRenewedVehicleSourceEvents(
+          "activate_contract",
+          createdContract,
+          state,
+          executor!,
+        );
+      } else if (deferVolatileCommit) {
+        const contractForSupersession = createdContract;
+        commitVolatileRenewal = async () => {
+          this.persistChanges(changes, "provision_contract_renewal");
+          await this.supersedeRenewedVehicleSourceEvents(
+            "activate_contract",
+            contractForSupersession,
+            state,
+            undefined,
+          );
+        };
+      } else {
+        const updatedContractIds = new Set(
+          changes.contracts.map((c) => c.contractId),
+        );
+        this.contracts = [
+          ...changes.contracts.map((c) => this.cloneContract(c)),
+          ...this.contracts.filter(
+            (c) => !updatedContractIds.has(c.contractId),
+          ),
+        ];
+        this.vehicles = [
+          this.cloneVehicle(reconciledVehicle),
+          ...this.vehicles.filter((v) => v.vehicleId !== vehicleId),
+        ];
+        this.persistChanges(changes, "provision_contract_renewal");
+        await this.supersedeRenewedVehicleSourceEvents(
+          "activate_contract",
+          createdContract,
+          state,
+          undefined,
+        );
+      }
+    }
+
+    const primaryContractId =
+      createdContract?.contractId ??
+      state.vehicle.supplyLifecycle.contract.contractId ??
+      current.canonicalContractId ??
+      null;
+    const primaryPolicyId =
+      createdPolicy?.policyId ??
+      state.vehicle.supplyLifecycle.insurance.policyId ??
+      current.canonicalPolicyId ??
+      null;
+
+    return {
+      canonicalDriverId: current.canonicalDriverId ?? null,
+      canonicalVehicleId: vehicleId,
+      canonicalContractId: primaryContractId,
+      canonicalPolicyId: primaryPolicyId,
+      vehicleAffiliation,
+      supplyPair: null,
+      stagedChanges: stageInMemoryUpdates ? changes : undefined,
+      commitVolatileRenewal,
+    };
+  }
+
+  private async supersedeRenewedDriverSourceEvents(
+    driverId: string,
+    driver: DriverRegistryRecord,
+    approvedAt: string,
+    client?: import("pg").PoolClient | RegulatoryRegistryQueryExecutor,
+  ): Promise<void> {
+    const repository = this.regulatoryRegistryRepository;
+    if (!repository) return;
+    const approvedAtMs = Date.parse(approvedAt);
+    if (
+      driver.licenseExpiry &&
+      Date.parse(driver.licenseExpiry) > approvedAtMs
+    ) {
+      await repository.supersedeActiveExpiryEventsForEntity?.(
+        "driver",
+        driverId,
+        "driver_license",
+        undefined,
+        client,
+      );
+    }
+    if (
+      driver.professionalDriverLicenseExpiry &&
+      Date.parse(driver.professionalDriverLicenseExpiry) > approvedAtMs
+    ) {
+      await repository.supersedeActiveExpiryEventsForEntity?.(
+        "driver",
+        driverId,
+        "professional_driver_license",
+        undefined,
+        client,
+      );
+    }
+    if (
+      driver.taxiDriverRegistrationExpiry &&
+      Date.parse(driver.taxiDriverRegistrationExpiry) > approvedAtMs
+    ) {
+      await repository.supersedeActiveExpiryEventsForEntity?.(
+        "driver",
+        driverId,
+        "taxi_driver_registration",
+        undefined,
+        client,
+      );
+    }
+    for (const [credential, field] of Object.entries(
+      PREEXPIRY_CREDENTIAL_FIELDS,
+    )) {
+      for (const days of [30, 7] as const) {
+        const previous =
+          (await repository.findActiveExpiryEventsForEntity?.(
+            "driver",
+            driverId,
+            `preexpiry:${credential}:${days}`,
+            client,
+          )) ?? [];
+        const changed = previous.filter((event) => {
+          const expiry =
+            event.source_expiry_at instanceof Date
+              ? event.source_expiry_at.getTime()
+              : Date.parse(event.source_expiry_at ?? "");
+          return expiry !== Date.parse(driver[field] ?? "");
+        });
+        if (changed.length > 0) {
+          await repository.supersedeExpiryEvents?.(
+            changed.map((e) => e.event_id),
+            undefined,
+            client,
+          );
+        }
+      }
+    }
   }
 
   recordVehicleFleetAffiliationCreated(
@@ -3635,7 +4330,7 @@ export class RegulatoryRegistryService
       | InsurancePolicyRecord
       | DispatchExclusivityRecord,
     state: RegulatoryVehicleCommandState,
-    client?: import("pg").PoolClient,
+    client?: import("pg").PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<void> {
     const repository = this.regulatoryRegistryRepository;
     if (!repository) return;
@@ -3869,6 +4564,9 @@ export class RegulatoryRegistryService
         lifecycleStatus: "draft",
         approvedBy: command.reviewerId,
         approvedAt,
+        sourceSubmissionId: command.submission.submissionId,
+        supersededByContractId: null,
+        supersededAt: null,
         createdAt: approvedAt,
         updatedAt: approvedAt,
       },
@@ -3905,6 +4603,9 @@ export class RegulatoryRegistryService
           "2099-12-31T23:59:59.000Z",
         status: "active",
         lifecycleStatus: "pending",
+        sourceSubmissionId: command.submission.submissionId,
+        supersededByPolicyId: null,
+        supersededAt: null,
         createdAt: approvedAt,
         updatedAt: approvedAt,
       },
@@ -4272,9 +4973,19 @@ export class RegulatoryRegistryService
         if (priorityDelta !== 0) {
           return priorityDelta;
         }
-        return (
+        const leftSuperseded = Boolean(left.supersededByContractId);
+        const rightSuperseded = Boolean(right.supersededByContractId);
+        if (leftSuperseded !== rightSuperseded) {
+          return leftSuperseded ? 1 : -1;
+        }
+        const updatedDelta =
           new Date(right.updatedAt).getTime() -
-          new Date(left.updatedAt).getTime()
+          new Date(left.updatedAt).getTime();
+        if (updatedDelta !== 0) {
+          return updatedDelta;
+        }
+        return (
+          new Date(right.endAt).getTime() - new Date(left.endAt).getTime()
         );
       });
 
@@ -4303,9 +5014,19 @@ export class RegulatoryRegistryService
         if (priorityDelta !== 0) {
           return priorityDelta;
         }
-        return (
+        const leftSuperseded = Boolean(left.supersededByPolicyId);
+        const rightSuperseded = Boolean(right.supersededByPolicyId);
+        if (leftSuperseded !== rightSuperseded) {
+          return leftSuperseded ? 1 : -1;
+        }
+        const updatedDelta =
           new Date(right.updatedAt).getTime() -
-          new Date(left.updatedAt).getTime()
+          new Date(left.updatedAt).getTime();
+        if (updatedDelta !== 0) {
+          return updatedDelta;
+        }
+        return (
+          new Date(right.endAt).getTime() - new Date(left.endAt).getTime()
         );
       });
 
@@ -6185,6 +6906,7 @@ export class RegulatoryRegistryService
           const expiryMs = Date.parse(expiry ?? "");
           const isContractActive =
             contract.status === "active" &&
+            !contract.supersededByContractId &&
             evaluatedContract.lifecycleStatus === "active";
           const extraContractRecord = contract as VehicleContractRecord & {
             partnerContactEmail?: string;
@@ -6354,6 +7076,7 @@ export class RegulatoryRegistryService
           const expiryMs = Date.parse(expiry ?? "");
           const isPolicyActive =
             policy.status === "active" &&
+            !policy.supersededByPolicyId &&
             evaluatedPolicy.lifecycleStatus === "active";
           const extraPolicyRecord = policy as InsurancePolicyRecord & {
             partnerId?: string;
@@ -6553,7 +7276,7 @@ export class RegulatoryRegistryService
       ? []
       : this.policies
           .filter((p) => {
-            if (p.status === "cancelled") return false;
+            if (p.status === "cancelled" || p.supersededByPolicyId) return false;
             const endAtMs = Date.parse(p.endAt);
             const startAtMs = Date.parse(p.startAt);
             return (
@@ -6759,7 +7482,7 @@ export class RegulatoryRegistryService
           const endAt = locked.endAt;
           const status = locked.status || "active";
 
-          if (status === "cancelled") continue;
+          if (status === "cancelled" || locked.supersededByPolicyId) continue;
           const startAtMs = Date.parse(startAt);
           const endAtMs = Date.parse(endAt);
           if (Number.isNaN(endAtMs) || endAtMs >= asOfMs) continue;
