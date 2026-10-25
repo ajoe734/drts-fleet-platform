@@ -7,10 +7,13 @@ import { useReviewDemo } from "./review-context";
 import { passengerPaymentDisplay } from "../../../../packages/passenger-client/src/payment/state";
 
 // Re-read cadence for the same-order payment authority while it can still
-// move (failed/authorized/manual_recovery/no charge yet). Async paths such as
-// the scheduled retry executor or a PSP callback change it without this page.
+// move (failed/authorized/manual_recovery/captured/no charge yet). Async paths
+// such as the scheduled retry executor, a PSP callback or a completed refund
+// (captured -> refunded) change it without this page, and this control does
+// not subscribe to the ride SSE stream.
 export const REVIEW_PAYMENT_SYNC_INTERVAL_MS = 10_000;
-const SETTLED_PAYMENT_STATUSES = new Set(["captured", "refunded"]);
+// Only refunded is terminal: no charge or refund write path leaves it.
+const TERMINAL_PAYMENT_STATUSES = new Set(["refunded"]);
 
 type PaymentRead = { status?: string } | null;
 
@@ -72,15 +75,15 @@ export function ReviewRideControls({ orderId }: { orderId: string }) {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [orderId, review, readAuthority]);
 
-  const settled =
-    paymentStatus !== undefined && SETTLED_PAYMENT_STATUSES.has(paymentStatus);
+  const terminal =
+    paymentStatus !== undefined && TERMINAL_PAYMENT_STATUSES.has(paymentStatus);
   useEffect(() => {
-    if (!review || settled) return;
+    if (!review || terminal) return;
     const timer = setInterval(() => {
       void readAuthority();
     }, REVIEW_PAYMENT_SYNC_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [orderId, review, settled, readAuthority]);
+  }, [orderId, review, terminal, readAuthority]);
 
   if (!review) return null;
   return (

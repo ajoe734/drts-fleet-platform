@@ -107,8 +107,29 @@ describe("ReviewRideControls same-order payment authority sync", () => {
       recordUrl(orderA),
       expect.objectContaining({ cache: "no-store" }),
     );
+  });
 
-    // Settled: no further authority polling.
+  // Gemini2 2026-10-25 reopen of 86df25c6: captured is refundable
+  // (payment-refund.repository.ts moves captured -> refunded and syncs
+  // billing.multi_taxi_passenger_payments), and this outer control does not
+  // subscribe to the inner SSE, so it must keep polling after captured.
+  it("updates the outer status from captured to refunded on the same open page", async () => {
+    authority[orderA] = { status: "captured" };
+    renderComponent(<ReviewRideControls orderId={orderA} />);
+    await flush();
+    expect(statusText()).toBe("付款完成");
+
+    // Refund completes server-side; no visibilitychange, page stays open.
+    authority[orderA] = { status: "refunded" };
+    await flush(REVIEW_PAYMENT_SYNC_INTERVAL_MS);
+    expect(statusText()).toBe("已退款");
+  });
+
+  it("stops polling only once the same-order authority is refunded", async () => {
+    authority[orderA] = { status: "refunded" };
+    renderComponent(<ReviewRideControls orderId={orderA} />);
+    await flush();
+    expect(statusText()).toBe("已退款");
     const calls = fetchMock.mock.calls.length;
     await flush(REVIEW_PAYMENT_SYNC_INTERVAL_MS * 3);
     expect(fetchMock.mock.calls.length).toBe(calls);
