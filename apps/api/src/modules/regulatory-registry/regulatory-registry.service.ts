@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
+import type { PoolClient } from "pg";
 import type { BootstrapRequestIdentity } from "../../common/auth/auth.types";
 import {
   disclosureMissingFields,
@@ -567,6 +568,9 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
   },
 ];
 
+export const DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL =
+  "regulatory-alerts@alerts.drts.local";
+
 @Injectable()
 export class RegulatoryRegistryService
   implements OnModuleInit, OnModuleDestroy
@@ -578,20 +582,23 @@ export class RegulatoryRegistryService
   registerFleetPartnerContacts(
     partnerId: string,
     emails: readonly string[] | string,
-  ): string[] {
-    return (
-      this.regulatoryRegistryRepository?.setFleetPartnerContacts(
+  ): Promise<string[]> & string[] {
+    if (this.regulatoryRegistryRepository) {
+      return this.regulatoryRegistryRepository.setFleetPartnerContacts(
         partnerId,
         emails,
-      ) ?? []
-    );
+      );
+    }
+    return Object.assign([] as string[], Promise.resolve([] as string[]));
   }
 
-  getFleetPartnerContacts(partnerId: string): string[] {
-    return (
-      this.regulatoryRegistryRepository?.getFleetPartnerContacts(partnerId) ??
-      []
-    );
+  getFleetPartnerContacts(partnerId: string): Promise<string[]> & string[] {
+    if (this.regulatoryRegistryRepository) {
+      return this.regulatoryRegistryRepository.getFleetPartnerContacts(
+        partnerId,
+      );
+    }
+    return Object.assign([] as string[], Promise.resolve([] as string[]));
   }
 
   private vehicles = VEHICLE_SEED.map((vehicle) => ({ ...vehicle }));
@@ -5375,15 +5382,56 @@ export class RegulatoryRegistryService
   ) {
     const repository = this.regulatoryRegistryRepository!;
     const asOfMs = Date.parse(asOf);
+    const enabled = repository.isEnabled();
+    const memoryDrivers = enabled
+      ? []
+      : [...this.drivers].sort((a, b) =>
+          a.driverId < b.driverId ? -1 : a.driverId > b.driverId ? 1 : 0,
+        );
+    const memoryContracts = enabled
+      ? []
+      : [...this.contracts].sort((a, b) =>
+          a.contractId < b.contractId ? -1 : a.contractId > b.contractId ? 1 : 0,
+        );
+    const memoryPolicies = enabled
+      ? []
+      : [...this.policies].sort((a, b) =>
+          a.policyId < b.policyId ? -1 : a.policyId > b.policyId ? 1 : 0,
+        );
+    const upperBounds = enabled
+      ? await repository.getExpiryScanUpperBounds()
+      : {
+          driverId: memoryDrivers.at(-1)?.driverId ?? null,
+          policyId: null,
+          preexpiryPolicyId: memoryPolicies.at(-1)?.policyId ?? null,
+          preexpiryContractId: memoryContracts.at(-1)?.contractId ?? null,
+        };
+
     const isValidEmail = (value: string | undefined | null): value is string =>
       Boolean(
         value &&
           value.length <= 254 &&
           /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(value),
       );
-    const configured = process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim();
+    const rawConfigured = process.env.REGULATORY_ALERT_RECIPIENT_EMAIL;
+    const configured = rawConfigured?.trim();
+    const hasExplicitConfig =
+      configured !== undefined &&
+      configured !== "" &&
+      configured !== "undefined";
     // Same address syntax as existing NotificationDeliveryService, before freezing an intent.
-    const platformRecipient = isValidEmail(configured) ? configured : null;
+    // When REGULATORY_ALERT_RECIPIENT_EMAIL is unset or empty (e.g. in shared dev where
+    // deploy-dev.yml does not mount it), fall back to the canonical regulatory alert
+    // mailbox (`DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL`) whenever extended R14 SQL
+    // or in-memory mode is active, so reminders are never silently dropped when a partner
+    // has no contacts and always include a platform recipient alongside partner contacts.
+    const platformRecipient = hasExplicitConfig
+      ? isValidEmail(configured)
+        ? configured
+        : null
+      : repository.supportsExtendedExpirySql()
+        ? DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL
+        : null;
     const result: NonNullable<ReconcileExpiryResult["preexpiry"]> = {
       eventsCreated: 0,
       intentsCreated: 0,
@@ -5395,6 +5443,7 @@ export class RegulatoryRegistryService
     const resolveRecipients = async (
       partnerIds: readonly (string | undefined | null)[],
       directEmails: readonly (string | undefined | null)[] = [],
+      client?: PoolClient,
     ): Promise<string[]> => {
       const normalizedPartnerIds = [
         ...new Set(
@@ -5408,6 +5457,7 @@ export class RegulatoryRegistryService
         const repoEmails =
           (await repository.findFleetPartnerContactEmails?.(
             normalizedPartnerIds,
+            client,
           )) ?? [];
         partnerEmails.push(...repoEmails);
 
@@ -5465,6 +5515,41 @@ export class RegulatoryRegistryService
       return recipients;
     };
 
+    const resolveMissingRecipientsForEvent = async (
+      event: RegistryExpiryEventRow,
+      recipients: readonly string[],
+      client: PoolClient,
+    ): Promise<string[]> => {
+      if (event.status === "superseded" || recipients.length === 0) {
+        return [];
+      }
+      const existingWithIntents = await repository.getExpiryEventById(
+        event.event_id,
+        client,
+      );
+      const existingIntents =
+        existingWithIntents?.intents ??
+        (existingWithIntents?.intent ? [existingWithIntents.intent] : []);
+      if (!repository.supportsExtendedExpirySql()) {
+        return existingIntents.length > 0 ? [] : [...recipients];
+      }
+      const existingRecipientSet = new Set(
+        existingIntents.map((intent) => intent.recipient_email),
+      );
+      const missing = recipients.filter(
+        (email) => !existingRecipientSet.has(email),
+      );
+      if (missing.length > 0 && event.status === "completed") {
+        await repository.updateExpiryEventStatus(
+          event.event_id,
+          "pending",
+          client,
+        );
+        event.status = "pending";
+      }
+      return missing;
+    };
+
     const vehiclePartnerIds = new Map<string, Set<string>>();
     const registerVehiclePartner = (
       vehicleId: string | undefined | null,
@@ -5485,31 +5570,6 @@ export class RegulatoryRegistryService
 
     const fromEmail =
       process.env.NOTIFICATION_FROM_EMAIL?.trim() || "noreply@fleet.drts.local";
-
-    const enabled = repository.isEnabled();
-    const memoryDrivers = enabled
-      ? []
-      : [...this.drivers].sort((a, b) =>
-          a.driverId < b.driverId ? -1 : a.driverId > b.driverId ? 1 : 0,
-        );
-    const memoryContracts = enabled
-      ? []
-      : [...this.contracts].sort((a, b) =>
-          a.contractId < b.contractId ? -1 : a.contractId > b.contractId ? 1 : 0,
-        );
-    const memoryPolicies = enabled
-      ? []
-      : [...this.policies].sort((a, b) =>
-          a.policyId < b.policyId ? -1 : a.policyId > b.policyId ? 1 : 0,
-        );
-    const upperBounds = enabled
-      ? await repository.getExpiryScanUpperBounds()
-      : {
-          driverId: memoryDrivers.at(-1)?.driverId ?? null,
-          policyId: null,
-          preexpiryPolicyId: memoryPolicies.at(-1)?.policyId ?? null,
-          preexpiryContractId: memoryContracts.at(-1)?.contractId ?? null,
-        };
 
     // 1. Driver credential pre-expiry reminders (T-30 and T-7)
     const upperDriver = upperBounds.driverId;
@@ -5535,14 +5595,34 @@ export class RegulatoryRegistryService
           const driverPartnerIds: string[] = [];
           const directPartnerId = (driver as { partnerId?: string }).partnerId;
           if (directPartnerId) driverPartnerIds.push(directPartnerId);
-          for (const pair of this.supplyPairs) {
-            if (pair.driverId === driverId) {
-              for (const pid of vehiclePartnerIds.get(pair.vehicleId) ?? []) {
-                driverPartnerIds.push(pid);
+          const pairedVehicles = this.supplyPairs
+            .filter((pair) => pair.driverId === driverId)
+            .map((pair) => pair.vehicleId);
+          if (
+            enabled &&
+            repository.supportsExtendedExpirySql() &&
+            pairedVehicles.length > 0
+          ) {
+            const dbVehiclePartners = await repository.findVehiclePartnerIds(
+              pairedVehicles,
+              client,
+            );
+            for (const [vId, pIds] of dbVehiclePartners.entries()) {
+              for (const pId of pIds) {
+                registerVehiclePartner(vId, pId);
               }
             }
           }
-          const recipients = await resolveRecipients(driverPartnerIds);
+          for (const vehicleId of pairedVehicles) {
+            for (const pid of vehiclePartnerIds.get(vehicleId) ?? []) {
+              driverPartnerIds.push(pid);
+            }
+          }
+          const recipients = await resolveRecipients(
+            driverPartnerIds,
+            [],
+            client,
+          );
           for (const [credential, field] of Object.entries(
             PREEXPIRY_CREDENTIAL_FIELDS,
           )) {
@@ -5614,14 +5694,13 @@ export class RegulatoryRegistryService
                 );
                 if (event.event_id === eventId) result.eventsCreated++;
               }
-              if (
-                event.status === "superseded" ||
-                recipients.length === 0 ||
-                (await repository.getExpiryEventById(event.event_id, client))
-                  ?.intent
-              )
-                continue;
-              for (const recipientEmail of recipients) {
+              const missingRecipients = await resolveMissingRecipientsForEvent(
+                event,
+                recipients,
+                client,
+              );
+              if (missingRecipients.length === 0) continue;
+              for (const recipientEmail of missingRecipients) {
                 const intentId = randomUUID();
                 const intent = await repository.insertDeliveryIntent(
                   {
@@ -5715,6 +5794,7 @@ export class RegulatoryRegistryService
           const recipients = await resolveRecipients(
             contractPartnerIds,
             directContractEmails,
+            client,
           );
 
           for (const days of [30, 7] as const) {
@@ -5783,14 +5863,13 @@ export class RegulatoryRegistryService
               );
               if (event.event_id === eventId) result.eventsCreated++;
             }
-            if (
-              event.status === "superseded" ||
-              recipients.length === 0 ||
-              (await repository.getExpiryEventById(event.event_id, client))
-                ?.intent
-            )
-              continue;
-            for (const recipientEmail of recipients) {
+            const missingRecipients = await resolveMissingRecipientsForEvent(
+              event,
+              recipients,
+              client,
+            );
+            if (missingRecipients.length === 0) continue;
+            for (const recipientEmail of missingRecipients) {
               const intentId = randomUUID();
               const intent = await repository.insertDeliveryIntent(
                 {
@@ -5842,6 +5921,17 @@ export class RegulatoryRegistryService
             .slice(0, limit);
       if (!page.length) break;
       await repository.withTransaction(async (client) => {
+        if (enabled && repository.supportsExtendedExpirySql()) {
+          const dbVehiclePartners = await repository.findVehiclePartnerIds(
+            page.map((p) => p.vehicleId),
+            client,
+          );
+          for (const [vId, pIds] of dbVehiclePartners.entries()) {
+            for (const pId of pIds) {
+              registerVehiclePartner(vId, pId);
+            }
+          }
+        }
         for (const policyId of [
           ...new Set(page.map((p) => p.policyId)),
         ].sort()) {
@@ -5874,6 +5964,7 @@ export class RegulatoryRegistryService
           const recipients = await resolveRecipients(
             policyPartnerIds,
             directPolicyEmails,
+            client,
           );
 
           for (const days of [30, 7] as const) {
@@ -5942,15 +6033,14 @@ export class RegulatoryRegistryService
               );
               if (event.event_id === eventId) result.eventsCreated++;
             }
-            if (
-              event.status === "superseded" ||
-              recipients.length === 0 ||
-              (await repository.getExpiryEventById(event.event_id, client))
-                ?.intent
-            )
-              continue;
+            const missingRecipients = await resolveMissingRecipientsForEvent(
+              event,
+              recipients,
+              client,
+            );
+            if (missingRecipients.length === 0) continue;
             const policyNo = policy.policyNo || policyId;
-            for (const recipientEmail of recipients) {
+            for (const recipientEmail of missingRecipients) {
               const intentId = randomUUID();
               const intent = await repository.insertDeliveryIntent(
                 {

@@ -706,32 +706,37 @@ export class RegulatoryRegistryController {
   }
 
   @Get("partners/:partnerId/contacts")
-  getFleetPartnerContacts(
+  async getFleetPartnerContacts(
     @Param("partnerId") partnerId: string,
     @Headers("x-request-id") requestId?: string,
   ) {
+    const emails = [
+      ...(await this.regulatoryRegistryService.getFleetPartnerContacts(
+        partnerId,
+      )),
+    ];
     return toApiSuccessEnvelope(
       {
         partnerId,
-        emails: this.regulatoryRegistryService.getFleetPartnerContacts(
-          partnerId,
-        ),
+        emails,
       },
       requestId,
     );
   }
 
   @Post("partners/:partnerId/contacts")
-  registerFleetPartnerContacts(
+  async registerFleetPartnerContacts(
     @Param("partnerId") partnerId: string,
     @Body() body: { emails?: readonly string[] | string; email?: string },
     @Headers("x-request-id") requestId?: string,
   ) {
     const input = body?.emails ?? (body?.email ? [body.email] : []);
-    const emails = this.regulatoryRegistryService.registerFleetPartnerContacts(
-      partnerId,
-      input,
-    );
+    const emails = [
+      ...(await this.regulatoryRegistryService.registerFleetPartnerContacts(
+        partnerId,
+        input,
+      )),
+    ];
     return toApiSuccessEnvelope(
       {
         partnerId,

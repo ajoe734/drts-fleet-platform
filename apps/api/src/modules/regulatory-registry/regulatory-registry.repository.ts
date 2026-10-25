@@ -332,12 +332,136 @@ export class RegulatoryRegistryRepository {
     return this.extendedExpirySqlSupported;
   }
 
+  private withLazyPromise<T extends object>(
+    snapshot: T,
+    loader: () => Promise<T>,
+  ): Promise<T> & T {
+    let promise: Promise<T> | undefined;
+    const getPromise = () => {
+      if (!promise) {
+        promise = loader();
+      }
+      return promise;
+    };
+    return Object.defineProperties(snapshot, {
+      then: {
+        value: <TResult1 = T, TResult2 = never>(
+          onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+          onrejected?:
+            | ((reason: unknown) => TResult2 | PromiseLike<TResult2>)
+            | null,
+        ) => getPromise().then(onfulfilled, onrejected),
+      },
+      catch: {
+        value: <TResult = never>(
+          onrejected?:
+            | ((reason: unknown) => TResult | PromiseLike<TResult>)
+            | null,
+        ) => getPromise().catch(onrejected),
+      },
+      finally: {
+        value: (onfinally?: (() => void) | null) =>
+          getPromise().finally(onfinally),
+      },
+    }) as Promise<T> & T;
+  }
+
+  private async persistFleetPartnerContactsInDb(
+    partnerId: string,
+    emails: readonly string[],
+  ): Promise<void> {
+    if (!this.isEnabled() || !this.extendedExpirySqlSupported) return;
+    if (emails.length === 0) {
+      await this.databaseService!.query(
+        `/* partner-contact-upsert */
+         WITH cleared_fleet_partner AS (
+           UPDATE admin.phase1_fleet_partners
+           SET record = (record - 'contactEmails') - 'contactEmail',
+               updated_at = now()
+           WHERE fleet_partner_id = $1
+           RETURNING fleet_partner_id
+         )
+         UPDATE core.partners
+         SET contact_email = NULL,
+             metadata = COALESCE(metadata, '{}'::jsonb) - 'contactEmails',
+             updated_at = now()
+         WHERE partner_id::text = $1 OR partner_code = $1`,
+        [partnerId],
+      );
+      return;
+    }
+    const primaryEmail = emails[0]!;
+    const emailsJson = JSON.stringify(emails);
+    await this.databaseService!.query(
+      `/* partner-contact-upsert */
+       WITH updated_fleet_partner AS (
+         UPDATE admin.phase1_fleet_partners
+         SET record = jsonb_set(
+               jsonb_set(record, '{contactEmails}', $3::jsonb, true),
+               '{contactEmail}',
+               to_jsonb($2::text),
+               true
+             ),
+             updated_at = now()
+         WHERE fleet_partner_id = $1
+         RETURNING fleet_partner_id
+       ),
+       updated AS (
+         UPDATE core.partners
+         SET contact_email = $2,
+             status = 'active',
+             metadata = jsonb_set(
+               COALESCE(metadata, '{}'::jsonb),
+               '{contactEmails}',
+               $3::jsonb,
+               true
+             ),
+             updated_at = now()
+         WHERE partner_id::text = $1 OR partner_code = $1
+         RETURNING partner_id
+       )
+       INSERT INTO core.partners (
+         partner_code,
+         partner_name,
+         partner_type,
+         contact_email,
+         status,
+         metadata,
+         created_at,
+         updated_at
+       )
+       SELECT
+         left($1, 50),
+         $1,
+         'fleet_company_partner'::core.partner_type_t,
+         $2,
+         'active',
+         jsonb_build_object('contactEmails', $3::jsonb),
+         now(),
+         now()
+       WHERE NOT EXISTS (SELECT 1 FROM updated)
+       ON CONFLICT (partner_code) DO UPDATE SET
+         contact_email = EXCLUDED.contact_email,
+         status = 'active',
+         metadata = jsonb_set(
+           COALESCE(core.partners.metadata, '{}'::jsonb),
+           '{contactEmails}',
+           $3::jsonb,
+           true
+         ),
+         updated_at = now()`,
+      [partnerId, primaryEmail, emailsJson],
+    );
+  }
+
   setFleetPartnerContacts(
     partnerId: string,
     emails: readonly string[] | string,
-  ): string[] {
+  ): Promise<string[]> & string[] {
     const normalized = partnerId.trim();
-    if (!normalized) return [];
+    if (!normalized) {
+      return this.withLazyPromise([], async () => []);
+    }
     const list =
       typeof emails === "string" ? emails.split(/[,;\s]+/) : emails;
     const cleaned = [
@@ -345,18 +469,33 @@ export class RegulatoryRegistryRepository {
     ];
     if (cleaned.length === 0) {
       this.inMemoryPartnerContacts.delete(normalized);
-      return [];
+    } else {
+      this.inMemoryPartnerContacts.set(normalized, cleaned);
     }
-    this.inMemoryPartnerContacts.set(normalized, cleaned);
-    return [...cleaned];
+    const snapshot = [...cleaned];
+    if (this.isEnabled() && this.extendedExpirySqlSupported) {
+      return this.withLazyPromise(snapshot, async () => {
+        await this.persistFleetPartnerContactsInDb(normalized, cleaned);
+        return [...cleaned];
+      });
+    }
+    return this.withLazyPromise(snapshot, async () => [...cleaned]);
   }
 
-  getFleetPartnerContacts(partnerId: string): string[] {
-    return [...(this.inMemoryPartnerContacts.get(partnerId.trim()) ?? [])];
+  getFleetPartnerContacts(partnerId: string): Promise<string[]> & string[] {
+    const normalized = partnerId.trim();
+    const inMemory = [...(this.inMemoryPartnerContacts.get(normalized) ?? [])];
+    if (this.isEnabled() && this.extendedExpirySqlSupported) {
+      return this.withLazyPromise(inMemory, () =>
+        this.findFleetPartnerContactEmails([normalized]),
+      );
+    }
+    return this.withLazyPromise(inMemory, async () => [...inMemory]);
   }
 
   async findFleetPartnerContactEmails(
     partnerIds: readonly string[],
+    client?: PoolClient,
   ): Promise<string[]> {
     const normalizedIds = [
       ...new Set(partnerIds.map((id) => id.trim()).filter(Boolean)),
@@ -364,19 +503,30 @@ export class RegulatoryRegistryRepository {
     if (normalizedIds.length === 0) return [];
     const results: string[] = [];
     for (const id of normalizedIds) {
-      results.push(...this.getFleetPartnerContacts(id));
+      results.push(...(this.inMemoryPartnerContacts.get(id) ?? []));
     }
     if (this.isEnabled() && this.extendedExpirySqlSupported) {
-      const dbResult = await this.databaseService!.query<{
+      const executor = this.getExpiryExecutor(client);
+      const dbResult = await executor.query<{
         email: string | null;
       }>(
         `/* partner-contact-lookup */
+         SELECT jsonb_array_elements_text(
+           CASE
+             WHEN jsonb_typeof(metadata->'contactEmails') = 'array' THEN metadata->'contactEmails'
+             ELSE '[]'::jsonb
+           END
+         ) AS email
+         FROM core.partners
+         WHERE (partner_id::text = ANY($1::text[]) OR partner_code = ANY($1::text[]))
+           AND status = 'active'
+         UNION ALL
          SELECT contact_email AS email
          FROM core.partners
          WHERE (partner_id::text = ANY($1::text[]) OR partner_code = ANY($1::text[]))
            AND status = 'active'
            AND contact_email IS NOT NULL
-         UNION
+         UNION ALL
          SELECT jsonb_array_elements_text(
            CASE
              WHEN jsonb_typeof(record->'contactEmails') = 'array' THEN record->'contactEmails'
@@ -386,13 +536,13 @@ export class RegulatoryRegistryRepository {
          FROM admin.phase1_fleet_partners
          WHERE fleet_partner_id = ANY($1::text[])
            AND active = true
-         UNION
+         UNION ALL
          SELECT record->>'contactEmail' AS email
          FROM admin.phase1_fleet_partners
          WHERE fleet_partner_id = ANY($1::text[])
            AND active = true
            AND record->>'contactEmail' IS NOT NULL
-         UNION
+         UNION ALL
          SELECT COALESCE(p.email_normalized, p.record->>'email') AS email
          FROM iam.identity_memberships m
          JOIN iam.identity_principals p ON p.principal_id = m.principal_id
@@ -409,6 +559,46 @@ export class RegulatoryRegistryRepository {
       }
     }
     return [...new Set(results)];
+  }
+
+  async findVehiclePartnerIds(
+    vehicleIds: readonly string[],
+    client?: PoolClient,
+  ): Promise<Map<string, string[]>> {
+    const normalized = [
+      ...new Set(vehicleIds.map((v) => v.trim()).filter(Boolean)),
+    ];
+    const map = new Map<string, string[]>();
+    if (
+      normalized.length === 0 ||
+      !this.isEnabled() ||
+      !this.extendedExpirySqlSupported
+    ) {
+      return map;
+    }
+    const executor = this.getExpiryExecutor(client);
+    const result = await executor.query<{
+      vehicle_id: string | null;
+      partner_id: string | null;
+    }>(
+      `/* vehicle-partner-lookup */
+       SELECT vehicle_id, COALESCE(record->>'partnerId', partner_id) AS partner_id
+       FROM reg.phase1_registry_contracts
+       WHERE vehicle_id = ANY($1::text[])
+         AND COALESCE(record->>'status', status) <> 'terminated'`,
+      [normalized],
+    );
+    for (const row of result.rows) {
+      const vId = row.vehicle_id?.trim();
+      const pId = row.partner_id?.trim();
+      if (!vId || !pId) continue;
+      const list = map.get(vId) ?? [];
+      if (!list.includes(pId)) {
+        list.push(pId);
+      }
+      map.set(vId, list);
+    }
+    return map;
   }
 
   async loadDriverMatchingSuppressions(
