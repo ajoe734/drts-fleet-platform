@@ -69,7 +69,11 @@ export function CaseReplyComposer({
   const isClosed = caseDetail.status === "closed";
   const responseUnavailable = caseDetail.actionDescriptor?.enabled === false;
   const isPlatform = caseDetail.responsibility === "platform";
-  const isEditable = !isClosed && !isPlatform && !responseUnavailable;
+  // No fleet has been attributed: read-only like platform/closed, but for
+  // its own honest reason rather than as a platform-owned case.
+  const isUnattributed = caseDetail.responsibility === "unattributed";
+  const isReadOnlyOwnership = isPlatform || isUnattributed;
+  const isEditable = !isClosed && !isReadOnlyOwnership && !responseUnavailable;
   const editableRef = useRef(isEditable);
   if (prevCaseDetailRef.current !== caseDetail) {
     prevCaseDetailRef.current = caseDetail;
@@ -228,6 +232,7 @@ export function CaseReplyComposer({
             detail.caseDetail &&
             (detail.caseDetail.status === "closed" ||
               detail.caseDetail.responsibility === "platform" ||
+              detail.caseDetail.responsibility === "unattributed" ||
               detail.caseDetail.actionDescriptor?.enabled === false)
           ) {
             editableRef.current = false;
@@ -420,6 +425,13 @@ export function CaseReplyComposer({
             {"已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。"}
           </div>
         </div>
+      ) : isUnattributed ? (
+        <CanvasBanner
+          theme={theme}
+          tone="info"
+          icon="lock"
+          body={t("actions.reason.caseUnattributed")}
+        />
       ) : responseUnavailable ? (
         <CanvasBanner
           theme={theme}
@@ -564,7 +576,9 @@ export function CaseReplyComposer({
           margin: "12px 0 8px",
         }}
       >
-        {isPlatform ? "附件 · attachments（唯讀）" : "附件 · attachments"}
+        {isReadOnlyOwnership
+          ? "附件 · attachments（唯讀）"
+          : "附件 · attachments"}
       </div>
 
       {downloadNotice && (
@@ -720,7 +734,7 @@ export function CaseReplyComposer({
         })}
       </div>
 
-      {!isClosed && !isPlatform && replyState !== "submitting" && (
+      {!isClosed && !isReadOnlyOwnership && replyState !== "submitting" && (
         <div style={{ marginTop: 10 }}>
           <input
             ref={fileInput}

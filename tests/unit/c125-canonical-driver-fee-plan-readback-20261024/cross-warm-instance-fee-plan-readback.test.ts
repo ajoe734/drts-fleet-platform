@@ -62,7 +62,11 @@ function createWarmInstance(
         (row) => row.batchId === batch.batchId,
       );
       if (idx >= 0) store.reimbursementBatches[idx] = { ...batch };
-      else store.reimbursementBatches = [...store.reimbursementBatches, { ...batch }];
+      else
+        store.reimbursementBatches = [
+          ...store.reimbursementBatches,
+          { ...batch },
+        ];
     }
   };
 
@@ -91,7 +95,11 @@ function createWarmInstance(
     listLiveDriverTripsInPeriod: async () => [],
     listLiveDriverTripsInPeriodForDriver: async () => [],
     withDriverStatementTarget: async (
-      identity: { periodMonth: string; driverId: string; feePlanVersion: string },
+      identity: {
+        periodMonth: string;
+        driverId: string;
+        feePlanVersion: string;
+      },
       execute: (target: {
         load: () => Promise<{
           statements: Record<string, unknown>[];
@@ -335,7 +343,9 @@ describe("C125-F1: same-instance pending-publication immutability", () => {
         driverFeePlans?: ReadonlyArray<Record<string, unknown>>;
       }) => {
         if (changes.driverFeePlans?.length) {
-          publishWrites.push(changes.driverFeePlans.map((plan) => ({ ...plan })));
+          publishWrites.push(
+            changes.driverFeePlans.map((plan) => ({ ...plan })),
+          );
           if (!firstWriteObserved) {
             firstWriteObserved = true;
             firstPersistStarted.resolve();

@@ -138,15 +138,15 @@ export function mergeCanonicalTenantApiKeyRecord(
   const isTerminal = (record: StoredTenantApiKeyRecord) =>
     Boolean(
       record.revokedAt ||
-        record.autoRevokedAt ||
-        record.status === "revoked" ||
-        record.status === "auto_revoked",
+      record.autoRevokedAt ||
+      record.status === "revoked" ||
+      record.status === "auto_revoked",
     );
   const isAutoRevoked = (record: StoredTenantApiKeyRecord) =>
     Boolean(
       record.autoRevokedAt ||
-        record.status === "auto_revoked" ||
-        record.revokeReason === "rotation_overlap_elapsed",
+      record.status === "auto_revoked" ||
+      record.revokeReason === "rotation_overlap_elapsed",
     );
 
   const existingTerminal = isTerminal(existing);

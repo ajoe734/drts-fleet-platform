@@ -34,6 +34,7 @@ Previous rounds: Owner Claude · Reviewer Codex2 · 2026-10-15.
 > also withdrawn: the persisted disposition explicitly preserves `blocked`.
 
 ## 0.7 Acceptance Evidence Itemized — current round (supersedes §0.7a/§0.7b
+
 below, which are both kept for audit)
 
 Executed this round with Git 2.43.0, Python 3.12.3, gh 2.100.0, no bypass
@@ -43,6 +44,7 @@ exit codes are from this session.
 
 **1. Exact contamination (identify the exact branch/worktree/commit
 contamination that keeps the parent blocked):**
+
 - There is no live branch/worktree/commit contamination left — see §11.
   The parent's candidate `0660ce29d219d6757ed975618d39f9eba7498804` merged
   cleanly to `origin/dev` via PR #2622 (`merge_sha=f37843e08b9b23e4877c3692ff62021076a8ef35`)
@@ -65,6 +67,7 @@ contamination that keeps the parent blocked):**
 
 **2. Non-destructive repair path (document a non-destructive repair path
 without force-pushing shared history):**
+
 - No further repair was needed once #2622 merged cleanly. The 5 stale PRs
   were closed (not merged, no force-push, no branch/ref deletion) — a purely
   non-destructive bookkeeping action, confirmed again this round by the same
@@ -76,6 +79,7 @@ without force-pushing shared history):**
 
 **3. Task-scoped commit/push/PR (produce task-scoped commit/push/PR evidence
 for any canonical change):**
+
 - `python3 tools/ci/git/check_commit_trailers.py --base 7b30ce6a3df4a9a9638cfc824e09b3f60f6baf93 --head 5e4cfd4c54dcd35384298c90385f856821bafe2f`
   → `check_commit_trailers: 1 commit(s) OK.` (exit 0), re-run fresh this
   round.
@@ -88,6 +92,7 @@ for any canonical change):**
   `Reviewer: Codex2` (this helper's own commit trailers).
 
 **4. Update the parent task with the concrete unblocked next step:**
+
 - See §15. The required metadata (`resolved_parent_status=blocked`,
   `resolved_parent_waiting_for=Gemini`, a `resolved_parent_next` that starts
   with the parent's full live `next` text) is **already persisted on this
@@ -140,7 +145,7 @@ for any canonical change):**
 > `b49b1b02735b` (13:49:34Z, "resolve H3/H4 finding gaps") →
 > `bca5cc068a4c`). This is a **parallel/concurrent attempt, not a descendant
 > of `94195322681e`**: `git merge-base bca5cc068a4cfd1ffbfff3d9db82274ad2bb6631
-> 94195322681ede1962659216f1c624c0ec164a0e` → `0875806698c022674217a3aee12bd89cb5fce27b`,
+94195322681ede1962659216f1c624c0ec164a0e` → `0875806698c022674217a3aee12bd89cb5fce27b`,
 > the common `dev` base both chains forked from independently. No
 > `worker_outcomes` entry in this task's canonical record ever recorded a
 > `handoff`/review of this SHA as a candidate — it survives only as a commit
@@ -148,11 +153,12 @@ for any canonical change):**
 > (14:01:15Z). It is preserved here, distinct from §0.7a, because its §0.7
 > content was reused verbatim as the basis for the current round's §0.7
 > above, and because a prior round of this file wrongly presented it as the
-> *same text* as §0.7a (it is not — see the diff between §0.7a and §0.7b).
+> _same text_ as §0.7a (it is not — see the diff between §0.7a and §0.7b).
 
 Below is the verifiable evidence for the 4 Acceptance Criteria of this helper task, executed using Git 2.43.0, Python 3.12.3, and gh 2.100.0 without bypasses.
 
 **1. Exact contamination (Identify the exact branch/worktree/commit contamination that keeps the parent blocked):**
+
 - **Prior Helper (fdc24d):** Retained polluted ancestry.
   - Reproducible command: `env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head fdc24d7150ea96f59681fc6c23fa5b49f825707d`
   - Output: Exit 1. Three non-compliant commits: `46df5aad...` (Missing Reviewer), `bfc9701f...` (Invalid subject), `42bc39e0...` (Subject and all trailers non-compliant).
@@ -161,12 +167,14 @@ Below is the verifiable evidence for the 4 Acceptance Criteria of this helper ta
   - Output: Exit 1. Five non-compliant commits: The 3 above plus `f0d75acc...` (Non-compliant) and `a4054262...` (Invalid subject and trailers).
 
 **2. Non-destructive repair path (Repair or document a non-destructive repair path without force-pushing shared history):**
+
 - **Verified Fix:** The clean `dev` + net diff principle correctly avoids destructive reverts.
 - **Evidence:** Comparing the 5 previously impacted operational files between the clean dev base (`08758066...`) and this candidate (`94195322...`) yields 0 diff.
   - Command: `git diff --numstat 0875806698c022674217a3aee12bd89cb5fce27b 94195322681ede1962659216f1c624c0ec164a0e -- .github/workflows/dev-owned-operational-fixture-cleanup.yml docs/04-uat/dev-owned-operational-fixture-cleanup-20261009.md operations/verification/cleanup-owned-operational-fixtures.py tests/unit/gcp-artifact-activation-20261004/test_owned_operational_fixture_cleanup.py tests/unit/audit-voice-application-wiring-20261003/trusted-turn-composition.test.ts`
   - Output: Exit 0 (Empty diff).
 
 **3. Task-scoped commit/push/PR (Produce task-scoped commit/push/PR evidence for any canonical change):**
+
 - **Identity:** LLM-Agent Gemini2, Task-ID PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR, Reviewer Codex2.
 - **Scope:** 1 artifact modified, 2 commits in the PR range (this candidate does not modify the product codebase).
 - **PR Location:** HEAD = GitHub remote = PR #2541 (`gemini2/pax-web-ride-ui-20261009-unblock-history-repair`).
@@ -176,6 +184,7 @@ Below is the verifiable evidence for the 4 Acceptance Criteria of this helper ta
 - **Pending Checks:** Hosted CI (lint, unit, integration, cross-surface-e2e, etc.) are in-progress and must complete successfully before merging.
 
 **4. Update parent concrete safe next (Update the parent task with the concrete unblocked next step):**
+
 - See Section 10 below for the exact concrete safe next step, which must be recorded onto the parent using the authorized Supervisor gateway (H4). **[Superseded by §15 below — this metadata is now confirmed already persisted, not pending.]**
 
 ## 1. Contamination identified
@@ -218,6 +227,7 @@ rebasing, or force-pushing that commit to add the missing trailer.
 ### Latest Contamination Details (H3)
 
 In the subsequent iteration (Codex2 review 2026-10-10T13:39:39Z, candidate generation `40a6f5e1b11d4c08978fb6f0370b0d18`, candidate SHA `fdc24d7150ea96f59681fc6c23fa5b49f825707d`), the formal checker continued to fail with exit code 1 because the `ours` merge approach retained the polluted ancestry. The specific failing commits are:
+
 - `46df5aad681eba8b1cd4b694459bcce55c4a8c57` (Missing `Reviewer` trailer)
 - `bfc9701f7a849c13dcd6bce23fa36d329ac36c3b` (Subject does not comply with conventional commits)
 - `42bc39e0cedcca690147d80b81369d29d3cb84a8` (Subject and all trailers non-compliant)
@@ -395,7 +405,7 @@ of the root cause, not just the sandbox's `defer` classification.
 - `gh pr view 2526` confirms the original contaminated PR is still `OPEN`
   and untouched, as intended (to be closed, not merged, once #2529 lands).
 - Tried both `ai-status.sh progress ...` and `ai-status.sh blocker ...
-  Codex2 ...` for this task; both were classified `defer` by the sandbox
+Codex2 ...` for this task; both were classified `defer` by the sandbox
   before reaching the tool, consistent with the confirmed broker outage
   above. Read-only `ai-status.sh show <task-id>` still succeeds.
 - No workaround substituted — same constraints as §4/§5/§6 apply.
@@ -413,9 +423,9 @@ green again:
 - Calling `ai_status.py` **directly** (bypassing the `ai-status.sh` wrapper,
   exporting `ORCH_STATUS_ROOT`/`AI_STATUS_ROOT` by hand) does **not** defer —
   it returns immediately. `show` and `progress
-  PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR ...` (this task's own id)
+PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR ...` (this task's own id)
   both succeeded instantly this way. So the broker outage explains why the
-  `ai-status.sh` *wrapper* hung in §4-§7, but it is not the only obstacle.
+  `ai-status.sh` _wrapper_ hung in §4-§7, but it is not the only obstacle.
 - `assign PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Claude Codex2` with
   `TASK_METADATA_JSON` (to durably set
   `resolved_parent_status`/`resolved_parent_next` on this task, per
@@ -424,15 +434,15 @@ green again:
   both fail immediately, even via the direct `ai_status.py` call, with:
   - `assign`: `Dispatched workers must use their assigned task lifecycle commands`
   - `note <parent-id>`: `Dispatched worker cannot mutate a different task`
-  Confirmed via `echo "$ORCH_DISPATCH_ROLE"` / `echo "$ORCH_RUN_ID"` that this
-  session has `ORCH_DISPATCH_ROLE=owner` and a populated `ORCH_RUN_ID` — i.e.
-  this is `TaskBoardCommandExecutor._guard_worker_command` rejecting a
-  dispatched worker's cross-task/non-lifecycle write, exactly as documented
-  for other unblock helpers. **This guard applies regardless of broker
-  health** — it is a structural rule, not a connectivity symptom. No dispatched
-  worker session (owner or reviewer role) can write this task's
-  `resolved_parent_*` metadata or note the parent directly; only a
-  Supervisor-privileged session (no `ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID`) can.
+    Confirmed via `echo "$ORCH_DISPATCH_ROLE"` / `echo "$ORCH_RUN_ID"` that this
+    session has `ORCH_DISPATCH_ROLE=owner` and a populated `ORCH_RUN_ID` — i.e.
+    this is `TaskBoardCommandExecutor._guard_worker_command` rejecting a
+    dispatched worker's cross-task/non-lifecycle write, exactly as documented
+    for other unblock helpers. **This guard applies regardless of broker
+    health** — it is a structural rule, not a connectivity symptom. No dispatched
+    worker session (owner or reviewer role) can write this task's
+    `resolved_parent_*` metadata or note the parent directly; only a
+    Supervisor-privileged session (no `ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID`) can.
 - Also re-confirmed: `gh pr view 2529` still fully green/`MERGEABLE`
   (unchanged, 5th confirmation — see §2/§5/§6/§7). This task's own PR
   [#2530](https://github.com/ajoe734/drts-fleet-platform/pull/2530)
@@ -499,7 +509,7 @@ this helper task.
 > **SUPERSEDED.** At the time this section was written (2026-10-10), the
 > parent was genuinely still contaminated and this section's "Pending" framing
 > was correct. It stayed correct through the `94195322681e`/`bca5cc068a4c`
-> round. It stopped being correct on 2026-10-14, when a *different* clean
+> round. It stopped being correct on 2026-10-14, when a _different_ clean
 > dev-continuation attempt (candidate `0660ce29d2`, not any `v2`/`v3`/helper
 > branch discussed anywhere in §1-§9) actually implemented the "True Safe
 > Path" below and merged via PR #2622. See §11 for the resolution and §15 for
@@ -529,7 +539,9 @@ The repair path proposed in §2-§8 (PR #2529) was rejected by the reviewer (Cod
 **Why PR #2529 was invalid:** It used the exact tree `debc788a...` from the old branch tip `96102377a...`, which was based on an older `dev` commit. Applying this old tree directly to the newer `dev` tip `d36ca2f80...` silently deleted recently merged `dev` files (e.g., dev operational cleanup fixtures) and reverted recent voice test fixes, acting as a destructive revert of shared work.
 
 ### The True Safe Path
+
 To properly reconstruct history without force-pushing and without destroying `dev` work:
+
 1. Create a new branch from current `dev`.
 2. Extract the net differences (the `diff` from the `merge-base` to the old tip) and apply them onto the new `dev` branch, ensuring dev's new files and changes remain intact.
 3. Commit these changes with properly formatted commit messages, including the missing `Reviewer` trailer.
@@ -537,9 +549,10 @@ To properly reconstruct history without force-pushing and without destroying `de
 
 ### Current Status & Pending Parent Resolution (H4)
 
-The parent task is NOT fully unblocked and is NOT safely resting on the clean PR #2535. The parent task's active worktree (`.artifacts/worktrees/auto/gemini-pax-web-ride-ui-20261009`, snapshot `94307fe0287658dea4074db6c1ddeba399d2a462`) is still contaminated because it merged the polluted PR 2513 lineage (parents `a4054262...` and `38c3fecd...`). 
+The parent task is NOT fully unblocked and is NOT safely resting on the clean PR #2535. The parent task's active worktree (`.artifacts/worktrees/auto/gemini-pax-web-ride-ui-20261009`, snapshot `94307fe0287658dea4074db6c1ddeba399d2a462`) is still contaminated because it merged the polluted PR 2513 lineage (parents `a4054262...` and `38c3fecd...`).
 
 Running the formal checker against the parent's current snapshot (`check_commit_trailers.py --head 94307fe0287658dea4074db6c1ddeba399d2a462`) fails with 5 non-compliant commits:
+
 - `46df5aad681eba8b1cd4b694459bcce55c4a8c57` (Missing Reviewer)
 - `bfc9701f7a849c13dcd6bce23fa36d329ac36c3b` (Invalid subject)
 - `42bc39e0cedcca690147d80b81369d29d3cb84a8` (Invalid subject and trailers)
@@ -565,7 +578,9 @@ The repair path proposed in §2-§8 (PR #2529) was rejected by the reviewer (Cod
 **Why PR #2529 was invalid:** It used the exact tree `debc788a...` from the old branch tip `96102377a...`, which was based on an older `dev` commit. Applying this old tree directly to the newer `dev` tip `d36ca2f80...` silently deleted recently merged `dev` files (e.g., dev operational cleanup fixtures) and reverted recent voice test fixes, acting as a destructive revert of shared work.
 
 ### The True Safe Path
+
 To properly reconstruct history without force-pushing and without destroying `dev` work:
+
 1. Create a new branch from current `dev`.
 2. Extract the net differences (the `diff` from the `merge-base` to the old tip) and apply them onto the new `dev` branch, ensuring dev's new files and changes remain intact.
 3. Commit these changes with properly formatted commit messages, including the missing `Reviewer` trailer.
@@ -577,6 +592,7 @@ The parent task is NOT fully unblocked and is NOT safely resting on the clean PR
 
 Running the formal checker against the parent's current snapshot fails with 5 non-compliant commits:
 `env -u COMMIT_TRAILER_BYPASS python3 tools/ci/git/check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head 94307fe0287658dea4074db6c1ddeba399d2a462`
+
 - `46df5aad681eba8b1cd4b694459bcce55c4a8c57` (Missing Reviewer)
 - `bfc9701f7a849c13dcd6bce23fa36d329ac36c3b` (Invalid subject)
 - `42bc39e0cedcca690147d80b81369d29d3cb84a8` (Invalid subject and trailers)
@@ -589,6 +605,7 @@ The parent owner must preserve their unpublished work, but must port their valid
 **Yielding to Supervisor Gateway for Parent Write (stale command, see §15):**
 Because this helper is a dispatched worker, it cannot mutate the canonical machine-truth of the parent task. To formally complete Acceptance Criterion 4 (Update the parent concrete safe next step), this helper delegates the metadata write to the Supervisor using the `blocker` flow.
 The Supervisor must use the authorized gateway to record:
+
 - `resolved_parent_status=blocked`
 - `resolved_parent_waiting_for=Gemini`
 - `resolved_parent_next="Pending safe history recovery: Extract net differences against dev and apply to a clean branch. Do not merge the polluted 'ours' ancestry."`
@@ -600,7 +617,7 @@ This ensures that upon merging this helper, the parent task is not erroneously r
 ## 11. Actual resolution (2026-10-14): a separate dev-continuation attempt closed the whole §1-§10 incident
 
 Sections 1-10 above (spanning 2026-10-10, candidates `96102377a` through
-`94195322681e`) all addressed the *original* contaminated branch lineage
+`94195322681e`) all addressed the _original_ contaminated branch lineage
 (`gemini/pax-web-ride-ui-20261009` and its `-v2`/`-v3`/helper variants). None
 of those branches is what ultimately unblocked the parent. Independently, a
 **later** dev-continuation attempt produced a clean candidate that went
@@ -622,7 +639,7 @@ than §10 anticipated:
   session, same precedent as §2 — the `rev-list`+`grep` form is the
   equivalent read-only substitute, not a different check.)
 - The owner's own `progress` trail (9 identical confirmations,
-  2026-10-14T11:03-13:05Z, recorded on the *parent* task, not this helper)
+  2026-10-14T11:03-13:05Z, recorded on the _parent_ task, not this helper)
   recorded the working tree as clean with an **empty diff** between the
   candidate and the merge commit across all 25 touched files — i.e. nothing
   was lost or overwritten by the earlier §1-§10 contamination; the correct
@@ -639,13 +656,13 @@ dev-continuation branch above, not fixed in place.
 The only remaining damage from the §1-§10 incident was bookkeeping debris —
 five abandoned PRs from the superseded branches that were never closed:
 
-| PR | Branch | State before this task | Disposition |
-| --- | --- | --- | --- |
-| [#2530](https://github.com/ajoe734/drts-fleet-platform/pull/2530) | `claude/pax-web-ride-ui-20261009-unblock-history-repair` | OPEN | Closed (not merged) 2026-10-15T20:34:00Z |
-| [#2541](https://github.com/ajoe734/drts-fleet-platform/pull/2541) | `gemini2/pax-web-ride-ui-20261009-unblock-history-repair-v2` | OPEN | Closed (not merged) 2026-10-15T20:34:12Z |
-| [#2566](https://github.com/ajoe734/drts-fleet-platform/pull/2566) | `gemini/pax-web-ride-ui-20261009-unblock-planning-decision` | OPEN | Closed (not merged) 2026-10-15T20:34:14Z |
-| [#2538](https://github.com/ajoe734/drts-fleet-platform/pull/2538) | `gemini/pax-web-ride-ui-20261009` | OPEN | Closed (not merged) 2026-10-15T20:34:17Z |
-| [#2535](https://github.com/ajoe734/drts-fleet-platform/pull/2535) | `gemini/pax-web-ride-ui-20261009-v3` | OPEN | Closed (not merged) 2026-10-15T20:34:20Z |
+| PR                                                                | Branch                                                       | State before this task | Disposition                              |
+| ----------------------------------------------------------------- | ------------------------------------------------------------ | ---------------------- | ---------------------------------------- |
+| [#2530](https://github.com/ajoe734/drts-fleet-platform/pull/2530) | `claude/pax-web-ride-ui-20261009-unblock-history-repair`     | OPEN                   | Closed (not merged) 2026-10-15T20:34:00Z |
+| [#2541](https://github.com/ajoe734/drts-fleet-platform/pull/2541) | `gemini2/pax-web-ride-ui-20261009-unblock-history-repair-v2` | OPEN                   | Closed (not merged) 2026-10-15T20:34:12Z |
+| [#2566](https://github.com/ajoe734/drts-fleet-platform/pull/2566) | `gemini/pax-web-ride-ui-20261009-unblock-planning-decision`  | OPEN                   | Closed (not merged) 2026-10-15T20:34:14Z |
+| [#2538](https://github.com/ajoe734/drts-fleet-platform/pull/2538) | `gemini/pax-web-ride-ui-20261009`                            | OPEN                   | Closed (not merged) 2026-10-15T20:34:17Z |
+| [#2535](https://github.com/ajoe734/drts-fleet-platform/pull/2535) | `gemini/pax-web-ride-ui-20261009-v3`                         | OPEN                   | Closed (not merged) 2026-10-15T20:34:20Z |
 
 Re-confirmed this round (fresh `gh pr view <n> --json number,state,mergedAt,closedAt`
 calls, this session, all exit 0): all five remain `state: CLOSED`,
@@ -697,19 +714,19 @@ per-acceptance evidence trail. This section restores it, together with the
 §0.7 and §10 texts, each pair from the same two commits, no longer merged
 into one — see the top-of-file warning), and adds each later round.
 
-| Round (candidate / generation) | R1 (old #2529 whole-tree revert) | H1 (commit-trailer graph/gate) | H2 (helper PR scope) | H3 (traceability) | H4 (parent-metadata safety) |
-| --- | --- | --- | --- | --- | --- |
-| `96102377a` (parent candidate, pre-helper) | N/A (this *is* the original contamination) | FAIL — `check_commit_trailers.py --base 5b11155d33fd4d6c345e01cb9730012d3b3d08d1 --head 96102377ac86e71887e63f82df695183796834ab` → exit 1, `46df5aad681e` missing `Reviewer` | N/A | N/A | N/A |
-| `1ad9f340583c` / PR #2529 (`46d1ef3a2c`, gen `12b92e9206da`) | **FAIL** — reviewer R1 2026-10-10T13:13:16Z: same tree as `96102377a` applied onto newer `dev` tip, silently deleting 4 cleanup files (+0/-312, +0/-96, +0/-1822, +0/-1228) and reverting voice test (895/1199 lines touched). `git diff --numstat d36ca2f807b70cb94564c023bfe07b02dc70abde 1ad9f340583c137322f5ec5f246d06622fb0e8df -- <5 files>` confirmed this. | PASS — `check_commit_trailers.py --base d36ca2f807b70cb94564c023bfe07b02dc70abde --head 1ad9f340583c137322f5ec5f246d06622fb0e8df` → exit 0, 1 commit OK | n/a (this round's own PR) | n/a | n/a |
-| `fdc24d7150ea` / PR #2539 (gen `40a6f5e1b1`) | FIXED — reviewer confirmed abandonment of #2529's whole-tree approach | **FAIL** — reviewer H1 2026-10-10T13:39:39Z: `ours` merge kept 2nd-parent ancestry; `check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head fdc24d7150ea96f59681fc6c23fa5b49f825707d` → exit 1, 3 non-compliant (`46df5aad681e`, `bfc9701f7a84`, `42bc39e0cedc`) | **FAIL** — H2: PR had 30 files (+5449/-55) incl. product code and an unrelated sidecar; `git diff --stat db8c36e13f6b3754a75ce4e843d55deb2e4386c5 fdc24d7150ea96f59681fc6c23fa5b49f825707d` confirmed | n/a | n/a |
-| `3f9e9a3b503b` / PR #2541 (gen `1c95c0924d`) | retained (not re-broken) | FIXED — same checker, `--base 0875806698c022674217a3aee12bd89cb5fce27b --head 3f9e9a3b503b4fa13f2224a01184ecc9e814a4a1` → exit 0 | FIXED — PR #2541 is 1 file only | **FAIL** — reviewer H3 2026-10-10T13:47:38Z: reinstated 301-line report but omitted the new H1/H2/graph evidence and adjacent-SHA lineage | **FAIL** — reviewer H4: `resolved_parent_status` still `in_progress` with stale v2 text, parent worktree snapshot `94307fe0287658dea4074db6c1ddeba399d2a462` re-confirmed still contaminated (5 non-compliant commits) |
-| `94195322681e` / PR #2541 updated (gen `dd837ff747`) | retained | retained | retained | **FAIL (2nd round)** — reviewer H3 2026-10-10T13:56:06Z: this candidate's own §0.7 (preserved verbatim as **§0.7a** above) was only a 4-bullet summary — not the per-finding ledger with reproducible base/head commands/exit/version — and mis-stated itself as "1 commit" when the PR range was 2. (The more detailed per-item evidence table now shown as **§0.7b** is *not* from this commit — it is from the separate sibling commit `bca5cc068a4c`, below.) | **FAIL (2nd round)** — H4: `resolved_parent_next` metadata still the stale v2 text; live parent snapshot `7a92e5e05ca9eea86ba882280a4c714e90f1f0c2` (child of `94307fe`) still fails the same 6-commit non-compliance set |
-| `bca5cc068a4c` (sibling branch `gemini2/pax-web-ride-ui-20261009-unblock-history-repair`, chain `0875806698c0`→`3b8ba136e4aa`→`b49b1b02735b`→`bca5cc068a4c`; never handed off) | retained | retained (commit itself passes `check_commit_trailers.py`, not independently re-run as a candidate) | retained | N/A as a reviewed round — no `worker_outcomes` entry ever recorded a `handoff`/review of this SHA. Its §0.7 (preserved as **§0.7b** above) is the detailed 4-item evidence table that a later round (`5e4cfd4c54dc` below, and this round) reused; forked from the same `0875806698c0` base as `94195322681e` but is not its ancestor or descendant (`git merge-base bca5cc068a4c 94195322681e` → `0875806698c0`). Preserved here only for provenance, not as a credited/failed review round. | N/A |
-| `0660ce29d219` (separate dev-continuation branch, gen `cb96c18f8f`) | **MOOT** — different branch entirely, built from current `dev`, not from any `96102377a`-derived tree; no `ours` merges in its history | **MOOT/PASS** — reviewer-approved, CI green | **MOOT/PASS** | — (this branch belongs to the *parent* task's own lifecycle, not this helper; its evidence lives in `PAX-WEB-RIDE-UI-20261009`'s own `worker_outcomes`, not here) | — |
-| `5e4cfd4c54dc` / PR #2705 (gen `fc5562ed9d`) | credited correctly (confirmed §0.7 current round) | credited correctly | credited correctly | **FAIL (3rd round)** — reviewer H3 2026-10-15T20:40:09Z: 347→141 line rewrite (`git diff --numstat 94195322681ede1962659216f1c624c0ec164a0e 5e4cfd4c54dcd35384298c90385f856821bafe2f -- <artifact>` → +134/-340) deleted the `94195322681e`/`bca5` evidence entirely; stale generation id left on line 6 | **FAIL** — reviewer H4 2026-10-15T20:40:09Z: artifact wrongly claimed `resolved_parent_*` was still pending and offered a destructive replacement command (see §15) |
-| `81ccb3bf0` / PR #2705 (gen `2b5376b957`) | credited correctly | credited correctly | credited correctly | **FAIL (4th round)** — reviewer H3 2026-10-15T20:58:37Z: restored §1-§10 and the detailed evidence table, but collapsed `94195322681e`'s own §0.7 and `bca5cc068a4c`'s distinct §0.7 into one "content-identical" claim, silently discarding `94195322681e`'s actual (shorter, erroring) §0.7 text — exactly what this row flagged above. | credited correctly (§15 withdrawal of the destructive replacement command stands) |
-| `fcc2475eb` / PR #2705 (gen `ee20608766`) | credited, unchanged | credited, unchanged | credited, unchanged | **Partially fixed, FAIL (5th round)** — reviewer H3 2026-10-15T~21:15Z: correctly split the single merged §0.7 back into **§0.7a** (`94195322681e`'s own, short, erroring text, verbatim) and **§0.7b** (`bca5cc068a4c`'s detailed table, verbatim), each bound to its real commit SHA/sha256/trailers/branch. But it left §10 using **only** `bca5cc068a4c`'s version of §10 under both the shared heading and the top-of-file "byte-identical" claim — the same silent-substitution bug it had just fixed for §0.7, now reproduced for §10 (the explicit `--base`+`--head` checker line and the "Concrete Unblocked Next Step"/"Yielding to Supervisor Gateway" close are `bca5cc068a4c`-only text; `94195322681e`'s own `--head`-only checker reference and "Next Action (Pending)" closing paragraph were never restored). | unchanged — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing |
-| this round (current artifact fix) | credited, unchanged | credited, unchanged | credited, unchanged | **Fixed** — applies the same split to §10 that the previous round applied to §0.7: **§10a** (`94195322681e`'s own text, verbatim, including its `--head`-only checker reference and "Next Action (Pending)" close) and **§10b** (`bca5cc068a4c`'s text, verbatim, including its explicit `--base`+`--head` line and two-part "Concrete Unblocked Next Step"/"Yielding to Supervisor Gateway" close), each bound to its real commit SHA/sha256 and marked historical; corrects the top-of-file warning's claim that §1-§10 (not just §1-§9) are byte-identical between the two commits. | unchanged — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing |
+| Round (candidate / generation)                                                                                                                                                 | R1 (old #2529 whole-tree revert)                                                                                                                                                                                                                                                                                                                                   | H1 (commit-trailer graph/gate)                                                                                                                                                                                                                                                            | H2 (helper PR scope)                                                                                                                                                                                  | H3 (traceability)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | H4 (parent-metadata safety)                                                                                                                                                                                               |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `96102377a` (parent candidate, pre-helper)                                                                                                                                     | N/A (this _is_ the original contamination)                                                                                                                                                                                                                                                                                                                         | FAIL — `check_commit_trailers.py --base 5b11155d33fd4d6c345e01cb9730012d3b3d08d1 --head 96102377ac86e71887e63f82df695183796834ab` → exit 1, `46df5aad681e` missing `Reviewer`                                                                                                             | N/A                                                                                                                                                                                                   | N/A                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | N/A                                                                                                                                                                                                                       |
+| `1ad9f340583c` / PR #2529 (`46d1ef3a2c`, gen `12b92e9206da`)                                                                                                                   | **FAIL** — reviewer R1 2026-10-10T13:13:16Z: same tree as `96102377a` applied onto newer `dev` tip, silently deleting 4 cleanup files (+0/-312, +0/-96, +0/-1822, +0/-1228) and reverting voice test (895/1199 lines touched). `git diff --numstat d36ca2f807b70cb94564c023bfe07b02dc70abde 1ad9f340583c137322f5ec5f246d06622fb0e8df -- <5 files>` confirmed this. | PASS — `check_commit_trailers.py --base d36ca2f807b70cb94564c023bfe07b02dc70abde --head 1ad9f340583c137322f5ec5f246d06622fb0e8df` → exit 0, 1 commit OK                                                                                                                                   | n/a (this round's own PR)                                                                                                                                                                             | n/a                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | n/a                                                                                                                                                                                                                       |
+| `fdc24d7150ea` / PR #2539 (gen `40a6f5e1b1`)                                                                                                                                   | FIXED — reviewer confirmed abandonment of #2529's whole-tree approach                                                                                                                                                                                                                                                                                              | **FAIL** — reviewer H1 2026-10-10T13:39:39Z: `ours` merge kept 2nd-parent ancestry; `check_commit_trailers.py --base 0875806698c022674217a3aee12bd89cb5fce27b --head fdc24d7150ea96f59681fc6c23fa5b49f825707d` → exit 1, 3 non-compliant (`46df5aad681e`, `bfc9701f7a84`, `42bc39e0cedc`) | **FAIL** — H2: PR had 30 files (+5449/-55) incl. product code and an unrelated sidecar; `git diff --stat db8c36e13f6b3754a75ce4e843d55deb2e4386c5 fdc24d7150ea96f59681fc6c23fa5b49f825707d` confirmed | n/a                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | n/a                                                                                                                                                                                                                       |
+| `3f9e9a3b503b` / PR #2541 (gen `1c95c0924d`)                                                                                                                                   | retained (not re-broken)                                                                                                                                                                                                                                                                                                                                           | FIXED — same checker, `--base 0875806698c022674217a3aee12bd89cb5fce27b --head 3f9e9a3b503b4fa13f2224a01184ecc9e814a4a1` → exit 0                                                                                                                                                          | FIXED — PR #2541 is 1 file only                                                                                                                                                                       | **FAIL** — reviewer H3 2026-10-10T13:47:38Z: reinstated 301-line report but omitted the new H1/H2/graph evidence and adjacent-SHA lineage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | **FAIL** — reviewer H4: `resolved_parent_status` still `in_progress` with stale v2 text, parent worktree snapshot `94307fe0287658dea4074db6c1ddeba399d2a462` re-confirmed still contaminated (5 non-compliant commits)    |
+| `94195322681e` / PR #2541 updated (gen `dd837ff747`)                                                                                                                           | retained                                                                                                                                                                                                                                                                                                                                                           | retained                                                                                                                                                                                                                                                                                  | retained                                                                                                                                                                                              | **FAIL (2nd round)** — reviewer H3 2026-10-10T13:56:06Z: this candidate's own §0.7 (preserved verbatim as **§0.7a** above) was only a 4-bullet summary — not the per-finding ledger with reproducible base/head commands/exit/version — and mis-stated itself as "1 commit" when the PR range was 2. (The more detailed per-item evidence table now shown as **§0.7b** is _not_ from this commit — it is from the separate sibling commit `bca5cc068a4c`, below.)                                                                                                                                                                                                                                                                                                                                                              | **FAIL (2nd round)** — H4: `resolved_parent_next` metadata still the stale v2 text; live parent snapshot `7a92e5e05ca9eea86ba882280a4c714e90f1f0c2` (child of `94307fe`) still fails the same 6-commit non-compliance set |
+| `bca5cc068a4c` (sibling branch `gemini2/pax-web-ride-ui-20261009-unblock-history-repair`, chain `0875806698c0`→`3b8ba136e4aa`→`b49b1b02735b`→`bca5cc068a4c`; never handed off) | retained                                                                                                                                                                                                                                                                                                                                                           | retained (commit itself passes `check_commit_trailers.py`, not independently re-run as a candidate)                                                                                                                                                                                       | retained                                                                                                                                                                                              | N/A as a reviewed round — no `worker_outcomes` entry ever recorded a `handoff`/review of this SHA. Its §0.7 (preserved as **§0.7b** above) is the detailed 4-item evidence table that a later round (`5e4cfd4c54dc` below, and this round) reused; forked from the same `0875806698c0` base as `94195322681e` but is not its ancestor or descendant (`git merge-base bca5cc068a4c 94195322681e` → `0875806698c0`). Preserved here only for provenance, not as a credited/failed review round.                                                                                                                                                                                                                                                                                                                                  | N/A                                                                                                                                                                                                                       |
+| `0660ce29d219` (separate dev-continuation branch, gen `cb96c18f8f`)                                                                                                            | **MOOT** — different branch entirely, built from current `dev`, not from any `96102377a`-derived tree; no `ours` merges in its history                                                                                                                                                                                                                             | **MOOT/PASS** — reviewer-approved, CI green                                                                                                                                                                                                                                               | **MOOT/PASS**                                                                                                                                                                                         | — (this branch belongs to the _parent_ task's own lifecycle, not this helper; its evidence lives in `PAX-WEB-RIDE-UI-20261009`'s own `worker_outcomes`, not here)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | —                                                                                                                                                                                                                         |
+| `5e4cfd4c54dc` / PR #2705 (gen `fc5562ed9d`)                                                                                                                                   | credited correctly (confirmed §0.7 current round)                                                                                                                                                                                                                                                                                                                  | credited correctly                                                                                                                                                                                                                                                                        | credited correctly                                                                                                                                                                                    | **FAIL (3rd round)** — reviewer H3 2026-10-15T20:40:09Z: 347→141 line rewrite (`git diff --numstat 94195322681ede1962659216f1c624c0ec164a0e 5e4cfd4c54dcd35384298c90385f856821bafe2f -- <artifact>` → +134/-340) deleted the `94195322681e`/`bca5` evidence entirely; stale generation id left on line 6                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | **FAIL** — reviewer H4 2026-10-15T20:40:09Z: artifact wrongly claimed `resolved_parent_*` was still pending and offered a destructive replacement command (see §15)                                                       |
+| `81ccb3bf0` / PR #2705 (gen `2b5376b957`)                                                                                                                                      | credited correctly                                                                                                                                                                                                                                                                                                                                                 | credited correctly                                                                                                                                                                                                                                                                        | credited correctly                                                                                                                                                                                    | **FAIL (4th round)** — reviewer H3 2026-10-15T20:58:37Z: restored §1-§10 and the detailed evidence table, but collapsed `94195322681e`'s own §0.7 and `bca5cc068a4c`'s distinct §0.7 into one "content-identical" claim, silently discarding `94195322681e`'s actual (shorter, erroring) §0.7 text — exactly what this row flagged above.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | credited correctly (§15 withdrawal of the destructive replacement command stands)                                                                                                                                         |
+| `fcc2475eb` / PR #2705 (gen `ee20608766`)                                                                                                                                      | credited, unchanged                                                                                                                                                                                                                                                                                                                                                | credited, unchanged                                                                                                                                                                                                                                                                       | credited, unchanged                                                                                                                                                                                   | **Partially fixed, FAIL (5th round)** — reviewer H3 2026-10-15T~21:15Z: correctly split the single merged §0.7 back into **§0.7a** (`94195322681e`'s own, short, erroring text, verbatim) and **§0.7b** (`bca5cc068a4c`'s detailed table, verbatim), each bound to its real commit SHA/sha256/trailers/branch. But it left §10 using **only** `bca5cc068a4c`'s version of §10 under both the shared heading and the top-of-file "byte-identical" claim — the same silent-substitution bug it had just fixed for §0.7, now reproduced for §10 (the explicit `--base`+`--head` checker line and the "Concrete Unblocked Next Step"/"Yielding to Supervisor Gateway" close are `bca5cc068a4c`-only text; `94195322681e`'s own `--head`-only checker reference and "Next Action (Pending)" closing paragraph were never restored). | unchanged — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing                                                                                                             |
+| this round (current artifact fix)                                                                                                                                              | credited, unchanged                                                                                                                                                                                                                                                                                                                                                | credited, unchanged                                                                                                                                                                                                                                                                       | credited, unchanged                                                                                                                                                                                   | **Fixed** — applies the same split to §10 that the previous round applied to §0.7: **§10a** (`94195322681e`'s own text, verbatim, including its `--head`-only checker reference and "Next Action (Pending)" close) and **§10b** (`bca5cc068a4c`'s text, verbatim, including its explicit `--base`+`--head` line and two-part "Concrete Unblocked Next Step"/"Yielding to Supervisor Gateway" close), each bound to its real commit SHA/sha256 and marked historical; corrects the top-of-file warning's claim that §1-§10 (not just §1-§9) are byte-identical between the two commits.                                                                                                                                                                                                                                         | unchanged — see §15: the correct, already-live binding is quoted verbatim instead of describing it as missing                                                                                                             |
 
 Four original acceptance criteria, current-round cross-walk (fresh evidence
 cited inline in §11-§13/§15, not re-derived here):
@@ -748,7 +765,7 @@ record, not the parent's):
   (the "Acceptance 狀態確認與核對..." text citing candidate `0660ce29d2`,
   reviewer APPROVED, CI success, merge `f37843e08`, and the two still-unmet
   `required_acceptance` keys). The remaining ~874 characters are two
-  governance notices appended *after* that full prefix: a mechanical
+  governance notices appended _after_ that full prefix: a mechanical
   "Book-R10" file-path-reservation notice for `PAX-BOOKING-HISTORY-20261009`
   (unrelated to this task, explicitly says it grants no new scope/approval),
   and a dated "ACTUAL ROOT SUPERVISOR H4 SAFE CURRENT-PARENT BINDING
@@ -758,7 +775,7 @@ record, not the parent's):
   parent's real state changes before merge — i.e. exactly the safe,
   non-destructive binding acceptance criterion 4 calls for.
 - `candidate_generation` on this helper's own record: `fc5562ed9db440919e776b27c2eb387f`
-  (unchanged across this doc-only fix) — this fix is a `handoff` to a *new*
+  (unchanged across this doc-only fix) — this fix is a `handoff` to a _new_
   candidate SHA on the same branch/PR #2705, not a metadata change; this
   helper has no lifecycle command available to it (`assign`,
   `note <parent-id>`) to touch `resolved_parent_*` even if it wanted to — see
@@ -766,7 +783,7 @@ record, not the parent's):
 
 **Why the previous round's replacement command would have been harmful:**
 `apply_unblock_parent_resolution` (`bin/ai_status.py`) replaces the parent's
-`next` with this helper's `resolved_parent_next` *verbatim*, not by
+`next` with this helper's `resolved_parent_next` _verbatim_, not by
 appending, when this helper's candidate eventually merges. The short
 replacement text the `5e4cfd4c54dc` round drafted (`"History/branch/PR
 contamination fully resolved: ..."`, ~550 characters) would have discarded
@@ -789,24 +806,24 @@ attempting it.
 ## 16. Final acceptance checklist for this task
 
 - [x] **Identify the exact branch/worktree/commit contamination that keeps
-  the parent blocked** — §1/§10 (historical, preserved) identify it; §11
-  identifies that it was independently resolved 2026-10-14; §13 identifies
-  the real, unrelated current blocker (acceptance witnessing gate).
+      the parent blocked** — §1/§10 (historical, preserved) identify it; §11
+      identifies that it was independently resolved 2026-10-14; §13 identifies
+      the real, unrelated current blocker (acceptance witnessing gate).
 - [x] **Repair or document a non-destructive repair path without
-  force-pushing shared history** — §10 documents the correct principle;
-  §12 is this helper's own non-destructive action (5 stale PRs closed, 0
-  merges, 0 force-pushes, 0 branch/ref deletions); no git history was
-  rewritten by this helper at any point in its lifecycle.
+      force-pushing shared history** — §10 documents the correct principle;
+      §12 is this helper's own non-destructive action (5 stale PRs closed, 0
+      merges, 0 force-pushes, 0 branch/ref deletions); no git history was
+      rewritten by this helper at any point in its lifecycle.
 - [x] **Produce task-scoped commit/push/PR evidence for any canonical
-  change** — this file, committed and pushed on this task's own branch/PR
-  #2705 (and its predecessors), scoped to `write_scopes`; §0.7 current round
-  item 3 and §14's ledger carry the exact identity/command/exit evidence.
+      change** — this file, committed and pushed on this task's own branch/PR
+      #2705 (and its predecessors), scoped to `write_scopes`; §0.7 current round
+      item 3 and §14's ledger carry the exact identity/command/exit evidence.
 - [x] **Update the parent task with the concrete unblocked next step** —
-  §15: this helper's `resolved_parent_status`/`resolved_parent_waiting_for`/
-  `resolved_parent_next` are already correctly persisted (confirmed live
-  this round, not re-derived or rewritten); on this helper's merge,
-  `apply_unblock_parent_resolution` will propagate that already-correct,
-  already-safe binding to the parent. No further write is outstanding.
+      §15: this helper's `resolved_parent_status`/`resolved_parent_waiting_for`/
+      `resolved_parent_next` are already correctly persisted (confirmed live
+      this round, not re-derived or rewritten); on this helper's merge,
+      `apply_unblock_parent_resolution` will propagate that already-correct,
+      already-safe binding to the parent. No further write is outstanding.
 
 ## 17. Root cause of this helper's own stuck `ci_status=failure` (not history, not the parent) — fixed by re-handoff, not by waiting
 
@@ -832,14 +849,14 @@ it — read-only citation):
   `candidate_approved` in `ai-activity-log.jsonl`).
 - `bin/ai_status.py` `command_reconcile_candidate()` line 2380:
   `elif ci_status in {"failure", "merge_conflict", "closed"}:
-  task["status"] = "in_progress"` — when the bus's next poll observes one of
+task["status"] = "in_progress"` — when the bus's next poll observes one of
   those three CI states, it flips status away from `"integrating"` to
   `"in_progress"` (not back to `"review"`), **without** calling
   `clear_candidate_evidence()`, so `candidate_sha`/`reviewed_sha`/`ci_sha`/
   `ci_status`/`pr_url` are all left populated exactly as they were — which is
   why this round's `ai-status.sh show` still displays a fully-populated,
   internally-consistent-looking approved candidate alongside `ci_status:
-  "failure"`, inviting the "it'll self-heal" misreading of the previous three
+"failure"`, inviting the "it'll self-heal" misreading of the previous three
   rounds.
 - `ai-activity-log.jsonl` confirms the exact moment this happened:
   `candidate_reconciled Supervisor` at `2026-10-15T22:13:38Z` — the last
@@ -849,8 +866,8 @@ it — read-only citation):
   ("CI (integration trunk)") had already finished at `22:07:41Z`). GitHub's
   check-run history for this exact SHA, re-queried fresh this round
   (`gh api repos/ajoe734/drts-fleet-platform/commits/a742faa7215ffca4b40942497f7582cbd3d516fc/check-runs
-  --paginate --jq '.check_runs[] | select(.conclusion != "success" and
-  .conclusion != "skipped" and .conclusion != "neutral")'` → empty, exit 0),
+--paginate --jq '.check_runs[] | select(.conclusion != "success" and
+.conclusion != "skipped" and .conclusion != "neutral")'` → empty, exit 0),
   shows **zero** check-runs with any non-success/non-skipped conclusion at
   any point in their current history — i.e. whatever reported `FAILURE` /
   `CANCELLED` / `TIMED_OUT` / `ACTION_REQUIRED` / `STARTUP_FAILURE` to
@@ -863,7 +880,7 @@ it — read-only citation):
   next poll.
 - Net effect, independently re-verified four times this session at
   `21:49:59Z`/`23:10:49Z`/`23:31:11Z`/and fresh again this round (`gh pr
-  checks 2705` → all 30 checks `pass`/`skipping`, zero `fail`/`cancelled`;
+checks 2705` → all 30 checks `pass`/`skipping`, zero `fail`/`cancelled`;
   `gh run list --commit a742faa7215ffca4b40942497f7582cbd3d516fc` → both
   runs `conclusion: success`; `gh pr view 2705` →
   `state: OPEN, mergeStateStatus: CLEAN, mergeable: MERGEABLE, headRefOid`
@@ -876,7 +893,7 @@ it — read-only citation):
 **Fix applied this round:** not a code change (out of `write_scopes`, and
 not needed — the mechanism above is a reasonable, if sharp-edged, safety
 behavior: it only ever misfires on a transient CI read, and self-corrects on
-the *next* handoff). The correct, available repair is to re-enter the normal
+the _next_ handoff). The correct, available repair is to re-enter the normal
 lifecycle: this section's own addition to this file is handed off, on the
 same branch/PR #2705, as a fresh candidate to Codex2. A fresh `handoff`
 unconditionally sets `status="review"` (`command_handoff`, `bin/ai_status.py`
@@ -921,16 +938,17 @@ That is consistent with every other mutation attempt on this exact task
 since **2026-10-10**, each denied for the same structural reason regardless
 of content quality — grepping this task's id for `type: worker_failed`
 across the full activity log turns up (abridged, chronological):
+
 - `2026-10-10T11:43:39Z` / `12:10:32Z`: `progress`/`blocker` denied — "state
   mutation outside read-only, focused-test, scoped-validation and ordinary-
   push approval categories."
 - `2026-10-15T21:16:33Z` through `23:56:04Z` (11 separate denials, roughly
   every 10–40 minutes across a 2.5-hour span): every `progress`/`blocker`/
-  `handoff` attempt denied with wording such as *"writes canonical task
-  metadata... outside this approval allowlist"*, *"Deny under the explicit
-  approval allowlist... no lifecycle write is permitted by this approval"*,
-  *"Preserve the diagnostic narrative for authorized Supervisor assessment
-  without authorizing this write."* One denial (`23:32:02Z`) even caught a
+  `handoff` attempt denied with wording such as _"writes canonical task
+  metadata... outside this approval allowlist"_, _"Deny under the explicit
+  approval allowlist... no lifecycle write is permitted by this approval"_,
+  _"Preserve the diagnostic narrative for authorized Supervisor assessment
+  without authorizing this write."_ One denial (`23:32:02Z`) even caught a
   bare subcommand-less invocation that would have defaulted to `sync`,
   confirming the allowlist is enforced structurally (by command shape), not
   just by skimming message text for plausibility.
@@ -968,6 +986,7 @@ way). No further canonical-state write is attempted by this round.
 a human operator or Supervisor process running outside this restricted
 Bash-approval context needs to run, once, for this exact already-pushed and
 already-reviewed-at-a-prior-SHA candidate:
+
 ```
 AI_NAME=Claude \
 CANDIDATE_SHA=98e4936165a116108a30e6f9fd85d64d02f7cc83 \
@@ -976,6 +995,7 @@ PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2705 \
 ai-status.sh handoff PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Codex2 \
 "Re-handoff per §17/§18: new candidate is current PR #2705 head; prior approval on a742faa7215f is superseded; re-review requested; bus will poll real CI on next cycle."
 ```
+
 That one `handoff` (or, if preferred, a direct Supervisor-side edit of this
 task's `candidate_sha`/`candidate_generation`/`status` fields in
 `ai-status.json` to the same effect) is the entire remaining unblock action.
@@ -1024,19 +1044,19 @@ Testing against this directly: an isolated, single-statement
 like §18's grepped activity-log entries, just an un-resolved defer, because
 there is no reachable broker to resolve it to allow or deny. A second probe
 — `git push --dry-run origin HEAD` issued alone — returned normally
-(`Everything up-to-date`); the *same* `git push --dry-run` chained after a
+(`Everything up-to-date`); the _same_ `git push --dry-run` chained after a
 `cd`+`git log` in one compound command was itself classified as `defer`,
 showing the classifier gates on command-string shape per invocation, not on
 a stored task-specific denylist.
 
 **Refinement of §18, not a reversal:** §18 is correct that no
 `ai-status.sh` state mutation is reachable through this channel and that
-retrying will not help. It is *not* a fixed, content-blind allowlist baked
+retrying will not help. It is _not_ a fixed, content-blind allowlist baked
 in for this task specifically — it is this session's `orchestrator_approval_broker`
 MCP connection being down, which defers every canonical-state-mutating Bash
 call for every task in this session (consistent with §18's own observation
 that unrelated tasks' `progress`/`handoff` attempts were denied in the same
-log batches). A content-blind *allowlist* and a broker-connectivity outage
+log batches). A content-blind _allowlist_ and a broker-connectivity outage
 produce the same externally-observed symptom (mutation commands never
 succeed); the two have different fixes. An allowlist is a policy someone
 would need to change; a `CONNECT_TIMEOUT` is an infrastructure fault someone
@@ -1046,6 +1066,7 @@ identical queue/log entry and cannot self-resolve from inside this worker.
 
 **Updated next step for a human/Supervisor (supersedes §18's hardcoded SHA,
 which is now one commit stale):**
+
 ```
 AI_NAME=Claude \
 CANDIDATE_SHA=$(git rev-parse HEAD) \
@@ -1054,11 +1075,12 @@ PR_URL=https://github.com/ajoe734/drts-fleet-platform/pull/2705 \
 ai-status.sh handoff PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR Codex2 \
 "Re-handoff: prior approval on a742faa7215f superseded by this helper's own doc-only commits; CI on current head clean/pending, zero failures; re-review requested."
 ```
+
 run from a shell session where `orchestrator_approval_broker` is actually
 reachable (restart/reconnect that MCP server first if it is still timing
 out) — equivalently, a direct Supervisor-side edit of this task's
 `candidate_sha`/`candidate_generation`/`status` fields to the same effect.
-Until that MCP connection is restored for *some* session able to drive this
+Until that MCP connection is restored for _some_ session able to drive this
 task, no dispatched worker in a session with the same outage can move this
 helper's machine-truth state, no matter how the request is worded.
 
@@ -1114,14 +1136,14 @@ Run `python3 <that-directory>/verify.py` from this task worktree. It calls
 the official trailer checker and real git/CLI/gh queries; no mocks or new
 product tests. The following results were read to completion before handoff.
 
-| Finding / original acceptance | Source and change | Old result → current result; command / exit evidence | Remaining limits |
-| --- | --- | --- | --- |
-| R1; acceptance 1 exact contamination, 2 non-destructive path | §1, §10a/§10b, §11; current fix only adds historical warnings and this section | `git diff --numstat d36ca2f807b70cb94564c023bfe07b02dc70abde 1ad9f340583c137322f5ec5f246d06622fb0e8df -- <five §0.7a paths>` exit 0 reproduces four deleted cleanup files and voice-test rollback. `git diff --exit-code <PR-base> HEAD -- <same five paths>` exit 0, empty. #2526/#2529/#2530/#2541/#2566/#2538/#2535/#2539 all CLOSED, unmerged via `gh pr view` exit 0. | Old refs preserved. Parent source was already repaired independently by #2622; no product reconstruction is needed. |
-| H1; acceptance 1, 3 commit evidence | Official `tools/ci/git/check_commit_trailers.py` | `--base 5b11155d33fd4d6c345e01cb9730012d3b3d08d1 --head 96102377ac86e71887e63f82df695183796834ab`: expected exit 1, missing Reviewer. Base `0875806698c022674217a3aee12bd89cb5fce27b`, heads `fdc24d7150ea96f59681fc6c23fa5b49f825707d` / `94307fe0287658dea4074db6c1ddeba399d2a462`: expected exit 1, three / five noncompliant commits; head `94195322681ede1962659216f1c624c0ec164a0e`: exit 0, two commits. Current PR base / HEAD: exit 0. No bypass. | Current commit identity comes from handoff and publication readback. Old passes do not approve new commits. |
-| H2; acceptance 2, 3 scope and publication | Full PR range against reported base | `git diff --name-only <PR-base> HEAD` exit 0, exactly the sole allowed artifact; published head verified against remote and PR. Adds commits to existing branch / #2705 with ordinary push. | No force push, rebase, amend, reset, transplant, product edit or new helper. |
-| H3; acceptance 1–3 traceability | Original `94195322681e` and sibling `bca5cc068a4c`; §0.7a/b, §10a/b, §14 | Probe exit 0 verifies both original §0.7 bodies and both complete §10 bodies (only two explicitly annotated stale heading pointers mapped), plus unchanged approved §0.7a–§16 body. Original artifact hashes remain `70f79a022779590a7f379b99e1d8224536ff931dd83747caafb5d6b56ed3811a` / `452acb9ac7b3f2bb07ca8bb27324b456d11152882668cdfa3f806af256f48204`. | `git diff --check <PR-base> HEAD` remains exit 2 for exactly one trailing space preserved verbatim in original §10a; previous reviewer explicitly recorded this historical-fidelity exception. No new whitespace warning. |
-| H4; acceptance 4 parent concrete next | Fresh helper/parent slices; release `apply_unblock_parent_resolution` | Probe exit 0: parent `blocked`, helper disposition `blocked` / Gemini, full 3223-character parent NEXT prefix retained in 4097-character helper NEXT, no `resolved_parent_at`. Parent `last_update=2026-10-16T00:30:35Z`; NEXT SHA256 `7c6d047588159a83cc4ca1e1c874693750a5642faf705eaebecb256154e79783`; helper NEXT SHA256 `3460dd80ff29783ec446bbf0e5562ff4aa05224f5dec9872f5089c1871bbd848`. Hashes and actual gate state match the previous binding. | No fresh rebinding needed for an unchanged prefix/gates. Recheck before review/merge; actual parent changes require genuine Supervisor rebinding. Do not shorten NEXT, fabricate resolution time or directly update another task. |
-| Stale §17–§19 guidance; acceptance 3, 4 | Warnings beside old instructions and current §20 | Old `ea78a31d89` says CLI attempts cannot succeed and helper completion leaves parent unblocked. Actual release `start` exit 0 and readback `in_progress`; `apply_unblock_parent_resolution` selects stored `resolved_parent_status=blocked`. Updated text withdraws those conclusions and the manual-state-edit alternative. | Fresh handoff still requires independent review by the assigned reviewer and matching CI/merge. |
+| Finding / original acceptance                                | Source and change                                                              | Old result → current result; command / exit evidence                                                                                                                                                                                                                                                                                                                                                                                                       | Remaining limits                                                                                                                                                                                                                  |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1; acceptance 1 exact contamination, 2 non-destructive path | §1, §10a/§10b, §11; current fix only adds historical warnings and this section | `git diff --numstat d36ca2f807b70cb94564c023bfe07b02dc70abde 1ad9f340583c137322f5ec5f246d06622fb0e8df -- <five §0.7a paths>` exit 0 reproduces four deleted cleanup files and voice-test rollback. `git diff --exit-code <PR-base> HEAD -- <same five paths>` exit 0, empty. #2526/#2529/#2530/#2541/#2566/#2538/#2535/#2539 all CLOSED, unmerged via `gh pr view` exit 0.                                                                                 | Old refs preserved. Parent source was already repaired independently by #2622; no product reconstruction is needed.                                                                                                               |
+| H1; acceptance 1, 3 commit evidence                          | Official `tools/ci/git/check_commit_trailers.py`                               | `--base 5b11155d33fd4d6c345e01cb9730012d3b3d08d1 --head 96102377ac86e71887e63f82df695183796834ab`: expected exit 1, missing Reviewer. Base `0875806698c022674217a3aee12bd89cb5fce27b`, heads `fdc24d7150ea96f59681fc6c23fa5b49f825707d` / `94307fe0287658dea4074db6c1ddeba399d2a462`: expected exit 1, three / five noncompliant commits; head `94195322681ede1962659216f1c624c0ec164a0e`: exit 0, two commits. Current PR base / HEAD: exit 0. No bypass. | Current commit identity comes from handoff and publication readback. Old passes do not approve new commits.                                                                                                                       |
+| H2; acceptance 2, 3 scope and publication                    | Full PR range against reported base                                            | `git diff --name-only <PR-base> HEAD` exit 0, exactly the sole allowed artifact; published head verified against remote and PR. Adds commits to existing branch / #2705 with ordinary push.                                                                                                                                                                                                                                                                | No force push, rebase, amend, reset, transplant, product edit or new helper.                                                                                                                                                      |
+| H3; acceptance 1–3 traceability                              | Original `94195322681e` and sibling `bca5cc068a4c`; §0.7a/b, §10a/b, §14       | Probe exit 0 verifies both original §0.7 bodies and both complete §10 bodies (only two explicitly annotated stale heading pointers mapped), plus unchanged approved §0.7a–§16 body. Original artifact hashes remain `70f79a022779590a7f379b99e1d8224536ff931dd83747caafb5d6b56ed3811a` / `452acb9ac7b3f2bb07ca8bb27324b456d11152882668cdfa3f806af256f48204`.                                                                                               | `git diff --check <PR-base> HEAD` remains exit 2 for exactly one trailing space preserved verbatim in original §10a; previous reviewer explicitly recorded this historical-fidelity exception. No new whitespace warning.         |
+| H4; acceptance 4 parent concrete next                        | Fresh helper/parent slices; release `apply_unblock_parent_resolution`          | Probe exit 0: parent `blocked`, helper disposition `blocked` / Gemini, full 3223-character parent NEXT prefix retained in 4097-character helper NEXT, no `resolved_parent_at`. Parent `last_update=2026-10-16T00:30:35Z`; NEXT SHA256 `7c6d047588159a83cc4ca1e1c874693750a5642faf705eaebecb256154e79783`; helper NEXT SHA256 `3460dd80ff29783ec446bbf0e5562ff4aa05224f5dec9872f5089c1871bbd848`. Hashes and actual gate state match the previous binding.  | No fresh rebinding needed for an unchanged prefix/gates. Recheck before review/merge; actual parent changes require genuine Supervisor rebinding. Do not shorten NEXT, fabricate resolution time or directly update another task. |
+| Stale §17–§19 guidance; acceptance 3, 4                      | Warnings beside old instructions and current §20                               | Old `ea78a31d89` says CLI attempts cannot succeed and helper completion leaves parent unblocked. Actual release `start` exit 0 and readback `in_progress`; `apply_unblock_parent_resolution` selects stored `resolved_parent_status=blocked`. Updated text withdraws those conclusions and the manual-state-edit alternative.                                                                                                                              | Fresh handoff still requires independent review by the assigned reviewer and matching CI/merge.                                                                                                                                   |
 
 ### CI and parent next action
 

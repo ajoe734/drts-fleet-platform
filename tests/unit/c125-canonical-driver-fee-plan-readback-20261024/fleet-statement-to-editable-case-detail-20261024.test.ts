@@ -32,7 +32,11 @@ function createFakeStatementDecisionRepository(
 ) {
   const decisions = new Map<
     string,
-    { status: "confirmed" | "disputed"; note: string; disputeCaseId: string | null }
+    {
+      status: "confirmed" | "disputed";
+      note: string;
+      disputeCaseId: string | null;
+    }
   >();
   const complaintCases: ComplaintCaseRecord[] = [];
   const complaintTimelines: ComplaintTimelineEntry[] = [];

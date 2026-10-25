@@ -293,6 +293,12 @@ export default async function FleetCaseDetailPage({
 
   const isClosed = c.status === "closed";
   const isPlatform = c.responsibility === "platform";
+  const isUnattributed = c.responsibility === "unattributed";
+  // An unattributed case shows its own honest localized label; the existing
+  // platform/fleet/shared values keep their wire code display.
+  const responsibilityLabel = isUnattributed
+    ? t("case.responsibility.unattributed", locale)
+    : c.responsibility;
   const status = isClosed ? "closed" : c.status;
 
   return (
@@ -345,8 +351,11 @@ export default async function FleetCaseDetailPage({
             <CanvasPill theme={theme} tone="danger">
               {c.severity}
             </CanvasPill>
-            <CanvasPill theme={theme} tone={isPlatform ? "neutral" : "danger"}>
-              {"責任歸屬 · "} {c.responsibility}
+            <CanvasPill
+              theme={theme}
+              tone={isPlatform || isUnattributed ? "neutral" : "danger"}
+            >
+              {"責任歸屬 · "} {responsibilityLabel}
             </CanvasPill>
           </span>
         }
@@ -463,10 +472,12 @@ export default async function FleetCaseDetailPage({
                     v: (
                       <CanvasPill
                         theme={theme}
-                        tone={isPlatform ? "neutral" : "danger"}
+                        tone={
+                          isPlatform || isUnattributed ? "neutral" : "danger"
+                        }
                         dot
                       >
-                        {c.responsibility}
+                        {responsibilityLabel}
                       </CanvasPill>
                     ),
                   },

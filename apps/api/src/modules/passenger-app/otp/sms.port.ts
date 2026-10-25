@@ -1,3 +1,21 @@
+export {
+  classifyTwilioError,
+  createSmsPortFromEnv,
+  formatTaiwanOtpBody,
+  isValidTwilioSender,
+  maskTaiwanPhone,
+  parseTwilioDeliveryReport,
+  TwilioSmsAdapter,
+  twilioSmsConfigFromEnv,
+  type SmsDeliveryStatus,
+  type SmsFailureCategory,
+  type SmsSendResult,
+  type TwilioDeliveryReport,
+  type TwilioHttpResponse,
+  type TwilioHttpTransport,
+  type TwilioSmsConfig,
+} from "./twilio-sms.adapter";
+
 export const SMS_PORT = Symbol("PASSENGER_SMS_PORT");
 
 export interface SmsPort {

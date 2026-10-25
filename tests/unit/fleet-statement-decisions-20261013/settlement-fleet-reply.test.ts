@@ -6,12 +6,16 @@ import type {
 } from "@drts/contracts";
 import type { BootstrapRequestIdentity } from "../../../apps/api/src/common/auth/auth.types";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
+import { BillingSettlementService } from "../../../apps/api/src/modules/billing-settlement/billing-settlement.service";
 import { ComplaintController } from "../../../apps/api/src/modules/complaint/complaint.controller";
 import { ComplaintRepository } from "../../../apps/api/src/modules/complaint/complaint.repository";
 import { ComplaintService } from "../../../apps/api/src/modules/complaint/complaint.service";
 import { buildSettlementDisputeCase } from "../../../apps/api/src/modules/complaint/settlement-dispute";
 import { FleetPartnerCaseService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner-case.service";
 import { FleetPartnerController } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.controller";
+import { FleetPartnerService } from "../../../apps/api/src/modules/fleet-partner/fleet-partner.service";
+import type { OwnedMobilityService } from "../../../apps/api/src/modules/owned-mobility/owned-mobility.service";
+import type { RegulatoryRegistryService } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 
 type ComplaintState = {
   complaintCases: ComplaintCaseRecord[];
@@ -95,12 +99,62 @@ function repositoryFixture(initial: ComplaintState) {
   };
 }
 
-function services(repository?: ComplaintRepository) {
+/** A legitimate order -> driver -> driver-fleet affiliation chain for a
+ * real (non-settlement) Fleet reply regression, standing in for the
+ * canonical order/driver-task and driver-fleet-affiliation seams. */
+async function buildOrdinaryFleetPartnerService(opts: {
+  orderId: string;
+  driverId: string;
+  driverName: string;
+}) {
+  const mobility = {
+    getDriverTasksForOrder: (orderId: string) =>
+      orderId === opts.orderId
+        ? [
+            {
+              orderId,
+              driverId: opts.driverId,
+              status: "completed",
+              completedAt: "2026-01-02T00:00:00.000Z",
+            },
+          ]
+        : [],
+    getActiveDispatchAssignmentForOrder: () => null,
+    getDispatchAssignmentsForOrder: () => [],
+  } as unknown as OwnedMobilityService;
+  const registry = {
+    listDrivers: () => [{ driverId: opts.driverId, name: opts.driverName }],
+  } as unknown as RegulatoryRegistryService;
+  const fleetPartnerService = new FleetPartnerService(
+    new BillingSettlementService(new AuditNotificationService()),
+    mobility,
+    registry,
+  );
+  const partner = await fleetPartnerService.createFleetPartner({
+    legalName: "Ordinary Fleet Reply Co., Ltd.",
+    displayName: "Ordinary Fleet Reply",
+    businessRegistrationNo: "REG-ordinary-fleet-reply",
+    contactName: "Fleet Ops Lead",
+    contactPhone: "+886-2-5550-0004",
+    partnershipType: "fleet_management",
+  });
+  await fleetPartnerService.createDriverFleetAffiliation(opts.driverId, {
+    fleetPartnerId: partner.fleetPartnerId,
+    affiliationType: "managed_by",
+    effectiveFrom: "2026-01-01T00:00:00.000Z",
+  });
+  return { fleetPartnerService, fleetPartnerId: partner.fleetPartnerId };
+}
+
+function services(
+  repository?: ComplaintRepository,
+  fleetPartnerService?: FleetPartnerService,
+) {
   const complaints = new ComplaintService(
     new AuditNotificationService(),
     repository,
   );
-  const cases = new FleetPartnerCaseService(complaints);
+  const cases = new FleetPartnerCaseService(complaints, fleetPartnerService);
   const fleet = new FleetPartnerController(
     {} as never,
     {} as never,
@@ -398,15 +452,31 @@ describe("settlement Fleet replies commit before success", () => {
   });
 
   it("retains ordinary in-memory Fleet reply and idempotency behavior without a database", async () => {
-    const first = services();
+    // Old defect this guards against: FleetPartnerCaseService let ANY
+    // fleetPartnerId reply to an ordinary complaint that had no source
+    // order and no FleetPartnerService at all -- i.e. it accepted a
+    // guessed/arbitrary fleet attribution. The fix requires a real,
+    // resolvable order -> driver -> driver-fleet affiliation chain before a
+    // reply succeeds; this fixture provides exactly that (not a fixed
+    // "METRO_FLEET" fallback), and the positive/idempotency assertions
+    // below are otherwise unchanged.
+    const orderId = "ord-ordinary-fleet-reply-001";
+    const { fleetPartnerService, fleetPartnerId } =
+      await buildOrdinaryFleetPartnerService({
+        orderId,
+        driverId: "drv-ordinary-fleet-reply",
+        driverName: "司機壬",
+      });
+    const first = services(undefined, fleetPartnerService);
     const ordinary = first.complaints.createComplaintCase({
       caseSource: "web",
+      relatedOrderId: orderId,
       category: "driver_service",
       severity: "normal",
       description: "Ordinary Fleet complaint",
     });
     const receipt = await first.cases.submitReply(
-      "METRO_FLEET",
+      fleetPartnerId,
       ordinary.caseNo,
       "fleet-manager",
       { content: "Driver follow-up completed", idempotencyKey: "ordinary-key" },
@@ -418,12 +488,12 @@ describe("settlement Fleet replies commit before success", () => {
     expect(first.complaints.getComplaintTimeline(ordinary.caseNo)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          note: "[車行回覆 · METRO_FLEET] Driver follow-up completed",
+          note: `[車行回覆 · ${fleetPartnerId}] Driver follow-up completed`,
         }),
       ]),
     );
     const repeated = await first.cases.submitReply(
-      "METRO_FLEET",
+      fleetPartnerId,
       ordinary.caseNo,
       "fleet-manager",
       { content: "Driver follow-up completed", idempotencyKey: "ordinary-key" },
@@ -434,5 +504,31 @@ describe("settlement Fleet replies commit before success", () => {
         .getComplaintTimeline(ordinary.caseNo)
         .filter((entry) => entry.action === "case_note_added"),
     ).toHaveLength(1);
+  });
+
+  it("rejects a reply from a fleet that is not the complaint's actually attributed fleet, instead of accepting an arbitrary fleetId", async () => {
+    const orderId = "ord-ordinary-fleet-reply-002";
+    const { fleetPartnerService } = await buildOrdinaryFleetPartnerService({
+      orderId,
+      driverId: "drv-ordinary-fleet-reply-2",
+      driverName: "司機癸",
+    });
+    const first = services(undefined, fleetPartnerService);
+    const ordinary = first.complaints.createComplaintCase({
+      caseSource: "web",
+      relatedOrderId: orderId,
+      category: "driver_service",
+      severity: "normal",
+      description:
+        "Ordinary Fleet complaint with no attribution for this requester",
+    });
+    await expect(
+      first.cases.submitReply(
+        "some-unrelated-fleet-id",
+        ordinary.caseNo,
+        "intruder",
+        { content: "不應通過" },
+      ),
+    ).rejects.toMatchObject({ code: "CASE_NOT_FLEET_SCOPED" });
   });
 });

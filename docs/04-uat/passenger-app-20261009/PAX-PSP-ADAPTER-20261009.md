@@ -4,7 +4,7 @@
 - **Owner**: `Gemini2`
 - **Reviewer**: `Claude`
 - **Branch / PR**: `gemini2/pax-psp-adapter-20261009` / PR `#2971`
-- **Candidate SHA History**: `6991d45ebc9ca996574b31026be6c47e0e131a92` → `3993591177d66b609fc37e400b7683e366bf937a` → `048b65ef492623a6f3339f2dd0c1ccdb59ff22c0` → `9d8c8514ce9ca846d3d73e9a3d5a515c3688cfca` → `287cd9e7563af59127d65eca192b3dab56388eaa`（本輪修正 `F1`–`F4`）
+- **Candidate SHA History**: `6991d45ebc9ca996574b31026be6c47e0e131a92` → `3993591177d66b609fc37e400b7683e366bf937a` → `048b65ef492623a6f3339f2dd0c1ccdb59ff22c0` → `9d8c8514ce9ca846d3d73e9a3d5a515c3688cfca` → `287cd9e7563af59127d65eca192b3dab56388eaa` → `a6aeb67002bc4b610d6859097a872f2f071816a8`（修正 `F1`–`F4` 並合併 `origin/dev` `51b2a05efc76` 解決 `.github/workflows/deploy-dev.yml` 鄰行衝突）
 - **User Decision (2026-10-24)**: 採用 **綠界 ECPay 站內付 2.0 信用卡綁定**（綁定特店會員模式；不走平台商 `PlatformID` 模式）。
 - **Task Spec Ref**: `/home/lupin/workspace/drts-fleet-platform/.local/passenger-bureau-gap-correction-20261018/Root-native-actual3c78-publish-and-live-dev-deploy-20261024T0800/PAX-PSP-ADAPTER-20261009.v4-real-callback-and-actual-CI-baseline-compatibility.task-spec.json`
 

@@ -43,7 +43,9 @@ function complaintFailure(
       : { key: fallbackKey };
 }
 /** Taipei-local stamp for a missing/invalid timestamp; never shows raw ISO or "Invalid Date". Caller applies the localized "Taipei time" wording via translations.ts. */
-function formatTaipeiTimestamp(value: string | null | undefined): string | null {
+function formatTaipeiTimestamp(
+  value: string | null | undefined,
+): string | null {
   if (!value) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;

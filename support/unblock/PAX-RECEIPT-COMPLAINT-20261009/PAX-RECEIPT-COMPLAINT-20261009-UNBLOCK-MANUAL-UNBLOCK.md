@@ -328,15 +328,15 @@ ancestor of `dev`). Despite that, in the active release
 
 - the GitHub-bus candidate-sync path has an explicit branch
   `elif task.get("status") == "blocked": # CI/merge observations cannot
-  resume an explicitly blocked task` (~line 2487) — CI/merge events for this
+resume an explicitly blocked task` (~line 2487) — CI/merge events for this
   exact SHA will never auto-advance the task while it stays `blocked`;
 - `command_record_acceptance` hard-requires `task.get("status") ==
-  "acceptance"` (~line 2562) — nobody, in any role, can record the missing
+"acceptance"` (~line 2562) — nobody, in any role, can record the missing
   evidence key while the task sits in `blocked`;
 - `command_resume_blocked` requires `actor == "Supervisor"` (~line 1984) and
   is **not** in `_guard_worker_command`'s dispatched-worker allowlist
   (`start/progress/note/handoff/approve/reopen/blocker/system-block/
-  record-acceptance/request-acceptance-review/decline-acceptance-review`), so
+record-acceptance/request-acceptance-review/decline-acceptance-review`), so
   no dispatched owner/reviewer session — including this one — can call it,
   on the parent or on itself.
 

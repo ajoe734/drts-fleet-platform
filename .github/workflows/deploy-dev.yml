@@ -997,7 +997,7 @@ jobs:
           optional_group line LINE_CHANNEL_ID LINE_CHANNEL_SECRET
           optional_group facebook FACEBOOK_APP_ID FACEBOOK_APP_SECRET
           optional_group otp PASSENGER_OTP_PEPPER
-          optional_group sms SMS_PROVIDER_API_KEY SMS_PROVIDER_SENDER_ID PASSENGER_OTP_PEPPER
+          optional_group sms TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET TWILIO_FROM_NUMBER PASSENGER_OTP_PEPPER
           if gcloud secrets describe "${SECRET_PREFIX}-psp-hash-key" --project "$PROJECT_ID" >/dev/null 2>&1 \
             || gcloud secrets describe "${SECRET_PREFIX}-psp-hash-iv" --project "$PROJECT_ID" >/dev/null 2>&1 \
             || ! gcloud secrets describe "${SECRET_PREFIX}-psp-api-key" --project "$PROJECT_ID" >/dev/null 2>&1; then
