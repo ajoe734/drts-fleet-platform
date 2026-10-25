@@ -168,6 +168,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
           error,
           "upsert dispatch daily records",
         );
+        throw new ApiRequestError(
+          503,
+          "REPORT_REBUILD_FAILED",
+          "Daily dispatch records could not be rebuilt.",
+        );
       }
     } else {
       this.dailyDispatchRecords = this.mergeRecords(
@@ -187,18 +192,27 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     query: DailyDispatchRecordQuery = {},
   ): Promise<DispatchDailyRecord[]> {
     if (this.reportingRepository?.isEnabled()) {
+      let records: DispatchDailyRecord[];
       try {
-        const records =
+        records =
           await this.reportingRepository.listDailyDispatchRecords(query);
-        if (records.length > 0) {
-          return records;
-        }
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
           "list dispatch daily records",
         );
+        throw new ApiRequestError(
+          503,
+          "REPORT_READ_FAILED",
+          "Daily dispatch records could not be loaded.",
+        );
       }
+      if (records.length > 0) {
+        return records;
+      }
+      return (await this.rebuildDailyDispatchRecords(query)).records.map(
+        (record) => ({ ...record }),
+      );
     }
 
     let rebuiltRecords: DispatchDailyRecord[] | null = null;
@@ -367,18 +381,36 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     query: MonthlyOperationsSummaryQuery = {},
   ): Promise<MonthlyOperationsSummaryRecord[]> {
     if (this.reportingRepository?.isEnabled()) {
+      let records: MonthlyOperationsSummaryRecord[];
       try {
-        const records =
+        records =
           await this.reportingRepository.listMonthlyOperationsSummaries(query);
-        if (records.length > 0) {
-          return records;
-        }
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
           "list monthly operations summaries",
         );
+        throw new ApiRequestError(
+          503,
+          "REPORT_READ_FAILED",
+          "Monthly operations summaries could not be loaded.",
+        );
       }
+      if (records.length > 0) {
+        return records;
+      }
+      return (await this.rebuildMonthlyOperationsSummaries(query)).records
+        .filter((record) => this.matchesMonthlySummaryQuery(record, query))
+        .map((record) => ({
+          ...record,
+          complaintsByCategory: { ...record.complaintsByCategory },
+        }))
+        .sort(
+          (left, right) =>
+            right.periodMonth.localeCompare(left.periodMonth) ||
+            left.businessArea.localeCompare(right.businessArea) ||
+            left.serviceProductCode.localeCompare(right.serviceProductCode),
+        );
     }
 
     if (this.monthlyOperationsSummaries.length === 0) {
@@ -440,7 +472,10 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       );
     const grouped = new Map<string, SixMonthOperationsSummary>();
     const weightedVehicleSumByKey = new Map<string, number>();
-    const monthlyRecordByKey = new Map<string, MonthlyOperationsSummaryRecord>();
+    const monthlyRecordByKey = new Map<
+      string,
+      MonthlyOperationsSummaryRecord
+    >();
     const complaintStatisticsAsOf = new Date().toISOString();
     const canonicalFrom = `${periodMonthFrom}-01`;
     const canonicalTo = this.endOfMonthIso(
@@ -1024,6 +1059,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         this.reportingRepository.reportPersistenceFailure(
           error,
           "load dispatch daily record source",
+        );
+        throw new ApiRequestError(
+          503,
+          "REPORT_SOURCE_UNAVAILABLE",
+          "Canonical reporting source could not be loaded.",
         );
       }
     }

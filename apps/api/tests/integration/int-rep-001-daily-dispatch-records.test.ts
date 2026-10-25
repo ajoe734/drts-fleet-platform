@@ -1,20 +1,26 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EventEmitter2 } from "@nestjs/event-emitter";
 import type { DriverRegistryRecord } from "@drts/contracts";
 
+import { DatabaseService } from "../../src/common/db";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { CallcenterService } from "../../src/modules/callcenter/callcenter.service";
+import { ComplaintRepository } from "../../src/modules/complaint/complaint.repository";
 import { ComplaintService } from "../../src/modules/complaint/complaint.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
+import { OwnedMobilityRepository } from "../../src/modules/owned-mobility/owned-mobility.repository";
 import { OwnedMobilityService } from "../../src/modules/owned-mobility/owned-mobility.service";
 import { OwnedMobilityTaskEventsService } from "../../src/modules/owned-mobility/owned-mobility-task-events.service";
 import { RegulatoryRegistryService } from "../../src/modules/regulatory-registry/regulatory-registry.service";
 import type { PersistRegulatoryRegistryChanges } from "../../src/modules/regulatory-registry/regulatory-registry.repository";
+import { ReportingRepository } from "../../src/modules/reporting/reporting.repository";
 import { ReportingService } from "../../src/modules/reporting/reporting.service";
 import { ReportingFilingService } from "../../src/modules/reporting-filing/reporting-filing.service";
 import { VehicleEligibilityService } from "../../src/modules/vehicle-eligibility/vehicle-eligibility.service";
+import { MultiTaxiRepository } from "../../src/modules/multi-taxi/multi-taxi.repository";
 
 function flushBackgroundWork() {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -362,4 +368,207 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       ]),
     );
   });
+
+  // Official migrated PostgreSQL schema persistence and readback check.
+  // Runs in authorized CI (product_api_unit after pnpm db:migrate) and skips on
+  // the local VM where starting PostgreSQL/Docker is prohibited.
+  it.skipIf(!process.env.DATABASE_URL)(
+    "persists canonical daily dispatch records to reporting.dispatch_daily_records and reads back idempotently on the official PostgreSQL schema",
+    async () => {
+      const {
+        ownedMobilityService,
+        complaintService,
+        regulatoryRegistryService,
+        cleanup,
+      } = createHarness();
+      cleanups.push(cleanup);
+
+      const database = new DatabaseService();
+      cleanups.push(async () => {
+        await database.onModuleDestroy();
+      });
+      const multiTaxiRepository = new MultiTaxiRepository(database);
+      const ownedMobilityRepository = new OwnedMobilityRepository(
+        database,
+        multiTaxiRepository,
+      );
+      const complaintRepository = new ComplaintRepository(database);
+      const reportingRepository = new ReportingRepository(database);
+
+      const runId = randomUUID().slice(0, 8);
+      const serviceDate = "2026-08-19";
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(`${serviceDate}T02:00:00.000Z`));
+
+      const completedOrder = ownedMobilityService.createCallCenterOrder({
+        callId: `call-int-rep-pg-001-${runId}`,
+        agentId: "ops-agent-001",
+        recordingId: `rec-int-rep-pg-001-${runId}`,
+        pickup: { address: "Taipei Main Station" },
+        dropoff: { address: "Songshan Airport" },
+        passenger: { name: "PG Rider One", phone: "0911888001" },
+        notes: "pg daily persistence happy path",
+      });
+      const firstDispatch = ownedMobilityService.dispatchOrder(
+        completedOrder.orderId,
+        { mode: "auto" },
+        `req-int-rep-pg-dispatch-${runId}`,
+      );
+      await ownedMobilityService.assignDispatch(
+        {
+          dispatchJobId: firstDispatch.dispatchJobId,
+          vehicleId: "veh-demo-001",
+          driverId: "drv-demo-001",
+        },
+        `req-int-rep-pg-assign-${runId}`,
+      );
+      const completedTask = ownedMobilityService
+        .getReportingSnapshot()
+        .driverTasks.find((task) => task.orderId === completedOrder.orderId)!;
+      ownedMobilityService.acceptDriverTask(
+        completedTask.taskId,
+        { acceptedAt: `${serviceDate}T02:03:00.000Z` },
+        `req-int-rep-pg-accept-${runId}`,
+      );
+      ownedMobilityService.departDriverTask(
+        completedTask.taskId,
+        { departedAt: `${serviceDate}T02:05:00.000Z` },
+        `req-int-rep-pg-depart-${runId}`,
+      );
+      ownedMobilityService.arrivedPickup(
+        completedTask.taskId,
+        { arrivedAt: `${serviceDate}T02:12:00.000Z` },
+        `req-int-rep-pg-arrive-${runId}`,
+      );
+      ownedMobilityService.startDriverTask(
+        completedTask.taskId,
+        { startedAt: `${serviceDate}T02:15:00.000Z` },
+        `req-int-rep-pg-start-${runId}`,
+      );
+      ownedMobilityService.completeDriverTask(
+        completedTask.taskId,
+        {
+          completedAt: `${serviceDate}T02:40:00.000Z`,
+          actualDistanceKm: 12.4,
+          actualDurationSec: 1500,
+        },
+        `req-int-rep-pg-complete-${runId}`,
+      );
+      const complaintCase = complaintService.createComplaintCase({
+        caseSource: "ops_console",
+        relatedOrderId: completedOrder.orderId,
+        category: "late_arrival",
+        severity: "normal",
+        description: "PG late pickup follow-up",
+      });
+      vi.useRealTimers();
+
+      const snapshot = ownedMobilityService.getReportingSnapshot();
+      const orderFilter = (item: { orderId: string }) =>
+        item.orderId === completedOrder.orderId;
+
+      try {
+        await ownedMobilityRepository.persistChanges({
+          orders: snapshot.orders.filter(orderFilter),
+          dispatchJobs: snapshot.dispatchJobs.filter(orderFilter),
+          dispatchAssignments: snapshot.dispatchAssignments.filter(orderFilter),
+          driverTasks: snapshot.driverTasks.filter(orderFilter),
+          dispatchTraceLogs: snapshot.dispatchTraceLogs.filter(orderFilter),
+        });
+        await complaintRepository.persistChanges({
+          complaintCases: [complaintCase],
+        });
+
+        // Fresh writer ReportingService bound to PostgreSQL; memory fallback is forbidden.
+        const memoryFallbackSpy = vi.fn(() => {
+          throw new Error("unexpected fallback to in-memory snapshot");
+        });
+        const writerService = new ReportingService(
+          { getReportingSnapshot: memoryFallbackSpy } as never,
+          { listComplaintCases: memoryFallbackSpy } as never,
+          regulatoryRegistryService,
+          undefined,
+          reportingRepository,
+        );
+
+        const firstRebuild = await writerService.rebuildDailyDispatchRecords({
+          serviceDate,
+          orderId: completedOrder.orderId,
+        });
+        expect(firstRebuild.rebuiltCount).toBe(1);
+        expect(memoryFallbackSpy).not.toHaveBeenCalled();
+
+        // Separate reader ReportingService instance reads back from reporting.dispatch_daily_records
+        const readerService = new ReportingService(
+          { getReportingSnapshot: memoryFallbackSpy } as never,
+          { listComplaintCases: memoryFallbackSpy } as never,
+          regulatoryRegistryService,
+          undefined,
+          reportingRepository,
+        );
+        const readback = await readerService.listDailyDispatchRecords({
+          serviceDate,
+          orderId: completedOrder.orderId,
+        });
+        expect(readback).toHaveLength(1);
+        expect(readback[0]).toMatchObject({
+          serviceDate,
+          orderId: completedOrder.orderId,
+          orderNo: completedOrder.orderNo,
+          orderSource: "phone",
+          finalDriverId: "drv-demo-001",
+          finalVehicleId: "veh-demo-001",
+          finalPlateNo: "ABC-1001",
+          arrivedPickupAt: `${serviceDate}T02:12:00.000Z`,
+          tripStartedAt: `${serviceDate}T02:15:00.000Z`,
+          tripCompletedAt: `${serviceDate}T02:40:00.000Z`,
+          finalStatus: "completed",
+          redispatchCount: 0,
+          complaintCount: 1,
+        });
+
+        // Idempotent rerun on the same (service_date, order_id) updates in place without duplicating
+        const secondRebuild = await writerService.rebuildDailyDispatchRecords({
+          serviceDate,
+          orderId: completedOrder.orderId,
+        });
+        expect(secondRebuild.rebuiltCount).toBe(1);
+        const afterRerun = await readerService.listDailyDispatchRecords({
+          serviceDate,
+          orderId: completedOrder.orderId,
+        });
+        expect(afterRerun).toHaveLength(1);
+        expect(afterRerun[0]?.orderId).toBe(completedOrder.orderId);
+      } finally {
+        await database.query(
+          "DELETE FROM reporting.dispatch_daily_records WHERE order_id = $1",
+          [completedOrder.orderId],
+        );
+        await database.query(
+          "DELETE FROM crm.phase1_complaint_cases WHERE case_no = $1",
+          [complaintCase.caseNo],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_dispatch_trace_logs WHERE order_id = $1",
+          [completedOrder.orderId],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_driver_tasks WHERE order_id = $1",
+          [completedOrder.orderId],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_dispatch_assignments WHERE order_id = $1",
+          [completedOrder.orderId],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_dispatch_jobs WHERE order_id = $1",
+          [completedOrder.orderId],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_owned_orders WHERE order_id = $1",
+          [completedOrder.orderId],
+        );
+      }
+    },
+  );
 });
