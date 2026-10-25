@@ -149,167 +149,269 @@ function makeIdentity(
 
 function createHarness(source: ReturnType<typeof mergeSources>) {
   vi.stubEnv("DATABASE_URL", "");
-  const database = new DatabaseService();
-  vi.spyOn(database, "isEnabled").mockReturnValue(true);
 
   const persistedGovernanceRows = new Map<string, Record<string, unknown>>();
+  const txSnapshots: Map<string, Record<string, unknown>>[] = [];
+  const savepointSnapshots = new Map<
+    string,
+    Map<string, Record<string, unknown>>
+  >();
   const sqlCalls: { sql: string; values: readonly unknown[] }[] = [];
 
-  const querySpy = vi
-    .spyOn(database, "query")
-    .mockImplementation(async (sql: string, values?: readonly unknown[]) => {
-      sqlCalls.push({ sql, values: values ?? [] });
+  const cloneRows = (src: Map<string, Record<string, unknown>>) =>
+    new Map([...src.entries()].map(([k, v]) => [k, structuredClone(v)]));
+  const restoreRows = (snapshot: Map<string, Record<string, unknown>>) => {
+    persistedGovernanceRows.clear();
+    for (const [k, v] of snapshot.entries()) {
+      persistedGovernanceRows.set(k, structuredClone(v));
+    }
+  };
 
-      if (sql.includes("WITH selected_orders AS")) {
-        return {
-          rows: [{ record: structuredClone(source) }],
-          rowCount: 1,
-          command: "SELECT",
-          oid: 0,
-          fields: [],
-        } as never;
+  const executeSql = async (sql: string, values?: readonly unknown[]) => {
+    sqlCalls.push({ sql, values: values ?? [] });
+    const normalized = sql.trim();
+
+    if (/^BEGIN\b/i.test(normalized)) {
+      txSnapshots.push(cloneRows(persistedGovernanceRows));
+      return {
+        rows: [],
+        rowCount: 0,
+        command: "BEGIN",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
+
+    if (/^COMMIT\b/i.test(normalized)) {
+      txSnapshots.pop();
+      return {
+        rows: [],
+        rowCount: 0,
+        command: "COMMIT",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
+
+    if (/^ROLLBACK TO SAVEPOINT\s+(\S+)/i.test(normalized)) {
+      const sp = /^ROLLBACK TO SAVEPOINT\s+(\S+)/i.exec(normalized)![1]!;
+      const snap = savepointSnapshots.get(sp);
+      if (snap) {
+        restoreRows(snap);
       }
+      return {
+        rows: [],
+        rowCount: 0,
+        command: "ROLLBACK",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
 
-      if (
-        sql.includes(
-          "INSERT INTO reporting.referral_monthly_rating_governance_records",
-        )
-      ) {
-        const [
-          recordId,
-          driverId,
-          periodMonth,
-          ruleType,
-          threshold,
-          averageRating,
-          ratingCount,
-          consecutiveLowMonths,
-          triggeredMonthsJson,
-          monthlyBreakdownJson,
-          nowIso,
-        ] = values ?? [];
-        const uniqueKey = `${driverId}::${periodMonth}::${ruleType}`;
-        const existing = persistedGovernanceRows.get(uniqueKey);
-        const unchanged =
-          existing &&
-          Number(existing.average_rating) === Number(averageRating) &&
-          Number(existing.rating_count) === Number(ratingCount) &&
-          Number(existing.consecutive_low_months) ===
-            Number(consecutiveLowMonths) &&
-          existing.triggered_months === triggeredMonthsJson &&
-          existing.monthly_breakdown === monthlyBreakdownJson;
+    if (/^SAVEPOINT\s+(\S+)/i.test(normalized)) {
+      const sp = /^SAVEPOINT\s+(\S+)/i.exec(normalized)![1]!;
+      savepointSnapshots.set(sp, cloneRows(persistedGovernanceRows));
+      return {
+        rows: [],
+        rowCount: 0,
+        command: "SAVEPOINT",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
 
-        const row = existing
-          ? {
-              ...existing,
-              threshold: Number(threshold).toFixed(2),
-              average_rating: Number(averageRating).toFixed(2),
-              rating_count: Number(ratingCount),
-              consecutive_low_months: Number(consecutiveLowMonths),
-              triggered_months: String(triggeredMonthsJson),
-              monthly_breakdown: String(monthlyBreakdownJson),
-              updated_at: unchanged ? existing.updated_at : String(nowIso),
-            }
-          : {
-              record_id: String(recordId),
-              driver_id: String(driverId),
-              period_month: String(periodMonth),
-              rule_type: String(ruleType),
-              threshold: Number(threshold).toFixed(2),
-              average_rating: Number(averageRating).toFixed(2),
-              rating_count: Number(ratingCount),
-              consecutive_low_months: Number(consecutiveLowMonths),
-              triggered_months: String(triggeredMonthsJson),
-              monthly_breakdown: String(monthlyBreakdownJson),
-              status: "pending",
-              outcome: null,
-              outcome_reason: null,
-              handled_by_actor_id: null,
-              handled_at: null,
-              audit_id: null,
-              created_at: String(nowIso),
-              updated_at: String(nowIso),
-            };
-        persistedGovernanceRows.set(uniqueKey, row);
-        return {
-          rows: [structuredClone(row)],
-          rowCount: 1,
-          command: "INSERT",
-          oid: 0,
-          fields: [],
-        } as never;
+    if (/^RELEASE SAVEPOINT\s+(\S+)/i.test(normalized)) {
+      const sp = /^RELEASE SAVEPOINT\s+(\S+)/i.exec(normalized)![1]!;
+      savepointSnapshots.delete(sp);
+      return {
+        rows: [],
+        rowCount: 0,
+        command: "RELEASE",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
+
+    if (/^ROLLBACK\b/i.test(normalized)) {
+      const snap = txSnapshots.pop();
+      if (snap) {
+        restoreRows(snap);
       }
+      savepointSnapshots.clear();
+      return {
+        rows: [],
+        rowCount: 0,
+        command: "ROLLBACK",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
 
-      if (
-        sql.includes(
-          "SELECT\n              record_id,\n              driver_id",
-        ) &&
-        sql.includes(
-          "FROM reporting.referral_monthly_rating_governance_records",
-        )
-      ) {
-        let rows = [...persistedGovernanceRows.values()];
-        if (sql.includes("WHERE record_id = $1")) {
-          rows = rows.filter((r) => r.record_id === values?.[0]);
-        } else if (sql.includes("WHERE driver_id = $1 AND period_month = $2")) {
-          rows = rows.filter(
-            (r) =>
-              r.driver_id === values?.[0] &&
-              r.period_month === values?.[1] &&
-              (!values?.[2] || r.rule_type === values[2]),
-          );
-        }
-        return {
-          rows: structuredClone(rows),
-          rowCount: rows.length,
-          command: "SELECT",
-          oid: 0,
-          fields: [],
-        } as never;
-      }
+    if (sql.includes("WITH selected_orders AS")) {
+      return {
+        rows: [{ record: structuredClone(source) }],
+        rowCount: 1,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
 
-      if (
-        sql.includes(
-          "UPDATE reporting.referral_monthly_rating_governance_records",
-        )
-      ) {
-        const [recordId, outcome, reason, actorId, handledAt, auditId] =
-          values ?? [];
-        const entry = [...persistedGovernanceRows.entries()].find(
-          ([, row]) => row.record_id === recordId,
+    if (
+      sql.includes(
+        "INSERT INTO reporting.referral_monthly_rating_governance_records",
+      )
+    ) {
+      const [
+        recordId,
+        driverId,
+        periodMonth,
+        ruleType,
+        threshold,
+        averageRating,
+        ratingCount,
+        consecutiveLowMonths,
+        triggeredMonthsJson,
+        monthlyBreakdownJson,
+        nowIso,
+      ] = values ?? [];
+      const uniqueKey = `${driverId}::${periodMonth}::${ruleType}`;
+      const existing = persistedGovernanceRows.get(uniqueKey);
+      const unchanged =
+        existing &&
+        Number(existing.average_rating) === Number(averageRating) &&
+        Number(existing.rating_count) === Number(ratingCount) &&
+        Number(existing.consecutive_low_months) ===
+          Number(consecutiveLowMonths) &&
+        existing.triggered_months === triggeredMonthsJson &&
+        existing.monthly_breakdown === monthlyBreakdownJson;
+
+      const row = existing
+        ? {
+            ...existing,
+            threshold: Number(threshold).toFixed(2),
+            average_rating: Number(averageRating).toFixed(2),
+            rating_count: Number(ratingCount),
+            consecutive_low_months: Number(consecutiveLowMonths),
+            triggered_months: String(triggeredMonthsJson),
+            monthly_breakdown: String(monthlyBreakdownJson),
+            updated_at: unchanged ? existing.updated_at : String(nowIso),
+          }
+        : {
+            record_id: String(recordId),
+            driver_id: String(driverId),
+            period_month: String(periodMonth),
+            rule_type: String(ruleType),
+            threshold: Number(threshold).toFixed(2),
+            average_rating: Number(averageRating).toFixed(2),
+            rating_count: Number(ratingCount),
+            consecutive_low_months: Number(consecutiveLowMonths),
+            triggered_months: String(triggeredMonthsJson),
+            monthly_breakdown: String(monthlyBreakdownJson),
+            status: "pending",
+            outcome: null,
+            outcome_reason: null,
+            handled_by_actor_id: null,
+            handled_at: null,
+            audit_id: null,
+            created_at: String(nowIso),
+            updated_at: String(nowIso),
+          };
+      persistedGovernanceRows.set(uniqueKey, row);
+      return {
+        rows: [structuredClone(row)],
+        rowCount: 1,
+        command: "INSERT",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
+
+    if (
+      sql.includes(
+        "SELECT\n              record_id,\n              driver_id",
+      ) &&
+      sql.includes(
+        "FROM reporting.referral_monthly_rating_governance_records",
+      )
+    ) {
+      let rows = [...persistedGovernanceRows.values()];
+      if (sql.includes("WHERE record_id = $1")) {
+        rows = rows.filter((r) => r.record_id === values?.[0]);
+      } else if (sql.includes("WHERE driver_id = $1 AND period_month = $2")) {
+        rows = rows.filter(
+          (r) =>
+            r.driver_id === values?.[0] &&
+            r.period_month === values?.[1] &&
+            (!values?.[2] || r.rule_type === values[2]),
         );
-        if (!entry) {
-          return {
-            rows: [],
-            rowCount: 0,
-            command: "UPDATE",
-            oid: 0,
-            fields: [],
-          } as never;
-        }
-        const [key, existing] = entry;
-        const updated = {
-          ...existing,
-          status: String(outcome),
-          outcome: String(outcome),
-          outcome_reason: String(reason),
-          handled_by_actor_id: String(actorId),
-          handled_at: String(handledAt),
-          audit_id: String(auditId),
-          updated_at: String(handledAt),
-        };
-        persistedGovernanceRows.set(key, updated);
+      }
+      return {
+        rows: structuredClone(rows),
+        rowCount: rows.length,
+        command: "SELECT",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
+
+    if (
+      sql.includes(
+        "UPDATE reporting.referral_monthly_rating_governance_records",
+      )
+    ) {
+      const [recordId, outcome, reason, actorId, handledAt, auditId] =
+        values ?? [];
+      const entry = [...persistedGovernanceRows.entries()].find(
+        ([, row]) => row.record_id === recordId,
+      );
+      if (!entry) {
         return {
-          rows: [structuredClone(updated)],
-          rowCount: 1,
+          rows: [],
+          rowCount: 0,
           command: "UPDATE",
           oid: 0,
           fields: [],
         } as never;
       }
+      const [key, existing] = entry;
+      const updated = {
+        ...existing,
+        status: String(outcome),
+        outcome: String(outcome),
+        outcome_reason: String(reason),
+        handled_by_actor_id: String(actorId),
+        handled_at: String(handledAt),
+        audit_id: String(auditId),
+        updated_at: String(handledAt),
+      };
+      persistedGovernanceRows.set(key, updated);
+      return {
+        rows: [structuredClone(updated)],
+        rowCount: 1,
+        command: "UPDATE",
+        oid: 0,
+        fields: [],
+      } as never;
+    }
 
-      throw new Error(`Unexpected SQL in test harness: ${sql}`);
-    });
+    throw new Error(`Unexpected SQL in test harness: ${sql}`);
+  };
+
+  const mockClient = {
+    query: (sql: string, values?: readonly unknown[]) =>
+      executeSql(sql, values),
+    release: vi.fn(),
+  };
+  const mockPool = {
+    connect: vi.fn(async () => mockClient),
+    query: (sql: string, values?: readonly unknown[]) =>
+      executeSql(sql, values),
+    end: vi.fn(async () => undefined),
+  };
+
+  const database = new DatabaseService(mockPool as never);
+  const querySpy = vi.spyOn(database, "query");
 
   const auditService = new AuditNotificationService();
   const repo = new ReportingRepository(database);
@@ -696,11 +798,14 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
     });
 
     const audits = h.service.getGovernanceAuditLogs();
-    expect(audits).toHaveLength(2);
+    expect(audits).toHaveLength(3);
     expect(audits.map((a) => a.actionName)).toEqual([
       "referral_monthly_rating_governance.dismissed",
       "referral_monthly_rating_governance.terminated",
+      "referral_monthly_rating_governance.evaluate",
     ]);
+    expect(dismissedEnv.data.auditId).toBe(audits[0]!.auditId);
+    expect(terminatedEnv.data.auditId).toBe(audits[1]!.auditId);
     expect(audits[1]).toMatchObject({
       actorId: "platform-gov-admin",
       moduleName: "reporting",
@@ -711,6 +816,20 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
         outcome: "terminated",
         outcomeReason: "連續三個月平均低於 3.5，依規定終止派遣合作",
         triggeredMonths: ["2026-08", "2026-09", "2026-10"],
+      }),
+    });
+    expect(audits[2]).toMatchObject({
+      actorId: "platform-gov-admin",
+      moduleName: "reporting",
+      actionName: "referral_monthly_rating_governance.evaluate",
+      resourceType: "referral_monthly_rating_governance_report",
+      resourceId: "2026-10",
+      requestId: "req-term-1",
+      newValuesSummary: expect.objectContaining({
+        periodMonth: "2026-10",
+        driverId: "driver-audit",
+        flaggedDriverCount: 1,
+        recordCount: 2,
       }),
     });
   });
@@ -848,7 +967,12 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
     await govTable.findByText(
       /已終止 \(terminated\)｜原因：連續三個月低於3.5分，經交通局規則審議終止合作｜處理人：ui-platform-admin/,
     );
-    expect(h.service.getGovernanceAuditLogs()).toHaveLength(1);
+    expect(
+      h.service.getGovernanceAuditLogs().map((a) => a.actionName),
+    ).toEqual([
+      "referral_monthly_rating_governance.terminated",
+      "referral_monthly_rating_governance.evaluate",
+    ]);
 
     // Reloading the same month via '查詢／重新整理' must immediately display the persisted handled state
     // rather than fabricating a pending coaching/termination row
@@ -941,11 +1065,12 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
       code: "GOVERNANCE_RECORD_NOT_FOUND",
     });
 
-    // 3. Failed persistent audit append must reject and not acknowledge outcome
+    // 3. Failed persistent audit append must reject and roll back the DB UPDATE so row remains pending
     const hAuditFail = createHarness(source);
-    vi.spyOn(hAuditFail.auditService, "recordAuditLogAsync").mockRejectedValueOnce(
-      new Error("injected-audit-storage-unavailable"),
-    );
+    vi.spyOn(
+      hAuditFail.auditService,
+      "recordAuditLogAsync",
+    ).mockRejectedValueOnce(new Error("injected-audit-storage-unavailable"));
     const evalForAudit = await hAuditFail.service.evaluateGovernance({
       periodMonth: "2026-06",
     });
@@ -959,5 +1084,63 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
         makeIdentity(),
       ),
     ).rejects.toThrow("injected-audit-storage-unavailable");
+
+    expect(
+      hAuditFail.persistedGovernanceRows.get(
+        "driver-boundary::2026-06::coaching",
+      ),
+    ).toMatchObject({
+      record_id: evalForAudit.records[0]!.recordId,
+      status: "pending",
+      outcome: null,
+      outcome_reason: null,
+      handled_by_actor_id: null,
+      handled_at: null,
+      audit_id: null,
+    });
+    expect(hAuditFail.service.getGovernanceAuditLogs()).toEqual([]);
+    const afterFailedOutcomeRead = await hAuditFail.service.readGovernance({
+      periodMonth: "2026-06",
+    });
+    expect(afterFailedOutcomeRead.records[0]).toMatchObject({
+      recordId: evalForAudit.records[0]!.recordId,
+      status: "pending",
+      outcome: null,
+      outcomeReason: null,
+      handledByActorId: null,
+      handledAt: null,
+      auditId: null,
+    });
+
+    // 4. Failed outcome audit during auto-materialized recordOutcome rolls back both auto-INSERT and UPDATE
+    const hAutoAuditFail = createHarness(source);
+    const originalRecordAuditAsync =
+      hAutoAuditFail.auditService.recordAuditLogAsync.bind(
+        hAutoAuditFail.auditService,
+      );
+    vi.spyOn(
+      hAutoAuditFail.auditService,
+      "recordAuditLogAsync",
+    ).mockImplementation(async (input) => {
+      if (input.actionName === "referral_monthly_rating_governance.coached") {
+        throw new Error("injected-auto-outcome-audit-failure");
+      }
+      return originalRecordAuditAsync(input);
+    });
+    await expect(
+      hAutoAuditFail.service.recordOutcome(
+        {
+          driverId: "driver-boundary",
+          periodMonth: "2026-06",
+          ruleType: "coaching",
+          outcome: "coached",
+          reason: "已完成輔導",
+        },
+        makeIdentity(),
+        "req-auto-fail",
+      ),
+    ).rejects.toThrow("injected-auto-outcome-audit-failure");
+    expect(hAutoAuditFail.persistedGovernanceRows.size).toBe(0);
+    expect(hAutoAuditFail.service.getGovernanceAuditLogs()).toEqual([]);
   });
 });
