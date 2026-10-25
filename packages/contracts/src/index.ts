@@ -4552,6 +4552,9 @@ export interface VehicleContractRecord {
   lifecycleStatus: VehicleContractLifecycleStatus;
   approvedBy: string | null;
   approvedAt: string | null;
+  sourceSubmissionId?: string | null;
+  supersededByContractId?: string | null;
+  supersededAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -4570,6 +4573,8 @@ export interface CreateVehicleContractCommand {
 export interface ActivateVehicleContractCommand {
   approvedBy?: string | null;
   approvedAt?: string;
+  startAt?: string;
+  endAt?: string;
 }
 
 export interface InsurancePolicyRecord {
@@ -4583,6 +4588,9 @@ export interface InsurancePolicyRecord {
   endAt: string;
   status: "pending" | "active" | "expired" | "cancelled";
   lifecycleStatus: InsurancePolicyLifecycleStatus;
+  sourceSubmissionId?: string | null;
+  supersededByPolicyId?: string | null;
+  supersededAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -4599,6 +4607,8 @@ export interface CreateInsurancePolicyCommand {
 
 export interface ActivateInsurancePolicyCommand {
   activatedAt?: string;
+  startAt?: string;
+  endAt?: string;
 }
 
 export interface DispatchExclusivityRecord {

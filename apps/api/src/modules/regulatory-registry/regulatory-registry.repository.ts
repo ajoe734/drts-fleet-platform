@@ -220,7 +220,7 @@ export function parsePreexpiryRecordFamily(family: string) {
   };
 }
 
-export type ExpiryEntityType = "driver" | "policy";
+export type ExpiryEntityType = "driver" | "policy" | "contract";
 export type ExpiryEventStatus =
   | "pending"
   | "leased"
@@ -798,11 +798,13 @@ export class RegulatoryRegistryRepository {
 
   async findDriverPublicRegistrationCredential(
     driverId: string,
+    executor: RegulatoryRegistryQueryExecutor | undefined = this.databaseService,
+    lock = false,
   ): Promise<DriverPublicRegistrationCredential | null> {
-    if (!this.isEnabled()) return null;
+    if (!this.isEnabled() || !executor) return null;
     const result =
-      await this.databaseService!.query<DriverPublicRegistrationCredentialRow>(
-        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1`,
+      await executor.query<DriverPublicRegistrationCredentialRow>(
+        `SELECT * FROM reg.driver_public_registration_credentials WHERE driver_id=$1${lock ? " FOR UPDATE" : ""}`,
         [driverId],
       );
     return result.rows[0] ? this.mapDriverCredentialRow(result.rows[0]) : null;
@@ -2015,7 +2017,7 @@ export class RegulatoryRegistryRepository {
   }
 
   private getExpiryExecutor(
-    client?: PoolClient,
+    client?: PoolClient | RegulatoryRegistryQueryExecutor,
   ): RegulatoryRegistryQueryExecutor {
     if (client) {
       return {
@@ -2023,7 +2025,10 @@ export class RegulatoryRegistryRepository {
           text: string,
           values?: readonly unknown[],
         ): Promise<{ rows: T[] }> => {
-          const res = await client.query(text, (values ?? []) as any[]);
+          const res = await (client as PoolClient).query(
+            text,
+            (values ?? []) as any[],
+          );
           return { rows: res.rows as T[] };
         },
       };
@@ -2105,7 +2110,7 @@ export class RegulatoryRegistryRepository {
    * read only its source records through that same dedicated executor. */
   async readVehicleCommandState(
     vehicleId: string,
-    client: PoolClient,
+    client: PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<RegulatoryVehicleCommandState | null> {
     const executor = this.getExpiryExecutor(client);
     const vehicles = await executor.query<JsonRecordRow>(
@@ -2381,6 +2386,7 @@ export class RegulatoryRegistryRepository {
           SELECT record
           FROM reg.phase1_registry_policies
           WHERE status != 'cancelled'
+            AND record->>'supersededByPolicyId' IS NULL
             AND (record->>'startAt' IS NULL OR (record->>'startAt')::timestamptz <= $1)
             AND (record->>'endAt' IS NOT NULL AND (record->>'endAt')::timestamptz < $1)
             AND ($3::varchar IS NULL OR policy_id > $3::varchar)
@@ -2418,7 +2424,7 @@ export class RegulatoryRegistryRepository {
     entityType: ExpiryEntityType,
     entityId: string,
     credentialType?: string,
-    client?: PoolClient,
+    client?: PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<RegistryExpiryEventRow[]> {
     if (this.isEnabled()) {
       const executor = this.getExpiryExecutor(client);
@@ -2503,7 +2509,7 @@ export class RegulatoryRegistryRepository {
   async supersedeExpiryEvents(
     eventIds: string[],
     supersededByEventId?: string,
-    client?: PoolClient,
+    client?: PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<void> {
     if (eventIds.length === 0) return;
     if (this.isEnabled()) {
@@ -2554,7 +2560,7 @@ export class RegulatoryRegistryRepository {
     entityId: string,
     credentialType: string,
     supersededByEventId?: string,
-    client?: PoolClient,
+    client?: PoolClient | RegulatoryRegistryQueryExecutor,
   ): Promise<number> {
     if (!this.isEnabled()) {
       const active = Array.from(this.inMemoryExpiryEvents.values()).filter(
@@ -2813,6 +2819,7 @@ export class RegulatoryRegistryRepository {
           changed =
             !source ||
             source.status === "terminated" ||
+            Boolean(source.supersededByContractId) ||
             Date.parse(source.endAt) !== sourceExpiryMs ||
             (preexpiry !== null &&
               (source.status !== "active" || sourceExpiryMs <= asOfMs));
@@ -2821,6 +2828,7 @@ export class RegulatoryRegistryRepository {
           changed =
             !source ||
             source.status === "cancelled" ||
+            Boolean(source.supersededByPolicyId) ||
             Date.parse(source.endAt) !== sourceExpiryMs ||
             (preexpiry !== null &&
               (source.status !== "active" || sourceExpiryMs <= asOfMs));
