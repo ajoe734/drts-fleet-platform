@@ -94,6 +94,69 @@ describe("deploy-dev SMTP secret mounts", () => {
           expect(result.stdout).toContain(
             "EXISTING_ENV=existing@NOTIFICATION_OUTBOX_TYPE=postgres",
           );
+          expect(result.stdout).not.toContain(
+            "REGULATORY_ALERT_RECIPIENT_EMAIL=",
+          );
+          const recipientCheck = spawnSync(
+            "bash",
+            [
+              "-c",
+              `
+        set -euo pipefail
+        project_id=unit-test-project
+        gcloud() {
+          [[ "$1 $2" == "secrets describe" ]] || { echo 'UNEXPECTED_SECRET_ACCESS'; return 99; }
+          [[ " $PRESENT " == *" $3 "* ]]
+        }
+        secret_args=EXISTING=existing:latest
+        DEV_REGULATORY_ALERT_RECIPIENT_EMAIL=reg-alerts@example.test
+        ${block}
+        notification_outbox_type="$(sed -n 's/^notification_outbox_type=//p' "$GITHUB_OUTPUT")"
+        REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED="$(sed -n 's/^regulatory_alert_recipient_secret_mounted=//p' "$GITHUB_OUTPUT")"
+        env_vars=EXISTING_ENV=existing
+        ${outboxBlock}
+        echo "ENV_CASE_SECRETS=$secret_args"
+        echo "ENV_CASE_VARS=$env_vars"
+
+        : > "$GITHUB_OUTPUT"
+        PRESENT="$PRESENT drts-dev-regulatory-alert-recipient-email"
+        secret_args=EXISTING=existing:latest
+        ${block}
+        notification_outbox_type="$(sed -n 's/^notification_outbox_type=//p' "$GITHUB_OUTPUT")"
+        REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED="$(sed -n 's/^regulatory_alert_recipient_secret_mounted=//p' "$GITHUB_OUTPUT")"
+        env_vars=EXISTING_ENV=existing
+        ${outboxBlock}
+        echo "SECRET_CASE_SECRETS=$secret_args"
+        echo "SECRET_CASE_VARS=$env_vars"
+      `,
+            ],
+            {
+              encoding: "utf8",
+              env: {
+                ...process.env,
+                GITHUB_OUTPUT: join(directory, "outputs-63-recipient"),
+                PRESENT: present
+                  .map(
+                    (setting) =>
+                      `drts-dev-smtp-${setting.toLowerCase().replaceAll("_", "-")}`,
+                  )
+                  .join(" "),
+              },
+            },
+          );
+          expect(recipientCheck.status).toBe(0);
+          expect(recipientCheck.stdout).not.toContain(
+            "ENV_CASE_SECRETS=EXISTING=existing:latest,REMOTE_SMTP_HOST=drts-dev-smtp-host:latest,REMOTE_SMTP_PORT=drts-dev-smtp-port:latest,REMOTE_SMTP_USERNAME=drts-dev-smtp-username:latest,REMOTE_SMTP_PASSWORD=drts-dev-smtp-password:latest,REMOTE_SMTP_FROM_EMAIL=drts-dev-smtp-from-email:latest,REMOTE_SMTP_RECIPIENT_ALLOWLIST=drts-dev-smtp-recipient-allowlist:latest,NOTIFICATION_FROM_EMAIL=drts-dev-smtp-from-email:latest,REGULATORY_ALERT_RECIPIENT_EMAIL=",
+          );
+          expect(recipientCheck.stdout).toContain(
+            "ENV_CASE_VARS=EXISTING_ENV=existing@NOTIFICATION_OUTBOX_TYPE=postgres@REGULATORY_ALERT_RECIPIENT_EMAIL=reg-alerts@example.test",
+          );
+          expect(recipientCheck.stdout).toContain(
+            "REGULATORY_ALERT_RECIPIENT_EMAIL=drts-dev-regulatory-alert-recipient-email:latest",
+          );
+          expect(recipientCheck.stdout).toContain(
+            "SECRET_CASE_VARS=EXISTING_ENV=existing@NOTIFICATION_OUTBOX_TYPE=postgres\n",
+          );
         } else {
           expect(result.status).toBe(1);
           expect(result.stdout).toContain(

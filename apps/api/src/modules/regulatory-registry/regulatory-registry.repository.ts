@@ -548,12 +548,12 @@ export class RegulatoryRegistryRepository {
          ) AS email
          FROM admin.phase1_fleet_partners
          WHERE fleet_partner_id = ANY($1::text[])
-           AND active = true
+           AND COALESCE(record->>'status', '') <> 'terminated'
          UNION ALL
          SELECT record->>'contactEmail' AS email
          FROM admin.phase1_fleet_partners
          WHERE fleet_partner_id = ANY($1::text[])
-           AND active = true
+           AND COALESCE(record->>'status', '') <> 'terminated'
            AND record->>'contactEmail' IS NOT NULL
          UNION ALL
          SELECT jsonb_array_elements_text(

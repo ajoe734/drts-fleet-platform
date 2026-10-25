@@ -19,7 +19,6 @@ import {
   resolvePlatformAlertRecipient,
   RegulatoryRegistryService,
 } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
-import { RemoteSmtpMailTransport } from "../../../apps/api/src/modules/notification-delivery/remote-smtp-mail.transport";
 import type {
   DriverRegistryRecord,
   InsurancePolicyRecord,
@@ -1265,35 +1264,45 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     );
   });
 
-  it("F5 regression: when REGULATORY_ALERT_RECIPIENT_EMAIL is unset or set to an unroutable .local domain, resolvePlatformAlertRecipient resolves a deliverable allowlisted mailbox (REMOTE_SMTP_FROM_EMAIL / NOTIFICATION_FROM_EMAIL) that passes RemoteSmtpMailTransport allowlist validation, sends when partner has no contacts, sends to BOTH partner and platform when partner has contacts, and backfills missing recipient intents", async () => {
-    // 1. Simulate Cloud Run dev environment where REGULATORY_ALERT_RECIPIENT_EMAIL is unset
-    // (or misconfigured as .local) and deploy-dev.yml mounts REMOTE_SMTP_FROM_EMAIL,
-    // NOTIFICATION_FROM_EMAIL, and REMOTE_SMTP_RECIPIENT_ALLOWLIST.
-    const devPlatformMailbox = "ops-alerts@smarttransport.tw";
+  it("F5 regression: when REGULATORY_ALERT_RECIPIENT_EMAIL is unset or invalid/.local, resolvePlatformAlertRecipient returns null without aliasing sender/allowlist, keeps partner-less events honestly pending, sends to partner contacts when present, and backfills missing recipient intents when configured", async () => {
+    const senderMailbox = "ops-sender@smarttransport.tw";
     vi.stubEnv("REGULATORY_ALERT_RECIPIENT_EMAIL", "");
     vi.stubEnv("REGULATORY_FLEET_PARTNER_CONTACT_EMAILS", "");
-    vi.stubEnv("REMOTE_SMTP_FROM_EMAIL", devPlatformMailbox);
-    vi.stubEnv("NOTIFICATION_FROM_EMAIL", devPlatformMailbox);
+    vi.stubEnv("REMOTE_SMTP_FROM_EMAIL", senderMailbox);
+    vi.stubEnv("NOTIFICATION_FROM_EMAIL", senderMailbox);
     vi.stubEnv(
       "REMOTE_SMTP_RECIPIENT_ALLOWLIST",
-      `${devPlatformMailbox},partner-ops@f5-fleet.tw,bureau-r14-alerts@transport.gov.tw`,
+      `${senderMailbox},partner-ops@f5-fleet.tw,bureau-r14-alerts@transport.gov.tw`,
     );
 
-    // Verify resolvePlatformAlertRecipient rejects .local domains and enforces allowlist
+    // Verify resolvePlatformAlertRecipient rejects unset, invalid, and .local/.invalid domains
+    // and never aliases REMOTE_SMTP_FROM_EMAIL, NOTIFICATION_FROM_EMAIL, or REMOTE_SMTP_RECIPIENT_ALLOWLIST
+    expect(
+      resolvePlatformAlertRecipient({
+        REGULATORY_ALERT_RECIPIENT_EMAIL: "",
+        REMOTE_SMTP_FROM_EMAIL: senderMailbox,
+        NOTIFICATION_FROM_EMAIL: senderMailbox,
+        REMOTE_SMTP_RECIPIENT_ALLOWLIST: senderMailbox,
+      }),
+    ).toBeNull();
     expect(
       resolvePlatformAlertRecipient({
         REGULATORY_ALERT_RECIPIENT_EMAIL: "regulatory-alerts@alerts.drts.local",
-        REMOTE_SMTP_FROM_EMAIL: devPlatformMailbox,
-        REMOTE_SMTP_RECIPIENT_ALLOWLIST: devPlatformMailbox,
+        REMOTE_SMTP_FROM_EMAIL: senderMailbox,
+        REMOTE_SMTP_RECIPIENT_ALLOWLIST: senderMailbox,
       }),
-    ).toBe(devPlatformMailbox);
+    ).toBeNull();
     expect(
       resolvePlatformAlertRecipient({
-        REGULATORY_ALERT_RECIPIENT_EMAIL: "not-in-allowlist@transport.gov.tw",
-        REMOTE_SMTP_FROM_EMAIL: devPlatformMailbox,
-        REMOTE_SMTP_RECIPIENT_ALLOWLIST: devPlatformMailbox,
+        REGULATORY_ALERT_RECIPIENT_EMAIL: "invalid-address",
+        REMOTE_SMTP_FROM_EMAIL: senderMailbox,
       }),
-    ).toBe(devPlatformMailbox);
+    ).toBeNull();
+    expect(
+      resolvePlatformAlertRecipient({
+        REGULATORY_ALERT_RECIPIENT_EMAIL: "bureau-r14-alerts@transport.gov.tw",
+      }),
+    ).toBe("bureau-r14-alerts@transport.gov.tw");
 
     const sqlDb = new R14SqlTransport();
     sqlDb.contracts.set("contract-f5-001", {
@@ -1328,39 +1337,28 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
 
-    // Use real RemoteSmtpMailTransport with development recipient allowlist enforcement!
     const sentDeliveries: Array<{ recipientEmail: string; subject: string }> =
       [];
-    const remoteSmtpTransport = new RemoteSmtpMailTransport(
-      {
-        DRTS_ENV: "development",
-        REMOTE_SMTP_HOST: "smtp.sendgrid.net",
-        REMOTE_SMTP_PORT: "587",
-        REMOTE_SMTP_SECURE: "false",
-        REMOTE_SMTP_USERNAME: "apikey",
-        REMOTE_SMTP_PASSWORD: "sg-secret-password",
-        REMOTE_SMTP_FROM_EMAIL: devPlatformMailbox,
-        REMOTE_SMTP_RECIPIENT_ALLOWLIST: `${devPlatformMailbox},partner-ops@f5-fleet.tw,bureau-r14-alerts@transport.gov.tw`,
+    const controlledTransport = {
+      provider: "controlled-f5",
+      send: async (msg: { recipientEmail: string; subject: string }) => {
+        sentDeliveries.push({
+          recipientEmail: msg.recipientEmail,
+          subject: msg.subject,
+        });
+        return {
+          provider: "controlled-f5",
+          response: "250 OK",
+          providerMessageId: `f5-${sentDeliveries.length}`,
+          acceptedAt: new Date().toISOString(),
+        };
       },
-      (() => ({
-        sendMail: async (request: { to: string; subject: string }) => {
-          sentDeliveries.push({
-            recipientEmail: request.to,
-            subject: request.subject,
-          });
-          return {
-            response: `250 2.0.0 OK: queued as f5-${sentDeliveries.length}`,
-            accepted: [request.to],
-            rejected: [],
-          };
-        },
-      })) as never,
-    );
+    };
 
     const outbox = new MemoryMailOutbox();
     const notification = new NotificationDeliveryService(
       outbox,
-      remoteSmtpTransport,
+      controlledTransport,
     );
     const repository = new RegulatoryRegistryRepository(
       sqlDb as unknown as DatabaseService,
@@ -1377,24 +1375,23 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     );
     const controller = new RegulatoryRegistryController(service);
 
-    // Phase A (F5b): Partner has NO contacts yet, and REGULATORY_ALERT_RECIPIENT_EMAIL is unset.
-    // Reminders must be sent to devPlatformMailbox (resolved from REMOTE_SMTP_FROM_EMAIL / NOTIFICATION_FROM_EMAIL)
-    // and pass RemoteSmtpMailTransport's recipient allowlist check without SMTP_RECIPIENT_NOT_ALLOWLISTED.
+    // Phase A (F5 unconfigured): Partner has NO contacts yet, and REGULATORY_ALERT_RECIPIENT_EMAIL is unset.
+    // Must keep events honestly pending with 0 intents and recipientStatus "unavailable" (never invent .local or alias sender).
     const run1 = await controller.reconcileExpiry({
       asOf: "2026-06-01T00:00:00.000Z", // T-24 (crosses T-30)
     });
     expect(run1.data.preexpiry).toEqual({
       eventsCreated: 2, // contract T-30 + policy T-30
-      intentsCreated: 2, // 1 deliverable platform recipient x 2 events
-      recipientStatus: "configured",
+      intentsCreated: 0,
+      recipientStatus: "unavailable",
       deliveryStatus: "available",
     });
-    expect(sentDeliveries.map((d) => d.recipientEmail)).toEqual([
-      devPlatformMailbox,
-      devPlatformMailbox,
-    ]);
+    expect(sentDeliveries).toHaveLength(0);
+    expect(
+      [...sqlDb.events.values()].every((e) => e.status === "pending"),
+    ).toBe(true);
 
-    // Phase B (F5a backfill of partner contacts): Partner now registers contacts while events already exist and are "completed".
+    // Phase B (F5 backfill of partner contacts): Partner registers contacts while REGULATORY_ALERT_RECIPIENT_EMAIL is still unset.
     await controller.registerFleetPartnerContacts("partner-f5-001", {
       emails: ["partner-ops@f5-fleet.tw"],
     });
@@ -1407,13 +1404,15 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       recipientStatus: "configured",
       deliveryStatus: "available",
     });
-    expect(sentDeliveries).toHaveLength(4);
-    expect(sentDeliveries.slice(2).map((d) => d.recipientEmail)).toEqual([
+    expect(sentDeliveries).toHaveLength(2);
+    expect(sentDeliveries.map((d) => d.recipientEmail)).toEqual([
       "partner-ops@f5-fleet.tw",
       "partner-ops@f5-fleet.tw",
     ]);
 
-    // Phase C (F5a backfill when REGULATORY_ALERT_RECIPIENT_EMAIL is explicitly set):
+    // Phase C (F5 backfill when REGULATORY_ALERT_RECIPIENT_EMAIL is later configured):
+    // Even though the T-30 events already completed delivery to partner-ops@f5-fleet.tw,
+    // configuring REGULATORY_ALERT_RECIPIENT_EMAIL backfills the missing platform recipient intents on the same events.
     vi.stubEnv(
       "REGULATORY_ALERT_RECIPIENT_EMAIL",
       "bureau-r14-alerts@transport.gov.tw",
@@ -1427,33 +1426,30 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       recipientStatus: "configured",
       deliveryStatus: "available",
     });
-    expect(sentDeliveries).toHaveLength(6);
-    expect(sentDeliveries.slice(4).map((d) => d.recipientEmail)).toEqual([
+    expect(sentDeliveries).toHaveLength(4);
+    expect(sentDeliveries.slice(2).map((d) => d.recipientEmail)).toEqual([
       "bureau-r14-alerts@transport.gov.tw",
       "bureau-r14-alerts@transport.gov.tw",
     ]);
 
-    // Phase D: At T-7 with REGULATORY_ALERT_RECIPIENT_EMAIL cleared again and partner contacts present,
-    // sends to BOTH partner AND deliverable platform mailbox on first pass
-    vi.stubEnv("REGULATORY_ALERT_RECIPIENT_EMAIL", "");
+    // Phase D: At T-7 with both partner contacts and REGULATORY_ALERT_RECIPIENT_EMAIL configured,
+    // sends to BOTH partner AND configured platform mailbox on first pass.
     const run4 = await controller.reconcileExpiry({
       asOf: "2026-06-20T00:00:00.000Z", // T-5 (crosses T-7)
     });
     expect(run4.data.preexpiry).toEqual({
       eventsCreated: 2, // contract T-7 + policy T-7
-      intentsCreated: 4, // 2 recipients (partner-ops@f5-fleet.tw + devPlatformMailbox) x 2 events
+      intentsCreated: 4, // 2 recipients (partner-ops@f5-fleet.tw + bureau-r14-alerts@transport.gov.tw) x 2 events
       recipientStatus: "configured",
       deliveryStatus: "available",
     });
-    expect(sentDeliveries).toHaveLength(10);
+    expect(sentDeliveries).toHaveLength(8);
   });
 
   it("F6 regression & side-effect guards: POST partners/:partnerId/contacts persists contacts across restarts, preserves suspended status on core.partners, and never fabricates rows in core.partners for non-existent partnerId", async () => {
-    const devPlatformMailbox = "ops-alerts@smarttransport.tw";
-    vi.stubEnv("REGULATORY_ALERT_RECIPIENT_EMAIL", "");
+    const configuredPlatformMailbox = "reg-alerts@platform.tw";
+    vi.stubEnv("REGULATORY_ALERT_RECIPIENT_EMAIL", configuredPlatformMailbox);
     vi.stubEnv("REGULATORY_FLEET_PARTNER_CONTACT_EMAILS", "");
-    vi.stubEnv("REMOTE_SMTP_FROM_EMAIL", devPlatformMailbox);
-    vi.stubEnv("NOTIFICATION_FROM_EMAIL", devPlatformMailbox);
 
     const sqlDb = new R14SqlTransport();
     // Seed a suspended partner in core.partners to verify F6 side-effect 1:
@@ -1633,20 +1629,20 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     });
 
     // Running reconcileExpiry on the restarted instance delivers reminders
-    // to both persisted partner contacts AND devPlatformMailbox
+    // to both persisted partner contacts AND configuredPlatformMailbox
     const reconcileAfterRestart = await controllerInstance2.reconcileExpiry({
       asOf: "2026-06-01T00:00:00.000Z", // T-19 for policy-f6-001
     });
     expect(reconcileAfterRestart.data.preexpiry).toEqual({
       eventsCreated: 1, // policy-f6-001 T-30
-      intentsCreated: 3, // 2 persisted partner contacts + 1 deliverable platform alert email
+      intentsCreated: 3, // 2 persisted partner contacts + 1 configured platform alert email
       recipientStatus: "configured",
       deliveryStatus: "available",
     });
     expect(sentAfterRestart.sort()).toEqual([
       "dispatch-lead@f6-partner.tw",
       "insurance-admin@f6-partner.tw",
-      devPlatformMailbox,
+      configuredPlatformMailbox,
     ]);
   });
 
