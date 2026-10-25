@@ -589,6 +589,39 @@ describe("locale intent and source mapping", () => {
     const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim();
+    const currentAgencySource = translationSourceAt(head, "agency-portal-web");
+    expect(currentAgencySource).toEqual({
+      app: "agency-portal-web",
+      kind: "dictionary",
+      source: "apps/agency-portal-web/lib/translations.ts",
+      locales: ["zh-TW", "en-US"],
+      keys: expect.arrayContaining(["app.title", "login.title", "shell.title"]),
+    });
+    expect(
+      translationKeysForCase(currentAgencySource, "zh-TW").length,
+    ).toBeGreaterThan(0);
+    expect(translationKeysForCase(currentAgencySource, "en-US")).toEqual(
+      translationKeysForCase(currentAgencySource, "zh-TW"),
+    );
+
+    vi.mocked(execFileSync).mockImplementation(((
+      command: string,
+      args: string[],
+      options: ExecFileSyncOptionsWithStringEncoding,
+    ) => {
+      if (command === "git" && args[0] === "show") {
+        if (args[1] === `${head}:apps/agency-portal-web/lib/translations.ts`) {
+          throw new Error("missing historical agency translations.ts");
+        }
+        if (args[1] === `${head}:apps/agency-portal-web/app/layout.tsx`) {
+          return '<html lang="zh-Hant"><body>{children}</body></html>\n';
+        }
+        if (args[1] === `${head}:apps/agency-portal-web/app/login/page.tsx`) {
+          return "<main><h1>主管機關唯讀查詢入口</h1></main>\n";
+        }
+      }
+      return realExecFileSync(command, args, options);
+    }) as typeof execFileSync);
     const agencySource = translationSourceAt(head, "agency-portal-web");
     expect(agencySource).toEqual({
       app: "agency-portal-web",

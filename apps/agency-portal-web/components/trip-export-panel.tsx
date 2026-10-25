@@ -3,6 +3,10 @@
 import type { AgencyTripExportScope } from "@drts/contracts";
 import { useState } from "react";
 
+import { displayStatusCode } from "@/lib/format";
+import { useTranslation } from "@/lib/i18n";
+import type { Locale } from "@/lib/translations";
+
 /** Raw BFF passthrough: the API wire format is snake_case. */
 type ApiEnvelope<T> = { data?: T; error?: { code?: string; message?: string } };
 
@@ -48,11 +52,14 @@ function newIdempotencyKey(): string {
  */
 export function TripExportPanel({
   initialScope,
+  locale: explicitLocale,
 }: {
   initialScope?:
     | { [K in keyof AgencyTripExportScope]?: string | undefined }
     | undefined;
+  locale?: Locale;
 } = {}) {
+  const { locale, t } = useTranslation(explicitLocale);
   const [month, setMonth] = useState(initialScope?.month ?? "");
   const [reservedFrom, setReservedFrom] = useState(
     initialScope?.reservedFrom ?? "",
@@ -83,16 +90,16 @@ export function TripExportPanel({
   const fail = (status: number, body: ApiEnvelope<unknown> | null) =>
     setMessage(
       status === 403
-        ? "此帳號沒有匯出權限（agency_exporter），或資料不屬於本機關。"
+        ? t("tripExports.error.forbidden403")
         : body?.error?.message ||
             body?.error?.code ||
-            `操作失敗（HTTP ${status}）`,
+            t("tripExports.error.operationFailed", { status }),
     );
 
   return (
     <div style={{ display: "grid", gap: 12, maxWidth: 640 }}>
       <label>
-        月份{" "}
+        {t("tripExports.month")}{" "}
         <input
           value={month}
           onChange={(e) => setMonth(e.target.value)}
@@ -100,7 +107,7 @@ export function TripExportPanel({
         />
       </label>
       <label>
-        預約日起{" "}
+        {t("tripExports.reservedFrom")}{" "}
         <input
           type="date"
           value={reservedFrom}
@@ -108,7 +115,7 @@ export function TripExportPanel({
         />
       </label>
       <label>
-        預約日迄{" "}
+        {t("tripExports.reservedTo")}{" "}
         <input
           type="date"
           value={reservedTo}
@@ -116,39 +123,39 @@ export function TripExportPanel({
         />
       </label>
       <label>
-        車號（精確）{" "}
+        {t("tripRecords.filter.plateNo")}{" "}
         <input
           value={plateNo}
           onChange={(e) => setPlateNo(e.target.value)}
-          placeholder="例如 BKR-2208"
+          placeholder={t("tripRecords.filter.plateNoPlaceholder")}
         />
       </label>
       <label>
-        訂單編號（精確）{" "}
+        {t("tripRecords.filter.orderNo")}{" "}
         <input
           value={orderNo}
           onChange={(e) => setOrderNo(e.target.value)}
-          placeholder="完整訂單編號"
+          placeholder={t("tripRecords.filter.orderNoPlaceholder")}
         />
       </label>
       <label>
-        訂單 ID（精確）{" "}
+        {t("tripRecords.filter.orderId")}{" "}
         <input
           value={orderId}
           onChange={(e) => setOrderId(e.target.value)}
-          placeholder="完整 orderId"
+          placeholder={t("tripRecords.filter.orderIdPlaceholder")}
         />
       </label>
       <label>
-        趟次 ID（精確）{" "}
+        {t("tripRecords.filter.tripId")}{" "}
         <input
           value={tripId}
           onChange={(e) => setTripId(e.target.value)}
-          placeholder="完整 tripId"
+          placeholder={t("tripRecords.filter.tripIdPlaceholder")}
         />
       </label>
       <label>
-        紀錄 ID（精確）{" "}
+        {t("tripRecords.filter.recordId")}{" "}
         <input
           value={recordId}
           onChange={(e) => setRecordId(e.target.value)}
@@ -167,11 +174,13 @@ export function TripExportPanel({
           setRecordCount(result.body?.data?.record_count ?? null);
         }}
       >
-        預覽筆數
+        {t("tripExports.previewBtn")}
       </button>
-      {recordCount !== null ? <p>符合保存期間的筆數：{recordCount}</p> : null}
+      {recordCount !== null ? (
+        <p>{t("tripExports.previewCount", { count: recordCount })}</p>
+      ) : null}
       <label>
-        匯出目的（必填）
+        {t("tripExports.purposeLabel")}
         <textarea
           value={purpose}
           onChange={(e) => setPurpose(e.target.value)}
@@ -197,12 +206,15 @@ export function TripExportPanel({
           setDownloadUrl(null);
         }}
       >
-        建立匯出
+        {t("tripExports.createBtn")}
       </button>
       {jobId ? (
         <div style={{ display: "grid", gap: 8 }}>
           <p>
-            匯出編號 <code>{jobId}</code> · 狀態：{jobStatus ?? "未提供"}
+            {t("tripExports.jobIdPrefix")} <code>{jobId}</code> ·{" "}
+            {t("tripExports.jobStatusLabel", {
+              status: displayStatusCode(jobStatus, locale),
+            })}
           </p>
           <button
             type="button"
@@ -214,7 +226,7 @@ export function TripExportPanel({
               setJobStatus(result.body?.data?.status ?? null);
             }}
           >
-            重新查詢狀態
+            {t("tripExports.refreshStatusBtn")}
           </button>
           <button
             type="button"
@@ -229,11 +241,11 @@ export function TripExportPanel({
               setDownloadUrl(result.body?.data?.download?.download_url ?? null);
             }}
           >
-            取得下載連結
+            {t("tripExports.getDownloadBtn")}
           </button>
           {downloadUrl ? (
             <a href={downloadUrl} rel="noreferrer">
-              下載（連結有效期限內）
+              {t("tripExports.downloadLink")}
             </a>
           ) : null}
         </div>

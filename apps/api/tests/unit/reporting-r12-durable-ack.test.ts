@@ -590,20 +590,41 @@ describe("BUREAU-R12 ReportingService durable ACK and shared canonical source er
       "utf8",
     );
     const displayDateTimeMatch =
-      /export function displayDateTime\([\s\S]*?return new Date\(parsed\)\.toLocaleString\("zh-TW",\s*\{[\s\S]*?\}\);\s*\}/.exec(
+      /export function displayDateTime\([\s\S]*?return new Intl\.DateTimeFormat\(locale === "zh" \? "zh-TW" : "en-US",\s*\{[\s\S]*?\}\)\.format\(new Date\(parsed\)\);\s*\}/.exec(
         agencyFormatSource,
       );
     expect(displayDateTimeMatch).not.toBeNull();
+    expect(displayDateTimeMatch![0]).not.toContain('timeZone: "UTC"');
     expect(displayDateTimeMatch![0]).toContain('timeZone: "Asia/Taipei"');
+    expect(displayDateTimeMatch![0]).toContain("hour12: false");
 
-    const agencyFormatted = new Date(
-      Date.parse(agencyView.requestedAt),
-    ).toLocaleString("zh-TW", {
+    const agencyZhFormatted = new Intl.DateTimeFormat("zh-TW", {
       timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
       hour12: false,
-    });
-    expect(agencyFormatted).toContain("2026/10/25");
-    expect(agencyFormatted).toContain("01:00:00");
+    }).format(new Date(Date.parse(agencyView.requestedAt)));
+    expect(agencyZhFormatted).toContain("2026/10/25");
+    expect(agencyZhFormatted).toContain("01:00:00");
+    expect(agencyZhFormatted).not.toContain("10/24");
+
+    const agencyEnFormatted = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(new Date(Date.parse(agencyView.requestedAt)));
+    expect(agencyEnFormatted).toContain("10/25/2026");
+    expect(agencyEnFormatted).toContain("01:00:00");
+    expect(agencyEnFormatted).not.toContain("10/24");
 
     const opsReportsPageSource = readFileSync(
       resolve(__dirname, "../../../ops-console-web/app/reports/page.tsx"),

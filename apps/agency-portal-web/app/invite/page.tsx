@@ -1,6 +1,9 @@
 import { Card, CardBody, CardHeader } from "@drts/ui-web";
 
+import { LanguageSwitch } from "@/components/language-switch";
+import { getServerLocale } from "@/lib/server-locale";
 import { firstParam } from "@/lib/session.server";
+import { t } from "@/lib/translations";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -10,20 +13,30 @@ export default async function InvitePage({
 }: {
   searchParams: SearchParams;
 }) {
-  const params = await searchParams;
+  const [params, locale] = await Promise.all([searchParams, getServerLocale()]);
   const token = firstParam(params.token);
   return (
     <main style={{ maxWidth: 480, margin: "80px auto", padding: 16 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          marginBottom: 12,
+        }}
+      >
+        <LanguageSwitch locale={locale} />
+      </div>
       <Card>
         <CardHeader>
-          <h1 style={{ fontSize: 20, margin: 0 }}>接受機關帳號邀請</h1>
+          <h1 style={{ fontSize: 20, margin: 0 }}>
+            {t("invite.title", undefined, locale)}
+          </h1>
         </CardHeader>
         <CardBody>
           {token ? (
             <>
               <p style={{ marginTop: 0 }}>
-                請以收到邀請的 Google
-                帳號登入。電子郵件須與邀請相同且已驗證；邀請只能使用一次。
+                {t("invite.description", undefined, locale)}
               </p>
               <a
                 href={`/api/auth/agency/login?token=${encodeURIComponent(token)}`}
@@ -36,11 +49,11 @@ export default async function InvitePage({
                   textDecoration: "none",
                 }}
               >
-                以 Google 帳號接受邀請
+                {t("invite.cta", undefined, locale)}
               </a>
             </>
           ) : (
-            <p role="alert">邀請連結無效。請向平台管理者確認。</p>
+            <p role="alert">{t("invite.invalidLink", undefined, locale)}</p>
           )}
         </CardBody>
       </Card>

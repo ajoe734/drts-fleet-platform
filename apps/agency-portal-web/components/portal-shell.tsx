@@ -1,18 +1,28 @@
+"use client";
+
 import type { ReactNode } from "react";
 import { Badge } from "@drts/ui-web";
 
-import { AGENCY_NAV } from "@/lib/navigation";
+import { useTranslation } from "@/lib/i18n";
+import { getAgencyNav } from "@/lib/navigation";
+import type { Locale } from "@/lib/translations";
+import { LanguageSwitch } from "./language-switch";
 import { LogoutButton } from "./logout-button";
 import { PrgMask } from "./prg-mask";
 
-/** Every page states 唯讀, 個資已遮罩 and that the query is access-logged. */
+/** Every page states read-only, PII masked and that the query is access-logged. */
 export function PortalShell({
   children,
   agencyName,
+  locale: explicitLocale,
 }: {
   children: ReactNode;
   agencyName?: string | null;
+  locale?: Locale;
 }) {
+  const { locale, t } = useTranslation(explicitLocale);
+  const navItems = getAgencyNav(locale);
+
   return (
     <div style={{ minHeight: "100vh", background: "#f8fafc" }}>
       <header
@@ -27,16 +37,26 @@ export function PortalShell({
           flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <strong>DRTS 主管機關唯讀查詢</strong>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <strong>{t("shell.title")}</strong>
           {agencyName ? <span>· {agencyName}</span> : null}
-          <Badge variant="blue">唯讀</Badge>
-          <PrgMask label="個資已遮罩" />
+          <Badge variant="blue">{t("shell.readOnly")}</Badge>
+          <PrgMask labelKey="shell.masked" locale={locale} />
         </div>
-        <LogoutButton />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <LanguageSwitch locale={locale} />
+          <LogoutButton locale={locale} />
+        </div>
       </header>
       <nav
-        aria-label="主要導覽"
+        aria-label={t("shell.navAriaLabel")}
         style={{
           display: "flex",
           gap: 12,
@@ -47,7 +67,7 @@ export function PortalShell({
           fontSize: 14,
         }}
       >
-        {AGENCY_NAV.map((item) => (
+        {navItems.map((item) => (
           <a key={item.href} href={item.href}>
             {item.label}
           </a>
@@ -64,7 +84,7 @@ export function PortalShell({
           borderBottom: "1px solid #fde68a",
         }}
       >
-        本系統僅供唯讀查詢；每一次查詢與匯出皆留存不可竄改的存取紀錄（查詢條件、筆數、時間、帳號），由平台管理者檢閱。
+        {t("shell.auditBanner")}
       </p>
       <main style={{ padding: 24, maxWidth: 1280, margin: "0 auto" }}>
         {children}
