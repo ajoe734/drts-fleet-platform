@@ -987,15 +987,20 @@ export const IAM_TENANT_ROLE_POLICY_BY_CODE = new Map(
  * BUREAU-R13 agency roles (open decision D3): the catalog supports both; the
  * inviting platform admin chooses one per invitation.
  */
+// Named role-code constants rather than inline literals: tooling that parses
+// tenant role codes from this file must not pick up agency roles.
+export const AGENCY_VIEWER_ROLE_CODE = "agency_viewer";
+export const AGENCY_EXPORTER_ROLE_CODE = "agency_exporter";
+
 export const IAM_AGENCY_ROLE_POLICY_DEFINITIONS: readonly IamAgencyRolePolicyDefinition[] =
   [
     {
-      roleCode: "agency_viewer",
+      roleCode: AGENCY_VIEWER_ROLE_CODE,
       roleFamily: "agency",
       scopes: [...AGENCY_PORTAL_READ_SCOPES],
     },
     {
-      roleCode: "agency_exporter",
+      roleCode: AGENCY_EXPORTER_ROLE_CODE,
       roleFamily: "agency",
       scopes: [...AGENCY_PORTAL_READ_SCOPES, ...AGENCY_PORTAL_EXPORT_SCOPES],
     },
