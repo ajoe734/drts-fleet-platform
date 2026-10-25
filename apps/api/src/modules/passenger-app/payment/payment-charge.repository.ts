@@ -438,6 +438,21 @@ export class PaymentChargeSession {
       );
     });
   }
+
+  async hasPriorDeclineForMethod(
+    passengerId: string,
+    methodId: string,
+  ): Promise<boolean> {
+    const result = await this.client.query(
+      `SELECT 1 FROM passenger.payment_charge_records
+       WHERE drts_passenger_id=$1 AND payment_method_id=$2 AND order_id<>$3
+         AND status IN ('failed','manual_recovery')
+         AND last_error_code IN ('card_declined','invalid_method')
+       LIMIT 1`,
+      [passengerId, methodId, this.orderId],
+    );
+    return (result.rowCount ?? result.rows.length) > 0;
+  }
 }
 
 @Injectable()
