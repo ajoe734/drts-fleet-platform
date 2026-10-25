@@ -113,6 +113,7 @@ function registerSupplyCandidate(
     lifecycleStatus: "active",
     reviewerId: "admin",
     reviewedAt: startAt,
+    exclusiveOperatorId: "partner-demo-001",
     exclusiveProviderName: "Acme Dispatch",
     effectiveStart: startAt,
     effectiveEnd: endAt,
@@ -281,9 +282,9 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(projection.announcement).toBe("正在等候司機確認");
       expect(projection.driverId).toBeNull();
       expect(projection.etaMinutes).toBeNull();
-      expect(VoiceDispatchProjectionViewSchema.safeParse(projection).success).toBe(
-        true,
-      );
+      expect(
+        VoiceDispatchProjectionViewSchema.safeParse(projection).success,
+      ).toBe(true);
     });
   });
 
@@ -329,9 +330,9 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(projection.driverId).toBe(offer.driverId);
       expect(projection.vehicleId).toBe(offer.vehicleId);
       expect(projection.announcement).toContain("司機已接單");
-      expect(VoiceDispatchProjectionViewSchema.safeParse(projection).success).toBe(
-        true,
-      );
+      expect(
+        VoiceDispatchProjectionViewSchema.safeParse(projection).success,
+      ).toBe(true);
     });
 
     it("releases reservation and advances to round 2 when driver rejects task", async () => {
@@ -399,22 +400,30 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
 
       // Regression check (SD §7.6 losing-transaction rollback):
       // Verify Order B has EXACTLY ONE assignment (candidate 2), with NO orphan active assignment for candidate 1
-      const orderBAssignments = ownedMobilityService.getDispatchAssignmentsForOrder(orderB.orderId);
+      const orderBAssignments =
+        ownedMobilityService.getDispatchAssignmentsForOrder(orderB.orderId);
       expect(orderBAssignments).toHaveLength(1);
       expect(orderBAssignments[0]?.assignmentId).toBe(offerB.assignmentId);
       expect(orderBAssignments[0]?.driverId).toBe(offerB.driverId);
 
-      const activeOrderBAssignment = ownedMobilityService.getActiveDispatchAssignmentForOrder(orderB.orderId);
+      const activeOrderBAssignment =
+        ownedMobilityService.getActiveDispatchAssignmentForOrder(
+          orderB.orderId,
+        );
       expect(activeOrderBAssignment?.assignmentId).toBe(offerB.assignmentId);
 
       // Candidate 1's active driver task belongs ONLY to Order A, NOT Order B
-      const candidate1ActiveTask = ownedMobilityService.getActiveDriverTaskForAssignment(offerA.assignmentId!);
+      const candidate1ActiveTask =
+        ownedMobilityService.getActiveDriverTaskForAssignment(
+          offerA.assignmentId!,
+        );
       expect(candidate1ActiveTask?.driverId).toBe(offerA.driverId);
       expect(candidate1ActiveTask?.orderId).toBe(orderA.orderId);
     });
 
     it("rolls back cleanly with no orphan active assignments when all candidates encounter reservation conflicts (SD §7.6 losing-transaction rollback)", async () => {
-      const { executor, ownedMobilityService, projectionService, createOrder } = createHarness();
+      const { executor, ownedMobilityService, projectionService, createOrder } =
+        createHarness();
 
       // Take all 3 candidates with orders A, B, C
       const orderA = createOrder({ passengerName: "Order A" });
@@ -430,7 +439,11 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(offerC.status).toBe("offered");
 
       // Verify each order took a distinct driver
-      const takenDrivers = new Set([offerA.driverId, offerB.driverId, offerC.driverId]);
+      const takenDrivers = new Set([
+        offerA.driverId,
+        offerB.driverId,
+        offerC.driverId,
+      ]);
       expect(takenDrivers.size).toBe(3);
 
       // Order D now requests dispatch: all 3 candidates collide
@@ -441,21 +454,32 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
 
       // Verify SD §7.6 losing-transaction rollback:
       // Order D must have ZERO active or orphan assignments
-      const orderDAssignments = ownedMobilityService.getDispatchAssignmentsForOrder(orderD.orderId);
+      const orderDAssignments =
+        ownedMobilityService.getDispatchAssignmentsForOrder(orderD.orderId);
       expect(orderDAssignments).toHaveLength(0);
 
-      const activeOrderDAssignment = ownedMobilityService.getActiveDispatchAssignmentForOrder(orderD.orderId);
+      const activeOrderDAssignment =
+        ownedMobilityService.getActiveDispatchAssignmentForOrder(
+          orderD.orderId,
+        );
       expect(activeOrderDAssignment).toBeNull();
 
       // None of the 3 drivers have any task for Order D
       for (const driverId of takenDrivers) {
-        const orderDTasks = (ownedMobilityService as unknown as { driverTasks: { orderId: string; driverId: string }[] })
-          .driverTasks.filter((t) => t.orderId === orderD.orderId && t.driverId === driverId);
+        const orderDTasks = (
+          ownedMobilityService as unknown as {
+            driverTasks: { orderId: string; driverId: string }[];
+          }
+        ).driverTasks.filter(
+          (t) => t.orderId === orderD.orderId && t.driverId === driverId,
+        );
         expect(orderDTasks).toHaveLength(0);
       }
 
       // Voice projection reflects 'retrying' with no driver/vehicle assigned
-      const projectionD = await projectionService.projectDispatch(orderD.orderId);
+      const projectionD = await projectionService.projectDispatch(
+        orderD.orderId,
+      );
       expect(projectionD.projection).toBe("retrying");
       expect(projectionD.assignmentId).toBeNull();
       expect(projectionD.driverId).toBeNull();
@@ -470,15 +494,28 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
 
       const offer = await executor.requestDispatch(order.orderId);
       expect(offer.status).toBe("offered");
-      expect(ownedMobilityService.getDispatchAssignmentsForOrder(order.orderId)).toHaveLength(1);
+      expect(
+        ownedMobilityService.getDispatchAssignmentsForOrder(order.orderId),
+      ).toHaveLength(1);
 
       // Execute explicit rollback
-      ownedMobilityService.rollbackDispatchAssignmentInMem(offer.assignmentId!, previousOrder);
+      ownedMobilityService.rollbackDispatchAssignmentInMem(
+        offer.assignmentId!,
+        previousOrder,
+      );
 
       // Verify assignment and task are removed
-      expect(ownedMobilityService.getDispatchAssignmentsForOrder(order.orderId)).toHaveLength(0);
-      expect(ownedMobilityService.getActiveDispatchAssignmentForOrder(order.orderId)).toBeNull();
-      expect(ownedMobilityService.getActiveDriverTaskForAssignment(offer.assignmentId!)).toBeNull();
+      expect(
+        ownedMobilityService.getDispatchAssignmentsForOrder(order.orderId),
+      ).toHaveLength(0);
+      expect(
+        ownedMobilityService.getActiveDispatchAssignmentForOrder(order.orderId),
+      ).toBeNull();
+      expect(
+        ownedMobilityService.getActiveDriverTaskForAssignment(
+          offer.assignmentId!,
+        ),
+      ).toBeNull();
       expect(() => ownedMobilityService.requireTask(offer.taskId!)).toThrow();
 
       // Verify order state was restored
@@ -553,9 +590,7 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       // Verify occupied capacity is NOT released
       const reservations = executor.getInMemReservations();
       const stillOccupied = reservations.find(
-        (r) =>
-          r.assignmentId === offer.assignmentId &&
-          r.status === "occupied",
+        (r) => r.assignmentId === offer.assignmentId && r.status === "occupied",
       );
       expect(stillOccupied).toBeDefined();
     });
@@ -586,15 +621,15 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
         orderId: order.orderId,
       };
 
-      const timeoutResult = await executor.handleOfferTimeout(oldTimeoutCommand);
+      const timeoutResult =
+        await executor.handleOfferTimeout(oldTimeoutCommand);
       expect(timeoutResult.outcome).toBe("superseded_or_no_op");
 
       // Verify Round 2 reservation is still held and unaffected
       const reservations = executor.getInMemReservations();
       const round2Held = reservations.find(
         (r) =>
-          r.assignmentId === offerRound2.assignmentId &&
-          r.status === "held",
+          r.assignmentId === offerRound2.assignmentId && r.status === "held",
       );
       expect(round2Held).toBeDefined();
     });
@@ -625,9 +660,7 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       // Verify Round 1 assignment capacity is released
       const reservations = executor.getInMemReservations();
       const round1Released = reservations.find(
-        (r) =>
-          r.assignmentId === offer.assignmentId &&
-          r.status === "released",
+        (r) => r.assignmentId === offer.assignmentId && r.status === "released",
       );
       expect(round1Released).toBeDefined();
 
@@ -652,7 +685,9 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       const view = projectionService.projectDispatchFromEntities(order, job);
       expect(view.projection).toBe("matching");
       expect(view.announcement).toBe("已受理，正在找車");
-      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(true);
+      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(
+        true,
+      );
     });
 
     it("correctly projects offered state (driver identity hidden, ETA null)", () => {
@@ -690,7 +725,9 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(view.driverId).toBeNull();
       expect(view.vehicleId).toBeNull();
       expect(view.etaMinutes).toBeNull();
-      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(true);
+      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(
+        true,
+      );
     });
 
     it("faithfully reports ETA absence (null) and only claims driver accepted on driver acceptance", () => {
@@ -771,7 +808,9 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(view.projection).toBe("arrived");
       expect(view.announcement).toBe("車輛已到指定上車點");
       expect(view.etaMinutes).toBe(0);
-      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(true);
+      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(
+        true,
+      );
     });
 
     it("correctly projects retrying state (cannot announce as cancelled)", () => {
@@ -786,7 +825,9 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       expect(view.projection).toBe("retrying");
       expect(view.announcement).toBe("仍在找車或重新安排");
       expect(view.announcement).not.toContain("取消");
-      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(true);
+      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(
+        true,
+      );
     });
 
     it("correctly projects manual_intervention state", () => {
@@ -800,7 +841,9 @@ describe("UV-EXEC-016: Autonomous Dispatch Executor & Voice Projection Integrati
       const view = projectionService.projectDispatchFromEntities(order);
       expect(view.projection).toBe("manual_intervention");
       expect(view.announcement).toBe("正在轉由調度協助");
-      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(true);
+      expect(VoiceDispatchProjectionViewSchema.safeParse(view).success).toBe(
+        true,
+      );
     });
 
     it("correctly projects terminal states", () => {

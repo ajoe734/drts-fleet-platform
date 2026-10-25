@@ -678,4 +678,74 @@ describe("BUREAU-R02: single-operator vehicle exclusivity binding & cross-operat
     expect(decisionOpY.boundOperatorId).toBe("fp-X");
     expect(decisionOpY.requestingOperatorId).toBe("op-Y");
   });
+
+  it("refuses sibling operator op-Y when a fleet partner lists multiple multiTaxiOperatorIds (op-X, op-Y) and exclusivity explicitly binds op-X", async () => {
+    const { registry, recordAuditSpy, ownedMobility } = createServices();
+
+    // Fleet partner fp-X lists two distinct operating-authority operator IDs
+    registry.registerFleetPartnerOperatorMapping("fp-X", ["op-X", "op-Y"]);
+
+    await registry.submitExclusivityReview("veh-demo-001", {
+      exclusiveOperatorId: "op-X",
+      exclusiveProviderName: "Operator X",
+      declarationFileId: "file-op-x-explicit",
+      effectiveStart: "2026-01-01",
+      effectiveEnd: "2027-12-31",
+    });
+    await registry.approveExclusivity("veh-demo-001", {
+      reviewerId: "ops-reviewer-001",
+    });
+
+    const authOpX = buildAuthorization("auth-op-x", "op-X");
+    const authOpY = buildAuthorization("auth-op-y", "op-Y");
+
+    // Bound operator op-X is allowed
+    const decisionOpX = registry.evaluateVehicleOperatorExclusivity(
+      "veh-demo-001",
+      {
+        requestingOperatorId: "op-X",
+        operatingAuthorizationId: authOpX.authorizationId,
+        auditRefusal: true,
+      },
+    );
+    expect(decisionOpX.allowed).toBe(true);
+    expect(decisionOpX.reasonCode).toBeNull();
+
+    // Sibling operator op-Y under the same fleet partner MUST be refused and audited
+    const decisionOpY = registry.evaluateVehicleOperatorExclusivity(
+      "veh-demo-001",
+      {
+        requestingOperatorId: "op-Y",
+        operatingAuthorizationId: authOpY.authorizationId,
+        auditRefusal: true,
+      },
+    );
+    expect(decisionOpY.allowed).toBe(false);
+    expect(decisionOpY.reasonCode).toBe("exclusivity_other_operator");
+    expect(decisionOpY.boundOperatorId).toBe("op-X");
+    expect(decisionOpY.requestingOperatorId).toBe("op-Y");
+
+    await expect(
+      ownedMobility.queueCheckInMultiTaxi(
+        {
+          siteId: "site-taipei-main",
+          vehicleId: "veh-demo-001",
+          queueMode: "virtual_matching",
+        },
+        authOpY,
+      ),
+    ).rejects.toMatchObject({
+      code: "QUEUE_VEHICLE_EXCLUSIVITY_OTHER_OPERATOR",
+    });
+
+    const refusalEvents = recordAuditSpy.mock.calls.filter(
+      ([entry]) =>
+        entry.moduleName === "regulatory-registry" &&
+        entry.actionName === "refuse_cross_operator_dispatch" &&
+        entry.resourceId === "veh-demo-001" &&
+        entry.newValuesSummary?.requestingOperatorId === "op-Y" &&
+        entry.newValuesSummary?.boundOperatorId === "op-X",
+    );
+    expect(refusalEvents.length).toBeGreaterThanOrEqual(2);
+  });
 });

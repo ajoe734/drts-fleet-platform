@@ -245,6 +245,7 @@ describe("regulatory registry service", () => {
             reviewStatus: "approved",
             reviewerId: "platform-admin-001",
             reviewedAt: "2026-01-01T00:00:00Z",
+            exclusiveOperatorId: "partner-persisted-001",
             exclusiveProviderName: "Persisted Dispatch",
             effectiveStart: "2026-01-01T00:00:00Z",
             effectiveEnd: "2026-12-31T23:59:59Z",

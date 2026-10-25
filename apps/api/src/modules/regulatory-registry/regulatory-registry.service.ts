@@ -3136,32 +3136,35 @@ export class RegulatoryRegistryService
     }
   }
 
-  private expandDispatchOperatorAliases(
-    operatorOrFleetId: string,
-  ): Set<string> {
-    const normalized = this.normalizeNullableText(operatorOrFleetId);
-    if (!normalized) {
-      return new Set();
+  private resolveUnambiguousFleetOperatorId(
+    fleetPartnerId: string,
+  ): string | null {
+    const mappedOperators =
+      this.fleetPartnerOperatorMappings.get(fleetPartnerId);
+    if (!mappedOperators || mappedOperators.size !== 1) {
+      return null;
     }
-    const aliases = new Set<string>([normalized]);
-    const directMapped = this.fleetPartnerOperatorMappings.get(normalized);
-    if (directMapped) {
-      for (const id of directMapped) {
-        aliases.add(id);
-      }
-    }
-    for (const [
-      fleetPartnerId,
-      operatorIds,
-    ] of this.fleetPartnerOperatorMappings.entries()) {
-      if (operatorIds.has(normalized)) {
-        aliases.add(fleetPartnerId);
-        for (const id of operatorIds) {
-          aliases.add(id);
+    const operatorId = [...mappedOperators][0]!;
+    let fleetMatchCount = 0;
+    for (const operatorIds of this.fleetPartnerOperatorMappings.values()) {
+      if (operatorIds.has(operatorId)) {
+        fleetMatchCount += 1;
+        if (fleetMatchCount > 1) {
+          return null;
         }
       }
     }
-    return aliases;
+    return fleetMatchCount === 1 ? operatorId : null;
+  }
+
+  private resolveCanonicalDispatchOperatorId(
+    operatorOrFleetId: string | null | undefined,
+  ): string | null {
+    const normalized = this.normalizeNullableText(operatorOrFleetId);
+    if (!normalized) {
+      return null;
+    }
+    return this.resolveUnambiguousFleetOperatorId(normalized) ?? normalized;
   }
 
   private areSameDispatchOperator(
@@ -3174,8 +3177,14 @@ export class RegulatoryRegistryService
     if (boundOperatorId === requestingOperatorId) {
       return true;
     }
-    return this.expandDispatchOperatorAliases(boundOperatorId).has(
-      requestingOperatorId,
+    const canonicalBound =
+      this.resolveCanonicalDispatchOperatorId(boundOperatorId);
+    const canonicalRequester =
+      this.resolveCanonicalDispatchOperatorId(requestingOperatorId);
+    return Boolean(
+      canonicalBound &&
+      canonicalRequester &&
+      canonicalBound === canonicalRequester,
     );
   }
 
@@ -3190,11 +3199,7 @@ export class RegulatoryRegistryService
     if (!partnerId) {
       return null;
     }
-    const mappedOperators = this.fleetPartnerOperatorMappings.get(partnerId);
-    if (mappedOperators && mappedOperators.size === 1) {
-      return [...mappedOperators][0]!;
-    }
-    return partnerId;
+    return this.resolveUnambiguousFleetOperatorId(partnerId) ?? partnerId;
   }
 
   prepareOperatingAuthorizationOperator(
