@@ -534,7 +534,10 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
     const mod = await import(/* @vite-ignore */ modPath);
     const config = mod.default as {
       headers: () => Promise<
-        Array<{ source: string; headers: Array<{ key: string; value: string }> }>
+        Array<{
+          source: string;
+          headers: Array<{ key: string; value: string }>;
+        }>
       >;
     };
     const { default: loadRoutes } = appRequire(
@@ -601,7 +604,9 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
       const headers = await resolveHeadersForUrl(paymentPath);
       expect(headers["Content-Security-Policy"]).toBe(ECPAY_HOSTED_FIELDS_CSP);
 
-      const directives = parseCspDirectives(headers["Content-Security-Policy"]!);
+      const directives = parseCspDirectives(
+        headers["Content-Security-Policy"]!,
+      );
       const scriptSrc =
         directives.get("script-src") ?? directives.get("default-src") ?? [];
       const connectSrc =
@@ -658,9 +663,7 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
     );
 
     // route.ts and next.config.ts must not import CSP constants from the "use client" component
-    expect(routeSource).not.toMatch(
-      /from\s+["'][^"']*ecpay-hosted-fields["']/,
-    );
+    expect(routeSource).not.toMatch(/from\s+["'][^"']*ecpay-hosted-fields["']/);
     expect(routeSource).toMatch(/from\s+["'][^"']*ecpay-csp["']/);
     expect(nextConfigSource).toMatch(/from\s+["'][^"']*ecpay-csp["']/);
 
@@ -669,7 +672,25 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
       resolve("apps/passenger-app-web/components/payment/ecpay-csp.ts"),
       "utf8",
     );
+    const sharedCspJsSource = readFileSync(
+      resolve("apps/passenger-app-web/components/payment/ecpay-csp.js"),
+      "utf8",
+    );
     expect(sharedCspSource).not.toMatch(/^\s*["']use client["']/m);
+    expect(sharedCspJsSource).not.toMatch(/^\s*["']use client["']/m);
+
+    // Node createRequire(apps/passenger-app-web/package.json) must also resolve ./components/payment/ecpay-csp
+    // when next.config.ts is evaluated in a CommonJS VM context (e.g., driver-mounted-producer.spec.tsx).
+    const cjsResolved = appRequire("./components/payment/ecpay-csp") as Record<
+      string,
+      unknown
+    >;
+    expect(cjsResolved.ECPAY_HOSTED_FIELDS_CSP).toBe(ECPAY_HOSTED_FIELDS_CSP);
+    expect(cjsResolved.ECPAY_SCRIPT_ORIGINS).toEqual(ECPAY_SCRIPT_ORIGINS);
+    expect(cjsResolved.ECPAY_CONNECT_ORIGINS).toEqual(ECPAY_CONNECT_ORIGINS);
+    expect(cjsResolved.ECPAY_ACTION_ORIGINS).toEqual(ECPAY_ACTION_ORIGINS);
+    expect(cjsResolved.ECPAY_JQUERY_URL).toBe(ECPAY_JQUERY_URL);
+    expect(cjsResolved.ECPAY_WEB_SDK_URLS).toEqual(ECPAY_WEB_SDK_URLS);
 
     // The "use client" component must consume from the shared module and not define/export the CSP constants itself
     expect(hostedFieldsSource).toMatch(/^\s*["']use client["']/m);
