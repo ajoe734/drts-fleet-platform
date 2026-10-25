@@ -10,6 +10,8 @@ export const IAM_ACTOR_TYPES = [
   "partner_api_key",
   "partner_user",
   "referral_passenger",
+  // BUREAU-R13: external regulatory agency user (agency realm, read-only).
+  "agency_user",
 ] as const;
 
 export type IamActorType = (typeof IAM_ACTOR_TYPES)[number];
@@ -21,6 +23,7 @@ export const IAM_REALMS = [
   "ops",
   "driver",
   "partner",
+  "agency",
 ] as const;
 
 export type IamRealm = (typeof IAM_REALMS)[number];
@@ -31,6 +34,7 @@ export const IAM_ROLE_FAMILIES = [
   "ops",
   "driver",
   "partner",
+  "agency",
 ] as const;
 
 export type IamRoleFamily = (typeof IAM_ROLE_FAMILIES)[number];
@@ -42,6 +46,7 @@ export const IAM_RESOURCE_CONSTRAINT_KINDS = [
   "driver",
   "actor",
   "object",
+  "agency",
 ] as const;
 
 export type IamResourceConstraintKind =
@@ -73,6 +78,12 @@ export interface IamActorPolicyDefinition {
 export interface IamTenantRolePolicyDefinition {
   roleCode: string;
   roleFamily: "tenant";
+  scopes: readonly string[];
+}
+
+export interface IamAgencyRolePolicyDefinition {
+  roleCode: string;
+  roleFamily: "agency";
   scopes: readonly string[];
 }
 
@@ -112,6 +123,13 @@ const OBJECT_CONSTRAINT: IamResourceConstraint = {
   description: "Requires an object-level ownership or assignment check.",
 };
 
+const AGENCY_CONSTRAINT: IamResourceConstraint = {
+  kind: "agency",
+  claimKey: "agencyId",
+  description:
+    "Must stay within the resolved regulatory agency membership boundary.",
+};
+
 const SANDBOX_COMPLIANCE_SCOPES = [
   "sandbox.compliance.read",
   "sandbox.compliance.manage",
@@ -144,6 +162,28 @@ const IDENTITY_BREAK_GLASS_SCOPES = [
 ] as const;
 
 const ASSISTANT_SCOPES = ["assistant:write"] as const;
+
+/**
+ * BUREAU-R13 agency read-only portal scopes. These four are held only by the
+ * agency role policies below; they are never added to an existing actor
+ * policy (docs/02-architecture/bureau-agency-readonly-20261024.md §2.1-2.2).
+ */
+export const AGENCY_PORTAL_READ_SCOPES = [
+  "agency:trip_records:read",
+  "agency:reports:read",
+  "agency:qualifications:read",
+] as const;
+
+export const AGENCY_PORTAL_EXPORT_SCOPES = [
+  "agency:trip_records:export",
+] as const;
+
+/** Platform-side agency administration and access-audit review scopes. */
+const AGENCY_ADMINISTRATION_SCOPES = [
+  "agency:directory:read",
+  "agency:directory:write",
+  "agency:access_audit:read",
+] as const;
 
 export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   {
@@ -561,6 +601,54 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     ],
   },
   {
+    scope: "agency:trip_records:read",
+    allowedRealms: ["system", "agency"],
+    description:
+      "Agency read-only view of retained multi-taxi trip records (R11), masked projection only.",
+    resourceConstraints: [AGENCY_CONSTRAINT],
+  },
+  {
+    scope: "agency:trip_records:export",
+    allowedRealms: ["system", "agency"],
+    description:
+      "Agency controlled export of retained multi-taxi trip records (R11); jobs are owner-bound.",
+    resourceConstraints: [AGENCY_CONSTRAINT, ACTOR_CONSTRAINT],
+  },
+  {
+    scope: "agency:reports:read",
+    allowedRealms: ["system", "agency"],
+    description:
+      "Agency read-only aggregate operations, daily dispatch and complaint statistics (R09/R10/R12).",
+    resourceConstraints: [AGENCY_CONSTRAINT],
+  },
+  {
+    scope: "agency:qualifications:read",
+    allowedRealms: ["system", "agency"],
+    description:
+      "Agency read-only vehicle and driver qualification expiry status (R14).",
+    resourceConstraints: [AGENCY_CONSTRAINT],
+  },
+  {
+    scope: "agency:directory:read",
+    allowedRealms: ["system", "platform"],
+    description:
+      "Read regulatory agencies, agency memberships and agency invitations.",
+    resourceConstraints: [OBJECT_CONSTRAINT],
+  },
+  {
+    scope: "agency:directory:write",
+    allowedRealms: ["system", "platform"],
+    description:
+      "Create agencies, invite, deactivate and change agency access periods.",
+    resourceConstraints: [OBJECT_CONSTRAINT],
+  },
+  {
+    scope: "agency:access_audit:read",
+    allowedRealms: ["system", "platform"],
+    description: "Review the append-only agency data-access log.",
+    resourceConstraints: [OBJECT_CONSTRAINT],
+  },
+  {
     // UV-EXEC-003 / SD §4.2: gates the *first* stage of the two-stage voice
     // identity exchange. Only a workload service principal already holding
     // this scope may exchange itself for a short-lived, session-scoped
@@ -633,6 +721,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
         ...IDENTITY_BREAK_GLASS_SCOPES,
         ...ASSISTANT_SCOPES,
+        ...AGENCY_ADMINISTRATION_SCOPES,
       ],
     },
     {
@@ -673,6 +762,7 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         ...MULTI_TAXI_RATING_GOVERNANCE_SCOPES,
         ...MULTI_TAXI_RECORD_GOVERNANCE_SCOPES,
         ...IDENTITY_BREAK_GLASS_SCOPES,
+        ...AGENCY_ADMINISTRATION_SCOPES,
       ],
     },
     {
@@ -796,6 +886,16 @@ export const IAM_ACTOR_POLICY_DEFINITIONS: readonly IamActorPolicyDefinition[] =
         "partner:book",
       ],
     },
+    {
+      // BUREAU-R13: the actor-type ceiling is the least-privileged agency
+      // role (agency_viewer). Export is only ever issued from an explicit
+      // agency_exporter role binding (IAM_AGENCY_ROLE_POLICY_DEFINITIONS).
+      actorType: "agency_user",
+      realm: "agency",
+      roleFamilies: ["agency"],
+      defaultRoles: ["agency_viewer"],
+      scopes: [...AGENCY_PORTAL_READ_SCOPES],
+    },
   ];
 
 export const IAM_ACTOR_POLICY_BY_TYPE = new Map(
@@ -883,6 +983,35 @@ export const IAM_TENANT_ROLE_POLICY_BY_CODE = new Map(
   ]),
 );
 
+/**
+ * BUREAU-R13 agency roles (open decision D3): the catalog supports both; the
+ * inviting platform admin chooses one per invitation.
+ */
+export const IAM_AGENCY_ROLE_POLICY_DEFINITIONS: readonly IamAgencyRolePolicyDefinition[] =
+  [
+    {
+      roleCode: "agency_viewer",
+      roleFamily: "agency",
+      scopes: [...AGENCY_PORTAL_READ_SCOPES],
+    },
+    {
+      roleCode: "agency_exporter",
+      roleFamily: "agency",
+      scopes: [...AGENCY_PORTAL_READ_SCOPES, ...AGENCY_PORTAL_EXPORT_SCOPES],
+    },
+  ];
+
+export const IAM_AGENCY_ROLE_POLICY_BY_CODE = new Map(
+  IAM_AGENCY_ROLE_POLICY_DEFINITIONS.map((definition) => [
+    definition.roleCode,
+    definition,
+  ]),
+);
+
+export const IAM_AGENCY_ROLE_CODES = IAM_AGENCY_ROLE_POLICY_DEFINITIONS.map(
+  (definition) => definition.roleCode,
+);
+
 export function getIamScopeDefinition(
   scope: string,
 ): IamScopeDefinition | null {
@@ -943,4 +1072,22 @@ export function getIamTenantRoleScopes(
   roleCode: string,
 ): readonly string[] | null {
   return getIamTenantRolePolicy(roleCode)?.scopes ?? null;
+}
+
+export function getIamAgencyRoleScopes(
+  roleCode: string,
+): readonly string[] | null {
+  return IAM_AGENCY_ROLE_POLICY_BY_CODE.get(roleCode)?.scopes ?? null;
+}
+
+export function getIamAgencyRoleScopePresets(): Record<
+  string,
+  readonly string[]
+> {
+  return Object.fromEntries(
+    IAM_AGENCY_ROLE_POLICY_DEFINITIONS.map((definition) => [
+      definition.roleCode,
+      definition.scopes,
+    ]),
+  );
 }

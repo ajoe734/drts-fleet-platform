@@ -173,6 +173,12 @@
       "amended_at": "2026-10-24",
       "scope": "Appended referral_monthly_rating_governance_allocations V0130 only; all previous allocations, amendments and task ownership entries remain unchanged",
       "reason": "Registers the R04 monthly driver rating governance migration V0130__referral_monthly_rating_governance.sql at accepted protected dev 352d347e25cfcaecc2ab21f376b6976cc0944486, whose previous highest reserved migration is V0129 in referral_passenger_fee_consent_allocations."
+    },
+    {
+      "amended_by_task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "amended_at": "2026-10-25",
+      "scope": "Appended regulatory_agency_access_allocations V0132 and V0133 only; all previous allocations, amendments and task ownership entries remain unchanged. V0131 stays reserved for BUREAU-R02 (V0131__exclusivity_operator_binding.sql) and is not claimed here.",
+      "reason": "Registers the R13 agency read-only portal migrations V0132__regulatory_agencies.sql and V0133__agency_access_logs.sql at origin/dev a852615e5737b8bb47f90a95c0e1a1ae872c8cec, whose highest accepted migration is V0130 (R04); V0131 is the R02 reservation."
     }
   ],
   "voice_application_allocations": [
@@ -864,6 +870,47 @@
         "UNIQUE (driver_id, period_month, rule_type) enforces per-driver, per-Asia/Taipei-month, per-rule idempotency so coaching and termination_review records can both exist for the same driver and month without overwriting each other.",
         "Idempotent evaluation upserts aggregate fields (average_rating, rating_count, consecutive_low_months, triggered_months, monthly_breakdown) while preserving recorded handling status, outcome, outcome_reason, handled_by_actor_id, handled_at and audit_id.",
         "CHECK constraints enforce period_month YYYY-MM format, rule_type IN ('coaching', 'termination_review'), status IN ('pending', 'coached', 'terminated', 'dismissed'), and consistency between pending/null outcome and handled outcome/reason/actor/timestamp."
+      ]
+    }
+  ],
+  "regulatory_agency_access_allocations": [
+    {
+      "task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "version": "V0132",
+      "migration_filename": "V0132__regulatory_agencies.sql",
+      "domain": "regulatory_agency_directory",
+      "target_schema": "core",
+      "primary_tables": ["core.regulatory_agencies"],
+      "referenced_tables": [
+        "iam.identity_memberships",
+        "iam.identity_role_bindings",
+        "iam.identity_invitations"
+      ],
+      "description": "Traffic Bureau R13 regulatory agency master record; agency memberships, role bindings and invitations reuse the canonical iam.identity_* tables with realm 'agency'.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "agency_code is UNIQUE; status IN ('active', 'suspended', 'retired'); display_name is non-blank.",
+        "No agency rows are seeded by the migration; platform admin creates agencies (open decision D1).",
+        "A suspended or retired agency denies every agency session on the next request (JwtAuthService durable-state check)."
+      ]
+    },
+    {
+      "task_id": "BUREAU-R13-AGENCY-READONLY-PORTAL-20261024",
+      "version": "V0133",
+      "migration_filename": "V0133__agency_access_logs.sql",
+      "domain": "regulatory_agency_access_audit",
+      "target_schema": "admin",
+      "primary_tables": ["admin.agency_access_logs"],
+      "referenced_tables": [
+        "core.regulatory_agencies",
+        "iam.identity_principals"
+      ],
+      "description": "Traffic Bureau R13 append-only per-access audit of every agency read, export and agency-route authorization denial.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "BEFORE UPDATE OR DELETE row trigger and BEFORE TRUNCATE statement trigger reject mutation; DELETE only under the existing audit_retention_operator role with audit.allow_retention_archival = on (V0080 contract).",
+        "action, resource_type and outcome are CHECK-constrained; a denied or error outcome never records row_count.",
+        "No retention period, default or purge scheduler is introduced (open decision D9)."
       ]
     }
   ]
