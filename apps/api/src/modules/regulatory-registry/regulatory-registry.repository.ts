@@ -473,25 +473,44 @@ export class RegulatoryRegistryRepository {
     const cleaned = [
       ...new Set(list.map((e) => e.trim()).filter(Boolean)),
     ];
-    if (cleaned.length === 0) {
-      this.inMemoryPartnerContacts.delete(normalized);
-    } else {
-      this.inMemoryPartnerContacts.set(normalized, cleaned);
-    }
+    const previousInMemory = this.inMemoryPartnerContacts.has(normalized)
+      ? [...(this.inMemoryPartnerContacts.get(normalized) ?? [])]
+      : undefined;
+    const restorePreviousInMemory = () => {
+      if (previousInMemory !== undefined) {
+        this.inMemoryPartnerContacts.set(normalized, [...previousInMemory]);
+      } else {
+        this.inMemoryPartnerContacts.delete(normalized);
+      }
+    };
+    const commitInMemory = () => {
+      if (cleaned.length === 0) {
+        this.inMemoryPartnerContacts.delete(normalized);
+      } else {
+        this.inMemoryPartnerContacts.set(normalized, [...cleaned]);
+      }
+    };
     const snapshot = [...cleaned];
     if (this.isEnabled() && this.extendedExpirySqlSupported) {
       return this.withLazyPromise(snapshot, async () => {
-        const persisted = await this.persistFleetPartnerContactsInDb(
-          normalized,
-          cleaned,
-        );
-        if (!persisted && cleaned.length > 0) {
-          this.inMemoryPartnerContacts.delete(normalized);
-          return [];
+        try {
+          const persisted = await this.persistFleetPartnerContactsInDb(
+            normalized,
+            cleaned,
+          );
+          if (!persisted && cleaned.length > 0) {
+            restorePreviousInMemory();
+            return [];
+          }
+          commitInMemory();
+          return [...cleaned];
+        } catch (error) {
+          restorePreviousInMemory();
+          throw error;
         }
-        return [...cleaned];
       });
     }
+    commitInMemory();
     return this.withLazyPromise(snapshot, async () => [...cleaned]);
   }
 

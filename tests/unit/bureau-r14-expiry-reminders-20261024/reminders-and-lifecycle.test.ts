@@ -217,7 +217,12 @@ class R14SqlTransport {
         if (isClear) {
           this.dbPartnerEmails.delete(partnerId);
         } else {
-          this.dbPartnerEmails.set(partnerId, parsedEmails);
+          this.dbPartnerEmails.set(partnerId, [
+            ...new Set([
+              ...(this.dbPartnerEmails.get(partnerId) ?? []),
+              ...parsedEmails,
+            ]),
+          ]);
         }
         matchedRows.push({ partner_id: partnerId });
       } else if (matchedRows.length > 0) {
@@ -1192,7 +1197,7 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     const repository = new RegulatoryRegistryRepository(
       sqlDb as unknown as DatabaseService,
     );
-    repository.setFleetPartnerContacts("partner-demo-001", [
+    await repository.setFleetPartnerContacts("partner-demo-001", [
       "in-mem@fleet.tw",
     ]);
 
@@ -1651,6 +1656,54 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       "insurance-admin@f6-partner.tw",
       configuredPlatformMailbox,
     ]);
+
+    // 4. F6 side-effect 3 check: DB UPDATE rejection must propagate and must NOT leave
+    // uncommitted input in inMemoryPartnerContacts for subsequent GET / lookup calls.
+    const originalQuery = sqlDb.query.bind(sqlDb);
+    sqlDb.query = async (text: string, values: readonly unknown[] = []) => {
+      if (text.includes("/* partner-contact-upsert */")) {
+        throw new Error("controlled-write-failure");
+      }
+      return originalQuery(text, values);
+    };
+    await expect(
+      controllerInstance1.registerFleetPartnerContacts("not-present", {
+        emails: ["ghost@example.test"],
+      }),
+    ).rejects.toThrow("controlled-write-failure");
+    await expect(
+      repoInstance1.setFleetPartnerContacts("not-present", [
+        "ghost@example.test",
+      ]),
+    ).rejects.toThrow("controlled-write-failure");
+
+    // Subsequent GET on the same instance with DB SELECT returning 0 rows must return [], never ["ghost@example.test"]
+    const getAfterRejectedWrite =
+      await controllerInstance1.getFleetPartnerContacts("not-present");
+    expect(getAfterRejectedWrite.data).toEqual({
+      partnerId: "not-present",
+      emails: [],
+    });
+    expect(
+      await repoInstance1.getFleetPartnerContacts("not-present"),
+    ).toEqual([]);
+    expect(
+      await repoInstance1.findFleetPartnerContactEmails(["not-present"]),
+    ).toEqual([]);
+
+    // Rejected overwrite on an existing partner must also preserve previously committed contacts
+    await expect(
+      controllerInstance1.registerFleetPartnerContacts("partner-f6-001", {
+        emails: ["uncommitted-overwrite@f6-partner.tw"],
+      }),
+    ).rejects.toThrow("controlled-write-failure");
+    const getExistingAfterRejectedOverwrite =
+      await controllerInstance1.getFleetPartnerContacts("partner-f6-001");
+    expect(getExistingAfterRejectedOverwrite.data).toEqual({
+      partnerId: "partner-f6-001",
+      emails: ["dispatch-lead@f6-partner.tw", "insurance-admin@f6-partner.tw"],
+    });
+    sqlDb.query = originalQuery;
   });
 
   it("F7 regression: findVehiclePartnerIds and reconcileExpiry never query non-existent partner_id column on reg.phase1_registry_contracts (PostgreSQL 42703) across both insurance policies and paired-vehicle drivers", async () => {
