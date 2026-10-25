@@ -397,6 +397,28 @@ export class SupplySubmissionService implements OnModuleInit {
         );
       }
 
+      const activeDriverRenewal = this.submissions.find(
+        (sub) =>
+          sub.fleetPartnerId === fleetPartnerId &&
+          sub.submissionType === "profile_correction" &&
+          (sub.subjectDriverId === targetDriverId ||
+            sub.canonicalDriverId === targetDriverId) &&
+          ["draft", "submitted", "in_review", "needs_revision"].includes(
+            sub.status,
+          ),
+      );
+      if (activeDriverRenewal) {
+        throw this.conflict(
+          "ACTIVE_RENEWAL_SUBMISSION_EXISTS",
+          "An active driver renewal submission already exists for this driver.",
+          {
+            subjectDriverId: targetDriverId,
+            existingSubmissionId: activeDriverRenewal.submissionId,
+            status: activeDriverRenewal.status,
+          },
+        );
+      }
+
       const latestDriverDraft = this.findLatestApprovedDriverDraft(
         fleetPartnerId,
         targetDriverId,
@@ -529,6 +551,29 @@ export class SupplySubmissionService implements OnModuleInit {
         "FLEET_SCOPE_DENIED",
         "The target vehicle is outside the fleet partner scope.",
         { subjectVehicleId: targetVehicleId, fleetPartnerId },
+      );
+    }
+
+    const activeVehicleRenewal = this.submissions.find(
+      (sub) =>
+        sub.fleetPartnerId === fleetPartnerId &&
+        sub.submissionType === command.submissionType &&
+        (sub.subjectVehicleId === targetVehicleId ||
+          sub.canonicalVehicleId === targetVehicleId) &&
+        ["draft", "submitted", "in_review", "needs_revision"].includes(
+          sub.status,
+        ),
+    );
+    if (activeVehicleRenewal) {
+      throw this.conflict(
+        "ACTIVE_RENEWAL_SUBMISSION_EXISTS",
+        `An active ${command.submissionType} submission already exists for this vehicle.`,
+        {
+          subjectVehicleId: targetVehicleId,
+          submissionType: command.submissionType,
+          existingSubmissionId: activeVehicleRenewal.submissionId,
+          status: activeVehicleRenewal.status,
+        },
       );
     }
 

@@ -1146,7 +1146,10 @@ export class SupplyReviewService implements OnModuleInit {
       return null;
     }
 
-    const reference = artifacts.vehicleDraft?.currentDriverSubmissionId;
+    const reference =
+      submission.submissionType === "vehicle_onboarding"
+        ? artifacts.vehicleDraft?.currentDriverSubmissionId
+        : null;
     let referencedDriverSubmission: SupplySubmissionRecord | null = null;
     if (reference) {
       if (executor && this.supplySubmissionRepository?.isEnabled()) {
