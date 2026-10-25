@@ -937,6 +937,38 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       ) {
         return { rows: [], rowCount: 0 };
       }
+      if (
+        normalized.includes("INSERT INTO reporting.dispatch_daily_records") &&
+        params.length === 1
+      ) {
+        const orderIdParam = String(params[0]);
+        const newestExisting = [...table.values()]
+          .filter((row) => row.order_id === orderIdParam)
+          .sort(
+            (a, b) =>
+              b.generated_at.localeCompare(a.generated_at) ||
+              b.service_date.localeCompare(a.service_date),
+          )[0];
+        if (newestExisting) {
+          const taipeiDay = toTaipeiDay(
+            newestExisting.reservation_time ?? newestExisting.requested_at,
+          );
+          if (newestExisting.service_date !== taipeiDay) {
+            const targetKey = `${taipeiDay}:${orderIdParam}`;
+            const existingOnTarget = table.get(targetKey);
+            if (
+              !existingOnTarget ||
+              existingOnTarget.generated_at <= newestExisting.generated_at
+            ) {
+              table.set(targetKey, {
+                ...newestExisting,
+                service_date: taipeiDay,
+              });
+            }
+          }
+        }
+        return { rows: [], rowCount: 1 };
+      }
       if (normalized.includes("INSERT INTO reporting.dispatch_daily_records")) {
         const serviceDateParam = String(params[0]);
         const orderIdParam = String(params[1]);
@@ -1161,6 +1193,38 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
     expect(
       committedDailyTable.has(`2026-10-25:${taipeiMidnightOrder.orderId}`),
     ).toBe(true);
+
+    // 5. Conditional legacy G2 > G1 reconciliation: if a legacy UTC-day row on 2026-10-24 has newer generated_at G2 than incoming stale G1 (Taipei 2026-10-25), G2 is re-keyed to 2026-10-25 and survives stale G1
+    committedDailyTable.clear();
+    seedLegacyUtcRow();
+    const g2Row = committedDailyTable.get(
+      `2026-10-24:${taipeiMidnightOrder.orderId}`,
+    )!;
+    g2Row.final_status = "completed";
+    g2Row.complaint_count = 1;
+    g2Row.generated_at = "2026-10-24T18:00:00.000Z";
+
+    await repository.upsertDailyDispatchRecords([
+      {
+        ...rebuilt.records[0]!,
+        serviceDate: "2026-10-25",
+        finalStatus: "assigned",
+        complaintCount: 0,
+        generatedAt: "2026-10-24T17:05:00.000Z",
+      },
+    ]);
+    expect(
+      committedDailyTable.has(`2026-10-24:${taipeiMidnightOrder.orderId}`),
+    ).toBe(false);
+    expect(
+      committedDailyTable.get(`2026-10-25:${taipeiMidnightOrder.orderId}`),
+    ).toMatchObject({
+      service_date: "2026-10-25",
+      order_id: taipeiMidnightOrder.orderId,
+      final_status: "completed",
+      complaint_count: 1,
+      generated_at: "2026-10-24T18:00:00.000Z",
+    });
   });
 
   // Official migrated PostgreSQL schema persistence and readback check.
@@ -1795,6 +1859,71 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
             order_id: taipeiMidnightOrder.orderId,
           },
         ]);
+
+        // 7. Conditional legacy G2 > G1 reconciliation on official PostgreSQL schema:
+        // when a legacy UTC-day row on 2026-10-24 (requested_at 17:00Z -> Taipei 2026-10-25) has newer generated_at G2 (17:45Z)
+        // than an incoming stale G1 (17:00:01Z, Taipei 2026-10-25), G2 is first re-keyed to 2026-10-25 and survives stale G1
+        await database.query(
+          "DELETE FROM reporting.dispatch_daily_records WHERE order_id = $1",
+          [taipeiMidnightOrder.orderId],
+        );
+        await insertLegacyUtcRow();
+
+        await reportingRepository.upsertDailyDispatchRecords([
+          {
+            ...readDay25[0]!,
+            serviceDate: taipeiServiceDay,
+            finalStatus: "assigned",
+            complaintCount: 0,
+            generatedAt: "2026-10-24T17:00:01.000Z",
+          },
+        ]);
+
+        const persistedAfterLegacyG2SurvivesStaleG1 = await database.query<{
+          service_date: string;
+          order_id: string;
+          final_status: string;
+          complaint_count: number;
+          generated_at: Date;
+        }>(
+          `
+            SELECT
+              service_date::text AS service_date,
+              order_id,
+              final_status,
+              complaint_count,
+              generated_at
+            FROM reporting.dispatch_daily_records
+            WHERE order_id = $1
+          `,
+          [taipeiMidnightOrder.orderId],
+        );
+        expect(persistedAfterLegacyG2SurvivesStaleG1.rows).toHaveLength(1);
+        expect(persistedAfterLegacyG2SurvivesStaleG1.rows[0]).toMatchObject({
+          service_date: taipeiServiceDay,
+          order_id: taipeiMidnightOrder.orderId,
+          final_status: "completed",
+          complaint_count: 1,
+        });
+        expect(
+          new Date(
+            persistedAfterLegacyG2SurvivesStaleG1.rows[0]!.generated_at,
+          ).toISOString(),
+        ).toBe("2026-10-24T17:45:00.000Z");
+
+        const readDay25AfterLegacyG2SurvivesG1 =
+          await readerService.listDailyDispatchRecords({
+            serviceDate: taipeiServiceDay,
+            orderId: taipeiMidnightOrder.orderId,
+          });
+        expect(readDay25AfterLegacyG2SurvivesG1).toHaveLength(1);
+        expect(readDay25AfterLegacyG2SurvivesG1[0]).toMatchObject({
+          serviceDate: taipeiServiceDay,
+          orderId: taipeiMidnightOrder.orderId,
+          finalStatus: "completed",
+          complaintCount: 1,
+          generatedAt: "2026-10-24T17:45:00.000Z",
+        });
       } finally {
         const cleanupOrderIds = [
           taipeiMidnightOrder.orderId,

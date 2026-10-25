@@ -203,6 +203,101 @@ export class ReportingRepository {
     const targetServiceDate =
       toTaipeiDate(record.reservationTime ?? record.requestedAt) ??
       this.normalizeServiceDate(record.serviceDate);
+    const rekeyExistingToTaipeiDaySql = `
+      INSERT INTO reporting.dispatch_daily_records (
+        service_date,
+        order_id,
+        order_no,
+        order_source,
+        tenant_id,
+        partner_id,
+        service_product_code,
+        requested_at,
+        reservation_time,
+        pickup_address_snapshot,
+        dropoff_address_snapshot,
+        first_dispatch_at,
+        first_assigned_at,
+        final_driver_id,
+        final_vehicle_id,
+        final_plate_no,
+        eta_seconds_at_assignment,
+        arrived_pickup_at,
+        trip_started_at,
+        trip_completed_at,
+        final_status,
+        redispatch_count,
+        cancellation_reason,
+        complaint_count,
+        generated_at
+      )
+      SELECT
+        (
+          COALESCE(existing.reservation_time, existing.requested_at)
+          AT TIME ZONE 'Asia/Taipei'
+        )::date AS service_date,
+        existing.order_id,
+        existing.order_no,
+        existing.order_source,
+        existing.tenant_id,
+        existing.partner_id,
+        existing.service_product_code,
+        existing.requested_at,
+        existing.reservation_time,
+        existing.pickup_address_snapshot,
+        existing.dropoff_address_snapshot,
+        existing.first_dispatch_at,
+        existing.first_assigned_at,
+        existing.final_driver_id,
+        existing.final_vehicle_id,
+        existing.final_plate_no,
+        existing.eta_seconds_at_assignment,
+        existing.arrived_pickup_at,
+        existing.trip_started_at,
+        existing.trip_completed_at,
+        existing.final_status,
+        existing.redispatch_count,
+        existing.cancellation_reason,
+        existing.complaint_count,
+        existing.generated_at
+      FROM (
+        SELECT *
+        FROM reporting.dispatch_daily_records
+        WHERE order_id = $1
+        ORDER BY generated_at DESC, service_date DESC
+        LIMIT 1
+      ) existing
+      WHERE existing.service_date <> (
+        COALESCE(existing.reservation_time, existing.requested_at)
+        AT TIME ZONE 'Asia/Taipei'
+      )::date
+      ON CONFLICT (service_date, order_id) DO UPDATE SET
+        order_no = EXCLUDED.order_no,
+        order_source = EXCLUDED.order_source,
+        tenant_id = EXCLUDED.tenant_id,
+        partner_id = EXCLUDED.partner_id,
+        service_product_code = EXCLUDED.service_product_code,
+        requested_at = EXCLUDED.requested_at,
+        reservation_time = EXCLUDED.reservation_time,
+        pickup_address_snapshot = EXCLUDED.pickup_address_snapshot,
+        dropoff_address_snapshot = EXCLUDED.dropoff_address_snapshot,
+        first_dispatch_at = EXCLUDED.first_dispatch_at,
+        first_assigned_at = EXCLUDED.first_assigned_at,
+        final_driver_id = EXCLUDED.final_driver_id,
+        final_vehicle_id = EXCLUDED.final_vehicle_id,
+        final_plate_no = EXCLUDED.final_plate_no,
+        eta_seconds_at_assignment = EXCLUDED.eta_seconds_at_assignment,
+        arrived_pickup_at = EXCLUDED.arrived_pickup_at,
+        trip_started_at = EXCLUDED.trip_started_at,
+        trip_completed_at = EXCLUDED.trip_completed_at,
+        final_status = EXCLUDED.final_status,
+        redispatch_count = EXCLUDED.redispatch_count,
+        cancellation_reason = EXCLUDED.cancellation_reason,
+        complaint_count = EXCLUDED.complaint_count,
+        generated_at = EXCLUDED.generated_at
+      WHERE reporting.dispatch_daily_records.generated_at <= EXCLUDED.generated_at
+    `;
+    const rekeyExistingToTaipeiDayValues = [record.orderId];
     const upsertSql = `
       INSERT INTO reporting.dispatch_daily_records (
         service_date,
@@ -324,6 +419,10 @@ export class ReportingRepository {
           "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
           [`reporting.dispatch_daily_records:${record.orderId}`],
         );
+        await client.query(
+          rekeyExistingToTaipeiDaySql,
+          rekeyExistingToTaipeiDayValues,
+        );
         await client.query(upsertSql, upsertValues);
         await client.query(deleteStaleDaysSql, deleteStaleDaysValues);
         await client.query("COMMIT");
@@ -340,6 +439,10 @@ export class ReportingRepository {
       return;
     }
 
+    await this.databaseService!.query(
+      rekeyExistingToTaipeiDaySql,
+      rekeyExistingToTaipeiDayValues,
+    );
     await this.databaseService!.query(upsertSql, upsertValues);
     await this.databaseService!.query(
       deleteStaleDaysSql,
