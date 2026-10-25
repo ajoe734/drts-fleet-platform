@@ -819,6 +819,48 @@ export class RegulatoryRegistryRepository {
     return result.rows[0]?.operator_id ?? null;
   }
 
+  async findFleetPartnerOperatorMappings(): Promise<
+    {
+      fleetPartnerId: string;
+      multiTaxiOperatorIds: string[];
+    }[]
+  > {
+    if (!this.isEnabled()) return [];
+    try {
+      const result = await this.databaseService!.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_fleet_partners`,
+      );
+      return result.rows
+        .map((row) =>
+          this.parseRecord<{
+            fleetPartnerId?: string;
+            multiTaxiOperatorIds?: string[];
+          }>(row.record, "admin.phase1_fleet_partners"),
+        )
+        .filter(
+          (
+            record,
+          ): record is {
+            fleetPartnerId: string;
+            multiTaxiOperatorIds?: string[];
+          } =>
+            typeof record.fleetPartnerId === "string" &&
+            record.fleetPartnerId.trim().length > 0,
+        )
+        .map((record) => ({
+          fleetPartnerId: record.fleetPartnerId.trim(),
+          multiTaxiOperatorIds: Array.isArray(record.multiTaxiOperatorIds)
+            ? record.multiTaxiOperatorIds
+                .filter((id): id is string => typeof id === "string")
+                .map((id) => id.trim())
+                .filter((id) => id.length > 0)
+            : [],
+        }));
+    } catch {
+      return [];
+    }
+  }
+
   async ensureLiveMapTestDriver() {
     return ensureLiveMapFixture(this.databaseService);
   }
@@ -1271,19 +1313,22 @@ export class RegulatoryRegistryRepository {
             INSERT INTO reg.phase1_registry_exclusivities (
               vehicle_id,
               review_status,
+              exclusive_operator_id,
               updated_at,
               record
             ) VALUES (
-              $1, $2, $3, $4::jsonb
+              $1, $2, $3, $4, $5::jsonb
             )
             ON CONFLICT (vehicle_id) DO UPDATE SET
               review_status = EXCLUDED.review_status,
+              exclusive_operator_id = EXCLUDED.exclusive_operator_id,
               updated_at = EXCLUDED.updated_at,
               record = EXCLUDED.record
           `,
           [
             exclusivity.vehicleId,
             exclusivity.reviewStatus,
+            exclusivity.exclusiveOperatorId ?? null,
             exclusivity.updatedAt,
             JSON.stringify(exclusivity),
           ],

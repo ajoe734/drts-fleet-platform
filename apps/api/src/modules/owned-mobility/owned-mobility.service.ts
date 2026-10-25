@@ -1253,6 +1253,10 @@ export class OwnedMobilityService
     }
 
     const now = new Date().toISOString();
+    this.regulatoryRegistryService.registerOperatingAuthorizationOperator?.(
+      authorization.authorizationId,
+      authorization.operatorId,
+    );
     const scheduled = command.timingMode === "scheduled";
     const reservationWindowEnd = scheduled
       ? new Date(
@@ -7371,14 +7375,16 @@ export class OwnedMobilityService
     const repository = this.ownedMobilityRepository;
     if (action === "check_in") {
       this.assertQueuePolicy(context);
-      const registry = await this.prepareQueueRegistryProjection();
+      const registry = await this.prepareQueueRegistryProjection(
+        context.operatingAuthorizationId,
+      );
       if (!registry.authorityAvailable)
         throw new ApiRequestError(
           HttpStatus.SERVICE_UNAVAILABLE,
           "QUEUE_ELIGIBILITY_AUTHORITY_UNAVAILABLE",
           "Current queue supply authority is unavailable.",
         );
-      this.assertQueueEligibility(command.vehicleId, context);
+      this.assertQueueEligibility(command.vehicleId, context, requestId);
       // Read the established dependency authorities before taking the queue
       // transaction's connection/lock. They keep their own current-read scope;
       // no additional connection is awaited while holding this queue transaction's lock.
@@ -7518,11 +7524,18 @@ export class OwnedMobilityService
     }
   }
 
-  private async prepareQueueRegistryProjection(): Promise<QueueRegistryProjection> {
+  private async prepareQueueRegistryProjection(
+    operatingAuthorizationId?: string | null,
+  ): Promise<QueueRegistryProjection> {
     try {
-      await this.regulatoryRegistryService.prepareDispatchSupply?.(
-        "standard_taxi",
-      );
+      await Promise.all([
+        this.regulatoryRegistryService.prepareDispatchSupply?.("standard_taxi"),
+        operatingAuthorizationId
+          ? this.regulatoryRegistryService.prepareOperatingAuthorizationOperator?.(
+              operatingAuthorizationId,
+            )
+          : undefined,
+      ]);
       return this.buildQueueRegistryProjection();
     } catch {
       // A failed fresh read must not silently reuse the old cached pair.
@@ -7557,6 +7570,10 @@ export class OwnedMobilityService
     authorization: MultiTaxiOperatingAuthorizationRecord,
     requestId?: string,
   ) {
+    this.regulatoryRegistryService.registerOperatingAuthorizationOperator?.(
+      authorization.authorizationId,
+      authorization.operatorId,
+    );
     return this.queueCheckIn(command, requestId, {
       runtimeProfileCode: "multi_taxi_direct",
       queueMode: command.queueMode ?? "virtual_matching",
@@ -7569,6 +7586,10 @@ export class OwnedMobilityService
     authorization: MultiTaxiOperatingAuthorizationRecord,
     requestId?: string,
   ) {
+    this.regulatoryRegistryService.registerOperatingAuthorizationOperator?.(
+      authorization.authorizationId,
+      authorization.operatorId,
+    );
     return this.queueCheckOut(command, requestId, {
       runtimeProfileCode: "multi_taxi_direct",
       queueMode: command.queueMode ?? "virtual_matching",
@@ -10611,6 +10632,7 @@ export class OwnedMobilityService
   private assertQueueEligibility(
     vehicleId: string,
     context: QueueRuntimeContext,
+    requestId?: string,
   ) {
     this.assertQueuePolicy(context);
     if (
@@ -10626,10 +10648,58 @@ export class OwnedMobilityService
     }
 
     if (
-      !this.regulatoryRegistryService.getVehicleDispatchability(
-        vehicleId,
-        "standard_taxi",
-      )
+      context.operatingAuthorizationId &&
+      typeof this.regulatoryRegistryService
+        .evaluateVehicleOperatorExclusivity === "function"
+    ) {
+      const exclusivityDecision =
+        this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity(
+          vehicleId,
+          {
+            operatingAuthorizationId: context.operatingAuthorizationId,
+            auditRefusal: true,
+            ...(requestId ? { requestId } : {}),
+          },
+        );
+      if (!exclusivityDecision.allowed) {
+        throw new ApiRequestError(
+          HttpStatus.CONFLICT,
+          exclusivityDecision.reasonCode === "exclusivity_other_operator"
+            ? "QUEUE_VEHICLE_EXCLUSIVITY_OTHER_OPERATOR"
+            : "QUEUE_VEHICLE_EXCLUSIVITY_OPERATOR_UNBOUND",
+          exclusivityDecision.reasonCode === "exclusivity_other_operator"
+            ? "Vehicle is exclusively bound to another operator and cannot check in under this operating authorization."
+            : "Vehicle exclusivity declaration is not yet bound to an operator ID.",
+          {
+            vehicleId,
+            operatingAuthorizationId: context.operatingAuthorizationId,
+            reasonCode: exclusivityDecision.reasonCode,
+            reasonCodes: exclusivityDecision.reasonCode
+              ? [exclusivityDecision.reasonCode]
+              : [],
+            requestingOperatorId: exclusivityDecision.requestingOperatorId,
+            boundOperatorId: exclusivityDecision.boundOperatorId,
+            evaluatedAt: exclusivityDecision.evaluatedAt,
+          },
+        );
+      }
+    }
+
+    if (
+      !(context.operatingAuthorizationId
+        ? this.regulatoryRegistryService.getVehicleDispatchability(
+            vehicleId,
+            "standard_taxi",
+            {
+              operatingAuthorizationId: context.operatingAuthorizationId,
+              auditRefusal: true,
+              ...(requestId ? { requestId } : {}),
+            },
+          )
+        : this.regulatoryRegistryService.getVehicleDispatchability(
+            vehicleId,
+            "standard_taxi",
+          ))
     ) {
       throw new ApiRequestError(
         HttpStatus.BAD_REQUEST,
@@ -11778,6 +11848,11 @@ export class OwnedMobilityService
   ): MaybePromise<void> {
     const matchingSuppressions =
       this.regulatoryRegistryService.prepareMatchingSuppressions();
+    const operatorBinding = order.operatingAuthorizationId
+      ? this.regulatoryRegistryService.prepareOperatingAuthorizationOperator?.(
+          order.operatingAuthorizationId,
+        )
+      : undefined;
     const capabilities =
       this.vehicleEligibilityService?.prepareVehicleCapabilities?.(
         vehicleIds ?? order.serviceBucket,
@@ -11789,10 +11864,13 @@ export class OwnedMobilityService
             order.serviceProductCode,
           )
         : undefined;
-    if (capabilities || product || matchingSuppressions)
-      return Promise.all([capabilities, product, matchingSuppressions]).then(
-        () => undefined,
-      );
+    if (capabilities || product || matchingSuppressions || operatorBinding)
+      return Promise.all([
+        capabilities,
+        product,
+        matchingSuppressions,
+        operatorBinding,
+      ]).then(() => undefined);
   }
 
   private assertAssignmentEligibilityRecheck(
@@ -11810,6 +11888,46 @@ export class OwnedMobilityService
         driverId,
       );
 
+      if (
+        order.operatingAuthorizationId &&
+        typeof this.regulatoryRegistryService
+          .evaluateVehicleOperatorExclusivity === "function"
+      ) {
+        const exclusivityDecision =
+          this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity(
+            vehicleId,
+            {
+              operatingAuthorizationId: order.operatingAuthorizationId,
+              auditRefusal: true,
+            },
+          );
+        if (!exclusivityDecision.allowed) {
+          throw new ApiRequestError(
+            HttpStatus.CONFLICT,
+            exclusivityDecision.reasonCode === "exclusivity_other_operator"
+              ? "VEHICLE_EXCLUSIVITY_OTHER_OPERATOR"
+              : "VEHICLE_EXCLUSIVITY_OPERATOR_UNBOUND",
+            exclusivityDecision.reasonCode === "exclusivity_other_operator"
+              ? "Vehicle is exclusively bound to another operator for the active period."
+              : "Vehicle exclusivity declaration is not yet bound to an operator ID.",
+            {
+              dispatchJobId,
+              orderId: order.orderId,
+              vehicleId,
+              driverId,
+              operatingAuthorizationId: order.operatingAuthorizationId,
+              reasonCode: exclusivityDecision.reasonCode,
+              reasonCodes: exclusivityDecision.reasonCode
+                ? [exclusivityDecision.reasonCode]
+                : [],
+              requestingOperatorId: exclusivityDecision.requestingOperatorId,
+              boundOperatorId: exclusivityDecision.boundOperatorId,
+              evaluatedAt: exclusivityDecision.evaluatedAt,
+            },
+          );
+        }
+      }
+
       if (this.vehicleEligibilityService) {
         this.vehicleEligibilityService.assertDispatchAssignmentEligible(
           order,
@@ -11818,10 +11936,19 @@ export class OwnedMobilityService
         );
       } else {
         if (
-          !this.regulatoryRegistryService.getVehicleDispatchability(
-            vehicleId,
-            order.serviceBucket,
-          )
+          !(order.operatingAuthorizationId
+            ? this.regulatoryRegistryService.getVehicleDispatchability(
+                vehicleId,
+                order.serviceBucket,
+                {
+                  operatingAuthorizationId: order.operatingAuthorizationId,
+                  auditRefusal: true,
+                },
+              )
+            : this.regulatoryRegistryService.getVehicleDispatchability(
+                vehicleId,
+                order.serviceBucket,
+              ))
         ) {
           throw new ApiRequestError(
             HttpStatus.BAD_REQUEST,
@@ -13777,17 +13904,37 @@ export class OwnedMobilityService
 
   private listEligibleDispatchCandidates(order: OwnedOrderRecord) {
     const destination = this.resolvePickupEtaDestination(order);
+    const operatingAuthorizationId =
+      order.operatingAuthorizationId?.trim() || null;
+    const hasOperatorContext = Boolean(operatingAuthorizationId);
     const candidates = this.vehicleEligibilityService
       ? this.vehicleEligibilityService.listEligibleSupply(
           this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(
             order,
           ),
-          { destination },
+          {
+            destination,
+            ...(hasOperatorContext
+              ? {
+                  operatingAuthorizationId,
+                  auditRefusal: true,
+                }
+              : {}),
+          },
         )
-      : this.regulatoryRegistryService.getEligibleCandidates(
-          order.serviceBucket,
-          destination,
-        );
+      : hasOperatorContext
+        ? this.regulatoryRegistryService.getEligibleCandidates(
+            order.serviceBucket,
+            destination,
+            {
+              operatingAuthorizationId,
+              auditRefusal: true,
+            },
+          )
+        : this.regulatoryRegistryService.getEligibleCandidates(
+            order.serviceBucket,
+            destination,
+          );
     return candidates
       .filter(
         (candidate) =>
@@ -13892,10 +14039,23 @@ export class OwnedMobilityService
     const destination = this.resolvePickupEtaDestination(order);
     const serviceProduct =
       this.vehicleEligibilityService.resolveServiceProductForOwnedOrder(order);
-    const candidates = this.regulatoryRegistryService.getEligibleCandidates(
-      order.serviceBucket,
-      destination,
-    );
+    const operatingAuthorizationId =
+      order.operatingAuthorizationId?.trim() || null;
+    const hasOperatorContext = Boolean(operatingAuthorizationId);
+    const candidates =
+      hasOperatorContext && !includeIneligible
+        ? this.regulatoryRegistryService.getEligibleCandidates(
+            order.serviceBucket,
+            destination,
+            {
+              operatingAuthorizationId,
+              auditRefusal: true,
+            },
+          )
+        : this.regulatoryRegistryService.getEligibleCandidates(
+            order.serviceBucket,
+            destination,
+          );
     const sourcePlatform = this.forwarderSourceMap.get(order.orderId) ?? null;
 
     const evaluatedCandidates = await Promise.all(
@@ -13925,6 +14085,27 @@ export class OwnedMobilityService
               ? { bookingRequirements: order.bookingRequirements }
               : {}),
           });
+          const exclusivityDecision =
+            hasOperatorContext &&
+            typeof this.regulatoryRegistryService
+              .evaluateVehicleOperatorExclusivity === "function"
+              ? this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity(
+                  candidate.vehicleId,
+                  {
+                    operatingAuthorizationId,
+                    auditRefusal: true,
+                  },
+                )
+              : null;
+          const exclusivityBlocked = Boolean(
+            exclusivityDecision && !exclusivityDecision.allowed,
+          );
+          const hardReasonCodes = [
+            ...decision.hardReasonCodes,
+            ...(exclusivityBlocked && exclusivityDecision?.reasonCode
+              ? [exclusivityDecision.reasonCode]
+              : []),
+          ];
 
           return {
             ...candidate,
@@ -13948,8 +14129,10 @@ export class OwnedMobilityService
               policyVersion: decision.policyVersion,
               evaluatedAt: decision.evaluatedAt,
             },
-            eligibilityDecision: decision.decision,
-            hardReasonCodes: [...decision.hardReasonCodes],
+            eligibilityDecision: exclusivityBlocked
+              ? "ineligible"
+              : decision.decision,
+            hardReasonCodes,
             softReasonCodes: [...decision.softReasonCodes],
             missingRequirements: [...decision.missingRequirements],
             locationState: decision.locationState,

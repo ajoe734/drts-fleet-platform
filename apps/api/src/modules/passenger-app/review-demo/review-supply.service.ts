@@ -170,6 +170,7 @@ export class ReviewSupplyService {
               ...exclusivity,
               vehicleId: fixture.vehicleId,
               declarationFileId: "review-simulated-document",
+              exclusiveOperatorId: operatorId,
               exclusiveProviderName: "虛構演練車隊",
               effectiveStart: start,
               effectiveEnd: end,

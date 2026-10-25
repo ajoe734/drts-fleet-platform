@@ -179,6 +179,12 @@
       "amended_at": "2026-10-25",
       "scope": "Appended regulatory_agency_access_allocations V0132 and V0133 only; all previous allocations, amendments and task ownership entries remain unchanged. V0131 stays reserved for BUREAU-R02 (V0131__exclusivity_operator_binding.sql) and is not claimed here.",
       "reason": "Registers the R13 agency read-only portal migrations V0132__regulatory_agencies.sql and V0133__agency_access_logs.sql at origin/dev a852615e5737b8bb47f90a95c0e1a1ae872c8cec, whose highest accepted migration is V0130 (R04); V0131 is the R02 reservation."
+    },
+    {
+      "amended_by_task_id": "BUREAU-R02-EXCLUSIVE-OPERATOR-CHECK-20261024",
+      "amended_at": "2026-10-25",
+      "scope": "Appended exclusivity_operator_binding_allocations V0131 only; all previous allocations, amendments and task ownership entries remain unchanged",
+      "reason": "Registers the R02 vehicle dispatch exclusivity operator-binding migration V0131__exclusivity_operator_binding.sql after BUREAU-R04 (V0130) and BUREAU-R13 (V0132, V0133) merged to origin/dev and 3-leaf migration_reservation_scope_coordination."
     }
   ],
   "voice_application_allocations": [
@@ -870,6 +876,27 @@
         "UNIQUE (driver_id, period_month, rule_type) enforces per-driver, per-Asia/Taipei-month, per-rule idempotency so coaching and termination_review records can both exist for the same driver and month without overwriting each other.",
         "Idempotent evaluation upserts aggregate fields (average_rating, rating_count, consecutive_low_months, triggered_months, monthly_breakdown) while preserving recorded handling status, outcome, outcome_reason, handled_by_actor_id, handled_at and audit_id.",
         "CHECK constraints enforce period_month YYYY-MM format, rule_type IN ('coaching', 'termination_review'), status IN ('pending', 'coached', 'terminated', 'dismissed'), and consistency between pending/null outcome and handled outcome/reason/actor/timestamp."
+      ]
+    }
+  ],
+  "exclusivity_operator_binding_allocations": [
+    {
+      "task_id": "BUREAU-R02-EXCLUSIVE-OPERATOR-CHECK-20261024",
+      "version": "V0131",
+      "migration_filename": "V0131__exclusivity_operator_binding.sql",
+      "domain": "exclusivity_operator_binding",
+      "target_schema": "reg",
+      "primary_tables": [
+        "reg.dispatch_exclusivities",
+        "reg.phase1_registry_exclusivities"
+      ],
+      "referenced_tables": ["reg.multi_taxi_operating_authorizations"],
+      "description": "Traffic Bureau R02 canonical dispatching-operator binding (exclusive_operator_id) on vehicle dispatch exclusivity records while preserving exclusiveProviderName as display text.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "reg.dispatch_exclusivities and reg.phase1_registry_exclusivities gain exclusive_operator_id varchar(100) NULL; existing rows without an operator ID remain NULL (unbound) and are blocked by runtime dispatch eligibility (exclusivity_operator_unbound) until bound to an approved operator.",
+        "Backfill copies non-empty trimmed record->>'exclusiveOperatorId' into reg.phase1_registry_exclusivities.exclusive_operator_id when exclusive_operator_id IS NULL without fabricating missing bindings.",
+        "idx_phase1_registry_exclusivities_operator_status indexes (exclusive_operator_id, review_status) on reg.phase1_registry_exclusivities for operator-scoped exclusivity lookups."
       ]
     }
   ],
