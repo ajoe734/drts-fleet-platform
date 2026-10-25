@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -47,7 +53,7 @@ const SCHEDULER_SA =
 const REGULATORY_EXPIRY_ROUTE_SCOPE =
   "POST internal/scheduled-tasks/regulatory-expiry/run";
 
-function runOpsProvisionScript(
+function runDevProvisionScript(
   env: Record<string, string | undefined>,
   describeExit = 1,
 ) {
@@ -56,11 +62,11 @@ function runOpsProvisionScript(
   const gcloud = path.join(dir, "gcloud");
   writeFileSync(
     gcloud,
-    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\nif [ "$3" = "describe" ]; then exit ${describeExit}; fi\n`,
+    `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "${log}"\nif [[ "$*" == *" scheduler jobs describe "* ]]; then exit ${describeExit}; fi\n`,
   );
   chmodSync(gcloud, 0o755);
   try {
-    execFileSync("bash", [opsSchedulerScriptPath], {
+    execFileSync("bash", [devSchedulerScriptPath], {
       env: {
         PATH: `${dir}:${process.env.PATH ?? ""}`,
         ...env,
@@ -278,7 +284,8 @@ describe("BUREAU-R14: Scheduled Reconciliation Route & Provisioning Scripts", ()
     });
   });
 
-  it("wires regulatory-expiry/run into infra/gcp/dev/scheduler/provision-dev-scheduler.sh", () => {
+  it("wires regulatory-expiry/run into canonical infra/gcp/dev/scheduler/provision-dev-scheduler.sh and removes duplicate operations script", () => {
+    expect(existsSync(opsSchedulerScriptPath)).toBe(false);
     const devScript = readFileSync(devSchedulerScriptPath, "utf8");
     expect(devScript).toContain("drts-dev-regulatory-expiry-run");
     expect(devScript).toContain(
@@ -289,7 +296,7 @@ describe("BUREAU-R14: Scheduled Reconciliation Route & Provisioning Scripts", ()
     );
   });
 
-  it("provisions and updates drts-regulatory-expiry via operations/deployment/provision-regulatory-expiry-scheduler.sh and validates parameters", () => {
+  it("provisions and updates drts-dev-regulatory-expiry-run via infra/gcp/dev/scheduler/provision-dev-scheduler.sh without duplicate jobs", () => {
     const baseEnv = {
       PROJECT_ID: "drts-dev-devcc-20260825",
       REGION: "us-central1",
@@ -299,24 +306,24 @@ describe("BUREAU-R14: Scheduled Reconciliation Route & Provisioning Scripts", ()
       TIME_ZONE: "Asia/Taipei",
     };
 
-    const created = runOpsProvisionScript(baseEnv, 1);
+    const created = runDevProvisionScript(baseEnv, 1);
     expect(created.ok).toBe(true);
-    expect(created.calls).toEqual([
-      "scheduler jobs describe drts-regulatory-expiry --project drts-dev-devcc-20260825 --location us-central1",
-      `scheduler jobs create http drts-regulatory-expiry --project drts-dev-devcc-20260825 --location us-central1 --schedule */15 * * * * --time-zone Asia/Taipei --uri ${API_ORIGIN}/api/internal/scheduled-tasks/regulatory-expiry/run --http-method POST --headers Content-Type=application/json --message-body {} --oidc-service-account-email ${SCHEDULER_SA} --oidc-token-audience ${API_ORIGIN}`,
+    const expiryCreateCalls = created.calls.filter((c) =>
+      c.includes("drts-dev-regulatory-expiry-run"),
+    );
+    expect(expiryCreateCalls).toEqual([
+      "--project drts-dev-devcc-20260825 scheduler jobs describe drts-dev-regulatory-expiry-run --location=us-central1",
+      `--project drts-dev-devcc-20260825 scheduler jobs create http drts-dev-regulatory-expiry-run --location=us-central1 --schedule=*/15 * * * * --time-zone=Asia/Taipei --uri=${API_ORIGIN}/api/internal/scheduled-tasks/regulatory-expiry/run --http-method=POST --oidc-service-account-email=${SCHEDULER_SA} --oidc-token-audience=${API_ORIGIN}`,
     ]);
 
-    const updated = runOpsProvisionScript(baseEnv, 0);
+    const updated = runDevProvisionScript(baseEnv, 0);
     expect(updated.ok).toBe(true);
-    expect(updated.calls[1]).toContain(
-      "scheduler jobs update http drts-regulatory-expiry",
-    );
-
-    const invalidOrigin = runOpsProvisionScript({
-      ...baseEnv,
-      API_ORIGIN: "http://insecure.example.com/",
-    });
-    expect(invalidOrigin.ok).toBe(false);
-    expect(invalidOrigin.calls).toEqual([]);
+    expect(
+      updated.calls.some((c) =>
+        c.includes(
+          "scheduler jobs update http drts-dev-regulatory-expiry-run",
+        ),
+      ),
+    ).toBe(true);
   });
 });

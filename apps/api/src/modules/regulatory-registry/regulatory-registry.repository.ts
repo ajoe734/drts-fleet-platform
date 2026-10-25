@@ -320,7 +320,7 @@ export class RegulatoryRegistryRepository {
     RegistryExpiryDeliveryIntentRow
   >();
   private readonly inMemoryPartnerContacts = new Map<string, string[]>();
-  private extendedExpirySqlSupported = false;
+  private extendedExpirySqlSupported = true;
 
   constructor(@Optional() private readonly databaseService?: DatabaseService) {}
 
@@ -367,49 +367,45 @@ export class RegulatoryRegistryRepository {
       results.push(...this.getFleetPartnerContacts(id));
     }
     if (this.isEnabled() && this.extendedExpirySqlSupported) {
-      try {
-        const dbResult = await this.databaseService!.query<{
-          email: string | null;
-        }>(
-          `/* partner-contact-lookup */
-           SELECT contact_email AS email
-           FROM core.partners
-           WHERE partner_id = ANY($1::text[])
-             AND status = 'active'
-             AND contact_email IS NOT NULL
-           UNION
-           SELECT jsonb_array_elements_text(
-             CASE
-               WHEN jsonb_typeof(record->'contactEmails') = 'array' THEN record->'contactEmails'
-               ELSE '[]'::jsonb
-             END
-           ) AS email
-           FROM admin.phase1_fleet_partners
-           WHERE fleet_partner_id = ANY($1::text[])
-             AND active = true
-           UNION
-           SELECT record->>'contactEmail' AS email
-           FROM admin.phase1_fleet_partners
-           WHERE fleet_partner_id = ANY($1::text[])
-             AND active = true
-             AND record->>'contactEmail' IS NOT NULL
-           UNION
-           SELECT p.email AS email
-           FROM iam.identity_memberships m
-           JOIN iam.identity_principals p ON p.principal_id = m.principal_id
-           WHERE m.partner_id = ANY($1::text[])
-             AND m.membership_status = 'active'
-             AND p.status = 'active'
-             AND p.email IS NOT NULL`,
-          [normalizedIds],
-        );
-        for (const row of dbResult.rows) {
-          if (typeof row.email === "string" && row.email.trim()) {
-            results.push(row.email.trim());
-          }
+      const dbResult = await this.databaseService!.query<{
+        email: string | null;
+      }>(
+        `/* partner-contact-lookup */
+         SELECT contact_email AS email
+         FROM core.partners
+         WHERE (partner_id::text = ANY($1::text[]) OR partner_code = ANY($1::text[]))
+           AND status = 'active'
+           AND contact_email IS NOT NULL
+         UNION
+         SELECT jsonb_array_elements_text(
+           CASE
+             WHEN jsonb_typeof(record->'contactEmails') = 'array' THEN record->'contactEmails'
+             ELSE '[]'::jsonb
+           END
+         ) AS email
+         FROM admin.phase1_fleet_partners
+         WHERE fleet_partner_id = ANY($1::text[])
+           AND active = true
+         UNION
+         SELECT record->>'contactEmail' AS email
+         FROM admin.phase1_fleet_partners
+         WHERE fleet_partner_id = ANY($1::text[])
+           AND active = true
+           AND record->>'contactEmail' IS NOT NULL
+         UNION
+         SELECT COALESCE(p.email_normalized, p.record->>'email') AS email
+         FROM iam.identity_memberships m
+         JOIN iam.identity_principals p ON p.principal_id = m.principal_id
+         WHERE m.partner_id = ANY($1::text[])
+           AND m.membership_status = 'active'
+           AND p.account_status = 'active'
+           AND COALESCE(p.email_normalized, p.record->>'email') IS NOT NULL`,
+        [normalizedIds],
+      );
+      for (const row of dbResult.rows) {
+        if (typeof row.email === "string" && row.email.trim()) {
+          results.push(row.email.trim());
         }
-      } catch {
-        // Optional partner tables may not be present in isolated unit schemas
       }
     }
     return [...new Set(results)];

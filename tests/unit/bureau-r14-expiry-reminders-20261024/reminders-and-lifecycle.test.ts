@@ -123,6 +123,14 @@ class R14SqlTransport {
       };
     }
     if (q.includes("/* partner-contact-lookup */")) {
+      expect(q).toContain(
+        "(partner_id::text = ANY($1::text[]) OR partner_code = ANY($1::text[]))",
+      );
+      expect(q).not.toContain("WHERE partner_id = ANY($1::text[])");
+      expect(q).toContain("COALESCE(p.email_normalized, p.record->>'email')");
+      expect(q).toContain("p.account_status = 'active'");
+      expect(q).not.toContain("p.email AS email");
+      expect(q).not.toContain("p.status = 'active'");
       const partnerIds = (values[0] as string[]) ?? [];
       const rows: Array<{ email: string }> = [];
       for (const pid of partnerIds) {
@@ -542,6 +550,7 @@ class R14SqlTransport {
 
 describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders and Lifecycle Regression", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
   });
 
@@ -708,6 +717,9 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       "compliance-desk@partner1.tw",
     ]);
 
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-12-10T00:00:00.000Z"));
+
     await f.controller.reconcileExpiry({
       asOf: "2026-12-10T00:00:00.000Z", // T-21 (within T-30 window)
     });
@@ -775,7 +787,10 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       }
     }
 
+    vi.useFakeTimers({ toFake: ["Date"] });
+
     // Phase 1: Before expiry (T-25 and T-5) -> reminders sent, vehicle remains dispatchable
+    vi.setSystemTime(new Date("2026-12-06T00:00:00.000Z"));
     await f.controller.reconcileExpiry({
       asOf: "2026-12-06T00:00:00.000Z", // T-25
     });
@@ -787,6 +802,7 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     expect(vehicleAtT25.supplyLifecycle.dispatch.blockedReasons).toEqual([]);
     expect(f.sentDeliveries).toHaveLength(4); // T-30 for contract & policy to 2 recipients
 
+    vi.setSystemTime(new Date("2026-12-26T00:00:00.000Z"));
     await f.controller.reconcileExpiry({
       asOf: "2026-12-26T00:00:00.000Z", // T-5
     });
@@ -794,6 +810,7 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     expect(f.sentDeliveries).toHaveLength(8); // + T-7 for contract & policy to 2 recipients
 
     // Phase 2: After expiry (2027-01-02T00:00:00.000Z) -> dispatch blocked with contract_expired and insurance_expired
+    vi.setSystemTime(new Date("2027-01-02T00:00:00.000Z"));
     await f.controller.reconcileExpiry({
       asOf: "2027-01-02T00:00:00.000Z",
     });
@@ -820,6 +837,7 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     );
 
     // Phase 3: Renew contract first -> contract_expired cleared, still blocked by insurance_expired
+    vi.setSystemTime(new Date("2027-01-02T01:00:00.000Z"));
     await f.controller.activateContract("contract-demo-001", {
       approvedBy: "ops-reviewer-01",
       approvedAt: "2027-01-02T01:00:00.000Z",
@@ -842,6 +860,7 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     expect(f.service.getVehicleDispatchability("veh-demo-001")).toBe(false);
 
     // Phase 4: Renew insurance policy -> insurance_expired cleared, vehicle is dispatchable again!
+    vi.setSystemTime(new Date("2027-01-02T01:05:00.000Z"));
     await f.controller.activateInsurancePolicy("policy-demo-001", {
       activatedAt: "2027-01-02T01:05:00.000Z",
       startAt: "2027-01-01T00:00:00.000Z",
@@ -948,5 +967,93 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     expect(
       [...sqlDb.events.values()].every((e) => e.status === "completed"),
     ).toBe(true);
+  });
+
+  it("F2 regression: findFleetPartnerContactEmails queries canonical iam.identity_principals.email_normalized/account_status and core.partners partner_id::text/partner_code without swallowing SQL errors", async () => {
+    const sqlDb = new R14SqlTransport();
+    sqlDb.dbPartnerEmails.set("partner-demo-001", [
+      "db-partner1@fleet.tw",
+      "iam-member@fleet.tw",
+    ]);
+    const repository = new RegulatoryRegistryRepository(
+      sqlDb as unknown as DatabaseService,
+    );
+    repository.setFleetPartnerContacts("partner-demo-001", [
+      "in-mem@fleet.tw",
+    ]);
+
+    const emails = await repository.findFleetPartnerContactEmails([
+      "partner-demo-001",
+    ]);
+    expect(emails.sort()).toEqual([
+      "db-partner1@fleet.tw",
+      "iam-member@fleet.tw",
+      "in-mem@fleet.tw",
+    ]);
+
+    // Verify SQL errors are not swallowed by catch {}
+    const failingDb = {
+      isEnabled: () => true,
+      query: async () => {
+        throw new Error(
+          'column p.email does not exist / operator does not exist: uuid = text',
+        );
+      },
+    } as unknown as DatabaseService;
+    const failingRepo = new RegulatoryRegistryRepository(failingDb);
+    await expect(
+      failingRepo.findFleetPartnerContactEmails(["partner-demo-001"]),
+    ).rejects.toThrow("column p.email does not exist");
+  });
+
+  it("F3 regression: reconcileExpiredCredentials with past or custom asOf does not leave sticky reconciledEvaluationTime or mutate policy-demo-002 from expired to pending", async () => {
+    const f = createInMemoryFixture();
+
+    // Baseline: policy-demo-002 (startAt: 2025-01-01, endAt: 2026-03-31) is expired, veh-demo-003 is blocked by insurance_expired
+    const beforePolicy2 = f.service
+      .listPolicies()
+      .find((p) => p.policyId === "policy-demo-002")!;
+    expect(beforePolicy2.lifecycleStatus).toBe("expired");
+    expect(f.service.getVehicleDispatchability("veh-demo-003")).toBe(false);
+
+    // Run reconcileExpiredCredentials with a past asOf before policy-demo-002's startAt (2024-06-01)
+    await f.service.reconcileExpiredCredentials({
+      asOf: "2024-06-01T00:00:00.000Z",
+    });
+
+    const after2024Policy2 = f.service
+      .listPolicies()
+      .find((p) => p.policyId === "policy-demo-002")!;
+    expect(after2024Policy2.lifecycleStatus).toBe("expired");
+    expect(f.service.getVehicleDispatchability("veh-demo-003")).toBe(false);
+    const veh3After2024 = f.service
+      .listVehicles()
+      .find((v) => v.vehicleId === "veh-demo-003")!;
+    expect(veh3After2024.supplyLifecycle.insurance.lifecycleStatus).toBe(
+      "expired",
+    );
+    expect(veh3After2024.supplyLifecycle.dispatch.blockedReasons).toContain(
+      "insurance_expired",
+    );
+
+    // Run reconcileExpiredCredentials with an asOf during policy-demo-002's window (2025-06-01)
+    await f.service.reconcileExpiredCredentials({
+      asOf: "2025-06-01T00:00:00.000Z",
+    });
+
+    const after2025Policy2 = f.service
+      .listPolicies()
+      .find((p) => p.policyId === "policy-demo-002")!;
+    expect(after2025Policy2.lifecycleStatus).toBe("expired");
+    expect(f.service.getVehicleDispatchability("veh-demo-003")).toBe(false);
+    const veh3After2025 = f.service
+      .listVehicles()
+      .find((v) => v.vehicleId === "veh-demo-003")!;
+    expect(veh3After2025.supplyLifecycle.insurance.lifecycleStatus).toBe(
+      "expired",
+    );
+    expect(veh3After2025.supplyLifecycle.dispatch.blockedReasons).toContain(
+      "insurance_expired",
+    );
   });
 });

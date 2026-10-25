@@ -574,15 +574,6 @@ export class RegulatoryRegistryService
   private readonly logger = new Logger(RegulatoryRegistryService.name);
   private expiryReconciliationTimer: NodeJS.Timeout | null = null;
   private expiryReconciliationInFlight: Promise<unknown> | null = null;
-  private reconciledEvaluationTime: string | null = null;
-
-  private getEffectiveEvaluationTime(explicit?: string): string {
-    if (explicit) return explicit;
-    if (this.reconciledEvaluationTime) {
-      return this.reconciledEvaluationTime;
-    }
-    return new Date().toISOString();
-  }
 
   registerFleetPartnerContacts(
     partnerId: string,
@@ -2080,7 +2071,7 @@ export class RegulatoryRegistryService
   }
 
   listContracts() {
-    const evaluatedAt = this.getEffectiveEvaluationTime();
+    const evaluatedAt = new Date().toISOString();
     return this.contracts.map((contract) =>
       this.cloneContract(this.applyContractLifecycle(contract, evaluatedAt)),
     );
@@ -2088,14 +2079,14 @@ export class RegulatoryRegistryService
 
   listExpiringContracts(
     windowDays = 30,
-    referenceDateMs: number = Date.parse(this.getEffectiveEvaluationTime()),
+    referenceDateMs: number = Date.now(),
   ): VehicleContractRecord[] {
     const evaluatedAt = new Date(referenceDateMs).toISOString();
     const cutoff = referenceDateMs + windowDays * 24 * 60 * 60 * 1000;
 
     return this.contracts
       .map((contract) =>
-        this.cloneContract(this.applyContractLifecycle(contract, evaluatedAt)),
+        this.applyContractLifecycle(this.cloneContract(contract), evaluatedAt),
       )
       .filter((contract) => contract.lifecycleStatus === "active")
       .filter((contract) => {
@@ -2145,7 +2136,7 @@ export class RegulatoryRegistryService
   }
 
   listPolicies() {
-    const evaluatedAt = this.getEffectiveEvaluationTime();
+    const evaluatedAt = new Date().toISOString();
     return this.policies.map((policy) =>
       this.clonePolicy(this.applyPolicyLifecycle(policy, evaluatedAt)),
     );
@@ -2153,14 +2144,14 @@ export class RegulatoryRegistryService
 
   listExpiringPolicies(
     windowDays = 30,
-    referenceDateMs: number = Date.parse(this.getEffectiveEvaluationTime()),
+    referenceDateMs: number = Date.now(),
   ): InsurancePolicyRecord[] {
     const evaluatedAt = new Date(referenceDateMs).toISOString();
     const cutoff = referenceDateMs + windowDays * 24 * 60 * 60 * 1000;
 
     return this.policies
       .map((policy) =>
-        this.clonePolicy(this.applyPolicyLifecycle(policy, evaluatedAt)),
+        this.applyPolicyLifecycle(this.clonePolicy(policy), evaluatedAt),
       )
       .filter((policy) => policy.lifecycleStatus === "active")
       .filter((policy) => {
@@ -2233,7 +2224,7 @@ export class RegulatoryRegistryService
   }
 
   listExclusivities() {
-    const evaluatedAt = this.getEffectiveEvaluationTime();
+    const evaluatedAt = new Date().toISOString();
     return this.exclusivities.map((exclusivity) =>
       this.cloneExclusivity(
         this.applyExclusivityLifecycle(exclusivity, evaluatedAt),
@@ -2333,8 +2324,7 @@ export class RegulatoryRegistryService
     state: RegulatoryVehicleCommandState,
   ): VehicleContractRecord {
     const contract = this.requireContract(contractId, state.contracts);
-    const approvedAt =
-      command.approvedAt ?? this.getEffectiveEvaluationTime();
+    const approvedAt = command.approvedAt ?? new Date().toISOString();
     const renewalDates = command as ActivateVehicleContractCommand & {
       startAt?: string;
       endAt?: string;
@@ -2430,8 +2420,7 @@ export class RegulatoryRegistryService
     state: RegulatoryVehicleCommandState,
   ): InsurancePolicyRecord {
     const policy = this.requirePolicy(policyId, state.policies);
-    const activatedAt =
-      command.activatedAt ?? this.getEffectiveEvaluationTime();
+    const activatedAt = command.activatedAt ?? new Date().toISOString();
     const renewalDates = command as ActivateInsurancePolicyCommand & {
       startAt?: string;
       endAt?: string;
@@ -3632,8 +3621,7 @@ export class RegulatoryRegistryService
     sources?: RegulatoryVehicleCommandState,
   ): VehicleRegistryRecord {
     const vehicle = stagedVehicle ?? this.requireVehicle(vehicleId);
-    const occurredAt =
-      options?.occurredAt ?? this.getEffectiveEvaluationTime();
+    const occurredAt = options?.occurredAt ?? new Date().toISOString();
     const previousLifecycle = this.cloneSupplyLifecycle(
       vehicle.supplyLifecycle,
     );
@@ -6013,9 +6001,7 @@ export class RegulatoryRegistryService
     const scope = command?.scope?.trim() || "default";
     const limit = command?.limit ?? 100;
 
-    this.reconciledEvaluationTime = asOf;
     this.reconcileSupplyLifecycleForAll({
-      occurredAt: asOf,
       emitEvent: false,
       persistContext: null,
     });
