@@ -3,7 +3,7 @@ function P5_S01(){ // Awaiting Assignment
   return <P5Phone><P5Header status="正在安排車輛"/>
     <P5Map state="missing"/>
     <P5Card><div style={{ display:'flex', gap:11, alignItems:'center' }}><span style={{ width:30, height:30, borderRadius:15, border:'3px solid '+P5.brandBg, borderTopColor:P5.brand, flexShrink:0 }}/><div><div style={{ fontSize:13.5, fontWeight:700 }}>正在為您安排合適的車輛</div><div style={{ fontSize:11.5, color:P5.mut, marginTop:2 }}>預約時間 今日 14:45 · 通常 1–3 分鐘完成指派</div></div></div></P5Card>
-    <P5RouteFare/><div style={{ margin:'0 14px 12px' }}><P5Btn icon="x" danger>取消行程</P5Btn><div style={{ textAlign:'center', fontSize:11, color:P5.mut, marginTop:6 }}>指派前取消不收費</div></div><P5Notice/></P5Phone>;
+    <P5RouteFare/><div style={{ margin:'0 14px 12px' }}><P5Btn icon="x" danger>取消行程</P5Btn><div style={{ textAlign:'center', fontSize:11, color:P5.mut, marginTop:6 }}>取消不收費</div></div><P5Notice/></P5Phone>;
 }
 function P5_S02(){ return <P5Phone><P5Header status="司機正在前往"/><P5Map state="fresh"/><P5Eta main="預計 6 分鐘抵達" sub="約 14:35 抵達"/><P5VehicleCard rating="rated"/><P5RouteFare/><P5Actions/><P5Notice/></P5Phone>; }
 function P5_S03(){ return <P5Phone><P5Header status="車輛已指派"/><P5Map state="fresh"/><P5Eta main="預計 8 分鐘抵達" sub="約 14:37 抵達"/><P5VehicleCard rating="new"/><P5RouteFare/><P5Actions/><P5Notice/></P5Phone>; }
@@ -21,7 +21,7 @@ function P5_S05(){ // Redispatch completed
     <P5VehicleCard rating="rated" plate="TDK-9317" driver="林建成" plateChanged/>
     <P5Actions/><P5Notice/></P5Phone>;
 }
-function P5_S06(){ return <P5Phone><P5Header status="司機已抵達"/><P5Map state="fresh"/><P5Eta main="司機已抵達上車點" sub="請於 3 分鐘內上車 · 核對車牌後再上車" tone="ok"/><P5VehicleCard rating="rated"/><P5Seatbelt/><P5Actions cancelNote="取消可能產生 NT$ 80 費用"/><P5Notice/></P5Phone>; }
+function P5_S06(){ return <P5Phone><P5Header status="司機已抵達"/><P5Map state="fresh"/><P5Eta main="司機已抵達上車點" sub="請於 3 分鐘內上車 · 核對車牌後再上車" tone="ok"/><P5VehicleCard rating="rated"/><P5Seatbelt/><P5Actions cancelNote="取消不收費"/><P5Notice/></P5Phone>; }
 function P5_S07(){ return <P5Phone><P5Header status="行程進行中"/><P5Map state="stale"/><P5Eta main="約 14:58 抵達目的地" sub="剩餘約 4.1 公里"/><P5Seatbelt/><P5VehicleCard rating="rated"/><P5RouteFare/><P5Notice/></P5Phone>; }
 function P5Stars({ picked=5 }){
   return <div style={{ display:'flex', justifyContent:'center', gap:10 }}>{[1,2,3,4,5].map(i=><span key={i} role="button" aria-label={i+' 星'} style={{ width:46, height:46, display:'flex', alignItems:'center', justifyContent:'center', color:i<=picked?'#C7860B':P5.line }}><svg width="34" height="34" viewBox="0 0 24 24" fill={i<=picked?'#C7860B':'none'} stroke="currentColor" strokeWidth="1.6"><path d="M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z"/></svg></span>)}</div>;
@@ -70,7 +70,7 @@ function P5_S12(){ // Contact not provisioned
   return <P5Phone><P5Header status="司機正在前往"/><P5Map state="fresh"/><P5Eta main="預計 6 分鐘抵達" sub="約 14:35 抵達"/><P5VehicleCard rating="rated"/>
     <div style={{ margin:'0 14px 12px', background:P5.surface, border:'1px solid '+P5.line, borderRadius:12, padding:'12px 14px' }}>
       <div style={{ display:'flex', gap:9 }}><P5Icon name="info" size={16} style={{ color:P5.brand, marginTop:1 }}/><div style={{ flex:1 }}><div style={{ fontSize:13, fontWeight:700 }}>目前無法直接聯絡司機</div><div style={{ fontSize:11.5, color:P5.mut, marginTop:2 }}>請改聯絡客服，我們會協助轉達。</div></div></div>
-      <div style={{ marginTop:10 }}><P5Btn kind="primary" icon="phone">聯絡客服 0800-090-000</P5Btn></div>
+      <div style={{ marginTop:10 }}><P5Btn kind="primary" icon="phone">聯絡客服 02-2944-0985</P5Btn></div>
     </div>
     <div style={{ margin:'0 14px 12px' }}><P5Btn icon="x" danger>取消行程</P5Btn></div><P5Notice/></P5Phone>;
 }
@@ -79,11 +79,11 @@ function P5_A04(){ return <P5Phone><P5Header status="正在確認預約"/><P5Map
   <div style={{ margin:'0 14px', fontSize:10.5, color:P5.dim, textAlign:'center' }}>正式報價完成前不會為您確認訂單</div><P5Notice/></P5Phone>; }
 function P5_A03(){ // Public fare version page
   const R=(k,v)=><div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:'1px solid '+P5.lineSoft, fontSize:12.5 }}><span style={{ color:P5.mut }}>{k}</span><b style={{ fontFamily:P5.mono }}>{v}</b></div>;
-  return <P5Phone url="ride.zhixing.tw/fares"><P5Header status="計費說明" order="公開資訊"/>
+  return <P5Phone url="ride.smarttransport.tw/fares"><P5Header status="計費說明" order="公開資訊"/>
     <P5Card title="現行計費表" tag={<span style={{ fontSize:10, fontWeight:700, color:P5.ok, background:P5.okBg, border:'1px solid '+P5.okBd, padding:'2px 8px', borderRadius:999 }}>已生效</span>}>
-      <div style={{ fontSize:11, color:P5.mut, marginBottom:6 }}>版本 F-2026-03 · 生效日 2026/07/01 · 備查 北市交運字第1130042號</div>
-      {R('起程運價（1.25 公里）','NT$ 85')}{R('續程運價（每 200 公尺）','NT$ 5')}{R('延滯計時（每 80 秒）','NT$ 5')}
-      <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', fontSize:12.5 }}><span style={{ color:P5.mut }}>夜間加成（23:00–06:00）</span><b style={{ fontFamily:P5.mono }}>+20%</b></div>
+      <div style={{ fontSize:11, color:P5.mut, marginBottom:6 }}>版本 F-2026-03 · 生效日 2026/07/01 · 依臺北市政府公告計程車運價</div>
+      {R('起程運價（1.25 公里）','NT$ 85')}{R('續程運價（每 200 公尺）','NT$ 5')}{R('延滯計時（每 60 秒）','NT$ 5')}
+      <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', fontSize:12.5 }}><span style={{ color:P5.mut }}>夜間加成（23:00–06:00）</span><b style={{ fontFamily:P5.mono }}>每趟加 NT$ 20</b></div>
     </P5Card>
     <P5Card title="車資變更規則"><div style={{ fontSize:12, color:P5.mut, lineHeight:1.65 }}>若乘客要求變更目的地、增加停靠點，或因依法需支付通行費，實際車資可能調整。固定報價行程以確認時之應付金額為準。</div></P5Card>
     <div style={{ margin:'0 14px', fontSize:10.5, color:P5.dim, textAlign:'center' }}>本頁依主管機關備查之現行版本公告</div><P5Notice/></P5Phone>;

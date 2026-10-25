@@ -2121,7 +2121,7 @@ jobs:
 
   operational-candidate-acceptance:
     name: Candidate SHA operational acceptance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [prepare, build-push, health-check, retired-service-cleanup]
     if: ${{ always() && needs.health-check.result == 'success' && needs.retired-service-cleanup.result == 'success' }}
     steps:
@@ -2658,7 +2658,7 @@ jobs:
   # operational journeys and its first trip.
   operational-quote-expiry-acceptance:
     name: Candidate SHA quote-expiry acceptance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [prepare, build-push, health-check, retired-service-cleanup]
     if: ${{ always() && needs.health-check.result == 'success' && needs.retired-service-cleanup.result == 'success' && vars.DEV_PAX_REVIEW_DEMO_ENABLED == 'true' }}
     steps:

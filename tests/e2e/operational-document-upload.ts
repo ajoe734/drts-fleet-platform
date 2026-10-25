@@ -2710,6 +2710,84 @@ export async function probeOperationalDocumentRoleAccess(
   };
 }
 
+function operationalAdminBaseUrlEnvFor(fleetBaseUrlEnv: string): string {
+  if (fleetBaseUrlEnv === "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL") {
+    return "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL";
+  }
+  if (fleetBaseUrlEnv === "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL") {
+    return "DRTS_DEV_PLATFORM_ADMIN_BASE_URL";
+  }
+  return fleetBaseUrlEnv;
+}
+
+/**
+ * Fleet statement listing lazily rebuilds driver statements for the
+ * requested period (fleet-partner.service.ts rebuildStatementsForPeriodMonth
+ * -> billing-settlement.service.ts generateDriverStatements), which requires
+ * an active published driver fee plan (billing-settlement.service.ts
+ * driverFeePlans[0] guard). Ensure that real, official precondition exists
+ * via the same existing admin API/identity this journey already verified
+ * (platform_reviewer), instead of guessing at the statement GET failure.
+ */
+async function ensureActiveDriverFeePlanPublished(
+  fleetBaseUrlEnv: string,
+): Promise<void> {
+  const adminBaseUrlEnv = operationalAdminBaseUrlEnvFor(fleetBaseUrlEnv);
+  const origin = new URL(requiredOrigin(adminBaseUrlEnv)).origin;
+  const listUrl = new URL(
+    "/control-plane-proxy/driver-fee-plans",
+    origin,
+  ).toString();
+  const listHeaders = operationalRoleRequestHeaders(
+    "platform_reviewer",
+    adminBaseUrlEnv,
+    listUrl,
+  );
+  const listResponse = await fetch(listUrl, {
+    method: "GET",
+    headers: listHeaders,
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  });
+  expect(listResponse.status, `GET driver fee plans ${listUrl}`).toBe(200);
+  const listData = (await listResponse.json()) as {
+    data?: { items?: Array<Record<string, unknown>> };
+  };
+  const existingPlans = Array.isArray(listData?.data?.items)
+    ? listData.data.items
+    : [];
+  if (existingPlans.length > 0) return;
+
+  const publishUrl = new URL(
+    "/control-plane-proxy/driver-fee-plans/publish",
+    origin,
+  ).toString();
+  const publishHeaders = operationalRoleRequestHeaders(
+    "platform_reviewer",
+    adminBaseUrlEnv,
+    publishUrl,
+    { "Content-Type": "application/json" },
+  );
+  const publishResponse = await fetch(publishUrl, {
+    method: "POST",
+    headers: publishHeaders,
+    body: JSON.stringify({
+      planName: "C125 Operational Setup Driver Fee Plan",
+      version: "c125-operational-setup-v1",
+      serviceFeeBps: 1500,
+      reimbursementMode: "platform_funded",
+    }),
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  });
+  // 409 FEE_PLAN_IMMUTABLE means a concurrent setup already published the
+  // same deterministic plan; the real precondition (a plan exists) holds.
+  expect(
+    [200, 201, 409].includes(publishResponse.status),
+    `POST driver fee plan publish ${publishUrl} must result in an active published plan, got ${publishResponse.status}`,
+  ).toBe(true);
+}
+
 export async function resolveOperationalEditableCase(
   baseUrlEnv: string,
   expectedFleetPartnerId: string,
@@ -2770,6 +2848,11 @@ export async function resolveOperationalEditableCase(
     }
   }
 
+  // The statements list lazily rebuilds the period's driver statements and
+  // requires an active published driver fee plan; ensure that real
+  // precondition once via the official admin API before relying on it.
+  await ensureActiveDriverFeePlanPublished(baseUrlEnv);
+
   for (const periodMonth of periodMonths) {
     const statementsUrl = new URL(
       `/control-plane-proxy/fleet-partner/statements?periodMonth=${encodeURIComponent(periodMonth)}`,
@@ -2785,15 +2868,36 @@ export async function resolveOperationalEditableCase(
       redirect: "manual",
       signal: AbortSignal.timeout(30_000),
     });
-    expect(
-      statementsResponse.status,
-      `GET fleet statements ${statementsUrl}`,
-    ).toBe(200);
+    // Read the body once, before deciding pass/fail, so a non-200 response
+    // keeps its real error code/message in the thrown failure instead of
+    // losing them to a status-only assertion (never cookies/tokens/PII).
+    const statementsRawBody = await statementsResponse.text();
+    if (statementsResponse.status !== 200) {
+      let statementsErrorCode: string | undefined;
+      let statementsErrorMessage: string | undefined;
+      try {
+        const parsedError = JSON.parse(statementsRawBody) as {
+          error?: { code?: string; message?: string };
+          code?: string;
+          message?: string;
+        };
+        statementsErrorCode = parsedError?.error?.code ?? parsedError?.code;
+        statementsErrorMessage =
+          parsedError?.error?.message ?? parsedError?.message;
+      } catch {
+        // Non-JSON error body; the status code remains the only signal.
+      }
+      throw new Error(
+        `GET fleet statements ${statementsUrl} returned ${statementsResponse.status}` +
+          (statementsErrorCode ? ` code=${statementsErrorCode}` : "") +
+          (statementsErrorMessage ? ` message=${statementsErrorMessage}` : ""),
+      );
+    }
     expectCandidateRevision(
       statementsResponse.headers,
       `GET fleet statements ${statementsUrl}`,
     );
-    const statementsData = (await statementsResponse.json()) as {
+    const statementsData = JSON.parse(statementsRawBody) as {
       data?: {
         items?: Array<Record<string, unknown>>;
         statements?: Array<Record<string, unknown>>;
@@ -2836,10 +2940,39 @@ export async function resolveOperationalEditableCase(
       redirect: "manual",
       signal: AbortSignal.timeout(30_000),
     });
-    expect(
-      [200, 201].includes(disputeResponse.status),
-      `POST statement dispute ${disputeUrl} must succeed, got ${disputeResponse.status}`,
-    ).toBe(true);
+    if (![200, 201].includes(disputeResponse.status)) {
+      const disputeRawBody = await disputeResponse.text();
+      let disputeErrorCode: string | undefined;
+      let disputeErrorMessage: string | undefined;
+      try {
+        const parsedDisputeError = JSON.parse(disputeRawBody) as {
+          error?: { code?: string; message?: string };
+          code?: string;
+          message?: string;
+        };
+        disputeErrorCode = parsedDisputeError?.error?.code ?? parsedDisputeError?.code;
+        disputeErrorMessage =
+          parsedDisputeError?.error?.message ?? parsedDisputeError?.message;
+      } catch {
+        // Non-JSON error body; the status code remains the only signal.
+      }
+      // STATEMENT_DECISION_CONFLICT means this statement already carries a
+      // different decision (e.g. a previously confirmed period) and is not
+      // eligible for a new dispute; that is an expected outcome of trying a
+      // real, already-decided period, not a setup failure, so fall through
+      // to the next candidate period instead of aborting the whole helper.
+      if (
+        disputeResponse.status === 409 &&
+        disputeErrorCode === "STATEMENT_DECISION_CONFLICT"
+      ) {
+        continue;
+      }
+      throw new Error(
+        `POST statement dispute ${disputeUrl} must succeed, got ${disputeResponse.status}` +
+          (disputeErrorCode ? ` code=${disputeErrorCode}` : "") +
+          (disputeErrorMessage ? ` message=${disputeErrorMessage}` : ""),
+      );
+    }
     expectCandidateRevision(
       disputeResponse.headers,
       `POST statement dispute ${disputeUrl}`,

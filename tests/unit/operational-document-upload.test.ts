@@ -89,6 +89,7 @@ function jsonResponse(
     status,
     headers: responseHeaders,
     json: async () => body,
+    text: async () => bodyBuffer.toString("utf8"),
     url: () => "mock-url",
     body: {
       getReader: () => {
@@ -3460,6 +3461,23 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         }
         if (
           method === "GET" &&
+          url.pathname === "/control-plane-proxy/driver-fee-plans"
+        ) {
+          return jsonResponse({
+            data: {
+              items: [
+                {
+                  fee_plan_id: "fee-plan-existing-001",
+                  plan_name: "Existing Driver Fee Plan",
+                  version: "v1",
+                  status: "published",
+                },
+              ],
+            },
+          });
+        }
+        if (
+          method === "GET" &&
           url.pathname === "/control-plane-proxy/fleet-partner/statements"
         ) {
           return jsonResponse({
@@ -3543,6 +3561,360 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
       resolution: "created_from_statement_dispute",
       statementId: "STL-2026-03-fleet-demo-001",
     });
+  });
+
+  it("publishes an active driver fee plan via the official admin API when none exists yet, then completes the real case setup", async () => {
+    let feePlanPublishCalls = 0;
+    const casesList: Array<Record<string, unknown>> = [
+      {
+        id: "CASE-CP-20260301-001",
+        fleet_partner_id: "METRO_FLEET",
+        status: "open",
+        responsibility: "fleet",
+      },
+    ];
+
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method || "GET";
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/cases"
+        ) {
+          return jsonResponse({ data: { items: casesList } });
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/driver-fee-plans"
+        ) {
+          return jsonResponse({ data: { items: [] } });
+        }
+        if (
+          method === "POST" &&
+          url.pathname === "/control-plane-proxy/driver-fee-plans/publish"
+        ) {
+          feePlanPublishCalls += 1;
+          expect(JSON.parse(String(init?.body))).toMatchObject({
+            planName: expect.any(String),
+            version: expect.any(String),
+          });
+          return jsonResponse(
+            {
+              data: {
+                fee_plan_id: "fee-plan-new-001",
+                status: "published",
+              },
+            },
+            201,
+          );
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/statements"
+        ) {
+          return jsonResponse({
+            data: {
+              items: [
+                {
+                  statement_id: "STL-2026-03-fleet-demo-001",
+                  fleet_partner_id: "fleet-demo-001",
+                },
+              ],
+            },
+          });
+        }
+        if (
+          method === "POST" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/statements/STL-2026-03-fleet-demo-001/dispute"
+        ) {
+          return jsonResponse({
+            data: { dispute_case_id: "CASE-STL-2026-03-fleet-demo-001" },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/cases/CASE-STL-2026-03-fleet-demo-001"
+        ) {
+          return jsonResponse({
+            data: {
+              case_detail: {
+                id: "CASE-STL-2026-03-fleet-demo-001",
+                fleet_partner_id: "fleet-demo-001",
+                status: "open",
+                responsibility: "shared",
+              },
+            },
+          });
+        }
+        return jsonResponse({ error: { code: "NOT_FOUND" } }, 404);
+      },
+    );
+
+    const resolved = await resolveOperationalEditableCase(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      "fleet-demo-001",
+    );
+    expect(feePlanPublishCalls).toBe(1);
+    expect(resolved).toEqual({
+      caseId: "CASE-STL-2026-03-fleet-demo-001",
+      fleetPartnerId: "fleet-demo-001",
+      status: "open",
+      responsibility: "shared",
+      resolution: "created_from_statement_dispute",
+      statementId: "STL-2026-03-fleet-demo-001",
+    });
+  });
+
+  it("surfaces the real error code and message when the statements lookup still fails after the fee plan precondition is confirmed", async () => {
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method || "GET";
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/cases"
+        ) {
+          return jsonResponse({ data: { items: [] } });
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/driver-fee-plans"
+        ) {
+          return jsonResponse({
+            data: { items: [{ fee_plan_id: "fee-plan-existing-001" }] },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/statements"
+        ) {
+          return jsonResponse(
+            {
+              error: {
+                code: "VALIDATION_ERROR",
+                message:
+                  "No eligible trips found for the requested statement period.",
+              },
+            },
+            400,
+          );
+        }
+        return jsonResponse({ error: { code: "NOT_FOUND" } }, 404);
+      },
+    );
+
+    await expect(
+      resolveOperationalEditableCase(
+        "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+        "fleet-demo-001",
+      ),
+    ).rejects.toThrow(
+      /returned 400 code=VALIDATION_ERROR message=No eligible trips found for the requested statement period\./,
+    );
+  });
+
+  // C125-F2: resolveOperationalEditableCase must not abort when the first
+  // candidate period's statement already carries a different, confirmed
+  // decision (a legitimate STATEMENT_DECISION_CONFLICT on a real dispute
+  // attempt) -- it must fall through to the next real candidate period
+  // instead. Exercises the actual helper and its real HTTP contract; only
+  // the network boundary is mocked.
+  it("skips a confirmed March statement's real STATEMENT_DECISION_CONFLICT and creates the dispute case from the legal June statement", async () => {
+    let marchDisputeAttempts = 0;
+    let juneDisputeAttempts = 0;
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method || "GET";
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/cases"
+        ) {
+          return jsonResponse({ data: { items: [] } });
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/driver-fee-plans"
+        ) {
+          return jsonResponse({
+            data: { items: [{ fee_plan_id: "fee-plan-existing-001" }] },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/statements" &&
+          url.searchParams.get("periodMonth") === "2026-03"
+        ) {
+          return jsonResponse({
+            data: {
+              items: [
+                {
+                  statement_id: "STL-2026-03-fleet-demo-001",
+                  fleet_partner_id: "fleet-demo-001",
+                },
+              ],
+            },
+          });
+        }
+        if (
+          method === "POST" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/statements/STL-2026-03-fleet-demo-001/dispute"
+        ) {
+          marchDisputeAttempts += 1;
+          // March was already confirmed by a real prior decision; a real
+          // dispute attempt on it genuinely conflicts.
+          return jsonResponse(
+            {
+              error: {
+                code: "STATEMENT_DECISION_CONFLICT",
+                message: "This statement already has a different decision.",
+              },
+            },
+            409,
+          );
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/statements" &&
+          url.searchParams.get("periodMonth") === "2026-06"
+        ) {
+          return jsonResponse({
+            data: {
+              items: [
+                {
+                  statement_id: "STL-2026-06-fleet-demo-001",
+                  fleet_partner_id: "fleet-demo-001",
+                },
+              ],
+            },
+          });
+        }
+        if (
+          method === "POST" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/statements/STL-2026-06-fleet-demo-001/dispute"
+        ) {
+          juneDisputeAttempts += 1;
+          return jsonResponse({
+            data: { dispute_case_id: "CASE-STL-2026-06-fleet-demo-001" },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/cases/CASE-STL-2026-06-fleet-demo-001"
+        ) {
+          return jsonResponse({
+            data: {
+              case_detail: {
+                id: "CASE-STL-2026-06-fleet-demo-001",
+                fleet_partner_id: "fleet-demo-001",
+                status: "open",
+                responsibility: "shared",
+              },
+            },
+          });
+        }
+        return jsonResponse({ error: { code: "NOT_FOUND" } }, 404);
+      },
+    );
+
+    const resolved = await resolveOperationalEditableCase(
+      "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+      "fleet-demo-001",
+    );
+    expect(marchDisputeAttempts).toBe(1);
+    expect(juneDisputeAttempts).toBe(1);
+    expect(resolved).toEqual({
+      caseId: "CASE-STL-2026-06-fleet-demo-001",
+      fleetPartnerId: "fleet-demo-001",
+      status: "open",
+      responsibility: "shared",
+      resolution: "created_from_statement_dispute",
+      statementId: "STL-2026-06-fleet-demo-001",
+    });
+  });
+
+  // Negative control for the same real helper: a genuine (non-conflict)
+  // dispute failure on the first candidate period must still abort with its
+  // real error code/message, not be swallowed as if it were an expected
+  // "try the next period" outcome.
+  it("still propagates a real non-conflict dispute failure on the first candidate period instead of silently trying the next one", async () => {
+    let juneStatementsRequested = false;
+    global.fetch = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = init?.method || "GET";
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/cases"
+        ) {
+          return jsonResponse({ data: { items: [] } });
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/driver-fee-plans"
+        ) {
+          return jsonResponse({
+            data: { items: [{ fee_plan_id: "fee-plan-existing-001" }] },
+          });
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/statements" &&
+          url.searchParams.get("periodMonth") === "2026-03"
+        ) {
+          return jsonResponse({
+            data: {
+              items: [
+                {
+                  statement_id: "STL-2026-03-fleet-demo-001",
+                  fleet_partner_id: "fleet-demo-001",
+                },
+              ],
+            },
+          });
+        }
+        if (
+          method === "POST" &&
+          url.pathname ===
+            "/control-plane-proxy/fleet-partner/statements/STL-2026-03-fleet-demo-001/dispute"
+        ) {
+          return jsonResponse(
+            {
+              error: {
+                code: "STATEMENT_ALREADY_PAID",
+                message: "Paid statements cannot receive a new decision.",
+              },
+            },
+            409,
+          );
+        }
+        if (
+          method === "GET" &&
+          url.pathname === "/control-plane-proxy/fleet-partner/statements" &&
+          url.searchParams.get("periodMonth") === "2026-06"
+        ) {
+          juneStatementsRequested = true;
+          return jsonResponse({ data: { items: [] } });
+        }
+        return jsonResponse({ error: { code: "NOT_FOUND" } }, 404);
+      },
+    );
+
+    await expect(
+      resolveOperationalEditableCase(
+        "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+        "fleet-demo-001",
+      ),
+    ).rejects.toThrow(
+      /must succeed, got 409 code=STATEMENT_ALREADY_PAID message=Paid statements cannot receive a new decision\./,
+    );
+    expect(juneStatementsRequested).toBe(false);
   });
 
   it("verifies backend role sessions, rejects spoofed identity headers, and executes cross-role denial probes", async () => {
