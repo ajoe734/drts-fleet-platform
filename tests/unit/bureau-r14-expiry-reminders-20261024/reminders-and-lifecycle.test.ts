@@ -1704,6 +1704,63 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       emails: ["dispatch-lead@f6-partner.tw", "insurance-admin@f6-partner.tw"],
     });
     sqlDb.query = originalQuery;
+
+    // 5. F9 regression: when inMemoryPartnerContacts is already warm for a partner ("saved@example.test")
+    // and a subsequent non-empty write ("ghost@example.test") completes with a 0-row DB UPDATE
+    // (partner row no longer present in DB, not a thrown SQL error), setFleetPartnerContacts must
+    // delete the stale in-memory cache entry rather than restoring "saved@example.test".
+    sqlDb.fleetPartners.set("partner-f9-warm", {
+      fleet_partner_id: "partner-f9-warm",
+      active: true,
+      record: {},
+    });
+    const warmWrite = await controllerInstance1.registerFleetPartnerContacts(
+      "partner-f9-warm",
+      {
+        emails: ["saved@example.test"],
+      },
+    );
+    expect(warmWrite.data).toEqual({
+      partnerId: "partner-f9-warm",
+      emails: ["saved@example.test"],
+    });
+    expect(
+      await repoInstance1.getFleetPartnerContacts("partner-f9-warm"),
+    ).toEqual(["saved@example.test"]);
+    expect(
+      await repoInstance1.findFleetPartnerContactEmails(["partner-f9-warm"]),
+    ).toEqual(["saved@example.test"]);
+
+    // Partner is removed from DB so the next UPDATE affects 0 rows (without throwing)
+    sqlDb.fleetPartners.delete("partner-f9-warm");
+    sqlDb.dbPartnerEmails.delete("partner-f9-warm");
+
+    const zeroRowAfterWarm =
+      await controllerInstance1.registerFleetPartnerContacts(
+        "partner-f9-warm",
+        {
+          emails: ["ghost@example.test"],
+        },
+      );
+    expect(zeroRowAfterWarm.data).toEqual({
+      partnerId: "partner-f9-warm",
+      emails: [],
+    });
+    expect([
+      ...repoInstance1.getFleetPartnerContacts("partner-f9-warm"),
+    ]).toEqual([]);
+    expect(
+      await repoInstance1.getFleetPartnerContacts("partner-f9-warm"),
+    ).toEqual([]);
+    expect(
+      await repoInstance1.findFleetPartnerContactEmails(["partner-f9-warm"]),
+    ).toEqual([]);
+    const getAfterWarmZeroRow =
+      await controllerInstance1.getFleetPartnerContacts("partner-f9-warm");
+    expect(getAfterWarmZeroRow.data).toEqual({
+      partnerId: "partner-f9-warm",
+      emails: [],
+    });
   });
 
   it("F7 regression: findVehiclePartnerIds and reconcileExpiry never query non-existent partner_id column on reg.phase1_registry_contracts (PostgreSQL 42703) across both insurance policies and paired-vehicle drivers", async () => {

@@ -310,36 +310,67 @@ describe("deploy-dev SMTP secret mounts", () => {
               return map[expr]!;
             },
           );
-          const fullApiEnvOut = join(directory, "outputs-full-api-env");
-          const fullApiEnvRun = spawnSync(
-            "bash",
-            [
-              "-c",
-              `
-              set -euo pipefail
-              gcloud() { echo "https://cloudrun.example.test"; }
-              ${renderedApiEnvScript}
-            `,
-            ],
-            {
-              encoding: "utf8",
-              env: {
-                ...process.env,
-                GITHUB_OUTPUT: fullApiEnvOut,
-                DEV_WORKLOAD_IDENTITY_ISSUER: "https://wif.example.test",
-                DEV_WORKLOAD_IDENTITY_AUDIENCE: "https://api.example.test",
-                DEV_PAX_REVIEW_DEMO_ENABLED: "true",
-                REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED: "false",
-                DEV_REGULATORY_ALERT_RECIPIENT_EMAIL: "reg-alerts@example.test",
-                ARTIFACT_PROVIDER_ENV_SUFFIX:
-                  "@REMITTANCE_PROOF_STORAGE_PROVIDER=unprovisioned@DOCUMENT_ARTIFACT_STORAGE_PROVIDER=unprovisioned",
+          const runFullApiEnvStep = (
+            name: string,
+            envOverrides: Record<string, string>,
+            scriptOverride = renderedApiEnvScript,
+          ): string => {
+            const outPath = join(directory, `outputs-${name}`);
+            const run = spawnSync(
+              "bash",
+              [
+                "-c",
+                `
+                set -euo pipefail
+                gcloud() { echo "\${MOCK_CLOUD_RUN_ORIGIN-https://cloudrun.example.test}"; }
+                ${scriptOverride}
+              `,
+              ],
+              {
+                encoding: "utf8",
+                env: {
+                  ...process.env,
+                  GITHUB_OUTPUT: outPath,
+                  DEV_WORKLOAD_IDENTITY_ISSUER: "https://wif.example.test",
+                  DEV_WORKLOAD_IDENTITY_AUDIENCE: "https://api.example.test",
+                  DEV_PAX_REVIEW_DEMO_ENABLED: "true",
+                  REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED: "false",
+                  DEV_REGULATORY_ALERT_RECIPIENT_EMAIL:
+                    "reg-alerts@example.test",
+                  ARTIFACT_PROVIDER_ENV_SUFFIX:
+                    "@REMITTANCE_PROOF_STORAGE_PROVIDER=unprovisioned@DOCUMENT_ARTIFACT_STORAGE_PROVIDER=unprovisioned",
+                  ...envOverrides,
+                },
               },
+            );
+            expect(run.status, run.stderr).toBe(0);
+            return readFileSync(outPath, "utf8").trim().replace(/^vars=/, "");
+          };
+
+          const fullVarsPayload = runFullApiEnvStep("full-api-env", {});
+          const globMailbox = "reg-alerts+*?[0]@example.test";
+          const globVarsPayload = runFullApiEnvStep("full-api-env-glob", {
+            DEV_REGULATORY_ALERT_RECIPIENT_EMAIL: globMailbox,
+          });
+          const emptySuffixVarsPayload = runFullApiEnvStep(
+            "full-api-env-empty-suffix",
+            {
+              ARTIFACT_PROVIDER_ENV_SUFFIX: "",
             },
           );
-          expect(fullApiEnvRun.status, fullApiEnvRun.stderr).toBe(0);
-          const fullVarsPayload = readFileSync(fullApiEnvOut, "utf8")
-            .trim()
-            .replace(/^vars=/, "");
+          const renderedApiEnvNoTenantOrigin = renderedApiEnvScript.replaceAll(
+            "https://tenant.example.test",
+            "",
+          );
+          const emptyAllTrailingVarsPayload = runFullApiEnvStep(
+            "full-api-env-empty-all-trailing",
+            {
+              ARTIFACT_PROVIDER_ENV_SUFFIX: "",
+              MOCK_CLOUD_RUN_ORIGIN: "",
+              DEV_PAX_REVIEW_DEMO_ENABLED: "false",
+            },
+            renderedApiEnvNoTenantOrigin,
+          );
 
           const argDictBatch = parseBatchWithGcloudArgDict({
             brokenAtDelim:
@@ -349,6 +380,9 @@ describe("deploy-dev SMTP secret mounts", () => {
             envCase: envCaseRaw,
             secretCase: `^@^${secretCaseRaw}`,
             fullApiEnv: fullVarsPayload,
+            globApiEnv: globVarsPayload,
+            emptySuffixApiEnv: emptySuffixVarsPayload,
+            emptyAllTrailingApiEnv: emptyAllTrailingVarsPayload,
           });
           expect(argDictBatch.brokenAtDelim?.ok).toBe(false);
           if (argDictBatch.brokenAtDelim && !argDictBatch.brokenAtDelim.ok) {
@@ -397,6 +431,55 @@ describe("deploy-dev SMTP secret mounts", () => {
             expect(() =>
               JSON.parse(parsedFull.PAX_PAYMENT_CAPTURE_POLICY!),
             ).not.toThrow();
+          }
+          const globApiEnv = argDictBatch.globApiEnv;
+          expect(globApiEnv?.ok).toBe(true);
+          if (globApiEnv?.ok) {
+            const parsedGlob = globApiEnv.parsed;
+            expect(parsedGlob.REGULATORY_ALERT_RECIPIENT_EMAIL).toBe(
+              globMailbox,
+            );
+            expect(parsedGlob.NOTIFICATION_OUTBOX_TYPE).toBe("postgres");
+            expect(parsedGlob.INVOICE_MAIL_PORTAL_ORIGIN).toBe(
+              "https://tenant.example.test",
+            );
+            expect(parsedGlob.REMITTANCE_PROOF_STORAGE_PROVIDER).toBe(
+              "unprovisioned",
+            );
+            expect(parsedGlob.DOCUMENT_ARTIFACT_STORAGE_PROVIDER).toBe(
+              "unprovisioned",
+            );
+          }
+          const emptySuffixApiEnv = argDictBatch.emptySuffixApiEnv;
+          expect(emptySuffixApiEnv?.ok).toBe(true);
+          if (emptySuffixApiEnv?.ok) {
+            const parsedEmptySuffix = emptySuffixApiEnv.parsed;
+            expect(parsedEmptySuffix.REGULATORY_ALERT_RECIPIENT_EMAIL).toBe(
+              "reg-alerts@example.test",
+            );
+            expect(parsedEmptySuffix.NOTIFICATION_OUTBOX_TYPE).toBe("postgres");
+            expect(parsedEmptySuffix.INVOICE_MAIL_PORTAL_ORIGIN).toBe(
+              "https://tenant.example.test",
+            );
+            expect(
+              parsedEmptySuffix.REMITTANCE_PROOF_STORAGE_PROVIDER,
+            ).toBeUndefined();
+            expect(
+              parsedEmptySuffix.DOCUMENT_ARTIFACT_STORAGE_PROVIDER,
+            ).toBeUndefined();
+          }
+          const emptyAllTrailingApiEnv = argDictBatch.emptyAllTrailingApiEnv;
+          expect(emptyAllTrailingApiEnv?.ok).toBe(true);
+          if (emptyAllTrailingApiEnv?.ok) {
+            const parsedEmptyAll = emptyAllTrailingApiEnv.parsed;
+            expect(parsedEmptyAll.REGULATORY_ALERT_RECIPIENT_EMAIL).toBe(
+              "reg-alerts@example.test",
+            );
+            expect(parsedEmptyAll.NOTIFICATION_OUTBOX_TYPE).toBe("postgres");
+            expect(parsedEmptyAll.INVOICE_MAIL_PORTAL_ORIGIN).toBeUndefined();
+            expect(
+              parsedEmptyAll.REMITTANCE_PROOF_STORAGE_PROVIDER,
+            ).toBeUndefined();
           }
         } else {
           expect(result.status).toBe(1);

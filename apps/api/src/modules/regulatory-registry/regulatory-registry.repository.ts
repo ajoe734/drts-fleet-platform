@@ -499,7 +499,7 @@ export class RegulatoryRegistryRepository {
             cleaned,
           );
           if (!persisted && cleaned.length > 0) {
-            restorePreviousInMemory();
+            this.inMemoryPartnerContacts.delete(normalized);
             return [];
           }
           commitInMemory();
