@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { LanguageProvider, toHtmlLang } from "@/lib/i18n";
+import { LanguageProvider } from "@/lib/i18n";
 import { getServerLocale } from "@/lib/server-locale";
 import { t } from "@/lib/translations";
 
@@ -25,7 +25,7 @@ export default async function RootLayout({
 }: Readonly<{ children: ReactNode }>) {
   const locale = await getServerLocale();
   return (
-    <html lang={toHtmlLang(locale)}>
+    <html lang={locale === "zh" ? "zh-Hant" : "en"}>
       <body
         style={{
           margin: 0,
