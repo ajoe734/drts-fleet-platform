@@ -198,7 +198,7 @@ jobs:
 
   owned-referral-business-journey:
     if: github.event_name == 'workflow_dispatch' && inputs.owned_referral_business == true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
       group: shared-dev-owned-referral-business-journey
@@ -351,7 +351,7 @@ jobs:
 
   shared-bureau-acceptance:
     if: github.event_name == 'workflow_dispatch' && inputs.shared_bureau == true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     concurrency:
       group: shared-dev-pax-bureau-acceptance
@@ -1300,7 +1300,7 @@ jobs:
   ui-route-e2e:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
@@ -1387,7 +1387,7 @@ jobs:
   ui-shared-order-e2e:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     services:
       postgres:
@@ -1483,7 +1483,7 @@ jobs:
   ui-bureau-acceptance-e2e:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     services:
       postgres:
