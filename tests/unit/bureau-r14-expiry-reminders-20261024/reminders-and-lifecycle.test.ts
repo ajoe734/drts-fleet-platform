@@ -87,7 +87,14 @@ function createInMemoryFixture(options?: {
 }
 
 class R14SqlTransport {
-  readonly drivers = new Map<string, DriverRegistryRecord>();
+  readonly drivers = new Map<
+    string,
+    DriverRegistryRecord & {
+      partnerId?: string;
+      vehicleId?: string;
+      pairedVehicleId?: string;
+    }
+  >();
   readonly contracts = new Map<
     string,
     VehicleContractRecord & {
@@ -185,22 +192,22 @@ class R14SqlTransport {
       }
       const fp = this.fleetPartners.get(partnerId);
       if (fp) {
-        if (isClear) {
+        if (isClear || !primaryEmail) {
           delete fp.record.contactEmail;
           delete fp.record.contactEmails;
         } else {
-          fp.record.contactEmail = primaryEmail ?? undefined;
+          fp.record.contactEmail = primaryEmail;
           fp.record.contactEmails = parsedEmails;
         }
         matchedRows.push({ partner_id: fp.fleet_partner_id });
       }
       for (const [, contract] of this.contracts) {
         if (contract.partnerId === partnerId) {
-          if (isClear) {
+          if (isClear || !primaryEmail) {
             delete contract.partnerContactEmail;
             delete contract.partnerContactEmails;
           } else {
-            contract.partnerContactEmail = primaryEmail ?? undefined;
+            contract.partnerContactEmail = primaryEmail;
             contract.partnerContactEmails = parsedEmails;
           }
           matchedRows.push({ partner_id: contract.contractId });
@@ -1682,7 +1689,7 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
       partnerContactEmails: ["f7-partner@fleet.tw"],
-    } as DriverContract & { partnerContactEmails: string[] });
+    });
 
     sqlDb.policies.set("policy-f7-001", {
       policyId: "policy-f7-001",
@@ -1701,23 +1708,24 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
 
     sqlDb.drivers.set("driver-f7-001", {
       driverId: "driver-f7-001",
-      licenseNo: "LIC-F7-001",
+      name: "Lin F7",
       vehicleId: "veh-f7-001",
-      fullName: "Lin F7",
-      phone: "0912000777",
-      operatingAreaId: "taipei-keelung",
-      licenseClass: "professional_small_car",
-      licenseExpiry: "2026-06-20",
-      businessRegistrationCertNo: "REG-F7-001",
-      businessRegistrationExpiry: "2026-12-31",
-      criminalRecordClear: true,
-      trafficViolationClear: true,
-      status: "active",
+      supportedServiceBuckets: ["standard_taxi"],
+      workState: "offline",
+      licensesValid: true,
+      licenseExpiry: "2026-06-20T00:00:00.000Z",
+      professionalDriverLicenseExpiry: "2026-12-31T00:00:00.000Z",
+      taxiDriverRegistrationExpiry: "2026-12-31T00:00:00.000Z",
       lifecycleStatus: "active",
-      approvedBy: "ops-01",
-      approvedAt: "2026-01-01T00:00:00.000Z",
+      eligibilityBlockedReasons: [],
+      dispatchEligible: true,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
+      activatedAt: "2026-01-01T00:00:00.000Z",
+      suspendedAt: null,
+      retiredAt: null,
+      profileUpdatedAt: "2026-01-01T00:00:00.000Z",
+      deviceBindings: [],
     });
 
     const sentRecipients: string[] = [];
