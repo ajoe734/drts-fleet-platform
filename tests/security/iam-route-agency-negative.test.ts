@@ -422,6 +422,20 @@ describe("BUREAU-R13 agency realm negative route matrix", () => {
     ).toMatchObject({ allowed: true });
   });
 
+  it("allows R11 trip-record detail on agency:trip_records:read without introducing a new permission gate (D4 resolution)", async () => {
+    expect(
+      await outcome(
+        guard,
+        agencyRequest("GET", "agency/trip-records/mtr-order-1", viewerToken),
+        {
+          open: false,
+          realms: ["agency"],
+          scopes: ["agency:trip_records:read"],
+        },
+      ),
+    ).toMatchObject({ allowed: true });
+  });
+
   it("denies a viewer the export routes and records the denial in the agency access log", async () => {
     const before = (await accessLogs.list({})).total;
     const result = await outcome(

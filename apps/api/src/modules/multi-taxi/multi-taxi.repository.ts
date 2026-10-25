@@ -22,12 +22,41 @@ export interface PassengerRideRatingContext extends PassengerAccountRatingHook {
   tokenDigest: string;
 }
 
+export interface TripOperationalRecordQueryExecutor {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: T[]; rowCount?: number | null }>;
+}
+
+export interface StoredMultiTaxiTripOperationalRecord
+  extends MultiTaxiTripOperationalRecord {
+  orderNo: string;
+  assignmentId: string | null;
+  collectedFareMinor: number | null;
+  paymentStatus: MultiTaxiTripPaymentStatus;
+  tollSource: MultiTaxiTripTollSource;
+  route: {
+    encodedPolyline: string | null;
+    pointCount: number;
+    distanceMeters: number | null;
+    durationSeconds: number | null;
+    source: MultiTaxiTripRouteSource;
+    routeSummary: string | null;
+  };
+}
+
 import type {
   ConsumerNotificationOutboxRecord,
   DriverRatingSummary,
   MultiTaxiAuthorizedVehicleRecord,
   MultiTaxiElectronicReceipt,
   MultiTaxiOperatingAuthorizationRecord,
+  MultiTaxiTripOperationalRecord,
+  MultiTaxiTripOperationalRecordQuery,
+  MultiTaxiTripPaymentStatus,
+  MultiTaxiTripRouteSource,
+  MultiTaxiTripTollSource,
   OrderFirstPartyNotificationRoute,
   OrderPartnerNotificationRoute,
   PartnerNotificationRetryDisposition,
@@ -2944,5 +2973,640 @@ export class MultiTaxiRepository {
     } finally {
       client.release();
     }
+  }
+
+  private readonly inMemoryTripOperationalRecords = new Map<
+    string,
+    StoredMultiTaxiTripOperationalRecord
+  >();
+
+  hasDurableTripOperationalRecordAuthority(): boolean {
+    return this.isEnabled() || this.inMemoryTripOperationalRecords.size > 0;
+  }
+
+  async persistTripOperationalRecordInTransaction(
+    executor: TripOperationalRecordQueryExecutor,
+    record: StoredMultiTaxiTripOperationalRecord,
+  ): Promise<StoredMultiTaxiTripOperationalRecord> {
+    const normalized = this.normalizeTripOperationalRecordForWrite(record);
+    const result = await executor.query(
+      `
+      WITH payment_lookup AS (
+        SELECT status, amount_minor
+        FROM billing.multi_taxi_passenger_payments
+        WHERE order_id = $2
+        LIMIT 1
+      ),
+      resolved_payment AS (
+        SELECT
+          COALESCE(
+            (SELECT status FROM payment_lookup),
+            NULLIF($18::text, ''),
+            'unknown'
+          ) AS payment_status,
+          CASE
+            WHEN COALESCE(
+              (SELECT status FROM payment_lookup),
+              NULLIF($18::text, ''),
+              'unknown'
+            ) = 'captured'
+              THEN COALESCE(
+                (SELECT amount_minor FROM payment_lookup),
+                $17::bigint,
+                $16::bigint,
+                0
+              )
+            WHEN COALESCE(
+              (SELECT status FROM payment_lookup),
+              NULLIF($18::text, ''),
+              'unknown'
+            ) = 'refunded'
+              THEN 0
+            ELSE NULL
+          END AS collected_fare_minor
+      )
+      INSERT INTO reporting.multi_taxi_trip_operational_records (
+        record_id,
+        order_id,
+        order_no,
+        trip_id,
+        assignment_id,
+        vehicle_id,
+        plate_no,
+        reserved_at,
+        pickup_at,
+        dropoff_at,
+        route_summary,
+        route_source,
+        distance_meters,
+        duration_seconds,
+        payable_fare_minor,
+        actual_fare_minor,
+        collected_fare_minor,
+        payment_status,
+        toll_minor,
+        toll_source,
+        fare_policy_version,
+        charging_mode,
+        currency,
+        record,
+        generated_at,
+        retain_until
+      )
+      SELECT
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7,
+        $8::timestamptz,
+        $9::timestamptz,
+        $10::timestamptz,
+        $11,
+        $12,
+        $13::integer,
+        $14::integer,
+        $15::bigint,
+        $16::bigint,
+        rp.collected_fare_minor,
+        rp.payment_status,
+        $19::bigint,
+        $20,
+        $21,
+        $22,
+        $23,
+        jsonb_set(
+          jsonb_set(
+            $24::jsonb,
+            '{paymentStatus}',
+            to_jsonb(rp.payment_status),
+            true
+          ),
+          '{collectedFareMinor}',
+          COALESCE(to_jsonb(rp.collected_fare_minor), 'null'::jsonb),
+          true
+        ),
+        $25::timestamptz,
+        $26::timestamptz
+      FROM resolved_payment rp
+      ON CONFLICT (order_id) DO UPDATE
+      SET
+        order_no = COALESCE(EXCLUDED.order_no, reporting.multi_taxi_trip_operational_records.order_no),
+        trip_id = EXCLUDED.trip_id,
+        assignment_id = COALESCE(EXCLUDED.assignment_id, reporting.multi_taxi_trip_operational_records.assignment_id),
+        vehicle_id = EXCLUDED.vehicle_id,
+        plate_no = EXCLUDED.plate_no,
+        reserved_at = EXCLUDED.reserved_at,
+        pickup_at = COALESCE(EXCLUDED.pickup_at, reporting.multi_taxi_trip_operational_records.pickup_at),
+        dropoff_at = COALESCE(EXCLUDED.dropoff_at, reporting.multi_taxi_trip_operational_records.dropoff_at),
+        route_summary = COALESCE(EXCLUDED.route_summary, reporting.multi_taxi_trip_operational_records.route_summary),
+        route_source = CASE
+          WHEN EXCLUDED.route_source <> 'unavailable' THEN EXCLUDED.route_source
+          ELSE reporting.multi_taxi_trip_operational_records.route_source
+        END,
+        distance_meters = COALESCE(EXCLUDED.distance_meters, reporting.multi_taxi_trip_operational_records.distance_meters),
+        duration_seconds = COALESCE(EXCLUDED.duration_seconds, reporting.multi_taxi_trip_operational_records.duration_seconds),
+        payable_fare_minor = EXCLUDED.payable_fare_minor,
+        actual_fare_minor = EXCLUDED.actual_fare_minor,
+        collected_fare_minor = EXCLUDED.collected_fare_minor,
+        payment_status = EXCLUDED.payment_status,
+        toll_minor = COALESCE(EXCLUDED.toll_minor, reporting.multi_taxi_trip_operational_records.toll_minor),
+        toll_source = CASE
+          WHEN EXCLUDED.toll_source <> 'unavailable' THEN EXCLUDED.toll_source
+          ELSE reporting.multi_taxi_trip_operational_records.toll_source
+        END,
+        fare_policy_version = EXCLUDED.fare_policy_version,
+        charging_mode = EXCLUDED.charging_mode,
+        currency = EXCLUDED.currency,
+        record = reporting.multi_taxi_trip_operational_records.record || EXCLUDED.record,
+        retain_until = GREATEST(
+          reporting.multi_taxi_trip_operational_records.retain_until,
+          EXCLUDED.retain_until,
+          reporting.multi_taxi_trip_operational_records.generated_at + interval '730 days'
+        )
+      RETURNING *
+      `,
+      [
+        normalized.recordId,
+        normalized.orderId,
+        normalized.orderNo || null,
+        normalized.tripId,
+        normalized.assignmentId,
+        normalized.vehicleId,
+        normalized.plateNo,
+        normalized.reservedAt,
+        normalized.pickupAt,
+        normalized.dropoffAt,
+        normalized.route.routeSummary,
+        normalized.route.source,
+        normalized.route.distanceMeters,
+        normalized.route.durationSeconds,
+        normalized.payableFareMinor,
+        normalized.actualFareMinor,
+        normalized.collectedFareMinor,
+        normalized.paymentStatus,
+        normalized.tollSource === "unavailable" ? null : normalized.tollMinor,
+        normalized.tollSource,
+        normalized.farePolicyVersion,
+        normalized.chargingMode,
+        normalized.currency,
+        JSON.stringify(normalized),
+        normalized.generatedAt,
+        normalized.retainUntil,
+      ],
+    );
+
+    const row = result.rows[0];
+    return row ? this.mapTripOperationalRecordRow(row) : normalized;
+  }
+
+  async upsertTripOperationalRecord(
+    record: StoredMultiTaxiTripOperationalRecord,
+  ): Promise<StoredMultiTaxiTripOperationalRecord> {
+    const normalized = this.normalizeTripOperationalRecordForWrite(record);
+    if (!this.isEnabled()) {
+      const existing = this.inMemoryTripOperationalRecords.get(
+        normalized.orderId,
+      );
+      if (existing) {
+        const merged: StoredMultiTaxiTripOperationalRecord = {
+          ...existing,
+          ...normalized,
+          recordId: existing.recordId,
+          orderId: existing.orderId,
+          generatedAt: existing.generatedAt,
+          retainUntil:
+            Date.parse(normalized.retainUntil) > Date.parse(existing.retainUntil)
+              ? normalized.retainUntil
+              : existing.retainUntil,
+        };
+        this.inMemoryTripOperationalRecords.set(normalized.orderId, merged);
+        return structuredClone(merged);
+      }
+      this.inMemoryTripOperationalRecords.set(
+        normalized.orderId,
+        structuredClone(normalized),
+      );
+      return structuredClone(normalized);
+    }
+
+    return this.persistTripOperationalRecordInTransaction(
+      this.databaseService!,
+      normalized,
+    );
+  }
+
+  async listTripOperationalRecords(): Promise<
+    StoredMultiTaxiTripOperationalRecord[]
+  > {
+    if (!this.isEnabled()) {
+      return [...this.inMemoryTripOperationalRecords.values()]
+        .map((item) => structuredClone(item))
+        .sort((left, right) => right.reservedAt.localeCompare(left.reservedAt));
+    }
+
+    const result = await this.databaseService!.query(
+      `
+      SELECT
+        r.*,
+        COALESCE(r.order_no, o.order_no, NULLIF(r.record->>'orderNo', ''), r.order_id) AS resolved_order_no,
+        p.status AS live_payment_status,
+        p.amount_minor AS live_payment_amount_minor
+      FROM reporting.multi_taxi_trip_operational_records r
+      LEFT JOIN ops.phase1_owned_orders o
+        ON o.order_id = r.order_id
+      LEFT JOIN billing.multi_taxi_passenger_payments p
+        ON p.order_id = r.order_id
+      ORDER BY r.reserved_at DESC, r.generated_at DESC, r.record_id DESC
+      `,
+    );
+
+    return result.rows.map((row) => this.mapTripOperationalRecordRow(row));
+  }
+
+  async findTripOperationalRecordById(
+    recordId: string,
+  ): Promise<StoredMultiTaxiTripOperationalRecord | null> {
+    const trimmed = recordId.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (!this.isEnabled()) {
+      for (const item of this.inMemoryTripOperationalRecords.values()) {
+        if (item.recordId === trimmed || item.orderId === trimmed) {
+          return structuredClone(item);
+        }
+      }
+      return null;
+    }
+
+    const result = await this.databaseService!.query(
+      `
+      SELECT
+        r.*,
+        COALESCE(r.order_no, o.order_no, NULLIF(r.record->>'orderNo', ''), r.order_id) AS resolved_order_no,
+        p.status AS live_payment_status,
+        p.amount_minor AS live_payment_amount_minor
+      FROM reporting.multi_taxi_trip_operational_records r
+      LEFT JOIN ops.phase1_owned_orders o
+        ON o.order_id = r.order_id
+      LEFT JOIN billing.multi_taxi_passenger_payments p
+        ON p.order_id = r.order_id
+      WHERE r.record_id = $1 OR r.order_id = $1
+      LIMIT 1
+      `,
+      [trimmed],
+    );
+
+    const row = result.rows[0];
+    return row ? this.mapTripOperationalRecordRow(row) : null;
+  }
+
+  async purgeExpiredTripOperationalRecords(options: {
+    nowIso?: string;
+    heldSubjects?: ReadonlySet<string>;
+  } = {}): Promise<{
+    purgedRecordIds: string[];
+    skippedHeldRecordIds: string[];
+  }> {
+    const nowIso = options.nowIso ?? new Date().toISOString();
+    const nowMs = Date.parse(nowIso);
+    const heldSubjects = options.heldSubjects ?? new Set<string>();
+
+    if (!this.isEnabled()) {
+      const purgedRecordIds: string[] = [];
+      const skippedHeldRecordIds: string[] = [];
+      for (const [orderId, record] of this.inMemoryTripOperationalRecords.entries()) {
+        if (Date.parse(record.retainUntil) > nowMs) {
+          continue;
+        }
+        if (
+          heldSubjects.has(record.orderId) ||
+          heldSubjects.has(record.recordId) ||
+          heldSubjects.has(record.tripId)
+        ) {
+          skippedHeldRecordIds.push(record.recordId);
+          continue;
+        }
+        this.inMemoryTripOperationalRecords.delete(orderId);
+        purgedRecordIds.push(record.recordId);
+      }
+      return { purgedRecordIds, skippedHeldRecordIds };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        "SET LOCAL reporting.allow_trip_record_retention_purge = 'on'",
+      );
+
+      const candidates = await client.query<{
+        record_id: string;
+        order_id: string;
+        trip_id: string;
+        has_db_hold: boolean;
+      }>(
+        `
+        SELECT
+          r.record_id,
+          r.order_id,
+          r.trip_id,
+          EXISTS (
+            SELECT 1
+            FROM voice.legal_hold lh
+            WHERE lh.status = 'active'
+              AND lh.evidence_family IN ('proof_bundle', 'multi_taxi_trip_record')
+              AND lh.subject_ref IN (r.order_id, r.record_id, r.trip_id)
+          ) AS has_db_hold
+        FROM reporting.multi_taxi_trip_operational_records r
+        WHERE r.retain_until <= $1::timestamptz
+        ORDER BY r.retain_until ASC, r.record_id ASC
+        FOR UPDATE
+        `,
+        [nowIso],
+      );
+
+      const purgedRecordIds: string[] = [];
+      const skippedHeldRecordIds: string[] = [];
+
+      for (const candidate of candidates.rows) {
+        const isHeld =
+          candidate.has_db_hold ||
+          heldSubjects.has(candidate.order_id) ||
+          heldSubjects.has(candidate.record_id) ||
+          heldSubjects.has(candidate.trip_id);
+        if (isHeld) {
+          skippedHeldRecordIds.push(candidate.record_id);
+          continue;
+        }
+        await client.query(
+          `DELETE FROM reporting.multi_taxi_trip_operational_records WHERE record_id = $1`,
+          [candidate.record_id],
+        );
+        purgedRecordIds.push(candidate.record_id);
+      }
+
+      await client.query("COMMIT");
+      return { purgedRecordIds, skippedHeldRecordIds };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private normalizeTripOperationalRecordForWrite(
+    record: StoredMultiTaxiTripOperationalRecord,
+  ): StoredMultiTaxiTripOperationalRecord {
+    const generatedAtMs = Date.parse(record.generatedAt);
+    const minRetainUntilMs =
+      (Number.isFinite(generatedAtMs) ? generatedAtMs : Date.now()) +
+      730 * 24 * 60 * 60 * 1000;
+    const requestedRetainUntilMs = Date.parse(record.retainUntil);
+    const retainUntil = new Date(
+      Number.isFinite(requestedRetainUntilMs) &&
+        requestedRetainUntilMs >= minRetainUntilMs
+        ? requestedRetainUntilMs
+        : minRetainUntilMs,
+    ).toISOString();
+
+    const paymentStatus: MultiTaxiTripPaymentStatus =
+      record.paymentStatus ?? "unknown";
+    const collectedFareMinor =
+      paymentStatus === "captured"
+        ? Math.max(0, Math.round(record.collectedFareMinor ?? record.actualFareMinor ?? 0))
+        : paymentStatus === "refunded"
+          ? 0
+          : null;
+
+    return {
+      ...record,
+      recordId: record.recordId || `mtr-${record.orderId}`,
+      orderNo: record.orderNo || record.orderId,
+      assignmentId: record.assignmentId ?? null,
+      pickupAt: record.pickupAt ?? null,
+      dropoffAt: record.dropoffAt ?? null,
+      route: {
+        encodedPolyline: record.route.encodedPolyline ?? null,
+        pointCount: Math.max(0, Math.round(record.route.pointCount ?? 0)),
+        distanceMeters:
+          record.route.distanceMeters !== null &&
+          record.route.distanceMeters !== undefined &&
+          Number.isFinite(record.route.distanceMeters)
+            ? Math.max(0, Math.round(record.route.distanceMeters))
+            : null,
+        durationSeconds:
+          record.route.durationSeconds !== null &&
+          record.route.durationSeconds !== undefined &&
+          Number.isFinite(record.route.durationSeconds)
+            ? Math.max(0, Math.round(record.route.durationSeconds))
+            : null,
+        source: record.route.source ?? "unavailable",
+        routeSummary: record.route.routeSummary ?? null,
+      },
+      payableFareMinor: Math.max(0, Math.round(record.payableFareMinor ?? 0)),
+      actualFareMinor: Math.max(0, Math.round(record.actualFareMinor ?? 0)),
+      collectedFareMinor,
+      paymentStatus,
+      tollMinor: Math.max(0, Math.round(record.tollMinor ?? 0)),
+      tollSource: record.tollSource ?? "unavailable",
+      currency: PLATFORM_CURRENCY,
+      farePolicyVersion: record.farePolicyVersion || "multi-taxi-v1",
+      chargingMode:
+        record.chargingMode === "platform_quote" ? "platform_quote" : "meter",
+      generatedAt: new Date(
+        Number.isFinite(generatedAtMs) ? generatedAtMs : Date.now(),
+      ).toISOString(),
+      retainUntil,
+    };
+  }
+
+  private mapTripOperationalRecordRow(
+    row: Record<string, unknown>,
+  ): StoredMultiTaxiTripOperationalRecord {
+    const jsonRecord =
+      row.record && typeof row.record === "object"
+        ? (row.record as Record<string, unknown>)
+        : {};
+    const jsonRoute =
+      jsonRecord.route && typeof jsonRecord.route === "object"
+        ? (jsonRecord.route as Record<string, unknown>)
+        : {};
+
+    const toIso = (val: unknown): string | null => {
+      if (!val) return null;
+      const d = val instanceof Date ? val : new Date(String(val));
+      return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+    };
+
+    const toNullableInt = (val: unknown): number | null => {
+      if (val === null || val === undefined || val === "") return null;
+      const num = Number(val);
+      return Number.isFinite(num) ? Math.max(0, Math.round(num)) : null;
+    };
+
+    const rawPaymentStatus =
+      (typeof row.live_payment_status === "string" && row.live_payment_status) ||
+      (typeof row.payment_status === "string" && row.payment_status) ||
+      (typeof jsonRecord.paymentStatus === "string" && jsonRecord.paymentStatus) ||
+      "unknown";
+    const paymentStatus: MultiTaxiTripPaymentStatus = [
+      "not_selected",
+      "authorized",
+      "captured",
+      "failed",
+      "refunded",
+      "manual_recovery",
+      "unknown",
+    ].includes(rawPaymentStatus)
+      ? (rawPaymentStatus as MultiTaxiTripPaymentStatus)
+      : "unknown";
+
+    const payableFareMinor =
+      toNullableInt(row.payable_fare_minor) ??
+      toNullableInt(jsonRecord.payableFareMinor) ??
+      0;
+    const actualFareMinor =
+      toNullableInt(row.actual_fare_minor) ??
+      toNullableInt(jsonRecord.actualFareMinor) ??
+      payableFareMinor;
+    const livePaymentAmount = toNullableInt(row.live_payment_amount_minor);
+    const storedCollectedFare =
+      toNullableInt(row.collected_fare_minor) ??
+      toNullableInt(jsonRecord.collectedFareMinor);
+
+    const collectedFareMinor =
+      paymentStatus === "captured"
+        ? (livePaymentAmount ?? storedCollectedFare ?? actualFareMinor)
+        : paymentStatus === "refunded"
+          ? 0
+          : null;
+
+    const rawTollSource =
+      (typeof row.toll_source === "string" && row.toll_source) ||
+      (typeof jsonRecord.tollSource === "string" && jsonRecord.tollSource) ||
+      (row.toll_minor !== null && row.toll_minor !== undefined
+        ? "driver_proof"
+        : jsonRecord.tollMinor !== null && jsonRecord.tollMinor !== undefined
+          ? "driver_proof"
+          : "unavailable");
+    const tollSource: MultiTaxiTripTollSource = [
+      "driver_proof",
+      "electronic_receipt",
+      "none",
+      "unavailable",
+    ].includes(rawTollSource)
+      ? (rawTollSource as MultiTaxiTripTollSource)
+      : "unavailable";
+    const tollMinor =
+      toNullableInt(row.toll_minor) ??
+      toNullableInt(jsonRecord.tollMinor) ??
+      0;
+
+    const rawRouteSource =
+      (typeof row.route_source === "string" && row.route_source) ||
+      (typeof jsonRoute.source === "string" && jsonRoute.source) ||
+      "unavailable";
+    const routeSource: MultiTaxiTripRouteSource = [
+      "driver_gps",
+      "provider_route",
+      "mixed",
+      "pickup_dropoff_summary",
+      "unavailable",
+    ].includes(rawRouteSource)
+      ? (rawRouteSource as MultiTaxiTripRouteSource)
+      : "unavailable";
+
+    const routeSummary =
+      (typeof row.route_summary === "string" && row.route_summary.trim()
+        ? row.route_summary.trim()
+        : null) ??
+      (typeof jsonRoute.routeSummary === "string" && jsonRoute.routeSummary.trim()
+        ? jsonRoute.routeSummary.trim()
+        : null);
+
+    const distanceMeters =
+      toNullableInt(row.distance_meters) ??
+      toNullableInt(jsonRoute.distanceMeters);
+    const durationSeconds =
+      toNullableInt(row.duration_seconds) ??
+      toNullableInt(jsonRoute.durationSeconds);
+    const encodedPolyline =
+      typeof jsonRoute.encodedPolyline === "string" &&
+      jsonRoute.encodedPolyline.trim()
+        ? jsonRoute.encodedPolyline.trim()
+        : null;
+    const pointCount = toNullableInt(jsonRoute.pointCount) ?? 0;
+
+    const reservedAt =
+      toIso(row.reserved_at) ??
+      toIso(jsonRecord.reservedAt) ??
+      new Date(0).toISOString();
+    const generatedAt =
+      toIso(row.generated_at) ??
+      toIso(jsonRecord.generatedAt) ??
+      reservedAt;
+    const retainUntil =
+      toIso(row.retain_until) ??
+      toIso(jsonRecord.retainUntil) ??
+      new Date(Date.parse(generatedAt) + 730 * 24 * 60 * 60 * 1000).toISOString();
+
+    const rawChargingMode =
+      (typeof row.charging_mode === "string" && row.charging_mode) ||
+      (typeof jsonRecord.chargingMode === "string" && jsonRecord.chargingMode) ||
+      "meter";
+
+    return {
+      recordId: String(row.record_id ?? jsonRecord.recordId ?? `mtr-${String(row.order_id)}`),
+      orderId: String(row.order_id ?? jsonRecord.orderId ?? ""),
+      orderNo: String(
+        row.resolved_order_no ??
+          row.order_no ??
+          jsonRecord.orderNo ??
+          row.order_id ??
+          "",
+      ),
+      tripId: String(row.trip_id ?? jsonRecord.tripId ?? ""),
+      assignmentId:
+        typeof row.assignment_id === "string" && row.assignment_id
+          ? row.assignment_id
+          : typeof jsonRecord.assignmentId === "string" && jsonRecord.assignmentId
+            ? jsonRecord.assignmentId
+            : null,
+      vehicleId: String(row.vehicle_id ?? jsonRecord.vehicleId ?? ""),
+      plateNo: String(row.plate_no ?? jsonRecord.plateNo ?? ""),
+      reservedAt,
+      pickupAt: toIso(row.pickup_at) ?? toIso(jsonRecord.pickupAt),
+      dropoffAt: toIso(row.dropoff_at) ?? toIso(jsonRecord.dropoffAt),
+      route: {
+        encodedPolyline,
+        pointCount,
+        distanceMeters,
+        durationSeconds,
+        source: routeSource,
+        routeSummary,
+      },
+      payableFareMinor,
+      actualFareMinor,
+      collectedFareMinor,
+      paymentStatus,
+      tollMinor,
+      tollSource,
+      currency: PLATFORM_CURRENCY,
+      farePolicyVersion: String(
+        row.fare_policy_version ??
+          jsonRecord.farePolicyVersion ??
+          "multi-taxi-v1",
+      ),
+      chargingMode:
+        rawChargingMode === "platform_quote" ? "platform_quote" : "meter",
+      generatedAt,
+      retainUntil,
+    };
   }
 }
