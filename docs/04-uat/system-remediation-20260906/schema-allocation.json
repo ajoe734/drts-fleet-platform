@@ -185,6 +185,12 @@
       "amended_at": "2026-10-25",
       "scope": "Appended exclusivity_operator_binding_allocations V0131 only; all previous allocations, amendments and task ownership entries remain unchanged",
       "reason": "Registers the R02 vehicle dispatch exclusivity operator-binding migration V0131__exclusivity_operator_binding.sql after BUREAU-R04 (V0130) and BUREAU-R13 (V0132, V0133) merged to origin/dev and 3-leaf migration_reservation_scope_coordination."
+    },
+    {
+      "amended_by_task_id": "BUREAU-R11-EXISTING-TRIP-RECORD-SOURCE-FOLLOWTHROUGH-20261025",
+      "amended_at": "2026-10-25",
+      "scope": "Appended V0135__multi_taxi_trip_record_truth_retention.sql to regulatory_agency_access_allocations only; all previous allocations, amendments and task ownership entries remain unchanged. V0134 stays reserved for BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025 and is not claimed here.",
+      "reason": "Registers the R11 per-trip operational record truth, telemetry.driver_location_events route provenance, historical backfill/reconciliation, payment collection synchronization, and two-calendar-year statutory retention + active legal-hold deletion guard migration V0135__multi_taxi_trip_record_truth_retention.sql on reporting.multi_taxi_trip_operational_records (V0056) at origin/dev 6d51859f979866a0d243b10c2a45f2ffb1806744."
     }
   ],
   "voice_application_allocations": [
@@ -938,6 +944,32 @@
         "BEFORE UPDATE OR DELETE row trigger and BEFORE TRUNCATE statement trigger reject mutation; DELETE only under the existing audit_retention_operator role with audit.allow_retention_archival = on (V0080 contract).",
         "action, resource_type and outcome are CHECK-constrained; a denied or error outcome never records row_count.",
         "No retention period, default or purge scheduler is introduced (open decision D9)."
+      ]
+    },
+    {
+      "task_id": "BUREAU-R11-EXISTING-TRIP-RECORD-SOURCE-FOLLOWTHROUGH-20261025",
+      "version": "V0135",
+      "migration_filename": "V0135__multi_taxi_trip_record_truth_retention.sql",
+      "domain": "multi_taxi_trip_record_truth_retention",
+      "target_schema": "reporting",
+      "primary_tables": ["reporting.multi_taxi_trip_operational_records"],
+      "referenced_tables": [
+        "ops.phase1_owned_orders",
+        "ops.phase1_driver_tasks",
+        "ops.phase1_dispatch_assignments",
+        "ops.driver_completion_outbox",
+        "ops.passenger_dispatch_disclosure_snapshots",
+        "reporting.multi_taxi_electronic_receipts",
+        "billing.multi_taxi_passenger_payments",
+        "telemetry.driver_location_events",
+        "voice.legal_hold"
+      ],
+      "description": "Traffic Bureau R11 per-trip operational record truth, telemetry.driver_location_events GPS provenance columns/snapshot, historical backfill/reconciliation, transactional payment collection synchronization, and two-calendar-year statutory retention + active legal-hold deletion guard.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "Extends V0056 reporting.multi_taxi_trip_operational_records with explicit statutory truth and provenance columns (order_no, assignment_id, route_summary, route_source, distance_meters, duration_seconds, collected_fare_minor, payment_status, toll_minor, toll_source, fare_policy_version, charging_mode) without creating a duplicate table.",
+        "multi_taxi_record_payment_collection_chk enforces that collected_fare_minor is non-null only when payment_status = 'captured', 0 when payment_status = 'refunded', and NULL when payment_status IN ('not_selected', 'authorized', 'failed', 'manual_recovery', 'unknown'), synchronized inside the same transaction via trg_sync_multi_taxi_trip_record_payment on billing.multi_taxi_passenger_payments without overwriting completion actual_fare_minor.",
+        "reporting.multi_taxi_two_calendar_year_retention_floor, trg_multi_taxi_trip_record_update_guard, trg_multi_taxi_trip_record_delete_guard, and trg_multi_taxi_trip_record_no_truncate forbid core trip-fact mutation once populated, forbid shortening retain_until below existing value or the two-calendar-year UTC floor (>= 2 calendar years and >= 730 days, rolling Feb 29 starts to Mar 1), forbid TRUNCATE, forbid DELETE while effective retain_until > clock_timestamp(), and after expiry require reporting.allow_trip_record_retention_purge = 'on' and no active hold in voice.legal_hold."
       ]
     }
   ]

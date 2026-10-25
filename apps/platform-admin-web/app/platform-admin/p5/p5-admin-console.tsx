@@ -35,6 +35,7 @@ import {
   type DisclosureReviewItem,
 } from "./p5-disclosure-review-model";
 import { PublicFareManagement } from "./fares/public-fare-management";
+import { resolveRecordCollectedFareMinor } from "./records/records-operations-model";
 
 type P5View = "disclosure" | "queue" | "fares" | "records";
 
@@ -79,7 +80,17 @@ function requiresAnyScope(scopeSet: Set<string>, scopes: string[]) {
   return scopes.some((scope) => scopeSet.has(scope));
 }
 
-function formatCurrencyMinor(amountMinor: number, locale: string) {
+function formatCurrencyMinor(
+  amountMinor: number | null | undefined,
+  locale: string,
+) {
+  if (
+    amountMinor === null ||
+    amountMinor === undefined ||
+    !Number.isFinite(amountMinor)
+  ) {
+    return "—";
+  }
   return new Intl.NumberFormat(locale === "zh" ? "zh-TW" : "en-US", {
     style: "currency",
     currency: "TWD",
@@ -563,7 +574,8 @@ function P5OtherAdminConsole({ view }: { view: P5View }) {
         h: t("p5.records.col.fare"),
         w: 108,
         align: "right",
-        r: (row) => formatCurrencyMinor(row.actualFareMinor, locale),
+        r: (row) =>
+          formatCurrencyMinor(resolveRecordCollectedFareMinor(row), locale),
       },
       {
         h: t("p5.records.col.retainUntil"),
