@@ -56,18 +56,56 @@ export class ReferralMonthlyRatingController {
     @CurrentIdentity() identity?: BootstrapRequestIdentity | null,
     @Headers("x-request-id") requestId?: string,
   ) {
-    const mergedQuery = {
-      ...(query ?? {}),
-      ...(body ?? {}),
-    } as ReferralMonthlyRatingQuery;
+    const mergedQuery = this.mergeGovernanceQuery(query, body);
     return toApiSuccessEnvelope(
       await this.service.evaluateGovernance(mergedQuery, {
-        identity: identity ?? null,
+        ...(identity !== undefined ? { identity } : {}),
         auditEvaluation: true,
         ...(requestId ? { requestId } : {}),
       }),
       requestId,
     );
+  }
+
+  private mergeGovernanceQuery(
+    query: Partial<ReferralMonthlyRatingQuery> | undefined,
+    body: Partial<ReferralMonthlyRatingQuery> | undefined,
+  ): ReferralMonthlyRatingQuery {
+    const raw = {
+      ...(query ?? {}),
+      ...(body ?? {}),
+    } as Record<string, unknown>;
+    const periodMonth =
+      (typeof raw.periodMonth === "string" ? raw.periodMonth : undefined) ??
+      (typeof raw.period_month === "string" ? raw.period_month : "");
+    const driverId =
+      (typeof raw.driverId === "string" ? raw.driverId : undefined) ??
+      (typeof raw.driver_id === "string" ? raw.driver_id : undefined);
+    const tenantId =
+      (typeof raw.tenantId === "string" ? raw.tenantId : undefined) ??
+      (typeof raw.tenant_id === "string" ? raw.tenant_id : undefined);
+    const partnerId =
+      (typeof raw.partnerId === "string" ? raw.partnerId : undefined) ??
+      (typeof raw.partner_id === "string" ? raw.partner_id : undefined);
+    const partnerProgramId =
+      (typeof raw.partnerProgramId === "string"
+        ? raw.partnerProgramId
+        : undefined) ??
+      (typeof raw.partner_program_id === "string"
+        ? raw.partner_program_id
+        : undefined);
+    const entrySlug =
+      (typeof raw.entrySlug === "string" ? raw.entrySlug : undefined) ??
+      (typeof raw.entry_slug === "string" ? raw.entry_slug : undefined);
+
+    return {
+      periodMonth,
+      ...(driverId !== undefined ? { driverId } : {}),
+      ...(tenantId !== undefined ? { tenantId } : {}),
+      ...(partnerId !== undefined ? { partnerId } : {}),
+      ...(partnerProgramId !== undefined ? { partnerProgramId } : {}),
+      ...(entrySlug !== undefined ? { entrySlug } : {}),
+    };
   }
 
   @Post("reports/referral-monthly-ratings/governance/outcomes")

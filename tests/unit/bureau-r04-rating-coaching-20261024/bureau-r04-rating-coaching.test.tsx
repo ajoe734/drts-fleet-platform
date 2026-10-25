@@ -881,6 +881,22 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
         }
         if (
           u.pathname ===
+            "/control-plane-proxy/reports/referral-monthly-ratings/governance/evaluate" &&
+          init.method === "POST"
+        ) {
+          const body = JSON.parse(String(init.body ?? "{}")) as Partial<{
+            periodMonth: string;
+            driverId: string;
+          }>;
+          return h.controller.evaluateGovernance(
+            body,
+            Object.fromEntries(u.searchParams),
+            adminIdentity,
+            reqId,
+          );
+        }
+        if (
+          u.pathname ===
             "/control-plane-proxy/reports/referral-monthly-ratings/governance/outcomes" &&
           init.method === "POST"
         ) {
@@ -934,8 +950,10 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
     fireEvent.click(screen.getByRole("button", { name: "查詢／重新整理" }));
 
     await screen.findByText(/評價數：1；平均：2.00/);
+    // Initial GET is read-only preview; no DB rows persisted yet
+    expect(h.persistedGovernanceRows.size).toBe(0);
 
-    // Load multi-month governance records (coaching + 3-month termination review)
+    // Clicking '評估／載入跨月輔導與終止紀錄' calls POST /governance/evaluate and persists flagged records in DB
     fireEvent.click(
       screen.getByRole("button", { name: "評估／載入跨月輔導與終止紀錄" }),
     );
@@ -948,6 +966,39 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
     await govTable.findByText("2026-08、2026-09、2026-10");
     expect(govTable.getByText("連續 3 個月低於 3.5 要終止")).toBeTruthy();
     expect(govTable.getByText("月平均低於 4.0 要輔導")).toBeTruthy();
+    expect(
+      fetchBoundary.mock.calls.some(([calledUrl, calledInit]) => {
+        const parsed = new URL(
+          String(calledUrl),
+          "https://socket-free.invalid",
+        );
+        return (
+          parsed.pathname ===
+            "/control-plane-proxy/reports/referral-monthly-ratings/governance/evaluate" &&
+          calledInit?.method === "POST"
+        );
+      }),
+    ).toBe(true);
+    expect(h.persistedGovernanceRows.size).toBe(2);
+    expect(
+      h.persistedGovernanceRows.get("driver-low-3m::2026-10::coaching"),
+    ).toMatchObject({
+      record_id: "r04-gov:driver-low-3m:2026-10:coaching",
+      status: "pending",
+      outcome: null,
+    });
+    expect(
+      h.persistedGovernanceRows.get(
+        "driver-low-3m::2026-10::termination_review",
+      ),
+    ).toMatchObject({
+      record_id: "r04-gov:driver-low-3m:2026-10:termination_review",
+      status: "pending",
+      outcome: null,
+    });
+    expect(
+      h.service.getGovernanceAuditLogs().map((a) => a.actionName),
+    ).toEqual(["referral_monthly_rating_governance.evaluate"]);
 
     // Record 'terminated' outcome on the termination_review row
     fireEvent.change(
@@ -1046,15 +1097,47 @@ describe("Bureau R04: monthly driver rating coaching (< 4.0) and consecutive low
     );
     expect(insertCallsAfterGet).toHaveLength(0);
 
-    // 2. Warm record with DB SELECT missing and UPDATE rowCount 0 must not acknowledge saved handling
-    const evaluated = await h.service.evaluateGovernance({
-      periodMonth: "2026-06",
+    // 2. Warm record with DB SELECT missing (0 rows) must NOT fall back to memoryGovernanceRecords on GET or POST
+    const coachedWarm = await h.service.recordOutcome(
+      {
+        driverId: "driver-boundary",
+        periodMonth: "2026-06",
+        ruleType: "coaching",
+        outcome: "coached",
+        reason: "初次完成輔導",
+      },
+      makeIdentity(),
+      "req-warm-coach",
+    );
+    expect(coachedWarm).toMatchObject({
+      recordId: "r04-gov:driver-boundary:2026-06:coaching",
+      status: "coached",
+      outcome: "coached",
+      auditId: expect.any(String),
     });
     h.persistedGovernanceRows.clear();
+
+    // PROBE_F3_GET: after DB rows are cleared, GET /governance must NOT return stale 'coached' or stale auditId from memory cache
+    const previewAfterDbCleared = await h.controller.readGovernance(
+      { periodMonth: "2026-06" },
+      makeIdentity({ scopes: ["reports:read"] }),
+      "req-probe-f3-get",
+    );
+    expect(previewAfterDbCleared.data.records).toHaveLength(1);
+    expect(previewAfterDbCleared.data.records[0]).toMatchObject({
+      recordId: "r04-gov:driver-boundary:2026-06:coaching",
+      status: "pending",
+      outcome: null,
+      outcomeReason: null,
+      handledByActorId: null,
+      handledAt: null,
+      auditId: null,
+    });
+
     await expect(
       h.service.recordOutcome(
         {
-          recordId: evaluated.records[0]!.recordId,
+          recordId: coachedWarm.recordId,
           outcome: "coached",
           reason: "已完成輔導",
         },

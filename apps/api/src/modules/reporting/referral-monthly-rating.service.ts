@@ -171,6 +171,37 @@ export class ReferralMonthlyRatingService {
       persist?: boolean;
     },
   ): Promise<ReferralMonthlyRatingGovernanceReport> {
+    if (options?.auditEvaluation && options.identity !== undefined) {
+      if (!options.identity?.actorId || !options.identity.actorId.trim()) {
+        throw new ApiRequestError(
+          401,
+          "AUTH_REQUIRED",
+          "Authenticated operator identity is required to evaluate monthly rating governance records.",
+        );
+      }
+      if (
+        options.identity.realm !== "platform" &&
+        options.identity.realm !== "ops" &&
+        options.identity.realm !== "system"
+      ) {
+        throw new ApiRequestError(
+          403,
+          "FORBIDDEN",
+          "Only platform or ops realm identities may evaluate monthly rating governance records.",
+        );
+      }
+      if (
+        Array.isArray(options.identity.scopes) &&
+        options.identity.scopes.length > 0 &&
+        !options.identity.scopes.includes("reports:write")
+      ) {
+        throw new ApiRequestError(
+          403,
+          "FORBIDDEN",
+          "reports:write scope is required to evaluate monthly rating governance records.",
+        );
+      }
+    }
     this.validateQuery(query);
     const shouldPersist = options?.persist !== false;
 
@@ -370,14 +401,16 @@ export class ReferralMonthlyRatingService {
           }
         }
 
-        if (options?.auditEvaluation && options.identity?.actorId) {
+        if (options?.auditEvaluation) {
+          const actorId =
+            options.identity?.actorId?.trim() || "system-governance-evaluator";
           await this.recordDurableAuditLog({
-            actorId: options.identity.actorId,
+            actorId,
             actorType:
-              (options.identity.actorType as
+              (options.identity?.actorType as
                 | AuditLogRecord["actorType"]
                 | undefined) ?? "platform_admin",
-            tenantId: options.identity.tenantId ?? null,
+            tenantId: options.identity?.tenantId ?? null,
             moduleName: "reporting",
             actionName: "referral_monthly_rating_governance.evaluate",
             resourceType: "referral_monthly_rating_governance_report",
@@ -504,6 +537,13 @@ export class ReferralMonthlyRatingService {
     }
 
     return this.runWithTransaction(async () => {
+      const wasWarmInMemory = this.hasMemoryGovernanceRecord({
+        recordId,
+        driverId,
+        periodMonth,
+        ruleType: command.ruleType,
+      });
+
       let existing = await this.findGovernanceRecord({
         recordId,
         driverId,
@@ -527,6 +567,7 @@ export class ReferralMonthlyRatingService {
 
       if (
         !existing &&
+        !wasWarmInMemory &&
         resolvedDriverId &&
         resolvedPeriodMonth &&
         this.repository.isEnabled()
@@ -978,6 +1019,28 @@ export class ReferralMonthlyRatingService {
         this.memoryGovernanceRecords.set(key, mapped);
         return structuredClone(mapped);
       }
+      const fallbackPending: ReferralMonthlyRatingGovernanceRecord = {
+        recordId,
+        driverId: input.driverId,
+        periodMonth: input.periodMonth,
+        ruleType: input.ruleType,
+        threshold: input.threshold,
+        averageRating: input.averageRating,
+        ratingCount: input.ratingCount,
+        consecutiveLowMonths: input.consecutiveLowMonths,
+        triggeredMonths: [...input.triggeredMonths],
+        monthlyBreakdown: structuredClone(input.monthlyBreakdown),
+        status: "pending",
+        outcome: null,
+        outcomeReason: null,
+        handledByActorId: null,
+        handledAt: null,
+        auditId: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.memoryGovernanceRecords.set(key, fallbackPending);
+      return structuredClone(fallbackPending);
     }
 
     const unchanged =
@@ -1133,6 +1196,33 @@ export class ReferralMonthlyRatingService {
     return record;
   }
 
+  private hasMemoryGovernanceRecord(filter: {
+    recordId?: string | undefined;
+    driverId?: string | undefined;
+    periodMonth?: string | undefined;
+    ruleType?: ReferralMonthlyGovernanceRuleType | undefined;
+  }): boolean {
+    if (filter.recordId) {
+      for (const record of this.memoryGovernanceRecords.values()) {
+        if (record.recordId === filter.recordId) {
+          return true;
+        }
+      }
+    }
+    if (filter.driverId && filter.periodMonth) {
+      for (const record of this.memoryGovernanceRecords.values()) {
+        if (
+          record.driverId === filter.driverId &&
+          record.periodMonth === filter.periodMonth &&
+          (!filter.ruleType || record.ruleType === filter.ruleType)
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   private async findGovernanceRecord(filter: {
     recordId?: string | undefined;
     driverId?: string | undefined;
@@ -1178,7 +1268,9 @@ export class ReferralMonthlyRatingService {
           );
           return mapped;
         }
-      } else if (filter.driverId && filter.periodMonth) {
+        return null;
+      }
+      if (filter.driverId && filter.periodMonth) {
         const values: unknown[] = [filter.driverId, filter.periodMonth];
         const ruleClause = filter.ruleType ? `AND rule_type = $3` : "";
         if (filter.ruleType) values.push(filter.ruleType);
@@ -1222,7 +1314,9 @@ export class ReferralMonthlyRatingService {
           }
           return this.selectMatchingRecord(mappedRows, filter);
         }
+        return null;
       }
+      return null;
     }
 
     if (filter.recordId) {

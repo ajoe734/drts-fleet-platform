@@ -95,17 +95,24 @@ export function ReferralMonthlyRatings() {
   async function loadGovernance() {
     setGovernanceLoading(true);
     setGovernanceError(null);
+    const trimmedDriverId = driverId.trim();
     const query = new URLSearchParams({ periodMonth: month });
-    if (driverId.trim()) query.set("driverId", driverId.trim());
+    if (trimmedDriverId) query.set("driverId", trimmedDriverId);
     try {
-      const envelope =
-        await client.getEnvelope<ReferralMonthlyRatingGovernanceReport>(
-          `/api/reports/referral-monthly-ratings/governance?${query}`,
+      const evaluated =
+        await client.post<ReferralMonthlyRatingGovernanceReport>(
+          `/api/reports/referral-monthly-ratings/governance/evaluate?${query}`,
+          {
+            body: {
+              periodMonth: month,
+              ...(trimmedDriverId ? { driverId: trimmedDriverId } : {}),
+            },
+          },
         );
-      setGovernance(envelope.data);
+      setGovernance(evaluated);
       const nextSaved: Record<string, ReferralMonthlyRatingGovernanceRecord> =
         {};
-      for (const rec of envelope.data.records) {
+      for (const rec of evaluated.records) {
         nextSaved[`${rec.driverId}::${rec.periodMonth}::${rec.ruleType}`] = rec;
       }
       setSavedRecordsByKey((prev) => ({ ...prev, ...nextSaved }));
