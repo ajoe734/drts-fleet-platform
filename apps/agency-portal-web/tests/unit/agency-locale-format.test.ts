@@ -113,6 +113,19 @@ describe("Agency portal locale catalog and formatters", () => {
   });
 
   it("formats timestamps in Asia/Taipei around UTC day and month boundaries in both locales", () => {
+    // R12 UTC day boundary: 2026-10-24T17:00:00.000Z is 2026-10-25 01:00:00 in Asia/Taipei (+08:00)
+    const r12ClockIso = "2026-10-24T17:00:00.000Z";
+    const r12ZhFormatted = displayDateTime(r12ClockIso, "zh");
+    const r12EnFormatted = displayDateTime(r12ClockIso, "en");
+
+    expect(r12ZhFormatted).toContain("2026/10/25");
+    expect(r12ZhFormatted).toContain("01:00:00");
+    expect(r12ZhFormatted).not.toContain("10/24");
+
+    expect(r12EnFormatted).toContain("10/25/2026");
+    expect(r12EnFormatted).toContain("01:00:00");
+    expect(r12EnFormatted).not.toContain("10/24");
+
     // 2026-10-31T16:30:00.000Z is 2026-11-01 00:30:00 in Asia/Taipei (+08:00)
     const boundaryIso = "2026-10-31T16:30:00.000Z";
     const zhFormatted = displayDateTime(boundaryIso, "zh");
@@ -131,7 +144,10 @@ describe("Agency portal locale catalog and formatters", () => {
 
     expect(displayDateTime(null, "zh")).toBe("未提供");
     expect(displayDateTime(null, "en")).toBe("Not provided");
+    expect(displayDateTime("not-a-date", "zh")).toBe("未提供");
     expect(displayDateTime("not-a-date", "en")).toBe("Not provided");
+    expect(displayDateTime("invalid-iso", "zh")).toBe("未提供");
+    expect(displayDateTime("invalid-iso", "en")).toBe("Not provided");
   });
 
   it("keeps unknown values as Not provided/未提供 while preserving numeric zero as 0", () => {

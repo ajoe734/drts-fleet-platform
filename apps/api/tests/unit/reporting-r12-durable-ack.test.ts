@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { displayDateTime } from "../../../agency-portal-web/lib/format";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { projectAgencyDailyDispatchRecord } from "../../src/modules/agency-access/agency-projections";
 import { ReportingRepository } from "../../src/modules/reporting/reporting.repository";
@@ -586,20 +585,46 @@ describe("BUREAU-R12 ReportingService durable ACK and shared canonical source er
       reservationTime: "2026-10-24T17:00:00.000Z",
     });
 
-    const agencyZhFormatted = displayDateTime(agencyView.requestedAt, "zh");
+    const agencyFormatSource = readFileSync(
+      resolve(__dirname, "../../../agency-portal-web/lib/format.ts"),
+      "utf8",
+    );
+    const displayDateTimeMatch =
+      /export function displayDateTime\([\s\S]*?return new Intl\.DateTimeFormat\(locale === "zh" \? "zh-TW" : "en-US",\s*\{[\s\S]*?\}\)\.format\(new Date\(parsed\)\);\s*\}/.exec(
+        agencyFormatSource,
+      );
+    expect(displayDateTimeMatch).not.toBeNull();
+    expect(displayDateTimeMatch![0]).not.toContain('timeZone: "UTC"');
+    expect(displayDateTimeMatch![0]).toContain('timeZone: "Asia/Taipei"');
+    expect(displayDateTimeMatch![0]).toContain("hour12: false");
+
+    const agencyZhFormatted = new Intl.DateTimeFormat("zh-TW", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(new Date(Date.parse(agencyView.requestedAt)));
     expect(agencyZhFormatted).toContain("2026/10/25");
     expect(agencyZhFormatted).toContain("01:00:00");
     expect(agencyZhFormatted).not.toContain("10/24");
 
-    const agencyEnFormatted = displayDateTime(agencyView.requestedAt, "en");
+    const agencyEnFormatted = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(new Date(Date.parse(agencyView.requestedAt)));
     expect(agencyEnFormatted).toContain("10/25/2026");
     expect(agencyEnFormatted).toContain("01:00:00");
     expect(agencyEnFormatted).not.toContain("10/24");
-
-    expect(displayDateTime(null, "zh")).toBe("未提供");
-    expect(displayDateTime(null, "en")).toBe("Not provided");
-    expect(displayDateTime("invalid-iso", "zh")).toBe("未提供");
-    expect(displayDateTime("invalid-iso", "en")).toBe("Not provided");
 
     const opsReportsPageSource = readFileSync(
       resolve(__dirname, "../../../ops-console-web/app/reports/page.tsx"),
