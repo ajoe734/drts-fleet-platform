@@ -188,6 +188,7 @@ const REGULATORY_REPORT_JOB_TYPE_SET: ReadonlySet<string> = new Set(
 
 const MULTI_TAXI_TRIP_EXPORT_JOB_TYPE = "multi_taxi_trip_records";
 const MULTI_TAXI_TRIP_EXPORT_SCOPE = "multi_taxi_records:export";
+const AGENCY_TRIP_EXPORT_SCOPE = "agency:trip_records:export";
 const MAX_EXPORT_PURPOSE_LENGTH = 500;
 const MAX_EXPORT_IDEMPOTENCY_KEY_LENGTH = 200;
 const MAX_EXPORT_QUERY_LENGTH = 200;
@@ -648,7 +649,8 @@ export class ReportingFilingService
     identity: EvidenceAccessIdentity | null,
     existingJob?: StoredReportJob | null,
   ): { job: StoredReportJob; idempotentReplay: boolean } {
-    const { actorId } = this.assertMultiTaxiTripExportAccess(identity);
+    const { actorId, agencyId } =
+      this.assertMultiTaxiTripExportAccess(identity);
     const scope = this.normalizeMultiTaxiTripExportScope(command.scope ?? {});
     const purpose = this.normalizeRequiredText(
       command.purpose,
@@ -676,7 +678,8 @@ export class ReportingFilingService
       if (
         this.stableSerialize(existingMetadata.scope) !==
           this.stableSerialize(scope) ||
-        existingMetadata.purpose !== purpose
+        existingMetadata.purpose !== purpose ||
+        (existingMetadata.agencyId ?? null) !== (agencyId ?? null)
       ) {
         throw new ApiRequestError(
           HttpStatus.CONFLICT,
@@ -697,6 +700,7 @@ export class ReportingFilingService
       idempotencyKey,
       requestedByActorId: actorId,
       recordCount: rows.length,
+      ...(agencyId ? { agencyId } : {}),
     };
     const job: StoredReportJob = {
       jobId: `JOB-${randomUUID()}`,
@@ -767,8 +771,10 @@ export class ReportingFilingService
     identity: EvidenceAccessIdentity | null,
     requestId?: string,
   ): MultiTaxiTripOperationalExportJobView {
-    const { policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const access = this.assertMultiTaxiTripExportAccess(identity);
+    const { policy } = access;
     const job = this.requireMultiTaxiTripExportJob(jobId);
+    this.assertMultiTaxiTripExportOwnership(job, access);
     const view = this.toMultiTaxiTripExportView(job);
     this.recordArtifactAccessAudit(
       {
@@ -794,8 +800,10 @@ export class ReportingFilingService
     identity: EvidenceAccessIdentity | null,
     requestId?: string,
   ): MultiTaxiTripOperationalExportDownload {
-    const { policy } = this.assertMultiTaxiTripExportAccess(identity);
+    const access = this.assertMultiTaxiTripExportAccess(identity);
+    const { policy } = access;
     const job = this.requireMultiTaxiTripExportJob(jobId);
+    this.assertMultiTaxiTripExportOwnership(job, access);
     const metadata = this.requireMultiTaxiTripExportMetadata(job);
     if (job.status !== "completed" || !job.artifact) {
       throw new ApiRequestError(
@@ -2786,6 +2794,7 @@ export class ReportingFilingService
       purpose: metadata.purpose,
       recordCount: metadata.recordCount,
       requestedByActorId: metadata.requestedByActorId,
+      ...(metadata.agencyId ? { agencyId: metadata.agencyId } : {}),
       downloadAvailable: job.status === "completed" && Boolean(job.artifact),
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
@@ -2811,8 +2820,37 @@ export class ReportingFilingService
 
   private assertMultiTaxiTripExportAccess(
     identity: EvidenceAccessIdentity | null,
-  ) {
+  ): {
+    actorId: string;
+    agencyId: string | null;
+    policy: ReturnType<typeof assertEvidenceAccess>;
+  } {
     const actorId = identity?.actorId?.trim();
+    // BUREAU-R13 §4.1: an agency exporter may create and read only its own
+    // agency-bound jobs; the platform path below is unchanged.
+    if (identity?.realm === "agency") {
+      const agencyId = identity.agencyId?.trim();
+      if (
+        identity.actorType !== "agency_user" ||
+        !actorId ||
+        !agencyId ||
+        !identity.scopes.includes(AGENCY_TRIP_EXPORT_SCOPE)
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "MULTI_TAXI_EXPORT_FORBIDDEN",
+          "An agency actor with agency:trip_records:export is required.",
+        );
+      }
+      return {
+        actorId,
+        agencyId,
+        policy: assertEvidenceAccess({
+          family: "report_artifact",
+          identity,
+        }),
+      };
+    }
     if (
       identity?.realm !== "platform" ||
       identity.actorType !== "platform_admin" ||
@@ -2827,11 +2865,40 @@ export class ReportingFilingService
     }
     return {
       actorId,
+      agencyId: null,
       policy: assertEvidenceAccess({
         family: "report_artifact",
         identity,
       }),
     };
+  }
+
+  /**
+   * Platform callers keep reading any multi-taxi export job (route-level
+   * `@RequireRealms("platform")`). An agency caller only sees a job it created
+   * for its own agency; anything else is indistinguishable from a missing job.
+   */
+  private assertMultiTaxiTripExportOwnership(
+    job: StoredReportJob,
+    access: { actorId: string; agencyId: string | null },
+  ) {
+    if (!access.agencyId) {
+      return;
+    }
+    const metadata = this.requireMultiTaxiTripExportMetadata(job);
+    if (
+      metadata.requestedByActorId !== access.actorId ||
+      metadata.agencyId !== access.agencyId
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "MULTI_TAXI_EXPORT_JOB_NOT_FOUND",
+        "Multi-taxi trip export job was not found.",
+        {
+          jobId: job.jobId,
+        },
+      );
+    }
   }
 
   private normalizeMultiTaxiTripExportScope(
@@ -2859,6 +2926,34 @@ export class ReportingFilingService
         );
       }
       normalized.q = query;
+    }
+    for (const field of ["reservedFrom", "reservedTo"] as const) {
+      const value = scope[field]?.trim();
+      if (!value) {
+        continue;
+      }
+      if (
+        !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value) ||
+        !Number.isFinite(Date.parse(`${value}T00:00:00.000Z`))
+      ) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "MULTI_TAXI_EXPORT_DATE_INVALID",
+          `Export ${field} must use YYYY-MM-DD.`,
+        );
+      }
+      normalized[field] = value;
+    }
+    if (
+      normalized.reservedFrom &&
+      normalized.reservedTo &&
+      normalized.reservedFrom > normalized.reservedTo
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_EXPORT_DATE_RANGE_INVALID",
+        "Export reservedFrom must not be after reservedTo.",
+      );
     }
     return normalized;
   }

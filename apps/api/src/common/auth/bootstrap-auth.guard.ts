@@ -13,9 +13,11 @@ import { AuditNotificationService } from "../../modules/audit-notification/audit
 import { IAPSubjectAdapter } from "../../modules/auth/iap-subject.adapter";
 import { extractIapJwtAssertion } from "@drts/control-plane-auth";
 import {
+  AGENCY_WRITE_ROUTE_ALLOWLIST,
   AUTH_ALLOWED_REALMS_KEY,
   AUTH_OPEN_ROUTE_KEY,
   AUTH_REQUIRED_SCOPES_KEY,
+  AUTH_ROUTE_READ_METHODS,
 } from "./auth.constants";
 import type {
   AuthenticatedRequestLike,
@@ -37,6 +39,7 @@ import {
   GOOGLE_WORKLOAD_IDENTITY_HEADER,
   GoogleWorkloadIdentityAdapter,
 } from "../../modules/auth/google-workload-identity.adapter";
+import { AgencyAccessAuditService } from "../../modules/agency-access/agency-access-audit.service";
 
 function asHeaderRecord(
   headers: unknown,
@@ -206,6 +209,8 @@ export class BootstrapAuthGuard implements CanActivate {
     private readonly googleWorkloadIdentityAdapter?: GoogleWorkloadIdentityAdapter,
     @Optional()
     private readonly passengerAccountService?: PassengerAccountService,
+    @Optional()
+    private readonly agencyAccessAuditService?: AgencyAccessAuditService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
@@ -611,6 +616,7 @@ export class BootstrapAuthGuard implements CanActivate {
             }
             if (policy) {
               try {
+                this.assertAgencyRouteBoundary(identity, policy, request);
                 this.assertRealmAllowed(
                   identity,
                   policy.allowedRealms,
@@ -627,6 +633,12 @@ export class BootstrapAuthGuard implements CanActivate {
                 );
               } catch (error) {
                 this.recordAuthorizationDenialAudit(identity, request, error);
+                await this.recordAgencyAuthorizationDenial(
+                  identity,
+                  request,
+                  policy,
+                  error,
+                );
                 throw error;
               }
             }
@@ -691,11 +703,22 @@ export class BootstrapAuthGuard implements CanActivate {
 
     request.identity = identity;
     try {
+      this.assertAgencyRouteBoundary(identity, policy, request);
       this.assertRealmAllowed(identity, policy.allowedRealms, request);
       this.assertScopesAllowed(identity, policy.requiredScopes, request);
       this.stepUpProofService?.assertRequestSatisfied(identity, request);
     } catch (error) {
       this.recordAuthorizationDenialAudit(identity, request, error);
+      if (identity.realm === "agency") {
+        return this.recordAgencyAuthorizationDenial(
+          identity,
+          request,
+          policy,
+          error,
+        ).then(() => {
+          throw error;
+        });
+      }
       throw error;
     }
 
@@ -727,6 +750,7 @@ export class BootstrapAuthGuard implements CanActivate {
             }
             const identity = this.jwtAuthService!.toRequestIdentity(payload);
             this.assertDriverProvisioningRoute(identity, request);
+            this.assertAgencyOpenRouteBoundary(identity, request);
             request.identity = identity;
           });
       }
@@ -908,6 +932,125 @@ export class BootstrapAuthGuard implements CanActivate {
         "AUTH_SCOPE_DENIED",
         "Driver provisioning sessions cannot access this route.",
       );
+    }
+  }
+
+  /**
+   * BUREAU-R13 §2.6 deny-by-default for the agency realm. An agency session
+   * may only reach a route whose resolved policy explicitly names `agency`
+   * (an empty realm list or the non-strict `default-authenticated` fallback
+   * is a denial, not an allowance), and only with a read method unless the
+   * exact route is in AGENCY_WRITE_ROUTE_ALLOWLIST. Other realms are untouched.
+   */
+  private assertAgencyRouteBoundary(
+    identity: RequestIdentity,
+    policy: ResolvedBootstrapAuthPolicy,
+    request: AuthenticatedRequestLike,
+  ) {
+    if (identity.realm !== "agency") {
+      return;
+    }
+    const method = (request.method ?? "GET").toUpperCase();
+    const routePath = normalizeRoutePath(
+      request.originalUrl ?? request.url ?? "",
+    )
+      .replace(/^api\/+/, "")
+      .replace(/\/+$/, "");
+    if (
+      policy.routeKey === "default-authenticated" ||
+      !policy.allowedRealms.includes("agency")
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_REALM_DENIED",
+        "Agency sessions may only access routes explicitly classified for the agency realm.",
+        {
+          route: request.originalUrl ?? request.url,
+          method,
+          realm: identity.realm,
+        },
+      );
+    }
+    if (
+      !AUTH_ROUTE_READ_METHODS.has(method) &&
+      !AGENCY_WRITE_ROUTE_ALLOWLIST.has(`${method} ${routePath}`)
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_REALM_DENIED",
+        "Agency sessions are read-only.",
+        {
+          route: request.originalUrl ?? request.url,
+          method,
+          realm: identity.realm,
+        },
+      );
+    }
+  }
+
+  /** Open routes stay public, but an agency bearer never turns one into a write. */
+  private assertAgencyOpenRouteBoundary(
+    identity: RequestIdentity,
+    request: AuthenticatedRequestLike,
+  ) {
+    if (identity.realm !== "agency") {
+      return;
+    }
+    const method = (request.method ?? "GET").toUpperCase();
+    const routePath = normalizeRoutePath(
+      request.originalUrl ?? request.url ?? "",
+    )
+      .replace(/^api\/+/, "")
+      .replace(/\/+$/, "");
+    if (
+      !AUTH_ROUTE_READ_METHODS.has(method) &&
+      !AGENCY_WRITE_ROUTE_ALLOWLIST.has(`${method} ${routePath}`)
+    ) {
+      throw new ApiRequestError(
+        403,
+        "AUTH_REALM_DENIED",
+        "Agency sessions are read-only.",
+        { route: request.originalUrl ?? request.url, method },
+      );
+    }
+  }
+
+  /**
+   * §5.3: a realm/scope denial of an agency session on an agency data route
+   * is itself an access-log entry (outcome = denied). The guard still throws
+   * the original authorization error whether or not the write succeeds.
+   */
+  private async recordAgencyAuthorizationDenial(
+    identity: RequestIdentity,
+    request: AuthenticatedRequestLike,
+    policy: ResolvedBootstrapAuthPolicy,
+    error: unknown,
+  ) {
+    if (identity.realm !== "agency" || !this.agencyAccessAuditService) {
+      return;
+    }
+    const code =
+      error instanceof ApiRequestError
+        ? ((error.getResponse() as { error?: { code?: string } })?.error
+            ?.code ?? null)
+        : null;
+    if (code !== "AUTH_REALM_DENIED" && code !== "AUTH_SCOPE_DENIED") {
+      return;
+    }
+    try {
+      await this.agencyAccessAuditService.recordGuardDenial(
+        identity,
+        {
+          method: (request.method ?? "GET").toUpperCase(),
+          url: request.originalUrl ?? request.url ?? "",
+          routeKey: policy.routeKey ?? "unclassified",
+          headers: asHeaderRecord(request.headers),
+        },
+        code,
+      );
+    } catch {
+      // The authorization error is the response; a failed denial record
+      // must never turn a 403 into a different status.
     }
   }
 
