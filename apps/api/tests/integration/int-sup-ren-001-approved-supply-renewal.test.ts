@@ -1,13 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type {
-  DriverRegistryRecord,
-  InsurancePolicyRecord,
-  SupplyDocumentRecord,
-  VehicleContractRecord,
-  VehicleRegistryRecord,
-} from "@drts/contracts";
+import type { SupplyDocumentRecord } from "@drts/contracts";
 import { DatabaseService } from "../../src/common/db";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../src/common/idempotency";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../src/modules/driver-profile/driver-profile.service";
@@ -36,10 +34,13 @@ function buildServices(db?: DatabaseService) {
     registryRepo,
   );
   const submissionRepo = new SupplySubmissionRepository(db);
+  const idempotencyRepo = new IdempotencyRepository(db);
+  const idempotencyService = new IdempotencyService(idempotencyRepo);
   const submissionService = new SupplySubmissionService(
     submissionRepo,
     registry,
     audit,
+    idempotencyService,
   );
   const reviewService = new SupplyReviewService(registry, submissionRepo, audit);
   const fleetPartnerServiceStub = {
@@ -61,9 +62,11 @@ function buildServices(db?: DatabaseService) {
   const controller = new FleetPartnerController(
     {} as never,
     submissionService,
-    undefined,
+    undefined as never,
+    reviewService,
     readinessService,
     undefined,
+    idempotencyService,
   );
 
   return {
@@ -72,6 +75,8 @@ function buildServices(db?: DatabaseService) {
     registryRepo,
     registry,
     submissionRepo,
+    idempotencyRepo,
+    idempotencyService,
     submissionService,
     reviewService,
     readinessService,
@@ -208,7 +213,17 @@ describe("INT-SUP-REN-001 approved supply renewal integration", () => {
     expect(targetVehicle.ready).toBe(false);
     expect(targetVehicle.reasonCodes).toContain("INSURANCE_EXPIRED");
 
-    // 3. Create insurance_update draft through FleetPartnerController
+    // 3. Create insurance_update draft through FleetPartnerController with Idempotency-Key and verify replay + conflict
+    const firstHeaders: Record<string, string> = {};
+    const firstRes = {
+      statusCode: 200,
+      status(code: number) {
+        this.statusCode = code;
+      },
+      setHeader(name: string, value: string) {
+        firstHeaders[name.toLowerCase()] = value;
+      },
+    };
     const createdEnvelope =
       await s.controller.createSupplyRenewalSubmission(
         fleetPartnerId,
@@ -219,14 +234,81 @@ describe("INT-SUP-REN-001 approved supply renewal integration", () => {
         },
         "req-create-ren-1",
         partnerIdentity,
+        "idem-ren-int-001",
+        firstRes,
       );
     const renewalSubId = createdEnvelope.data.submission.submissionId;
+    expect(firstRes.statusCode).toBe(201);
+    expect(firstHeaders["x-idempotent-replay"]).toBeUndefined();
     expect(createdEnvelope.data.submission.submissionType).toBe(
       "insurance_update",
     );
     expect(createdEnvelope.data.submission.canonicalVehicleId).toBe(
       canonicalVehicleId,
     );
+
+    // Replay with identical Idempotency-Key and payload returns stored submission without creating a duplicate or throwing 409
+    const replayHeaders: Record<string, string> = {};
+    const replayRes = {
+      statusCode: 200,
+      status(code: number) {
+        this.statusCode = code;
+      },
+      setHeader(name: string, value: string) {
+        replayHeaders[name.toLowerCase()] = value;
+      },
+    };
+    const replayedEnvelope =
+      await s.controller.createSupplyRenewalSubmission(
+        fleetPartnerId,
+        undefined,
+        {
+          submissionType: "insurance_update",
+          subjectVehicleId: canonicalVehicleId,
+        },
+        "req-create-ren-1-replay",
+        partnerIdentity,
+        "idem-ren-int-001",
+        replayRes,
+      );
+    expect(replayRes.statusCode).toBe(201);
+    expect(replayHeaders["x-idempotent-replay"]).toBe("true");
+    expect(replayedEnvelope.data.submission.submissionId).toBe(renewalSubId);
+
+    // Reusing the same Idempotency-Key with a different payload rejects with 409 IDEMPOTENCY_KEY_REUSED
+    await expect(
+      s.controller.createSupplyRenewalSubmission(
+        fleetPartnerId,
+        undefined,
+        {
+          submissionType: "contract_update",
+          subjectVehicleId: canonicalVehicleId,
+        },
+        "req-create-ren-1-conflict",
+        partnerIdentity,
+        "idem-ren-int-001",
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
+
+    // Omitting Idempotency-Key on a duplicate active target/type still rejects with 409 ACTIVE_RENEWAL_SUBMISSION_EXISTS
+    await expect(
+      s.controller.createSupplyRenewalSubmission(
+        fleetPartnerId,
+        undefined,
+        {
+          submissionType: "insurance_update",
+          subjectVehicleId: canonicalVehicleId,
+        },
+        "req-create-ren-1-nokey-dup",
+        partnerIdentity,
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "ACTIVE_RENEWAL_SUBMISSION_EXISTS",
+    });
 
     // 4. Attach renewed insurance_policy document and submit
     const subRecord = s.submissionService.requireScopedSubmission(
@@ -331,9 +413,14 @@ describe("INT-SUP-REN-001 approved supply renewal integration", () => {
           if (DATABASE_URL) {
             const cleanup = createDb();
             if (createdFleetPartnerIds.size > 0) {
+              const fpIds = [...createdFleetPartnerIds];
+              await cleanup.query(
+                "DELETE FROM ops.idempotency_records WHERE scope = ANY($1::text[])",
+                [fpIds.map((fp) => `fleet-partner:${fp}:supply_renewal_create`)],
+              );
               await cleanup.query(
                 "DELETE FROM fleet.vehicle_fleet_affiliations WHERE fleet_partner_id = ANY($1::text[])",
-                [[...createdFleetPartnerIds]],
+                [fpIds],
               );
             }
             if (createdSubmissionIds.size > 0) {
@@ -379,15 +466,7 @@ describe("INT-SUP-REN-001 approved supply renewal integration", () => {
                 [vehIds],
               );
               await cleanup.query(
-                "UPDATE reg.phase1_registry_policies SET superseded_by_policy_id = NULL WHERE vehicle_id = ANY($1::text[])",
-                [vehIds],
-              );
-              await cleanup.query(
                 "DELETE FROM reg.phase1_registry_policies WHERE vehicle_id = ANY($1::text[])",
-                [vehIds],
-              );
-              await cleanup.query(
-                "UPDATE reg.phase1_registry_contracts SET superseded_by_contract_id = NULL WHERE vehicle_id = ANY($1::text[])",
                 [vehIds],
               );
               await cleanup.query(

@@ -490,7 +490,7 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
     expect(targetVehicle?.plateNo).toBe(seeded.plateNo);
     expect(targetVehicle?.reasonCodes).toContain("INSURANCE_EXPIRED");
 
-    // Create insurance_update renewal draft
+    // Create insurance_update renewal draft with Idempotency-Key
     const renewalDraft = await ctx.submissionService.createRenewalDraft(
       seeded.fleetPartnerId,
       "fleet-manager-1",
@@ -498,6 +498,8 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
         submissionType: "insurance_update",
         subjectVehicleId: seeded.canonicalVehicleId,
       },
+      "req-unit-ren-1",
+      "idem-unit-ren-ins-1",
     );
     const renewalSubId = renewalDraft.submission.submissionId;
     expect(renewalDraft.submission.submissionType).toBe("insurance_update");
@@ -509,7 +511,36 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
     );
     expect(renewalDraft.vehicleDraft?.plateNo).toBe(seeded.plateNo);
 
-    // Duplicate active renewal submission for the same vehicle + type is rejected
+    // Replaying with the same Idempotency-Key and identical payload returns the stored draft without re-running
+    const replayedRenewalDraft = await ctx.submissionService.createRenewalDraft(
+      seeded.fleetPartnerId,
+      "fleet-manager-1",
+      {
+        submissionType: "insurance_update",
+        subjectVehicleId: seeded.canonicalVehicleId,
+      },
+      "req-unit-ren-1-replay",
+      "idem-unit-ren-ins-1",
+    );
+    expect(replayedRenewalDraft.submission.submissionId).toBe(renewalSubId);
+
+    // Reusing the same Idempotency-Key with a different payload rejects with IDEMPOTENCY_KEY_REUSED
+    await expect(
+      ctx.submissionService.createRenewalDraft(
+        seeded.fleetPartnerId,
+        "fleet-manager-1",
+        {
+          submissionType: "contract_update",
+          subjectVehicleId: seeded.canonicalVehicleId,
+        },
+        "req-unit-ren-1-conflict",
+        "idem-unit-ren-ins-1",
+      ),
+    ).rejects.toMatchObject({
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
+
+    // Duplicate active renewal submission without Idempotency-Key for the same vehicle + type is rejected
     await expect(
       ctx.submissionService.createRenewalDraft(
         seeded.fleetPartnerId,

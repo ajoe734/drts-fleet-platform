@@ -15,6 +15,10 @@ import type {
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../common/idempotency";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import type { SupplyReviewEventRecord } from "./supply-submission.repository";
@@ -75,6 +79,9 @@ type LoadedState = {
 
 @Injectable()
 export class SupplySubmissionService implements OnModuleInit {
+  private readonly fallbackIdempotencyService = new IdempotencyService(
+    new IdempotencyRepository(),
+  );
   private submissions: SupplySubmissionRecord[] = [];
   private driverDrafts: DriverSupplyDraft[] = [];
   private vehicleDrafts: VehicleSupplyDraft[] = [];
@@ -87,6 +94,8 @@ export class SupplySubmissionService implements OnModuleInit {
     private readonly regulatoryRegistryService: RegulatoryRegistryService,
     @Optional()
     private readonly auditNotificationService?: AuditNotificationService,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   async onModuleInit() {
@@ -344,6 +353,43 @@ export class SupplySubmissionService implements OnModuleInit {
   }
 
   async createRenewalDraft(
+    fleetPartnerId: string,
+    actorId: string,
+    command: CreateSupplyRenewalDraftCommand,
+    requestId?: string,
+    idempotencyKey?: string,
+  ): Promise<SupplySubmissionDetail> {
+    if (idempotencyKey && idempotencyKey.trim()) {
+      const idempotency =
+        this.idempotencyService ?? this.fallbackIdempotencyService;
+      const result = await idempotency.execute({
+        scope: `fleet-partner:${fleetPartnerId}:supply_renewal_create`,
+        idempotencyKey,
+        actorId,
+        requestPath: "fleet-partner/supply-submissions/renewals",
+        required: false,
+        payload: command,
+        execute: async () => ({
+          data: await this.executeCreateRenewalDraft(
+            fleetPartnerId,
+            actorId,
+            command,
+            requestId,
+          ),
+          statusCode: HttpStatus.CREATED,
+        }),
+      });
+      return result.data;
+    }
+    return this.executeCreateRenewalDraft(
+      fleetPartnerId,
+      actorId,
+      command,
+      requestId,
+    );
+  }
+
+  private async executeCreateRenewalDraft(
     fleetPartnerId: string,
     actorId: string,
     command: CreateSupplyRenewalDraftCommand,
