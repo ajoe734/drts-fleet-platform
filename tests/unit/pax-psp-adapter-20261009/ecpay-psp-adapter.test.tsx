@@ -11,6 +11,7 @@ import {
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { PassThrough } from "node:stream";
 import {
   cleanup,
   fireEvent,
@@ -26,7 +27,12 @@ import type {
   PassengerPaymentFieldsAvailability,
 } from "@drts/passenger-client";
 import {
+  ECPAY_ACTION_ORIGINS,
+  ECPAY_CONNECT_ORIGINS,
   ECPAY_HOSTED_FIELDS_CSP,
+  ECPAY_JQUERY_URL,
+  ECPAY_SCRIPT_ORIGINS,
+  ECPAY_WEB_SDK_URLS,
   EcpayHostedFields,
   createEcpayHostedFieldsPort,
   type EcpaySdkGlobal,
@@ -519,6 +525,116 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
       }),
     });
     expect(unauthRes.status).toBe(401);
+  });
+
+  it("next.config.ts headers() serves ECPAY_HOSTED_FIELDS_CSP on /account/payment-methods so browser CSP permits dynamic jQuery and ECPay SDK script injection while preserving strict default CSP on ordinary routes", async () => {
+    const modPath = "../../../apps/passenger-app-web/next.config.ts";
+    const mod = await import(/* @vite-ignore */ modPath);
+    const config = mod.default as {
+      headers: () => Promise<
+        Array<{ source: string; headers: Array<{ key: string; value: string }> }>
+      >;
+    };
+    const { default: loadRoutes } = appRequire(
+      "next/dist/lib/load-custom-routes",
+    );
+    const { defaultConfig } = appRequire("next/dist/server/config-shared");
+    const { getPathMatch } = appRequire(
+      "next/dist/shared/lib/router/utils/path-match",
+    );
+    const { getResolveRoutes } = appRequire(
+      "next/dist/server/lib/router-utils/resolve-routes",
+    );
+
+    const resolveHeadersForUrl = async (url: string) => {
+      const runtimeConfig = { ...defaultConfig, ...config };
+      const routes = await loadRoutes(runtimeConfig);
+      const fsChecker = {
+        buildId: "payment-csp-header-probe",
+        onMatchHeaders: [],
+        headers: routes.headers.map((route: { source: string }) => ({
+          ...route,
+          match: getPathMatch(route.source),
+        })),
+        redirects: [],
+        rewrites: { beforeFiles: [], afterFiles: [], fallback: [] },
+        getMiddlewareMatchers: () => undefined,
+        getItem: async () => ({ type: "appFile" }),
+      };
+      const opts = { dir: resolve("."), dev: false, minimalMode: false };
+      const resolveRoute =
+        getResolveRoutes.length >= 7
+          ? getResolveRoutes(
+              fsChecker,
+              runtimeConfig,
+              () => runtimeConfig.assetPrefix ?? "",
+              opts,
+            )
+          : getResolveRoutes(fsChecker, runtimeConfig, opts);
+      const req = Object.assign(new PassThrough(), {
+        url,
+        headers: { host: "ride.smarttransport.tw" },
+        socket: {},
+      });
+      return (await resolveRoute({ req, res: {}, isUpgradeReq: false }))
+        .resHeaders as Record<string, string>;
+    };
+
+    const parseCspDirectives = (csp: string) =>
+      new Map(
+        csp
+          .split(";")
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .map((part) => {
+            const [directive, ...sources] = part.split(/\s+/);
+            return [directive!, sources] as const;
+          }),
+      );
+
+    for (const paymentPath of [
+      "/account/payment-methods",
+      "/account/payment-methods/bind",
+    ]) {
+      const headers = await resolveHeadersForUrl(paymentPath);
+      expect(headers["Content-Security-Policy"]).toBe(ECPAY_HOSTED_FIELDS_CSP);
+
+      const directives = parseCspDirectives(headers["Content-Security-Policy"]!);
+      const scriptSrc =
+        directives.get("script-src") ?? directives.get("default-src") ?? [];
+      const connectSrc =
+        directives.get("connect-src") ?? directives.get("default-src") ?? [];
+      const frameSrc =
+        directives.get("frame-src") ?? directives.get("default-src") ?? [];
+      const formAction =
+        directives.get("form-action") ?? directives.get("default-src") ?? [];
+
+      for (const origin of ECPAY_SCRIPT_ORIGINS) {
+        expect(scriptSrc).toContain(origin);
+      }
+      for (const origin of ECPAY_CONNECT_ORIGINS) {
+        expect(connectSrc).toContain(origin);
+      }
+      for (const origin of ECPAY_ACTION_ORIGINS) {
+        expect(frameSrc).toContain(origin);
+        expect(formAction).toContain(origin);
+      }
+
+      // Verify dynamic script URLs injected by <EcpayHostedFields /> pass the page's script-src origin check.
+      for (const scriptUrl of [
+        ECPAY_JQUERY_URL,
+        ECPAY_WEB_SDK_URLS.Stage,
+        ECPAY_WEB_SDK_URLS.Prod,
+      ]) {
+        const scriptOrigin = new URL(scriptUrl).origin;
+        expect(scriptSrc).toContain(scriptOrigin);
+      }
+    }
+
+    const rootHeaders = await resolveHeadersForUrl("/");
+    expect(rootHeaders["Content-Security-Policy"]).toBe(
+      "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
+    );
   });
 });
 

@@ -36,6 +36,14 @@ const nextConfig: NextConfig = {
       process.env.DRTS_CANDIDATE_SHA?.trim() || "unconfigured";
     const contentSecurityPolicy =
       "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';";
+    const paymentMethodsContentSecurityPolicy =
+      "default-src 'self'; " +
+      "connect-src 'self' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw; " +
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw; " +
+      "style-src 'self' 'unsafe-inline' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw; " +
+      "img-src 'self' data: https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw; " +
+      "frame-src 'self' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw https://payment-stage.ecpay.com.tw https://payment.ecpay.com.tw; " +
+      "form-action 'self' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw https://payment-stage.ecpay.com.tw https://payment.ecpay.com.tw;";
     return [
       {
         source: "/:path*",
@@ -59,6 +67,33 @@ const nextConfig: NextConfig = {
           {
             key: "Content-Security-Policy",
             value: contentSecurityPolicy,
+          },
+        ],
+      },
+      {
+        source: "/account/payment-methods",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: paymentMethodsContentSecurityPolicy,
+          },
+        ],
+      },
+      {
+        source: "/account/payment-methods/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: paymentMethodsContentSecurityPolicy,
+          },
+        ],
+      },
+      {
+        source: "/api/passenger-app/payment-methods/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: paymentMethodsContentSecurityPolicy,
           },
         ],
       },
