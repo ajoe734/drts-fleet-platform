@@ -187,7 +187,7 @@ class EnterpriseSearchAcceptanceWorkflowTests(unittest.TestCase):
         browser = self.text.split("  browser-acceptance:", 1)[1]
         for command in ("pnpm --filter @drts/api build", "pnpm --filter @drts/enterprise-dispatch-web build", "enterprise-search-browser-server.mjs", "next start", "pnpm exec playwright test", "enterprise-search-browser.spec.ts"):
             self.assertIn(command, browser)
-        self.assertIn("runs-on: ubuntu-latest", browser)
+        self.assertIn("runs-on: ubuntu-24.04", browser)
         self.assertIn("git rev-parse HEAD", browser)
         upload = browser.split("actions/upload-artifact@v4", 1)[1]
         self.assertNotIn("sessions.private.json", upload)

@@ -144,6 +144,9 @@ const C125_HISTORICALLY_CORRECTED_FILES = [
   },
 ] as const;
 
+const IMMUTABLE_337_WORKFLOW_FIXTURE_PATH =
+  "tests/unit/operational-role-session-wiring-20261021/fixtures/deploy-dev-337f3dd7fb530b44f4e65875dd03c7a2191e3706.yml";
+
 const IMMUTABLE_337_CALLER_BASELINES = {
   workflow: {
     path: ".github/workflows/deploy-dev.yml",
@@ -261,10 +264,34 @@ function reconstructImmutable337CallerSources(): {
     ].join("\n"),
   ];
 
-  let baselineWorkflow = currentWorkflow;
   for (const block of workflowAddedBlocks) {
-    expect(baselineWorkflow).toContain(block);
-    baselineWorkflow = baselineWorkflow.replace(block, "");
+    expect(currentWorkflow).toContain(block);
+  }
+
+  const fixtureWorkflow = readFileSync(
+    path.join(process.cwd(), IMMUTABLE_337_WORKFLOW_FIXTURE_PATH),
+    "utf8",
+  );
+  const baselineWorkflow = hasLocalBaselineCommit(IMMUTABLE_BASELINE_REF)
+    ? execFileSync(
+        "git",
+        [
+          "show",
+          `${IMMUTABLE_BASELINE_REF}:${IMMUTABLE_337_CALLER_BASELINES.workflow.path}`,
+        ],
+        { encoding: "utf8" },
+      )
+    : hasLocalBlob(IMMUTABLE_337_CALLER_BASELINES.workflow.blob)
+      ? execFileSync(
+          "git",
+          ["cat-file", "blob", IMMUTABLE_337_CALLER_BASELINES.workflow.blob],
+          { encoding: "utf8" },
+        )
+      : fixtureWorkflow;
+
+  expect(fixtureWorkflow).toBe(baselineWorkflow);
+  for (const block of workflowAddedBlocks) {
+    expect(baselineWorkflow).not.toContain(block);
   }
 
   const baselineRunner = currentRunner
