@@ -422,6 +422,12 @@ describe("deploy-dev SMTP secret mounts", () => {
             expect(parsedFull.INVOICE_MAIL_PORTAL_ORIGIN).toBe(
               "https://tenant.example.test",
             );
+            expect(parsedFull.AGENCY_INVITATION_ACCEPT_URL_BASE).toBe(
+              "https://cloudrun.example.test/invite",
+            );
+            expect(parsedFull.AUTH_ALLOWED_ORIGINS).toContain(
+              "https://cloudrun.example.test",
+            );
             expect(parsedFull.REMITTANCE_PROOF_STORAGE_PROVIDER).toBe(
               "unprovisioned",
             );

@@ -59,6 +59,15 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(workflowContent).toContain(
       'curl_ready_auth "${{ steps.urls.outputs.channel_partner_portal }}" "${CHANNEL_PARTNER_PORTAL_ID_TOKEN}"',
     );
+    expect(workflowContent).toContain(
+      'curl_ready_auth "${{ steps.urls.outputs.agency_portal }}" "${AGENCY_PORTAL_ID_TOKEN}"',
+    );
+    expect(workflowContent).toContain(
+      'curl_ready_auth "${{ steps.urls.outputs.agency_portal }}/login" "${AGENCY_PORTAL_ID_TOKEN}"',
+    );
+    expect(workflowContent).toContain(
+      'curl_ready_auth "${{ steps.urls.outputs.agency_portal }}/invite" "${AGENCY_PORTAL_ID_TOKEN}"',
+    );
 
     // Assert Cloud Run infrastructure-reserved path /healthz is not probed over public GFE
     expect(workflowContent).not.toContain(
@@ -66,6 +75,9 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     );
     expect(workflowContent).not.toContain(
       'curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/healthz"',
+    );
+    expect(workflowContent).not.toContain(
+      'curl_ready_auth "${{ steps.urls.outputs.agency_portal }}/healthz"',
     );
   });
 
@@ -91,6 +103,9 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     expect(workflowContent).not.toContain(
       'curl_ready "${{ steps.urls.outputs.channel_partner_portal }}"',
     );
+    expect(workflowContent).not.toContain(
+      'curl_ready "${{ steps.urls.outputs.agency_portal }}"',
+    );
   });
 
   it("preserves strict --no-allow-unauthenticated defaults for private services", () => {
@@ -115,6 +130,9 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
     );
     expect(workflowContent).toContain(
       'channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"',
+    );
+    expect(workflowContent).toContain(
+      'agency_portal_exposure_flag="$(exposure_flag "${DEV_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"',
     );
   });
 
@@ -151,6 +169,11 @@ describe("SR-DEV-HEALTHCHECK-IDENTITY-20260915: dev deployment health check iden
         "channel-partner-portal-web",
         "channel_partner_portal_service",
         "channel_partner_portal_exposure_flag",
+      ],
+      [
+        "agency-portal-web",
+        "agency_portal_service",
+        "agency_portal_exposure_flag",
       ],
     ] as const) {
       expect(workflowContent).toContain(
