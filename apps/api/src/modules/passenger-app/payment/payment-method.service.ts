@@ -142,7 +142,13 @@ export class PaymentMethodService {
         "Payment provider returned an invalid result.",
       );
     if (result.status === "failed") {
-      if (!["card_declined", "invalid_credential"].includes(result.error))
+      if (
+        ![
+          "card_declined",
+          "invalid_credential",
+          "card_limit_exceeded",
+        ].includes(result.error)
+      )
         throw new ApiRequestError(
           502,
           "payment_provider_invalid",
@@ -154,6 +160,13 @@ export class PaymentMethodService {
         "failed",
         result.error,
       );
+      if (result.error === "card_limit_exceeded") {
+        throw new ApiRequestError(
+          409,
+          "card_limit_exceeded",
+          "每個會員最多只能綁定 5 張信用卡，請先移除既有卡片後再新增。",
+        );
+      }
       throw new ApiRequestError(
         400,
         result.error,
@@ -473,10 +486,16 @@ export class PaymentMethodService {
                   amountMinor: result.authorizedAmountMinor,
                 });
               if (!cancelled && !this.runtime.provider.sandbox) {
+                if (typeof this.runtime.provider.unbind === "function") {
+                  await this.runtime.provider
+                    .unbind(card.token, { passengerId: ownerId })
+                    .catch(() => false);
+                }
                 await this.repository.bindingOutcome(
                   ownerId,
                   claim.idempotencyKey,
-                  "pending",
+                  "failed",
+                  "card_declined",
                 );
                 throw new ApiRequestError(
                   503,

@@ -23,7 +23,10 @@ export type BindResult =
   | { status: "completed"; card: ProviderCard }
   | { status: "action_required"; nextActionUrl: string }
   | { status: "pending" }
-  | { status: "failed"; error: "card_declined" | "invalid_credential" };
+  | {
+      status: "failed";
+      error: "card_declined" | "invalid_credential" | "card_limit_exceeded";
+    };
 
 export type PaymentBindResult = BindResult;
 

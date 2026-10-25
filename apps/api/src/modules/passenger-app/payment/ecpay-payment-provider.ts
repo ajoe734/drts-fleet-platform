@@ -106,6 +106,21 @@ const INVALID_CREDENTIAL_CODES = new Set([
   10100256, // Member binding token mismatch
 ]);
 
+const CARD_LIMIT_EXCEEDED_CODES = new Set([
+  10100255, // Member bound card count reached maximum limit (5 cards)
+  10100257, // Member bound card limit exceeded
+  10200136, // Bound card count limit exceeded
+]);
+
+function isCardLimitExceeded(rtnCode: number, rtnMsg: string): boolean {
+  if (CARD_LIMIT_EXCEEDED_CODES.has(rtnCode)) {
+    return true;
+  }
+  return /綁定.*上限|最多.*5.*張|超過.*綁定|綁卡.*上限|绑定.*上限|card.*limit/i.test(
+    rtnMsg,
+  );
+}
+
 const INVALID_METHOD_CODES = new Set([
   10100058, // Card ID invalid
   10100252, // BindCardID not found or unbound
@@ -248,7 +263,7 @@ function parseCardExpiry(cardInfo: Record<string, unknown>): {
 
 function parseBoundCard(
   data: Record<string, unknown>,
-): PaymentBindResult | null {
+): Extract<PaymentBindResult, { status: "completed" }> | null {
   const cardInfo =
     data.CardInfo &&
     typeof data.CardInfo === "object" &&
@@ -731,12 +746,22 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
         // (sandbox=false), while allowing Stage bindings to complete if Stage rejects
         // or omits Credit/DoAction.
         if (!cancelled && !this.sandbox) {
+          await this.unbind(bound.card.token, { passengerId }).catch(
+            () => false,
+          );
           throw new Error(
             "ECPay binding authorization cancellation was not confirmed.",
           );
         }
       }
       result = bound;
+    } else if (
+      isCardLimitExceeded(
+        rtnCode,
+        typeof data.RtnMsg === "string" ? data.RtnMsg : "",
+      )
+    ) {
+      result = { status: "failed", error: "card_limit_exceeded" };
     } else if (INVALID_CREDENTIAL_CODES.has(rtnCode)) {
       result = { status: "failed", error: "invalid_credential" };
     } else {
@@ -761,7 +786,7 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
    */
   async unbind(
     token: string,
-    _context?: { passengerId?: string },
+    context?: { passengerId?: string },
   ): Promise<boolean> {
     const bindCardId = typeof token === "string" ? token.trim() : "";
     if (!bindCardId || /^[0-9 -]+$/.test(bindCardId)) {
@@ -780,6 +805,8 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       if (rtnCode === 1 || rtnCode === 10100252) {
         for (const [key, entry] of this.bindings.entries()) {
           if (
+            (!context?.passengerId ||
+              entry.passengerId === context.passengerId) &&
             entry.result.status === "completed" &&
             entry.result.card.token === bindCardId
           ) {
@@ -897,9 +924,11 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       const bindResult: PaymentBindResult =
         rtnCode === 1 && bound
           ? bound
-          : INVALID_CREDENTIAL_CODES.has(rtnCode)
-            ? { status: "failed", error: "invalid_credential" }
-            : { status: "failed", error: "card_declined" };
+          : isCardLimitExceeded(rtnCode, rtnMsg)
+            ? { status: "failed", error: "card_limit_exceeded" }
+            : INVALID_CREDENTIAL_CODES.has(rtnCode)
+              ? { status: "failed", error: "invalid_credential" }
+              : { status: "failed", error: "card_declined" };
 
       let pendingBinding = merchantTradeNo
         ? this.pendingBindingsByTradeNo.get(merchantTradeNo)

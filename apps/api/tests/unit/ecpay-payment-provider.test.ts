@@ -1676,9 +1676,7 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
       "pax_declined_owner",
       "00000000-0000-4000-8000-000000000077",
     );
-    expect(
-      finishSpy,
-    ).toHaveBeenCalledWith(
+    expect(finishSpy).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         status: "manual_recovery",
@@ -1849,6 +1847,19 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
           now,
         ),
       )
+      // bind() -> DeleteMemberBindCard rollback for ECPAY_PROD_BIND_CARD_001
+      .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
+        expect(String(url)).toBe(
+          "https://ecpg.ecpay.com.tw/Merchant/DeleteMemberBindCard",
+        );
+        const unwrapped = verifyAndUnwrapEcpayEnvelope({
+          envelope: JSON.parse(String(init?.body ?? "{}")),
+          ...SYNTHETIC_CREDENTIALS,
+          nowSeconds,
+        });
+        expect(unwrapped.data.BindCardID).toBe("ECPAY_PROD_BIND_CARD_001");
+        return buildMockResponse({ RtnCode: 1, RtnMsg: "Unbound" }, now);
+      })
       // verifyNotification() -> Credit/DoAction fails
       .mockResolvedValueOnce(
         buildMockResponse({ RtnCode: 10100001, RtnMsg: "Busy" }, now),
@@ -1862,7 +1873,20 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
           },
           now,
         ),
-      );
+      )
+      // verifyNotification() -> DeleteMemberBindCard rollback for ECPAY_STAGE_3DS_BIND_CARD_002
+      .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
+        expect(String(url)).toBe(
+          "https://ecpg.ecpay.com.tw/Merchant/DeleteMemberBindCard",
+        );
+        const unwrapped = verifyAndUnwrapEcpayEnvelope({
+          envelope: JSON.parse(String(init?.body ?? "{}")),
+          ...SYNTHETIC_CREDENTIALS,
+          nowSeconds,
+        });
+        expect(unwrapped.data.BindCardID).toBe("ECPAY_STAGE_3DS_BIND_CARD_002");
+        return buildMockResponse({ RtnCode: 1, RtnMsg: "Unbound" }, now);
+      });
 
     const prodProvider = new EcpayPaymentProvider({
       ...SYNTHETIC_CREDENTIALS,
@@ -1901,9 +1925,11 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
     expect(prodRepo.bindingOutcome).toHaveBeenCalledWith(
       owner,
       "pax:bind:prod_3ds_001",
-      "pending",
+      "failed",
+      "card_declined",
     );
     expect(prodRepo.completeBinding).not.toHaveBeenCalled();
+    expect(prodFetch).toHaveBeenCalledTimes(7);
   });
 
   it("calls ECPay DeleteMemberBindCard on PaymentMethodService.remove (F3) before deleting local card record, blocks removal on unsettled ride or unbind failure, and frees the 5-card slot for re-binding", async () => {
@@ -2002,5 +2028,44 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
     expect(repo.remove).toHaveBeenCalledWith(owner, methodId5);
     expect(activeCards).toHaveLength(4);
     expect(fetchFn).toHaveBeenCalledTimes(2);
+
+    // 3. If ECPay upstream still reports member bound-card limit exceeded on CreateBindCard,
+    // provider maps it to card_limit_exceeded and service surfaces 409 card_limit_exceeded (not 400 card_declined)
+    fetchFn.mockResolvedValueOnce(
+      buildMockResponse(
+        {
+          RtnCode: 10100255,
+          RtnMsg: "綁定卡片數量已達上限(最多5張)",
+        },
+        now,
+      ),
+    );
+    const repoWithClaim = {
+      ...repo,
+      claimBinding: vi.fn(async () => ({
+        idempotencyKey: "pax:bind:f3_limit_001",
+        methodId: "00000000-0000-4000-8000-000000000006",
+        completed: null,
+      })),
+      bindingOutcome: vi.fn(async () => undefined),
+    };
+    const serviceWithClaim = new PaymentMethodService(
+      repoWithClaim as unknown as PaymentMethodRepository,
+      { provider, cipher },
+    );
+    await expect(
+      serviceWithClaim.bind(owner, {
+        providerToken: "ecpay_pay_token_limit_exceeded_0001",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "card_limit_exceeded",
+    });
+    expect(repoWithClaim.bindingOutcome).toHaveBeenCalledWith(
+      owner,
+      "pax:bind:f3_limit_001",
+      "failed",
+      "card_limit_exceeded",
+    );
   });
 });
