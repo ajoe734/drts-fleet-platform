@@ -841,25 +841,6 @@ export class ReportingRepository {
       return `$${values.length}`;
     };
 
-    if (query.serviceDate) {
-      const boundDate = bind(query.serviceDate);
-      whereClauses.push(
-        `(service_date = ${boundDate}::date OR (COALESCE(reservation_time, requested_at) AT TIME ZONE 'Asia/Taipei')::date = ${boundDate}::date)`,
-      );
-    } else {
-      if (query.serviceDateFrom) {
-        const boundFrom = bind(query.serviceDateFrom);
-        whereClauses.push(
-          `(service_date >= ${boundFrom}::date OR (COALESCE(reservation_time, requested_at) AT TIME ZONE 'Asia/Taipei')::date >= ${boundFrom}::date)`,
-        );
-      }
-      if (query.serviceDateTo) {
-        const boundTo = bind(query.serviceDateTo);
-        whereClauses.push(
-          `(service_date <= ${boundTo}::date OR (COALESCE(reservation_time, requested_at) AT TIME ZONE 'Asia/Taipei')::date <= ${boundTo}::date)`,
-        );
-      }
-    }
     if (query.orderId) {
       whereClauses.push(`order_id = ${bind(query.orderId)}`);
     }
@@ -876,9 +857,6 @@ export class ReportingRepository {
       whereClauses.push(
         `service_product_code = ${bind(query.serviceProductCode)}`,
       );
-    }
-    if (query.finalStatus) {
-      whereClauses.push(`final_status = ${bind(query.finalStatus)}`);
     }
 
     const where =
@@ -918,11 +896,16 @@ export class ReportingRepository {
       values,
     );
 
+    const matchesQueryRow = (candidate: DispatchDailyRecord) =>
+      this.matchesDateBounds(candidate, query) &&
+      (!query.finalStatus || candidate.finalStatus === query.finalStatus);
+
     const mappedRows = result.rows.map((row) => this.mapRow(row));
     const recordsToReconcileByOrderId = new Map<string, DispatchDailyRecord>();
     const orderIdsWithMiskeyedRow = new Set<string>();
     const orderIdsSeen = new Set<string>();
     const orderIdsWithDuplicateRows = new Set<string>();
+    const orderIdsTouchingQuery = new Set<string>();
 
     for (const record of mappedRows) {
       if (orderIdsSeen.has(record.orderId)) {
@@ -941,6 +924,10 @@ export class ReportingRepository {
         record.serviceDate !== expectedServiceDate
           ? { ...record, serviceDate: expectedServiceDate }
           : record;
+      if (matchesQueryRow(record) || matchesQueryRow(corrected)) {
+        orderIdsTouchingQuery.add(record.orderId);
+      }
+
       const existing = recordsToReconcileByOrderId.get(record.orderId);
       if (
         !existing ||
@@ -952,10 +939,11 @@ export class ReportingRepository {
       }
     }
 
-    const dirtyOrderIds = new Set<string>([
-      ...orderIdsWithMiskeyedRow,
-      ...orderIdsWithDuplicateRows,
-    ]);
+    const dirtyOrderIds = new Set<string>(
+      [...orderIdsWithMiskeyedRow, ...orderIdsWithDuplicateRows].filter(
+        (orderId) => orderIdsTouchingQuery.has(orderId),
+      ),
+    );
     if (dirtyOrderIds.size > 0) {
       const dirtyRecords = Array.from(dirtyOrderIds)
         .map((orderId) => recordsToReconcileByOrderId.get(orderId))
@@ -964,7 +952,7 @@ export class ReportingRepository {
     }
 
     return Array.from(recordsToReconcileByOrderId.values())
-      .filter((record) => this.matchesDateBounds(record, query))
+      .filter(matchesQueryRow)
       .sort(
         (left, right) =>
           right.serviceDate.localeCompare(left.serviceDate) ||
