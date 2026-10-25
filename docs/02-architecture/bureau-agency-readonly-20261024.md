@@ -235,81 +235,74 @@ BFF 實作：新 package `packages/agency-auth`（`createAgencyAuthHandlers`、
 
 ### 4.1 R11 行程紀錄（2 年保存檢視與匯出）
 
-權威來源：`MultiTaxiService.listTripOperationalRecords`（multi-taxi.service.ts:388-420，回傳
-`MultiTaxiTripOperationalAdminView[]`）、`exportTripOperationalRecords`（422-452，回傳
-`MultiTaxiTripOperationalExportRow[]`）。每筆的 `generatedAt` 等於完成時間（`const generatedAt = completedAt`，
-2552），`retainUntil = generatedAt + 730 日`（2583）；`reservedAt` 是 `order.reservationWindowStart ?? order.createdAt`（2562）。
+權威來源：`reporting.multi_taxi_trip_operational_records`（原定義於 `V0056__multi_taxi_runtime_compliance_closure.sql`，並由 `V0135__multi_taxi_trip_record_truth_retention.sql` 補齊逐趟真值欄位、歷史回填與 DB 保存／法律保留防護）。
+每一趟 `runtimeProfileCode === "multi_taxi_direct"` 的多元化計程車行程於司機完成行程的**同一筆交易**（`OwnedMobilityService.finalizeDriverTaskCompletionInTransaction` → `MultiTaxiRepository.persistTripOperationalRecordInTransaction`）寫入單一邏輯 R11 營運紀錄（`recordId = mtr-<orderId>`，`ON CONFLICT (order_id)` 冪等重播；若完成交易回滾，R11 紀錄一併回滾）。
+`MultiTaxiService.listTripOperationalRecords`、`getTripOperationalRecord` 與 `exportTripOperationalRecords` 直接讀取已提交之 `reporting.multi_taxi_trip_operational_records`（並關聯 `billing.multi_taxi_passenger_payments` 實收狀態與 `AuditNotificationService` 證據治理／法律保留狀態），不再由單一行程的記憶體啟動快取重算。既有已完成的歷史多元化計程車行程由已提交之訂單／司機任務／派車指派／電子乘車證明／付款紀錄回填對齊，缺漏的歷史事實誠實標示為 `null`／`"unavailable"`／`"unknown"`，絕不以派車時間、更新時間、預估路線或報價金額冒充。
+
+每筆紀錄的 `generatedAt` 為實際完成時間（`completedAt`），`retainUntil = generatedAt + 730 日`；`reservedAt` 為 `order.reservationWindowStart ?? order.createdAt`；`pickupAt` 為司機實際載客起算時間（`task.startedAt`，歷史無紀錄時為 `null`，不以 `assignedAt` 冒充）；`dropoffAt` 為實際下車完成時間（`command.completedAt`／`task.completedAt`，不以 `updatedAt` 冒充）。
 
 | API                                                        | scope                        | 重用                                                                                                                                                                                         |
 | ---------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/agency/trip-records`                             | `agency:trip_records:read`   | `listTripOperationalRecords`，再套保存邊界、分頁與列表投影                                                                                                                                   |
-| `GET /api/agency/trip-records/:recordId`                   | `agency:trip_records:read`   | 同上，以 `recordId` 取單筆（權威層沒有單筆 method）；保存邊界外或不存在一律 404                                                                                                              |
-| `POST /api/agency/trip-records/export-jobs/preview`        | `agency:trip_records:export` | `AgencyPortalService` 先呼叫 `exportTripOperationalRecords(scope)` 並套保存邊界，再以過濾後筆數呼叫 `ReportingFilingService.previewMultiTaxiTripExport(scope, recordCount, identity)`（513） |
-| `POST /api/agency/trip-records/export-jobs`                | `agency:trip_records:export` | 同上取得過濾後 rows，呼叫 `createMultiTaxiTripExportJobDurably(command, rows, identity)`（588；需 `purpose`、`idempotencyKey`，`CreateMultiTaxiTripOperationalExportJobCommand`）            |
-| `GET /api/agency/trip-records/export-jobs/:jobId`          | `agency:trip_records:export` | `getMultiTaxiTripExportJob`（765），只回本機關、本人建立的 job                                                                                                                               |
-| `GET /api/agency/trip-records/export-jobs/:jobId/download` | `agency:trip_records:export` | `issueMultiTaxiTripExportDownload`（792；controlled download，簽章下載連結），同上擁有者核對                                                                                                 |
+| `GET /api/agency/trip-records`                             | `agency:trip_records:read`   | `listTripOperationalRecords`，再套保存邊界、精確篩選、分頁與列表投影                                                                                                                         |
+| `GET /api/agency/trip-records/:recordId`                   | `agency:trip_records:read`   | `getTripOperationalRecord`／`listTripOperationalRecords` 以 `recordId` 取單筆；保存邊界外或不存在一律 404                                                                                    |
+| `POST /api/agency/trip-records/export-jobs/preview`        | `agency:trip_records:export` | `AgencyPortalService` 先呼叫 `exportTripOperationalRecords(scope)` 並套保存邊界與精確範圍，再以過濾後筆數呼叫 `ReportingFilingService.previewMultiTaxiTripExport(scope, recordCount, identity)` |
+| `POST /api/agency/trip-records/export-jobs`                | `agency:trip_records:export` | 同上取得過濾後 rows，呼叫 `createMultiTaxiTripExportJobDurably(command, rows, identity)`（需 `purpose`、`idempotencyKey`，`CreateMultiTaxiTripOperationalExportJobCommand`）                 |
+| `GET /api/agency/trip-records/export-jobs/:jobId`          | `agency:trip_records:export` | `getMultiTaxiTripExportJob`，只回本機關、本人建立的 job                                                                                                                                      |
+| `GET /api/agency/trip-records/export-jobs/:jobId/download` | `agency:trip_records:export` | `issueMultiTaxiTripExportDownload`（controlled download，簽章下載連結），同上擁有者核對                                                                                                      |
 
 既有 `preview`／`create` 的 rows 與 `recordCount` 本來就由 caller 傳入（平台端是
-multi-taxi.controller.ts 先呼叫 `exportTripOperationalRecords`，489、509），所以機關的保存邊界
-在 `AgencyPortalService` 傳入前套用即可，不需改 `ReportingFilingService` 的列產生方式。
+multi-taxi.controller.ts 先呼叫 `exportTripOperationalRecords`），所以機關的保存邊界與精確篩選範圍
+在 `AgencyPortalService` 傳入前套用即可，並由 `ReportingFilingService.normalizeMultiTaxiTripExportScope` 一併驗證與持久化至匯出 job scope。
 
-機關查詢參數（列表與匯出 scope 相同）：`month`、`reservedFrom`、`reservedTo`、`legalHold`
-（列表）、`page`、`pageSize`。**不接受 `q`**：既有 `q` 會比對未遮罩的 `orderNo`、`plateNo`、
-`orderId`、`tripId`（multi-taxi.service.ts:405-414），開放給機關等於可用逐字猜測反查被遮罩或不回傳
-的值。匯出 scope 也不接受 `legalHold`：既有 `normalizeMultiTaxiTripExportScope`
-（reporting-filing.service.ts:2831-2858）只保留 `month`、`q`，`legalHold` 不會進入 job scope。
+機關查詢參數（列表與匯出 scope 對齊）：
+- 日期區間：`month`（`YYYY-MM`）、`reservedFrom`、`reservedTo`（ISO 日期，比對 `reservedAt`）
+- 核准車號精確查詢：`plateNo`（精確比對完整車號，不分大小寫但須完整一致）
+- 訂單／趟次識別碼精確查詢：`orderNo`、`orderId`、`tripId`、`recordId`（精確比對，不開放任意子字串模糊搜尋）
+- 列表附加參數：`legalHold`（`all`／`active`／`none`）、`page`、`pageSize`（上限 200）。
+- **不接受任意子字串 `q`**：既有平台端 `q` 允許任意子字串比對未遮罩欄位，機關路徑拒絕 `q`（回 400 `AGENCY_TRIP_RECORD_QUERY_INVALID`），僅開放上述法定最小精確查詢條件並回傳總筆數（`total`）。
 
-必要的權威層調整（列入實作任務）：
+必要的權威層調整：
 
-- `ReportingFilingService.assertMultiTaxiTripExportAccess`（reporting-filing.service.ts:2806-2829）
-  目前只允許 `realm === "platform"`、`actorType === "platform_admin"` 且持有
-  `multi_taxi_records:export`；改為也接受 `realm === "agency"`、`actorType === "agency_user"`、
-  持有 `agency:trip_records:export`。
-- job 擁有者：`MultiTaxiTripExportJobMetadata`（`apps/api/src/modules/reporting-filing/reporting-filing.repository.ts:21-27`）
-  目前只有 `scope`/`purpose`/`idempotencyKey`/`requestedByActorId`/`recordCount`，沒有機關欄位；
-  `EvidenceAccessIdentity`（evidence-governance.ts:18-24）也不帶 `agencyId`。新增 optional
-  `agencyId`，由 `prepareMultiTaxiTripExportJob`（645-717）從 agency identity 寫入，
-  `toMultiTaxiTripExportView`（2772-2787）帶出 `MultiTaxiTripOperationalExportJobView.agencyId?`。
-  既有 `getMultiTaxiTripExportJob`／`issueMultiTaxiTripExportDownload` 不核對擁有者（平台端靠
-  `@RequireRealms("platform")`）；agency identity 呼叫時必須在 service 內核對
-  `requestedByActorId === identity.actorId` 且 `agencyId === identity.agencyId`，不符回 404，
-  機關不能讀平台或其他機關的 job。平台端行為不變。
-- `normalizeMultiTaxiTripExportScope` 加入 `reservedFrom`／`reservedTo` 的格式驗證與保留，否則
-  新參數不會進入 job scope、也不參與 idempotency 比對（`stableSerialize(existingMetadata.scope)`，677）。
-- `assertEvidenceAccess` 的 `report_artifact` 規則（`apps/api/src/common/evidence-governance.ts:111-138`）
-  新增 `{ realms: ["agency"], actorTypes: ["agency_user"], requiredScopes: ["agency:trip_records:export"], tenantScoped: false }`。
-- `MultiTaxiTripOperationalRecordQuery`（`packages/contracts/src/phase1-p5-s3-multi-taxi.ts:825-829`）
-  目前只有 `month`/`q`/`legalHold`；新增 optional `reservedFrom`/`reservedTo`（ISO 日期，比對
-  `reservedAt`，與既有 `month` 過濾同一欄位），滿足 doc 08 的「日期區間」最小查詢；
-  `listTripOperationalRecords` 加入對應過濾（未帶時平台端行為不變）。列表回應目前把全部結果當
-  一頁（multi-taxi.controller.ts:455-464）；機關 API 加 `page`/`pageSize`（上限 200）。
+- `ReportingFilingService.assertMultiTaxiTripExportAccess`
+  允許 `realm === "platform"`（`platform_admin` + `multi_taxi_records:export`）與 `realm === "agency"`（`agency_user` + `agency:trip_records:export`）。
+- job 擁有者：`MultiTaxiTripExportJobMetadata` 與 `EvidenceAccessIdentity` 帶 `agencyId?`；agency identity 呼叫 `getMultiTaxiTripExportJob`／`issueMultiTaxiTripExportDownload` 時核對 `requestedByActorId === identity.actorId` 且 `agencyId === identity.agencyId`，不符回 404，機關不能讀平台或其他機關／其他使用者的 job。
+- `normalizeMultiTaxiTripExportScope` 驗證並保留 `month`、`reservedFrom`、`reservedTo`、`plateNo`、`orderNo`、`orderId`、`tripId`、`recordId`，使匯出 job scope 與機關列表篩選條件完全一致並參與 idempotency 比對。
+- `assertEvidenceAccess` 的 `report_artifact` 規則包含 `{ realms: ["agency"], actorTypes: ["agency_user"], requiredScopes: ["agency:trip_records:export"], tenantScoped: false }`。
 
-**2 年保存邊界**：機關列表、詳情與匯出只包含 `retainUntil >= now` 的紀錄（等同完成時間
-`generatedAt >= now - 730 日`）。這是唯一的保存邊界判斷；`reservedFrom`／`reservedTo`／`month`
-只是使用者篩選條件，不另外以 `reservedAt` 推算保存期限（預約時間早於完成時間，若以
-`reservedAt` 夾下限會誤排除仍在保存期內的紀錄）。現有 service 只計算 `retainUntil`，不據此
-過濾；本設計不改平台端行為，只在機關路徑套用。實際 purge 仍由後端保存政策負責，UI 只顯示
-「法定最低保存期間：各趟次至少二年」（doc 08:370）。
+**2 年保存邊界與持久保護**：
+- 資料庫層（`V0135`）強制 `retain_until >= generated_at + interval '730 days'`，禁止 `TRUNCATE`、禁止將 `retain_until` 縮短或竄改核心趟次事實，且當 `retain_until > clock_timestamp()` 時拒絕任何 `DELETE`。
+- 超過 2 年保存期後，仍須同時具備 `reporting.allow_trip_record_retention_purge = 'on'` 且該趟次無有效法律保留（`voice.legal_hold` 針對 `proof_bundle`／`multi_taxi_trip_record` 之 `active` hold）或刪除例外（`AuditNotificationService` deletion exception），才允許受控清理。
+- 機關列表、詳情與匯出只包含 `retainUntil >= now` 的紀錄（等同完成時間 `generatedAt >= now - 730 日`）。
 
-**欄位投影與遮罩**：列表與詳情使用下表（來源為 `MultiTaxiTripOperationalAdminView`，未列出的
-`route.pointCount`、`route.source` 等一律不回傳）。匯出**不另設欄位**，直接沿用既有
-`exportTripOperationalRecords` 產生的 `MultiTaxiTripOperationalExportRow` 13 欄與 CSV 檔名
-`multi-taxi-trip-records-<yyyymm|all>.csv`；該列型別本身沒有 `recordId`、`route.*`、`legalHold`，
-所以匯出比列表少這三類欄位，其餘欄位的遮罩規則與下表相同。
+**D4 決議與九大法定欄位投影／來源誠實性**：
+依 `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/04_standard_taxi_vs_multi_taxi_dispatch_compliance_review_20260721.md` 與 `08_multi_taxi_operations_ui_design_requirements_20260723.md`，R11 九大法定欄位類別（車號、預約時間、上車時間、下車時間、行駛路線、行駛里程、應付車資、實收車資、通行費）在機關列表、詳情（`AgencyTripRecordView`）與 CSV 匯出（`MultiTaxiTripOperationalExportRow`）完整揭露，不另設新的使用者權限 gate（維持既有 `agency:trip_records:read` 與 `agency:trip_records:export`）：
+1. **車號**：揭露完整法定車號 `plateNo`（同時保留 `plateNoMasked` 供相容顯示）。
+2. **預約／上車／下車時間**：原值揭露 `reservedAt`、`pickupAt`、`dropoffAt`；缺漏時為 `null`（UI 顯示「未提供」）。
+3. **行駛路線與行駛里程（含來源 provenance）**：
+   - `route.routeSummary`：完成時保存之起訖路線摘要（例如 `pickup.address -> dropoff.address`），歷史缺漏時為 `null`。
+   - `route.distanceMeters`、`route.durationSeconds`：實際完成里程（公尺）與行駛時間（秒）；若僅有預估路線或歷史未記錄實際里程，區分來源且不將預估路線偽裝為實際 GPS 軌跡。
+   - `route.source`：明確標示 `"driver_gps"`（實際司機 GPS 軌跡）、`"mixed"`（混合）、`"pickup_dropoff_summary"`（完成認證之起訖路線與里程摘要）、`"provider_route"`（派車預估路線）或 `"unavailable"`（歷史無路線資料）。
+   - `route.encodedPolyline`：原始座標折線仍不對機關回傳，兼顧法定行駛路線查核與乘客住址座標最小揭露。
+4. **應付車資、實收車資、通行費（含收款狀態 provenance）**：
+   - `payableFareMinor`：契約預告／應付車資。
+   - `actualFareMinor`：行程完成計費金額。
+   - `collectedFareMinor` 與 `paymentStatus`：對齊 `billing.multi_taxi_passenger_payments` 真實收款結果——僅於 `paymentStatus === "captured"` 時為實際扣款金額；`paymentStatus === "refunded"` 時為 `0`；`not_selected`／`authorized`（待請款）／`failed`／`manual_recovery`／`unknown` 時為 `null`，絕不將未請款、失敗或已退款之交易偽裝為正數實收車資。
+   - `tollMinor` 與 `tollSource`：司機完單證明（`expenseItems.toll`）或電子乘車證明紀錄之通行費；明確為 0 時回傳 `0`，歷史紀錄無通行費證據（`tollSource === "unavailable"`）時在機關檢視回傳 `null`（未提供）。
 
-| 欄位                                                           | 列表／詳情                                    | 匯出（`MultiTaxiTripOperationalExportRow`） | 規則／函式                                                       |
-| -------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------- |
-| `orderNo`                                                      | `orderNoMasked`                               | `orderNoMasked`                             | `maskOpaqueToken(v, 3, 2)`（同現有匯出，437）                    |
-| `plateNo`                                                      | `plateNoMasked`（預設）                       | `plateNoMasked`                             | `maskOpaqueToken(v, 2, 2)`（同現有匯出，438）；是否改為全碼見 D4 |
-| `recordId`                                                     | 原值                                          | 無此欄                                      | 系統產生的 `mtr-<orderId>`，作為詳情查詢 key                     |
-| `orderId`、`tripId`、`assignmentId`、`vehicleId`               | 不回傳                                        | 無此欄                                      | 內部識別碼                                                       |
-| `reservedAt`、`pickupAt`、`dropoffAt`                          | 原值                                          | 原值                                        | 法定欄位；`null` 顯示未提供                                      |
-| `route.distanceMeters`、`route.durationSeconds`                | 原值                                          | 無此欄                                      | 法定「行駛里程」；匯出是否補欄位屬契約變更，本設計不做           |
-| `route.encodedPolyline`                                        | 不回傳（預設）                                | 無此欄                                      | 起訖點可推回住址；是否提供路線見 D4                              |
-| `payableFareMinor`、`actualFareMinor`、`tollMinor`、`currency` | 原值                                          | 原值                                        | 法定車資欄位                                                     |
-| `farePolicyVersion`、`chargingMode`                            | 原值                                          | 原值                                        |                                                                  |
-| `generatedAt`、`retainUntil`                                   | 原值                                          | 原值                                        |                                                                  |
-| `legalHold`                                                    | 只回 `state`（`active`/`none`/`unavailable`） | 無此欄                                      | 不回 `activeHolds`（含 `placedByActorId`、`reasonNote`）         |
+| 欄位                                                           | 列表／詳情（`AgencyTripRecordView`）          | 匯出（`MultiTaxiTripOperationalExportRow`）                | 規則／來源                                                                                   |
+| -------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `recordId`、`orderId`、`tripId`                                | 原值                                          | 原值（`recordId`、`orderId`、`tripId`）                    | 供精確查核與跨表對照                                                                         |
+| `orderNo`                                                      | `orderNoMasked`                               | `orderNoMasked`                                            | `maskOpaqueToken(v, 3, 2)`                                                                   |
+| `plateNo`                                                      | `plateNo`（全碼）＋ `plateNoMasked`           | `plateNo`（全碼）＋ `plateNoMasked`                        | D4 決議：法定車號全碼揭露，保留遮罩欄位相容                                                  |
+| `reservedAt`、`pickupAt`、`dropoffAt`                          | 原值                                          | 原值                                                       | 法定時間欄位；`pickupAt` 取自實際上車時間，缺漏為 `null`                                     |
+| `route.routeSummary`、`route.source`                           | 原值                                          | `routeSummary`、`routeSource`                              | D4 決議：揭露起訖路線摘要與路線來源，不回傳 `encodedPolyline`                                |
+| `route.distanceMeters`、`route.durationSeconds`                | 原值                                          | `distanceMeters`、`durationSeconds`                        | 法定行駛里程與時間；缺漏為 `null`                                                            |
+| `payableFareMinor`、`actualFareMinor`                          | 原值                                          | `payableFareMinor`、`actualFareMinor`                      | 應付車資與完單計費車資                                                                       |
+| `collectedFareMinor`、`paymentStatus`                          | 原值（未收／失敗為 `null`，退款為 `0`）       | `collectedFareMinor`、`paymentStatus`                      | 實收車資真值與收款狀態（`captured`／`refunded`／`authorized`／`failed`／`not_selected` 等） |
+| `tollMinor`                                                    | 原值（未知時 `null`）                         | `tollMinor`、`tollSource`                                  | 通行費與來源（`driver_proof`／`electronic_receipt`／`none`／`unavailable`）                  |
+| `currency`、`farePolicyVersion`、`chargingMode`                | 原值                                          | 原值                                                       |                                                                                              |
+| `generatedAt`、`retainUntil`                                   | 原值                                          | 原值                                                       | 完成時間與 730 日法定保存期限                                                                |
+| `legalHold`                                                    | 只回 `state`（`active`/`none`/`unavailable`） | 無此欄                                                     | 不回 `activeHolds`（含 `placedByActorId`、`reasonNote`）                                     |
 
 ### 4.2 R10 六個月營運統計
 
@@ -604,7 +597,7 @@ Google OAuth client 加 redirect URI 與 DNS 由 operator／使用者執行，�
 | D1  | 要開通哪些機關、各機關可看的轄區範圍       | repo 內沒有任何機關清單；寫入真實機關名稱／代碼屬對外識別資料，曾因真實機構識別碼導致 GCP 停權（`GCP-TOS-REMEDIATION-20260907`）。轄區切分也影響資料範圍                                                             | 不放種子資料；預設全平台資料（§4.6）；由 platform admin 在 UI 建立      |
 | D2  | production 是否強制機關 MFA                | `hasTrustedMfa` 只認 ID token 真實 `amr`/`acr`（`trusted-mfa.policy.ts` `STRICT_TRUSTED_AMR`）。Google 外部帳號 ID token 是否帶可信 amr，本 repo 沒有實測證據（**待確認**）；若強制而 IdP 不提供，機關將完全無法登入 | dev 用既有 `DRTS_DEV_MFA_WAIVED` 並記 event；production 行為待決定      |
 | D3  | 是否分「唯讀」與「唯讀＋匯出」兩種角色     | 匯出代表資料離開平台，責任歸屬是業務／法遵判斷                                                                                                                                                                       | catalog 同時支援 `agency_viewer`、`agency_exporter`；邀請時由管理者選擇 |
-| D4  | 機關是否看全碼車號、是否提供行駛路線       | doc 08 把「車號」「行駛路線」列為法定欄位，但現有匯出契約 `plateNoMasked` 是遮罩值；全碼與路線屬揭露程度決定                                                                                                         | 預設遮罩車號、不回 polyline，只回里程與時間                             |
+| D4  | 機關是否看全碼車號、是否提供行駛路線       | doc 08 把「車號」「行駛路線」列為法定欄位，但原匯出契約 `plateNoMasked` 是遮罩值；全碼與路線屬揭露程度決定                                                                                                           | **已決議（BUREAU-R11-EXISTING-TRIP-RECORD-SOURCE-FOLLOWTHROUGH-20261025）**：沿用既有 `agency:trip_records:read`／`agency:trip_records:export` 權限（不新增 permission gate），於機關列表、詳情與 CSV 匯出完整揭露全碼 `plateNo`（並保留 `plateNoMasked` 相容）、`route.routeSummary`（起訖路線摘要）、`route.source`（路線來源 provenance）、`route.distanceMeters`、`route.durationSeconds`、`payableFareMinor`、`actualFareMinor`、`collectedFareMinor`、`paymentStatus` 與 `tollMinor`；原始 `encodedPolyline` 座標折線仍不回傳 |
 | D5  | 機關入口網域名稱                           | DNS 由使用者控制（custom-domains runbook 前提 2）                                                                                                                                                                    | 建議 `agency.smarttransport.tw`                                         |
 | D6  | 是否先出機關 portal 設計 canvas            | 現有 canvas `platform-regulator.jsx` 把主管機關檢視放在 Platform Admin shell，與本需求的獨立非 IAP 入口衝突；過往任務有「不自行新增未有 canvas 畫面」的約束                                                          | 實作沿用 `@drts/ui-web` 元件與 `PrgMask` 語意；待決定是否先補 canvas    |
 | D7  | R09 投訴月報是否要補結案數／SLA 逾期等彙總 | 交通局 R09 表單欄位不在 repo（未提供）；現有權威彙總只有 `complaintCount`、`complaintsByCategory`                                                                                                                    | 回應以 `unavailableMetrics` 明示缺項，不臆算                            |

@@ -2,20 +2,41 @@ import { Card, CardBody, PageHeader } from "@drts/ui-web";
 
 import { PortalShell } from "@/components/portal-shell";
 import { TripExportPanel } from "@/components/trip-export-panel";
-import { readAgencyProfile, requireAgencyToken } from "@/lib/session.server";
+import {
+  firstParam,
+  readAgencyProfile,
+  requireAgencyToken,
+} from "@/lib/session.server";
 
-export default async function TripExportsPage() {
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+export default async function TripExportsPage({
+  searchParams,
+}: {
+  searchParams?: SearchParams;
+}) {
   await requireAgencyToken("/trip-records/exports");
+  const params = searchParams ? await searchParams : {};
+  const initialScope = {
+    month: firstParam(params.month),
+    reservedFrom: firstParam(params.reservedFrom),
+    reservedTo: firstParam(params.reservedTo),
+    plateNo: firstParam(params.plateNo),
+    orderNo: firstParam(params.orderNo),
+    orderId: firstParam(params.orderId),
+    tripId: firstParam(params.tripId),
+    recordId: firstParam(params.recordId),
+  };
   const profile = await readAgencyProfile();
   return (
     <PortalShell agencyName={profile?.agencyDisplayName ?? null}>
       <PageHeader
         title="R11 受控匯出"
-        subtitle="匯出檔沿用平台遮罩欄位（訂單編號、車號遮罩，不含行駛路線）；僅能讀取本人建立的匯出。"
+        subtitle="匯出檔包含九大法定欄位（車號、預約／上車／下車時間、行駛路線、行駛里程、應付車資、實收車資、通行費）與來源狀態；僅能讀取與下載本機關本人建立的匯出。"
       />
       <Card>
         <CardBody>
-          <TripExportPanel />
+          <TripExportPanel initialScope={initialScope} />
         </CardBody>
       </Card>
     </PortalShell>

@@ -53,20 +53,49 @@ export function isWithinAgencyRetention(
 export function projectAgencyTripRecord(
   record: MultiTaxiTripOperationalAdminView,
 ): AgencyTripRecordView {
+  const rawPlate = record.plateNo?.trim() ?? "";
+  const plateNo =
+    rawPlate && rawPlate !== "—" && rawPlate !== "UNRECORDED" ? rawPlate : null;
+  const paymentStatus = record.paymentStatus ?? "unknown";
+  const collectedFareMinor =
+    record.collectedFareMinor !== undefined
+      ? record.collectedFareMinor
+      : paymentStatus === "captured"
+        ? record.actualFareMinor
+        : paymentStatus === "refunded"
+          ? 0
+          : null;
+  const tollSource =
+    record.tollSource ??
+    (record.tollMinor !== undefined && record.tollMinor !== null
+      ? record.tollMinor > 0
+        ? "driver_proof"
+        : "none"
+      : "unavailable");
+  const tollMinor = tollSource === "unavailable" ? null : record.tollMinor;
+
   return {
     recordId: record.recordId,
+    orderId: record.orderId,
+    tripId: record.tripId,
     orderNoMasked: maskOpaqueToken(record.orderNo, 3, 2),
-    plateNoMasked: maskOpaqueToken(record.plateNo, 2, 2),
+    plateNo,
+    plateNoMasked: maskOpaqueToken(plateNo, 2, 2),
     reservedAt: record.reservedAt,
     pickupAt: record.pickupAt ?? null,
     dropoffAt: record.dropoffAt ?? null,
     route: {
+      routeSummary: record.route?.routeSummary ?? null,
+      source: record.route?.source ?? "unavailable",
       distanceMeters: record.route?.distanceMeters ?? null,
       durationSeconds: record.route?.durationSeconds ?? null,
     },
     payableFareMinor: record.payableFareMinor,
     actualFareMinor: record.actualFareMinor,
-    tollMinor: record.tollMinor,
+    collectedFareMinor,
+    paymentStatus,
+    tollMinor,
+    tollSource,
     currency: record.currency,
     farePolicyVersion: record.farePolicyVersion,
     chargingMode: record.chargingMode,
@@ -76,7 +105,7 @@ export function projectAgencyTripRecord(
   };
 }
 
-/** Export reuses the existing 13-column masked row; only retention is applied. */
+/** Export rows preserve full statutory R11 fields and provenance within the 2-year retention window. */
 export function filterAgencyExportRows(
   rows: readonly MultiTaxiTripOperationalExportRow[],
   nowMs: number,
