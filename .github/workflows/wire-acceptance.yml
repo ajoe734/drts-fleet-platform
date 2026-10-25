@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   api-db-and-normal-ui:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     services:
       postgres:
