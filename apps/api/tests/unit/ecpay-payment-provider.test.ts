@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { Logger } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildEcpayEnvelope,
@@ -1874,7 +1875,7 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
           now,
         ),
       )
-      // verifyNotification() -> DeleteMemberBindCard rollback for ECPAY_STAGE_3DS_BIND_CARD_002
+      // verifyNotification() -> DeleteMemberBindCard rollback for ECPAY_STAGE_3DS_CARD_002
       .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
         expect(String(url)).toBe(
           "https://ecpg.ecpay.com.tw/Merchant/DeleteMemberBindCard",
@@ -1884,7 +1885,7 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
           ...SYNTHETIC_CREDENTIALS,
           nowSeconds,
         });
-        expect(unwrapped.data.BindCardID).toBe("ECPAY_STAGE_3DS_BIND_CARD_002");
+        expect(unwrapped.data.BindCardID).toBe("ECPAY_STAGE_3DS_CARD_002");
         return buildMockResponse({ RtnCode: 1, RtnMsg: "Unbound" }, now);
       });
 
@@ -1930,9 +1931,123 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
     );
     expect(prodRepo.completeBinding).not.toHaveBeenCalled();
     expect(prodFetch).toHaveBeenCalledTimes(7);
+    expect(prodProvider.getOrphanedBindCardRollbacks()).toHaveLength(0);
+
+    // 3. Production (sandbox=false): missing TradeNo/MerchantTradeNo fails closed (does NOT skip cancelBindingAuthorization)
+    // and when rollback DeleteMemberBindCard fails, emits structured error log + records OrphanedBindCardRollbackRecord
+    const loggerErrorSpy = vi
+      .spyOn(Logger.prototype, "error")
+      .mockImplementation(() => undefined);
+
+    // 3a. bind() with missing TradeNo -> fails closed and when DeleteMemberBindCard fails, records orphan rollback alert
+    prodFetch
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          {
+            RtnCode: 1,
+            RtnMsg: "Prod Bind Missing TradeNo",
+            BindCardID: "ECPAY_PROD_ORPHAN_CARD_003",
+            CardInfo: {
+              Card6No: "431195",
+              Card4No: "2222",
+              CardValidYY: "30",
+              CardValidMM: "06",
+            },
+            OrderInfo: {
+              MerchantTradeNo: "DRPRODMISSINGTRADENO",
+              // TradeNo intentionally omitted
+              TotalAmount: 5,
+            },
+          },
+          now,
+        ),
+      )
+      // DeleteMemberBindCard rollback fails (RtnCode=10100001)
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          { RtnCode: 10100001, RtnMsg: "Unbind upstream outage" },
+          now,
+        ),
+      )
+      // 3b. verifyNotification() with missing TradeNo -> fails closed and triggers DeleteMemberBindCard rollback
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          { RtnCode: 10100001, RtnMsg: "Unbind 3DS outage" },
+          now,
+        ),
+      );
+
+    await expect(
+      prodProvider.bind(
+        "ecpay_prod_pay_token_missing_tradeno",
+        "pax:bind:prod_missing_tradeno",
+        { passengerId: owner },
+      ),
+    ).rejects.toThrow(/requires MerchantTradeNo and TradeNo in production/);
+
+    const missingTradeNoCallbackEnvelope = {
+      ...buildEcpayEnvelope({
+        ...SYNTHETIC_CREDENTIALS,
+        timestamp: nowSeconds,
+        data: {
+          RtnCode: 1,
+          RtnMsg: "Prod 3DS Missing TradeNo",
+          MerchantMemberID: prodProvider.deriveMerchantMemberId(owner),
+          BindCardID: "ECPAY_PROD_3DS_ORPHAN_CARD_004",
+          CardInfo: {
+            Card6No: "431195",
+            Card4No: "2222",
+            CardValidYY: "31",
+            CardValidMM: "09",
+          },
+          OrderInfo: {
+            MerchantTradeNo: "DRPROD3DSNOTRADENO01",
+            // TradeNo intentionally omitted
+            TotalAmount: 5,
+          },
+        },
+      }),
+      RpHeader: { Timestamp: nowSeconds },
+      TransCode: 1,
+    };
+
+    await expect(
+      prodService.verifyNotification(missingTradeNoCallbackEnvelope),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "payment_unavailable",
+    });
+    expect(prodRepo.completeBinding).not.toHaveBeenCalled();
+
+    const orphanRollbacks = prodProvider.getOrphanedBindCardRollbacks();
+    expect(orphanRollbacks).toHaveLength(2);
+    expect(orphanRollbacks[0]).toMatchObject({
+      passengerId: owner,
+      memberId: prodProvider.deriveMerchantMemberId(owner),
+      merchantTradeNo: "DRPRODMISSINGTRADENO",
+      tradeNo: null,
+      reason: "missing_trade_identifiers_for_cancel",
+      occurredAt: now.toISOString(),
+    });
+    expect(orphanRollbacks[0]!.bindCardIdDigest).toMatch(/^[0-9a-f]{16}$/);
+    // Raw BindCardID must never appear in the rollback record or error logs
+    expect(JSON.stringify(orphanRollbacks)).not.toContain(
+      "ECPAY_PROD_ORPHAN_CARD_003",
+    );
+    expect(JSON.stringify(orphanRollbacks)).not.toContain(
+      "ECPAY_PROD_3DS_ORPHAN_CARD_004",
+    );
+    expect(loggerErrorSpy).toHaveBeenCalledTimes(2);
+    expect(String(loggerErrorSpy.mock.calls[0]?.[0])).toContain(
+      "ecpay_orphan_bind_card_rollback_failed",
+    );
+    expect(String(loggerErrorSpy.mock.calls[0]?.[0])).not.toContain(
+      "ECPAY_PROD_ORPHAN_CARD_003",
+    );
+    loggerErrorSpy.mockRestore();
   });
 
-  it("calls ECPay DeleteMemberBindCard on PaymentMethodService.remove (F3) before deleting local card record, blocks removal on unsettled ride or unbind failure, and frees the 5-card slot for re-binding", async () => {
+  it("calls ECPay DeleteMemberBindCard on PaymentMethodService.remove (F3) inside a single atomic DB transaction with unsettled-ride checks, blocks removal on unsettled ride or unbind failure, and frees the 5-card slot for re-binding", async () => {
     const now = new Date("2026-10-24T10:00:00Z");
     const nowSeconds = Math.floor(now.getTime() / 1000);
     const owner = "pax_f3_unbind_owner";
@@ -1946,7 +2061,7 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
 
     const fetchFn = vi
       .fn()
-      // 1. First remove attempt: DeleteMemberBindCard fails -> local card must NOT be removed
+      // 1. First remove attempt: DeleteMemberBindCard fails -> transaction rolls back, local card NOT removed
       .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
         expect(String(url)).toBe(
           "https://ecpg-stage.ecpay.com.tw/Merchant/DeleteMemberBindCard",
@@ -1966,7 +2081,11 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
           now,
         );
       })
-      // 2. Second remove attempt: DeleteMemberBindCard succeeds (RtnCode=1) -> local card is removed
+      // 2. Second remove attempt: DeleteMemberBindCard succeeds, but a concurrent unsettled ride appears before UPDATE -> rolls back with 409 pending_payment_block
+      .mockResolvedValueOnce(
+        buildMockResponse({ RtnCode: 1, RtnMsg: "Success" }, now),
+      )
+      // 3. Third remove attempt: DeleteMemberBindCard succeeds (RtnCode=1) and no unsettled ride -> single transaction commits removal
       .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
         expect(String(url)).toBe(
           "https://ecpg-stage.ecpay.com.tw/Merchant/DeleteMemberBindCard",
@@ -1988,48 +2107,134 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
     });
 
     const activeCards = [1, 2, 3, 4, 5].map((i) => ({
-      paymentMethodId: `00000000-0000-4000-8000-00000000000${i}`,
+      payment_method_id: `00000000-0000-4000-8000-00000000000${i}`,
       last4: `111${i}`,
-      cardType: "VISA",
-      expiryMonth: "12",
-      expiryYear: "2030",
-      isDefault: i === 1,
+      card_type: "VISA",
+      expiry_month: "12",
+      expiry_year: "2030",
+      is_default: i === 1,
     }));
 
-    const repo = {
-      list: vi.fn(async () => [...activeCards]),
-      findRemovableToken: vi.fn(async (_pid: string, id: string) => ({
-        provider: "ecpay",
-        tokenEnvelope: id === methodId5 ? encryptedCard5 : null,
-      })),
-      remove: vi.fn(async (_pid: string, id: string) => {
-        const idx = activeCards.findIndex((c) => c.paymentMethodId === id);
-        if (idx >= 0) activeCards.splice(idx, 1);
+    let simulatePostUnbindConcurrentRide = false;
+    let bookingHistoryQueryCountInTx = 0;
+    const txQueries: string[] = [];
+    const mockClient = {
+      query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
+        txQueries.push(sql);
+        if (sql === "BEGIN") {
+          bookingHistoryQueryCountInTx = 0;
+          return { rows: [], rowCount: 0 };
+        }
+        if (sql.startsWith("SELECT status FROM passenger.accounts")) {
+          return { rows: [{ status: "active" }], rowCount: 1 };
+        }
+        if (
+          sql.startsWith("SELECT payment_method_id FROM passenger.psp_tokens")
+        ) {
+          const id = String(params?.[0] ?? "");
+          const found = activeCards.find((c) => c.payment_method_id === id);
+          return {
+            rows: found ? [{ payment_method_id: found.payment_method_id }] : [],
+            rowCount: found ? 1 : 0,
+          };
+        }
+        if (sql.includes("FROM passenger.booking_histories")) {
+          bookingHistoryQueryCountInTx += 1;
+          if (
+            simulatePostUnbindConcurrentRide &&
+            bookingHistoryQueryCountInTx >= 2
+          ) {
+            return { rows: [{ "?column?": 1 }], rowCount: 1 };
+          }
+          return { rows: [], rowCount: 0 };
+        }
+        if (
+          sql.startsWith(
+            "SELECT provider,token_envelope FROM passenger.psp_tokens",
+          )
+        ) {
+          return {
+            rows: [
+              {
+                provider: "ecpay",
+                token_envelope: encryptedCard5,
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (
+          sql.startsWith("UPDATE passenger.psp_tokens SET status='removed'")
+        ) {
+          const id = String(params?.[0] ?? "");
+          const idx = activeCards.findIndex((c) => c.payment_method_id === id);
+          if (idx >= 0) activeCards.splice(idx, 1);
+          return { rows: [], rowCount: 1 };
+        }
+        if (
+          sql.startsWith(
+            "SELECT payment_method_id,last4,card_type,expiry_month,expiry_year,is_default",
+          )
+        ) {
+          return { rows: [...activeCards], rowCount: activeCards.length };
+        }
+        return { rows: [], rowCount: 1 };
       }),
+      release: vi.fn(),
     };
 
-    const service = new PaymentMethodService(
-      repo as unknown as PaymentMethodRepository,
-      { provider, cipher },
-    );
+    const realRepo = new PaymentMethodRepository({
+      connect: vi.fn().mockResolvedValue(mockClient),
+    } as unknown as DatabaseService);
 
-    // 1. When DeleteMemberBindCard fails, remove() throws 503 payment_unavailable and does NOT call repo.remove
+    const service = new PaymentMethodService(realRepo, { provider, cipher });
+
+    // 1. When DeleteMemberBindCard fails, remove() throws 503 payment_unavailable and rolls back without UPDATE
+    txQueries.length = 0;
     await expect(service.remove(owner, methodId5)).rejects.toMatchObject({
       status: 503,
       code: "payment_unavailable",
     });
-    expect(repo.remove).not.toHaveBeenCalled();
+    expect(txQueries.filter((q) => q === "BEGIN")).toHaveLength(1);
+    expect(txQueries.filter((q) => q === "ROLLBACK")).toHaveLength(1);
+    expect(txQueries.some((q) => q.includes("SET status='removed'"))).toBe(
+      false,
+    );
     expect(activeCards).toHaveLength(5);
 
-    // 2. When DeleteMemberBindCard succeeds, remove() calls repo.remove and frees the 5th slot
+    // 2. When a concurrent ride is inserted during unbind(), post-unbind check in the same transaction blocks with 409 and rolls back
+    txQueries.length = 0;
+    simulatePostUnbindConcurrentRide = true;
+    await expect(service.remove(owner, methodId5)).rejects.toMatchObject({
+      status: 409,
+      code: "pending_payment_block",
+    });
+    expect(txQueries.filter((q) => q === "BEGIN")).toHaveLength(1);
+    expect(txQueries.filter((q) => q === "ROLLBACK")).toHaveLength(1);
+    expect(txQueries.some((q) => q.includes("SET status='removed'"))).toBe(
+      false,
+    );
+    expect(activeCards).toHaveLength(5);
+
+    // 3. When DeleteMemberBindCard succeeds and no unsettled ride exists, remove() runs in a single transaction (1 BEGIN, 1 COMMIT) and frees the 5th slot
+    txQueries.length = 0;
+    simulatePostUnbindConcurrentRide = false;
     await expect(service.remove(owner, methodId5)).resolves.toEqual({
       success: true,
     });
-    expect(repo.remove).toHaveBeenCalledWith(owner, methodId5);
+    expect(txQueries.filter((q) => q === "BEGIN")).toHaveLength(1);
+    expect(txQueries.filter((q) => q === "COMMIT")).toHaveLength(1);
+    expect(
+      txQueries.some((q) =>
+        q.includes(
+          "SELECT provider,token_envelope FROM passenger.psp_tokens\n           WHERE payment_method_id=$1 AND drts_passenger_id=$2 AND status='active' FOR UPDATE",
+        ),
+      ),
+    ).toBe(true);
     expect(activeCards).toHaveLength(4);
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
 
-    // 3. If ECPay upstream still reports member bound-card limit exceeded on CreateBindCard,
+    // 4. If ECPay upstream still reports member bound-card limit exceeded on CreateBindCard,
     // provider maps it to card_limit_exceeded and service surfaces 409 card_limit_exceeded (not 400 card_declined)
     fetchFn.mockResolvedValueOnce(
       buildMockResponse(
@@ -2041,7 +2246,7 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
       ),
     );
     const repoWithClaim = {
-      ...repo,
+      list: vi.fn(async () => []),
       claimBinding: vi.fn(async () => ({
         idempotencyKey: "pax:bind:f3_limit_001",
         methodId: "00000000-0000-4000-8000-000000000006",

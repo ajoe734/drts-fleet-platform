@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { Logger } from "@nestjs/common";
 import {
   assertEcpayHashMaterial,
   buildEcpayEnvelope,
@@ -9,11 +11,14 @@ import {
 } from "./ecpay-cipher";
 import type {
   MoneyResult,
+  OrphanedBindCardRollbackRecord,
   PaymentBindResult,
   PaymentCaptureCommand,
   PaymentProviderPort,
   PaymentRefundCommand,
 } from "./payment-provider.port";
+
+export type { OrphanedBindCardRollbackRecord };
 
 export const ECPAY_STAGE_BASE_URL = "https://ecpg-stage.ecpay.com.tw";
 export const ECPAY_PROD_BASE_URL = "https://ecpg.ecpay.com.tw";
@@ -355,6 +360,9 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
    * automatically re-authorized.
    */
   private readonly declinedBindCardIds = new Set<string>();
+  private readonly logger = new Logger(EcpayPaymentProvider.name);
+  private readonly orphanedBindCardRollbacks: OrphanedBindCardRollbackRecord[] =
+    [];
 
   constructor(options: EcpayProviderOptions) {
     const merchantId = options.merchantId?.trim();
@@ -734,23 +742,34 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
         Number(rawTotalAmount) > 0
           ? Number(rawTotalAmount)
           : this.bindingAuthAmountTwd;
-      if (merchantTradeNo && tradeNo && authAmountTwd > 0) {
-        const cancelled = await this.cancelBindingAuthorization({
-          merchantTradeNo,
-          tradeNo,
-          amountMinor: authAmountTwd * ECPAY_MINOR_UNITS_PER_TWD,
-        });
+      if (authAmountTwd > 0) {
+        const hasTradeIds = Boolean(merchantTradeNo && tradeNo);
+        const cancelled = hasTradeIds
+          ? await this.cancelBindingAuthorization({
+              merchantTradeNo,
+              tradeNo,
+              amountMinor: authAmountTwd * ECPAY_MINOR_UNITS_PER_TWD,
+            })
+          : false;
         // Per official ECPay specification (https://developers.ecpay.com.tw/35642/),
         // Stage (sandbox=true) does not perform real bank settlement and does not
-        // provide /1.0.0/Credit/DoAction. Require confirmed DoAction(N) in Production
-        // (sandbox=false), while allowing Stage bindings to complete if Stage rejects
-        // or omits Credit/DoAction.
+        // provide /1.0.0/Credit/DoAction. Require confirmed DoAction(N) (and valid
+        // MerchantTradeNo + TradeNo) in Production (sandbox=false), while allowing
+        // Stage bindings to complete if Stage rejects or omits Credit/DoAction.
         if (!cancelled && !this.sandbox) {
-          await this.unbind(bound.card.token, { passengerId }).catch(
-            () => false,
-          );
+          await this.rollbackOrphanedBinding({
+            token: bound.card.token,
+            passengerId,
+            merchantTradeNo: merchantTradeNo || responseTradeNo || null,
+            tradeNo: tradeNo || null,
+            reason: hasTradeIds
+              ? "do_action_cancel_unconfirmed"
+              : "missing_trade_identifiers_for_cancel",
+          });
           throw new Error(
-            "ECPay binding authorization cancellation was not confirmed.",
+            hasTradeIds
+              ? "ECPay binding authorization cancellation was not confirmed."
+              : "ECPay binding authorization cancellation requires MerchantTradeNo and TradeNo in production.",
           );
         }
       }
@@ -776,6 +795,64 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       result: structuredClone(result),
     });
     return result;
+  }
+
+  getOrphanedBindCardRollbacks(): readonly OrphanedBindCardRollbackRecord[] {
+    return this.orphanedBindCardRollbacks.map((entry) => ({ ...entry }));
+  }
+
+  /**
+   * Attempts to unbind a newly issued `BindCardID` on ECPay when Production
+   * `cancelBindingAuthorization` (`DoAction(N)`) fails or lacks trade IDs.
+   * If `/Merchant/DeleteMemberBindCard` itself fails, emits a structured
+   * error alert and records a queryable `OrphanedBindCardRollbackRecord`
+   * (with a non-secret SHA-256 digest of `BindCardID`) so operators can
+   * reconcile and reclaim the 5-card member slot on ECPay.
+   */
+  async rollbackOrphanedBinding(params: {
+    token: string;
+    passengerId: string;
+    merchantTradeNo?: string | null;
+    tradeNo?: string | null;
+    reason:
+      | "do_action_cancel_unconfirmed"
+      | "missing_trade_identifiers_for_cancel";
+  }): Promise<boolean> {
+    const bindCardId =
+      typeof params.token === "string" ? params.token.trim() : "";
+    const passengerId = params.passengerId?.trim() ?? "";
+    const memberId = passengerId
+      ? deriveEcpayMerchantMemberId(passengerId, this.merchantId)
+      : "";
+    let unbound = false;
+    try {
+      unbound = await this.unbind(bindCardId, { passengerId });
+    } catch {
+      unbound = false;
+    }
+    if (!unbound) {
+      const bindCardIdDigest = createHash("sha256")
+        .update(bindCardId)
+        .digest("hex")
+        .slice(0, 16);
+      const record: OrphanedBindCardRollbackRecord = {
+        passengerId,
+        memberId,
+        bindCardIdDigest,
+        merchantTradeNo: params.merchantTradeNo?.trim() || null,
+        tradeNo: params.tradeNo?.trim() || null,
+        reason: params.reason,
+        occurredAt: this.now().toISOString(),
+      };
+      this.orphanedBindCardRollbacks.push(record);
+      this.logger.error(
+        JSON.stringify({
+          event: "ecpay_orphan_bind_card_rollback_failed",
+          ...record,
+        }),
+      );
+    }
+    return unbound;
   }
 
   /**
