@@ -1225,6 +1225,68 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       complaint_count: 1,
       generated_at: "2026-10-24T18:00:00.000Z",
     });
+
+    // 6. Selected-day rescheduled legacy correct-key duplicate case (SA §7.2:1130 one final record per order):
+    // when legacy rows exist on both 2026-11-25 (G1, 10:01Z) and 2026-11-26 (G2, 10:02Z) with valid Taipei day keys for their respective reservation timestamps,
+    // a direct selected-day read on 2026-11-25 reconciles across dates to G2 (2026-11-26), removes 2026-11-25 G1, and returns [] for 2026-11-25 while 2026-11-26 returns [G2]
+    committedDailyTable.clear();
+    seedLegacyUtcRow();
+    const baseRescheduledRow = committedDailyTable.get(
+      `2026-10-24:${taipeiMidnightOrder.orderId}`,
+    )!;
+    committedDailyTable.delete(`2026-10-24:${taipeiMidnightOrder.orderId}`);
+    committedDailyTable.set(`2026-11-25:${taipeiMidnightOrder.orderId}`, {
+      ...baseRescheduledRow,
+      service_date: "2026-11-25",
+      requested_at: "2026-10-25T10:00:00.000Z",
+      reservation_time: "2026-11-25T02:00:00.000Z",
+      final_status: "created",
+      complaint_count: 0,
+      generated_at: "2026-10-25T10:01:00.000Z",
+    });
+    committedDailyTable.set(`2026-11-26:${taipeiMidnightOrder.orderId}`, {
+      ...baseRescheduledRow,
+      service_date: "2026-11-26",
+      requested_at: "2026-10-25T10:00:00.000Z",
+      reservation_time: "2026-11-26T02:00:00.000Z",
+      final_status: "created",
+      complaint_count: 0,
+      generated_at: "2026-10-25T10:02:00.000Z",
+    });
+
+    const selectedDay25Rescheduled = await repository.listDailyDispatchRecords({
+      serviceDate: "2026-11-25",
+      orderId: taipeiMidnightOrder.orderId,
+    });
+    expect(selectedDay25Rescheduled).toEqual([]);
+    expect(
+      committedDailyTable.has(`2026-11-25:${taipeiMidnightOrder.orderId}`),
+    ).toBe(false);
+    expect(
+      committedDailyTable.get(`2026-11-26:${taipeiMidnightOrder.orderId}`),
+    ).toMatchObject({
+      service_date: "2026-11-26",
+      order_id: taipeiMidnightOrder.orderId,
+      reservation_time: "2026-11-26T02:00:00.000Z",
+      final_status: "created",
+      generated_at: "2026-10-25T10:02:00.000Z",
+    });
+    expect(
+      committedDailyTable.has(`2026-10-24:${sameDayControlOrder.orderId}`),
+    ).toBe(true);
+
+    const selectedDay26Rescheduled = await repository.listDailyDispatchRecords({
+      serviceDate: "2026-11-26",
+      orderId: taipeiMidnightOrder.orderId,
+    });
+    expect(selectedDay26Rescheduled).toHaveLength(1);
+    expect(selectedDay26Rescheduled[0]).toMatchObject({
+      serviceDate: "2026-11-26",
+      orderId: taipeiMidnightOrder.orderId,
+      reservationTime: "2026-11-26T02:00:00.000Z",
+      finalStatus: "created",
+      generatedAt: "2026-10-25T10:02:00.000Z",
+    });
   });
 
   // Official migrated PostgreSQL schema persistence and readback check.
@@ -1924,6 +1986,141 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
           complaintCount: 1,
           generatedAt: "2026-10-24T17:45:00.000Z",
         });
+
+        // 8. Selected-day rescheduled legacy correct-key duplicate reconciliation on official PostgreSQL schema:
+        // when legacy rows for the same order exist on both 2026-11-25 (G1, 10:01Z) and 2026-11-26 (G2, 10:02Z) with valid Taipei day keys for their respective reservation_time values,
+        // a direct selected-day read on 2026-11-25 reconciles across dates to G2 (2026-11-26), deletes 2026-11-25 G1, and returns [] for 2026-11-25 while 2026-11-26 returns [G2]
+        await database.query(
+          "DELETE FROM reporting.dispatch_daily_records WHERE order_id = $1",
+          [taipeiMidnightOrder.orderId],
+        );
+        await database.query(
+          `
+            INSERT INTO reporting.dispatch_daily_records (
+              service_date,
+              order_id,
+              order_no,
+              order_source,
+              tenant_id,
+              partner_id,
+              service_product_code,
+              requested_at,
+              reservation_time,
+              pickup_address_snapshot,
+              dropoff_address_snapshot,
+              first_dispatch_at,
+              first_assigned_at,
+              final_driver_id,
+              final_vehicle_id,
+              final_plate_no,
+              eta_seconds_at_assignment,
+              arrived_pickup_at,
+              trip_started_at,
+              trip_completed_at,
+              final_status,
+              redispatch_count,
+              cancellation_reason,
+              complaint_count,
+              generated_at
+            ) VALUES
+              (
+                '2026-11-25'::date, $1, $2, 'phone', $3, $4, 'taxi_realtime',
+                '2026-10-25T10:00:00.000Z'::timestamptz,
+                '2026-11-25T02:00:00.000Z'::timestamptz,
+                'Taipei Main Station',
+                'Songshan Airport',
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                'created', 0, NULL, 0,
+                '2026-10-25T10:01:00.000Z'::timestamptz
+              ),
+              (
+                '2026-11-26'::date, $1, $2, 'phone', $3, $4, 'taxi_realtime',
+                '2026-10-25T10:00:00.000Z'::timestamptz,
+                '2026-11-26T02:00:00.000Z'::timestamptz,
+                'Taipei Main Station',
+                'Songshan Airport',
+                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                'created', 0, NULL, 0,
+                '2026-10-25T10:02:00.000Z'::timestamptz
+              )
+          `,
+          [
+            taipeiMidnightOrder.orderId,
+            taipeiMidnightOrder.orderNo,
+            taipeiMidnightOrder.tenantId,
+            taipeiMidnightOrder.partnerId,
+          ],
+        );
+
+        const pgSelectedDay25Rescheduled =
+          await reportingRepository.listDailyDispatchRecords({
+            serviceDate: "2026-11-25",
+            orderId: taipeiMidnightOrder.orderId,
+          });
+        expect(pgSelectedDay25Rescheduled).toEqual([]);
+
+        const pgSelectedDay26Rescheduled =
+          await reportingRepository.listDailyDispatchRecords({
+            serviceDate: "2026-11-26",
+            orderId: taipeiMidnightOrder.orderId,
+          });
+        expect(pgSelectedDay26Rescheduled).toHaveLength(1);
+        expect(pgSelectedDay26Rescheduled[0]).toMatchObject({
+          serviceDate: "2026-11-26",
+          orderId: taipeiMidnightOrder.orderId,
+          reservationTime: "2026-11-26T02:00:00.000Z",
+          finalStatus: "created",
+          generatedAt: "2026-10-25T10:02:00.000Z",
+        });
+
+        const persistedAfterRescheduledSelectedDayRead = await database.query<{
+          service_date: string;
+          order_id: string;
+          reservation_time: Date;
+          final_status: string;
+          generated_at: Date;
+        }>(
+          `
+            SELECT
+              service_date::text AS service_date,
+              order_id,
+              reservation_time,
+              final_status,
+              generated_at
+            FROM reporting.dispatch_daily_records
+            WHERE order_id = $1
+          `,
+          [taipeiMidnightOrder.orderId],
+        );
+        expect(persistedAfterRescheduledSelectedDayRead.rows).toHaveLength(1);
+        expect(
+          persistedAfterRescheduledSelectedDayRead.rows[0],
+        ).toMatchObject({
+          service_date: "2026-11-26",
+          order_id: taipeiMidnightOrder.orderId,
+          final_status: "created",
+        });
+        expect(
+          new Date(
+            persistedAfterRescheduledSelectedDayRead.rows[0]!.reservation_time,
+          ).toISOString(),
+        ).toBe("2026-11-26T02:00:00.000Z");
+        expect(
+          new Date(
+            persistedAfterRescheduledSelectedDayRead.rows[0]!.generated_at,
+          ).toISOString(),
+        ).toBe("2026-10-25T10:02:00.000Z");
+
+        // Unrelated order on 2026-10-24 remains untouched in PG
+        const pgControlDay24AfterRescheduled =
+          await reportingRepository.listDailyDispatchRecords({
+            serviceDate: legacyUtcDay,
+            orderId: controlDay24Order.orderId,
+          });
+        expect(pgControlDay24AfterRescheduled).toHaveLength(1);
+        expect(pgControlDay24AfterRescheduled[0]?.serviceDate).toBe(
+          legacyUtcDay,
+        );
       } finally {
         const cleanupOrderIds = [
           taipeiMidnightOrder.orderId,

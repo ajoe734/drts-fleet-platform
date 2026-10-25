@@ -813,12 +813,24 @@ describe("BUREAU-R12 ReportingService durable ACK and shared canonical source er
         return { rows: [], rowCount: 1 };
       }
       if (normalized.includes("FROM reporting.dispatch_daily_records")) {
-        const targetDate = String(params[0]);
         const rows = [...table.values()].filter((row) => {
           const rowTaipeiDay = toTaipeiDay(
             row.reservation_time ?? row.requested_at,
           );
-          return row.service_date === targetDate || rowTaipeiDay === targetDate;
+          let idx = 0;
+          if (normalized.includes("service_date = $1::date")) {
+            const target = String(params[idx++]);
+            if (row.service_date !== target && rowTaipeiDay !== target) {
+              return false;
+            }
+          }
+          if (normalized.includes("order_id =")) {
+            const targetOrder = String(params[idx++]);
+            if (row.order_id !== targetOrder) {
+              return false;
+            }
+          }
+          return true;
         });
         return { rows: structuredClone(rows), rowCount: rows.length };
       }
@@ -898,6 +910,302 @@ describe("BUREAU-R12 ReportingService durable ACK and shared canonical source er
       finalStatus: "completed",
       complaintCount: 1,
       generatedAt: g2GeneratedAt,
+    });
+  });
+
+  it("reconciles selected-day read when a rescheduled order has legacy correctly-keyed rows on both old (2026-11-25 G1) and new (2026-11-26 G2) Taipei service days", async () => {
+    type StoredRow = {
+      service_date: string;
+      order_id: string;
+      order_no: string;
+      order_source: "phone";
+      tenant_id: string | null;
+      partner_id: string | null;
+      service_product_code: string;
+      requested_at: string;
+      reservation_time: string | null;
+      pickup_address_snapshot: string;
+      dropoff_address_snapshot: string | null;
+      first_dispatch_at: string | null;
+      first_assigned_at: string | null;
+      final_driver_id: string | null;
+      final_vehicle_id: string | null;
+      final_plate_no: string | null;
+      eta_seconds_at_assignment: number | null;
+      arrived_pickup_at: string | null;
+      trip_started_at: string | null;
+      trip_completed_at: string | null;
+      final_status: string;
+      redispatch_count: number;
+      cancellation_reason: string | null;
+      complaint_count: number;
+      generated_at: string;
+    };
+
+    const toTaipeiDay = (iso: string) =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Taipei",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(iso));
+
+    const table = new Map<string, StoredRow>();
+    const rescheduledOrderId = "same-existing-rescheduled-order";
+    const unrelatedOrderId = "unrelated-order-2026-11-25";
+
+    // G1: older generation on 2026-11-25 (valid Taipei day for its stored timestamp 2026-11-25T02:00:00.000Z)
+    table.set(`2026-11-25:${rescheduledOrderId}`, {
+      service_date: "2026-11-25",
+      order_id: rescheduledOrderId,
+      order_no: "O-RESCHED-001",
+      order_source: "phone",
+      tenant_id: "tenant-001",
+      partner_id: "partner-001",
+      service_product_code: "airport_transfer",
+      requested_at: "2026-10-25T10:00:00.000Z",
+      reservation_time: "2026-11-25T02:00:00.000Z",
+      pickup_address_snapshot: "Taipei Main Station",
+      dropoff_address_snapshot: "Songshan Airport",
+      first_dispatch_at: null,
+      first_assigned_at: null,
+      final_driver_id: null,
+      final_vehicle_id: null,
+      final_plate_no: null,
+      eta_seconds_at_assignment: null,
+      arrived_pickup_at: null,
+      trip_started_at: null,
+      trip_completed_at: null,
+      final_status: "created",
+      redispatch_count: 0,
+      cancellation_reason: null,
+      complaint_count: 0,
+      generated_at: "2026-10-25T10:01:00.000Z",
+    });
+
+    // G2: newer generation on 2026-11-26 after tenant booking update changed reservationWindowStart
+    table.set(`2026-11-26:${rescheduledOrderId}`, {
+      service_date: "2026-11-26",
+      order_id: rescheduledOrderId,
+      order_no: "O-RESCHED-001",
+      order_source: "phone",
+      tenant_id: "tenant-001",
+      partner_id: "partner-001",
+      service_product_code: "airport_transfer",
+      requested_at: "2026-10-25T10:00:00.000Z",
+      reservation_time: "2026-11-26T02:00:00.000Z",
+      pickup_address_snapshot: "Taipei Main Station",
+      dropoff_address_snapshot: "Songshan Airport",
+      first_dispatch_at: null,
+      first_assigned_at: null,
+      final_driver_id: null,
+      final_vehicle_id: null,
+      final_plate_no: null,
+      eta_seconds_at_assignment: null,
+      arrived_pickup_at: null,
+      trip_started_at: null,
+      trip_completed_at: null,
+      final_status: "created",
+      redispatch_count: 0,
+      cancellation_reason: null,
+      complaint_count: 0,
+      generated_at: "2026-10-25T10:02:00.000Z",
+    });
+
+    // Unrelated order on 2026-11-25 must remain intact
+    table.set(`2026-11-25:${unrelatedOrderId}`, {
+      service_date: "2026-11-25",
+      order_id: unrelatedOrderId,
+      order_no: "O-UNRELATED-1125",
+      order_source: "phone",
+      tenant_id: "tenant-001",
+      partner_id: "partner-001",
+      service_product_code: "airport_transfer",
+      requested_at: "2026-10-25T09:00:00.000Z",
+      reservation_time: "2026-11-25T03:00:00.000Z",
+      pickup_address_snapshot: "Banqiao Station",
+      dropoff_address_snapshot: "Ximen Station",
+      first_dispatch_at: null,
+      first_assigned_at: null,
+      final_driver_id: null,
+      final_vehicle_id: null,
+      final_plate_no: null,
+      eta_seconds_at_assignment: null,
+      arrived_pickup_at: null,
+      trip_started_at: null,
+      trip_completed_at: null,
+      final_status: "created",
+      redispatch_count: 0,
+      cancellation_reason: null,
+      complaint_count: 0,
+      generated_at: "2026-10-25T09:05:00.000Z",
+    });
+
+    const executeQuery = async (sql: string, params: unknown[] = []) => {
+      const normalized = sql.replace(/\s+/g, " ").trim();
+      if (
+        normalized.includes("INSERT INTO reporting.dispatch_daily_records") &&
+        params.length === 1
+      ) {
+        const targetOrderId = String(params[0]);
+        const newestExisting = [...table.values()]
+          .filter((row) => row.order_id === targetOrderId)
+          .sort(
+            (a, b) =>
+              b.generated_at.localeCompare(a.generated_at) ||
+              b.service_date.localeCompare(a.service_date),
+          )[0];
+        if (newestExisting) {
+          const taipeiDay = toTaipeiDay(
+            newestExisting.reservation_time ?? newestExisting.requested_at,
+          );
+          if (newestExisting.service_date !== taipeiDay) {
+            const targetKey = `${taipeiDay}:${targetOrderId}`;
+            const existingOnTarget = table.get(targetKey);
+            if (
+              !existingOnTarget ||
+              existingOnTarget.generated_at <= newestExisting.generated_at
+            ) {
+              table.set(targetKey, {
+                ...newestExisting,
+                service_date: taipeiDay,
+              });
+            }
+          }
+        }
+        return { rows: [], rowCount: 1 };
+      }
+      if (normalized.includes("INSERT INTO reporting.dispatch_daily_records")) {
+        const serviceDateParam = String(params[0]);
+        const orderIdParam = String(params[1]);
+        const generatedAtParam = String(params[24]);
+        const hasNewerValidRow = [...table.values()].some(
+          (existing) =>
+            existing.order_id === orderIdParam &&
+            existing.service_date ===
+              toTaipeiDay(
+                existing.reservation_time ?? existing.requested_at,
+              ) &&
+            existing.generated_at > generatedAtParam,
+        );
+        if (!hasNewerValidRow) {
+          const key = `${serviceDateParam}:${orderIdParam}`;
+          const existingOnSameKey = table.get(key);
+          if (
+            !existingOnSameKey ||
+            existingOnSameKey.generated_at <= generatedAtParam
+          ) {
+            table.set(key, {
+              service_date: serviceDateParam,
+              order_id: orderIdParam,
+              order_no: String(params[2]),
+              order_source: "phone",
+              tenant_id: params[4] ? String(params[4]) : null,
+              partner_id: params[5] ? String(params[5]) : null,
+              service_product_code: String(params[6]),
+              requested_at: String(params[7]),
+              reservation_time: params[8] ? String(params[8]) : null,
+              pickup_address_snapshot: String(params[9]),
+              dropoff_address_snapshot: params[10] ? String(params[10]) : null,
+              first_dispatch_at: params[11] ? String(params[11]) : null,
+              first_assigned_at: params[12] ? String(params[12]) : null,
+              final_driver_id: params[13] ? String(params[13]) : null,
+              final_vehicle_id: params[14] ? String(params[14]) : null,
+              final_plate_no: params[15] ? String(params[15]) : null,
+              eta_seconds_at_assignment:
+                typeof params[16] === "number" ? params[16] : null,
+              arrived_pickup_at: params[17] ? String(params[17]) : null,
+              trip_started_at: params[18] ? String(params[18]) : null,
+              trip_completed_at: params[19] ? String(params[19]) : null,
+              final_status: String(params[20]),
+              redispatch_count: Number(params[21]),
+              cancellation_reason: params[22] ? String(params[22]) : null,
+              complaint_count: Number(params[23]),
+              generated_at: generatedAtParam,
+            });
+          }
+        }
+        return { rows: [], rowCount: 1 };
+      }
+      if (normalized.includes("DELETE FROM reporting.dispatch_daily_records")) {
+        const orderIdParam = String(params[0]);
+        const targetDateParam = String(params[1]);
+        const generatedAtParam = String(params[2]);
+        for (const [key, row] of table.entries()) {
+          const rowTaipeiDay = toTaipeiDay(
+            row.reservation_time ?? row.requested_at,
+          );
+          if (
+            row.order_id === orderIdParam &&
+            row.service_date !== targetDateParam &&
+            (row.service_date !== rowTaipeiDay ||
+              row.generated_at <= generatedAtParam)
+          ) {
+            table.delete(key);
+          }
+        }
+        return { rows: [], rowCount: 1 };
+      }
+      if (normalized.includes("FROM reporting.dispatch_daily_records")) {
+        const rows = [...table.values()].filter((row) => {
+          const rowTaipeiDay = toTaipeiDay(
+            row.reservation_time ?? row.requested_at,
+          );
+          let idx = 0;
+          if (normalized.includes("service_date = $1::date")) {
+            const target = String(params[idx++]);
+            if (row.service_date !== target && rowTaipeiDay !== target) {
+              return false;
+            }
+          }
+          if (normalized.includes("order_id =")) {
+            const targetOrder = String(params[idx++]);
+            if (row.order_id !== targetOrder) {
+              return false;
+            }
+          }
+          return true;
+        });
+        return { rows: structuredClone(rows), rowCount: rows.length };
+      }
+      return { rows: [], rowCount: 0 };
+    };
+
+    const repository = new ReportingRepository({
+      isEnabled: () => true,
+      query: executeQuery,
+      connect: async () => ({
+        query: executeQuery,
+        release: () => undefined,
+      }),
+    } as never);
+
+    // Direct selected-day read on old date 2026-11-25 before any unbounded read/rebuild
+    const selectedDay25 = await repository.listDailyDispatchRecords({
+      serviceDate: "2026-11-25",
+      orderId: rescheduledOrderId,
+    });
+    expect(selectedDay25).toEqual([]);
+    expect(table.has(`2026-11-25:${rescheduledOrderId}`)).toBe(false);
+    expect(table.get(`2026-11-26:${rescheduledOrderId}`)).toMatchObject({
+      service_date: "2026-11-26",
+      order_id: rescheduledOrderId,
+      reservation_time: "2026-11-26T02:00:00.000Z",
+      generated_at: "2026-10-25T10:02:00.000Z",
+    });
+    expect(table.has(`2026-11-25:${unrelatedOrderId}`)).toBe(true);
+
+    // Reading the new date 2026-11-26 returns the single final G2 record
+    const selectedDay26 = await repository.listDailyDispatchRecords({
+      serviceDate: "2026-11-26",
+      orderId: rescheduledOrderId,
+    });
+    expect(selectedDay26).toHaveLength(1);
+    expect(selectedDay26[0]).toMatchObject({
+      serviceDate: "2026-11-26",
+      orderId: rescheduledOrderId,
+      reservationTime: "2026-11-26T02:00:00.000Z",
+      generatedAt: "2026-10-25T10:02:00.000Z",
     });
   });
 });
