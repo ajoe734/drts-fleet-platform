@@ -29,7 +29,7 @@ on:
         options:
           - "current"
       retired_service_cleanup:
-        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."
+        description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 11 active services plus drts-passenger-web."
         required: false
         default: "none"
         type: choice
@@ -283,10 +283,7 @@ jobs:
           assert_exact_active_service enterprise-dispatch-web "$enterprise_dispatch_service" "drts-dev-enterprise-dispatch-web"
           assert_exact_active_service channel-partner-portal-web "$channel_partner_portal_service" "drts-channel-partner-portal-web"
           assert_exact_active_service passenger-app-web "$passenger_app_service" "drts-dev-passenger-app-web"
-          if [[ "$agency_portal_service" != "drts-dev-agency-portal-web" ]]; then
-            echo "::error::Resolved agency-portal-web target ${agency_portal_service} is outside the reviewed active dev inventory; expected drts-dev-agency-portal-web. Partner Booking is paused and service-target changes require a reviewed workflow update."
-            exit 1
-          fi
+          assert_exact_active_service agency-portal-web "$agency_portal_service" "drts-dev-agency-portal-web"
 
           api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" false)"
           platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)"
