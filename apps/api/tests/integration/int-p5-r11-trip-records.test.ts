@@ -93,6 +93,7 @@ function createTransactionalDbHarness() {
     allowPurge: boolean,
     sql: string,
     values: readonly unknown[] = [],
+    retentionNowIso?: string,
   ): { rows: any[]; rowCount: number } {
     const normalizedSql = sql.replace(/\s+/g, " ").trim();
 
@@ -402,7 +403,13 @@ function createTransactionalDbHarness() {
         Date.parse(String(row.retain_until)),
         computeTwoCalendarYearRetentionFloorMs(String(row.generated_at)),
       );
-      if (effectiveFloorMs > Date.now() && !allowPurge) {
+      const referenceNowMs =
+        allowPurge &&
+        retentionNowIso &&
+        Number.isFinite(Date.parse(retentionNowIso))
+          ? Date.parse(retentionNowIso)
+          : Date.now();
+      if (effectiveFloorMs > referenceNowMs) {
         throw new Error(
           `R11 trip operational record ${targetRecordId} cannot be deleted before 2-year retention expiry`,
         );
@@ -472,12 +479,14 @@ function createTransactionalDbHarness() {
     connect: vi.fn(async () => {
       let staged: SimulatedDbState = structuredClone(committed);
       let allowPurge = false;
+      let retentionNowIso: string | undefined;
       return {
         query: vi.fn(async (sql: string, values?: readonly unknown[]) => {
           const trimmed = sql.trim().toUpperCase();
           if (trimmed === "BEGIN") {
             staged = structuredClone(committed);
             allowPurge = false;
+            retentionNowIso = undefined;
             return { rows: [], rowCount: 0 };
           }
           if (
@@ -487,6 +496,15 @@ function createTransactionalDbHarness() {
           ) {
             allowPurge = true;
             return { rows: [], rowCount: 0 };
+          }
+          if (
+            trimmed.includes(
+              "SELECT SET_CONFIG('REPORTING.TRIP_RECORD_RETENTION_NOW'",
+            )
+          ) {
+            retentionNowIso =
+              typeof values?.[0] === "string" ? values[0] : undefined;
+            return { rows: [], rowCount: 1 };
           }
           if (trimmed === "COMMIT") {
             committed.tripRecordsByOrderId = staged.tripRecordsByOrderId;
@@ -517,9 +535,16 @@ function createTransactionalDbHarness() {
           if (trimmed === "ROLLBACK") {
             staged = structuredClone(committed);
             allowPurge = false;
+            retentionNowIso = undefined;
             return { rows: [], rowCount: 0 };
           }
-          return executeQueryAgainstState(staged, allowPurge, sql, values);
+          return executeQueryAgainstState(
+            staged,
+            allowPurge,
+            sql,
+            values,
+            retentionNowIso,
+          );
         }),
         release: vi.fn(),
       };
@@ -1831,10 +1856,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
     const suffix = randomUUID().replace(/-/g, "").slice(0, 12);
     const orderId = `ord_r11_pg_${suffix}`;
     const recordId = `mtr-${orderId}`;
+    const nonLeapOrderId = `ord_r11_pg_nl_${suffix}`;
+    const nonLeapRecordId = `mtr-${nonLeapOrderId}`;
+    const leapDayOrderId = `ord_r11_pg_ld_${suffix}`;
+    const leapDayRecordId = `mtr-${leapDayOrderId}`;
     const paymentId = `pay_r11_pg_${suffix}`;
     const taskId = `task_r11_pg_${suffix}`;
     const driverId = `drv_r11_pg_${suffix}`;
     const vehicleId = `veh_r11_pg_${suffix}`;
+    const deviceId = `dev_pg_${suffix}`;
 
     afterAll(async () => {
       try {
@@ -1850,12 +1880,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
             [taskId],
           );
           await client.query(
-            "DELETE FROM voice.legal_hold WHERE subject_ref = $1",
-            [orderId],
+            "DELETE FROM voice.legal_hold WHERE subject_ref = ANY($1::text[])",
+            [[orderId, nonLeapOrderId, leapDayOrderId]],
           );
           await client.query(
             "DELETE FROM billing.multi_taxi_passenger_payments WHERE order_id = $1",
             [orderId],
+          );
+          await client.query(
+            "SET LOCAL reporting.allow_trip_record_retention_purge = 'on'",
+          );
+          await client.query(
+            "SELECT set_config('reporting.trip_record_retention_now', '2099-01-01T00:00:00.000Z', true)",
+          );
+          await client.query(
+            "DELETE FROM reporting.multi_taxi_trip_operational_records WHERE record_id = ANY($1::text[])",
+            [[recordId, nonLeapRecordId, leapDayRecordId]],
           );
           await client.query("COMMIT");
         } catch {
@@ -1872,8 +1912,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await database.query(
         `
         INSERT INTO ops.phase1_driver_tasks (
-          task_id, order_id, dispatch_job_id, assignment_id, status, updated_at, record
-        ) VALUES ($1, $2, $3, $4, 'completed', '2026-10-25T02:00:00.000Z'::timestamptz, $5::jsonb)
+          task_id, order_id, dispatch_job_id, assignment_id, status, created_at, updated_at, record
+        ) VALUES (
+          $1, $2, $3, $4, 'completed',
+          '2026-10-25T01:55:00.000Z'::timestamptz,
+          '2026-10-25T02:00:00.000Z'::timestamptz,
+          $5::jsonb
+        )
         `,
         [
           taskId,
@@ -1899,21 +1944,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
           recorded_at, received_at, lat, lng, accuracy_m,
           work_state, app_state, transport_mode, network_type, out_of_order
         ) VALUES
-          ($1, 'dev-pg-1', $2, $3, $4, 1, '2026-10-25T01:56:30.000Z'::timestamptz, '2026-10-25T01:56:31.000Z'::timestamptz, 25.0478, 121.5170, 12, 'on_trip', 'foreground', 'driving', '4g', false),
-          ($5, 'dev-pg-1', $2, NULL, $4, 2, '2026-10-25T01:58:00.000Z'::timestamptz, '2026-10-25T01:58:01.000Z'::timestamptz, 25.0550, 121.5340, 15, 'on_trip', 'foreground', 'driving', '4g', false),
-          ($6, 'dev-pg-1', $2, $3, $4, 3, '2026-10-25T01:59:30.000Z'::timestamptz, '2026-10-25T01:59:31.000Z'::timestamptz, 25.0630, 121.5517, 10, 'on_trip', 'foreground', 'driving', '4g', false),
-          ($7, 'dev-pg-1', $2, 'veh-conflict-wrong', $4, 4, '2026-10-25T01:57:00.000Z'::timestamptz, '2026-10-25T01:57:01.000Z'::timestamptz, 24.9000, 121.9000, 10, 'on_trip', 'foreground', 'driving', '4g', false),
-          ($8, 'dev-pg-1', $2, $3, $4, 5, '2026-10-25T01:58:30.000Z'::timestamptz, '2026-10-25T01:58:31.000Z'::timestamptz, 24.8500, 121.8500, 150, 'on_trip', 'foreground', 'driving', '4g', false)
+          ($1::uuid, $2, $3, $4, $5, 1, '2026-10-25T01:56:30.000Z'::timestamptz, '2026-10-25T01:56:31.000Z'::timestamptz, 25.0478, 121.5170, 12, 'on_trip', 'foreground', 'driving', '4g', false),
+          ($6::uuid, $2, $3, NULL, $5, 2, '2026-10-25T01:58:00.000Z'::timestamptz, '2026-10-25T01:58:01.000Z'::timestamptz, 25.0550, 121.5340, 15, 'on_trip', 'foreground', 'driving', '4g', false),
+          ($7::uuid, $2, $3, $4, $5, 3, '2026-10-25T01:59:30.000Z'::timestamptz, '2026-10-25T01:59:31.000Z'::timestamptz, 25.0630, 121.5517, 10, 'on_trip', 'foreground', 'driving', '4g', false),
+          ($8::uuid, $2, $3, 'veh-conflict-wrong', $5, 4, '2026-10-25T01:57:00.000Z'::timestamptz, '2026-10-25T01:57:01.000Z'::timestamptz, 24.9000, 121.9000, 10, 'on_trip', 'foreground', 'driving', '4g', false),
+          ($9::uuid, $2, $3, $4, $5, 5, '2026-10-25T01:58:30.000Z'::timestamptz, '2026-10-25T01:58:31.000Z'::timestamptz, 24.8500, 121.8500, 150, 'on_trip', 'foreground', 'driving', '4g', false)
         `,
         [
-          `evt_1_${suffix}`,
+          randomUUID(),
+          deviceId,
           driverId,
           vehicleId,
           taskId,
-          `evt_2_nullveh_${suffix}`,
-          `evt_3_${suffix}`,
-          `evt_4_conflict_${suffix}`,
-          `evt_5_inaccurate_${suffix}`,
+          randomUUID(),
+          randomUUID(),
+          randomUUID(),
+          randomUUID(),
         ],
       );
 
@@ -1975,6 +2021,80 @@ describe.skipIf(!process.env.DATABASE_URL)(
         retainUntil: "2028-10-24T02:00:00.000Z",
       });
 
+      // Also persist non-leap control (2028-03-01 -> 2030-03-01) and leap-day start (2028-02-29 -> 2030-03-01)
+      await repository.upsertTripOperationalRecord({
+        recordId: nonLeapRecordId,
+        orderId: nonLeapOrderId,
+        orderNo: `MTX-PG-NL-${suffix}`,
+        tripId: `trip-nl-${suffix}`,
+        assignmentId: `asg-nl-${suffix}`,
+        driverId,
+        vehicleId,
+        plateNo: "TPE-7789",
+        reservedAt: "2028-03-01T01:50:00.000Z",
+        pickupAt: "2028-03-01T01:56:00.000Z",
+        dropoffAt: "2028-03-01T02:00:00.000Z",
+        route: {
+          encodedPolyline: null,
+          pointCount: 0,
+          distanceMeters: 5100,
+          durationSeconds: 240,
+          source: "pickup_dropoff_summary",
+          routeSummary: "NL Start → NL End",
+        },
+        payableFareMinor: 25000,
+        actualFareMinor: 25000,
+        collectedFareMinor: null,
+        paymentStatus: "unknown",
+        tollMinor: null,
+        tollSource: "unavailable",
+        currency: "TWD",
+        farePolicyVersion: "multi-taxi-v1",
+        chargingMode: "meter",
+        generatedAt: "2028-03-01T02:00:00.000Z",
+        retainUntil: "2030-02-28T02:00:00.000Z",
+      });
+      await repository.upsertTripOperationalRecord({
+        recordId: leapDayRecordId,
+        orderId: leapDayOrderId,
+        orderNo: `MTX-PG-LD-${suffix}`,
+        tripId: `trip-ld-${suffix}`,
+        assignmentId: `asg-ld-${suffix}`,
+        driverId,
+        vehicleId,
+        plateNo: "TPE-7790",
+        reservedAt: "2028-02-29T01:50:00.000Z",
+        pickupAt: "2028-02-29T01:56:00.000Z",
+        dropoffAt: "2028-02-29T02:00:00.000Z",
+        route: {
+          encodedPolyline: null,
+          pointCount: 0,
+          distanceMeters: 5200,
+          durationSeconds: 240,
+          source: "pickup_dropoff_summary",
+          routeSummary: "LD Start → LD End",
+        },
+        payableFareMinor: 26000,
+        actualFareMinor: 26000,
+        collectedFareMinor: null,
+        paymentStatus: "unknown",
+        tollMinor: null,
+        tollSource: "unavailable",
+        currency: "TWD",
+        farePolicyVersion: "multi-taxi-v1",
+        chargingMode: "meter",
+        generatedAt: "2028-02-29T02:00:00.000Z",
+        retainUntil: "2030-02-28T02:00:00.000Z",
+      });
+
+      const nonLeapPersisted =
+        await repository.findTripOperationalRecordById(nonLeapRecordId);
+      const leapDayPersisted =
+        await repository.findTripOperationalRecordById(leapDayRecordId);
+      expect(nonLeapPersisted?.retainUntil).toBe("2030-03-01T02:00:00.000Z");
+      expect(nonLeapPersisted?.tollMinor).toBeNull();
+      expect(leapDayPersisted?.retainUntil).toBe("2030-03-01T02:00:00.000Z");
+
       const initialPersisted =
         await repository.findTripOperationalRecordById(recordId);
       expect(initialPersisted?.retainUntil).toBe("2028-10-25T02:00:00.000Z");
@@ -1993,13 +2113,24 @@ describe.skipIf(!process.env.DATABASE_URL)(
         coverage: "full_sampled",
       });
 
-      // At 2028-10-24T02:00:00.000Z (730 days after 2026-10-25T02:00:00.000Z),
-      // retention sweep must NOT consider the record expired.
-      const sweepAt730d = await repository.purgeExpiredTripOperationalRecords(
-        new Date("2028-10-24T02:00:00.000Z"),
-        new Set(),
+      // Collect any pre-existing unrelated record_ids in the shared CI DB so purge sweeps only affect our test rows
+      const existingRows = await database.query<{ record_id: string }>(
+        "SELECT record_id FROM reporting.multi_taxi_trip_operational_records WHERE record_id <> ALL($1::text[])",
+        [[recordId, nonLeapRecordId, leapDayRecordId]],
       );
+      const unrelatedHeldSet = new Set(
+        existingRows.rows.map((r) => r.record_id),
+      );
+
+      // At 2028-10-24T02:00:00.000Z (730 days after 2026-10-25T02:00:00.000Z),
+      // retention sweep must NOT consider the record expired, and record remains queryable.
+      const sweepAt730d = await repository.purgeExpiredTripOperationalRecords({
+        nowIso: "2028-10-24T02:00:00.000Z",
+        heldSubjects: unrelatedHeldSet,
+      });
       expect(sweepAt730d.purgedRecordIds).not.toContain(recordId);
+      const allRecordsAt730d = await repository.listTripOperationalRecords();
+      expect(allRecordsAt730d.some((r) => r.recordId === recordId)).toBe(true);
 
       // Prune raw telemetry.driver_location_events and replay upsert -> retained R11 GPS snapshot survives!
       await database.query(
@@ -2077,6 +2208,50 @@ describe.skipIf(!process.env.DATABASE_URL)(
           [recordId],
         ),
       ).rejects.toThrow();
+
+      // Extending retain_until to a longer date (2031-01-01T00:00:00.000Z) succeeds, and subsequent upsert with shorter retainUntil preserves the longer retention
+      await database.query(
+        `UPDATE reporting.multi_taxi_trip_operational_records SET retain_until = '2031-01-01T00:00:00.000Z'::timestamptz WHERE record_id = $1`,
+        [nonLeapRecordId],
+      );
+      await repository.upsertTripOperationalRecord({
+        ...nonLeapPersisted!,
+        retainUntil: "2030-03-01T02:00:00.000Z",
+      });
+      const preservedLonger =
+        await repository.findTripOperationalRecordById(nonLeapRecordId);
+      expect(preservedLonger?.retainUntil).toBe("2031-01-01T00:00:00.000Z");
+
+      // Active legal hold in voice.legal_hold blocks both purgeExpiredTripOperationalRecords and direct DELETE after 2-year expiry (2028-10-26T00:00:00.000Z)
+      await database.query(
+        `
+        INSERT INTO voice.legal_hold (
+          case_number, evidence_family, subject_ref, reason_code, status, placed_by
+        ) VALUES ($1, 'proof_bundle', $2, 'regulatory_inquiry', 'active', 'usr-admin-r11-pg')
+        `,
+        [`CASE-R11-${suffix}`, orderId],
+      );
+
+      const sweepUnderHold =
+        await repository.purgeExpiredTripOperationalRecords({
+          nowIso: "2028-10-26T00:00:00.000Z",
+          heldSubjects: unrelatedHeldSet,
+        });
+      expect(sweepUnderHold.purgedRecordIds).not.toContain(recordId);
+      expect(sweepUnderHold.skippedHeldRecordIds).toContain(recordId);
+
+      // Releasing the legal hold allows controlled retention purge after expiry
+      await database.query(
+        `UPDATE voice.legal_hold SET status = 'released', released_by = 'usr-admin-r11-pg', released_at = now() WHERE subject_ref = $1`,
+        [orderId],
+      );
+      const sweepAfterHoldRelease =
+        await repository.purgeExpiredTripOperationalRecords({
+          nowIso: "2028-10-26T00:00:00.000Z",
+          heldSubjects: unrelatedHeldSet,
+        });
+      expect(sweepAfterHoldRelease.purgedRecordIds).toContain(recordId);
+      expect(await repository.findTripOperationalRecordById(recordId)).toBeNull();
     });
   },
 );

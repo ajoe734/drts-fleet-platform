@@ -3824,6 +3824,10 @@ export class MultiTaxiRepository {
       await client.query(
         "SET LOCAL reporting.allow_trip_record_retention_purge = 'on'",
       );
+      await client.query(
+        "SELECT set_config('reporting.trip_record_retention_now', $1, true)",
+        [nowIso],
+      );
 
       const candidates = await client.query<{
         record_id: string;

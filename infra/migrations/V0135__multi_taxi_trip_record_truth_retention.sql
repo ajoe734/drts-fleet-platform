@@ -797,6 +797,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   v_effective_retain_until timestamptz;
+  v_reference_now timestamptz;
 BEGIN
   IF TG_OP = 'TRUNCATE' THEN
     RAISE EXCEPTION 'reporting.multi_taxi_trip_operational_records cannot be truncated (R11 two-calendar-year statutory retention)'
@@ -807,7 +808,13 @@ BEGIN
     OLD.retain_until,
     reporting.multi_taxi_two_calendar_year_retention_floor(OLD.generated_at)
   );
-  IF v_effective_retain_until > clock_timestamp() THEN
+  v_reference_now := CASE
+    WHEN current_setting('reporting.allow_trip_record_retention_purge', true) = 'on'
+     AND NULLIF(current_setting('reporting.trip_record_retention_now', true), '') IS NOT NULL
+    THEN current_setting('reporting.trip_record_retention_now', true)::timestamptz
+    ELSE clock_timestamp()
+  END;
+  IF v_effective_retain_until > v_reference_now THEN
     RAISE EXCEPTION 'R11 trip operational record % cannot be deleted before two-calendar-year retention expiry (%)',
       OLD.record_id, v_effective_retain_until
       USING ERRCODE = 'check_violation';
