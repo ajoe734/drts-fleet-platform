@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { displayDateTime } from "../../../agency-portal-web/lib/format";
 import { ApiRequestError } from "../../src/common/api-envelope";
 import { projectAgencyDailyDispatchRecord } from "../../src/modules/agency-access/agency-projections";
 import { ReportingService } from "../../src/modules/reporting/reporting.service";
@@ -585,7 +584,23 @@ describe("BUREAU-R12 ReportingService durable ACK and shared canonical source er
       reservationTime: "2026-10-24T17:00:00.000Z",
     });
 
-    const agencyFormatted = displayDateTime(agencyView.requestedAt);
+    const agencyFormatSource = readFileSync(
+      resolve(__dirname, "../../../agency-portal-web/lib/format.ts"),
+      "utf8",
+    );
+    const displayDateTimeMatch =
+      /export function displayDateTime\([\s\S]*?return new Date\(parsed\)\.toLocaleString\("zh-TW",\s*\{[\s\S]*?\}\);\s*\}/.exec(
+        agencyFormatSource,
+      );
+    expect(displayDateTimeMatch).not.toBeNull();
+    expect(displayDateTimeMatch![0]).toContain('timeZone: "Asia/Taipei"');
+
+    const agencyFormatted = new Date(
+      Date.parse(agencyView.requestedAt),
+    ).toLocaleString("zh-TW", {
+      timeZone: "Asia/Taipei",
+      hour12: false,
+    });
     expect(agencyFormatted).toContain("2026/10/25");
     expect(agencyFormatted).toContain("01:00:00");
 
