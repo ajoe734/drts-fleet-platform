@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 
 import { DatabaseModule } from "../../common/db";
+import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { ComplaintModule } from "../complaint/complaint.module";
 import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
@@ -14,6 +15,7 @@ import { ReportingService } from "./reporting.service";
 @Module({
   imports: [
     DatabaseModule,
+    AuditNotificationModule,
     ComplaintModule,
     OwnedMobilityModule,
     RegulatoryRegistryModule,
@@ -25,6 +27,6 @@ import { ReportingService } from "./reporting.service";
     ReportingService,
     ReferralMonthlyRatingService,
   ],
-  exports: [ReportingService],
+  exports: [ReportingService, ReferralMonthlyRatingService],
 })
 export class ReportingModule {}

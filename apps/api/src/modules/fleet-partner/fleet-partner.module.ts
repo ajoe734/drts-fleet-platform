@@ -13,6 +13,7 @@ import { FleetStatementDecisionRepository } from "./fleet-statement-decision.rep
 import { FleetPartnerRepository } from "./fleet-partner.repository";
 import { FleetPartnerService } from "./fleet-partner.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
+import { CallcenterModule } from "../callcenter/callcenter.module";
 import { ComplaintModule } from "../complaint/complaint.module";
 import { FleetPartnerCaseService } from "./fleet-partner-case.service";
 import { SupplyDocumentService } from "./supply-document.service";
@@ -32,6 +33,7 @@ import { SupplySubmissionService } from "./supply-submission.service";
     VehicleEligibilityModule,
     AuditNotificationModule,
     ComplaintModule,
+    CallcenterModule,
   ],
   controllers: [FleetPartnerController],
   providers: [

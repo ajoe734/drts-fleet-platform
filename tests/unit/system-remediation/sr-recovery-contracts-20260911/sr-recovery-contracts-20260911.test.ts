@@ -139,6 +139,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.referral_passenger_journey_allocations || []),
         ...(content.normal_onboarding_supply_pair_allocations || []),
         ...(content.referral_passenger_fee_consent_allocations || []),
+        ...(content.referral_monthly_rating_governance_allocations || []),
       ];
 
       // No duplicate versions across all allocations
@@ -179,6 +180,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.referral_passenger_journey_allocations || []),
         ...(content.normal_onboarding_supply_pair_allocations || []),
         ...(content.referral_passenger_fee_consent_allocations || []),
+        ...(content.referral_monthly_rating_governance_allocations || []),
       ];
       const diskFiles = fs.existsSync(migrationsDir)
         ? fs.readdirSync(migrationsDir)
@@ -220,6 +222,7 @@ describe("SR-RECOVERY-CONTRACTS-20260911: Proof, Push-Receipt & Adapter-Registry
         ...(content.referral_passenger_journey_allocations || []),
         ...(content.normal_onboarding_supply_pair_allocations || []),
         ...(content.referral_passenger_fee_consent_allocations || []),
+        ...(content.referral_monthly_rating_governance_allocations || []),
       ];
       const maxAllocated = Math.max(
         100,

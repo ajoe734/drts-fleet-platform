@@ -71,7 +71,11 @@ describe("SupplySubmissionService", () => {
       preferredVehicleSubmissionId: null,
     };
 
-    await service.createDriverDraft("fleet-demo-001", "actor-demo-001", payload);
+    await service.createDriverDraft(
+      "fleet-demo-001",
+      "actor-demo-001",
+      payload,
+    );
 
     // Creating again with same identity should throw
     await expect(
@@ -152,9 +156,14 @@ describe("SupplySubmissionService", () => {
 
     // Submitting it should throw a conflict because doorCount/color are missing
     await expect(
-      service.submitSupplySubmission("fleet-demo-001", submissionId, "actor-demo-001", {
-        expectedRevisionNo: 1,
-      }),
+      service.submitSupplySubmission(
+        "fleet-demo-001",
+        submissionId,
+        "actor-demo-001",
+        {
+          expectedRevisionNo: 1,
+        },
+      ),
     ).rejects.toThrowError(ApiRequestError);
 
     // Update draft to have doorCount and color
@@ -183,9 +192,14 @@ describe("SupplySubmissionService", () => {
 
     // Now it should proceed past draft validation (though it might fail on missing documents, which is a different error code)
     await expect(
-      service.submitSupplySubmission("fleet-demo-001", submissionId, "actor-demo-001", {
-        expectedRevisionNo: 2,
-      }),
+      service.submitSupplySubmission(
+        "fleet-demo-001",
+        submissionId,
+        "actor-demo-001",
+        {
+          expectedRevisionNo: 2,
+        },
+      ),
     ).rejects.toThrowError(
       expect.objectContaining({
         response: expect.objectContaining({
@@ -385,7 +399,10 @@ describe("SupplySubmissionService", () => {
     await service.onModuleInit();
 
     // Verify submission status was backfilled to needs_revision
-    const detail = await service.getSupplySubmissionDetail("fleet-demo-001", submissionId);
+    const detail = await service.getSupplySubmissionDetail(
+      "fleet-demo-001",
+      submissionId,
+    );
     expect(detail.submission.status).toBe("needs_revision");
   });
 });

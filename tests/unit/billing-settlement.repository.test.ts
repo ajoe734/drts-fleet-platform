@@ -89,7 +89,9 @@ describe("billing settlement repository", () => {
     expect(query).toHaveBeenCalledWith(
       expect.stringContaining("billing.phase1_driver_fee_plans"),
     );
-    expect(query).toHaveBeenCalledWith(expect.stringContaining("published_at DESC"));
+    expect(query).toHaveBeenCalledWith(
+      expect.stringContaining("published_at DESC"),
+    );
     expect(plans).toEqual([
       expect.objectContaining({
         feePlanId: "fee-plan-canonical-001",

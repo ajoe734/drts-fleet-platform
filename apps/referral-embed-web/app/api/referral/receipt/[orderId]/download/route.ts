@@ -1,5 +1,6 @@
 import { referralErrorResponse } from "../../../../../../lib/embed-booking-api";
 import { NextResponse } from "next/server";
+import { buildReferralReceiptE04Fields } from "@drts/contracts";
 import { getReferralTripReceiptServer } from "../../../../../../lib/embed-booking-api";
 
 export async function GET(
@@ -42,6 +43,13 @@ export async function GET(
         : `Night Fare: NT$ ${receipt.fareNight}`,
       `TOTAL FARE: ${receipt.formattedTotal}`,
       `Payment Channel: ${receipt.paymentChannel}`,
+      "",
+      "----------------------------------------",
+      "E-04 乘車證明欄位（未核發者顯示未提供）",
+      ...buildReferralReceiptE04Fields(receipt).map(
+        (field) => `${field.label}：${field.value}`,
+      ),
+      "----------------------------------------",
       "客服：02-2944-0985；主管機關：1999",
       "========================================",
     ].join("\n");

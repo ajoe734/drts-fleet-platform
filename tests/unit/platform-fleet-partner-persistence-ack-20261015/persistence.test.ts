@@ -424,9 +424,9 @@ describe.each(["absent", "disabled"] as const)(
         partnershipType: "vehicle_owner_group",
         active: false,
       });
-      expect(await service.getFleetPartner(created.data.fleetPartnerId)).toEqual(
-        updated.data,
-      );
+      expect(
+        await service.getFleetPartner(created.data.fleetPartnerId),
+      ).toEqual(updated.data);
       // Existing reference rules require a master, and allow a disabled master.
       const linked = await controller.createDriverFleetAffiliation(
         " no-db-driver ",

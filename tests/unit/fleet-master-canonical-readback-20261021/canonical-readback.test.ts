@@ -156,9 +156,7 @@ function createSharedDbCluster() {
     return { rows: ordered, rowCount: ordered.length };
   });
 
-  const makeNode = (
-    registryOverrides?: Partial<RegulatoryRegistryService>,
-  ) => {
+  const makeNode = (registryOverrides?: Partial<RegulatoryRegistryService>) => {
     const repository = new FleetPartnerRepository({
       isEnabled: () => true,
       query,
@@ -254,9 +252,8 @@ describe("FLEET-MASTER-CANONICAL-READBACK-20261021: cross-instance canonical Fle
         (row) => row.fleetPartnerId === bAnotherCreated.fleetPartnerId,
       ),
     ).toBe(true);
-    const bListEnvelope = await bWarmForList.controller.listFleetPartners(
-      "req-b-list",
-    );
+    const bListEnvelope =
+      await bWarmForList.controller.listFleetPartners("req-b-list");
     expect(Array.isArray(bListEnvelope.data.items)).toBe(true);
     expect(
       bListEnvelope.data.items.some(
@@ -435,9 +432,9 @@ describe("FLEET-MASTER-CANONICAL-READBACK-20261021: cross-instance canonical Fle
     expect(await b.service.listFleetPartners()).toHaveLength(1);
     createGate.resolve();
     const created = await pendingCreate;
-    expect((await b.service.getFleetPartner(created.fleetPartnerId)).displayName).toBe(
-      "Created on A",
-    );
+    expect(
+      (await b.service.getFleetPartner(created.fleetPartnerId)).displayName,
+    ).toBe("Created on A");
 
     // Rejected update on A does not mutate A cache, B readback, or canonical store
     const updateGate = cluster.delayNextWrite();
@@ -525,9 +522,8 @@ describe("FLEET-MASTER-CANONICAL-READBACK-20261021: cross-instance canonical Fle
     await b.service.onModuleInit();
 
     // Warm B readiness initially sees active partner
-    const readyBefore = await b.supplyReadiness.listFleetPartnerReadiness(
-      "fleet-demo-001",
-    );
+    const readyBefore =
+      await b.supplyReadiness.listFleetPartnerReadiness("fleet-demo-001");
     expect(readyBefore[0]?.reasonCodes).not.toContain("FLEET_PARTNER_INACTIVE");
 
     // Instance A soft-disables fleet-demo-001 and creates a new operator-mapped fleet
@@ -539,9 +535,8 @@ describe("FLEET-MASTER-CANONICAL-READBACK-20261021: cross-instance canonical Fle
     });
 
     // Warm B SupplyReadinessService immediately sees FLEET_PARTNER_INACTIVE without restart
-    const readyAfterDisable = await b.supplyReadiness.listFleetPartnerReadiness(
-      "fleet-demo-001",
-    );
+    const readyAfterDisable =
+      await b.supplyReadiness.listFleetPartnerReadiness("fleet-demo-001");
     expect(readyAfterDisable[0]?.reasonCodes).toContain(
       "FLEET_PARTNER_INACTIVE",
     );

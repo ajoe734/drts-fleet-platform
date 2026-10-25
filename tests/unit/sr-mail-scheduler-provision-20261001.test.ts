@@ -7,6 +7,11 @@ import path from "node:path";
 import * as jwt from "jsonwebtoken";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  BootstrapAuthGuard,
+  JwtAuthService,
+  type AuthenticatedRequestLike,
+} from "../../apps/api/src/common/auth";
 import { matchesScope } from "../../apps/api/src/common/auth/internal-key-exception-registry";
 import { GoogleWorkloadIdentityAdapter } from "../../apps/api/src/modules/auth/google-workload-identity.adapter";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
@@ -40,16 +45,20 @@ const SCHEDULER_SA_EMAIL =
 const MAIL_OUTBOX_ROUTE_SCOPE = "POST internal/scheduled-tasks/mail-outbox/drain";
 const APPROVAL_REMINDER_ROUTE_SCOPE =
   "POST internal/scheduled-tasks/approval-timeout-reminders/run";
+const REGULATORY_EXPIRY_ROUTE_SCOPE =
+  "POST internal/scheduled-tasks/regulatory-expiry/run";
 
 /** The exact routeScopes/scopes entry C must declare -- asserted against the
  * delivered JSON below, not fed to the adapter directly. */
 const ENTRY_C_ROUTE_SCOPES = [
   MAIL_OUTBOX_ROUTE_SCOPE,
   APPROVAL_REMINDER_ROUTE_SCOPE,
+  REGULATORY_EXPIRY_ROUTE_SCOPE,
 ];
 const ENTRY_C_SCOPES = [
   "notification-delivery:drain",
   "tenant-partner:approval-timeout-reminders:run",
+  "regulatory:write",
 ];
 
 type RegistryEntry = {
@@ -108,7 +117,7 @@ const threeEntryArray = jsonFences.find(
 const entryCFromArray = threeEntryArray?.find(isEntryC);
 
 describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C routeScopes format (matchesScope)", () => {
-  it("matches both scheduled-task routes as the guard would present them (leading /api, leading slash)", () => {
+  it("matches all three scheduled-task routes as the guard would present them (leading /api, leading slash)", () => {
     expect(
       matchesScope(
         MAIL_OUTBOX_ROUTE_SCOPE,
@@ -123,6 +132,13 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C routeScopes format (matc
         "/api/internal/scheduled-tasks/approval-timeout-reminders/run",
       ),
     ).toBe(true);
+    expect(
+      matchesScope(
+        REGULATORY_EXPIRY_ROUTE_SCOPE,
+        "POST",
+        "/api/internal/scheduled-tasks/regulatory-expiry/run",
+      ),
+    ).toBe(true);
   });
 
   it("denies every other route, method mismatch, and prefix/suffix variant against either pattern", () => {
@@ -134,6 +150,7 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C routeScopes format (matc
       ["POST", "/api/internal/scheduled-tasks/mail-outbox/drain/extra"],
       ["POST", "/api/internal/scheduled-tasks"],
       ["GET", "/api/internal/scheduled-tasks/approval-timeout-reminders/run"],
+      ["GET", "/api/internal/scheduled-tasks/regulatory-expiry/run"],
     ];
     for (const [method, requestPath] of denied) {
       const anyMatch = ENTRY_C_ROUTE_SCOPES.some((pattern) =>
@@ -227,6 +244,51 @@ describe("SR-MAIL-SCHEDULER-PROVISION-20261001: entry C enforced end to end thro
       },
     );
     expect(resolved.principalId).toBe("dev-scheduler");
+  });
+
+  it("resolves the regulatory-expiry reconciliation route and tolerates reused Cloud Scheduler OIDC tokens across multiple firings through BootstrapAuthGuard", async () => {
+    const { adapter, token } = setUp();
+    const resolved = await adapter.verifyServicePrincipal(
+      { "x-drts-google-id-token": token },
+      {
+        requestPath: "/api/internal/scheduled-tasks/regulatory-expiry/run",
+        requestMethod: "POST",
+        enforceReplayProtection: false,
+      },
+    );
+    expect(resolved.principalId).toBe("dev-scheduler");
+    expect(resolved.scopes).toContain("regulatory:write");
+
+    const guard = new BootstrapAuthGuard(
+      { getAllAndOverride: () => undefined } as never,
+      new JwtAuthService(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      adapter,
+    );
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const request: AuthenticatedRequestLike = {
+        headers: { authorization: `Bearer ${token}` },
+        method: "POST",
+        originalUrl: "/api/internal/scheduled-tasks/regulatory-expiry/run",
+      };
+      const context = {
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => function handler() {},
+        getClass: () => class GuardTarget {},
+      } as unknown as Parameters<BootstrapAuthGuard["canActivate"]>[0];
+      expect(await guard.canActivate(context)).toBe(true);
+      expect(request.identity).toMatchObject({
+        authMode: "jwt_bearer",
+        actorType: "system",
+        realm: "system",
+        principalId: "dev-scheduler",
+      });
+      expect(request.identity?.scopes).toContain("regulatory:write");
+    }
   });
 
   it("rejects a request to any other route with WORKLOAD_ROUTE_SCOPE_DENIED", async () => {

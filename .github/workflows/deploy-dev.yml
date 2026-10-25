@@ -997,7 +997,7 @@ jobs:
           optional_group line LINE_CHANNEL_ID LINE_CHANNEL_SECRET
           optional_group facebook FACEBOOK_APP_ID FACEBOOK_APP_SECRET
           optional_group otp PASSENGER_OTP_PEPPER
-          optional_group sms SMS_PROVIDER_API_KEY SMS_PROVIDER_SENDER_ID PASSENGER_OTP_PEPPER
+          optional_group sms TWILIO_ACCOUNT_SID TWILIO_API_KEY_SID TWILIO_API_KEY_SECRET TWILIO_FROM_NUMBER PASSENGER_OTP_PEPPER
           optional_group payment PSP_MERCHANT_ID PSP_API_KEY PSP_SANDBOX PSP_TOKEN_ENCRYPTION_KEY_NAME
           # The current BFF does not consume a cookie encryption/signing key.
           # Do not declare a secret until its reader and contract exist.
@@ -2113,7 +2113,7 @@ jobs:
 
   operational-candidate-acceptance:
     name: Candidate SHA operational acceptance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [prepare, build-push, health-check, retired-service-cleanup]
     if: ${{ always() && needs.health-check.result == 'success' && needs.retired-service-cleanup.result == 'success' }}
     steps:
@@ -2650,7 +2650,7 @@ jobs:
   # operational journeys and its first trip.
   operational-quote-expiry-acceptance:
     name: Candidate SHA quote-expiry acceptance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [prepare, build-push, health-check, retired-service-cleanup]
     if: ${{ always() && needs.health-check.result == 'success' && needs.retired-service-cleanup.result == 'success' && vars.DEV_PAX_REVIEW_DEMO_ENABLED == 'true' }}
     steps:

@@ -5065,6 +5065,16 @@ export interface ComplaintTimelineEntry {
     | "incident_linked";
   note: string;
   createdAt: string;
+  /** Server-created relation between a Fleet reply note and the confirmed
+   * stored attachments it was submitted with. Set only by the server at
+   * write time, never parsed from client text; internal metadata that the
+   * default public/Ops timeline projections omit. */
+  fleetReplyAttachments?: Array<{
+    attachmentId: string;
+    name: string;
+    size: string;
+    fileSize?: number;
+  }>;
 }
 
 export interface ComplaintExportViewRecord {

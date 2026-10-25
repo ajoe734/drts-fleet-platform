@@ -233,9 +233,9 @@ describe("ReferralDemoTripService arrive/board: real transition, external-bounda
       initialStatus: "enroute_pickup",
       failAt: "persist",
     });
-    await expect(
-      demo.arrive("probe-order", identity, "req-1"),
-    ).rejects.toBe(error);
+    await expect(demo.arrive("probe-order", identity, "req-1")).rejects.toBe(
+      error,
+    );
   });
 
   it("propagates a real audit-log failure after arrive already persisted", async () => {
@@ -243,9 +243,9 @@ describe("ReferralDemoTripService arrive/board: real transition, external-bounda
       initialStatus: "enroute_pickup",
       failAt: "audit",
     });
-    await expect(
-      demo.arrive("probe-order", identity, "req-1"),
-    ).rejects.toBe(error);
+    await expect(demo.arrive("probe-order", identity, "req-1")).rejects.toBe(
+      error,
+    );
     // The write genuinely committed before the audit step failed.
     expect(persisted.driverTasks[0]!.status).toBe("arrived_pickup");
   });
@@ -255,9 +255,9 @@ describe("ReferralDemoTripService arrive/board: real transition, external-bounda
       initialStatus: "enroute_pickup",
       failAt: "event",
     });
-    await expect(
-      demo.arrive("probe-order", identity, "req-1"),
-    ).rejects.toBe(error);
+    await expect(demo.arrive("probe-order", identity, "req-1")).rejects.toBe(
+      error,
+    );
     expect(persisted.driverTasks[0]!.status).toBe("arrived_pickup");
   });
 
@@ -273,9 +273,9 @@ describe("ReferralDemoTripService arrive/board: real transition, external-bounda
       initialStatus: "arrived_pickup",
       failAt: "persist",
     });
-    await expect(
-      demo.board("probe-order", identity, "req-1"),
-    ).rejects.toBe(error);
+    await expect(demo.board("probe-order", identity, "req-1")).rejects.toBe(
+      error,
+    );
   });
 
   it("propagates a real audit-log failure after board already persisted", async () => {
@@ -283,9 +283,9 @@ describe("ReferralDemoTripService arrive/board: real transition, external-bounda
       initialStatus: "arrived_pickup",
       failAt: "audit",
     });
-    await expect(
-      demo.board("probe-order", identity, "req-1"),
-    ).rejects.toBe(error);
+    await expect(demo.board("probe-order", identity, "req-1")).rejects.toBe(
+      error,
+    );
     expect(persisted.driverTasks[0]!.status).toBe("on_trip");
   });
 
@@ -294,9 +294,9 @@ describe("ReferralDemoTripService arrive/board: real transition, external-bounda
       initialStatus: "arrived_pickup",
       failAt: "event",
     });
-    await expect(
-      demo.board("probe-order", identity, "req-1"),
-    ).rejects.toBe(error);
+    await expect(demo.board("probe-order", identity, "req-1")).rejects.toBe(
+      error,
+    );
     expect(persisted.driverTasks[0]!.status).toBe("on_trip");
   });
 

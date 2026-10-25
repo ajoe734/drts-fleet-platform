@@ -431,5 +431,118 @@ export interface SixMonthOperationsSummary {
   complaintCount: number;
   complaintsByCategory: Record<string, number>;
 
+  /**
+   * Bureau R10 (未準時／未到). The four counts partition the assigned trips
+   * (`actualDispatchCount`); see LATE_ARRIVAL_THRESHOLD_MINUTES. The R10 / R09
+   * fields are derived by the preview; a row without them has no such figure
+   * (未提供), never zero.
+   */
+  lateArrivalThresholdMinutes?: number;
+  onTimeTripCount?: number;
+  lateTripCount?: number;
+  noShowTripCount?: number;
+  punctualityUnknownTripCount?: number;
+
+  /**
+   * Bureau R09 distinct-case totals over the window's Asia/Taipei months.
+   * Per-month figures are in `drilldown.complaintMonthlyStatistics`.
+   */
+  complaintCreatedLowRatingAutoCount?: number;
+  complaintCreatedManualCount?: number;
+  complaintClosedLowRatingAutoCount?: number;
+  complaintClosedManualCount?: number;
+  complaintOverdueLowRatingAutoCount?: number;
+  complaintOverdueManualCount?: number;
+  /** Reference time for complaint `overdue` (SLA due passed, not closed). */
+  complaintStatisticsAsOf?: string;
+
+  /**
+   * Source order / case ids behind every figure above. Returned by the
+   * preview API (and its JSON export); file exports carry the counts only.
+   */
+  drilldown?: OperationsSummaryDrilldown;
+
   generatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Bureau R10 punctuality (未準時／未到) and R09 monthly complaint statistics
+// ---------------------------------------------------------------------------
+
+/**
+ * 未準時: the recorded pickup arrival is more than this many minutes after the
+ * reference time — the reservation window start for scheduled (reservation)
+ * orders, or first assignment time + ETA committed at assignment for
+ * immediate orders. Exactly this many minutes is still on time.
+ */
+export const LATE_ARRIVAL_THRESHOLD_MINUTES = 5;
+
+export const OPERATIONS_PUNCTUALITY_DEFINITION_VERSION = "bureau-r10-v1";
+
+/**
+ * Every assigned trip of the window falls in exactly one outcome.
+ * `no_show` (未到): the order was assigned, finally cancelled and has no
+ * recorded pickup arrival. `unknown`: a canonical timestamp needed for the
+ * comparison is missing; such a trip is never counted as on time.
+ */
+export const OPERATIONS_PUNCTUALITY_OUTCOMES = [
+  "on_time",
+  "late",
+  "no_show",
+  "unknown",
+] as const;
+export type OperationsPunctualityOutcome =
+  (typeof OPERATIONS_PUNCTUALITY_OUTCOMES)[number];
+
+export interface OperationsPunctualityMetrics {
+  definitionVersion: string;
+  lateArrivalThresholdMinutes: number;
+
+  /** Orders with a recorded first assignment (same set as actualDispatchCount). */
+  assignedTripCount: number;
+  onTimeTripCount: number;
+  lateTripCount: number;
+  noShowTripCount: number;
+  unknownTripCount: number;
+
+  onTimeOrderIds: string[];
+  lateOrderIds: string[];
+  noShowOrderIds: string[];
+  unknownOrderIds: string[];
+}
+
+export const COMPLAINT_STATISTICS_TIME_ZONE = "Asia/Taipei";
+
+export interface ComplaintMonthlyCounts {
+  /** Cases created in the month. */
+  createdCount: number;
+  /** Cases with a `case_closed` timeline entry in the month. */
+  closedCount: number;
+  /** Cases whose SLA due falls in the month, has passed, and are not closed. */
+  overdueCount: number;
+
+  createdCaseNos: string[];
+  closedCaseNos: string[];
+  overdueCaseNos: string[];
+}
+
+export interface ComplaintMonthlyCategoryCounts extends ComplaintMonthlyCounts {
+  category: string;
+}
+
+export interface OperationsSummaryDrilldown {
+  punctuality: OperationsPunctualityMetrics;
+  complaintMonthlyStatistics: ComplaintMonthlyStatistic[];
+}
+
+export interface ComplaintMonthlyStatistic {
+  /** YYYY-MM in the Asia/Taipei calendar. */
+  periodMonth: string;
+  timeZone: typeof COMPLAINT_STATISTICS_TIME_ZONE;
+
+  /** Cases created automatically from a low passenger rating. */
+  lowRatingAuto: ComplaintMonthlyCounts;
+  /** Every other case (manual intake), with its per-category split. */
+  manual: ComplaintMonthlyCounts;
+  manualByCategory: ComplaintMonthlyCategoryCounts[];
 }
