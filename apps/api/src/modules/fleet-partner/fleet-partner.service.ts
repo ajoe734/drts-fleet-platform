@@ -1114,9 +1114,7 @@ export class FleetPartnerService implements OnModuleInit {
         await this.ownedMobilityService.prepareOrderAction({ orderId });
       } catch (error) {
         if (
-          !(
-            error instanceof ApiRequestError && error.code === "ORDER_NOT_FOUND"
-          )
+          !(error instanceof ApiRequestError && error.code === "ORDER_NOT_FOUND")
         ) {
           // A genuine refresh failure (e.g. the durable store is down) is a
           // distinct outcome from "this order has no canonical record" and
@@ -1188,12 +1186,15 @@ export class FleetPartnerService implements OnModuleInit {
     }
 
     const assignment =
-      this.ownedMobilityService.getActiveDispatchAssignmentForOrder(orderId) ??
+      this.ownedMobilityService.getActiveDispatchAssignmentForOrder(
+        orderId,
+      ) ??
       this.ownedMobilityService
         .getDispatchAssignmentsForOrder(orderId)
         .filter(
           (candidate) =>
-            candidate.status !== "rejected" && candidate.status !== "cancelled",
+            candidate.status !== "rejected" &&
+            candidate.status !== "cancelled",
         )
         .at(-1) ??
       null;

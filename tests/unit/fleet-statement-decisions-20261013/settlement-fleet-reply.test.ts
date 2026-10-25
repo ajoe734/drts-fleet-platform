@@ -519,8 +519,7 @@ describe("settlement Fleet replies commit before success", () => {
       relatedOrderId: orderId,
       category: "driver_service",
       severity: "normal",
-      description:
-        "Ordinary Fleet complaint with no attribution for this requester",
+      description: "Ordinary Fleet complaint with no attribution for this requester",
     });
     await expect(
       first.cases.submitReply(
