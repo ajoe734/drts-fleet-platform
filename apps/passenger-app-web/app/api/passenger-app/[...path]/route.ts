@@ -218,11 +218,11 @@ async function checkCSRF(request: NextRequest) {
   }
 }
 
+const PASSENGER_PAYMENT_CSP =
+  "default-src 'self'; connect-src 'self' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://code.jquery.com https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw; style-src 'self' 'unsafe-inline' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw; img-src 'self' data: https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw; frame-src 'self' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw https://payment-stage.ecpay.com.tw https://payment.ecpay.com.tw; form-action 'self' https://ecpg-stage.ecpay.com.tw https://ecpg.ecpay.com.tw https://payment-stage.ecpay.com.tw https://payment.ecpay.com.tw;";
+
 function withSecurityHeaders(response: NextResponse) {
-  response.headers.set(
-    "Content-Security-Policy",
-    "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
-  );
+  response.headers.set("Content-Security-Policy", PASSENGER_PAYMENT_CSP);
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set(

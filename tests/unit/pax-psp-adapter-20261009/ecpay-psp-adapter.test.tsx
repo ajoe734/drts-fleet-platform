@@ -26,6 +26,7 @@ import type {
   PassengerPaymentFieldsAvailability,
 } from "@drts/passenger-client";
 import {
+  ECPAY_HOSTED_FIELDS_CSP,
   EcpayHostedFields,
   createEcpayHostedFieldsPort,
   type EcpaySdkGlobal,
@@ -372,6 +373,18 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/plain");
+    expect(res.headers.get("content-security-policy")).toBe(
+      ECPAY_HOSTED_FIELDS_CSP,
+    );
+    expect(res.headers.get("content-security-policy")).toContain(
+      "https://code.jquery.com",
+    );
+    expect(res.headers.get("content-security-policy")).toContain(
+      "https://ecpg-stage.ecpay.com.tw",
+    );
+    expect(res.headers.get("content-security-policy")).toContain(
+      "https://ecpg.ecpay.com.tw",
+    );
     expect(await res.text()).toBe("1|OK");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });

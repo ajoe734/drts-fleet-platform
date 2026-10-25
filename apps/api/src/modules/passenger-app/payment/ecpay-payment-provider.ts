@@ -725,7 +725,12 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
           tradeNo,
           amountMinor: authAmountTwd * ECPAY_MINOR_UNITS_PER_TWD,
         });
-        if (!cancelled) {
+        // Per official ECPay specification (https://developers.ecpay.com.tw/35642/),
+        // Stage (sandbox=true) does not perform real bank settlement and does not
+        // provide /1.0.0/Credit/DoAction. Require confirmed DoAction(N) in Production
+        // (sandbox=false), while allowing Stage bindings to complete if Stage rejects
+        // or omits Credit/DoAction.
+        if (!cancelled && !this.sandbox) {
           throw new Error(
             "ECPay binding authorization cancellation was not confirmed.",
           );
@@ -746,6 +751,47 @@ export class EcpayPaymentProvider implements PaymentProviderPort {
       result: structuredClone(result),
     });
     return result;
+  }
+
+  /**
+   * Unbinds a previously bound credit card (`BindCardID`) on ECPay via
+   * `/Merchant/DeleteMemberBindCard` (https://developers.ecpay.com.tw/35608/)
+   * so that removing a card locally also frees the slot in ECPay's 5-card
+   * per-member limit.
+   */
+  async unbind(
+    token: string,
+    _context?: { passengerId?: string },
+  ): Promise<boolean> {
+    const bindCardId = typeof token === "string" ? token.trim() : "";
+    if (!bindCardId || /^[0-9 -]+$/.test(bindCardId)) {
+      return false;
+    }
+    try {
+      const data = await this.postEncrypted(
+        `${this.baseUrl}/Merchant/DeleteMemberBindCard`,
+        {
+          PlatformID: "",
+          MerchantID: this.merchantId,
+          BindCardID: bindCardId,
+        },
+      );
+      const rtnCode = Number(data.RtnCode);
+      if (rtnCode === 1 || rtnCode === 10100252) {
+        for (const [key, entry] of this.bindings.entries()) {
+          if (
+            entry.result.status === "completed" &&
+            entry.result.card.token === bindCardId
+          ) {
+            this.bindings.delete(key);
+          }
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
   }
 
   /**

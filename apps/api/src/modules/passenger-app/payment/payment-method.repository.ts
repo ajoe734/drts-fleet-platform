@@ -443,6 +443,50 @@ export class PaymentMethodRepository {
     });
   }
 
+  async findRemovableToken(
+    passengerId: string,
+    id: string,
+  ): Promise<{
+    provider: string;
+    tokenEnvelope: EncryptedPaymentToken | null;
+  }> {
+    return this.withAccount(passengerId, async (client) => {
+      await this.requireActive(client, passengerId, id, true);
+      const used = await client.query(
+        `SELECT 1 FROM passenger.booking_histories h
+         JOIN ops.phase1_owned_orders o ON o.order_id=h.order_id::text
+         LEFT JOIN billing.multi_taxi_passenger_payments p ON p.order_id=h.order_id::text
+         WHERE h.drts_passenger_id=$1 AND lower(o.record->>'paymentMethodTokenRef')=lower($2)
+           AND o.status<>'cancelled' AND (p.status IS NULL OR p.status NOT IN ('captured','refunded')) LIMIT 1`,
+        [passengerId, id],
+      );
+      if (used.rows.length)
+        throw new ApiRequestError(
+          409,
+          "pending_payment_block",
+          "A ride still requires this payment method.",
+        );
+      const tokenRow = await client.query(
+        `SELECT provider,token_envelope FROM passenger.psp_tokens
+         WHERE payment_method_id=$1 AND drts_passenger_id=$2 AND status='active' FOR UPDATE`,
+        [id, passengerId],
+      );
+      const row = tokenRow.rows[0];
+      if (!row) notFound();
+      const rawEnvelope = row.token_envelope;
+      const parsedEnvelope =
+        typeof rawEnvelope === "string"
+          ? (JSON.parse(rawEnvelope) as EncryptedPaymentToken)
+          : rawEnvelope && typeof rawEnvelope === "object"
+            ? (rawEnvelope as EncryptedPaymentToken)
+            : null;
+      return {
+        provider: typeof row.provider === "string" ? row.provider : "",
+        tokenEnvelope: parsedEnvelope,
+      };
+    });
+  }
+
   async remove(passengerId: string, id: string): Promise<void> {
     await this.withAccount(passengerId, async (client) => {
       await this.requireActive(client, passengerId, id, true);

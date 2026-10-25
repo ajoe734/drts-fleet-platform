@@ -1676,7 +1676,9 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
       "pax_declined_owner",
       "00000000-0000-4000-8000-000000000077",
     );
-    expect(finishSpy).toHaveBeenCalledWith(
+    expect(
+      finishSpy,
+    ).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         status: "manual_recovery",
@@ -1685,5 +1687,320 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
       }),
     );
     expect(freshProviderFetch).not.toHaveBeenCalled();
+  });
+
+  it("enforces F2 Stage vs Production cancelBindingAuthorization boundary: Stage completes binding when DoAction is unavailable, while Production requires confirmed DoAction(N)", async () => {
+    const now = new Date("2026-10-24T10:00:00Z");
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+    const owner = "pax_f2_boundary_owner";
+    const cipher = new PaymentTokenCipher(syntheticEncryptionKeysJson());
+
+    // 1. Stage (sandbox=true): CreateBindCard returns RtnCode=1 with TradeNo, then Stage Credit/DoAction returns 404/failure
+    const stageFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          {
+            RtnCode: 1,
+            RtnMsg: "Stage Bind Success",
+            BindCardID: "ECPAY_STAGE_BIND_CARD_001",
+            CardInfo: {
+              Card6No: "431195",
+              Card4No: "2222",
+              CardValidYY: "30",
+              CardValidMM: "06",
+            },
+            OrderInfo: {
+              MerchantTradeNo: "DRSTAGEBIND000000001",
+              TradeNo: "26102400000888",
+              TotalAmount: 5,
+            },
+          },
+          now,
+        ),
+      )
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        async json() {
+          return {};
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        async json() {
+          return {};
+        },
+      });
+
+    const stageProvider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      now: () => now,
+      fetchFn: stageFetch as unknown as typeof fetch,
+    });
+
+    const stageBound = await stageProvider.bind(
+      "ecpay_stage_pay_token_0001",
+      "pax:bind:stage_doaction_unavailable",
+      { passengerId: owner },
+    );
+    expect(stageBound).toEqual({
+      status: "completed",
+      card: {
+        token: "ECPAY_STAGE_BIND_CARD_001",
+        last4: "2222",
+        cardType: "VISA",
+        expiryMonth: "06",
+        expiryYear: "2030",
+      },
+    });
+
+    // Stage 3DS verifyNotification also completes when Stage Credit/DoAction is unavailable
+    const stage3dsClaimId = "00000000-0000-4000-8000-000000000188";
+    const stageRepo = {
+      findBindingByMerchantMember: vi.fn().mockResolvedValue({
+        passengerId: owner,
+        idempotencyKey: "pax:bind:stage_3ds_001",
+        methodId: stage3dsClaimId,
+      }),
+      completeBinding: vi.fn(async (_pid, _key, stored) => ({
+        paymentMethodId: stored.paymentMethodId,
+        last4: stored.last4,
+        cardType: stored.cardType,
+        expiryMonth: stored.expiryMonth,
+        expiryYear: stored.expiryYear,
+        isDefault: true,
+      })),
+      bindingOutcome: vi.fn(),
+    };
+    const stageService = new PaymentMethodService(
+      stageRepo as unknown as PaymentMethodRepository,
+      { provider: stageProvider, cipher },
+    );
+    const stageCallbackEnvelope = {
+      ...buildEcpayEnvelope({
+        ...SYNTHETIC_CREDENTIALS,
+        timestamp: nowSeconds,
+        data: {
+          RtnCode: 1,
+          RtnMsg: "Stage 3DS Bind Success",
+          MerchantMemberID: stageProvider.deriveMerchantMemberId(owner),
+          BindCardID: "ECPAY_STAGE_3DS_CARD_002",
+          CardInfo: {
+            Card6No: "431195",
+            Card4No: "2222",
+            CardValidYY: "31",
+            CardValidMM: "09",
+          },
+          OrderInfo: {
+            MerchantTradeNo: "DRSTAGE3DS0000000002",
+            TradeNo: "26102400000889",
+            TotalAmount: 5,
+          },
+        },
+      }),
+      RpHeader: { Timestamp: nowSeconds },
+      TransCode: 1,
+    };
+    const stageNotifRes = await stageService.verifyNotification(
+      stageCallbackEnvelope,
+    );
+    expect(stageNotifRes.status).toBe("completed");
+    expect(stageRepo.completeBinding).toHaveBeenCalledOnce();
+
+    // 2. Production (sandbox=false): unconfirmed DoAction(N) must fail closed in both bind() and verifyNotification()
+    const prodFetch = vi
+      .fn()
+      // bind() -> CreateBindCard succeeds
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          {
+            RtnCode: 1,
+            RtnMsg: "Prod Bind Success",
+            BindCardID: "ECPAY_PROD_BIND_CARD_001",
+            CardInfo: {
+              Card6No: "431195",
+              Card4No: "2222",
+              CardValidYY: "30",
+              CardValidMM: "06",
+            },
+            OrderInfo: {
+              MerchantTradeNo: "DRPRODBIND0000000001",
+              TradeNo: "26102400000777",
+              TotalAmount: 5,
+            },
+          },
+          now,
+        ),
+      )
+      // bind() -> Credit/DoAction fails
+      .mockResolvedValueOnce(
+        buildMockResponse({ RtnCode: 10100001, RtnMsg: "Busy" }, now),
+      )
+      // bind() -> CreditDetail/QueryTrade still shows Authorized (not Cancelled)
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          {
+            RtnMsg: "",
+            RtnValue: { status: "Authorized", amount: 5, close_data: [] },
+          },
+          now,
+        ),
+      )
+      // verifyNotification() -> Credit/DoAction fails
+      .mockResolvedValueOnce(
+        buildMockResponse({ RtnCode: 10100001, RtnMsg: "Busy" }, now),
+      )
+      // verifyNotification() -> CreditDetail/QueryTrade still shows Authorized
+      .mockResolvedValueOnce(
+        buildMockResponse(
+          {
+            RtnMsg: "",
+            RtnValue: { status: "Authorized", amount: 5, close_data: [] },
+          },
+          now,
+        ),
+      );
+
+    const prodProvider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: false,
+      now: () => now,
+      fetchFn: prodFetch as unknown as typeof fetch,
+    });
+
+    await expect(
+      prodProvider.bind(
+        "ecpay_prod_pay_token_0001",
+        "pax:bind:prod_doaction_failed",
+        { passengerId: owner },
+      ),
+    ).rejects.toThrow(/cancellation was not confirmed/);
+
+    const prodRepo = {
+      findBindingByMerchantMember: vi.fn().mockResolvedValue({
+        passengerId: owner,
+        idempotencyKey: "pax:bind:prod_3ds_001",
+        methodId: stage3dsClaimId,
+      }),
+      completeBinding: vi.fn(),
+      bindingOutcome: vi.fn().mockResolvedValue(undefined),
+    };
+    const prodService = new PaymentMethodService(
+      prodRepo as unknown as PaymentMethodRepository,
+      { provider: prodProvider, cipher },
+    );
+    await expect(
+      prodService.verifyNotification(stageCallbackEnvelope),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "payment_unavailable",
+    });
+    expect(prodRepo.bindingOutcome).toHaveBeenCalledWith(
+      owner,
+      "pax:bind:prod_3ds_001",
+      "pending",
+    );
+    expect(prodRepo.completeBinding).not.toHaveBeenCalled();
+  });
+
+  it("calls ECPay DeleteMemberBindCard on PaymentMethodService.remove (F3) before deleting local card record, blocks removal on unsettled ride or unbind failure, and frees the 5-card slot for re-binding", async () => {
+    const now = new Date("2026-10-24T10:00:00Z");
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+    const owner = "pax_f3_unbind_owner";
+    const methodId5 = "00000000-0000-4000-8000-000000000005";
+    const cipher = new PaymentTokenCipher(syntheticEncryptionKeysJson());
+    const encryptedCard5 = cipher.encrypt(
+      "ECPAY_BIND_CARD_SLOT_5",
+      owner,
+      methodId5,
+    );
+
+    const fetchFn = vi
+      .fn()
+      // 1. First remove attempt: DeleteMemberBindCard fails -> local card must NOT be removed
+      .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
+        expect(String(url)).toBe(
+          "https://ecpg-stage.ecpay.com.tw/Merchant/DeleteMemberBindCard",
+        );
+        const unwrapped = verifyAndUnwrapEcpayEnvelope({
+          envelope: JSON.parse(String(init?.body ?? "{}")),
+          ...SYNTHETIC_CREDENTIALS,
+          nowSeconds,
+        });
+        expect(unwrapped.data).toEqual({
+          PlatformID: "",
+          MerchantID: SYNTHETIC_MERCHANT_ID,
+          BindCardID: "ECPAY_BIND_CARD_SLOT_5",
+        });
+        return buildMockResponse(
+          { RtnCode: 10100001, RtnMsg: "System busy" },
+          now,
+        );
+      })
+      // 2. Second remove attempt: DeleteMemberBindCard succeeds (RtnCode=1) -> local card is removed
+      .mockImplementationOnce(async (url: string | URL, init?: RequestInit) => {
+        expect(String(url)).toBe(
+          "https://ecpg-stage.ecpay.com.tw/Merchant/DeleteMemberBindCard",
+        );
+        const unwrapped = verifyAndUnwrapEcpayEnvelope({
+          envelope: JSON.parse(String(init?.body ?? "{}")),
+          ...SYNTHETIC_CREDENTIALS,
+          nowSeconds,
+        });
+        expect(unwrapped.data.BindCardID).toBe("ECPAY_BIND_CARD_SLOT_5");
+        return buildMockResponse({ RtnCode: 1, RtnMsg: "Success" }, now);
+      });
+
+    const provider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      now: () => now,
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+
+    const activeCards = [1, 2, 3, 4, 5].map((i) => ({
+      paymentMethodId: `00000000-0000-4000-8000-00000000000${i}`,
+      last4: `111${i}`,
+      cardType: "VISA",
+      expiryMonth: "12",
+      expiryYear: "2030",
+      isDefault: i === 1,
+    }));
+
+    const repo = {
+      list: vi.fn(async () => [...activeCards]),
+      findRemovableToken: vi.fn(async (_pid: string, id: string) => ({
+        provider: "ecpay",
+        tokenEnvelope: id === methodId5 ? encryptedCard5 : null,
+      })),
+      remove: vi.fn(async (_pid: string, id: string) => {
+        const idx = activeCards.findIndex((c) => c.paymentMethodId === id);
+        if (idx >= 0) activeCards.splice(idx, 1);
+      }),
+    };
+
+    const service = new PaymentMethodService(
+      repo as unknown as PaymentMethodRepository,
+      { provider, cipher },
+    );
+
+    // 1. When DeleteMemberBindCard fails, remove() throws 503 payment_unavailable and does NOT call repo.remove
+    await expect(service.remove(owner, methodId5)).rejects.toMatchObject({
+      status: 503,
+      code: "payment_unavailable",
+    });
+    expect(repo.remove).not.toHaveBeenCalled();
+    expect(activeCards).toHaveLength(5);
+
+    // 2. When DeleteMemberBindCard succeeds, remove() calls repo.remove and frees the 5th slot
+    await expect(service.remove(owner, methodId5)).resolves.toEqual({
+      success: true,
+    });
+    expect(repo.remove).toHaveBeenCalledWith(owner, methodId5);
+    expect(activeCards).toHaveLength(4);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
   });
 });

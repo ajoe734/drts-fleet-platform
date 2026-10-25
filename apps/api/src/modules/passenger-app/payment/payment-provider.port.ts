@@ -69,6 +69,7 @@ export type PaymentRefundCommand = RefundCommand;
 export interface PaymentProviderPort {
   readonly name: string;
   readonly available: boolean;
+  readonly sandbox?: boolean;
   readonly captureAttemptMetadata?: boolean;
   readonly capturePassengerContext?: boolean;
   bind(
@@ -76,6 +77,7 @@ export interface PaymentProviderPort {
     idempotencyKey: string,
     context?: PaymentBindContext,
   ): Promise<BindResult>;
+  unbind?(token: string, context?: PaymentBindContext): Promise<boolean>;
   createBindingSession?(
     passengerId: string,
     options?: {

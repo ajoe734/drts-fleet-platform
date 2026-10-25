@@ -472,7 +472,7 @@ export class PaymentMethodService {
                   tradeNo: result.tradeNo,
                   amountMinor: result.authorizedAmountMinor,
                 });
-              if (!cancelled) {
+              if (!cancelled && !this.runtime.provider.sandbox) {
                 await this.repository.bindingOutcome(
                   ownerId,
                   claim.idempotencyKey,
@@ -566,7 +566,58 @@ export class PaymentMethodService {
     passengerId: string,
     id: unknown,
   ): Promise<{ success: boolean }> {
-    await this.repository.remove(passengerId, paymentMethodId(id));
+    const canonicalId = paymentMethodId(id);
+    if (typeof this.runtime.provider.unbind === "function") {
+      if (!this.runtime.provider.available || !this.runtime.cipher) {
+        throw new ApiRequestError(
+          503,
+          "payment_unavailable",
+          "Payment provider is not configured.",
+        );
+      }
+      if (typeof this.repository.findRemovableToken === "function") {
+        const removable = await this.repository.findRemovableToken(
+          passengerId,
+          canonicalId,
+        );
+        if (
+          removable.tokenEnvelope &&
+          (!removable.provider ||
+            removable.provider === this.runtime.provider.name)
+        ) {
+          let token: string;
+          try {
+            token = this.runtime.cipher.decrypt(
+              removable.tokenEnvelope,
+              passengerId,
+              canonicalId,
+            );
+          } catch {
+            throw new ApiRequestError(
+              503,
+              "payment_persistence_unavailable",
+              "Payment persistence is unavailable.",
+            );
+          }
+          let unbound = false;
+          try {
+            unbound = await this.runtime.provider.unbind(token, {
+              passengerId,
+            });
+          } catch {
+            unbound = false;
+          }
+          if (!unbound) {
+            throw new ApiRequestError(
+              503,
+              "payment_unavailable",
+              "Payment provider did not acknowledge card unbinding.",
+            );
+          }
+        }
+      }
+    }
+    await this.repository.remove(passengerId, canonicalId);
     return { success: true };
   }
 }
