@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       harness_sha:
-        description: Reviewed harness full SHA (must equal dispatch ref)
+        description: Reviewed harness full 40-hex commit SHA resolved by the workflow_dispatch branch/tag --ref (GITHUB_SHA == inputs.harness_sha)
         required: true
       runtime_sha:
         description: Immutable already-deployed product SHA
