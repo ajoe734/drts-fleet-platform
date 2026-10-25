@@ -30,6 +30,7 @@ const intendedServices = [
   "drts-dev-enterprise-dispatch-web",
   "drts-channel-partner-portal-web",
   "drts-dev-passenger-app-web",
+  "drts-dev-agency-portal-web",
 ] as const;
 const optionalServices = ["drts-dev-scanner"] as const;
 const retiredService = "drts-passenger-web";

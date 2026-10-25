@@ -87,6 +87,7 @@ env:
   DEV_GCP_ENTERPRISE_DISPATCH_SERVICE: ${{ vars.DEV_GCP_ENTERPRISE_DISPATCH_SERVICE }}
   DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE: ${{ vars.DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE }}
   DEV_GCP_PASSENGER_APP_SERVICE: ${{ vars.DEV_GCP_PASSENGER_APP_SERVICE }}
+  DEV_GCP_AGENCY_PORTAL_SERVICE: ${{ vars.DEV_GCP_AGENCY_PORTAL_SERVICE }}
   DEV_GCP_MIGRATION_JOB: ${{ vars.DEV_GCP_MIGRATION_JOB }}
   DEV_API_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_API_ALLOW_UNAUTHENTICATED }}
   DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED }}
@@ -97,6 +98,7 @@ env:
   DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED }}
   DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED }}
   DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED }}
+  DEV_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED: ${{ vars.DEV_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED }}
   DEV_CONTROL_PLANE_API_ORIGIN: ${{ vars.DEV_CONTROL_PLANE_API_ORIGIN }}
   DEV_WORKLOAD_IDENTITY_ISSUER: ${{ vars.DEV_WORKLOAD_IDENTITY_ISSUER || vars.WORKLOAD_IDENTITY_ISSUER }}
   DEV_WORKLOAD_IDENTITY_AUDIENCE: ${{ vars.DEV_WORKLOAD_IDENTITY_AUDIENCE || vars.WORKLOAD_IDENTITY_AUDIENCE }}
@@ -115,6 +117,7 @@ env:
   DEV_OIDC_CLIENT_ID: ${{ vars.DEV_OIDC_CLIENT_ID }}
   DEV_ENTERPRISE_DISPATCH_ORIGIN: ${{ vars.DEV_ENTERPRISE_DISPATCH_ORIGIN }}
   DEV_CHANNEL_PARTNER_PORTAL_ORIGIN: ${{ vars.DEV_CHANNEL_PARTNER_PORTAL_ORIGIN }}
+  DEV_AGENCY_PORTAL_ORIGIN: ${{ vars.DEV_AGENCY_PORTAL_ORIGIN }}
   DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME: ${{ vars.DEV_PLATFORM_ADMIN_ASSISTANT_RUNTIME }}
   DEV_OPENCLAW_AGENT_MODEL: ${{ vars.DEV_OPENCLAW_AGENT_MODEL }}
   DEV_OPENCLAW_SUMMARIZER_MODEL: ${{ vars.DEV_OPENCLAW_SUMMARIZER_MODEL }}
@@ -155,6 +158,7 @@ jobs:
       enterprise_dispatch_service: ${{ steps.resolve.outputs.enterprise_dispatch_service }}
       channel_partner_portal_service: ${{ steps.resolve.outputs.channel_partner_portal_service }}
       passenger_app_service: ${{ steps.resolve.outputs.passenger_app_service }}
+      agency_portal_service: ${{ steps.resolve.outputs.agency_portal_service }}
       migration_job: ${{ steps.resolve.outputs.migration_job }}
       api_exposure_flag: ${{ steps.resolve.outputs.api_exposure_flag }}
       platform_admin_exposure_flag: ${{ steps.resolve.outputs.platform_admin_exposure_flag }}
@@ -165,6 +169,7 @@ jobs:
       enterprise_dispatch_exposure_flag: ${{ steps.resolve.outputs.enterprise_dispatch_exposure_flag }}
       channel_partner_portal_exposure_flag: ${{ steps.resolve.outputs.channel_partner_portal_exposure_flag }}
       passenger_app_exposure_flag: ${{ steps.resolve.outputs.passenger_app_exposure_flag }}
+      agency_portal_exposure_flag: ${{ steps.resolve.outputs.agency_portal_exposure_flag }}
       api_origin: ${{ steps.resolve.outputs.api_origin }}
       platform_admin_origin: ${{ steps.resolve.outputs.platform_admin_origin }}
       ops_console_origin: ${{ steps.resolve.outputs.ops_console_origin }}
@@ -172,6 +177,7 @@ jobs:
       tenant_console_origin: ${{ steps.resolve.outputs.tenant_console_origin }}
       enterprise_dispatch_origin: ${{ steps.resolve.outputs.enterprise_dispatch_origin }}
       channel_partner_portal_origin: ${{ steps.resolve.outputs.channel_partner_portal_origin }}
+      agency_portal_origin: ${{ steps.resolve.outputs.agency_portal_origin }}
 
     steps:
       - name: Resolve dev config
@@ -254,6 +260,7 @@ jobs:
           enterprise_dispatch_service="$(pick "${DEV_GCP_ENTERPRISE_DISPATCH_SERVICE:-}" "" "drts-dev-enterprise-dispatch-web")"
           channel_partner_portal_service="$(pick "${DEV_GCP_CHANNEL_PARTNER_PORTAL_SERVICE:-}" "" "drts-channel-partner-portal-web")"
           passenger_app_service="$(pick "${DEV_GCP_PASSENGER_APP_SERVICE:-}" "" "drts-dev-passenger-app-web")"
+          agency_portal_service="$(pick "${DEV_GCP_AGENCY_PORTAL_SERVICE:-}" "" "drts-dev-agency-portal-web")"
           migration_job="$(pick "${DEV_GCP_MIGRATION_JOB:-}" "" "drts-migrate")"
 
           assert_exact_active_service() {
@@ -276,6 +283,10 @@ jobs:
           assert_exact_active_service enterprise-dispatch-web "$enterprise_dispatch_service" "drts-dev-enterprise-dispatch-web"
           assert_exact_active_service channel-partner-portal-web "$channel_partner_portal_service" "drts-channel-partner-portal-web"
           assert_exact_active_service passenger-app-web "$passenger_app_service" "drts-dev-passenger-app-web"
+          if [[ "$agency_portal_service" != "drts-dev-agency-portal-web" ]]; then
+            echo "::error::Resolved agency-portal-web target ${agency_portal_service} is outside the reviewed active dev inventory; expected drts-dev-agency-portal-web. Partner Booking is paused and service-target changes require a reviewed workflow update."
+            exit 1
+          fi
 
           api_exposure_flag="$(exposure_flag "${DEV_API_ALLOW_UNAUTHENTICATED:-}" false)"
           platform_admin_exposure_flag="$(exposure_flag "${DEV_PLATFORM_ADMIN_ALLOW_UNAUTHENTICATED:-}" false)"
@@ -286,6 +297,7 @@ jobs:
           enterprise_dispatch_exposure_flag="$(exposure_flag "${DEV_ENTERPRISE_DISPATCH_ALLOW_UNAUTHENTICATED:-}" false)"
           channel_partner_portal_exposure_flag="$(exposure_flag "${DEV_CHANNEL_PARTNER_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
           passenger_app_exposure_flag="$(exposure_flag "${DEV_PASSENGER_APP_ALLOW_UNAUTHENTICATED:-}" false)"
+          agency_portal_exposure_flag="$(exposure_flag "${DEV_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED:-}" false)"
           api_origin="${DEV_CONTROL_PLANE_API_ORIGIN:-}"
           platform_admin_origin="${DEV_PLATFORM_ADMIN_ORIGIN:-}"
           ops_console_origin="${DEV_OPS_CONSOLE_ORIGIN:-}"
@@ -293,6 +305,7 @@ jobs:
           tenant_console_origin="${DEV_TENANT_CONSOLE_ORIGIN:-}"
           enterprise_dispatch_origin="${DEV_ENTERPRISE_DISPATCH_ORIGIN:-}"
           channel_partner_portal_origin="${DEV_CHANNEL_PARTNER_PORTAL_ORIGIN:-}"
+          agency_portal_origin="${DEV_AGENCY_PORTAL_ORIGIN:-}"
 
           target_profile="${INPUT_TARGET_PROFILE:-current}"
           case "$target_profile" in
@@ -375,6 +388,7 @@ jobs:
           emit enterprise_dispatch_service "$enterprise_dispatch_service"
           emit channel_partner_portal_service "$channel_partner_portal_service"
           emit passenger_app_service "$passenger_app_service"
+          emit agency_portal_service "$agency_portal_service"
           emit migration_job "$migration_job"
           emit api_exposure_flag "$api_exposure_flag"
           emit platform_admin_exposure_flag "$platform_admin_exposure_flag"
@@ -385,6 +399,7 @@ jobs:
           emit enterprise_dispatch_exposure_flag "$enterprise_dispatch_exposure_flag"
           emit channel_partner_portal_exposure_flag "$channel_partner_portal_exposure_flag"
           emit passenger_app_exposure_flag "$passenger_app_exposure_flag"
+          emit agency_portal_exposure_flag "$agency_portal_exposure_flag"
           emit api_origin "$api_origin"
           emit platform_admin_origin "$platform_admin_origin"
           emit ops_console_origin "$ops_console_origin"
@@ -392,6 +407,7 @@ jobs:
           emit tenant_console_origin "$tenant_console_origin"
           emit enterprise_dispatch_origin "$enterprise_dispatch_origin"
           emit channel_partner_portal_origin "$channel_partner_portal_origin"
+          emit agency_portal_origin "$agency_portal_origin"
 
   build-push:
     name: Build & push images
@@ -403,7 +419,7 @@ jobs:
     # Migration still waits for every image to succeed.
     strategy:
       fail-fast: false
-      max-parallel: 11
+      max-parallel: 12
       matrix:
         image:
           [
@@ -418,6 +434,7 @@ jobs:
             enterprise-dispatch-web,
             channel-partner-portal-web,
             passenger-app-web,
+            agency-portal-web,
           ]
     # These outputs are identical for every matrix entry: all check out the
     # same immutable source. No per-image value is exposed as a shared output.
@@ -615,6 +632,19 @@ jobs:
             ${{ needs.prepare.outputs.registry }}/passenger-app-web:${{ steps.tag.outputs.tag }}
           cache-from: type=gha,scope=passenger-app-web
           cache-to: type=gha,scope=passenger-app-web,mode=min
+
+      - name: Build & push — agency-portal-web
+        if: matrix.image == 'agency-portal-web' && steps.existing.outputs.agency-portal-web != 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/agency-portal-web/Dockerfile
+          build-args: DRTS_CANDIDATE_SHA=${{ steps.tag.outputs.candidate_sha }}
+          push: true
+          tags: |
+            ${{ needs.prepare.outputs.registry }}/agency-portal-web:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha,scope=agency-portal-web
+          cache-to: type=gha,scope=agency-portal-web,mode=min
 
   migrate:
     name: DB migration
@@ -1041,6 +1071,8 @@ jobs:
         env:
           ARTIFACT_PROVIDER_ENV_SUFFIX: ${{ steps.artifact_providers.outputs.env_suffix }}
           REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED: ${{ steps.api_secrets.outputs.regulatory_alert_recipient_secret_mounted }}
+          AGENCY_PORTAL_SERVICE: ${{ needs.prepare.outputs.agency_portal_service }}
+          AGENCY_PORTAL_ORIGIN: ${{ needs.prepare.outputs.agency_portal_origin }}
         run: |
           set -euo pipefail
 
@@ -1063,6 +1095,25 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)' 2>/dev/null || true)"
+          agency_portal_service="${AGENCY_PORTAL_SERVICE:-${DEV_GCP_AGENCY_PORTAL_SERVICE:-drts-dev-agency-portal-web}}"
+          agency_portal_configured_origin="${AGENCY_PORTAL_ORIGIN:-${DEV_AGENCY_PORTAL_ORIGIN:-}}"
+          agency_describe_stderr="$(mktemp)"
+          if agency_portal_cloud_run_origin="$(gcloud run services describe "$agency_portal_service" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)' 2>"$agency_describe_stderr")"; then
+            rm -f "$agency_describe_stderr"
+          else
+            if grep -Eiq 'NOT_FOUND|Cannot find service|could not be found|was not found' "$agency_describe_stderr"; then
+              agency_portal_cloud_run_origin=""
+              rm -f "$agency_describe_stderr"
+            else
+              cat "$agency_describe_stderr" >&2
+              rm -f "$agency_describe_stderr"
+              echo "::error::Failed to describe ${agency_portal_service} in ${{ needs.prepare.outputs.project_id }} (${{ needs.prepare.outputs.region }})."
+              exit 1
+            fi
+          fi
           oauth_redirect_allowlist=""
           for origin in https://ride.smarttransport.tw "$passenger_app_cloud_run_origin"; do
             [[ -n "$origin" ]] || continue
@@ -1085,6 +1136,17 @@ jobs:
                 exit 1
                 ;;
             esac
+            case ",${auth_allowed_origins}," in
+              *",${origin},"*) continue ;;
+            esac
+            auth_allowed_origins="${auth_allowed_origins:+${auth_allowed_origins},}${origin}"
+          done
+          for origin in "$agency_portal_configured_origin" "$agency_portal_cloud_run_origin"; do
+            [[ -n "$origin" ]] || continue
+            if [[ ! "$origin" =~ ^https://[^/[:space:]]+$ ]]; then
+              echo "::error::Agency Portal origin must be a bare HTTPS origin: $origin"
+              exit 1
+            fi
             case ",${auth_allowed_origins}," in
               *",${origin},"*) continue ;;
             esac
@@ -1140,6 +1202,10 @@ jobs:
               exit 1
             fi
             env_vars="${env_vars}@OIDC_ISSUER=https://accounts.google.com@OIDC_CLIENT_ID=${DEV_OIDC_CLIENT_ID}@OIDC_AUTHORIZATION_ENDPOINT=https://accounts.google.com/o/oauth2/v2/auth@OIDC_TOKEN_ENDPOINT=https://oauth2.googleapis.com/token@OIDC_USERINFO_ENDPOINT=https://openidconnect.googleapis.com/v1/userinfo@OIDC_JWKS_URI=https://www.googleapis.com/oauth2/v3/certs@OIDC_MOCK_MODE=false@TENANT_INVITATION_ACCEPT_URL_BASE=${tenant_login_origin}/api/auth/tenant/login"
+          fi
+          agency_login_origin="${agency_portal_configured_origin:-$agency_portal_cloud_run_origin}"
+          if [[ -n "$agency_login_origin" ]]; then
+            env_vars="${env_vars}@AGENCY_INVITATION_ACCEPT_URL_BASE=${agency_login_origin}/invite"
           fi
           # Dev API only: seed the fixed live-map-observer principal and its
           # read-only ops_observer membership. Never enable in staging/prod
@@ -1554,6 +1620,88 @@ jobs:
             "${{ needs.prepare.outputs.region }}" \
             "${{ needs.prepare.outputs.project_id }}"
 
+      - name: Deploy — agency-portal-web
+        run: |
+          set -euo pipefail
+          IMAGE="${{ needs.prepare.outputs.registry }}/agency-portal-web:${{ needs.build-push.outputs.image_tag }}"
+          api_origin="${{ needs.prepare.outputs.api_origin }}"
+          if [[ -z "$api_origin" ]]; then
+            api_origin="${{ steps.api_url.outputs.url }}"
+          fi
+          env_vars="NODE_ENV=production,DRTS_ENV=development,DRTS_CANDIDATE_SHA=${{ needs.build-push.outputs.candidate_sha }},DRTS_API_URL=${api_origin},DRTS_API_AUTH_AUDIENCE=${{ steps.api_url.outputs.url }}"
+          operations/deployment/deploy-cloud-run-service.sh "${{ needs.prepare.outputs.agency_portal_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --image "$IMAGE" \
+            --port 3012 \
+            --ingress all \
+            --service-account "${{ needs.prepare.outputs.runtime_service_account }}" \
+            --set-secrets "${{ steps.api_secrets.outputs.tenant_auth }}" \
+            --set-env-vars "$env_vars" \
+            ${{ needs.prepare.outputs.agency_portal_exposure_flag }} \
+            --cpu 1 \
+            --concurrency 80 \
+            --execution-environment gen1 \
+            --no-cpu-boost \
+            --min-instances 0 \
+            --max-instances 1 \
+            --project "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Enforce no public access — agency-portal-web
+        if: ${{ needs.prepare.outputs.agency_portal_exposure_flag == '--no-allow-unauthenticated' }}
+        run: |
+          ./operations/deployment/enforce-no-public-access.sh \
+            "${{ needs.prepare.outputs.agency_portal_service }}" \
+            "${{ needs.prepare.outputs.region }}" \
+            "${{ needs.prepare.outputs.project_id }}"
+
+      - name: Reconcile API agency portal origin and invitation base
+        id: agency_portal_api_reconcile
+        run: |
+          set -euo pipefail
+          agency_portal_url="$(gcloud run services describe "${{ needs.prepare.outputs.agency_portal_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
+          if [[ ! "$agency_portal_url" =~ ^https://[^/[:space:]]+$ ]]; then
+            echo "::error::Resolved ${{ needs.prepare.outputs.agency_portal_service }} URL is not a valid HTTPS origin: ${agency_portal_url}"
+            exit 1
+          fi
+          echo "url=${agency_portal_url}" >> "$GITHUB_OUTPUT"
+
+          agency_configured_origin="${{ needs.prepare.outputs.agency_portal_origin }}"
+          if [[ -n "$agency_configured_origin" && ! "$agency_configured_origin" =~ ^https://[^/[:space:]]+$ ]]; then
+            echo "::error::Agency Portal origin must be a bare HTTPS origin: ${agency_configured_origin}"
+            exit 1
+          fi
+          selected_agency_origin="${agency_configured_origin:-$agency_portal_url}"
+          expected_invite_base="${selected_agency_origin}/invite"
+
+          current_api_env="$(gcloud run services describe "${{ needs.prepare.outputs.api_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='json')"
+          current_allowed_origins="$(jq -r '.spec.template.spec.containers[0].env[]? | select(.name == "AUTH_ALLOWED_ORIGINS") | .value // empty' <<<"$current_api_env")"
+          current_invite_base="$(jq -r '.spec.template.spec.containers[0].env[]? | select(.name == "AGENCY_INVITATION_ACCEPT_URL_BASE") | .value // empty' <<<"$current_api_env")"
+
+          reconciled_allowed_origins="$current_allowed_origins"
+          for origin in "$agency_configured_origin" "$agency_portal_url"; do
+            [[ -n "$origin" ]] || continue
+            case ",${reconciled_allowed_origins}," in
+              *",${origin},"*) ;;
+              *)
+                reconciled_allowed_origins="${reconciled_allowed_origins:+${reconciled_allowed_origins},}${origin}"
+                ;;
+            esac
+          done
+
+          if [[ "$reconciled_allowed_origins" != "$current_allowed_origins" || "$current_invite_base" != "$expected_invite_base" ]]; then
+            echo "::notice::Updating ${{ needs.prepare.outputs.api_service }} with resolved agency origin (${selected_agency_origin}) and invitation base (${expected_invite_base})."
+            gcloud run services update "${{ needs.prepare.outputs.api_service }}" \
+              --region "${{ needs.prepare.outputs.region }}" \
+              --project "${{ needs.prepare.outputs.project_id }}" \
+              --update-env-vars "^@^AUTH_ALLOWED_ORIGINS=${reconciled_allowed_origins}@AGENCY_INVITATION_ACCEPT_URL_BASE=${expected_invite_base}"
+          fi
+
   paused-partner-booking-cleanup:
     name: Enforce Partner Booking paused state
     runs-on: ubuntu-latest
@@ -1601,6 +1749,7 @@ jobs:
       channel_partner_portal: ${{ steps.urls.outputs.channel_partner_portal }}
       referral_embed: ${{ steps.urls.outputs.referral_embed }}
       passenger_app: ${{ steps.urls.outputs.passenger_app }}
+      agency_portal: ${{ steps.urls.outputs.agency_portal }}
       referral_entry_host: ${{ needs.deploy.outputs.referral_entry_host }}
 
     steps:
@@ -1630,7 +1779,8 @@ jobs:
             "${{ needs.prepare.outputs.referral_embed_service }}" \
             "${{ needs.prepare.outputs.enterprise_dispatch_service }}" \
             "${{ needs.prepare.outputs.channel_partner_portal_service }}" \
-            "${{ needs.prepare.outputs.passenger_app_service }}"; do
+            "${{ needs.prepare.outputs.passenger_app_service }}" \
+            "${{ needs.prepare.outputs.agency_portal_service }}"; do
             echo "Waiting for ${svc} ..."
             service_ready=false
             for i in $(seq 1 24); do
@@ -1698,6 +1848,10 @@ jobs:
             --region "${{ needs.prepare.outputs.region }}" \
             --project "${{ needs.prepare.outputs.project_id }}" \
             --format='value(status.url)')"
+          agency_portal_url="$(gcloud run services describe "${{ needs.prepare.outputs.agency_portal_service }}" \
+            --region "${{ needs.prepare.outputs.region }}" \
+            --project "${{ needs.prepare.outputs.project_id }}" \
+            --format='value(status.url)')"
 
           echo "api=${api_url}" >> "$GITHUB_OUTPUT"
           echo "platform_admin=${platform_admin_url}" >> "$GITHUB_OUTPUT"
@@ -1709,6 +1863,7 @@ jobs:
           echo "enterprise_dispatch=${enterprise_dispatch_url}" >> "$GITHUB_OUTPUT"
           echo "channel_partner_portal=${channel_partner_portal_url}" >> "$GITHUB_OUTPUT"
           echo "passenger_app=${passenger_app_url}" >> "$GITHUB_OUTPUT"
+          echo "agency_portal=${agency_portal_url}" >> "$GITHUB_OUTPUT"
 
       # gcloud auth print-identity-token, and IAM credentials API generateIdToken
       # called with an *already-impersonated* SA access token (self-impersonation),
@@ -1807,6 +1962,17 @@ jobs:
           id_token_audience: ${{ steps.urls.outputs.passenger_app }}
           id_token_include_email: true
 
+      - name: Mint identity token — agency portal
+        id: id_token_agency_portal
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ steps.urls.outputs.agency_portal }}
+          id_token_include_email: true
+
       - name: Verify passenger app endpoints
         env:
           PASSENGER_APP_ID_TOKEN: ${{ steps.id_token_passenger_app.outputs.id_token }}
@@ -1830,6 +1996,28 @@ jobs:
             [[ "$served_sha" == "$CANDIDATE_SHA" ]]
           done
 
+      - name: Verify agency portal endpoints
+        env:
+          AGENCY_PORTAL_ID_TOKEN: ${{ steps.id_token_agency_portal.outputs.id_token }}
+          AGENCY_PORTAL_URL: ${{ steps.urls.outputs.agency_portal }}
+          CANDIDATE_SHA: ${{ needs.deploy.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          [[ -n "$AGENCY_PORTAL_ID_TOKEN" ]]
+          echo "::add-mask::${AGENCY_PORTAL_ID_TOKEN}"
+          for path in /login /invite; do
+            headers="$(mktemp)"
+            status="$(curl --silent --show-error --fail \
+              --retry 10 --retry-all-errors --retry-delay 3 --max-time 30 \
+              --header "Authorization: Bearer ${AGENCY_PORTAL_ID_TOKEN}" \
+              --dump-header "$headers" --output /dev/null --write-out '%{http_code}' \
+              "${AGENCY_PORTAL_URL}${path}")"
+            [[ "$status" == 200 ]]
+            served_sha="$(awk 'tolower($1) == "x-drts-candidate-sha:" {gsub("\\r", "", $2); print $2}' "$headers")"
+            rm -f "$headers"
+            [[ "$served_sha" == "$CANDIDATE_SHA" ]]
+          done
+
       - name: Verify dev endpoints
         env:
           TENANT_CONSOLE_ID_TOKEN: ${{ steps.id_token_tenant_console.outputs.id_token }}
@@ -1839,6 +2027,7 @@ jobs:
           OPS_CONSOLE_ID_TOKEN: ${{ steps.id_token_ops_console.outputs.id_token }}
           FLEET_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_fleet_partner_portal.outputs.id_token }}
           CHANNEL_PARTNER_PORTAL_ID_TOKEN: ${{ steps.id_token_channel_partner_portal.outputs.id_token }}
+          AGENCY_PORTAL_ID_TOKEN: ${{ steps.id_token_agency_portal.outputs.id_token }}
         run: |
           echo "::add-mask::${TENANT_CONSOLE_ID_TOKEN}"
           echo "::add-mask::${BANK_CONSOLE_ID_TOKEN}"
@@ -1847,8 +2036,9 @@ jobs:
           echo "::add-mask::${OPS_CONSOLE_ID_TOKEN}"
           echo "::add-mask::${FLEET_PARTNER_PORTAL_ID_TOKEN}"
           echo "::add-mask::${CHANNEL_PARTNER_PORTAL_ID_TOKEN}"
+          echo "::add-mask::${AGENCY_PORTAL_ID_TOKEN}"
 
-          for name in TENANT_CONSOLE_ID_TOKEN BANK_CONSOLE_ID_TOKEN ENTERPRISE_DISPATCH_ID_TOKEN PLATFORM_ADMIN_ID_TOKEN OPS_CONSOLE_ID_TOKEN FLEET_PARTNER_PORTAL_ID_TOKEN CHANNEL_PARTNER_PORTAL_ID_TOKEN; do
+          for name in TENANT_CONSOLE_ID_TOKEN BANK_CONSOLE_ID_TOKEN ENTERPRISE_DISPATCH_ID_TOKEN PLATFORM_ADMIN_ID_TOKEN OPS_CONSOLE_ID_TOKEN FLEET_PARTNER_PORTAL_ID_TOKEN CHANNEL_PARTNER_PORTAL_ID_TOKEN AGENCY_PORTAL_ID_TOKEN; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::${name} is empty; identity token minting failed upstream." >&2
               exit 1
@@ -1887,6 +2077,9 @@ jobs:
           curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/bookings/new" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.enterprise_dispatch }}/embed/unsupported-host" "${ENTERPRISE_DISPATCH_ID_TOKEN}" >/dev/null
           curl_ready_auth "${{ steps.urls.outputs.channel_partner_portal }}" "${CHANNEL_PARTNER_PORTAL_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.agency_portal }}" "${AGENCY_PORTAL_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.agency_portal }}/login" "${AGENCY_PORTAL_ID_TOKEN}" >/dev/null
+          curl_ready_auth "${{ steps.urls.outputs.agency_portal }}/invite" "${AGENCY_PORTAL_ID_TOKEN}" >/dev/null
 
       - name: Re-authenticate to GCP (restore access-token credentials)
         uses: google-github-actions/auth@v2
@@ -2099,6 +2292,9 @@ jobs:
           echo "  enterprise-dispatch: ${{ steps.urls.outputs.enterprise_dispatch }}"
           echo "  channel-partner-portal: ${{ steps.urls.outputs.channel_partner_portal }}"
           echo "  passenger-app: ${{ steps.urls.outputs.passenger_app }} (/ and /login; candidate SHA checked)"
+          echo "  agency-portal: ${{ steps.urls.outputs.agency_portal }} (/login and /invite; candidate SHA checked)"
+          echo "  agency OAuth callback: ${{ steps.urls.outputs.agency_portal }}/api/auth/agency/callback"
+          echo "  agency invitation accept base: ${{ steps.urls.outputs.agency_portal }}/invite"
           for provider in google facebook line; do
             echo "  passenger default callback: ${{ steps.urls.outputs.passenger_app }}/auth/callback/${provider}"
           done
