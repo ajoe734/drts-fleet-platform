@@ -16,9 +16,10 @@ import {
   type RegistryExpiryEventRow,
 } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.repository";
 import {
-  DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL,
+  resolvePlatformAlertRecipient,
   RegulatoryRegistryService,
 } from "../../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
+import { RemoteSmtpMailTransport } from "../../../apps/api/src/modules/notification-delivery/remote-smtp-mail.transport";
 import type {
   DriverRegistryRecord,
   InsurancePolicyRecord,
@@ -88,11 +89,36 @@ function createInMemoryFixture(options?: {
 
 class R14SqlTransport {
   readonly drivers = new Map<string, DriverRegistryRecord>();
-  readonly contracts = new Map<string, VehicleContractRecord>();
+  readonly contracts = new Map<
+    string,
+    VehicleContractRecord & {
+      partnerContactEmail?: string;
+      partnerContactEmails?: string[];
+    }
+  >();
   readonly policies = new Map<string, InsurancePolicyRecord>();
   readonly events = new Map<string, RegistryExpiryEventRow>();
   readonly intents = new Map<string, RegistryExpiryDeliveryIntentRow>();
   readonly dbPartnerEmails = new Map<string, string[]>();
+  readonly corePartners = new Map<
+    string,
+    {
+      partner_id: string;
+      partner_code: string;
+      partner_name: string;
+      status: string;
+      contact_email: string | null;
+      metadata: { contactEmails?: string[] };
+    }
+  >();
+  readonly fleetPartners = new Map<
+    string,
+    {
+      fleet_partner_id: string;
+      active: boolean;
+      record: { contactEmail?: string; contactEmails?: string[] };
+    }
+  >();
 
   isEnabled() {
     return true;
@@ -127,16 +153,75 @@ class R14SqlTransport {
     }
     if (q.includes("/* partner-contact-upsert */")) {
       expect(q).toContain("UPDATE admin.phase1_fleet_partners");
-      expect(q).toContain("INSERT INTO core.partners");
-      expect(q).toContain("ON CONFLICT (partner_code) DO UPDATE");
+      expect(q).toContain("UPDATE reg.phase1_registry_contracts");
+      expect(q).toContain("UPDATE core.partners");
+      // F6 side-effect guardrails: must NEVER insert fake rows into core.partners or force status = 'active'
+      expect(q).not.toContain("INSERT INTO core.partners");
+      expect(q).not.toContain("status = 'active'");
       const partnerId = String(values[0] ?? "");
-      if (values.length >= 3) {
-        const parsedEmails = JSON.parse(String(values[2] ?? "[]")) as string[];
-        this.dbPartnerEmails.set(partnerId, parsedEmails);
-      } else {
-        this.dbPartnerEmails.delete(partnerId);
+      const matchedRows: Array<{ partner_id: string }> = [];
+      const isClear = values.length < 3;
+      const primaryEmail = isClear ? null : String(values[1] ?? "");
+      const parsedEmails = isClear
+        ? []
+        : (JSON.parse(String(values[2] ?? "[]")) as string[]);
+
+      for (const [, corePartner] of this.corePartners) {
+        if (
+          corePartner.partner_id === partnerId ||
+          corePartner.partner_code === partnerId
+        ) {
+          corePartner.contact_email = primaryEmail;
+          if (isClear) {
+            delete corePartner.metadata.contactEmails;
+          } else {
+            corePartner.metadata = {
+              ...corePartner.metadata,
+              contactEmails: parsedEmails,
+            };
+          }
+          // Notice: corePartner.status is NEVER mutated!
+          matchedRows.push({ partner_id: corePartner.partner_id });
+        }
       }
-      return { rows: [] };
+      const fp = this.fleetPartners.get(partnerId);
+      if (fp) {
+        if (isClear) {
+          delete fp.record.contactEmail;
+          delete fp.record.contactEmails;
+        } else {
+          fp.record.contactEmail = primaryEmail ?? undefined;
+          fp.record.contactEmails = parsedEmails;
+        }
+        matchedRows.push({ partner_id: fp.fleet_partner_id });
+      }
+      for (const [, contract] of this.contracts) {
+        if (contract.partnerId === partnerId) {
+          if (isClear) {
+            delete contract.partnerContactEmail;
+            delete contract.partnerContactEmails;
+          } else {
+            contract.partnerContactEmail = primaryEmail ?? undefined;
+            contract.partnerContactEmails = parsedEmails;
+          }
+          matchedRows.push({ partner_id: contract.contractId });
+        }
+      }
+      if (this.dbPartnerEmails.has(partnerId) && matchedRows.length === 0) {
+        if (isClear) {
+          this.dbPartnerEmails.delete(partnerId);
+        } else {
+          this.dbPartnerEmails.set(partnerId, parsedEmails);
+        }
+        matchedRows.push({ partner_id: partnerId });
+      } else if (matchedRows.length > 0) {
+        if (isClear) {
+          this.dbPartnerEmails.delete(partnerId);
+        } else {
+          this.dbPartnerEmails.set(partnerId, parsedEmails);
+        }
+      }
+      return { rows: matchedRows, rowCount: matchedRows.length };
     }
     if (q.includes("/* partner-contact-lookup */")) {
       expect(q).toContain(
@@ -151,6 +236,42 @@ class R14SqlTransport {
       const partnerIds = (values[0] as string[]) ?? [];
       const rows: Array<{ email: string }> = [];
       for (const pid of partnerIds) {
+        for (const [, corePartner] of this.corePartners) {
+          if (
+            (corePartner.partner_id === pid ||
+              corePartner.partner_code === pid) &&
+            corePartner.status !== "terminated"
+          ) {
+            for (const email of corePartner.metadata.contactEmails ?? []) {
+              rows.push({ email });
+            }
+            if (corePartner.contact_email) {
+              rows.push({ email: corePartner.contact_email });
+            }
+          }
+        }
+        const fp = this.fleetPartners.get(pid);
+        if (fp && fp.active) {
+          for (const email of fp.record.contactEmails ?? []) {
+            rows.push({ email });
+          }
+          if (fp.record.contactEmail) {
+            rows.push({ email: fp.record.contactEmail });
+          }
+        }
+        for (const [, contract] of this.contracts) {
+          if (
+            contract.partnerId === pid &&
+            contract.status !== "terminated"
+          ) {
+            for (const email of contract.partnerContactEmails ?? []) {
+              rows.push({ email });
+            }
+            if (contract.partnerContactEmail) {
+              rows.push({ email: contract.partnerContactEmail });
+            }
+          }
+        }
         for (const email of this.dbPartnerEmails.get(pid) ?? []) {
           rows.push({ email });
         }
@@ -158,6 +279,24 @@ class R14SqlTransport {
       return { rows };
     }
     if (q.includes("/* vehicle-partner-lookup */")) {
+      // F7 schema guardrail: reg.phase1_registry_contracts (V0013) only has
+      // (contract_id, vehicle_id, status, created_at, updated_at, record) — NO partner_id column!
+      const phase1ContractsClause = q.split("UNION ALL")[0] ?? "";
+      if (
+        /\bCOALESCE\s*\(\s*(?:c\.)?record->>'partnerId'\s*,\s*(?:c\.)?partner_id\s*\)/i.test(
+          phase1ContractsClause,
+        ) ||
+        /\bc\.partner_id\b/i.test(phase1ContractsClause)
+      ) {
+        const err = new Error(
+          'column "partner_id" does not exist in reg.phase1_registry_contracts',
+        ) as Error & { code: string };
+        err.code = "42703";
+        throw err;
+      }
+      expect(phase1ContractsClause).toContain("c.record->>'partnerId'");
+      expect(q).toContain("FROM reg.vehicle_contracts vc");
+      expect(q).toContain("FROM reg.vehicles v");
       const vehicleIds = (values[0] as string[]) ?? [];
       const rows = [...this.contracts.values()]
         .filter(
@@ -1126,10 +1265,35 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     );
   });
 
-  it("F5 regression: when REGULATORY_ALERT_RECIPIENT_EMAIL is unset/cleared (as in deploy-dev.yml), reminders still send to DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL when partner has no contacts, send to BOTH partner and platform when partner has contacts, and backfill missing recipient intents on existing events", async () => {
-    // 1. Clear REGULATORY_ALERT_RECIPIENT_EMAIL completely (simulating Cloud Run dev without the env var)
+  it("F5 regression: when REGULATORY_ALERT_RECIPIENT_EMAIL is unset or set to an unroutable .local domain, resolvePlatformAlertRecipient resolves a deliverable allowlisted mailbox (REMOTE_SMTP_FROM_EMAIL / NOTIFICATION_FROM_EMAIL) that passes RemoteSmtpMailTransport allowlist validation, sends when partner has no contacts, sends to BOTH partner and platform when partner has contacts, and backfills missing recipient intents", async () => {
+    // 1. Simulate Cloud Run dev environment where REGULATORY_ALERT_RECIPIENT_EMAIL is unset
+    // (or misconfigured as .local) and deploy-dev.yml mounts REMOTE_SMTP_FROM_EMAIL,
+    // NOTIFICATION_FROM_EMAIL, and REMOTE_SMTP_RECIPIENT_ALLOWLIST.
+    const devPlatformMailbox = "ops-alerts@smarttransport.tw";
     vi.stubEnv("REGULATORY_ALERT_RECIPIENT_EMAIL", "");
     vi.stubEnv("REGULATORY_FLEET_PARTNER_CONTACT_EMAILS", "");
+    vi.stubEnv("REMOTE_SMTP_FROM_EMAIL", devPlatformMailbox);
+    vi.stubEnv("NOTIFICATION_FROM_EMAIL", devPlatformMailbox);
+    vi.stubEnv(
+      "REMOTE_SMTP_RECIPIENT_ALLOWLIST",
+      `${devPlatformMailbox},partner-ops@f5-fleet.tw,bureau-r14-alerts@transport.gov.tw`,
+    );
+
+    // Verify resolvePlatformAlertRecipient rejects .local domains and enforces allowlist
+    expect(
+      resolvePlatformAlertRecipient({
+        REGULATORY_ALERT_RECIPIENT_EMAIL: "regulatory-alerts@alerts.drts.local",
+        REMOTE_SMTP_FROM_EMAIL: devPlatformMailbox,
+        REMOTE_SMTP_RECIPIENT_ALLOWLIST: devPlatformMailbox,
+      }),
+    ).toBe(devPlatformMailbox);
+    expect(
+      resolvePlatformAlertRecipient({
+        REGULATORY_ALERT_RECIPIENT_EMAIL: "not-in-allowlist@transport.gov.tw",
+        REMOTE_SMTP_FROM_EMAIL: devPlatformMailbox,
+        REMOTE_SMTP_RECIPIENT_ALLOWLIST: devPlatformMailbox,
+      }),
+    ).toBe(devPlatformMailbox);
 
     const sqlDb = new R14SqlTransport();
     sqlDb.contracts.set("contract-f5-001", {
@@ -1164,24 +1328,40 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
 
+    // Use real RemoteSmtpMailTransport with development recipient allowlist enforcement!
     const sentDeliveries: Array<{ recipientEmail: string; subject: string }> =
       [];
-    const outbox = new MemoryMailOutbox();
-    const notification = new NotificationDeliveryService(outbox, {
-      provider: "controlled-f5",
-      send: async (msg) => {
-        sentDeliveries.push({
-          recipientEmail: msg.recipientEmail,
-          subject: msg.subject,
-        });
-        return {
-          provider: "controlled-f5",
-          response: "250 OK",
-          providerMessageId: `f5-${sentDeliveries.length}`,
-          acceptedAt: new Date().toISOString(),
-        };
+    const remoteSmtpTransport = new RemoteSmtpMailTransport(
+      {
+        DRTS_ENV: "development",
+        REMOTE_SMTP_HOST: "smtp.sendgrid.net",
+        REMOTE_SMTP_PORT: "587",
+        REMOTE_SMTP_SECURE: "false",
+        REMOTE_SMTP_USERNAME: "apikey",
+        REMOTE_SMTP_PASSWORD: "sg-secret-password",
+        REMOTE_SMTP_FROM_EMAIL: devPlatformMailbox,
+        REMOTE_SMTP_RECIPIENT_ALLOWLIST: `${devPlatformMailbox},partner-ops@f5-fleet.tw,bureau-r14-alerts@transport.gov.tw`,
       },
-    });
+      (() => ({
+        sendMail: async (request: { to: string; subject: string }) => {
+          sentDeliveries.push({
+            recipientEmail: request.to,
+            subject: request.subject,
+          });
+          return {
+            response: `250 2.0.0 OK: queued as f5-${sentDeliveries.length}`,
+            accepted: [request.to],
+            rejected: [],
+          };
+        },
+      })) as never,
+    );
+
+    const outbox = new MemoryMailOutbox();
+    const notification = new NotificationDeliveryService(
+      outbox,
+      remoteSmtpTransport,
+    );
     const repository = new RegulatoryRegistryRepository(
       sqlDb as unknown as DatabaseService,
     );
@@ -1198,19 +1378,20 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
     const controller = new RegulatoryRegistryController(service);
 
     // Phase A (F5b): Partner has NO contacts yet, and REGULATORY_ALERT_RECIPIENT_EMAIL is unset.
-    // Reminders must NOT be dropped (recipients.length !== 0); they must be sent to DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL.
+    // Reminders must be sent to devPlatformMailbox (resolved from REMOTE_SMTP_FROM_EMAIL / NOTIFICATION_FROM_EMAIL)
+    // and pass RemoteSmtpMailTransport's recipient allowlist check without SMTP_RECIPIENT_NOT_ALLOWLISTED.
     const run1 = await controller.reconcileExpiry({
       asOf: "2026-06-01T00:00:00.000Z", // T-24 (crosses T-30)
     });
     expect(run1.data.preexpiry).toEqual({
       eventsCreated: 2, // contract T-30 + policy T-30
-      intentsCreated: 2, // 1 default platform recipient x 2 events
+      intentsCreated: 2, // 1 deliverable platform recipient x 2 events
       recipientStatus: "configured",
       deliveryStatus: "available",
     });
     expect(sentDeliveries.map((d) => d.recipientEmail)).toEqual([
-      DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL,
-      DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL,
+      devPlatformMailbox,
+      devPlatformMailbox,
     ]);
 
     // Phase B (F5a backfill of partner contacts): Partner now registers contacts while events already exist and are "completed".
@@ -1232,7 +1413,7 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       "partner-ops@f5-fleet.tw",
     ]);
 
-    // Phase C (F5a backfill when REGULATORY_ALERT_RECIPIENT_EMAIL is later set):
+    // Phase C (F5a backfill when REGULATORY_ALERT_RECIPIENT_EMAIL is explicitly set):
     vi.stubEnv(
       "REGULATORY_ALERT_RECIPIENT_EMAIL",
       "bureau-r14-alerts@transport.gov.tw",
@@ -1252,25 +1433,41 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       "bureau-r14-alerts@transport.gov.tw",
     ]);
 
-    // Phase D: At T-7 with env var cleared again and partner contacts present, sends to BOTH partner AND default platform mailbox on first pass
+    // Phase D: At T-7 with REGULATORY_ALERT_RECIPIENT_EMAIL cleared again and partner contacts present,
+    // sends to BOTH partner AND deliverable platform mailbox on first pass
     vi.stubEnv("REGULATORY_ALERT_RECIPIENT_EMAIL", "");
     const run4 = await controller.reconcileExpiry({
       asOf: "2026-06-20T00:00:00.000Z", // T-5 (crosses T-7)
     });
     expect(run4.data.preexpiry).toEqual({
       eventsCreated: 2, // contract T-7 + policy T-7
-      intentsCreated: 4, // 2 recipients (partner-ops@f5-fleet.tw + DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL) x 2 events
+      intentsCreated: 4, // 2 recipients (partner-ops@f5-fleet.tw + devPlatformMailbox) x 2 events
       recipientStatus: "configured",
       deliveryStatus: "available",
     });
     expect(sentDeliveries).toHaveLength(10);
   });
 
-  it("F6 regression: POST partners/:partnerId/contacts persists contacts to PostgreSQL and survives process restarts / fresh instances with cleared env vars", async () => {
+  it("F6 regression & side-effect guards: POST partners/:partnerId/contacts persists contacts across restarts, preserves suspended status on core.partners, and never fabricates rows in core.partners for non-existent partnerId", async () => {
+    const devPlatformMailbox = "ops-alerts@smarttransport.tw";
     vi.stubEnv("REGULATORY_ALERT_RECIPIENT_EMAIL", "");
     vi.stubEnv("REGULATORY_FLEET_PARTNER_CONTACT_EMAILS", "");
+    vi.stubEnv("REMOTE_SMTP_FROM_EMAIL", devPlatformMailbox);
+    vi.stubEnv("NOTIFICATION_FROM_EMAIL", devPlatformMailbox);
 
     const sqlDb = new R14SqlTransport();
+    // Seed a suspended partner in core.partners to verify F6 side-effect 1:
+    // registering contacts MUST NOT change core.partners.status from 'suspended' to 'active'.
+    const suspendedPartnerUuid = "00000000-0000-4000-8000-000000000601";
+    sqlDb.corePartners.set(suspendedPartnerUuid, {
+      partner_id: suspendedPartnerUuid,
+      partner_code: "partner-f6-suspended",
+      partner_name: "Suspended Fleet Co.",
+      status: "suspended",
+      contact_email: null,
+      metadata: {},
+    });
+
     // Contract is valid for 180 days (outside T-30 scan window), while insurance policy is within T-30 window.
     // This also proves restarted instances resolve vehicle -> partnerId from DB (`/* vehicle-partner-lookup */`).
     sqlDb.contracts.set("contract-f6-001", {
@@ -1322,6 +1519,7 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       serviceInstance1,
     );
 
+    // 1. Register contacts for existing contract partner "partner-f6-001"
     const postResponse = await controllerInstance1.registerFleetPartnerContacts(
       "partner-f6-001",
       {
@@ -1336,6 +1534,45 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       "dispatch-lead@f6-partner.tw",
       "insurance-admin@f6-partner.tw",
     ]);
+    // Verify no fabricated row was inserted into core.partners for "partner-f6-001"
+    expect(sqlDb.corePartners.size).toBe(1);
+
+    // 2. F6 side-effect 1 check: Register contacts on a SUSPENDED partner in core.partners
+    const suspendedResponse =
+      await controllerInstance1.registerFleetPartnerContacts(
+        "partner-f6-suspended",
+        {
+          emails: ["compliance@suspended-fleet.tw"],
+        },
+      );
+    expect(suspendedResponse.data).toEqual({
+      partnerId: "partner-f6-suspended",
+      emails: ["compliance@suspended-fleet.tw"],
+    });
+    const suspendedRowAfter = sqlDb.corePartners.get(suspendedPartnerUuid);
+    expect(suspendedRowAfter?.status).toBe("suspended");
+    expect(suspendedRowAfter?.contact_email).toBe(
+      "compliance@suspended-fleet.tw",
+    );
+    expect(suspendedRowAfter?.metadata.contactEmails).toEqual([
+      "compliance@suspended-fleet.tw",
+    ]);
+
+    // 3. F6 side-effect 2 check: Register contacts on a NON-EXISTENT partnerId
+    const corePartnerCountBefore = sqlDb.corePartners.size;
+    const nonexistentResponse =
+      await controllerInstance1.registerFleetPartnerContacts(
+        "nonexistent-partner-999",
+        {
+          emails: ["ghost@nowhere.tw"],
+        },
+      );
+    // Must not fabricate a partner row in core.partners or cache ghost contacts
+    expect(sqlDb.corePartners.size).toBe(corePartnerCountBefore);
+    expect(nonexistentResponse.data).toEqual({
+      partnerId: "nonexistent-partner-999",
+      emails: [],
+    });
 
     // Simulate process restart / second Cloud Run instance: brand-new repository, service, and controller
     // with empty in-process memory Map, connected to the same database (`sqlDb`).
@@ -1380,22 +1617,163 @@ describe("BUREAU-R14: Vehicle Contract & Insurance Policy Pre-Expiry Reminders a
       partnerId: "partner-f6-001",
       emails: ["dispatch-lead@f6-partner.tw", "insurance-admin@f6-partner.tw"],
     });
+    const getSuspendedAfterRestart =
+      await controllerInstance2.getFleetPartnerContacts("partner-f6-suspended");
+    expect(getSuspendedAfterRestart.data).toEqual({
+      partnerId: "partner-f6-suspended",
+      emails: ["compliance@suspended-fleet.tw"],
+    });
+    const getNonexistentAfterRestart =
+      await controllerInstance2.getFleetPartnerContacts(
+        "nonexistent-partner-999",
+      );
+    expect(getNonexistentAfterRestart.data).toEqual({
+      partnerId: "nonexistent-partner-999",
+      emails: [],
+    });
 
-    // Running reconcileExpiry on the restarted instance with cleared env vars delivers reminders
-    // to both persisted partner contacts AND DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL
+    // Running reconcileExpiry on the restarted instance delivers reminders
+    // to both persisted partner contacts AND devPlatformMailbox
     const reconcileAfterRestart = await controllerInstance2.reconcileExpiry({
       asOf: "2026-06-01T00:00:00.000Z", // T-19 for policy-f6-001
     });
     expect(reconcileAfterRestart.data.preexpiry).toEqual({
       eventsCreated: 1, // policy-f6-001 T-30
-      intentsCreated: 3, // 2 persisted partner contacts + 1 default platform alert email
+      intentsCreated: 3, // 2 persisted partner contacts + 1 deliverable platform alert email
       recipientStatus: "configured",
       deliveryStatus: "available",
     });
     expect(sentAfterRestart.sort()).toEqual([
       "dispatch-lead@f6-partner.tw",
       "insurance-admin@f6-partner.tw",
-      DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL,
+      devPlatformMailbox,
+    ]);
+  });
+
+  it("F7 regression: findVehiclePartnerIds and reconcileExpiry never query non-existent partner_id column on reg.phase1_registry_contracts (PostgreSQL 42703) across both insurance policies and paired-vehicle drivers", async () => {
+    vi.stubEnv(
+      "REGULATORY_ALERT_RECIPIENT_EMAIL",
+      "bureau-r14-alerts@transport.gov.tw",
+    );
+    const sqlDb = new R14SqlTransport();
+
+    // Verify that R14SqlTransport strictly rejects any query referencing partner_id on reg.phase1_registry_contracts with 42703
+    await expect(
+      sqlDb.query(
+        `/* vehicle-partner-lookup */ SELECT vehicle_id, COALESCE(record->>'partnerId', partner_id) AS partner_id FROM reg.phase1_registry_contracts WHERE vehicle_id = ANY($1::text[])`,
+        [["veh-f7-001"]],
+      ),
+    ).rejects.toMatchObject({
+      code: "42703",
+    });
+
+    // Seed contract (in reg.phase1_registry_contracts where partnerId is only in record JSONB),
+    // expiring insurance policy, and expiring driver paired with veh-f7-001
+    sqlDb.contracts.set("contract-f7-001", {
+      contractId: "contract-f7-001",
+      vehicleId: "veh-f7-001",
+      partnerId: "partner-f7-001",
+      partnerType: "fleet_partner",
+      contractType: "fleet_participation_contract",
+      operatingAreaId: "taipei-keelung",
+      serviceScope: "standard_taxi",
+      startAt: "2026-01-01T00:00:00.000Z",
+      endAt: "2026-12-31T00:00:00.000Z",
+      status: "active",
+      lifecycleStatus: "active",
+      approvedBy: "ops-01",
+      approvedAt: "2026-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      partnerContactEmails: ["f7-partner@fleet.tw"],
+    } as DriverContract & { partnerContactEmails: string[] });
+
+    sqlDb.policies.set("policy-f7-001", {
+      policyId: "policy-f7-001",
+      vehicleId: "veh-f7-001",
+      policyNo: "POL-F7-001",
+      insuranceType: "commercial_liability",
+      insurerName: "Cathay Century",
+      coverageAmount: 5000000,
+      startAt: "2026-01-01T00:00:00.000Z",
+      endAt: "2026-06-20T00:00:00.000Z",
+      status: "active",
+      lifecycleStatus: "active",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    sqlDb.drivers.set("driver-f7-001", {
+      driverId: "driver-f7-001",
+      licenseNo: "LIC-F7-001",
+      vehicleId: "veh-f7-001",
+      fullName: "Lin F7",
+      phone: "0912000777",
+      operatingAreaId: "taipei-keelung",
+      licenseClass: "professional_small_car",
+      licenseExpiry: "2026-06-20",
+      businessRegistrationCertNo: "REG-F7-001",
+      businessRegistrationExpiry: "2026-12-31",
+      criminalRecordClear: true,
+      trafficViolationClear: true,
+      status: "active",
+      lifecycleStatus: "active",
+      approvedBy: "ops-01",
+      approvedAt: "2026-01-01T00:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const sentRecipients: string[] = [];
+    const outbox = new MemoryMailOutbox();
+    const notification = new NotificationDeliveryService(outbox, {
+      provider: "controlled-f7",
+      send: async (msg) => {
+        sentRecipients.push(msg.recipientEmail);
+        return {
+          provider: "controlled-f7",
+          response: "250 OK",
+          providerMessageId: `f7-${sentRecipients.length}`,
+          acceptedAt: new Date().toISOString(),
+        };
+      },
+    });
+    const repository = new RegulatoryRegistryRepository(
+      sqlDb as unknown as DatabaseService,
+    );
+    const service = new RegulatoryRegistryService(
+      new OpsDispatchEventsService(new EventEmitter() as never),
+      new AuditNotificationService(),
+      new DriverProfileService(
+        new AuditNotificationService(),
+        new DriverProfileRepository(),
+      ),
+      repository,
+      notification,
+    );
+    const controller = new RegulatoryRegistryController(service);
+
+    // Direct repository call to findVehiclePartnerIds succeeds and maps veh-f7-001 -> partner-f7-001
+    const vehiclePartnerMap = await repository.findVehiclePartnerIds([
+      "veh-f7-001",
+    ]);
+    expect(vehiclePartnerMap.get("veh-f7-001")).toEqual(["partner-f7-001"]);
+
+    // Full reconcileExpiry with both insurance policy and paired-vehicle driver in 30-day window succeeds
+    const result = await controller.reconcileExpiry({
+      asOf: "2026-06-01T00:00:00.000Z",
+    });
+    expect(result.data.preexpiry).toEqual({
+      eventsCreated: 2, // 1 insurance policy T-30 + 1 paired-vehicle driver license T-30
+      intentsCreated: 4, // 2 recipients (f7-partner@fleet.tw + bureau-r14-alerts@transport.gov.tw) x 2 events
+      recipientStatus: "configured",
+      deliveryStatus: "available",
+    });
+    expect(sentRecipients.sort()).toEqual([
+      "bureau-r14-alerts@transport.gov.tw",
+      "bureau-r14-alerts@transport.gov.tw",
+      "f7-partner@fleet.tw",
+      "f7-partner@fleet.tw",
     ]);
   });
 });

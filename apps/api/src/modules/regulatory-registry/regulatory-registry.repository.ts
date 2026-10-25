@@ -369,10 +369,12 @@ export class RegulatoryRegistryRepository {
   private async persistFleetPartnerContactsInDb(
     partnerId: string,
     emails: readonly string[],
-  ): Promise<void> {
-    if (!this.isEnabled() || !this.extendedExpirySqlSupported) return;
+  ): Promise<boolean> {
+    if (!this.isEnabled() || !this.extendedExpirySqlSupported) return false;
     if (emails.length === 0) {
-      await this.databaseService!.query(
+      const cleared = await this.databaseService!.query<{
+        partner_id: string;
+      }>(
         `/* partner-contact-upsert */
          WITH cleared_fleet_partner AS (
            UPDATE admin.phase1_fleet_partners
@@ -380,19 +382,36 @@ export class RegulatoryRegistryRepository {
                updated_at = now()
            WHERE fleet_partner_id = $1
            RETURNING fleet_partner_id
+         ),
+         cleared_contract_partner AS (
+           UPDATE reg.phase1_registry_contracts
+           SET record = (record - 'partnerContactEmails') - 'partnerContactEmail',
+               updated_at = now()
+           WHERE record->>'partnerId' = $1
+           RETURNING contract_id
+         ),
+         cleared_core_partner AS (
+           UPDATE core.partners
+           SET contact_email = NULL,
+               metadata = COALESCE(metadata, '{}'::jsonb) - 'contactEmails',
+               updated_at = now()
+           WHERE partner_id::text = $1 OR partner_code = $1
+           RETURNING partner_id::text AS partner_id
          )
-         UPDATE core.partners
-         SET contact_email = NULL,
-             metadata = COALESCE(metadata, '{}'::jsonb) - 'contactEmails',
-             updated_at = now()
-         WHERE partner_id::text = $1 OR partner_code = $1`,
+         SELECT partner_id FROM cleared_core_partner
+         UNION ALL
+         SELECT fleet_partner_id AS partner_id FROM cleared_fleet_partner
+         UNION ALL
+         SELECT contract_id AS partner_id FROM cleared_contract_partner`,
         [partnerId],
       );
-      return;
+      return (cleared.rowCount ?? cleared.rows.length) > 0;
     }
     const primaryEmail = emails[0]!;
     const emailsJson = JSON.stringify(emails);
-    await this.databaseService!.query(
+    const updated = await this.databaseService!.query<{
+      partner_id: string;
+    }>(
       `/* partner-contact-upsert */
        WITH updated_fleet_partner AS (
          UPDATE admin.phase1_fleet_partners
@@ -406,10 +425,21 @@ export class RegulatoryRegistryRepository {
          WHERE fleet_partner_id = $1
          RETURNING fleet_partner_id
        ),
-       updated AS (
+       updated_contract_partner AS (
+         UPDATE reg.phase1_registry_contracts
+         SET record = jsonb_set(
+               jsonb_set(record, '{partnerContactEmails}', $3::jsonb, true),
+               '{partnerContactEmail}',
+               to_jsonb($2::text),
+               true
+             ),
+             updated_at = now()
+         WHERE record->>'partnerId' = $1
+         RETURNING contract_id
+       ),
+       updated_core_partner AS (
          UPDATE core.partners
          SET contact_email = $2,
-             status = 'active',
              metadata = jsonb_set(
                COALESCE(metadata, '{}'::jsonb),
                '{contactEmails}',
@@ -418,40 +448,16 @@ export class RegulatoryRegistryRepository {
              ),
              updated_at = now()
          WHERE partner_id::text = $1 OR partner_code = $1
-         RETURNING partner_id
+         RETURNING partner_id::text AS partner_id
        )
-       INSERT INTO core.partners (
-         partner_code,
-         partner_name,
-         partner_type,
-         contact_email,
-         status,
-         metadata,
-         created_at,
-         updated_at
-       )
-       SELECT
-         left($1, 50),
-         $1,
-         'fleet_company_partner'::core.partner_type_t,
-         $2,
-         'active',
-         jsonb_build_object('contactEmails', $3::jsonb),
-         now(),
-         now()
-       WHERE NOT EXISTS (SELECT 1 FROM updated)
-       ON CONFLICT (partner_code) DO UPDATE SET
-         contact_email = EXCLUDED.contact_email,
-         status = 'active',
-         metadata = jsonb_set(
-           COALESCE(core.partners.metadata, '{}'::jsonb),
-           '{contactEmails}',
-           $3::jsonb,
-           true
-         ),
-         updated_at = now()`,
+       SELECT partner_id FROM updated_core_partner
+       UNION ALL
+       SELECT fleet_partner_id AS partner_id FROM updated_fleet_partner
+       UNION ALL
+       SELECT contract_id AS partner_id FROM updated_contract_partner`,
       [partnerId, primaryEmail, emailsJson],
     );
+    return (updated.rowCount ?? updated.rows.length) > 0;
   }
 
   setFleetPartnerContacts(
@@ -475,7 +481,14 @@ export class RegulatoryRegistryRepository {
     const snapshot = [...cleaned];
     if (this.isEnabled() && this.extendedExpirySqlSupported) {
       return this.withLazyPromise(snapshot, async () => {
-        await this.persistFleetPartnerContactsInDb(normalized, cleaned);
+        const persisted = await this.persistFleetPartnerContactsInDb(
+          normalized,
+          cleaned,
+        );
+        if (!persisted && cleaned.length > 0) {
+          this.inMemoryPartnerContacts.delete(normalized);
+          return [];
+        }
         return [...cleaned];
       });
     }
@@ -519,12 +532,12 @@ export class RegulatoryRegistryRepository {
          ) AS email
          FROM core.partners
          WHERE (partner_id::text = ANY($1::text[]) OR partner_code = ANY($1::text[]))
-           AND status = 'active'
+           AND status <> 'terminated'
          UNION ALL
          SELECT contact_email AS email
          FROM core.partners
          WHERE (partner_id::text = ANY($1::text[]) OR partner_code = ANY($1::text[]))
-           AND status = 'active'
+           AND status <> 'terminated'
            AND contact_email IS NOT NULL
          UNION ALL
          SELECT jsonb_array_elements_text(
@@ -542,6 +555,22 @@ export class RegulatoryRegistryRepository {
          WHERE fleet_partner_id = ANY($1::text[])
            AND active = true
            AND record->>'contactEmail' IS NOT NULL
+         UNION ALL
+         SELECT jsonb_array_elements_text(
+           CASE
+             WHEN jsonb_typeof(record->'partnerContactEmails') = 'array' THEN record->'partnerContactEmails'
+             ELSE '[]'::jsonb
+           END
+         ) AS email
+         FROM reg.phase1_registry_contracts
+         WHERE record->>'partnerId' = ANY($1::text[])
+           AND COALESCE(record->>'status', status) <> 'terminated'
+         UNION ALL
+         SELECT record->>'partnerContactEmail' AS email
+         FROM reg.phase1_registry_contracts
+         WHERE record->>'partnerId' = ANY($1::text[])
+           AND COALESCE(record->>'status', status) <> 'terminated'
+           AND record->>'partnerContactEmail' IS NOT NULL
          UNION ALL
          SELECT COALESCE(p.email_normalized, p.record->>'email') AS email
          FROM iam.identity_memberships m
@@ -582,10 +611,26 @@ export class RegulatoryRegistryRepository {
       partner_id: string | null;
     }>(
       `/* vehicle-partner-lookup */
-       SELECT vehicle_id, COALESCE(record->>'partnerId', partner_id) AS partner_id
-       FROM reg.phase1_registry_contracts
-       WHERE vehicle_id = ANY($1::text[])
-         AND COALESCE(record->>'status', status) <> 'terminated'`,
+       SELECT c.vehicle_id AS vehicle_id, c.record->>'partnerId' AS partner_id
+       FROM reg.phase1_registry_contracts c
+       WHERE c.vehicle_id = ANY($1::text[])
+         AND COALESCE(c.record->>'status', c.status) <> 'terminated'
+         AND c.record->>'partnerId' IS NOT NULL
+       UNION ALL
+       SELECT vc.vehicle_id::text AS vehicle_id, vc.partner_id::text AS partner_id
+       FROM reg.vehicle_contracts vc
+       WHERE vc.vehicle_id::text = ANY($1::text[])
+         AND vc.status <> 'terminated'
+       UNION ALL
+       SELECT v.vehicle_id::text AS vehicle_id, v.owner_partner_id::text AS partner_id
+       FROM reg.vehicles v
+       WHERE v.vehicle_id::text = ANY($1::text[])
+         AND v.owner_partner_id IS NOT NULL
+       UNION ALL
+       SELECT v.vehicle_id::text AS vehicle_id, v.dispatch_partner_id::text AS partner_id
+       FROM reg.vehicles v
+       WHERE v.vehicle_id::text = ANY($1::text[])
+         AND v.dispatch_partner_id IS NOT NULL`,
       [normalized],
     );
     for (const row of result.rows) {

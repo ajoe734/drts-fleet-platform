@@ -568,8 +568,81 @@ const EXCLUSIVITY_SEED: DispatchExclusivityRecord[] = [
   },
 ];
 
-export const DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL =
-  "regulatory-alerts@alerts.drts.local";
+export function resolvePlatformAlertRecipient(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const isDeliverableEmail = (
+    value: string | undefined | null,
+  ): value is string => {
+    if (!value || value.length > 254) return false;
+    const parts = value.split("@");
+    if (parts.length !== 2) return false;
+    const [local, domain] = parts as [string, string];
+    if (
+      !local ||
+      local.length > 64 ||
+      !/^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local) ||
+      !/^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/.test(
+        domain,
+      )
+    ) {
+      return false;
+    }
+    const lowerDomain = domain.toLowerCase();
+    if (lowerDomain.endsWith(".local") || lowerDomain.endsWith(".invalid")) {
+      return false;
+    }
+    return true;
+  };
+
+  const allowlist = env.REMOTE_SMTP_RECIPIENT_ALLOWLIST?.trim()
+    ? env.REMOTE_SMTP_RECIPIENT_ALLOWLIST.split(",")
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+  const isAllowlisted = (email: string): boolean => {
+    if (allowlist.length === 0 || env.DRTS_ENV === "production") {
+      return true;
+    }
+    const lower = email.toLowerCase();
+    const domain = lower.split("@")[1]!;
+    return allowlist.some((entry) => entry === lower || entry === domain);
+  };
+
+  const rawConfigured = env.REGULATORY_ALERT_RECIPIENT_EMAIL;
+  const configured = rawConfigured?.trim();
+  const hasExplicitConfig =
+    configured !== undefined &&
+    configured !== "" &&
+    configured !== "undefined";
+  if (
+    hasExplicitConfig &&
+    isDeliverableEmail(configured) &&
+    isAllowlisted(configured)
+  ) {
+    return configured;
+  }
+  if (hasExplicitConfig && !configured.includes("@")) {
+    return null;
+  }
+
+  for (const candidate of [
+    env.REMOTE_SMTP_FROM_EMAIL?.trim(),
+    env.NOTIFICATION_FROM_EMAIL?.trim(),
+  ]) {
+    if (isDeliverableEmail(candidate) && isAllowlisted(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const entry of allowlist) {
+    if (isDeliverableEmail(entry)) {
+      return entry;
+    }
+  }
+
+  return null;
+}
 
 @Injectable()
 export class RegulatoryRegistryService
@@ -5413,25 +5486,7 @@ export class RegulatoryRegistryService
           value.length <= 254 &&
           /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+$/.test(value),
       );
-    const rawConfigured = process.env.REGULATORY_ALERT_RECIPIENT_EMAIL;
-    const configured = rawConfigured?.trim();
-    const hasExplicitConfig =
-      configured !== undefined &&
-      configured !== "" &&
-      configured !== "undefined";
-    // Same address syntax as existing NotificationDeliveryService, before freezing an intent.
-    // When REGULATORY_ALERT_RECIPIENT_EMAIL is unset or empty (e.g. in shared dev where
-    // deploy-dev.yml does not mount it), fall back to the canonical regulatory alert
-    // mailbox (`DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL`) whenever extended R14 SQL
-    // or in-memory mode is active, so reminders are never silently dropped when a partner
-    // has no contacts and always include a platform recipient alongside partner contacts.
-    const platformRecipient = hasExplicitConfig
-      ? isValidEmail(configured)
-        ? configured
-        : null
-      : repository.supportsExtendedExpirySql()
-        ? DEFAULT_REGULATORY_ALERT_RECIPIENT_EMAIL
-        : null;
+    const platformRecipient = resolvePlatformAlertRecipient(process.env);
     const result: NonNullable<ReconcileExpiryResult["preexpiry"]> = {
       eventsCreated: 0,
       intentsCreated: 0,
@@ -5569,7 +5624,9 @@ export class RegulatoryRegistryService
     }
 
     const fromEmail =
-      process.env.NOTIFICATION_FROM_EMAIL?.trim() || "noreply@fleet.drts.local";
+      process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+      process.env.REMOTE_SMTP_FROM_EMAIL?.trim() ||
+      "noreply@fleet.drts.local";
 
     // 1. Driver credential pre-expiry reminders (T-30 and T-7)
     const upperDriver = upperBounds.driverId;
@@ -5595,9 +5652,21 @@ export class RegulatoryRegistryService
           const driverPartnerIds: string[] = [];
           const directPartnerId = (driver as { partnerId?: string }).partnerId;
           if (directPartnerId) driverPartnerIds.push(directPartnerId);
-          const pairedVehicles = this.supplyPairs
-            .filter((pair) => pair.driverId === driverId)
-            .map((pair) => pair.vehicleId);
+          const directVehicleId =
+            (driver as { vehicleId?: string; pairedVehicleId?: string })
+              .vehicleId ??
+            (driver as { vehicleId?: string; pairedVehicleId?: string })
+              .pairedVehicleId;
+          const pairedVehicles = [
+            ...new Set(
+              [
+                ...this.supplyPairs
+                  .filter((pair) => pair.driverId === driverId)
+                  .map((pair) => pair.vehicleId),
+                directVehicleId,
+              ].filter((v): v is string => Boolean(v && v.trim())),
+            ),
+          ];
           if (
             enabled &&
             repository.supportsExtendedExpirySql() &&
@@ -6304,6 +6373,7 @@ export class RegulatoryRegistryService
             ) {
               const recipientEmail =
                 process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim() ||
+                resolvePlatformAlertRecipient(process.env) ||
                 `driver-${driverId}@alerts.drts.local`;
               const idempotencyKey = JSON.stringify([
                 "credential-alert/v1",
@@ -6313,6 +6383,7 @@ export class RegulatoryRegistryService
               ]);
               const fromEmail =
                 process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+                process.env.REMOTE_SMTP_FROM_EMAIL?.trim() ||
                 "noreply@fleet.drts.local";
               const subject = `[DRTS Alert] Credential Expired: ${check.credentialType} for driver ${driverId}`;
               const body = `The credential ${check.credentialType} for driver ${driverId} expired at ${check.expiry}. Immediate renewal or suspension review required.`;
@@ -6417,6 +6488,7 @@ export class RegulatoryRegistryService
           ) {
             const recipientEmail =
               process.env.REGULATORY_ALERT_RECIPIENT_EMAIL?.trim() ||
+              resolvePlatformAlertRecipient(process.env) ||
               `policy-${policyId}@alerts.drts.local`;
             const idempotencyKey = JSON.stringify([
               "credential-alert/v1",
@@ -6426,6 +6498,7 @@ export class RegulatoryRegistryService
             ]);
             const fromEmail =
               process.env.NOTIFICATION_FROM_EMAIL?.trim() ||
+              process.env.REMOTE_SMTP_FROM_EMAIL?.trim() ||
               "noreply@fleet.drts.local";
             const subject = `[DRTS Alert] Insurance Policy Expired: policy ${policyNo} for vehicle ${locked.vehicleId}`;
             const body = `Insurance policy ${policyNo} (type: ${insuranceType}) for vehicle ${locked.vehicleId} expired at ${endAt}. Immediate renewal required.`;
