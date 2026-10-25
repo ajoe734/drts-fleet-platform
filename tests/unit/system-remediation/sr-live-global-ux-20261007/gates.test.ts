@@ -1033,10 +1033,18 @@ describe("nonsecret global-ux-input producer and consumer contract", () => {
       "ya29.a0AfH6SMBx-fake-google-oauth-token",
       "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkq",
       '{"GLOBAL_UX_SESSIONS":"secret"}',
+      '{"cookies":[{"name":"synthetic_fixture","value":"synthetic_not_a_credential"}]}',
+      '{"sessions":[{"id":"synthetic"}]}',
+      '{"tokens":["synthetic"]}',
+      '{"authorization":"Basic synthetic"}',
+      '{"proxy-authorization":"Basic synthetic"}',
     ]) {
       expect(() =>
         assertNonSecretBytes(Buffer.from(secretPayload), "plan.json"),
       ).toThrow("private credential material rejected");
+      expect(() =>
+        assertNonSecretBytes(Buffer.from(secretPayload), "artifact"),
+      ).toThrow("private credential material rejected in artifact");
     }
 
     withTempDirs(({ root, sourceDir, bundleDir }) => {
@@ -1073,10 +1081,105 @@ describe("nonsecret global-ux-input producer and consumer contract", () => {
       ).toThrow("unexpected input bundle entry");
       rmSync(path.join(sourceDir, "sessions.json"));
 
-      // Symlink inside artifacts/ rejected.
+      // Referenced manual/report.json artifact containing JSON sensitive keys (e.g. cookies)
+      // is rejected by both validateInputManual and packageInput, while safe JSON artifacts pass.
+      const cookieJarBytes = Buffer.from(
+        '{"cookies":[{"name":"synthetic_fixture","value":"synthetic_not_a_credential"}]}',
+        "utf8",
+      );
+      const cookieJarSha256 = hash(cookieJarBytes);
+      const e = evidence();
+      const cookieJarManual: ManualEvidence = {
+        ...e.manual[0]!,
+        planHash: planSha256,
+        checks: e.manual[0]!.checks.map((check) => ({
+          ...check,
+          artifact: "manual/report.json",
+          sha256: cookieJarSha256,
+        })),
+      };
+      expect(() =>
+        validateInputManual(
+          [cookieJarManual],
+          inventory,
+          { harnessSha: binding.harnessSha, planHash: planSha256 },
+          () => cookieJarBytes,
+        ),
+      ).toThrow("private credential material rejected in artifact");
+
       mkdirSync(path.join(sourceDir, "artifacts", "manual"), {
         recursive: true,
       });
+      writeFileSync(
+        path.join(sourceDir, "artifacts", "manual", "report.json"),
+        cookieJarBytes,
+      );
+      writeFileSync(
+        path.join(sourceDir, "manual.json"),
+        JSON.stringify([cookieJarManual]),
+      );
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: planSha256,
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("private credential material rejected in artifact");
+
+      const safeReportBytes = Buffer.from(
+        '{"summary":"NVDA and contrast observations","measuredRatio":7.1}\n',
+        "utf8",
+      );
+      const safeReportSha256 = hash(safeReportBytes);
+      const safeManual: ManualEvidence = {
+        ...e.manual[0]!,
+        planHash: planSha256,
+        checks: e.manual[0]!.checks.map((check) => ({
+          ...check,
+          artifact: "manual/report.json",
+          sha256: safeReportSha256,
+        })),
+      };
+      expect(
+        validateInputManual(
+          [safeManual],
+          inventory,
+          { harnessSha: binding.harnessSha, planHash: planSha256 },
+          () => safeReportBytes,
+        ),
+      ).toEqual(new Set(["manual/report.json"]));
+      writeFileSync(
+        path.join(sourceDir, "artifacts", "manual", "report.json"),
+        safeReportBytes,
+      );
+      writeFileSync(
+        path.join(sourceDir, "manual.json"),
+        JSON.stringify([safeManual]),
+      );
+      const safeReceipt = packageInput({
+        sourceDir,
+        bundleDir,
+        harnessSha: binding.harnessSha,
+        runtimeSha: sha,
+        expectedPlanSha256: planSha256,
+        inventory,
+        applicability: [],
+      });
+      expect(safeReceipt.artifacts).toEqual([
+        {
+          path: "manual/report.json",
+          bytes: safeReportBytes.length,
+          sha256: safeReportSha256,
+        },
+      ]);
+      rmSync(path.join(sourceDir, "artifacts", "manual", "report.json"));
+      writeFileSync(path.join(sourceDir, "manual.json"), "[]");
+
+      // Symlink inside artifacts/ rejected.
       const outside = path.join(root, "outside.txt");
       writeFileSync(outside, "outside");
       symlinkSync(

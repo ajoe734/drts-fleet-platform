@@ -515,17 +515,12 @@ export function assertNonSecretBytes(bytes: Buffer, label: string) {
         text,
       ) &&
       !/\bBearer\s+eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(text) &&
-      !/\bya29\.[A-Za-z0-9_-]+/.test(text),
-    `private credential material rejected in ${label}`,
-  );
-  if (label !== "artifact") {
-    assert(
+      !/\bya29\.[A-Za-z0-9_-]+/.test(text) &&
       !/"(?:cookies|sessions|tokens|authorization|proxy-authorization)"\s*:/i.test(
         text,
       ),
-      `private credential material rejected in ${label}`,
-    );
-  }
+    `private credential material rejected in ${label}`,
+  );
 }
 
 export function validateInputManual(
