@@ -785,6 +785,384 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
     expect(pgDateReadback[0]?.serviceDate).toBe(serviceDate);
   });
 
+  it("reconciles persisted legacy UTC-day daily_dispatch_records rows through real ReportingRepository and ReportingService with per-order transactional rollback on failure", async () => {
+    const {
+      ownedMobilityService,
+      complaintService,
+      regulatoryRegistryService,
+      cleanup,
+    } = createHarness();
+    cleanups.push(cleanup);
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-24T17:00:00.000Z"));
+    const taipeiMidnightOrder = await ownedMobilityService.createCallCenterOrder({
+      callId: "call-int-rep-rekey-unit-001",
+      agentId: "ops-agent-001",
+      recordingId: "rec-int-rep-rekey-unit-001",
+      pickup: { address: "Taipei Main Station" },
+      dropoff: { address: "Banqiao Station" },
+      passenger: { name: "Taipei Midnight Rider", phone: "0911666001" },
+    });
+
+    vi.setSystemTime(new Date("2026-10-24T02:00:00.000Z"));
+    const sameDayControlOrder = await ownedMobilityService.createCallCenterOrder({
+      callId: "call-int-rep-rekey-unit-002",
+      agentId: "ops-agent-001",
+      recordingId: "rec-int-rep-rekey-unit-002",
+      pickup: { address: "Ximen Station" },
+      dropoff: { address: "Songshan Airport" },
+      passenger: { name: "Control Day Rider", phone: "0911666002" },
+    });
+    vi.useRealTimers();
+
+    const snapshot = ownedMobilityService.getReportingSnapshot();
+
+    type StoredDailyRow = {
+      service_date: string;
+      order_id: string;
+      order_no: string;
+      order_source: string;
+      tenant_id: string | null;
+      partner_id: string | null;
+      service_product_code: string;
+      requested_at: string;
+      reservation_time: string | null;
+      pickup_address_snapshot: string;
+      dropoff_address_snapshot: string | null;
+      first_dispatch_at: string | null;
+      first_assigned_at: string | null;
+      final_driver_id: string | null;
+      final_vehicle_id: string | null;
+      final_plate_no: string | null;
+      eta_seconds_at_assignment: number | null;
+      arrived_pickup_at: string | null;
+      trip_started_at: string | null;
+      trip_completed_at: string | null;
+      final_status: string;
+      redispatch_count: number;
+      cancellation_reason: string | null;
+      complaint_count: number;
+      generated_at: string;
+    };
+
+    const committedDailyTable = new Map<string, StoredDailyRow>();
+    const seedLegacyUtcRow = () => {
+      committedDailyTable.set(`2026-10-24:${taipeiMidnightOrder.orderId}`, {
+        service_date: "2026-10-24",
+        order_id: taipeiMidnightOrder.orderId,
+        order_no: taipeiMidnightOrder.orderNo,
+        order_source: "phone",
+        tenant_id: taipeiMidnightOrder.tenantId,
+        partner_id: taipeiMidnightOrder.partnerId,
+        service_product_code: "taxi_realtime",
+        requested_at: "2026-10-24T17:00:00.000Z",
+        reservation_time: taipeiMidnightOrder.reservationWindowStart,
+        pickup_address_snapshot: "Taipei Main Station",
+        dropoff_address_snapshot: "Banqiao Station",
+        first_dispatch_at: null,
+        first_assigned_at: null,
+        final_driver_id: null,
+        final_vehicle_id: null,
+        final_plate_no: null,
+        eta_seconds_at_assignment: null,
+        arrived_pickup_at: null,
+        trip_started_at: null,
+        trip_completed_at: null,
+        final_status: "pending_review",
+        redispatch_count: 0,
+        cancellation_reason: null,
+        complaint_count: 0,
+        generated_at: "2026-10-24T17:01:00.000Z",
+      });
+      committedDailyTable.set(`2026-10-24:${sameDayControlOrder.orderId}`, {
+        service_date: "2026-10-24",
+        order_id: sameDayControlOrder.orderId,
+        order_no: sameDayControlOrder.orderNo,
+        order_source: "phone",
+        tenant_id: sameDayControlOrder.tenantId,
+        partner_id: sameDayControlOrder.partnerId,
+        service_product_code: "taxi_realtime",
+        requested_at: "2026-10-24T02:00:00.000Z",
+        reservation_time: sameDayControlOrder.reservationWindowStart,
+        pickup_address_snapshot: "Ximen Station",
+        dropoff_address_snapshot: "Songshan Airport",
+        first_dispatch_at: null,
+        first_assigned_at: null,
+        final_driver_id: null,
+        final_vehicle_id: null,
+        final_plate_no: null,
+        eta_seconds_at_assignment: null,
+        arrived_pickup_at: null,
+        trip_started_at: null,
+        trip_completed_at: null,
+        final_status: "pending_review",
+        redispatch_count: 0,
+        cancellation_reason: null,
+        complaint_count: 0,
+        generated_at: "2026-10-24T02:01:00.000Z",
+      });
+    };
+    seedLegacyUtcRow();
+
+    let failNextDelete = false;
+    const toTaipeiDay = (iso: string) =>
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Taipei",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date(iso));
+
+    const executeOnTable = (
+      table: Map<string, StoredDailyRow>,
+      sql: string,
+      params: unknown[] = [],
+    ) => {
+      const normalized = sql.replace(/\s+/g, " ").trim();
+      if (normalized.includes("FROM ops.phase1_owned_orders")) {
+        return {
+          rows: snapshot.orders.map((record) => ({
+            record: structuredClone(record),
+          })),
+          rowCount: snapshot.orders.length,
+        };
+      }
+      if (
+        normalized.includes("FROM ops.phase1_dispatch_jobs") ||
+        normalized.includes("FROM ops.phase1_dispatch_assignments") ||
+        normalized.includes("FROM ops.phase1_driver_tasks") ||
+        normalized.includes("FROM ops.phase1_dispatch_trace_logs") ||
+        normalized.includes("FROM crm.phase1_complaint_cases")
+      ) {
+        return { rows: [], rowCount: 0 };
+      }
+      if (normalized.includes("INSERT INTO reporting.dispatch_daily_records")) {
+        const serviceDateParam = String(params[0]);
+        const orderIdParam = String(params[1]);
+        const generatedAtParam = String(params[24]);
+        const hasNewerValidRow = [...table.values()].some(
+          (existing) =>
+            existing.order_id === orderIdParam &&
+            existing.service_date ===
+              toTaipeiDay(
+                existing.reservation_time ?? existing.requested_at,
+              ) &&
+            existing.generated_at > generatedAtParam,
+        );
+        if (!hasNewerValidRow) {
+          const key = `${serviceDateParam}:${orderIdParam}`;
+          const existingOnSameKey = table.get(key);
+          if (
+            !existingOnSameKey ||
+            existingOnSameKey.generated_at <= generatedAtParam
+          ) {
+            table.set(key, {
+              service_date: serviceDateParam,
+              order_id: orderIdParam,
+              order_no: String(params[2]),
+              order_source: String(params[3]),
+              tenant_id: params[4] ? String(params[4]) : null,
+              partner_id: params[5] ? String(params[5]) : null,
+              service_product_code: String(params[6]),
+              requested_at: String(params[7]),
+              reservation_time: params[8] ? String(params[8]) : null,
+              pickup_address_snapshot: String(params[9]),
+              dropoff_address_snapshot: params[10] ? String(params[10]) : null,
+              first_dispatch_at: params[11] ? String(params[11]) : null,
+              first_assigned_at: params[12] ? String(params[12]) : null,
+              final_driver_id: params[13] ? String(params[13]) : null,
+              final_vehicle_id: params[14] ? String(params[14]) : null,
+              final_plate_no: params[15] ? String(params[15]) : null,
+              eta_seconds_at_assignment:
+                typeof params[16] === "number" ? params[16] : null,
+              arrived_pickup_at: params[17] ? String(params[17]) : null,
+              trip_started_at: params[18] ? String(params[18]) : null,
+              trip_completed_at: params[19] ? String(params[19]) : null,
+              final_status: String(params[20]),
+              redispatch_count: Number(params[21]),
+              cancellation_reason: params[22] ? String(params[22]) : null,
+              complaint_count: Number(params[23]),
+              generated_at: generatedAtParam,
+            });
+          }
+        }
+        return { rows: [], rowCount: 1 };
+      }
+      if (normalized.includes("DELETE FROM reporting.dispatch_daily_records")) {
+        if (failNextDelete) {
+          failNextDelete = false;
+          throw new Error("simulated failure during stale day-key delete");
+        }
+        const orderIdParam = String(params[0]);
+        const targetDateParam = String(params[1]);
+        const generatedAtParam = String(params[2]);
+        for (const [key, row] of table.entries()) {
+          const rowTaipeiDay = toTaipeiDay(
+            row.reservation_time ?? row.requested_at,
+          );
+          if (
+            row.order_id === orderIdParam &&
+            row.service_date !== targetDateParam &&
+            (row.service_date !== rowTaipeiDay ||
+              row.generated_at <= generatedAtParam)
+          ) {
+            table.delete(key);
+          }
+        }
+        return { rows: [], rowCount: 1 };
+      }
+      if (normalized.includes("FROM reporting.dispatch_daily_records")) {
+        const rows = [...table.values()].filter((row) => {
+          const rowTaipeiDay = toTaipeiDay(
+            row.reservation_time ?? row.requested_at,
+          );
+          let idx = 0;
+          if (normalized.includes("service_date = $1::date")) {
+            const target = String(params[idx++]);
+            if (row.service_date !== target && rowTaipeiDay !== target) {
+              return false;
+            }
+          }
+          if (normalized.includes("order_id =")) {
+            const targetOrder = String(params[idx++]);
+            if (row.order_id !== targetOrder) {
+              return false;
+            }
+          }
+          return true;
+        });
+        return { rows: structuredClone(rows), rowCount: rows.length };
+      }
+      return { rows: [], rowCount: 0 };
+    };
+
+    const transactionalDb = {
+      isEnabled: () => true,
+      query: async (sql: string, params?: unknown[]) =>
+        executeOnTable(committedDailyTable, sql, params),
+      connect: async () => {
+        let workingCopy: Map<string, StoredDailyRow> | null = null;
+        return {
+          query: async (sql: string, params?: unknown[]) => {
+            const normalized = sql.trim();
+            if (normalized === "BEGIN") {
+              workingCopy = new Map(structuredClone([...committedDailyTable]));
+              return { rows: [], rowCount: 0 };
+            }
+            if (normalized === "COMMIT") {
+              if (workingCopy) {
+                committedDailyTable.clear();
+                for (const [k, v] of workingCopy) {
+                  committedDailyTable.set(k, v);
+                }
+                workingCopy = null;
+              }
+              return { rows: [], rowCount: 0 };
+            }
+            if (normalized === "ROLLBACK") {
+              workingCopy = null;
+              return { rows: [], rowCount: 0 };
+            }
+            if (normalized.includes("pg_advisory_xact_lock")) {
+              return { rows: [], rowCount: 0 };
+            }
+            return executeOnTable(
+              workingCopy ?? committedDailyTable,
+              sql,
+              params,
+            );
+          },
+          release: () => undefined,
+        };
+      },
+    };
+
+    const repository = new ReportingRepository(transactionalDb as never);
+    const service = new ReportingService(
+      {
+        getReportingSnapshot: () => {
+          throw new Error("forbidden memory fallback");
+        },
+      } as never,
+      {
+        listComplaintCases: () => {
+          throw new Error("forbidden memory fallback");
+        },
+      } as never,
+      regulatoryRegistryService,
+      undefined,
+      repository,
+    );
+
+    // 1. Failed per-order rekey rolls back the transaction and preserves the prior durable 2026-10-24 row without creating a duplicate on 2026-10-25
+    failNextDelete = true;
+    await expect(
+      service.rebuildDailyDispatchRecords({
+        serviceDate: "2026-10-25",
+        orderId: taipeiMidnightOrder.orderId,
+      }),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "REPORT_REBUILD_FAILED",
+    });
+    expect(
+      committedDailyTable.has(`2026-10-24:${taipeiMidnightOrder.orderId}`),
+    ).toBe(true);
+    expect(
+      committedDailyTable.has(`2026-10-25:${taipeiMidnightOrder.orderId}`),
+    ).toBe(false);
+    expect(
+      committedDailyTable.has(`2026-10-24:${sameDayControlOrder.orderId}`),
+    ).toBe(true);
+
+    // 2. Retry succeeds idempotently: moves affected order to 2026-10-25, removes old 2026-10-24 key, preserves unrelated 2026-10-24 order
+    const rebuilt = await service.rebuildDailyDispatchRecords({
+      serviceDate: "2026-10-25",
+      orderId: taipeiMidnightOrder.orderId,
+    });
+    expect(rebuilt.rebuiltCount).toBe(1);
+    expect(rebuilt.records[0]?.serviceDate).toBe("2026-10-25");
+    expect(
+      committedDailyTable.has(`2026-10-24:${taipeiMidnightOrder.orderId}`),
+    ).toBe(false);
+    expect(
+      committedDailyTable.has(`2026-10-25:${taipeiMidnightOrder.orderId}`),
+    ).toBe(true);
+    expect(
+      committedDailyTable.has(`2026-10-24:${sameDayControlOrder.orderId}`),
+    ).toBe(true);
+
+    // 3. Out-of-order older rebuild does not overwrite a newer persisted record
+    await repository.upsertDailyDispatchRecords([
+      {
+        ...rebuilt.records[0]!,
+        finalStatus: "assigned",
+        generatedAt: "2026-10-24T16:59:00.000Z",
+      },
+    ]);
+    expect(
+      committedDailyTable.get(`2026-10-25:${taipeiMidnightOrder.orderId}`)
+        ?.final_status,
+    ).toBe("ready_for_dispatch");
+
+    // 4. Read-path cutover also reconciles a legacy UTC-keyed row directly
+    committedDailyTable.clear();
+    seedLegacyUtcRow();
+    const readCutover = await service.listDailyDispatchRecords({
+      serviceDate: "2026-10-25",
+      orderId: taipeiMidnightOrder.orderId,
+    });
+    expect(readCutover).toHaveLength(1);
+    expect(readCutover[0]?.serviceDate).toBe("2026-10-25");
+    expect(
+      committedDailyTable.has(`2026-10-24:${taipeiMidnightOrder.orderId}`),
+    ).toBe(false);
+    expect(
+      committedDailyTable.has(`2026-10-25:${taipeiMidnightOrder.orderId}`),
+    ).toBe(true);
+  });
+
   // Official migrated PostgreSQL schema persistence and readback check.
   // Runs in authorized CI (product_api_unit after pnpm db:migrate) and skips on
   // the local VM where starting PostgreSQL/Docker is prohibited.
@@ -989,6 +1367,474 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
         await database.query(
           "DELETE FROM ops.phase1_owned_orders WHERE order_id = $1",
           [completedOrder.orderId],
+        );
+      }
+    },
+  );
+
+  it.skipIf(!process.env.DATABASE_URL)(
+    "reconciles legacy UTC-keyed reporting.dispatch_daily_records rows to the Asia/Taipei service day without old-day duplicates and rolls back failed rekeys on the official PostgreSQL schema",
+    async () => {
+      const {
+        ownedMobilityService,
+        complaintService,
+        regulatoryRegistryService,
+        cleanup,
+      } = createHarness();
+      cleanups.push(cleanup);
+
+      const database = new DatabaseService();
+      cleanups.push(async () => {
+        await database.onModuleDestroy();
+      });
+      const multiTaxiRepository = new MultiTaxiRepository(database);
+      const ownedMobilityRepository = new OwnedMobilityRepository(
+        database,
+        multiTaxiRepository,
+      );
+      const complaintRepository = new ComplaintRepository(database);
+      const reportingRepository = new ReportingRepository(database);
+
+      const runId = randomUUID().slice(0, 8);
+      const legacyUtcDay = "2026-10-24";
+      const taipeiServiceDay = "2026-10-25";
+
+      // 1. Create a completed order at 2026-10-24T17:00:00.000Z (legacy UTC day 2026-10-24, Asia/Taipei day 2026-10-25)
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-24T17:00:00.000Z"));
+      const taipeiMidnightOrder =
+        await ownedMobilityService.createCallCenterOrder({
+          callId: `call-int-rep-pg-rekey-${runId}`,
+          agentId: "ops-agent-001",
+          recordingId: `rec-int-rep-pg-rekey-${runId}`,
+          pickup: { address: "Taipei Main Station" },
+          dropoff: { address: "Songshan Airport" },
+          passenger: { name: "PG Taipei Midnight Rider", phone: "0911999001" },
+          notes: "pg legacy utc day-key reconciliation",
+        });
+      const dispatch = await ownedMobilityService.dispatchOrder(
+        taipeiMidnightOrder.orderId,
+        { mode: "auto" },
+        `req-int-rep-pg-rekey-dispatch-${runId}`,
+      );
+      await ownedMobilityService.assignDispatch(
+        {
+          dispatchJobId: dispatch.dispatchJobId,
+          vehicleId: "veh-demo-001",
+          driverId: "drv-demo-001",
+        },
+        `req-int-rep-pg-rekey-assign-${runId}`,
+      );
+      const task = ownedMobilityService
+        .getReportingSnapshot()
+        .driverTasks.find(
+          (item) => item.orderId === taipeiMidnightOrder.orderId,
+        )!;
+      await ownedMobilityService.acceptDriverTask(
+        task.taskId,
+        { acceptedAt: "2026-10-24T17:03:00.000Z" },
+        `req-int-rep-pg-rekey-accept-${runId}`,
+      );
+      const acceptedSnapshot = ownedMobilityService.getReportingSnapshot();
+      await ownedMobilityService.departDriverTask(
+        task.taskId,
+        { departedAt: "2026-10-24T17:05:00.000Z" },
+        `req-int-rep-pg-rekey-depart-${runId}`,
+      );
+      await ownedMobilityService.arrivedPickup(
+        task.taskId,
+        { arrivedAt: "2026-10-24T17:12:00.000Z" },
+        `req-int-rep-pg-rekey-arrive-${runId}`,
+      );
+      await ownedMobilityService.startDriverTask(
+        task.taskId,
+        { startedAt: "2026-10-24T17:15:00.000Z" },
+        `req-int-rep-pg-rekey-start-${runId}`,
+      );
+      await ownedMobilityService.completeDriverTask(
+        task.taskId,
+        {
+          completedAt: "2026-10-24T17:40:00.000Z",
+          actualDistanceKm: 11.8,
+          actualDurationSec: 1500,
+        },
+        `req-int-rep-pg-rekey-complete-${runId}`,
+      );
+      const complaintCase = complaintService.createComplaintCase({
+        caseSource: "ops_console",
+        relatedOrderId: taipeiMidnightOrder.orderId,
+        category: "late_arrival",
+        severity: "normal",
+        description: "PG Taipei day rekey complaint",
+      });
+
+      // 2. Create an unrelated order on 2026-10-24T02:00:00.000Z (both UTC and Asia/Taipei day 2026-10-24)
+      vi.setSystemTime(new Date("2026-10-24T02:00:00.000Z"));
+      const controlDay24Order =
+        await ownedMobilityService.createCallCenterOrder({
+          callId: `call-int-rep-pg-ctrl-${runId}`,
+          agentId: "ops-agent-001",
+          recordingId: `rec-int-rep-pg-ctrl-${runId}`,
+          pickup: { address: "Banqiao Station" },
+          dropoff: { address: "Ximen Station" },
+          passenger: { name: "PG Control Day 24 Rider", phone: "0911999002" },
+          notes: "pg unrelated day 24 control",
+        });
+      vi.useRealTimers();
+
+      const completedSnapshot = ownedMobilityService.getReportingSnapshot();
+
+      const insertLegacyUtcRow = async () => {
+        await database.query(
+          `
+            INSERT INTO reporting.dispatch_daily_records (
+              service_date,
+              order_id,
+              order_no,
+              order_source,
+              tenant_id,
+              partner_id,
+              service_product_code,
+              requested_at,
+              reservation_time,
+              pickup_address_snapshot,
+              dropoff_address_snapshot,
+              first_dispatch_at,
+              first_assigned_at,
+              final_driver_id,
+              final_vehicle_id,
+              final_plate_no,
+              eta_seconds_at_assignment,
+              arrived_pickup_at,
+              trip_started_at,
+              trip_completed_at,
+              final_status,
+              redispatch_count,
+              cancellation_reason,
+              complaint_count,
+              generated_at
+            ) VALUES (
+              $1::date, $2, $3, 'phone', $4, $5, 'taxi_realtime',
+              '2026-10-24T17:00:00.000Z'::timestamptz,
+              $6::timestamptz,
+              'Taipei Main Station',
+              'Songshan Airport',
+              '2026-10-24T17:00:00.000Z'::timestamptz,
+              '2026-10-24T17:00:00.000Z'::timestamptz,
+              'drv-demo-001',
+              'veh-demo-001',
+              'ABC-1001',
+              300,
+              '2026-10-24T17:12:00.000Z'::timestamptz,
+              '2026-10-24T17:15:00.000Z'::timestamptz,
+              '2026-10-24T17:40:00.000Z'::timestamptz,
+              'completed',
+              0,
+              NULL,
+              1,
+              '2026-10-24T17:45:00.000Z'::timestamptz
+            )
+            ON CONFLICT (service_date, order_id) DO UPDATE SET
+              generated_at = EXCLUDED.generated_at
+          `,
+          [
+            legacyUtcDay,
+            taipeiMidnightOrder.orderId,
+            taipeiMidnightOrder.orderNo,
+            taipeiMidnightOrder.tenantId,
+            taipeiMidnightOrder.partnerId,
+            taipeiMidnightOrder.reservationWindowStart,
+          ],
+        );
+      };
+
+      try {
+        await persistCompletedTripWithPairedReservations(
+          ownedMobilityRepository,
+          acceptedSnapshot,
+          completedSnapshot,
+          taipeiMidnightOrder.orderId,
+        );
+        await ownedMobilityRepository.withTransaction(async (tx) => {
+          await ownedMobilityRepository.persistOrderWorkflow(tx, {
+            orders: completedSnapshot.orders.filter(
+              (item) => item.orderId === controlDay24Order.orderId,
+            ),
+            dispatchJobs: [],
+            dispatchAssignments: [],
+            driverTasks: [],
+            dispatchTraceLogs: [],
+          });
+        });
+        await complaintRepository.persistChanges({
+          complaintCases: [complaintCase],
+        });
+
+        const memoryFallbackSpy = vi.fn(() => {
+          throw new Error("unexpected fallback to in-memory snapshot");
+        });
+        const writerService = new ReportingService(
+          { getReportingSnapshot: memoryFallbackSpy } as never,
+          { listComplaintCases: memoryFallbackSpy } as never,
+          regulatoryRegistryService,
+          undefined,
+          reportingRepository,
+        );
+        const readerService = new ReportingService(
+          { getReportingSnapshot: memoryFallbackSpy } as never,
+          { listComplaintCases: memoryFallbackSpy } as never,
+          regulatoryRegistryService,
+          undefined,
+          reportingRepository,
+        );
+
+        // Persist the unrelated 2026-10-24 control order and seed the legacy UTC row on 2026-10-24 for the 17:00Z order
+        await writerService.rebuildDailyDispatchRecords({
+          serviceDate: legacyUtcDay,
+          orderId: controlDay24Order.orderId,
+        });
+        await insertLegacyUtcRow();
+
+        // Verify both rows initially sit on 2026-10-24 in PG
+        const initialRows = await database.query<{
+          service_date: string;
+          order_id: string;
+        }>(
+          `
+            SELECT service_date::text AS service_date, order_id
+            FROM reporting.dispatch_daily_records
+            WHERE order_id = ANY($1::text[])
+            ORDER BY order_id ASC, service_date ASC
+          `,
+          [[taipeiMidnightOrder.orderId, controlDay24Order.orderId]],
+        );
+        expect(initialRows.rows).toEqual(
+          expect.arrayContaining([
+            {
+              service_date: legacyUtcDay,
+              order_id: taipeiMidnightOrder.orderId,
+            },
+            {
+              service_date: legacyUtcDay,
+              order_id: controlDay24Order.orderId,
+            },
+          ]),
+        );
+
+        // 3. Simulate a per-order failure during the rekey transaction (after INSERT, on DELETE before COMMIT)
+        // and verify PostgreSQL ROLLBACK preserves the prior durable 2026-10-24 row without leaving a 2026-10-25 duplicate
+        const failingDbProxy = {
+          isEnabled: () => database.isEnabled(),
+          query: (sql: string, values?: readonly unknown[]) =>
+            database.query(sql, values),
+          connect: async () => {
+            const rawClient = await database.connect();
+            return {
+              query: async (sql: string, values?: unknown[]) => {
+                if (
+                  sql.includes("DELETE FROM reporting.dispatch_daily_records")
+                ) {
+                  throw new Error(
+                    "simulated PG failure during legacy UTC day-key cleanup",
+                  );
+                }
+                return rawClient.query(sql, values);
+              },
+              release: () => rawClient.release(),
+            };
+          },
+        };
+        const failingService = new ReportingService(
+          { getReportingSnapshot: memoryFallbackSpy } as never,
+          { listComplaintCases: memoryFallbackSpy } as never,
+          regulatoryRegistryService,
+          undefined,
+          new ReportingRepository(failingDbProxy as never),
+        );
+
+        await expect(
+          failingService.rebuildDailyDispatchRecords({
+            serviceDate: taipeiServiceDay,
+            orderId: taipeiMidnightOrder.orderId,
+          }),
+        ).rejects.toMatchObject({
+          status: 503,
+          code: "REPORT_REBUILD_FAILED",
+        });
+
+        const rowsAfterFailedRekey = await database.query<{
+          service_date: string;
+          order_id: string;
+        }>(
+          `
+            SELECT service_date::text AS service_date, order_id
+            FROM reporting.dispatch_daily_records
+            WHERE order_id = $1
+          `,
+          [taipeiMidnightOrder.orderId],
+        );
+        expect(rowsAfterFailedRekey.rows).toEqual([
+          {
+            service_date: legacyUtcDay,
+            order_id: taipeiMidnightOrder.orderId,
+          },
+        ]);
+
+        // Canonical order, assignment, and complaint history remain intact after failed rekey
+        const canonicalOrderCheck = await database.query<{ order_id: string }>(
+          "SELECT order_id FROM ops.phase1_owned_orders WHERE order_id = $1",
+          [taipeiMidnightOrder.orderId],
+        );
+        expect(canonicalOrderCheck.rows).toHaveLength(1);
+
+        // 4. Production rebuild moves the legacy UTC row to Taipei day 2026-10-25 and leaves 2026-10-24 empty for this order
+        const rebuild25 = await writerService.rebuildDailyDispatchRecords({
+          serviceDate: taipeiServiceDay,
+          orderId: taipeiMidnightOrder.orderId,
+        });
+        expect(rebuild25.rebuiltCount).toBe(1);
+        expect(rebuild25.records[0]?.serviceDate).toBe(taipeiServiceDay);
+        expect(memoryFallbackSpy).not.toHaveBeenCalled();
+
+        const readDay25 = await readerService.listDailyDispatchRecords({
+          serviceDate: taipeiServiceDay,
+          orderId: taipeiMidnightOrder.orderId,
+        });
+        expect(readDay25).toHaveLength(1);
+        expect(readDay25[0]).toMatchObject({
+          serviceDate: taipeiServiceDay,
+          orderId: taipeiMidnightOrder.orderId,
+          requestedAt: "2026-10-24T17:00:00.000Z",
+          reservationTime: taipeiMidnightOrder.reservationWindowStart,
+          finalStatus: "completed",
+          complaintCount: 1,
+        });
+
+        const readOldDay24ForMovedOrder =
+          await readerService.listDailyDispatchRecords({
+            serviceDate: legacyUtcDay,
+            orderId: taipeiMidnightOrder.orderId,
+          });
+        expect(readOldDay24ForMovedOrder).toEqual([]);
+
+        // Unrelated order on 2026-10-24 is preserved
+        const readControlDay24 = await readerService.listDailyDispatchRecords({
+          serviceDate: legacyUtcDay,
+          orderId: controlDay24Order.orderId,
+        });
+        expect(readControlDay24).toHaveLength(1);
+        expect(readControlDay24[0]?.serviceDate).toBe(legacyUtcDay);
+
+        // Direct SQL table check confirms exactly one row on 2026-10-25 and no duplicate on 2026-10-24
+        const persistedAfterRebuild = await database.query<{
+          service_date: string;
+          order_id: string;
+        }>(
+          `
+            SELECT service_date::text AS service_date, order_id
+            FROM reporting.dispatch_daily_records
+            WHERE order_id = $1
+          `,
+          [taipeiMidnightOrder.orderId],
+        );
+        expect(persistedAfterRebuild.rows).toEqual([
+          {
+            service_date: taipeiServiceDay,
+            order_id: taipeiMidnightOrder.orderId,
+          },
+        ]);
+
+        // 5. Replay is idempotent and an older rebuild cannot overwrite a newer persisted result
+        const replay = await writerService.rebuildDailyDispatchRecords({
+          serviceDate: taipeiServiceDay,
+          orderId: taipeiMidnightOrder.orderId,
+        });
+        expect(replay.rebuiltCount).toBe(1);
+        await reportingRepository.upsertDailyDispatchRecords([
+          {
+            ...readDay25[0]!,
+            finalStatus: "assigned",
+            generatedAt: "2026-10-24T17:00:01.000Z",
+          },
+        ]);
+        const afterStaleAttempt = await readerService.listDailyDispatchRecords({
+          serviceDate: taipeiServiceDay,
+          orderId: taipeiMidnightOrder.orderId,
+        });
+        expect(afterStaleAttempt).toHaveLength(1);
+        expect(afterStaleAttempt[0]?.finalStatus).toBe("completed");
+
+        // 6. Read-path cutover: if a legacy UTC row exists before an explicit rebuild, listDailyDispatchRecords reconciles it to the Taipei day
+        await database.query(
+          "DELETE FROM reporting.dispatch_daily_records WHERE order_id = $1",
+          [taipeiMidnightOrder.orderId],
+        );
+        await insertLegacyUtcRow();
+
+        const readCutover25 = await readerService.listDailyDispatchRecords({
+          serviceDate: taipeiServiceDay,
+          orderId: taipeiMidnightOrder.orderId,
+        });
+        expect(readCutover25).toHaveLength(1);
+        expect(readCutover25[0]?.serviceDate).toBe(taipeiServiceDay);
+
+        const persistedAfterReadCutover = await database.query<{
+          service_date: string;
+          order_id: string;
+        }>(
+          `
+            SELECT service_date::text AS service_date, order_id
+            FROM reporting.dispatch_daily_records
+            WHERE order_id = $1
+          `,
+          [taipeiMidnightOrder.orderId],
+        );
+        expect(persistedAfterReadCutover.rows).toEqual([
+          {
+            service_date: taipeiServiceDay,
+            order_id: taipeiMidnightOrder.orderId,
+          },
+        ]);
+      } finally {
+        const cleanupOrderIds = [
+          taipeiMidnightOrder.orderId,
+          controlDay24Order.orderId,
+        ];
+        await database.query(
+          "DELETE FROM reporting.dispatch_daily_records WHERE order_id = ANY($1::text[])",
+          [cleanupOrderIds],
+        );
+        await database.query(
+          "DELETE FROM crm.phase1_complaint_cases WHERE case_no = $1",
+          [complaintCase.caseNo],
+        );
+        await database.query(
+          "UPDATE ops.phase1_dispatch_assignments SET status = 'cancelled' WHERE order_id = ANY($1::text[]) AND status IN ('assigned', 'accepted')",
+          [cleanupOrderIds],
+        );
+        await database.query(
+          "DELETE FROM ops.dispatch_resource_reservations WHERE order_id = ANY($1::text[])",
+          [cleanupOrderIds],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_dispatch_trace_logs WHERE order_id = ANY($1::text[])",
+          [cleanupOrderIds],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_driver_tasks WHERE order_id = ANY($1::text[])",
+          [cleanupOrderIds],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_dispatch_assignments WHERE order_id = ANY($1::text[])",
+          [cleanupOrderIds],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_dispatch_jobs WHERE order_id = ANY($1::text[])",
+          [cleanupOrderIds],
+        );
+        await database.query(
+          "DELETE FROM ops.phase1_owned_orders WHERE order_id = ANY($1::text[])",
+          [cleanupOrderIds],
         );
       }
     },

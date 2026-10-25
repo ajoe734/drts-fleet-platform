@@ -25,7 +25,10 @@ import type {
   VehicleRegistryRecord,
 } from "@drts/contracts";
 
-import { LATE_ARRIVAL_THRESHOLD_MINUTES } from "@drts/contracts";
+import {
+  COMPLAINT_STATISTICS_TIME_ZONE,
+  LATE_ARRIVAL_THRESHOLD_MINUTES,
+} from "@drts/contracts";
 
 import { ComplaintService } from "../complaint/complaint.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
@@ -87,6 +90,29 @@ const SNAPSHOT_INTERVAL_MS = 5 * 60 * 1000;
 const LOCATION_FRESHNESS_WINDOW_MS = 90 * 1000;
 const LOCATION_ACCURACY_THRESHOLD_METERS = 100;
 
+const TAIPEI_DATE_FORMATTER = new Intl.DateTimeFormat("en", {
+  timeZone: COMPLAINT_STATISTICS_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function toTaipeiDate(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) {
+    const trimmed = value.trim();
+    return /^\d{4}-\d{2}-\d{2}/.test(trimmed) ? trimmed.slice(0, 10) : null;
+  }
+  const parts = TAIPEI_DATE_FORMATTER.formatToParts(new Date(time));
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : null;
+}
+
 @Injectable()
 export class ReportingService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ReportingService.name);
@@ -140,20 +166,43 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const records = source.orders
-      .map((order) =>
-        this.buildDispatchDailyRecord(
-          order,
-          source.dispatchJobs,
-          source.dispatchAssignments,
-          source.driverTasks,
-          source.dispatchTraceLogs,
-          vehiclePlateById,
-          complaintCountByOrderId,
-          generatedAt,
-        ),
-      )
+    const allBuilt = source.orders.map((order) => {
+      const record = this.buildDispatchDailyRecord(
+        order,
+        source.dispatchJobs,
+        source.dispatchAssignments,
+        source.driverTasks,
+        source.dispatchTraceLogs,
+        vehiclePlateById,
+        complaintCountByOrderId,
+        generatedAt,
+      );
+      const legacyUtcDate = (
+        order.reservationWindowStart ?? order.createdAt
+      ).slice(0, 10);
+      return { record, legacyUtcDate };
+    });
+
+    const records = allBuilt
+      .map(({ record }) => record)
       .filter((record) => this.matchesQuery(record, query))
+      .sort(
+        (left, right) =>
+          right.requestedAt.localeCompare(left.requestedAt) ||
+          right.orderId.localeCompare(left.orderId),
+      );
+
+    const recordsToPersist = allBuilt
+      .filter(
+        ({ record, legacyUtcDate }) =>
+          this.matchesQuery(record, query) ||
+          (legacyUtcDate !== record.serviceDate &&
+            this.matchesQuery(
+              { ...record, serviceDate: legacyUtcDate },
+              query,
+            )),
+      )
+      .map(({ record }) => record)
       .sort(
         (left, right) =>
           right.requestedAt.localeCompare(left.requestedAt) ||
@@ -162,7 +211,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
 
     if (this.reportingRepository?.isEnabled()) {
       try {
-        await this.reportingRepository.upsertDailyDispatchRecords(records);
+        await this.reportingRepository.upsertDailyDispatchRecords(
+          recordsToPersist,
+        );
       } catch (error) {
         this.reportingRepository.reportPersistenceFailure(
           error,
@@ -177,7 +228,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     } else {
       this.dailyDispatchRecords = this.mergeRecords(
         this.dailyDispatchRecords,
-        records,
+        recordsToPersist,
       );
     }
 
@@ -210,7 +261,9 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       if (records.length > 0) {
         return records.map((record) => ({
           ...record,
-          serviceDate: this.normalizeServiceDate(record.serviceDate),
+          serviceDate:
+            toTaipeiDate(record.reservationTime ?? record.requestedAt) ??
+            this.normalizeServiceDate(record.serviceDate),
         }));
       }
       return (await this.rebuildDailyDispatchRecords(query)).records.map(
@@ -228,6 +281,18 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     if (rebuiltRecords) {
       return rebuiltRecords;
     }
+
+    this.dailyDispatchRecords = this.mergeRecords(
+      [],
+      this.dailyDispatchRecords.map((record) => {
+        const expectedDate = toTaipeiDate(
+          record.reservationTime ?? record.requestedAt,
+        );
+        return expectedDate && expectedDate !== record.serviceDate
+          ? { ...record, serviceDate: expectedDate }
+          : record;
+      }),
+    );
 
     return this.dailyDispatchRecords
       .filter((record) => this.matchesQuery(record, query))
@@ -1059,7 +1124,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   }
 
   private resolveServiceDate(order: OwnedOrderRecord) {
-    return (order.reservationWindowStart ?? order.createdAt).slice(0, 10);
+    const raw = order.reservationWindowStart ?? order.createdAt;
+    return toTaipeiDate(raw) ?? raw.slice(0, 10);
   }
 
   private normalizeServiceDate(value: string | Date): string {
@@ -1366,10 +1432,16 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   ) {
     const merged = new Map<string, DispatchDailyRecord>();
     for (const record of existing) {
-      merged.set(`${record.serviceDate}:${record.orderId}`, { ...record });
+      const prior = merged.get(record.orderId);
+      if (!prior || prior.generatedAt <= record.generatedAt) {
+        merged.set(record.orderId, { ...record });
+      }
     }
     for (const record of next) {
-      merged.set(`${record.serviceDate}:${record.orderId}`, { ...record });
+      const prior = merged.get(record.orderId);
+      if (!prior || prior.generatedAt <= record.generatedAt) {
+        merged.set(record.orderId, { ...record });
+      }
     }
     return Array.from(merged.values());
   }

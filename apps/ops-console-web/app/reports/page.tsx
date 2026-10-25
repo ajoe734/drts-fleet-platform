@@ -336,7 +336,7 @@ function formatDateTime(
           hour: "2-digit",
           minute: "2-digit",
           hour12: false,
-          timeZone: "UTC",
+          timeZone: "Asia/Taipei",
         }
       : {
           month: "2-digit",
@@ -344,7 +344,7 @@ function formatDateTime(
           hour: "2-digit",
           minute: "2-digit",
           hour12: false,
-          timeZone: "UTC",
+          timeZone: "Asia/Taipei",
         },
   ).format(parsed);
 

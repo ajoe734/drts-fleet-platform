@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { displayDateTime } from "../../../agency-portal-web/lib/format";
 import { ApiRequestError } from "../../src/common/api-envelope";
+import { projectAgencyDailyDispatchRecord } from "../../src/modules/agency-access/agency-projections";
 import { ReportingService } from "../../src/modules/reporting/reporting.service";
 
 function createOrder(overrides: Record<string, unknown> = {}) {
@@ -371,5 +375,246 @@ describe("BUREAU-R12 ReportingService durable ACK and shared canonical source er
     );
     expect(sandboxListed).toHaveLength(1);
     expect(sandboxListed[0]?.orderId).toBe("order-stale-memory-999");
+  });
+
+  it("computes serviceDate as the Asia/Taipei calendar day of reservationWindowStart ?? createdAt across midnight, +08:00, fallback, and month/year boundaries while preserving UTC event timestamps", async () => {
+    const orders = [
+      createOrder({
+        orderId: "order-tpe-before-midnight",
+        orderNo: "O-TPE-BEFORE-MIDNIGHT",
+        createdAt: "2026-10-24T15:00:00.000Z",
+        reservationWindowStart: "2026-10-24T15:59:59.000Z",
+      }),
+      createOrder({
+        orderId: "order-tpe-at-midnight",
+        orderNo: "O-TPE-AT-MIDNIGHT",
+        createdAt: "2026-10-24T15:30:00.000Z",
+        reservationWindowStart: "2026-10-24T16:00:00.000Z",
+      }),
+      createOrder({
+        orderId: "order-tpe-null-reservation-fallback",
+        orderNo: "O-TPE-NULL-RES-FALLBACK",
+        createdAt: "2026-10-24T16:00:00.000Z",
+        reservationWindowStart: null,
+      }),
+      createOrder({
+        orderId: "order-tpe-explicit-offset-next-day",
+        orderNo: "O-TPE-OFFSET-NEXT",
+        createdAt: "2026-10-24T23:50:00+08:00",
+        reservationWindowStart: "2026-10-25T00:05:00+08:00",
+      }),
+      createOrder({
+        orderId: "order-tpe-explicit-offset-same-day",
+        orderNo: "O-TPE-OFFSET-SAME",
+        createdAt: "2026-10-24T23:59:59+08:00",
+        reservationWindowStart: null,
+      }),
+      createOrder({
+        orderId: "order-tpe-month-boundary",
+        orderNo: "O-TPE-MONTH-BOUNDARY",
+        createdAt: "2026-10-31T15:00:00.000Z",
+        reservationWindowStart: "2026-10-31T16:00:00.000Z",
+      }),
+      createOrder({
+        orderId: "order-tpe-year-boundary",
+        orderNo: "O-TPE-YEAR-BOUNDARY",
+        createdAt: "2026-12-31T15:00:00.000Z",
+        reservationWindowStart: "2026-12-31T16:00:00.000Z",
+      }),
+    ];
+
+    const harness = createDurableAckHarness({ dbEnabled: false });
+    harness.ownedMobilityService.getReportingSnapshot.mockReturnValue({
+      orders,
+      dispatchJobs: [
+        {
+          dispatchJobId: "job-tpe-at-midnight",
+          orderId: "order-tpe-at-midnight",
+          status: "assigned",
+          mode: "auto",
+          latestEtaMinutes: 8,
+          createdAt: "2026-10-24T15:31:00.000Z",
+          updatedAt: "2026-10-24T15:32:00.000Z",
+        },
+      ],
+      dispatchAssignments: [
+        {
+          assignmentId: "assign-tpe-at-midnight",
+          dispatchJobId: "job-tpe-at-midnight",
+          orderId: "order-tpe-at-midnight",
+          taskId: "task-tpe-at-midnight",
+          vehicleId: "vehicle-001",
+          driverId: "driver-001",
+          assignmentType: "metered",
+          status: "completed",
+          acceptedAt: "2026-10-24T15:33:00.000Z",
+          rejectedAt: null,
+          rejectReasonCode: null,
+          createdAt: "2026-10-24T15:32:00.000Z",
+          updatedAt: "2026-10-24T16:25:00.000Z",
+        },
+      ],
+      driverTasks: [
+        {
+          taskId: "task-tpe-at-midnight",
+          orderId: "order-tpe-at-midnight",
+          dispatchJobId: "job-tpe-at-midnight",
+          assignmentId: "assign-tpe-at-midnight",
+          driverId: "driver-001",
+          vehicleId: "vehicle-001",
+          sourcePlatform: null,
+          routeProvided: false,
+          waypoints: [],
+          status: "completed",
+          acceptedAt: "2026-10-24T15:33:00.000Z",
+          departedAt: "2026-10-24T15:40:00.000Z",
+          arrivedPickupAt: "2026-10-24T15:58:00.000Z",
+          startedAt: "2026-10-24T16:02:00.000Z",
+          completedAt: "2026-10-24T16:25:00.000Z",
+          actualDistanceKm: 10.5,
+          actualDurationSec: 1380,
+          fare: null,
+          proof: null,
+        },
+      ],
+      dispatchTraceLogs: [
+        {
+          traceId: "trace-tpe-arrived",
+          orderId: "order-tpe-at-midnight",
+          eventType: "driver.arrived_pickup",
+          message: "arrived",
+          createdAt: "2026-10-24T15:58:00.000Z",
+          details: { taskId: "task-tpe-at-midnight" },
+        },
+        {
+          traceId: "trace-tpe-started",
+          orderId: "order-tpe-at-midnight",
+          eventType: "driver.started_trip",
+          message: "started",
+          createdAt: "2026-10-24T16:02:00.000Z",
+          details: { taskId: "task-tpe-at-midnight" },
+        },
+        {
+          traceId: "trace-tpe-completed",
+          orderId: "order-tpe-at-midnight",
+          eventType: "driver.completed_trip",
+          message: "completed",
+          createdAt: "2026-10-24T16:25:00.000Z",
+          details: { taskId: "task-tpe-at-midnight" },
+        },
+      ],
+    });
+    harness.complaintService.listComplaintCases.mockReturnValue([]);
+
+    const rebuilt = await harness.service.rebuildDailyDispatchRecords();
+    const byId = new Map(
+      rebuilt.records.map((record) => [record.orderId, record] as const),
+    );
+
+    expect(byId.get("order-tpe-before-midnight")?.serviceDate).toBe(
+      "2026-10-24",
+    );
+    expect(byId.get("order-tpe-at-midnight")).toMatchObject({
+      serviceDate: "2026-10-25",
+      requestedAt: "2026-10-24T15:30:00.000Z",
+      reservationTime: "2026-10-24T16:00:00.000Z",
+      firstDispatchAt: "2026-10-24T15:31:00.000Z",
+      firstAssignedAt: "2026-10-24T15:32:00.000Z",
+      arrivedPickupAt: "2026-10-24T15:58:00.000Z",
+      tripStartedAt: "2026-10-24T16:02:00.000Z",
+      tripCompletedAt: "2026-10-24T16:25:00.000Z",
+    });
+    expect(byId.get("order-tpe-null-reservation-fallback")).toMatchObject({
+      serviceDate: "2026-10-25",
+      requestedAt: "2026-10-24T16:00:00.000Z",
+      reservationTime: null,
+    });
+    expect(byId.get("order-tpe-explicit-offset-next-day")?.serviceDate).toBe(
+      "2026-10-25",
+    );
+    expect(byId.get("order-tpe-explicit-offset-same-day")?.serviceDate).toBe(
+      "2026-10-24",
+    );
+    expect(byId.get("order-tpe-month-boundary")?.serviceDate).toBe(
+      "2026-11-01",
+    );
+    expect(byId.get("order-tpe-year-boundary")?.serviceDate).toBe("2027-01-01");
+  });
+
+  it("aligns Ops Reports formatDateTime and Agency displayDateTime on Asia/Taipei so 2026-10-24T17:00:00.000Z is serviceDate 2026-10-25 across query, projection, and display", async () => {
+    const harness = createDurableAckHarness({ dbEnabled: false });
+    harness.ownedMobilityService.getReportingSnapshot.mockReturnValue({
+      orders: [
+        createOrder({
+          orderId: "order-r12-clock-20261025",
+          orderNo: "O-R12-CLOCK-20261025",
+          createdAt: "2026-10-24T17:00:00.000Z",
+          reservationWindowStart: "2026-10-24T17:00:00.000Z",
+        }),
+      ],
+      dispatchJobs: [],
+      dispatchAssignments: [],
+      driverTasks: [],
+      dispatchTraceLogs: [],
+    });
+    harness.complaintService.listComplaintCases.mockReturnValue([]);
+
+    await harness.service.rebuildDailyDispatchRecords();
+
+    const day24Records = await harness.service.listDailyDispatchRecords({
+      serviceDate: "2026-10-24",
+    });
+    const day25Records = await harness.service.listDailyDispatchRecords({
+      serviceDate: "2026-10-25",
+    });
+
+    expect(day24Records).toHaveLength(0);
+    expect(day25Records).toHaveLength(1);
+
+    const record = day25Records[0]!;
+    expect(record).toMatchObject({
+      serviceDate: "2026-10-25",
+      requestedAt: "2026-10-24T17:00:00.000Z",
+      reservationTime: "2026-10-24T17:00:00.000Z",
+    });
+
+    const agencyView = projectAgencyDailyDispatchRecord(record);
+    expect(agencyView).toMatchObject({
+      serviceDate: "2026-10-25",
+      requestedAt: "2026-10-24T17:00:00.000Z",
+      reservationTime: "2026-10-24T17:00:00.000Z",
+    });
+
+    const agencyFormatted = displayDateTime(agencyView.requestedAt);
+    expect(agencyFormatted).toContain("2026/10/25");
+    expect(agencyFormatted).toContain("01:00:00");
+
+    const opsReportsPageSource = readFileSync(
+      resolve(__dirname, "../../../ops-console-web/app/reports/page.tsx"),
+      "utf8",
+    );
+    const formatDateTimeMatch =
+      /function formatDateTime\([\s\S]*?return formatted\.replace\(","\s*,\s*""\);\s*\}/.exec(
+        opsReportsPageSource,
+      );
+    expect(formatDateTimeMatch).not.toBeNull();
+    expect(formatDateTimeMatch![0]).not.toContain('timeZone: "UTC"');
+    expect(
+      formatDateTimeMatch![0].match(/timeZone:\s*"Asia\/Taipei"/g),
+    ).toHaveLength(2);
+
+    const opsLongFormatted = new Intl.DateTimeFormat("zh-TW", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: "Asia/Taipei",
+    })
+      .format(new Date(record.requestedAt))
+      .replace(",", "");
+    expect(opsLongFormatted).toContain("2026/10/25");
+    expect(opsLongFormatted).toContain("01:00");
   });
 });
