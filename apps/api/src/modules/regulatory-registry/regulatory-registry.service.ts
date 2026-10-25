@@ -2423,11 +2423,8 @@ export class RegulatoryRegistryService
               : existing.exclusiveOperatorId !== undefined
                 ? this.normalizeNullableText(existing.exclusiveOperatorId)
                 : this.normalizeNullableText(
-                    this.selectPrimaryContract(
-                      vehicleId,
-                      now,
-                      state.contracts,
-                    )?.partnerId,
+                    this.selectPrimaryContract(vehicleId, now, state.contracts)
+                      ?.partnerId,
                   ),
           exclusiveProviderName:
             this.normalizeNullableText(command.exclusiveProviderName) ??
@@ -2455,11 +2452,8 @@ export class RegulatoryRegistryService
             command.exclusiveOperatorId !== undefined
               ? this.normalizeNullableText(command.exclusiveOperatorId)
               : this.normalizeNullableText(
-                  this.selectPrimaryContract(
-                    vehicleId,
-                    now,
-                    state.contracts,
-                  )?.partnerId,
+                  this.selectPrimaryContract(vehicleId, now, state.contracts)
+                    ?.partnerId,
                 ),
           exclusiveProviderName: this.normalizeNullableText(
             command.exclusiveProviderName,
@@ -3162,9 +3156,12 @@ export class RegulatoryRegistryService
     const operatingAuthorizationId = this.normalizeNullableText(
       context?.operatingAuthorizationId,
     );
-    const requestingOperatorId =
-      this.normalizeNullableText(context?.requestingOperatorId) ??
-      this.resolveOperatingAuthorizationOperatorId(operatingAuthorizationId);
+    // When an operating authorization is supplied, the operator resolved
+    // server-side from reg.multi_taxi_operating_authorizations is the only
+    // authority; a caller-supplied requestingOperatorId never overrides it.
+    const requestingOperatorId = operatingAuthorizationId
+      ? this.resolveOperatingAuthorizationOperatorId(operatingAuthorizationId)
+      : this.normalizeNullableText(context?.requestingOperatorId);
     const hasOperatorContext = Boolean(
       requestingOperatorId || operatingAuthorizationId,
     );
@@ -3285,7 +3282,7 @@ export class RegulatoryRegistryService
     });
     const hasOperatorContext = Boolean(
       this.normalizeNullableText(operatorContext?.requestingOperatorId) ||
-        this.normalizeNullableText(operatorContext?.operatingAuthorizationId),
+      this.normalizeNullableText(operatorContext?.operatingAuthorizationId),
     );
     return this.supplyPairs
       .map((pair) => {
@@ -3360,7 +3357,10 @@ export class RegulatoryRegistryService
     if (!vehicle.supplyLifecycle.dispatch.eligible) {
       return false;
     }
-    if (serviceBucket && !vehicle.supportedServiceBuckets.includes(serviceBucket)) {
+    if (
+      serviceBucket &&
+      !vehicle.supportedServiceBuckets.includes(serviceBucket)
+    ) {
       return false;
     }
     if (!serviceBucket && vehicle.supportedServiceBuckets.length === 0) {
@@ -4172,8 +4172,8 @@ export class RegulatoryRegistryService
   private hydrateExclusivity(
     exclusivity: DispatchExclusivityRecord,
   ): DispatchExclusivityRecord {
-    const hasExplicitOperatorField =
-      exclusivity.exclusiveOperatorId !== undefined;
+    // Persisted rows written before V0131 carry no exclusiveOperatorId; they
+    // stay unbound (exclusivity_operator_unbound) until rebound by review.
     const rawOperatorId = this.normalizeNullableText(
       exclusivity.exclusiveOperatorId,
     );
@@ -4181,14 +4181,7 @@ export class RegulatoryRegistryService
       exclusivity.declarationFileId === "review-simulated-document" &&
       rawOperatorId === "partner-demo-001"
         ? "review-synthetic-operator"
-        : hasExplicitOperatorField
-          ? rawOperatorId
-          : this.normalizeNullableText(
-              this.selectPrimaryContract(
-                exclusivity.vehicleId,
-                exclusivity.updatedAt ?? SEED_TIMESTAMP,
-              )?.partnerId,
-            );
+        : rawOperatorId;
     return this.applyExclusivityLifecycle(
       {
         ...exclusivity,

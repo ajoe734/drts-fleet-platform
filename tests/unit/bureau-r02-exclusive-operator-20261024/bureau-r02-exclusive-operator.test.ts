@@ -197,8 +197,7 @@ describe("BUREAU-R02: single-operator vehicle exclusivity binding & cross-operat
   });
 
   it("enforces operator exclusivity in VehicleEligibilityService, OwnedMobilityService (multi-taxi dispatch & queue), and ForwarderService", async () => {
-    const { registry, vehicleEligibility, ownedMobility, forwarder } =
-      createServices();
+    const { vehicleEligibility, ownedMobility, forwarder } = createServices();
 
     const authPartner1 = buildAuthorization(
       "auth-partner-001",
@@ -376,88 +375,76 @@ describe("BUREAU-R02: single-operator vehicle exclusivity binding & cross-operat
     expect(checkedInEntry.status).toBe("checked_in");
     expect(checkedInEntry.vehicleId).toBe("veh-demo-001");
 
-    // 2. ForwarderService: broadcastOrder and relayDriverAccept enforce operator exclusivity
-    const forwarded = await forwarder.ingestExternalOrder({
+    // 3. ForwarderService: operator identity self-reported in the external
+    // payload is never trusted for exclusivity decisions (no authoritative
+    // platform -> operator mapping exists for forwarded orders yet).
+    const spoofed = await forwarder.ingestExternalOrder({
       platformCode: "uber",
       externalOrderId: "ext-r02-001",
       payload: {
         serviceBucket: "standard_taxi",
         requestingOperatorId: "partner-demo-004",
+        operatorId: "partner-demo-004",
+        operatingAuthorizationId: "auth-partner-004",
         pickupAddress: "Songshan Airport",
         dropoffAddress: "Xinyi District",
       },
     });
-
-    // Broadcasting for partner-demo-004 refuses drv-demo-001 (paired with veh-demo-001, bound to partner-demo-001)
-    let broadcastError: unknown = null;
-    try {
-      await forwarder.broadcastOrder(forwarded.mirrorOrderId, {
-        candidateDriverIds: ["drv-demo-001"],
-      });
-    } catch (error) {
-      broadcastError = error;
-    }
-    expect(broadcastError).toBeDefined();
-    const broadcastResponse = (
-      broadcastError as {
-        getResponse: () => { error?: Record<string, unknown> };
-      }
-    ).getResponse();
-    expect(broadcastResponse.error?.code).toBe(
-      "NO_ELIGIBLE_FORWARDER_CANDIDATES",
-    );
-
-    // Broadcasting for bound operator (partner-demo-001) succeeds, and subsequent rebind causes acceptForwardedOrder/relayDriverAccept to refuse
-    const forwardedPartner1 = await forwarder.ingestExternalOrder({
-      platformCode: "uber",
-      externalOrderId: "ext-r02-002",
-      payload: {
-        serviceBucket: "standard_taxi",
-        requestingOperatorId: "partner-demo-001",
-        pickupAddress: "Songshan Airport",
-        dropoffAddress: "Xinyi District",
-      },
-    });
-    const broadcasted = await forwarder.broadcastOrder(
-      forwardedPartner1.mirrorOrderId,
+    const spoofedBroadcast = await forwarder.broadcastOrder(
+      spoofed.mirrorOrderId,
       {
         candidateDriverIds: ["drv-demo-001"],
       },
     );
-    expect(broadcasted.candidateDriverIds).toContain("drv-demo-001");
+    expect(spoofedBroadcast.candidateDriverIds).toEqual(["drv-demo-001"]);
+  });
 
-    // Rebind veh-demo-001 to partner-demo-004 before driver accepts the precomputed broadcast
-    await registry.approveExclusivity("veh-demo-001", {
-      reviewerId: "ops-reviewer-001",
-      exclusiveOperatorId: "partner-demo-004",
-    });
-
-    let acceptError: unknown = null;
-    try {
-      await forwarder.acceptForwardedOrder(
-        forwardedPartner1.mirrorOrderId,
-        "drv-demo-001",
-      );
-    } catch (error) {
-      acceptError = error;
-    }
-    expect(acceptError).toBeDefined();
-    const acceptResponse = (
-      acceptError as {
-        getResponse: () => { error?: Record<string, unknown> };
-      }
-    ).getResponse();
-    expect(acceptResponse.error?.code).toBe(
-      "FORWARDER_VEHICLE_EXCLUSIVITY_OTHER_OPERATOR",
+  it("resolves the requesting operator only from the operating authorization when one is supplied", () => {
+    const { registry } = createServices();
+    registry.registerOperatingAuthorizationOperator(
+      "auth-partner-004",
+      "partner-demo-004",
     );
-    expect(acceptResponse.error?.details).toMatchObject({
-      orderId: forwardedPartner1.mirrorOrderId,
-      driverId: "drv-demo-001",
-      vehicleId: "veh-demo-001",
-      reasonCode: "exclusivity_other_operator",
-      requestingOperatorId: "partner-demo-001",
-      boundOperatorId: "partner-demo-004",
-    });
+
+    // A caller-supplied requestingOperatorId cannot override the operator
+    // resolved server-side from the authorization.
+    const spoofDecision = registry.evaluateVehicleOperatorExclusivity(
+      "veh-demo-001",
+      {
+        requestingOperatorId: "partner-demo-001",
+        operatingAuthorizationId: "auth-partner-004",
+      },
+    );
+    expect(spoofDecision.allowed).toBe(false);
+    expect(spoofDecision.reasonCode).toBe("exclusivity_other_operator");
+    expect(spoofDecision.requestingOperatorId).toBe("partner-demo-004");
+    expect(spoofDecision.boundOperatorId).toBe("partner-demo-001");
+
+    // An authorization that does not resolve server-side is refused.
+    const unknownAuthDecision = registry.evaluateVehicleOperatorExclusivity(
+      "veh-demo-001",
+      {
+        requestingOperatorId: "partner-demo-001",
+        operatingAuthorizationId: "auth-unknown-999",
+      },
+    );
+    expect(unknownAuthDecision.allowed).toBe(false);
+    expect(unknownAuthDecision.reasonCode).toBe("exclusivity_other_operator");
+  });
+
+  it("hydrates persisted pre-V0131 exclusivity rows without exclusiveOperatorId as unbound", () => {
+    const { registry } = createServices();
+    const seeded = registry
+      .listExclusivities()
+      .find((entry) => entry.vehicleId === "veh-demo-001")!;
+    const legacyRow: Partial<typeof seeded> = { ...seeded };
+    delete legacyRow.exclusiveOperatorId;
+    const hydrated = (
+      registry as unknown as {
+        hydrateExclusivity: (record: Partial<typeof seeded>) => typeof seeded;
+      }
+    ).hydrateExclusivity(legacyRow);
+    expect(hydrated.exclusiveOperatorId).toBeNull();
   });
 
   it("verifies V0131 migration and platform-admin fleet exclusivity operator binding helper", () => {
