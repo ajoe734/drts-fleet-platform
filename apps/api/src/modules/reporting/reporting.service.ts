@@ -20,6 +20,7 @@ import type {
   OwnedOrderRecord,
   Phase1ServiceBucket,
   ServiceProductType,
+  SixMonthMonthlyOperationsSummary,
   SixMonthOperationsSummary,
   VehicleRegistryRecord,
 } from "@drts/contracts";
@@ -35,6 +36,7 @@ import {
   buildComplaintMonthlyStatistics,
   emptyPunctualityMetrics,
   sortPunctualityMetrics,
+  toTaipeiMonth,
   totalComplaintMonthlyStatistics,
   type ComplaintStatisticsSource,
 } from "./operations-metrics";
@@ -403,8 +405,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       to?: string;
     } = {},
   ): Promise<SixMonthOperationsSummary[]> {
-    const { periodMonthFrom, periodMonthTo } =
-      this.resolveSummaryMonthBounds(query);
+    const { periodMonthFrom, periodMonthTo } = this.resolveSummaryMonthBounds(
+      query,
+      { maxMonths: 6 },
+    );
+    const periods = this.enumerateMonths(periodMonthFrom, periodMonthTo);
     const monthlyQuery: MonthlyOperationsSummaryQuery = {
       periodMonthFrom,
       periodMonthTo,
@@ -418,28 +423,43 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
 
     const source = await this.loadDailyDispatchRecordSource();
     // One canonical source read feeds both the rebuilt monthly read model and
-    // the derived R09/R10 figures below.
-    await this.rebuildMonthlyOperationsSummaries(monthlyQuery, source);
-
-    const monthly = await this.listMonthlyOperationsSummaries(monthlyQuery);
+    // the derived R09/R10 figures below. Use rebuild.records directly rather
+    // than re-querying PG so stale monthly rows can never mix with the new
+    // six-month totals in the same response.
+    const rebuild = await this.rebuildMonthlyOperationsSummaries(
+      monthlyQuery,
+      source,
+    );
+    const monthly = rebuild.records
+      .filter((record) => this.matchesMonthlySummaryQuery(record, monthlyQuery))
+      .sort(
+        (left, right) =>
+          left.periodMonth.localeCompare(right.periodMonth) ||
+          left.businessArea.localeCompare(right.businessArea) ||
+          left.serviceProductCode.localeCompare(right.serviceProductCode),
+      );
     const grouped = new Map<string, SixMonthOperationsSummary>();
+    const weightedVehicleSumByKey = new Map<string, number>();
+    const monthlyRecordByKey = new Map<string, MonthlyOperationsSummaryRecord>();
     const complaintStatisticsAsOf = new Date().toISOString();
+    const canonicalFrom = `${periodMonthFrom}-01`;
+    const canonicalTo = this.endOfMonthIso(
+      `${periodMonthTo}-01T00:00:00.000Z`,
+    ).slice(0, 10);
     const createSummary = (
       businessArea: string,
       serviceProductCode: string,
       generatedAt: string,
     ): SixMonthOperationsSummary => ({
-      from: query.from ?? `${periodMonthFrom}-01`,
-      to:
-        query.to ??
-        this.endOfMonthIso(`${periodMonthTo}-01T00:00:00.000Z`).slice(0, 10),
+      from: canonicalFrom,
+      to: canonicalTo,
       businessArea,
       serviceProductCode,
       demandRequestCount: 0,
       actualDispatchCount: 0,
       completedTripCount: 0,
       cancelledOrderCount: 0,
-      averageDispatchableVehicleCount: 0,
+      averageDispatchableVehicleCount: null,
       validSnapshotCount: 0,
       expectedSnapshotCount: 0,
       snapshotCoverageRate: 0,
@@ -457,14 +477,17 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       complaintOverdueLowRatingAutoCount: 0,
       complaintOverdueManualCount: 0,
       complaintStatisticsAsOf,
+      monthlySummaries: [],
       drilldown: {
         punctuality: emptyPunctualityMetrics(),
         complaintMonthlyStatistics: [],
+        monthlySummaries: [],
       },
       generatedAt,
     });
     for (const record of monthly) {
       const key = `${record.businessArea}:${record.serviceProductCode}`;
+      monthlyRecordByKey.set(`${key}:${record.periodMonth}`, record);
       const current =
         grouped.get(key) ??
         createSummary(
@@ -476,8 +499,12 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       current.actualDispatchCount += record.actualDispatchCount;
       current.completedTripCount += record.completedTripCount;
       current.cancelledOrderCount += record.cancelledOrderCount;
-      current.averageDispatchableVehicleCount +=
-        record.averageDispatchableVehicleCount * record.validSnapshotCount;
+      weightedVehicleSumByKey.set(
+        key,
+        (weightedVehicleSumByKey.get(key) ?? 0) +
+          (record.averageDispatchableVehicleCount ?? 0) *
+            record.validSnapshotCount,
+      );
       current.validSnapshotCount += record.validSnapshotCount;
       current.expectedSnapshotCount += record.expectedSnapshotCount;
       current.complaintCount += record.complaintCount;
@@ -494,41 +521,128 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       grouped.set(key, current);
     }
 
-    await this.attachOperationsMetrics(
+    const monthlyPunctualityByKey = await this.attachOperationsMetrics(
       grouped,
       source,
-      this.enumerateMonths(periodMonthFrom, periodMonthTo),
+      periods,
       monthlyQuery,
       complaintStatisticsAsOf,
       (businessArea, serviceProductCode) =>
         createSummary(
           businessArea,
           serviceProductCode,
-          complaintStatisticsAsOf,
+          rebuild.generatedAt || complaintStatisticsAsOf,
         ),
     );
 
     return Array.from(grouped.values())
       .map((summary) => this.withOperationsMetricTotals(summary))
-      .map((summary) => ({
-        ...summary,
-        averageDispatchableVehicleCount:
-          summary.validSnapshotCount > 0
-            ? this.roundTo(
-                summary.averageDispatchableVehicleCount /
-                  summary.validSnapshotCount,
-                2,
-              )
-            : 0,
-        snapshotCoverageRate:
+      .map((summary) => {
+        const key = `${summary.businessArea ?? ""}:${summary.serviceProductCode ?? ""}`;
+        const weightedVehicleSum = weightedVehicleSumByKey.get(key) ?? 0;
+        const statisticsByMonth = new Map(
+          (summary.drilldown?.complaintMonthlyStatistics ?? []).map((item) => [
+            item.periodMonth,
+            item,
+          ]),
+        );
+        const monthlySummaries: SixMonthMonthlyOperationsSummary[] =
+          periods.map((periodMonth) => {
+            const baseRecord = monthlyRecordByKey.get(`${key}:${periodMonth}`);
+            const monthPunctuality = sortPunctualityMetrics(
+              monthlyPunctualityByKey.get(`${key}:${periodMonth}`) ??
+                emptyPunctualityMetrics(),
+            );
+            const monthComplaintStat = statisticsByMonth.get(periodMonth);
+            const expectedSnapshotCount =
+              baseRecord?.expectedSnapshotCount ??
+              this.expectedSnapshotsForMonth(periodMonth);
+            const validSnapshotCount = baseRecord?.validSnapshotCount ?? 0;
+            const snapshotCoverageRate =
+              baseRecord?.snapshotCoverageRate ??
+              (expectedSnapshotCount > 0
+                ? this.roundTo(validSnapshotCount / expectedSnapshotCount, 4)
+                : 0);
+            return {
+              periodMonth,
+              from: `${periodMonth}-01`,
+              to: this.endOfMonthIso(`${periodMonth}-01T00:00:00.000Z`).slice(
+                0,
+                10,
+              ),
+              businessArea: summary.businessArea,
+              serviceProductCode: summary.serviceProductCode,
+              demandRequestCount: baseRecord?.demandRequestCount ?? 0,
+              actualDispatchCount: baseRecord?.actualDispatchCount ?? 0,
+              completedTripCount: baseRecord?.completedTripCount ?? 0,
+              cancelledOrderCount: baseRecord?.cancelledOrderCount ?? 0,
+              averageDispatchableVehicleCount:
+                validSnapshotCount > 0
+                  ? (baseRecord?.averageDispatchableVehicleCount ?? 0)
+                  : null,
+              validSnapshotCount,
+              expectedSnapshotCount,
+              snapshotCoverageRate,
+              complaintCount: baseRecord?.complaintCount ?? 0,
+              complaintsByCategory: {
+                ...(baseRecord?.complaintsByCategory ?? {}),
+              },
+              lateArrivalThresholdMinutes:
+                monthPunctuality.lateArrivalThresholdMinutes,
+              onTimeTripCount: monthPunctuality.onTimeTripCount,
+              lateTripCount: monthPunctuality.lateTripCount,
+              noShowTripCount: monthPunctuality.noShowTripCount,
+              punctualityUnknownTripCount: monthPunctuality.unknownTripCount,
+              complaintCreatedLowRatingAutoCount:
+                monthComplaintStat?.lowRatingAuto.createdCount ?? 0,
+              complaintCreatedManualCount:
+                monthComplaintStat?.manual.createdCount ?? 0,
+              complaintClosedLowRatingAutoCount:
+                monthComplaintStat?.lowRatingAuto.closedCount ?? 0,
+              complaintClosedManualCount:
+                monthComplaintStat?.manual.closedCount ?? 0,
+              complaintOverdueLowRatingAutoCount:
+                monthComplaintStat?.lowRatingAuto.overdueCount ?? 0,
+              complaintOverdueManualCount:
+                monthComplaintStat?.manual.overdueCount ?? 0,
+              complaintStatisticsAsOf,
+              generatedAt: summary.generatedAt,
+            };
+          });
+        const expectedSnapshotCount =
           summary.expectedSnapshotCount > 0
-            ? this.roundTo(
-                summary.validSnapshotCount / summary.expectedSnapshotCount,
-                4,
-              )
-            : 0,
-        complaintsByCategory: { ...summary.complaintsByCategory },
-      }))
+            ? summary.expectedSnapshotCount
+            : monthlySummaries.reduce(
+                (acc, item) => acc + item.expectedSnapshotCount,
+                0,
+              );
+        const nextSummary: SixMonthOperationsSummary = {
+          ...summary,
+          expectedSnapshotCount,
+          averageDispatchableVehicleCount:
+            summary.validSnapshotCount > 0
+              ? this.roundTo(weightedVehicleSum / summary.validSnapshotCount, 2)
+              : null,
+          snapshotCoverageRate:
+            expectedSnapshotCount > 0
+              ? this.roundTo(
+                  summary.validSnapshotCount / expectedSnapshotCount,
+                  4,
+                )
+              : 0,
+          complaintsByCategory: { ...summary.complaintsByCategory },
+          monthlySummaries,
+          ...(summary.drilldown
+            ? {
+                drilldown: {
+                  ...summary.drilldown,
+                  monthlySummaries,
+                },
+              }
+            : {}),
+        };
+        return nextSummary;
+      })
       .sort(
         (left, right) =>
           (left.businessArea ?? "").localeCompare(right.businessArea ?? "") ||
@@ -598,6 +712,10 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       return summary;
     };
 
+    const monthlyPunctualityByKey = new Map<
+      string,
+      ReturnType<typeof emptyPunctualityMetrics>
+    >();
     for (const dimension of dimensions.values()) {
       if (
         !periods.includes(dimension.periodMonth) ||
@@ -605,14 +723,22 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       ) {
         continue;
       }
+      const tripInput = {
+        record: dimension.record,
+        dispatchSemantics: dimension.order.dispatchSemantics,
+      };
       addTripPunctuality(
         ensure(dimension.businessArea, dimension.serviceProductCode).drilldown!
           .punctuality,
-        {
-          record: dimension.record,
-          dispatchSemantics: dimension.order.dispatchSemantics,
-        },
+        tripInput,
       );
+      const monthKey = `${dimension.businessArea}:${dimension.serviceProductCode}:${dimension.periodMonth}`;
+      let monthPunctuality = monthlyPunctualityByKey.get(monthKey);
+      if (!monthPunctuality) {
+        monthPunctuality = emptyPunctualityMetrics();
+        monthlyPunctualityByKey.set(monthKey, monthPunctuality);
+      }
+      addTripPunctuality(monthPunctuality, tripInput);
     }
 
     // Same case attribution as the existing complaint count: the related
@@ -675,6 +801,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
           buildComplaintMonthlyStatistics([], statisticsSource, periods, asOf);
       }
     }
+    return monthlyPunctualityByKey;
   }
 
   private async loadComplaintStatisticsSource(
@@ -748,10 +875,17 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         complaintCountByOrderId,
         generatedAt,
       );
+      // SA §7.4 defines order demand/dispatch event timing from the scheduled
+      // reservation window start or order creation timestamp; SA §7.4 does not
+      // name a time zone, so R10 followthrough aligns order month attribution
+      // with the accepted R09 Asia/Taipei calendar month helper.
+      const orderEventTimestamp =
+        order.reservationWindowStart ?? order.createdAt;
       dimensions.set(order.orderId, {
         order,
         record,
-        periodMonth: record.serviceDate.slice(0, 7),
+        periodMonth:
+          toTaipeiMonth(orderEventTimestamp) ?? record.serviceDate.slice(0, 7),
         businessArea: this.resolveOrderBusinessArea(
           order,
           source.dispatchAssignments,
@@ -1309,7 +1443,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     }
 
     for (const snapshot of snapshots) {
-      const periodMonth = snapshot.snapshotAt.slice(0, 7);
+      const periodMonth =
+        toTaipeiMonth(snapshot.snapshotAt) ?? snapshot.snapshotAt.slice(0, 7);
       if (!periods.includes(periodMonth)) {
         continue;
       }
@@ -1327,7 +1462,8 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       );
       if (snapshot.sourceHealth === "complete") {
         group.validSnapshotCount += 1;
-        group.averageDispatchableVehicleCount +=
+        group.averageDispatchableVehicleCount =
+          (group.averageDispatchableVehicleCount ?? 0) +
           snapshot.dispatchableVehicleCount;
       }
     }
@@ -1335,9 +1471,13 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     // SA §7.4: distinct cases CREATED in the requested period, grouped by
     // their actual category. Neither an earlier service month nor no linked
     // order makes a submitted case disappear from the unfiltered total.
+    // Attribute complaint creation month using the accepted R09 Asia/Taipei
+    // calendar month helper so R10 and R09 agree on cross-month boundaries.
     const countedComplaintCases = new Set<string>();
     for (const complaintCase of source.complaintCases) {
-      const periodMonth = complaintCase.createdAt.slice(0, 7);
+      const periodMonth =
+        toTaipeiMonth(complaintCase.createdAt) ??
+        complaintCase.createdAt.slice(0, 7);
       if (
         !periods.includes(periodMonth) ||
         countedComplaintCases.has(complaintCase.caseNo)
@@ -1397,7 +1537,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         averageDispatchableVehicleCount:
           group.validSnapshotCount > 0
             ? this.roundTo(
-                group.averageDispatchableVehicleCount /
+                (group.averageDispatchableVehicleCount ?? 0) /
                   group.validSnapshotCount,
                 2,
               )
@@ -1430,31 +1570,151 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       from?: string;
       to?: string;
     },
+    options?: { maxMonths?: number },
   ) {
-    if (query.periodMonth) {
+    if (query.periodMonth !== undefined && query.periodMonth !== "") {
+      const periodMonth = this.parseCalendarMonth(
+        query.periodMonth,
+        "periodMonth",
+      );
       return {
-        periodMonthFrom: query.periodMonth,
-        periodMonthTo: query.periodMonth,
+        periodMonthFrom: periodMonth,
+        periodMonthTo: periodMonth,
       };
     }
 
-    const fromMonth = query.from?.slice(0, 7) ?? query.periodMonthFrom;
-    const toMonth = query.to?.slice(0, 7) ?? query.periodMonthTo;
-    if (fromMonth && toMonth) {
-      return { periodMonthFrom: fromMonth, periodMonthTo: toMonth };
+    const parsedPeriodFrom =
+      query.periodMonthFrom !== undefined && query.periodMonthFrom !== ""
+        ? this.parseCalendarMonth(query.periodMonthFrom, "periodMonthFrom")
+        : undefined;
+    const parsedPeriodTo =
+      query.periodMonthTo !== undefined && query.periodMonthTo !== ""
+        ? this.parseCalendarMonth(query.periodMonthTo, "periodMonthTo")
+        : undefined;
+    const parsedFrom =
+      query.from !== undefined && query.from !== ""
+        ? this.parseSummaryBoundaryMonth(query.from, "from")
+        : undefined;
+    const parsedTo =
+      query.to !== undefined && query.to !== ""
+        ? this.parseSummaryBoundaryMonth(query.to, "to")
+        : undefined;
+
+    if (parsedPeriodFrom && parsedFrom && parsedPeriodFrom !== parsedFrom) {
+      throw new ApiRequestError(
+        400,
+        "REPORT_QUERY_INVALID",
+        "from and periodMonthFrom must refer to the same calendar month.",
+      );
+    }
+    if (parsedPeriodTo && parsedTo && parsedPeriodTo !== parsedTo) {
+      throw new ApiRequestError(
+        400,
+        "REPORT_QUERY_INVALID",
+        "to and periodMonthTo must refer to the same calendar month.",
+      );
     }
 
+    const fromMonth = parsedPeriodFrom ?? parsedFrom;
+    const toMonth = parsedPeriodTo ?? parsedTo;
+
     const today = new Date();
-    const latest = today.toISOString().slice(0, 7);
-    const start = new Date(
-      Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 5, 1),
-    )
-      .toISOString()
-      .slice(0, 7);
+    const latest =
+      toTaipeiMonth(today.toISOString()) ?? today.toISOString().slice(0, 7);
+    const periodMonthTo =
+      toMonth ??
+      (fromMonth && fromMonth > latest
+        ? fromMonth
+        : fromMonth
+          ? this.minCalendarMonth(latest, this.shiftCalendarMonth(fromMonth, 5))
+          : latest);
+    const periodMonthFrom =
+      fromMonth ?? this.shiftCalendarMonth(periodMonthTo, -5);
+
+    if (periodMonthFrom > periodMonthTo) {
+      throw new ApiRequestError(
+        400,
+        "REPORT_QUERY_INVALID",
+        "periodMonthFrom must not be after periodMonthTo.",
+      );
+    }
+
+    if (options?.maxMonths !== undefined) {
+      const span = this.calendarMonthSpan(periodMonthFrom, periodMonthTo);
+      if (span < 1 || span > options.maxMonths) {
+        throw new ApiRequestError(
+          400,
+          "REPORT_WINDOW_TOO_LARGE",
+          `Operations summary window must not exceed ${options.maxMonths} calendar months.`,
+        );
+      }
+    }
+
     return {
-      periodMonthFrom: fromMonth ?? start,
-      periodMonthTo: toMonth ?? latest,
+      periodMonthFrom,
+      periodMonthTo,
     };
+  }
+
+  private parseCalendarMonth(value: string, field: string): string {
+    const trimmed = value.trim();
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(trimmed)) {
+      throw new ApiRequestError(
+        400,
+        "REPORT_QUERY_INVALID",
+        `Invalid ${field} parameter (expected YYYY-MM).`,
+      );
+    }
+    return trimmed;
+  }
+
+  private parseSummaryBoundaryMonth(
+    value: string,
+    boundary: "from" | "to",
+  ): string {
+    const trimmed = value.trim();
+    if (/^\d{4}-(0[1-9]|1[0-2])$/.test(trimmed)) {
+      return trimmed;
+    }
+    const datePrefix = trimmed.slice(0, 10);
+    if (!/^\d{4}-(0[1-9]|1[0-2])-\d{2}$/.test(datePrefix)) {
+      throw new ApiRequestError(
+        400,
+        "REPORT_QUERY_INVALID",
+        `Invalid ${boundary} parameter (expected YYYY-MM or full calendar month boundary).`,
+      );
+    }
+    const periodMonth = datePrefix.slice(0, 7);
+    const expectedDate =
+      boundary === "from"
+        ? `${periodMonth}-01`
+        : this.endOfMonthIso(`${periodMonth}-01T00:00:00.000Z`).slice(0, 10);
+    if (datePrefix !== expectedDate) {
+      throw new ApiRequestError(
+        400,
+        "REPORT_QUERY_INVALID",
+        `${boundary} must be a calendar month (YYYY-MM) or the exact ${boundary === "from" ? "first" : "last"} day of that month (${expectedDate}); arbitrary mid-month dates are not supported for monthly operations summaries.`,
+      );
+    }
+    return periodMonth;
+  }
+
+  private shiftCalendarMonth(periodMonth: string, deltaMonths: number): string {
+    const [yearText, monthText] = periodMonth.split("-");
+    const shifted = new Date(
+      Date.UTC(Number(yearText), Number(monthText) - 1 + deltaMonths, 1),
+    );
+    return shifted.toISOString().slice(0, 7);
+  }
+
+  private minCalendarMonth(left: string, right: string): string {
+    return left <= right ? left : right;
+  }
+
+  private calendarMonthSpan(fromMonth: string, toMonth: string): number {
+    const [fromYear, fromM] = fromMonth.split("-").map(Number);
+    const [toYear, toM] = toMonth.split("-").map(Number);
+    return (toYear! - fromYear!) * 12 + (toM! - fromM!) + 1;
   }
 
   private enumerateMonths(from: string, to: string) {

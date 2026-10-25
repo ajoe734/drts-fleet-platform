@@ -16,6 +16,7 @@ import type {
   InsurancePolicyRecord,
   MultiTaxiTripOperationalAdminView,
   MultiTaxiTripOperationalExportRow,
+  SixMonthMonthlyOperationsSummary,
   SixMonthOperationsSummary,
   VehicleRegistryRecord,
 } from "@drts/contracts";
@@ -130,6 +131,11 @@ function projectSummaryFigures(
     | "complaintCount"
     | "complaintsByCategory"
     | "generatedAt"
+    | "lateArrivalThresholdMinutes"
+    | "onTimeTripCount"
+    | "lateTripCount"
+    | "noShowTripCount"
+    | "punctualityUnknownTripCount"
   >,
 ) {
   return {
@@ -139,7 +145,12 @@ function projectSummaryFigures(
     actualDispatchCount: summary.actualDispatchCount,
     completedTripCount: summary.completedTripCount,
     cancelledOrderCount: summary.cancelledOrderCount,
-    averageDispatchableVehicleCount: summary.averageDispatchableVehicleCount,
+    // When validSnapshotCount === 0, the average is unknown (null -> UI 未提供);
+    // numeric 0 is preserved only when valid snapshots measured zero vehicles.
+    averageDispatchableVehicleCount:
+      summary.validSnapshotCount > 0
+        ? summary.averageDispatchableVehicleCount
+        : null,
     validSnapshotCount: summary.validSnapshotCount,
     expectedSnapshotCount: summary.expectedSnapshotCount,
     // §4.2: with no expected snapshot the rate is 未提供, never 0%.
@@ -147,6 +158,21 @@ function projectSummaryFigures(
       summary.expectedSnapshotCount > 0 ? summary.snapshotCoverageRate : null,
     complaintCount: summary.complaintCount,
     complaintsByCategory: { ...summary.complaintsByCategory },
+    ...(summary.lateArrivalThresholdMinutes !== undefined
+      ? { lateArrivalThresholdMinutes: summary.lateArrivalThresholdMinutes }
+      : {}),
+    ...(summary.onTimeTripCount !== undefined
+      ? { onTimeTripCount: summary.onTimeTripCount }
+      : {}),
+    ...(summary.lateTripCount !== undefined
+      ? { lateTripCount: summary.lateTripCount }
+      : {}),
+    ...(summary.noShowTripCount !== undefined
+      ? { noShowTripCount: summary.noShowTripCount }
+      : {}),
+    ...(summary.punctualityUnknownTripCount !== undefined
+      ? { punctualityUnknownTripCount: summary.punctualityUnknownTripCount }
+      : {}),
     generatedAt: summary.generatedAt,
   };
 }
@@ -159,11 +185,18 @@ export function projectAgencyOperationsSummary(
     from: summary.from,
     to: summary.to,
     ...projectSummaryFigures(summary),
+    ...(summary.monthlySummaries
+      ? {
+          monthlySummaries: summary.monthlySummaries.map(
+            projectAgencyMonthlyOperationsSummary,
+          ),
+        }
+      : {}),
   };
 }
 
 export function projectAgencyMonthlyOperationsSummary(
-  record: MonthlyOperationsSummaryRecord,
+  record: MonthlyOperationsSummaryRecord | SixMonthMonthlyOperationsSummary,
 ): AgencyMonthlyOperationsSummaryView {
   return {
     periodMonth: record.periodMonth,
