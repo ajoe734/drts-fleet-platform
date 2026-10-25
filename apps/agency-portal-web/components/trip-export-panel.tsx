@@ -1,5 +1,6 @@
 "use client";
 
+import type { AgencyTripExportScope } from "@drts/contracts";
 import { useState } from "react";
 
 /** Raw BFF passthrough: the API wire format is snake_case. */
@@ -45,10 +46,23 @@ function newIdempotencyKey(): string {
  * with a stated purpose, then poll and request a signed download. Only
  * agency_exporter sessions are authorized; every step is access-logged.
  */
-export function TripExportPanel() {
-  const [month, setMonth] = useState("");
-  const [reservedFrom, setReservedFrom] = useState("");
-  const [reservedTo, setReservedTo] = useState("");
+export function TripExportPanel({
+  initialScope,
+}: {
+  initialScope?:
+    | { [K in keyof AgencyTripExportScope]?: string | undefined }
+    | undefined;
+} = {}) {
+  const [month, setMonth] = useState(initialScope?.month ?? "");
+  const [reservedFrom, setReservedFrom] = useState(
+    initialScope?.reservedFrom ?? "",
+  );
+  const [reservedTo, setReservedTo] = useState(initialScope?.reservedTo ?? "");
+  const [plateNo, setPlateNo] = useState(initialScope?.plateNo ?? "");
+  const [orderNo, setOrderNo] = useState(initialScope?.orderNo ?? "");
+  const [orderId, setOrderId] = useState(initialScope?.orderId ?? "");
+  const [tripId, setTripId] = useState(initialScope?.tripId ?? "");
+  const [recordId, setRecordId] = useState(initialScope?.recordId ?? "");
   const [purpose, setPurpose] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [recordCount, setRecordCount] = useState<number | null>(null);
@@ -56,10 +70,15 @@ export function TripExportPanel() {
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
-  const scope = {
-    ...(month ? { month } : {}),
-    ...(reservedFrom ? { reservedFrom } : {}),
-    ...(reservedTo ? { reservedTo } : {}),
+  const scope: AgencyTripExportScope = {
+    ...(month.trim() ? { month: month.trim() } : {}),
+    ...(reservedFrom.trim() ? { reservedFrom: reservedFrom.trim() } : {}),
+    ...(reservedTo.trim() ? { reservedTo: reservedTo.trim() } : {}),
+    ...(plateNo.trim() ? { plateNo: plateNo.trim() } : {}),
+    ...(orderNo.trim() ? { orderNo: orderNo.trim() } : {}),
+    ...(orderId.trim() ? { orderId: orderId.trim() } : {}),
+    ...(tripId.trim() ? { tripId: tripId.trim() } : {}),
+    ...(recordId.trim() ? { recordId: recordId.trim() } : {}),
   };
   const fail = (status: number, body: ApiEnvelope<unknown> | null) =>
     setMessage(
@@ -94,6 +113,46 @@ export function TripExportPanel() {
           type="date"
           value={reservedTo}
           onChange={(e) => setReservedTo(e.target.value)}
+        />
+      </label>
+      <label>
+        車號（精確）{" "}
+        <input
+          value={plateNo}
+          onChange={(e) => setPlateNo(e.target.value)}
+          placeholder="例如 BKR-2208"
+        />
+      </label>
+      <label>
+        訂單編號（精確）{" "}
+        <input
+          value={orderNo}
+          onChange={(e) => setOrderNo(e.target.value)}
+          placeholder="完整訂單編號"
+        />
+      </label>
+      <label>
+        訂單 ID（精確）{" "}
+        <input
+          value={orderId}
+          onChange={(e) => setOrderId(e.target.value)}
+          placeholder="完整 orderId"
+        />
+      </label>
+      <label>
+        趟次 ID（精確）{" "}
+        <input
+          value={tripId}
+          onChange={(e) => setTripId(e.target.value)}
+          placeholder="完整 tripId"
+        />
+      </label>
+      <label>
+        紀錄 ID（精確）{" "}
+        <input
+          value={recordId}
+          onChange={(e) => setRecordId(e.target.value)}
+          placeholder="mtr-..."
         />
       </label>
       <button

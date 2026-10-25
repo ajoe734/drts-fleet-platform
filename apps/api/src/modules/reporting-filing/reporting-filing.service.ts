@@ -2955,6 +2955,26 @@ export class ReportingFilingService
         "Export reservedFrom must not be after reservedTo.",
       );
     }
+    for (const field of [
+      "plateNo",
+      "orderNo",
+      "orderId",
+      "tripId",
+      "recordId",
+    ] as const) {
+      const value = scope[field]?.trim();
+      if (!value) {
+        continue;
+      }
+      if (value.length > MAX_EXPORT_QUERY_LENGTH) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "MULTI_TAXI_EXPORT_QUERY_TOO_LONG",
+          `Export ${field} must not exceed ${MAX_EXPORT_QUERY_LENGTH} characters.`,
+        );
+      }
+      normalized[field] = value;
+    }
     return normalized;
   }
 

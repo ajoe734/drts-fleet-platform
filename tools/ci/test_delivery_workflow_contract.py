@@ -159,7 +159,7 @@ class ParallelImageBuildTests(unittest.TestCase):
         expected = {"api", "migrate", "platform-admin-web", "ops-console-web",
                     "fleet-partner-portal-web", "tenant-console-web", "bank-console-web",
                     "referral-embed-web", "enterprise-dispatch-web", "channel-partner-portal-web",
-                    "passenger-app-web"}
+                    "passenger-app-web", "agency-portal-web"}
         self.assertEqual(set(images), expected)
         self.assertEqual(len(images), len(expected))
         for image in images:

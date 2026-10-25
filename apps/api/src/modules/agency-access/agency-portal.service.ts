@@ -228,15 +228,20 @@ export class AgencyPortalService {
       filter: {},
       execute: async () => {
         const now = Date.now();
-        // The authority has no single-record read; it is resolved from the
-        // same list, and a record outside retention is simply not found.
-        const record = (
-          await this.multiTaxiService.listTripOperationalRecords({})
-        ).find(
-          (candidate) =>
-            candidate.recordId === recordId &&
-            isWithinAgencyRetention(candidate.retainUntil, now),
-        );
+        const candidate =
+          typeof this.multiTaxiService.getTripOperationalRecord === "function"
+            ? await this.multiTaxiService.getTripOperationalRecord(recordId)
+            : ((
+                await this.multiTaxiService.listTripOperationalRecords({
+                  recordId,
+                })
+              ).find((item) => item.recordId === recordId) ?? null);
+        const record =
+          candidate &&
+          candidate.recordId === recordId &&
+          isWithinAgencyRetention(candidate.retainUntil, now)
+            ? candidate
+            : null;
         if (!record) {
           throw new ApiRequestError(
             HttpStatus.NOT_FOUND,
@@ -692,6 +697,11 @@ export class AgencyPortalService {
       month: auditText(query.month),
       reservedFrom: auditText(query.reservedFrom),
       reservedTo: auditText(query.reservedTo),
+      plateNo: auditText(query.plateNo),
+      orderNo: auditText(query.orderNo),
+      orderId: auditText(query.orderId),
+      tripId: auditText(query.tripId),
+      recordId: auditText(query.recordId),
       legalHold: auditText(query.legalHold),
       page: auditText(query.page),
       pageSize: auditText(query.pageSize),
@@ -719,6 +729,31 @@ export class AgencyPortalService {
         "reservedFrom must not be after reservedTo.",
       );
     }
+    const exactFields = [
+      "plateNo",
+      "orderNo",
+      "orderId",
+      "tripId",
+      "recordId",
+    ] as const;
+    const exactFilters: Partial<
+      Pick<
+        MultiTaxiTripOperationalRecordQuery,
+        "plateNo" | "orderNo" | "orderId" | "tripId" | "recordId"
+      >
+    > = {};
+    for (const field of exactFields) {
+      const value = optionalText(query[field]);
+      if (value !== undefined) {
+        if (value.length > 120) {
+          throw badRequest(
+            "AGENCY_QUERY_INVALID",
+            `${field} must not exceed 120 characters.`,
+          );
+        }
+        exactFilters[field] = value;
+      }
+    }
     const legalHold = optionalText(query.legalHold);
     if (
       legalHold !== undefined &&
@@ -733,6 +768,7 @@ export class AgencyPortalService {
       ...(month ? { month } : {}),
       ...(reservedFrom ? { reservedFrom } : {}),
       ...(reservedTo ? { reservedTo } : {}),
+      ...exactFilters,
       ...(legalHold
         ? {
             legalHold: legalHold as NonNullable<
@@ -743,7 +779,7 @@ export class AgencyPortalService {
     };
   }
 
-  /** Export scope: month/reservedFrom/reservedTo only (no q, no legalHold). */
+  /** Export scope: month/reservedFrom/reservedTo + exact plate/order/trip identifiers (no q, no legalHold). */
   private toExportScope(
     scope: Record<string, unknown>,
   ): MultiTaxiTripOperationalRecordQuery {
