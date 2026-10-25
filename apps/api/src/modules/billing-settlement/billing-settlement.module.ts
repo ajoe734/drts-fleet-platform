@@ -19,7 +19,6 @@ import {
   PlatformManualPaymentRecoveryPort,
   PassengerCoreManualPaymentRecoveryPort,
 } from "./payment-recovery.port";
-import { ReferralSettlementScaffoldService } from "./referral-settlement.scaffold.service";
 import { RemittanceProofService } from "./remittance-proof.service";
 import {
   REMITTANCE_PROOF_SCANNER,
@@ -93,7 +92,6 @@ import {
       provide: PAYMENT_RECOVERY_PORT,
       useExisting: PassengerCoreManualPaymentRecoveryPort,
     },
-    ReferralSettlementScaffoldService,
     RemittanceProofService,
     // Explicit runtime providers; missing configuration cannot pretend durable
     // storage or a clean malware verdict. Memory storage is test-only.
@@ -110,6 +108,6 @@ import {
       ): RemittanceProofScannerPort => createRemittanceProofScanner(storage),
     },
   ],
-  exports: [BillingSettlementService, ReferralSettlementScaffoldService],
+  exports: [BillingSettlementService],
 })
 export class BillingSettlementModule {}

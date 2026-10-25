@@ -13,6 +13,10 @@ import {
 } from "./pax-review-shared-order/additional-journey";
 import { recordOrderEvidence } from "./pax-review-shared-order/evidence";
 import { createJourneyProgress } from "./pax-review-shared-order/progress";
+import {
+  createPlaywrightRideListFetcher,
+  readAuthoritativeLinkedOrders,
+} from "./pax-real-quote-linked-orders";
 
 const requireApi = createRequire(
   resolve(__dirname, "../../apps/api/package.json"),
@@ -33,28 +37,14 @@ async function linkedOrders(pax: Page, snapshotId: string) {
       await pool.end();
     }
   }
-  const ids: string[] = [];
-  const cursors = new Set<string>();
-  let cursor: string | undefined;
-  do {
-    const url = new URL(`${PAX}/api/passenger-app/rides`);
-    url.searchParams.set("limit", "50");
-    if (cursor) url.searchParams.set("cursor", cursor);
-    const response = await pax.request.get(url.toString());
-    expect(response.status()).toBe(200);
-    const data = camel(await response.json()).data;
-    for (const ride of data.rides) {
-      const actual = await authority(pax, ride.order.orderId);
-      if (actual.bookingQuote?.fareSnapshotId === snapshotId)
-        ids.push(actual.order.orderId);
-    }
-    cursor = data.nextCursor;
-    if (cursor) {
-      expect(cursors.has(cursor)).toBe(false);
-      cursors.add(cursor);
-    }
-  } while (cursor);
-  return ids.sort();
+  return readAuthoritativeLinkedOrders(
+    createPlaywrightRideListFetcher(
+      pax.request,
+      `${PAX}/api/passenger-app/rides`,
+      camel,
+    ),
+    snapshotId,
+  );
 }
 
 test("a real fifteen-minute quote expires without booking, then requotes and cancels one real order", async ({

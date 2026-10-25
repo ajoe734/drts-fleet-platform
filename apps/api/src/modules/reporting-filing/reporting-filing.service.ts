@@ -2309,10 +2309,16 @@ export class ReportingFilingService
   private async buildSixMonthOperationsSummaryRows(job: StoredReportJob) {
     const filters = this.extractSixMonthOperationsSummaryFilters(job.filters);
     const rows = await this.sixMonthOperationsSummaryProvider(filters);
-    return rows.map((row) => ({
-      ...row,
-      complaintsByCategory: { ...row.complaintsByCategory },
-    }));
+    // File exports carry the scalar figures; the source id lists stay on the
+    // preview API / JSON export, where each figure is drilled down.
+    return rows.map((source) => {
+      const row = {
+        ...source,
+        complaintsByCategory: { ...source.complaintsByCategory },
+      };
+      delete row.drilldown;
+      return row;
+    });
   }
 
   private buildTenantMonthlyTripRows(

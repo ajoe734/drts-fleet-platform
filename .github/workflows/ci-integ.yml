@@ -198,7 +198,7 @@ jobs:
 
   owned-referral-business-journey:
     if: github.event_name == 'workflow_dispatch' && inputs.owned_referral_business == true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
       group: shared-dev-owned-referral-business-journey
@@ -351,7 +351,7 @@ jobs:
 
   shared-bureau-acceptance:
     if: github.event_name == 'workflow_dispatch' && inputs.shared_bureau == true
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     concurrency:
       group: shared-dev-pax-bureau-acceptance
@@ -1300,7 +1300,7 @@ jobs:
   ui-route-e2e:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
@@ -1369,14 +1369,26 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # The real scheduled journeys need their own existing 25-minute envelope;
-  # the legacy route suites consumed half of it before this case could start.
-  # Both jobs remain required by the original E2E aggregate below.
+  # The real scheduled journeys need their own execution envelope, separate
+  # from the legacy route suites that used to consume half of it. Hosted
+  # 57b attempts 1/2 show preparation plus the main three-role journey
+  # already using roughly 21m of the prior 25-minute cap (the apt-get
+  # mirror transfer for Playwright's Chromium deps took 320s/461s within
+  # that total across the two attempts, not on top of it); main passed
+  # both times, but the additional suite was then cancelled mid real
+  # scheduled-time wait before it could reach a pass or fail, with too
+  # little of the cap left for it. timeout-minutes is raised 25->40
+  # (~21m preparation+main plus ~14-15m headroom for slow-mirror
+  # variance and the additional suite's own required real waits),
+  # mirroring the same accommodation already used below for
+  # ui-bureau-acceptance-e2e; this does not fix the underlying
+  # mirror/network transfer speed. Both jobs remain required by the
+  # original E2E aggregate below.
   ui-shared-order-e2e:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -1471,7 +1483,7 @@ jobs:
   ui-bureau-acceptance-e2e:
     needs: [candidate, changes]
     if: needs.candidate.outputs.run_full_ci == 'true' && needs.changes.outputs.e2e == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     services:
       postgres:

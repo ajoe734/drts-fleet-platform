@@ -409,10 +409,7 @@ function createInMemoryTenantPartnerRepository(
           changes.userRoles,
           (value) => value.userId,
         ),
-        apiKeys: mergeApiKeysByKey(
-          nextState.apiKeys,
-          changes.apiKeys,
-        ),
+        apiKeys: mergeApiKeysByKey(nextState.apiKeys, changes.apiKeys),
       };
     }),
     reportPersistenceFailure: vi.fn(),

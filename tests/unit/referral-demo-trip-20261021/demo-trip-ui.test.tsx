@@ -144,24 +144,30 @@ it("assigns the test driver for a trip still waiting for dispatch", async () => 
   });
 });
 
-it("completes an assigned trip and opens the completed screen", async () => {
+it("completes a trip in progress and opens the completed screen", async () => {
   const assign = vi.fn();
   vi.stubGlobal("location", { ...window.location, assign });
   const calls = stubFetch(
-    () =>
+    (url) =>
       Response.json({
         ok: true,
-        data: { orderId, status: "completed", driverId: "d", simulated: true },
+        data: {
+          orderId,
+          // Still driving when the heartbeat reports; the tap completes it.
+          status: url.endsWith("/complete") ? "completed" : "on_trip",
+          driverId: "d",
+          simulated: true,
+        },
       }),
-    trip("assigned", "商務測試司機 1（虛構）"),
+    trip("on_trip", "商務測試司機 1（虛構）"),
   );
   render(
     <PassengerEmbed
       context={context(true) as never}
-      liveData={live("assigned", "商務測試司機 1（虛構）") as never}
+      liveData={live("on_trip", "商務測試司機 1（虛構）") as never}
     />,
   );
-  fireEvent.click(screen.getByText("測試：完成行程"));
+  fireEvent.click(screen.getByText("測試：立即抵達目的地"));
   await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
   expect(
     calls.some((c) => c.url === `/api/referral/demo-trip/${orderId}/complete`),
@@ -256,11 +262,75 @@ it("sends one heartbeat per interval even as live refreshes re-render the trip",
     />,
   );
   // Each heartbeat triggers a live refresh and a re-render; none of those may
-  // start another heartbeat before the 30 s interval.
+  // start another heartbeat before the 10 s interval.
   await new Promise((resolve) => setTimeout(resolve, 400));
   const heartbeats = calls.filter((c) => c.url.endsWith("/heartbeat"));
   expect(heartbeats).toHaveLength(1);
   expect(
     calls.filter((c) => c.url === "/api/referral/active").length,
   ).toBeGreaterThan(0);
+});
+
+for (const [status, label, action] of [
+  ["enroute_pickup", "測試：司機立即抵達", "arrive"],
+  ["arrived_pickup", "測試：乘客已上車", "board"],
+] as const) {
+  it(`offers ${label} while ${status} and stays on the trip after it`, async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const calls = stubFetch(
+      () =>
+        Response.json({
+          ok: true,
+          data: { orderId, status, driverId: "d", simulated: true },
+        }),
+      trip(status, "商務測試司機 1（虛構）"),
+    );
+    render(
+      <PassengerEmbed
+        context={context(true) as never}
+        liveData={live(status, "商務測試司機 1（虛構）") as never}
+      />,
+    );
+    expect(screen.queryByText("測試：立即抵達目的地")).toBeNull();
+    fireEvent.click(screen.getByText(label));
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.url === `/api/referral/demo-trip/${orderId}/${action}`,
+        ),
+      ).toBe(true),
+    );
+    // The trip screen refreshes the same trip instead of navigating away.
+    await waitFor(() =>
+      expect(
+        calls.filter((c) => c.url === "/api/referral/active").length,
+      ).toBeGreaterThan(0),
+    );
+    expect(assign).not.toHaveBeenCalled();
+  });
+}
+
+it("opens the completed screen when the test driver ends the trip at the destination", async () => {
+  const assign = vi.fn();
+  vi.stubGlobal("location", { ...window.location, assign });
+  stubFetch(
+    () =>
+      Response.json({
+        ok: true,
+        data: { orderId, status: "completed", driverId: "d", simulated: true },
+      }),
+    trip("on_trip", "商務測試司機 1（虛構）"),
+  );
+  render(
+    <PassengerEmbed
+      context={context(true) as never}
+      liveData={live("on_trip", "商務測試司機 1（虛構）") as never}
+    />,
+  );
+  // No tap: the first heartbeat reports the trip completed.
+  await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+  const target = new URL(String(assign.mock.calls[0]![0]), "https://x.test");
+  expect(target.searchParams.get("screen")).toBe("completed");
+  expect(target.searchParams.get("orderId")).toBe(orderId);
 });

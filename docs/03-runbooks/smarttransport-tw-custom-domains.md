@@ -171,7 +171,7 @@ env 名稱的小寫 kebab case。例如 `GOOGLE_OAUTH_CLIENT_SECRET` 對應
 | LINE                    | `LINE_CHANNEL_ID` / `line-channel-id`；`LINE_CHANNEL_SECRET` / `line-channel-secret`                                                                                   | API                                               |
 | Facebook                | `FACEBOOK_APP_ID` / `facebook-app-id`；`FACEBOOK_APP_SECRET` / `facebook-app-secret`                                                                                   | API                                               |
 | Email OTP pepper        | `PASSENGER_OTP_PEPPER` / `passenger-otp-pepper`                                                                                                                        | API；Email 另須既有完整 SMTP 與平台 delivery 可用 |
-| SMS                     | `SMS_PROVIDER_API_KEY` / `sms-provider-api-key`；`SMS_PROVIDER_SENDER_ID` / `sms-provider-sender-id`；`PASSENGER_OTP_PEPPER` / `passenger-otp-pepper`                  | API；仍須實際 SmsPort adapter                     |
+| SMS                     | `TWILIO_ACCOUNT_SID`、`TWILIO_API_KEY_SID`、`TWILIO_API_KEY_SECRET`、`TWILIO_FROM_NUMBER`、`PASSENGER_OTP_PEPPER`（對應 `twilio-*`／`passenger-otp-pepper`）           | API；完整 5 項才啟用 Twilio SmsPort               |
 | PSP + payment token key | `PSP_MERCHANT_ID` / `psp-merchant-id`；`PSP_API_KEY` / `psp-api-key`；`PSP_SANDBOX` / `psp-sandbox`；`PSP_TOKEN_ENCRYPTION_KEY_NAME` / `psp-token-encryption-key-name` | API；完整套組才掛載                               |
 
 各群組缺任一項時整組不掛載並輸出 notice；其他完整 provider 獨立保留。
@@ -182,9 +182,9 @@ API `--set-secrets` 與 BFF `--clear-secrets` 也會移除前次
 configuration 錯誤不因新增乘客服務而放寬。
 
 完整 metadata 套組只代表可以掛載，**不代表功能已驗收啟用**：目前 API 的
-SMS port 是 `UnconfiguredSmsPort`、PSP adapter 是外部 gate，
+SMS port 由 `createSmsPortFromEnv` 在完整 `TWILIO_*` 與 `PASSENGER_OTP_PEPPER` 齊全時啟用 `TwilioSmsAdapter`（缺任一項維持 `not_configured`，真實送達仍受 Twilio KYC／`drts-dev-twilio-from-number` 外部 gate 管轄）、PSP adapter 是外部 gate，
 `REQUIRE_SMS_VERIFICATION=false`。workflow 的 `*_mounts_complete` 只記錄
-reference metadata 是否齊全，並非 feature-enabled 或 provider 可用旗標。
+reference metadata 是否齊全，並非真實送達驗收或 provider 可用旗標。
 SD §4 尚未定義 cookie slot，shell 的 HttpOnly bearer cookies 也不消耗
 crypto key，因此目前不宣告、不查詢或掛載 cookie secret。付款 token
 欄位依 SD §4 使用 `PSP_TOKEN_ENCRYPTION_KEY_NAME`，由 PAX-PAYMENT-CORE

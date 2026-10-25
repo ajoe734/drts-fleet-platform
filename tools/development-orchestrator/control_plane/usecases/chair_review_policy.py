@@ -14,28 +14,29 @@ def pending_approval_items(approval_state: dict[str, Any]) -> list[dict[str, Any
     ]
 
 
+def blocked_task_holds_delivery(task: dict[str, Any]) -> bool:
+    # A noncanonical release verifies another owner's candidate. Source-repair
+    # children cannot satisfy its CI/deployment/acceptance gates.
+    return task.get("task_class") == "release" and task.get("mutates_canonical") is False
+
+
 def blocked_task_triage_kind(task: dict[str, Any]) -> str:
-    text = " ".join(
-        str(value or "")
-        for value in (
-            task.get("id"),
-            task.get("title"),
-            task.get("summary_zh"),
-            task.get("next"),
-            " ".join(str(item or "") for item in (task.get("artifacts") or [])),
-        )
-    ).lower()
+    # IDs, titles and artifact paths describe historical work, not the current
+    # blocker. Ordinary mentions of commits or branches are not repair evidence.
+    text = str(task.get("next") or "").lower()
     if any(
         marker in text
         for marker in (
-            "commit",
-            "branch",
-            "worktree",
-            "task-scoped",
-            "history",
             "head moved",
-            "pre-commit",
-            "push",
+            "mixed commit",
+            "dirty worktree",
+            "branch contamination",
+            "non-fast-forward",
+            "pre-commit failed",
+            "push rejected",
+            "history repair",
+            "history-repair",
+            "history_repair",
         )
     ):
         return "history_repair"

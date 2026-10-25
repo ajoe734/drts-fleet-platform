@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { voiceDatetimeUtcRegex } from "./voice-datetime";
 
 export const BookingActorTypeSchema = z.enum(["voice_agent", "human"]);
 export type BookingActorType = z.infer<typeof BookingActorTypeSchema>;
@@ -6,7 +7,7 @@ export type BookingActorType = z.infer<typeof BookingActorTypeSchema>;
 export const VoiceAgentBookingActorSchema = z
   .object({
     type: z.literal("voice_agent"),
-    voiceSessionId: z.string().uuid(),
+    voiceSessionId: z.string().guid(),
     principalId: z.string().min(1),
   })
   .strict();
@@ -38,8 +39,8 @@ export type VoiceControlCutoff = z.infer<typeof VoiceControlCutoffSchema>;
 
 export const VoiceSpeechEvidenceSchema = z
   .object({
-    turnId: z.string().uuid(),
-    finalEventId: z.string().uuid(),
+    turnId: z.string().guid(),
+    finalEventId: z.string().guid(),
   })
   .strict();
 export type VoiceSpeechEvidence = z.infer<typeof VoiceSpeechEvidenceSchema>;
@@ -48,7 +49,7 @@ export const DTMF_DIGIT_REGEX = /^[0-9*#A-Da-d]$/;
 
 export const VoiceDtmfEvidenceSchema = z
   .object({
-    eventId: z.string().uuid(),
+    eventId: z.string().guid(),
     digit: z
       .string()
       .regex(
@@ -82,20 +83,20 @@ export const VoiceProofUnionSchema = z.discriminatedUnion(
 export type VoiceProofUnion = z.infer<typeof VoiceProofUnionSchema>;
 
 export const BaseVoiceProofSchema = z.object({
-  confirmationId: z.string().uuid(),
-  voiceSessionId: z.string().uuid(),
-  intentId: z.string().uuid(),
+  confirmationId: z.string().guid(),
+  voiceSessionId: z.string().guid(),
+  intentId: z.string().guid(),
   action: z.string(),
   draftVersion: z.number().int(),
   snapshotHash: z.string().min(1),
-  readbackPlaybackId: z.string().uuid(),
-  readbackCompletedEventId: z.string().uuid(),
+  readbackPlaybackId: z.string().guid(),
+  readbackCompletedEventId: z.string().guid(),
   inputEpoch: z.number().int(),
   controlCutoff: VoiceControlCutoffSchema,
   leaseEpoch: z.number().int(),
-  recordingCheckpointId: z.string().uuid(),
-  confirmedAt: z.string().datetime(),
-  expiresAt: z.string().datetime(),
+  recordingCheckpointId: z.string().guid(),
+  confirmedAt: z.string().regex(voiceDatetimeUtcRegex),
+  expiresAt: z.string().regex(voiceDatetimeUtcRegex),
 });
 
 export const SpeechVoiceProofSchema = BaseVoiceProofSchema.extend({
@@ -118,7 +119,7 @@ export type VoiceProof = z.infer<typeof VoiceProofSchema>;
 
 export const VoiceScopeProfileSchema = z
   .object({
-    resourceScopeId: z.string().uuid(),
+    resourceScopeId: z.string().guid(),
     brandId: z.string(),
     operatingProfileId: z.string(),
     operatingProfileVersion: z.number().int(),
@@ -232,9 +233,9 @@ export const VoiceOutcomeSchema = z.enum([
 export type VoiceOutcome = z.infer<typeof VoiceOutcomeSchema>;
 
 export const VoiceSessionSchema = z.object({
-  voiceSessionId: z.string().uuid(),
+  voiceSessionId: z.string().guid(),
   callId: z.string().min(1),
-  callLegId: z.string().uuid().optional(),
+  callLegId: z.string().guid().optional(),
   scope: VoiceScopeProfileSchema,
   dialogState: VoiceDialogStateSchema,
   mediaState: VoiceMediaStateSchema,
@@ -255,24 +256,32 @@ export type VoiceSession = z.infer<typeof VoiceSessionSchema>;
 export const VoiceDraftSlotSchema = z.object({
   rawText: z.string().optional(),
   normalizedValue: z.unknown().optional(),
-  sourceTurnIds: z.array(z.string().uuid()).optional(),
+  sourceTurnIds: z.array(z.string().guid()).optional(),
   sourceSegmentIds: z.array(z.string()).optional(),
   providerConfidence: z.number().nullable().optional(),
   validationState: z.string().optional(),
-  confirmedByCustomerAt: z.string().datetime().nullable().optional(),
+  confirmedByCustomerAt: z
+    .string()
+    .regex(voiceDatetimeUtcRegex)
+    .nullable()
+    .optional(),
 });
 export type VoiceDraftSlot = z.infer<typeof VoiceDraftSlotSchema>;
 
 export const VoiceDraftSchema = z.object({
-  intentId: z.string().uuid(),
+  intentId: z.string().guid(),
   draftVersion: z.number().int(),
   rawText: z.string().optional(),
   normalizedValue: z.unknown().optional(),
-  sourceTurnIds: z.array(z.string().uuid()).optional(),
+  sourceTurnIds: z.array(z.string().guid()).optional(),
   sourceSegmentIds: z.array(z.string()).optional(),
   providerConfidence: z.number().nullable().optional(),
   validationState: z.string().optional(),
-  confirmedByCustomerAt: z.string().datetime().nullable().optional(),
+  confirmedByCustomerAt: z
+    .string()
+    .regex(voiceDatetimeUtcRegex)
+    .nullable()
+    .optional(),
   slots: z.record(z.string(), VoiceDraftSlotSchema).optional(),
   snapshotHash: z.string().optional(),
   canonicalSnapshot: z.record(z.string(), z.unknown()).optional(),
@@ -281,13 +290,13 @@ export const VoiceDraftSchema = z.object({
 export type VoiceDraft = z.infer<typeof VoiceDraftSchema>;
 
 export const VoiceDraftRevisionSchema = z.object({
-  intentId: z.string().uuid(),
+  intentId: z.string().guid(),
   draftVersion: z.number().int(),
   slots: z.record(z.string(), VoiceDraftSlotSchema),
   validationRefs: z.array(z.string()).optional(),
   canonicalSnapshot: z.record(z.string(), z.unknown()).optional(),
   snapshotHash: z.string().min(1),
-  createdAt: z.string().datetime().optional(),
+  createdAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
 });
 export type VoiceDraftRevision = z.infer<typeof VoiceDraftRevisionSchema>;
 
@@ -302,7 +311,7 @@ export type VoiceReceiptStatus = z.infer<typeof VoiceReceiptStatusSchema>;
 
 export const VoicePendingReceiptSchema = z
   .object({
-    commandId: z.string().uuid(),
+    commandId: z.string().guid(),
     status: z.literal("pending"),
     orderId: z.null().optional(),
     nextAction: z.string().optional(),
@@ -314,9 +323,9 @@ export type VoicePendingReceipt = z.infer<typeof VoicePendingReceiptSchema>;
 
 export const VoiceSucceededReceiptSchema = z
   .object({
-    commandId: z.string().uuid(),
+    commandId: z.string().guid(),
     status: z.literal("succeeded"),
-    orderId: z.string().uuid(),
+    orderId: z.string().guid(),
     nextAction: z.string().optional(),
     pollAfterMs: z.number().int().optional(),
     actionKey: z.string().optional(),
@@ -326,7 +335,7 @@ export type VoiceSucceededReceipt = z.infer<typeof VoiceSucceededReceiptSchema>;
 
 export const VoiceRejectedReceiptSchema = z
   .object({
-    commandId: z.string().uuid(),
+    commandId: z.string().guid(),
     status: z.literal("rejected"),
     orderId: z.null().optional(),
     rejectionReason: z.string().optional(),
@@ -347,14 +356,14 @@ export type VoiceReceipt = z.infer<typeof VoiceReceiptSchema>;
 export const VoicePendingReceiptRecordSchema = z
   .object({
     actionKey: z.string().min(1),
-    commandId: z.string().uuid(),
+    commandId: z.string().guid(),
     status: z.literal("pending"),
     orderId: z.null().optional(),
     payloadHash: z.string().optional(),
     resultVersion: z.number().int().optional(),
     rejectionReason: z.string().optional(),
-    createdAt: z.string().datetime().optional(),
-    updatedAt: z.string().datetime().optional(),
+    createdAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
+    updatedAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
   })
   .strict();
 export type VoicePendingReceiptRecord = z.infer<
@@ -364,14 +373,14 @@ export type VoicePendingReceiptRecord = z.infer<
 export const VoiceSucceededReceiptRecordSchema = z
   .object({
     actionKey: z.string().min(1),
-    commandId: z.string().uuid(),
+    commandId: z.string().guid(),
     status: z.literal("succeeded"),
-    orderId: z.string().uuid(),
+    orderId: z.string().guid(),
     payloadHash: z.string().optional(),
     resultVersion: z.number().int().optional(),
     rejectionReason: z.string().optional(),
-    createdAt: z.string().datetime().optional(),
-    updatedAt: z.string().datetime().optional(),
+    createdAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
+    updatedAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
   })
   .strict();
 export type VoiceSucceededReceiptRecord = z.infer<
@@ -381,14 +390,14 @@ export type VoiceSucceededReceiptRecord = z.infer<
 export const VoiceRejectedReceiptRecordSchema = z
   .object({
     actionKey: z.string().min(1),
-    commandId: z.string().uuid(),
+    commandId: z.string().guid(),
     status: z.literal("rejected"),
     orderId: z.null().optional(),
     rejectionReason: z.string().optional(),
     payloadHash: z.string().optional(),
     resultVersion: z.number().int().optional(),
-    createdAt: z.string().datetime().optional(),
-    updatedAt: z.string().datetime().optional(),
+    createdAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
+    updatedAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
   })
   .strict();
 export type VoiceRejectedReceiptRecord = z.infer<
@@ -447,12 +456,12 @@ export type VoiceCallbackAttemptOutcome = z.infer<
 
 export const VoiceCallbackAttemptSchema = z
   .object({
-    attemptId: z.string().uuid().optional(),
-    taskId: z.string().uuid(),
+    attemptId: z.string().guid().optional(),
+    taskId: z.string().guid(),
     attemptNumber: z.number().int().positive().optional(),
     operatorId: z.string().min(1).optional(),
-    startedAt: z.string().datetime().optional(),
-    endedAt: z.string().datetime().nullable().optional(),
+    startedAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
+    endedAt: z.string().regex(voiceDatetimeUtcRegex).nullable().optional(),
     outcome: VoiceCallbackAttemptOutcomeSchema,
     nextAction: z.string().optional(),
   })
@@ -460,19 +469,19 @@ export const VoiceCallbackAttemptSchema = z
 export type VoiceCallbackAttempt = z.infer<typeof VoiceCallbackAttemptSchema>;
 
 export const VoiceCallbackSchema = z.object({
-  callbackId: z.string().uuid(),
-  voiceSessionId: z.string().uuid(),
+  callbackId: z.string().guid(),
+  voiceSessionId: z.string().guid(),
   contactPhone: z.string(),
   consentSnapshotHash: z.string(),
   status: VoiceCallbackStatusSchema,
-  scheduledAt: z.string().datetime().optional(),
+  scheduledAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
   attemptCount: z.number().int().nonnegative().optional(),
   lastOutcome: VoiceCallbackAttemptOutcomeSchema.optional(),
-  resourceScopeId: z.string().uuid().optional(),
+  resourceScopeId: z.string().guid().optional(),
   contactRole: z.string().optional(),
   reason: z.string().optional(),
   priority: z.string().optional(),
-  dueAt: z.string().datetime().optional(),
+  dueAt: z.string().regex(voiceDatetimeUtcRegex).optional(),
   ownerClaimLease: z.string().optional(),
   version: z.number().int().optional(),
 });
@@ -498,8 +507,8 @@ export const VoiceCapabilitySchema = z
     iat: z.number().int().positive().optional(),
     nbf: z.number().int().positive().optional(),
     servicePrincipalId: z.string().min(1),
-    voiceSessionId: z.string().uuid(),
-    resourceScopeId: z.string().uuid(),
+    voiceSessionId: z.string().guid(),
+    resourceScopeId: z.string().guid(),
     routeProfileVersion: z.number().int(),
     leaseEpoch: z.number().int(),
     scopes: z.array(VoiceCapabilityScopeSchema),
@@ -515,8 +524,8 @@ export const VoiceCapabilityTokenClaimsSchema = z
     iat: z.number().int().positive().optional(),
     nbf: z.number().int().positive().optional(),
     servicePrincipalId: z.string().min(1),
-    voiceSessionId: z.string().uuid(),
-    resourceScopeId: z.string().uuid(),
+    voiceSessionId: z.string().guid(),
+    resourceScopeId: z.string().guid(),
     routeProfileVersion: z.number().int(),
     leaseEpoch: z.number().int(),
     scopes: z.array(VoiceCapabilityScopeSchema),
@@ -565,8 +574,8 @@ export const VoiceDispatchProjectionViewSchema = z.object({
   assignmentVersion: z.number().int().nullable().optional(),
   driverTaskId: z.string().nullable().optional(),
   driverTaskStatus: z.string().nullable().optional(),
-  observedAt: z.string().datetime(),
-  acceptedAt: z.string().datetime().nullable().optional(),
+  observedAt: z.string().regex(voiceDatetimeUtcRegex),
+  acceptedAt: z.string().regex(voiceDatetimeUtcRegex).nullable().optional(),
   etaMinutes: z.number().nullable().optional(),
   etaSource: z.string().nullable().optional(),
   driverId: z.string().nullable().optional(),
@@ -615,4 +624,3 @@ export interface AutonomousDispatchTimeoutResult {
   nextRound?: number;
   nextOffer?: AutonomousDispatchOfferResult;
 }
-

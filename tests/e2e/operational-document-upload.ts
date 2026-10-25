@@ -24,6 +24,118 @@ function expectCandidateRevision(
   }
 }
 
+export const OPERATIONAL_PDF_BYTES = Buffer.from(
+  "%PDF-1.4\n" +
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\n" +
+    "xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n" +
+    "trailer\n<< /Size 4 /Root 1 0 R >>\n" +
+    "startxref\n184\n%%EOF\n",
+);
+
+export const OPERATIONAL_PNG_BYTES = Buffer.from(
+  "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753de" +
+    "0000000c4944415478da6338639c060003340166067b33000000000049454e44ae" +
+    "426082",
+  "hex",
+);
+
+export const OPERATIONAL_JPEG_BYTES = Buffer.from(
+  "ffd8ffe000104a46494600010101006000600000ffdb0043000806060706050807" +
+    "07070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c20242e2720222c" +
+    "231c1c2837292c30313434341f27393d38323c2e333432ffc0000b080001000101" +
+    "011100ffc4001f0000010501010101010100000000000000000102030405060708" +
+    "090a0bffc400b5100002010303020403050504040000017d010203000411051221" +
+    "31410613516107227114328191a1082342b1c11552d1f02433627282090a161718" +
+    "191a25262728292a3435363738393a434445464748494a535455565758595a6364" +
+    "65666768696a737475767778797a838485868788898a92939495969798999aa2a3" +
+    "a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9" +
+    "dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffda0008010100003f00fbfd" +
+    "ffd9",
+  "hex",
+);
+
+export type OperationalDocumentMimeType =
+  | "application/pdf"
+  | "image/png"
+  | "image/jpeg";
+
+export const ALLOWED_SUPPLY_DOCUMENT_TYPES = [
+  "professional_driver_license",
+  "taxi_driver_registration",
+  "vehicle_registration",
+  "insurance_policy",
+  "fleet_participation_contract",
+  "driver_management_contract",
+  "vehicle_management_contract",
+  "other",
+] as const;
+
+export const DRIVER_SUPPLY_DOCUMENT_TYPES = [
+  "professional_driver_license",
+  "taxi_driver_registration",
+  "fleet_participation_contract",
+  "driver_management_contract",
+  "other",
+] as const;
+
+export const VEHICLE_SUPPLY_DOCUMENT_TYPES = [
+  "vehicle_registration",
+  "insurance_policy",
+  "fleet_participation_contract",
+  "vehicle_management_contract",
+  "other",
+] as const;
+
+export function getOperationalDocumentFixture(
+  contentTypeInput?: unknown,
+  fileNameInput?: unknown,
+): {
+  bytes: Buffer<ArrayBuffer>;
+  sha256: string;
+  fileSize: number;
+  contentType: OperationalDocumentMimeType;
+  originalFileName: string;
+} {
+  const requestedType =
+    typeof contentTypeInput === "string" && contentTypeInput.trim()
+      ? contentTypeInput.trim().toLowerCase()
+      : "application/pdf";
+  let bytes: Buffer<ArrayBuffer>;
+  let contentType: OperationalDocumentMimeType;
+  let defaultFileName: string;
+  if (requestedType === "application/pdf") {
+    bytes = OPERATIONAL_PDF_BYTES;
+    contentType = "application/pdf";
+    defaultFileName = "harmless-upload.pdf";
+  } else if (requestedType === "image/png") {
+    bytes = OPERATIONAL_PNG_BYTES;
+    contentType = "image/png";
+    defaultFileName = "harmless-upload.png";
+  } else if (requestedType === "image/jpeg") {
+    bytes = OPERATIONAL_JPEG_BYTES;
+    contentType = "image/jpeg";
+    defaultFileName = "harmless-upload.jpg";
+  } else {
+    throw new Error(
+      `Unsupported operational document contentType: ${String(contentTypeInput)}`,
+    );
+  }
+  const originalFileName =
+    typeof fileNameInput === "string" && fileNameInput.trim()
+      ? fileNameInput.trim()
+      : defaultFileName;
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  return {
+    bytes,
+    sha256,
+    fileSize: bytes.length,
+    contentType,
+    originalFileName,
+  };
+}
+
 export type LifecycleEvidence = {
   objectKey: string;
   sha256: string;
@@ -33,17 +145,27 @@ export type LifecycleEvidence = {
   confirmAttempts: number;
   downloadAttempts: number;
   documentId?: string;
+  attachmentId?: string;
   intentStatus: number;
   putStatus: number;
   putScanState: string;
   confirmStatus: number;
   confirmSubmissionId?: string;
+  confirmCaseId?: string;
   confirmFleetPartnerId?: string;
   confirmDocumentType?: string;
+  confirmAttachmentState?: string;
+  canonicalReadbackStatus?: number;
+  readUrlStatus?: number;
+  signedDownloadUrl?: string;
   downloadStatus: number;
   readbackSha256: string;
   readbackFileSize: number;
   readbackContentType: string;
+  reviewerDownloadStatus?: number;
+  reviewerReadbackSha256?: string;
+  reviewerReadbackFileSize?: number;
+  reviewerReadbackContentType?: string;
   transientHistory: string[];
 };
 
@@ -57,18 +179,19 @@ export async function uploadOperationalDocument(
   headers: Record<string, string>,
 ): Promise<LifecycleEvidence> {
   const lifecycleHeaders = new Headers(headers);
-  const pdfBytes = Buffer.from(
-    "%PDF-1.4\n" +
-      "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n" +
-      "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n" +
-      "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 72 72] >>\nendobj\n" +
-      "xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n" +
-      "trailer\n<< /Size 4 /Root 1 0 R >>\n" +
-      "startxref\n184\n%%EOF\n",
+  const {
+    bytes: fixtureBytes,
+    sha256,
+    fileSize,
+    contentType,
+    originalFileName,
+  } = getOperationalDocumentFixture(
+    intentBody.contentType ?? confirmBody.contentType,
+    intentBody.originalFileName ??
+      intentBody.fileName ??
+      confirmBody.originalFileName ??
+      confirmBody.fileName,
   );
-  const sha256 = createHash("sha256").update(pdfBytes).digest("hex");
-  const fileSize = pdfBytes.length;
-  const contentType = "application/pdf";
 
   const totalBudget = 60000;
   const startTime = Date.now();
@@ -152,15 +275,17 @@ export async function uploadOperationalDocument(
     );
   }
   const intentPathname = parsedIntentUrl.pathname;
-  const parentPrefixMatch = intentPathname.match(
+  const supplyParentPrefixMatch = intentPathname.match(
     /^(\/control-plane-proxy\/fleet-partner\/supply-submissions\/([^/]+))\/documents\/(?:intent|upload-url)$/,
   );
+  const caseParentPrefixMatch = intentPathname.match(
+    /^(\/control-plane-proxy\/fleet-partner\/cases\/([^/]+))\/attachments\/(?:intent|upload-url)$/,
+  );
+  const parentPrefixMatch = supplyParentPrefixMatch ?? caseParentPrefixMatch;
   expect(
     parentPrefixMatch,
-    "intentPath must match exact parent prefix shape (/control-plane-proxy/fleet-partner/supply-submissions/...).",
+    "intentPath must match exact parent prefix shape (/control-plane-proxy/fleet-partner/supply-submissions/... or /control-plane-proxy/fleet-partner/cases/...).",
   ).toBeTruthy();
-  const parentPrefix = parentPrefixMatch![1] as string;
-  const expectedSubmissionId = parentPrefixMatch![2] as string;
 
   const parsedConfirmUrl = new URL(confirmPath, origin);
   expect(parsedConfirmUrl.origin, "confirm URL must be same origin").toBe(
@@ -189,9 +314,591 @@ export async function uploadOperationalDocument(
     );
   }
   const confirmPathname = parsedConfirmUrl.pathname;
+
+  if (caseParentPrefixMatch) {
+    const parentPrefix = caseParentPrefixMatch[1] as string;
+    const expectedCaseId = decodeURIComponent(
+      caseParentPrefixMatch[2] as string,
+    );
+    expect(
+      confirmPathname,
+      "confirm URL pathname must match parent scope",
+    ).toBe(`${parentPrefix}/attachments/confirm`);
+
+    // Hop 1: Authoritative Case readback
+    const readbackResponse = await boundedFetch(
+      new URL(parentPrefix, origin).toString(),
+      {
+        method: "GET",
+        headers: lifecycleHeaders,
+      },
+    );
+    checkDeadline();
+    expect(readbackResponse.status, `readback case ${parentPrefix}`).toBe(200);
+    expectCandidateRevision(
+      readbackResponse.headers,
+      `readback case ${parentPrefix}`,
+    );
+    const readbackData = JSON.parse(
+      readbackResponse.body.toString("utf8"),
+    ) as any;
+    const caseDetail =
+      readbackData?.data?.case_detail ??
+      readbackData?.data?.caseDetail ??
+      readbackData?.data;
+    const authoritativeFleetId =
+      caseDetail?.fleet_partner_id ||
+      caseDetail?.fleetPartnerId ||
+      readbackData?.data?.fleet_partner_id ||
+      readbackData?.data?.fleetPartnerId;
+    const authoritativeCaseId =
+      caseDetail?.id || caseDetail?.case_id || caseDetail?.caseId;
+    const caseStatus = caseDetail?.status;
+    const caseResponsibility = caseDetail?.responsibility;
+    expect(authoritativeFleetId, "authoritative case fleet").toBeTruthy();
+    expect(
+      authoritativeCaseId,
+      "authoritative case ID must match intent URL",
+    ).toBe(expectedCaseId);
+    if (caseStatus === "closed") {
+      throw new Error(`case ${expectedCaseId} must be editable (not closed)`);
+    }
+    if (caseResponsibility === "platform") {
+      throw new Error(
+        `case ${expectedCaseId} must be fleet-editable (not platform-only responsibility)`,
+      );
+    }
+    if (
+      typeof intentBody.expectedFleetPartnerId === "string" &&
+      intentBody.expectedFleetPartnerId.trim() &&
+      authoritativeFleetId !== intentBody.expectedFleetPartnerId.trim()
+    ) {
+      throw new Error(
+        `authoritative case fleet_partner_id (${authoritativeFleetId}) must match expectedFleetPartnerId (${intentBody.expectedFleetPartnerId.trim()})`,
+      );
+    }
+
+    const cleanCaseIntentBody = Object.fromEntries(
+      Object.entries(intentBody).filter(
+        ([key]) =>
+          ![
+            "contentType",
+            "originalFileName",
+            "fileName",
+            "fileSize",
+            "expectedFleetPartnerId",
+          ].includes(key),
+      ),
+    );
+
+    // Hop 2: Case attachment intent execution
+    const intentResponse = await boundedFetch(parsedIntentUrl.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({
+        ...cleanCaseIntentBody,
+        fileName: originalFileName,
+        fileSize,
+        contentType,
+      }),
+    });
+    checkDeadline();
+    expect(
+      [200, 201].includes(intentResponse.status),
+      `intent request to ${intentPath} must be 200 or 201, got ${intentResponse.status}`,
+    ).toBeTruthy();
+    expectCandidateRevision(
+      intentResponse.headers,
+      `intent request to ${intentPath}`,
+    );
+
+    const intentData = JSON.parse(intentResponse.body.toString("utf8")) as {
+      data: {
+        attachment_id?: string;
+        attachmentId?: string;
+        case_id?: string;
+        caseId?: string;
+        fleet_partner_id?: string;
+        fleetPartnerId?: string;
+        object_key?: string;
+        objectKey?: string;
+        upload_url?: string;
+        uploadUrl?: string;
+        method?: string;
+        headers?: Record<string, string>;
+      };
+    };
+
+    const attachmentId =
+      intentData?.data?.attachment_id || intentData?.data?.attachmentId;
+    const objectKey =
+      intentData?.data?.object_key || intentData?.data?.objectKey || "";
+    const rawUploadUrl =
+      intentData?.data?.upload_url || intentData?.data?.uploadUrl || "";
+    const uploadMethod = intentData?.data?.method;
+    const uploadHeaders = intentData?.data?.headers || {};
+    const intentCaseId = intentData?.data?.case_id || intentData?.data?.caseId;
+    const intentFleetId =
+      intentData?.data?.fleet_partner_id || intentData?.data?.fleetPartnerId;
+
+    expect(attachmentId, "attachment_id from case intent").toBeTruthy();
+    expect(
+      attachmentId,
+      "attachment_id must be a strict single segment",
+    ).toMatch(/^[-a-zA-Z0-9_]+$/);
+    expect(objectKey, "object_key from case intent").toBeTruthy();
+    expect(
+      objectKey.startsWith(
+        `fleet-partner/${authoritativeFleetId}/cases/${expectedCaseId}/${attachmentId}-`,
+      ),
+      "case object_key must begin with exact authoritative fleet/case/attachment prefix",
+    ).toBeTruthy();
+    if (intentCaseId) {
+      expect(intentCaseId, "intent case_id must match").toBe(expectedCaseId);
+    }
+    if (intentFleetId) {
+      expect(
+        intentFleetId,
+        "intent fleet_partner_id must match authoritative case fleet",
+      ).toBe(authoritativeFleetId);
+    }
+    expect(rawUploadUrl, "upload_url from case intent").toBeTruthy();
+    expect(uploadMethod, "upload method must be exactly provided").toBe("PUT");
+    expect(
+      uploadHeaders["Content-Type"] || uploadHeaders["content-type"],
+      "must contain application/octet-stream",
+    ).toBe("application/octet-stream");
+
+    const parsedUploadUrl = new URL(rawUploadUrl, origin);
+    expect(parsedUploadUrl.origin, "upload URL must be same origin").toBe(
+      new URL(origin).origin,
+    );
+    expect(
+      parsedUploadUrl.username,
+      "upload URL must not contain credentials",
+    ).toBe("");
+    expect(
+      parsedUploadUrl.password,
+      "upload URL must not contain credentials",
+    ).toBe("");
+    if (parsedUploadUrl.pathname.startsWith("/api/")) {
+      parsedUploadUrl.pathname = parsedUploadUrl.pathname.replace(
+        /^\/api\//,
+        "/control-plane-proxy/",
+      );
+    }
+    expect(
+      parsedUploadUrl.pathname,
+      "upload URL pathname must match case parent scope",
+    ).toBe(`${parentPrefix}/attachments/content`);
+    expect(
+      parsedUploadUrl.searchParams.get("objectKey") ||
+        parsedUploadUrl.searchParams.get("object_key"),
+      "upload URL must bind objectKey",
+    ).toBe(objectKey);
+    expect(
+      Array.from(parsedUploadUrl.searchParams.keys()).length,
+      "upload URL must not contain extra queries",
+    ).toBe(1);
+    expect(parsedUploadUrl.hash, "upload URL must not contain fragment").toBe(
+      "",
+    );
+
+    const uploadUrl = parsedUploadUrl.toString();
+    const putHeaders = new Headers(uploadHeaders);
+    lifecycleHeaders.forEach((value, name) => {
+      if (name !== "content-type") putHeaders.set(name, value);
+    });
+
+    // Hop 3: PUT exact bytes and scan
+    let scanReceiptOk = false;
+    let putAttempts = 0;
+    let putStatus = 0;
+    let putScanState = "";
+    const transientHistory: string[] = [];
+    const maxAttempts = 45;
+
+    while (
+      !scanReceiptOk &&
+      putAttempts < maxAttempts &&
+      getRemainingTime() > 0
+    ) {
+      putAttempts++;
+      const putResponse = await boundedFetch(uploadUrl, {
+        method: "PUT",
+        headers: putHeaders,
+        body: fixtureBytes,
+      });
+      checkDeadline();
+
+      putStatus = putResponse.status;
+      if (putResponse.status === 503) {
+        const errText = putResponse.body.toString("utf8");
+        const errBody = JSON.parse(errText || "{}");
+        checkDeadline();
+        expectCandidateRevision(
+          putResponse.headers,
+          `PUT exact bytes transient error to ${uploadUrl}`,
+        );
+        transientHistory.push(errBody?.error?.code || "unknown_503");
+        if (errBody?.error?.code === "DOCUMENT_SCANNER_UNAVAILABLE") {
+          await new Promise((resolve) =>
+            setTimeout(resolve, Math.min(1000, getRemainingTime())),
+          );
+          checkDeadline();
+          continue;
+        }
+      }
+
+      expect(
+        [200, 201].includes(putResponse.status),
+        `PUT exact bytes to ${uploadUrl} must be 200 or 201, got ${putResponse.status}`,
+      ).toBeTruthy();
+      expectCandidateRevision(
+        putResponse.headers,
+        `PUT exact bytes to ${uploadUrl}`,
+      );
+
+      const putData = JSON.parse(putResponse.body.toString("utf8")) as {
+        data?: {
+          attachment_id?: string;
+          attachmentId?: string;
+          case_id?: string;
+          caseId?: string;
+          checksum_sha256?: string;
+          checksumSha256?: string;
+          file_size?: number;
+          fileSize?: number;
+          scan_state?: string;
+          scanState?: string;
+        };
+      };
+      checkDeadline();
+      if (putData?.data?.attachment_id || putData?.data?.attachmentId) {
+        expect(
+          putData?.data?.attachment_id || putData?.data?.attachmentId,
+          "PUT attachment_id must match intent attachmentId",
+        ).toBe(attachmentId);
+      }
+      const casePutChecksum =
+        putData?.data?.checksum_sha256 ?? putData?.data?.checksumSha256;
+      const casePutSize = putData?.data?.file_size ?? putData?.data?.fileSize;
+      const casePutScanState =
+        putData?.data?.scan_state ?? putData?.data?.scanState;
+      expect(casePutChecksum, "PUT checksum").toBe(sha256);
+      expect(casePutSize, "PUT file_size").toBe(fileSize);
+      expect(casePutScanState, "PUT scan_state").toBe("clean");
+      putScanState = casePutScanState || "";
+      scanReceiptOk = true;
+    }
+    expect(
+      scanReceiptOk,
+      "Scanner must eventually process the bytes and return clean receipt within deadline",
+    ).toBeTruthy();
+
+    // Hop 4: Confirm case attachment
+    const cleanCaseConfirmBody = Object.fromEntries(
+      Object.entries(confirmBody).filter(
+        ([key]) =>
+          !["contentType", "originalFileName", "fileName", "fileSize"].includes(
+            key,
+          ),
+      ),
+    );
+    const finalConfirmBody = {
+      ...cleanCaseConfirmBody,
+      attachmentId,
+      objectKey,
+      fileName: originalFileName,
+      fileSize,
+      contentType,
+      checksumSha256: sha256,
+    };
+
+    const confirmResponse = await boundedFetch(parsedConfirmUrl.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(finalConfirmBody),
+    });
+    checkDeadline();
+    expect(
+      [200, 201].includes(confirmResponse.status),
+      `confirm request to ${confirmPath} must be 200 or 201, got ${confirmResponse.status}`,
+    ).toBeTruthy();
+    expectCandidateRevision(
+      confirmResponse.headers,
+      `confirm request to ${confirmPath}`,
+    );
+
+    const confirmData = JSON.parse(confirmResponse.body.toString("utf8")) as {
+      data?: {
+        attachment_id?: string;
+        attachmentId?: string;
+        case_id?: string;
+        caseId?: string;
+        fleet_partner_id?: string;
+        fleetPartnerId?: string;
+        object_key?: string;
+        objectKey?: string;
+        file_size?: number;
+        fileSize?: number;
+        content_type?: string;
+        contentType?: string;
+        name?: string;
+        state?: string;
+      };
+    };
+    checkDeadline();
+
+    const confirmAttachmentId =
+      confirmData?.data?.attachment_id || confirmData?.data?.attachmentId;
+    const confirmCaseId =
+      confirmData?.data?.case_id || confirmData?.data?.caseId;
+    const confirmFleetId =
+      confirmData?.data?.fleet_partner_id || confirmData?.data?.fleetPartnerId;
+    const confirmObjKey =
+      confirmData?.data?.object_key || confirmData?.data?.objectKey;
+    const confirmSize =
+      confirmData?.data?.file_size ?? confirmData?.data?.fileSize;
+    const confirmType =
+      confirmData?.data?.content_type || confirmData?.data?.contentType;
+    const confirmName = confirmData?.data?.name;
+    const confirmState = confirmData?.data?.state;
+
+    expect(
+      confirmAttachmentId,
+      "confirm attachment_id must match intent attachmentId",
+    ).toBe(attachmentId);
+    expect(confirmCaseId, "confirm case_id must match URL").toBe(
+      expectedCaseId,
+    );
+    expect(
+      confirmFleetId,
+      "confirm fleet_partner_id must match authoritative case readback",
+    ).toBe(authoritativeFleetId);
+    expect(confirmObjKey, "confirm object_key metadata").toBe(objectKey);
+    expect(confirmSize, "confirm size metadata").toBe(fileSize);
+    expect(confirmType, "confirm mime metadata").toBe(contentType);
+    expect(confirmName, "confirm file name metadata").toBe(originalFileName);
+    expect(confirmState, "confirm attachment state must be done").toBe("done");
+
+    // Hop 5: Canonical Case readback verifying persisted attachment metadata
+    const canonicalCaseResponse = await boundedFetch(
+      new URL(parentPrefix, origin).toString(),
+      {
+        method: "GET",
+        headers: lifecycleHeaders,
+      },
+    );
+    checkDeadline();
+    expect(
+      canonicalCaseResponse.status,
+      `canonical case readback ${parentPrefix}`,
+    ).toBe(200);
+    expectCandidateRevision(
+      canonicalCaseResponse.headers,
+      `canonical case readback ${parentPrefix}`,
+    );
+    const canonicalCaseData = JSON.parse(
+      canonicalCaseResponse.body.toString("utf8"),
+    ) as any;
+    const canonicalCaseDetail =
+      canonicalCaseData?.data?.case_detail ??
+      canonicalCaseData?.data?.caseDetail ??
+      canonicalCaseData?.data;
+    const rawCanonicalAttachments = Array.isArray(
+      canonicalCaseData?.data?.attachments,
+    )
+      ? canonicalCaseData.data.attachments
+      : canonicalCaseDetail?.attachments;
+    const canonicalAttachments = Array.isArray(rawCanonicalAttachments)
+      ? (rawCanonicalAttachments as Array<Record<string, unknown>>)
+      : [];
+    const matchedAttachment = canonicalAttachments.find(
+      (item) =>
+        (item.attachment_id || item.attachmentId || item.id) === attachmentId,
+    );
+    expect(
+      matchedAttachment,
+      `canonical case ${expectedCaseId} attachments must include confirmed ${attachmentId}`,
+    ).toBeTruthy();
+    expect(
+      matchedAttachment?.state,
+      "canonical case attachment state must be done",
+    ).toBe("done");
+    expect(
+      matchedAttachment?.object_key || matchedAttachment?.objectKey,
+      "canonical case attachment object_key must match",
+    ).toBe(objectKey);
+    expect(
+      matchedAttachment?.file_size ?? matchedAttachment?.fileSize,
+      "canonical case attachment file_size must match",
+    ).toBe(fileSize);
+    expect(
+      matchedAttachment?.content_type || matchedAttachment?.contentType,
+      "canonical case attachment content_type must match",
+    ).toBe(contentType);
+
+    // Hop 6: Request signed read-url
+    const readUrlPath = `${parentPrefix}/attachments/${encodeURIComponent(attachmentId!)}/read-url`;
+    const parsedReadUrl = new URL(readUrlPath, origin);
+    const readUrlResponse = await boundedFetch(parsedReadUrl.toString(), {
+      method: "GET",
+      headers: lifecycleHeaders,
+    });
+    checkDeadline();
+    expect(
+      readUrlResponse.status,
+      `GET case attachment read-url from ${parsedReadUrl.toString()}`,
+    ).toBe(200);
+    expectCandidateRevision(
+      readUrlResponse.headers,
+      `GET case attachment read-url from ${parsedReadUrl.toString()}`,
+    );
+    const readUrlData = JSON.parse(readUrlResponse.body.toString("utf8")) as {
+      data?: {
+        authorized?: boolean;
+        attachment_id?: string;
+        attachmentId?: string;
+        name?: string;
+        download_url?: string;
+        downloadUrl?: string;
+        expires_at?: string;
+        expiresAt?: string;
+      };
+    };
+    const rawDownloadUrl =
+      readUrlData?.data?.download_url || readUrlData?.data?.downloadUrl || "";
+    expect(
+      readUrlData?.data?.authorized,
+      "read-url must return authorized=true",
+    ).toBe(true);
+    expect(
+      readUrlData?.data?.attachment_id || readUrlData?.data?.attachmentId,
+      "read-url attachment_id must match",
+    ).toBe(attachmentId);
+    expect(readUrlData?.data?.name, "read-url name must match").toBe(
+      originalFileName,
+    );
+    expect(
+      readUrlData?.data?.expires_at || readUrlData?.data?.expiresAt,
+      "read-url must include expires_at",
+    ).toBeTruthy();
+    expect(rawDownloadUrl, "read-url must include download_url").toBeTruthy();
+
+    const parsedDownloadUrl = new URL(rawDownloadUrl, origin);
+    expect(
+      parsedDownloadUrl.origin,
+      "signed download URL must be same origin",
+    ).toBe(new URL(origin).origin);
+    expect(
+      parsedDownloadUrl.username,
+      "signed download URL must not contain credentials",
+    ).toBe("");
+    expect(
+      parsedDownloadUrl.password,
+      "signed download URL must not contain credentials",
+    ).toBe("");
+    if (parsedDownloadUrl.pathname.startsWith("/api/")) {
+      parsedDownloadUrl.pathname = parsedDownloadUrl.pathname.replace(
+        /^\/api\//,
+        "/control-plane-proxy/",
+      );
+    }
+    expect(
+      parsedDownloadUrl.pathname,
+      "signed download URL pathname must match case attachment download route",
+    ).toBe(
+      `${parentPrefix}/attachments/${encodeURIComponent(attachmentId!)}/download`,
+    );
+    expect(
+      parsedDownloadUrl.searchParams.get("expiresAt"),
+      "signed download URL must bind expiresAt",
+    ).toBeTruthy();
+    expect(
+      parsedDownloadUrl.searchParams.get("sig"),
+      "signed download URL must bind sig",
+    ).toBeTruthy();
+    expect(
+      parsedDownloadUrl.hash,
+      "signed download URL must not contain fragment",
+    ).toBe("");
+
+    // Hop 7: Signed download readback
+    const downloadResponse = await boundedFetch(parsedDownloadUrl.toString(), {
+      method: "GET",
+      headers: lifecycleHeaders,
+    });
+    checkDeadline();
+    expect(
+      downloadResponse.status,
+      `GET readback from ${parsedDownloadUrl.toString()}`,
+    ).toBe(200);
+    expectCandidateRevision(
+      downloadResponse.headers,
+      `GET readback from ${parsedDownloadUrl.toString()}`,
+    );
+
+    const readbackBuffer = downloadResponse.body;
+    const readbackSha256 = createHash("sha256")
+      .update(readbackBuffer)
+      .digest("hex");
+    expect(readbackSha256, "readback checksum").toBe(sha256);
+    expect(readbackBuffer.length, "readback file_size").toBe(fileSize);
+
+    const returnedType = downloadResponse.headers.get("content-type") || "";
+    expect(
+      (returnedType.split(";")[0] || "").trim().toLowerCase(),
+      `readback content_type exactly ${contentType}`,
+    ).toBe(contentType);
+
+    return {
+      objectKey,
+      sha256,
+      fileSize,
+      intentAttempts: 1,
+      putAttempts,
+      confirmAttempts: 1,
+      downloadAttempts: 1,
+      documentId: attachmentId!,
+      attachmentId: attachmentId!,
+      intentStatus: intentResponse.status,
+      putStatus,
+      putScanState,
+      confirmStatus: confirmResponse.status,
+      confirmCaseId: expectedCaseId,
+      confirmFleetPartnerId: authoritativeFleetId,
+      confirmAttachmentState: confirmState || "done",
+      canonicalReadbackStatus: canonicalCaseResponse.status,
+      readUrlStatus: readUrlResponse.status,
+      signedDownloadUrl: parsedDownloadUrl.toString(),
+      downloadStatus: downloadResponse.status,
+      readbackSha256,
+      readbackFileSize: readbackBuffer.length,
+      readbackContentType: returnedType,
+      transientHistory,
+    };
+  }
+
+  const parentPrefix = supplyParentPrefixMatch![1] as string;
+  const expectedSubmissionId = supplyParentPrefixMatch![2] as string;
+
   expect(confirmPathname, "confirm URL pathname must match parent scope").toBe(
     `${parentPrefix}/documents/confirm`,
   );
+
+  const requestedSupplyDocumentType = String(
+    intentBody.documentType ?? confirmBody.documentType ?? "",
+  ).trim();
+  if (
+    !(ALLOWED_SUPPLY_DOCUMENT_TYPES as readonly string[]).includes(
+      requestedSupplyDocumentType,
+    )
+  ) {
+    throw new Error(
+      `supply documentType must be an authorized enum value (no invented photo enum), got ${requestedSupplyDocumentType}`,
+    );
+  }
 
   // R4: Authoritative Fleet readback
   const readbackResponse = await boundedFetch(
@@ -220,20 +927,56 @@ export async function uploadOperationalDocument(
   const authoritativeSubmissionId =
     readbackData?.data?.submission?.submission_id ||
     readbackData?.data?.submission?.id;
+  const authoritativeSubmissionType =
+    readbackData?.data?.submission?.submission_type ||
+    readbackData?.data?.submission?.submissionType;
   expect(authoritativeFleetId, "authoritative expected fleet").toBeTruthy();
   expect(
     authoritativeSubmissionId,
     "authoritative submission ID must match intent URL",
   ).toBe(expectedSubmissionId);
+  const authoritativeParentCategory =
+    authoritativeSubmissionType === "driver" ||
+    authoritativeSubmissionType === "driver_onboarding"
+      ? "driver"
+      : authoritativeSubmissionType === "vehicle" ||
+          authoritativeSubmissionType === "vehicle_onboarding"
+        ? "vehicle"
+        : undefined;
+  if (
+    authoritativeParentCategory === "driver" &&
+    !(DRIVER_SUPPLY_DOCUMENT_TYPES as readonly string[]).includes(
+      requestedSupplyDocumentType,
+    )
+  ) {
+    throw new Error(
+      `driver supply submission ${expectedSubmissionId} does not allow documentType ${requestedSupplyDocumentType}`,
+    );
+  } else if (
+    authoritativeParentCategory === "vehicle" &&
+    !(VEHICLE_SUPPLY_DOCUMENT_TYPES as readonly string[]).includes(
+      requestedSupplyDocumentType,
+    )
+  ) {
+    throw new Error(
+      `vehicle supply submission ${expectedSubmissionId} does not allow documentType ${requestedSupplyDocumentType}`,
+    );
+  }
+
+  const cleanSupplyIntentBody = Object.fromEntries(
+    Object.entries(intentBody).filter(
+      ([key]) => !["contentType", "originalFileName", "fileName"].includes(key),
+    ),
+  );
 
   // 1. Intent execution
   const intentResponse = await boundedFetch(parsedIntentUrl.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify({
-      ...intentBody,
+      ...cleanSupplyIntentBody,
       contentType,
-      originalFileName: "harmless-upload.pdf",
+      originalFileName,
     }),
   });
   checkDeadline();
@@ -249,19 +992,27 @@ export async function uploadOperationalDocument(
   const intentText = intentResponse.body.toString("utf8");
   const intentData = JSON.parse(intentText) as {
     data: {
-      object_key: string;
-      upload_url: string;
+      object_key?: string;
+      objectKey?: string;
+      upload_url?: string;
+      uploadUrl?: string;
       method: string;
       headers: Record<string, string>;
       submission_id?: string;
+      submissionId?: string;
       fleet_partner_id?: string;
+      fleetPartnerId?: string;
     };
   };
 
-  const objectKey = intentData.data.object_key;
-  const rawUploadUrl = intentData.data.upload_url;
+  const objectKey =
+    intentData.data.object_key ?? intentData.data.objectKey ?? "";
+  const rawUploadUrl =
+    intentData.data.upload_url ?? intentData.data.uploadUrl ?? "";
   const uploadMethod = intentData.data.method;
   const uploadHeaders = intentData.data.headers;
+  const intentSubmissionId =
+    intentData.data.submission_id ?? intentData.data.submissionId;
 
   expect(objectKey, "object_key from intent").toBeTruthy();
   expect(
@@ -271,11 +1022,10 @@ export async function uploadOperationalDocument(
     "object_key must begin with exact authoritative prefix",
   ).toBeTruthy();
 
-  if (intentData.data.submission_id) {
-    expect(
-      intentData.data.submission_id,
-      "intent submission_id must match",
-    ).toBe(expectedSubmissionId);
+  if (intentSubmissionId) {
+    expect(intentSubmissionId, "intent submission_id must match").toBe(
+      expectedSubmissionId,
+    );
   }
 
   expect(rawUploadUrl, "upload_url from intent").toBeTruthy();
@@ -343,7 +1093,7 @@ export async function uploadOperationalDocument(
     const putResponse = await boundedFetch(uploadUrl, {
       method: "PUT",
       headers: putHeaders,
-      body: pdfBytes,
+      body: fixtureBytes,
     });
     checkDeadline();
 
@@ -379,15 +1129,23 @@ export async function uploadOperationalDocument(
     const putData = JSON.parse(putText) as {
       data?: {
         checksum_sha256?: string;
+        checksumSha256?: string;
         file_size?: number;
+        fileSize?: number;
         scan_state?: string;
+        scanState?: string;
       };
     };
     checkDeadline();
-    expect(putData?.data?.checksum_sha256, "PUT checksum").toBe(sha256);
-    expect(putData?.data?.file_size, "PUT file_size").toBe(fileSize);
-    expect(putData?.data?.scan_state, "PUT scan_state").toBe("clean");
-    putScanState = putData?.data?.scan_state || "";
+    const supplyPutChecksum =
+      putData?.data?.checksum_sha256 ?? putData?.data?.checksumSha256;
+    const supplyPutSize = putData?.data?.file_size ?? putData?.data?.fileSize;
+    const supplyPutScanState =
+      putData?.data?.scan_state ?? putData?.data?.scanState;
+    expect(supplyPutChecksum, "PUT checksum").toBe(sha256);
+    expect(supplyPutSize, "PUT file_size").toBe(fileSize);
+    expect(supplyPutScanState, "PUT scan_state").toBe("clean");
+    putScanState = supplyPutScanState || "";
     scanReceiptOk = true;
   }
   expect(
@@ -396,13 +1154,18 @@ export async function uploadOperationalDocument(
   ).toBeTruthy();
 
   // 3. Confirm (R3 validate first)
+  const cleanSupplyConfirmBody = Object.fromEntries(
+    Object.entries(confirmBody).filter(
+      ([key]) => !["contentType", "originalFileName", "fileName"].includes(key),
+    ),
+  );
   const finalConfirmBody = {
-    ...confirmBody,
+    ...cleanSupplyConfirmBody,
     objectKey,
     contentType,
     fileSize,
     checksumSha256: sha256,
-    originalFileName: "harmless-upload.pdf",
+    originalFileName,
   };
 
   const confirmResponse = await boundedFetch(parsedConfirmUrl.toString(), {
@@ -518,8 +1281,8 @@ export async function uploadOperationalDocument(
   const returnedType = downloadResponse.headers.get("content-type") || "";
   expect(
     (returnedType.split(";")[0] || "").trim().toLowerCase(),
-    "readback content_type exactly application/pdf",
-  ).toBe("application/pdf");
+    `readback content_type exactly ${contentType}`,
+  ).toBe(contentType);
 
   return {
     objectKey,
@@ -559,13 +1322,59 @@ export type HttpRequestSetup = {
 export type DocumentUploadSetup = {
   kind: "document-upload";
   baseUrlEnv?: string;
+  reviewerBaseUrlEnv?: string;
   intentPath: string;
   intentBody: Record<string, unknown>;
   confirmPath: string;
   confirmBody: Record<string, unknown>;
   headers?: Record<string, string>;
+  capture?: Record<string, string>;
 };
-export type SetupRequest = HttpRequestSetup | DocumentUploadSetup;
+export type FleetEditableCaseSetup = {
+  kind: "fleet-editable-case";
+  baseUrlEnv?: string;
+  path?: string;
+  expectedFleetPartnerId: string;
+  periodMonths?: string[];
+  capture?: Record<string, string>;
+};
+export type OperationalProbeRole =
+  | "own_fleet"
+  | "platform_reviewer"
+  | "foreign_fleet"
+  | "tenant_admin"
+  | "tenant_ops"
+  | "driver"
+  | "ops_non_reviewer"
+  | "system"
+  | "unauthenticated"
+  | "invalid_session";
+export type RoleAccessProbeSetup = {
+  kind: "role-access-probe";
+  baseUrlEnv?: string;
+  role: OperationalProbeRole;
+  path: string;
+  method: HttpMethod;
+  body?: unknown;
+  rawBodyContentType?: OperationalDocumentMimeType;
+  headers?: Record<string, string>;
+  expectedStatus: number | number[];
+  expectedErrorCode?: string;
+  verifySession?: boolean;
+  expectedOwnFleetId?: string;
+};
+export type SetupRequest =
+  | HttpRequestSetup
+  | DocumentUploadSetup
+  | FleetEditableCaseSetup
+  | RoleAccessProbeSetup;
+export type DocumentAcceptanceManifest = {
+  id: string;
+  surface: string;
+  baseUrlEnv: string;
+  actorScope: string;
+  setup: SetupRequest[];
+};
 export type Journey = {
   id: string;
   surface: string;
@@ -652,6 +1461,15 @@ export function getIdentityToken(baseUrlEnv?: string): string | undefined {
       process.env.DRTS_DEV_CHANNEL_PARTNER_PORTAL_ID_TOKEN
     );
   }
+  if (
+    baseUrlEnv === "DRTS_OPERATIONAL_API_URL" ||
+    baseUrlEnv === "DRTS_DEV_API_BASE_URL"
+  ) {
+    return (
+      process.env.DRTS_OPERATIONAL_API_ID_TOKEN ||
+      process.env.DRTS_DEV_API_ID_TOKEN
+    );
+  }
   return undefined;
 }
 
@@ -671,6 +1489,27 @@ export type PreparedOperationalFleetSession = {
   cleanup: () => Promise<void>;
 };
 let verifiedFleetSessionToken: string | undefined;
+let verifiedAdminSessionToken: string | undefined;
+
+const FORBIDDEN_IDENTITY_SPOOF_HEADERS = new Set([
+  "x-realm",
+  "x-roles",
+  "x-role-families",
+  "x-actor-id",
+  "x-actor-type",
+  "x-scopes",
+  "x-auth-mode",
+]);
+
+function rejectSpoofedIdentityHeaders(headers: Record<string, string>) {
+  for (const name of Object.keys(headers)) {
+    if (FORBIDDEN_IDENTITY_SPOOF_HEADERS.has(name.toLowerCase())) {
+      throw new Error(
+        `Spoofed identity header ${name} is forbidden; operational harness must use verified backend sessions`,
+      );
+    }
+  }
+}
 
 function maskOperationalSecret(value: string) {
   if (process.env.GITHUB_ACTIONS === "true") {
@@ -1080,6 +1919,8 @@ export async function prepareOperationalFleetSession(
     }
     if (verifiedFleetSessionToken === applicationToken)
       verifiedFleetSessionToken = undefined;
+    if (verifiedAdminSessionToken === adminSessionToken)
+      verifiedAdminSessionToken = undefined;
     if (failures.length) {
       // IDs are non-secret recovery metadata; never include key/token material.
       throw new Error(
@@ -1171,6 +2012,7 @@ export async function prepareOperationalFleetSession(
             adminIdentity.principalId === issuedAdminPrincipalId)),
       "verified Admin session",
     );
+    verifiedAdminSessionToken = adminSessionToken;
     const entry = await adminMutation(
       "create bound entry",
       "/control-plane-proxy/platform-admin/partner-entries",
@@ -1347,6 +2189,7 @@ export function operationalRequestHeaders(
       "Operational request proof requires its exact credential-free origin and no fragment",
     );
   }
+  rejectSpoofedIdentityHeaders(suppliedHeaders);
   const headers = { ...suppliedHeaders };
   const setupIdToken = getIdentityToken(baseUrlEnv);
   if (
@@ -1377,6 +2220,841 @@ export function operationalRequestHeaders(
     headers["x-drts-authorization"] = applicationProof;
   }
   return headers;
+}
+
+export function operationalReviewerRequestHeaders(
+  baseUrlEnv: string,
+  requestUrl: string,
+  suppliedHeaders: Record<string, string> = {},
+): Record<string, string> {
+  const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
+  const target = new URL(requestUrl, origin);
+  if (
+    target.origin !== origin ||
+    target.username ||
+    target.password ||
+    target.hash
+  ) {
+    throw new Error(
+      "Operational reviewer request proof requires its exact credential-free origin and no fragment",
+    );
+  }
+  rejectSpoofedIdentityHeaders(suppliedHeaders);
+  const headers = { ...suppliedHeaders };
+  const setupIdToken = getIdentityToken(baseUrlEnv);
+  if (
+    setupIdToken &&
+    !Object.keys(headers).some((k) => k.toLowerCase() === "authorization")
+  ) {
+    headers["Authorization"] = `Bearer ${setupIdToken}`;
+  }
+  const reviewerToken =
+    verifiedAdminSessionToken ??
+    process.env.DRTS_OPERATIONAL_PLATFORM_REVIEWER_SESSION_TOKEN?.trim() ??
+    process.env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN?.trim();
+  if (reviewerToken && reviewerToken === setupIdToken?.trim()) {
+    throw new Error(
+      "Platform reviewer session token must be a legitimate backend application session distinct from Cloud Run invocation proof",
+    );
+  }
+  if (reviewerToken) {
+    const reviewerProof = `Bearer ${reviewerToken}`;
+    for (const name of Object.keys(headers)) {
+      if (name.toLowerCase() !== "x-drts-authorization") continue;
+      if (headers[name] !== reviewerProof) {
+        throw new Error(
+          "Platform reviewer application proof must match its declared existing session",
+        );
+      }
+      delete headers[name];
+    }
+    headers["x-drts-authorization"] = reviewerProof;
+  }
+  return headers;
+}
+
+export async function downloadOperationalDocumentAsReviewer(
+  reviewerOrigin: string,
+  reviewerBaseUrlEnv: string,
+  target:
+    | { kind: "supply"; submissionId: string; documentId: string }
+    | { kind: "case"; caseId: string; attachmentId: string },
+  expected: {
+    sha256: string;
+    fileSize: number;
+    contentType: OperationalDocumentMimeType;
+  },
+): Promise<{
+  downloadStatus: number;
+  readbackSha256: string;
+  readbackFileSize: number;
+  readbackContentType: string;
+}> {
+  const prefix =
+    reviewerBaseUrlEnv === "DRTS_OPERATIONAL_API_URL" ||
+    reviewerBaseUrlEnv === "DRTS_DEV_API_BASE_URL"
+      ? "/api"
+      : "/control-plane-proxy";
+  const downloadPath =
+    target.kind === "supply"
+      ? `${prefix}/admin/fleet-partners/supply-documents/${encodeURIComponent(target.submissionId)}/${encodeURIComponent(target.documentId)}/download`
+      : `${prefix}/admin/fleet-partners/case-attachments/${encodeURIComponent(target.caseId)}/${encodeURIComponent(target.attachmentId)}/download`;
+  const downloadUrl = new URL(downloadPath, reviewerOrigin).toString();
+  const headers = operationalReviewerRequestHeaders(
+    reviewerBaseUrlEnv,
+    downloadUrl,
+  );
+  const response = await fetch(downloadUrl, {
+    method: "GET",
+    headers,
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  });
+  expect(
+    response.status,
+    `Reviewer GET ${target.kind} document download ${downloadUrl}`,
+  ).toBe(200);
+  expectCandidateRevision(
+    response.headers,
+    `Reviewer GET ${target.kind} document download ${downloadUrl}`,
+  );
+  const body = Buffer.from(await response.arrayBuffer());
+  const readbackSha256 = createHash("sha256").update(body).digest("hex");
+  const returnedType = response.headers.get("content-type") || "";
+  expect(readbackSha256, `Reviewer ${target.kind} readback checksum`).toBe(
+    expected.sha256,
+  );
+  expect(body.length, `Reviewer ${target.kind} readback file_size`).toBe(
+    expected.fileSize,
+  );
+  expect(
+    (returnedType.split(";")[0] || "").trim().toLowerCase(),
+    `Reviewer ${target.kind} readback content_type exactly ${expected.contentType}`,
+  ).toBe(expected.contentType);
+  return {
+    downloadStatus: response.status,
+    readbackSha256,
+    readbackFileSize: body.length,
+    readbackContentType: returnedType,
+  };
+}
+
+const ROLE_SESSION_TOKEN_ENVS: Record<
+  Exclude<OperationalProbeRole, "unauthenticated" | "invalid_session">,
+  readonly string[]
+> = {
+  own_fleet: ["DRTS_OPERATIONAL_FLEET_SESSION_TOKEN"],
+  platform_reviewer: [
+    "DRTS_OPERATIONAL_PLATFORM_REVIEWER_SESSION_TOKEN",
+    "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_TOKEN",
+  ],
+  foreign_fleet: [
+    "DRTS_OPERATIONAL_FOREIGN_FLEET_SESSION_TOKEN",
+    "DRTS_OPERATIONAL_OTHER_FLEET_SESSION_TOKEN",
+  ],
+  tenant_admin: [
+    "DRTS_OPERATIONAL_TENANT_ADMIN_SESSION_TOKEN",
+    "DRTS_OPERATIONAL_TENANT_SESSION_TOKEN",
+  ],
+  tenant_ops: [
+    "DRTS_OPERATIONAL_TENANT_OPS_SESSION_TOKEN",
+    "DRTS_OPERATIONAL_DISPATCH_SESSION_TOKEN",
+  ],
+  driver: ["DRTS_OPERATIONAL_DRIVER_SESSION_TOKEN"],
+  ops_non_reviewer: ["DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN"],
+  system: ["DRTS_OPERATIONAL_SYSTEM_SESSION_TOKEN"],
+};
+
+function resolveOperationalRoleSessionToken(
+  role: Exclude<OperationalProbeRole, "unauthenticated" | "invalid_session">,
+): string | undefined {
+  if (role === "own_fleet" && verifiedFleetSessionToken) {
+    return verifiedFleetSessionToken;
+  }
+  if (role === "platform_reviewer" && verifiedAdminSessionToken) {
+    return verifiedAdminSessionToken;
+  }
+  for (const envName of ROLE_SESSION_TOKEN_ENVS[role]) {
+    const value = process.env[envName]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+export function operationalRoleRequestHeaders(
+  role: OperationalProbeRole,
+  baseUrlEnv: string,
+  requestUrl: string,
+  suppliedHeaders: Record<string, string> = {},
+): Record<string, string> {
+  const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
+  const target = new URL(requestUrl, origin);
+  if (
+    target.origin !== origin ||
+    target.username ||
+    target.password ||
+    target.hash
+  ) {
+    throw new Error(
+      "Operational role request requires its exact credential-free origin and no fragment",
+    );
+  }
+  rejectSpoofedIdentityHeaders(suppliedHeaders);
+  const headers = { ...suppliedHeaders };
+  const setupIdToken = getIdentityToken(baseUrlEnv)?.trim();
+  const isDirectApiOrigin =
+    baseUrlEnv === "DRTS_OPERATIONAL_API_URL" ||
+    baseUrlEnv === "DRTS_DEV_API_BASE_URL";
+
+  if (role === "unauthenticated") {
+    for (const name of Object.keys(headers)) {
+      if (
+        name.toLowerCase() === "x-drts-authorization" ||
+        name.toLowerCase() === "authorization"
+      ) {
+        delete headers[name];
+      }
+    }
+    if (setupIdToken && !isDirectApiOrigin) {
+      headers["Authorization"] = `Bearer ${setupIdToken}`;
+    }
+    return headers;
+  }
+
+  if (role === "invalid_session") {
+    for (const name of Object.keys(headers)) {
+      if (
+        name.toLowerCase() === "x-drts-authorization" ||
+        name.toLowerCase() === "authorization"
+      ) {
+        delete headers[name];
+      }
+    }
+    if (setupIdToken) {
+      headers["Authorization"] = `Bearer ${setupIdToken}`;
+      headers["x-drts-authorization"] =
+        "Bearer invalid.operational.session.token";
+    } else if (isDirectApiOrigin) {
+      headers["Authorization"] = "Bearer invalid.operational.session.token";
+    } else {
+      headers["x-drts-authorization"] =
+        "Bearer invalid.operational.session.token";
+    }
+    return headers;
+  }
+
+  const sessionToken = resolveOperationalRoleSessionToken(role);
+  if (sessionToken && sessionToken === setupIdToken) {
+    throw new Error(
+      `Operational role ${role} session token must be distinct from Cloud Run invocation proof`,
+    );
+  }
+  if (!sessionToken) {
+    if (
+      role === "platform_reviewer" &&
+      (baseUrlEnv === "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL" ||
+        baseUrlEnv === "DRTS_DEV_PLATFORM_ADMIN_BASE_URL") &&
+      setupIdToken
+    ) {
+      headers["Authorization"] = `Bearer ${setupIdToken}`;
+      return headers;
+    }
+    throw new Error(
+      `Operational role ${role} requires a verified backend session token (${ROLE_SESSION_TOKEN_ENVS[role].join(" or ")})`,
+    );
+  }
+
+  if (setupIdToken) {
+    headers["Authorization"] = `Bearer ${setupIdToken}`;
+    headers["x-drts-authorization"] = `Bearer ${sessionToken}`;
+  } else if (isDirectApiOrigin) {
+    headers["Authorization"] = `Bearer ${sessionToken}`;
+  } else {
+    headers["x-drts-authorization"] = `Bearer ${sessionToken}`;
+  }
+  return headers;
+}
+
+export async function verifyOperationalRoleSession(
+  role: Exclude<OperationalProbeRole, "unauthenticated" | "invalid_session">,
+  baseUrlEnv: string,
+  expectedOwnFleetId = "fleet-demo-001",
+): Promise<Record<string, unknown>> {
+  const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
+  const sessionPath =
+    baseUrlEnv === "DRTS_OPERATIONAL_API_URL" ||
+    baseUrlEnv === "DRTS_DEV_API_BASE_URL"
+      ? "/api/auth/session"
+      : "/control-plane-proxy/auth/session";
+  const sessionUrl = new URL(sessionPath, origin).toString();
+  const headers = operationalRoleRequestHeaders(role, baseUrlEnv, sessionUrl);
+  const response = await fetch(sessionUrl, {
+    method: "GET",
+    headers,
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  });
+  expect(
+    response.status,
+    `Role session verification for ${role} at ${sessionUrl}`,
+  ).toBe(200);
+  expectCandidateRevision(
+    response.headers,
+    `Role session verification for ${role} at ${sessionUrl}`,
+  );
+  const rawPayload = normalizeApiResponse(await response.json());
+  const payload = objectValue(rawPayload);
+  const data = objectValue(payload.data ?? payload);
+  const identity = objectValue(data.identity);
+  expect(
+    data.active,
+    `Role ${role} session must be active in /auth/session`,
+  ).toBe(true);
+
+  const realm = String(identity.realm ?? "");
+  const actorType = String(identity.actorType ?? "");
+  const partnerId = String(identity.partnerId ?? "");
+  const roles = Array.isArray(identity.roles)
+    ? identity.roles.map((r) => String(r))
+    : [];
+
+  if (role === "own_fleet") {
+    expect(realm, "own_fleet session must be partner realm").toBe("partner");
+    expect(partnerId, "own_fleet session must bind expectedOwnFleetId").toBe(
+      expectedOwnFleetId,
+    );
+  } else if (role === "foreign_fleet") {
+    expect(realm, "foreign_fleet session must be partner realm").toBe(
+      "partner",
+    );
+    expect(partnerId, "foreign_fleet session must have partnerId").toBeTruthy();
+    expect(
+      partnerId !== expectedOwnFleetId,
+      `foreign_fleet partnerId (${partnerId}) must differ from own fleet (${expectedOwnFleetId})`,
+    ).toBe(true);
+  } else if (role === "platform_reviewer") {
+    expect(realm, "platform_reviewer session must be platform realm").toBe(
+      "platform",
+    );
+    expect(
+      actorType === "platform_admin" ||
+        roles.includes("platform_reviewer") ||
+        roles.includes("platform_admin") ||
+        roles.includes("super_admin"),
+      "platform_reviewer session must have platform reviewer/admin authority",
+    ).toBe(true);
+  } else if (role === "tenant_admin") {
+    expect(realm, "tenant_admin session must be tenant realm").toBe("tenant");
+    expect(
+      roles.includes("tenant_admin") ||
+        (actorType === "tenant_admin" && !roles.includes("tenant_ops_admin")),
+      "tenant_admin session must carry tenant_admin role",
+    ).toBe(true);
+  } else if (role === "tenant_ops") {
+    expect(realm, "tenant_ops session must be tenant realm").toBe("tenant");
+    expect(
+      roles.includes("tenant_ops_admin") ||
+        roles.includes("tenant_ops") ||
+        roles.includes("dispatcher") ||
+        actorType === "tenant_ops",
+      "tenant_ops session must carry tenant_ops_admin/tenant_ops/dispatcher role",
+    ).toBe(true);
+    expect(
+      roles.includes("tenant_admin"),
+      "tenant_ops session must not carry tenant_admin role",
+    ).toBe(false);
+  } else if (role === "driver") {
+    expect(
+      realm === "driver" || actorType === "driver" || roles.includes("driver"),
+      "driver session must carry driver identity",
+    ).toBe(true);
+  } else if (role === "ops_non_reviewer") {
+    expect(
+      realm === "ops" || realm === "platform",
+      "ops_non_reviewer session must be ops or platform realm",
+    ).toBe(true);
+    expect(
+      actorType === "ops_user" ||
+        realm === "ops" ||
+        roles.includes("ops_user") ||
+        roles.includes("operator") ||
+        roles.includes("ops_dispatcher"),
+      "ops_non_reviewer session must carry ops identity",
+    ).toBe(true);
+    expect(
+      roles.includes("platform_reviewer") ||
+        roles.includes("platform_admin") ||
+        roles.includes("super_admin") ||
+        roles.includes("superadmin") ||
+        actorType === "platform_admin",
+      "ops_non_reviewer session must not have platform_reviewer/platform_admin authority",
+    ).toBe(false);
+  } else if (role === "system") {
+    expect(
+      realm === "system" || actorType === "system" || roles.includes("system"),
+      "system session must carry system identity",
+    ).toBe(true);
+  }
+
+  return identity;
+}
+
+export async function probeOperationalDocumentRoleAccess(
+  probe: RoleAccessProbeSetup,
+): Promise<{
+  role: OperationalProbeRole;
+  url: string;
+  method: HttpMethod;
+  status: number;
+  errorCode?: string;
+}> {
+  const baseUrlEnv =
+    probe.baseUrlEnv ??
+    (process.env.DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL?.trim()
+      ? "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL"
+      : "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL");
+  const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
+  if (
+    probe.verifySession !== false &&
+    probe.role !== "unauthenticated" &&
+    probe.role !== "invalid_session"
+  ) {
+    const sessionBaseUrlEnv = process.env.DRTS_OPERATIONAL_API_URL?.trim()
+      ? "DRTS_OPERATIONAL_API_URL"
+      : process.env.DRTS_DEV_API_BASE_URL?.trim()
+        ? "DRTS_DEV_API_BASE_URL"
+        : baseUrlEnv;
+    await verifyOperationalRoleSession(
+      probe.role,
+      sessionBaseUrlEnv,
+      probe.expectedOwnFleetId ?? "fleet-demo-001",
+    );
+  }
+
+  const parsedUrl = new URL(probe.path, origin);
+  if (
+    baseUrlEnv !== "DRTS_OPERATIONAL_API_URL" &&
+    baseUrlEnv !== "DRTS_DEV_API_BASE_URL" &&
+    parsedUrl.pathname.startsWith("/api/")
+  ) {
+    parsedUrl.pathname = parsedUrl.pathname.replace(
+      /^\/api\//,
+      "/control-plane-proxy/",
+    );
+  }
+  const targetUrl = parsedUrl.toString();
+  const headers = operationalRoleRequestHeaders(
+    probe.role,
+    baseUrlEnv,
+    targetUrl,
+    probe.headers,
+  );
+
+  let requestBody: BodyInit | undefined;
+  if (probe.rawBodyContentType) {
+    const fixture = getOperationalDocumentFixture(probe.rawBodyContentType);
+    requestBody = new Uint8Array(fixture.bytes);
+    headers["Content-Type"] = "application/octet-stream";
+  } else if (probe.body !== undefined) {
+    requestBody = JSON.stringify(probe.body);
+    headers["Content-Type"] = "application/json";
+  }
+
+  const response = await fetch(targetUrl, {
+    method: probe.method,
+    headers,
+    ...(requestBody !== undefined ? { body: requestBody } : {}),
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  });
+  expectCandidateRevision(
+    response.headers,
+    `Role access probe (${probe.role} ${probe.method} ${targetUrl})`,
+  );
+
+  const expectedStatuses = Array.isArray(probe.expectedStatus)
+    ? probe.expectedStatus
+    : [probe.expectedStatus];
+  expect(
+    expectedStatuses.includes(response.status),
+    `Role access probe (${probe.role} ${probe.method} ${probe.path}) expected status ${expectedStatuses.join(" or ")}, got ${response.status}`,
+  ).toBe(true);
+
+  let errorCode: string | undefined;
+  try {
+    const parsed =
+      typeof response.json === "function"
+        ? ((await response.json()) as {
+            error?: { code?: string };
+            code?: string;
+          })
+        : null;
+    errorCode = parsed?.error?.code ?? parsed?.code;
+  } catch {
+    // Binary or non-JSON response
+  }
+
+  if (probe.expectedErrorCode) {
+    expect(
+      errorCode,
+      `Role access probe (${probe.role} ${probe.method} ${probe.path}) expected error code ${probe.expectedErrorCode}`,
+    ).toBe(probe.expectedErrorCode);
+  }
+
+  return {
+    role: probe.role,
+    url: targetUrl,
+    method: probe.method,
+    status: response.status,
+    ...(errorCode ? { errorCode } : {}),
+  };
+}
+
+function operationalAdminBaseUrlEnvFor(fleetBaseUrlEnv: string): string {
+  if (fleetBaseUrlEnv === "DRTS_OPERATIONAL_FLEET_PARTNER_PORTAL_URL") {
+    return "DRTS_OPERATIONAL_PLATFORM_ADMIN_URL";
+  }
+  if (fleetBaseUrlEnv === "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL") {
+    return "DRTS_DEV_PLATFORM_ADMIN_BASE_URL";
+  }
+  return fleetBaseUrlEnv;
+}
+
+/**
+ * Fleet statement listing lazily rebuilds driver statements for the
+ * requested period (fleet-partner.service.ts rebuildStatementsForPeriodMonth
+ * -> billing-settlement.service.ts generateDriverStatements), which requires
+ * an active published driver fee plan (billing-settlement.service.ts
+ * driverFeePlans[0] guard). Ensure that real, official precondition exists
+ * via the same existing admin API/identity this journey already verified
+ * (platform_reviewer), instead of guessing at the statement GET failure.
+ */
+async function ensureActiveDriverFeePlanPublished(
+  fleetBaseUrlEnv: string,
+): Promise<void> {
+  const adminBaseUrlEnv = operationalAdminBaseUrlEnvFor(fleetBaseUrlEnv);
+  const origin = new URL(requiredOrigin(adminBaseUrlEnv)).origin;
+  const listUrl = new URL(
+    "/control-plane-proxy/driver-fee-plans",
+    origin,
+  ).toString();
+  const listHeaders = operationalRoleRequestHeaders(
+    "platform_reviewer",
+    adminBaseUrlEnv,
+    listUrl,
+  );
+  const listResponse = await fetch(listUrl, {
+    method: "GET",
+    headers: listHeaders,
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  });
+  expect(listResponse.status, `GET driver fee plans ${listUrl}`).toBe(200);
+  const listData = (await listResponse.json()) as {
+    data?: { items?: Array<Record<string, unknown>> };
+  };
+  const existingPlans = Array.isArray(listData?.data?.items)
+    ? listData.data.items
+    : [];
+  if (existingPlans.length > 0) return;
+
+  const publishUrl = new URL(
+    "/control-plane-proxy/driver-fee-plans/publish",
+    origin,
+  ).toString();
+  const publishHeaders = operationalRoleRequestHeaders(
+    "platform_reviewer",
+    adminBaseUrlEnv,
+    publishUrl,
+    { "Content-Type": "application/json" },
+  );
+  const publishResponse = await fetch(publishUrl, {
+    method: "POST",
+    headers: publishHeaders,
+    body: JSON.stringify({
+      planName: "C125 Operational Setup Driver Fee Plan",
+      version: "c125-operational-setup-v1",
+      serviceFeeBps: 1500,
+      reimbursementMode: "platform_funded",
+    }),
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  });
+  // 409 FEE_PLAN_IMMUTABLE means a concurrent setup already published the
+  // same deterministic plan; the real precondition (a plan exists) holds.
+  expect(
+    [200, 201, 409].includes(publishResponse.status),
+    `POST driver fee plan publish ${publishUrl} must result in an active published plan, got ${publishResponse.status}`,
+  ).toBe(true);
+}
+
+export async function resolveOperationalEditableCase(
+  baseUrlEnv: string,
+  expectedFleetPartnerId: string,
+  periodMonths: string[] = ["2026-03", "2026-06"],
+): Promise<{
+  caseId: string;
+  fleetPartnerId: string;
+  status: string;
+  responsibility: string;
+  resolution: "existing" | "created_from_statement_dispute";
+  statementId?: string;
+}> {
+  const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
+  const listUrl = new URL(
+    "/control-plane-proxy/fleet-partner/cases",
+    origin,
+  ).toString();
+  const listHeaders = operationalRequestHeaders(baseUrlEnv, listUrl);
+  const listResponse = await fetch(listUrl, {
+    method: "GET",
+    headers: listHeaders,
+    redirect: "manual",
+    signal: AbortSignal.timeout(30_000),
+  });
+  expect(listResponse.status, `GET fleet cases ${listUrl}`).toBe(200);
+  expectCandidateRevision(listResponse.headers, `GET fleet cases ${listUrl}`);
+  const listData = (await listResponse.json()) as {
+    data?: {
+      items?: Array<Record<string, unknown>>;
+      cases?: Array<Record<string, unknown>>;
+    };
+  };
+  const cases = Array.isArray(listData?.data?.items)
+    ? listData.data.items
+    : Array.isArray(listData?.data?.cases)
+      ? listData.data.cases
+      : [];
+  for (const item of cases) {
+    const id = String(item.id ?? item.case_id ?? item.caseId ?? "").trim();
+    const fleetId = String(
+      item.fleet_partner_id ?? item.fleetPartnerId ?? "",
+    ).trim();
+    const status = String(item.status ?? "").trim();
+    const responsibility = String(item.responsibility ?? "").trim();
+    if (
+      id &&
+      fleetId === expectedFleetPartnerId &&
+      status !== "closed" &&
+      responsibility !== "platform"
+    ) {
+      return {
+        caseId: id,
+        fleetPartnerId: fleetId,
+        status,
+        responsibility,
+        resolution: "existing",
+      };
+    }
+  }
+
+  // The statements list lazily rebuilds the period's driver statements and
+  // requires an active published driver fee plan; ensure that real
+  // precondition once via the official admin API before relying on it.
+  await ensureActiveDriverFeePlanPublished(baseUrlEnv);
+
+  for (const periodMonth of periodMonths) {
+    const statementsUrl = new URL(
+      `/control-plane-proxy/fleet-partner/statements?periodMonth=${encodeURIComponent(periodMonth)}`,
+      origin,
+    ).toString();
+    const statementsHeaders = operationalRequestHeaders(
+      baseUrlEnv,
+      statementsUrl,
+    );
+    const statementsResponse = await fetch(statementsUrl, {
+      method: "GET",
+      headers: statementsHeaders,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+    });
+    // Read the body once, before deciding pass/fail, so a non-200 response
+    // keeps its real error code/message in the thrown failure instead of
+    // losing them to a status-only assertion (never cookies/tokens/PII).
+    const statementsRawBody = await statementsResponse.text();
+    if (statementsResponse.status !== 200) {
+      let statementsErrorCode: string | undefined;
+      let statementsErrorMessage: string | undefined;
+      try {
+        const parsedError = JSON.parse(statementsRawBody) as {
+          error?: { code?: string; message?: string };
+          code?: string;
+          message?: string;
+        };
+        statementsErrorCode = parsedError?.error?.code ?? parsedError?.code;
+        statementsErrorMessage =
+          parsedError?.error?.message ?? parsedError?.message;
+      } catch {
+        // Non-JSON error body; the status code remains the only signal.
+      }
+      throw new Error(
+        `GET fleet statements ${statementsUrl} returned ${statementsResponse.status}` +
+          (statementsErrorCode ? ` code=${statementsErrorCode}` : "") +
+          (statementsErrorMessage ? ` message=${statementsErrorMessage}` : ""),
+      );
+    }
+    expectCandidateRevision(
+      statementsResponse.headers,
+      `GET fleet statements ${statementsUrl}`,
+    );
+    const statementsData = JSON.parse(statementsRawBody) as {
+      data?: {
+        items?: Array<Record<string, unknown>>;
+        statements?: Array<Record<string, unknown>>;
+      };
+    };
+    const statements = Array.isArray(statementsData?.data?.items)
+      ? statementsData.data.items
+      : Array.isArray(statementsData?.data?.statements)
+        ? statementsData.data.statements
+        : [];
+    const matchingStatement = statements.find((stmt) => {
+      const stmtFleetId = String(
+        stmt.fleet_partner_id ?? stmt.fleetPartnerId ?? expectedFleetPartnerId,
+      ).trim();
+      const stmtId = String(
+        stmt.statement_id ?? stmt.statementId ?? stmt.id ?? "",
+      ).trim();
+      return Boolean(stmtId) && stmtFleetId === expectedFleetPartnerId;
+    });
+    if (!matchingStatement) continue;
+
+    const statementId = String(
+      matchingStatement.statement_id ??
+        matchingStatement.statementId ??
+        matchingStatement.id,
+    ).trim();
+    const disputeUrl = new URL(
+      `/control-plane-proxy/fleet-partner/statements/${encodeURIComponent(statementId)}/dispute`,
+      origin,
+    ).toString();
+    const disputeHeaders = operationalRequestHeaders(baseUrlEnv, disputeUrl, {
+      "Content-Type": "application/json",
+    });
+    const disputeResponse = await fetch(disputeUrl, {
+      method: "POST",
+      headers: disputeHeaders,
+      body: JSON.stringify({
+        reason: "Operational C125 case attachment verification",
+      }),
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (![200, 201].includes(disputeResponse.status)) {
+      const disputeRawBody = await disputeResponse.text();
+      let disputeErrorCode: string | undefined;
+      let disputeErrorMessage: string | undefined;
+      try {
+        const parsedDisputeError = JSON.parse(disputeRawBody) as {
+          error?: { code?: string; message?: string };
+          code?: string;
+          message?: string;
+        };
+        disputeErrorCode =
+          parsedDisputeError?.error?.code ?? parsedDisputeError?.code;
+        disputeErrorMessage =
+          parsedDisputeError?.error?.message ?? parsedDisputeError?.message;
+      } catch {
+        // Non-JSON error body; the status code remains the only signal.
+      }
+      // STATEMENT_DECISION_CONFLICT means this statement already carries a
+      // different decision (e.g. a previously confirmed period) and is not
+      // eligible for a new dispute; that is an expected outcome of trying a
+      // real, already-decided period, not a setup failure, so fall through
+      // to the next candidate period instead of aborting the whole helper.
+      if (
+        disputeResponse.status === 409 &&
+        disputeErrorCode === "STATEMENT_DECISION_CONFLICT"
+      ) {
+        continue;
+      }
+      throw new Error(
+        `POST statement dispute ${disputeUrl} must succeed, got ${disputeResponse.status}` +
+          (disputeErrorCode ? ` code=${disputeErrorCode}` : "") +
+          (disputeErrorMessage ? ` message=${disputeErrorMessage}` : ""),
+      );
+    }
+    expectCandidateRevision(
+      disputeResponse.headers,
+      `POST statement dispute ${disputeUrl}`,
+    );
+    const disputeData = (await disputeResponse.json()) as {
+      data?: {
+        dispute_case_id?: string;
+        disputeCaseId?: string;
+      };
+    };
+    const disputeCaseId = String(
+      disputeData?.data?.dispute_case_id ??
+        disputeData?.data?.disputeCaseId ??
+        "",
+    ).trim();
+    expect(
+      disputeCaseId,
+      "statement dispute must return dispute_case_id",
+    ).toBeTruthy();
+
+    const detailUrl = new URL(
+      `/control-plane-proxy/fleet-partner/cases/${encodeURIComponent(disputeCaseId)}`,
+      origin,
+    ).toString();
+    const detailHeaders = operationalRequestHeaders(baseUrlEnv, detailUrl);
+    const detailResponse = await fetch(detailUrl, {
+      method: "GET",
+      headers: detailHeaders,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+    });
+    expect(detailResponse.status, `GET created dispute case ${detailUrl}`).toBe(
+      200,
+    );
+    expectCandidateRevision(
+      detailResponse.headers,
+      `GET created dispute case ${detailUrl}`,
+    );
+    const detailData = (await detailResponse.json()) as {
+      data?: {
+        case_detail?: Record<string, unknown>;
+        caseDetail?: Record<string, unknown>;
+      };
+    };
+    const caseDetail = objectValue(
+      detailData?.data?.case_detail ??
+        detailData?.data?.caseDetail ??
+        detailData?.data,
+    );
+    const resolvedFleetId = String(
+      caseDetail.fleet_partner_id ?? caseDetail.fleetPartnerId ?? "",
+    ).trim();
+    const resolvedStatus = String(caseDetail.status ?? "").trim();
+    const resolvedResponsibility = String(
+      caseDetail.responsibility ?? "",
+    ).trim();
+    expect(
+      resolvedFleetId,
+      "created dispute case fleet_partner_id must match expectedFleetPartnerId",
+    ).toBe(expectedFleetPartnerId);
+    expect(
+      resolvedStatus !== "closed",
+      "created dispute case must be open/editable",
+    ).toBe(true);
+    expect(
+      resolvedResponsibility !== "platform",
+      "created dispute case must be fleet-editable",
+    ).toBe(true);
+    return {
+      caseId: disputeCaseId,
+      fleetPartnerId: resolvedFleetId,
+      status: resolvedStatus,
+      responsibility: resolvedResponsibility,
+      resolution: "created_from_statement_dispute",
+      statementId,
+    };
+  }
+
+  throw new Error(
+    `Unable to resolve or create an open fleet-editable case associated with ${expectedFleetPartnerId}`,
+  );
 }
 
 /** Preserve the existing request rail for other surfaces. Fleet application
@@ -1542,6 +3220,85 @@ export async function runSetup(
 ) {
   for (const setup of journey.setup ?? []) {
     const setupBaseUrlEnv = setup.baseUrlEnv ?? journey.baseUrlEnv;
+
+    if (setup.kind === "fleet-editable-case") {
+      const expectedFleetPartnerId = materializeString(
+        setup.expectedFleetPartnerId,
+        variables,
+      );
+      const resolved = await resolveOperationalEditableCase(
+        setupBaseUrlEnv,
+        expectedFleetPartnerId,
+        setup.periodMonths,
+      );
+      if (setup.capture) {
+        for (const [name, valuePath] of Object.entries(setup.capture)) {
+          const value =
+            valueAtPath(resolved, valuePath) ??
+            valueAtPath({ data: resolved }, valuePath);
+          expect(
+            value,
+            `${journey.id} setup fleet-editable-case capture ${name}`,
+          ).toBeTruthy();
+          variables[name] = value;
+        }
+      }
+      context.record({
+        kind: "setup-fleet-editable-case",
+        journey: journey.id,
+        surface: journey.surface,
+        actorScope: journey.actorScope,
+        caseId: resolved.caseId,
+        fleetPartnerId: resolved.fleetPartnerId,
+        status: resolved.status,
+        responsibility: resolved.responsibility,
+        resolution: resolved.resolution,
+        ...(resolved.statementId ? { statementId: resolved.statementId } : {}),
+      });
+      continue;
+    }
+
+    if (setup.kind === "role-access-probe") {
+      const materializedProbe: RoleAccessProbeSetup = {
+        ...setup,
+        baseUrlEnv: setupBaseUrlEnv,
+        path: materializeString(setup.path, variables),
+        ...(setup.body !== undefined
+          ? { body: materializeValue(setup.body, variables) }
+          : {}),
+        ...(setup.headers
+          ? {
+              headers: materializeValue(setup.headers, variables) as Record<
+                string,
+                string
+              >,
+            }
+          : {}),
+        ...(setup.expectedOwnFleetId
+          ? {
+              expectedOwnFleetId: materializeString(
+                setup.expectedOwnFleetId,
+                variables,
+              ),
+            }
+          : {}),
+      };
+      const probeResult =
+        await probeOperationalDocumentRoleAccess(materializedProbe);
+      context.record({
+        kind: "setup-role-access-probe",
+        journey: journey.id,
+        surface: journey.surface,
+        actorScope: journey.actorScope,
+        role: probeResult.role,
+        method: probeResult.method,
+        url: probeResult.url,
+        status: probeResult.status,
+        ...(probeResult.errorCode ? { errorCode: probeResult.errorCode } : {}),
+      });
+      continue;
+    }
+
     const origin = requiredOrigin(setupBaseUrlEnv);
     const rawHeaders = setup.headers
       ? (materializeValue(setup.headers, variables) as Record<string, string>)
@@ -1574,6 +3331,51 @@ export async function runSetup(
         headers,
       );
 
+      if (setup.reviewerBaseUrlEnv) {
+        const reviewerOrigin = requiredOrigin(setup.reviewerBaseUrlEnv);
+        const fixture = getOperationalDocumentFixture(
+          intentBody.contentType ?? confirmBody.contentType,
+        );
+        const reviewerResult = await downloadOperationalDocumentAsReviewer(
+          reviewerOrigin,
+          setup.reviewerBaseUrlEnv,
+          evidence.confirmCaseId && evidence.attachmentId
+            ? {
+                kind: "case",
+                caseId: evidence.confirmCaseId,
+                attachmentId: evidence.attachmentId,
+              }
+            : {
+                kind: "supply",
+                submissionId: evidence.confirmSubmissionId!,
+                documentId: evidence.documentId!,
+              },
+          {
+            sha256: evidence.sha256,
+            fileSize: evidence.fileSize,
+            contentType: fixture.contentType,
+          },
+        );
+        evidence.reviewerDownloadStatus = reviewerResult.downloadStatus;
+        evidence.reviewerReadbackSha256 = reviewerResult.readbackSha256;
+        evidence.reviewerReadbackFileSize = reviewerResult.readbackFileSize;
+        evidence.reviewerReadbackContentType =
+          reviewerResult.readbackContentType;
+      }
+
+      if (setup.capture) {
+        for (const [name, valuePath] of Object.entries(setup.capture)) {
+          const value =
+            valueAtPath(evidence, valuePath) ??
+            valueAtPath({ data: evidence }, valuePath);
+          expect(
+            value,
+            `${journey.id} setup document-upload capture ${name}`,
+          ).toBeTruthy();
+          variables[name] = value;
+        }
+      }
+
       context.record({
         kind: "setup-document-upload",
         journey: journey.id,
@@ -1582,6 +3384,9 @@ export async function runSetup(
         intentUrl: new URL(intentPath, origin).toString(),
         confirmUrl: new URL(confirmPath, origin).toString(),
         documentId: evidence.documentId,
+        ...(evidence.attachmentId
+          ? { attachmentId: evidence.attachmentId }
+          : {}),
         objectKey: evidence.objectKey,
         fileSize: evidence.fileSize,
         sha256: evidence.sha256,
@@ -1596,12 +3401,35 @@ export async function runSetup(
         putScanState: evidence.putScanState,
         confirmStatus: evidence.confirmStatus,
         confirmSubmissionId: evidence.confirmSubmissionId,
+        ...(evidence.confirmCaseId
+          ? { confirmCaseId: evidence.confirmCaseId }
+          : {}),
         confirmFleetPartnerId: evidence.confirmFleetPartnerId,
         confirmDocumentType: evidence.confirmDocumentType,
+        ...(evidence.confirmAttachmentState
+          ? { confirmAttachmentState: evidence.confirmAttachmentState }
+          : {}),
+        ...(evidence.canonicalReadbackStatus
+          ? { canonicalReadbackStatus: evidence.canonicalReadbackStatus }
+          : {}),
+        ...(evidence.readUrlStatus
+          ? { readUrlStatus: evidence.readUrlStatus }
+          : {}),
+        ...(evidence.signedDownloadUrl
+          ? { signedDownloadUrl: evidence.signedDownloadUrl }
+          : {}),
         downloadStatus: evidence.downloadStatus,
         readbackSha256: evidence.readbackSha256,
         readbackFileSize: evidence.readbackFileSize,
         readbackContentType: evidence.readbackContentType,
+        ...(evidence.reviewerDownloadStatus
+          ? {
+              reviewerDownloadStatus: evidence.reviewerDownloadStatus,
+              reviewerReadbackSha256: evidence.reviewerReadbackSha256,
+              reviewerReadbackFileSize: evidence.reviewerReadbackFileSize,
+              reviewerReadbackContentType: evidence.reviewerReadbackContentType,
+            }
+          : {}),
         transientHistory: evidence.transientHistory,
       });
       continue;
@@ -1672,4 +3500,23 @@ export async function runSetup(
       captures: setup.capture ? Object.keys(setup.capture) : [],
     });
   }
+}
+
+export async function runOperationalDocumentAcceptance(
+  context: SetupExecutorContext,
+  acceptance: DocumentAcceptanceManifest,
+  variables: TemplateVariables,
+) {
+  await runSetup(
+    context,
+    {
+      id: acceptance.id,
+      surface: acceptance.surface,
+      baseUrlEnv: acceptance.baseUrlEnv,
+      route: "/cases",
+      actorScope: acceptance.actorScope,
+      setup: acceptance.setup,
+    },
+    variables,
+  );
 }

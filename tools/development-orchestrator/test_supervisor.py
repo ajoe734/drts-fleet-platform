@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import copy
 import json
 import shutil
 import signal
@@ -3705,6 +3706,65 @@ class GovernanceRecursionGuardTests(unittest.TestCase):
         self.assertIn(parent["id"], state.get("governance_escalations", {}))
         logged_types = [call.args[1].get("type") for call in logged.call_args_list if len(call.args) > 1]
         self.assertIn("governance_recursion_blocked", logged_types)
+
+
+class ArchivedUnblockGuardTests(unittest.TestCase):
+    """Archived helpers must not be assigned again after leaving the live board."""
+
+    def _create_helper(self, archived, kind="history_repair", *, live_helper=False):
+        parent = {
+            "id": "INVOICES-BILLING",
+            "status": "blocked",
+            "owner": "Codex",
+            "reviewer": "Codex2",
+            "depends_on": [],
+        }
+        helper_id = supervisor.chair_unblock_task_id(parent["id"], kind)
+        tasks = [parent]
+        if live_helper:
+            tasks.append({"id": helper_id, "status": "done"})
+        status = {"tasks": tasks, "archived_task_ids": archived}
+        before = copy.deepcopy(status)
+        state: dict[str, Any] = {}
+        action = {"task_id": parent["id"], "unblock_kind": kind, "reason": "archive regression"}
+        with (
+            mock.patch.object(supervisor, "load_status", return_value=status),
+            mock.patch.object(supervisor, "chair_unblock_agent", side_effect=["Codex", "Codex2"]),
+            mock.patch.object(supervisor, "run_task_board_command", return_value=mock.Mock(ok=True)) as assign,
+            mock.patch.object(supervisor, "queue_delivery_event") as dispatch,
+            mock.patch.object(supervisor, "write_activity_log") as logged,
+        ):
+            result = supervisor.create_chair_unblock_task({}, state, action, {})
+        self.assertEqual(status, before)
+        self.assertEqual(state, {})
+        dispatch.assert_not_called()
+        return result, assign, logged, helper_id
+
+    def test_archived_helper_is_never_reassigned(self) -> None:
+        for kind in ("history_repair", "planning_decision", "manual_unblock"):
+            helper_id = supervisor.chair_unblock_task_id("INVOICES-BILLING", kind)
+            for archived in ([helper_id], (helper_id,), {helper_id}, {helper_id: True}):
+                with self.subTest(kind=kind, archived=archived):
+                    result, assign, logged, _ = self._create_helper(archived, kind)
+                    self.assertFalse(result)
+                    assign.assert_not_called()
+                    logged.assert_not_called()
+
+    def test_unarchived_helper_can_still_be_created(self) -> None:
+        helper_id = supervisor.chair_unblock_task_id("INVOICES-BILLING", "history_repair")
+        for archived in (None, [], {}, ["OTHER-HELPER"], {"OTHER-HELPER": True}, {helper_id: False}):
+            with self.subTest(archived=archived):
+                result, assign, logged, expected_id = self._create_helper(archived)
+                self.assertTrue(result)
+                assign.assert_called_once()
+                self.assertEqual(assign.call_args.args[1:3], ("assign", [expected_id, "Codex", "Codex2"]))
+                self.assertEqual(logged.call_args.args[1]["type"], "chair_unblock_task_created")
+
+    def test_live_completed_helper_is_still_not_reassigned(self) -> None:
+        result, assign, logged, _ = self._create_helper([], live_helper=True)
+        self.assertFalse(result)
+        assign.assert_not_called()
+        logged.assert_not_called()
 
 
 class ProactiveReassignmentAntiFlapTests(unittest.TestCase):

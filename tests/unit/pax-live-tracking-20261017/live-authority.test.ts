@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from "vitest";
 import type {
+  DriverTaskRecord,
   DriverTrackingStatus,
+  GeoRouteResponse,
   OwnedOrderRecord,
   PassengerRideAccessGrant,
 } from "@drts/contracts";
@@ -138,6 +140,227 @@ it("stale or inaccurate Driver location has no live pickup ETA", async () => {
     expect(result.tracking?.locationFreshness).toBe(freshness);
     expect(result.tracking?.pickupEta).toBeNull();
   }
+  expect(f.registry.getDriverEta).not.toHaveBeenCalled();
+});
+
+it("a GPS fix buffered minutes ago has no live pickup ETA even though it was just received", async () => {
+  const f = fixture();
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "fresh",
+    currentLocation: {
+      ...current.currentLocation!,
+      recordedAt: new Date(NOW - 600_000).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("stale");
+  expect(result.tracking?.pickupEta).toBeNull();
+  expect(result.tracking?.location?.lat).toBe(current.currentLocation!.lat);
+  expect(result.assignment).toEqual(f.original);
+  expect(f.registry.getDriverEta).not.toHaveBeenCalled();
+});
+
+it("a GPS fix recorded seconds ago keeps the live pickup ETA (fresh control)", async () => {
+  const f = fixture();
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "fresh",
+    currentLocation: {
+      ...current.currentLocation!,
+      recordedAt: new Date(NOW - 5_000).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("fresh");
+  expect(result.tracking?.pickupEta).toEqual({
+    minutes: 3,
+    calculatedAt: new Date(NOW).toISOString(),
+  });
+});
+
+it("a GPS fix that ages past the window while the ETA lookup is in flight loses the live pickup ETA", async () => {
+  const f = fixture();
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "fresh",
+    currentLocation: {
+      ...current.currentLocation!,
+      recordedAt: new Date(NOW - 59_000).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+  // Simulate a Registry authority storage lock that makes the ETA lookup take
+  // long enough for this same GPS fix to cross the 60s observation window
+  // between the pre-await freshness check and this call resolving.
+  f.registry.getDriverEta.mockImplementation(async () => {
+    vi.setSystemTime(NOW + 2_000);
+    return {
+      driverId: "ETA-DRIVER",
+      etaMinutes: 3,
+      calculatedAt: new Date(NOW + 2_000).toISOString(),
+      driverLocation: f.position,
+      destination: { lat: 25, lng: 121 },
+    };
+  });
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(f.registry.getDriverEta).toHaveBeenCalledWith("ETA-DRIVER", 25, 121);
+  expect(result.tracking?.pickupEta).toBeNull();
+  expect(result.tracking?.locationFreshness).toBe("stale");
+  expect(result.tracking?.location?.lat).toBe(current.currentLocation!.lat);
+  expect(result.assignment).toEqual(f.original);
+});
+
+it("an on_trip observation that ages past the window during the dropoff route lookup is labeled stale, not fresh", async () => {
+  const f = fixture("on_trip");
+  // The dropoff leg needs real coordinates to be eligible for a route lookup;
+  // the presentation-layer fixture order only carries a display address.
+  vi.spyOn(f.owned, "resolvePersistedOrder").mockResolvedValue({
+    ...f.view.order,
+    runtimeProfileCode: "multi_taxi_direct",
+    reservationWindowStart: f.view.order.requestedPickupAt,
+    dropoff: { ...f.view.order.dropoff, lat: 25.1, lng: 121.1 },
+  } as unknown as OwnedOrderRecord);
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "fresh",
+    currentLocation: {
+      ...current.currentLocation!,
+      recordedAt: new Date(NOW - 59_000).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    },
+    currentTaskId: "ETA-TASK",
+  });
+  const task: DriverTaskRecord = {
+    taskId: "ETA-TASK",
+    orderId: "ETA-ORDER",
+    dispatchJobId: "ETA-JOB",
+    assignmentId: "ETA-ASSIGNMENT",
+    driverId: "ETA-DRIVER",
+    vehicleId: "ETA-VEHICLE",
+    sourcePlatform: null,
+    routeProvided: true,
+    waypoints: [],
+    status: "on_trip",
+    acceptedAt: null,
+    departedAt: null,
+    arrivedPickupAt: null,
+    startedAt: new Date(NOW).toISOString(),
+    completedAt: null,
+    actualDistanceKm: null,
+    actualDurationSec: null,
+    fare: null,
+    proof: null,
+  };
+  f.owned.findDriverTaskForRead = vi.fn(async () => task);
+  // Simulate a route-provider lookup that takes long enough for this same GPS
+  // fix to cross the 60s observation window between the pre-await freshness
+  // check and this return, mirroring the pickup-await race above.
+  Object.assign(f.owned, {
+    passengerRouteGeoService: {
+      route: vi.fn(async (): Promise<GeoRouteResponse> => {
+        vi.setSystemTime(NOW + 2_000);
+        return {
+          provider: "controlled-provider",
+          distanceMeters: 1000,
+          durationSeconds: 300,
+          generatedAt: new Date(NOW + 2_000).toISOString(),
+          encodedPolyline: null,
+        };
+      }),
+    },
+  });
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("stale");
+  expect(result.tracking?.pickupEta).toBeNull();
+  expect(result.tracking).toHaveProperty("dropoffRoute", null);
+  expect(result.tracking?.location?.lat).toBe(current.currentLocation!.lat);
+  expect(result.assignment).toEqual(f.original);
+});
+
+it("the final observation-age gate also nulls a dropoff route the lookup already computed, mirroring the pickup ETA gate", async () => {
+  const f = fixture("on_trip");
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "fresh",
+    currentLocation: {
+      ...current.currentLocation!,
+      recordedAt: new Date(NOW - 61_000).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+    },
+  });
+  // Even if the dropoff route lookup itself returns what looks like a valid
+  // leg (its own internal recheck can race the same way getDriverEta's did
+  // above), the same final observation-age recheck that gates pickupEta must
+  // also gate dropoffRoute; a GPS fix already outside the window cannot carry
+  // a live route just because the lookup resolved before noticing.
+  (
+    f.owned as unknown as {
+      resolvePassengerDropoffRoute: () => Promise<unknown>;
+    }
+  ).resolvePassengerDropoffRoute = vi.fn(async () => ({
+    leg: "dropoff",
+    source: "geo_route",
+    provider: "existing-road-provider",
+    assignmentId: "ETA-ASSIGNMENT",
+    assignmentVersion: 1,
+    taskId: "ETA-TASK",
+    origin: {
+      lat: current.currentLocation!.lat,
+      lng: current.currentLocation!.lng,
+    },
+    destination: { lat: 25.1, lng: 121.1 },
+    locationRecordedAt: new Date(NOW - 61_000).toISOString(),
+    generatedAt: new Date(NOW).toISOString(),
+    remainingDistanceMeters: 1000,
+    remainingDurationSeconds: 300,
+  }));
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("stale");
+  expect(result.tracking).toHaveProperty("dropoffRoute", null);
+  expect(result.assignment).toEqual(f.original);
+});
+
+it("an old receipt with an old GPS fix stays stale (old receipt control)", async () => {
+  const f = fixture();
+  const current = await f.registry.getDriverTrackingStatus();
+  f.registry.getDriverTrackingStatus.mockResolvedValue({
+    ...current,
+    locationFreshness: "stale",
+    currentLocation: {
+      ...current.currentLocation!,
+      recordedAt: new Date(NOW - 600_000).toISOString(),
+      updatedAt: new Date(NOW - 100_000).toISOString(),
+    },
+  });
+  const result = await f.service.getPassengerRideById(
+    "ETA-ORDER",
+    "test-owner",
+  );
+  expect(result.tracking?.locationFreshness).toBe("stale");
+  expect(result.tracking?.pickupEta).toBeNull();
   expect(f.registry.getDriverEta).not.toHaveBeenCalled();
 });
 

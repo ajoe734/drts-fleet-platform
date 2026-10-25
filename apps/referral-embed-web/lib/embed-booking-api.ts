@@ -216,7 +216,7 @@ export function acknowledgeReferralFeesServer(
 /** Dev demo only: advance an own trip with the synthetic business test driver. */
 export function runReferralDemoTripServer(
   orderId: string,
-  action: "assign" | "heartbeat" | "complete",
+  action: "assign" | "heartbeat" | "arrive" | "board" | "complete",
 ) {
   return request<{
     orderId: string;

@@ -73,10 +73,10 @@ function PA_P5Queue({ theme:th }) {
 }
 function PA_P5Fare({ theme:th }) {
   const rows=[
-    { id:'F-2026-04', name:'2026 Q4 調整版', status:'已備查', tone:'info', from:'2026-10-01', ref:'北市交運字第1130077號' },
-    { id:'F-2026-03', name:'現行計費表', status:'已生效', tone:'success', from:'2026-07-01', ref:'北市交運字第1130042號' },
+    { id:'F-2026-04', name:'2026 Q4 調整版', status:'已備查', tone:'info', from:'2026-10-01', ref:'依臺北市政府公告計程車運價' },
+    { id:'F-2026-03', name:'現行計費表', status:'已生效', tone:'success', from:'2026-07-01', ref:'依臺北市政府公告計程車運價' },
     { id:'F-2026-05', name:'夜間費率研議', status:'草稿', tone:'neutral', from:'—', ref:'—' },
-    { id:'F-2025-11', name:'2025 舊版', status:'已停用', tone:'neutral', from:'2025-11-01', ref:'北市交運字第1120198號' },
+    { id:'F-2025-11', name:'2025 舊版', status:'已停用', tone:'neutral', from:'2025-11-01', ref:'依臺北市政府公告計程車運價' },
   ];
   return (
     <Shell theme={th} nav={PA_NAV} active="p5-disclosure" breadcrumb={['智行叫車', '公開車資版本']}
@@ -90,14 +90,14 @@ function PA_P5Fare({ theme:th }) {
             { h:'名稱', k:'name', w:150 },
             { h:'狀態', w:96, r:r=><Pill theme={th} tone={r.tone} dot>{r.status}</Pill> },
             { h:'生效日', k:'from', w:110, mono:true },
-            { h:'備查文號', k:'ref', w:190, mono:true },
+            { h:'運價依據', k:'ref', w:190, mono:true },
             { h:'', w:110, r:r=>r.status==='已備查'?<Btn theme={th} size="xs" variant="primary">排程生效</Btn>:<Btn theme={th} size="xs" variant="ghost" icon="eye">公開預覽</Btn> },
           ]} rows={rows}/>
         </Card>
         <Card theme={th} title="公開頁預覽 · /fares" subtitle="F-2026-03 · 已生效">
           <DL theme={th} cols={1} items={[
             { k:'起程運價（1.25 公里）', v:'NT$ 85', mono:true }, { k:'續程運價（每 200 公尺）', v:'NT$ 5', mono:true },
-            { k:'延滯計時（每 80 秒）', v:'NT$ 5', mono:true }, { k:'夜間加成', v:'+20% · 23:00–06:00', mono:true },
+            { k:'延滯計時（每 60 秒）', v:'NT$ 5', mono:true }, { k:'夜間加成', v:'每趟加 NT$ 20 · 23:00–06:00', mono:true },
           ]}/>
           <div style={{ marginTop:10 }}><Banner theme={th} tone="neutral" icon="info" body="F-2026-04 已備查、生效日 2026-10-01；生效前訂單一律沿用現行版本。"/></div>
         </Card>

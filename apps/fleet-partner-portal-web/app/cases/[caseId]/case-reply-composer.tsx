@@ -62,18 +62,29 @@ export function CaseReplyComposer({
   const operationEpochs = useRef(new Map<string, number>());
   const composerEpoch = useRef(0);
   const mountedRef = useRef(true);
+  const prevCaseDetailRef = useRef(caseDetail);
   const activeCaseIdRef = useRef(caseDetail.id);
   const retryTarget = useRef<string | null>(null);
 
   const isClosed = caseDetail.status === "closed";
   const responseUnavailable = caseDetail.actionDescriptor?.enabled === false;
   const isPlatform = caseDetail.responsibility === "platform";
-  const isEditable = !isClosed && !isPlatform && !responseUnavailable;
+  // No fleet has been attributed: read-only like platform/closed, but for
+  // its own honest reason rather than as a platform-owned case.
+  const isUnattributed = caseDetail.responsibility === "unattributed";
+  const isReadOnlyOwnership = isPlatform || isUnattributed;
+  const isEditable = !isClosed && !isReadOnlyOwnership && !responseUnavailable;
   const editableRef = useRef(isEditable);
-  editableRef.current = isEditable;
+  if (prevCaseDetailRef.current !== caseDetail) {
+    prevCaseDetailRef.current = caseDetail;
+    editableRef.current = isEditable;
+  } else if (!isEditable) {
+    editableRef.current = false;
+  }
 
   if (activeCaseIdRef.current !== caseDetail.id) {
     activeCaseIdRef.current = caseDetail.id;
+    editableRef.current = isEditable;
     composerEpoch.current += 1;
     uploadSessions.current.clear();
     uploadFiles.current.clear();
@@ -184,6 +195,7 @@ export function CaseReplyComposer({
         scopeKey,
         getSession: () => uploadSessions.current.get(temporaryId),
         setSession: (nextSession) => {
+          if (!isOperationActive()) return;
           if (nextSession) uploadSessions.current.set(temporaryId, nextSession);
           else uploadSessions.current.delete(temporaryId);
         },
@@ -205,6 +217,9 @@ export function CaseReplyComposer({
             caseDetail?: FleetCaseItem;
             attachments?: FleetCaseAttachmentRecord[];
           }>(`/api/fleet-partner/cases/${targetCaseId}`);
+          if (!isOperationActive()) {
+            return null;
+          }
           const matched = (detail.attachments ?? []).find(
             (item) =>
               (item.attachmentId === intent.attachmentId ||
@@ -217,10 +232,13 @@ export function CaseReplyComposer({
             detail.caseDetail &&
             (detail.caseDetail.status === "closed" ||
               detail.caseDetail.responsibility === "platform" ||
+              detail.caseDetail.responsibility === "unattributed" ||
               detail.caseDetail.actionDescriptor?.enabled === false)
           ) {
             editableRef.current = false;
             composerEpoch.current += 1;
+            uploadSessions.current.clear();
+            inFlightUploads.current.clear();
           }
           return null;
         },
@@ -407,6 +425,13 @@ export function CaseReplyComposer({
             {"已與司機當面對證並完成教育訓練，訓練紀錄與行車記錄器截圖已附上。"}
           </div>
         </div>
+      ) : isUnattributed ? (
+        <CanvasBanner
+          theme={theme}
+          tone="info"
+          icon="lock"
+          body={t("actions.reason.caseUnattributed")}
+        />
       ) : responseUnavailable ? (
         <CanvasBanner
           theme={theme}
@@ -551,7 +576,9 @@ export function CaseReplyComposer({
           margin: "12px 0 8px",
         }}
       >
-        {isPlatform ? "附件 · attachments（唯讀）" : "附件 · attachments"}
+        {isReadOnlyOwnership
+          ? "附件 · attachments（唯讀）"
+          : "附件 · attachments"}
       </div>
 
       {downloadNotice && (
@@ -707,7 +734,7 @@ export function CaseReplyComposer({
         })}
       </div>
 
-      {!isClosed && !isPlatform && replyState !== "submitting" && (
+      {!isClosed && !isReadOnlyOwnership && replyState !== "submitting" && (
         <div style={{ marginTop: 10 }}>
           <input
             ref={fileInput}

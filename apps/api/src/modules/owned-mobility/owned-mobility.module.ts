@@ -27,7 +27,6 @@ import { VehicleEligibilityModule } from "../vehicle-eligibility/vehicle-eligibi
 import { VoiceBookingModule } from "../voice-booking/voice-booking.module";
 import { OwnedMobilityController } from "./owned-mobility.controller";
 import { OwnedMobilityRepository } from "./owned-mobility.repository";
-import { ReferralBindingScaffoldService } from "./referral-binding.scaffold.service";
 import { OwnedMobilityTaskEventsService } from "./owned-mobility-task-events.service";
 import { OwnedMobilityService } from "./owned-mobility.service";
 import { OwnedAutonomousDispatchExecutorService } from "./owned-autonomous-dispatch-executor.service";
@@ -64,15 +63,10 @@ import { ReferralDemoTripService } from "./referral-demo-trip.service";
     PassengerFareRepository,
     OwnedMobilityService,
     OwnedMobilityTaskEventsService,
-    ReferralBindingScaffoldService,
     OwnedAutonomousDispatchExecutorService,
     ReferralDemoTripService,
   ],
-  exports: [
-    OwnedMobilityService,
-    ReferralBindingScaffoldService,
-    OwnedAutonomousDispatchExecutorService,
-  ],
+  exports: [OwnedMobilityService, OwnedAutonomousDispatchExecutorService],
 })
 export class OwnedMobilityModule implements OnModuleInit {
   constructor(

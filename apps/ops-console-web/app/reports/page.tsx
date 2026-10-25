@@ -57,6 +57,7 @@ import { formatOpsCodeLabel, getOpsLabel } from "../../lib/localized-labels";
 import { t as translate, type Locale } from "../../lib/translations";
 
 import { artifactDownloadUrl } from "../../lib/report-artifact-url";
+import { OperationsMetricsSection } from "./operations-metrics-section";
 
 type ReportsTab = "jobs" | "operational" | "packages" | "schedules";
 
@@ -1540,6 +1541,14 @@ function OperationalReportsPanel() {
                       {t("reports.ops.metric.noComplaints")}
                     </div>
                   )}
+                  <OperationsMetricsSection
+                    row={row}
+                    theme={th}
+                    locale={locale}
+                    formatTime={(value) =>
+                      formatDateTime(locale, value, "long")
+                    }
+                  />
                 </CanvasCard>
               );
             })}
