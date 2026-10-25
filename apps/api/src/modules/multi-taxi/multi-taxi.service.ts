@@ -406,35 +406,33 @@ export class MultiTaxiService implements OnModuleInit {
         .map((order) => this.mapOrderToOperationalRecord(order)),
     );
 
-    return (
-      records
-        .filter((record) =>
-          month ? record.reservedAt.slice(0, 7) === month : true,
-        )
-        // BUREAU-R13: inclusive date-range filter on the same reservedAt field
-        // as `month`; absent bounds leave the existing behavior unchanged.
-        .filter((record) =>
-          reservedFrom ? record.reservedAt.slice(0, 10) >= reservedFrom : true,
-        )
-        .filter((record) =>
-          reservedTo ? record.reservedAt.slice(0, 10) <= reservedTo : true,
-        )
-        .filter((record) =>
-          needle.length === 0
-            ? true
-            : [
-                record.orderNo,
-                record.plateNo,
-                record.orderId,
-                record.tripId,
-                record.farePolicyVersion,
-              ].some((value) => value.toLowerCase().includes(needle)),
-        )
-        .filter((record) =>
-          legalHold === "all" ? true : record.legalHold.state === legalHold,
-        )
-        .sort((left, right) => right.reservedAt.localeCompare(left.reservedAt))
-    );
+    // BUREAU-R13: reservedFrom/reservedTo are an inclusive date range on the
+    // same reservedAt field as `month`; absent bounds change nothing.
+    return records
+      .filter((record) =>
+        month ? record.reservedAt.slice(0, 7) === month : true,
+      )
+      .filter((record) =>
+        reservedFrom ? record.reservedAt.slice(0, 10) >= reservedFrom : true,
+      )
+      .filter((record) =>
+        reservedTo ? record.reservedAt.slice(0, 10) <= reservedTo : true,
+      )
+      .filter((record) =>
+        needle.length === 0
+          ? true
+          : [
+              record.orderNo,
+              record.plateNo,
+              record.orderId,
+              record.tripId,
+              record.farePolicyVersion,
+            ].some((value) => value.toLowerCase().includes(needle)),
+      )
+      .filter((record) =>
+        legalHold === "all" ? true : record.legalHold.state === legalHold,
+      )
+      .sort((left, right) => right.reservedAt.localeCompare(left.reservedAt));
   }
 
   async exportTripOperationalRecords(
