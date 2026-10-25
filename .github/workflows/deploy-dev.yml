@@ -120,6 +120,7 @@ env:
   DEV_OPENCLAW_SUMMARIZER_MODEL: ${{ vars.DEV_OPENCLAW_SUMMARIZER_MODEL }}
   DEV_OPENCLAW_AUTH_PROVIDER: ${{ vars.DEV_OPENCLAW_AUTH_PROVIDER }}
   DEV_OPENCLAW_HOME: ${{ vars.DEV_OPENCLAW_HOME }}
+  DEV_REGULATORY_ALERT_RECIPIENT_EMAIL: ${{ vars.DEV_REGULATORY_ALERT_RECIPIENT_EMAIL || vars.REGULATORY_ALERT_RECIPIENT_EMAIL }}
   LEGACY_GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
   LEGACY_GCP_REGION: ${{ vars.GCP_REGION }}
   LEGACY_GCP_CLOUDSQL_INSTANCE: ${{ vars.GCP_CLOUDSQL_INSTANCE }}
@@ -875,6 +876,7 @@ jobs:
           smtp_mounts=""
           smtp_secret_count=0
           notification_outbox_type=""
+          regulatory_alert_recipient_secret_mounted=false
           for smtp_setting in HOST PORT USERNAME PASSWORD FROM_EMAIL RECIPIENT_ALLOWLIST; do
             smtp_suffix="$(echo "$smtp_setting" | tr '[:upper:]_' '[:lower:]-')"
             smtp_secret="drts-dev-smtp-${smtp_suffix}"
@@ -885,6 +887,10 @@ jobs:
           done
           if [[ "$smtp_secret_count" -eq 6 ]]; then
             secret_args="${secret_args}${smtp_mounts},NOTIFICATION_FROM_EMAIL=drts-dev-smtp-from-email:latest"
+            if gcloud secrets describe "drts-dev-regulatory-alert-recipient-email" --project "$project_id" >/dev/null 2>&1; then
+              secret_args="${secret_args},REGULATORY_ALERT_RECIPIENT_EMAIL=drts-dev-regulatory-alert-recipient-email:latest"
+              regulatory_alert_recipient_secret_mounted=true
+            fi
             # V0103 creates the durable outbox tables via the migration job.
             # Reuse the API's DATABASE_URL and shared pool, never Cloud Run disk.
             notification_outbox_type="postgres"
@@ -893,6 +899,7 @@ jobs:
             exit 1
           fi
           echo "notification_outbox_type=${notification_outbox_type}" >> "$GITHUB_OUTPUT"
+          echo "regulatory_alert_recipient_secret_mounted=${regulatory_alert_recipient_secret_mounted}" >> "$GITHUB_OUTPUT"
 
           # SR-LIVE-PUSH-001 web push is self-signed VAPID, not an external
           # provider (2026-09-15 decision). --set-secrets replaces the whole
@@ -1033,6 +1040,7 @@ jobs:
         id: api_env
         env:
           ARTIFACT_PROVIDER_ENV_SUFFIX: ${{ steps.artifact_providers.outputs.env_suffix }}
+          REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED: ${{ steps.api_secrets.outputs.regulatory_alert_recipient_secret_mounted }}
         run: |
           set -euo pipefail
 
@@ -1141,6 +1149,10 @@ jobs:
           if [[ "${{ steps.api_secrets.outputs.notification_outbox_type }}" == "postgres" ]]; then
             env_vars="${env_vars}@NOTIFICATION_OUTBOX_TYPE=postgres"
           fi
+          if [[ "${REGULATORY_ALERT_RECIPIENT_SECRET_MOUNTED:-false}" != "true" && -n "${DEV_REGULATORY_ALERT_RECIPIENT_EMAIL:-}" ]]; then
+            env_vars="^;^${env_vars#^@^}"
+            env_vars="${env_vars//@/;};REGULATORY_ALERT_RECIPIENT_EMAIL=${DEV_REGULATORY_ALERT_RECIPIENT_EMAIL}"
+          fi
           # End SMTP outbox selection.
           # Mail links lead to the authenticated console, never signed artifacts.
           invoice_mail_portal_origin="${{ needs.prepare.outputs.tenant_console_origin }}"
@@ -1165,6 +1177,11 @@ jobs:
           fi
 
           env_vars="${env_vars}${ARTIFACT_PROVIDER_ENV_SUFFIX}"
+          if [[ "$env_vars" == "^;^"*";REGULATORY_ALERT_RECIPIENT_EMAIL="* ]]; then
+            env_vars_prefix="${env_vars%%;REGULATORY_ALERT_RECIPIENT_EMAIL=*}"
+            env_vars_suffix="${env_vars#*";REGULATORY_ALERT_RECIPIENT_EMAIL=${DEV_REGULATORY_ALERT_RECIPIENT_EMAIL}"}"
+            env_vars="${env_vars_prefix}${env_vars_suffix//@/;};REGULATORY_ALERT_RECIPIENT_EMAIL=${DEV_REGULATORY_ALERT_RECIPIENT_EMAIL}"
+          fi
           echo "vars=${env_vars}" >> "$GITHUB_OUTPUT"
 
       - name: Deploy — api
