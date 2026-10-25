@@ -478,3 +478,142 @@ export function validateApplicability(
     );
   }
 }
+
+export function safeRelativePath(value: string, label = "artifact"): string {
+  assert(
+    typeof value === "string" &&
+      value.length > 0 &&
+      value.length <= 240 &&
+      !value.startsWith("/") &&
+      !value.startsWith("\\") &&
+      !/[\\\0\r\n]/.test(value),
+    `unsafe ${label} path`,
+  );
+  const segments = value.split("/");
+  for (const seg of segments) {
+    assert(
+      seg.length > 0 && seg !== "." && seg !== ".." && !seg.startsWith("."),
+      `unsafe ${label} path`,
+    );
+    assert(
+      !/^(?:sessions|tokens|credentials|secrets|cookies|storage-?state)(?:\..+)?$/i.test(
+        seg,
+      ) &&
+        !/\.(?:pem|key|p12|pfx|env)$/i.test(seg) &&
+        !/^id_(?:rsa|ed25519|ecdsa)/i.test(seg),
+      "private credential material rejected",
+    );
+  }
+  return segments.join("/");
+}
+
+export function assertNonSecretBytes(bytes: Buffer, label: string) {
+  const text = bytes.toString("utf8");
+  assert(
+    !/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/.test(text) &&
+      !/\b(?:storageState|X-Serverless-Authorization|X-Goog-Iap-Jwt-Assertion|X-Drts-Google-Id-Token|GLOBAL_UX_SESSIONS|GLOBAL_UX_TOKENS)\b/i.test(
+        text,
+      ) &&
+      !/\bBearer\s+eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/.test(text) &&
+      !/\bya29\.[A-Za-z0-9_-]+/.test(text) &&
+      !/"(?:cookies|sessions|tokens|authorization|proxy-authorization)"\s*:/i.test(
+        text,
+      ),
+    `private credential material rejected in ${label}`,
+  );
+}
+
+export function validateInputManual(
+  manual: ManualEvidence[],
+  inventory: Inventory,
+  binding: { harnessSha: string; planHash: string },
+  readArtifact: (file: string) => Buffer,
+  applicability: Applicability[] = [],
+): Set<string> {
+  validateApplicability(applicability, inventory);
+  assert(
+    fullSha(binding.harnessSha) && /^[a-f0-9]{64}$/.test(binding.planHash),
+    "invalid input binding",
+  );
+  assert(Array.isArray(manual), "manual input must be an array");
+  const expectedById = new Map(cases(inventory).map((c) => [c.id, c]));
+  const naKeys = new Set(applicability.map((rule) => rule.key));
+  assert.equal(
+    new Set(manual.map((e) => e.id)).size,
+    manual.length,
+    "duplicate manual evidence",
+  );
+  const referencedArtifacts = new Set<string>();
+  for (const m of manual) {
+    assert(
+      m &&
+        typeof m === "object" &&
+        !Array.isArray(m) &&
+        Object.keys(m).sort().join(",") ===
+          "checks,harnessSha,id,planHash,runId,runtimeSha",
+      "unexpected manual evidence fields",
+    );
+    const c = expectedById.get(m.id);
+    assert(c, `unknown manual case: ${m.id}`);
+    assert(!naKeys.has(recipeKey(c)), "manual evidence provided for N/A case");
+    assert(
+      m.runtimeSha === inventory.runtimeSha &&
+        m.harnessSha === binding.harnessSha &&
+        /^\d+\/\d+$/.test(m.runId) &&
+        m.planHash === binding.planHash,
+      "manual release/run/plan mismatch",
+    );
+    assert(
+      Array.isArray(m.checks) && m.checks.length > 0,
+      "manual gate omitted/duplicated",
+    );
+    assert.equal(
+      new Set(m.checks.map((check) => check.check)).size,
+      m.checks.length,
+      "manual gate omitted/duplicated",
+    );
+    for (const check of m.checks) {
+      assert(
+        check &&
+          typeof check === "object" &&
+          !Array.isArray(check) &&
+          Object.keys(check).sort().join(",") ===
+            "artifact,check,procedure,sha256,sourceRef,status,tester,tool",
+        "unexpected manual check fields",
+      );
+      assert(
+        (manualChecks as readonly string[]).includes(check.check),
+        "manual gate omitted/duplicated",
+      );
+      assert(
+        ["passed", "failed", "blocked", "not_applicable"].includes(
+          check.status,
+        ),
+        "invalid manual check status",
+      );
+      assert(
+        check.tester?.trim() &&
+          check.tool?.trim() &&
+          check.procedure?.trim() &&
+          check.sourceRef?.includes(c.screen.source),
+        "unverified manual/design evidence",
+      );
+      if (check.status === "passed" || check.artifact) {
+        const rel = safeRelativePath(check.artifact, "manual artifact");
+        const bytes = readArtifact(rel);
+        assertNonSecretBytes(bytes, "artifact");
+        assert(
+          /^[a-f0-9]{64}$/.test(check.sha256) && hash(bytes) === check.sha256,
+          "manual artifact missing/corrupt",
+        );
+        referencedArtifacts.add(rel);
+      } else {
+        assert(
+          check.artifact === "" && check.sha256 === "",
+          "manual artifact missing/corrupt",
+        );
+      }
+    }
+  }
+  return referencedArtifacts;
+}
