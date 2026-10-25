@@ -567,4 +567,187 @@ describe("INT-REP-002 six-month summary aggregates snapshots", () => {
     const csvJob = reportingFilingService.getReportJob(csvJobAccepted.jobId);
     expect(csvJob.rows).toHaveLength(6);
   });
+
+  it("computes the SA §7.4 six-month weighted snapshot average from the raw snapshot sum (1/12 -> 0.08, not 0.17*6/12 -> 0.09) and preserves single-batch source/snapshot reads", async () => {
+    const {
+      ownedMobilityService,
+      reportingService,
+      regulatoryRegistryService,
+      cleanup,
+    } = createHarness();
+    cleanups.push(cleanup);
+
+    // Ensure the taichung-port / taxi_realtime dimension has an order in 2026-06
+    vi.setSystemTime(new Date("2026-06-05T01:00:00.000Z"));
+    const juneOrder = ownedMobilityService.createCallCenterOrder({
+      callId: "call-int-rep-raw-precision-001",
+      agentId: "ops-agent-001",
+      recordingId: "rec-int-rep-raw-precision-001",
+      pickup: { address: "Taichung Station" },
+      dropoff: { address: "Port Terminal" },
+      passenger: { name: "Rider June", phone: "0911000601" },
+      notes: "precision boundary order",
+    });
+    const juneDispatch = ownedMobilityService.dispatchOrder(
+      juneOrder.orderId,
+      { mode: "auto" },
+      "req-int-rep-raw-precision-dispatch-001",
+    );
+    await ownedMobilityService.assignDispatch(
+      {
+        dispatchJobId: juneDispatch.dispatchJobId,
+        vehicleId: "veh-demo-001",
+        driverId: "drv-demo-001",
+      },
+      "req-int-rep-raw-precision-assign-001",
+    );
+
+    const runScenario = async (juneCounts: readonly number[]) => {
+      // June: 6 complete snapshots; July: 6 complete snapshots of 0; Aug-Nov: empty
+      const juneTimes = [
+        "2026-06-05T01:05:00.000Z",
+        "2026-06-05T01:10:00.000Z",
+        "2026-06-05T01:15:00.000Z",
+        "2026-06-05T01:20:00.000Z",
+        "2026-06-05T01:25:00.000Z",
+        "2026-06-05T01:30:00.000Z",
+      ];
+      const julyTimes = [
+        "2026-07-05T01:05:00.000Z",
+        "2026-07-05T01:10:00.000Z",
+        "2026-07-05T01:15:00.000Z",
+        "2026-07-05T01:20:00.000Z",
+        "2026-07-05T01:25:00.000Z",
+        "2026-07-05T01:30:00.000Z",
+      ];
+      const syntheticSnapshots = [
+        ...juneTimes.map((snapshotAt, index) => ({
+          snapshotAt,
+          businessArea: "taichung-port",
+          serviceProductCode: "taxi_realtime" as const,
+          dispatchableVehicleCount: juneCounts[index] ?? 0,
+          availableDriverCount: juneCounts[index] ?? 0,
+          sourceHealth: "complete" as const,
+          generatedAt: snapshotAt,
+        })),
+        ...julyTimes.map((snapshotAt) => ({
+          snapshotAt,
+          businessArea: "taichung-port",
+          serviceProductCode: "taxi_realtime" as const,
+          dispatchableVehicleCount: 0,
+          availableDriverCount: 0,
+          sourceHealth: "complete" as const,
+          generatedAt: snapshotAt,
+        })),
+      ];
+
+      let sourceReads = 0;
+      let snapshotReads = 0;
+      const controlledRepo = {
+        isEnabled: () => true,
+        loadDailyDispatchRecordSource: async () => {
+          sourceReads += 1;
+          const snapshot = ownedMobilityService.getReportingSnapshot();
+          return {
+            orders: snapshot.orders,
+            dispatchJobs: snapshot.dispatchJobs,
+            dispatchAssignments: snapshot.dispatchAssignments,
+            driverTasks: snapshot.driverTasks,
+            dispatchTraceLogs: snapshot.dispatchTraceLogs,
+            complaintCases: [],
+          };
+        },
+        listDispatchableSupplySnapshots: async () => {
+          snapshotReads += 1;
+          return structuredClone(syntheticSnapshots);
+        },
+        replaceMonthlyOperationsSummaries: async () => undefined,
+        loadComplaintStatisticsSource: async () => ({
+          closures: [],
+          lowRatingCaseNos: [],
+        }),
+        reportPersistenceFailure: vi.fn(),
+      };
+      const service = new ReportingService(
+        ownedMobilityService,
+        {
+          listComplaintCases: () => [],
+          getComplaintTimeline: () => [],
+        } as never,
+        regulatoryRegistryService,
+        undefined,
+        controlledRepo as never,
+      );
+      const result = await service.previewSixMonthOperationsSummary({
+        periodMonthFrom: "2026-06",
+        periodMonthTo: "2026-11",
+        businessArea: "taichung-port",
+        serviceProductCode: "taxi_realtime",
+      });
+      expect(sourceReads).toBe(1);
+      expect(snapshotReads).toBe(1);
+      expect(result).toHaveLength(1);
+      return result[0]!;
+    };
+
+    // Boundary counterexample: June [1,0,0,0,0,0] (raw sum 1, monthly rounded 0.17) + July 6 zeros -> raw 1/12 = 0.08 (not 0.09)
+    const boundarySummary = await runScenario([1, 0, 0, 0, 0, 0]);
+    expect(boundarySummary.validSnapshotCount).toBe(12);
+    expect(boundarySummary.expectedSnapshotCount).toBe(
+      (30 + 31 + 31 + 30 + 31 + 30) * 24 * 12,
+    );
+    expect(boundarySummary.averageDispatchableVehicleCount).toBe(0.08);
+    expect(boundarySummary.monthlySummaries).toHaveLength(6);
+    expect(
+      boundarySummary.monthlySummaries?.map((m) => ({
+        periodMonth: m.periodMonth,
+        validSnapshotCount: m.validSnapshotCount,
+        averageDispatchableVehicleCount: m.averageDispatchableVehicleCount,
+      })),
+    ).toEqual([
+      {
+        periodMonth: "2026-06",
+        validSnapshotCount: 6,
+        averageDispatchableVehicleCount: 0.17,
+      },
+      {
+        periodMonth: "2026-07",
+        validSnapshotCount: 6,
+        averageDispatchableVehicleCount: 0,
+      },
+      {
+        periodMonth: "2026-08",
+        validSnapshotCount: 0,
+        averageDispatchableVehicleCount: null,
+      },
+      {
+        periodMonth: "2026-09",
+        validSnapshotCount: 0,
+        averageDispatchableVehicleCount: null,
+      },
+      {
+        periodMonth: "2026-10",
+        validSnapshotCount: 0,
+        averageDispatchableVehicleCount: null,
+      },
+      {
+        periodMonth: "2026-11",
+        validSnapshotCount: 0,
+        averageDispatchableVehicleCount: null,
+      },
+    ]);
+
+    // Divisible control: June [1,1,1,1,1,1] + July 6 zeros -> raw 6/12 = 0.50
+    const controlSummary = await runScenario([1, 1, 1, 1, 1, 1]);
+    expect(controlSummary.validSnapshotCount).toBe(12);
+    expect(controlSummary.averageDispatchableVehicleCount).toBe(0.5);
+    expect(
+      controlSummary.monthlySummaries?.find((m) => m.periodMonth === "2026-06")
+        ?.averageDispatchableVehicleCount,
+    ).toBe(1);
+    expect(
+      controlSummary.monthlySummaries?.find((m) => m.periodMonth === "2026-07")
+        ?.averageDispatchableVehicleCount,
+    ).toBe(0);
+  });
 });

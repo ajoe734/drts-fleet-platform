@@ -424,7 +424,12 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
   }
 
   it("enforces V0091 paired dispatch_resource_reservations invariant and awaits async completeDriverTask before snapshotting", async () => {
-    const { ownedMobilityService, cleanup } = createHarness();
+    const {
+      ownedMobilityService,
+      complaintService,
+      regulatoryRegistryService,
+      cleanup,
+    } = createHarness();
     cleanups.push(cleanup);
 
     const serviceDate = "2026-08-19";
@@ -729,6 +734,55 @@ describe("INT-REP-001 daily record joins dispatch/task data", () => {
       [...reservationsTable.values()].every((row) => row.status === "released"),
     ).toBe(true);
     expect(reservationsTable.size).toBe(2);
+
+    // Verify ReportingService.listDailyDispatchRecords normalizes node-postgres DATE (OID 1082) Date instances to YYYY-MM-DD
+    const pgDateDb = {
+      isEnabled: () => true,
+      query: async () => ({
+        rows: [
+          {
+            service_date: new Date(2026, 7, 19, 0, 0, 0, 0) as unknown as string,
+            order_id: order.orderId,
+            order_no: order.orderNo,
+            order_source: "phone" as const,
+            tenant_id: null,
+            partner_id: null,
+            service_product_code: "taxi_realtime",
+            requested_at: new Date(`${serviceDate}T02:00:00.000Z`),
+            reservation_time: null,
+            pickup_address_snapshot: "Taipei Main Station",
+            dropoff_address_snapshot: "Songshan Airport",
+            first_dispatch_at: new Date(`${serviceDate}T02:00:00.000Z`),
+            first_assigned_at: new Date(`${serviceDate}T02:01:00.000Z`),
+            final_driver_id: "drv-demo-001",
+            final_vehicle_id: "veh-demo-001",
+            final_plate_no: "ABC-1001",
+            eta_seconds_at_assignment: 300,
+            arrived_pickup_at: new Date(`${serviceDate}T02:12:00.000Z`),
+            trip_started_at: new Date(`${serviceDate}T02:15:00.000Z`),
+            trip_completed_at: new Date(`${serviceDate}T02:40:00.000Z`),
+            final_status: "completed",
+            redispatch_count: 0,
+            cancellation_reason: null,
+            complaint_count: 1,
+            generated_at: new Date(`${serviceDate}T02:45:00.000Z`),
+          },
+        ],
+      }),
+    };
+    const pgDateReader = new ReportingService(
+      ownedMobilityService,
+      complaintService,
+      regulatoryRegistryService,
+      undefined,
+      new ReportingRepository(pgDateDb as never),
+    );
+    const pgDateReadback = await pgDateReader.listDailyDispatchRecords({
+      serviceDate,
+      orderId: order.orderId,
+    });
+    expect(pgDateReadback).toHaveLength(1);
+    expect(pgDateReadback[0]?.serviceDate).toBe(serviceDate);
   });
 
   // Official migrated PostgreSQL schema persistence and readback check.

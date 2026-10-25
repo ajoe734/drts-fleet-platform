@@ -208,7 +208,10 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
         );
       }
       if (records.length > 0) {
-        return records;
+        return records.map((record) => ({
+          ...record,
+          serviceDate: this.normalizeServiceDate(record.serviceDate),
+        }));
       }
       return (await this.rebuildDailyDispatchRecords(query)).records.map(
         (record) => ({ ...record }),
@@ -312,6 +315,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
   async rebuildMonthlyOperationsSummaries(
     query: MonthlyOperationsSummaryQuery = {},
     preloadedSource?: DispatchDailyRecordSource,
+    rawSnapshotVehicleSumByKey?: Map<string, number>,
   ): Promise<MonthlyOperationsSummaryRebuildResult> {
     const generatedAt = new Date().toISOString();
     const source =
@@ -330,6 +334,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       generatedAt,
       query,
       snapshots,
+      rawSnapshotVehicleSumByKey,
     );
 
     if (this.reportingRepository?.isEnabled()) {
@@ -458,9 +463,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     // the derived R09/R10 figures below. Use rebuild.records directly rather
     // than re-querying PG so stale monthly rows can never mix with the new
     // six-month totals in the same response.
+    const rawSnapshotVehicleSumByKey = new Map<string, number>();
     const rebuild = await this.rebuildMonthlyOperationsSummaries(
       monthlyQuery,
       source,
+      rawSnapshotVehicleSumByKey,
     );
     const monthly = rebuild.records
       .filter((record) => this.matchesMonthlySummaryQuery(record, monthlyQuery))
@@ -534,11 +541,15 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       current.actualDispatchCount += record.actualDispatchCount;
       current.completedTripCount += record.completedTripCount;
       current.cancelledOrderCount += record.cancelledOrderCount;
+      const rawMonthVehicleSum =
+        rawSnapshotVehicleSumByKey.get(
+          `${record.periodMonth}:${record.businessArea}:${record.serviceProductCode}`,
+        ) ??
+        (record.averageDispatchableVehicleCount ?? 0) *
+          record.validSnapshotCount;
       weightedVehicleSumByKey.set(
         key,
-        (weightedVehicleSumByKey.get(key) ?? 0) +
-          (record.averageDispatchableVehicleCount ?? 0) *
-            record.validSnapshotCount,
+        (weightedVehicleSumByKey.get(key) ?? 0) + rawMonthVehicleSum,
       );
       current.validSnapshotCount += record.validSnapshotCount;
       current.expectedSnapshotCount += record.expectedSnapshotCount;
@@ -1051,6 +1062,16 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     return (order.reservationWindowStart ?? order.createdAt).slice(0, 10);
   }
 
+  private normalizeServiceDate(value: string | Date): string {
+    if (value instanceof Date) {
+      const year = String(value.getFullYear()).padStart(4, "0");
+      const month = String(value.getMonth() + 1).padStart(2, "0");
+      const day = String(value.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+    return String(value).slice(0, 10);
+  }
+
   private async loadDailyDispatchRecordSource(): Promise<DispatchDailyRecordSource> {
     if (this.reportingRepository?.isEnabled()) {
       try {
@@ -1406,6 +1427,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     generatedAt: string,
     query: MonthlyOperationsSummaryQuery,
     snapshots: readonly DispatchableSupplySnapshotRecord[],
+    rawSnapshotVehicleSumByKey?: Map<string, number>,
   ): MonthlyOperationsSummaryRecord[] {
     const recordsByOrderId = new Map<string, DispatchDailyRecord>();
     // A complaint can be filed after its trip's service month. Keep the
@@ -1502,9 +1524,14 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       );
       if (snapshot.sourceHealth === "complete") {
         group.validSnapshotCount += 1;
-        group.averageDispatchableVehicleCount =
+        const nextRawVehicleSum =
           (group.averageDispatchableVehicleCount ?? 0) +
           snapshot.dispatchableVehicleCount;
+        group.averageDispatchableVehicleCount = nextRawVehicleSum;
+        rawSnapshotVehicleSumByKey?.set(
+          `${periodMonth}:${snapshot.businessArea}:${snapshot.serviceProductCode}`,
+          nextRawVehicleSum,
+        );
       }
     }
 
