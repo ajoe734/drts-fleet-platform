@@ -225,6 +225,13 @@ describe("Agency portal server and component rendering in zh and en", () => {
       searchParams: Promise<Record<string, string | string[] | undefined>>;
     }) => Promise<React.ReactElement>;
   };
+  const operationsMod = loader.loadModule(
+    "@/app/reports/operations/page",
+  ) as {
+    default: (props: {
+      searchParams: Promise<Record<string, string | string[] | undefined>>;
+    }) => Promise<React.ReactElement>;
+  };
   const tripRecordsMod = loader.loadModule("@/app/trip-records/page") as {
     default: (props: {
       searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -642,6 +649,119 @@ describe("Agency portal server and component rendering in zh and en", () => {
       /[\u4e00-\u9fff]/u.test(
         stripIntentionalLanguageToggleCopy(enExportsHtml),
       ),
+    ).toBe(false);
+  });
+
+  it("renders R10 OperationsReportPage summary and same-batch monthly breakdown in zh and en while preserving Taipei month range, unknown vs 0 semantics, and Asia/Taipei generatedAt formatting", async () => {
+    const operationsSummaryPayload = {
+      items: [
+        {
+          from: "2026-05-01",
+          to: "2026-10-31",
+          businessArea: "NTPC",
+          serviceProductCode: "taxi_realtime",
+          demandRequestCount: 120,
+          actualDispatchCount: 110,
+          completedTripCount: 100,
+          cancelledOrderCount: 0,
+          onTimeTripCount: 92,
+          lateTripCount: 6,
+          noShowTripCount: 0,
+          punctualityUnknownTripCount: 2,
+          averageDispatchableVehicleCount: null,
+          validSnapshotCount: 0,
+          expectedSnapshotCount: 184,
+          snapshotCoverageRate: null,
+          complaintCount: 3,
+          generatedAt: "2026-10-31T16:30:00.000Z",
+          monthlySummaries: [
+            {
+              periodMonth: "2026-10",
+              businessArea: "NTPC",
+              serviceProductCode: "taxi_realtime",
+              demandRequestCount: 45,
+              actualDispatchCount: 42,
+              completedTripCount: 40,
+              cancelledOrderCount: 0,
+              onTimeTripCount: 37,
+              lateTripCount: 2,
+              noShowTripCount: 0,
+              punctualityUnknownTripCount: 1,
+              averageDispatchableVehicleCount: 18.5,
+              validSnapshotCount: 31,
+              expectedSnapshotCount: 31,
+              snapshotCoverageRate: 1,
+              complaintCount: 1,
+              generatedAt: "2026-10-31T16:30:00.000Z",
+            },
+          ],
+        },
+      ],
+    };
+
+    mockedLocaleCookie = "zh";
+    mockedAgencyDataQueue.push({
+      ok: true,
+      status: 200,
+      data: operationsSummaryPayload,
+      error: null,
+    });
+    const zhOpsHtml = renderToStaticMarkup(
+      await operationsMod.default({
+        searchParams: Promise.resolve({
+          periodMonthFrom: "2026-05",
+          periodMonthTo: "2026-10",
+        }),
+      }),
+    );
+    expect(zhOpsHtml).toContain("R10 六個月營運統計");
+    expect(zhOpsHtml).toContain("各月明細（同批生成）");
+    expect(zhOpsHtml).toContain("有效／預期快照");
+    expect(zhOpsHtml).toContain("無法判定");
+    expect(zhOpsHtml).toContain("2026-05 ~ 2026-10");
+    expect(zhOpsHtml).toContain("2026-10");
+    expect(zhOpsHtml).toContain("0 / 184");
+    expect(zhOpsHtml).toContain("31 / 31");
+    expect(zhOpsHtml).toContain("100.00%");
+    expect(zhOpsHtml).toContain("未提供");
+    expect(zhOpsHtml).toMatch(/2026\/11\/01\s+00:30:00/);
+
+    mockedLocaleCookie = "en";
+    mockedAgencyDataQueue.push({
+      ok: true,
+      status: 200,
+      data: operationsSummaryPayload,
+      error: null,
+    });
+    const enOpsHtml = renderToStaticMarkup(
+      await operationsMod.default({
+        searchParams: Promise.resolve({
+          periodMonthFrom: "2026-05",
+          periodMonthTo: "2026-10",
+        }),
+      }),
+    );
+    expect(enOpsHtml).toContain("R10 Six-Month Operations Summary");
+    expect(enOpsHtml).toContain("Period Summary");
+    expect(enOpsHtml).toContain("Monthly Breakdown (Same Batch)");
+    expect(enOpsHtml).toContain("Month Range");
+    expect(enOpsHtml).toContain("Start Month");
+    expect(enOpsHtml).toContain("End Month");
+    expect(enOpsHtml).toContain("On Time");
+    expect(enOpsHtml).toContain("Punctuality Unknown");
+    expect(enOpsHtml).toContain("Valid / Expected Snapshots");
+    expect(enOpsHtml).toContain("Generated At");
+    expect(enOpsHtml).toContain("2026-05 ~ 2026-10");
+    expect(enOpsHtml).toContain("2026-10");
+    expect(enOpsHtml).toContain("NTPC");
+    expect(enOpsHtml).toContain("taxi_realtime");
+    expect(enOpsHtml).toContain("0 / 184");
+    expect(enOpsHtml).toContain("31 / 31");
+    expect(enOpsHtml).toContain("100.00%");
+    expect(enOpsHtml).toContain("Not provided");
+    expect(enOpsHtml).toMatch(/11\/01\/2026,\s+00:30:00/);
+    expect(
+      /[\u4e00-\u9fff]/u.test(stripIntentionalLanguageToggleCopy(enOpsHtml)),
     ).toBe(false);
   });
 });

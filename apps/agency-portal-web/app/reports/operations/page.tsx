@@ -6,55 +6,69 @@ import { Card, CardHeader, DataTable, PageHeader, Td, Tr } from "@drts/ui-web";
 
 import { ErrorNotice } from "@/components/error-notice";
 import { PortalShell } from "@/components/portal-shell";
-import { display, displayPercent } from "@/lib/format";
+import { display, displayDateTime, displayPercent } from "@/lib/format";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   firstParam,
   loadAgencyData,
   readAgencyProfile,
 } from "@/lib/session.server";
+import { type Locale, t } from "@/lib/translations";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-const FIGURE_COLUMNS = [
-  { label: "營業區" },
-  { label: "服務" },
-  { label: "叫車需求" },
-  { label: "實際派遣" },
-  { label: "完成趟次" },
-  { label: "取消" },
-  { label: "準時" },
-  { label: "未準時" },
-  { label: "未到" },
-  { label: "無法判定" },
-  { label: "平均可派車輛" },
-  { label: "有效／預期快照" },
-  { label: "快照涵蓋率" },
-  { label: "投訴數" },
-  { label: "生成時間" },
-];
+function getFigureColumns(locale: Locale) {
+  return [
+    { label: t("reports.operations.col.businessArea", undefined, locale) },
+    { label: t("reports.operations.col.service", undefined, locale) },
+    { label: t("reports.operations.col.demand", undefined, locale) },
+    { label: t("reports.operations.col.actualDispatch", undefined, locale) },
+    { label: t("reports.operations.col.completed", undefined, locale) },
+    { label: t("reports.operations.col.cancelled", undefined, locale) },
+    { label: t("reports.operations.col.onTime", undefined, locale) },
+    { label: t("reports.operations.col.lateArrival", undefined, locale) },
+    { label: t("reports.operations.col.noShow", undefined, locale) },
+    {
+      label: t("reports.operations.col.punctualityUnknown", undefined, locale),
+    },
+    { label: t("reports.operations.col.avgDispatchable", undefined, locale) },
+    {
+      label: t(
+        "reports.operations.col.validExpectedSnapshots",
+        undefined,
+        locale,
+      ),
+    },
+    { label: t("reports.operations.col.snapshotCoverage", undefined, locale) },
+    { label: t("reports.operations.col.complaintCount", undefined, locale) },
+    { label: t("reports.operations.col.generatedAt", undefined, locale) },
+  ];
+}
 
 function FigureCells({
   row,
+  locale,
 }: {
   row: AgencyOperationsSummaryView | AgencyMonthlyOperationsSummaryView;
+  locale: Locale;
 }) {
   return (
     <>
-      <Td>{display(row.businessArea)}</Td>
-      <Td>{display(row.serviceProductCode)}</Td>
+      <Td>{display(row.businessArea, locale)}</Td>
+      <Td>{display(row.serviceProductCode, locale)}</Td>
       <Td>{row.demandRequestCount}</Td>
       <Td>{row.actualDispatchCount}</Td>
       <Td>{row.completedTripCount}</Td>
       <Td>{row.cancelledOrderCount}</Td>
-      <Td>{display(row.onTimeTripCount)}</Td>
-      <Td>{display(row.lateTripCount)}</Td>
-      <Td>{display(row.noShowTripCount)}</Td>
-      <Td>{display(row.punctualityUnknownTripCount)}</Td>
-      <Td>{display(row.averageDispatchableVehicleCount)}</Td>
+      <Td>{display(row.onTimeTripCount, locale)}</Td>
+      <Td>{display(row.lateTripCount, locale)}</Td>
+      <Td>{display(row.noShowTripCount, locale)}</Td>
+      <Td>{display(row.punctualityUnknownTripCount, locale)}</Td>
+      <Td>{display(row.averageDispatchableVehicleCount, locale)}</Td>
       <Td>{`${row.validSnapshotCount} / ${row.expectedSnapshotCount}`}</Td>
-      <Td>{displayPercent(row.snapshotCoverageRate)}</Td>
+      <Td>{displayPercent(row.snapshotCoverageRate, locale)}</Td>
       <Td>{row.complaintCount}</Td>
-      <Td>{display(row.generatedAt)}</Td>
+      <Td>{displayDateTime(row.generatedAt, locale)}</Td>
     </>
   );
 }
@@ -64,7 +78,7 @@ export default async function OperationsReportPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const params = await searchParams;
+  const [params, locale] = await Promise.all([searchParams, getServerLocale()]);
   const periodMonthFrom =
     firstParam(params.periodMonthFrom) ?? firstParam(params.from);
   const periodMonthTo =
@@ -100,15 +114,19 @@ export default async function OperationsReportPage({
           )
       : null;
   const profile = await readAgencyProfile();
+  const figureColumns = getFigureColumns(locale);
   return (
-    <PortalShell agencyName={profile?.agencyDisplayName ?? null}>
+    <PortalShell
+      agencyName={profile?.agencyDisplayName ?? null}
+      locale={locale}
+    >
       <PageHeader
-        title="R10 六個月營運統計"
-        subtitle="以臺北曆月（Asia/Taipei）為統計單位，區間上限 6 個曆月；彙總與逐月明細共用同一生成批次，不含個資。"
+        title={t("reports.operations.title", undefined, locale)}
+        subtitle={t("reports.operations.subtitle", undefined, locale)}
       />
       <form method="get" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
         <label>
-          起始月份{" "}
+          {t("reports.operations.filter.monthFrom", undefined, locale)}{" "}
           <input
             type="month"
             name="periodMonthFrom"
@@ -116,53 +134,77 @@ export default async function OperationsReportPage({
           />
         </label>
         <label>
-          結束月份{" "}
+          {t("reports.operations.filter.monthTo", undefined, locale)}{" "}
           <input
             type="month"
             name="periodMonthTo"
             defaultValue={periodMonthTo ?? ""}
           />
         </label>
-        <button type="submit">查詢</button>
+        <button type="submit">{t("common.search", undefined, locale)}</button>
       </form>
       {summary.data ? (
         <Card>
-          <CardHeader>區間彙總</CardHeader>
+          <CardHeader>
+            {t("reports.operations.summaryHeader", undefined, locale)}
+          </CardHeader>
           <DataTable
-            columns={[{ label: "月份區間" }, ...FIGURE_COLUMNS]}
-            empty="查無資料"
+            columns={[
+              {
+                label: t(
+                  "reports.operations.col.periodRange",
+                  undefined,
+                  locale,
+                ),
+              },
+              ...figureColumns,
+            ]}
+            empty={t("common.empty", undefined, locale)}
           >
             {summary.data.items.map((row: AgencyOperationsSummaryView) => (
               <Tr key={`${row.businessArea}:${row.serviceProductCode}`}>
                 <Td>{`${row.from.slice(0, 7)} ~ ${row.to.slice(0, 7)}`}</Td>
-                <FigureCells row={row} />
+                <FigureCells row={row} locale={locale} />
               </Tr>
             ))}
           </DataTable>
         </Card>
       ) : (
-        <ErrorNotice status={summary.status} error={summary.error} />
+        <ErrorNotice
+          status={summary.status}
+          error={summary.error}
+          locale={locale}
+        />
       )}
       <div style={{ height: 16 }} />
       {sameBatchMonthly ? (
         <Card>
-          <CardHeader>各月明細（同批生成）</CardHeader>
+          <CardHeader>
+            {t("reports.operations.monthlyHeader", undefined, locale)}
+          </CardHeader>
           <DataTable
-            columns={[{ label: "月份" }, ...FIGURE_COLUMNS]}
-            empty="查無資料"
+            columns={[
+              { label: t("reports.operations.col.month", undefined, locale) },
+              ...figureColumns,
+            ]}
+            empty={t("common.empty", undefined, locale)}
           >
             {sameBatchMonthly.map((row: AgencyMonthlyOperationsSummaryView) => (
               <Tr
                 key={`${row.periodMonth}:${row.businessArea}:${row.serviceProductCode}`}
               >
                 <Td>{row.periodMonth}</Td>
-                <FigureCells row={row} />
+                <FigureCells row={row} locale={locale} />
               </Tr>
             ))}
           </DataTable>
         </Card>
       ) : (
-        <ErrorNotice status={summary.status} error={summary.error} />
+        <ErrorNotice
+          status={summary.status}
+          error={summary.error}
+          locale={locale}
+        />
       )}
     </PortalShell>
   );
