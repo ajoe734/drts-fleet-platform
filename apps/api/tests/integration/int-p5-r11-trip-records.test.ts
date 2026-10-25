@@ -9,7 +9,6 @@ import type {
   DispatchJobRecord,
   OwnedOrderRecord,
 } from "../../src/common/auth/auth.types";
-import { ApiRequestError } from "../../src/common/api-envelope";
 import { recordsToCsv } from "../../src/common/csv";
 import { DatabaseService } from "../../src/common/db";
 import { OpsDispatchEventsService } from "../../src/common/ops-dispatch-events.service";
@@ -19,6 +18,8 @@ import { AgencyPortalService } from "../../src/modules/agency-access/agency-port
 import { AuditNotificationService } from "../../src/modules/audit-notification/audit-notification.service";
 import {
   MultiTaxiRepository,
+  computeTwoCalendarYearRetentionFloorIso,
+  computeTwoCalendarYearRetentionFloorMs,
   type StoredMultiTaxiTripOperationalRecord,
 } from "../../src/modules/multi-taxi/multi-taxi.repository";
 import { MultiTaxiService } from "../../src/modules/multi-taxi/multi-taxi.service";
@@ -215,10 +216,8 @@ function createTransactionalDbHarness() {
         string,
       ];
 
-      if (
-        Date.parse(retainUntil) <
-        Date.parse(generatedAt) + 730 * 24 * 60 * 60 * 1000
-      ) {
+      const retentionFloorMs = computeTwoCalendarYearRetentionFloorMs(generatedAt);
+      if (Date.parse(retainUntil) < retentionFloorMs) {
         throw new Error("multi_taxi_record_retention_chk violation");
       }
 
@@ -254,17 +253,54 @@ function createTransactionalDbHarness() {
       if (preserveTelemetryRoute && existingRecordObj.route) {
         mergedRecordObj.route = existingRecordObj.route;
       }
+      const existingGeneratedAt = String(existing?.generated_at ?? generatedAt);
+      const effectiveFloorIso =
+        computeTwoCalendarYearRetentionFloorIso(existingGeneratedAt);
+      const effectiveRetainUntil = existing
+        ? [retainUntil, String(existing.retain_until), effectiveFloorIso].reduce(
+            (latest, candidate) =>
+              Date.parse(candidate) > Date.parse(latest) ? candidate : latest,
+            effectiveFloorIso,
+          )
+        : Date.parse(retainUntil) > Date.parse(effectiveFloorIso)
+          ? retainUntil
+          : effectiveFloorIso;
+
+      if (existing) {
+        const preservedTripId = String(existing.trip_id || tripId);
+        const preservedVehicleId = String(existing.vehicle_id || vehicleId);
+        const preservedPlateNo =
+          existing.plate_no && existing.plate_no !== "UNRECORDED"
+            ? String(existing.plate_no)
+            : plateNo;
+        const preservedReservedAt = String(existing.reserved_at || reservedAt);
+        const preservedPickupAt = existing.pickup_at ?? pickupAt;
+        const preservedDropoffAt = existing.dropoff_at ?? dropoffAt;
+        mergedRecordObj.tripId = preservedTripId;
+        mergedRecordObj.vehicleId = preservedVehicleId;
+        mergedRecordObj.plateNo = preservedPlateNo;
+        mergedRecordObj.reservedAt = preservedReservedAt;
+        mergedRecordObj.pickupAt = preservedPickupAt;
+        mergedRecordObj.dropoffAt = preservedDropoffAt;
+        mergedRecordObj.retainUntil = effectiveRetainUntil;
+      } else {
+        parsedJson.retainUntil = effectiveRetainUntil;
+      }
+
       const row: Record<string, unknown> = existing
         ? {
             ...existing,
             order_no: orderNo ?? existing.order_no,
-            trip_id: tripId,
+            trip_id: existing.trip_id || tripId,
             assignment_id: assignmentId ?? existing.assignment_id,
-            vehicle_id: vehicleId,
-            plate_no: plateNo,
-            reserved_at: reservedAt,
-            pickup_at: pickupAt ?? existing.pickup_at,
-            dropoff_at: dropoffAt ?? existing.dropoff_at,
+            vehicle_id: existing.vehicle_id || vehicleId,
+            plate_no:
+              existing.plate_no && existing.plate_no !== "UNRECORDED"
+                ? existing.plate_no
+                : plateNo,
+            reserved_at: existing.reserved_at || reservedAt,
+            pickup_at: existing.pickup_at ?? pickupAt,
+            dropoff_at: existing.dropoff_at ?? dropoffAt,
             route_summary: routeSummary ?? existing.route_summary,
             route_source:
               routeSource === "driver_gps" || routeSource === "mixed"
@@ -287,10 +323,7 @@ function createTransactionalDbHarness() {
             charging_mode: chargingMode,
             currency,
             record: mergedRecordObj,
-            retain_until:
-              Date.parse(retainUntil) > Date.parse(String(existing.retain_until))
-                ? retainUntil
-                : existing.retain_until,
+            retain_until: effectiveRetainUntil,
           }
         : {
             record_id: recordId,
@@ -318,7 +351,7 @@ function createTransactionalDbHarness() {
             currency,
             record: parsedJson,
             generated_at: generatedAt,
-            retain_until: retainUntil,
+            retain_until: effectiveRetainUntil,
           };
 
       state.tripRecordsByOrderId.set(orderId, row);
@@ -329,11 +362,17 @@ function createTransactionalDbHarness() {
       normalizedSql.includes(
         "FROM reporting.multi_taxi_trip_operational_records r",
       ) &&
-      normalizedSql.includes("WHERE r.retain_until <= $1::timestamptz")
+      normalizedSql.includes("<= $1::timestamptz")
     ) {
       const cutoffMs = Date.parse(String(values[0]));
       const rows = [...state.tripRecordsByOrderId.values()]
-        .filter((row) => Date.parse(String(row.retain_until)) <= cutoffMs)
+        .filter((row) => {
+          const retainMs = Date.parse(String(row.retain_until));
+          const floorMs = computeTwoCalendarYearRetentionFloorMs(
+            String(row.generated_at),
+          );
+          return Math.max(retainMs, floorMs) <= cutoffMs;
+        })
         .map((row) => ({
           record_id: row.record_id,
           order_id: row.order_id,
@@ -359,7 +398,11 @@ function createTransactionalDbHarness() {
         return { rows: [], rowCount: 0 };
       }
       const [orderId, row] = entry;
-      if (Date.parse(String(row.retain_until)) > Date.now() && !allowPurge) {
+      const effectiveFloorMs = Math.max(
+        Date.parse(String(row.retain_until)),
+        computeTwoCalendarYearRetentionFloorMs(String(row.generated_at)),
+      );
+      if (effectiveFloorMs > Date.now() && !allowPurge) {
         throw new Error(
           `R11 trip operational record ${targetRecordId} cannot be deleted before 2-year retention expiry`,
         );
@@ -509,9 +552,6 @@ function createTransactionalDbHarness() {
             : null;
       existing.payment_status = status;
       existing.collected_fare_minor = collected;
-      if (status === "captured" && amountMinor !== null) {
-        existing.actual_fare_minor = amountMinor;
-      }
       const rec = (existing.record ?? {}) as Record<string, unknown>;
       rec.paymentStatus = status;
       rec.collectedFareMinor = collected;
@@ -916,7 +956,7 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
       farePolicyVersion: "multi-taxi-v2026",
       chargingMode: "meter",
       generatedAt: "2026-10-20T09:32:00.000Z",
-      retainUntil: "2028-10-19T09:32:00.000Z",
+      retainUntil: "2028-10-20T09:32:00.000Z",
     });
 
     // 4. Cross-instance read: a fresh MultiTaxiService whose OwnedMobilityService
@@ -976,24 +1016,27 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
     expect(record?.paymentStatus).toBe("failed");
     expect(record?.collectedFareMinor).toBeNull();
 
-    // Case C: captured -> collectedFareMinor equals captured amount
-    env.db.setPaymentOutcome(env.order.orderId, "captured", 36500);
+    // Case C: captured -> collectedFareMinor equals captured amount while actualFareMinor remains immutable
+    env.db.setPaymentOutcome(env.order.orderId, "captured", 35000);
     record = await readerService.getTripOperationalRecord(
       "mtr-order-r11-tx-001",
     );
     expect(record?.paymentStatus).toBe("captured");
-    expect(record?.collectedFareMinor).toBe(36500);
+    expect(record?.payableFareMinor).toBe(32000);
+    expect(record?.actualFareMinor).toBe(36500);
+    expect(record?.collectedFareMinor).toBe(35000);
 
     // Case D: refunded -> collectedFareMinor equals 0 (never positive)
-    env.db.setPaymentOutcome(env.order.orderId, "refunded", 36500);
+    env.db.setPaymentOutcome(env.order.orderId, "refunded", 35000);
     record = await readerService.getTripOperationalRecord(
       "mtr-order-r11-tx-001",
     );
     expect(record?.paymentStatus).toBe("refunded");
+    expect(record?.actualFareMinor).toBe(36500);
     expect(record?.collectedFareMinor).toBe(0);
 
     // Case E: Legacy completed order without committed R11 row, without task.startedAt,
-    // and without toll proof -> reconciles without inventing pickupAt or toll
+    // and without toll proof -> reconciles without inventing pickupAt or numeric 0 toll
     const legacyOrder: OwnedOrderRecord = {
       ...env.order,
       orderId: "order-legacy-002",
@@ -1032,6 +1075,8 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
       pickupAt: null, // Never fabricated from assignment.createdAt!
       dropoffAt: "2026-10-18T11:20:00.000Z",
       route: {
+        encodedPolyline: "est_poly",
+        pointCount: 0,
         distanceMeters: 8100,
         durationSeconds: 1400,
         source: "provider_route", // Honestly labeled as estimated provider route
@@ -1039,16 +1084,17 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
       payableFareMinor: 29000,
       collectedFareMinor: null,
       paymentStatus: "unknown",
+      tollMinor: null,
       tollSource: "unavailable",
     });
   });
 
-  it("enforces 730-day retention floor, blocks early deletion, and respects active legal holds and deletion exceptions", async () => {
+  it("enforces two-calendar-year retention floor across leap years, blocks early deletion at the 730-day mark, preserves longer retainUntil and core facts, and respects active legal holds", async () => {
     const env = setupCompletionEnvironment();
     await env.ownedMobilityService.completeDriverTask(
       env.task.taskId,
       {
-        completedAt: "2026-10-20T09:32:00.000Z",
+        completedAt: "2026-10-25T02:00:00.000Z",
         actualDistanceKm: 6.45,
         actualDurationSec: 1620,
         fare: { currency: "TWD", amountMinor: 36500 },
@@ -1061,6 +1107,21 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
       "req-retention-1",
     );
 
+    const multiTaxiService = new MultiTaxiService(
+      { listOrders: () => [] } as never,
+      env.multiTaxiRepository,
+      undefined,
+      env.auditNotificationService,
+    );
+
+    const committedRecord = await multiTaxiService.getTripOperationalRecord(
+      "mtr-order-r11-tx-001",
+    );
+    expect(committedRecord?.generatedAt).toBe("2026-10-25T02:00:00.000Z");
+    expect(committedRecord?.retainUntil).toBe("2028-10-25T02:00:00.000Z");
+    expect(committedRecord?.tollMinor).toBe(0);
+    expect(committedRecord?.tollSource).toBe("none");
+
     // 1. Direct early deletion before 2-year expiry is rejected by the DB guard
     expect(() =>
       env.db.executeDirectQuery(
@@ -1069,22 +1130,70 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
       ),
     ).toThrow(/cannot be deleted before 2-year retention expiry/);
 
-    // 2. Even if retention sweep runs before retainUntil (2028-10-19), row is not purged
-    const multiTaxiService = new MultiTaxiService(
-      { listOrders: () => [] } as never,
-      env.multiTaxiRepository,
-      undefined,
-      env.auditNotificationService,
-    );
-    const earlySweep = await multiTaxiService.purgeExpiredTripOperationalRecords(
-      "2027-10-20T00:00:00.000Z",
-    );
-    expect(earlySweep.purgedRecordIds).toEqual([]);
+    // 2. At 2028-10-24T02:00:00.000Z (fixed 730d across 2028 leap year, 1 day short of 2 calendar years),
+    //    the record is NOT expired, remains undeletable by retention sweep, and stays queryable.
+    const fixed730Sweep =
+      await multiTaxiService.purgeExpiredTripOperationalRecords(
+        "2028-10-24T02:00:00.000Z",
+      );
+    expect(fixed730Sweep.purgedRecordIds).toEqual([]);
     expect(
       await multiTaxiService.getTripOperationalRecord("mtr-order-r11-tx-001"),
     ).not.toBeNull();
 
-    // 3. After 2-year expiry (2028-11-01), an active legal hold blocks purge
+    // 2b. Verify non-leap control (2028-03-01 -> 2030-03-01), leap-day start (2028-02-29 -> 2030-03-01),
+    //     longer existing retainUntil preservation, and core fact immutability on upsert.
+    const nonLeapControl =
+      await env.multiTaxiRepository.upsertTripOperationalRecord({
+        ...committedRecord!,
+        recordId: "mtr-order-r11-nonleap-ctrl",
+        orderId: "order-r11-nonleap-ctrl",
+        orderNo: "MTX-R11-NONLEAP",
+        tripId: "task-r11-nonleap-ctrl",
+        generatedAt: "2028-03-01T02:00:00.000Z",
+        retainUntil: "2028-03-01T02:00:00.000Z",
+      });
+    expect(nonLeapControl.retainUntil).toBe("2030-03-01T02:00:00.000Z");
+
+    const leapDayStart =
+      await env.multiTaxiRepository.upsertTripOperationalRecord({
+        ...committedRecord!,
+        recordId: "mtr-order-r11-leapday-start",
+        orderId: "order-r11-leapday-start",
+        orderNo: "MTX-R11-LEAPDAY",
+        tripId: "task-r11-leapday-start",
+        generatedAt: "2028-02-29T02:00:00.000Z",
+        retainUntil: "2030-02-28T02:00:00.000Z",
+      });
+    expect(leapDayStart.retainUntil).toBe("2030-03-01T02:00:00.000Z");
+
+    const extendedRetention =
+      await env.multiTaxiRepository.upsertTripOperationalRecord({
+        ...committedRecord!,
+        retainUntil: "2031-01-01T00:00:00.000Z",
+      });
+    expect(extendedRetention.retainUntil).toBe("2031-01-01T00:00:00.000Z");
+
+    const shortenAndTamperAttempt =
+      await env.multiTaxiRepository.upsertTripOperationalRecord({
+        ...committedRecord!,
+        plateNo: "TAMPER-9999",
+        vehicleId: "veh-tamper-999",
+        tripId: "task-tamper-999",
+        reservedAt: "2020-01-01T00:00:00.000Z",
+        pickupAt: "2020-01-01T00:05:00.000Z",
+        dropoffAt: "2020-01-01T00:10:00.000Z",
+        retainUntil: "2028-10-25T02:00:00.000Z",
+      });
+    expect(shortenAndTamperAttempt.retainUntil).toBe("2031-01-01T00:00:00.000Z");
+    expect(shortenAndTamperAttempt.plateNo).toBe("TPE-8899");
+    expect(shortenAndTamperAttempt.vehicleId).toBe("vehicle-r11-001");
+    expect(shortenAndTamperAttempt.tripId).toBe("task-r11-tx-001");
+    expect(shortenAndTamperAttempt.reservedAt).toBe("2026-10-20T09:00:00.000Z");
+    expect(shortenAndTamperAttempt.pickupAt).toBe("2026-10-20T09:05:00.000Z");
+    expect(shortenAndTamperAttempt.dropoffAt).toBe("2026-10-25T02:00:00.000Z");
+
+    // 3. After extended retention expiry (2031-02-01), an active legal hold blocks purge
     const platformIdentity: BootstrapRequestIdentity = {
       authMode: "jwt_bearer",
       actorType: "platform_admin",
@@ -1109,9 +1218,12 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
     );
 
     const heldSweep = await multiTaxiService.purgeExpiredTripOperationalRecords(
-      "2028-11-01T00:00:00.000Z",
+      "2031-02-01T00:00:00.000Z",
     );
-    expect(heldSweep.purgedRecordIds).toEqual([]);
+    expect(heldSweep.purgedRecordIds).toEqual([
+      "mtr-order-r11-nonleap-ctrl",
+      "mtr-order-r11-leapday-start",
+    ]);
     expect(heldSweep.skippedHeldRecordIds).toEqual(["mtr-order-r11-tx-001"]);
 
     // 4. Releasing the legal hold allows the expired record to be lawfully purged
@@ -1124,7 +1236,7 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
 
     const releasedSweep =
       await multiTaxiService.purgeExpiredTripOperationalRecords(
-        "2028-11-01T00:00:00.000Z",
+        "2031-02-01T00:00:00.000Z",
       );
     expect(releasedSweep.purgedRecordIds).toEqual(["mtr-order-r11-tx-001"]);
     expect(
@@ -1523,7 +1635,7 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
         work_state: "available",
         out_of_order: false,
       },
-      // Rejected: accuracy_m > 200
+      // Rejected: accuracy_m > 100
       {
         event_id: "evt-reject-low-accuracy",
         driver_id: "driver-r11-001",
@@ -1531,7 +1643,7 @@ describe("INT-P5-R11: Multi-taxi trip operational record truth, 730-day retentio
         task_id: "task-r11-tx-001",
         latitude: 24.555,
         longitude: 121.555,
-        accuracy_m: 450,
+        accuracy_m: 150,
         recorded_at: "2026-10-20T09:08:30.000Z",
         received_at: "2026-10-20T09:08:31.000Z",
         work_state: "on_trip",
@@ -1756,12 +1868,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
       }
     });
 
-    it("enforces payment collection synchronization, telemetry.driver_location_events provenance, core immutability, and 730-day + legal-hold deletion guard in PostgreSQL", async () => {
+    it("enforces payment collection synchronization, telemetry.driver_location_events provenance, core immutability, and two-calendar-year + legal-hold deletion guard in PostgreSQL", async () => {
       await database.query(
         `
         INSERT INTO ops.phase1_driver_tasks (
           task_id, order_id, dispatch_job_id, assignment_id, status, updated_at, record
-        ) VALUES ($1, $2, $3, $4, 'completed', '2026-10-20T08:09:00.000Z'::timestamptz, $5::jsonb)
+        ) VALUES ($1, $2, $3, $4, 'completed', '2026-10-25T02:00:00.000Z'::timestamptz, $5::jsonb)
         `,
         [
           taskId,
@@ -1774,8 +1886,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
             driverId,
             vehicleId,
             status: "completed",
-            startedAt: "2026-10-20T08:05:00.000Z",
-            completedAt: "2026-10-20T08:09:00.000Z",
+            startedAt: "2026-10-25T01:56:00.000Z",
+            completedAt: "2026-10-25T02:00:00.000Z",
           }),
         ],
       );
@@ -1783,13 +1895,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await database.query(
         `
         INSERT INTO telemetry.driver_location_events (
-          event_id, driver_id, vehicle_id, task_id, latitude, longitude, accuracy_m,
-          recorded_at, received_at, work_state, out_of_order, payload
+          event_id, device_id, driver_id, vehicle_id, task_id, sequence_no,
+          recorded_at, received_at, lat, lng, accuracy_m,
+          work_state, app_state, transport_mode, network_type, out_of_order
         ) VALUES
-          ($1, $2, $3, $4, 25.0478, 121.5170, 12, '2026-10-20T08:05:30.000Z'::timestamptz, '2026-10-20T08:05:31.000Z'::timestamptz, 'on_trip', false, '{}'::jsonb),
-          ($5, $2, NULL, $4, 25.0550, 121.5340, 15, '2026-10-20T08:07:00.000Z'::timestamptz, '2026-10-20T08:07:01.000Z'::timestamptz, 'on_trip', false, '{}'::jsonb),
-          ($6, $2, $3, $4, 25.0630, 121.5517, 10, '2026-10-20T08:08:30.000Z'::timestamptz, '2026-10-20T08:08:31.000Z'::timestamptz, 'on_trip', false, '{}'::jsonb),
-          ($7, $2, 'veh-conflict-wrong', $4, 24.9000, 121.9000, 10, '2026-10-20T08:06:00.000Z'::timestamptz, '2026-10-20T08:06:01.000Z'::timestamptz, 'on_trip', false, '{}'::jsonb)
+          ($1, 'dev-pg-1', $2, $3, $4, 1, '2026-10-25T01:56:30.000Z'::timestamptz, '2026-10-25T01:56:31.000Z'::timestamptz, 25.0478, 121.5170, 12, 'on_trip', 'foreground', 'driving', '4g', false),
+          ($5, 'dev-pg-1', $2, NULL, $4, 2, '2026-10-25T01:58:00.000Z'::timestamptz, '2026-10-25T01:58:01.000Z'::timestamptz, 25.0550, 121.5340, 15, 'on_trip', 'foreground', 'driving', '4g', false),
+          ($6, 'dev-pg-1', $2, $3, $4, 3, '2026-10-25T01:59:30.000Z'::timestamptz, '2026-10-25T01:59:31.000Z'::timestamptz, 25.0630, 121.5517, 10, 'on_trip', 'foreground', 'driving', '4g', false),
+          ($7, 'dev-pg-1', $2, 'veh-conflict-wrong', $4, 4, '2026-10-25T01:57:00.000Z'::timestamptz, '2026-10-25T01:57:01.000Z'::timestamptz, 24.9000, 121.9000, 10, 'on_trip', 'foreground', 'driving', '4g', false),
+          ($8, 'dev-pg-1', $2, $3, $4, 5, '2026-10-25T01:58:30.000Z'::timestamptz, '2026-10-25T01:58:31.000Z'::timestamptz, 24.8500, 121.8500, 150, 'on_trip', 'foreground', 'driving', '4g', false)
         `,
         [
           `evt_1_${suffix}`,
@@ -1799,9 +1913,35 @@ describe.skipIf(!process.env.DATABASE_URL)(
           `evt_2_nullveh_${suffix}`,
           `evt_3_${suffix}`,
           `evt_4_conflict_${suffix}`,
+          `evt_5_inaccurate_${suffix}`,
         ],
       );
 
+      // Verify PostgreSQL two-calendar-year helper function across leap year, non-leap control, and Feb 29 start
+      const floorCheck = await database.query<{
+        leap_span: Date;
+        non_leap: Date;
+        leap_day: Date;
+      }>(
+        `
+        SELECT
+          reporting.multi_taxi_two_calendar_year_retention_floor('2026-10-25T02:00:00.000Z'::timestamptz) AS leap_span,
+          reporting.multi_taxi_two_calendar_year_retention_floor('2028-03-01T02:00:00.000Z'::timestamptz) AS non_leap,
+          reporting.multi_taxi_two_calendar_year_retention_floor('2028-02-29T02:00:00.000Z'::timestamptz) AS leap_day
+        `,
+      );
+      expect(new Date(floorCheck.rows[0]!.leap_span).toISOString()).toBe(
+        "2028-10-25T02:00:00.000Z",
+      );
+      expect(new Date(floorCheck.rows[0]!.non_leap).toISOString()).toBe(
+        "2030-03-01T02:00:00.000Z",
+      );
+      expect(new Date(floorCheck.rows[0]!.leap_day).toISOString()).toBe(
+        "2030-03-01T02:00:00.000Z",
+      );
+
+      // Even if caller passes fixed 730-day retainUntil (2028-10-24T02:00:00.000Z),
+      // repository & DB enforce the two-calendar-year floor (2028-10-25T02:00:00.000Z).
       await repository.upsertTripOperationalRecord({
         recordId,
         orderId,
@@ -1811,9 +1951,9 @@ describe.skipIf(!process.env.DATABASE_URL)(
         driverId,
         vehicleId,
         plateNo: "TPE-7788",
-        reservedAt: "2026-10-20T08:00:00.000Z",
-        pickupAt: "2026-10-20T08:05:00.000Z",
-        dropoffAt: "2026-10-20T08:09:00.000Z",
+        reservedAt: "2026-10-25T01:50:00.000Z",
+        pickupAt: "2026-10-25T01:56:00.000Z",
+        dropoffAt: "2026-10-25T02:00:00.000Z",
         route: {
           encodedPolyline: null,
           pointCount: 0,
@@ -1831,12 +1971,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
         currency: "TWD",
         farePolicyVersion: "multi-taxi-v1",
         chargingMode: "meter",
-        generatedAt: "2026-10-20T08:09:00.000Z",
-        retainUntil: "2028-10-19T08:09:00.000Z",
+        generatedAt: "2026-10-25T02:00:00.000Z",
+        retainUntil: "2028-10-24T02:00:00.000Z",
       });
 
       const initialPersisted =
         await repository.findTripOperationalRecordById(recordId);
+      expect(initialPersisted?.retainUntil).toBe("2028-10-25T02:00:00.000Z");
       expect(initialPersisted?.route.source).toBe("driver_gps");
       expect(initialPersisted?.route.pointCount).toBe(3);
       expect(initialPersisted?.route.encodedPolyline).toBe(
@@ -1852,7 +1993,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
         coverage: "full_sampled",
       });
 
-      // Prune raw telemetry.driver_location_events and replay upsert -> retained 730-day R11 GPS snapshot survives!
+      // At 2028-10-24T02:00:00.000Z (730 days after 2026-10-25T02:00:00.000Z),
+      // retention sweep must NOT consider the record expired.
+      const sweepAt730d = await repository.purgeExpiredTripOperationalRecords(
+        new Date("2028-10-24T02:00:00.000Z"),
+        new Set(),
+      );
+      expect(sweepAt730d.purgedRecordIds).not.toContain(recordId);
+
+      // Prune raw telemetry.driver_location_events and replay upsert -> retained R11 GPS snapshot survives!
       await database.query(
         "DELETE FROM telemetry.driver_location_events WHERE driver_id = $1",
         [driverId],
@@ -1875,21 +2024,23 @@ describe.skipIf(!process.env.DATABASE_URL)(
         "25.047800,121.517000;25.055000,121.534000;25.063000,121.551700",
       );
 
-      // Insert captured payment -> trigger updates collected_fare_minor and payment_status
+      // Insert captured payment (partial amount 29500) -> trigger updates collected_fare_minor and payment_status,
+      // while preserving actual_fare_minor = 31000
       await database.query(
         `
         INSERT INTO billing.multi_taxi_passenger_payments (
           payment_id, order_id, status, amount_minor, currency
-        ) VALUES ($1, $2, 'captured', 31000, 'TWD')
+        ) VALUES ($1, $2, 'captured', 29500, 'TWD')
         `,
         [paymentId, orderId],
       );
       const afterCapture =
         await repository.findTripOperationalRecordById(recordId);
       expect(afterCapture?.paymentStatus).toBe("captured");
-      expect(afterCapture?.collectedFareMinor).toBe(31000);
+      expect(afterCapture?.actualFareMinor).toBe(31000);
+      expect(afterCapture?.collectedFareMinor).toBe(29500);
 
-      // Update payment to refunded -> trigger sets collected_fare_minor = 0
+      // Update payment to refunded -> trigger sets collected_fare_minor = 0 while preserving actual_fare_minor = 31000
       await database.query(
         `
         UPDATE billing.multi_taxi_passenger_payments
@@ -1901,12 +2052,21 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const afterRefund =
         await repository.findTripOperationalRecordById(recordId);
       expect(afterRefund?.paymentStatus).toBe("refunded");
+      expect(afterRefund?.actualFareMinor).toBe(31000);
       expect(afterRefund?.collectedFareMinor).toBe(0);
 
-      // Attempt to shorten retain_until or delete before 2-year expiry -> rejected by DB trigger
+      // Attempt to mutate populated core trip fact (plate_no) -> rejected by DB trigger
       await expect(
         database.query(
-          `UPDATE reporting.multi_taxi_trip_operational_records SET retain_until = generated_at + interval '10 days' WHERE record_id = $1`,
+          `UPDATE reporting.multi_taxi_trip_operational_records SET plate_no = 'TAMPER-9999' WHERE record_id = $1`,
+          [recordId],
+        ),
+      ).rejects.toThrow();
+
+      // Attempt to shorten retain_until to 730 days (2028-10-24T02:00:00.000Z) or delete before 2-year expiry -> rejected by DB trigger
+      await expect(
+        database.query(
+          `UPDATE reporting.multi_taxi_trip_operational_records SET retain_until = '2028-10-24T02:00:00.000Z'::timestamptz WHERE record_id = $1`,
           [recordId],
         ),
       ).rejects.toThrow();

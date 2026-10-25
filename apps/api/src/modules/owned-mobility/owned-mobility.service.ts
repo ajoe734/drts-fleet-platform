@@ -17,6 +17,7 @@ import {
   type MaskedCallPort,
 } from "../multi-taxi/masked-call.port";
 import {
+  computeTwoCalendarYearRetentionFloorIso,
   MultiTaxiRepository,
   type StoredMultiTaxiTripOperationalRecord,
 } from "../multi-taxi/multi-taxi.repository";
@@ -9264,9 +9265,7 @@ export class OwnedMobilityService
       ),
     );
     const generatedAt = certificateEvent.completedAt;
-    const retainUntil = new Date(
-      Date.parse(generatedAt) + 730 * 24 * 60 * 60 * 1000,
-    ).toISOString();
+    const retainUntil = computeTwoCalendarYearRetentionFloorIso(generatedAt);
 
     return {
       recordId: `mtr-${order.orderId}`,

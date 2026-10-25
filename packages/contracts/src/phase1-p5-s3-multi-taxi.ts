@@ -830,7 +830,7 @@ export interface MultiTaxiTripOperationalRecord {
   actualFareMinor: number;
   collectedFareMinor?: number | null;
   paymentStatus?: MultiTaxiTripPaymentStatus;
-  tollMinor: number;
+  tollMinor: number | null;
   tollSource?: MultiTaxiTripTollSource;
   currency: typeof PLATFORM_CURRENCY;
 
@@ -902,7 +902,7 @@ export interface MultiTaxiTripOperationalExportRow {
   actualFareMinor: number;
   collectedFareMinor?: number | null;
   paymentStatus?: MultiTaxiTripPaymentStatus;
-  tollMinor: number;
+  tollMinor: number | null;
   tollSource?: MultiTaxiTripTollSource;
   currency: typeof PLATFORM_CURRENCY;
   farePolicyVersion: string;

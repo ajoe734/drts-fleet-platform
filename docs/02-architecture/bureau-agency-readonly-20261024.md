@@ -239,7 +239,7 @@ BFF 實作：新 package `packages/agency-auth`（`createAgencyAuthHandlers`、
 每一趟 `runtimeProfileCode === "multi_taxi_direct"` 的多元化計程車行程於司機完成行程的**同一筆交易**（`OwnedMobilityService.finalizeDriverTaskCompletionInTransaction` → `MultiTaxiRepository.persistTripOperationalRecordInTransaction`）寫入單一邏輯 R11 營運紀錄（`recordId = mtr-<orderId>`，`ON CONFLICT (order_id)` 冪等重播；若完成交易回滾，R11 紀錄一併回滾）。
 `MultiTaxiService.listTripOperationalRecords`、`getTripOperationalRecord` 與 `exportTripOperationalRecords` 直接讀取已提交之 `reporting.multi_taxi_trip_operational_records`（並關聯 `billing.multi_taxi_passenger_payments` 實收狀態與 `AuditNotificationService` 證據治理／法律保留狀態），不再由單一行程的記憶體啟動快取重算。既有已完成的歷史多元化計程車行程由已提交之訂單／司機任務／派車指派／電子乘車證明／付款紀錄回填對齊，缺漏的歷史事實誠實標示為 `null`／`"unavailable"`／`"unknown"`，絕不以派車時間、更新時間、預估路線或報價金額冒充。
 
-每筆紀錄的 `generatedAt` 為實際完成時間（`completedAt`），`retainUntil = generatedAt + 730 日`；`reservedAt` 為 `order.reservationWindowStart ?? order.createdAt`；`pickupAt` 為司機實際載客起算時間（`task.startedAt`，歷史無紀錄時為 `null`，不以 `assignedAt` 冒充）；`dropoffAt` 為實際下車完成時間（`command.completedAt`／`task.completedAt`，不以 `updatedAt` 冒充）。
+每筆紀錄的 `generatedAt` 為實際完成時間（`completedAt`），`retainUntil = computeTwoCalendarYearRetentionFloorIso(generatedAt)`（依計程車客運服務業申請核准經營辦法第 18 條第 10 款「至少保存二年」與民法第 119、121、123 條曆年期間計算，至少保存滿兩曆年且不少於 730 日：例如 `2026-10-25T02:00:00.000Z` 跨越 2028 閏年須保存至 `2028-10-25T02:00:00.000Z`，不得以固定 730 日提前於 `2028-10-24T02:00:00.000Z` 屆滿；非閏年控制組 `2028-03-01T02:00:00.000Z` 保存至 `2030-03-01T02:00:00.000Z`；閏日 `2028-02-29T02:00:00.000Z` 起算進位至 `2030-03-01T02:00:00.000Z` 而不提前於 `2030-02-28` 屆滿；既有更長 `retainUntil` 絕不縮短）；`reservedAt` 為 `order.reservationWindowStart ?? order.createdAt`；`pickupAt` 為司機實際載客起算時間（`task.startedAt`，歷史無紀錄時為 `null`，不以 `assignedAt` 冒充）；`dropoffAt` 為實際下車完成時間（`command.completedAt`／`task.completedAt`，不以 `updatedAt` 冒充）。
 
 | API                                                        | scope                        | 重用                                                                                                                                                                                         |
 | ---------------------------------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -259,7 +259,7 @@ multi-taxi.controller.ts 先呼叫 `exportTripOperationalRecords`），所以機
 - 核准車號精確查詢：`plateNo`（精確比對完整車號，不分大小寫但須完整一致）
 - 訂單／趟次識別碼精確查詢：`orderNo`、`orderId`、`tripId`、`recordId`（精確比對，不開放任意子字串模糊搜尋）
 - 列表附加參數：`legalHold`（`all`／`active`／`none`）、`page`、`pageSize`（上限 200）。
-- **不接受任意子字串 `q`**：既有平台端 `q` 允許任意子字串比對未遮罩欄位，機關路徑拒絕 `q`（回 400 `AGENCY_TRIP_RECORD_QUERY_INVALID`），僅開放上述法定最小精確查詢條件並回傳總筆數（`total`）。
+- **不接受任意子字串 `q`**：既有平台端 `q` 允許任意子字串比對未遮罩欄位，機關路徑拒絕 `q`（回 400 `AGENCY_QUERY_PARAMETER_UNSUPPORTED`；欄位格式錯誤回 400 `AGENCY_QUERY_INVALID`），僅開放上述法定最小精確查詢條件並回傳總筆數（`total`）。`AgencyPortalService.tripFilter` 將精確查詢條件（`plateNo`、`orderNo`、`orderId`、`tripId`、`recordId`、`month`、`reservedFrom`、`reservedTo`、`legalHold`、`page`、`pageSize`）完整記錄至 `admin.agency_access_logs.filter`。
 
 必要的權威層調整：
 
@@ -269,10 +269,10 @@ multi-taxi.controller.ts 先呼叫 `exportTripOperationalRecords`），所以機
 - `normalizeMultiTaxiTripExportScope` 驗證並保留 `month`、`reservedFrom`、`reservedTo`、`plateNo`、`orderNo`、`orderId`、`tripId`、`recordId`，使匯出 job scope 與機關列表篩選條件完全一致並參與 idempotency 比對。
 - `assertEvidenceAccess` 的 `report_artifact` 規則包含 `{ realms: ["agency"], actorTypes: ["agency_user"], requiredScopes: ["agency:trip_records:export"], tenantScoped: false }`。
 
-**2 年保存邊界與持久保護**：
-- 資料庫層（`V0135`）強制 `retain_until >= generated_at + interval '730 days'`，禁止 `TRUNCATE`、禁止將 `retain_until` 縮短或竄改核心趟次事實，且當 `retain_until > clock_timestamp()` 時拒絕任何 `DELETE`。
-- 超過 2 年保存期後，仍須同時具備 `reporting.allow_trip_record_retention_purge = 'on'` 且該趟次無有效法律保留（`voice.legal_hold` 針對 `proof_bundle`／`multi_taxi_trip_record` 之 `active` hold）或刪除例外（`AuditNotificationService` deletion exception），才允許受控清理。
-- 機關列表、詳情與匯出只包含 `retainUntil >= now` 的紀錄（等同完成時間 `generatedAt >= now - 730 日`）。
+**2 年（兩曆年）保存邊界與持久保護**：
+- 資料庫層（`V0135`）透過 `reporting.multi_taxi_two_calendar_year_retention_floor(generated_at)` 強制 `retain_until >= max(generated_at + 2 calendar years in UTC, generated_at + 730 days)`（閏日 2/29 起算進位至 3/1，絕不提前屆滿），禁止 `TRUNCATE`、禁止將既有 `retain_until` 縮短、禁止竄改已寫入之核心趟次事實（`record_id`、`order_id`、`trip_id`、`vehicle_id`、非 `'UNRECORDED'` 之 `plate_no`、`reserved_at`、已非 NULL 之 `pickup_at`/`dropoff_at`、`generated_at`），且當 `GREATEST(retain_until, reporting.multi_taxi_two_calendar_year_retention_floor(generated_at)) > clock_timestamp()` 時拒絕任何 `DELETE`。
+- 超過兩曆年保存期後，仍須同時具備 `reporting.allow_trip_record_retention_purge = 'on'` 且該趟次無有效法律保留（`voice.legal_hold` 針對 `proof_bundle`／`multi_taxi_trip_record` 之 `active` hold）或刪除例外（`AuditNotificationService` deletion exception），才允許受控清理。
+- 機關列表、詳情與匯出只包含 `retainUntil >= now` 的紀錄（保存期限至少滿兩曆年，例如 `2026-10-25T02:00:00Z` 完成之紀錄於 `2028-10-24T02:00:00Z` 仍為有效可查且不可刪除，至少保存至 `2028-10-25T02:00:00Z`）。
 
 **D4 決議與九大法定欄位投影／來源誠實性**：
 依 `docs/02-architecture/phase1-p5-s3-multi-taxi-20260720/04_standard_taxi_vs_multi_taxi_dispatch_compliance_review_20260721.md` 與 `08_multi_taxi_operations_ui_design_requirements_20260723.md`，R11 九大法定欄位類別（車號、預約時間、上車時間、下車時間、行駛路線、行駛里程、應付車資、實收車資、通行費）在機關列表、詳情（`AgencyTripRecordView`）與 CSV 匯出（`MultiTaxiTripOperationalExportRow`）完整揭露，不另設新的使用者權限 gate（維持既有 `agency:trip_records:read` 與 `agency:trip_records:export`）：
@@ -281,17 +281,17 @@ multi-taxi.controller.ts 先呼叫 `exportTripOperationalRecords`），所以機
 3. **行駛路線與行駛里程（含 `telemetry.driver_location_events` 評估與來源 provenance）**：
    - `route.routeSummary`：完成時保存之起訖路線摘要（例如 `pickup.address -> dropoff.address`），歷史缺漏時為 `null`。
    - `route.distanceMeters`、`route.durationSeconds`：實際完成里程（公尺）與行駛時間（秒）；若僅有預估路線或歷史未記錄實際里程，區分來源且不將預估路線偽裝為實際 GPS 軌跡。
-   - **既有 `telemetry.driver_location_events` 持久軌跡評估與 730 日快照保存**：R11 完成交易寫入（`MultiTaxiRepository.persistTripOperationalRecordInTransaction`）與歷史回填（`V0135`）會針對權威完單司機任務（`ops.phase1_driver_tasks.status = 'completed'`）核對 `driver_id`、`task_id`、車輛所有權（若樣本 `e.vehicle_id IS NULL`，僅可由權威任務 `at.vehicle_id` 解析；若樣本 `e.vehicle_id` 非空且與任務車輛不符則拒絕）、時間窗 `[pickup_at, dropoff_at]`、`work_state = 'on_trip'`、`out_of_order = false` 與 `accuracy_m <= 200`。
+   - **既有 `telemetry.driver_location_events` 持久軌跡評估與兩曆年快照保存**：R11 完成交易寫入（`MultiTaxiRepository.persistTripOperationalRecordInTransaction`）與歷史回填（`V0135`）會針對權威完單司機任務（`ops.phase1_driver_tasks.status = 'completed'`）核對 `driver_id`、`task_id`、車輛所有權（若樣本 `e.vehicle_id IS NULL`，僅可由權威任務 `at.vehicle_id` 解析；若樣本 `e.vehicle_id` 非空且與任務車輛不符則拒絕）、時間窗 `[pickup_at, dropoff_at]`、`work_state = 'on_trip'`、`out_of_order = false` 與 `accuracy_m <= 100`（依 `recorded_at ASC, sequence_no ASC` 排序）。
      - 當有效樣本數 `>= 2` 且包含起點／相鄰樣本／終點之最大間隔 `maxGapSeconds <= 180` 秒時，標示 `route.source = "driver_gps"`（`coverage = "full_sampled"`、`pointCount = validSampleCount`、持久保存取樣折線與 `telemetryProvenance`）。
      - 當僅有單點樣本（`validSampleCount = 1`、`encodedPolyline = null`）或取樣間隔過大（`maxGapSeconds > 180`）時，誠實標示 `route.source = "mixed"`（`coverage = "single_point" | "gapped_sampled"`），絕不將單點或斷續心跳冒充為完整行駛軌跡 `"driver_gps"`。
      - 當無符合條件之 GPS 樣本時，依實際完成摘要標示 `"pickup_dropoff_summary"`（`pointCount = 0`、`encodedPolyline = null`，不沿用派車前預估折線）、僅有派車預估時標示 `"provider_route"`，或歷史缺漏標示 `"unavailable"`。
-     - 取樣後之路線幾何、點數與 `telemetryProvenance` 直接保存在 `reporting.multi_taxi_trip_operational_records.record->'route'` 達完整 730 日法定保存期（即使底層 `telemetry.driver_location_events` 日後清理或重播 upsert，亦不降級已保存之 `driver_gps`／`mixed` 快照）。
+     - 取樣後之路線幾何、點數與 `telemetryProvenance` 直接保存在 `reporting.multi_taxi_trip_operational_records.record->'route'` 達完整兩曆年法定保存期（與該趟 R11 紀錄 `retainUntil` 同壽命保存；即使底層 `telemetry.driver_location_events` 日後清理或重播 upsert，亦不降級已保存之 `driver_gps`／`mixed` 快照）。
    - `route.encodedPolyline`：原始座標折線仍不對機關回傳，兼顧法定行駛路線查核與乘客住址座標最小揭露。
 4. **應付車資、實收車資、通行費（含收款狀態 provenance 與平台端 P5 對齊）**：
    - `payableFareMinor`：契約預告／應付車資。
-   - `actualFareMinor`：行程完成計費金額。
+   - `actualFareMinor`：行程完成計費金額（`sync_multi_taxi_trip_record_payment` 僅同步收款狀態與實收金額，不覆寫完單 `actual_fare_minor`）。
    - `collectedFareMinor` 與 `paymentStatus`：對齊 `billing.multi_taxi_passenger_payments` 真實收款結果——僅於 `paymentStatus === "captured"` 時為實際扣款金額；`paymentStatus === "refunded"` 時為 `0`；`not_selected`／`authorized`（待請款）／`failed`／`manual_recovery`／`unknown` 時為 `null`，絕不將未請款、失敗或已退款之交易偽裝為正數實收車資。
-   - `tollMinor` 與 `tollSource`：司機完單證明（`expenseItems.toll`）或電子乘車證明紀錄之通行費；明確為 0 時回傳 `0`，歷史紀錄無通行費證據（`tollSource === "unavailable"`）時在機關檢視回傳 `null`（未提供）。
+   - `tollMinor` 與 `tollSource`：司機完單證明（`expenseItems.toll`）或電子乘車證明紀錄之通行費；明確為 0 時回傳 `0`，歷史紀錄無通行費證據（`tollSource === "unavailable"`）時在 `MultiTaxiTripOperationalRecord`、機關檢視與 CSV 匯出均保持 `null`（未提供，不轉為 `0`）。
    - **平台端 P5 既有消費端同步對齊**：`apps/platform-admin-web/app/platform-admin/p5/records/records-operations-model.ts`、`records-operations-console.tsx` 與 `p5-admin-console.tsx` 同步透過 `resolveRecordCollectedFareMinor`／`resolveRecordTollMinor`／`formatRecordMoney` 呈現 `collectedFareMinor`、`paymentStatus`、`tollSource` 與 `route.routeSummary`，對未收款或未知通行費顯示未提供（`—`）而非 `$0`。
 
 | 欄位                                                           | 列表／詳情（`AgencyTripRecordView`）          | 匯出（`MultiTaxiTripOperationalExportRow`）                | 規則／來源                                                                                   |
@@ -304,9 +304,9 @@ multi-taxi.controller.ts 先呼叫 `exportTripOperationalRecords`），所以機
 | `route.distanceMeters`、`route.durationSeconds`                | 原值                                          | `distanceMeters`、`durationSeconds`                        | 法定行駛里程與時間；缺漏為 `null`                                                            |
 | `payableFareMinor`、`actualFareMinor`                          | 原值                                          | `payableFareMinor`、`actualFareMinor`                      | 應付車資與完單計費車資                                                                       |
 | `collectedFareMinor`、`paymentStatus`                          | 原值（未收／失敗為 `null`，退款為 `0`）       | `collectedFareMinor`、`paymentStatus`                      | 實收車資真值與收款狀態（`captured`／`refunded`／`authorized`／`failed`／`not_selected` 等） |
-| `tollMinor`                                                    | 原值（未知時 `null`）                         | `tollMinor`、`tollSource`                                  | 通行費與來源（`driver_proof`／`electronic_receipt`／`none`／`unavailable`）                  |
+| `tollMinor`                                                    | 原值（未知時 `null`）                         | `tollMinor`（未知時 `null`）、`tollSource`                 | 通行費與來源（`driver_proof`／`electronic_receipt`／`none`／`unavailable`）                  |
 | `currency`、`farePolicyVersion`、`chargingMode`                | 原值                                          | 原值                                                       |                                                                                              |
-| `generatedAt`、`retainUntil`                                   | 原值                                          | 原值                                                       | 完成時間與 730 日法定保存期限                                                                |
+| `generatedAt`、`retainUntil`                                   | 原值                                          | 原值                                                       | 完成時間與至少兩曆年法定保存期限（跨閏年不少於兩曆年）                                       |
 | `legalHold`                                                    | 只回 `state`（`active`/`none`/`unavailable`） | 無此欄                                                     | 不回 `activeHolds`（含 `placedByActorId`、`reasonNote`）                                     |
 
 ### 4.2 R10 六個月營運統計

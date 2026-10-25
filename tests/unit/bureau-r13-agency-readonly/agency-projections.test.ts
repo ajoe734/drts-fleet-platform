@@ -576,12 +576,12 @@ describe("BUREAU-R13 agency portal service access logging", () => {
     });
   });
 
-  it("passes exact plateNo and order/trip identifier filters to the R11 authority", async () => {
+  it("passes exact plateNo and order/trip identifier filters to the R11 authority and records them in admin.agency_access_logs.filter", async () => {
     const retained = tripRecord({
       recordId: "mtr-order-1",
       retainUntil: new Date(Date.now() + DAY).toISOString(),
     });
-    const { service, multiTaxi } = portal({ records: [retained] });
+    const { service, multiTaxi, logRepository } = portal({ records: [retained] });
     await service.listTripRecords(
       agencyIdentity,
       {
@@ -602,6 +602,38 @@ describe("BUREAU-R13 agency portal service access logging", () => {
       tripId: "trip-1",
       recordId: "mtr-order-1",
     });
+    const logs = await logRepository.list({});
+    expect(logs.items[0]?.filter).toMatchObject({
+      month: "2026-10",
+      plateNo: "ABC-1234",
+      orderNo: "ORD-20261001-0001",
+      orderId: "order-1",
+      tripId: "trip-1",
+      recordId: "mtr-order-1",
+    });
+  });
+
+  it("keeps 2026-10-25T02:00:00.000Z retained/queryable at 2028-10-24T02:00:00.000Z under the two-calendar-year floor (2028-10-25T02:00:00.000Z)", () => {
+    const at730DaysMark = Date.parse("2028-10-24T02:00:00.000Z");
+    const atTwoCalendarYearsMark = Date.parse("2028-10-25T02:00:00.000Z");
+    const afterTwoCalendarYearsMark = Date.parse("2028-10-25T02:00:00.001Z");
+    const twoCalendarYearRetainUntil = "2028-10-25T02:00:00.000Z";
+
+    expect(
+      isWithinAgencyRetention(twoCalendarYearRetainUntil, at730DaysMark),
+    ).toBe(true);
+    expect(
+      isWithinAgencyRetention(
+        twoCalendarYearRetainUntil,
+        atTwoCalendarYearsMark,
+      ),
+    ).toBe(true);
+    expect(
+      isWithinAgencyRetention(
+        twoCalendarYearRetainUntil,
+        afterTwoCalendarYearsMark,
+      ),
+    ).toBe(false);
   });
 
   it("denies and logs a request whose membership/agency/access period is no longer active", async () => {

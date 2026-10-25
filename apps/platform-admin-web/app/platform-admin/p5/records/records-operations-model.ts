@@ -202,13 +202,13 @@ export function resolveRecordCollectedFareMinor(record: {
 }
 
 export function resolveRecordTollMinor(record: {
-  tollMinor: number;
+  tollMinor: number | null | undefined;
   tollSource?: MultiTaxiTripOperationalRecord["tollSource"];
 }): number | null {
   if (record.tollSource === "unavailable") {
     return null;
   }
-  return record.tollMinor;
+  return record.tollMinor ?? null;
 }
 
 export function formatRecordDistance(distanceMeters: number | null) {

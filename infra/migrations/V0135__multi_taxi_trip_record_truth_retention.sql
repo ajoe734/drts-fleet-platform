@@ -9,8 +9,34 @@
 --    missing timestamps, routes, tolls, or uncollected fares.
 -- 3. Synchronize payment status and collected_fare_minor in the same transaction
 --    whenever billing.multi_taxi_passenger_payments is inserted or updated.
--- 4. Enforce 730-day statutory retention floor, core-fact immutability, no-truncate,
---    and active legal-hold deletion protection at the PostgreSQL boundary.
+-- 4. Enforce two-calendar-year (>= 2 calendar years in UTC and >= 730 days)
+--    statutory retention floor, core-fact immutability, no-truncate, and
+--    active legal-hold deletion protection at the PostgreSQL boundary.
+
+CREATE OR REPLACE FUNCTION reporting.multi_taxi_two_calendar_year_retention_floor(
+  p_generated_at timestamptz
+)
+RETURNS timestamptz
+LANGUAGE sql
+IMMUTABLE
+STRICT
+PARALLEL SAFE
+AS $$
+  SELECT GREATEST(
+    (
+      (p_generated_at AT TIME ZONE 'UTC')
+      + interval '2 years'
+      + CASE
+          WHEN EXTRACT(MONTH FROM (p_generated_at AT TIME ZONE 'UTC')) = 2
+           AND EXTRACT(DAY FROM (p_generated_at AT TIME ZONE 'UTC')) = 29
+           AND EXTRACT(DAY FROM ((p_generated_at AT TIME ZONE 'UTC') + interval '2 years')) = 28
+          THEN interval '1 day'
+          ELSE interval '0 days'
+        END
+    ) AT TIME ZONE 'UTC',
+    p_generated_at + interval '730 days'
+  );
+$$;
 
 ALTER TABLE reporting.multi_taxi_trip_operational_records
   ADD COLUMN IF NOT EXISTS order_no text NULL,
@@ -361,8 +387,9 @@ resolved_trips AS (
     ordered_samples AS (
       SELECT
         e.event_id,
-        e.latitude,
-        e.longitude,
+        e.sequence_no,
+        e.lat,
+        e.lng,
         e.recorded_at,
         e.received_at,
         (e.vehicle_id IS NULL) AS vehicle_was_null,
@@ -372,7 +399,7 @@ resolved_trips AS (
         tb.window_start_at,
         tb.window_end_at,
         LAG(e.recorded_at) OVER (
-          ORDER BY e.recorded_at ASC, e.received_at ASC, e.event_id ASC
+          ORDER BY e.recorded_at ASC, e.sequence_no ASC, e.received_at ASC, e.event_id ASC
         ) AS prev_recorded_at
       FROM trip_bounds tb
       JOIN telemetry.driver_location_events e
@@ -389,9 +416,9 @@ resolved_trips AS (
        AND e.recorded_at <= tb.window_end_at
        AND e.work_state = 'on_trip'
        AND e.out_of_order = false
-       AND (e.accuracy_m IS NULL OR (e.accuracy_m >= 0 AND e.accuracy_m <= 200))
-       AND e.latitude BETWEEN -90 AND 90
-       AND e.longitude BETWEEN -180 AND 180
+       AND (e.accuracy_m IS NULL OR (e.accuracy_m >= 0 AND e.accuracy_m <= 100))
+       AND e.lat BETWEEN -90 AND 90
+       AND e.lng BETWEEN -180 AND 180
     ),
     agg AS (
       SELECT
@@ -415,9 +442,9 @@ resolved_trips AS (
           0
         ) AS max_internal_gap_seconds,
         STRING_AGG(
-          ROUND(os.latitude::numeric, 6)::text || ',' || ROUND(os.longitude::numeric, 6)::text,
+          ROUND(os.lat::numeric, 6)::text || ',' || ROUND(os.lng::numeric, 6)::text,
           ';'
-          ORDER BY os.recorded_at ASC, os.received_at ASC, os.event_id ASC
+          ORDER BY os.recorded_at ASC, os.sequence_no ASC, os.received_at ASC, os.event_id ASC
         ) AS sampled_polyline
       FROM ordered_samples os
     )
@@ -543,23 +570,23 @@ SELECT
     'actualFareMinor', r.actual_fare_minor,
     'collectedFareMinor', r.collected_fare_minor,
     'paymentStatus', r.payment_status,
-    'tollMinor', COALESCE(r.toll_minor, 0),
+    'tollMinor', r.toll_minor,
     'tollSource', r.toll_source,
     'currency', 'TWD',
     'farePolicyVersion', r.fare_policy_version,
     'chargingMode', r.charging_mode,
     'generatedAt', to_jsonb(r.generated_at),
-    'retainUntil', to_jsonb(r.generated_at + interval '730 days')
+    'retainUntil', to_jsonb(reporting.multi_taxi_two_calendar_year_retention_floor(r.generated_at))
   ),
   r.generated_at,
-  r.generated_at + interval '730 days'
+  reporting.multi_taxi_two_calendar_year_retention_floor(r.generated_at)
 FROM resolved_trips r
 ON CONFLICT (order_id) DO UPDATE
 SET
   order_no = COALESCE(EXCLUDED.order_no, reporting.multi_taxi_trip_operational_records.order_no),
   assignment_id = COALESCE(EXCLUDED.assignment_id, reporting.multi_taxi_trip_operational_records.assignment_id),
-  pickup_at = COALESCE(EXCLUDED.pickup_at, reporting.multi_taxi_trip_operational_records.pickup_at),
-  dropoff_at = COALESCE(EXCLUDED.dropoff_at, reporting.multi_taxi_trip_operational_records.dropoff_at),
+  pickup_at = COALESCE(reporting.multi_taxi_trip_operational_records.pickup_at, EXCLUDED.pickup_at),
+  dropoff_at = COALESCE(reporting.multi_taxi_trip_operational_records.dropoff_at, EXCLUDED.dropoff_at),
   route_summary = COALESCE(EXCLUDED.route_summary, reporting.multi_taxi_trip_operational_records.route_summary),
   route_source = CASE
     WHEN EXCLUDED.route_source IN ('driver_gps', 'mixed') THEN EXCLUDED.route_source
@@ -582,7 +609,9 @@ SET
   record = reporting.multi_taxi_trip_operational_records.record || EXCLUDED.record,
   retain_until = GREATEST(
     reporting.multi_taxi_trip_operational_records.retain_until,
-    reporting.multi_taxi_trip_operational_records.generated_at + interval '730 days'
+    reporting.multi_taxi_two_calendar_year_retention_floor(
+      reporting.multi_taxi_trip_operational_records.generated_at
+    )
   );
 
 -- Also reconcile any pre-existing rows in reporting.multi_taxi_trip_operational_records
@@ -633,7 +662,22 @@ SET
     WHEN p.status = 'captured' THEN COALESCE(p.amount_minor, r.actual_fare_minor)
     WHEN p.status = 'refunded' THEN 0
     ELSE NULL
-  END
+  END,
+  retain_until = GREATEST(
+    r.retain_until,
+    reporting.multi_taxi_two_calendar_year_retention_floor(r.generated_at)
+  ),
+  record = jsonb_set(
+    r.record,
+    '{retainUntil}',
+    to_jsonb(
+      GREATEST(
+        r.retain_until,
+        reporting.multi_taxi_two_calendar_year_retention_floor(r.generated_at)
+      )
+    ),
+    true
+  )
 FROM (
   SELECT r2.record_id, pay.status, pay.amount_minor
   FROM reporting.multi_taxi_trip_operational_records r2
@@ -663,10 +707,6 @@ BEGIN
   SET
     payment_status = v_status,
     collected_fare_minor = v_collected,
-    actual_fare_minor = CASE
-      WHEN v_status = 'captured' AND NEW.amount_minor IS NOT NULL THEN NEW.amount_minor
-      ELSE r.actual_fare_minor
-    END,
     record = jsonb_set(
       jsonb_set(
         r.record,
@@ -690,23 +730,53 @@ CREATE TRIGGER trg_sync_multi_taxi_trip_record_payment
 AFTER INSERT OR UPDATE ON billing.multi_taxi_passenger_payments
 FOR EACH ROW EXECUTE FUNCTION reporting.sync_multi_taxi_trip_record_payment();
 
--- Enforce core-fact immutability and 730-day retention floor on UPDATE.
+-- Enforce core-fact immutability and two-calendar-year retention floor on UPDATE.
 CREATE OR REPLACE FUNCTION reporting.enforce_multi_taxi_trip_record_update_guard()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
+DECLARE
+  v_floor timestamptz;
 BEGIN
   IF NEW.record_id IS DISTINCT FROM OLD.record_id
      OR NEW.order_id IS DISTINCT FROM OLD.order_id
-     OR NEW.generated_at IS DISTINCT FROM OLD.generated_at THEN
-    RAISE EXCEPTION 'R11 trip operational record core identity (record_id, order_id, generated_at) is immutable'
+     OR NEW.generated_at IS DISTINCT FROM OLD.generated_at
+     OR (
+       NULLIF(OLD.trip_id, '') IS NOT NULL
+       AND OLD.trip_id <> 'trip-' || OLD.order_id
+       AND NEW.trip_id IS DISTINCT FROM OLD.trip_id
+     )
+     OR (
+       NULLIF(OLD.vehicle_id, '') IS NOT NULL
+       AND OLD.vehicle_id NOT IN ('unassigned', 'veh-unknown-' || OLD.order_id)
+       AND NEW.vehicle_id IS DISTINCT FROM OLD.vehicle_id
+     )
+     OR (
+       NULLIF(OLD.plate_no, '') IS NOT NULL
+       AND OLD.plate_no NOT IN ('UNRECORDED', '—')
+       AND NEW.plate_no IS DISTINCT FROM OLD.plate_no
+     )
+     OR (
+       OLD.reserved_at IS NOT NULL
+       AND NEW.reserved_at IS DISTINCT FROM OLD.reserved_at
+     )
+     OR (
+       OLD.pickup_at IS NOT NULL
+       AND NEW.pickup_at IS DISTINCT FROM OLD.pickup_at
+     )
+     OR (
+       OLD.dropoff_at IS NOT NULL
+       AND NEW.dropoff_at IS DISTINCT FROM OLD.dropoff_at
+     ) THEN
+    RAISE EXCEPTION 'R11 trip operational record core trip facts (record_id, order_id, trip_id, vehicle_id, plate_no, reserved_at, pickup_at, dropoff_at, generated_at) are immutable once populated'
       USING ERRCODE = 'check_violation';
   END IF;
 
+  v_floor := reporting.multi_taxi_two_calendar_year_retention_floor(NEW.generated_at);
   IF NEW.retain_until < OLD.retain_until
-     OR NEW.retain_until < NEW.generated_at + interval '730 days' THEN
-    RAISE EXCEPTION 'R11 trip operational record retain_until (%) cannot be shortened below existing (%) or 730-day floor',
-      NEW.retain_until, OLD.retain_until
+     OR NEW.retain_until < v_floor THEN
+    RAISE EXCEPTION 'R11 trip operational record retain_until (%) cannot be shortened below existing (%) or two-calendar-year floor (%)',
+      NEW.retain_until, OLD.retain_until, v_floor
       USING ERRCODE = 'check_violation';
   END IF;
 
@@ -720,20 +790,26 @@ CREATE TRIGGER trg_multi_taxi_trip_record_update_guard
 BEFORE UPDATE ON reporting.multi_taxi_trip_operational_records
 FOR EACH ROW EXECUTE FUNCTION reporting.enforce_multi_taxi_trip_record_update_guard();
 
--- Enforce 730-day statutory retention floor and active legal-hold gate on DELETE / TRUNCATE.
+-- Enforce two-calendar-year statutory retention floor and active legal-hold gate on DELETE / TRUNCATE.
 CREATE OR REPLACE FUNCTION reporting.enforce_multi_taxi_trip_record_delete_guard()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
+DECLARE
+  v_effective_retain_until timestamptz;
 BEGIN
   IF TG_OP = 'TRUNCATE' THEN
-    RAISE EXCEPTION 'reporting.multi_taxi_trip_operational_records cannot be truncated (R11 730-day statutory retention)'
+    RAISE EXCEPTION 'reporting.multi_taxi_trip_operational_records cannot be truncated (R11 two-calendar-year statutory retention)'
       USING ERRCODE = 'check_violation';
   END IF;
 
-  IF OLD.retain_until > clock_timestamp() THEN
-    RAISE EXCEPTION 'R11 trip operational record % cannot be deleted before 2-year retention expiry (%)',
-      OLD.record_id, OLD.retain_until
+  v_effective_retain_until := GREATEST(
+    OLD.retain_until,
+    reporting.multi_taxi_two_calendar_year_retention_floor(OLD.generated_at)
+  );
+  IF v_effective_retain_until > clock_timestamp() THEN
+    RAISE EXCEPTION 'R11 trip operational record % cannot be deleted before two-calendar-year retention expiry (%)',
+      OLD.record_id, v_effective_retain_until
       USING ERRCODE = 'check_violation';
   END IF;
 

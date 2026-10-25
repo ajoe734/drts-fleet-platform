@@ -56,8 +56,11 @@ export interface TripTelemetrySampleRow extends QueryResultRow {
   driver_id: string | null;
   vehicle_id: string | null;
   task_id: string | null;
-  latitude: number | string | null;
-  longitude: number | string | null;
+  sequence_no?: number | string | null;
+  lat?: number | string | null;
+  lng?: number | string | null;
+  latitude?: number | string | null;
+  longitude?: number | string | null;
   accuracy_m: number | string | null;
   recorded_at: Date | string | null;
   received_at: Date | string | null;
@@ -65,8 +68,57 @@ export interface TripTelemetrySampleRow extends QueryResultRow {
   out_of_order: boolean | null;
 }
 
-export const TRIP_TELEMETRY_MAX_ACCURACY_METERS = 200;
+export const TRIP_TELEMETRY_MAX_ACCURACY_METERS = 100;
 export const TRIP_TELEMETRY_MAX_FULL_ROUTE_GAP_SECONDS = 180;
+export const TRIP_RECORD_MIN_RETENTION_DAYS = 730;
+export const TRIP_RECORD_MIN_RETENTION_MS =
+  TRIP_RECORD_MIN_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * Authoritative at-least-two-calendar-year retention floor in UTC.
+ * - Cross-leap-year trips (e.g. 2026-10-25T02:00:00.000Z) retain until at least
+ *   2028-10-25T02:00:00.000Z (731 days), never expiring early at +730 days
+ *   (2028-10-24T02:00:00.000Z).
+ * - Non-leap control (2028-03-01T02:00:00.000Z) retains until 2030-03-01T02:00:00.000Z.
+ * - Leap-day start (2028-02-29T02:00:00.000Z) rolls to 2030-03-01T02:00:00.000Z
+ *   rather than rounding down into an early 2030-02-28T02:00:00.000Z expiry.
+ */
+export function computeTwoCalendarYearRetentionFloorMs(
+  generatedAt: number | string | Date,
+): number {
+  const parsedMs =
+    typeof generatedAt === "number"
+      ? generatedAt
+      : generatedAt instanceof Date
+        ? generatedAt.getTime()
+        : Date.parse(String(generatedAt));
+  const safeBaseMs = Number.isFinite(parsedMs) ? parsedMs : Date.now();
+  const baseDate = new Date(safeBaseMs);
+  const calendarTwoYearsMs = Date.UTC(
+    baseDate.getUTCFullYear() + 2,
+    baseDate.getUTCMonth(),
+    baseDate.getUTCDate(),
+    baseDate.getUTCHours(),
+    baseDate.getUTCMinutes(),
+    baseDate.getUTCSeconds(),
+    baseDate.getUTCMilliseconds(),
+  );
+  return Math.max(calendarTwoYearsMs, safeBaseMs + TRIP_RECORD_MIN_RETENTION_MS);
+}
+
+export function computeTwoCalendarYearRetentionFloorIso(
+  generatedAtIso: string,
+  existingRetainUntilIso?: string | null,
+): string {
+  const generatedAtMs = Date.parse(generatedAtIso);
+  const floorMs = computeTwoCalendarYearRetentionFloorMs(generatedAtMs);
+  const existingMs = existingRetainUntilIso
+    ? Date.parse(existingRetainUntilIso)
+    : NaN;
+  return new Date(
+    Number.isFinite(existingMs) && existingMs > floorMs ? existingMs : floorMs,
+  ).toISOString();
+}
 
 export function evaluateTripTelemetrySamples(input: {
   record: StoredMultiTaxiTripOperationalRecord;
@@ -112,8 +164,10 @@ export function evaluateTripTelemetrySamples(input: {
     return record;
   }
 
+  const seenEventIds = new Set<string>();
   const validSamples: Array<{
     eventId: string;
+    sequenceNo: number | null;
     latitude: number;
     longitude: number;
     recordedAtIso: string;
@@ -124,6 +178,10 @@ export function evaluateTripTelemetrySamples(input: {
 
   for (const row of rows) {
     if (!row.event_id) {
+      continue;
+    }
+    const eventId = String(row.event_id);
+    if (seenEventIds.has(eventId)) {
       continue;
     }
     if (
@@ -155,8 +213,10 @@ export function evaluateTripTelemetrySamples(input: {
     ) {
       continue;
     }
-    const lat = Number(row.latitude);
-    const lng = Number(row.longitude);
+    const rawLat = row.lat ?? row.latitude;
+    const rawLng = row.lng ?? row.longitude;
+    const lat = rawLat === null || rawLat === undefined ? NaN : Number(rawLat);
+    const lng = rawLng === null || rawLng === undefined ? NaN : Number(rawLng);
     if (
       !Number.isFinite(lat) ||
       !Number.isFinite(lng) ||
@@ -186,9 +246,16 @@ export function evaluateTripTelemetrySamples(input: {
     const receivedAtMs = Number.isFinite(receivedDate.getTime())
       ? receivedDate.getTime()
       : recordedAtMs;
+    const rawSeq =
+      row.sequence_no === null || row.sequence_no === undefined
+        ? NaN
+        : Number(row.sequence_no);
+    const sequenceNo = Number.isFinite(rawSeq) ? rawSeq : null;
 
+    seenEventIds.add(eventId);
     validSamples.push({
-      eventId: String(row.event_id),
+      eventId,
+      sequenceNo,
       latitude: Number(lat.toFixed(6)),
       longitude: Number(lng.toFixed(6)),
       recordedAtIso: recordedDate.toISOString(),
@@ -201,6 +268,13 @@ export function evaluateTripTelemetrySamples(input: {
   validSamples.sort((left, right) => {
     if (left.recordedAtMs !== right.recordedAtMs) {
       return left.recordedAtMs - right.recordedAtMs;
+    }
+    if (
+      left.sequenceNo !== null &&
+      right.sequenceNo !== null &&
+      left.sequenceNo !== right.sequenceNo
+    ) {
+      return left.sequenceNo - right.sequenceNo;
     }
     if (left.receivedAtMs !== right.receivedAtMs) {
       return left.receivedAtMs - right.receivedAtMs;
@@ -3299,8 +3373,11 @@ export class MultiTaxiRepository {
           e.driver_id,
           e.vehicle_id,
           e.task_id,
-          e.latitude,
-          e.longitude,
+          e.sequence_no,
+          e.lat,
+          e.lng,
+          e.lat AS latitude,
+          e.lng AS longitude,
           e.accuracy_m,
           e.recorded_at,
           e.received_at,
@@ -3340,10 +3417,10 @@ export class MultiTaxiRepository {
          AND e.recorded_at <= $6::timestamptz
          AND e.work_state = 'on_trip'
          AND e.out_of_order = false
-         AND (e.accuracy_m IS NULL OR (e.accuracy_m >= 0 AND e.accuracy_m <= 200))
-         AND e.latitude BETWEEN -90 AND 90
-         AND e.longitude BETWEEN -180 AND 180
-        ORDER BY e.recorded_at ASC, e.received_at ASC, e.event_id ASC
+         AND (e.accuracy_m IS NULL OR (e.accuracy_m >= 0 AND e.accuracy_m <= 100))
+         AND e.lat BETWEEN -90 AND 90
+         AND e.lng BETWEEN -180 AND 180
+        ORDER BY e.recorded_at ASC, e.sequence_no ASC, e.received_at ASC, e.event_id ASC
         `,
         [
           record.orderId,
@@ -3482,13 +3559,31 @@ export class MultiTaxiRepository {
       ON CONFLICT (order_id) DO UPDATE
       SET
         order_no = COALESCE(EXCLUDED.order_no, reporting.multi_taxi_trip_operational_records.order_no),
-        trip_id = EXCLUDED.trip_id,
+        trip_id = CASE
+          WHEN NULLIF(reporting.multi_taxi_trip_operational_records.trip_id, '') IS NULL
+            OR reporting.multi_taxi_trip_operational_records.trip_id = 'trip-' || reporting.multi_taxi_trip_operational_records.order_id
+          THEN EXCLUDED.trip_id
+          ELSE reporting.multi_taxi_trip_operational_records.trip_id
+        END,
         assignment_id = COALESCE(EXCLUDED.assignment_id, reporting.multi_taxi_trip_operational_records.assignment_id),
-        vehicle_id = EXCLUDED.vehicle_id,
-        plate_no = EXCLUDED.plate_no,
-        reserved_at = EXCLUDED.reserved_at,
-        pickup_at = COALESCE(EXCLUDED.pickup_at, reporting.multi_taxi_trip_operational_records.pickup_at),
-        dropoff_at = COALESCE(EXCLUDED.dropoff_at, reporting.multi_taxi_trip_operational_records.dropoff_at),
+        vehicle_id = CASE
+          WHEN NULLIF(reporting.multi_taxi_trip_operational_records.vehicle_id, '') IS NULL
+            OR reporting.multi_taxi_trip_operational_records.vehicle_id IN (
+              'unassigned',
+              'veh-unknown-' || reporting.multi_taxi_trip_operational_records.order_id
+            )
+          THEN EXCLUDED.vehicle_id
+          ELSE reporting.multi_taxi_trip_operational_records.vehicle_id
+        END,
+        plate_no = CASE
+          WHEN NULLIF(reporting.multi_taxi_trip_operational_records.plate_no, '') IS NULL
+            OR reporting.multi_taxi_trip_operational_records.plate_no IN ('UNRECORDED', '—')
+          THEN EXCLUDED.plate_no
+          ELSE reporting.multi_taxi_trip_operational_records.plate_no
+        END,
+        reserved_at = COALESCE(reporting.multi_taxi_trip_operational_records.reserved_at, EXCLUDED.reserved_at),
+        pickup_at = COALESCE(reporting.multi_taxi_trip_operational_records.pickup_at, EXCLUDED.pickup_at),
+        dropoff_at = COALESCE(reporting.multi_taxi_trip_operational_records.dropoff_at, EXCLUDED.dropoff_at),
         route_summary = COALESCE(EXCLUDED.route_summary, reporting.multi_taxi_trip_operational_records.route_summary),
         route_source = CASE
           WHEN EXCLUDED.route_source IN ('driver_gps', 'mixed') THEN EXCLUDED.route_source
@@ -3525,6 +3620,17 @@ export class MultiTaxiRepository {
         retain_until = GREATEST(
           reporting.multi_taxi_trip_operational_records.retain_until,
           EXCLUDED.retain_until,
+          (
+            (reporting.multi_taxi_trip_operational_records.generated_at AT TIME ZONE 'UTC')
+            + interval '2 years'
+            + CASE
+                WHEN EXTRACT(MONTH FROM (reporting.multi_taxi_trip_operational_records.generated_at AT TIME ZONE 'UTC')) = 2
+                 AND EXTRACT(DAY FROM (reporting.multi_taxi_trip_operational_records.generated_at AT TIME ZONE 'UTC')) = 29
+                 AND EXTRACT(DAY FROM ((reporting.multi_taxi_trip_operational_records.generated_at AT TIME ZONE 'UTC') + interval '2 years')) = 28
+                THEN interval '1 day'
+                ELSE interval '0 days'
+              END
+          ) AT TIME ZONE 'UTC',
           reporting.multi_taxi_trip_operational_records.generated_at + interval '730 days'
         )
       RETURNING *
@@ -3586,10 +3692,12 @@ export class MultiTaxiRepository {
           recordId: existing.recordId,
           orderId: existing.orderId,
           generatedAt: existing.generatedAt,
-          retainUntil:
+          retainUntil: computeTwoCalendarYearRetentionFloorIso(
+            existing.generatedAt,
             Date.parse(normalized.retainUntil) > Date.parse(existing.retainUntil)
               ? normalized.retainUntil
               : existing.retainUntil,
+          ),
         };
         this.inMemoryTripOperationalRecords.set(normalized.orderId, merged);
         return structuredClone(merged);
@@ -3689,7 +3797,11 @@ export class MultiTaxiRepository {
       const purgedRecordIds: string[] = [];
       const skippedHeldRecordIds: string[] = [];
       for (const [orderId, record] of this.inMemoryTripOperationalRecords.entries()) {
-        if (Date.parse(record.retainUntil) > nowMs) {
+        const effectiveRetainUntilMs = Math.max(
+          Date.parse(record.retainUntil),
+          computeTwoCalendarYearRetentionFloorMs(Date.parse(record.generatedAt)),
+        );
+        if (effectiveRetainUntilMs > nowMs) {
           continue;
         }
         if (
@@ -3732,7 +3844,21 @@ export class MultiTaxiRepository {
               AND lh.subject_ref IN (r.order_id, r.record_id, r.trip_id)
           ) AS has_db_hold
         FROM reporting.multi_taxi_trip_operational_records r
-        WHERE r.retain_until <= $1::timestamptz
+        WHERE GREATEST(
+          r.retain_until,
+          (
+            (r.generated_at AT TIME ZONE 'UTC')
+            + interval '2 years'
+            + CASE
+                WHEN EXTRACT(MONTH FROM (r.generated_at AT TIME ZONE 'UTC')) = 2
+                 AND EXTRACT(DAY FROM (r.generated_at AT TIME ZONE 'UTC')) = 29
+                 AND EXTRACT(DAY FROM ((r.generated_at AT TIME ZONE 'UTC') + interval '2 years')) = 28
+                THEN interval '1 day'
+                ELSE interval '0 days'
+              END
+          ) AT TIME ZONE 'UTC',
+          r.generated_at + interval '730 days'
+        ) <= $1::timestamptz
         ORDER BY r.retain_until ASC, r.record_id ASC
         FOR UPDATE
         `,
@@ -3773,16 +3899,13 @@ export class MultiTaxiRepository {
     record: StoredMultiTaxiTripOperationalRecord,
   ): StoredMultiTaxiTripOperationalRecord {
     const generatedAtMs = Date.parse(record.generatedAt);
-    const minRetainUntilMs =
-      (Number.isFinite(generatedAtMs) ? generatedAtMs : Date.now()) +
-      730 * 24 * 60 * 60 * 1000;
-    const requestedRetainUntilMs = Date.parse(record.retainUntil);
-    const retainUntil = new Date(
-      Number.isFinite(requestedRetainUntilMs) &&
-        requestedRetainUntilMs >= minRetainUntilMs
-        ? requestedRetainUntilMs
-        : minRetainUntilMs,
+    const normalizedGeneratedAt = new Date(
+      Number.isFinite(generatedAtMs) ? generatedAtMs : Date.now(),
     ).toISOString();
+    const retainUntil = computeTwoCalendarYearRetentionFloorIso(
+      normalizedGeneratedAt,
+      record.retainUntil,
+    );
 
     const paymentStatus: MultiTaxiTripPaymentStatus =
       record.paymentStatus ?? "unknown";
@@ -3792,6 +3915,12 @@ export class MultiTaxiRepository {
         : paymentStatus === "refunded"
           ? 0
           : null;
+    const tollSource: MultiTaxiTripTollSource =
+      record.tollSource ?? "unavailable";
+    const tollMinor =
+      tollSource === "unavailable"
+        ? null
+        : Math.max(0, Math.round(record.tollMinor ?? 0));
 
     return {
       ...record,
@@ -3826,15 +3955,13 @@ export class MultiTaxiRepository {
       actualFareMinor: Math.max(0, Math.round(record.actualFareMinor ?? 0)),
       collectedFareMinor,
       paymentStatus,
-      tollMinor: Math.max(0, Math.round(record.tollMinor ?? 0)),
-      tollSource: record.tollSource ?? "unavailable",
+      tollMinor,
+      tollSource,
       currency: PLATFORM_CURRENCY,
       farePolicyVersion: record.farePolicyVersion || "multi-taxi-v1",
       chargingMode:
         record.chargingMode === "platform_quote" ? "platform_quote" : "meter",
-      generatedAt: new Date(
-        Number.isFinite(generatedAtMs) ? generatedAtMs : Date.now(),
-      ).toISOString(),
+      generatedAt: normalizedGeneratedAt,
       retainUntil,
     };
   }
@@ -3917,9 +4044,11 @@ export class MultiTaxiRepository {
       ? (rawTollSource as MultiTaxiTripTollSource)
       : "unavailable";
     const tollMinor =
-      toNullableInt(row.toll_minor) ??
-      toNullableInt(jsonRecord.tollMinor) ??
-      0;
+      tollSource === "unavailable"
+        ? null
+        : (toNullableInt(row.toll_minor) ??
+          toNullableInt(jsonRecord.tollMinor) ??
+          0);
 
     const rawRouteSource =
       (typeof row.route_source === "string" && row.route_source) ||
@@ -3964,10 +4093,10 @@ export class MultiTaxiRepository {
       toIso(row.generated_at) ??
       toIso(jsonRecord.generatedAt) ??
       reservedAt;
-    const retainUntil =
-      toIso(row.retain_until) ??
-      toIso(jsonRecord.retainUntil) ??
-      new Date(Date.parse(generatedAt) + 730 * 24 * 60 * 60 * 1000).toISOString();
+    const retainUntil = computeTwoCalendarYearRetentionFloorIso(
+      generatedAt,
+      toIso(row.retain_until) ?? toIso(jsonRecord.retainUntil),
+    );
 
     const rawChargingMode =
       (typeof row.charging_mode === "string" && row.charging_mode) ||

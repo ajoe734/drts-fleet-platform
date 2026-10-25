@@ -190,7 +190,7 @@
       "amended_by_task_id": "BUREAU-R11-EXISTING-TRIP-RECORD-SOURCE-FOLLOWTHROUGH-20261025",
       "amended_at": "2026-10-25",
       "scope": "Appended V0135__multi_taxi_trip_record_truth_retention.sql to regulatory_agency_access_allocations only; all previous allocations, amendments and task ownership entries remain unchanged. V0134 stays reserved for BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025 and is not claimed here.",
-      "reason": "Registers the R11 per-trip operational record truth, historical backfill/reconciliation, payment collection synchronization, and 730-day statutory retention + active legal-hold deletion guard migration V0135__multi_taxi_trip_record_truth_retention.sql on reporting.multi_taxi_trip_operational_records (V0056) at origin/dev 6d51859f979866a0d243b10c2a45f2ffb1806744."
+      "reason": "Registers the R11 per-trip operational record truth, telemetry.driver_location_events route provenance, historical backfill/reconciliation, payment collection synchronization, and two-calendar-year statutory retention + active legal-hold deletion guard migration V0135__multi_taxi_trip_record_truth_retention.sql on reporting.multi_taxi_trip_operational_records (V0056) at origin/dev 6d51859f979866a0d243b10c2a45f2ffb1806744."
     }
   ],
   "voice_application_allocations": [
@@ -961,14 +961,15 @@
         "ops.passenger_dispatch_disclosure_snapshots",
         "reporting.multi_taxi_electronic_receipts",
         "billing.multi_taxi_passenger_payments",
+        "telemetry.driver_location_events",
         "voice.legal_hold"
       ],
-      "description": "Traffic Bureau R11 per-trip operational record truth, provenance columns, historical backfill/reconciliation, transactional payment collection synchronization, and 730-day statutory retention + active legal-hold deletion guard.",
+      "description": "Traffic Bureau R11 per-trip operational record truth, telemetry.driver_location_events GPS provenance columns/snapshot, historical backfill/reconciliation, transactional payment collection synchronization, and two-calendar-year statutory retention + active legal-hold deletion guard.",
       "downstream_tasks": [],
       "table_invariants": [
         "Extends V0056 reporting.multi_taxi_trip_operational_records with explicit statutory truth and provenance columns (order_no, assignment_id, route_summary, route_source, distance_meters, duration_seconds, collected_fare_minor, payment_status, toll_minor, toll_source, fare_policy_version, charging_mode) without creating a duplicate table.",
-        "multi_taxi_record_payment_collection_chk enforces that collected_fare_minor is non-null only when payment_status = 'captured', 0 when payment_status = 'refunded', and NULL when payment_status IN ('not_selected', 'authorized', 'failed', 'manual_recovery', 'unknown'), synchronized inside the same transaction via trg_sync_multi_taxi_trip_record_payment on billing.multi_taxi_passenger_payments.",
-        "trg_multi_taxi_trip_record_update_guard, trg_multi_taxi_trip_record_delete_guard, and trg_multi_taxi_trip_record_no_truncate forbid core identity mutation, forbid shortening retain_until below existing value or generated_at + 730 days, forbid TRUNCATE, forbid DELETE while retain_until > clock_timestamp(), and after expiry require reporting.allow_trip_record_retention_purge = 'on' and no active hold in voice.legal_hold."
+        "multi_taxi_record_payment_collection_chk enforces that collected_fare_minor is non-null only when payment_status = 'captured', 0 when payment_status = 'refunded', and NULL when payment_status IN ('not_selected', 'authorized', 'failed', 'manual_recovery', 'unknown'), synchronized inside the same transaction via trg_sync_multi_taxi_trip_record_payment on billing.multi_taxi_passenger_payments without overwriting completion actual_fare_minor.",
+        "reporting.multi_taxi_two_calendar_year_retention_floor, trg_multi_taxi_trip_record_update_guard, trg_multi_taxi_trip_record_delete_guard, and trg_multi_taxi_trip_record_no_truncate forbid core trip-fact mutation once populated, forbid shortening retain_until below existing value or the two-calendar-year UTC floor (>= 2 calendar years and >= 730 days, rolling Feb 29 starts to Mar 1), forbid TRUNCATE, forbid DELETE while effective retain_until > clock_timestamp(), and after expiry require reporting.allow_trip_record_retention_purge = 'on' and no active hold in voice.legal_hold."
       ]
     }
   ]

@@ -963,9 +963,10 @@ function RecordDetail({
           cols={1}
           items={[
             { k: t("detail.routeSource"), v: record.route.source },
-            ...(record.route.routeSummary
-              ? [{ k: "路線摘要 / Route", v: record.route.routeSummary }]
-              : []),
+            {
+              k: "路線摘要 / Route",
+              v: record.route.routeSummary ?? missing,
+            },
             {
               k: t("detail.routeDistance"),
               v: formatRecordDistance(record.route.distanceMeters) ?? missing,
@@ -1010,10 +1011,21 @@ function RecordDetail({
               mono: true,
             },
             {
+              k: "實收狀態 / Collection",
+              v: `${
+                formatRecordMoney(
+                  resolveRecordCollectedFareMinor(record),
+                  locale,
+                ) ?? missing
+              } (${record.paymentStatus ?? "unknown"})`,
+              mono: true,
+            },
+            {
               k: t("detail.toll"),
-              v:
+              v: `${
                 formatRecordMoney(resolveRecordTollMinor(record), locale) ??
-                missing,
+                missing
+              } (${record.tollSource ?? "unavailable"})`,
               mono: true,
             },
             {

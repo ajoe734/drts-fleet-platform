@@ -40,7 +40,7 @@ export const AGENCY_EXPIRY_WINDOW_DEFAULT_DAYS = 30;
 export const AGENCY_EXPIRY_WINDOW_MAX_DAYS = 365;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Two-year retention boundary: `retainUntil` (= completion + 730 days) >= now. */
+/** Two-calendar-year retention boundary: `retainUntil` (>= two calendar years from completion) >= now. */
 export function isWithinAgencyRetention(
   retainUntil: string | null | undefined,
   nowMs: number,

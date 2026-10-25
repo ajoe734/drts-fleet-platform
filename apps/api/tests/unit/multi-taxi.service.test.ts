@@ -1007,7 +1007,7 @@ describe("MultiTaxiService trip operational records", () => {
         activeHolds: null,
       },
     });
-    expect(records[0]?.retainUntil).toBe("2028-07-22T00:00:00.000Z");
+    expect(records[0]?.retainUntil).toBe("2028-07-23T00:00:00.000Z");
   });
 
   it("maps proof-bundle governance by order ID and filters active holds separately from retention", async () => {
@@ -1052,7 +1052,7 @@ describe("MultiTaxiService trip operational records", () => {
     );
     expect(active).toHaveLength(1);
     expect(active[0]).toMatchObject({
-      retainUntil: "2028-07-22T00:00:00.000Z",
+      retainUntil: "2028-07-23T00:00:00.000Z",
       legalHold: {
         state: "active",
         activeHoldCount: 1,
@@ -1165,10 +1165,100 @@ describe("MultiTaxiService trip operational records", () => {
         actualFareMinor: 0,
         collectedFareMinor: null,
         paymentStatus: "unknown",
-        tollMinor: 0,
+        tollMinor: null,
         tollSource: "unavailable",
       }),
     ]);
+  });
+
+  it("enforces two-calendar-year retention floor across leap years, non-leap controls, Feb 29 starts, and longer existing retainUntil", async () => {
+    const repo = new MultiTaxiRepository();
+    // 1. Cross-leap-year counterexample: 2026-10-25T02:00:00.000Z (+730d = 2028-10-24T02:00:00.000Z is 1 day early)
+    const leapCrossing = await repo.upsertTripOperationalRecord({
+      recordId: "mtr-order-leap-cross",
+      orderId: "order-leap-cross",
+      orderNo: "MTX-LEAP-CROSS-001",
+      tripId: "task-leap-cross",
+      assignmentId: "asg-leap-cross",
+      vehicleId: "veh-leap-1",
+      plateNo: "TPE-2028",
+      reservedAt: "2026-10-25T01:30:00.000Z",
+      pickupAt: "2026-10-25T01:40:00.000Z",
+      dropoffAt: "2026-10-25T02:00:00.000Z",
+      route: {
+        encodedPolyline: null,
+        pointCount: 0,
+        distanceMeters: 8500,
+        durationSeconds: 1200,
+        source: "pickup_dropoff_summary",
+        routeSummary: "台北車站 → 南港展覽館",
+      },
+      payableFareMinor: 28000,
+      actualFareMinor: 28000,
+      collectedFareMinor: 28000,
+      paymentStatus: "captured",
+      tollMinor: null,
+      tollSource: "unavailable",
+      currency: "TWD",
+      farePolicyVersion: "multi-taxi-v1",
+      chargingMode: "meter",
+      generatedAt: "2026-10-25T02:00:00.000Z",
+      retainUntil: "2028-10-24T02:00:00.000Z", // old fixed-730d value
+    });
+    expect(leapCrossing.retainUntil).toBe("2028-10-25T02:00:00.000Z");
+    expect(leapCrossing.tollMinor).toBeNull();
+
+    // 2. Non-leap control: 2028-03-01T02:00:00.000Z -> 2030-03-01T02:00:00.000Z
+    const nonLeapControl = await repo.upsertTripOperationalRecord({
+      ...leapCrossing,
+      recordId: "mtr-order-non-leap",
+      orderId: "order-non-leap",
+      orderNo: "MTX-NON-LEAP-001",
+      reservedAt: "2028-03-01T01:30:00.000Z",
+      pickupAt: "2028-03-01T01:40:00.000Z",
+      dropoffAt: "2028-03-01T02:00:00.000Z",
+      generatedAt: "2028-03-01T02:00:00.000Z",
+      retainUntil: "2030-03-01T02:00:00.000Z",
+    });
+    expect(nonLeapControl.retainUntil).toBe("2030-03-01T02:00:00.000Z");
+
+    // 3. Leap-day start: 2028-02-29T02:00:00.000Z must NOT round down to 2030-02-28T02:00:00.000Z
+    const feb29Start = await repo.upsertTripOperationalRecord({
+      ...leapCrossing,
+      recordId: "mtr-order-feb29",
+      orderId: "order-feb29",
+      orderNo: "MTX-FEB29-001",
+      reservedAt: "2028-02-29T01:30:00.000Z",
+      pickupAt: "2028-02-29T01:40:00.000Z",
+      dropoffAt: "2028-02-29T02:00:00.000Z",
+      generatedAt: "2028-02-29T02:00:00.000Z",
+      retainUntil: "2030-02-28T02:00:00.000Z",
+    });
+    expect(feb29Start.retainUntil).toBe("2030-03-01T02:00:00.000Z");
+
+    // 4. Existing longer retainUntil is never shortened on replay
+    const longerInitial = await repo.upsertTripOperationalRecord({
+      ...leapCrossing,
+      recordId: "mtr-order-longer",
+      orderId: "order-longer",
+      orderNo: "MTX-LONGER-001",
+      retainUntil: "2031-01-01T00:00:00.000Z",
+    });
+    expect(longerInitial.retainUntil).toBe("2031-01-01T00:00:00.000Z");
+    const longerReplayed = await repo.upsertTripOperationalRecord({
+      ...longerInitial,
+      retainUntil: "2028-10-25T02:00:00.000Z",
+    });
+    expect(longerReplayed.retainUntil).toBe("2031-01-01T00:00:00.000Z");
+
+    // At 2028-10-24T02:00:00.000Z (fixed 730d mark), 2026-10-25T02:00:00.000Z is NOT purgeable!
+    const earlyPurgeAt730d = await repo.purgeExpiredTripOperationalRecords({
+      nowIso: "2028-10-24T02:00:00.000Z",
+    });
+    expect(earlyPurgeAt730d.purgedRecordIds).toEqual([]);
+    expect(
+      await repo.findTripOperationalRecordById("mtr-order-leap-cross"),
+    ).not.toBeNull();
   });
 
   it("reads committed R11 rows from MultiTaxiRepository, supports exact filters, and blocks purge on active hold or deletion exception", async () => {

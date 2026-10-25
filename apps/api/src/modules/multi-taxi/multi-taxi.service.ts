@@ -93,6 +93,7 @@ import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-use
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { InjectMaskedCallPort, type MaskedCallPort } from "./masked-call.port";
 import {
+  computeTwoCalendarYearRetentionFloorIso,
   MultiTaxiRepository,
   type PassengerNotificationChannelMetadata,
   type PassengerRatingReviewRepositoryDetail,
@@ -564,7 +565,10 @@ export class MultiTaxiService implements OnModuleInit {
         actualFareMinor: record.actualFareMinor,
         collectedFareMinor: record.collectedFareMinor ?? null,
         paymentStatus: record.paymentStatus ?? "unknown",
-        tollMinor: record.tollMinor,
+        tollMinor:
+          (record.tollSource ?? "unavailable") === "unavailable"
+            ? null
+            : (record.tollMinor ?? 0),
         tollSource: record.tollSource ?? "unavailable",
         currency: record.currency,
         farePolicyVersion: record.farePolicyVersion,
@@ -2843,7 +2847,7 @@ export class MultiTaxiService implements OnModuleInit {
           ? 0
           : null;
 
-    let tollMinor = 0;
+    let tollMinor: number | null = null;
     let tollSource: MultiTaxiTripTollSource = "unavailable";
     if (Array.isArray(completedTask?.proof?.expenseItems)) {
       const tollItems = completedTask.proof.expenseItems.filter(
@@ -2879,8 +2883,11 @@ export class MultiTaxiService implements OnModuleInit {
       pickupAt,
       dropoffAt,
       route: {
-        encodedPolyline: assignment?.routeFare?.encodedPolyline ?? null,
-        pointCount: assignment?.routeFare?.encodedPolyline ? 1 : 0,
+        encodedPolyline:
+          routeSource === "provider_route"
+            ? (assignment?.routeFare?.encodedPolyline ?? null)
+            : null,
+        pointCount: 0,
         distanceMeters,
         durationSeconds,
         source: routeSource,
@@ -2899,15 +2906,13 @@ export class MultiTaxiService implements OnModuleInit {
         "active_authorization_fare",
       chargingMode: order.fixedPrice ? "platform_quote" : "meter",
       generatedAt,
-      retainUntil: this.plusRetentionDays(generatedAt, 730),
+      retainUntil: this.plusRetentionDays(generatedAt),
       legalHold: this.readOperationalRecordLegalHold(order.orderId),
     };
   }
 
-  private plusRetentionDays(iso: string, days: number) {
-    const date = new Date(iso);
-    date.setUTCDate(date.getUTCDate() + days);
-    return date.toISOString();
+  private plusRetentionDays(iso: string) {
+    return computeTwoCalendarYearRetentionFloorIso(iso);
   }
 
   private isPassengerCancelable(order: OwnedOrderRecord) {
