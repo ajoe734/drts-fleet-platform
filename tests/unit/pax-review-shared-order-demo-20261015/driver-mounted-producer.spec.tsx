@@ -75,22 +75,29 @@ async function headersFor(url: string) {
   );
   const runtimeConfig = { ...defaultConfig, ...config };
   const routes = await loadRoutes(runtimeConfig);
-  const resolve = getResolveRoutes(
-    {
-      buildId: "socket-free-header-probe",
-      onMatchHeaders: [],
-      headers: routes.headers.map((route: { source: string }) => ({
-        ...route,
-        match: getPathMatch(route.source),
-      })),
-      redirects: [],
-      rewrites: { beforeFiles: [], afterFiles: [], fallback: [] },
-      getMiddlewareMatchers: () => undefined,
-      getItem: async () => ({ type: "appFile" }),
-    },
-    runtimeConfig,
-    { dir: root, dev: false, minimalMode: false },
-  );
+  const fsChecker = {
+    buildId: "socket-free-header-probe",
+    onMatchHeaders: [],
+    headers: routes.headers.map((route: { source: string }) => ({
+      ...route,
+      match: getPathMatch(route.source),
+    })),
+    redirects: [],
+    rewrites: { beforeFiles: [], afterFiles: [], fallback: [] },
+    getMiddlewareMatchers: () => undefined,
+    getItem: async () => ({ type: "appFile" }),
+  };
+  const opts = { dir: root, dev: false, minimalMode: false };
+  // Next 16.4 inserted getAssetPrefix as the third parameter, before opts.
+  const resolve =
+    getResolveRoutes.length >= 7
+      ? getResolveRoutes(
+          fsChecker,
+          runtimeConfig,
+          () => runtimeConfig.assetPrefix ?? "",
+          opts,
+        )
+      : getResolveRoutes(fsChecker, runtimeConfig, opts);
   const request = Object.assign(new PassThrough(), {
     url,
     headers: { host: "pax.example" },

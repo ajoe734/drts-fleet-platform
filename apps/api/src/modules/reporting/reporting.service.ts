@@ -8,6 +8,7 @@ import {
 import { ApiRequestError } from "../../common/api-envelope";
 
 import type {
+  ComplaintCaseRecord,
   DispatchAssignmentRecord,
   DispatchDailyRecord,
   DispatchJobRecord,
@@ -23,10 +24,20 @@ import type {
   VehicleRegistryRecord,
 } from "@drts/contracts";
 
+import { LATE_ARRIVAL_THRESHOLD_MINUTES } from "@drts/contracts";
+
 import { ComplaintService } from "../complaint/complaint.service";
 import { OwnedMobilityService } from "../owned-mobility/owned-mobility.service";
 import { RegulatoryRegistryService } from "../regulatory-registry/regulatory-registry.service";
 import { VehicleEligibilityService } from "../vehicle-eligibility/vehicle-eligibility.service";
+import {
+  addTripPunctuality,
+  buildComplaintMonthlyStatistics,
+  emptyPunctualityMetrics,
+  sortPunctualityMetrics,
+  totalComplaintMonthlyStatistics,
+  type ComplaintStatisticsSource,
+} from "./operations-metrics";
 import {
   ReportingRepository,
   type DailyDispatchRecordQuery,
@@ -52,6 +63,14 @@ type MonthlyOperationsSummaryRebuildResult = {
   rebuiltCount: number;
   generatedAt: string;
   records: MonthlyOperationsSummaryRecord[];
+};
+
+type OrderReportingDimension = {
+  order: OwnedOrderRecord;
+  record: DispatchDailyRecord;
+  periodMonth: string;
+  businessArea: string;
+  serviceProductCode: string;
 };
 
 type SnapshotEligibilityPair = {
@@ -276,9 +295,11 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
 
   async rebuildMonthlyOperationsSummaries(
     query: MonthlyOperationsSummaryQuery = {},
+    preloadedSource?: DispatchDailyRecordSource,
   ): Promise<MonthlyOperationsSummaryRebuildResult> {
     const generatedAt = new Date().toISOString();
-    const source = await this.loadDailyDispatchRecordSource();
+    const source =
+      preloadedSource ?? (await this.loadDailyDispatchRecordSource());
     const snapshots = await this.loadDispatchableSupplySnapshots();
     const periods = this.resolveRequestedMonths(query);
     const vehicleAreaById = new Map(
@@ -395,31 +416,62 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       monthlyQuery.serviceProductCode = query.serviceProductCode;
     }
 
-    await this.rebuildMonthlyOperationsSummaries(monthlyQuery);
+    const source = await this.loadDailyDispatchRecordSource();
+    // One canonical source read feeds both the rebuilt monthly read model and
+    // the derived R09/R10 figures below.
+    await this.rebuildMonthlyOperationsSummaries(monthlyQuery, source);
 
     const monthly = await this.listMonthlyOperationsSummaries(monthlyQuery);
     const grouped = new Map<string, SixMonthOperationsSummary>();
+    const complaintStatisticsAsOf = new Date().toISOString();
+    const createSummary = (
+      businessArea: string,
+      serviceProductCode: string,
+      generatedAt: string,
+    ): SixMonthOperationsSummary => ({
+      from: query.from ?? `${periodMonthFrom}-01`,
+      to:
+        query.to ??
+        this.endOfMonthIso(`${periodMonthTo}-01T00:00:00.000Z`).slice(0, 10),
+      businessArea,
+      serviceProductCode,
+      demandRequestCount: 0,
+      actualDispatchCount: 0,
+      completedTripCount: 0,
+      cancelledOrderCount: 0,
+      averageDispatchableVehicleCount: 0,
+      validSnapshotCount: 0,
+      expectedSnapshotCount: 0,
+      snapshotCoverageRate: 0,
+      complaintCount: 0,
+      complaintsByCategory: {},
+      lateArrivalThresholdMinutes: LATE_ARRIVAL_THRESHOLD_MINUTES,
+      onTimeTripCount: 0,
+      lateTripCount: 0,
+      noShowTripCount: 0,
+      punctualityUnknownTripCount: 0,
+      complaintCreatedLowRatingAutoCount: 0,
+      complaintCreatedManualCount: 0,
+      complaintClosedLowRatingAutoCount: 0,
+      complaintClosedManualCount: 0,
+      complaintOverdueLowRatingAutoCount: 0,
+      complaintOverdueManualCount: 0,
+      complaintStatisticsAsOf,
+      drilldown: {
+        punctuality: emptyPunctualityMetrics(),
+        complaintMonthlyStatistics: [],
+      },
+      generatedAt,
+    });
     for (const record of monthly) {
       const key = `${record.businessArea}:${record.serviceProductCode}`;
-      const current = grouped.get(key) ?? {
-        from: query.from ?? `${periodMonthFrom}-01`,
-        to:
-          query.to ??
-          this.endOfMonthIso(`${periodMonthTo}-01T00:00:00.000Z`).slice(0, 10),
-        businessArea: record.businessArea,
-        serviceProductCode: record.serviceProductCode,
-        demandRequestCount: 0,
-        actualDispatchCount: 0,
-        completedTripCount: 0,
-        cancelledOrderCount: 0,
-        averageDispatchableVehicleCount: 0,
-        validSnapshotCount: 0,
-        expectedSnapshotCount: 0,
-        snapshotCoverageRate: 0,
-        complaintCount: 0,
-        complaintsByCategory: {},
-        generatedAt: record.generatedAt,
-      };
+      const current =
+        grouped.get(key) ??
+        createSummary(
+          record.businessArea,
+          record.serviceProductCode,
+          record.generatedAt,
+        );
       current.demandRequestCount += record.demandRequestCount;
       current.actualDispatchCount += record.actualDispatchCount;
       current.completedTripCount += record.completedTripCount;
@@ -442,7 +494,22 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       grouped.set(key, current);
     }
 
+    await this.attachOperationsMetrics(
+      grouped,
+      source,
+      this.enumerateMonths(periodMonthFrom, periodMonthTo),
+      monthlyQuery,
+      complaintStatisticsAsOf,
+      (businessArea, serviceProductCode) =>
+        createSummary(
+          businessArea,
+          serviceProductCode,
+          complaintStatisticsAsOf,
+        ),
+    );
+
     return Array.from(grouped.values())
+      .map((summary) => this.withOperationsMetricTotals(summary))
       .map((summary) => ({
         ...summary,
         averageDispatchableVehicleCount:
@@ -469,6 +536,231 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
             right.serviceProductCode ?? "",
           ),
       );
+  }
+
+  private withOperationsMetricTotals(
+    summary: SixMonthOperationsSummary,
+  ): SixMonthOperationsSummary {
+    const punctuality = sortPunctualityMetrics(
+      summary.drilldown?.punctuality ?? emptyPunctualityMetrics(),
+    );
+    const complaintMonthlyStatistics =
+      summary.drilldown?.complaintMonthlyStatistics ?? [];
+    return {
+      ...summary,
+      lateArrivalThresholdMinutes: punctuality.lateArrivalThresholdMinutes,
+      onTimeTripCount: punctuality.onTimeTripCount,
+      lateTripCount: punctuality.lateTripCount,
+      noShowTripCount: punctuality.noShowTripCount,
+      punctualityUnknownTripCount: punctuality.unknownTripCount,
+      ...totalComplaintMonthlyStatistics(complaintMonthlyStatistics),
+      drilldown: { punctuality, complaintMonthlyStatistics },
+    };
+  }
+
+  /**
+   * Bureau R10 / R09 figures for the previewed window. They reuse the same
+   * order dimensions and window months as the existing monthly summary and
+   * never modify its persisted figures.
+   */
+  private async attachOperationsMetrics(
+    grouped: Map<string, SixMonthOperationsSummary>,
+    source: DispatchDailyRecordSource,
+    periods: readonly string[],
+    query: MonthlyOperationsSummaryQuery,
+    asOf: string,
+    createSummary: (
+      businessArea: string,
+      serviceProductCode: string,
+    ) => SixMonthOperationsSummary,
+  ) {
+    const vehicleAreaById = new Map(
+      this.regulatoryRegistryService
+        .listVehicles()
+        .map((vehicle) => [vehicle.vehicleId, vehicle.operatingArea] as const),
+    );
+    const dimensions = this.buildOrderReportingDimensions(
+      source,
+      vehicleAreaById,
+      asOf,
+    );
+    const matchesQuery = (businessArea: string, serviceProductCode: string) =>
+      (!query.businessArea || businessArea === query.businessArea) &&
+      (!query.serviceProductCode ||
+        serviceProductCode === query.serviceProductCode);
+    const ensure = (businessArea: string, serviceProductCode: string) => {
+      const key = `${businessArea}:${serviceProductCode}`;
+      let summary = grouped.get(key);
+      if (!summary) {
+        summary = createSummary(businessArea, serviceProductCode);
+        grouped.set(key, summary);
+      }
+      return summary;
+    };
+
+    for (const dimension of dimensions.values()) {
+      if (
+        !periods.includes(dimension.periodMonth) ||
+        !matchesQuery(dimension.businessArea, dimension.serviceProductCode)
+      ) {
+        continue;
+      }
+      addTripPunctuality(
+        ensure(dimension.businessArea, dimension.serviceProductCode).drilldown!
+          .punctuality,
+        {
+          record: dimension.record,
+          dispatchSemantics: dimension.order.dispatchSemantics,
+        },
+      );
+    }
+
+    // Same case attribution as the existing complaint count: the related
+    // order's dimensions, else explicit unassigned/unknown.
+    const casesByKey = new Map<
+      string,
+      {
+        businessArea: string;
+        serviceProductCode: string;
+        cases: ComplaintCaseRecord[];
+      }
+    >();
+    const seenCases = new Set<string>();
+    for (const complaintCase of source.complaintCases) {
+      if (seenCases.has(complaintCase.caseNo)) continue;
+      seenCases.add(complaintCase.caseNo);
+      const dimension = complaintCase.relatedOrderId
+        ? dimensions.get(complaintCase.relatedOrderId)
+        : undefined;
+      const businessArea = dimension?.businessArea ?? "unassigned";
+      const serviceProductCode = dimension?.serviceProductCode ?? "unknown";
+      if (!matchesQuery(businessArea, serviceProductCode)) continue;
+      const key = `${businessArea}:${serviceProductCode}`;
+      const entry = casesByKey.get(key) ?? {
+        businessArea,
+        serviceProductCode,
+        cases: [],
+      };
+      entry.cases.push(complaintCase);
+      casesByKey.set(key, entry);
+    }
+    const statisticsSource = await this.loadComplaintStatisticsSource(source);
+    for (const entry of casesByKey.values()) {
+      const statistics = buildComplaintMonthlyStatistics(
+        entry.cases,
+        statisticsSource,
+        periods,
+        asOf,
+      );
+      const hasFigures = statistics.some(
+        (month) =>
+          month.lowRatingAuto.createdCount +
+            month.lowRatingAuto.closedCount +
+            month.lowRatingAuto.overdueCount +
+            month.manual.createdCount +
+            month.manual.closedCount +
+            month.manual.overdueCount >
+          0,
+      );
+      const key = `${entry.businessArea}:${entry.serviceProductCode}`;
+      if (!hasFigures && !grouped.has(key)) continue;
+      ensure(
+        entry.businessArea,
+        entry.serviceProductCode,
+      ).drilldown!.complaintMonthlyStatistics = statistics;
+    }
+    for (const summary of grouped.values()) {
+      if (summary.drilldown!.complaintMonthlyStatistics.length === 0) {
+        summary.drilldown!.complaintMonthlyStatistics =
+          buildComplaintMonthlyStatistics([], statisticsSource, periods, asOf);
+      }
+    }
+  }
+
+  private async loadComplaintStatisticsSource(
+    source: DispatchDailyRecordSource,
+  ): Promise<ComplaintStatisticsSource> {
+    if (this.reportingRepository?.isEnabled()) {
+      try {
+        return await this.reportingRepository.loadComplaintStatisticsSource();
+      } catch (error) {
+        this.reportingRepository.reportPersistenceFailure(
+          error,
+          "load complaint statistics source",
+        );
+      }
+    }
+
+    // In-memory runtime: closures from the complaint timelines and low-rating
+    // links recorded on the Referral rating itself.
+    const closures: ComplaintStatisticsSource["closures"] = [];
+    for (const complaintCase of source.complaintCases) {
+      let timeline: ReturnType<ComplaintService["getComplaintTimeline"]> = [];
+      try {
+        timeline = this.complaintService.getComplaintTimeline(
+          complaintCase.caseNo,
+        );
+      } catch {
+        continue;
+      }
+      for (const entry of timeline) {
+        if (entry.action === "case_closed") {
+          closures.push({ caseNo: entry.caseNo, closedAt: entry.createdAt });
+        }
+      }
+    }
+    const lowRatingCaseNos = source.orders
+      .map((order) => order.referralPassengerLifecycle?.rating?.complaintCaseNo)
+      .filter((caseNo): caseNo is string => Boolean(caseNo));
+    return { closures, lowRatingCaseNos };
+  }
+
+  /** Canonical per-order record and summary dimensions for every order. */
+  private buildOrderReportingDimensions(
+    source: DispatchDailyRecordSource,
+    vehicleAreaById: ReadonlyMap<string, string>,
+    generatedAt: string,
+  ) {
+    const vehiclePlateById = new Map(
+      this.regulatoryRegistryService
+        .listVehicles()
+        .map((vehicle) => [vehicle.vehicleId, vehicle.plateNo] as const),
+    );
+    const complaintCountByOrderId = new Map<string, number>();
+    for (const complaintCase of source.complaintCases) {
+      if (!complaintCase.relatedOrderId) {
+        continue;
+      }
+      complaintCountByOrderId.set(
+        complaintCase.relatedOrderId,
+        (complaintCountByOrderId.get(complaintCase.relatedOrderId) ?? 0) + 1,
+      );
+    }
+    const dimensions = new Map<string, OrderReportingDimension>();
+    for (const order of source.orders) {
+      const record = this.buildDispatchDailyRecord(
+        order,
+        source.dispatchJobs,
+        source.dispatchAssignments,
+        source.driverTasks,
+        source.dispatchTraceLogs,
+        vehiclePlateById,
+        complaintCountByOrderId,
+        generatedAt,
+      );
+      dimensions.set(order.orderId, {
+        order,
+        record,
+        periodMonth: record.serviceDate.slice(0, 7),
+        businessArea: this.resolveOrderBusinessArea(
+          order,
+          source.dispatchAssignments,
+          vehicleAreaById,
+        ),
+        serviceProductCode: record.serviceProductCode,
+      });
+    }
+    return dimensions;
   }
 
   private buildDispatchDailyRecord(
@@ -941,51 +1233,18 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
     query: MonthlyOperationsSummaryQuery,
     snapshots: readonly DispatchableSupplySnapshotRecord[],
   ): MonthlyOperationsSummaryRecord[] {
-    const vehiclePlateById = new Map(
-      this.regulatoryRegistryService
-        .listVehicles()
-        .map((vehicle) => [vehicle.vehicleId, vehicle.plateNo] as const),
-    );
-    const complaintCountByOrderId = new Map<string, number>();
-    for (const complaintCase of source.complaintCases) {
-      if (!complaintCase.relatedOrderId) {
-        continue;
-      }
-      complaintCountByOrderId.set(
-        complaintCase.relatedOrderId,
-        (complaintCountByOrderId.get(complaintCase.relatedOrderId) ?? 0) + 1,
-      );
-    }
-
     const recordsByOrderId = new Map<string, DispatchDailyRecord>();
-    const dimensionByOrderId = new Map<
-      string,
-      { periodMonth: string; businessArea: string; serviceProductCode: string }
-    >();
-    for (const order of source.orders) {
-      const record = this.buildDispatchDailyRecord(
-        order,
-        source.dispatchJobs,
-        source.dispatchAssignments,
-        source.driverTasks,
-        source.dispatchTraceLogs,
-        vehiclePlateById,
-        complaintCountByOrderId,
-        generatedAt,
-      );
-      const periodMonth = record.serviceDate.slice(0, 7);
-      const businessArea = this.resolveOrderBusinessArea(
-        order,
-        source.dispatchAssignments,
-        vehicleAreaById,
-      );
-      // A complaint can be filed after its trip's service month. Keep the
-      // canonical order dimensions even when that trip is outside this period.
-      dimensionByOrderId.set(order.orderId, {
-        periodMonth,
-        businessArea,
-        serviceProductCode: record.serviceProductCode,
-      });
+    // A complaint can be filed after its trip's service month. Keep the
+    // canonical order dimensions even when that trip is outside this period.
+    const dimensionByOrderId = this.buildOrderReportingDimensions(
+      source,
+      vehicleAreaById,
+      generatedAt,
+    );
+    for (const [
+      orderId,
+      { record, periodMonth, businessArea },
+    ] of dimensionByOrderId) {
       if (
         !periods.includes(periodMonth) ||
         (query.businessArea && businessArea !== query.businessArea) ||
@@ -994,7 +1253,7 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       ) {
         continue;
       }
-      recordsByOrderId.set(order.orderId, record);
+      recordsByOrderId.set(orderId, record);
     }
 
     const groups = new Map<string, MonthlyOperationsSummaryRecord>();

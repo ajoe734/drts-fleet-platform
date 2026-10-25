@@ -29,12 +29,12 @@ function App(){
   return (
     <DesignCanvas projectName="智行叫車 · P-5 乘客端" subtitle="multi_taxi_direct · 390×844 mobile web · 法定派車揭露 + 評價 + 乘車證明 · 樣本資料均為虛構 · fail-closed 狀態完整" accent="#0B5CAB">
       <DCSection id="main" title="01 · 派車主流程 P5-01 ~ 07" subtitle="等待指派 → 指派（評價/新進駕駛）→ 改派中/完成 → 抵達 → 行程中（安全帶提醒）">
-        <DCArtboard id="p5-01" label="P5-01 · 正在安排車輛 · 指派前取消不收費" width={W} height={H}><F><P5_S01/></F></DCArtboard>
+        <DCArtboard id="p5-01" label="P5-01 · 正在安排車輛 · 取消不收費" width={W} height={H}><F><P5_S01/></F></DCArtboard>
         <DCArtboard id="p5-02" label="P5-02 · 已指派 · 評價駕駛 4.9★/328 · 位置 fresh" width={W} height={H}><F><P5_S02/></F></DCArtboard>
         <DCArtboard id="p5-03" label="P5-03 · 已指派 · 新進駕駛（誠實揭露，無假星等）" width={W} height={H}><F><P5_S03/></F></DCArtboard>
         <DCArtboard id="p5-04" label="P5-04 · 改派中 · 舊車卡進入已取消指派" width={W} height={H}><F><P5_S04/></F></DCArtboard>
         <DCArtboard id="p5-05" label="P5-05 · 改派完成 · 車牌變更高亮 + 14:31 活動紀錄" width={W} height={H}><F><P5_S05/></F></DCArtboard>
-        <DCArtboard id="p5-06" label="P5-06 · 司機已抵達 · 收費取消窗口 + 安全帶提醒" width={W} height={H}><F><P5_S06/></F></DCArtboard>
+        <DCArtboard id="p5-06" label="P5-06 · 司機已抵達 · 取消不收費 + 安全帶提醒" width={W} height={H}><F><P5_S06/></F></DCArtboard>
         <DCArtboard id="p5-07" label="P5-07 · 行程進行中 · 位置 stale 提示" width={W} height={H}><F><P5_S07/></F></DCArtboard>
       </DCSection>
       <DCSection id="post" title="02 · 行程後 P5-08 ~ 10" subtitle="評價（星等 ≥44px + 文字標籤 + tags）→ 送出 → 電子乘車證明">
@@ -54,10 +54,10 @@ function App(){
         <DCArtboard id="p5-12" label="P5-12 · 無法直接聯絡司機 → 客服" width={W} height={H}><F><P5_S12/></F></DCArtboard>
         <DCArtboard id="p5-a04" label="P5-A04 · 暫時無法取得正式報價" width={W} height={H}><F><P5_A04/></F></DCArtboard>
       </DCSection>
-      <DCSection id="public" title="04 · 公開頁 P5-A03" subtitle="公開車資版本（active）· 生效日 · 備查文號 · 車資變更規則">
+      <DCSection id="public" title="04 · 公開頁 P5-A03" subtitle="公開車資版本（active）· 生效日 · 運價依據 · 車資變更規則">
         <DCArtboard id="p5-a03" label="P5-A03 · 公開計費說明頁 /fares" width={W} height={H}><F><P5_A03/></F></DCArtboard>
       </DCSection>
-      <DCSection id="auth-account" title="05 · 登入與帳號 (PAX-AUTH-CANVAS-20261010)" subtitle="登入入口 · 手機/Email 驗證 · 第三方登入 · 帳號管理 · 行程紀錄 · 付款管理">
+      <DCSection id="auth-account" title="05 · 登入與帳號 (PAX-AUTH-CANVAS-20261010) · 已由 docs/05-ui/passenger-app-design-20261015 取代" subtitle="登入入口 · 手機/Email 驗證 · 第三方登入 · 帳號管理 · 行程紀錄 · 付款管理">
         <DCArtboard id="a-01" label="A-01 · 登入入口 · 已啟用方式" width={W} height={H}><F><P5A_S01/></F></DCArtboard>
         <DCArtboard id="a-01a" label="A-01a · 登入入口 · 部分啟用方式" width={W} height={H}><F><P5A_S01a/></F></DCArtboard>
         <DCArtboard id="a-02" label="A-02 · 登入入口 · 無可用方式空狀態" width={W} height={H}><F><P5A_S02/></F></DCArtboard>

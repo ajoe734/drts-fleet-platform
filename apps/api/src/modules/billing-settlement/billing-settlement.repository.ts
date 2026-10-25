@@ -980,6 +980,30 @@ export class BillingSettlementRepository {
     };
   }
 
+  // Canonical cross-instance read used by the service to refresh its warm
+  // in-memory cache: a plan published on another API instance must become
+  // visible here without waiting for this process's own onModuleInit.
+  async loadDriverFeePlans(): Promise<DriverFeePlanRecord[]> {
+    if (!this.isEnabled()) {
+      return [];
+    }
+
+    const feePlansResult = await this.databaseService!.query<JsonRecordRow>(
+      `
+        SELECT record
+        FROM billing.phase1_driver_fee_plans
+        ORDER BY published_at DESC
+      `,
+    );
+
+    return feePlansResult.rows.map((row) =>
+      this.parseRecord<DriverFeePlanRecord>(
+        row.record,
+        "billing.phase1_driver_fee_plans",
+      ),
+    );
+  }
+
   async listLiveCompletedTenantTrips(
     tenantId: string,
     periodStart: string,

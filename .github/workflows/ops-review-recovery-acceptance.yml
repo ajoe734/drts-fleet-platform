@@ -38,7 +38,7 @@ env:
 
 jobs:
   real-ops-recovery:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Exercise the original dispatch eligibility response and Ops correction.
     timeout-minutes: 25
     services:

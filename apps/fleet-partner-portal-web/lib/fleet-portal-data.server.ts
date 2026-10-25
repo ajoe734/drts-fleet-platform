@@ -121,7 +121,7 @@ export type FleetCase = {
   cat: string;
   driver: string;
   severity: "high" | "medium" | "low";
-  responsibility: "fleet" | "shared" | "platform";
+  responsibility: "fleet" | "shared" | "platform" | "unattributed";
   status: string;
   actionDescriptor?: FleetCaseItem["actionDescriptor"];
   sla: "breached" | "on_track";
@@ -1297,7 +1297,7 @@ export interface FleetCaseItem {
   driver: string;
   driverId: string;
   severity: "high" | "normal" | "medium" | "low" | "critical";
-  responsibility: "fleet" | "shared" | "platform";
+  responsibility: "fleet" | "shared" | "platform" | "unattributed";
   fleetPartnerId: string;
   status: string;
   slaDueAt: string;

@@ -2838,6 +2838,21 @@ export class OwnedMobilityService
       .catch(() => null);
     if (!current) return missing;
     const location = current.currentLocation;
+    // Prefer the actual GPS observation time over server receive time, matching
+    // the same -5s..60s window the dropoff route binding already enforces via
+    // passengerDropoffObservationKey; a buffered-upload fix stays "fresh" by
+    // receipt time alone but must not pass a live ETA to the passenger.
+    const locationObservationAgeMs = location
+      ? Date.now() - Date.parse(location.recordedAt)
+      : NaN;
+    const isLocationObservationCurrent =
+      Number.isFinite(locationObservationAgeMs) &&
+      locationObservationAgeMs >= -5_000 &&
+      locationObservationAgeMs < 60_000;
+    const passengerLocationFreshness =
+      current.locationFreshness === "fresh" && !isLocationObservationCurrent
+        ? "stale"
+        : current.locationFreshness;
     const waitingForPickup = [
       "assigned",
       "driver_accepted",
@@ -2846,7 +2861,7 @@ export class OwnedMobilityService
     const pickup = assignment.routeFare?.pickup;
     const eta =
       waitingForPickup &&
-      current.locationFreshness === "fresh" &&
+      passengerLocationFreshness === "fresh" &&
       location &&
       pickup &&
       Number.isFinite(pickup.lat) &&
@@ -2855,11 +2870,32 @@ export class OwnedMobilityService
             .getDriverEta?.(assignment.driver.driverId, pickup.lat, pickup.lng)
             .catch(() => null)
         : null;
+    const isOnTripOrder = order.status === "on_trip";
+    const dropoffRoute = isOnTripOrder
+      ? await this.resolvePassengerDropoffRoute(order, assignment, current)
+      : null;
+    // getDriverEta or resolvePassengerDropoffRoute above can each block long
+    // enough (an authority storage lock or route provider call) for this same
+    // GPS fix to age past the observation window between the freshness check
+    // and this return; recheck the observation age after both awaits, not
+    // just the pre-await classification.
+    const finalLocationAgeMs = location
+      ? Date.now() - Date.parse(location.recordedAt)
+      : NaN;
+    const isLocationObservationStillCurrent =
+      Number.isFinite(finalLocationAgeMs) &&
+      finalLocationAgeMs >= -5_000 &&
+      finalLocationAgeMs < 60_000;
+    const finalLocationFreshness =
+      passengerLocationFreshness === "fresh" &&
+      !isLocationObservationStillCurrent
+        ? "stale"
+        : passengerLocationFreshness;
     return {
       assignmentId: assignment.assignmentId,
       driverId: assignment.driver.driverId,
       vehicleId: assignment.vehicle.vehicleId,
-      locationFreshness: current.locationFreshness,
+      locationFreshness: finalLocationFreshness,
       location: location
         ? {
             lat: location.lat,
@@ -2868,16 +2904,15 @@ export class OwnedMobilityService
             recordedAt: location.recordedAt,
           }
         : null,
-      pickupEta: eta
-        ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
-        : null,
-      ...(order.status === "on_trip"
+      pickupEta:
+        eta && isLocationObservationStillCurrent
+          ? { minutes: eta.etaMinutes, calculatedAt: eta.calculatedAt }
+          : null,
+      ...(isOnTripOrder
         ? {
-            dropoffRoute: await this.resolvePassengerDropoffRoute(
-              order,
-              assignment,
-              current,
-            ),
+            dropoffRoute: isLocationObservationStillCurrent
+              ? dropoffRoute
+              : null,
           }
         : {}),
     };
@@ -16437,6 +16472,14 @@ export class OwnedMobilityService
       location: null,
       pickupEta: null,
       dropoffRoute: null,
+      pickupPoint:
+        order.pickup.lat != null && order.pickup.lng != null
+          ? { lat: order.pickup.lat, lng: order.pickup.lng }
+          : null,
+      dropoffPoint:
+        order.dropoff.lat != null && order.dropoff.lng != null
+          ? { lat: order.dropoff.lat, lng: order.dropoff.lng }
+          : null,
     };
     try {
       const current =
@@ -16451,7 +16494,22 @@ export class OwnedMobilityService
       )
         return result;
       const point = current.currentLocation;
-      result.locationFreshness = current.locationFreshness;
+      // Prefer the actual GPS observation time over server receive time, matching
+      // the same -5s..60s window the dropoff/route validation below already
+      // enforces; a buffered-upload fix stays "fresh" by receipt time alone but
+      // must not pass a live pickup/dropoff ETA to the referral passenger.
+      const pointObservationAgeMs = point
+        ? Date.now() - Date.parse(point.recordedAt)
+        : NaN;
+      const isPointObservationCurrent =
+        Number.isFinite(pointObservationAgeMs) &&
+        pointObservationAgeMs >= -5_000 &&
+        pointObservationAgeMs < 60_000;
+      const passengerLocationFreshness =
+        current.locationFreshness === "fresh" && !isPointObservationCurrent
+          ? "stale"
+          : current.locationFreshness;
+      result.locationFreshness = passengerLocationFreshness;
       result.location = point
         ? {
             lat: point.lat,
@@ -16460,7 +16518,7 @@ export class OwnedMobilityService
             recordedAt: point.recordedAt,
           }
         : null;
-      if (current.locationFreshness !== "fresh" || !point) return result;
+      if (passengerLocationFreshness !== "fresh" || !point) return result;
       if (
         ["assigned", "driver_accepted", "enroute_pickup"].includes(
           order.status,
@@ -16563,6 +16621,10 @@ export class OwnedMobilityService
         await this.regulatoryRegistryService.getDriverTrackingStatus(
           assignment.driverId,
         );
+      // The provider await above can take long enough for this same GPS fix to
+      // age past the observation window; recheck recordedAt age here too, not
+      // just whether the receipt-time classification or identity changed.
+      const finalPointAgeMs = Date.now() - Date.parse(point.recordedAt);
       if (
         !latestOrder ||
         latestOrder.status !== order.status ||
@@ -16571,6 +16633,9 @@ export class OwnedMobilityService
         latestCurrent.currentVehicleId !== assignment.vehicleId ||
         latestCurrent.currentTaskId !== current.currentTaskId ||
         latestCurrent.locationFreshness !== "fresh" ||
+        !Number.isFinite(finalPointAgeMs) ||
+        finalPointAgeMs < -5_000 ||
+        finalPointAgeMs >= 60_000 ||
         latestCurrent.currentLocation?.recordedAt !== point.recordedAt ||
         latestCurrent.currentLocation?.lat !== point.lat ||
         latestCurrent.currentLocation?.lng !== point.lng
@@ -16884,6 +16949,7 @@ export class OwnedMobilityService
     const fareNight = hasComponents ? captured.nightMinor / 100 : null;
     const completedAt = (order as unknown as Record<string, unknown>)
       .completedAt as string | undefined;
+    const e04 = await this.referralReceiptE04Facts(order, details.task);
 
     return {
       orderId: order.orderId,
@@ -16910,6 +16976,84 @@ export class OwnedMobilityService
       feeConfirmation:
         order.referralPassengerLifecycle?.feeConfirmation ?? null,
       downloadUrl: `/api/referral/receipt/${order.orderId}/download`,
+      ...e04,
+    };
+  }
+
+  /**
+   * E-04 fields for the informal Referral receipt, read from the same
+   * completed task, registry, operator and payment-method authorities that
+   * `captureMultiTaxiE04` uses. Read-only: this never issues a certificate,
+   * persists a snapshot or asserts payment. Absent authority stays null.
+   */
+  private async referralReceiptE04Facts(
+    order: OwnedOrderRecord,
+    task: DriverTaskRecord | undefined,
+  ): Promise<
+    Pick<
+      ReferralPassengerReceipt,
+      | "fleetOperatorName"
+      | "driverSurname"
+      | "driverSurnameSource"
+      | "driverRegistrationMasked"
+      | "pickupAt"
+      | "dropoffAt"
+      | "distanceMeters"
+      | "paymentMethodDisplay"
+      | "certificateNo"
+    >
+  > {
+    const completed = task?.status === "completed" ? task : undefined;
+    const instant = (value: string | null | undefined) =>
+      value && Number.isFinite(Date.parse(value)) ? value : null;
+    const operatorId = order.operatingAuthorizationId
+      ? await this.receiptRegistryRepository?.findCompletionOperatorId(
+          order.operatingAuthorizationId,
+        )
+      : null;
+    const fleetOperatorName = operatorId
+      ? await this.receiptFleetRepository?.findReceiptOperatorName(operatorId)
+      : null;
+    const paymentMethodDisplay = order.passenger?.passengerId
+      ? await this.receiptPaymentMethods?.getReceiptDisplay(
+          order.passenger.passengerId,
+          order.paymentMethodTokenRef,
+        )
+      : null;
+    const identity =
+      completed?.driverId &&
+      this.regulatoryRegistryService.getDriverCompletionReceiptIdentity
+        ? await this.regulatoryRegistryService.getDriverCompletionReceiptIdentity(
+            completed.driverId,
+          )
+        : null;
+    // The completion-time snapshot on the task wins over the live profile.
+    const surname = completed?.driverSurname?.trim()
+      ? {
+          driverSurname: completed.driverSurname,
+          driverSurnameSource: completed.driverSurnameSource ?? null,
+        }
+      : identity?.surname
+        ? {
+            driverSurname: identity.surname.driverSurname,
+            driverSurnameSource: identity.surname.driverSurnameSource,
+          }
+        : { driverSurname: null, driverSurnameSource: null };
+    const km = completed?.actualDistanceKm;
+    return {
+      fleetOperatorName: fleetOperatorName ?? null,
+      ...surname,
+      driverRegistrationMasked: identity?.driverRegistrationMasked ?? null,
+      pickupAt: instant(completed?.startedAt),
+      dropoffAt: instant(completed?.completedAt),
+      distanceMeters:
+        typeof km === "number" && Number.isFinite(km) && km >= 0
+          ? Math.round(km * 1000)
+          : null,
+      paymentMethodDisplay: paymentMethodDisplay ?? null,
+      // Formal E-04 issuance is multi_taxi_direct only and is not reachable
+      // from this projection; an order number is never presented as one.
+      certificateNo: null,
     };
   }
 

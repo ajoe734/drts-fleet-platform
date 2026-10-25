@@ -94,8 +94,10 @@ const groups = {
   facebook: ["FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET"],
   otp: ["PASSENGER_OTP_PEPPER"],
   sms: [
-    "SMS_PROVIDER_API_KEY",
-    "SMS_PROVIDER_SENDER_ID",
+    "TWILIO_ACCOUNT_SID",
+    "TWILIO_API_KEY_SID",
+    "TWILIO_API_KEY_SECRET",
+    "TWILIO_FROM_NUMBER",
     "PASSENGER_OTP_PEPPER",
   ],
   payment: [

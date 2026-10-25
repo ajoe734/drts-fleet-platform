@@ -167,6 +167,12 @@
       "amended_at": "2026-10-19",
       "scope": "Append sos_duty_allocations V0124 only; all previous entries and V0122/V0123 reservations remain owned by their original tasks.",
       "reason": "Complete the original S-3 §24 outbox acknowledged semantics after normal Root exact scope/number coordination. Existing migration collision collector includes this new group; no existing assertion is weakened."
+    },
+    {
+      "amended_by_task_id": "BUREAU-R04-MONTHLY-RATING-COACHING-20261024",
+      "amended_at": "2026-10-24",
+      "scope": "Appended referral_monthly_rating_governance_allocations V0130 only; all previous allocations, amendments and task ownership entries remain unchanged",
+      "reason": "Registers the R04 monthly driver rating governance migration V0130__referral_monthly_rating_governance.sql at accepted protected dev 352d347e25cfcaecc2ab21f376b6976cc0944486, whose previous highest reserved migration is V0129 in referral_passenger_fee_consent_allocations."
     }
   ],
   "voice_application_allocations": [
@@ -834,6 +840,30 @@
         "Canonical tenant/partner/program/entry/passenger/version unique first acknowledgement; original time immutable. No passenger.accounts FK.",
         "Order/quote/fee snapshot/normal notification route share the existing transaction and owned quote; server time, disclosure hash and real quote tariff kept distinct.",
         "Exact committed old intent can replay without fee backfill; no historical quote-consumption/creation/privacy time is transformed into fee agreement."
+      ]
+    }
+  ],
+  "referral_monthly_rating_governance_allocations": [
+    {
+      "task_id": "BUREAU-R04-MONTHLY-RATING-COACHING-20261024",
+      "version": "V0130",
+      "migration_filename": "V0130__referral_monthly_rating_governance.sql",
+      "domain": "referral_monthly_rating_governance",
+      "target_schema": "reporting",
+      "primary_tables": [
+        "reporting.referral_monthly_rating_governance_records"
+      ],
+      "referenced_tables": [
+        "ops.phase1_owned_orders",
+        "ops.phase1_driver_tasks",
+        "ops.phase1_dispatch_assignments"
+      ],
+      "description": "Traffic Bureau R04 monthly driver rating coaching (< 4.0) and three-consecutive-month low rating (< 3.5) termination review governance records with audited handling outcomes.",
+      "downstream_tasks": [],
+      "table_invariants": [
+        "UNIQUE (driver_id, period_month, rule_type) enforces per-driver, per-Asia/Taipei-month, per-rule idempotency so coaching and termination_review records can both exist for the same driver and month without overwriting each other.",
+        "Idempotent evaluation upserts aggregate fields (average_rating, rating_count, consecutive_low_months, triggered_months, monthly_breakdown) while preserving recorded handling status, outcome, outcome_reason, handled_by_actor_id, handled_at and audit_id.",
+        "CHECK constraints enforce period_month YYYY-MM format, rule_type IN ('coaching', 'termination_review'), status IN ('pending', 'coached', 'terminated', 'dismissed'), and consistency between pending/null outcome and handled outcome/reason/actor/timestamp."
       ]
     }
   ]

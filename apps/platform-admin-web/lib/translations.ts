@@ -1562,6 +1562,52 @@ const en = {
   "referralMonthly.no": "No",
   "referralMonthly.empty": "No ratings for this month / driver.",
   "referralMonthly.tagSeparator": ", ",
+  "referralMonthly.governanceSectionAria":
+    "Driver monthly rating coaching and consecutive low-rating termination handling",
+  "referralMonthly.governanceTitle":
+    "Driver monthly rating coaching and consecutive low-rating termination handling (R04)",
+  "referralMonthly.governanceRuleSummary":
+    "Rule thresholds: monthly average below {coachingThreshold} requires coaching; {consecutiveMonths} consecutive months below {terminationThreshold} requires termination review. Months with no ratings are recorded as no_data (not 0) and break the consecutive low-rating streak.",
+  "referralMonthly.governanceEvaluateButton":
+    "Evaluate / load multi-month coaching and termination records",
+  "referralMonthly.governanceLoadFailed":
+    "Unable to load coaching and termination records.",
+  "referralMonthly.governanceSaveFailed": "Unable to save handling outcome.",
+  "referralMonthly.governanceReasonRequired": "Please enter a handling reason.",
+  "referralMonthly.governanceTableCaption":
+    "Driver monthly rating coaching and termination handling records",
+  "referralMonthly.governanceColRuleType": "Rule type",
+  "referralMonthly.governanceColTriggeredMonths": "Triggered months",
+  "referralMonthly.governanceColMonthlyBreakdown":
+    "Multi-month average breakdown",
+  "referralMonthly.governanceColHandlingStatus": "Handling status and record",
+  "referralMonthly.governanceColActions": "Handling actions",
+  "referralMonthly.governanceRuleCoaching":
+    "Monthly average below {threshold} requires coaching",
+  "referralMonthly.governanceRuleTermination":
+    "{consecutiveMonths} consecutive months below {threshold} requires termination",
+  "referralMonthly.governanceBreakdownNoData": "{month}: No data (no_data)",
+  "referralMonthly.governanceBreakdownRated":
+    "{month}: {average} ({count} ratings)",
+  "referralMonthly.governanceOutcomeLabel": "Handling outcome",
+  "referralMonthly.governanceOutcomeCoached": "Coached (coached)",
+  "referralMonthly.governanceOutcomeTerminated": "Terminated (terminated)",
+  "referralMonthly.governanceOutcomeDismissed": "Dismissed (dismissed)",
+  "referralMonthly.governanceOutcomePending": "Pending (pending)",
+  "referralMonthly.governanceStatusDetail":
+    "{outcome} | Reason: {reason} | Handled by: {actor} | Audit: {audit}",
+  "referralMonthly.governanceReasonLabel": "Handling reason",
+  "referralMonthly.governanceReasonPlaceholder": "Enter handling reason",
+  "referralMonthly.governanceSaveButton": "Save handling outcome",
+  "referralMonthly.governanceOutcomeSelectAria":
+    "Handling outcome {driverId} {ruleType}",
+  "referralMonthly.governanceReasonInputAria":
+    "Handling reason {driverId} {ruleType}",
+  "referralMonthly.governanceSaveButtonAria":
+    "Save handling {driverId} {ruleType}",
+  "referralMonthly.governanceEmpty":
+    "No drivers require coaching or termination review for this month.",
+  "referralMonthly.governanceBreakdownSeparator": " / ",
   "fareManage.inputError":
     "Complete the required fields with valid whole TWD amounts, increments and times.",
   "fareManage.revisionError":
@@ -4939,6 +4985,43 @@ const zh: typeof en = {
   "referralMonthly.no": "否",
   "referralMonthly.empty": "此月份／駕駛沒有評價。",
   "referralMonthly.tagSeparator": "、",
+  "referralMonthly.governanceSectionAria": "司機月評分輔導與連續低分終止處理",
+  "referralMonthly.governanceTitle": "司機月評分輔導與連續低分終止處理（R04）",
+  "referralMonthly.governanceRuleSummary":
+    "規則門檻：月平均低於 {coachingThreshold} 要輔導；連續 {consecutiveMonths} 個月低於 {terminationThreshold} 要終止。無評價月份視為「無資料（no_data）」不計 0 分，並中斷連續低分月份計算。",
+  "referralMonthly.governanceEvaluateButton": "評估／載入跨月輔導與終止紀錄",
+  "referralMonthly.governanceLoadFailed": "無法載入輔導與終止紀錄。",
+  "referralMonthly.governanceSaveFailed": "處置結果儲存失敗。",
+  "referralMonthly.governanceReasonRequired": "請輸入處置原因。",
+  "referralMonthly.governanceTableCaption": "司機月評分輔導與終止處理紀錄",
+  "referralMonthly.governanceColRuleType": "規則類型",
+  "referralMonthly.governanceColTriggeredMonths": "觸發月份",
+  "referralMonthly.governanceColMonthlyBreakdown": "跨月平均明細",
+  "referralMonthly.governanceColHandlingStatus": "處置狀態與紀錄",
+  "referralMonthly.governanceColActions": "處置操作",
+  "referralMonthly.governanceRuleCoaching": "月平均低於 {threshold} 要輔導",
+  "referralMonthly.governanceRuleTermination":
+    "連續 {consecutiveMonths} 個月低於 {threshold} 要終止",
+  "referralMonthly.governanceBreakdownNoData": "{month}: 無資料 (no_data)",
+  "referralMonthly.governanceBreakdownRated": "{month}: {average} ({count}筆)",
+  "referralMonthly.governanceOutcomeLabel": "處置結果",
+  "referralMonthly.governanceOutcomeCoached": "已輔導 (coached)",
+  "referralMonthly.governanceOutcomeTerminated": "已終止 (terminated)",
+  "referralMonthly.governanceOutcomeDismissed": "不予處置 (dismissed)",
+  "referralMonthly.governanceOutcomePending": "待處理 (pending)",
+  "referralMonthly.governanceStatusDetail":
+    "{outcome}｜原因：{reason}｜處理人：{actor}｜稽核：{audit}",
+  "referralMonthly.governanceReasonLabel": "處置原因",
+  "referralMonthly.governanceReasonPlaceholder": "請輸入處置原因",
+  "referralMonthly.governanceSaveButton": "儲存處置結果",
+  "referralMonthly.governanceOutcomeSelectAria":
+    "處置結果 {driverId} {ruleType}",
+  "referralMonthly.governanceReasonInputAria":
+    "處置原因 {driverId} {ruleType}",
+  "referralMonthly.governanceSaveButtonAria":
+    "儲存處置 {driverId} {ruleType}",
+  "referralMonthly.governanceEmpty": "此月份無需輔導或終止檢討之駕駛。",
+  "referralMonthly.governanceBreakdownSeparator": " ／ ",
   "fareManage.inputError":
     "請填妥必要欄位，並使用有效的整數新臺幣金額、計價單位及時間。",
   "fareManage.revisionError":

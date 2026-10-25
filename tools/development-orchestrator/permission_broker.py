@@ -298,6 +298,7 @@ SAFE_TOOLS = {"Read", "Grep", "Glob", "LS", "Task", "TodoRead", "TodoWrite", "Re
               "ExitPlanMode", "EnterPlanMode", "AskUserQuestion", "ExitWorktree", "EnterWorktree"}
 EDIT_TOOLS = {"Edit", "MultiEdit", "Write"}
 NETWORK_TOOLS = {"WebFetch", "WebSearch"}
+CLOUD_RELAY_TRIGGER_ACTIONS = {"create", "get", "list_runs", "get_run_log"}
 
 SAFE_PYTHON_ONE_LINER_MARKERS = (
     "print(",
@@ -1723,12 +1724,58 @@ def _check_claude_allow_rules(tool_name: str, tool_input: dict[str, Any]) -> boo
     return False
 
 
+def _cloud_relay_decision(tool_name: str, tool_input: dict[str, Any]) -> tuple[str, str] | None:
+    """Rules for a Claude cloud relay session (adapters/claude_cloud_relay.py).
+
+    The adapter marks a relay with ORCH_EXECUTION=cloud_relay and the cloud
+    environment it may use. A relay hands the task to one run-once Claude Code
+    routine in that environment and follows it; it never edits files here.
+    Every other session gets no RemoteTrigger rule, so the call defers.
+    """
+    if (os.environ.get("ORCH_EXECUTION") or "").strip() != "cloud_relay":
+        return None
+    if tool_name in EDIT_TOOLS or tool_name == "NotebookEdit":
+        return "deny", "A cloud relay does not edit locally; the Claude Code cloud session implements the task."
+    if tool_name != "RemoteTrigger":
+        return None
+    action = str(tool_input.get("action") or "").strip()
+    if action not in CLOUD_RELAY_TRIGGER_ACTIONS:
+        return None
+    if action == "create":
+        body = tool_input.get("body") if isinstance(tool_input.get("body"), dict) else {}
+        ccr = ((body.get("job_config") or {}) if isinstance(body.get("job_config"), dict) else {}).get("ccr") or {}
+        expected = (os.environ.get("ORCH_CLOUD_ENVIRONMENT_ID") or "").strip()
+        if (
+            not str(body.get("run_once_at") or "").strip()
+            or str(body.get("cron_expression") or "").strip()
+            or not expected
+            or not isinstance(ccr, dict)
+            or str(ccr.get("environment_id") or "").strip() != expected
+        ):
+            return None
+    return "allow", f"Cloud relay may {action} its run-once Claude Code routine."
+
+
 def evaluate_tool_request(tool_name: str, tool_input: dict[str, Any] | None, config: dict[str, Any]) -> dict[str, Any]:
     tool_input = tool_input or {}
     decision = "defer"
     reason = f"Deferred by default for {tool_name}."
     risk_class = "unknown"
     suggested_rule = None
+
+    relay_decision = _cloud_relay_decision(tool_name, tool_input)
+    if relay_decision is not None:
+        decision, reason = relay_decision
+        return {
+            "decision": decision,
+            "reason": reason,
+            "risk_class": "cloud_relay",
+            "suggested_rule": None,
+            "tool_name": tool_name,
+            "tool_input": tool_input,
+            "evaluated_at": utc_now(),
+            "policy_default_mode": config.get("providers", {}).get("claude", {}).get("approval", {}).get("rule_default_mode", "acceptEdits"),
+        }
 
     if _check_claude_allow_rules(tool_name, tool_input):
         return {"decision": "allow", "reason": "Matched Claude settings allow rule.", "risk_class": "settings_allowed", "suggested_rule": None}

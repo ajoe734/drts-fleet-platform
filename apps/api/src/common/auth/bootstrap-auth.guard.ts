@@ -177,6 +177,7 @@ const REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS = new Set([
   "internal:scheduled-tasks:mail-outbox:drain",
   "internal:scheduled-tasks:approval-timeout-reminders:run",
   "internal:scheduled-tasks:billing-monthly:run",
+  "internal:scheduled-tasks:regulatory-expiry:run",
 ]);
 
 interface ResolvedBootstrapAuthPolicy {

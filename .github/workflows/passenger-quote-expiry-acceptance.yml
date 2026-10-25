@@ -31,7 +31,7 @@ env:
 
 jobs:
   real-quote-expiry:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Includes builds plus the unchanged real15minute wait. The original shared
     # journeys retain their12minute test and25minute job envelopes.
     timeout-minutes: 35
