@@ -98,7 +98,7 @@ const routeSpecs: RouteSpec[] = [
     screenshot: "11-trip.png",
     label: "trip",
     path: embedPath("handoff", "trip"),
-    markers: [/重開 App 仍可找回/, /取消行程/],
+    markers: [/請以同一身分驗證後查詢/, /取消行程/],
   },
   {
     screenshot: "12-trips.png",
