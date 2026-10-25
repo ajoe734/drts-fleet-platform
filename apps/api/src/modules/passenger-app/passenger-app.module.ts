@@ -24,7 +24,7 @@ import {
   otpOptionsFromEnv,
   PassengerOtpService,
 } from "./otp/passenger-otp.service";
-import { SMS_PORT, UnconfiguredSmsPort } from "./otp/sms.port";
+import { createSmsPortFromEnv, SMS_PORT } from "./otp/sms.port";
 import { FacebookDataDeletionController } from "./oauth/facebook-data-deletion.controller";
 import { FacebookDataDeletionService } from "./oauth/facebook-data-deletion.service";
 import { PassengerBookingController } from "./booking/passenger-booking.controller";
@@ -153,7 +153,9 @@ import {
       provide: SMS_PORT,
       inject: [ReviewSmsPort],
       useFactory: (reviewSms: ReviewSmsPort) =>
-        reviewDemoEnabled(process.env) ? reviewSms : new UnconfiguredSmsPort(),
+        reviewDemoEnabled(process.env)
+          ? reviewSms
+          : createSmsPortFromEnv(process.env),
     },
     { provide: OTP_OPTIONS, useFactory: () => otpOptionsFromEnv(process.env) },
     {
