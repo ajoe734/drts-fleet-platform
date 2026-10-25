@@ -239,6 +239,35 @@ describe("BUREAU-R14: Scheduled Reconciliation Route & Provisioning Scripts", ()
     expect(response.meta.requestId).toBe("req-r14-sched-001");
     expect(response.data.preexpiry?.eventsCreated).toBeGreaterThan(0);
     expect(response.data.preexpiry?.intentsCreated).toBeGreaterThan(0);
+
+    // F1 regression: 2nd firing within the 5-minute OIDC token cache window reuses the same token
+    // and must succeed via REPLAY_TOLERANT_SYSTEM_ROUTE_KEYS (not fail with WORKLOAD_ASSERTION_REPLAYED / JWT_INVALID)
+    const req2: Record<string, unknown> = {
+      method: "POST",
+      originalUrl: "/api/internal/scheduled-tasks/regulatory-expiry/run",
+      url: "/api/internal/scheduled-tasks/regulatory-expiry/run",
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    };
+    const context2 = {
+      getHandler: () => RegulatoryExpiryScheduledController.prototype.run,
+      getClass: () => RegulatoryExpiryScheduledController,
+      switchToHttp: () => ({
+        getRequest: () => req2,
+      }),
+    } as unknown as Parameters<BootstrapAuthGuard["canActivate"]>[0];
+
+    const allowedSecond = await guard.canActivate(context2);
+    expect(allowedSecond).toBe(true);
+    const secondResponse = await scheduledController.run(
+      { asOf: "2026-12-10T00:01:00.000Z" },
+      req2.identity as never,
+      "req-r14-sched-002",
+    );
+    expect(secondResponse.meta.requestId).toBe("req-r14-sched-002");
+    expect(secondResponse.data.preexpiry?.eventsCreated).toBe(0);
+    expect(secondResponse.data.preexpiry?.intentsCreated).toBe(0);
   });
 
   it("rejects non-system or wrong-scope identities in RegulatoryExpiryScheduledController", async () => {
