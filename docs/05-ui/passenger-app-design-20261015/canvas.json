@@ -1,0 +1,334 @@
+{
+ "v": 3,
+ "attachments": {},
+ "boards": {
+  "Main.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1314,
+   "h": 1040,
+   "title": "AU-01 登入入口",
+   "page": "auth"
+  },
+  "AU-02.dc.html": {
+   "x": 0,
+   "y": 1160,
+   "w": 1736,
+   "h": 1040,
+   "title": "AU-02 輸入手機號碼",
+   "page": "auth"
+  },
+  "AU-03.dc.html": {
+   "x": 0,
+   "y": 2320,
+   "w": 2580,
+   "h": 1040,
+   "title": "AU-03 輸入驗證碼",
+   "page": "auth"
+  },
+  "AU-04.dc.html": {
+   "x": 0,
+   "y": 3480,
+   "w": 2158,
+   "h": 1040,
+   "title": "AU-04 輸入 Email",
+   "page": "auth"
+  },
+  "AU-05.dc.html": {
+   "x": 0,
+   "y": 4640,
+   "w": 1314,
+   "h": 1040,
+   "title": "AU-05 第三方登入處理中",
+   "page": "auth"
+  },
+  "AU-06.dc.html": {
+   "x": 0,
+   "y": 5800,
+   "w": 1314,
+   "h": 1040,
+   "title": "AU-06 第三方登入失敗或取消",
+   "page": "auth"
+  },
+  "AU-07.dc.html": {
+   "x": 0,
+   "y": 6960,
+   "w": 470,
+   "h": 1040,
+   "title": "AU-07 登入方式已屬於其他帳號",
+   "page": "auth"
+  },
+  "AU-08.dc.html": {
+   "x": 0,
+   "y": 8120,
+   "w": 892,
+   "h": 1040,
+   "title": "AU-08 同意服務條款與隱私權",
+   "page": "auth"
+  },
+  "AC-01.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1314,
+   "h": 1040,
+   "title": "AC-01 帳號首頁",
+   "page": "account"
+  },
+  "AC-02.dc.html": {
+   "x": 0,
+   "y": 1160,
+   "w": 1314,
+   "h": 1040,
+   "title": "AC-02 編輯個人資料",
+   "page": "account"
+  },
+  "AC-03.dc.html": {
+   "x": 0,
+   "y": 2320,
+   "w": 1314,
+   "h": 1040,
+   "title": "AC-03 驗證聯絡手機",
+   "page": "account"
+  },
+  "AC-04.dc.html": {
+   "x": 0,
+   "y": 3480,
+   "w": 1736,
+   "h": 1040,
+   "title": "AC-04 登入方式管理",
+   "page": "account"
+  },
+  "AC-05.dc.html": {
+   "x": 0,
+   "y": 4640,
+   "w": 470,
+   "h": 1040,
+   "title": "AC-05 登出確認",
+   "page": "account"
+  },
+  "AC-06.dc.html": {
+   "x": 0,
+   "y": 5800,
+   "w": 2158,
+   "h": 1040,
+   "title": "AC-06 刪除帳號",
+   "page": "account"
+  },
+  "BK-01.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 2158,
+   "h": 1040,
+   "title": "BK-01 叫車表單",
+   "page": "booking"
+  },
+  "BK-02.dc.html": {
+   "x": 0,
+   "y": 1160,
+   "w": 2580,
+   "h": 1040,
+   "title": "BK-02 地址搜尋",
+   "page": "booking"
+  },
+  "BK-03.dc.html": {
+   "x": 0,
+   "y": 2320,
+   "w": 1314,
+   "h": 1040,
+   "title": "BK-03 地圖選點",
+   "page": "booking"
+  },
+  "BK-04.dc.html": {
+   "x": 0,
+   "y": 3480,
+   "w": 1314,
+   "h": 1040,
+   "title": "BK-04 預約時間",
+   "page": "booking"
+  },
+  "BK-05.dc.html": {
+   "x": 0,
+   "y": 4640,
+   "w": 1736,
+   "h": 1040,
+   "title": "BK-05 試算結果",
+   "page": "booking"
+  },
+  "TR-01.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1314,
+   "h": 1040,
+   "title": "TR-01 行程紀錄",
+   "page": "trips"
+  },
+  "TR-02.dc.html": {
+   "x": 0,
+   "y": 1160,
+   "w": 470,
+   "h": 1040,
+   "title": "TR-02 行程紀錄空狀態",
+   "page": "trips"
+  },
+  "TR-03.dc.html": {
+   "x": 0,
+   "y": 2320,
+   "w": 1736,
+   "h": 1040,
+   "title": "TR-03 客訴與遺失物",
+   "page": "trips"
+  },
+  "TR-04.dc.html": {
+   "x": 0,
+   "y": 3480,
+   "w": 470,
+   "h": 1040,
+   "title": "TR-04 申訴已送出",
+   "page": "trips"
+  },
+  "PM-01.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1314,
+   "h": 1040,
+   "title": "PM-01 付款方式",
+   "page": "payment"
+  },
+  "PM-02.dc.html": {
+   "x": 0,
+   "y": 1160,
+   "w": 2580,
+   "h": 1040,
+   "title": "PM-02 新增信用卡",
+   "page": "payment"
+  },
+  "PM-03.dc.html": {
+   "x": 0,
+   "y": 2320,
+   "w": 1314,
+   "h": 1040,
+   "title": "PM-03 叫車時選卡",
+   "page": "payment"
+  },
+  "PM-04.dc.html": {
+   "x": 0,
+   "y": 3480,
+   "w": 1314,
+   "h": 1040,
+   "title": "PM-04 扣款失敗／有未付款",
+   "page": "payment"
+  },
+  "PM-05.dc.html": {
+   "x": 0,
+   "y": 4640,
+   "w": 1314,
+   "h": 1040,
+   "title": "PM-05 刪除卡片",
+   "page": "payment"
+  }
+ },
+ "createdOnFiles": {
+  "at": "2026-10-10T13:06:53.215Z",
+  "v": 1
+ },
+ "designSystems": [],
+ "launch": {
+  "view": "canvas",
+  "page": "auth"
+ },
+ "notes": {
+  "auth-title": {
+   "x": 0,
+   "y": -300,
+   "text": "登入與註冊（AU）",
+   "kind": "title1",
+   "maxW": 2580,
+   "page": "auth"
+  },
+  "account-title": {
+   "x": 0,
+   "y": -300,
+   "text": "帳號管理（AC）",
+   "kind": "title1",
+   "maxW": 2158,
+   "page": "account"
+  },
+  "booking-title": {
+   "x": 0,
+   "y": -300,
+   "text": "叫車表單（BK）",
+   "kind": "title1",
+   "maxW": 2580,
+   "page": "booking"
+  },
+  "trips-title": {
+   "x": 0,
+   "y": -300,
+   "text": "行程紀錄、客訴與遺失物（TR）",
+   "kind": "title1",
+   "maxW": 1736,
+   "page": "trips"
+  },
+  "payment-title": {
+   "x": 0,
+   "y": -300,
+   "text": "付款（PM）",
+   "kind": "title1",
+   "maxW": 2580,
+   "page": "payment"
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "AU-02.dc.html",
+  "AU-03.dc.html",
+  "AU-04.dc.html",
+  "AU-05.dc.html",
+  "AU-06.dc.html",
+  "AU-07.dc.html",
+  "AU-08.dc.html",
+  "AC-01.dc.html",
+  "AC-02.dc.html",
+  "AC-03.dc.html",
+  "AC-04.dc.html",
+  "AC-05.dc.html",
+  "AC-06.dc.html",
+  "BK-01.dc.html",
+  "BK-02.dc.html",
+  "BK-03.dc.html",
+  "BK-04.dc.html",
+  "BK-05.dc.html",
+  "TR-01.dc.html",
+  "TR-02.dc.html",
+  "TR-03.dc.html",
+  "TR-04.dc.html",
+  "PM-01.dc.html",
+  "PM-02.dc.html",
+  "PM-03.dc.html",
+  "PM-04.dc.html",
+  "PM-05.dc.html"
+ ],
+ "pages": [
+  {
+   "id": "auth",
+   "name": "登入與註冊"
+  },
+  {
+   "id": "account",
+   "name": "帳號管理"
+  },
+  {
+   "id": "booking",
+   "name": "叫車表單"
+  },
+  {
+   "id": "trips",
+   "name": "行程紀錄與客訴"
+  },
+  {
+   "id": "payment",
+   "name": "付款"
+  }
+ ],
+ "title": "Design"
+}

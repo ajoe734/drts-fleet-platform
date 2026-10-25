@@ -307,7 +307,11 @@ export class BillingSettlementController {
   // (180/min, no block) instead of the global default 60/min + 5-min block.
   @Get("driver-fee-plans")
   @Throttle(READ_HEAVY_RATE_LIMIT)
-  listDriverFeePlans(@Headers("x-request-id") requestId?: string) {
+  async listDriverFeePlans(@Headers("x-request-id") requestId?: string) {
+    // A plan published on another already-warm API instance is only
+    // persisted canonically; this instance's in-memory cache never reloads
+    // on its own, so the read must refresh from the canonical source first.
+    await this.billingSettlementService.refreshDriverFeePlansFromCanonicalSource();
     const items = this.billingSettlementService.listDriverFeePlans();
     return toApiSuccessEnvelope(toApiListData(items), requestId);
   }

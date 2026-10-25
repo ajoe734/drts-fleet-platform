@@ -1,9 +1,9 @@
 // p5-e-screens.jsx — G201011 送審補件：E-18 行程評分 / E-18b 低分導流 / E-19a 費用與優惠說明 / E-19b 下單前確認。
-// 費用政策文字為定稿，不得改寫。客服 02-2944-0985。運價寫「依主管機關核定運價」，不虛構文號。
+// 費用政策依 G201011 與 2026-10-10 使用者決定：取消一律不收費（含派車後）。其餘定稿文字不得改寫。客服 02-2944-0985。運價寫「依主管機關核定運價」，不虛構文號。
 const E_FEES = [
   ['車資','依主管機關核定運價計費（含延滯計時）'],
   ['預約費','不另收取'],
-  ['取消費','不收取（指派前取消不收費）'],
+  ['取消費','不收取（含派車後取消）'],
   ['等待費','不另收取（車資依核定運價含延滯計時計收）'],
   ['遺失物返還補償金','不收取；如要求專程送還，所生車資由乘客負擔並於送還前確認'],
   ['車內汙損清潔費','由可歸責之乘客負擔實際清潔費用，實支實付、憑單據計收'],
@@ -46,7 +46,7 @@ function P5_E18({ stars=4 }) {
 }
 // E-19a 首頁費用與優惠說明
 function P5_E19a() {
-  return <P5Phone url="(App Domain Pending)/fares"><P5Header status="費用與優惠說明" order="公開資訊"/>
+  return <P5Phone url="ride.smarttransport.tw/fares"><P5Header status="費用與優惠說明" order="公開資訊"/>
     <div style={{ margin:'12px 14px 10px', fontSize:12.5, color:P5.mut }}>下單前請確認以下收費規則</div>
     <P5Card>
       {E_FEES.map(([k,v],i)=>(
@@ -64,7 +64,7 @@ function P5_E19a() {
 // E-19b 下單前確認（bottom sheet）
 function P5_E19b({ checked=true }) {
   const R=(k,v,mono)=><div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'6px 0', fontSize:12.5 }}><span style={{ color:P5.mut }}>{k}</span><span style={{ fontWeight:600, fontFamily:mono?P5.mono:'inherit', textAlign:'right' }}>{v}</span></div>;
-  return <P5Phone url="(App Domain Pending)/r/••••K2"><P5Header status="建立乘車需求"/>
+  return <P5Phone url="ride.smarttransport.tw/r/••••K2"><P5Header status="建立乘車需求"/>
     <div style={{ flex:1, position:'relative', display:'flex', flexDirection:'column' }}>
       <div style={{ flex:1, background:'rgba(22,33,44,.45)' }}/>
       <div style={{ background:P5.surface, borderRadius:'20px 20px 0 0', padding:'10px 14px 14px', boxShadow:'0 -8px 30px rgba(0,0,0,.18)' }}>
@@ -75,7 +75,7 @@ function P5_E19b({ checked=true }) {
         </div>
         <div style={{ border:'1px solid '+P5.line, borderRadius:12, padding:'10px 14px', marginBottom:10 }}>
           <div style={{ fontSize:13, fontWeight:700, marginBottom:6 }}>費用規則</div>
-          {['車資依核定運價計費（含延滯計時）','預約費、取消費（指派前）、等待費：不另收','國道通行費經您同意行駛後實收','車內汙損清潔費實支實付'].map(t=><div key={t} style={{ display:'flex', gap:7, fontSize:12, color:P5.ink, padding:'3px 0' }}><span style={{ color:P5.ok }}>✓</span><span>{t}</span></div>)}
+          {['車資依核定運價計費（含延滯計時）','預約費、取消費、等待費：不另收','國道通行費經您同意行駛後實收','車內汙損清潔費實支實付'].map(t=><div key={t} style={{ display:'flex', gap:7, fontSize:12, color:P5.ink, padding:'3px 0' }}><span style={{ color:P5.ok }}>✓</span><span>{t}</span></div>)}
           <div style={{ textAlign:'right', marginTop:4 }}><span style={{ fontSize:11.5, color:P5.brand, fontWeight:700 }}>查看完整費用與優惠說明 ›</span></div>
         </div>
         <label style={{ display:'flex', alignItems:'center', gap:9, fontSize:12.5, fontWeight:600, marginBottom:10 }}>
