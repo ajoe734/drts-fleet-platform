@@ -6,24 +6,26 @@ import { Card, DataTable, PageHeader, Td, Tr } from "@drts/ui-web";
 
 import { ErrorNotice } from "@/components/error-notice";
 import { PortalShell } from "@/components/portal-shell";
-import { NOT_PROVIDED, displayDateTime } from "@/lib/format";
+import { displayDateTime, notProvided } from "@/lib/format";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   firstParam,
   loadAgencyData,
   readAgencyProfile,
 } from "@/lib/session.server";
+import { type Locale, type TranslationKey, t } from "@/lib/translations";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-const METRIC_LABELS: Record<string, string> = {
-  resolvedCount: "已解決數",
-  slaBreachCount: "歷史 SLA 逾期總數",
+const METRIC_LABEL_KEYS: Record<string, TranslationKey> = {
+  resolvedCount: "reports.complaints.metric.resolvedCount",
+  slaBreachCount: "reports.complaints.metric.slaBreachCount",
 };
 
-function counts(value: AgencyComplaintCounts | null) {
+function counts(value: AgencyComplaintCounts | null, locale: Locale) {
   return value
     ? `${value.createdCount} / ${value.closedCount} / ${value.overdueCount}`
-    : NOT_PROVIDED;
+    : notProvided(locale);
 }
 
 export default async function ComplaintStatisticsPage({
@@ -31,24 +33,33 @@ export default async function ComplaintStatisticsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const params = await searchParams;
+  const [params, locale] = await Promise.all([searchParams, getServerLocale()]);
   const periodMonthFrom = firstParam(params.periodMonthFrom);
   const periodMonthTo = firstParam(params.periodMonthTo);
-  const result = await loadAgencyData<AgencyComplaintMonthlyStatisticsResponse>(
-    "/reports/complaints",
-    ["reports", "complaint-monthly-statistics"],
-    { periodMonthFrom, periodMonthTo },
-  );
-  const profile = await readAgencyProfile();
+  const [result, profile] = await Promise.all([
+    loadAgencyData<AgencyComplaintMonthlyStatisticsResponse>(
+      "/reports/complaints",
+      ["reports", "complaint-monthly-statistics"],
+      { periodMonthFrom, periodMonthTo },
+    ),
+    readAgencyProfile(),
+  ]);
+  const separator = t("common.listSeparator", undefined, locale);
   return (
-    <PortalShell agencyName={profile?.agencyDisplayName ?? null}>
+    <PortalShell
+      agencyName={profile?.agencyDisplayName ?? null}
+      locale={locale}
+    >
       <PageHeader
-        title="R09 投訴月統計"
-        subtitle="僅月彙總數字，不含任何案件明細或案號；區間上限 12 個月。"
+        title={t("reports.complaints.title", undefined, locale)}
+        subtitle={t("reports.complaints.subtitle", undefined, locale)}
       />
-      <form method="get" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+      <form
+        method="get"
+        style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}
+      >
         <label>
-          起月{" "}
+          {t("reports.complaints.filter.from", undefined, locale)}{" "}
           <input
             name="periodMonthFrom"
             placeholder="YYYY-MM"
@@ -56,41 +67,95 @@ export default async function ComplaintStatisticsPage({
           />
         </label>
         <label>
-          迄月{" "}
+          {t("reports.complaints.filter.to", undefined, locale)}{" "}
           <input
             name="periodMonthTo"
             placeholder="YYYY-MM"
             defaultValue={periodMonthTo ?? ""}
           />
         </label>
-        <button type="submit">查詢</button>
+        <button type="submit">{t("common.search", undefined, locale)}</button>
       </form>
       {result.data ? (
         <>
           <p style={{ fontSize: 13 }}>
-            統計基準時間：{displayDateTime(result.data.statisticsAsOf)}。「新增
-            / 結案 / 逾期」：逾期指 SLA 期限已過且尚未結案。
+            {t(
+              "reports.complaints.asOfNote",
+              { asOf: displayDateTime(result.data.statisticsAsOf, locale) },
+              locale,
+            )}
           </p>
           {result.data.unavailableMetrics.length > 0 ? (
             <p style={{ fontSize: 13, color: "#92400e" }}>
-              {result.data.unavailableMetrics
-                .map((metric) => METRIC_LABELS[metric] ?? metric)
-                .join("、")}
-              ：{NOT_PROVIDED}（目前無權威彙總）
+              {t(
+                "reports.complaints.unavailableNote",
+                {
+                  metrics: result.data.unavailableMetrics
+                    .map((metric) => {
+                      const key = METRIC_LABEL_KEYS[metric];
+                      return key ? t(key, undefined, locale) : metric;
+                    })
+                    .join(separator),
+                  notProvided: notProvided(locale),
+                },
+                locale,
+              )}
             </p>
           ) : null}
           <Card>
             <DataTable
               columns={[
-                { label: "月份" },
-                { label: "營業區" },
-                { label: "服務" },
-                { label: "投訴數" },
-                { label: "依類別" },
-                { label: "低評分自動（新增/結案/逾期）" },
-                { label: "人工受理（新增/結案/逾期）" },
+                {
+                  label: t(
+                    "reports.complaints.col.month",
+                    undefined,
+                    locale,
+                  ),
+                },
+                {
+                  label: t(
+                    "reports.complaints.col.businessArea",
+                    undefined,
+                    locale,
+                  ),
+                },
+                {
+                  label: t(
+                    "reports.complaints.col.service",
+                    undefined,
+                    locale,
+                  ),
+                },
+                {
+                  label: t(
+                    "reports.complaints.col.complaintCount",
+                    undefined,
+                    locale,
+                  ),
+                },
+                {
+                  label: t(
+                    "reports.complaints.col.byCategory",
+                    undefined,
+                    locale,
+                  ),
+                },
+                {
+                  label: t(
+                    "reports.complaints.col.lowRatingAuto",
+                    undefined,
+                    locale,
+                  ),
+                },
+                {
+                  label: t(
+                    "reports.complaints.col.manual",
+                    undefined,
+                    locale,
+                  ),
+                },
               ]}
-              empty="查無資料"
+              empty={t("common.empty", undefined, locale)}
             >
               {result.data.items.map((row) => (
                 <Tr
@@ -103,17 +168,21 @@ export default async function ComplaintStatisticsPage({
                   <Td>
                     {Object.entries(row.complaintsByCategory)
                       .map(([category, count]) => `${category}: ${count}`)
-                      .join("、") || "—"}
+                      .join(separator) || "—"}
                   </Td>
-                  <Td>{counts(row.lowRatingAuto)}</Td>
-                  <Td>{counts(row.manual)}</Td>
+                  <Td>{counts(row.lowRatingAuto, locale)}</Td>
+                  <Td>{counts(row.manual, locale)}</Td>
                 </Tr>
               ))}
             </DataTable>
           </Card>
         </>
       ) : (
-        <ErrorNotice status={result.status} error={result.error} />
+        <ErrorNotice
+          status={result.status}
+          error={result.error}
+          locale={locale}
+        />
       )}
     </PortalShell>
   );

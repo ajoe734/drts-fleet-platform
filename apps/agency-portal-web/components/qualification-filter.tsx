@@ -1,24 +1,35 @@
+"use client";
+
+import { useTranslation } from "@/lib/i18n";
+import type { Locale } from "@/lib/translations";
+
 export function QualificationFilter({
   status,
   windowDays,
+  locale: explicitLocale,
 }: {
   status: string | undefined;
   windowDays: string | undefined;
+  locale?: Locale;
 }) {
+  const { t } = useTranslation(explicitLocale);
   return (
-    <form method="get" style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+    <form
+      method="get"
+      style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}
+    >
       <label>
-        到期狀態
+        {t("qualifications.filter.status")}{" "}
         <select name="status" defaultValue={status ?? ""}>
-          <option value="">全部</option>
-          <option value="expired">已過期</option>
-          <option value="expiring">即將到期</option>
-          <option value="valid">有效</option>
-          <option value="unavailable">未提供</option>
+          <option value="">{t("common.all")}</option>
+          <option value="expired">{t("expiry.expired")}</option>
+          <option value="expiring">{t("expiry.expiring")}</option>
+          <option value="valid">{t("expiry.valid")}</option>
+          <option value="unavailable">{t("expiry.unavailable")}</option>
         </select>
       </label>
       <label>
-        到期預警天數（0–365）
+        {t("qualifications.filter.windowDays")}{" "}
         <input
           name="windowDays"
           type="number"
@@ -27,7 +38,7 @@ export function QualificationFilter({
           defaultValue={windowDays ?? "30"}
         />
       </label>
-      <button type="submit">查詢</button>
+      <button type="submit">{t("qualifications.filter.submit")}</button>
     </form>
   );
 }

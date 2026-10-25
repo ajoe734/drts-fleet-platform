@@ -8,12 +8,14 @@ import { ErrorNotice } from "@/components/error-notice";
 import { Pager } from "@/components/pager";
 import { PortalShell } from "@/components/portal-shell";
 import { PrgMask } from "@/components/prg-mask";
-import { display, displayDateTime } from "@/lib/format";
+import { display, displayDateTime, displayStatusCode } from "@/lib/format";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   firstParam,
   loadAgencyData,
   readAgencyProfile,
 } from "@/lib/session.server";
+import { t } from "@/lib/translations";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -22,7 +24,7 @@ export default async function DailyDispatchPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const params = await searchParams;
+  const [params, locale] = await Promise.all([searchParams, getServerLocale()]);
   const today = new Date().toISOString().slice(0, 10);
   const query = {
     serviceDateFrom: firstParam(params.serviceDateFrom) ?? today,
@@ -31,22 +33,29 @@ export default async function DailyDispatchPage({
     finalStatus: firstParam(params.finalStatus),
     page: firstParam(params.page),
   };
-  const result = await loadAgencyData<
-    AgencyPage<AgencyDailyDispatchRecordView>
-  >("/reports/daily-dispatch", ["reports", "daily-dispatch-records"], query);
-  const profile = await readAgencyProfile();
+  const [result, profile] = await Promise.all([
+    loadAgencyData<AgencyPage<AgencyDailyDispatchRecordView>>(
+      "/reports/daily-dispatch",
+      ["reports", "daily-dispatch-records"],
+      query,
+    ),
+    readAgencyProfile(),
+  ]);
   return (
-    <PortalShell agencyName={profile?.agencyDisplayName ?? null}>
+    <PortalShell
+      agencyName={profile?.agencyDisplayName ?? null}
+      locale={locale}
+    >
       <PageHeader
-        title="R12 每日派遣報表"
-        subtitle="區間上限 31 日；地址、車號、駕駛代號皆已遮罩。"
+        title={t("reports.dailyDispatch.title", undefined, locale)}
+        subtitle={t("reports.dailyDispatch.subtitle", undefined, locale)}
       />
       <form
         method="get"
         style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}
       >
         <label>
-          起日{" "}
+          {t("reports.dailyDispatch.filter.from", undefined, locale)}{" "}
           <input
             type="date"
             name="serviceDateFrom"
@@ -54,7 +63,7 @@ export default async function DailyDispatchPage({
           />
         </label>
         <label>
-          迄日{" "}
+          {t("reports.dailyDispatch.filter.to", undefined, locale)}{" "}
           <input
             type="date"
             name="serviceDateTo"
@@ -62,61 +71,162 @@ export default async function DailyDispatchPage({
           />
         </label>
         <label>
-          服務代碼{" "}
+          {t(
+            "reports.dailyDispatch.filter.serviceProductCode",
+            undefined,
+            locale,
+          )}{" "}
           <input
             name="serviceProductCode"
             defaultValue={query.serviceProductCode ?? ""}
           />
         </label>
         <label>
-          最終狀態{" "}
+          {t("reports.dailyDispatch.filter.finalStatus", undefined, locale)}{" "}
           <input name="finalStatus" defaultValue={query.finalStatus ?? ""} />
         </label>
-        <button type="submit">查詢</button>
+        <button type="submit">{t("common.search", undefined, locale)}</button>
       </form>
       {result.data ? (
         <Card>
           <DataTable
             columns={[
-              { label: "服務日" },
-              { label: "訂單編號" },
-              { label: "來源" },
-              { label: "服務" },
-              { label: "叫車時間" },
-              { label: "上車地點" },
-              { label: "下車地點" },
-              { label: "首次指派" },
-              { label: "駕駛" },
-              { label: "車號" },
-              { label: "抵達上車點" },
-              { label: "完成" },
-              { label: "最終狀態" },
-              { label: "改派次數" },
-              { label: "取消原因" },
-              { label: "投訴數" },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.serviceDate",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.orderNo",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.source",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.service",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.requestedAt",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.pickupAddress",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.dropoffAddress",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.firstAssignedAt",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.driver",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.plateNo",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.arrivedPickupAt",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.completedAt",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.finalStatus",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.redispatchCount",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.cancellationReason",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "reports.dailyDispatch.col.complaintCount",
+                  undefined,
+                  locale,
+                ),
+              },
             ]}
             minWidth={1400}
-            empty="查無資料"
+            empty={t("common.empty", undefined, locale)}
           >
             {result.data.items.map((row, index) => (
               <Tr key={`${row.serviceDate}:${row.orderNoMasked}:${index}`}>
                 <Td>{row.serviceDate}</Td>
-                <Td mono>{display(row.orderNoMasked)}</Td>
+                <Td mono>{display(row.orderNoMasked, locale)}</Td>
                 <Td>{row.orderSource}</Td>
                 <Td>{row.serviceProductCode}</Td>
-                <Td>{displayDateTime(row.requestedAt)}</Td>
-                <Td>{display(row.pickupAddressMasked)}</Td>
-                <Td>{display(row.dropoffAddressMasked)}</Td>
-                <Td>{displayDateTime(row.firstAssignedAt)}</Td>
-                <Td mono>{display(row.finalDriverIdMasked)}</Td>
+                <Td>{displayDateTime(row.requestedAt, locale)}</Td>
+                <Td>{display(row.pickupAddressMasked, locale)}</Td>
+                <Td>{display(row.dropoffAddressMasked, locale)}</Td>
+                <Td>{displayDateTime(row.firstAssignedAt, locale)}</Td>
+                <Td mono>{display(row.finalDriverIdMasked, locale)}</Td>
                 <Td mono>
-                  {display(row.finalPlateNoMasked)} <PrgMask />
+                  {display(row.finalPlateNoMasked, locale)}{" "}
+                  <PrgMask locale={locale} />
                 </Td>
-                <Td>{displayDateTime(row.arrivedPickupAt)}</Td>
-                <Td>{displayDateTime(row.tripCompletedAt)}</Td>
-                <Td>{row.finalStatus}</Td>
+                <Td>{displayDateTime(row.arrivedPickupAt, locale)}</Td>
+                <Td>{displayDateTime(row.tripCompletedAt, locale)}</Td>
+                <Td>{displayStatusCode(row.finalStatus, locale)}</Td>
                 <Td>{row.redispatchCount}</Td>
-                <Td>{display(row.cancellationReason)}</Td>
+                <Td>{display(row.cancellationReason, locale)}</Td>
                 <Td>{row.complaintCount}</Td>
               </Tr>
             ))}
@@ -128,11 +238,16 @@ export default async function DailyDispatchPage({
               page={result.data.page}
               pageSize={result.data.pageSize}
               total={result.data.total}
+              locale={locale}
             />
           </div>
         </Card>
       ) : (
-        <ErrorNotice status={result.status} error={result.error} />
+        <ErrorNotice
+          status={result.status}
+          error={result.error}
+          locale={locale}
+        />
       )}
     </PortalShell>
   );

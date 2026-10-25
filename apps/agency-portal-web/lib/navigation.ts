@@ -1,10 +1,25 @@
-export const AGENCY_NAV = [
-  { href: "/", label: "首頁" },
-  { href: "/trip-records", label: "R11 行程紀錄" },
-  { href: "/trip-records/exports", label: "R11 匯出" },
-  { href: "/reports/operations", label: "R10 營運統計" },
-  { href: "/reports/complaints", label: "R09 投訴月統計" },
-  { href: "/reports/daily-dispatch", label: "R12 每日派遣" },
-  { href: "/qualifications/vehicles", label: "R14 車輛資格" },
-  { href: "/qualifications/drivers", label: "R14 駕駛資格" },
+import { type Locale, type TranslationKey, t } from "./translations";
+
+export const AGENCY_NAV_ITEMS: readonly {
+  href: string;
+  labelKey: TranslationKey;
+}[] = [
+  { href: "/", labelKey: "nav.home" },
+  { href: "/trip-records", labelKey: "nav.tripRecords" },
+  { href: "/trip-records/exports", labelKey: "nav.tripExports" },
+  { href: "/reports/operations", labelKey: "nav.operations" },
+  { href: "/reports/complaints", labelKey: "nav.complaints" },
+  { href: "/reports/daily-dispatch", labelKey: "nav.dailyDispatch" },
+  { href: "/qualifications/vehicles", labelKey: "nav.vehicles" },
+  { href: "/qualifications/drivers", labelKey: "nav.drivers" },
 ] as const;
+
+export function getAgencyNav(locale: Locale = "zh") {
+  return AGENCY_NAV_ITEMS.map((item) => ({
+    href: item.href,
+    labelKey: item.labelKey,
+    label: t(item.labelKey, undefined, locale),
+  }));
+}
+
+export const AGENCY_NAV = getAgencyNav("zh");

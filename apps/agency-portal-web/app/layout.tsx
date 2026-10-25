@@ -1,24 +1,31 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { LanguageProvider, toHtmlLang } from "@/lib/i18n";
+import { getServerLocale } from "@/lib/server-locale";
+import { t } from "@/lib/translations";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "DRTS 主管機關唯讀查詢",
-  description: "主管機關唯讀查詢介面（BUREAU-R13）",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = await getServerLocale();
+  return {
+    title: t("app.title", undefined, locale),
+    description: t("app.description", undefined, locale),
+    robots: { index: false, follow: false },
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
+  const locale = await getServerLocale();
   return (
-    <html lang="zh-Hant">
+    <html lang={toHtmlLang(locale)}>
       <body
         style={{
           margin: 0,
@@ -27,7 +34,7 @@ export default function RootLayout({
           color: "#0f172a",
         }}
       >
-        {children}
+        <LanguageProvider defaultLocale={locale}>{children}</LanguageProvider>
       </body>
     </html>
   );

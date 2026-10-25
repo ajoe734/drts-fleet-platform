@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "@/lib/i18n";
+import type { Locale } from "@/lib/translations";
 
 function readCookie(name: string): string | null {
   const match = document.cookie
@@ -10,8 +12,9 @@ function readCookie(name: string): string | null {
   return match ? decodeURIComponent(match.slice(name.length + 1)) : null;
 }
 
-export function LogoutButton() {
+export function LogoutButton({ locale: explicitLocale }: { locale?: Locale }) {
   const [pending, setPending] = useState(false);
+  const { t } = useTranslation(explicitLocale);
   return (
     <button
       type="button"
@@ -33,7 +36,7 @@ export function LogoutButton() {
         cursor: pending ? "wait" : "pointer",
       }}
     >
-      登出
+      {t("shell.logout")}
     </button>
   );
 }

@@ -10,16 +10,19 @@ import { PortalShell } from "@/components/portal-shell";
 import { PrgMask } from "@/components/prg-mask";
 import { QualificationFilter } from "@/components/qualification-filter";
 import {
-  EXPIRY_STATUS_LABELS,
   display,
   displayBoolean,
   displayDateTime,
+  displayExpiryStatus,
+  displayStatusCode,
 } from "@/lib/format";
+import { getServerLocale } from "@/lib/server-locale";
 import {
   firstParam,
   loadAgencyData,
   readAgencyProfile,
 } from "@/lib/session.server";
+import { t } from "@/lib/translations";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
@@ -28,63 +31,146 @@ export default async function VehicleQualificationsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const params = await searchParams;
+  const [params, locale] = await Promise.all([searchParams, getServerLocale()]);
   const query = {
     status: firstParam(params.status),
     windowDays: firstParam(params.windowDays),
     page: firstParam(params.page),
   };
-  const result = await loadAgencyData<
-    AgencyPage<AgencyVehicleQualificationView>
-  >("/qualifications/vehicles", ["qualifications", "vehicles"], query);
-  const profile = await readAgencyProfile();
+  const [result, profile] = await Promise.all([
+    loadAgencyData<AgencyPage<AgencyVehicleQualificationView>>(
+      "/qualifications/vehicles",
+      ["qualifications", "vehicles"],
+      query,
+    ),
+    readAgencyProfile(),
+  ]);
+  const separator = t("common.listSeparator", undefined, locale);
   return (
-    <PortalShell agencyName={profile?.agencyDisplayName ?? null}>
+    <PortalShell
+      agencyName={profile?.agencyDisplayName ?? null}
+      locale={locale}
+    >
       <PageHeader
-        title="R14 車輛資格與到期"
-        subtitle="車號、保單號碼已遮罩；保險人與保額不提供；定期檢驗到期日目前無資料來源（未提供）。"
+        title={t("qualifications.vehicles.title", undefined, locale)}
+        subtitle={t("qualifications.vehicles.subtitle", undefined, locale)}
       />
       <QualificationFilter
         status={query.status}
         windowDays={query.windowDays}
+        locale={locale}
       />
       {result.data ? (
         <Card>
           <DataTable
             columns={[
-              { label: "車號" },
-              { label: "牌照類別" },
-              { label: "營業區" },
-              { label: "可派遣" },
-              { label: "派遣資格" },
-              { label: "保險到期" },
-              { label: "保險狀態" },
-              { label: "保單號碼" },
-              { label: "定期檢驗" },
-              { label: "退場狀態" },
+              {
+                label: t(
+                  "qualifications.vehicles.col.plateNo",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.licenseType",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.operatingArea",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.dispatchableFlag",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.dispatchEligible",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.insuranceEndAt",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.insuranceStatus",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.policyNo",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.inspectionStatus",
+                  undefined,
+                  locale,
+                ),
+              },
+              {
+                label: t(
+                  "qualifications.vehicles.col.offboardingStatus",
+                  undefined,
+                  locale,
+                ),
+              },
             ]}
             minWidth={1100}
-            empty="查無資料"
+            empty={t("common.empty", undefined, locale)}
           >
             {result.data.items.map((row, index) => (
               <Tr key={`${row.plateNoMasked}:${index}`}>
                 <Td mono>
-                  {display(row.plateNoMasked)} <PrgMask />
+                  {display(row.plateNoMasked, locale)}{" "}
+                  <PrgMask locale={locale} />
                 </Td>
-                <Td>{display(row.licenseType)}</Td>
-                <Td>{row.operatingArea}</Td>
-                <Td>{displayBoolean(row.dispatchableFlag)}</Td>
+                <Td>{display(row.licenseType, locale)}</Td>
+                <Td>{display(row.operatingArea, locale)}</Td>
+                <Td>{displayBoolean(row.dispatchableFlag, locale)}</Td>
                 <Td>
-                  {displayBoolean(row.dispatchEligible)}
                   {row.dispatchBlockedReasons.length > 0
-                    ? `（${row.dispatchBlockedReasons.join("、")}）`
-                    : ""}
+                    ? t(
+                        "qualifications.vehicles.blockedFormat",
+                        {
+                          eligible: displayBoolean(
+                            row.dispatchEligible,
+                            locale,
+                          ),
+                          reasons: row.dispatchBlockedReasons
+                            .map((reason) => displayStatusCode(reason, locale))
+                            .join(separator),
+                        },
+                        locale,
+                      )
+                    : displayBoolean(row.dispatchEligible, locale)}
                 </Td>
-                <Td>{displayDateTime(row.insuranceEndAt)}</Td>
-                <Td>{EXPIRY_STATUS_LABELS[row.insuranceExpiryStatus]}</Td>
-                <Td mono>{display(row.policyNoMasked)}</Td>
-                <Td>{EXPIRY_STATUS_LABELS[row.inspectionExpiryStatus]}</Td>
-                <Td>{display(row.offboardingStatus)}</Td>
+                <Td>{displayDateTime(row.insuranceEndAt, locale)}</Td>
+                <Td>{displayExpiryStatus(row.insuranceExpiryStatus, locale)}</Td>
+                <Td mono>{display(row.policyNoMasked, locale)}</Td>
+                <Td>
+                  {displayExpiryStatus(row.inspectionExpiryStatus, locale)}
+                </Td>
+                <Td>{displayStatusCode(row.offboardingStatus, locale)}</Td>
               </Tr>
             ))}
           </DataTable>
@@ -95,11 +181,16 @@ export default async function VehicleQualificationsPage({
               page={result.data.page}
               pageSize={result.data.pageSize}
               total={result.data.total}
+              locale={locale}
             />
           </div>
         </Card>
       ) : (
-        <ErrorNotice status={result.status} error={result.error} />
+        <ErrorNotice
+          status={result.status}
+          error={result.error}
+          locale={locale}
+        />
       )}
     </PortalShell>
   );
