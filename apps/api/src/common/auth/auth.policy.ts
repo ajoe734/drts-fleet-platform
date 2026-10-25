@@ -1124,6 +1124,19 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  if (
+    routePath === "internal/scheduled-tasks/regulatory-expiry/run" &&
+    upperMethod === "POST"
+  ) {
+    return {
+      routeKey: "internal:scheduled-tasks:regulatory-expiry:run",
+      requiredScopes: ["regulatory:write"],
+      allowedRealms: ["system"],
+      description:
+        "Internal scheduler execution of regulatory expiry and pre-expiry reconciliation",
+    };
+  }
+
   if (routePath === "identity/step-up-proofs" && upperMethod === "POST") {
     return {
       routeKey: "identity:step-up-proofs:create",

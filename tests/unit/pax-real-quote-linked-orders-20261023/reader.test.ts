@@ -11,7 +11,10 @@ import {
 
 const SNAPSHOT = "25f30fb7-5a04-4424-ae0f-d111fdf58420";
 
-function ride(orderId: string, fareSnapshotId?: string): AuthoritativeRideListItem {
+function ride(
+  orderId: string,
+  fareSnapshotId?: string,
+): AuthoritativeRideListItem {
   return {
     order: { orderId },
     ...(fareSnapshotId ? { bookingQuote: { fareSnapshotId } } : {}),
@@ -22,7 +25,10 @@ function page(
   rides: AuthoritativeRideListItem[],
   nextCursor?: string,
 ): RideListPageResult {
-  return { status: 200, body: { rides, ...(nextCursor ? { nextCursor } : {}) } };
+  return {
+    status: 200,
+    body: { rides, ...(nextCursor ? { nextCursor } : {}) },
+  };
 }
 
 describe("readAuthoritativeLinkedOrders", () => {
@@ -60,7 +66,9 @@ describe("readAuthoritativeLinkedOrders", () => {
   it("returns an empty list for an empty history page", async () => {
     const fetchPage = vi.fn(async () => page([]));
 
-    expect(await readAuthoritativeLinkedOrders(fetchPage, SNAPSHOT)).toEqual([]);
+    expect(await readAuthoritativeLinkedOrders(fetchPage, SNAPSHOT)).toEqual(
+      [],
+    );
     expect(fetchPage).toHaveBeenCalledTimes(1);
   });
 
@@ -82,7 +90,9 @@ describe("readAuthoritativeLinkedOrders", () => {
       page([{ order: { orderId: "cccccccc-cccc-cccc-cccc-cccccccccccc" } }]),
     );
 
-    expect(await readAuthoritativeLinkedOrders(fetchPage, SNAPSHOT)).toEqual([]);
+    expect(await readAuthoritativeLinkedOrders(fetchPage, SNAPSHOT)).toEqual(
+      [],
+    );
   });
 
   it("throws on a repeated cursor instead of looping forever", async () => {
@@ -97,9 +107,11 @@ describe("readAuthoritativeLinkedOrders", () => {
   });
 
   it("fails immediately on a non-200 page without retrying or treating 429 as pass", async () => {
-    const fetchPage = vi.fn(async (): Promise<RideListPageResult> => ({
-      status: 429,
-    }));
+    const fetchPage = vi.fn(
+      async (): Promise<RideListPageResult> => ({
+        status: 429,
+      }),
+    );
 
     await expect(
       readAuthoritativeLinkedOrders(fetchPage, SNAPSHOT),
@@ -111,9 +123,11 @@ describe("readAuthoritativeLinkedOrders", () => {
   });
 
   it("fails on a 200 page with no body instead of silently proving zero orders", async () => {
-    const fetchPage = vi.fn(async (): Promise<RideListPageResult> => ({
-      status: 200,
-    }));
+    const fetchPage = vi.fn(
+      async (): Promise<RideListPageResult> => ({
+        status: 200,
+      }),
+    );
 
     await expect(
       readAuthoritativeLinkedOrders(fetchPage, SNAPSHOT),
@@ -123,7 +137,10 @@ describe("readAuthoritativeLinkedOrders", () => {
 
   it("fails on a 200 body missing the rides array instead of defaulting to empty", async () => {
     const fetchPage = vi.fn(
-      async (): Promise<RideListPageResult> => ({ status: 200, body: {} as any }),
+      async (): Promise<RideListPageResult> => ({
+        status: 200,
+        body: {} as any,
+      }),
     );
 
     await expect(
@@ -154,7 +171,12 @@ describe("createPlaywrightRideListFetcher", () => {
     const responses = [
       fakeResponse(200, {
         data: {
-          rides: [{ order: { orderId: "o1" }, bookingQuote: { fareSnapshotId: SNAPSHOT } }],
+          rides: [
+            {
+              order: { orderId: "o1" },
+              bookingQuote: { fareSnapshotId: SNAPSHOT },
+            },
+          ],
           nextCursor: "cursor-1",
         },
       }),

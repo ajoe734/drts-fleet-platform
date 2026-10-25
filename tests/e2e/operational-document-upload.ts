@@ -2950,7 +2950,8 @@ export async function resolveOperationalEditableCase(
           code?: string;
           message?: string;
         };
-        disputeErrorCode = parsedDisputeError?.error?.code ?? parsedDisputeError?.code;
+        disputeErrorCode =
+          parsedDisputeError?.error?.code ?? parsedDisputeError?.code;
         disputeErrorMessage =
           parsedDisputeError?.error?.message ?? parsedDisputeError?.message;
       } catch {

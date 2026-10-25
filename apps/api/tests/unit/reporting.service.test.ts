@@ -279,9 +279,9 @@ describe("ReportingService", () => {
       tripStartedAt: "2026-06-20T01:15:00.000Z",
       tripCompletedAt: "2026-06-20T01:40:00.000Z",
     });
-    expect(reportingRepository.upsertDailyDispatchRecords).toHaveBeenCalledTimes(
-      1,
-    );
+    expect(
+      reportingRepository.upsertDailyDispatchRecords,
+    ).toHaveBeenCalledTimes(1);
   });
 
   it("keeps arrivedPickupAt null when no arrival trace exists even if the task snapshot carries a timestamp", async () => {
@@ -323,12 +323,17 @@ describe("ReportingService", () => {
     expect(
       reportingRepository.upsertDispatchableSupplySnapshots,
     ).toHaveBeenCalledTimes(1);
-    expect(vehicleEligibilityService.listActiveServiceProducts).toHaveBeenCalled();
+    expect(
+      vehicleEligibilityService.listActiveServiceProducts,
+    ).toHaveBeenCalled();
   });
 
   it("marks snapshot source health when eligible supply lacks a fresh location", async () => {
     const { service, regulatoryRegistryService } = createService();
-    vi.spyOn(regulatoryRegistryService, "listLatestDriverLocations").mockReturnValue([
+    vi.spyOn(
+      regulatoryRegistryService,
+      "listLatestDriverLocations",
+    ).mockReturnValue([
       {
         driverId: "driver-001",
         lat: 25.0,
@@ -419,6 +424,30 @@ describe("ReportingService", () => {
         complaintsByCategory: {
           late_arrival: 1,
           no_show: 2,
+        },
+        // Bureau R09/R10 figures derive from the canonical source, which has
+        // no trip or case of this dimension inside the window.
+        lateArrivalThresholdMinutes: 5,
+        onTimeTripCount: 0,
+        lateTripCount: 0,
+        noShowTripCount: 0,
+        punctualityUnknownTripCount: 0,
+        complaintCreatedLowRatingAutoCount: 0,
+        complaintCreatedManualCount: 0,
+        complaintClosedLowRatingAutoCount: 0,
+        complaintClosedManualCount: 0,
+        complaintOverdueLowRatingAutoCount: 0,
+        complaintOverdueManualCount: 0,
+        complaintStatisticsAsOf: expect.any(String),
+        drilldown: {
+          punctuality: expect.objectContaining({
+            assignedTripCount: 0,
+            lateArrivalThresholdMinutes: 5,
+          }),
+          complaintMonthlyStatistics: [
+            expect.objectContaining({ periodMonth: "2026-01" }),
+            expect.objectContaining({ periodMonth: "2026-02" }),
+          ],
         },
         generatedAt: "2026-03-01T00:00:00.000Z",
       },

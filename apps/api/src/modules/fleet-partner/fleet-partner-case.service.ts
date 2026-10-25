@@ -3,11 +3,13 @@ import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 import type {
   ComplaintCaseRecord,
   ComplaintCaseStatus,
+  ComplaintTimelineEntry,
   ResourceActionDescriptor,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
 import { AuditNotificationService } from "../audit-notification/audit-notification.service";
+import { CallcenterService } from "../callcenter/callcenter.service";
 import { ComplaintService } from "../complaint/complaint.service";
 import {
   FleetDocumentStorageService,
@@ -24,7 +26,12 @@ export interface FleetCaseItem {
   driver: string;
   driverId: string;
   severity: "high" | "normal" | "medium" | "low" | "critical";
-  responsibility: "fleet" | "shared" | "platform";
+  // "unattributed" is the honest value for an ordinary complaint whose
+  // real source order/driver/vehicle fleet attribution is missing or
+  // ambiguous: no fleet and no platform responsibility has been
+  // determined. Like "platform" and closed cases it is read-only (no fleet
+  // reply), but it is never presented as platform-owned.
+  responsibility: "fleet" | "shared" | "platform" | "unattributed";
   fleetPartnerId: string;
   status: ComplaintCaseStatus;
   slaDueAt: string;
@@ -114,6 +121,86 @@ const READBACK_SECRET =
   process.env.DRTS_READBACK_SECRET || "drts-fleet-case-attachment-secret-2026";
 const MAX_ATTACHMENT_SIZE = MAX_FLEET_DOCUMENT_BYTES;
 
+// Replies written before the structured ComplaintTimelineEntry
+// fleetReplyAttachments relation existed embedded their attachment manifest
+// in the note text behind this marker. Current replies never write it; it is
+// only read back as a narrowly-checked legacy fallback (see
+// splitLegacyAttachmentManifest).
+const FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER = "\n<<fleet-reply-attachments>>";
+
+function fleetReplyNotePrefix(fleetPartnerId: string): string {
+  return `[車行回覆 · ${fleetPartnerId}] `;
+}
+
+function formatAttachmentNamesSuffix(
+  attachments: readonly { name: string }[],
+): string {
+  return attachments.length
+    ? ` (附件: ${attachments.map((a) => a.name).join(", ")})`
+    : "";
+}
+
+/**
+ * Legacy-only reader for an entry that carries no structured
+ * fleetReplyAttachments relation. Text shape alone can never establish a
+ * relation, so the suffix is trusted only when the whole note is exactly
+ * what the old server-side reply writer produced for this case's own fleet
+ * (`[車行回覆 · <fleet>] <content> (附件: <names>)` + marker + manifest, with
+ * the names matching the manifest) and every attachmentId is verified
+ * against this same case's confirmed stored attachments. Anything else is
+ * literal human text and is returned untouched.
+ */
+function splitLegacyAttachmentManifest(
+  note: string,
+  fleetPartnerId: string,
+  verifyAttachment: (attachmentId: string) => boolean,
+): {
+  body: string;
+  attachments: FleetCaseTimelineAttachment[];
+} {
+  const literal = { body: note, attachments: [] };
+  if (!fleetPartnerId || !note.startsWith(fleetReplyNotePrefix(fleetPartnerId)))
+    return literal;
+  const markerIndex = note.lastIndexOf(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER);
+  if (markerIndex === -1) return literal;
+  const body = note.slice(0, markerIndex);
+  const raw = note.slice(
+    markerIndex + FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER.length,
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return literal;
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return literal;
+  const attachments: FleetCaseTimelineAttachment[] = [];
+  for (const item of parsed) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      typeof (item as Record<string, unknown>).attachmentId !== "string" ||
+      typeof (item as Record<string, unknown>).name !== "string" ||
+      !verifyAttachment(
+        (item as Record<string, unknown>).attachmentId as string,
+      )
+    ) {
+      return literal;
+    }
+    const record = item as Record<string, unknown>;
+    attachments.push({
+      attachmentId: record.attachmentId as string,
+      name: record.name as string,
+      size: typeof record.size === "string" ? record.size : "",
+      ...(typeof record.fileSize === "number"
+        ? { fileSize: record.fileSize }
+        : {}),
+    });
+  }
+  if (!body.endsWith(formatAttachmentNamesSuffix(attachments))) return literal;
+  return { body, attachments };
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -176,6 +263,7 @@ export class FleetPartnerCaseService {
     private readonly auditNotificationService?: AuditNotificationService,
     @Optional()
     private readonly storage: FleetDocumentStorageService = new FleetDocumentStorageService(),
+    @Optional() private readonly callcenterService?: CallcenterService,
   ) {
     this.seedCases();
   }
@@ -522,21 +610,46 @@ export class FleetPartnerCaseService {
     }
   }
 
-  private resolveCase(caseId: string): FleetCaseItem {
+  private async resolveCase(caseId: string): Promise<FleetCaseItem> {
     const item = this.cases.get(caseId);
     if (item) {
       return item;
     }
 
-    // Check if complaintService has this case
+    // Check if complaintService has this case, preferring the canonical Ops
+    // readback: it reconciles against the durable repository when the case
+    // was created or updated on a different already-warm API instance and
+    // is therefore absent from this instance's optimistic in-memory cache.
     if (this.complaintService) {
+      let complaint: ComplaintCaseRecord | undefined;
       try {
-        const complaint = this.complaintService.getComplaintCase(caseId);
-        if (complaint) {
-          return this.mapComplaintToFleetCase(complaint);
+        complaint =
+          typeof this.complaintService.getComplaintCaseForOps === "function"
+            ? await this.complaintService.getComplaintCaseForOps(caseId)
+            : this.complaintService.getComplaintCase(caseId);
+      } catch (error) {
+        // A pending-commit/refresh failure is a real, distinct outcome from
+        // "case not found" and must not be disguised as either a 404 or a
+        // false success.
+        if (
+          error instanceof ApiRequestError &&
+          error.code === "IDEMPOTENCY_IN_PROGRESS"
+        ) {
+          throw error;
         }
-      } catch {
-        // Fall through to 404
+        if (!(error instanceof ApiRequestError && error.code === "NOT_FOUND")) {
+          // A genuine lookup failure (e.g. the durable store errored) is
+          // likewise distinct from "this case does not exist" and must
+          // propagate as itself rather than becoming a false 404.
+          throw error;
+        }
+        complaint = undefined;
+      }
+      if (complaint) {
+        // Deliberately outside the try block above: a real attribution
+        // refresh failure here must propagate as itself, not be disguised
+        // as "case not found".
+        return this.mapComplaintToFleetCase(complaint);
       }
     }
 
@@ -548,26 +661,97 @@ export class FleetPartnerCaseService {
     );
   }
 
-  private mapComplaintToFleetCase(
+  /**
+   * Derives the actual driver/fleet attribution for an ordinary (non
+   * settlement_dispute) complaint from its real source order, via the
+   * injected FleetPartnerService (order -> driver -> driver-fleet
+   * affiliation, refreshed from the canonical repository). Returns null
+   * when the complaint has no related order, no resolvable driver, or no
+   * single unambiguous current affiliation — callers must treat that as
+   * unattributed rather than guessing a fleet. A genuine refresh failure
+   * (not a mere absence) propagates instead, since it must not be
+   * disguised as an unattributed case.
+   */
+  private async resolveComplaintFleetAttribution(
     complaint: ComplaintCaseRecord,
-  ): FleetCaseItem {
+  ): Promise<{
+    driverId: string;
+    driverName: string;
+    fleetPartnerId: string;
+  } | null> {
+    if (!this.fleetPartnerService) {
+      return null;
+    }
+    const orderId =
+      complaint.relatedOrderId ||
+      (await this.resolveOrderIdFromRelatedCall(complaint.relatedCallId));
+    if (!orderId) {
+      return null;
+    }
+    return this.fleetPartnerService.resolveOrderDriverFleetAttribution(orderId);
+  }
+
+  /**
+   * A legitimate case can carry only a `relatedCallId` (no direct
+   * `relatedOrderId` of its own) while the persisted call it came from
+   * already has a canonical `linkedOrderId` — e.g. when the complaint was
+   * created through a path other than `transferCallToComplaint`'s own
+   * `command.relatedOrderId ?? session.linkedOrderId` resolution. Fall back
+   * to that call's canonical linkage rather than leaving it unattributed.
+   * A missing call/order is honest non-attribution; any other read failure
+   * propagates.
+   */
+  private async resolveOrderIdFromRelatedCall(
+    relatedCallId: string | null | undefined,
+  ): Promise<string | null> {
+    if (!relatedCallId || !this.callcenterService) {
+      return null;
+    }
+    try {
+      const session =
+        await this.callcenterService.getCallSessionForRead(relatedCallId);
+      return session.linkedOrderId ?? null;
+    } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        error.code === "CALL_SESSION_NOT_FOUND"
+      ) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private async mapComplaintToFleetCase(
+    complaint: ComplaintCaseRecord,
+  ): Promise<FleetCaseItem> {
     const isClosed = complaint.status === "closed";
+    const isSettlement = complaint.category === "settlement_dispute";
+    const attribution = isSettlement
+      ? null
+      : await this.resolveComplaintFleetAttribution(complaint);
+    const isUnattributed = !isSettlement && !attribution;
     return {
       id: complaint.caseNo,
       caseNo: complaint.caseNo,
       type: "complaint",
       cat: complaint.category,
       desc: complaint.description,
-      driver: complaint.category === "settlement_dispute" ? "—" : "旗下司機",
-      driverId:
-        complaint.category === "settlement_dispute" ? "" : "drv-affiliated",
+      driver: isSettlement ? "—" : (attribution?.driverName ?? "未歸屬"),
+      driverId: isSettlement ? "" : (attribution?.driverId ?? ""),
       severity: complaint.severity,
-      responsibility:
-        complaint.category === "settlement_dispute" ? "shared" : "fleet",
-      fleetPartnerId:
-        complaint.category === "settlement_dispute"
-          ? (complaint.fleetPartnerId ?? "")
-          : "METRO_FLEET",
+      // Fleet responsibility can only be asserted when a real driver/fleet
+      // attribution is resolved. An unresolved ordinary complaint is not a
+      // determined platform responsibility either; it is reported as
+      // honestly unattributed.
+      responsibility: isSettlement
+        ? "shared"
+        : attribution
+          ? "fleet"
+          : "unattributed",
+      fleetPartnerId: isSettlement
+        ? (complaint.fleetPartnerId ?? "")
+        : (attribution?.fleetPartnerId ?? ""),
       status: complaint.status,
       slaDueAt: complaint.slaDueAt,
       slaBreachedAt: complaint.slaBreach ? complaint.updatedAt : null,
@@ -585,17 +769,22 @@ export class FleetPartnerCaseService {
       reopenCount: complaint.reopenCount ?? 0,
       relatedOrder: complaint.relatedOrderId,
       relatedCall: complaint.relatedCallId,
-      assignee:
-        complaint.assigneeId ||
-        (complaint.category === "settlement_dispute"
-          ? "—"
-          : "陳維 (ops_compliance)"),
+      // A resolved fleet attribution says nothing about who is actually
+      // assigned to work the case; project the real assigneeId honestly
+      // rather than inventing a named owner when none is assigned.
+      assignee: complaint.assigneeId || "—",
       openedAt: complaint.createdAt,
       updatedAt: complaint.updatedAt,
+      // An unattributed case has no fleet to reply on its behalf, so it is
+      // read-only for that honest reason, alongside the existing closed rule.
       actionDescriptor: {
         action: "respond",
-        enabled: !isClosed,
-        ...(isClosed ? { disabledReasonCode: "case_closed" } : {}),
+        enabled: !isClosed && !isUnattributed,
+        ...(isClosed
+          ? { disabledReasonCode: "case_closed" }
+          : isUnattributed
+            ? { disabledReasonCode: "case_unattributed" }
+            : {}),
         riskLevel: "medium",
       },
     };
@@ -615,21 +804,29 @@ export class FleetPartnerCaseService {
     }
 
     if (this.complaintService) {
-      try {
-        const complaints = this.complaintService.listComplaintCases();
-        for (const c of complaints) {
-          if (
-            c.category === "settlement_dispute" &&
-            c.fleetPartnerId !== fleetPartnerId
-          )
-            continue;
-          if (!seen.has(c.caseNo)) {
-            seen.add(c.caseNo);
-            result.push(this.mapComplaintToFleetCase(c));
-          }
-        }
-      } catch {
-        // Ignore background list error
+      // Prefer the canonical ordinary-case refresh so a warm instance that
+      // never itself created or updated a given complaint still lists it
+      // (same guarantee refreshSettlementCases already gives settlement
+      // cases above). A real refresh failure here must propagate, not be
+      // disguised as "no ordinary complaints exist".
+      const complaints =
+        typeof this.complaintService.listComplaintCasesForFleetOps ===
+        "function"
+          ? await this.complaintService.listComplaintCasesForFleetOps()
+          : typeof this.complaintService.listComplaintCases === "function"
+            ? this.complaintService.listComplaintCases()
+            : [];
+      for (const c of complaints) {
+        if (seen.has(c.caseNo)) continue;
+        const mapped = await this.mapComplaintToFleetCase(c);
+        // Ordinary complaints must be isolated to their actually
+        // attributed fleet, same as settlement_dispute cases above; an
+        // unattributed or foreign-fleet complaint must not leak into
+        // this list.
+        if (!this.isFleetScopeMatch(mapped.fleetPartnerId, fleetPartnerId))
+          continue;
+        seen.add(c.caseNo);
+        result.push(mapped);
       }
     }
 
@@ -644,7 +841,7 @@ export class FleetPartnerCaseService {
     attachments: FleetCaseAttachmentRecord[];
   }> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     await this.loadStoredAttachments(caseItem.id);
@@ -675,7 +872,7 @@ export class FleetPartnerCaseService {
     caseId: string,
   ): Promise<FleetCaseTimelineEvent[]> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     const tl =
@@ -683,12 +880,48 @@ export class FleetPartnerCaseService {
       this.timelines.get(caseItem.caseNo) ||
       [];
 
-    // If complaint service has entries, synthesize any notes
+    // A legacy text manifest is only ever trusted once it is tied to this
+    // same case's real confirmed stored attachments (see
+    // splitLegacyAttachmentManifest). Only load them when a legacy entry
+    // actually contains the marker: current entries carry the structured
+    // fleetReplyAttachments relation instead.
+    let attachmentsLoaded = false;
+    const verifyAttachment = (attachmentId: string): boolean => {
+      const att = this.attachments.get(attachmentId);
+      return (
+        !!att &&
+        att.state === "done" &&
+        (att.caseId === caseItem.id || att.caseId === caseItem.caseNo) &&
+        this.isFleetScopeMatch(att.fleetPartnerId, fleetPartnerId)
+      );
+    };
+
+    // If complaint service has entries, synthesize any notes. Prefers the
+    // canonical (repository-backed) Ops readback so a case created or
+    // updated on a different warm instance still surfaces its real
+    // timeline here.
     if (this.complaintService) {
       try {
-        const compTl = this.complaintService.getComplaintTimeline(
-          caseItem.caseNo,
-        );
+        const compTl =
+          typeof this.complaintService.getComplaintTimelineForOps === "function"
+            ? await this.complaintService.getComplaintTimelineForOps(
+                caseItem.caseNo,
+                { includeAttachmentManifest: true },
+              )
+            : this.complaintService.getComplaintTimeline(caseItem.caseNo, {
+                includeAttachmentManifest: true,
+              });
+        if (
+          !attachmentsLoaded &&
+          compTl.some(
+            (entry) =>
+              entry.fleetReplyAttachments === undefined &&
+              entry.note.includes(FLEET_REPLY_ATTACHMENT_MANIFEST_MARKER),
+          )
+        ) {
+          attachmentsLoaded = true;
+          await this.loadStoredAttachments(caseItem.id);
+        }
         for (const entry of compTl) {
           const exists = tl.some((t) => t.entryId === entry.entryId);
           if (
@@ -698,6 +931,20 @@ export class FleetPartnerCaseService {
                 entry.action === "case_created"))
           ) {
             const isFleetReply = entry.note.includes("[車行回覆");
+            // The server-created structured relation is authoritative; the
+            // note text is shown exactly as written.
+            const { body, attachments } = entry.fleetReplyAttachments
+              ? {
+                  body: entry.note,
+                  attachments: entry.fleetReplyAttachments.map(
+                    (attachment) => ({ ...attachment }),
+                  ),
+                }
+              : splitLegacyAttachmentManifest(
+                  entry.note,
+                  caseItem.fleetPartnerId,
+                  verifyAttachment,
+                );
             tl.push({
               entryId: entry.entryId,
               caseId: caseItem.id,
@@ -709,14 +956,26 @@ export class FleetPartnerCaseService {
                   : isFleetReply
                     ? "車行回覆"
                     : "評論",
-              actor: isFleetReply ? "車行負責人" : "陳維",
+              // The canonical ComplaintTimelineEntry contract has no
+              // per-note actor field; the case's real current assignee is
+              // the same honest signal already used as this action's audit
+              // actorId (see addComplaintCaseNoteInternal). Project that
+              // instead of inventing a named ops owner.
+              actor: isFleetReply ? "車行負責人" : caseItem.assignee,
               actorRealm: isFleetReply ? "tenant" : "ops",
-              body: entry.note,
+              body,
+              ...(attachments.length ? { attachments } : {}),
             });
           }
         }
-      } catch {
-        // Ignore
+      } catch (error) {
+        if (!(error instanceof ApiRequestError && error.code === "NOT_FOUND")) {
+          // This case has no corresponding ComplaintService record (e.g. a
+          // fleet seed case) is the only expected absence here; anything
+          // else is a genuine canonical-read failure and must not be
+          // silently returned as a (possibly incomplete) success.
+          throw error;
+        }
       }
     }
 
@@ -732,7 +991,7 @@ export class FleetPartnerCaseService {
     requestId?: string,
   ): Promise<FleetCaseReplyRecord> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     // Check responsibility: platform owned cannot be replied to by fleet
@@ -741,6 +1000,18 @@ export class FleetPartnerCaseService {
         HttpStatus.CONFLICT,
         "CASE_PLATFORM_OWNED",
         "案件責任歸屬 platform，唯讀檢視；回覆按鈕停用，車行無法處理。",
+        { caseId, responsibility: caseItem.responsibility },
+      );
+    }
+
+    // An unattributed case is not scoped to any fleet (no real
+    // source-order/driver/vehicle fleet was resolved), so no fleet caller
+    // may reply on its behalf -- even one whose own id is blank.
+    if (caseItem.responsibility === "unattributed") {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "CASE_NOT_FLEET_SCOPED",
+        "案件尚未歸屬任何車行：車行無法回覆此案件。",
         { caseId, responsibility: caseItem.responsibility },
       );
     }
@@ -820,6 +1091,9 @@ export class FleetPartnerCaseService {
 
     // Resolve attachments for timeline
     const resolvedAttachments: FleetCaseTimelineAttachment[] = [];
+    const fleetReplyAttachments: NonNullable<
+      ComplaintTimelineEntry["fleetReplyAttachments"]
+    > = [];
     if (command.attachmentIds?.length) {
       await this.loadStoredAttachments(caseItem.id);
       for (const attId of command.attachmentIds) {
@@ -843,6 +1117,12 @@ export class FleetPartnerCaseService {
             size: att.size,
             fileSize: att.fileSize,
           });
+          fleetReplyAttachments.push({
+            attachmentId: att.attachmentId,
+            name: att.name,
+            size: att.size,
+            fileSize: att.fileSize,
+          });
         }
       }
     }
@@ -859,11 +1139,16 @@ export class FleetPartnerCaseService {
       deduplicated: false,
     };
 
-    const attsNote = resolvedAttachments.length
-      ? ` (附件: ${resolvedAttachments.map((a) => a.name).join(", ")})`
-      : "";
-    const notePayload = `[車行回覆 · ${fleetPartnerId}] ${content}${attsNote}`;
+    // The note keeps only the human-readable reply text and attachment
+    // names. The relation itself travels as the structured, server-created
+    // fleetReplyAttachments field on the same canonical timeline entry, so
+    // another already-warm instance reads it back without parsing any text.
+    // An empty array is still set: it records that this reply has no
+    // attachments, so its text is never re-read as a legacy manifest.
+    const notePayload = `${fleetReplyNotePrefix(fleetPartnerId)}${content}${formatAttachmentNamesSuffix(resolvedAttachments)}`;
+
     let settlementTimelineEntryId: string | undefined;
+    let ordinaryReplyTimelineEntryId: string | undefined;
     if (caseItem.cat === "settlement_dispute") {
       if (!this.complaintService) {
         throw new ApiRequestError(
@@ -876,6 +1161,7 @@ export class FleetPartnerCaseService {
         caseItem.caseNo,
         { note: notePayload },
         requestId,
+        { fleetReplyAttachments },
       );
       settlementTimelineEntryId = this.complaintService
         .getComplaintTimeline(caseItem.caseNo)
@@ -893,6 +1179,7 @@ export class FleetPartnerCaseService {
           requestId,
           {
             captureAudit: true,
+            fleetReplyAttachments,
             ...(idempotencyKey
               ? {
                   commandIdentity: {
@@ -904,6 +1191,13 @@ export class FleetPartnerCaseService {
           },
         );
         await this.complaintService.awaitSettlementPersistence(caseItem.caseNo);
+        // Keep the local timeline entry's id aligned with the canonical
+        // Complaint note's entryId so a later reload on this same instance
+        // (or a fresh read on another warm instance) recognizes it as the
+        // same event instead of duplicating it.
+        ordinaryReplyTimelineEntryId = this.complaintService
+          .getComplaintTimeline(caseItem.caseNo)
+          .at(-1)?.entryId;
       } catch (error) {
         if (error instanceof ApiRequestError && error.code === "NOT_FOUND") {
           // ComplaintService has no record of this caseNo; the fleet-side
@@ -927,7 +1221,10 @@ export class FleetPartnerCaseService {
 
     // Append to timeline
     const timelineEntry: FleetCaseTimelineEvent = {
-      entryId: settlementTimelineEntryId ?? `tl-${replyId}`,
+      entryId:
+        settlementTimelineEntryId ??
+        ordinaryReplyTimelineEntryId ??
+        `tl-${replyId}`,
       caseId: caseItem.id,
       at: now,
       tone: "accent",
@@ -984,7 +1281,7 @@ export class FleetPartnerCaseService {
     contentType: string,
   ) {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
     if (caseItem.status === "closed")
       throw new ApiRequestError(
@@ -1003,7 +1300,7 @@ export class FleetPartnerCaseService {
 
   async downloadAttachmentForReview(caseId: string, attachmentId: string) {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     await this.loadStoredAttachments(caseItem.id);
     const attachment = this.attachments.get(attachmentId);
     if (
@@ -1041,7 +1338,7 @@ export class FleetPartnerCaseService {
     headers: Record<string, string>;
   }> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     // Closed cases cannot upload new attachments
@@ -1099,7 +1396,7 @@ export class FleetPartnerCaseService {
     command: ConfirmCaseAttachmentUploadCommand,
   ): Promise<FleetCaseAttachmentRecord> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     if (caseItem.status === "closed") {
@@ -1162,7 +1459,7 @@ export class FleetPartnerCaseService {
     authorized: boolean;
   }> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     await this.loadStoredAttachments(caseItem.id);
@@ -1210,7 +1507,7 @@ export class FleetPartnerCaseService {
     fileContent: Buffer;
   }> {
     await this.complaintService?.refreshSettlementCases?.();
-    const caseItem = this.resolveCase(caseId);
+    const caseItem = await this.resolveCase(caseId);
     this.assertFleetScope(caseItem, fleetPartnerId);
 
     const valid = verifyAttachmentToken(

@@ -58,6 +58,10 @@ type ComplaintActionOptions<Capture extends boolean> = {
   commandIdentity?: ComplaintCommandIdentity;
   /** Original caller payload when domain preparation adds generated IDs. */
   commandPayload?: unknown;
+  /** Server-verified Fleet reply attachment relation for this note. Only
+   * server-side callers (the Fleet reply path) set it; it is stored on the
+   * timeline entry itself, never decoded from the note text. */
+  fleetReplyAttachments?: ComplaintTimelineEntry["fleetReplyAttachments"];
 };
 type IdentifiedComplaintPayload = {
   complaintCommandIdentity: ComplaintCommandIdentity;
@@ -1329,6 +1333,29 @@ export class ComplaintService implements OnModuleInit {
     return this.listComplaintCases();
   }
 
+  /** Read every committed non-settlement case on each call, the same
+   * canonical-refresh guarantee refreshSettlementCases already gives
+   * settlement_dispute cases, so a warm instance that never itself created
+   * or updated a given ordinary case still lists it. Applies the same
+   * pending-commit readback guard as listComplaintCasesForOps: an ordinary
+   * case whose COMMIT outcome is still unconfirmed must reject this list
+   * the same way it already rejects the Ops list/detail, never resolve as
+   * an optimistic success that silently omits it. */
+  async listComplaintCasesForFleetOps(): Promise<ComplaintCaseRecord[]> {
+    this.ensureComplaintReadbackAvailable();
+    if (
+      this.complaintRepository?.isEnabled() &&
+      typeof this.complaintRepository.loadState === "function"
+    ) {
+      const state = await this.complaintRepository.loadState();
+      for (const durableCase of state.complaintCases) {
+        if (durableCase.category === "settlement_dispute") continue;
+        this.reconcileComplaintCaseIntoCache(durableCase);
+      }
+    }
+    return this.listComplaintCases();
+  }
+
   async getComplaintCaseForOps(caseNo: string) {
     // Legacy/definitely rejected commands can leave no retained identity.
     // Actual ordinary GET still reads this case's canonical full snapshot.
@@ -1348,10 +1375,13 @@ export class ComplaintService implements OnModuleInit {
     return this.getComplaintCase(caseNo);
   }
 
-  async getComplaintTimelineForOps(caseNo: string) {
+  async getComplaintTimelineForOps(
+    caseNo: string,
+    opts?: { includeAttachmentManifest?: boolean },
+  ) {
     if (!/^PAX-[0-9a-f-]{36}$/i.test(caseNo)) {
       await this.getComplaintCaseForOps(caseNo);
-      return this.getComplaintTimeline(caseNo);
+      return this.getComplaintTimeline(caseNo, opts);
     }
     this.ensureComplaintReadbackAvailable(caseNo);
     await this.getComplaintCaseForOps(caseNo);
@@ -1373,7 +1403,7 @@ export class ComplaintService implements OnModuleInit {
         ),
       );
     }
-    return this.getComplaintTimeline(caseNo);
+    return this.getComplaintTimeline(caseNo, opts);
   }
 
   listComplaintCases() {
@@ -1386,11 +1416,27 @@ export class ComplaintService implements OnModuleInit {
     return this.cloneComplaintCase(this.requireComplaintCase(caseNo));
   }
 
-  getComplaintTimeline(caseNo: string) {
+  /** The human note text is always returned exactly as written. Only the
+   * structured fleetReplyAttachments relation is internal metadata, and it
+   * is omitted unless an internal reader (the Fleet case timeline)
+   * explicitly asks for it. */
+  getComplaintTimeline(
+    caseNo: string,
+    opts?: { includeAttachmentManifest?: boolean },
+  ): ComplaintTimelineEntry[] {
     this.requireComplaintCase(caseNo);
-    return (this.complaintTimelines.get(caseNo) ?? []).map((entry) => ({
-      ...entry,
-    }));
+    const includeAttachmentManifest = opts?.includeAttachmentManifest ?? false;
+    return (this.complaintTimelines.get(caseNo) ?? []).map((entry) => {
+      const { fleetReplyAttachments, ...publicEntry } = entry;
+      return includeAttachmentManifest && fleetReplyAttachments
+        ? {
+            ...publicEntry,
+            fleetReplyAttachments: fleetReplyAttachments.map((item) => ({
+              ...item,
+            })),
+          }
+        : publicEntry;
+    });
   }
 
   assignComplaintCase<Capture extends boolean = false>(
@@ -1485,6 +1531,7 @@ export class ComplaintService implements OnModuleInit {
     caseNo: string,
     command: AddComplaintCaseNoteCommand,
     requestId?: string,
+    options?: Pick<ComplaintActionOptions<false>, "fleetReplyAttachments">,
   ) {
     const complaintCase = this.requireComplaintCase(caseNo);
     if (complaintCase.category !== "settlement_dispute") {
@@ -1495,7 +1542,13 @@ export class ComplaintService implements OnModuleInit {
         { caseNo },
       );
     }
-    return this.addComplaintCaseNoteInternal(caseNo, command, requestId, true);
+    return this.addComplaintCaseNoteInternal(
+      caseNo,
+      command,
+      requestId,
+      true,
+      options,
+    );
   }
 
   private addComplaintCaseNoteInternal<Capture extends boolean = false>(
@@ -1536,6 +1589,8 @@ export class ComplaintService implements OnModuleInit {
       caseNo,
       TIMELINE_ACTIONS.noteAdded,
       command.note.trim(),
+      undefined,
+      options?.fleetReplyAttachments,
     );
     const isOrdinaryDbWrite = this.isOrdinaryDbWrite(complaintCase.category);
     const persistence = this.persistChanges(
@@ -2266,9 +2321,20 @@ export class ComplaintService implements OnModuleInit {
     action: ComplaintTimelineEntry["action"],
     note: string,
     createdAt = new Date().toISOString(),
+    fleetReplyAttachments?: ComplaintTimelineEntry["fleetReplyAttachments"],
   ) {
     const currentTimeline = this.complaintTimelines.get(caseNo) ?? [];
     const entry = this.createTimelineEntry(caseNo, action, note, createdAt);
+    if (fleetReplyAttachments) {
+      entry.fleetReplyAttachments = fleetReplyAttachments.map((item) => ({
+        attachmentId: item.attachmentId,
+        name: item.name,
+        size: item.size,
+        ...(typeof item.fileSize === "number"
+          ? { fileSize: item.fileSize }
+          : {}),
+      }));
+    }
     this.complaintTimelines.set(caseNo, [...currentTimeline, entry]);
     return entry;
   }

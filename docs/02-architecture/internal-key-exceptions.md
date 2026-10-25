@@ -968,6 +968,7 @@ policy in `apps/api/src/common/auth/auth.policy.ts:936-958`):
 | --- | --- | --- |
 | `POST internal/scheduled-tasks/mail-outbox/drain` | `notification-delivery:drain` | `system` only |
 | `POST internal/scheduled-tasks/approval-timeout-reminders/run` | `tenant-partner:approval-timeout-reminders:run` | `system` only |
+| `POST internal/scheduled-tasks/regulatory-expiry/run` | `regulatory:write` | `system` only |
 
 Cloud Scheduler presents its OIDC identity token as a plain
 `Authorization: Bearer <token>` header (it cannot be redirected to the
@@ -1024,11 +1025,13 @@ registry secret is still unpopulated (this task does not populate it either
   "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
   "routeScopes": [
     "POST internal/scheduled-tasks/mail-outbox/drain",
-    "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+    "POST internal/scheduled-tasks/approval-timeout-reminders/run",
+    "POST internal/scheduled-tasks/regulatory-expiry/run"
   ],
   "scopes": [
     "notification-delivery:drain",
-    "tenant-partner:approval-timeout-reminders:run"
+    "tenant-partner:approval-timeout-reminders:run",
+    "regulatory:write"
   ]
 }
 ```
@@ -1094,11 +1097,13 @@ task does not perform — see the runbook, `docs/03-runbooks/dev-scheduled-tasks
     "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
     "routeScopes": [
       "POST internal/scheduled-tasks/mail-outbox/drain",
-      "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+      "POST internal/scheduled-tasks/approval-timeout-reminders/run",
+      "POST internal/scheduled-tasks/regulatory-expiry/run"
     ],
     "scopes": [
       "notification-delivery:drain",
-      "tenant-partner:approval-timeout-reminders:run"
+      "tenant-partner:approval-timeout-reminders:run",
+      "regulatory:write"
     ]
   }
 ]
@@ -1572,11 +1577,13 @@ unchanged):
     "allowedTokenAudiences": ["https://drts-dev-api-r6ykdme3wa-uc.a.run.app"],
     "routeScopes": [
       "POST internal/scheduled-tasks/mail-outbox/drain",
-      "POST internal/scheduled-tasks/approval-timeout-reminders/run"
+      "POST internal/scheduled-tasks/approval-timeout-reminders/run",
+      "POST internal/scheduled-tasks/regulatory-expiry/run"
     ],
     "scopes": [
       "notification-delivery:drain",
-      "tenant-partner:approval-timeout-reminders:run"
+      "tenant-partner:approval-timeout-reminders:run",
+      "regulatory:write"
     ]
   }
 ]

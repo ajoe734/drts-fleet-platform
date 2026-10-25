@@ -33,14 +33,14 @@ tasks are `done`:
 
 Fetched `origin/dev`: `d43d0321f4dc27e3534c06c66b186a64b7cdf97f`.
 
-| Ref | HEAD | Comparison with fetched dev |
-| --- | --- | --- |
-| local `pi/sr-shared-dev-current-fixes-delivery-20261015` | `7b09254fec401c49a1f9200bf52860047386a501` | `git rev-list --left-right --count origin/dev...pi/...` → `13  0`: **0 commits ahead, fully merged ancestor of dev.** Reflog: single entry `branch: Created from origin/dev`. HEAD subject is an unrelated prior merge (`[ReviewBus] PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR ... (#2705)`) because that was `dev`'s tip at branch-creation time — this is an inherited trunk base, not Pi's own work landing under the wrong subject. |
-| This helper branch | `claude2/sr-shared-dev-current-fixes-delivery-20261015-unblock-history-repair`, base `origin/dev` | Clean isolated task branch before this report. |
+| Ref                                                      | HEAD                                                                                              | Comparison with fetched dev                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| local `pi/sr-shared-dev-current-fixes-delivery-20261015` | `7b09254fec401c49a1f9200bf52860047386a501`                                                        | `git rev-list --left-right --count origin/dev...pi/...` → `13  0`: **0 commits ahead, fully merged ancestor of dev.** Reflog: single entry `branch: Created from origin/dev`. HEAD subject is an unrelated prior merge (`[ReviewBus] PAX-WEB-RIDE-UI-20261009-UNBLOCK-HISTORY-REPAIR ... (#2705)`) because that was `dev`'s tip at branch-creation time — this is an inherited trunk base, not Pi's own work landing under the wrong subject. |
+| This helper branch                                       | `claude2/sr-shared-dev-current-fixes-delivery-20261015-unblock-history-repair`, base `origin/dev` | Clean isolated task branch before this report.                                                                                                                                                                                                                                                                                                                                                                                                |
 
 Additional checks, all exit 0 as noted (finite search results; a no-match
 result on a live, mutable remote/PR set only means no branch/PR was found
-*at the time of this audit*, not a permanent guarantee that none could ever
+_at the time of this audit_, not a permanent guarantee that none could ever
 have existed):
 
 - `git ls-remote origin "refs/heads/pi/*"` returned no row for this branch at
@@ -102,7 +102,8 @@ Per prior precedent (`project-unblock-helper-dispatch-guard-parent-writes`),
 a dispatched helper cannot mutate a different task directly, and a merged
 helper must not flip a still-blocked parent to `todo`. Supervisor should apply
 the following to `SR-SHARED-DEV-CURRENT-FIXES-DELIVERY-20261015` via `assign`
-+ `note`, preserving all existing fields:
+
+- `note`, preserving all existing fields:
 
 ```json
 {
@@ -114,12 +115,12 @@ the following to `SR-SHARED-DEV-CURRENT-FIXES-DELIVERY-20261015` via `assign`
 
 ## Finding-level verification
 
-| Acceptance item | Result |
-| --- | --- |
-| Identify the exact contamination | **None found at audit time.** 0 local commits ahead of dev on the parent's scratch branch; no PR found; no worktree reference found. |
-| Repair or document a non-destructive repair path | Documented: no repair action is indicated by the evidence above; this report does not perform or recommend any ref deletion/rewrite. |
-| Task-scoped commit/push/PR evidence for any canonical change | This artifact file is the only canonical change; see publication receipt below. |
-| Update the parent with the concrete unblocked next step | Recommended `resolved_parent_*` payload above, for Supervisor to apply (dispatched-worker guard blocks direct parent mutation by this helper), preserving the parent's full existing acceptance scope rather than implying the dependency gate alone clears delivery. |
+| Acceptance item                                              | Result                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identify the exact contamination                             | **None found at audit time.** 0 local commits ahead of dev on the parent's scratch branch; no PR found; no worktree reference found.                                                                                                                                  |
+| Repair or document a non-destructive repair path             | Documented: no repair action is indicated by the evidence above; this report does not perform or recommend any ref deletion/rewrite.                                                                                                                                  |
+| Task-scoped commit/push/PR evidence for any canonical change | This artifact file is the only canonical change; see publication receipt below.                                                                                                                                                                                       |
+| Update the parent with the concrete unblocked next step      | Recommended `resolved_parent_*` payload above, for Supervisor to apply (dispatched-worker guard blocks direct parent mutation by this helper), preserving the parent's full existing acceptance scope rather than implying the dependency gate alone clears delivery. |
 
 ## Publication receipt
 

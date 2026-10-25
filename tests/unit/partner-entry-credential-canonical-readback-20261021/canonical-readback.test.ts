@@ -63,7 +63,9 @@ function createSharedDbPort() {
           (record) => record.entrySlug === String(params[0]),
         );
       }
-      if (/ORDER BY updated_at DESC, created_at DESC/i.test(selectMatch[2] ?? "")) {
+      if (
+        /ORDER BY updated_at DESC, created_at DESC/i.test(selectMatch[2] ?? "")
+      ) {
         records.sort((left, right) => {
           const updatedCompare = String(right.updatedAt ?? "").localeCompare(
             String(left.updatedAt ?? ""),
@@ -240,9 +242,9 @@ describe("PARTNER-ENTRY-CREDENTIAL-CANONICAL-READBACK-20261021: Cross-instance c
       );
     expect(created.entrySlug).toBe(slug.toLowerCase());
     expect(aCreateInsert).toBe(true);
-    expect(
-      a.controller.getPartnerEntry(created.entrySlug).data.entrySlug,
-    ).toBe(created.entrySlug);
+    expect(a.controller.getPartnerEntry(created.entrySlug).data.entrySlug).toBe(
+      created.entrySlug,
+    );
 
     // Existing canonical lookup control on warm instance B
     const bCanonicalReferralLookup = await b.repo.loadReferralRateEntries(
@@ -312,9 +314,9 @@ describe("PARTNER-ENTRY-CREDENTIAL-CANONICAL-READBACK-20261021: Cross-instance c
     });
     const b2 = await createWarmInstance(db, "B2");
     servicesToDestroy.push(b2.service);
-    expect(
-      (await b2.controller.getPartnerEntry(slug2)).data.entrySlug,
-    ).toBe(slug2);
+    expect((await b2.controller.getPartnerEntry(slug2)).data.entrySlug).toBe(
+      slug2,
+    );
 
     const beforeKeyIssue = db.calls.length;
     const issued = (
