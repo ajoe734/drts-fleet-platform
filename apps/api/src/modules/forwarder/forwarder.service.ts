@@ -1336,7 +1336,8 @@ export class ForwarderService implements OnModuleInit {
           newValuesSummary: {
             status: committed.status,
             nativeStatus: committed.lastNativeStatus,
-            reconciliationJobId: committed.reconciliationJob!.reconciliationJobId,
+            reconciliationJobId:
+              committed.reconciliationJob!.reconciliationJobId,
           },
         },
         requestId,
@@ -1611,7 +1612,11 @@ export class ForwarderService implements OnModuleInit {
     draft.updatedAt = failedAt;
     const adapterHealth = this.updateAdapterHealth(
       draft.platformCode,
-      this.buildFailureAdapterHealthPatch(draft.platformCode, command, failedAt),
+      this.buildFailureAdapterHealthPatch(
+        draft.platformCode,
+        command,
+        failedAt,
+      ),
     );
 
     let persisted = true;
@@ -1662,7 +1667,8 @@ export class ForwarderService implements OnModuleInit {
           errorCode: lastSyncError.code,
           retryable: lastSyncError.retryable,
           persisted,
-          reconciliationJobId: draft.reconciliationJob?.reconciliationJobId ?? null,
+          reconciliationJobId:
+            draft.reconciliationJob?.reconciliationJobId ?? null,
         },
       },
       requestId,
@@ -2732,8 +2738,9 @@ export class ForwarderService implements OnModuleInit {
     if (!response || typeof response !== "object") {
       return false;
     }
-    const details = (response as { error?: { details?: Record<string, unknown> } })
-      .error?.details;
+    const details = (
+      response as { error?: { details?: Record<string, unknown> } }
+    ).error?.details;
     return details?.persisted === false;
   }
 

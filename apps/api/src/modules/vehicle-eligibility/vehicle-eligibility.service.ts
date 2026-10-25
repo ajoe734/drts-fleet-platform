@@ -537,7 +537,7 @@ export class VehicleEligibilityService implements OnModuleInit {
       context?.serviceBucketOverride ?? definition.serviceBucket;
     const hasOperatorContext = Boolean(
       context?.requestingOperatorId?.trim() ||
-        context?.operatingAuthorizationId?.trim(),
+      context?.operatingAuthorizationId?.trim(),
     );
 
     return (
@@ -673,8 +673,8 @@ export class VehicleEligibilityService implements OnModuleInit {
 
     if (
       hasOperatorContext &&
-      typeof this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity ===
-        "function"
+      typeof this.regulatoryRegistryService
+        .evaluateVehicleOperatorExclusivity === "function"
     ) {
       const exclusivityDecision =
         this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity(

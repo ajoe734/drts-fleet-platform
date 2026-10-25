@@ -445,6 +445,48 @@ export class RegulatoryRegistryRepository {
     return result.rows[0]?.operator_id ?? null;
   }
 
+  async findFleetPartnerOperatorMappings(): Promise<
+    {
+      fleetPartnerId: string;
+      multiTaxiOperatorIds: string[];
+    }[]
+  > {
+    if (!this.isEnabled()) return [];
+    try {
+      const result = await this.databaseService!.query<JsonRecordRow>(
+        `SELECT record FROM admin.phase1_fleet_partners`,
+      );
+      return result.rows
+        .map((row) =>
+          this.parseRecord<{
+            fleetPartnerId?: string;
+            multiTaxiOperatorIds?: string[];
+          }>(row.record, "admin.phase1_fleet_partners"),
+        )
+        .filter(
+          (
+            record,
+          ): record is {
+            fleetPartnerId: string;
+            multiTaxiOperatorIds?: string[];
+          } =>
+            typeof record.fleetPartnerId === "string" &&
+            record.fleetPartnerId.trim().length > 0,
+        )
+        .map((record) => ({
+          fleetPartnerId: record.fleetPartnerId.trim(),
+          multiTaxiOperatorIds: Array.isArray(record.multiTaxiOperatorIds)
+            ? record.multiTaxiOperatorIds
+                .filter((id): id is string => typeof id === "string")
+                .map((id) => id.trim())
+                .filter((id) => id.length > 0)
+            : [],
+        }));
+    } catch {
+      return [];
+    }
+  }
+
   async ensureLiveMapTestDriver() {
     return ensureLiveMapFixture(this.databaseService);
   }
@@ -890,15 +932,7 @@ export class RegulatoryRegistryRepository {
       );
     }
 
-    for (const rawExclusivity of changes.exclusivities ?? []) {
-      const exclusivity: DispatchExclusivityRecord =
-        rawExclusivity.declarationFileId === "review-simulated-document" &&
-        rawExclusivity.exclusiveOperatorId === "partner-demo-001"
-          ? {
-              ...rawExclusivity,
-              exclusiveOperatorId: "review-synthetic-operator",
-            }
-          : rawExclusivity;
+    for (const exclusivity of changes.exclusivities ?? []) {
       writes.push(
         executor.query(
           `

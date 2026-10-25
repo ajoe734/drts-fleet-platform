@@ -662,6 +662,11 @@ export class RegulatoryRegistryService
 
   private readonly operatingAuthorizationOperators = new Map<string, string>();
 
+  private readonly fleetPartnerOperatorMappings = new Map<
+    string,
+    Set<string>
+  >();
+
   constructor(
     private readonly opsDispatchEventsService: OpsDispatchEventsService,
     private readonly auditNotificationService: AuditNotificationService,
@@ -696,6 +701,7 @@ export class RegulatoryRegistryService
 
       if (this.regulatoryRegistryRepository.isEnabled()) {
         await this.regulatoryRegistryRepository.runIdempotentBackfill?.();
+        await this.syncFleetPartnerOperatorMappings();
       } else {
         this.runInMemoryIdempotentBackfill();
       }
@@ -983,6 +989,7 @@ export class RegulatoryRegistryService
     const repository = this.regulatoryRegistryRepository;
     if (!repository?.isEnabled()) return;
     await this.prepareMatchingSuppressions();
+    await this.syncFleetPartnerOperatorMappings();
     await Promise.all(
       this.drivers
         .filter((d) => d.supportedServiceBuckets.includes(serviceBucket))
@@ -2406,6 +2413,9 @@ export class RegulatoryRegistryService
     const existing = state.exclusivities.find(
       (exclusivity) => exclusivity.vehicleId === vehicleId,
     );
+    const defaultOperatorId =
+      this.normalizeNullableText(existing?.exclusiveOperatorId) ??
+      this.resolveDefaultContractOperatorId(vehicleId, now, state.contracts);
     const exclusivity: DispatchExclusivityRecord = existing
       ? {
           ...existing,
@@ -2420,15 +2430,7 @@ export class RegulatoryRegistryService
           exclusiveOperatorId:
             command.exclusiveOperatorId !== undefined
               ? this.normalizeNullableText(command.exclusiveOperatorId)
-              : existing.exclusiveOperatorId !== undefined
-                ? this.normalizeNullableText(existing.exclusiveOperatorId)
-                : this.normalizeNullableText(
-                    this.selectPrimaryContract(
-                      vehicleId,
-                      now,
-                      state.contracts,
-                    )?.partnerId,
-                  ),
+              : defaultOperatorId,
           exclusiveProviderName:
             this.normalizeNullableText(command.exclusiveProviderName) ??
             existing.exclusiveProviderName,
@@ -2454,13 +2456,7 @@ export class RegulatoryRegistryService
           exclusiveOperatorId:
             command.exclusiveOperatorId !== undefined
               ? this.normalizeNullableText(command.exclusiveOperatorId)
-              : this.normalizeNullableText(
-                  this.selectPrimaryContract(
-                    vehicleId,
-                    now,
-                    state.contracts,
-                  )?.partnerId,
-                ),
+              : defaultOperatorId,
           exclusiveProviderName: this.normalizeNullableText(
             command.exclusiveProviderName,
           ),
@@ -3102,6 +3098,105 @@ export class RegulatoryRegistryService
     return this.operatingAuthorizationOperators.get(normalizedAuthId) ?? null;
   }
 
+  registerFleetPartnerOperatorMapping(
+    fleetPartnerId?: string | null,
+    multiTaxiOperatorIds?: readonly string[] | null,
+  ): void {
+    const normalizedFleetId = this.normalizeNullableText(fleetPartnerId);
+    if (!normalizedFleetId) {
+      return;
+    }
+    const normalizedIds = (multiTaxiOperatorIds ?? [])
+      .map((id) => this.normalizeNullableText(id))
+      .filter((id): id is string => Boolean(id));
+    this.fleetPartnerOperatorMappings.set(
+      normalizedFleetId,
+      new Set(normalizedIds),
+    );
+  }
+
+  async syncFleetPartnerOperatorMappings(): Promise<void> {
+    const repository = this.regulatoryRegistryRepository;
+    if (
+      !repository?.isEnabled() ||
+      typeof repository.findFleetPartnerOperatorMappings !== "function"
+    ) {
+      return;
+    }
+    try {
+      const mappings = await repository.findFleetPartnerOperatorMappings();
+      for (const mapping of mappings) {
+        this.registerFleetPartnerOperatorMapping(
+          mapping.fleetPartnerId,
+          mapping.multiTaxiOperatorIds,
+        );
+      }
+    } catch {
+      // Non-fatal if fleet partner table is unavailable in isolated test mocks
+    }
+  }
+
+  private expandDispatchOperatorAliases(
+    operatorOrFleetId: string,
+  ): Set<string> {
+    const normalized = this.normalizeNullableText(operatorOrFleetId);
+    if (!normalized) {
+      return new Set();
+    }
+    const aliases = new Set<string>([normalized]);
+    const directMapped = this.fleetPartnerOperatorMappings.get(normalized);
+    if (directMapped) {
+      for (const id of directMapped) {
+        aliases.add(id);
+      }
+    }
+    for (const [
+      fleetPartnerId,
+      operatorIds,
+    ] of this.fleetPartnerOperatorMappings.entries()) {
+      if (operatorIds.has(normalized)) {
+        aliases.add(fleetPartnerId);
+        for (const id of operatorIds) {
+          aliases.add(id);
+        }
+      }
+    }
+    return aliases;
+  }
+
+  private areSameDispatchOperator(
+    boundOperatorId: string,
+    requestingOperatorId: string | null,
+  ): boolean {
+    if (!requestingOperatorId) {
+      return false;
+    }
+    if (boundOperatorId === requestingOperatorId) {
+      return true;
+    }
+    return this.expandDispatchOperatorAliases(boundOperatorId).has(
+      requestingOperatorId,
+    );
+  }
+
+  private resolveDefaultContractOperatorId(
+    vehicleId: string,
+    evaluatedAt: string,
+    contracts?: VehicleContractRecord[],
+  ): string | null {
+    const partnerId = this.normalizeNullableText(
+      this.selectPrimaryContract(vehicleId, evaluatedAt, contracts)?.partnerId,
+    );
+    if (!partnerId) {
+      return null;
+    }
+    const mappedOperators = this.fleetPartnerOperatorMappings.get(partnerId);
+    if (mappedOperators && mappedOperators.size === 1) {
+      return [...mappedOperators][0]!;
+    }
+    return partnerId;
+  }
+
   prepareOperatingAuthorizationOperator(
     authorizationId?: string | null,
   ): Promise<string | null> | undefined {
@@ -3109,21 +3204,22 @@ export class RegulatoryRegistryService
     if (!normalizedAuthId || !this.regulatoryRegistryRepository?.isEnabled()) {
       return undefined;
     }
-    return this.regulatoryRegistryRepository
-      .findCompletionOperatorId(normalizedAuthId)
-      .then((operatorId) => {
-        const persistedOperatorId = this.normalizeNullableText(operatorId);
-        if (persistedOperatorId) {
-          this.operatingAuthorizationOperators.set(
-            normalizedAuthId,
-            persistedOperatorId,
-          );
-          return persistedOperatorId;
-        }
-        return (
-          this.operatingAuthorizationOperators.get(normalizedAuthId) ?? null
+    return Promise.all([
+      this.regulatoryRegistryRepository.findCompletionOperatorId(
+        normalizedAuthId,
+      ),
+      this.syncFleetPartnerOperatorMappings(),
+    ]).then(([operatorId]) => {
+      const persistedOperatorId = this.normalizeNullableText(operatorId);
+      if (persistedOperatorId) {
+        this.operatingAuthorizationOperators.set(
+          normalizedAuthId,
+          persistedOperatorId,
         );
-      });
+        return persistedOperatorId;
+      }
+      return this.operatingAuthorizationOperators.get(normalizedAuthId) ?? null;
+    });
   }
 
   evaluateVehicleOperatorExclusivity(
@@ -3150,15 +3246,10 @@ export class RegulatoryRegistryService
     });
     const vehicle = this.requireVehicle(vehicleId);
     const exclusivity = this.selectPrimaryExclusivity(vehicleId, evaluatedAt);
-    const boundOperatorId =
-      exclusivity && exclusivity.exclusiveOperatorId === undefined
-        ? this.normalizeNullableText(
-            this.selectPrimaryContract(vehicleId, evaluatedAt)?.partnerId,
-          )
-        : this.normalizeNullableText(
-            exclusivity?.exclusiveOperatorId ??
-              vehicle.supplyLifecycle.exclusivity.operatorId,
-          );
+    const boundOperatorId = this.normalizeNullableText(
+      exclusivity?.exclusiveOperatorId ??
+        vehicle.supplyLifecycle.exclusivity.operatorId,
+    );
     const operatingAuthorizationId = this.normalizeNullableText(
       context?.operatingAuthorizationId,
     );
@@ -3197,7 +3288,7 @@ export class RegulatoryRegistryService
       hasOperatorContext &&
       exclusivity?.lifecycleStatus === "active" &&
       boundOperatorId &&
-      requestingOperatorId !== boundOperatorId
+      !this.areSameDispatchOperator(boundOperatorId, requestingOperatorId)
     ) {
       const effectiveRequester =
         requestingOperatorId ?? operatingAuthorizationId;
@@ -3285,7 +3376,7 @@ export class RegulatoryRegistryService
     });
     const hasOperatorContext = Boolean(
       this.normalizeNullableText(operatorContext?.requestingOperatorId) ||
-        this.normalizeNullableText(operatorContext?.operatingAuthorizationId),
+      this.normalizeNullableText(operatorContext?.operatingAuthorizationId),
     );
     return this.supplyPairs
       .map((pair) => {
@@ -3360,7 +3451,10 @@ export class RegulatoryRegistryService
     if (!vehicle.supplyLifecycle.dispatch.eligible) {
       return false;
     }
-    if (serviceBucket && !vehicle.supportedServiceBuckets.includes(serviceBucket)) {
+    if (
+      serviceBucket &&
+      !vehicle.supportedServiceBuckets.includes(serviceBucket)
+    ) {
       return false;
     }
     if (!serviceBucket && vehicle.supportedServiceBuckets.length === 0) {
@@ -3851,10 +3945,9 @@ export class RegulatoryRegistryService
       blockedReasons.push("insurance_cancelled");
     }
 
-    const boundOperatorId =
-      exclusivity && exclusivity.exclusiveOperatorId === undefined
-        ? this.normalizeNullableText(contract?.partnerId)
-        : this.normalizeNullableText(exclusivity?.exclusiveOperatorId);
+    const boundOperatorId = this.normalizeNullableText(
+      exclusivity?.exclusiveOperatorId,
+    );
     if (!exclusivity || exclusivity.lifecycleStatus === "missing") {
       blockedReasons.push("exclusivity_missing");
     } else if (exclusivity.lifecycleStatus === "pending_review") {
@@ -4172,27 +4265,12 @@ export class RegulatoryRegistryService
   private hydrateExclusivity(
     exclusivity: DispatchExclusivityRecord,
   ): DispatchExclusivityRecord {
-    const hasExplicitOperatorField =
-      exclusivity.exclusiveOperatorId !== undefined;
-    const rawOperatorId = this.normalizeNullableText(
-      exclusivity.exclusiveOperatorId,
-    );
-    const exclusiveOperatorId =
-      exclusivity.declarationFileId === "review-simulated-document" &&
-      rawOperatorId === "partner-demo-001"
-        ? "review-synthetic-operator"
-        : hasExplicitOperatorField
-          ? rawOperatorId
-          : this.normalizeNullableText(
-              this.selectPrimaryContract(
-                exclusivity.vehicleId,
-                exclusivity.updatedAt ?? SEED_TIMESTAMP,
-              )?.partnerId,
-            );
     return this.applyExclusivityLifecycle(
       {
         ...exclusivity,
-        exclusiveOperatorId,
+        exclusiveOperatorId: this.normalizeNullableText(
+          exclusivity.exclusiveOperatorId,
+        ),
         lifecycleStatus: exclusivity.lifecycleStatus ?? "missing",
       },
       exclusivity.updatedAt ?? SEED_TIMESTAMP,

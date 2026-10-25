@@ -10649,8 +10649,8 @@ export class OwnedMobilityService
 
     if (
       context.operatingAuthorizationId &&
-      typeof this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity ===
-        "function"
+      typeof this.regulatoryRegistryService
+        .evaluateVehicleOperatorExclusivity === "function"
     ) {
       const exclusivityDecision =
         this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity(
@@ -11890,8 +11890,8 @@ export class OwnedMobilityService
 
       if (
         order.operatingAuthorizationId &&
-        typeof this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity ===
-          "function"
+        typeof this.regulatoryRegistryService
+          .evaluateVehicleOperatorExclusivity === "function"
       ) {
         const exclusivityDecision =
           this.regulatoryRegistryService.evaluateVehicleOperatorExclusivity(

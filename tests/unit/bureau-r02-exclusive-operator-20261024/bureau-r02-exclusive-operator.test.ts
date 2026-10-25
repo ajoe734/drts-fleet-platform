@@ -493,4 +493,189 @@ describe("BUREAU-R02: single-operator vehicle exclusivity binding & cross-operat
       displayLabel: "Legacy Unbound Fleet (exclusivity_operator_unbound)",
     });
   });
+
+  it("preserves NULL exclusiveOperatorId and exclusivity_operator_unbound on legacy pre-V0131 persisted rows without auto-binding to contract.partnerId", async () => {
+    const persistChanges = vi.fn(async () => undefined);
+    const repository = {
+      isEnabled: vi.fn(() => true),
+      loadState: vi.fn(async () => ({
+        vehicles: [
+          {
+            vehicleId: "veh-legacy-r02",
+            plateNo: "TPE-8899",
+            operatingArea: "taichung-port",
+            supportedServiceBuckets: ["standard_taxi"],
+            dispatchableFlag: true,
+            exclusivityApproved: true,
+            insuranceStatus: "valid",
+          },
+        ],
+        drivers: [
+          {
+            driverId: "drv-legacy-r02",
+            name: "Legacy Driver",
+            supportedServiceBuckets: ["standard_taxi"],
+            workState: "available",
+            licensesValid: true,
+          },
+        ],
+        supplyPairs: [
+          {
+            vehicleId: "veh-legacy-r02",
+            driverId: "drv-legacy-r02",
+            etaMinutes: 5,
+          },
+        ],
+        contracts: [
+          {
+            contractId: "contract-legacy-r02",
+            vehicleId: "veh-legacy-r02",
+            partnerId: "fp-legacy-001",
+            partnerType: "fleet_partner",
+            contractType: "service_fleet_contract",
+            operatingAreaId: "taichung-port",
+            serviceScope: "standard_taxi",
+            startAt: "2026-01-01T00:00:00Z",
+            endAt: "2027-12-31T23:59:59Z",
+            status: "active",
+            approvedBy: "platform-admin-001",
+            approvedAt: "2026-01-01T00:00:00Z",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+        policies: [
+          {
+            policyId: "policy-legacy-r02",
+            vehicleId: "veh-legacy-r02",
+            policyNo: "POL-LEGACY-R02",
+            insuranceType: "passenger_liability",
+            insurerName: "Legacy Insurance",
+            coverageAmount: 3000000,
+            startAt: "2026-01-01T00:00:00Z",
+            endAt: "2027-12-31T23:59:59Z",
+            status: "active",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+        // Legacy pre-V0131 row without exclusiveOperatorId field
+        exclusivities: [
+          {
+            vehicleId: "veh-legacy-r02",
+            declarationStatus: "submitted",
+            declarationFileId: "file-legacy-r02",
+            reviewStatus: "approved",
+            reviewerId: "platform-admin-001",
+            reviewedAt: "2026-01-01T00:00:00Z",
+            exclusiveProviderName: "Legacy Fleet Name Only",
+            effectiveStart: "2026-01-01T00:00:00Z",
+            effectiveEnd: "2027-12-31T23:59:59Z",
+            terminationReason: null,
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        ],
+        disclosureProfiles: [],
+        driverCredentials: [],
+      })),
+      persistChanges,
+      reportPersistenceFailure: vi.fn(),
+    };
+
+    const opsEvents = new OpsDispatchEventsService(new EventEmitter() as never);
+    const auditService = new AuditNotificationService();
+    const driverProfile = new DriverProfileService(auditService);
+    const registry = new RegulatoryRegistryService(
+      opsEvents,
+      auditService,
+      driverProfile,
+      repository as never,
+    );
+
+    await registry.onModuleInit();
+
+    const exclusivity = registry
+      .listExclusivities()
+      .find((entry) => entry.vehicleId === "veh-legacy-r02")!;
+    expect(exclusivity.exclusiveOperatorId).toBeNull();
+
+    const vehicle = registry
+      .listVehicles()
+      .find((entry) => entry.vehicleId === "veh-legacy-r02")!;
+    expect(vehicle.supplyLifecycle.exclusivity.operatorId).toBeNull();
+    expect(vehicle.supplyLifecycle.dispatch.blockedReasons).toContain(
+      "exclusivity_operator_unbound",
+    );
+    expect(vehicle.exclusivityApproved).toBe(false);
+    expect(vehicle.dispatchableFlag).toBe(false);
+
+    const decision = registry.evaluateVehicleOperatorExclusivity(
+      "veh-legacy-r02",
+      {
+        requestingOperatorId: "fp-legacy-001",
+        auditRefusal: true,
+      },
+    );
+    expect(decision.allowed).toBe(false);
+    expect(decision.reasonCode).toBe("exclusivity_operator_unbound");
+    expect(decision.boundOperatorId).toBeNull();
+  });
+
+  it("aligns FleetPartner.fleetPartnerId with MultiTaxiOperatingAuthorization.operatorId via multiTaxiOperatorIds so a fleet can dispatch its own bound vehicle", async () => {
+    const { registry, ownedMobility } = createServices();
+
+    // Simulate a fleet partner fp-X that maps to MultiTaxiOperatingAuthorization.operatorId = "op-X"
+    registry.registerFleetPartnerOperatorMapping("fp-X", ["op-X"]);
+
+    // Bind veh-demo-001 exclusivity to fp-X (e.g. from contract.partnerId = fp-X)
+    await registry.submitExclusivityReview("veh-demo-001", {
+      exclusiveOperatorId: "fp-X",
+      exclusiveProviderName: "Fleet X",
+      declarationFileId: "file-fp-x-001",
+      effectiveStart: "2026-01-01",
+      effectiveEnd: "2027-12-31",
+    });
+    await registry.approveExclusivity("veh-demo-001", {
+      reviewerId: "ops-reviewer-001",
+    });
+
+    const authOpX = buildAuthorization("auth-op-x", "op-X");
+    const authOpY = buildAuthorization("auth-op-y", "op-Y");
+
+    // Dispatching with op-X's operating authorization succeeds because fp-X maps to multiTaxiOperatorIds: ["op-X"]
+    const decisionOpX = registry.evaluateVehicleOperatorExclusivity(
+      "veh-demo-001",
+      {
+        requestingOperatorId: "op-X",
+        operatingAuthorizationId: authOpX.authorizationId,
+        auditRefusal: true,
+      },
+    );
+    expect(decisionOpX.allowed).toBe(true);
+    expect(decisionOpX.reasonCode).toBeNull();
+
+    const checkedInOpX = await ownedMobility.queueCheckInMultiTaxi(
+      {
+        siteId: "site-taipei-main",
+        vehicleId: "veh-demo-001",
+        queueMode: "virtual_matching",
+      },
+      authOpX,
+    );
+    expect(checkedInOpX.status).toBe("checked_in");
+
+    // Meanwhile op-Y is still refused with exclusivity_other_operator
+    const decisionOpY = registry.evaluateVehicleOperatorExclusivity(
+      "veh-demo-001",
+      {
+        requestingOperatorId: "op-Y",
+        operatingAuthorizationId: authOpY.authorizationId,
+        auditRefusal: true,
+      },
+    );
+    expect(decisionOpY.allowed).toBe(false);
+    expect(decisionOpY.reasonCode).toBe("exclusivity_other_operator");
+    expect(decisionOpY.boundOperatorId).toBe("fp-X");
+    expect(decisionOpY.requestingOperatorId).toBe("op-Y");
+  });
 });
