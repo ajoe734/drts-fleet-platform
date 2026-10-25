@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import type {
   PassengerPaymentMethod,
   PaymentMethodResponse,
@@ -10,6 +10,7 @@ import {
   PaymentMethodRepository,
 } from "./payment-method.repository";
 import { type PaymentRuntime } from "./payment-runtime.config";
+import type { EncryptedPaymentToken } from "./payment-token-cipher";
 
 export { MAX_BOUND_CARDS_PER_MEMBER };
 export const PAYMENT_RUNTIME = Symbol("PAYMENT_RUNTIME");
@@ -32,6 +33,8 @@ export function paymentMethodId(raw: unknown): string {
 
 @Injectable()
 export class PaymentMethodService {
+  private readonly logger = new Logger(PaymentMethodService.name);
+
   constructor(
     private readonly repository: PaymentMethodRepository,
     @Inject(PAYMENT_RUNTIME) private readonly runtime: PaymentRuntime,
@@ -472,24 +475,59 @@ export class PaymentMethodService {
               );
             }
             if (
-              result.merchantTradeNo &&
-              result.tradeNo &&
-              result.authorizedAmountMinor &&
-              result.authorizedAmountMinor > 0 &&
               typeof this.runtime.provider.cancelBindingAuthorization ===
-                "function"
+              "function"
             ) {
-              const cancelled =
-                await this.runtime.provider.cancelBindingAuthorization({
-                  merchantTradeNo: result.merchantTradeNo,
-                  tradeNo: result.tradeNo,
-                  amountMinor: result.authorizedAmountMinor,
-                });
+              const authAmountMinor =
+                typeof result.authorizedAmountMinor === "number" &&
+                result.authorizedAmountMinor > 0
+                  ? result.authorizedAmountMinor
+                  : 0;
+              const hasTradeIds = Boolean(
+                result.merchantTradeNo && result.tradeNo && authAmountMinor > 0,
+              );
+              const cancelled = hasTradeIds
+                ? await this.runtime.provider.cancelBindingAuthorization({
+                    merchantTradeNo: result.merchantTradeNo!,
+                    tradeNo: result.tradeNo!,
+                    amountMinor: authAmountMinor,
+                  })
+                : false;
               if (!cancelled && !this.runtime.provider.sandbox) {
-                if (typeof this.runtime.provider.unbind === "function") {
-                  await this.runtime.provider
-                    .unbind(card.token, { passengerId: ownerId })
-                    .catch(() => false);
+                const reason = hasTradeIds
+                  ? "do_action_cancel_unconfirmed"
+                  : "missing_trade_identifiers_for_cancel";
+                if (
+                  typeof this.runtime.provider.rollbackOrphanedBinding ===
+                  "function"
+                ) {
+                  await this.runtime.provider.rollbackOrphanedBinding({
+                    token: card.token,
+                    passengerId: ownerId,
+                    merchantTradeNo: result.merchantTradeNo ?? null,
+                    tradeNo: result.tradeNo ?? null,
+                    reason,
+                  });
+                } else if (typeof this.runtime.provider.unbind === "function") {
+                  let unbound = false;
+                  try {
+                    unbound = await this.runtime.provider.unbind(card.token, {
+                      passengerId: ownerId,
+                    });
+                  } catch {
+                    unbound = false;
+                  }
+                  if (!unbound) {
+                    this.logger.error(
+                      JSON.stringify({
+                        event: "ecpay_orphan_bind_card_rollback_failed",
+                        passengerId: ownerId,
+                        merchantTradeNo: result.merchantTradeNo ?? null,
+                        tradeNo: result.tradeNo ?? null,
+                        reason,
+                      }),
+                    );
+                  }
                 }
                 await this.repository.bindingOutcome(
                   ownerId,
@@ -586,57 +624,59 @@ export class PaymentMethodService {
     id: unknown,
   ): Promise<{ success: boolean }> {
     const canonicalId = paymentMethodId(id);
-    if (typeof this.runtime.provider.unbind === "function") {
-      if (!this.runtime.provider.available || !this.runtime.cipher) {
-        throw new ApiRequestError(
-          503,
-          "payment_unavailable",
-          "Payment provider is not configured.",
-        );
-      }
-      if (typeof this.repository.findRemovableToken === "function") {
-        const removable = await this.repository.findRemovableToken(
-          passengerId,
-          canonicalId,
-        );
-        if (
-          removable.tokenEnvelope &&
-          (!removable.provider ||
-            removable.provider === this.runtime.provider.name)
-        ) {
-          let token: string;
-          try {
-            token = this.runtime.cipher.decrypt(
-              removable.tokenEnvelope,
-              passengerId,
-              canonicalId,
-            );
-          } catch {
-            throw new ApiRequestError(
-              503,
-              "payment_persistence_unavailable",
-              "Payment persistence is unavailable.",
-            );
-          }
-          let unbound = false;
-          try {
-            unbound = await this.runtime.provider.unbind(token, {
-              passengerId,
-            });
-          } catch {
-            unbound = false;
-          }
-          if (!unbound) {
-            throw new ApiRequestError(
-              503,
-              "payment_unavailable",
-              "Payment provider did not acknowledge card unbinding.",
-            );
-          }
+    if (typeof this.runtime.provider.unbind !== "function") {
+      await this.repository.remove(passengerId, canonicalId);
+      return { success: true };
+    }
+    if (!this.runtime.provider.available || !this.runtime.cipher) {
+      throw new ApiRequestError(
+        503,
+        "payment_unavailable",
+        "Payment provider is not configured.",
+      );
+    }
+    const cipher = this.runtime.cipher;
+    const provider = this.runtime.provider;
+    const beforeRemove = async (removable: {
+      provider: string;
+      tokenEnvelope: EncryptedPaymentToken | null;
+    }) => {
+      if (
+        removable.tokenEnvelope &&
+        (!removable.provider || removable.provider === provider.name)
+      ) {
+        let token: string;
+        try {
+          token = cipher.decrypt(
+            removable.tokenEnvelope,
+            passengerId,
+            canonicalId,
+          );
+        } catch {
+          throw new ApiRequestError(
+            503,
+            "payment_persistence_unavailable",
+            "Payment persistence is unavailable.",
+          );
+        }
+        let unbound = false;
+        try {
+          unbound = await provider.unbind!(token, {
+            passengerId,
+          });
+        } catch {
+          unbound = false;
+        }
+        if (!unbound) {
+          throw new ApiRequestError(
+            503,
+            "payment_unavailable",
+            "Payment provider did not acknowledge card unbinding.",
+          );
         }
       }
-    }
-    await this.repository.remove(passengerId, canonicalId);
+    };
+    await this.repository.remove(passengerId, canonicalId, beforeRemove);
     return { success: true };
   }
 }

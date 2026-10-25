@@ -34,6 +34,18 @@ export interface PaymentBindContext {
   passengerId?: string;
 }
 
+export interface OrphanedBindCardRollbackRecord {
+  passengerId: string;
+  memberId: string;
+  bindCardIdDigest: string;
+  merchantTradeNo: string | null;
+  tradeNo: string | null;
+  reason:
+    | "do_action_cancel_unconfirmed"
+    | "missing_trade_identifiers_for_cancel";
+  occurredAt: string;
+}
+
 /** An unacknowledged request is unknown, not declined and not captured. */
 export type MoneyResult =
   | { status: "completed"; providerRef: string }
@@ -118,6 +130,16 @@ export interface PaymentProviderPort {
     tradeNo: string;
     amountMinor: number;
   }): Promise<boolean>;
+  rollbackOrphanedBinding?(params: {
+    token: string;
+    passengerId: string;
+    merchantTradeNo?: string | null;
+    tradeNo?: string | null;
+    reason:
+      | "do_action_cancel_unconfirmed"
+      | "missing_trade_identifiers_for_cancel";
+  }): Promise<boolean>;
+  getOrphanedBindCardRollbacks?(): readonly OrphanedBindCardRollbackRecord[];
   deriveMerchantMemberId?(passengerId: string): string;
   capture(command: CaptureCommand): Promise<MoneyResult>;
   readCapture(idempotencyKey: string): Promise<MoneyResult>;
