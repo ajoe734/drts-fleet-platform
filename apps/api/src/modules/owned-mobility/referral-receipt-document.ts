@@ -1,7 +1,12 @@
 import { createHash } from "node:crypto";
-import type {
-  ReferralPassengerReceipt,
-  ReferralPassengerReceiptPdfDocument,
+import {
+  REFERRAL_RECEIPT_AUTHORITY_COMPLAINT_PHONE,
+  REFERRAL_RECEIPT_CONSUMER_SERVICE_PHONE,
+  REFERRAL_RECEIPT_NOT_TAX_RECEIPT_NOTICE,
+  buildReferralReceiptE04Fields,
+  formatReferralReceiptTaipeiTime,
+  type ReferralPassengerReceipt,
+  type ReferralPassengerReceiptPdfDocument,
 } from "@drts/contracts";
 import { renderBillingDocumentPdf } from "../billing-settlement/billing-document-pdf.renderer";
 
@@ -12,21 +17,8 @@ export async function renderReferralReceiptDocument(
 ): Promise<ReferralPassengerReceiptPdfDocument> {
   const fare = (n: number | null | undefined) =>
     n == null ? "實際分項未提供" : `NT$ ${n}`;
-  let completed = "完成時間待確認";
-  if (receipt.completedAt && Number.isFinite(Date.parse(receipt.completedAt))) {
-    const parts = new Intl.DateTimeFormat("zh-TW", {
-      timeZone: "Asia/Taipei",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date(receipt.completedAt));
-    const part = (key: string) => parts.find((p) => p.type === key)!.value;
-    completed = `${part("year")}/${part("month")}/${part("day")} ${part("hour")}:${part("minute")}:${part("second")}`;
-  }
+  const completed =
+    formatReferralReceiptTaipeiTime(receipt.completedAt) ?? "完成時間待確認";
   const serviceLabels: Record<string, string> = {
     enterprise_dispatch: "企業派車",
     standard: "一般計程車",
@@ -54,8 +46,13 @@ export async function renderReferralReceiptDocument(
     `實際車資合計：${receipt.formattedTotal}`,
     `付款及結算：${receipt.paymentChannel}`,
     "",
-    "客服：02-2944-0985；主管機關：1999",
-    "乘車紀錄，非正式稅務憑證；付款及結算狀態以實際通知為準。",
+    "E-04 乘車證明欄位（未核發者顯示未提供）",
+    ...buildReferralReceiptE04Fields(receipt).map(
+      (field) => `${field.label}：${field.value}`,
+    ),
+    "",
+    `客服：${REFERRAL_RECEIPT_CONSUMER_SERVICE_PHONE}；主管機關：${REFERRAL_RECEIPT_AUTHORITY_COMPLAINT_PHONE}`,
+    REFERRAL_RECEIPT_NOT_TAX_RECEIPT_NOTICE,
   ]);
   return {
     orderId: receipt.orderId,
