@@ -281,6 +281,8 @@ describe("fleet cases: actual server mapping to real list/detail/reply actions",
 
   it.each([
     ["platform", "open", false],
+    ["unattributed", "open", true],
+    ["unattributed", "open", false],
     ["fleet", "closed", false],
     ["fleet", "closed", true],
     ["fleet", "resolved", false],
@@ -313,6 +315,68 @@ describe("fleet cases: actual server mapping to real list/detail/reply actions",
       ).toBeNull();
     },
   );
+
+  it("shows an unattributed case with its own honest label and read-only reason in the table, never as navigable or platform-owned", async () => {
+    const records = [
+      caseRecord("case-unattributed", "open", "unattributed", true),
+      caseRecord("case-platform-owned", "open", "platform", false),
+      caseRecord("case-known-fleet", "open", "fleet", true),
+    ];
+    const { data, CasesTable, wrap } = harness(records);
+    const { rows } = await data.loadCases();
+    expect(rows.map((row) => row.responsibility)).toEqual([
+      "unattributed",
+      "platform",
+      "fleet",
+    ]);
+    wrap(<CasesTable rows={rows} />);
+    const rowOf = (id: string) =>
+      within(
+        screen.getByRole("link", { name: id, exact: true }).closest("tr")!,
+      );
+    const unattributed = rowOf("case-unattributed");
+    expect(unattributed.getByText("Unattributed")).toBeTruthy();
+    expect(unattributed.queryByText("Platform")).toBeNull();
+    expect(
+      unattributed.queryByRole("link", { name: "Respond", exact: true }),
+    ).toBeNull();
+    expect(
+      unattributed.getByRole("button", { name: /Respond/ }),
+    ).toHaveProperty("disabled", true);
+    expect(
+      unattributed.getByText(/case not yet attributed to a fleet/),
+    ).toBeTruthy();
+    expect(unattributed.queryByText(/platform-owned case/)).toBeNull();
+    const platform = rowOf("case-platform-owned");
+    expect(platform.getByText("Platform")).toBeTruthy();
+    expect(platform.getByText(/platform-owned case/)).toBeTruthy();
+    expect(
+      rowOf("case-known-fleet")
+        .getByRole("link", { name: "Respond", exact: true })
+        .getAttribute("href"),
+    ).toBe("/cases/case-known-fleet#case-reply-content");
+  });
+
+  it("labels an unattributed case detail honestly and keeps its composer read-only even if availability says enabled", async () => {
+    const h = harness([
+      caseRecord("case-detail-unattributed", "open", "unattributed", true),
+    ]);
+    h.wrap(
+      await h.detailPage({
+        params: Promise.resolve({ caseId: "case-detail-unattributed" }),
+      }),
+    );
+    expect(screen.getAllByText(/Unattributed/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/CASE_PLATFORM_OWNED/)).toBeNull();
+    expect(
+      screen.getAllByText(/case not yet attributed to a fleet/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByRole("textbox", { name: "Reply content" })).toBeNull();
+    expect(
+      screen.queryByRole("link", { name: "Respond", exact: true }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /送出回覆/ })).toBeNull();
+  });
 
   it("a failed read for a real ID cannot present or submit the unrelated fallback fixture case", async () => {
     const h = harness([caseRecord("case-real-failed")], true);

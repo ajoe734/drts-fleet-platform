@@ -1088,6 +1088,123 @@ export class FleetPartnerService implements OnModuleInit {
       )[0];
   }
 
+  /**
+   * Resolves the actual fleet-partner attribution for an ordinary complaint
+   * from its real source order: order -> driver task/dispatch assignment,
+   * refreshed from the canonical repository first so a warm instance that
+   * never itself handled this order still sees it -> driver-fleet
+   * affiliation effective at the order's own fulfillment event time (not the
+   * complaint's filing time). Returns null when the order, driver, or a
+   * single unambiguous effective affiliation cannot be established —
+   * callers must treat that as unattributed rather than guessing a fleet.
+   */
+  async resolveOrderDriverFleetAttribution(
+    orderId: string | null | undefined,
+  ): Promise<{
+    driverId: string;
+    driverName: string;
+    fleetPartnerId: string;
+  } | null> {
+    if (!orderId) {
+      return null;
+    }
+
+    if (typeof this.ownedMobilityService.prepareOrderAction === "function") {
+      try {
+        await this.ownedMobilityService.prepareOrderAction({ orderId });
+      } catch (error) {
+        if (
+          !(error instanceof ApiRequestError && error.code === "ORDER_NOT_FOUND")
+        ) {
+          // A genuine refresh failure (e.g. the durable store is down) is a
+          // distinct outcome from "this order has no canonical record" and
+          // must not be disguised as an unattributed case.
+          throw error;
+        }
+        // prepareOrderAction throws ORDER_NOT_FOUND before replacing any
+        // cached task/assignment rows for this order, so an authoritative
+        // "absent" leaves a possibly-stale local cache untouched. Honor the
+        // authoritative absence directly rather than falling through to
+        // that stale cache, which could still name a driver/fleet.
+        return null;
+      }
+    }
+
+    const sourceEvent = this.resolveOrderDriverEvent(orderId);
+    if (!sourceEvent) {
+      return null;
+    }
+    const { driverId, asOf } = sourceEvent;
+
+    const affiliations = this.isPersistenceEnabled()
+      ? await this.loadCanonicalDriverAffiliations()
+      : this.driverAffiliations;
+
+    const effective = affiliations.filter(
+      (affiliation) =>
+        affiliation.driverId === driverId &&
+        affiliation.effectiveFrom <= asOf &&
+        (!affiliation.effectiveUntil || affiliation.effectiveUntil >= asOf),
+    );
+    const distinctFleetIds = new Set(
+      effective.map((affiliation) => affiliation.fleetPartnerId),
+    );
+    // No effective affiliation, or more than one for the same driver at the
+    // same event time, is a genuine absence/ambiguity: never guess between them.
+    if (distinctFleetIds.size !== 1) {
+      return null;
+    }
+
+    const driverRecord = this.regulatoryRegistryService
+      .listDrivers()
+      .find((driver) => driver.driverId === driverId);
+
+    return {
+      driverId,
+      driverName: driverRecord?.name ?? driverId,
+      fleetPartnerId: effective[0]!.fleetPartnerId,
+    };
+  }
+
+  /** The actual fulfillment event (driver + a credible historical event
+   * time) for an order: prefers its driver task's own lifecycle timestamp,
+   * falling back to the dispatch assignment's when no task exists yet. */
+  private resolveOrderDriverEvent(
+    orderId: string,
+  ): { driverId: string; asOf: string } | null {
+    const task = this.ownedMobilityService
+      .getDriverTasksForOrder(orderId)
+      .filter(
+        (task) => task.status !== "cancelled" && task.status !== "rejected",
+      )
+      .at(-1);
+    if (task) {
+      const asOf = task.completedAt ?? task.startedAt ?? task.acceptedAt;
+      if (asOf) {
+        return { driverId: task.driverId, asOf };
+      }
+    }
+
+    const assignment =
+      this.ownedMobilityService.getActiveDispatchAssignmentForOrder(
+        orderId,
+      ) ??
+      this.ownedMobilityService
+        .getDispatchAssignmentsForOrder(orderId)
+        .filter(
+          (candidate) =>
+            candidate.status !== "rejected" &&
+            candidate.status !== "cancelled",
+        )
+        .at(-1) ??
+      null;
+    if (!assignment) {
+      return null;
+    }
+    const asOf = assignment.acceptedAt ?? assignment.createdAt;
+    return asOf ? { driverId: assignment.driverId, asOf } : null;
+  }
+
   private matchRevenueShareRule(
     affiliation: DriverFleetAffiliationRecord,
     trip: BillingSettlementTripRecord,
