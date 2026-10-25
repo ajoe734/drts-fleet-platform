@@ -1735,7 +1735,12 @@ export class CallcenterService implements OnModuleInit {
     );
   }
 
-  linkCaseToCallSession(callId: string, caseNo: string, requestId?: string) {
+  linkCaseToCallSession(
+    callId: string,
+    caseNo: string,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ): CallSessionRecord | Promise<CallSessionRecord> {
     const nextCaseNo = caseNo.trim();
     if (!nextCaseNo) {
       throw new ApiRequestError(
@@ -1745,7 +1750,26 @@ export class CallcenterService implements OnModuleInit {
       );
     }
 
-    const session = this.requireSession(callId);
+    if (write) {
+      return this.applyCaseLinkToSession(callId, nextCaseNo, requestId, write);
+    }
+    if (!this.callcenterRepository?.isEnabled()) {
+      this.requireSession(callId);
+    }
+    return this.runPhoneSessionWrite(callId, (activeWrite) =>
+      this.applyCaseLinkToSession(callId, nextCaseNo, requestId, activeWrite),
+    );
+  }
+
+  private applyCaseLinkToSession(
+    callId: string,
+    nextCaseNo: string,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ): CallSessionRecord | Promise<CallSessionRecord> {
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     session.linkedCaseNo = nextCaseNo;
     if (session.callbackTask) {
       session.callbackTask = {
@@ -1754,25 +1778,30 @@ export class CallcenterService implements OnModuleInit {
         updatedAt: new Date().toISOString(),
       };
     }
-    this.persistSessions([session], "link_call_case");
 
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "link_call_case",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          linkedCaseNo: session.linkedCaseNo,
-        },
+    return this.finishPhoneSessionMutation(
+      session,
+      write,
+      "link_call_case",
+      () => {
+        this.recordAudit(
+          {
+            actorId: session.agentId,
+            actorType: "ops_user",
+            tenantId: null,
+            moduleName: "callcenter",
+            actionName: "link_call_case",
+            resourceType: "call_session",
+            resourceId: session.callId,
+            newValuesSummary: {
+              linkedCaseNo: session.linkedCaseNo,
+            },
+          },
+          requestId,
+        );
       },
-      requestId,
+      () => undefined,
     );
-
-    return this.cloneSession(session);
   }
 
   recordIncidentTransfer(
