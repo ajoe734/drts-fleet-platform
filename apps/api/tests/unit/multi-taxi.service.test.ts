@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiRequestError } from "../../src/common/api-envelope";
+import { MultiTaxiRepository } from "../../src/modules/multi-taxi/multi-taxi.repository";
 import { MultiTaxiService } from "../../src/modules/multi-taxi/multi-taxi.service";
 
 function createService(options?: {
@@ -1153,9 +1154,120 @@ describe("MultiTaxiService trip operational records", () => {
     expect(exported.filename).toBe("multi-taxi-trip-records-202607.csv");
     expect(exported.rows).toEqual([
       expect.objectContaining({
+        recordId: "mtr-order-001",
+        orderId: "order-001",
         orderNoMasked: "M***1",
+        plateNo: "BKR-2208",
         plateNoMasked: "BK...08",
+        routeSummary: "台北車站 → 松山機場",
+        routeSource: "pickup_dropoff_summary",
+        payableFareMinor: 0,
+        actualFareMinor: 0,
+        collectedFareMinor: null,
+        paymentStatus: "unknown",
+        tollMinor: 0,
+        tollSource: "unavailable",
       }),
     ]);
+  });
+
+  it("reads committed R11 rows from MultiTaxiRepository, supports exact filters, and blocks purge on active hold or deletion exception", async () => {
+    const repo = new MultiTaxiRepository();
+    await repo.upsertTripOperationalRecord({
+      recordId: "mtr-order-committed-1",
+      orderId: "order-committed-1",
+      orderNo: "MTX-COMMITTED-001",
+      tripId: "task-committed-1",
+      assignmentId: "asg-committed-1",
+      vehicleId: "veh-committed-1",
+      plateNo: "TPE-9988",
+      reservedAt: "2024-01-10T08:00:00.000Z",
+      pickupAt: "2024-01-10T08:12:00.000Z",
+      dropoffAt: "2024-01-10T08:42:00.000Z",
+      route: {
+        encodedPolyline: null,
+        pointCount: 0,
+        distanceMeters: 11200,
+        durationSeconds: 1800,
+        source: "pickup_dropoff_summary",
+        routeSummary: "信義路 → 內湖科技園區",
+      },
+      payableFareMinor: 38000,
+      actualFareMinor: 40000,
+      collectedFareMinor: 40000,
+      paymentStatus: "captured",
+      tollMinor: 4000,
+      tollSource: "driver_proof",
+      currency: "TWD",
+      farePolicyVersion: "multi-taxi-v1",
+      chargingMode: "meter",
+      generatedAt: "2024-01-10T08:42:00.000Z",
+      retainUntil: "2026-01-09T08:42:00.000Z",
+    });
+
+    const getEvidenceSubjectGovernance = vi.fn(() => ({
+      family: "proof_bundle",
+      subjectId: "order-committed-1",
+      tenantId: null,
+      manifestHash: null,
+      activeLegalHolds: [],
+      activeDeletionExceptions: [
+        {
+          exceptionId: "exc-001",
+          sourceResourceId: "TICKET-R11-HOLD",
+          reasonCode: "regulatory_inquiry",
+          reasonNote: "Hold under deletion exception",
+          requestedByActorId: "admin-1",
+          requestedAt: "2025-12-01T00:00:00.000Z",
+          expiresAt: "2027-01-01T00:00:00.000Z",
+          status: "active",
+        },
+      ],
+      deletionSuppressed: true,
+    }));
+
+    const service = new MultiTaxiService(
+      { listOrders: () => [] } as never,
+      repo,
+      undefined,
+      { getEvidenceSubjectGovernance } as never,
+    );
+
+    const byPlate = await service.listTripOperationalRecords({
+      plateNo: "tpe-9988",
+    });
+    expect(byPlate).toHaveLength(1);
+    expect(byPlate[0]?.recordId).toBe("mtr-order-committed-1");
+    expect(byPlate[0]?.legalHold.state).toBe("active");
+
+    const single = await service.getTripOperationalRecord(
+      "mtr-order-committed-1",
+    );
+    expect(single?.collectedFareMinor).toBe(40000);
+    expect(single?.tollMinor).toBe(4000);
+
+    const purgeHeld = await service.purgeExpiredTripOperationalRecords(
+      "2026-06-01T00:00:00.000Z",
+    );
+    expect(purgeHeld.purgedRecordIds).toEqual([]);
+    expect(purgeHeld.skippedHeldRecordIds).toEqual(["mtr-order-committed-1"]);
+
+    getEvidenceSubjectGovernance.mockReturnValue({
+      family: "proof_bundle",
+      subjectId: "order-committed-1",
+      tenantId: null,
+      manifestHash: null,
+      activeLegalHolds: [],
+      activeDeletionExceptions: [],
+      deletionSuppressed: false,
+    });
+
+    const purgeReleased = await service.purgeExpiredTripOperationalRecords(
+      "2026-06-01T00:00:00.000Z",
+    );
+    expect(purgeReleased.purgedRecordIds).toEqual(["mtr-order-committed-1"]);
+    expect(
+      await service.getTripOperationalRecord("mtr-order-committed-1"),
+    ).toBeNull();
   });
 });

@@ -16,6 +16,10 @@ import {
   InjectMaskedCallPort,
   type MaskedCallPort,
 } from "../multi-taxi/masked-call.port";
+import {
+  MultiTaxiRepository,
+  type StoredMultiTaxiTripOperationalRecord,
+} from "../multi-taxi/multi-taxi.repository";
 import { resolveOrderPartnerNotificationRoute } from "../tenant-partner/order-partner-notification-route";
 import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-user-identity-link.repository";
 import { PartnerNotificationNavigationRepository } from "../tenant-partner/partner-notification-navigation.repository";
@@ -677,6 +681,7 @@ export class OwnedMobilityService
     @Optional()
     private readonly referralFareRepository?: PassengerFareRepository,
     @Optional() private readonly referralComplaintService?: ComplaintService,
+    @Optional() private readonly multiTaxiRepository?: MultiTaxiRepository,
   ) {}
 
   private _fallbackIdempotencyService?: IdempotencyService;
@@ -8568,6 +8573,17 @@ export class OwnedMobilityService
       });
       await this.publishCompletedTripSettlementEvent(order, task);
       if (certificateEvent) {
+        if (this.multiTaxiRepository) {
+          await this.multiTaxiRepository.upsertTripOperationalRecord(
+            this.buildMultiTaxiTripOperationalRecord(
+              order,
+              assignment,
+              task,
+              certificateEvent,
+              proof,
+            ),
+          );
+        }
         await this.publishMultiTaxiCertificateEvent(certificateEvent);
       }
       await this.ownedMobilityTaskEventsService.publishTaskUpdated(
@@ -8880,6 +8896,18 @@ export class OwnedMobilityService
       assignment.assignmentId,
       tx,
     );
+    if (certificateEvent && this.multiTaxiRepository) {
+      await this.multiTaxiRepository.persistTripOperationalRecordInTransaction(
+        tx,
+        this.buildMultiTaxiTripOperationalRecord(
+          order,
+          assignment,
+          task,
+          certificateEvent,
+          params.proof,
+        ),
+      );
+    }
     await this.persistDriverCompletionOutbox(tx, {
       order,
       dispatchJob,
@@ -9209,6 +9237,76 @@ export class OwnedMobilityService
         process.env.MULTI_TAXI_AUTHORITY_COMPLAINT_PHONE ??
         DEFAULT_AUTHORITY_COMPLAINT_PHONE,
       completedAt: command.completedAt,
+    };
+  }
+
+  private buildMultiTaxiTripOperationalRecord(
+    order: OwnedOrderRecord,
+    assignment: DispatchAssignmentRecord,
+    task: DriverTaskRecord,
+    certificateEvent: OwnedMobilityMultiTaxiTripCompletedEvent,
+    proof: Required<Pick<CompletionProofBundle, "photos" | "expenseItems">> & {
+      signatureId: string | null;
+    },
+  ): StoredMultiTaxiTripOperationalRecord {
+    const latestDisclosure = this.findPassengerAssignmentDisclosure(
+      order.orderId,
+    );
+    const hasTollExpenseItems = proof.expenseItems.some(
+      (item) => item.type.trim().toLowerCase() === "toll",
+    );
+    const payableFareMinor = Math.max(
+      0,
+      Math.round(
+        latestDisclosure?.routeFare.payableFareMinor ??
+          order.quotedFare?.amountMinor ??
+          certificateEvent.fareMinor,
+      ),
+    );
+    const generatedAt = certificateEvent.completedAt;
+    const retainUntil = new Date(
+      Date.parse(generatedAt) + 730 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    return {
+      recordId: `mtr-${order.orderId}`,
+      orderId: order.orderId,
+      orderNo: order.orderNo,
+      tripId: certificateEvent.tripId,
+      assignmentId: assignment.assignmentId,
+      driverId: task.driverId ?? assignment.driverId ?? null,
+      vehicleId: task.vehicleId,
+      plateNo: certificateEvent.plateNo,
+      reservedAt: order.reservationWindowStart ?? order.createdAt,
+      pickupAt: certificateEvent.pickupAt,
+      dropoffAt: certificateEvent.dropoffAt,
+      route: {
+        encodedPolyline: null,
+        pointCount: 0,
+        distanceMeters: certificateEvent.distanceMeters,
+        durationSeconds: certificateEvent.travelDurationSeconds,
+        source: "pickup_dropoff_summary",
+        routeSummary: certificateEvent.routeSummary,
+      },
+      payableFareMinor,
+      actualFareMinor: Math.max(0, Math.round(certificateEvent.fareMinor)),
+      collectedFareMinor: null,
+      paymentStatus: "unknown",
+      tollMinor: Math.max(0, Math.round(certificateEvent.tollMinor)),
+      tollSource: hasTollExpenseItems ? "driver_proof" : "none",
+      currency: PLATFORM_CURRENCY,
+      farePolicyVersion:
+        latestDisclosure?.routeFare.farePolicyVersion ?? "multi-taxi-v1",
+      chargingMode:
+        latestDisclosure?.routeFare.chargingMode === "fixed_quote"
+          ? "platform_quote"
+          : latestDisclosure?.routeFare.chargingMode === "meter_estimate"
+            ? "meter"
+            : order.fixedPrice
+              ? "platform_quote"
+              : "meter",
+      generatedAt,
+      retainUntil,
     };
   }
 

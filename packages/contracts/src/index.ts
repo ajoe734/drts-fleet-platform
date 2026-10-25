@@ -8000,6 +8000,11 @@ export interface AgencyTripRecordQuery {
   month?: string;
   reservedFrom?: string;
   reservedTo?: string;
+  plateNo?: string;
+  orderNo?: string;
+  orderId?: string;
+  tripId?: string;
+  recordId?: string;
   legalHold?: "all" | "active" | "none";
   page?: number;
   pageSize?: number;
@@ -8008,18 +8013,42 @@ export interface AgencyTripRecordQuery {
 /** §4.1 allowlist projection of MultiTaxiTripOperationalAdminView. */
 export interface AgencyTripRecordView {
   recordId: string;
+  orderId: string;
+  tripId: string;
   orderNoMasked: string | null;
+  plateNo: string | null;
   plateNoMasked: string | null;
   reservedAt: string;
   pickupAt: string | null;
   dropoffAt: string | null;
   route: {
+    routeSummary: string | null;
+    source:
+      | "driver_gps"
+      | "provider_route"
+      | "mixed"
+      | "pickup_dropoff_summary"
+      | "unavailable";
     distanceMeters: number | null;
     durationSeconds: number | null;
   };
   payableFareMinor: number;
   actualFareMinor: number;
-  tollMinor: number;
+  collectedFareMinor: number | null;
+  paymentStatus:
+    | "not_selected"
+    | "authorized"
+    | "captured"
+    | "failed"
+    | "refunded"
+    | "manual_recovery"
+    | "unknown";
+  tollMinor: number | null;
+  tollSource:
+    | "driver_proof"
+    | "electronic_receipt"
+    | "none"
+    | "unavailable";
   currency: string;
   farePolicyVersion: string;
   chargingMode: "meter" | "platform_quote";
@@ -8032,6 +8061,11 @@ export interface AgencyTripExportScope {
   month?: string;
   reservedFrom?: string;
   reservedTo?: string;
+  plateNo?: string;
+  orderNo?: string;
+  orderId?: string;
+  tripId?: string;
+  recordId?: string;
 }
 
 export interface CreateAgencyTripExportJobCommand {

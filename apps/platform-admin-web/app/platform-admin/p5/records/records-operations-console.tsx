@@ -45,6 +45,8 @@ import {
   isRetentionFloorMet,
   normalizeRecordsScope,
   requireControlledDownloadUrl,
+  resolveRecordCollectedFareMinor,
+  resolveRecordTollMinor,
   TAIPEI_TIME_ZONE,
 } from "./records-operations-model";
 import styles from "./records-operations.module.css";
@@ -399,7 +401,11 @@ export function RecordsOperationsConsole() {
       h: t("table.fare"),
       w: 118,
       align: "right",
-      r: (row) => formatRecordMoney(row.actualFareMinor, locale),
+      r: (row) =>
+        unavailable(
+          formatRecordMoney(resolveRecordCollectedFareMinor(row), locale),
+          t("table.unavailable"),
+        ),
     },
     {
       h: t("table.retention"),
@@ -957,6 +963,9 @@ function RecordDetail({
           cols={1}
           items={[
             { k: t("detail.routeSource"), v: record.route.source },
+            ...(record.route.routeSummary
+              ? [{ k: "路線摘要 / Route", v: record.route.routeSummary }]
+              : []),
             {
               k: t("detail.routeDistance"),
               v: formatRecordDistance(record.route.distanceMeters) ?? missing,
@@ -993,12 +1002,18 @@ function RecordDetail({
             },
             {
               k: t("detail.actualFare"),
-              v: formatRecordMoney(record.actualFareMinor, locale),
+              v:
+                formatRecordMoney(
+                  resolveRecordCollectedFareMinor(record),
+                  locale,
+                ) ?? missing,
               mono: true,
             },
             {
               k: t("detail.toll"),
-              v: formatRecordMoney(record.tollMinor, locale),
+              v:
+                formatRecordMoney(resolveRecordTollMinor(record), locale) ??
+                missing,
               mono: true,
             },
             {

@@ -25,6 +25,11 @@ import {
   projectAgencyVehicleQualification,
 } from "../../../apps/api/src/modules/agency-access/agency-projections";
 import type { MonthlyOperationsSummaryRecord } from "../../../apps/api/src/modules/reporting/reporting.repository";
+import {
+  formatRecordMoney,
+  resolveRecordCollectedFareMinor,
+  resolveRecordTollMinor,
+} from "../../../apps/platform-admin-web/app/platform-admin/p5/records/records-operations-model";
 
 // BUREAU-R13 §4: every agency projection outputs only allowlisted fields,
 // masks with the shared sensitive-data functions, keeps missing values null
@@ -82,12 +87,30 @@ function tripRecord(
 }
 
 describe("BUREAU-R13 agency projections", () => {
-  it("R11 list/detail projection keeps only §4.1 fields and masks order/plate", () => {
-    const view = projectAgencyTripRecord(tripRecord());
+  it("R11 list/detail projection exposes D4 statutory fields + provenance while withholding raw polyline and internal hold metadata", () => {
+    const view = projectAgencyTripRecord(
+      tripRecord({
+        route: {
+          encodedPolyline: "secret_polyline_encoding",
+          pointCount: 1,
+          distanceMeters: 5200,
+          durationSeconds: 1500,
+          source: "pickup_dropoff_summary",
+          routeSummary: "台北車站 → 松山機場",
+        },
+        collectedFareMinor: 330,
+        paymentStatus: "captured",
+        tollMinor: 40,
+        tollSource: "driver_proof",
+      }),
+    );
     expect(Object.keys(view).sort()).toEqual(
       [
         "recordId",
+        "orderId",
+        "tripId",
         "orderNoMasked",
+        "plateNo",
         "plateNoMasked",
         "reservedAt",
         "pickupAt",
@@ -95,7 +118,10 @@ describe("BUREAU-R13 agency projections", () => {
         "route",
         "payableFareMinor",
         "actualFareMinor",
+        "collectedFareMinor",
+        "paymentStatus",
         "tollMinor",
+        "tollSource",
         "currency",
         "farePolicyVersion",
         "chargingMode",
@@ -104,20 +130,26 @@ describe("BUREAU-R13 agency projections", () => {
         "legalHold",
       ].sort(),
     );
-    expect(view.route).toEqual({ distanceMeters: 5200, durationSeconds: 1500 });
+    expect(view.plateNo).toBe("ABC-1234");
+    expect(view.plateNoMasked).not.toBe("ABC-1234");
+    expect(view.route).toEqual({
+      routeSummary: "台北車站 → 松山機場",
+      source: "pickup_dropoff_summary",
+      distanceMeters: 5200,
+      durationSeconds: 1500,
+    });
+    expect(view.collectedFareMinor).toBe(330);
+    expect(view.paymentStatus).toBe("captured");
+    expect(view.tollMinor).toBe(40);
+    expect(view.tollSource).toBe("driver_proof");
     expect(view.legalHold).toEqual({ state: "active" });
     expect(view.orderNoMasked).not.toContain("20261001");
     expect(view.orderNoMasked?.startsWith("ORD")).toBe(true);
-    expect(view.plateNoMasked).not.toBe("ABC-1234");
     const serialized = JSON.stringify(view);
     for (const secret of [
       "secret_polyline_encoding",
       "platform-admin-7",
       "free text note",
-      // recordId is the design's system key (mtr-<orderId>); the separate
-      // internal orderId/tripId/vehicleId/assignmentId fields never appear.
-      '"orderId"',
-      '"tripId"',
       "vehicle-1",
       "assignment-1",
     ]) {
@@ -125,7 +157,7 @@ describe("BUREAU-R13 agency projections", () => {
     }
   });
 
-  it("keeps missing values null instead of inventing zero", () => {
+  it("keeps missing values null instead of inventing zero or fabricating collected fare", () => {
     const view = projectAgencyTripRecord(
       tripRecord({
         pickupAt: null,
@@ -135,13 +167,36 @@ describe("BUREAU-R13 agency projections", () => {
           pointCount: 0,
           distanceMeters: null,
           durationSeconds: null,
-          source: "provider_route",
+          source: "unavailable",
+          routeSummary: null,
         },
+        paymentStatus: "authorized",
+        collectedFareMinor: null,
+        tollMinor: 0,
+        tollSource: "unavailable",
       }),
     );
     expect(view.pickupAt).toBeNull();
     expect(view.dropoffAt).toBeNull();
-    expect(view.route).toEqual({ distanceMeters: null, durationSeconds: null });
+    expect(view.route).toEqual({
+      routeSummary: null,
+      source: "unavailable",
+      distanceMeters: null,
+      durationSeconds: null,
+    });
+    expect(view.paymentStatus).toBe("authorized");
+    expect(view.collectedFareMinor).toBeNull();
+    expect(view.tollMinor).toBeNull();
+    expect(view.tollSource).toBe("unavailable");
+
+    const refundedView = projectAgencyTripRecord(
+      tripRecord({
+        paymentStatus: "refunded",
+        collectedFareMinor: 0,
+      }),
+    );
+    expect(refundedView.paymentStatus).toBe("refunded");
+    expect(refundedView.collectedFareMinor).toBe(0);
   });
 
   it("applies the two-year retention boundary on retainUntil (not reservedAt)", () => {
@@ -521,6 +576,34 @@ describe("BUREAU-R13 agency portal service access logging", () => {
     });
   });
 
+  it("passes exact plateNo and order/trip identifier filters to the R11 authority", async () => {
+    const retained = tripRecord({
+      recordId: "mtr-order-1",
+      retainUntil: new Date(Date.now() + DAY).toISOString(),
+    });
+    const { service, multiTaxi } = portal({ records: [retained] });
+    await service.listTripRecords(
+      agencyIdentity,
+      {
+        month: "2026-10",
+        plateNo: "ABC-1234",
+        orderNo: "ORD-20261001-0001",
+        orderId: "order-1",
+        tripId: "trip-1",
+        recordId: "mtr-order-1",
+      },
+      {},
+    );
+    expect(multiTaxi.listTripOperationalRecords).toHaveBeenCalledWith({
+      month: "2026-10",
+      plateNo: "ABC-1234",
+      orderNo: "ORD-20261001-0001",
+      orderId: "order-1",
+      tripId: "trip-1",
+      recordId: "mtr-order-1",
+    });
+  });
+
   it("denies and logs a request whose membership/agency/access period is no longer active", async () => {
     const { service, logRepository, multiTaxi } = portal({
       records: [tripRecord()],
@@ -562,5 +645,60 @@ describe("BUREAU-R13 agency portal service access logging", () => {
       ),
     ).rejects.toMatchObject({ code: "AGENCY_IDENTITY_INVALID" });
     expect(multiTaxi.listTripOperationalRecords).not.toHaveBeenCalled();
+  });
+
+  it("Platform P5 record helpers preserve null for uncollected fares and unknown tolls instead of coercing to $0", () => {
+    expect(formatRecordMoney(null, "zh")).toBeNull();
+    expect(formatRecordMoney(undefined, "en")).toBeNull();
+    expect(formatRecordMoney(0, "zh")).toContain("0");
+    expect(formatRecordMoney(36500, "zh")).toContain("365");
+
+    expect(
+      resolveRecordCollectedFareMinor({
+        actualFareMinor: 36500,
+        collectedFareMinor: null,
+        paymentStatus: "authorized",
+      }),
+    ).toBeNull();
+    expect(
+      resolveRecordCollectedFareMinor({
+        actualFareMinor: 36500,
+        collectedFareMinor: null,
+        paymentStatus: "failed",
+      }),
+    ).toBeNull();
+    expect(
+      resolveRecordCollectedFareMinor({
+        actualFareMinor: 36500,
+        collectedFareMinor: 0,
+        paymentStatus: "refunded",
+      }),
+    ).toBe(0);
+    expect(
+      resolveRecordCollectedFareMinor({
+        actualFareMinor: 36500,
+        collectedFareMinor: 36500,
+        paymentStatus: "captured",
+      }),
+    ).toBe(36500);
+
+    expect(
+      resolveRecordTollMinor({
+        tollMinor: 0,
+        tollSource: "unavailable",
+      }),
+    ).toBeNull();
+    expect(
+      resolveRecordTollMinor({
+        tollMinor: 0,
+        tollSource: "none",
+      }),
+    ).toBe(0);
+    expect(
+      resolveRecordTollMinor({
+        tollMinor: 4000,
+        tollSource: "driver_proof",
+      }),
+    ).toBe(4000);
   });
 });
