@@ -9,6 +9,16 @@ import { deriveEcpayMerchantTradeNo } from "./ecpay-cipher";
 
 export const MAX_BOUND_CARDS_PER_MEMBER = 5;
 
+export const PAYMENT_IDEMPOTENCY_ERROR_CODES = [
+  "card_declined",
+  "invalid_credential",
+  "unavailable",
+  "invalid_method",
+] as const;
+
+export type PaymentIdempotencyErrorCode =
+  (typeof PAYMENT_IDEMPOTENCY_ERROR_CODES)[number];
+
 export interface StoredPaymentMethod extends PassengerPaymentMethod {
   drtsPassengerId: string;
   provider: string;
@@ -257,13 +267,18 @@ export class PaymentMethodRepository {
     passengerId: string,
     key: string,
     outcome: "pending" | "failed" | "action_required",
-    error?: string,
+    error?: string | null,
   ): Promise<void> {
+    const persistedError =
+      typeof error === "string" &&
+      (PAYMENT_IDEMPOTENCY_ERROR_CODES as readonly string[]).includes(error)
+        ? error
+        : null;
     await this.withAccount(passengerId, async (client) => {
       await client.query(
         `UPDATE passenger.payment_idempotency_keys SET outcome=$3,error_code=$4,updated_at=now()
          WHERE idempotency_key=$1 AND drts_passenger_id=$2 AND operation='bind' AND outcome<>'completed'`,
-        [key, passengerId, outcome, error ?? null],
+        [key, passengerId, outcome, persistedError],
       );
     });
   }

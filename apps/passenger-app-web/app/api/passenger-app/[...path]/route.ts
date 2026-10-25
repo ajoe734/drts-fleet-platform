@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ECPAY_HOSTED_FIELDS_CSP } from "../../../../components/payment/ecpay-hosted-fields";
+import { ECPAY_HOSTED_FIELDS_CSP } from "../../../../components/payment/ecpay-csp";
 import { applyUpstreamAuth } from "../../../../lib/api-upstream";
 import {
   readOAuthBinding,

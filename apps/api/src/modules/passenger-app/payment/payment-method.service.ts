@@ -157,19 +157,32 @@ export class PaymentMethodService {
           "payment_provider_invalid",
           "Payment provider returned an invalid result.",
         );
-      await this.repository.bindingOutcome(
-        passengerId,
-        claim.idempotencyKey,
-        "failed",
-        result.error,
-      );
       if (result.error === "card_limit_exceeded") {
+        this.logger.warn(
+          JSON.stringify({
+            event: "passenger_payment_bind_card_limit_exceeded",
+            passengerId,
+            idempotencyKey: claim.idempotencyKey,
+            source: "provider_bind",
+          }),
+        );
+        await this.repository.bindingOutcome(
+          passengerId,
+          claim.idempotencyKey,
+          "failed",
+        );
         throw new ApiRequestError(
           409,
           "card_limit_exceeded",
           "每個會員最多只能綁定 5 張信用卡，請先移除既有卡片後再新增。",
         );
       }
+      await this.repository.bindingOutcome(
+        passengerId,
+        claim.idempotencyKey,
+        "failed",
+        result.error,
+      );
       throw new ApiRequestError(
         400,
         result.error,
@@ -562,12 +575,28 @@ export class PaymentMethodService {
               },
             );
           } else if (result.bindResult.status === "failed") {
-            await this.repository.bindingOutcome(
-              ownerId,
-              claim.idempotencyKey,
-              "failed",
-              result.bindResult.error,
-            );
+            if (result.bindResult.error === "card_limit_exceeded") {
+              this.logger.warn(
+                JSON.stringify({
+                  event: "passenger_payment_bind_card_limit_exceeded",
+                  passengerId: ownerId,
+                  idempotencyKey: claim.idempotencyKey,
+                  source: "provider_notification",
+                }),
+              );
+              await this.repository.bindingOutcome(
+                ownerId,
+                claim.idempotencyKey,
+                "failed",
+              );
+            } else {
+              await this.repository.bindingOutcome(
+                ownerId,
+                claim.idempotencyKey,
+                "failed",
+                result.bindResult.error,
+              );
+            }
           }
         }
       }

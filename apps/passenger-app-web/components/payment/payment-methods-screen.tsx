@@ -20,10 +20,8 @@ import {
 import type { PassengerPaymentFieldsAvailability } from "@drts/passenger-client";
 import { AuthScreen, AuthAlert, P5Btn, P5Card, P5 } from "../auth/ui";
 import { PAY_T as T } from "../../lib/payment/translations";
-import {
-  ECPAY_ACTION_ORIGINS,
-  EcpayHostedFields,
-} from "./ecpay-hosted-fields";
+import { ECPAY_ACTION_ORIGINS } from "./ecpay-csp";
+import { EcpayHostedFields } from "./ecpay-hosted-fields";
 
 export const MAX_BOUND_CARDS = 5;
 export const CARD_LIMIT_MESSAGE =

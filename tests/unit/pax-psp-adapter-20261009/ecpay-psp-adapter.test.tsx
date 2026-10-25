@@ -33,6 +33,8 @@ import {
   ECPAY_JQUERY_URL,
   ECPAY_SCRIPT_ORIGINS,
   ECPAY_WEB_SDK_URLS,
+} from "../../../apps/passenger-app-web/components/payment/ecpay-csp";
+import {
   EcpayHostedFields,
   createEcpayHostedFieldsPort,
   type EcpaySdkGlobal,
@@ -634,6 +636,52 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
     const rootHeaders = await resolveHeadersForUrl("/");
     expect(rootHeaders["Content-Security-Policy"]).toBe(
       "default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';",
+    );
+  });
+
+  it("sources ECPAY_HOSTED_FIELDS_CSP, ECPAY_SCRIPT_ORIGINS, and ECPAY_CONNECT_ORIGINS from a non-'use client' server-safe module so Next.js production build never compiles BFF Content-Security-Policy into a client reference proxy function", () => {
+    const routeSource = readFileSync(
+      resolve(
+        "apps/passenger-app-web/app/api/passenger-app/[...path]/route.ts",
+      ),
+      "utf8",
+    );
+    const nextConfigSource = readFileSync(
+      resolve("apps/passenger-app-web/next.config.ts"),
+      "utf8",
+    );
+    const hostedFieldsSource = readFileSync(
+      resolve(
+        "apps/passenger-app-web/components/payment/ecpay-hosted-fields.tsx",
+      ),
+      "utf8",
+    );
+
+    // route.ts and next.config.ts must not import CSP constants from the "use client" component
+    expect(routeSource).not.toMatch(
+      /from\s+["'][^"']*ecpay-hosted-fields["']/,
+    );
+    expect(routeSource).toMatch(/from\s+["'][^"']*ecpay-csp["']/);
+    expect(nextConfigSource).toMatch(/from\s+["'][^"']*ecpay-csp["']/);
+
+    // The shared server-safe constants module must not have a "use client" directive
+    const sharedCspSource = readFileSync(
+      resolve("apps/passenger-app-web/components/payment/ecpay-csp.ts"),
+      "utf8",
+    );
+    expect(sharedCspSource).not.toMatch(/^\s*["']use client["']/m);
+
+    // The "use client" component must consume from the shared module and not define/export the CSP constants itself
+    expect(hostedFieldsSource).toMatch(/^\s*["']use client["']/m);
+    expect(hostedFieldsSource).toMatch(/from\s+["']\.\/ecpay-csp["']/);
+    expect(hostedFieldsSource).not.toMatch(
+      /export\s+const\s+ECPAY_HOSTED_FIELDS_CSP\b/,
+    );
+    expect(hostedFieldsSource).not.toMatch(
+      /export\s+const\s+ECPAY_SCRIPT_ORIGINS\b/,
+    );
+    expect(hostedFieldsSource).not.toMatch(
+      /export\s+const\s+ECPAY_CONNECT_ORIGINS\b/,
     );
   });
 });

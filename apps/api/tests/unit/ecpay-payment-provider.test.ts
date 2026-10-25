@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Logger } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -15,7 +17,10 @@ import { paymentCapturePolicyFromEnv } from "../../src/modules/passenger-app/pay
 import type { PaymentChargeRepository } from "../../src/modules/passenger-app/payment/payment-charge.repository";
 import { PaymentChargeService } from "../../src/modules/passenger-app/payment/payment-charge.service";
 import { PaymentMethodController } from "../../src/modules/passenger-app/payment/payment-method.controller";
-import { PaymentMethodRepository } from "../../src/modules/passenger-app/payment/payment-method.repository";
+import {
+  PAYMENT_IDEMPOTENCY_ERROR_CODES,
+  PaymentMethodRepository,
+} from "../../src/modules/passenger-app/payment/payment-method.repository";
 import { PaymentMethodService } from "../../src/modules/passenger-app/payment/payment-method.service";
 import {
   ECPAY_PAYMENT_REQUIRED_SECRETS,
@@ -2270,7 +2275,176 @@ describe("5-card per member limit in PaymentMethodService & PaymentMethodReposit
       owner,
       "pax:bind:f3_limit_001",
       "failed",
-      "card_limit_exceeded",
     );
+  });
+
+  it("enforces V0115 payment_idempotency_keys.error_code CHECK constraint on real PaymentMethodRepository when ECPay returns card_limit_exceeded", async () => {
+    const migrationPath = resolve(
+      __dirname,
+      "../../../../infra/migrations/V0115__passenger_payment_core.sql",
+    );
+    const migrationSql = readFileSync(migrationPath, "utf8");
+    const tableBlockMatch = migrationSql.match(
+      /CREATE TABLE passenger\.payment_idempotency_keys\s*\(([\s\S]*?)\);/,
+    );
+    expect(tableBlockMatch).not.toBeNull();
+    const errorCodeCheckMatch = tableBlockMatch![1]!.match(
+      /error_code\s+text\s+CHECK\s*\(\s*error_code\s+IN\s*\(([^)]+)\)\s*\)/,
+    );
+    expect(errorCodeCheckMatch).not.toBeNull();
+    const v0115AllowedErrorCodes = errorCodeCheckMatch![1]!
+      .split(",")
+      .map((token) => token.trim().replace(/^'|'$/g, ""))
+      .filter(Boolean);
+    expect(v0115AllowedErrorCodes).toEqual([
+      "card_declined",
+      "invalid_credential",
+      "unavailable",
+      "invalid_method",
+    ]);
+    expect([...PAYMENT_IDEMPOTENCY_ERROR_CODES]).toEqual(
+      v0115AllowedErrorCodes,
+    );
+    expect(v0115AllowedErrorCodes).not.toContain("card_limit_exceeded");
+
+    const now = new Date("2026-10-25T07:50:00Z");
+    const owner = "pax_v0115_check_owner_001";
+    const fetchFn = vi.fn().mockResolvedValueOnce(
+      buildMockResponse(
+        {
+          RtnCode: 10100255,
+          RtnMsg: "綁定卡片數量已達上限(最多5張)",
+        },
+        now,
+      ),
+    );
+    const provider = new EcpayPaymentProvider({
+      ...SYNTHETIC_CREDENTIALS,
+      sandbox: true,
+      now: () => now,
+      fetchFn: fetchFn as unknown as typeof fetch,
+    });
+    const cipher = new PaymentTokenCipher(syntheticEncryptionKeysJson());
+
+    const journalState: {
+      idempotencyKey: string;
+      outcome: string;
+      errorCode: string | null;
+    } = {
+      idempotencyKey: "",
+      outcome: "pending",
+      errorCode: null,
+    };
+
+    const client = {
+      query: vi.fn(async (sql: string, params: unknown[] = []) => {
+        if (
+          sql === "BEGIN" ||
+          sql === "COMMIT" ||
+          sql === "ROLLBACK" ||
+          sql.startsWith("SET LOCAL lock_timeout")
+        ) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("SELECT status FROM passenger.accounts")) {
+          return { rows: [{ status: "active" }], rowCount: 1 };
+        }
+        if (sql.includes("INSERT INTO passenger.payment_idempotency_keys")) {
+          journalState.idempotencyKey = String(params[0]);
+          journalState.outcome = "pending";
+          journalState.errorCode = null;
+          return { rows: [], rowCount: 1 };
+        }
+        if (
+          sql.includes(
+            "SELECT drts_passenger_id,entity_id,outcome FROM passenger.payment_idempotency_keys",
+          )
+        ) {
+          return {
+            rows: [
+              {
+                drts_passenger_id: owner,
+                entity_id: "00000000-0000-4000-8000-000000000077",
+                outcome: journalState.outcome,
+              },
+            ],
+            rowCount: 1,
+          };
+        }
+        if (sql.includes("FROM passenger.psp_tokens WHERE drts_passenger_id=$1")) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (
+          sql.includes(
+            "UPDATE passenger.payment_idempotency_keys SET outcome=$3,error_code=$4",
+          )
+        ) {
+          const nextOutcome = String(params[2]);
+          const nextErrorCode =
+            params[3] === null || params[3] === undefined
+              ? null
+              : String(params[3]);
+          if (
+            nextErrorCode !== null &&
+            !v0115AllowedErrorCodes.includes(nextErrorCode)
+          ) {
+            throw new Error(
+              `new row for relation "payment_idempotency_keys" violates check constraint "payment_idempotency_keys_error_code_check" (error_code=${nextErrorCode})`,
+            );
+          }
+          journalState.outcome = nextOutcome;
+          journalState.errorCode = nextErrorCode;
+          return { rows: [], rowCount: 1 };
+        }
+        return { rows: [], rowCount: 0 };
+      }),
+      release: vi.fn(),
+    };
+    const realRepository = new PaymentMethodRepository({
+      connect: vi.fn().mockResolvedValue(client),
+      query: client.query,
+    } as unknown as DatabaseService);
+    const service = new PaymentMethodService(realRepository, {
+      provider,
+      cipher,
+    });
+
+    await expect(
+      service.bind(owner, {
+        providerToken: "ecpay_pay_token_v0115_limit_0001",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "card_limit_exceeded",
+    });
+    expect(journalState.outcome).toBe("failed");
+    expect(journalState.errorCode).toBeNull();
+
+    // Direct repository guard: even if a caller passes a non-V0115 error string,
+    // bindingOutcome never writes an invalid error_code into payment_idempotency_keys.
+    journalState.outcome = "action_required";
+    await expect(
+      realRepository.bindingOutcome(
+        owner,
+        journalState.idempotencyKey,
+        "failed",
+        "card_limit_exceeded",
+      ),
+    ).resolves.toBeUndefined();
+    expect(journalState.outcome).toBe("failed");
+    expect(journalState.errorCode).toBeNull();
+
+    // Valid V0115 error codes are still persisted as-is.
+    journalState.outcome = "pending";
+    await expect(
+      realRepository.bindingOutcome(
+        owner,
+        journalState.idempotencyKey,
+        "failed",
+        "card_declined",
+      ),
+    ).resolves.toBeUndefined();
+    expect(journalState.outcome).toBe("failed");
+    expect(journalState.errorCode).toBe("card_declined");
   });
 });

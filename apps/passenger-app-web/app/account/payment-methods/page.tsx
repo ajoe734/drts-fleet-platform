@@ -5,10 +5,8 @@ import { isDemoMode } from "../../../lib/demo/store";
 import { demoPaymentFields } from "../../../lib/demo/payment-fields";
 import { useEffect, useState } from "react";
 import type { PassengerPaymentFieldsAvailability } from "@drts/passenger-client";
-import {
-  ECPAY_ACTION_ORIGINS,
-  EcpayHostedFields,
-} from "../../../components/payment/ecpay-hosted-fields";
+import { ECPAY_ACTION_ORIGINS } from "../../../components/payment/ecpay-csp";
+import { EcpayHostedFields } from "../../../components/payment/ecpay-hosted-fields";
 import { PaymentMethodsScreen } from "../../../components/payment/payment-methods-screen";
 import { useReviewDemo } from "../../../components/review-demo/review-context";
 import {
