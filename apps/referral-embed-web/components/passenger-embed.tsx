@@ -1344,7 +1344,7 @@ function ConsentScreen({ context }: { context: EmbedContext }) {
     ["使用必要個資", "上下車地址、聯絡電話以完成媒合與聯繫", "pii.trip"],
     [
       "行程綁定住戶身分",
-      "讓您重開 App 後仍能找回進行中行程與收據",
+      "將進行中行程與收據綁定您的住戶身分，需以同一身分驗證後查詢",
       "identity.bind",
     ],
   ] as const;
@@ -1514,7 +1514,8 @@ function FallbackScreen({ context }: { context: EmbedContext }) {
           <Card theme={theme} title="接下來">
             <div style={{ fontSize: 13, lineHeight: 1.6, color: theme.ink2 }}>
               目前無法在社區 App 內完成叫車。您可改用 <b>獨立叫車網站</b>
-              ，以手機號碼驗證後繼續，行程與收據仍會綁定您的身分。
+              重新驗證身分後叫車；社區 App
+              內已綁定身分的行程與收據，請於恢復後以同一身分重新進入查詢。
             </div>
           </Card>
           <Card theme={theme}>
@@ -2908,7 +2909,7 @@ function TripScreen({
           style={{ color: theme.primary, flexShrink: 0 }}
         />
         <span style={{ fontSize: 11.5, color: theme.ink2, lineHeight: 1.4 }}>
-          此行程已綁定您的身分 · <b>重開 App 仍可找回</b>
+          此行程已綁定您的身分 · <b>請以同一身分驗證後查詢</b>
         </span>
       </div>
 
@@ -3201,7 +3202,7 @@ function TripsScreen({
         }}
       >
         <Icon name="shield" size={13} style={{ color: theme.primary }} />
-        重開 App 後行程與收據仍可找回
+        行程與收據已綁定您的身分，請以同一身分驗證後查詢
       </div>
       {historyItems.length === 0 ? (
         <Card theme={theme}>

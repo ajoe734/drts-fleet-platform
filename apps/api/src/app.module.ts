@@ -21,6 +21,7 @@ import { BootstrapThrottlerGuard } from "./common/throttling/bootstrap-throttler
 import { KeyScopedThrottlerStorage } from "./common/throttling/key-scoped-throttler.storage";
 import { GLOBAL_RATE_LIMIT } from "./common/throttling/rate-limit.constants";
 import { HealthModule } from "./health/health.module";
+import { AgencyAccessModule } from "./modules/agency-access/agency-access.module";
 import { AuditNotificationModule } from "./modules/audit-notification/audit-notification.module";
 import { AssistantModule } from "./modules/assistant/assistant.module";
 import { BillingSettlementModule } from "./modules/billing-settlement/billing-settlement.module";
@@ -123,6 +124,8 @@ import { PassengerAppModule } from "./modules/passenger-app/passenger-app.module
     DriverLeaveModule,
     DriverAcademyModule,
     HostViewModule,
+    // BUREAU-R13 regulatory agency read-only portal and access audit.
+    AgencyAccessModule,
     DriverSettingsModule,
     PlatformPresenceModule,
     PlatformEarningsModule,

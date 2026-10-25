@@ -30,6 +30,8 @@ import {
 import {
   hash,
   inventoryAt,
+  translationKeysForCase,
+  translationSourceAt,
 } from "../../../e2e/system-remediation/sr-live-global-ux-20261007/inventory";
 import { scaffoldPlan } from "../../../e2e/system-remediation/sr-live-global-ux-20261007/runner";
 
@@ -51,12 +53,20 @@ function alterSource(head: string, path: string, alter: (s: string) => string) {
     args: string[],
     options: ExecFileSyncOptionsWithStringEncoding,
   ) => {
-    const result = realExecFileSync(command, args, options);
-    return command === "git" &&
+    if (
+      command === "git" &&
       args[0] === "show" &&
       args[1] === `${head}:${path}`
-      ? alter(result)
-      : result;
+    ) {
+      let existing = "";
+      try {
+        existing = realExecFileSync(command, args, options);
+      } catch {
+        existing = "";
+      }
+      return alter(existing);
+    }
+    return realExecFileSync(command, args, options);
   }) as typeof execFileSync);
 }
 
@@ -428,7 +438,19 @@ describe("locale intent and source mapping", () => {
       roles: ["first_party_passenger"],
       roleSource: "packages/contracts/src/passenger-app.ts",
     });
+    expect(manifest.surfaces).toContainEqual({
+      app: "agency-portal-web",
+      service: "drts-dev-agency-portal-web",
+      roles: ["agency_viewer", "agency_exporter"],
+      roleSource: "packages/contracts/src/iam-policy-catalog.ts",
+    });
+    for (const app of ["tenant-console-web", "enterprise-dispatch-web"]) {
+      const surface = manifest.surfaces.find((s) => s.app === app)!;
+      expect(surface.roles).not.toContain("agency_viewer");
+      expect(surface.roles).not.toContain("agency_exporter");
+    }
     expect(manifest.excluded).not.toHaveProperty("passenger-app-web");
+    expect(manifest.excluded).not.toHaveProperty("agency-portal-web");
     for (const app of ["passenger-web", "partner-booking-web"])
       expect(manifest.excluded).toHaveProperty(app);
     const plan = scaffoldPlan(manifest);
@@ -480,6 +502,24 @@ describe("locale intent and source mapping", () => {
     expect(
       cases(manifest).filter((c) => c.screen.app === "passenger-app-web"),
     ).toHaveLength(passengerPages.length * 8 * 2 * 3);
+    const agencyPages = pages.filter((file) =>
+      file.startsWith("apps/agency-portal-web/app/"),
+    );
+    const agencyScreens = manifest.screens.filter(
+      (screen) => screen.app === "agency-portal-web",
+    );
+    expect(agencyPages.length).toBeGreaterThan(0);
+    expect(agencyScreens.map((s) => s.source).sort()).toEqual(
+      agencyPages.sort(),
+    );
+    expect(
+      agencyScreens.every(
+        (s) => s.roles.join() === "agency_viewer,agency_exporter",
+      ),
+    ).toBe(true);
+    expect(
+      cases(manifest).filter((c) => c.screen.app === "agency-portal-web"),
+    ).toHaveLength(agencyPages.length * 2 * 8 * 2 * 3);
     expect(
       manifest.screens.every(
         (s) =>
@@ -491,7 +531,7 @@ describe("locale intent and source mapping", () => {
     // Full git page/blob discovery can exceed the default 5s on a busy VM.
     // Keep all pages and checks; bound only this complete inventory probe.
   }, 30_000);
-  it.each(["passenger-app-web", "tenant-console-web"])(
+  it.each(["passenger-app-web", "tenant-console-web", "agency-portal-web"])(
     "rejects missing active surface %s without shrinking the page denominator",
     (app) => {
       const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
@@ -513,6 +553,7 @@ describe("locale intent and source mapping", () => {
     "passenger-web",
     "partner-booking-web",
     "passenger-app-web",
+    "agency-portal-web",
   ])("rejects extra or duplicated active surface %s", (app) => {
     const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",
@@ -544,6 +585,117 @@ describe("locale intent and source mapping", () => {
       );
     },
   );
+  it("adapts inline-zh agency translation source honestly, blocks en-US per case, and prefers a real dictionary when present", () => {
+    const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const currentAgencySource = translationSourceAt(head, "agency-portal-web");
+    expect(currentAgencySource).toEqual({
+      app: "agency-portal-web",
+      kind: "dictionary",
+      source: "apps/agency-portal-web/lib/translations.ts",
+      locales: ["zh-TW", "en-US"],
+      keys: expect.arrayContaining(["app.title", "login.title", "shell.title"]),
+    });
+    expect(
+      translationKeysForCase(currentAgencySource, "zh-TW").length,
+    ).toBeGreaterThan(0);
+    expect(translationKeysForCase(currentAgencySource, "en-US")).toEqual(
+      translationKeysForCase(currentAgencySource, "zh-TW"),
+    );
+
+    vi.mocked(execFileSync).mockImplementation(((
+      command: string,
+      args: string[],
+      options: ExecFileSyncOptionsWithStringEncoding,
+    ) => {
+      if (command === "git" && args[0] === "show") {
+        if (args[1] === `${head}:apps/agency-portal-web/lib/translations.ts`) {
+          throw new Error("missing historical agency translations.ts");
+        }
+        if (args[1] === `${head}:apps/agency-portal-web/app/layout.tsx`) {
+          return '<html lang="zh-Hant"><body>{children}</body></html>\n';
+        }
+        if (args[1] === `${head}:apps/agency-portal-web/app/login/page.tsx`) {
+          return "<main><h1>主管機關唯讀查詢入口</h1></main>\n";
+        }
+      }
+      return realExecFileSync(command, args, options);
+    }) as typeof execFileSync);
+    const agencySource = translationSourceAt(head, "agency-portal-web");
+    expect(agencySource).toEqual({
+      app: "agency-portal-web",
+      kind: "inline-locale",
+      source: "apps/agency-portal-web/app/layout.tsx",
+      locales: ["zh-TW"],
+      keys: [],
+      unsupportedLocaleReason: "agency-en-us-translation-source-missing",
+    });
+    expect(translationKeysForCase(agencySource, "zh-TW")).toEqual([]);
+    expect(() => translationKeysForCase(agencySource, "en-US")).toThrow(
+      "agency-en-us-translation-source-missing",
+    );
+
+    // Unsupported en-US locale records per-case blocked evidence rather than N/A or vacuous PASS.
+    const e = evidence();
+    const enRow = e.rows.find((row) => row.locale === "en-US")!;
+    enRow.status = "blocked";
+    enRow.reason = "agency-en-us-translation-source-missing";
+    enRow.checks = [];
+    expect(() => runGate(e)).toThrow(`case not passed: ${enRow.id}`);
+
+    // Empty fake dictionary is rejected instead of vacuously passing.
+    alterSource(
+      head,
+      "apps/agency-portal-web/lib/translations.ts",
+      () => "export const translations = { en: {}, zh: {} } as const;\n",
+    );
+    const emptyDict = translationSourceAt(head, "agency-portal-web");
+    expect(emptyDict).toEqual({
+      app: "agency-portal-web",
+      kind: "unsupported",
+      source: "apps/agency-portal-web/lib/translations.ts",
+      locales: [],
+      keys: [],
+      reason: "translation-dictionary-empty",
+    });
+    expect(() => translationKeysForCase(emptyDict, "zh-TW")).toThrow(
+      "translation-dictionary-empty",
+    );
+    expect(() => translationKeysForCase(emptyDict, "en-US")).toThrow(
+      "translation-dictionary-empty",
+    );
+
+    // Real bilingual dictionary is preferred once provided.
+    alterSource(
+      head,
+      "apps/agency-portal-web/lib/translations.ts",
+      () =>
+        'const en = { "agency.login.title": "Agency Portal" };\nconst zh = { "agency.login.title": "主管機關唯讀查詢" };\nexport const translations = { en, zh } as const;\n',
+    );
+    const realDict = translationSourceAt(head, "agency-portal-web");
+    expect(realDict).toEqual({
+      app: "agency-portal-web",
+      kind: "dictionary",
+      source: "apps/agency-portal-web/lib/translations.ts",
+      locales: ["zh-TW", "en-US"],
+      keys: ["agency.login.title"],
+    });
+    expect(translationKeysForCase(realDict, "zh-TW")).toEqual([
+      "agency.login.title",
+    ]);
+    expect(translationKeysForCase(realDict, "en-US")).toEqual([
+      "agency.login.title",
+    ]);
+
+    // Unadapted surface without translations.ts does not throw at map construction time,
+    // and fails closed per case with translation-source-adapter-missing.
+    const unadapted = translationSourceAt(head, "unadapted-web");
+    expect(unadapted.kind).toBe("unsupported");
+    expect(() => translationKeysForCase(unadapted, "zh-TW")).toThrow(
+      "translation-source-adapter-missing",
+    );
+  });
   it("workflow never starts a local product server and keeps browser/manual gates distinct", () => {
     const workflow = readFileSync(
       ".github/workflows/live-global-ux-acceptance.yml",

@@ -11,11 +11,13 @@ import {
 import { Injectable, Logger, Optional } from "@nestjs/common";
 import * as jwt from "jsonwebtoken";
 
+import { AgencyDirectoryRepository } from "../../modules/agency-access/agency-directory.repository";
 import { IdentityRepository } from "../../modules/identity/identity.repository";
 import { RegulatoryRegistryService } from "../../modules/regulatory-registry/regulatory-registry.service";
 import { TenantPartnerService } from "../../modules/tenant-partner/tenant-partner.service";
 import { ApiRequestError } from "../api-envelope";
 import {
+  getAgencyRoleScopes,
   getTenantRoleScopes,
   AUTH_SCOPE_PRESETS,
   AUTH_TENANT_ROLE_SCOPE_PRESETS,
@@ -50,6 +52,7 @@ export interface JwtIdentityPayload {
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
+  agencyId?: string | null;
   roleFamilies: AuthRoleFamily[];
   roles: string[];
   scopes: string[];
@@ -104,6 +107,7 @@ type JwtSignIdentityBase =
         | "partnerId"
         | "partnerProgramId"
         | "partnerEntrySlug"
+        | "agencyId"
         | "sessionId"
         | "tokenId"
         | "tokenVersion"
@@ -301,6 +305,8 @@ export class JwtAuthService {
     @Optional() private readonly tenantPartnerService?: TenantPartnerService,
     @Optional()
     private readonly regulatoryRegistryService?: RegulatoryRegistryService,
+    @Optional()
+    private readonly agencyDirectoryRepository?: AgencyDirectoryRepository,
   ) {}
 
   private getSignKey(): {
@@ -891,6 +897,9 @@ export class JwtAuthService {
       partnerId: identity.partnerId ?? null,
       partnerProgramId: identity.partnerProgramId ?? null,
       partnerEntrySlug: identity.partnerEntrySlug ?? null,
+      ...(identity.realm === "agency"
+        ? { agencyId: identity.agencyId ?? null }
+        : {}),
       roleFamilies: identity.roleFamilies,
       roles: identity.roles,
       scopes: identity.scopes,
@@ -985,6 +994,15 @@ export class JwtAuthService {
       // The proxy token is purpose-bound, signed, and short-lived. It is not a
       // user session and therefore has no durable session record to resolve.
       return isSessionlessControlPlaneProxyToken ? payload : null;
+    }
+
+    // BUREAU-R13: an agency session is only valid with a durable session
+    // record and its own membership/expiry revalidation; never fail open.
+    if (
+      payload.realm === "agency" &&
+      (!this.identityRepository || !payload.sid)
+    ) {
+      return null;
     }
 
     if (!this.identityRepository || !payload.sid) {
@@ -1197,7 +1215,114 @@ export class JwtAuthService {
       return true;
     }
 
+    if (payload.realm === "agency") {
+      return this.validateAgencyDurableState(payload, session);
+    }
+
     return true;
+  }
+
+  /**
+   * BUREAU-R13 §2.5: checked on every request, so membership deactivation,
+   * agency suspension, an expired `valid_to` or any role/membership change
+   * revokes an already-issued agency token immediately (no scheduler).
+   */
+  private async validateAgencyDurableState(
+    payload: JwtIdentityPayload,
+    session: CanonicalIdentitySessionRecord,
+  ): Promise<boolean> {
+    if (
+      payload.actorType !== "agency_user" ||
+      !this.identityRepository ||
+      !this.agencyDirectoryRepository
+    ) {
+      return false;
+    }
+    const principalId = payload.principalId ?? payload.sub;
+    const agencyId = payload.agencyId?.trim();
+    if (
+      !principalId ||
+      !agencyId ||
+      !payload.membershipId ||
+      session.principalId !== principalId ||
+      session.membershipId !== payload.membershipId
+    ) {
+      return false;
+    }
+
+    const principal =
+      await this.identityRepository.findPrincipalById(principalId);
+    if (!principal || principal.status !== "active") {
+      return false;
+    }
+
+    const membership = await this.identityRepository.findMembershipById(
+      payload.membershipId,
+    );
+    if (
+      !membership ||
+      membership.principalId !== principal.principalId ||
+      membership.realm !== "agency" ||
+      membership.status !== "active" ||
+      membership.scopeRef !== `agency:${agencyId}`
+    ) {
+      return false;
+    }
+
+    const agency = await this.agencyDirectoryRepository.findById(agencyId);
+    if (!agency || agency.status !== "active") {
+      return false;
+    }
+
+    const roleBindings =
+      await this.identityRepository.findRoleBindingsByMembershipId(
+        membership.membershipId,
+      );
+    const now = Date.now();
+    const activeBindings = roleBindings.filter((binding) => {
+      if (!binding.validTo || !getAgencyRoleScopes(binding.roleCode)) {
+        return false;
+      }
+      const validFrom = Date.parse(binding.validFrom);
+      const validTo = Date.parse(binding.validTo);
+      return (
+        Number.isFinite(validFrom) &&
+        Number.isFinite(validTo) &&
+        validFrom <= now &&
+        now < validTo
+      );
+    });
+    if (activeBindings.length === 0) {
+      return false;
+    }
+
+    const timestamps = [
+      principal.updatedAt,
+      membership.updatedAt,
+      ...roleBindings.map((binding) => binding.updatedAt),
+    ];
+    if (
+      this.computeWorkforceTokenVersion(timestamps) !== payload.tokenVersion
+    ) {
+      return false;
+    }
+
+    if (!Array.isArray(payload.scopes) || !Array.isArray(payload.roles)) {
+      return false;
+    }
+    const allowedRoles = new Set(
+      activeBindings.map((binding) => binding.roleCode),
+    );
+    const allowedScopes = new Set<string>();
+    for (const binding of activeBindings) {
+      getAgencyRoleScopes(binding.roleCode)?.forEach((scope) =>
+        allowedScopes.add(scope),
+      );
+    }
+    return (
+      payload.roles.every((role) => allowedRoles.has(role)) &&
+      payload.scopes.every((scope) => allowedScopes.has(scope))
+    );
   }
 
   toRequestIdentity(payload: JwtIdentityPayload): BootstrapRequestIdentity {
@@ -1214,6 +1339,9 @@ export class JwtAuthService {
       partnerId: payload.partnerId ?? null,
       partnerProgramId: payload.partnerProgramId ?? null,
       partnerEntrySlug: payload.partnerEntrySlug ?? null,
+      ...(payload.realm === "agency"
+        ? { agencyId: payload.agencyId ?? null }
+        : {}),
       drtsPassengerId: payload.drtsPassengerId ?? null,
       sessionId: payload.sid ?? null,
       tokenId: payload.jti ?? null,
