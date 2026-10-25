@@ -1573,56 +1573,109 @@ test(journeyName, async ({ browser, request }) => {
       });
 
       // Re-enter through the actual history card, not an API read standing in
-      // for UI navigation. TripsScreen links include the exact canonical ID.
-      await page.goto(
-        `${origins.referral}/embed/${ENTRY}?state=handoff&screen=trips&entryHost=${encodeURIComponent(host)}`,
-      );
-      await expect(page.getByText("我的行程", { exact: true })).toBeVisible();
-      const ownHistoryCard = page.getByRole("link").filter({
-        hasText: text(
-          history.orderNo,
-          "canonical history order number required",
-        ),
+      // for UI navigation. TripsScreen links show the shortened displayOrderNo,
+      // not the raw canonical order number (see TripsScreen in passenger-embed.tsx).
+      // A native Playwright assertion/timeout anywhere in this window is not a
+      // JourneyFailure, so each named step records the fixed safe phase reached
+      // before it, plus its closed class/code (same allowlisted facts as
+      // closedPdfFailureFacts below), instead of losing this window to one bare
+      // generic placeholder that cannot tell goto/count/href/click/assert apart.
+      type HistoryRestorePhase =
+        | "browser-history-restore-goto"
+        | "browser-history-restore-card-count"
+        | "browser-history-restore-href"
+        | "browser-history-restore-click"
+        | "browser-history-restore-assert";
+      const historyPhase = async <T>(
+        stage: HistoryRestorePhase,
+        action: () => Promise<T>,
+      ): Promise<T> => {
+        evidence.record({
+          stage,
+          orderId: completedOrderId,
+          caseNo,
+          result: "observed",
+        });
+        try {
+          return await action();
+        } catch (error) {
+          evidence.record({
+            stage,
+            orderId: completedOrderId,
+            caseNo,
+            ...closedPdfFailureFacts(error),
+            result: "failed",
+          });
+          throw error;
+        }
+      };
+      await historyPhase("browser-history-restore-goto", async () => {
+        await page.goto(
+          `${origins.referral}/embed/${ENTRY}?state=handoff&screen=trips&entryHost=${encodeURIComponent(host)}`,
+        );
+        await expect(page.getByText("我的行程", { exact: true })).toBeVisible();
       });
-      await expect(ownHistoryCard).toHaveCount(1);
-      const historyHref = new URL(
-        text(await ownHistoryCard.getAttribute("href")),
-        origins.referral,
+      const ownHistoryCard = await historyPhase(
+        "browser-history-restore-card-count",
+        async () => {
+          const card = page.getByRole("link").filter({
+            hasText: displayOrderNo(
+              text(
+                history.orderNo,
+                "canonical history order number required",
+              ),
+            ),
+          });
+          await expect(card).toHaveCount(1);
+          return card;
+        },
       );
-      requireFact(
-        assertCompletedBrowserUrl(historyHref),
-        "history card retains exact completed orderId",
-      );
-      await ownHistoryCard.click();
-      await expect(page).toHaveURL(assertCompletedBrowserUrl);
-      await expect(page.getByText("行程已完成", { exact: true })).toBeVisible();
-      for (const n of [1, 2, 3, 4, 5])
+      await historyPhase("browser-history-restore-href", async () => {
+        const historyHref = new URL(
+          text(await ownHistoryCard.getAttribute("href")),
+          origins.referral,
+        );
+        requireFact(
+          assertCompletedBrowserUrl(historyHref),
+          "history card retains exact completed orderId",
+        );
+      });
+      await historyPhase("browser-history-restore-click", async () => {
+        await ownHistoryCard.click();
+        await expect(page).toHaveURL(assertCompletedBrowserUrl);
+      });
+      await historyPhase("browser-history-restore-assert", async () => {
         await expect(
-          page.getByRole("button", { name: `評分 ${n} 星`, exact: true }),
+          page.getByText("行程已完成", { exact: true }),
+        ).toBeVisible();
+        for (const n of [1, 2, 3, 4, 5])
+          await expect(
+            page.getByRole("button", { name: `評分 ${n} 星`, exact: true }),
+          ).toBeDisabled();
+        const restoredTwoStarColors = await assertBrowserTwoStarSelection();
+        requireFact(
+          restoredTwoStarColors.every(
+            (color, index) => color === originalTwoStarColors[index],
+          ),
+          "history restores the original selected-two browser color distribution",
+        );
+        const restoredContact = page.getByRole("switch", {
+          name: "需要客服聯絡",
+          exact: true,
+        });
+        await expect(restoredContact).not.toBeChecked();
+        await expect(restoredContact).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "評分已送出", exact: true }),
         ).toBeDisabled();
-      const restoredTwoStarColors = await assertBrowserTwoStarSelection();
-      requireFact(
-        restoredTwoStarColors.every(
-          (color, index) => color === originalTwoStarColors[index],
-        ),
-        "history restores the original selected-two browser color distribution",
-      );
-      const restoredContact = page.getByRole("switch", {
-        name: "需要客服聯絡",
-        exact: true,
+        await expect(
+          page.getByRole("status").filter({ hasText: caseNo }),
+        ).toContainText("不需客服聯絡，僅供內部檢視");
+        requireFact(
+          browserRatingRequests.length === 1,
+          "history return must not resubmit rating",
+        );
       });
-      await expect(restoredContact).not.toBeChecked();
-      await expect(restoredContact).toBeDisabled();
-      await expect(
-        page.getByRole("button", { name: "評分已送出", exact: true }),
-      ).toBeDisabled();
-      await expect(
-        page.getByRole("status").filter({ hasText: caseNo }),
-      ).toContainText("不需客服聯絡，僅供內部檢視");
-      requireFact(
-        browserRatingRequests.length === 1,
-        "history return must not resubmit rating",
-      );
       evidence.record({
         stage: "browser-history-card-restores-locked-two-contactfalse-case",
         orderId: completedOrderId,
