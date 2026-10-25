@@ -55,6 +55,7 @@ import type {
   ReportJobRecord,
   ReportJobType,
   SettlementMatrixRecord,
+  SixMonthMonthlyOperationsSummary,
   SixMonthOperationsSummary,
   TenantCostCenterRecord,
   TenantMonthlyTripReportRowRecord,
@@ -156,6 +157,9 @@ type DailyDispatchRecordProvider = (
   filters: DailyDispatchRecordQuery,
 ) => Promise<DispatchDailyRecord[]> | DispatchDailyRecord[];
 type SixMonthOperationsSummaryProvider = (filters: {
+  periodMonth?: string;
+  periodMonthFrom?: string;
+  periodMonthTo?: string;
   from?: string;
   to?: string;
   businessArea?: string;
@@ -2314,17 +2318,50 @@ export class ReportingFilingService
     return rows.map((row) => ({ ...row }));
   }
 
-  private async buildSixMonthOperationsSummaryRows(job: StoredReportJob) {
+  private async buildSixMonthOperationsSummaryRows(
+    job: StoredReportJob,
+  ): Promise<
+    Array<SixMonthOperationsSummary | SixMonthMonthlyOperationsSummary>
+  > {
     const filters = this.extractSixMonthOperationsSummaryFilters(job.filters);
     const rows = await this.sixMonthOperationsSummaryProvider(filters);
-    // File exports carry the scalar figures; the source id lists stay on the
-    // preview API / JSON export, where each figure is drilled down.
+    // CSV exports carry the six monthly detail rows per observed
+    // businessArea/serviceProductCode from the same preview generation; PDF
+    // exports remain six-month aggregate summaries. Source id lists stay on
+    // the preview API / JSON export.
+    if (job.format === "csv") {
+      const monthlyRows = rows.flatMap((source) =>
+        (source.monthlySummaries ?? []).map((monthly) => ({
+          ...monthly,
+          averageDispatchableVehicleCount:
+            monthly.validSnapshotCount === 0
+              ? null
+              : monthly.averageDispatchableVehicleCount,
+          complaintsByCategory: { ...monthly.complaintsByCategory },
+        })),
+      );
+      if (monthlyRows.length > 0) {
+        return monthlyRows.sort(
+          (left, right) =>
+            left.periodMonth.localeCompare(right.periodMonth) ||
+            (left.businessArea ?? "").localeCompare(right.businessArea ?? "") ||
+            (left.serviceProductCode ?? "").localeCompare(
+              right.serviceProductCode ?? "",
+            ),
+        );
+      }
+    }
     return rows.map((source) => {
       const row = {
         ...source,
+        averageDispatchableVehicleCount:
+          source.validSnapshotCount === 0
+            ? null
+            : source.averageDispatchableVehicleCount,
         complaintsByCategory: { ...source.complaintsByCategory },
       };
       delete row.drilldown;
+      delete row.monthlySummaries;
       return row;
     });
   }
@@ -2466,21 +2503,44 @@ export class ReportingFilingService
   private extractSixMonthOperationsSummaryFilters(
     filters: Record<string, unknown>,
   ) {
-    const readText = (key: string) => {
-      const value = filters[key];
-      return typeof value === "string" && value.trim() ? value.trim() : null;
+    const readText = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = filters[key];
+        if (typeof value === "string" && value.trim()) {
+          return value.trim();
+        }
+      }
+      return null;
     };
     const query: {
+      periodMonth?: string;
+      periodMonthFrom?: string;
+      periodMonthTo?: string;
       from?: string;
       to?: string;
       businessArea?: string;
       serviceProductCode?: string;
     } = {};
+    const periodMonth = readText("periodMonth", "period_month");
+    const periodMonthFrom = readText("periodMonthFrom", "period_month_from");
+    const periodMonthTo = readText("periodMonthTo", "period_month_to");
     const from = readText("from");
     const to = readText("to");
-    const businessArea = readText("businessArea");
-    const serviceProductCode = readText("serviceProductCode");
+    const businessArea = readText("businessArea", "business_area");
+    const serviceProductCode = readText(
+      "serviceProductCode",
+      "service_product_code",
+    );
 
+    if (periodMonth) {
+      query.periodMonth = periodMonth;
+    }
+    if (periodMonthFrom) {
+      query.periodMonthFrom = periodMonthFrom;
+    }
+    if (periodMonthTo) {
+      query.periodMonthTo = periodMonthTo;
+    }
     if (from) {
       query.from = from;
     }

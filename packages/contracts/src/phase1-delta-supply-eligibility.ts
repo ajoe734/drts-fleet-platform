@@ -411,6 +411,50 @@ export interface DispatchableSupplySnapshotRecord {
   generatedAt: string;
 }
 
+export interface SixMonthMonthlyOperationsSummary {
+  periodMonth: string;
+  from: string;
+  to: string;
+
+  businessArea: string | null;
+  serviceProductCode: string | null;
+
+  demandRequestCount: number;
+  actualDispatchCount: number;
+  completedTripCount: number;
+  cancelledOrderCount: number;
+
+  /**
+   * Sample-weighted dispatchable vehicle average across valid complete
+   * snapshots in the month. `null` when `validSnapshotCount === 0` (未提供);
+   * numeric `0` only when at least one valid complete snapshot measured zero
+   * vehicles.
+   */
+  averageDispatchableVehicleCount: number | null;
+  validSnapshotCount: number;
+  expectedSnapshotCount: number;
+  snapshotCoverageRate: number;
+
+  complaintCount: number;
+  complaintsByCategory: Record<string, number>;
+
+  lateArrivalThresholdMinutes?: number;
+  onTimeTripCount?: number;
+  lateTripCount?: number;
+  noShowTripCount?: number;
+  punctualityUnknownTripCount?: number;
+
+  complaintCreatedLowRatingAutoCount?: number;
+  complaintCreatedManualCount?: number;
+  complaintClosedLowRatingAutoCount?: number;
+  complaintClosedManualCount?: number;
+  complaintOverdueLowRatingAutoCount?: number;
+  complaintOverdueManualCount?: number;
+  complaintStatisticsAsOf?: string;
+
+  generatedAt: string;
+}
+
 export interface SixMonthOperationsSummary {
   from: string;
   to: string;
@@ -423,7 +467,13 @@ export interface SixMonthOperationsSummary {
   completedTripCount: number;
   cancelledOrderCount: number;
 
-  averageDispatchableVehicleCount: number;
+  /**
+   * Sample-weighted dispatchable vehicle average across valid complete
+   * snapshots in the window. `null` when `validSnapshotCount === 0` (未提供);
+   * numeric `0` only when at least one valid complete snapshot measured zero
+   * vehicles.
+   */
+  averageDispatchableVehicleCount: number | null;
   validSnapshotCount: number;
   expectedSnapshotCount: number;
   snapshotCoverageRate: number;
@@ -455,6 +505,12 @@ export interface SixMonthOperationsSummary {
   complaintOverdueManualCount?: number;
   /** Reference time for complaint `overdue` (SLA due passed, not closed). */
   complaintStatisticsAsOf?: string;
+
+  /**
+   * Six consecutive monthly detail rows generated from the same canonical
+   * source snapshot and rebuild batch as this summary row.
+   */
+  monthlySummaries?: SixMonthMonthlyOperationsSummary[];
 
   /**
    * Source order / case ids behind every figure above. Returned by the
@@ -533,6 +589,7 @@ export interface ComplaintMonthlyCategoryCounts extends ComplaintMonthlyCounts {
 export interface OperationsSummaryDrilldown {
   punctuality: OperationsPunctualityMetrics;
   complaintMonthlyStatistics: ComplaintMonthlyStatistic[];
+  monthlySummaries?: SixMonthMonthlyOperationsSummary[];
 }
 
 export interface ComplaintMonthlyStatistic {
