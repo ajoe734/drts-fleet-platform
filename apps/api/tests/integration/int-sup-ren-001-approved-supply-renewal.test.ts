@@ -330,8 +330,18 @@ describe("INT-SUP-REN-001 approved supply renewal integration", () => {
         try {
           if (DATABASE_URL) {
             const cleanup = createDb();
+            if (createdFleetPartnerIds.size > 0) {
+              await cleanup.query(
+                "DELETE FROM fleet.vehicle_fleet_affiliations WHERE fleet_partner_id = ANY($1::text[])",
+                [[...createdFleetPartnerIds]],
+              );
+            }
             if (createdSubmissionIds.size > 0) {
               const subIds = [...createdSubmissionIds];
+              await cleanup.query(
+                "DELETE FROM fleet.vehicle_fleet_affiliations WHERE source_submission_id = ANY($1::uuid[])",
+                [subIds],
+              );
               await cleanup.query(
                 "DELETE FROM fleet.supply_review_events WHERE submission_id = ANY($1::uuid[])",
                 [subIds],
@@ -353,20 +363,31 @@ describe("INT-SUP-REN-001 approved supply renewal integration", () => {
                 [subIds],
               );
             }
-            if (createdFleetPartnerIds.size > 0) {
-              await cleanup.query(
-                "DELETE FROM fleet.vehicle_fleet_affiliations WHERE fleet_partner_id = ANY($1::text[])",
-                [[...createdFleetPartnerIds]],
-              );
-            }
             if (createdVehicleIds.size > 0) {
               const vehIds = [...createdVehicleIds];
+              await cleanup.query(
+                `DELETE FROM reg.phase1_registry_expiry_events
+                 WHERE entity_id IN (
+                   SELECT policy_id FROM reg.phase1_registry_policies WHERE vehicle_id = ANY($1::text[])
+                   UNION
+                   SELECT contract_id FROM reg.phase1_registry_contracts WHERE vehicle_id = ANY($1::text[])
+                 )`,
+                [vehIds],
+              );
               await cleanup.query(
                 "DELETE FROM reg.phase1_registry_supply_pairs WHERE vehicle_id = ANY($1::text[])",
                 [vehIds],
               );
               await cleanup.query(
+                "UPDATE reg.phase1_registry_policies SET superseded_by_policy_id = NULL WHERE vehicle_id = ANY($1::text[])",
+                [vehIds],
+              );
+              await cleanup.query(
                 "DELETE FROM reg.phase1_registry_policies WHERE vehicle_id = ANY($1::text[])",
+                [vehIds],
+              );
+              await cleanup.query(
+                "UPDATE reg.phase1_registry_contracts SET superseded_by_contract_id = NULL WHERE vehicle_id = ANY($1::text[])",
                 [vehIds],
               );
               await cleanup.query(

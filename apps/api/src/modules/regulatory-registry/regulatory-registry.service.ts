@@ -128,6 +128,7 @@ type ProvisionFromSubmissionCommand = {
   documents: SupplyDocumentRecord[];
   approvedAt: string;
   reviewerId: string;
+  deferVolatileCommit?: boolean | undefined;
 };
 
 export type ProvisionedCanonicalRecordIds = {
@@ -141,6 +142,7 @@ export type SubmissionProvisioningResult = ProvisionedCanonicalRecordIds & {
   vehicleAffiliation: VehicleFleetAffiliationRecord | null;
   supplyPair: RegulatorySupplyPair | null;
   stagedChanges?: PersistRegulatoryRegistryChanges | undefined;
+  commitVolatileRenewal?: (() => Promise<void>) | undefined;
 };
 
 export type ReconcileExpiryCommand = {
@@ -1417,68 +1419,71 @@ export class RegulatoryRegistryService
   }
 
   /** Publish staged canonical driver/vehicle/contract/policy/credential updates
-   * to in-memory state only after the approval transaction has committed. */
-  publishCommittedProvisioning(result: SubmissionProvisioningResult) {
+   * to in-memory state only after the approval transaction or volatile submission write has committed. */
+  async publishCommittedProvisioning(result: SubmissionProvisioningResult) {
     this.publishCommittedSupplyPair(result.supplyPair);
     const changes = result.stagedChanges;
-    if (!changes) return;
+    if (changes) {
+      if (changes.drivers?.length) {
+        const updatedIds = new Set(changes.drivers.map((d) => d.driverId));
+        this.drivers = [
+          ...changes.drivers.map((d) => this.cloneDriver(d)),
+          ...this.drivers.filter((d) => !updatedIds.has(d.driverId)),
+        ];
+      }
 
-    if (changes.drivers?.length) {
-      const updatedIds = new Set(changes.drivers.map((d) => d.driverId));
-      this.drivers = [
-        ...changes.drivers.map((d) => this.cloneDriver(d)),
-        ...this.drivers.filter((d) => !updatedIds.has(d.driverId)),
-      ];
-    }
+      if (changes.contracts?.length) {
+        const updatedIds = new Set(changes.contracts.map((c) => c.contractId));
+        this.contracts = [
+          ...changes.contracts.map((c) => this.cloneContract(c)),
+          ...this.contracts.filter((c) => !updatedIds.has(c.contractId)),
+        ];
+      }
 
-    if (changes.contracts?.length) {
-      const updatedIds = new Set(changes.contracts.map((c) => c.contractId));
-      this.contracts = [
-        ...changes.contracts.map((c) => this.cloneContract(c)),
-        ...this.contracts.filter((c) => !updatedIds.has(c.contractId)),
-      ];
-    }
+      if (changes.policies?.length) {
+        const updatedIds = new Set(changes.policies.map((p) => p.policyId));
+        this.policies = [
+          ...changes.policies.map((p) => this.clonePolicy(p)),
+          ...this.policies.filter((p) => !updatedIds.has(p.policyId)),
+        ];
+      }
 
-    if (changes.policies?.length) {
-      const updatedIds = new Set(changes.policies.map((p) => p.policyId));
-      this.policies = [
-        ...changes.policies.map((p) => this.clonePolicy(p)),
-        ...this.policies.filter((p) => !updatedIds.has(p.policyId)),
-      ];
-    }
+      if (changes.vehicles?.length) {
+        const updatedIds = new Set(changes.vehicles.map((v) => v.vehicleId));
+        const clonedVehicles = changes.vehicles.map((v) => this.cloneVehicle(v));
+        this.vehicles = [
+          ...clonedVehicles,
+          ...this.vehicles.filter((v) => !updatedIds.has(v.vehicleId)),
+        ];
+        for (const updatedVehicle of clonedVehicles) {
+          this.opsDispatchEventsService.publishSupplyLifecycleUpdated(
+            this.cloneVehicle(updatedVehicle),
+          );
+        }
+      }
 
-    if (changes.vehicles?.length) {
-      const updatedIds = new Set(changes.vehicles.map((v) => v.vehicleId));
-      const clonedVehicles = changes.vehicles.map((v) => this.cloneVehicle(v));
-      this.vehicles = [
-        ...clonedVehicles,
-        ...this.vehicles.filter((v) => !updatedIds.has(v.vehicleId)),
-      ];
-      for (const updatedVehicle of clonedVehicles) {
-        this.opsDispatchEventsService.publishSupplyLifecycleUpdated(
-          this.cloneVehicle(updatedVehicle),
+      if (changes.disclosureProfiles?.length) {
+        const updatedIds = new Set(
+          changes.disclosureProfiles.map((p) => p.vehicleId),
         );
+        this.disclosureProfiles = [
+          ...this.disclosureProfiles.filter((p) => !updatedIds.has(p.vehicleId)),
+          ...changes.disclosureProfiles.map((p) => ({ ...p })),
+        ];
+      }
+
+      if (changes.driverCredentials?.length) {
+        const updatedIds = new Set(
+          changes.driverCredentials.map((c) => c.driverId),
+        );
+        this.driverCredentials = [
+          ...this.driverCredentials.filter((c) => !updatedIds.has(c.driverId)),
+          ...changes.driverCredentials.map((c) => ({ ...c })),
+        ];
       }
     }
-
-    if (changes.disclosureProfiles?.length) {
-      const updatedIds = new Set(
-        changes.disclosureProfiles.map((p) => p.vehicleId),
-      );
-      this.disclosureProfiles = [
-        ...this.disclosureProfiles.filter((p) => !updatedIds.has(p.vehicleId)),
-        ...changes.disclosureProfiles.map((p) => ({ ...p })),
-      ];
-    }
-
-    if (changes.driverCredentials?.length) {
-      const updatedIds = new Set(
-        changes.driverCredentials.map((c) => c.driverId),
-      );
-      this.driverCredentials = [
-        ...this.driverCredentials.filter((c) => !updatedIds.has(c.driverId)),
-        ...changes.driverCredentials.map((c) => ({ ...c })),
-      ];
+    if (result.commitVolatileRenewal) {
+      await result.commitVolatileRenewal();
     }
   }
 
@@ -1503,6 +1508,9 @@ export class RegulatoryRegistryService
     const useDbTransaction = Boolean(
       executor && this.regulatoryRegistryRepository?.isEnabled(),
     );
+    const deferVolatileCommit =
+      !useDbTransaction && Boolean(command.deferVolatileCommit);
+    const stageInMemoryUpdates = useDbTransaction || deferVolatileCommit;
     const changes: PersistRegulatoryRegistryChanges = {};
 
     if (current.submissionType === "profile_correction") {
@@ -1624,7 +1632,13 @@ export class RegulatoryRegistryService
           executor!,
           changes,
         );
-      } else {
+        await this.supersedeRenewedDriverSourceEvents(
+          driverId,
+          updatedDriver,
+          command.approvedAt,
+          executor!,
+        );
+      } else if (!deferVolatileCommit) {
         this.drivers = [
           this.cloneDriver(updatedDriver),
           ...this.drivers.filter((d) => d.driverId !== driverId),
@@ -1634,14 +1648,13 @@ export class RegulatoryRegistryService
           { ...updatedCredential },
         ];
         this.persistChanges(changes, "provision_driver_renewal");
+        await this.supersedeRenewedDriverSourceEvents(
+          driverId,
+          updatedDriver,
+          command.approvedAt,
+          undefined,
+        );
       }
-
-      await this.supersedeRenewedDriverSourceEvents(
-        driverId,
-        updatedDriver,
-        command.approvedAt,
-        useDbTransaction ? executor! : undefined,
-      );
 
       return {
         canonicalDriverId: driverId,
@@ -1650,7 +1663,18 @@ export class RegulatoryRegistryService
         canonicalPolicyId: null,
         vehicleAffiliation: null,
         supplyPair: null,
-        stagedChanges: useDbTransaction ? changes : undefined,
+        stagedChanges: stageInMemoryUpdates ? changes : undefined,
+        commitVolatileRenewal: deferVolatileCommit
+          ? async () => {
+              this.persistChanges(changes, "provision_driver_renewal");
+              await this.supersedeRenewedDriverSourceEvents(
+                driverId,
+                updatedDriver,
+                command.approvedAt,
+                undefined,
+              );
+            }
+          : undefined,
       };
     }
 
@@ -1702,6 +1726,7 @@ export class RegulatoryRegistryService
     let createdContract: VehicleContractRecord | null = null;
     let createdPolicy: InsurancePolicyRecord | null = null;
     let vehicleAffiliation: VehicleFleetAffiliationRecord | null = null;
+    let commitVolatileRenewal: (() => Promise<void>) | undefined;
 
     if (current.submissionType === "insurance_update") {
       const policyDocument = command.documents.find(
@@ -1770,7 +1795,7 @@ export class RegulatoryRegistryService
             "Vehicle insurance policy renewed from approved submission.",
           occurredAt: command.approvedAt,
           relatedEntityId: createdPolicy.policyId,
-          emitEvent: !useDbTransaction,
+          emitEvent: !stageInMemoryUpdates,
           persistContext: null,
           touchUpdatedAt: true,
         },
@@ -1789,6 +1814,23 @@ export class RegulatoryRegistryService
           executor!,
           changes,
         );
+        await this.supersedeRenewedVehicleSourceEvents(
+          "activate_insurance_policy",
+          createdPolicy,
+          state,
+          executor!,
+        );
+      } else if (deferVolatileCommit) {
+        const policyForSupersession = createdPolicy;
+        commitVolatileRenewal = async () => {
+          this.persistChanges(changes, "provision_insurance_renewal");
+          await this.supersedeRenewedVehicleSourceEvents(
+            "activate_insurance_policy",
+            policyForSupersession,
+            state,
+            undefined,
+          );
+        };
       } else {
         const updatedPolicyIds = new Set(
           changes.policies.map((p) => p.policyId),
@@ -1802,14 +1844,13 @@ export class RegulatoryRegistryService
           ...this.vehicles.filter((v) => v.vehicleId !== vehicleId),
         ];
         this.persistChanges(changes, "provision_insurance_renewal");
+        await this.supersedeRenewedVehicleSourceEvents(
+          "activate_insurance_policy",
+          createdPolicy,
+          state,
+          undefined,
+        );
       }
-
-      await this.supersedeRenewedVehicleSourceEvents(
-        "activate_insurance_policy",
-        createdPolicy,
-        state,
-        useDbTransaction ? executor! : undefined,
-      );
     } else if (current.submissionType === "contract_update") {
       const contractDocument = command.documents.find((doc) =>
         [
@@ -1905,7 +1946,7 @@ export class RegulatoryRegistryService
           message: "Vehicle contract renewed from approved submission.",
           occurredAt: command.approvedAt,
           relatedEntityId: createdContract.contractId,
-          emitEvent: !useDbTransaction,
+          emitEvent: !stageInMemoryUpdates,
           persistContext: null,
           touchUpdatedAt: true,
         },
@@ -1924,6 +1965,23 @@ export class RegulatoryRegistryService
           executor!,
           changes,
         );
+        await this.supersedeRenewedVehicleSourceEvents(
+          "activate_contract",
+          createdContract,
+          state,
+          executor!,
+        );
+      } else if (deferVolatileCommit) {
+        const contractForSupersession = createdContract;
+        commitVolatileRenewal = async () => {
+          this.persistChanges(changes, "provision_contract_renewal");
+          await this.supersedeRenewedVehicleSourceEvents(
+            "activate_contract",
+            contractForSupersession,
+            state,
+            undefined,
+          );
+        };
       } else {
         const updatedContractIds = new Set(
           changes.contracts.map((c) => c.contractId),
@@ -1939,14 +1997,13 @@ export class RegulatoryRegistryService
           ...this.vehicles.filter((v) => v.vehicleId !== vehicleId),
         ];
         this.persistChanges(changes, "provision_contract_renewal");
+        await this.supersedeRenewedVehicleSourceEvents(
+          "activate_contract",
+          createdContract,
+          state,
+          undefined,
+        );
       }
-
-      await this.supersedeRenewedVehicleSourceEvents(
-        "activate_contract",
-        createdContract,
-        state,
-        useDbTransaction ? executor! : undefined,
-      );
     }
 
     const primaryContractId =
@@ -1967,7 +2024,8 @@ export class RegulatoryRegistryService
       canonicalPolicyId: primaryPolicyId,
       vehicleAffiliation,
       supplyPair: null,
-      stagedChanges: useDbTransaction ? changes : undefined,
+      stagedChanges: stageInMemoryUpdates ? changes : undefined,
+      commitVolatileRenewal,
     };
   }
 

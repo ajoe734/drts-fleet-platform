@@ -1,6 +1,5 @@
 import type {
   DriverSupplyDraft,
-  FleetSupplyRenewalTargetsResponse,
   SupplyDocumentRecord,
   SupplyDocumentType,
   SupplyReadinessReasonCode,

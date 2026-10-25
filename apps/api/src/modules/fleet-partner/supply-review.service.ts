@@ -877,7 +877,7 @@ export class SupplyReviewService implements OnModuleInit {
         },
       );
       if (result.canonical) {
-        this.regulatoryRegistryService?.publishCommittedProvisioning(
+        await this.regulatoryRegistryService?.publishCommittedProvisioning(
           result.canonical,
         );
       } else {
@@ -981,7 +981,9 @@ export class SupplyReviewService implements OnModuleInit {
           : {}),
       });
       if (canonical) {
-        this.regulatoryRegistryService?.publishCommittedProvisioning(canonical);
+        await this.regulatoryRegistryService?.publishCommittedProvisioning(
+          canonical,
+        );
       } else {
         this.regulatoryRegistryService?.publishCommittedSupplyPair(null);
       }
@@ -1081,9 +1083,13 @@ export class SupplyReviewService implements OnModuleInit {
       );
     }
 
-    this.regulatoryRegistryService?.publishCommittedSupplyPair(
-      canonical?.supplyPair ?? null,
-    );
+    if (canonical) {
+      await this.regulatoryRegistryService?.publishCommittedProvisioning(
+        canonical,
+      );
+    } else {
+      this.regulatoryRegistryService?.publishCommittedSupplyPair(null);
+    }
 
     return { ...updated };
   }
@@ -1174,6 +1180,7 @@ export class SupplyReviewService implements OnModuleInit {
       documents: artifacts.documents,
       approvedAt: new Date().toISOString(),
       reviewerId,
+      deferVolatileCommit: !executor,
     });
   }
 

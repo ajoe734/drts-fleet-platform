@@ -3,12 +3,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  DriverSupplyDraft,
-  SupplyDocumentRecord,
-  SupplySubmissionRecord,
-  VehicleSupplyDraft,
-} from "@drts/contracts";
+import type { SupplyDocumentRecord } from "@drts/contracts";
 import { OpsDispatchEventsService } from "../../../apps/api/src/common/ops-dispatch-events.service";
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { DriverProfileService } from "../../../apps/api/src/modules/driver-profile/driver-profile.service";
@@ -43,7 +38,6 @@ function createRenewalTestContext() {
   const reviewService = new SupplyReviewService(
     registry,
     submissionRepository,
-    audit,
   );
   const fleetPartnerServiceStub = {
     getFleetPartner: async (fleetPartnerId: string) => ({
@@ -985,7 +979,10 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
     );
     expect(rejected.status).toBe("rejected");
     expect(
-      ctx.registry.requireVehicle(seeded.canonicalVehicleId).insuranceStatus,
+      ctx.registry
+        .listVehicles()
+        .find((v) => v.vehicleId === seeded.canonicalVehicleId)!
+        .insuranceStatus,
     ).toBe("expired");
     expect(
       ctx.registry.getVehicleDispatchability(
@@ -1043,9 +1040,9 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
       "platform-reviewer-4",
     );
 
-    const vehicleAfterInsuranceRenewal = ctx.registry.requireVehicle(
-      seeded.canonicalVehicleId,
-    );
+    const vehicleAfterInsuranceRenewal = ctx.registry
+      .listVehicles()
+      .find((v) => v.vehicleId === seeded.canonicalVehicleId)!;
     expect(vehicleAfterInsuranceRenewal.insuranceStatus).toBe("valid");
     expect(
       vehicleAfterInsuranceRenewal.supplyLifecycle.dispatch.blockedReasons,
@@ -1059,7 +1056,7 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
     ).toBe(false);
   });
 
-  it("verifies V0134 migration DDL and rolls back canonical renewal + R14 supersession + submission approval atomically on DB transaction failure", async () => {
+  it("verifies V0134 migration DDL and rolls back canonical renewal + R14 supersession + submission approval atomically on DB transaction or volatile write failure", async () => {
     const v0134Sql = readFileSync(
       resolve(
         process.cwd(),
@@ -1129,7 +1126,56 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
       "platform-reviewer-tx",
     );
 
-    // Simulate a DB transaction where persistChangesWithExecutor + R14 supersession run on the shared executor,
+    // 1. Volatile no-DB mode: if submissionRepository.persistChanges throws on writing status=approved,
+    // canonical policy history, vehicle lifecycle, and R14 pending events remain untouched!
+    await ctx.registryRepository.insertExpiryEvent({
+      eventId: randomUUID(),
+      scope: "global",
+      entityType: "policy",
+      entityId: seeded.initialPolicyId,
+      credentialType: "preexpiry:insurance_policy:30",
+      sourceFingerprint: `volatile-tx-policy-30-${seeded.initialPolicyId}`,
+      sourceExpiryAt: "2020-01-01T23:59:59.000Z",
+    });
+    const origPersistChanges = ctx.submissionRepository.persistChanges.bind(
+      ctx.submissionRepository,
+    );
+    const volatilePersistSpy = vi
+      .spyOn(ctx.submissionRepository, "persistChanges")
+      .mockImplementation(async (changes) => {
+        if (changes.submissions?.some((s) => s.status === "approved")) {
+          throw new Error("CONTROLLED_SUBMISSION_APPROVAL_WRITE_FAILURE");
+        }
+        return origPersistChanges(changes);
+      });
+
+    await expect(
+      ctx.reviewService.approveSubmission(
+        renewalSubId,
+        {
+          expectedRevisionNo: inReview.revisionNo,
+          reasonCode: "all_documents_valid",
+        },
+        "platform-reviewer-tx",
+      ),
+    ).rejects.toThrow("CONTROLLED_SUBMISSION_APPROVAL_WRITE_FAILURE");
+    volatilePersistSpy.mockRestore();
+
+    const policiesAfterVolatileFail = ctx.registry
+      .listPolicies()
+      .filter((p) => p.vehicleId === seeded.canonicalVehicleId);
+    expect(policiesAfterVolatileFail).toHaveLength(1);
+    expect(policiesAfterVolatileFail[0]?.supersededByPolicyId ?? null).toBeNull();
+    const activeVolatileEvents =
+      await ctx.registryRepository.findActiveExpiryEventsForEntity(
+        "policy",
+        seeded.initialPolicyId,
+        "preexpiry:insurance_policy:30",
+      );
+    expect(activeVolatileEvents).toHaveLength(1);
+    expect(activeVolatileEvents[0]?.status).toBe("pending");
+
+    // 2. Simulate a DB transaction where persistChangesWithExecutor + R14 supersession run on the shared executor,
     // and transitionSubmissionStatusWithExecutor throws before COMMIT:
     const executedSteps: string[] = [];
     const fakeExecutor = { query: vi.fn() } as any;
@@ -1164,7 +1210,9 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
       ctx.registryRepository,
       "readVehicleCommandState",
     ).mockResolvedValue({
-      vehicle: ctx.registry.requireVehicle(seeded.canonicalVehicleId),
+      vehicle: ctx.registry
+        .listVehicles()
+        .find((v) => v.vehicleId === seeded.canonicalVehicleId)!,
       contracts: ctx.registry
         .listContracts()
         .filter((c) => c.vehicleId === seeded.canonicalVehicleId),
@@ -1228,7 +1276,10 @@ describe("BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: approved supply rene
         .filter((p) => p.vehicleId === seeded.canonicalVehicleId),
     ).toHaveLength(1);
     expect(
-      ctx.registry.requireVehicle(seeded.canonicalVehicleId).insuranceStatus,
+      ctx.registry
+        .listVehicles()
+        .find((v) => v.vehicleId === seeded.canonicalVehicleId)!
+        .insuranceStatus,
     ).toBe("expired");
   });
 });
