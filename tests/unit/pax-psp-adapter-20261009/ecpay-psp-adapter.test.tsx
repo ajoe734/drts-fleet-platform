@@ -3,6 +3,7 @@ import React from "react";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -667,24 +668,41 @@ describe("Passenger App BFF route ECPay ReturnURL callback, OrderResultURL brows
     expect(routeSource).toMatch(/from\s+["'][^"']*ecpay-csp["']/);
     expect(nextConfigSource).toMatch(/from\s+["'][^"']*ecpay-csp["']/);
 
-    // The shared server-safe constants module must not have a "use client" directive
-    const sharedCspSource = readFileSync(
-      resolve("apps/passenger-app-web/components/payment/ecpay-csp.ts"),
-      "utf8",
+    // There must be a single authoritative runtime module (ecpay-csp.js) plus pure type declarations (ecpay-csp.d.ts),
+    // with no duplicate ecpay-csp.ts runtime file that webpack/vitest would ignore while tsc checks it.
+    expect(
+      existsSync(
+        resolve("apps/passenger-app-web/components/payment/ecpay-csp.ts"),
+      ),
+    ).toBe(false);
+    const sharedCspJsPath = resolve(
+      "apps/passenger-app-web/components/payment/ecpay-csp.js",
     );
-    const sharedCspJsSource = readFileSync(
-      resolve("apps/passenger-app-web/components/payment/ecpay-csp.js"),
-      "utf8",
+    const sharedCspDtsPath = resolve(
+      "apps/passenger-app-web/components/payment/ecpay-csp.d.ts",
     );
-    expect(sharedCspSource).not.toMatch(/^\s*["']use client["']/m);
+    expect(appRequire.resolve("./components/payment/ecpay-csp")).toBe(
+      sharedCspJsPath,
+    );
+    const sharedCspJsSource = readFileSync(sharedCspJsPath, "utf8");
+    const sharedCspDtsSource = readFileSync(sharedCspDtsPath, "utf8");
     expect(sharedCspJsSource).not.toMatch(/^\s*["']use client["']/m);
+    expect(sharedCspDtsSource).not.toMatch(/^\s*["']use client["']/m);
+    expect(sharedCspDtsSource).not.toContain("https://");
 
-    // Node createRequire(apps/passenger-app-web/package.json) must also resolve ./components/payment/ecpay-csp
-    // when next.config.ts is evaluated in a CommonJS VM context (e.g., driver-mounted-producer.spec.tsx).
+    // Node createRequire(apps/passenger-app-web/package.json) must resolve ./components/payment/ecpay-csp
+    // to the exact same ecpay-csp.js module when next.config.ts is evaluated in a CommonJS VM context.
     const cjsResolved = appRequire("./components/payment/ecpay-csp") as Record<
       string,
       unknown
     >;
+    const dtsDeclaredExports = Array.from(
+      sharedCspDtsSource.matchAll(
+        /export\s+declare\s+const\s+([A-Z0-9_]+)\s*:/g,
+      ),
+      (m) => m[1]!,
+    ).sort();
+    expect(dtsDeclaredExports).toEqual(Object.keys(cjsResolved).sort());
     expect(cjsResolved.ECPAY_HOSTED_FIELDS_CSP).toBe(ECPAY_HOSTED_FIELDS_CSP);
     expect(cjsResolved.ECPAY_SCRIPT_ORIGINS).toEqual(ECPAY_SCRIPT_ORIGINS);
     expect(cjsResolved.ECPAY_CONNECT_ORIGINS).toEqual(ECPAY_CONNECT_ORIGINS);
