@@ -57,11 +57,13 @@ import type {
   ConfirmSupplyDocumentUploadCommand,
   CreateDriverSupplySubmissionCommand,
   CreateSupplyDocumentUploadUrlCommand,
+  CreateSupplyRenewalDraftCommand,
   CreateVehicleSupplySubmissionCommand,
   DeleteSupplyDocumentCommand,
   SubmitSupplySubmissionCommand,
   SupplySubmissionFilters,
   UpdateDriverSupplySubmissionCommand,
+  UpdateSupplyRenewalDraftCommand,
   UpdateVehicleSupplySubmissionCommand,
   WithdrawSupplySubmissionCommand,
 } from "./supply-submission.types";
@@ -755,6 +757,68 @@ export class FleetPartnerController {
   ) {
     return toApiSuccessEnvelope(
       await this.supplySubmissionService.updateVehicleDraft(
+        this.documentPartner(fleetPartnerId, identity),
+        submissionId,
+        this.requirePartnerActorId(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/supply-renewals/targets")
+  async listSupplyRenewalTargets(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolvedFleetPartnerId = this.requireFleetPartnerId(fleetPartnerId);
+    const readinessRecords =
+      typeof this.supplyReadinessService?.listFleetPartnerReadiness ===
+      "function"
+        ? await this.supplyReadinessService.listFleetPartnerReadiness(
+            resolvedFleetPartnerId,
+          )
+        : undefined;
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.listRenewalTargets(
+        resolvedFleetPartnerId,
+        readinessRecords,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("fleet-partner/supply-submissions/renewals")
+  async createSupplyRenewalSubmission(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    _untrustedActorId: string | undefined,
+    @Body() command: CreateSupplyRenewalDraftCommand,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.createRenewalDraft(
+        this.documentPartner(fleetPartnerId, identity),
+        this.requirePartnerActorId(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Put("fleet-partner/supply-submissions/:submissionId/renewal")
+  async updateSupplyRenewalSubmission(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    _untrustedActorId: string | undefined,
+    @Param("submissionId") submissionId: string,
+    @Body() command: UpdateSupplyRenewalDraftCommand,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.updateRenewalDraft(
         this.documentPartner(fleetPartnerId, identity),
         submissionId,
         this.requirePartnerActorId(identity),

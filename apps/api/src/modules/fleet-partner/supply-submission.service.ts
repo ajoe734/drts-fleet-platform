@@ -6,8 +6,11 @@ import type {
   AuditLogRecord,
   DriverSupplyDraft,
   SupplyDocumentRecord,
+  SupplyReadinessReasonCode,
+  SupplyReadinessRecord,
   SupplySubmissionRecord,
   SupplySubmissionStatus,
+  VehicleFleetAffiliationRecord,
   VehicleSupplyDraft,
 } from "@drts/contracts";
 
@@ -18,11 +21,17 @@ import type { SupplyReviewEventRecord } from "./supply-submission.repository";
 import { SupplySubmissionRepository } from "./supply-submission.repository";
 import type {
   CreateDriverSupplySubmissionCommand,
+  CreateSupplyRenewalDraftCommand,
   CreateVehicleSupplySubmissionCommand,
+  FleetSupplyRenewalTargetDriver,
+  FleetSupplyRenewalTargetVehicle,
+  FleetSupplyRenewalTargetsResponse,
   SubmitSupplySubmissionCommand,
+  SupplyRenewalSubmissionType,
   SupplySubmissionDetail,
   SupplySubmissionFilters,
   UpdateDriverSupplySubmissionCommand,
+  UpdateSupplyRenewalDraftCommand,
   UpdateVehicleSupplySubmissionCommand,
   WithdrawSupplySubmissionCommand,
 } from "./supply-submission.types";
@@ -36,6 +45,19 @@ const VEHICLE_REQUIRED_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][
 const VEHICLE_CONTRACT_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][] =
   ["fleet_participation_contract", "vehicle_management_contract"];
 
+const RENEWAL_CONTRACT_DOCUMENTS: readonly SupplyDocumentRecord["documentType"][] =
+  [
+    "fleet_participation_contract",
+    "driver_management_contract",
+    "vehicle_management_contract",
+  ];
+
+const RENEWAL_SUBMISSION_TYPES: readonly SupplyRenewalSubmissionType[] = [
+  "insurance_update",
+  "contract_update",
+  "profile_correction",
+];
+
 const EDITABLE_STATUSES: readonly SupplySubmissionStatus[] = [
   "draft",
   "needs_revision",
@@ -48,6 +70,7 @@ type LoadedState = {
   vehicleDrafts: VehicleSupplyDraft[];
   documents: SupplyDocumentRecord[];
   reviewEvents: SupplyReviewEventRecord[];
+  vehicleAffiliations?: VehicleFleetAffiliationRecord[];
 };
 
 @Injectable()
@@ -57,6 +80,7 @@ export class SupplySubmissionService implements OnModuleInit {
   private vehicleDrafts: VehicleSupplyDraft[] = [];
   private documents: SupplyDocumentRecord[] = [];
   private reviewEvents: SupplyReviewEventRecord[] = [];
+  private vehicleAffiliations: VehicleFleetAffiliationRecord[] = [];
 
   constructor(
     private readonly supplySubmissionRepository: SupplySubmissionRepository,
@@ -121,6 +145,704 @@ export class SupplySubmissionService implements OnModuleInit {
     submissionId: string,
   ) {
     await this.syncState();
+    return this.buildDetail(submissionId, fleetPartnerId);
+  }
+
+  async listRenewalTargets(
+    fleetPartnerId: string,
+    readinessRecords?: readonly SupplyReadinessRecord[],
+  ): Promise<FleetSupplyRenewalTargetsResponse> {
+    await this.syncState();
+
+    const readinessMap = new Map<string, SupplyReadinessRecord>();
+    for (const record of readinessRecords ?? []) {
+      readinessMap.set(`${record.subjectType}:${record.subjectId}`, record);
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const approvedSubmissions = this.submissions
+      .filter(
+        (submission) =>
+          submission.fleetPartnerId === fleetPartnerId &&
+          submission.status === "approved",
+      )
+      .sort((left, right) =>
+        (right.reviewedAt ?? right.updatedAt).localeCompare(
+          left.reviewedAt ?? left.updatedAt,
+        ),
+      );
+
+    const drivers: FleetSupplyRenewalTargetDriver[] =
+      this.regulatoryRegistryService
+        .listDrivers()
+        .filter((driver) =>
+          this.isDriverOwnedByFleet(driver.driverId, fleetPartnerId),
+        )
+        .map((driver) => {
+          const latestDraft = this.findLatestApprovedDriverDraft(
+            fleetPartnerId,
+            driver.driverId,
+          );
+          const readiness = readinessMap.get(`driver:${driver.driverId}`);
+
+          const professionalDriverLicenseExpiry =
+            driver.professionalDriverLicenseExpiry ??
+            latestDraft?.professionalDriverLicenseExpiry ??
+            "";
+          const taxiDriverRegistrationExpiry =
+            driver.taxiDriverRegistrationExpiry ??
+            latestDraft?.taxiDriverRegistrationExpiry ??
+            "";
+
+          const fallbackReasons: SupplyReadinessReasonCode[] = [];
+          if (driver.lifecycleStatus === "suspended") {
+            fallbackReasons.push("MANUALLY_SUSPENDED");
+          }
+          if (
+            professionalDriverLicenseExpiry &&
+            professionalDriverLicenseExpiry < today
+          ) {
+            fallbackReasons.push("DRIVER_LICENSE_EXPIRED");
+          } else if (!professionalDriverLicenseExpiry) {
+            fallbackReasons.push("DRIVER_LICENSE_MISSING");
+          }
+          if (
+            taxiDriverRegistrationExpiry &&
+            taxiDriverRegistrationExpiry < today
+          ) {
+            fallbackReasons.push("DRIVER_REGISTRATION_EXPIRED");
+          } else if (!taxiDriverRegistrationExpiry) {
+            fallbackReasons.push("DRIVER_REGISTRATION_MISSING");
+          }
+          if (!driver.licensesValid && fallbackReasons.length === 0) {
+            fallbackReasons.push("DRIVER_LICENSE_EXPIRED");
+          }
+
+          return {
+            driverId: driver.driverId,
+            fleetPartnerId,
+            name: driver.name,
+            mobile: latestDraft?.mobile ?? "",
+            professionalDriverLicenseNo:
+              latestDraft?.professionalDriverLicenseNo ?? "",
+            professionalDriverLicenseExpiry,
+            taxiDriverRegistrationNo:
+              latestDraft?.taxiDriverRegistrationNo ?? "",
+            taxiDriverRegistrationArea:
+              latestDraft?.taxiDriverRegistrationArea ?? "台北市",
+            taxiDriverRegistrationExpiry,
+            supportedServiceProductCodes:
+              latestDraft?.supportedServiceProductCodes?.length
+                ? [...latestDraft.supportedServiceProductCodes]
+                : ["taxi_realtime"],
+            lifecycleStatus: driver.lifecycleStatus,
+            licensesValid: driver.licensesValid,
+            ready: readiness
+              ? readiness.state === "ready"
+              : fallbackReasons.length === 0,
+            reasonCodes: readiness
+              ? [...readiness.reasonCodes]
+              : fallbackReasons,
+          };
+        });
+
+    const policiesById = new Map(
+      this.regulatoryRegistryService
+        .listPolicies()
+        .map((p) => [p.policyId, p]),
+    );
+    const vehicles: FleetSupplyRenewalTargetVehicle[] =
+      this.regulatoryRegistryService
+        .listVehicles()
+        .filter((vehicle) =>
+          this.isVehicleOwnedByFleet(vehicle.vehicleId, fleetPartnerId),
+        )
+        .map((vehicle) => {
+          const latestDraft = this.findLatestApprovedVehicleDraft(
+            fleetPartnerId,
+            vehicle.vehicleId,
+          );
+          const contract = vehicle.supplyLifecycle.contract;
+          const policy = vehicle.supplyLifecycle.insurance;
+          const activePolicyRecord = policy.policyId
+            ? policiesById.get(policy.policyId)
+            : undefined;
+          const readiness = readinessMap.get(`vehicle:${vehicle.vehicleId}`);
+
+          const contractEndDate = contract.endAt
+            ? contract.endAt.slice(0, 10)
+            : null;
+          const policyEndDate = policy.endAt
+            ? policy.endAt.slice(0, 10)
+            : null;
+          const fallbackReasons: SupplyReadinessReasonCode[] = [];
+          if (contract.lifecycleStatus === "missing") {
+            fallbackReasons.push("CONTRACT_MISSING");
+          } else if (
+            contract.lifecycleStatus !== "active" ||
+            (contractEndDate !== null && contractEndDate < today)
+          ) {
+            fallbackReasons.push("CONTRACT_INACTIVE");
+          }
+          if (
+            policy.lifecycleStatus === "missing" ||
+            policy.lifecycleStatus === "pending"
+          ) {
+            fallbackReasons.push("INSURANCE_MISSING");
+          } else if (
+            policy.lifecycleStatus !== "active" ||
+            (policyEndDate !== null && policyEndDate < today)
+          ) {
+            fallbackReasons.push("INSURANCE_EXPIRED");
+          }
+
+          return {
+            vehicleId: vehicle.vehicleId,
+            fleetPartnerId,
+            plateNo: vehicle.plateNo,
+            licenseType:
+              vehicle.licenseType ?? latestDraft?.licenseType ?? "taxi",
+            brand: latestDraft?.brand ?? null,
+            model: latestDraft?.model ?? null,
+            modelYear: latestDraft?.modelYear ?? null,
+            seatCount: latestDraft?.seatCount ?? 4,
+            luggageCapacity: latestDraft?.luggageCapacity ?? 2,
+            businessArea: latestDraft?.businessArea ?? "台北市",
+            supportedServiceProductCodes:
+              latestDraft?.supportedServiceProductCodes?.length
+                ? [...latestDraft.supportedServiceProductCodes]
+                : ["taxi_realtime"],
+            airportTransferEligible:
+              latestDraft?.airportTransferEligible ?? false,
+            fixedFareAllowed: latestDraft?.fixedFareAllowed ?? false,
+            doorCount: latestDraft?.doorCount ?? 4,
+            color: latestDraft?.color ?? "White",
+            supplyLifecycle: vehicle.dispatchableFlag ? "active" : "suspended",
+            activeContractId: contract.contractId ?? null,
+            activeContractStatus: contract.lifecycleStatus ?? null,
+            activeContractEndAt: contract.endAt ?? null,
+            activePolicyId: policy.policyId ?? null,
+            activePolicyNo: activePolicyRecord?.policyNo ?? null,
+            activePolicyStatus: policy.lifecycleStatus ?? null,
+            activePolicyEndAt: policy.endAt ?? null,
+            ready: readiness
+              ? readiness.state === "ready"
+              : fallbackReasons.length === 0,
+            reasonCodes: readiness
+              ? [...readiness.reasonCodes]
+              : fallbackReasons,
+          };
+        });
+
+    void approvedSubmissions;
+    return {
+      fleetPartnerId,
+      drivers,
+      vehicles,
+    };
+  }
+
+  async createRenewalDraft(
+    fleetPartnerId: string,
+    actorId: string,
+    command: CreateSupplyRenewalDraftCommand,
+    requestId?: string,
+  ) {
+    await this.syncState();
+
+    if (
+      !RENEWAL_SUBMISSION_TYPES.includes(
+        command.submissionType as SupplyRenewalSubmissionType,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "submissionType must be insurance_update, contract_update, or profile_correction.",
+        { submissionType: command.submissionType },
+      );
+    }
+
+    const now = new Date().toISOString();
+    const submissionId = randomUUID();
+
+    if (command.submissionType === "profile_correction") {
+      const targetDriverId = command.subjectDriverId?.trim();
+      if (!targetDriverId) {
+        throw new ApiRequestError(
+          HttpStatus.BAD_REQUEST,
+          "VALIDATION_ERROR",
+          "subjectDriverId is required for profile_correction renewal submissions.",
+          { fieldName: "subjectDriverId" },
+        );
+      }
+      const canonicalDriver = this.regulatoryRegistryService
+        .listDrivers()
+        .find((driver) => driver.driverId === targetDriverId);
+      if (!canonicalDriver) {
+        throw new ApiRequestError(
+          HttpStatus.NOT_FOUND,
+          "NOT_FOUND",
+          "The target canonical driver could not be found.",
+          { subjectDriverId: targetDriverId },
+        );
+      }
+      if (!this.isDriverOwnedByFleet(targetDriverId, fleetPartnerId)) {
+        throw new ApiRequestError(
+          HttpStatus.FORBIDDEN,
+          "FLEET_SCOPE_DENIED",
+          "The target driver is outside the fleet partner scope.",
+          { subjectDriverId: targetDriverId, fleetPartnerId },
+        );
+      }
+
+      const latestDriverDraft = this.findLatestApprovedDriverDraft(
+        fleetPartnerId,
+        targetDriverId,
+      );
+      const mergedDriverCommand: CreateDriverSupplySubmissionCommand = {
+        name: command.driverDraft?.name ?? canonicalDriver.name,
+        mobile:
+          command.driverDraft?.mobile ??
+          latestDriverDraft?.mobile ??
+          "0912345678",
+        professionalDriverLicenseNo:
+          command.driverDraft?.professionalDriverLicenseNo ??
+          latestDriverDraft?.professionalDriverLicenseNo ??
+          "",
+        professionalDriverLicenseExpiry:
+          command.driverDraft?.professionalDriverLicenseExpiry ??
+          canonicalDriver.professionalDriverLicenseExpiry ??
+          latestDriverDraft?.professionalDriverLicenseExpiry ??
+          now.slice(0, 10),
+        taxiDriverRegistrationNo:
+          command.driverDraft?.taxiDriverRegistrationNo ??
+          latestDriverDraft?.taxiDriverRegistrationNo ??
+          "",
+        taxiDriverRegistrationArea:
+          command.driverDraft?.taxiDriverRegistrationArea ??
+          latestDriverDraft?.taxiDriverRegistrationArea ??
+          "台北市",
+        taxiDriverRegistrationExpiry:
+          command.driverDraft?.taxiDriverRegistrationExpiry ??
+          canonicalDriver.taxiDriverRegistrationExpiry ??
+          latestDriverDraft?.taxiDriverRegistrationExpiry ??
+          now.slice(0, 10),
+        supportedServiceProductCodes:
+          command.driverDraft?.supportedServiceProductCodes ??
+          (latestDriverDraft?.supportedServiceProductCodes?.length
+            ? [...latestDriverDraft.supportedServiceProductCodes]
+            : ["taxi_realtime"]),
+        preferredVehicleSubmissionId:
+          command.driverDraft?.preferredVehicleSubmissionId !== undefined
+            ? command.driverDraft.preferredVehicleSubmissionId
+            : (latestDriverDraft?.preferredVehicleSubmissionId ?? null),
+      };
+
+      this.validateDriverDraft(mergedDriverCommand);
+      this.assertDriverIdentityAvailable(
+        mergedDriverCommand.professionalDriverLicenseNo,
+        mergedDriverCommand.taxiDriverRegistrationNo,
+        submissionId,
+        targetDriverId,
+      );
+
+      const submission: SupplySubmissionRecord = {
+        submissionId,
+        fleetPartnerId,
+        submissionType: "profile_correction",
+        status: "draft",
+        revisionNo: 1,
+        subjectDriverId: targetDriverId,
+        subjectVehicleId: null,
+        submittedBy: null,
+        submittedAt: null,
+        reviewStartedBy: null,
+        reviewStartedAt: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewReasonCode: null,
+        reviewComment: null,
+        canonicalDriverId: targetDriverId,
+        canonicalVehicleId: null,
+        canonicalContractId: null,
+        canonicalPolicyId: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const draft: DriverSupplyDraft = {
+        submissionId,
+        ...this.normalizeDriverDraft(mergedDriverCommand),
+      };
+
+      this.submissions = [submission, ...this.submissions];
+      this.driverDrafts = [draft, ...this.driverDrafts];
+      await this.persistChanges(
+        { submissions: [submission], driverDrafts: [draft] },
+        "create driver renewal draft",
+      );
+      this.recordAudit(
+        {
+          actorId,
+          actorType: "partner_api_key",
+          tenantId: null,
+          moduleName: "fleet-partner",
+          actionName: "create_supply_submission_renewal",
+          resourceType: "supply_submission",
+          resourceId: submissionId,
+          newValuesSummary: {
+            fleetPartnerId,
+            submissionType: submission.submissionType,
+            canonicalDriverId: targetDriverId,
+          },
+        },
+        requestId,
+      );
+
+      return this.buildDetail(submissionId, fleetPartnerId);
+    }
+
+    const targetVehicleId = command.subjectVehicleId?.trim();
+    if (!targetVehicleId) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "subjectVehicleId is required for vehicle renewal submissions.",
+        { fieldName: "subjectVehicleId" },
+      );
+    }
+    const canonicalVehicle = this.regulatoryRegistryService
+      .listVehicles()
+      .find((vehicle) => vehicle.vehicleId === targetVehicleId);
+    if (!canonicalVehicle) {
+      throw new ApiRequestError(
+        HttpStatus.NOT_FOUND,
+        "NOT_FOUND",
+        "The target canonical vehicle could not be found.",
+        { subjectVehicleId: targetVehicleId },
+      );
+    }
+    if (!this.isVehicleOwnedByFleet(targetVehicleId, fleetPartnerId)) {
+      throw new ApiRequestError(
+        HttpStatus.FORBIDDEN,
+        "FLEET_SCOPE_DENIED",
+        "The target vehicle is outside the fleet partner scope.",
+        { subjectVehicleId: targetVehicleId, fleetPartnerId },
+      );
+    }
+
+    if (
+      command.vehicleDraft?.plateNo &&
+      command.vehicleDraft.plateNo.trim().toUpperCase() !==
+        canonicalVehicle.plateNo.trim().toUpperCase()
+    ) {
+      throw this.conflict(
+        "PLATE_IMMUTABLE_ON_RENEWAL",
+        "Vehicle plate number cannot be changed in a renewal submission.",
+        {
+          subjectVehicleId: targetVehicleId,
+          canonicalPlateNo: canonicalVehicle.plateNo,
+          requestedPlateNo: command.vehicleDraft.plateNo,
+        },
+      );
+    }
+
+    const latestVehicleDraft = this.findLatestApprovedVehicleDraft(
+      fleetPartnerId,
+      targetVehicleId,
+    );
+    const mergedVehicleCommand: CreateVehicleSupplySubmissionCommand = {
+      plateNo: canonicalVehicle.plateNo,
+      licenseType:
+        command.vehicleDraft?.licenseType ??
+        canonicalVehicle.licenseType ??
+        latestVehicleDraft?.licenseType ??
+        "taxi",
+      brand:
+        command.vehicleDraft?.brand !== undefined
+          ? command.vehicleDraft.brand
+          : (latestVehicleDraft?.brand ?? null),
+      model:
+        command.vehicleDraft?.model !== undefined
+          ? command.vehicleDraft.model
+          : (latestVehicleDraft?.model ?? null),
+      modelYear:
+        command.vehicleDraft?.modelYear !== undefined
+          ? command.vehicleDraft.modelYear
+          : (latestVehicleDraft?.modelYear ?? null),
+      seatCount:
+        command.vehicleDraft?.seatCount ?? latestVehicleDraft?.seatCount ?? 4,
+      luggageCapacity:
+        command.vehicleDraft?.luggageCapacity ??
+        latestVehicleDraft?.luggageCapacity ??
+        2,
+      businessArea:
+        command.vehicleDraft?.businessArea ??
+        latestVehicleDraft?.businessArea ??
+        "台北市",
+      supportedServiceProductCodes:
+        command.vehicleDraft?.supportedServiceProductCodes ??
+        (latestVehicleDraft?.supportedServiceProductCodes?.length
+          ? [...latestVehicleDraft.supportedServiceProductCodes]
+          : ["taxi_realtime"]),
+      airportTransferEligible:
+        command.vehicleDraft?.airportTransferEligible ??
+        latestVehicleDraft?.airportTransferEligible ??
+        false,
+      fixedFareAllowed:
+        command.vehicleDraft?.fixedFareAllowed ??
+        latestVehicleDraft?.fixedFareAllowed ??
+        false,
+      currentDriverSubmissionId:
+        command.vehicleDraft?.currentDriverSubmissionId !== undefined
+          ? command.vehicleDraft.currentDriverSubmissionId
+          : (latestVehicleDraft?.currentDriverSubmissionId ?? null),
+      doorCount:
+        command.vehicleDraft?.doorCount !== undefined
+          ? command.vehicleDraft.doorCount
+          : (latestVehicleDraft?.doorCount ?? 4),
+      color:
+        command.vehicleDraft?.color !== undefined
+          ? command.vehicleDraft.color
+          : (latestVehicleDraft?.color ?? "White"),
+    };
+
+    this.validateVehicleDraft(mergedVehicleCommand);
+
+    const activeContractId =
+      canonicalVehicle.supplyLifecycle.contract.contractId ?? null;
+    const activePolicyId =
+      canonicalVehicle.supplyLifecycle.insurance.policyId ?? null;
+
+    const submission: SupplySubmissionRecord = {
+      submissionId,
+      fleetPartnerId,
+      submissionType: command.submissionType,
+      status: "draft",
+      revisionNo: 1,
+      subjectDriverId: null,
+      subjectVehicleId: targetVehicleId,
+      submittedBy: null,
+      submittedAt: null,
+      reviewStartedBy: null,
+      reviewStartedAt: null,
+      reviewedBy: null,
+      reviewedAt: null,
+      reviewReasonCode: null,
+      reviewComment: null,
+      canonicalDriverId: null,
+      canonicalVehicleId: targetVehicleId,
+      canonicalContractId: activeContractId,
+      canonicalPolicyId: activePolicyId,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const draft: VehicleSupplyDraft = {
+      submissionId,
+      ...this.normalizeVehicleDraft(mergedVehicleCommand),
+    };
+
+    this.submissions = [submission, ...this.submissions];
+    this.vehicleDrafts = [draft, ...this.vehicleDrafts];
+    await this.persistChanges(
+      { submissions: [submission], vehicleDrafts: [draft] },
+      "create vehicle renewal draft",
+    );
+    this.recordAudit(
+      {
+        actorId,
+        actorType: "partner_api_key",
+        tenantId: null,
+        moduleName: "fleet-partner",
+        actionName: "create_supply_submission_renewal",
+        resourceType: "supply_submission",
+        resourceId: submissionId,
+        newValuesSummary: {
+          fleetPartnerId,
+          submissionType: submission.submissionType,
+          canonicalVehicleId: targetVehicleId,
+          plateNo: draft.plateNo,
+        },
+      },
+      requestId,
+    );
+
+    return this.buildDetail(submissionId, fleetPartnerId);
+  }
+
+  async updateRenewalDraft(
+    fleetPartnerId: string,
+    submissionId: string,
+    actorId: string,
+    command: UpdateSupplyRenewalDraftCommand,
+    requestId?: string,
+  ) {
+    await this.syncState();
+
+    const submission = this.requireScopedSubmission(
+      submissionId,
+      fleetPartnerId,
+    );
+    if (
+      !RENEWAL_SUBMISSION_TYPES.includes(
+        submission.submissionType as SupplyRenewalSubmissionType,
+      )
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "VALIDATION_ERROR",
+        "Submission is not a supply renewal draft.",
+        { submissionId, submissionType: submission.submissionType },
+      );
+    }
+    this.assertEditable(submission);
+    this.assertExpectedRevisionNo(submission, command.expectedRevisionNo);
+
+    if (submission.submissionType === "profile_correction") {
+      const draft = this.requireDriverDraft(submissionId);
+      const previous = { ...draft };
+      const merged: CreateDriverSupplySubmissionCommand = {
+        name: command.driverDraft?.name ?? draft.name,
+        mobile: command.driverDraft?.mobile ?? draft.mobile,
+        professionalDriverLicenseNo:
+          command.driverDraft?.professionalDriverLicenseNo ??
+          draft.professionalDriverLicenseNo,
+        professionalDriverLicenseExpiry:
+          command.driverDraft?.professionalDriverLicenseExpiry ??
+          draft.professionalDriverLicenseExpiry,
+        taxiDriverRegistrationNo:
+          command.driverDraft?.taxiDriverRegistrationNo ??
+          draft.taxiDriverRegistrationNo,
+        taxiDriverRegistrationArea:
+          command.driverDraft?.taxiDriverRegistrationArea ??
+          draft.taxiDriverRegistrationArea,
+        taxiDriverRegistrationExpiry:
+          command.driverDraft?.taxiDriverRegistrationExpiry ??
+          draft.taxiDriverRegistrationExpiry,
+        supportedServiceProductCodes:
+          command.driverDraft?.supportedServiceProductCodes ?? [
+            ...draft.supportedServiceProductCodes,
+          ],
+        preferredVehicleSubmissionId:
+          command.driverDraft?.preferredVehicleSubmissionId !== undefined
+            ? command.driverDraft.preferredVehicleSubmissionId
+            : draft.preferredVehicleSubmissionId,
+      };
+      this.validateDriverDraft(merged);
+      this.assertDriverIdentityAvailable(
+        merged.professionalDriverLicenseNo,
+        merged.taxiDriverRegistrationNo,
+        submissionId,
+        submission.canonicalDriverId ?? submission.subjectDriverId ?? undefined,
+      );
+
+      Object.assign(draft, this.normalizeDriverDraft(merged));
+      this.bumpSubmissionRevision(submission);
+
+      await this.persistChanges(
+        { submissions: [submission], driverDrafts: [draft] },
+        "update driver renewal draft",
+      );
+      this.recordAudit(
+        {
+          actorId,
+          actorType: "partner_api_key",
+          tenantId: null,
+          moduleName: "fleet-partner",
+          actionName: "update_supply_submission_renewal",
+          resourceType: "supply_submission",
+          resourceId: submissionId,
+          oldValuesSummary: { ...previous },
+          newValuesSummary: { ...draft },
+        },
+        requestId,
+      );
+
+      return this.buildDetail(submissionId, fleetPartnerId);
+    }
+
+    const draft = this.requireVehicleDraft(submissionId);
+    if (
+      command.vehicleDraft?.plateNo &&
+      command.vehicleDraft.plateNo.trim().toUpperCase() !==
+        draft.plateNo.trim().toUpperCase()
+    ) {
+      throw this.conflict(
+        "PLATE_IMMUTABLE_ON_RENEWAL",
+        "Vehicle plate number cannot be changed in a renewal submission.",
+        {
+          submissionId,
+          canonicalPlateNo: draft.plateNo,
+          requestedPlateNo: command.vehicleDraft.plateNo,
+        },
+      );
+    }
+    const previous = { ...draft };
+    const merged: CreateVehicleSupplySubmissionCommand = {
+      plateNo: draft.plateNo,
+      licenseType: command.vehicleDraft?.licenseType ?? draft.licenseType,
+      brand:
+        command.vehicleDraft?.brand !== undefined
+          ? command.vehicleDraft.brand
+          : draft.brand,
+      model:
+        command.vehicleDraft?.model !== undefined
+          ? command.vehicleDraft.model
+          : draft.model,
+      modelYear:
+        command.vehicleDraft?.modelYear !== undefined
+          ? command.vehicleDraft.modelYear
+          : draft.modelYear,
+      seatCount: command.vehicleDraft?.seatCount ?? draft.seatCount,
+      luggageCapacity:
+        command.vehicleDraft?.luggageCapacity ?? draft.luggageCapacity,
+      businessArea: command.vehicleDraft?.businessArea ?? draft.businessArea,
+      supportedServiceProductCodes:
+        command.vehicleDraft?.supportedServiceProductCodes ?? [
+          ...draft.supportedServiceProductCodes,
+        ],
+      airportTransferEligible:
+        command.vehicleDraft?.airportTransferEligible ??
+        draft.airportTransferEligible,
+      fixedFareAllowed:
+        command.vehicleDraft?.fixedFareAllowed ?? draft.fixedFareAllowed,
+      currentDriverSubmissionId:
+        command.vehicleDraft?.currentDriverSubmissionId !== undefined
+          ? command.vehicleDraft.currentDriverSubmissionId
+          : draft.currentDriverSubmissionId,
+      doorCount:
+        command.vehicleDraft?.doorCount !== undefined
+          ? command.vehicleDraft.doorCount
+          : draft.doorCount,
+      color:
+        command.vehicleDraft?.color !== undefined
+          ? command.vehicleDraft.color
+          : draft.color,
+    };
+    this.validateVehicleDraft(merged);
+
+    Object.assign(draft, this.normalizeVehicleDraft(merged));
+    this.bumpSubmissionRevision(submission);
+
+    await this.persistChanges(
+      { submissions: [submission], vehicleDrafts: [draft] },
+      "update vehicle renewal draft",
+    );
+    this.recordAudit(
+      {
+        actorId,
+        actorType: "partner_api_key",
+        tenantId: null,
+        moduleName: "fleet-partner",
+        actionName: "update_supply_submission_renewal",
+        resourceType: "supply_submission",
+        resourceId: submissionId,
+        oldValuesSummary: { ...previous },
+        newValuesSummary: { ...draft },
+      },
+      requestId,
+    );
+
     return this.buildDetail(submissionId, fleetPartnerId);
   }
 
@@ -213,6 +935,11 @@ export class SupplySubmissionService implements OnModuleInit {
       command.professionalDriverLicenseNo,
       command.taxiDriverRegistrationNo,
       submissionId,
+      submission.canonicalDriverId ??
+        (submission.submissionType === "profile_correction"
+          ? submission.subjectDriverId
+          : null) ??
+        undefined,
     );
 
     const draft = this.requireDriverDraft(submissionId);
@@ -250,7 +977,7 @@ export class SupplySubmissionService implements OnModuleInit {
   ) {
     await this.syncState();
     this.validateVehicleDraft(command);
-    this.assertVehiclePlateAvailable(command.plateNo);
+    this.assertVehiclePlateAvailable(command.plateNo, undefined, fleetPartnerId);
 
     const now = new Date().toISOString();
     const submissionId = randomUUID();
@@ -324,9 +1051,34 @@ export class SupplySubmissionService implements OnModuleInit {
     );
     this.assertEditable(submission);
     this.assertExpectedRevisionNo(submission, command.expectedRevisionNo);
-    this.assertVehiclePlateAvailable(command.plateNo, submissionId);
 
     const draft = this.requireVehicleDraft(submissionId);
+    if (
+      submission.submissionType === "insurance_update" ||
+      submission.submissionType === "contract_update"
+    ) {
+      if (
+        command.plateNo.trim().toUpperCase() !==
+        draft.plateNo.trim().toUpperCase()
+      ) {
+        throw this.conflict(
+          "PLATE_IMMUTABLE_ON_RENEWAL",
+          "Vehicle plate number cannot be changed in a renewal submission.",
+          {
+            submissionId,
+            canonicalPlateNo: draft.plateNo,
+            requestedPlateNo: command.plateNo,
+          },
+        );
+      }
+    } else {
+      this.assertVehiclePlateAvailable(
+        command.plateNo,
+        submissionId,
+        fleetPartnerId,
+      );
+    }
+
     const previous = { ...draft };
     Object.assign(draft, this.normalizeVehicleDraft(command));
     this.bumpSubmissionRevision(submission);
@@ -390,8 +1142,19 @@ export class SupplySubmissionService implements OnModuleInit {
     );
     this.reviewEvents = [event, ...this.reviewEvents];
 
+    const updatedDriverDraft =
+      submission.submissionType === "profile_correction"
+        ? this.driverDrafts.find(
+            (draft) => draft.submissionId === submission.submissionId,
+          )
+        : undefined;
+
     await this.persistChanges(
-      { submissions: [submission], reviewEvents: [event] },
+      {
+        submissions: [submission],
+        reviewEvents: [event],
+        ...(updatedDriverDraft ? { driverDrafts: [updatedDriverDraft] } : {}),
+      },
       "submit supply submission",
     );
     this.recordAudit(
@@ -582,6 +1345,57 @@ export class SupplySubmissionService implements OnModuleInit {
     this.vehicleDrafts = state.vehicleDrafts.map((draft) => ({ ...draft }));
     this.documents = state.documents.map((document) => ({ ...document }));
     this.reviewEvents = state.reviewEvents.map((event) => ({ ...event }));
+    this.vehicleAffiliations = (state.vehicleAffiliations ?? []).map(
+      (affiliation) => ({ ...affiliation }),
+    );
+  }
+
+  private isDriverOwnedByFleet(
+    driverId: string,
+    fleetPartnerId: string,
+  ): boolean {
+    if (
+      this.submissions.some(
+        (sub) =>
+          sub.fleetPartnerId === fleetPartnerId &&
+          sub.status === "approved" &&
+          (sub.canonicalDriverId === driverId ||
+            sub.subjectDriverId === driverId),
+      )
+    ) {
+      return true;
+    }
+    const pairs =
+      typeof this.regulatoryRegistryService.listSupplyPairs === "function"
+        ? this.regulatoryRegistryService.listSupplyPairs()
+        : [];
+    return pairs.some(
+      (pair) =>
+        pair.driverId === driverId &&
+        this.isVehicleOwnedByFleet(pair.vehicleId, fleetPartnerId),
+    );
+  }
+
+  private isVehicleOwnedByFleet(
+    vehicleId: string,
+    fleetPartnerId: string,
+  ): boolean {
+    if (
+      this.submissions.some(
+        (sub) =>
+          sub.fleetPartnerId === fleetPartnerId &&
+          sub.status === "approved" &&
+          (sub.canonicalVehicleId === vehicleId ||
+            sub.subjectVehicleId === vehicleId),
+      )
+    ) {
+      return true;
+    }
+    return this.vehicleAffiliations.some(
+      (affiliation) =>
+        affiliation.vehicleId === vehicleId &&
+        affiliation.fleetPartnerId === fleetPartnerId,
+    );
   }
 
   private buildDetail(
@@ -733,10 +1547,67 @@ export class SupplySubmissionService implements OnModuleInit {
     };
   }
 
+  private findLatestApprovedDriverDraft(
+    fleetPartnerId: string,
+    canonicalDriverId: string,
+  ): DriverSupplyDraft | undefined {
+    const approvedSubs = this.submissions
+      .filter(
+        (sub) =>
+          sub.fleetPartnerId === fleetPartnerId &&
+          sub.status === "approved" &&
+          (sub.canonicalDriverId === canonicalDriverId ||
+            sub.subjectDriverId === canonicalDriverId),
+      )
+      .sort((left, right) =>
+        (right.reviewedAt ?? right.updatedAt).localeCompare(
+          left.reviewedAt ?? left.updatedAt,
+        ),
+      );
+    for (const sub of approvedSubs) {
+      const draft = this.driverDrafts.find(
+        (candidate) => candidate.submissionId === sub.submissionId,
+      );
+      if (draft) {
+        return draft;
+      }
+    }
+    return undefined;
+  }
+
+  private findLatestApprovedVehicleDraft(
+    fleetPartnerId: string,
+    canonicalVehicleId: string,
+  ): VehicleSupplyDraft | undefined {
+    const approvedSubs = this.submissions
+      .filter(
+        (sub) =>
+          sub.fleetPartnerId === fleetPartnerId &&
+          sub.status === "approved" &&
+          (sub.canonicalVehicleId === canonicalVehicleId ||
+            sub.subjectVehicleId === canonicalVehicleId),
+      )
+      .sort((left, right) =>
+        (right.reviewedAt ?? right.updatedAt).localeCompare(
+          left.reviewedAt ?? left.updatedAt,
+        ),
+      );
+    for (const sub of approvedSubs) {
+      const draft = this.vehicleDrafts.find(
+        (candidate) => candidate.submissionId === sub.submissionId,
+      );
+      if (draft) {
+        return draft;
+      }
+    }
+    return undefined;
+  }
+
   private assertDriverIdentityAvailable(
     professionalDriverLicenseNo: string,
     taxiDriverRegistrationNo: string,
     excludeSubmissionId?: string,
+    excludeCanonicalDriverId?: string,
   ) {
     const normalizedLicenseNo = professionalDriverLicenseNo
       .trim()
@@ -744,9 +1615,23 @@ export class SupplySubmissionService implements OnModuleInit {
     const normalizedRegistrationNo = taxiDriverRegistrationNo
       .trim()
       .toLowerCase();
+    const excludedSubmissionIds = new Set<string>();
+    if (excludeSubmissionId) {
+      excludedSubmissionIds.add(excludeSubmissionId);
+    }
+    if (excludeCanonicalDriverId) {
+      for (const sub of this.submissions) {
+        if (
+          sub.canonicalDriverId === excludeCanonicalDriverId ||
+          sub.subjectDriverId === excludeCanonicalDriverId
+        ) {
+          excludedSubmissionIds.add(sub.submissionId);
+        }
+      }
+    }
     const existing = this.driverDrafts.find(
       (candidate) =>
-        candidate.submissionId !== excludeSubmissionId &&
+        !excludedSubmissionIds.has(candidate.submissionId) &&
         (candidate.professionalDriverLicenseNo.trim().toLowerCase() ===
           normalizedLicenseNo ||
           candidate.taxiDriverRegistrationNo.trim().toLowerCase() ===
@@ -765,11 +1650,24 @@ export class SupplySubmissionService implements OnModuleInit {
   private assertVehiclePlateAvailable(
     plateNo: string,
     excludeSubmissionId?: string,
+    fleetPartnerId?: string,
   ) {
     const normalizedPlateNo = plateNo.trim().toLowerCase();
+    const activeOnboardingSubmissionIds = new Set(
+      this.submissions
+        .filter(
+          (sub) =>
+            sub.submissionType === "vehicle_onboarding" &&
+            ["draft", "submitted", "in_review", "needs_revision"].includes(
+              sub.status,
+            ),
+        )
+        .map((sub) => sub.submissionId),
+    );
     const existingDraft = this.vehicleDrafts.find(
       (candidate) =>
         candidate.submissionId !== excludeSubmissionId &&
+        activeOnboardingSubmissionIds.has(candidate.submissionId) &&
         candidate.plateNo.trim().toLowerCase() === normalizedPlateNo,
     );
     if (existingDraft) {
@@ -787,11 +1685,28 @@ export class SupplySubmissionService implements OnModuleInit {
         (vehicle) => vehicle.plateNo.trim().toLowerCase() === normalizedPlateNo,
       );
     if (existingVehicle) {
+      const fleetPartnerOwned = Boolean(
+        fleetPartnerId &&
+          this.isVehicleOwnedByFleet(existingVehicle.vehicleId, fleetPartnerId),
+      );
       throw new ApiRequestError(
         HttpStatus.CONFLICT,
         "PLATE_ALREADY_EXISTS",
-        "A canonical vehicle with the same plate already exists.",
-        { vehicleId: existingVehicle.vehicleId, plateNo },
+        fleetPartnerOwned
+          ? "This vehicle plate is already approved under your fleet. Create a supply renewal submission to update insurance or contract credentials."
+          : "A canonical vehicle with the same plate already exists.",
+        {
+          vehicleId: existingVehicle.vehicleId,
+          existingCanonicalVehicleId: existingVehicle.vehicleId,
+          plateNo,
+          fleetPartnerOwned,
+          ...(fleetPartnerOwned
+            ? {
+                suggestedAction: "create_renewal",
+                renewalPath: `/supply/renewals/new?targetVehicleId=${encodeURIComponent(existingVehicle.vehicleId)}`,
+              }
+            : {}),
+        },
       );
     }
   }
@@ -852,6 +1767,25 @@ export class SupplySubmissionService implements OnModuleInit {
 
     const documents = this.listDocumentsForSubmission(submission.submissionId);
     const today = new Date().toISOString().slice(0, 10);
+    const invalidRangeDocument = documents.find(
+      (document) =>
+        document.effectiveFrom &&
+        document.effectiveUntil &&
+        document.effectiveFrom > document.effectiveUntil,
+    );
+    if (invalidRangeDocument) {
+      throw this.conflict(
+        "INVALID_DOCUMENT_EFFECTIVE_RANGE",
+        "Document effectiveFrom must not be later than effectiveUntil.",
+        {
+          submissionId: submission.submissionId,
+          documentId: invalidRangeDocument.documentId,
+          documentType: invalidRangeDocument.documentType,
+          effectiveFrom: invalidRangeDocument.effectiveFrom,
+          effectiveUntil: invalidRangeDocument.effectiveUntil,
+        },
+      );
+    }
     const expiredDocument = documents.find(
       (document) => document.effectiveUntil && document.effectiveUntil < today,
     );
@@ -866,6 +1800,115 @@ export class SupplySubmissionService implements OnModuleInit {
           effectiveUntil: expiredDocument.effectiveUntil,
         },
       );
+    }
+
+    if (submission.submissionType === "insurance_update") {
+      const insuranceDocuments = documents.filter(
+        (document) => document.documentType === "insurance_policy",
+      );
+      if (insuranceDocuments.length === 0) {
+        throw this.conflict(
+          "DOCUMENT_REQUIRED",
+          "Required supply documents are missing.",
+          {
+            submissionId: submission.submissionId,
+            missingDocumentTypes: ["insurance_policy"],
+          },
+        );
+      }
+      const missingEffectiveDateDoc = insuranceDocuments.find(
+        (document) => !document.effectiveUntil?.trim(),
+      );
+      if (missingEffectiveDateDoc) {
+        throw this.conflict(
+          "DOCUMENT_EFFECTIVE_DATE_REQUIRED",
+          "Insurance policy renewal requires a valid effectiveUntil date.",
+          {
+            submissionId: submission.submissionId,
+            documentId: missingEffectiveDateDoc.documentId,
+            documentType: missingEffectiveDateDoc.documentType,
+          },
+        );
+      }
+      return;
+    }
+
+    if (submission.submissionType === "contract_update") {
+      const contractDocuments = documents.filter((document) =>
+        RENEWAL_CONTRACT_DOCUMENTS.includes(document.documentType),
+      );
+      if (contractDocuments.length === 0) {
+        throw this.conflict(
+          "DOCUMENT_REQUIRED",
+          "Required supply documents are missing.",
+          {
+            submissionId: submission.submissionId,
+            missingDocumentTypes: ["fleet_participation_contract"],
+          },
+        );
+      }
+      const missingEffectiveDateDoc = contractDocuments.find(
+        (document) => !document.effectiveUntil?.trim(),
+      );
+      if (missingEffectiveDateDoc) {
+        throw this.conflict(
+          "DOCUMENT_EFFECTIVE_DATE_REQUIRED",
+          "Contract renewal requires a valid effectiveUntil date.",
+          {
+            submissionId: submission.submissionId,
+            documentId: missingEffectiveDateDoc.documentId,
+            documentType: missingEffectiveDateDoc.documentType,
+          },
+        );
+      }
+      return;
+    }
+
+    if (submission.submissionType === "profile_correction") {
+      const draft = this.requireDriverDraft(submission.submissionId);
+      const licenseDoc = documents.find(
+        (document) => document.documentType === "professional_driver_license",
+      );
+      const registrationDoc = documents.find(
+        (document) => document.documentType === "taxi_driver_registration",
+      );
+      if (!licenseDoc && !registrationDoc) {
+        throw this.conflict(
+          "DOCUMENT_REQUIRED",
+          "Driver renewal submission requires at least one updated credential document.",
+          {
+            submissionId: submission.submissionId,
+            missingDocumentTypes: [
+              "professional_driver_license",
+              "taxi_driver_registration",
+            ],
+          },
+        );
+      }
+      if (licenseDoc?.effectiveUntil?.trim()) {
+        draft.professionalDriverLicenseExpiry =
+          licenseDoc.effectiveUntil.trim();
+      }
+      if (registrationDoc?.effectiveUntil?.trim()) {
+        draft.taxiDriverRegistrationExpiry =
+          registrationDoc.effectiveUntil.trim();
+      }
+      if (
+        draft.professionalDriverLicenseExpiry < today ||
+        draft.taxiDriverRegistrationExpiry < today
+      ) {
+        throw this.conflict(
+          "DOCUMENT_EXPIRED",
+          "Driver credential expiry dates must be today or in the future before submitting.",
+          {
+            submissionId: submission.submissionId,
+            professionalDriverLicenseExpiry:
+              draft.professionalDriverLicenseExpiry,
+            taxiDriverRegistrationExpiry: draft.taxiDriverRegistrationExpiry,
+          },
+        );
+      }
+      return;
     }
 
     const requiredDocumentTypes =
