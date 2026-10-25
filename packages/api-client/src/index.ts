@@ -280,6 +280,9 @@ import type {
   SupplySubmissionRecord,
   SupplySubmissionStatus,
   SupplySubmissionType,
+  CreateSupplyRenewalDraftCommand,
+  UpdateSupplyRenewalDraftCommand,
+  FleetSupplyRenewalTargetsResponse,
   VehicleSupplyDraft,
   TenantApiKeyIssued,
   TenantBillingProfile,
@@ -2653,6 +2656,42 @@ export class ApiClient {
   }> {
     return this.get(
       `/api/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`,
+    );
+  }
+
+  async listFleetPortalSupplyRenewalTargets(): Promise<FleetSupplyRenewalTargetsResponse> {
+    return this.get<FleetSupplyRenewalTargetsResponse>(
+      "/api/fleet-partner/supply-renewals/targets",
+    );
+  }
+
+  async createFleetPortalSupplyRenewalDraft(
+    command: CreateSupplyRenewalDraftCommand,
+  ): Promise<{
+    submission: SupplySubmissionRecord;
+    driverDraft: DriverSupplyDraft | null;
+    vehicleDraft: VehicleSupplyDraft | null;
+    documents: SupplyDocumentRecord[];
+  }> {
+    return this.post("/api/fleet-partner/supply-submissions/renewals", {
+      body: command,
+    });
+  }
+
+  async updateFleetPortalSupplyRenewalDraft(
+    submissionId: string,
+    command: UpdateSupplyRenewalDraftCommand,
+  ): Promise<{
+    submission: SupplySubmissionRecord;
+    driverDraft: DriverSupplyDraft | null;
+    vehicleDraft: VehicleSupplyDraft | null;
+    documents: SupplyDocumentRecord[];
+  }> {
+    return this.put(
+      `/api/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}/renewal`,
+      {
+        body: command,
+      },
     );
   }
 

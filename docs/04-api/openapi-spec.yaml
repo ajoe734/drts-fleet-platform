@@ -1415,6 +1415,111 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/fleet-partner/supply-renewals/targets:
+    get:
+      tags:
+        - FleetPartnerSupply
+      operationId: listFleetSupplyRenewalTargets
+      summary: 車行管理員查詢名下既有可續保／續約／證照更新之車輛與司機
+      description: |
+        RBAC: realm `tenant` / `ops`, role `tenant_ops_admin`.
+        回傳車行名下已核准之既有 canonical 車輛（含契約與保險效期、readiness 狀態）與司機（含職業駕照與執業登記證效期、readiness 狀態），供發起續期送審。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      responses:
+        "200":
+          description: 既有供給續期目標清單
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FleetSupplyRenewalTargetsEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/fleet-partner/supply-submissions/renewals:
+    post:
+      tags:
+        - FleetPartnerSupply
+      operationId: createFleetSupplyRenewalDraft
+      summary: 建立既有車輛續保／續約或既有司機證照更新送審草稿
+      description: |
+        RBAC: realm `tenant` / `ops`, role `tenant_ops_admin`.
+        針對車行名下既有 canonical 車輛 (`insurance_update` / `contract_update`) 或司機 (`profile_correction`) 建立新送審草稿，保留既有車牌／司機識別碼並允許後續以 C125 流程上傳更新證明文件後送審。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSupplyRenewalDraftCommand"
+      responses:
+        "201":
+          description: 續期送審草稿建立成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyRenewalDraftEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/fleet-partner/supply-submissions/{submissionId}/renewal:
+    put:
+      tags:
+        - FleetPartnerSupply
+      operationId: updateFleetSupplyRenewalDraft
+      summary: 更新既有供給續期送審草稿欄位
+      description: |
+        RBAC: realm `tenant` / `ops`, role `tenant_ops_admin`.
+        更新 `draft` 或 `needs_revision` 狀態之續期送審草稿（保單／契約效期或司機證照效期），不得變更既有車牌或跨車行綁定。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+        - name: submissionId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 送審案件識別碼
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSupplyRenewalDraftCommand"
+      responses:
+        "200":
+          description: 續期送審草稿更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SupplyRenewalDraftEnvelope"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
   /api/host/vehicles:
     get:
       tags:
@@ -6225,3 +6330,164 @@ components:
         tags:
           { type: array, maxItems: 10, items: { type: string, maxLength: 100 } }
         idempotencyKey: { type: string, maxLength: 255 }
+
+    # === BUREAU-APPROVED-SUPPLY-RENEWAL-WORKFLOW-20261025: Existing Supply Renewal ===
+    SupplyRenewalSubmissionType:
+      type: string
+      enum: [insurance_update, contract_update, profile_correction]
+    CreateSupplyRenewalDraftCommand:
+      type: object
+      additionalProperties: false
+      required: [submissionType]
+      properties:
+        submissionType:
+          $ref: "#/components/schemas/SupplyRenewalSubmissionType"
+        targetDriverId:
+          type: string
+          nullable: true
+        targetVehicleId:
+          type: string
+          nullable: true
+        effectiveFrom:
+          type: string
+          nullable: true
+        effectiveUntil:
+          type: string
+          nullable: true
+        professionalDriverLicenseExpiry:
+          type: string
+          nullable: true
+        taxiDriverRegistrationExpiry:
+          type: string
+          nullable: true
+        driverName:
+          type: string
+          nullable: true
+        nationalIdMasked:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    UpdateSupplyRenewalDraftCommand:
+      type: object
+      additionalProperties: false
+      properties:
+        effectiveFrom:
+          type: string
+          nullable: true
+        effectiveUntil:
+          type: string
+          nullable: true
+        professionalDriverLicenseExpiry:
+          type: string
+          nullable: true
+        taxiDriverRegistrationExpiry:
+          type: string
+          nullable: true
+        driverName:
+          type: string
+          nullable: true
+        nationalIdMasked:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+    FleetSupplyRenewalTargetsResponse:
+      type: object
+      required: [drivers, vehicles]
+      properties:
+        drivers:
+          type: array
+          items:
+            type: object
+            required:
+              [
+                driverId,
+                fullName,
+                phone,
+                lifecycleStatus,
+                licensesValid,
+                readinessStatus,
+                missingReasons,
+              ]
+            properties:
+              driverId: { type: string }
+              fullName: { type: string }
+              phone: { type: string }
+              nationalIdMasked: { type: string, nullable: true }
+              lifecycleStatus: { type: string }
+              licensesValid: { type: boolean }
+              professionalDriverLicenseExpiry: { type: string, nullable: true }
+              taxiDriverRegistrationExpiry: { type: string, nullable: true }
+              readinessStatus: { type: string }
+              missingReasons:
+                type: array
+                items: { type: string }
+        vehicles:
+          type: array
+          items:
+            type: object
+            required:
+              [
+                vehicleId,
+                plateNo,
+                makeModel,
+                seatCapacity,
+                wheelchairAccessible,
+                lifecycleStatus,
+                insuranceValid,
+                inspectionValid,
+                readinessStatus,
+                missingReasons,
+              ]
+            properties:
+              vehicleId: { type: string }
+              plateNo: { type: string }
+              makeModel: { type: string }
+              seatCapacity: { type: integer }
+              wheelchairAccessible: { type: boolean }
+              lifecycleStatus: { type: string }
+              insuranceValid: { type: boolean }
+              inspectionValid: { type: boolean }
+              activeContractId: { type: string, nullable: true }
+              contractStartAt: { type: string, nullable: true }
+              contractEndAt: { type: string, nullable: true }
+              activePolicyId: { type: string, nullable: true }
+              insuranceStartAt: { type: string, nullable: true }
+              insuranceEndAt: { type: string, nullable: true }
+              readinessStatus: { type: string }
+              missingReasons:
+                type: array
+                items: { type: string }
+    FleetSupplyRenewalTargetsEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: "#/components/schemas/FleetSupplyRenewalTargetsResponse"
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
+    SupplyRenewalDraftEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: object
+          required: [submission, driverDraft, vehicleDraft, documents]
+          properties:
+            submission: { type: object }
+            driverDraft: { type: object, nullable: true }
+            vehicleDraft: { type: object, nullable: true }
+            documents:
+              type: array
+              items: { type: object }
+        meta:
+          $ref: "#/components/schemas/ApiMeta"
