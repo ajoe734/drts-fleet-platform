@@ -30,6 +30,26 @@ export type PublicReferralEmbedSession = Pick<
   | "consent"
   | "navigationContext"
 > & { recoveryScope: string };
+export type PublicReferralSessionReadback = {
+  ok: true;
+  session: PublicReferralEmbedSession;
+  data: {
+    active: true;
+    session: PublicReferralEmbedSession;
+    identity: {
+      actor_id: string;
+      subject_alias: string;
+      recovery_scope: string;
+      actor_type: "referral_passenger";
+      realm: "partner";
+      roles: ["referral_passenger"];
+      partner_entry_slug: string;
+      entry_host: string;
+      handoff_id: string;
+      identity_active: true;
+    };
+  };
+};
 type SessionCookie = Omit<ServerReferralEmbedSession, "accessToken"> & {
   issuedAt: string;
   bearerDigest?: string;
@@ -174,6 +194,131 @@ export async function readActiveReferralSession(): Promise<ServerReferralEmbedSe
   )
     throw authError();
   return session;
+}
+
+function verifyReferralBearerClaims(session: ServerReferralEmbedSession) {
+  if (
+    !session.identityActive ||
+    !session.accessToken ||
+    session.tokenType !== "Bearer" ||
+    !session.expiresAt ||
+    !Number.isFinite(Date.parse(session.expiresAt)) ||
+    Date.parse(session.expiresAt) <= Date.now() ||
+    typeof session.drtsPassengerId !== "string" ||
+    !session.drtsPassengerId.trim() ||
+    typeof session.partnerEntrySlug !== "string" ||
+    !session.partnerEntrySlug.trim() ||
+    typeof session.entryHost !== "string" ||
+    !session.entryHost.trim() ||
+    typeof session.handoffId !== "string" ||
+    !session.handoffId.trim() ||
+    !session.identity ||
+    session.identity.actorType !== "referral_passenger" ||
+    session.identity.realm !== "partner" ||
+    session.identity.actorId !== session.drtsPassengerId ||
+    session.identity.drtsPassengerId !== session.drtsPassengerId ||
+    session.identity.partnerEntrySlug !== session.partnerEntrySlug ||
+    typeof session.identity.tenantId !== "string" ||
+    !session.identity.tenantId.trim() ||
+    typeof session.identity.partnerId !== "string" ||
+    !session.identity.partnerId.trim() ||
+    typeof session.identity.partnerProgramId !== "string" ||
+    !session.identity.partnerProgramId.trim() ||
+    !Array.isArray(session.identity.scopes) ||
+    !session.identity.scopes.includes("partner:book") ||
+    !session.consent ||
+    typeof session.consent.grantedAt !== "string" ||
+    !session.consent.grantedAt.trim() ||
+    !Array.isArray(session.consent.requiredScopes) ||
+    !REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES.every((scope) =>
+      session.consent.requiredScopes.includes(scope),
+    )
+  ) {
+    throw authError();
+  }
+  const jwtParts = session.accessToken.split(".");
+  if (jwtParts.length !== 3 || !jwtParts[0] || !jwtParts[1] || !jwtParts[2]) {
+    throw authError();
+  }
+  let header: { alg?: unknown } | null = null;
+  let payload: Record<string, unknown> | null = null;
+  try {
+    header = JSON.parse(
+      Buffer.from(jwtParts[0], "base64url").toString("utf8"),
+    ) as { alg?: unknown };
+    payload = JSON.parse(
+      Buffer.from(jwtParts[1], "base64url").toString("utf8"),
+    ) as Record<string, unknown>;
+  } catch {
+    throw authError();
+  }
+  const jwtSecret = process.env.JWT_SECRET?.trim();
+  if (
+    jwtSecret &&
+    !process.env.JWT_KEY_RING_JSON?.trim() &&
+    header?.alg === "HS256"
+  ) {
+    const expectedSig = Buffer.from(
+      createHmac("sha256", jwtSecret)
+        .update(`${jwtParts[0]}.${jwtParts[1]}`)
+        .digest("base64url"),
+    );
+    const actualSig = Buffer.from(jwtParts[2]);
+    if (
+      expectedSig.length !== actualSig.length ||
+      !timingSafeEqual(expectedSig, actualSig)
+    ) {
+      throw authError();
+    }
+  }
+  if (
+    !payload ||
+    payload.realm !== "partner" ||
+    payload.actorType !== "referral_passenger" ||
+    payload.partnerEntrySlug !== session.partnerEntrySlug ||
+    payload.drtsPassengerId !== session.drtsPassengerId ||
+    payload.tenantId !== session.identity.tenantId ||
+    payload.partnerId !== session.identity.partnerId ||
+    payload.partnerProgramId !== session.identity.partnerProgramId ||
+    !Array.isArray(payload.scopes) ||
+    !payload.scopes.includes("partner:book") ||
+    typeof payload.exp !== "number" ||
+    payload.exp * 1000 <= Date.now()
+  ) {
+    throw authError();
+  }
+}
+
+export function toPublicReferralEmbedSessionReadback(
+  session: ServerReferralEmbedSession,
+): PublicReferralSessionReadback {
+  verifyReferralBearerClaims(session);
+  const publicSession = toPublicReferralEmbedSession(session);
+  return {
+    ok: true,
+    session: publicSession,
+    data: {
+      active: true,
+      session: publicSession,
+      identity: {
+        actor_id: publicSession.recoveryScope,
+        subject_alias: publicSession.recoveryScope,
+        recovery_scope: publicSession.recoveryScope,
+        actor_type: "referral_passenger",
+        realm: "partner",
+        roles: ["referral_passenger"],
+        partner_entry_slug: publicSession.partnerEntrySlug,
+        entry_host: publicSession.entryHost,
+        handoff_id: publicSession.handoffId,
+        identity_active: true,
+      },
+    },
+  };
+}
+
+export async function readPublicReferralEmbedSessionReadback(): Promise<PublicReferralSessionReadback> {
+  const session = await readActiveReferralSession();
+  return toPublicReferralEmbedSessionReadback(session);
 }
 
 export async function getReferralIdentityHeaders(
