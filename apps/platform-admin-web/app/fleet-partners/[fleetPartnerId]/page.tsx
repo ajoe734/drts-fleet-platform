@@ -240,12 +240,14 @@ export default function FleetPartnerDetailPage() {
             row.validTo === ack.validTo,
         )
       ) {
-        throw new Error(
-          "Fleet role write was not confirmed by canonical readback.",
-        );
+        throw new Error(t("fleetPartners.humanRoles.readbackMismatch"));
       }
       setHumanAck(
-        `Confirmed ${ack.roleCode} / ${ack.status} for ${ack.principalId}`,
+        t("fleetPartners.humanRoles.confirmed", {
+          role: ack.roleCode,
+          status: ack.status,
+          principal: ack.principalId,
+        }),
       );
     } catch (saveError: any) {
       setError(saveError?.message ?? t("common.unknown"));
@@ -442,13 +444,13 @@ export default function FleetPartnerDetailPage() {
       ) : (
         <>
           <CanvasCard
-            title="Fleet human roles"
-            subtitle="Platform manager only. Target must already have a verified, linked partner account; Referral link alone is not a grant."
+            title={t("fleetPartners.humanRoles.title")}
+            subtitle={t("fleetPartners.humanRoles.subtitle")}
           >
             <div style={formGridStyle}>
-              <CanvasField label="Canonical Fleet entry slug">
+              <CanvasField label={t("fleetPartners.humanRoles.entrySlug")}>
                 <input
-                  aria-label="Canonical Fleet entry slug"
+                  aria-label={t("fleetPartners.humanRoles.entrySlug")}
                   style={inputStyle()}
                   value={humanEntrySlug}
                   onChange={(event) => {
@@ -458,17 +460,17 @@ export default function FleetPartnerDetailPage() {
                   }}
                 />
               </CanvasField>
-              <CanvasField label="Existing linked OIDC subject">
+              <CanvasField label={t("fleetPartners.humanRoles.subject")}>
                 <input
-                  aria-label="Existing linked OIDC subject"
+                  aria-label={t("fleetPartners.humanRoles.subject")}
                   style={inputStyle()}
                   value={humanSubject}
                   onChange={(event) => setHumanSubject(event.target.value)}
                 />
               </CanvasField>
-              <CanvasField label="Fleet role">
+              <CanvasField label={t("fleetPartners.humanRoles.role")}>
                 <select
-                  aria-label="Fleet role"
+                  aria-label={t("fleetPartners.humanRoles.role")}
                   style={inputStyle()}
                   value={humanRole}
                   onChange={(event) =>
@@ -479,32 +481,40 @@ export default function FleetPartnerDetailPage() {
                   }
                 >
                   <option value="fleet_partner_admin">
-                    Fleet administrator
+                    {t("fleetPartners.humanRoles.admin")}
                   </option>
-                  <option value="fleet_partner_ops">Fleet operations</option>
-                  <option value="fleet_partner_finance">Fleet finance</option>
+                  <option value="fleet_partner_ops">
+                    {t("fleetPartners.humanRoles.ops")}
+                  </option>
+                  <option value="fleet_partner_finance">
+                    {t("fleetPartners.humanRoles.finance")}
+                  </option>
                 </select>
               </CanvasField>
-              <CanvasField label="Access expiry (optional)">
+              <CanvasField label={t("fleetPartners.humanRoles.expiry")}>
                 <input
-                  aria-label="Access expiry"
+                  aria-label={t("fleetPartners.humanRoles.expiry")}
                   type="datetime-local"
                   style={inputStyle()}
                   value={humanValidTo}
                   onChange={(event) => setHumanValidTo(event.target.value)}
                 />
               </CanvasField>
-              <CanvasField label="Membership state">
+              <CanvasField label={t("fleetPartners.humanRoles.state")}>
                 <select
-                  aria-label="Membership state"
+                  aria-label={t("fleetPartners.humanRoles.state")}
                   style={inputStyle()}
                   value={humanEnabled ? "active" : "disabled"}
                   onChange={(event) =>
                     setHumanEnabled(event.target.value === "active")
                   }
                 >
-                  <option value="active">Active</option>
-                  <option value="disabled">Disabled / revoke</option>
+                  <option value="active">
+                    {t("fleetPartners.status.active")}
+                  </option>
+                  <option value="disabled">
+                    {t("fleetPartners.humanRoles.disabled")}
+                  </option>
                 </select>
               </CanvasField>
             </div>
@@ -513,14 +523,16 @@ export default function FleetPartnerDetailPage() {
                 disabled={!humanEntrySlug || humanSaving}
                 onClick={() => void handleReadHumanRoles()}
               >
-                Read canonical roles
+                {t("fleetPartners.humanRoles.read")}
               </CanvasBtn>
               <CanvasBtn
                 variant="primary"
                 disabled={!humanEntrySlug || !humanSubject || humanSaving}
                 onClick={() => void handleManageHumanRole()}
               >
-                {humanSaving ? "Saving" : "Save human role"}
+                {humanSaving
+                  ? t("common.saving")
+                  : t("fleetPartners.humanRoles.save")}
               </CanvasBtn>
             </div>
             {humanAck ? <p role="status">{humanAck}</p> : null}
@@ -528,7 +540,9 @@ export default function FleetPartnerDetailPage() {
               {humanRoles.map((row) => (
                 <li key={row.membershipId}>
                   {row.principalId}: {row.roleCode} / {row.status}
-                  {row.validTo ? ` (until ${row.validTo})` : ""}
+                  {row.validTo
+                    ? t("fleetPartners.humanRoles.until", { date: row.validTo })
+                    : ""}
                 </li>
               ))}
             </ul>

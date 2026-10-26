@@ -22,9 +22,16 @@ vi.mock("@/lib/admin-client", () => ({
   usePlatformAdminClient: () => state.client,
   formatDateTime: (s: string) => s,
 }));
-vi.mock("@/lib/i18n", () => ({
-  useTranslation: () => ({ t: (key: string) => key, locale: "en" }),
-}));
+vi.mock("@/lib/i18n", async () => {
+  const { t } = await import("../../apps/platform-admin-web/lib/translations");
+  return {
+    useTranslation: () => ({
+      t: (key: string, params?: Record<string, string | number>) =>
+        t(key, "en", params),
+      locale: "en",
+    }),
+  };
+});
 
 afterEach(() => {
   cleanup();
