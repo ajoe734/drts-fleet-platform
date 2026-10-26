@@ -24,6 +24,7 @@
 // noted inline; they are follow-up work for the backend, not fabricated here.
 
 import "server-only";
+import { ApiClientError } from "@drts/api-client";
 
 import type {
   DriverWorkState,
@@ -735,6 +736,10 @@ function mapStatement(record: FleetPartnerStatementRecord): FleetStatement {
   };
 }
 
+function isStatementAuthorityError(err: unknown) {
+  return err instanceof ApiClientError && (err.statusCode === 401 || err.statusCode === 403);
+}
+
 export async function loadStatements(): Promise<StatementsView> {
   try {
     const { client } = await getServerFleetPartnerClient();
@@ -742,7 +747,7 @@ export async function loadStatements(): Promise<StatementsView> {
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapStatement), source: "live" };
   } catch (err) {
-    if (isConfigError(err)) {
+    if (isConfigError(err) || isStatementAuthorityError(err)) {
       throw err;
     }
     return { rows: FX_FLEET_STATEMENTS, source: "fallback" };
@@ -820,7 +825,7 @@ export async function loadStatementDetail(
       source: "live",
     };
   } catch (err) {
-    if (isConfigError(err)) {
+    if (isConfigError(err) || isStatementAuthorityError(err)) {
       throw err;
     }
     const fixture = FX_FLEET_STATEMENTS.find((row) => row.id === statementId);

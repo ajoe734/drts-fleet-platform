@@ -1218,6 +1218,96 @@ export class IdentityRepository implements OnModuleInit {
     }
   }
 
+  /** Fleet human authority: one membership and one binding per verified entry/link.
+   * The existing principal is created by the normal partner OIDC login, not by
+   * this manager action. Audit and session revocation share the write transaction.
+   */
+  async manageFleetHumanRole(input: {
+    entrySlug: string;
+    principalId: string;
+    roleCode: string;
+    enabled: boolean;
+    validTo: string | null;
+    managerPrincipalId: string;
+    audit: (client: PoolClient) => Promise<void>;
+  }): Promise<{ membership: CanonicalIdentityMembershipRecord; binding: CanonicalIdentityRoleBindingRecord }> {
+    if (!this.isEnabled()) throw new Error("Canonical Fleet human role storage is unavailable.");
+    const client = await this.databaseService!.connect();
+    const now = new Date().toISOString();
+    const sourceRef = `fleet_member:${input.entrySlug}:${input.principalId}`;
+    try {
+      await client.query("BEGIN");
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`, [input.principalId],
+      );
+      const principal = principalRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityPrincipalRecord>(principalRows.rows[0].record, "iam.identity_principals") : null;
+      if (!principal || principal.status !== "active" || principal.principalType !== "human" ||
+          principal.sourceRef !== `jwt_principal:partner:${input.principalId}`) {
+        throw new Error("Target must have an existing active linked partner-human principal.");
+      }
+      const rows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE source_ref = $1 FOR UPDATE`, [sourceRef],
+      );
+      const previous = rows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(rows.rows[0].record, "iam.identity_memberships") : null;
+      if (!input.enabled && !previous) throw new Error("Fleet membership does not exist.");
+      if (previous && (previous.principalId !== input.principalId || previous.realm !== "partner" ||
+          previous.scopeRef !== `fleet:${input.entrySlug}` || previous.partnerId !== input.entrySlug)) {
+        throw new Error("Fleet membership binding mismatch.");
+      }
+      const membership = await this.upsertMembership(client, {
+        membershipId: previous?.membershipId ?? `membership_${randomUUID().replace(/-/g, "")}`,
+        sourceRef, principalId: input.principalId, realm: "partner",
+        scopeRef: `fleet:${input.entrySlug}`, tenantId: null, partnerId: input.entrySlug,
+        status: input.enabled ? "active" : "disabled",
+        invitedByPrincipalId: previous?.invitedByPrincipalId ?? input.managerPrincipalId,
+        invitationId: null, createdAt: previous?.createdAt ?? now, updatedAt: now,
+      }, true);
+      const bindingSource = `fleet_role:${input.entrySlug}:${input.principalId}`;
+      const bindingRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_role_bindings WHERE source_ref = $1 FOR UPDATE`, [bindingSource],
+      );
+      const priorBinding = bindingRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityRoleBindingRecord>(bindingRows.rows[0].record, "iam.identity_role_bindings") : null;
+      if (priorBinding && priorBinding.membershipId !== membership.membershipId) throw new Error("Fleet role binding mismatch.");
+      const binding = await this.upsertRoleBinding(client, {
+        roleBindingId: priorBinding?.roleBindingId ?? `role_binding_${randomUUID().replace(/-/g, "")}`,
+        sourceRef: bindingSource, membershipId: membership.membershipId,
+        roleCode: input.roleCode, grantedByPrincipalId: input.managerPrincipalId,
+        approvalId: null, validFrom: now, validTo: input.validTo,
+        createdAt: priorBinding?.createdAt ?? now, updatedAt: now,
+      }, true, { allowValidFromMutation: true });
+      await this.revokePrincipalSessionsInTransaction(client, input.principalId, now,
+        "fleet_human_role_changed", input.managerPrincipalId);
+      await input.audit(client);
+      await client.query("COMMIT");
+      return { membership, binding };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async listFleetHumanRoles(entrySlug: string): Promise<Array<{
+    membership: CanonicalIdentityMembershipRecord;
+    binding: CanonicalIdentityRoleBindingRecord;
+  }>> {
+    if (!this.isEnabled()) throw new Error("Canonical Fleet human role storage is unavailable.");
+    const result = await this.databaseService!.query<{ membership_record: unknown; binding_record: unknown }>(
+      `SELECT m.record AS membership_record, b.record AS binding_record
+         FROM iam.identity_memberships m
+         JOIN iam.identity_role_bindings b ON b.membership_id = m.membership_id
+        WHERE m.realm = 'partner' AND m.scope_ref = $1 AND m.partner_id = $2
+          AND m.source_ref LIKE 'fleet_member:%' AND b.source_ref LIKE 'fleet_role:%'
+        ORDER BY m.created_at`, [`fleet:${entrySlug}`, entrySlug],
+    );
+    return result.rows.map((row) => ({
+      membership: this.parseRecord<CanonicalIdentityMembershipRecord>(row.membership_record, "iam.identity_memberships"),
+      binding: this.parseRecord<CanonicalIdentityRoleBindingRecord>(row.binding_record, "iam.identity_role_bindings"),
+    }));
+  }
+
   async ensurePrincipalRecord(
     principal: CanonicalIdentityPrincipalRecord,
   ): Promise<CanonicalIdentityPrincipalRecord> {

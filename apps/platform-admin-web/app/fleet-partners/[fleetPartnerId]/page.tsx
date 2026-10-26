@@ -27,6 +27,10 @@ import {
   formatMoneyMinor,
   getFleetPartner,
   listFleetPartnerDrivers,
+  listFleetHumanRoles,
+  manageFleetHumanRole,
+  type FleetHumanRoleRecord,
+  type ManageFleetHumanRoleCommand,
   listFleetStatements,
   listRevenueShareRules,
   PARTNERSHIP_TYPES,
@@ -130,6 +134,14 @@ export default function FleetPartnerDetailPage() {
   const [creatingAffiliation, setCreatingAffiliation] = useState(false);
   const [creatingRule, setCreatingRule] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [humanEntrySlug, setHumanEntrySlug] = useState("");
+  const [humanSubject, setHumanSubject] = useState("");
+  const [humanRole, setHumanRole] = useState<ManageFleetHumanRoleCommand["roleCode"]>("fleet_partner_ops");
+  const [humanEnabled, setHumanEnabled] = useState(true);
+  const [humanValidTo, setHumanValidTo] = useState("");
+  const [humanRoles, setHumanRoles] = useState<FleetHumanRoleRecord[]>([]);
+  const [humanSaving, setHumanSaving] = useState(false);
+  const [humanAck, setHumanAck] = useState<string | null>(null);
 
   const loadDetail = async () => {
     if (!fleetPartnerId) {
@@ -181,6 +193,40 @@ export default function FleetPartnerDetailPage() {
       setError(saveError?.message ?? t("common.unknown"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReadHumanRoles = async () => {
+    setHumanAck(null);
+    setError(null);
+    try {
+      setHumanRoles(await listFleetHumanRoles(client, fleetPartnerId, humanEntrySlug.trim()));
+    } catch (readError: any) {
+      setError(readError?.message ?? t("common.unknown"));
+    }
+  };
+
+  const handleManageHumanRole = async () => {
+    setHumanSaving(true);
+    setHumanAck(null);
+    setError(null);
+    try {
+      const ack = await manageFleetHumanRole(client, fleetPartnerId, {
+        entrySlug: humanEntrySlug.trim(), partnerUserRef: humanSubject.trim(),
+        roleCode: humanRole, enabled: humanEnabled,
+        validTo: humanValidTo ? new Date(humanValidTo).toISOString() : null,
+      });
+      const readback = await listFleetHumanRoles(client, fleetPartnerId, humanEntrySlug.trim());
+      setHumanRoles(readback);
+      if (!readback.some((row) => row.membershipId === ack.membershipId &&
+        row.roleCode === ack.roleCode && row.status === ack.status && row.validTo === ack.validTo)) {
+        throw new Error("Fleet role write was not confirmed by canonical readback.");
+      }
+      setHumanAck(`Confirmed ${ack.roleCode} / ${ack.status} for ${ack.principalId}`);
+    } catch (saveError: any) {
+      setError(saveError?.message ?? t("common.unknown"));
+    } finally {
+      setHumanSaving(false);
     }
   };
 
@@ -371,6 +417,23 @@ export default function FleetPartnerDetailPage() {
         <CanvasCard>{t("fleetPartners.detail.loading")}</CanvasCard>
       ) : (
         <>
+          <CanvasCard title="Fleet human roles" subtitle="Platform manager only. Target must already have a verified, linked partner account; Referral link alone is not a grant.">
+            <div style={formGridStyle}>
+              <CanvasField label="Canonical Fleet entry slug"><input aria-label="Canonical Fleet entry slug" style={inputStyle()} value={humanEntrySlug} onChange={(event) => { setHumanEntrySlug(event.target.value); setHumanRoles([]); setHumanAck(null); }} /></CanvasField>
+              <CanvasField label="Existing linked OIDC subject"><input aria-label="Existing linked OIDC subject" style={inputStyle()} value={humanSubject} onChange={(event) => setHumanSubject(event.target.value)} /></CanvasField>
+              <CanvasField label="Fleet role"><select aria-label="Fleet role" style={inputStyle()} value={humanRole} onChange={(event) => setHumanRole(event.target.value as ManageFleetHumanRoleCommand["roleCode"])}>
+                <option value="fleet_partner_admin">Fleet administrator</option><option value="fleet_partner_ops">Fleet operations</option><option value="fleet_partner_finance">Fleet finance</option>
+              </select></CanvasField>
+              <CanvasField label="Access expiry (optional)"><input aria-label="Access expiry" type="datetime-local" style={inputStyle()} value={humanValidTo} onChange={(event) => setHumanValidTo(event.target.value)} /></CanvasField>
+              <CanvasField label="Membership state"><select aria-label="Membership state" style={inputStyle()} value={humanEnabled ? "active" : "disabled"} onChange={(event) => setHumanEnabled(event.target.value === "active")}><option value="active">Active</option><option value="disabled">Disabled / revoke</option></select></CanvasField>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <CanvasBtn disabled={!humanEntrySlug || humanSaving} onClick={() => void handleReadHumanRoles()}>Read canonical roles</CanvasBtn>
+              <CanvasBtn variant="primary" disabled={!humanEntrySlug || !humanSubject || humanSaving} onClick={() => void handleManageHumanRole()}>{humanSaving ? "Saving" : "Save human role"}</CanvasBtn>
+            </div>
+            {humanAck ? <p role="status">{humanAck}</p> : null}
+            <ul>{humanRoles.map((row) => <li key={row.membershipId}>{row.principalId}: {row.roleCode} / {row.status}{row.validTo ? ` (until ${row.validTo})` : ""}</li>)}</ul>
+          </CanvasCard>
           <div style={heroStyle}>
             <CanvasCard
               title={t("fleetPartners.partnerProfileTitle")}

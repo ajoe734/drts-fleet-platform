@@ -14,6 +14,7 @@ import type {
   TenantPortalProfile,
 } from "@drts/contracts";
 
+import { getIamFleetRoleScopes } from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
@@ -1253,7 +1254,31 @@ export class OidcPkceService {
       );
     }
 
-    const scopes = ["partner:read", "partner:write"];
+    // An active Referral link is not a Fleet staff grant. Resolve only the
+    // exact linked canonical human and its manager-created bounded membership.
+    const principal = await this.identityRepository?.findPrincipalById(linkRecord.drtsPassengerId);
+    const memberships = principal?.status === "active" && principal.principalType === "human"
+      ? await this.identityRepository?.findMembershipsByPrincipalId(principal.principalId) : [];
+    const managedMembership = memberships?.find((candidate) =>
+      candidate.realm === "partner" && candidate.scopeRef === `fleet:${matchedEntry.entrySlug}` &&
+      candidate.partnerId === matchedEntry.entrySlug &&
+      candidate.sourceRef === `fleet_member:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}`);
+    // A disabled membership never silently falls back to a fresh human grant.
+    const roleBindings = managedMembership?.status === "active"
+      ? await this.identityRepository!.findRoleBindingsByMembershipId(managedMembership.membershipId) : [];
+    const now = Date.now();
+    const activeRoles = roleBindings.filter((binding) =>
+      Boolean(getIamFleetRoleScopes(binding.roleCode)) &&
+      binding.sourceRef === `fleet_role:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}` &&
+      Number.isFinite(Date.parse(binding.validFrom)) && Date.parse(binding.validFrom) <= now &&
+      (!binding.validTo || (Number.isFinite(Date.parse(binding.validTo)) && now < Date.parse(binding.validTo))));
+    const managedRole = activeRoles.length === 1 ? activeRoles[0] : null;
+    const scopes = managedRole ? [...getIamFleetRoleScopes(managedRole.roleCode)!] : ["partner:read", "partner:write"];
+    const roles = managedRole ? [managedRole.roleCode] : ["partner_user"];
+    const managedVersion = managedRole && principal && managedMembership
+      ? Math.max(...[matchedEntry.updatedAt, principal.updatedAt, managedMembership.updatedAt,
+          ...roleBindings.map((binding) => binding.updatedAt)].map((stamp) => Date.parse(stamp)))
+      : Date.parse(matchedEntry.updatedAt);
     const identity: IdentityContext = {
       authMode: "jwt_bearer",
       actorType: "partner_user",
@@ -1264,8 +1289,11 @@ export class OidcPkceService {
       partnerId: matchedEntry.entrySlug,
       partnerEntrySlug: matchedEntry.entrySlug,
       roleFamilies: ["partner"],
-      roles: ["partner_admin"],
+      roles,
       scopes,
+      ...(managedRole && principal && managedMembership ? {
+        principalId: principal.principalId, membershipId: managedMembership.membershipId,
+      } : {}),
       supportedExecutionModes: [
         "discussion_planning",
         "supervisor_managed_execution",
@@ -1291,14 +1319,15 @@ export class OidcPkceService {
         partnerId: matchedEntry.entrySlug,
         partnerEntrySlug: matchedEntry.entrySlug,
         roleFamilies: ["partner"],
-        roles: ["partner_admin"],
+        roles,
         scopes,
+        membershipId: managedRole ? managedMembership!.membershipId : null,
         requestId: meta?.requestId ?? null,
       },
       {
         expiresIn: "8h",
-        ensurePrincipal: true,
-        tokenVersion: Date.parse(matchedEntry.updatedAt),
+        ensurePrincipal: !managedRole,
+        tokenVersion: managedVersion,
         authTime: new Date(
           (claims.auth_time ?? Math.floor(Date.now() / 1000)) * 1000,
         ).toISOString(),

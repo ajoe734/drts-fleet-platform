@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ApiClientError } from "@drts/api-client";
 import { statementDisplayStatus } from "../../../lib/fleet-portal-statement-actions";
 import {
   loadStatementDetail,
@@ -36,11 +37,13 @@ function toCsv(rows: string[][]): string {
 }
 
 export async function GET(request: NextRequest) {
+  try {
   const statementId =
     request.nextUrl.searchParams.get("statementId") ?? undefined;
 
   if (statementId) {
-    const { statement } = await loadStatementDetail(statementId);
+    const { statement, source } = await loadStatementDetail(statementId);
+    if (source !== "live") return unavailableStatementExport();
     if (!statement) {
       // Same not-found/cross-fleet-denial rule as the detail page: an id
       // outside the caller's scoped statement list never resolves.
@@ -79,11 +82,13 @@ export async function GET(request: NextRequest) {
         "Content-Type": "text/csv; charset=utf-8",
         "Content-Disposition": `attachment; filename="${statement.id}.csv"`,
         "Cache-Control": "no-store",
+        "X-DRTS-Data-Source": "live",
       },
     });
   }
 
-  const { rows } = await loadStatements();
+  const { rows, source } = await loadStatements();
+  if (source !== "live") return unavailableStatementExport();
   const csv = toCsv([
     [
       "StatementID",
@@ -110,6 +115,18 @@ export async function GET(request: NextRequest) {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": 'attachment; filename="statements.csv"',
       "Cache-Control": "no-store",
+      "X-DRTS-Data-Source": "live",
     },
   });
+  } catch (err) {
+    const status = err instanceof ApiClientError && [401, 403].includes(err.statusCode)
+      ? err.statusCode : 503;
+    return NextResponse.json({ ok: false, error: { code: "STATEMENT_EXPORT_UNAVAILABLE" } },
+      { status, headers: { "Cache-Control": "no-store" } });
+  }
+}
+
+function unavailableStatementExport() {
+  return NextResponse.json({ ok: false, error: { code: "STATEMENT_SOURCE_NOT_LIVE" } },
+    { status: 503, headers: { "Cache-Control": "no-store", "X-DRTS-Data-Source": "fallback" } });
 }

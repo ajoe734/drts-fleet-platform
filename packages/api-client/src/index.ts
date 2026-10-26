@@ -70,6 +70,8 @@ import type {
   CreateEvidenceDeletionExceptionCommand,
   CreateEvidenceLegalHoldCommand,
   CreateFleetPartnerCommand,
+  ManageFleetHumanRoleCommand,
+  FleetHumanRoleRecord,
   CreateFleetPartnerRevenueShareRuleCommand,
   DriverForwardedOrderAcceptCommand,
   DriverForwardedOrderRejectCommand,
@@ -4601,6 +4603,18 @@ export class ApiClient {
     return this.put<FleetPartnerRecord>(
       `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}`,
       { body: command },
+    );
+  }
+
+  async listFleetHumanRoles(fleetPartnerId: string, entrySlug: string): Promise<FleetHumanRoleRecord[]> {
+    return this.getList<FleetHumanRoleRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/human-roles?entrySlug=${encodeURIComponent(entrySlug)}`,
+    );
+  }
+
+  async manageFleetHumanRole(fleetPartnerId: string, command: ManageFleetHumanRoleCommand): Promise<FleetHumanRoleRecord> {
+    return this.put<FleetHumanRoleRecord>(
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/human-roles`, { body: command },
     );
   }
 
