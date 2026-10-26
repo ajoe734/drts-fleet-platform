@@ -1111,6 +1111,12 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         expect(result.preview.syntheticProvenanceVerified).toBe(
           expectedPreviewControlled,
         );
+        expect(result.preview.controlledRowCount).toBe(
+          expectedPreviewControlled ? 2 : 1,
+        );
+        expect(result.preview.unverifiedSiblingRowCount).toBe(
+          expectedPreviewControlled ? 0 : 1,
+        );
         expect(result.preview.finalPlateNo).toBe(PLATE_NO);
 
         for (const format of DAILY_REPORT_FORMATS) {
@@ -1119,6 +1125,15 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           expect(dl.runtimeSha).toBe(RUNTIME_SHA);
           expect(dl.syntheticProvenanceVerified).toBe(expectedRetained);
           expect(dl.rawArtifactRetained).toBe(expectedRetained);
+          expect(dl.controlledRowCount).toBe(expectedRetained ? 2 : 1);
+          expect(dl.unverifiedSiblingRowCount).toBe(expectedRetained ? 0 : 1);
+          expect(
+            evidence.events.some(
+              (event) =>
+                event.stage ===
+                `daily-report-download-${format}-raw-retention-skipped`,
+            ),
+          ).toBe(!expectedRetained);
           if (expectedRetained) {
             expect(dl.artifactPath).not.toBeNull();
             const onDisk = await readFile(dl.artifactPath!);
