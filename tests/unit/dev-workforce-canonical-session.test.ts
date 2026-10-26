@@ -729,12 +729,34 @@ describe.each(REPORT_APPS)("%s report business query boundary", (app) => {
         expect(response.status).toBe(400);
         expect(outbound).not.toHaveBeenCalled();
       }
+      if (method === "POST") {
+        // With a single empty camel query value, the controller chooses that
+        // string before the snake alias; this is not a valid body override.
+        const response = await route.POST(
+          new NextRequest(
+            `https://private.example.test/control-plane-proxy/${path}?tenantId=`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: '{"tenant_id":"alias-tenant"}',
+            },
+          ),
+          { params: Promise.resolve({ path: path.split("/") }) },
+        );
+        expect(response.status).toBe(400);
+        expect(outbound).not.toHaveBeenCalled();
+      }
     },
   );
 
   it("keeps evaluate body precedence when an invalid query selector is superseded", async () => {
     vi.stubEnv("DRTS_API_URL", "https://api.example.test");
-    const evaluateGovernance = vi.fn(async () => ({ records: [] }));
+    const evaluateGovernance = vi.fn(
+      async (query: { tenantId?: string; periodMonth?: string }) => {
+        expect(query.tenantId).toBe("body-tenant");
+        return { records: [] };
+      },
+    );
     const controller = new ReferralMonthlyRatingController({
       evaluateGovernance,
     } as never);
@@ -780,6 +802,57 @@ describe.each(REPORT_APPS)("%s report business query boundary", (app) => {
         periodMonth: "2026-10",
         tenantId: "body-tenant",
       });
+  });
+
+  it("preserves the evaluate controller snake alias fallback only when camel is not a string", async () => {
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    const evaluateGovernance = vi.fn(async () => ({ records: [] }));
+    const controller = new ReferralMonthlyRatingController({
+      evaluateGovernance,
+    } as never);
+    const outbound = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const body = JSON.parse(await new Response(init?.body).text());
+        expect(url.searchParams.has("tenantId")).toBe(false);
+        await controller.evaluateGovernance(
+          body,
+          Object.fromEntries(url.searchParams),
+        );
+        return Response.json({ ok: true });
+      },
+    );
+    vi.stubGlobal("fetch", outbound);
+    const path = "reports/referral-monthly-ratings/governance/evaluate";
+    const route = await reportProxy(app);
+    const response = await route.POST(
+      new NextRequest(
+        `https://private.example.test/control-plane-proxy/${path}?tenantId=tenant-a&tenantId=tenant-b`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: '{"periodMonth":"2026-10","tenant_id":"alias-tenant"}',
+        },
+      ),
+      { params: Promise.resolve({ path: path.split("/") }) },
+    );
+    expect(response.status).toBe(200);
+    expect(evaluateGovernance).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "alias-tenant" }),
+      expect.anything(),
+    );
+    expect(outbound).toHaveBeenCalledTimes(1);
+    // On the original repeated query the real controller also selects the
+    // snake alias because the camel value is an array, not a string.
+    await controller.evaluateGovernance(
+      { tenant_id: "alias-tenant" } as never,
+      { tenantId: ["tenant-a", "tenant-b"] as never },
+    );
+    expect(evaluateGovernance).toHaveBeenCalledTimes(2);
+    expect(evaluateGovernance).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tenantId: "alias-tenant" }),
+      expect.anything(),
+    );
   });
 
   it.each(REPORT_OPERATIONS)(

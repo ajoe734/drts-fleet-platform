@@ -621,9 +621,12 @@ export function stripControlPlaneAuthQueryParams(
       "POST /api/reports/referral-monthly-ratings/governance/evaluate" &&
     body !== null &&
     typeof body === "object" &&
-    "tenantId" in body &&
-    typeof body.tenantId === "string" &&
-    Boolean(body.tenantId.trim());
+    (typeof ("tenantId" in body ? body.tenantId : undefined) === "string"
+      ? Boolean((body as { tenantId: string }).tenantId.trim())
+      : typeof ("tenant_id" in body ? body.tenant_id : undefined) ===
+          "string" &&
+        Boolean((body as { tenant_id: string }).tenant_id.trim()) &&
+        ("tenantId" in body || tenantValues.length > 1));
   if (
     allowedReport &&
     tenantValues.length > 0 &&
