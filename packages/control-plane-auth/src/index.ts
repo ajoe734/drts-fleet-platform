@@ -601,7 +601,10 @@ const REPORT_TENANT_QUERY_OPERATIONS = new Set([
   "POST /api/reports/referral-monthly-ratings/governance/evaluate",
 ]);
 
-export function stripControlPlaneAuthQueryParams(targetUrl: URL, method?: string) {
+export function stripControlPlaneAuthQueryParams(
+  targetUrl: URL,
+  method?: string,
+) {
   const tenantValues = targetUrl.searchParams.getAll("tenantId");
   const preserveBusinessTenant =
     REPORT_TENANT_QUERY_OPERATIONS.has(`${method} ${targetUrl.pathname}`) &&
