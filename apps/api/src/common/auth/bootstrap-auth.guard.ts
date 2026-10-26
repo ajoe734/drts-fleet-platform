@@ -1088,15 +1088,27 @@ export class BootstrapAuthGuard implements CanActivate {
     // A directly called API is not obliged to use the portal's Fleet client.
     // Bind the Fleet selector at the backend guard as well: scope possession
     // alone never permits an own-Fleet token to query another Fleet by header.
-    const routePath = normalizeRoutePath(request.originalUrl ?? request.url ?? "")
-      .replace(/^api\/+/, "");
-    if (identity.realm === "partner" && routePath.startsWith("fleet-partner/") &&
-        !routePath.startsWith("fleet-partner/training/")) {
+    const routePath = normalizeRoutePath(
+      request.originalUrl ?? request.url ?? "",
+    ).replace(/^api\/+/, "");
+    if (
+      identity.realm === "partner" &&
+      routePath.startsWith("fleet-partner/") &&
+      !routePath.startsWith("fleet-partner/training/")
+    ) {
       const headers = asHeaderRecord(request.headers);
-      const rawSelector = headers["x-fleet-partner-id"] ?? headers["X-Fleet-Partner-Id"];
+      const rawSelector =
+        headers["x-fleet-partner-id"] ?? headers["X-Fleet-Partner-Id"];
       const selector = Array.isArray(rawSelector) ? null : rawSelector?.trim();
-      if (rawSelector !== undefined && (!selector || selector !== identity.partnerId)) {
-        throw new ApiRequestError(403, "FLEET_SCOPE_DENIED", "The Fleet selector differs from the verified partner.");
+      if (
+        rawSelector !== undefined &&
+        (!selector || selector !== identity.partnerId)
+      ) {
+        throw new ApiRequestError(
+          403,
+          "FLEET_SCOPE_DENIED",
+          "The Fleet selector differs from the verified partner.",
+        );
       }
     }
     if (requiredScopes.length === 0) {
@@ -1113,20 +1125,33 @@ export class BootstrapAuthGuard implements CanActivate {
     // have partner:read/write but no billing:read, managed finance has no
     // partner:write, Host has neither. Do not relax other decorator scopes,
     // training's separate reports:read rule, or canonical selector checks.
-    const route = normalizeRoutePath(request.originalUrl ?? request.url ?? "")
-      .replace(/^api\/+/, "");
-    const fleetOperation = route.startsWith("fleet-partner/") &&
+    const route = normalizeRoutePath(
+      request.originalUrl ?? request.url ?? "",
+    ).replace(/^api\/+/, "");
+    const fleetOperation =
+      route.startsWith("fleet-partner/") &&
       !route.startsWith("fleet-partner/training/");
-    const scopedCredential = identity.authMode === "jwt_bearer" &&
+    const scopedCredential =
+      identity.authMode === "jwt_bearer" &&
       identity.realm === "partner" &&
-      (identity.actorType === "partner_api_key" || identity.actorType === "partner_user") &&
-      !identity.membershipId && Boolean(identity.partnerId?.trim()) &&
+      (identity.actorType === "partner_api_key" ||
+        identity.actorType === "partner_user") &&
+      !identity.membershipId &&
+      Boolean(identity.partnerId?.trim()) &&
       identity.scopes.includes("billing:read") &&
       identity.scopes.includes("partner:read");
-    if (fleetOperation && scopedCredential && requiredScopes.every((scope) =>
-      identity.scopes.includes(scope) ||
-      (scope === "fleet:read" && identity.scopes.includes("partner:read")) ||
-      (scope === "fleet:supply:write" && identity.scopes.includes("partner:write")))) {
+    if (
+      fleetOperation &&
+      scopedCredential &&
+      requiredScopes.every(
+        (scope) =>
+          identity.scopes.includes(scope) ||
+          (scope === "fleet:read" &&
+            identity.scopes.includes("partner:read")) ||
+          (scope === "fleet:supply:write" &&
+            identity.scopes.includes("partner:write")),
+      )
+    ) {
       return;
     }
 

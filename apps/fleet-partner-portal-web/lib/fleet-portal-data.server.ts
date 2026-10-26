@@ -736,8 +736,10 @@ function mapStatement(record: FleetPartnerStatementRecord): FleetStatement {
 }
 
 function isStatementAuthorityError(err: unknown) {
-  const status = err && typeof err === "object" && "statusCode" in err
-    ? (err as { statusCode: unknown }).statusCode : null;
+  const status =
+    err && typeof err === "object" && "statusCode" in err
+      ? (err as { statusCode: unknown }).statusCode
+      : null;
   return status === 401 || status === 403;
 }
 

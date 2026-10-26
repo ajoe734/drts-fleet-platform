@@ -1,8 +1,14 @@
 "use client";
 
 import type { ApiClient } from "@drts/api-client";
-import type { FleetHumanRoleRecord, ManageFleetHumanRoleCommand } from "@drts/contracts";
-export type { FleetHumanRoleRecord, ManageFleetHumanRoleCommand } from "@drts/contracts";
+import type {
+  FleetHumanRoleRecord,
+  ManageFleetHumanRoleCommand,
+} from "@drts/contracts";
+export type {
+  FleetHumanRoleRecord,
+  ManageFleetHumanRoleCommand,
+} from "@drts/contracts";
 
 export type FleetPartnershipType =
   | "driver_recruitment"
@@ -372,11 +378,19 @@ export async function updateFleetPartner(
   return normalizeFleetPartnerRecord(result);
 }
 
-export async function listFleetHumanRoles(client: ApiClient, fleetPartnerId: string, entrySlug: string): Promise<FleetHumanRoleRecord[]> {
+export async function listFleetHumanRoles(
+  client: ApiClient,
+  fleetPartnerId: string,
+  entrySlug: string,
+): Promise<FleetHumanRoleRecord[]> {
   return client.listFleetHumanRoles(fleetPartnerId, entrySlug);
 }
 
-export async function manageFleetHumanRole(client: ApiClient, fleetPartnerId: string, command: ManageFleetHumanRoleCommand): Promise<FleetHumanRoleRecord> {
+export async function manageFleetHumanRole(
+  client: ApiClient,
+  fleetPartnerId: string,
+  command: ManageFleetHumanRoleCommand,
+): Promise<FleetHumanRoleRecord> {
   return client.manageFleetHumanRole(fleetPartnerId, command);
 }
 

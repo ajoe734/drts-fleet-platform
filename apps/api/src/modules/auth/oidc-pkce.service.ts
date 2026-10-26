@@ -1256,39 +1256,76 @@ export class OidcPkceService {
 
     // An active Referral link is not a Fleet staff grant. Resolve only the
     // exact linked canonical human and its manager-created bounded membership.
-    const principal = await this.identityRepository?.findPrincipalById(linkRecord.drtsPassengerId);
+    const principal = await this.identityRepository?.findPrincipalById(
+      linkRecord.drtsPassengerId,
+    );
     if (principal && principal.status !== "active") {
-      throw new ApiRequestError(403, "IAM_PRINCIPAL_NOT_ACTIVE", "Linked principal is not active.");
+      throw new ApiRequestError(
+        403,
+        "IAM_PRINCIPAL_NOT_ACTIVE",
+        "Linked principal is not active.",
+      );
     }
-    const memberships = matchedEntry.partnerType === "fleet_partner" &&
-      principal?.status === "active" && principal.principalType === "human" &&
-      principal.sourceRef === `jwt_principal:partner:${linkRecord.drtsPassengerId}`
-      ? await this.identityRepository?.findMembershipsByPrincipalId(principal.principalId) : [];
-    const managedMembership = memberships?.find((candidate) =>
-      candidate.realm === "partner" && candidate.scopeRef === `fleet:${matchedEntry.entrySlug}` &&
-      candidate.partnerId === matchedEntry.partnerId &&
-      candidate.sourceRef === `fleet_member:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}`);
+    const memberships =
+      matchedEntry.partnerType === "fleet_partner" &&
+      principal?.status === "active" &&
+      principal.principalType === "human" &&
+      principal.sourceRef ===
+        `jwt_principal:partner:${linkRecord.drtsPassengerId}`
+        ? await this.identityRepository?.findMembershipsByPrincipalId(
+            principal.principalId,
+          )
+        : [];
+    const managedMembership = memberships?.find(
+      (candidate) =>
+        candidate.realm === "partner" &&
+        candidate.scopeRef === `fleet:${matchedEntry.entrySlug}` &&
+        candidate.partnerId === matchedEntry.partnerId &&
+        candidate.sourceRef ===
+          `fleet_member:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}`,
+    );
     // A disabled membership never silently falls back to a fresh human grant.
-    const roleBindings = managedMembership?.status === "active"
-      ? await this.identityRepository!.findRoleBindingsByMembershipId(managedMembership.membershipId) : [];
+    const roleBindings =
+      managedMembership?.status === "active"
+        ? await this.identityRepository!.findRoleBindingsByMembershipId(
+            managedMembership.membershipId,
+          )
+        : [];
     const now = Date.now();
-    const activeRoles = roleBindings.filter((binding) =>
-      Boolean(getIamFleetRoleScopes(binding.roleCode)) &&
-      binding.sourceRef === `fleet_role:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}` &&
-      Number.isFinite(Date.parse(binding.validFrom)) && Date.parse(binding.validFrom) <= now &&
-      (!binding.validTo || (Number.isFinite(Date.parse(binding.validTo)) && now < Date.parse(binding.validTo))));
+    const activeRoles = roleBindings.filter(
+      (binding) =>
+        Boolean(getIamFleetRoleScopes(binding.roleCode)) &&
+        binding.sourceRef ===
+          `fleet_role:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}` &&
+        Number.isFinite(Date.parse(binding.validFrom)) &&
+        Date.parse(binding.validFrom) <= now &&
+        (!binding.validTo ||
+          (Number.isFinite(Date.parse(binding.validTo)) &&
+            now < Date.parse(binding.validTo))),
+    );
     const managedRole = activeRoles.length === 1 ? activeRoles[0] : null;
-    const scopes = managedRole ? [...getIamFleetRoleScopes(managedRole.roleCode)!] : ["partner:read", "partner:write"];
+    const scopes = managedRole
+      ? [...getIamFleetRoleScopes(managedRole.roleCode)!]
+      : ["partner:read", "partner:write"];
     // The entry slug identifies the linked subject; the canonical Fleet
     // master identifies the business selector and owned records.
-    const canonicalPartnerId = managedRole ? matchedEntry.partnerId : matchedEntry.entrySlug;
+    const canonicalPartnerId = managedRole
+      ? matchedEntry.partnerId
+      : matchedEntry.entrySlug;
     // Preserve the legacy restricted entry role label for existing consumers;
     // it is not a Fleet human grant and has no business scopes.
     const roles = managedRole ? [managedRole.roleCode] : ["partner_admin"];
-    const managedVersion = managedRole && principal && managedMembership
-      ? Math.max(...[matchedEntry.updatedAt, principal.updatedAt, managedMembership.updatedAt,
-          ...roleBindings.map((binding) => binding.updatedAt)].map((stamp) => Date.parse(stamp)))
-      : Date.parse(matchedEntry.updatedAt);
+    const managedVersion =
+      managedRole && principal && managedMembership
+        ? Math.max(
+            ...[
+              matchedEntry.updatedAt,
+              principal.updatedAt,
+              managedMembership.updatedAt,
+              ...roleBindings.map((binding) => binding.updatedAt),
+            ].map((stamp) => Date.parse(stamp)),
+          )
+        : Date.parse(matchedEntry.updatedAt);
     const identity: IdentityContext = {
       authMode: "jwt_bearer",
       actorType: "partner_user",
@@ -1301,9 +1338,12 @@ export class OidcPkceService {
       roleFamilies: ["partner"],
       roles,
       scopes,
-      ...(managedRole && principal && managedMembership ? {
-        principalId: principal.principalId, membershipId: managedMembership.membershipId,
-      } : {}),
+      ...(managedRole && principal && managedMembership
+        ? {
+            principalId: principal.principalId,
+            membershipId: managedMembership.membershipId,
+          }
+        : {}),
       supportedExecutionModes: [
         "discussion_planning",
         "supervisor_managed_execution",

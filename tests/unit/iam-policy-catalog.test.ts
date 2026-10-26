@@ -78,13 +78,31 @@ describe("IAM policy catalog", () => {
   });
 
   it("keeps Fleet personas distinct from Referral, Host and tenant finance", () => {
-    expect(getIamFleetRoleScopes("fleet_partner_admin")).toEqual(["fleet:read", "fleet:supply:write", "billing:read", "billing:write"]);
-    expect(getIamFleetRoleScopes("fleet_partner_ops")).toEqual(["fleet:read", "fleet:supply:write"]);
-    expect(getIamFleetRoleScopes("fleet_partner_finance")).toEqual(["fleet:read", "billing:read", "billing:write"]);
+    expect(getIamFleetRoleScopes("fleet_partner_admin")).toEqual([
+      "fleet:read",
+      "fleet:supply:write",
+      "billing:read",
+      "billing:write",
+    ]);
+    expect(getIamFleetRoleScopes("fleet_partner_ops")).toEqual([
+      "fleet:read",
+      "fleet:supply:write",
+    ]);
+    expect(getIamFleetRoleScopes("fleet_partner_finance")).toEqual([
+      "fleet:read",
+      "billing:read",
+      "billing:write",
+    ]);
     expect(getIamFleetRoleScopes("partner_finance")).toBeNull();
     expect(getIamActorScopePreset("partner_user")).not.toContain("fleet:read");
-    expect(getIamActorScopePreset("partner_api_key")).not.toContain("fleet:supply:write");
-    expect(getIamScopeDefinition("fleet:read")?.resourceConstraints.map(({ kind }) => kind)).toEqual(["partner", "partner_entry", "object"]);
+    expect(getIamActorScopePreset("partner_api_key")).not.toContain(
+      "fleet:supply:write",
+    );
+    expect(
+      getIamScopeDefinition("fleet:read")?.resourceConstraints.map(
+        ({ kind }) => kind,
+      ),
+    ).toEqual(["partner", "partner_entry", "object"]);
   });
 
   it("exposes a stable catalog version for drift checks", () => {

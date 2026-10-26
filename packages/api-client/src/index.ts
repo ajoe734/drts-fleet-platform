@@ -4606,15 +4606,22 @@ export class ApiClient {
     );
   }
 
-  async listFleetHumanRoles(fleetPartnerId: string, entrySlug: string): Promise<FleetHumanRoleRecord[]> {
+  async listFleetHumanRoles(
+    fleetPartnerId: string,
+    entrySlug: string,
+  ): Promise<FleetHumanRoleRecord[]> {
     return this.getList<FleetHumanRoleRecord>(
       `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/human-roles?entrySlug=${encodeURIComponent(entrySlug)}`,
     );
   }
 
-  async manageFleetHumanRole(fleetPartnerId: string, command: ManageFleetHumanRoleCommand): Promise<FleetHumanRoleRecord> {
+  async manageFleetHumanRole(
+    fleetPartnerId: string,
+    command: ManageFleetHumanRoleCommand,
+  ): Promise<FleetHumanRoleRecord> {
     return this.put<FleetHumanRoleRecord>(
-      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/human-roles`, { body: command },
+      `/api/admin/fleet-partners/${encodeURIComponent(fleetPartnerId)}/human-roles`,
+      { body: command },
     );
   }
 

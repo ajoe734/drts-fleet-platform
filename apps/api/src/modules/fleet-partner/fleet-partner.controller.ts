@@ -393,7 +393,13 @@ export class FleetPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      toApiListData(await this.fleetPartnerService.listFleetHumanRoles(fleetPartnerId, entrySlug)), requestId,
+      toApiListData(
+        await this.fleetPartnerService.listFleetHumanRoles(
+          fleetPartnerId,
+          entrySlug,
+        ),
+      ),
+      requestId,
     );
   }
 
@@ -406,7 +412,12 @@ export class FleetPartnerController {
     @Headers("x-request-id") requestId?: string,
   ) {
     return toApiSuccessEnvelope(
-      await this.fleetPartnerService.manageFleetHumanRole(fleetPartnerId, command, identity), requestId,
+      await this.fleetPartnerService.manageFleetHumanRole(
+        fleetPartnerId,
+        command,
+        identity,
+      ),
+      requestId,
     );
   }
 

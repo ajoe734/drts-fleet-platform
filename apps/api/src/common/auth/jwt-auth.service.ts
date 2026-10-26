@@ -1234,50 +1234,94 @@ export class JwtAuthService {
    * issuance. Legacy scoped service credentials remain on their original path.
    */
   private async validateFleetHumanDurableState(
-    payload: JwtIdentityPayload, session: CanonicalIdentitySessionRecord,
+    payload: JwtIdentityPayload,
+    session: CanonicalIdentitySessionRecord,
   ): Promise<boolean> {
-    if (payload.actorType !== "partner_user" || !payload.partnerEntrySlug ||
-        !payload.principalId || !payload.membershipId || !this.identityRepository ||
-        !this.tenantPartnerService || !this.partnerUserIdentityLinkRepository ||
-        !payload.partnerId ||
-        session.principalId !== payload.principalId || session.membershipId !== payload.membershipId ||
-        session.partnerId !== payload.partnerId || session.partnerEntrySlug !== payload.partnerEntrySlug) return false;
+    if (
+      payload.actorType !== "partner_user" ||
+      !payload.partnerEntrySlug ||
+      !payload.principalId ||
+      !payload.membershipId ||
+      !this.identityRepository ||
+      !this.tenantPartnerService ||
+      !this.partnerUserIdentityLinkRepository ||
+      !payload.partnerId ||
+      session.principalId !== payload.principalId ||
+      session.membershipId !== payload.membershipId ||
+      session.partnerId !== payload.partnerId ||
+      session.partnerEntrySlug !== payload.partnerEntrySlug
+    )
+      return false;
     const entrySlug = payload.partnerEntrySlug;
     let state;
     try {
       state = await Promise.all([
         this.identityRepository.findPrincipalById(payload.principalId),
         this.identityRepository.findMembershipById(payload.membershipId),
-        this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(entrySlug, payload.principalId),
+        this.partnerUserIdentityLinkRepository.findByDrtsPassengerId(
+          entrySlug,
+          payload.principalId,
+        ),
         this.tenantPartnerService.resolvePartnerEntry(entrySlug),
       ] as const);
-    } catch { return false; }
+    } catch {
+      return false;
+    }
     const [principal, membership, link, entry] = state;
-    if (!principal || principal.status !== "active" || principal.principalType !== "human" ||
-        principal.sourceRef !== `jwt_principal:partner:${payload.principalId}` ||
-        !link || link.status !== "active" ||
-        !entry || entry.partnerType !== "fleet_partner" || entry.status !== "active" || !entry.activeFlag ||
-        entry.entrySlug !== entrySlug || entry.partnerId !== payload.partnerId ||
-        !membership || membership.status !== "active" || membership.realm !== "partner" ||
-        membership.principalId !== principal.principalId || membership.partnerId !== entry.partnerId ||
-        membership.scopeRef !== `fleet:${entrySlug}` ||
-        membership.sourceRef !== `fleet_member:${entrySlug}:${principal.principalId}`) return false;
-    const bindings = await this.identityRepository.findRoleBindingsByMembershipId(membership.membershipId);
+    if (
+      !principal ||
+      principal.status !== "active" ||
+      principal.principalType !== "human" ||
+      principal.sourceRef !== `jwt_principal:partner:${payload.principalId}` ||
+      !link ||
+      link.status !== "active" ||
+      !entry ||
+      entry.partnerType !== "fleet_partner" ||
+      entry.status !== "active" ||
+      !entry.activeFlag ||
+      entry.entrySlug !== entrySlug ||
+      entry.partnerId !== payload.partnerId ||
+      !membership ||
+      membership.status !== "active" ||
+      membership.realm !== "partner" ||
+      membership.principalId !== principal.principalId ||
+      membership.partnerId !== entry.partnerId ||
+      membership.scopeRef !== `fleet:${entrySlug}` ||
+      membership.sourceRef !==
+        `fleet_member:${entrySlug}:${principal.principalId}`
+    )
+      return false;
+    const bindings =
+      await this.identityRepository.findRoleBindingsByMembershipId(
+        membership.membershipId,
+      );
     const now = Date.now();
-    const active = bindings.filter((binding) =>
-      binding.sourceRef === `fleet_role:${entrySlug}:${principal.principalId}` &&
-      getIamFleetRoleScopes(binding.roleCode) &&
-      Number.isFinite(Date.parse(binding.validFrom)) && Date.parse(binding.validFrom) <= now &&
-      (!binding.validTo || (Number.isFinite(Date.parse(binding.validTo)) && now < Date.parse(binding.validTo))));
+    const active = bindings.filter(
+      (binding) =>
+        binding.sourceRef ===
+          `fleet_role:${entrySlug}:${principal.principalId}` &&
+        getIamFleetRoleScopes(binding.roleCode) &&
+        Number.isFinite(Date.parse(binding.validFrom)) &&
+        Date.parse(binding.validFrom) <= now &&
+        (!binding.validTo ||
+          (Number.isFinite(Date.parse(binding.validTo)) &&
+            now < Date.parse(binding.validTo))),
+    );
     const currentRole = active[0];
     if (active.length !== 1 || !currentRole) return false;
     const version = this.computeWorkforceTokenVersion([
-      entry.updatedAt, principal.updatedAt, membership.updatedAt,
+      entry.updatedAt,
+      principal.updatedAt,
+      membership.updatedAt,
       ...bindings.map((binding) => binding.updatedAt),
     ]);
-    return payload.tokenVersion === version &&
+    return (
+      payload.tokenVersion === version &&
       arraysEqual(payload.roles, [currentRole.roleCode]) &&
-      arraysEqual(payload.scopes, [...getIamFleetRoleScopes(currentRole.roleCode)!]);
+      arraysEqual(payload.scopes, [
+        ...getIamFleetRoleScopes(currentRole.roleCode)!,
+      ])
+    );
   }
 
   /**

@@ -587,7 +587,8 @@ export function resolveRouteAuthPolicy(
 
   if (routePath.startsWith("fleet-partner/")) {
     const routeSuffix = routePath.slice("fleet-partner/".length) || "root";
-    const finance = routeSuffix.startsWith("statements") || routeSuffix.startsWith("revenue");
+    const finance =
+      routeSuffix.startsWith("statements") || routeSuffix.startsWith("revenue");
     // Academy has its own @RequireScopes(reports:read) and independent
     // tenant/ops selector. Preserve those existing callers while Fleet human
     // training access is evaluated through that endpoint's own guard.

@@ -202,7 +202,10 @@ export async function resolveFleetPrincipal(
       "FLEET_PARTNER_AUTHORITY_REQUIRED",
       "The existing principal has no original partner-realm binding; tenant/training or workforce authority cannot be promoted to Fleet partner authority.",
     );
-  if (!identity.scopes?.includes("fleet:read") && !identity.scopes?.includes("billing:read"))
+  if (
+    !identity.scopes?.includes("fleet:read") &&
+    !identity.scopes?.includes("billing:read")
+  )
     throw fleetError(
       403,
       "AUTH_SCOPE_DENIED",

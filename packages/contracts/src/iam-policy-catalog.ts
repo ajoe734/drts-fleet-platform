@@ -1,4 +1,5 @@
-export const IAM_POLICY_CATALOG_VERSION = "2026-10-26.fleet-human-roles" as const;
+export const IAM_POLICY_CATALOG_VERSION =
+  "2026-10-26.fleet-human-roles" as const;
 
 export const IAM_ACTOR_TYPES = [
   "system",
@@ -327,14 +328,24 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   {
     scope: "fleet:read",
     allowedRealms: ["partner"],
-    description: "Read own Fleet operational records, not Host or Referral data.",
-    resourceConstraints: [PARTNER_CONSTRAINT, PARTNER_ENTRY_CONSTRAINT, OBJECT_CONSTRAINT],
+    description:
+      "Read own Fleet operational records, not Host or Referral data.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
   },
   {
     scope: "fleet:supply:write",
     allowedRealms: ["partner"],
-    description: "Manage own Fleet supply drafts and submissions, never approve registry changes.",
-    resourceConstraints: [PARTNER_CONSTRAINT, PARTNER_ENTRY_CONSTRAINT, OBJECT_CONSTRAINT],
+    description:
+      "Manage own Fleet supply drafts and submissions, never approve registry changes.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
   },
   {
     scope: "billing:read",
@@ -351,7 +362,11 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     allowedRealms: ["system", "platform", "tenant", "ops", "partner"],
     description:
       "Mutate billing and settlement data within the caller boundary.",
-    resourceConstraints: [TENANT_CONSTRAINT, PARTNER_CONSTRAINT, OBJECT_CONSTRAINT],
+    resourceConstraints: [
+      TENANT_CONSTRAINT,
+      PARTNER_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
   },
   {
     scope: "billing:monthly:run",
@@ -1010,14 +1025,37 @@ export const IAM_TENANT_ROLE_POLICY_BY_CODE = new Map(
 export const AGENCY_VIEWER_ROLE_CODE = "agency_viewer";
 export const AGENCY_EXPORTER_ROLE_CODE = "agency_exporter";
 
-export const IAM_FLEET_ROLE_POLICY_DEFINITIONS: readonly IamFleetRolePolicyDefinition[] = [
-  { roleCode: "fleet_partner_admin", roleFamily: "partner", scopes: ["fleet:read", "fleet:supply:write", "billing:read", "billing:write"] },
-  { roleCode: "fleet_partner_ops", roleFamily: "partner", scopes: ["fleet:read", "fleet:supply:write"] },
-  { roleCode: "fleet_partner_finance", roleFamily: "partner", scopes: ["fleet:read", "billing:read", "billing:write"] },
-];
+export const IAM_FLEET_ROLE_POLICY_DEFINITIONS: readonly IamFleetRolePolicyDefinition[] =
+  [
+    {
+      roleCode: "fleet_partner_admin",
+      roleFamily: "partner",
+      scopes: [
+        "fleet:read",
+        "fleet:supply:write",
+        "billing:read",
+        "billing:write",
+      ],
+    },
+    {
+      roleCode: "fleet_partner_ops",
+      roleFamily: "partner",
+      scopes: ["fleet:read", "fleet:supply:write"],
+    },
+    {
+      roleCode: "fleet_partner_finance",
+      roleFamily: "partner",
+      scopes: ["fleet:read", "billing:read", "billing:write"],
+    },
+  ];
 
-export function getIamFleetRoleScopes(roleCode: string): readonly string[] | null {
-  return IAM_FLEET_ROLE_POLICY_DEFINITIONS.find((role) => role.roleCode === roleCode)?.scopes ?? null;
+export function getIamFleetRoleScopes(
+  roleCode: string,
+): readonly string[] | null {
+  return (
+    IAM_FLEET_ROLE_POLICY_DEFINITIONS.find((role) => role.roleCode === roleCode)
+      ?.scopes ?? null
+  );
 }
 
 export const IAM_AGENCY_ROLE_POLICY_DEFINITIONS: readonly IamAgencyRolePolicyDefinition[] =
