@@ -188,7 +188,7 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
       token: string,
       path: string,
       handler: unknown,
-      controller = FleetPartnerController,
+      controller: unknown = FleetPartnerController,
     ) =>
       guard.canActivate({
         switchToHttp: () => ({
@@ -514,7 +514,7 @@ describe("existing scoped credential guard compatibility without Referral/Host p
       token: string,
       path: string,
       handler: unknown,
-      controller = FleetPartnerController,
+      controller: unknown = FleetPartnerController,
     ) =>
       guard.canActivate({
         switchToHttp: () => ({
