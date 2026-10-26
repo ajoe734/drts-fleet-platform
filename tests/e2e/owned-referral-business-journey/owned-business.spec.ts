@@ -66,6 +66,11 @@ import {
   type DisplayObservations,
 } from "./display-observations";
 import {
+  resolveActiveTripScreenOrder,
+  runOwnedDailyReportDownloads,
+  type DailyReportDownloadsEvidence,
+} from "./daily-report-downloads";
+import {
   RETAINED_REFERRAL_ORDER,
   recoverRetainedReferralOrder,
 } from "./retained-order-recovery";
@@ -231,6 +236,7 @@ test(journeyName, async ({ browser, request }) => {
   let completed = false;
   let recoveryResolved = false;
   let displayObservations: DisplayObservations | undefined;
+  let dailyReportDownloads: DailyReportDownloadsEvidence | undefined;
   let retainedRecovery: Readonly<{
     originalRun: number;
     orderId: string;
@@ -762,13 +768,14 @@ test(journeyName, async ({ browser, request }) => {
         "taxi_driver_registration",
       ]);
       driverId = text(approvedDriver.canonicalDriverId);
+      const ownPlateNo = `SIM-${randomUUID().slice(0, 8).toUpperCase()}`;
       const vehicleDraft = await call(
         "fleet",
         "/control-plane-proxy/fleet-partner/supply-submissions/vehicles",
         {
           method: "POST",
           body: {
-            plateNo: `SIM-${randomUUID().slice(0, 8).toUpperCase()}`,
+            plateNo: ownPlateNo,
             licenseType: "business_vehicle",
             brand: "合成示範",
             model: "非正式測試車",
@@ -1620,10 +1627,7 @@ test(journeyName, async ({ browser, request }) => {
         async () => {
           const card = page.getByRole("link").filter({
             hasText: displayOrderNo(
-              text(
-                history.orderNo,
-                "canonical history order number required",
-              ),
+              text(history.orderNo, "canonical history order number required"),
             ),
           });
           await expect(card).toHaveCount(1);
@@ -2080,17 +2084,21 @@ test(journeyName, async ({ browser, request }) => {
             const button = page.locator(
               '[data-drt-operation="referral-cancel"]',
             );
-            await expect(
-              page.getByText(id, { exact: false }).first(),
-            ).toBeVisible();
             const active = object(
               (await referral("/api/referral/active")).data,
             );
-            const current = object(active.trip);
-            requireFact(
-              current.orderId === id,
-              "current UI cancellation exact order",
+            const resolvedTrip = resolveActiveTripScreenOrder(
+              active,
+              id,
+              page.url(),
+              "current UI cancellation",
             );
+            await expect(
+              page
+                .getByText(resolvedTrip.displayOrderNo, { exact: false })
+                .first(),
+            ).toBeVisible();
+            const current = resolvedTrip.trip;
             const window = readCancellationWindowSnapshot(
               current.cancellationWindow,
             );
@@ -2277,14 +2285,21 @@ test(journeyName, async ({ browser, request }) => {
                 `${origins.referral}/embed/${ENTRY}?state=handoff&screen=${screen}&orderId=${encodeURIComponent(id)}`,
               );
             if (screen === "trip") {
-              await expect(
-                page.getByText(id, { exact: false }).first(),
-              ).toBeVisible();
               const active = object(
                 (await referral("/api/referral/active")).data,
               );
-              const current = object(active.trip);
-              requireFact(current.orderId === id, "capture exact active order");
+              const resolvedTrip = resolveActiveTripScreenOrder(
+                active,
+                id,
+                page.url(),
+                "capture active trip",
+              );
+              await expect(
+                page
+                  .getByText(resolvedTrip.displayOrderNo, { exact: false })
+                  .first(),
+              ).toBeVisible();
+              const current = resolvedTrip.trip;
               const window = readCancellationWindowSnapshot(
                 current.cancellationWindow,
               );
@@ -2343,6 +2358,37 @@ test(journeyName, async ({ browser, request }) => {
         directory: DIRECTORY,
         definitionSha: definition,
         runtimeSha: runtime,
+      });
+      const completedOrderForReport = await getOrder();
+      const controlledOrderIds = [
+        completedOrderId,
+        ...cancellations
+          .map((stage) => stage.orderId)
+          .filter(
+            (candidate): candidate is string =>
+              typeof candidate === "string" && candidate.trim().length > 0,
+          ),
+      ];
+      dailyReportDownloads = await runOwnedDailyReportDownloads({
+        context,
+        page,
+        opsOrigin: origins.ops,
+        opsHeaders: (url) => tx.headers("ops", url),
+        order: completedOrderForReport,
+        completedTask,
+        entrySlug: ENTRY,
+        fleetSupplyTenantId: TENANT,
+        controlledOrderIds,
+        driverId,
+        vehicleId,
+        plateNo: ownPlateNo,
+        pickupAddress,
+        dropoffAddress,
+        directory: DIRECTORY,
+        definitionSha: definition,
+        runtimeSha: runtime,
+        recoveryOnly: RECOVERY_ONLY,
+        evidence,
       });
     }
   } catch (error) {
@@ -2526,6 +2572,7 @@ test(journeyName, async ({ browser, request }) => {
               }))
             : cancellations,
           displayObservations: displayObservations ?? null,
+          dailyReportDownloads: dailyReportDownloads ?? null,
         },
         null,
         2,
