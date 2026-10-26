@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
 import { describe, expect, it } from "vitest";
+import { toApiListData, toApiSuccessEnvelope } from "../../../apps/api/src/common/api-envelope";
 import { recordsToCsv } from "../../../apps/api/src/common/csv";
+import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import {
   recordsToPdf,
   recordsToXlsx,
@@ -165,6 +167,18 @@ function buildJobDetailFixture(
     rows,
     ...overrides,
   };
+}
+
+// Preserve the real API success producer and global wire interceptor in the
+// socket-free harness; only the browser/transport are simulated below.
+function successWireBytes(data: unknown): Buffer {
+  return Buffer.from(
+    JSON.stringify(
+      deepToSnakeCase(
+        toApiSuccessEnvelope(data, "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55"),
+      ),
+    ),
+  );
 }
 
 async function renderFormatBytes(
@@ -1061,19 +1075,13 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             // cannot issue the dependent client-side jobs list request.
             if (failedPage) return null;
             initialJobsRequests += 1;
-            const jobsPayload = {
-              ok: true,
-              data: {
-                items: createdJobs.map((j) => j.detail),
-              },
-            };
             await dispatchRoute(
               "GET",
               `${OPS_ORIGIN}/control-plane-proxy/reports/jobs`,
               null,
               200,
               { "content-type": "application/json" },
-              Buffer.from(JSON.stringify(jobsPayload)),
+              successWireBytes(toApiListData(createdJobs.map((j) => j.detail))),
             );
             return null;
           },
@@ -1115,7 +1123,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                                 message: "private-error-message",
                               },
                             }
-                          : { ok: true, data: { items: rows } },
+                          : deepToSnakeCase(
+                              toApiSuccessEnvelope(toApiListData(rows)),
+                            ),
                       ),
                     ),
                   );
@@ -1141,15 +1151,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     JSON.stringify(bodyObj),
                     200,
                     { "content-type": "application/json" },
-                    Buffer.from(
-                      JSON.stringify({
-                        ok: true,
-                        data: {
-                          rebuiltCount: 2,
-                          generatedAt: "2026-10-25T18:31:00.000Z",
-                        },
-                      }),
-                    ),
+                    successWireBytes({
+                      rebuiltCount: 2,
+                      generatedAt: "2026-10-25T18:31:00.000Z",
+                    }),
                   );
                   const query = new URLSearchParams(bodyObj);
                   await dispatchRoute(
@@ -1158,11 +1163,8 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     null,
                     200,
                     { "content-type": "application/json" },
-                    Buffer.from(
-                      JSON.stringify({
-                        ok: true,
-                        data: { items: [previewSiblingRow, ownRow] },
-                      }),
+                    successWireBytes(
+                      toApiListData([previewSiblingRow, ownRow]),
                     ),
                   );
                 },
@@ -1197,16 +1199,11 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     JSON.stringify(reqBody),
                     201,
                     { "content-type": "application/json" },
-                    Buffer.from(
-                      JSON.stringify({
-                        ok: true,
-                        data: {
-                          jobId,
-                          status: "completed",
-                          acceptedAt: "2026-10-25T18:32:00.000Z",
-                        },
-                      }),
-                    ),
+                    successWireBytes({
+                      jobId,
+                      status: "completed",
+                      acceptedAt: "2026-10-25T18:32:00.000Z",
+                    }),
                   );
                 },
               });
@@ -1305,7 +1302,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                                         message: "private-detail-error",
                                       },
                                     }
-                                  : { ok: true, data: foundJob.detail },
+                                  : deepToSnakeCase(
+                                      toApiSuccessEnvelope(foundJob.detail),
+                                    ),
                               ),
                             ),
                           );
