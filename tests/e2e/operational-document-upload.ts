@@ -1790,6 +1790,23 @@ export async function prepareOperationalFleetSession(
   ) => {
     const identity = objectValue(data.identity);
     const grantedScopes = identity.scopes;
+    // Issued first keys must echo exactly our declared grants. A supplied key
+    // belongs to its caller: accept equivalent explicit own-Fleet read/write
+    // grants, but never augment the token or mistake finance-only for supply.
+    // Mirror the backend Fleet dashboard/read/driver scope boundary: legacy
+    // partner aliases require an unlinked credential and partner:read, whereas
+    // direct fleet:* grants may satisfy their respective routes independently.
+    const hasSuppliedFleetAccess = (scopes: string[]) => {
+      const legacyRead =
+        !identity.membershipId && scopes.includes("partner:read");
+      return (
+        scopes.includes("billing:read") &&
+        (scopes.includes("fleet:read") || legacyRead) &&
+        (scopes.includes("fleet:finance:read") || legacyRead) &&
+        (scopes.includes("fleet:supply:write") ||
+          (legacyRead && scopes.includes("partner:write")))
+      );
+    };
     requireValue(
       (!activeSession || data.active === true) &&
         identity.realm === "partner" &&
@@ -1802,7 +1819,9 @@ export async function prepareOperationalFleetSession(
         identity.actorId.trim() &&
         identity.partnerId === configuration.fleetPartnerId &&
         Array.isArray(grantedScopes) &&
-        ownFleetScopes.every((scope) => grantedScopes.includes(scope)),
+        (issued
+          ? hasExactOwnScopes(grantedScopes)
+          : hasSuppliedFleetAccess(grantedScopes)),
       "verified session",
     );
     if (issued) {

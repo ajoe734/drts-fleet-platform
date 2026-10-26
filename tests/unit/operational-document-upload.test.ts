@@ -2019,15 +2019,39 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
       fault === "foreign-program" ? "foreign-program" : entry.programId,
     sessionId: "own-session-dummy",
     scopes:
-      fault === "provided-read-only"
-        ? ["billing:read", "partner:read"]
-        : fault === "session-read-only"
-          ? ["billing:read"]
-          : fault === "session-extra"
-            ? [...issuedScopes(), "billing:write"]
-            : calls.some((c) => c.path.endsWith("/credentials/issue"))
-              ? issuedScopes()
-              : declaredScopes,
+      fault === "provided-direct" || fault === "provided-direct-inactive"
+        ? [
+            "billing:read",
+            "fleet:read",
+            "fleet:finance:read",
+            "fleet:supply:write",
+          ]
+        : fault === "provided-mixed"
+          ? ["billing:read", "partner:read", "fleet:supply:write"]
+          : fault === "provided-direct-read-only"
+            ? ["billing:read", "fleet:read", "fleet:finance:read"]
+            : fault === "provided-direct-write-only"
+              ? ["billing:read", "fleet:supply:write"]
+              : fault === "provided-finance-only"
+                ? ["billing:read", "fleet:finance:read", "fleet:supply:write"]
+                : fault === "provided-mixed-without-legacy-read"
+                  ? [
+                      "billing:read",
+                      "fleet:read",
+                      "fleet:finance:read",
+                      "partner:write",
+                    ]
+                  : fault === "provided-read-only"
+                    ? ["billing:read", "partner:read"]
+                    : fault === "session-read-only"
+                      ? ["billing:read"]
+                      : fault === "session-extra"
+                        ? [...issuedScopes(), "billing:write"]
+                        : calls.some((c) =>
+                              c.path.endsWith("/credentials/issue"),
+                            )
+                          ? issuedScopes()
+                          : declaredScopes,
   });
   const reply = (data: unknown, status = 200) =>
     new Response(JSON.stringify(deepToSnakeCase({ data })), {
@@ -2284,7 +2308,9 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
           if (fault === "session-revoked")
             return authError("SESSION_REVOKED", 401);
           return reply({
-            active: fault !== "session-inactive",
+            active:
+              fault !== "session-inactive" &&
+              fault !== "provided-direct-inactive",
             identity:
               fault === "session-echo-actor"
                 ? { ...identity(), actorId: "other-key" }
@@ -2697,6 +2723,79 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
     expect(maskOutput).toEqual(["::add-mask::provided-session-dummy\n"]);
   });
+
+  it.each(["provided-direct", "provided-mixed"])(
+    "accepts a backend-authorized %s provided own Fleet session without minting or revoking anything",
+    async (variant) => {
+      vi.stubEnv(
+        "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+        "provided-session-dummy",
+      );
+      fault = variant;
+      const principal = { ...identity(), membershipId: null, roles: [] };
+      const guard = new BootstrapAuthGuard({} as any) as any;
+      for (const [method, route] of [
+        ["GET", "/api/fleet-partner/dashboard"],
+        ["GET", "/api/fleet-partner/supply-submissions"],
+        ["POST", "/api/fleet-partner/supply-submissions/drivers"],
+      ]) {
+        const policy = resolveRouteAuthPolicy(method, route)!;
+        expect(policy).toBeTruthy();
+        expect(() =>
+          guard.assertScopesAllowed(principal, policy.requiredScopes, {
+            method,
+            originalUrl: route,
+            headers: {},
+          }),
+        ).not.toThrow();
+      }
+      prepared = await prepareOperationalFleetSession(configuration);
+      expect(prepared.metadata.source).toBe("provided-session");
+      await prepared.cleanup();
+      expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
+      expect(revokedKey || revokedEntry || adminRevoked).toBe(false);
+      expect(maskOutput).toEqual(["::add-mask::provided-session-dummy\n"]);
+    },
+  );
+
+  it.each([
+    "provided-direct-read-only",
+    "provided-direct-write-only",
+    "provided-finance-only",
+    "provided-mixed-without-legacy-read",
+    "provided-direct-inactive",
+  ])(
+    "rejects insufficient %s provided session without any mutation",
+    async (variant) => {
+      vi.stubEnv(
+        "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+        "provided-session-dummy",
+      );
+      fault = variant;
+      if (variant !== "provided-direct-inactive") {
+        const route =
+          variant === "provided-direct-write-only" ||
+          variant === "provided-finance-only"
+            ? "/api/fleet-partner/dashboard"
+            : "/api/fleet-partner/supply-submissions/drivers";
+        const method = route.endsWith("/drivers") ? "POST" : "GET";
+        const guard = new BootstrapAuthGuard({} as any) as any;
+        const policy = resolveRouteAuthPolicy(method, route)!;
+        expect(() =>
+          guard.assertScopesAllowed(
+            { ...identity(), membershipId: null, roles: [] },
+            policy.requiredScopes,
+            { method, originalUrl: route, headers: {} },
+          ),
+        ).toThrow();
+      }
+      await expect(
+        prepareOperationalFleetSession(configuration),
+      ).rejects.toThrow(/verified session/);
+      expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
+      expect(revokedKey || revokedEntry || adminRevoked).toBe(false);
+    },
+  );
 
   it("rejects a real provided read-only session before any mutation without minting or revoking it", async () => {
     vi.stubEnv(
