@@ -1119,12 +1119,13 @@ export class BootstrapAuthGuard implements CanActivate {
       return;
     }
 
-    // A preexisting explicitly scoped signed partner credential can still use
-    // its original own-Fleet operations after human roles move to fleet:*.
-    // This is NOT a role/Referral link grant: ordinary linked OIDC subjects
-    // have partner:read/write but no billing:read, managed finance has no
-    // partner:write, Host has neither. Do not relax other decorator scopes,
-    // training's separate reports:read rule, or canonical selector checks.
+    // Explicitly scoped partner credentials retain original own-Fleet operations
+    // after human roles move to fleet:*. Non-strict deployments also accept the
+    // existing partner_api_key bootstrap fixture when it explicitly carries
+    // read AND write scopes. Strict deployments reject bootstrap headers above.
+    // This is NOT a Referral/finance grant: ordinary linked subjects lack
+    // billing:read and finance cannot write supply. Keep decorator, training
+    // reports:read and canonical selector checks intact.
     const route = normalizeRoutePath(
       request.originalUrl ?? request.url ?? "",
     ).replace(/^api\/+/, "");
@@ -1132,10 +1133,13 @@ export class BootstrapAuthGuard implements CanActivate {
       route.startsWith("fleet-partner/") &&
       !route.startsWith("fleet-partner/training/");
     const scopedCredential =
-      identity.authMode === "jwt_bearer" &&
+      ((identity.authMode === "jwt_bearer" &&
+        (identity.actorType === "partner_api_key" ||
+          identity.actorType === "partner_user")) ||
+        (identity.authMode === "bootstrap_headers" &&
+          !isStrictAuthEnvironment() &&
+          identity.actorType === "partner_api_key")) &&
       identity.realm === "partner" &&
-      (identity.actorType === "partner_api_key" ||
-        identity.actorType === "partner_user") &&
       !identity.membershipId &&
       Boolean(identity.partnerId?.trim()) &&
       identity.scopes.includes("billing:read") &&

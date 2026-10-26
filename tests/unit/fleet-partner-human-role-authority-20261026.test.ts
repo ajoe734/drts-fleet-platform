@@ -356,6 +356,44 @@ describe("existing scoped credential guard compatibility without Referral/Host p
       code: "AUTH_SCOPE_DENIED",
     });
   });
+
+  it("retains explicitly scoped non-strict partner API key bootstrap supply without finance-only write", async () => {
+    const guard = new BootstrapAuthGuard(new Reflector());
+    const request = (scopes: string, selector = "fleet-test-001") => ({
+      method: "POST",
+      url: "/api/fleet-partner/supply-submissions/drivers",
+      headers: {
+        "x-actor-type": "partner_api_key",
+        "x-actor-id": "fleet-test-api-key",
+        "x-partner-id": "fleet-test-001",
+        "x-fleet-partner-id": selector,
+        "x-scopes": scopes,
+      },
+    });
+    const activate = async (req: ReturnType<typeof request>) =>
+      guard.canActivate({
+        switchToHttp: () => ({ getRequest: () => req }),
+        getHandler: () =>
+          FleetPartnerController.prototype.createDriverSupplySubmission,
+        getClass: () => FleetPartnerController,
+      } as never);
+    await expect(
+      activate(request("billing:read partner:entries:read")),
+    ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+    expect(
+      await activate(
+        request("billing:read partner:read partner:write partner:entries:read"),
+      ),
+    ).toBe(true);
+    await expect(
+      activate(
+        request("billing:read partner:read partner:write", "another-fleet"),
+      ),
+    ).rejects.toMatchObject({ code: "FLEET_SCOPE_DENIED" });
+    await expect(
+      activate(request("partner:read partner:write")),
+    ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+  });
 });
 
 describe("manager producer through production repository SQL (transactional fake PG port)", () => {
