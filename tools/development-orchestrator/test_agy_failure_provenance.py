@@ -26,7 +26,12 @@ class AntigravityFailureProvenanceTests(unittest.TestCase):
                 self.assertIsNone(detect_failure_signal_in_lines([self.step(kind)]))
 
     def test_native_rejection_after_tool_output_still_pauses(self):
-        for error in ("Error: Individual quota reached. Resets in 61h.", "API Error: 401 Unauthorized"):
+        for error in (
+            "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 116h50m26s.",
+            "individual QUOTA reached. Resets in 61h.",
+            "Error: Individual quota reached. Resets in 61h.",
+            "API Error: 401 Unauthorized",
+        ):
             with self.subTest(error=error):
                 event = json.dumps({"event": "result", "result": {"status": "ERROR", "error": error}})
                 signal = detect_failure_signal_in_lines([self.step("tool"), event])
@@ -46,3 +51,25 @@ class AntigravityFailureProvenanceTests(unittest.TestCase):
         self.assertIsNotNone(signal)
         self.assertEqual(signal.source, "raw_process_line")
         self.assertTrue(signal.provider_pause_authorized)
+
+    def test_bare_quota_requires_native_terminal_error(self):
+        error = "Individual quota reached. Resets in 61h."
+        for kind in ("tool", "user_input", "agent_response"):
+            with self.subTest(step_type=kind):
+                event = json.dumps({"event": "step_update", "step_update": {
+                    "step_type": kind, "state": "ERROR", "text": error,
+                    "error_message": error,
+                }})
+                self.assertIsNone(detect_failure_signal_in_lines([event]))
+        done = json.dumps({"event": "result", "result": {"status": "DONE", "error": error}})
+        self.assertIsNone(detect_failure_signal_in_lines([done]))
+        response = json.dumps({"event": "result", "result": {"status": "ERROR", "response": error}})
+        signal = detect_failure_signal_in_lines([response])
+        self.assertIsNotNone(signal)
+        self.assertFalse(signal.provider_pause_authorized)
+        # A non-prefix lookalike must not acquire quota authority.
+        lookalike = json.dumps({"event": "result", "result": {
+            "status": "ERROR", "error": "Reported: Individual quota reached"}})
+        signal = detect_failure_signal_in_lines([lookalike])
+        self.assertIsNotNone(signal)
+        self.assertFalse(signal.provider_pause_authorized)
