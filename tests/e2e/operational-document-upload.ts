@@ -1775,6 +1775,14 @@ export async function prepareOperationalFleetSession(
     });
   }
 
+  // The normal first key is an explicitly declared own-Fleet read/write credential,
+  // not a legacy billing-only key or an implicit human/finance grant.
+  const ownFleetScopes = ["billing:read", "partner:read", "partner:write"];
+  const hasExactOwnScopes = (scopes: unknown) =>
+    Array.isArray(scopes) &&
+    scopes.length === ownFleetScopes.length &&
+    ownFleetScopes.every((scope) => scopes.includes(scope));
+
   const verifyIdentity = (
     data: Record<string, unknown>,
     issued: boolean,
@@ -1791,7 +1799,7 @@ export async function prepareOperationalFleetSession(
         identity.actorId.trim() &&
         identity.partnerId === configuration.fleetPartnerId &&
         Array.isArray(identity.scopes) &&
-        identity.scopes.includes("billing:read"),
+        ownFleetScopes.every((scope) => identity.scopes.includes(scope)),
       "verified session",
     );
     if (issued) {
@@ -1801,8 +1809,7 @@ export async function prepareOperationalFleetSession(
           identity.partnerEntrySlug === entrySlug &&
           identity.tenantId === configuration.tenantId &&
           identity.partnerProgramId === programId &&
-          Array.isArray(identity.scopes) &&
-          identity.scopes.length === 1 &&
+          hasExactOwnScopes(identity.scopes) &&
           (!activeSession || identity.principalId === ownKeyId),
         "issued session binding",
       );
@@ -2053,6 +2060,7 @@ export async function prepareOperationalFleetSession(
     entryHasUnownedCredentials =
       !Array.isArray(credentials.items) || credentials.items.length !== 0;
     requireValue(!entryHasUnownedCredentials, "no existing keys to rotate");
+    const keyExpiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
     const issued = await adminMutation(
       "first key issue",
       `${entryPath}/credentials/issue`,
@@ -2062,8 +2070,8 @@ export async function prepareOperationalFleetSession(
         ownerName: "Synthetic operational worker",
         ownerType: "operational_acceptance",
         purpose: "Original operational document lifecycle acceptance",
-        scopes: ["billing:read"],
-        expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+        scopes: ownFleetScopes,
+        expiresAt: keyExpiresAt,
       },
       deadline,
       (ack) => {
@@ -2085,10 +2093,11 @@ export async function prepareOperationalFleetSession(
         typeof plaintextKey === "string" &&
         plaintextKey &&
         credential.realm === "partner" &&
+        credential.ownerRef === requestId &&
+        credential.ownerType === "operational_acceptance" &&
         credential.resourceScope === `partner_entry:${entrySlug}` &&
-        Array.isArray(credential.scopes) &&
-        credential.scopes.length === 1 &&
-        credential.scopes[0] === "billing:read" &&
+        hasExactOwnScopes(credential.scopes) &&
+        credential.expiresAt === keyExpiresAt &&
         credential.status === "active" &&
         credential.revokedAt === null &&
         issued.revokedCredentialId === null &&
@@ -2115,7 +2124,7 @@ export async function prepareOperationalFleetSession(
           configuration.fleetPartnerId,
       "bootstrap receipt",
     );
-    verifyIdentity(bootstrap, true, false);
+    const bootstrapIdentity = verifyIdentity(bootstrap, true, false);
     applicationToken = bootstrap.accessToken as string;
     const session = await request(
       "issued session",
@@ -2134,6 +2143,14 @@ export async function prepareOperationalFleetSession(
       },
     );
     const identity = verifyIdentity(session, true);
+    requireValue(
+      ["realm", "actorType", "actorId", "partnerId", "partnerEntrySlug", "tenantId", "partnerProgramId"].every(
+        (field) => identity[field] === bootstrapIdentity[field],
+      ) &&
+        hasExactOwnScopes(bootstrapIdentity.scopes) &&
+        hasExactOwnScopes(identity.scopes),
+      "issued session echo",
+    );
     requireValue(
       typeof identity.sessionId === "string" && identity.sessionId,
       "owned session receipt",
