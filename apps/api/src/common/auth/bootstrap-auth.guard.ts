@@ -1121,7 +1121,9 @@ export class BootstrapAuthGuard implements CanActivate {
       if (identity.realm !== "partner" || !trainingRoute) return;
       const url = request.originalUrl ?? request.url ?? "";
       const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
-      const rawQuery = asQueryRecord(request.query)["fleetPartnerId"];
+      const rawQuery = asQueryRecord(
+        (request as AuthenticatedRequestLike & { query?: unknown }).query,
+      )["fleetPartnerId"];
       const selected = params.getAll("fleetPartnerId");
       if (
         !identity.partnerId?.trim() ||
