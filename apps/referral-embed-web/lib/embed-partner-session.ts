@@ -250,7 +250,9 @@ async function verifyReferralBearerClaims(session: ServerReferralEmbedSession) {
   });
   if (!response.ok) throw authError();
   const envelope: unknown = await response.json().catch(() => null);
-  const root = envelope as { data?: { active?: unknown; identity?: Record<string, unknown> } } | null;
+  const root = envelope as {
+    data?: { active?: unknown; identity?: Record<string, unknown> };
+  } | null;
   const identity = root?.data?.identity;
   if (
     root?.data?.active !== true ||
@@ -259,7 +261,10 @@ async function verifyReferralBearerClaims(session: ServerReferralEmbedSession) {
     identity.realm !== "partner" ||
     identity.actor_type !== "referral_passenger" ||
     identity.actor_id !== session.drtsPassengerId ||
+    identity.subject !== session.drtsPassengerId ||
     identity.drts_passenger_id !== session.drtsPassengerId ||
+    !Array.isArray(identity.roles) ||
+    !identity.roles.includes("referral_passenger") ||
     identity.partner_entry_slug !== session.partnerEntrySlug ||
     identity.tenant_id !== session.identity.tenantId ||
     identity.partner_id !== session.identity.partnerId ||
@@ -271,7 +276,8 @@ async function verifyReferralBearerClaims(session: ServerReferralEmbedSession) {
     typeof identity.expires_at !== "string" ||
     !Number.isFinite(Date.parse(identity.expires_at)) ||
     Date.parse(identity.expires_at) <= Date.now()
-  ) throw authError();
+  )
+    throw authError();
 }
 
 export async function toPublicReferralEmbedSessionReadback(

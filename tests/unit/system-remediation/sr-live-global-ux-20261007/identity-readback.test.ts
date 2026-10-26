@@ -288,9 +288,9 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
 
         // Old literal check against raw upstream /api/auth/session was RED because
         // data.identity.roles contains canonical tenant_* role codes, not bank_* UI roles.
-        expect(legacyLiteralReadbackMatches(sessionSpec, rawUpstreamEnvelope)).toBe(
-          false,
-        );
+        expect(
+          legacyLiteralReadbackMatches(sessionSpec, rawUpstreamEnvelope),
+        ).toBe(false);
 
         vi.stubGlobal(
           "fetch",
@@ -314,9 +314,8 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
           scopes,
         });
         const signedCookie = signSessionRole(bankRole, "acme");
-        const { GET } = await import(
-          "../../../../apps/bank-console-web/app/api/auth/[...auth]/route"
-        );
+        const { GET } =
+          await import("../../../../apps/bank-console-web/app/api/auth/[...auth]/route");
         const response = await GET(
           new NextRequest("https://bank-console.run.app/api/auth/session", {
             headers: {
@@ -396,6 +395,41 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
       },
     );
 
+    it("rejects a different selected UI role even when both roles occur in verified tenant claims", () => {
+      const identity = {
+        actor_id: "self-1",
+        tenant_id: "tenant-demo-001",
+        realm: "tenant",
+        actor_type: "tenant_user",
+        roles: ["tenant_admin", "tenant_finance_admin"],
+      };
+      const roleCookie = signSessionRole("bank_program_admin", "acme");
+      const body = projectBankSessionReadback(
+        { data: { active: true, identity } },
+        {
+          signedRoleCookie: roleCookie,
+          signedSessionCookie: roleCookie,
+        },
+      );
+      const finance: Pick<Session, "app" | "role" | "identity"> = {
+        app: "bank-console-web",
+        role: "bank_finance",
+        identity: {
+          path: "/api/auth/session",
+          subjectPath: "data.identity.actor_id",
+          rolePath: "data.identity.roles",
+          expectedSubject: "self-1",
+        },
+      };
+      expect(() => verifyIdentityReadback(finance, body)).toThrow(
+        "bank selected display_role mismatch",
+      );
+      expect(
+        verifyIdentityReadback({ ...finance, role: "bank_program_admin" }, body)
+          .effectiveRoles,
+      ).toContain("bank_program_admin");
+    });
+
     it("fails closed on signed-out marker, forged cookies, role escalation cookies, cross-tenant cookies, and non-canonical roles", async () => {
       const viewerUpstream = deepToSnakeCase(
         toApiSuccessEnvelope({
@@ -428,9 +462,8 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         roles: ["tenant_viewer"],
         scopes: ["tenant:read"],
       });
-      const { GET } = await import(
-        "../../../../apps/bank-console-web/app/api/auth/[...auth]/route"
-      );
+      const { GET } =
+        await import("../../../../apps/bank-console-web/app/api/auth/[...auth]/route");
 
       // 1. Signed-out cookie fails closed with 401.
       const signedOutRes = await GET(
@@ -447,7 +480,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
       const forgedRes = await GET(
         new NextRequest("https://bank-console.run.app/api/auth/session", {
           headers: {
-            cookie: `drts_tenant_session=${viewerJwt}; ${BANK_CONSOLE_ROLE_COOKIE}=bank_program_admin|acme.forgedsig`,
+            cookie: `drts_tenant_session=${viewerJwt}; ${BANK_CONSOLE_ROLE_COOKIE}=bank_program_admin:acme.forgedsig; ${BANK_CONSOLE_SESSION_COOKIE}=bank_program_admin:acme.forgedsig`,
           },
         }),
         { params: Promise.resolve({ auth: ["session"] }) },
@@ -459,7 +492,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
       const escalatedRes = await GET(
         new NextRequest("https://bank-console.run.app/api/auth/session", {
           headers: {
-            cookie: `drts_tenant_session=${viewerJwt}; ${BANK_CONSOLE_ROLE_COOKIE}=${escalatedCookie}`,
+            cookie: `drts_tenant_session=${viewerJwt}; ${BANK_CONSOLE_ROLE_COOKIE}=${escalatedCookie}; ${BANK_CONSOLE_SESSION_COOKIE}=${escalatedCookie}`,
           },
         }),
         { params: Promise.resolve({ auth: ["session"] }) },
@@ -475,7 +508,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
       const foreignTenantRes = await GET(
         new NextRequest("https://bank-console.run.app/api/auth/session", {
           headers: {
-            cookie: `drts_tenant_session=${viewerJwt}; ${BANK_CONSOLE_ROLE_COOKIE}=${foreignBankCookie}`,
+            cookie: `drts_tenant_session=${viewerJwt}; ${BANK_CONSOLE_ROLE_COOKIE}=${foreignBankCookie}; ${BANK_CONSOLE_SESSION_COOKIE}=${foreignBankCookie}`,
           },
         }),
         { params: Promise.resolve({ auth: ["session"] }) },
@@ -485,6 +518,43 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         active: false,
         error: { code: "TENANT_MISMATCH" },
       });
+
+      // Tenant-only sessions remain valid upstream, but cannot claim a selected
+      // Bank UI role; partial or disagreeing signed cookies are rejected.
+      const noBankCookies = projectBankSessionReadback(viewerUpstream);
+      expect(() =>
+        verifyIdentityReadback(
+          {
+            app: "bank-console-web",
+            role: "bank_ops_viewer",
+            identity: {
+              path: "/api/auth/session",
+              subjectPath: "data.identity.actor_id",
+              rolePath: "data.identity.roles",
+              expectedSubject: "viewer-1",
+            },
+          },
+          noBankCookies,
+        ),
+      ).toThrow();
+      const partial = await GET(
+        new NextRequest("https://bank-console.run.app/api/auth/session", {
+          headers: {
+            cookie: `drts_tenant_session=${viewerJwt}; ${BANK_CONSOLE_ROLE_COOKIE}=${signSessionRole("bank_ops_viewer", "acme")}`,
+          },
+        }),
+        { params: Promise.resolve({ auth: ["session"] }) },
+      );
+      expect(partial.status).toBe(401);
+      const disagree = await GET(
+        new NextRequest("https://bank-console.run.app/api/auth/session", {
+          headers: {
+            cookie: `drts_tenant_session=${viewerJwt}; ${BANK_CONSOLE_ROLE_COOKIE}=${signSessionRole("bank_ops_viewer", "acme")}; ${BANK_CONSOLE_SESSION_COOKIE}=${signSessionRole("bank_ops_viewer", "contoso")}`,
+          },
+        }),
+        { params: Promise.resolve({ auth: ["session"] }) },
+      );
+      expect(disagree.status).toBe(401);
 
       // 5. Empty or non-canonical tenant roles fail closed in both getBankUserIdentity and projectBankSessionReadback.
       for (const badRoles of [
@@ -533,18 +603,32 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
   });
 
   describe("Referral Embed (referral_passenger) GET /api/referral/session", () => {
-    function installAuthorityReadback(f: Awaited<ReturnType<typeof issueReferralFixture>>) {
-      vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-        if (new URL(url).pathname !== "/api/auth/session") throw new Error("unexpected authority route");
-        const token = new Headers(init?.headers).get("Authorization")?.replace(/^Bearer /, "");
-        const verified = token ? await f.jwt.verifyAccessToken(token) : null;
-        if (!verified) return new Response(JSON.stringify({ error: { code: "AUTHENTICATION_REQUIRED" } }), { status: 401 });
-        const body = deepToSnakeCase(toApiSuccessEnvelope({
-          active: true,
-          identity: f.jwt.toRequestIdentity(verified),
-        }));
-        return Response.json(body);
-      }));
+    function installAuthorityReadback(
+      f: Awaited<ReturnType<typeof issueReferralFixture>>,
+    ) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (new URL(url).pathname !== "/api/auth/session")
+            throw new Error("unexpected authority route");
+          const token = new Headers(init?.headers)
+            .get("Authorization")
+            ?.replace(/^Bearer /, "");
+          const verified = token ? await f.jwt.verifyAccessToken(token) : null;
+          if (!verified)
+            return new Response(
+              JSON.stringify({ error: { code: "AUTHENTICATION_REQUIRED" } }),
+              { status: 401 },
+            );
+          const body = deepToSnakeCase(
+            toApiSuccessEnvelope({
+              active: true,
+              identity: f.jwt.toRequestIdentity(verified),
+            }),
+          );
+          return Response.json(body);
+        }),
+      );
     }
 
     it("returns verified public session readback with opaque recoveryScope and referral_passenger classification without leaking accessToken or drtsPassengerId", async () => {
@@ -573,16 +657,18 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         }),
       ).toBe(false);
 
-      const { GET } = await import(
-        "../../../../apps/referral-embed-web/app/api/referral/session/route"
-      );
+      const { GET } =
+        await import("../../../../apps/referral-embed-web/app/api/referral/session/route");
       const response = await GET(
         new Request("https://embed.example/api/referral/session", {
           method: "GET",
           headers: { Origin: "https://embed.example" },
         }),
       );
-      expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+      expect(
+        response.status,
+        JSON.stringify(await response.clone().json()),
+      ).toBe(200);
       expect(response.headers.get("Cache-Control")).toContain("no-store");
       const payload = await response.json();
 
@@ -627,9 +713,8 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
     });
 
     it("fails closed with 401/403 when missing, unconsented, expired, bearer-tampered, cross-origin, or cross-entry", async () => {
-      const { GET } = await import(
-        "../../../../apps/referral-embed-web/app/api/referral/session/route"
-      );
+      const { GET } =
+        await import("../../../../apps/referral-embed-web/app/api/referral/session/route");
 
       // 1. Missing session cookie -> 401.
       const missingRes = await GET(
@@ -671,7 +756,10 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
 
       // 5. Tampered bearer cookie rejected with 401.
       const originalBearer = browser.jar.get("drts_referral_embed_bearer")!;
-      browser.jar.set("drts_referral_embed_bearer", `${originalBearer}tampered`);
+      browser.jar.set(
+        "drts_referral_embed_bearer",
+        `${originalBearer}tampered`,
+      );
       const tamperedRes = await GET(
         new Request("https://embed.example/api/referral/session"),
       );
@@ -684,6 +772,38 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         new Request("https://embed.example/api/referral/session"),
       );
       expect(expiredRes.status).toBe(401);
+    });
+
+    it("rejects revoked durable session and mismatched signed-cookie server claims, without clearing the caller cookie", async () => {
+      const f = await issueReferralFixture(false);
+      installAuthorityReadback(f);
+      const { GET } =
+        await import("../../../../apps/referral-embed-web/app/api/referral/session/route");
+      const request = () =>
+        new Request("https://embed.example/api/referral/session");
+      await referralSessions.writeReferralEmbedSession(f.consumed);
+      expect((await GET(request())).status).toBe(200);
+
+      // The server response is genuine but may not be substituted for a
+      // different tenant/entry/subject stored in a validly signed cookie.
+      for (const mutation of [
+        { identity: { ...f.consumed.identity, tenantId: "tenant-other" } },
+        {
+          identity: { ...f.consumed.identity, actorId: "drts_passenger_other" },
+        },
+        { partnerEntrySlug: "other-entry" },
+      ]) {
+        await referralSessions.writeReferralEmbedSession({
+          ...f.consumed,
+          ...mutation,
+        });
+        expect((await GET(request())).status).toBe(401);
+      }
+      await referralSessions.writeReferralEmbedSession(f.consumed);
+      const signedCookie = browser.jar.get("drts_referral_embed_session");
+      await f.identities.revokeSession(f.consumed.sessionId, "unit revocation");
+      expect((await GET(request())).status).toBe(401);
+      expect(browser.jar.get("drts_referral_embed_session")).toBe(signedCookie);
     });
   });
 
@@ -704,10 +824,11 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
       // DB boundary only: production getMe/current still checks actor, expiry,
       // active account and live family against the repository transaction.
       const store = {
-        transaction: async (run: (tx: unknown) => Promise<unknown>) => run({
-          lockAccount: async () => accountRecord,
-          findLiveFamily: async () => ({ sessionId: "fam_001" }),
-        }),
+        transaction: async (run: (tx: unknown) => Promise<unknown>) =>
+          run({
+            lockAccount: async () => accountRecord,
+            findLiveFamily: async () => ({ sessionId: "fam_001" }),
+          }),
       };
       const service = new PassengerAccountService(store as never, {} as never);
       const meResult = await service.getMe({

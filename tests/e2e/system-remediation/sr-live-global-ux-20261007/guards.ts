@@ -318,18 +318,16 @@ export function verifyIdentityReadback(
       ),
       "bank canonical tenant role does not authorize requested bank UI role",
     );
-    if (identity.display_role !== undefined) {
-      assert(
-        typeof identity.display_role === "string" &&
-          canonicalDisplayRoles.includes(
-            identity.display_role as
-              | "bank_program_admin"
-              | "bank_ops_viewer"
-              | "bank_finance",
-          ),
-        "bank display_role disagrees with canonical tenant roles",
-      );
-    }
+    assert(
+      typeof identity.display_role === "string" &&
+        canonicalDisplayRoles.includes(
+          identity.display_role as
+            | "bank_program_admin"
+            | "bank_ops_viewer"
+            | "bank_finance",
+        ),
+      "bank selected display_role requires signed Bank session and canonical tenant role",
+    );
     if (identity.display_roles !== undefined) {
       assert(
         Array.isArray(identity.display_roles) &&
@@ -356,14 +354,12 @@ export function verifyIdentityReadback(
           identity.display_roles.includes(expectedRole),
         "bank display_roles mismatch",
       );
-    } else if (identity.display_role !== undefined) {
-      assert(
-        identity.display_role === expectedRole ||
-          (Array.isArray(identity.display_roles) &&
-            identity.display_roles.includes(expectedRole)),
-        "bank display_role mismatch",
-      );
     }
+    assert.equal(
+      identity.display_role,
+      expectedRole,
+      "bank selected display_role mismatch",
+    );
     return {
       subject: actualSubject,
       effectiveRoles: canonicalDisplayRoles,

@@ -12,11 +12,7 @@ import {
   type Plan,
   type Session,
 } from "./model";
-import {
-  hash,
-  translationKeysForCase,
-  translationSourceAt,
-} from "./inventory";
+import { hash, translationKeysForCase, translationSourceAt } from "./inventory";
 import {
   expectedFormat,
   isolatedHeaders,

@@ -168,7 +168,17 @@ export function projectBankSessionReadback(
 
   const hasRoleCookie = Boolean(options?.signedRoleCookie);
   const hasSessionCookie = Boolean(options?.signedSessionCookie);
-  if (hasRoleCookie || hasSessionCookie) {
+  // A tenant-auth session without a Bank UI session remains a valid tenant
+  // session, but must not claim a selected Bank UI role. Partial cookies fail.
+  if (!hasRoleCookie && !hasSessionCookie) return root;
+  if (hasRoleCookie !== hasSessionCookie) {
+    bankUserError(
+      401,
+      "AUTHENTICATION_REQUIRED",
+      "Incomplete bank console session.",
+    );
+  }
+  if (hasRoleCookie && hasSessionCookie) {
     const verifiedRoleCookie = hasRoleCookie
       ? verifySessionRole(options?.signedRoleCookie)
       : null;
