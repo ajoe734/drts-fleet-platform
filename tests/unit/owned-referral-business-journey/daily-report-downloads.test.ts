@@ -861,6 +861,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
   it.each([
     {
+      caseName: "actual Ops preview returns non-200 with private error payload",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: false,
+      expectedRetained: false,
+      previewFailure: true,
+    },
+    {
       caseName: "all sibling rows belong to controlled owned orders",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -898,6 +906,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       jobSiblingOrderId,
       expectedPreviewControlled,
       expectedRetained,
+      previewFailure,
     }) => {
       const tempDir = await mkdtemp(
         path.join(tmpdir(), "owned-daily-reports-test-"),
@@ -1052,10 +1061,21 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     "GET",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records?${query.toString()}`,
                     null,
-                    200,
+                    previewFailure ? 503 : 200,
                     { "content-type": "application/json" },
                     Buffer.from(
-                      JSON.stringify({ ok: true, data: { items: rows } }),
+                      JSON.stringify(
+                        previewFailure
+                          ? {
+                              error: {
+                                code: "REPORT_READ_FAILED",
+                                trace_id:
+                                  "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                                message: "private-error-message",
+                              },
+                            }
+                          : { ok: true, data: { items: rows } },
+                      ),
                     ),
                   );
                 },
@@ -1274,7 +1294,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         } as unknown as BrowserContext;
 
         const evidence = new Evidence();
-        const result = await runOwnedDailyReportDownloads({
+        const run = runOwnedDailyReportDownloads({
           context: fakeContext,
           page: fakePage as Page,
           opsOrigin: OPS_ORIGIN,
@@ -1298,6 +1318,36 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           recoveryOnly: false,
           evidence,
         });
+        if (previewFailure) {
+          await expect(run).rejects.toMatchObject({
+            stage: "daily-report-preview-status-200",
+            status: 503,
+            code: "REPORT_READ_FAILED",
+            context: {
+              phase: "preview",
+              method: "GET",
+              route: "daily-dispatch-records",
+              runtimeSha: RUNTIME_SHA,
+              requestId: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+            },
+          });
+          expect(evidence.events).toContainEqual({
+            stage: "daily-report-http-preview-get-daily-dispatch-records",
+            status: 503,
+            code: "REPORT_READ_FAILED",
+            objectKey: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+            result: "failed",
+          });
+          expect(JSON.stringify(evidence.events)).not.toContain(
+            "private-error-message",
+          );
+          expect(createdJobs).toHaveLength(0);
+          await expect(
+            stat(path.join(tempDir, "daily-reports")),
+          ).rejects.toThrow();
+          return;
+        }
+        const result = await run;
 
         expect(result.orderId).toBe(ORDER_ID);
         expect(result.serviceDate).toBe("2026-10-26");
