@@ -1299,7 +1299,8 @@ export class IdentityRepository implements OnModuleInit {
          FROM iam.identity_memberships m
          JOIN iam.identity_role_bindings b ON b.membership_id = m.membership_id
         WHERE m.realm = 'partner' AND m.scope_ref = $1 AND m.partner_id = $2
-          AND m.source_ref LIKE 'fleet_member:%' AND b.source_ref LIKE 'fleet_role:%'
+          AND m.source_ref = 'fleet_member:' || $2 || ':' || m.principal_id
+          AND b.source_ref = 'fleet_role:' || $2 || ':' || m.principal_id
         ORDER BY m.created_at`, [`fleet:${entrySlug}`, entrySlug],
     );
     return result.rows.map((row) => ({

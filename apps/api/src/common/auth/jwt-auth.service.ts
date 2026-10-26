@@ -1269,14 +1269,15 @@ export class JwtAuthService {
       getIamFleetRoleScopes(binding.roleCode) &&
       Number.isFinite(Date.parse(binding.validFrom)) && Date.parse(binding.validFrom) <= now &&
       (!binding.validTo || (Number.isFinite(Date.parse(binding.validTo)) && now < Date.parse(binding.validTo))));
-    if (active.length !== 1) return false;
+    const currentRole = active[0];
+    if (active.length !== 1 || !currentRole) return false;
     const version = this.computeWorkforceTokenVersion([
       entry.updatedAt, principal.updatedAt, membership.updatedAt,
       ...bindings.map((binding) => binding.updatedAt),
     ]);
     return payload.tokenVersion === version &&
-      arraysEqual(payload.roles, [active[0].roleCode]) &&
-      arraysEqual(payload.scopes, [...getIamFleetRoleScopes(active[0].roleCode)!]);
+      arraysEqual(payload.roles, [currentRole.roleCode]) &&
+      arraysEqual(payload.scopes, [...getIamFleetRoleScopes(currentRole.roleCode)!]);
   }
 
   /**

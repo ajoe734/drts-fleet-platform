@@ -1257,7 +1257,12 @@ export class OidcPkceService {
     // An active Referral link is not a Fleet staff grant. Resolve only the
     // exact linked canonical human and its manager-created bounded membership.
     const principal = await this.identityRepository?.findPrincipalById(linkRecord.drtsPassengerId);
-    const memberships = principal?.status === "active" && principal.principalType === "human"
+    if (principal && principal.status !== "active") {
+      throw new ApiRequestError(403, "IAM_PRINCIPAL_NOT_ACTIVE", "Linked principal is not active.");
+    }
+    const memberships = matchedEntry.partnerType === "fleet_partner" &&
+      principal?.status === "active" && principal.principalType === "human" &&
+      principal.sourceRef === `jwt_principal:partner:${linkRecord.drtsPassengerId}`
       ? await this.identityRepository?.findMembershipsByPrincipalId(principal.principalId) : [];
     const managedMembership = memberships?.find((candidate) =>
       candidate.realm === "partner" && candidate.scopeRef === `fleet:${matchedEntry.entrySlug}` &&
@@ -1274,7 +1279,9 @@ export class OidcPkceService {
       (!binding.validTo || (Number.isFinite(Date.parse(binding.validTo)) && now < Date.parse(binding.validTo))));
     const managedRole = activeRoles.length === 1 ? activeRoles[0] : null;
     const scopes = managedRole ? [...getIamFleetRoleScopes(managedRole.roleCode)!] : ["partner:read", "partner:write"];
-    const roles = managedRole ? [managedRole.roleCode] : ["partner_user"];
+    // Preserve the legacy restricted entry role label for existing consumers;
+    // it is not a Fleet human grant and has no business scopes.
+    const roles = managedRole ? [managedRole.roleCode] : ["partner_admin"];
     const managedVersion = managedRole && principal && managedMembership
       ? Math.max(...[matchedEntry.updatedAt, principal.updatedAt, managedMembership.updatedAt,
           ...roleBindings.map((binding) => binding.updatedAt)].map((stamp) => Date.parse(stamp)))
