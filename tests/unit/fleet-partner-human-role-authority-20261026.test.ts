@@ -10,6 +10,7 @@ import { AuditNotificationService } from "../../apps/api/src/modules/audit-notif
 import { resolveRouteAuthPolicy } from "../../apps/api/src/common/auth/auth.policy";
 import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { FleetPartnerController } from "../../apps/api/src/modules/fleet-partner/fleet-partner.controller";
+import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 import type { CanonicalIdentityPrincipalRecord } from "../../packages/contracts/src";
 
@@ -71,6 +72,22 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
       partnerId: "fleet-test-001", partnerEntrySlug: ENTRY,
       roles: ["fleet_partner_ops"], scopes: ["fleet:read", "fleet:supply:write"] });
     expect(await jwt.verifyAccessToken(ops.accessToken)).not.toBeNull();
+    const guard = new BootstrapAuthGuard(new Reflector(), jwt);
+    const operational = { method: "GET", url: "/api/fleet-partner/drivers",
+      headers: { authorization: `Bearer ${ops.accessToken}` }, identity: null as any };
+    expect(await guard.canActivate({ switchToHttp: () => ({ getRequest: () => operational }),
+      getHandler: () => FleetPartnerController.prototype.listPortalDrivers,
+      getClass: () => FleetPartnerController } as never)).toBe(true);
+    expect(operational.identity).toMatchObject({ partnerId: "fleet-test-001",
+      partnerEntrySlug: ENTRY, membershipId: membership.membershipId });
+    const crossFleet = { ...operational, headers: {
+      ...operational.headers, "x-fleet-partner-id": "fleet-other" } };
+    await expect(guard.canActivate({ switchToHttp: () => ({ getRequest: () => crossFleet }),
+      getHandler: () => FleetPartnerController.prototype.listPortalDrivers,
+      getClass: () => FleetPartnerController } as never)).rejects.toMatchObject({ code: "FLEET_SCOPE_DENIED" });
+    const authController = new AuthController(jwt, tenant, {} as never);
+    expect(authController.getAuthSession(operational.identity).data).toMatchObject({ active: true,
+      identity: { roles: ["fleet_partner_ops"], partnerId: "fleet-test-001" } });
     expect(resolveRouteAuthPolicy("GET", "/api/fleet-partner/drivers")?.requiredScopes).toEqual(["fleet:read"]);
     expect(resolveRouteAuthPolicy("POST", "/api/fleet-partner/supply-submissions/drivers")?.requiredScopes).toEqual(["fleet:supply:write"]);
     expect(resolveRouteAuthPolicy("GET", "/api/fleet-partner/statements")?.requiredScopes).toEqual(["billing:read"]);
@@ -89,7 +106,6 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     expect(finance.identity.roles).toEqual(["fleet_partner_finance"]);
     expect(finance.identity.scopes).toContain("billing:read");
     expect(finance.identity.scopes).not.toContain("fleet:supply:write");
-    const guard = new BootstrapAuthGuard(new Reflector(), jwt);
     const request = { method: "POST", url: "/api/fleet-partner/supply-submissions/drivers",
       headers: { authorization: `Bearer ${finance.accessToken}` } };
     await expect(guard.canActivate({ switchToHttp: () => ({ getRequest: () => request }),
@@ -106,6 +122,26 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     await repository.ensureMembershipRecord({ ...membership, status: "disabled",
       updatedAt: new Date(Date.now() + 2000).toISOString() });
     expect(await jwt.verifyAccessToken(finance.accessToken)).toBeNull();
+    await repository.ensureMembershipRecord({ ...membership, status: "active",
+      updatedAt: new Date(Date.now() + 3000).toISOString() });
+    await repository.ensureRoleBindingRecord({ ...binding, roleCode: "fleet_partner_finance",
+      validTo: new Date(Date.now() + 5000).toISOString(),
+      updatedAt: new Date(Date.now() + 3000).toISOString() });
+    const expiring = await login();
+    expect(await jwt.verifyAccessToken(expiring.accessToken)).not.toBeNull();
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date(Date.now() + 6000));
+      expect(await jwt.verifyAccessToken(expiring.accessToken)).toBeNull();
+    } finally { vi.useRealTimers(); }
+    await repository.ensureRoleBindingRecord({ ...binding, roleCode: "fleet_partner_finance",
+      validTo: null, updatedAt: new Date(Date.now() + 7000).toISOString() });
+    const linkedSession = await login();
+    const fallbackLinks = (link as unknown as { fallbackLinks: Map<string, {status: string}> }).fallbackLinks;
+    const linkedEntry = [...fallbackLinks.values()].find((candidate) =>
+      (candidate as {drtsPassengerId?: string}).drtsPassengerId === linked.drtsPassengerId)!;
+    linkedEntry.status = "disabled";
+    expect(await jwt.verifyAccessToken(linkedSession.accessToken)).toBeNull();
   });
 });
 

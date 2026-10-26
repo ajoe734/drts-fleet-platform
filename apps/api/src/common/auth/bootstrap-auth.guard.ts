@@ -1085,6 +1085,20 @@ export class BootstrapAuthGuard implements CanActivate {
     requiredScopes: string[],
     request: AuthenticatedRequestLike,
   ) {
+    // A directly called API is not obliged to use the portal's Fleet client.
+    // Bind the Fleet selector at the backend guard as well: scope possession
+    // alone never permits an own-Fleet token to query another Fleet by header.
+    const routePath = normalizeRoutePath(request.originalUrl ?? request.url ?? "")
+      .replace(/^api\/+/, "");
+    if (identity.realm === "partner" && routePath.startsWith("fleet-partner/") &&
+        !routePath.startsWith("fleet-partner/training/")) {
+      const headers = asHeaderRecord(request.headers);
+      const rawSelector = headers["x-fleet-partner-id"] ?? headers["X-Fleet-Partner-Id"];
+      const selector = Array.isArray(rawSelector) ? null : rawSelector?.trim();
+      if (rawSelector !== undefined && (!selector || selector !== identity.partnerId)) {
+        throw new ApiRequestError(403, "FLEET_SCOPE_DENIED", "The Fleet selector differs from the verified partner.");
+      }
+    }
     if (requiredScopes.length === 0) {
       return;
     }
