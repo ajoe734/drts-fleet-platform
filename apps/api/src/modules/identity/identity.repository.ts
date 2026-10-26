@@ -113,6 +113,47 @@ export function hashIdentitySecret(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
 
+/**
+ * BUREAU-R13: placeholder issuer of an invited agency principal. The
+ * principal is rebound to the verified Google (issuer, sub) when, and only
+ * when, the invitation is accepted; nobody can authenticate as this issuer.
+ */
+export const AGENCY_INVITATION_ISSUER = "agency_invitation";
+
+export interface AgencyOidcProof {
+  issuer: string;
+  subject: string;
+  email: string;
+  /** Agency named in the login state; must equal the invitation's agency. */
+  agencyId?: string | null;
+}
+
+export interface AgencyMembershipSnapshot {
+  principal: CanonicalIdentityPrincipalRecord;
+  membership: CanonicalIdentityMembershipRecord;
+  roleBindings: CanonicalIdentityRoleBindingRecord[];
+  agencyId: string;
+}
+
+export interface IssueAgencyInvitationInput {
+  agencyId: string;
+  email: string;
+  roleCode: string;
+  accessValidTo: string;
+  tokenHash: string;
+  expiresAt: string;
+  issuerPrincipalId: string | null;
+}
+
+export function buildAgencyScopeRef(agencyId: string): string {
+  return `agency:${agencyId}`;
+}
+
+export function parseAgencyScopeRef(scopeRef: string | null | undefined) {
+  const match = /^agency:(.+)$/.exec(scopeRef ?? "");
+  return match?.[1] ?? null;
+}
+
 @Injectable()
 export class IdentityRepository implements OnModuleInit {
   private readonly logger = new Logger(IdentityRepository.name);
@@ -3925,5 +3966,844 @@ export class IdentityRepository implements OnModuleInit {
         "iam.privileged_role_grants",
       ),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // BUREAU-R13 agency memberships (realm = 'agency', scope_ref = 'agency:<id>')
+  // -------------------------------------------------------------------------
+
+  private agencyMemberSourceRef(agencyId: string, email: string) {
+    return `agency_member:${agencyId}:${email.trim().toLowerCase()}`;
+  }
+
+  private async principalExists(
+    client: PoolClient,
+    principalId: string | null,
+  ): Promise<string | null> {
+    if (!principalId) return null;
+    const result = await client.query<{ principal_id: string }>(
+      `SELECT principal_id FROM iam.identity_principals WHERE principal_id = $1`,
+      [principalId],
+    );
+    return result.rows[0]?.principal_id ?? null;
+  }
+
+  /**
+   * Creates (or re-invites) the invited principal, membership, role binding
+   * with a required `valid_to`, and a pending invitation in one transaction.
+   * An already active member is never silently re-invited.
+   */
+  async issueAgencyInvitation(input: IssueAgencyInvitationInput): Promise<{
+    principal: CanonicalIdentityPrincipalRecord;
+    membership: CanonicalIdentityMembershipRecord;
+    roleBinding: CanonicalIdentityRoleBindingRecord;
+    invitation: CanonicalIdentityInvitationRecord;
+  } | null> {
+    const now = new Date().toISOString();
+    const email = input.email.trim().toLowerCase();
+    const sourceRef = this.agencyMemberSourceRef(input.agencyId, email);
+    const scopeRef = buildAgencyScopeRef(input.agencyId);
+    const invitationId = `invitation_${randomUUID().replace(/-/g, "")}`;
+    const buildRecords = (
+      existingPrincipal: CanonicalIdentityPrincipalRecord | null,
+      existingMembership: CanonicalIdentityMembershipRecord | null,
+      existingBinding: CanonicalIdentityRoleBindingRecord | null,
+      issuerPrincipalId: string | null,
+    ) => {
+      // A re-invited principal (e.g. previously deactivated) is reset to the
+      // unbound invitation placeholder: the new proof must be accepted again,
+      // with a freshly verified (issuer, sub), before any session is issued.
+      const principal: CanonicalIdentityPrincipalRecord = existingPrincipal
+        ? {
+            ...existingPrincipal,
+            issuer: AGENCY_INVITATION_ISSUER,
+            subject: `${scopeRef}:email:${email}`,
+            email,
+            emailVerified: false,
+            status: "invited",
+            updatedAt: now,
+          }
+        : {
+            principalId: `principal_${randomUUID().replace(/-/g, "")}`,
+            sourceRef: `${sourceRef}:principal`,
+            issuer: AGENCY_INVITATION_ISSUER,
+            subject: `${scopeRef}:email:${email}`,
+            principalType: "human",
+            email,
+            emailVerified: false,
+            displayName: null,
+            status: "invited",
+            createdAt: now,
+            updatedAt: now,
+          };
+      const membership: CanonicalIdentityMembershipRecord = {
+        membershipId:
+          existingMembership?.membershipId ??
+          `membership_${randomUUID().replace(/-/g, "")}`,
+        sourceRef: `${sourceRef}:membership`,
+        principalId: principal.principalId,
+        realm: "agency",
+        scopeRef,
+        tenantId: null,
+        partnerId: null,
+        status: "invited",
+        invitedByPrincipalId: issuerPrincipalId,
+        invitationId: null,
+        createdAt: existingMembership?.createdAt ?? now,
+        updatedAt: now,
+      };
+      const roleBinding: CanonicalIdentityRoleBindingRecord = {
+        roleBindingId:
+          existingBinding?.roleBindingId ??
+          `role_binding_${randomUUID().replace(/-/g, "")}`,
+        sourceRef: `${sourceRef}:role_binding`,
+        membershipId: membership.membershipId,
+        roleCode: input.roleCode,
+        grantedByPrincipalId: issuerPrincipalId,
+        approvalId: null,
+        validFrom: now,
+        validTo: input.accessValidTo,
+        createdAt: existingBinding?.createdAt ?? now,
+        updatedAt: now,
+      };
+      const invitation: CanonicalIdentityInvitationRecord = {
+        invitationId,
+        sourceRef: `agency_invitation:${invitationId}`,
+        membershipId: membership.membershipId,
+        issuerPrincipalId,
+        realm: "agency",
+        scopeRef,
+        tenantId: null,
+        partnerId: null,
+        email,
+        roleCode: input.roleCode,
+        tokenHash: input.tokenHash,
+        deliveryStatus: "pending_delivery",
+        deliveryId: null,
+        expiresAt: input.expiresAt,
+        acceptedAt: null,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      return { principal, membership, roleBinding, invitation };
+    };
+
+    if (!this.isEnabled()) {
+      const membershipId = this.fallbackMembershipSourceRefs.get(
+        `${sourceRef}:membership`,
+      );
+      const existingMembership = membershipId
+        ? (this.fallbackMemberships.get(membershipId) ?? null)
+        : null;
+      if (existingMembership?.status === "active") return null;
+      const existingPrincipal = existingMembership
+        ? (this.fallbackPrincipals.get(existingMembership.principalId) ?? null)
+        : null;
+      const bindingId = this.fallbackRoleBindingSourceRefs.get(
+        `${sourceRef}:role_binding`,
+      );
+      const existingBinding = bindingId
+        ? (this.fallbackRoleBindings.get(bindingId) ?? null)
+        : null;
+      const issuer =
+        input.issuerPrincipalId &&
+        this.fallbackPrincipals.has(input.issuerPrincipalId)
+          ? input.issuerPrincipalId
+          : null;
+      const records = buildRecords(
+        existingPrincipal,
+        existingMembership,
+        existingBinding,
+        issuer,
+      );
+      for (const pending of this.fallbackInvitations.values()) {
+        if (
+          pending.membershipId === records.membership.membershipId &&
+          !pending.acceptedAt &&
+          !pending.revokedAt
+        ) {
+          this.upsertFallbackInvitation({
+            ...pending,
+            revokedAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      const principal = this.upsertFallbackPrincipal(records.principal);
+      this.upsertFallbackMembership(records.membership);
+      const roleBinding = this.upsertFallbackRoleBinding(records.roleBinding, {
+        allowValidFromMutation: true,
+      });
+      const invitation = this.upsertFallbackInvitation(records.invitation);
+      const membership = this.upsertFallbackMembership({
+        ...records.membership,
+        invitationId: invitation.invitationId,
+      });
+      return { principal, membership, roleBinding, invitation };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE source_ref = $1 FOR UPDATE`,
+        [`${sourceRef}:membership`],
+      );
+      const existingMembership = membershipRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+            membershipRows.rows[0].record,
+            "iam.identity_memberships",
+          )
+        : null;
+      if (existingMembership?.status === "active") {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principalRows = existingMembership
+        ? await client.query<JsonRecordRow>(
+            `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+            [existingMembership.principalId],
+          )
+        : { rows: [] as JsonRecordRow[] };
+      const existingPrincipal = principalRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
+            principalRows.rows[0].record,
+            "iam.identity_principals",
+          )
+        : null;
+      const bindingRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_role_bindings WHERE source_ref = $1 FOR UPDATE`,
+        [`${sourceRef}:role_binding`],
+      );
+      const existingBinding = bindingRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+            bindingRows.rows[0].record,
+            "iam.identity_role_bindings",
+          )
+        : null;
+      const issuer = await this.principalExists(
+        client,
+        input.issuerPrincipalId,
+      );
+      const records = buildRecords(
+        existingPrincipal,
+        existingMembership,
+        existingBinding,
+        issuer,
+      );
+      if (existingMembership) {
+        await client.query(
+          `UPDATE iam.identity_invitations
+              SET revoked_at = $2::timestamptz,
+                  updated_at = $2::timestamptz,
+                  record = jsonb_set(jsonb_set(record, '{revokedAt}', to_jsonb($2::text)), '{updatedAt}', to_jsonb($2::text))
+            WHERE membership_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL`,
+          [existingMembership.membershipId, now],
+        );
+      }
+      const principal = await this.upsertPrincipal(
+        client,
+        records.principal,
+        true,
+      );
+      await this.upsertMembership(
+        client,
+        { ...records.membership, principalId: principal.principalId },
+        true,
+      );
+      const roleBinding = await this.upsertRoleBinding(
+        client,
+        records.roleBinding,
+        true,
+        { allowValidFromMutation: true },
+      );
+      const invitation = await this.upsertInvitation(
+        client,
+        records.invitation,
+      );
+      const membership = await this.upsertMembership(
+        client,
+        {
+          ...records.membership,
+          principalId: principal.principalId,
+          invitationId: invitation.invitationId,
+        },
+        true,
+      );
+      await client.query("COMMIT");
+      return { principal, membership, roleBinding, invitation };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * One transaction owns agency invitation consumption, (issuer, sub)
+   * binding and activation. Any failed check (wrong email, wrong agency,
+   * revoked/expired/used proof, expired access period, inactive agency or an
+   * (issuer, sub) already bound elsewhere) rolls back without consuming it.
+   */
+  async acceptAgencyOidcInvitation(
+    tokenHash: string,
+    proof: AgencyOidcProof,
+  ): Promise<AgencyMembershipSnapshot | null> {
+    const now = new Date().toISOString();
+    const nowMs = Date.parse(now);
+    if (!proof.issuer || !proof.subject || !proof.email) return null;
+    const email = proof.email.trim().toLowerCase();
+    const validInvitation = (
+      invitation: CanonicalIdentityInvitationRecord | undefined | null,
+    ) => {
+      const agencyId = parseAgencyScopeRef(invitation?.scopeRef);
+      return Boolean(
+        invitation &&
+        agencyId &&
+        invitation.realm === "agency" &&
+        !invitation.acceptedAt &&
+        !invitation.revokedAt &&
+        Date.parse(invitation.expiresAt) > nowMs &&
+        invitation.email.toLowerCase() === email &&
+        (!proof.agencyId || proof.agencyId === agencyId),
+      );
+    };
+    const validMembership = (
+      membership: CanonicalIdentityMembershipRecord | undefined | null,
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      Boolean(
+        membership &&
+        membership.realm === "agency" &&
+        membership.status === "invited" &&
+        membership.scopeRef === invitation.scopeRef &&
+        membership.membershipId === invitation.membershipId,
+      );
+    const validPrincipal = (
+      principal: CanonicalIdentityPrincipalRecord | undefined | null,
+    ) =>
+      Boolean(
+        principal &&
+        principal.status === "invited" &&
+        principal.issuer === AGENCY_INVITATION_ISSUER &&
+        principal.email?.toLowerCase() === email,
+      );
+    const hasActiveAccess = (
+      bindings: CanonicalIdentityRoleBindingRecord[],
+      invitation: CanonicalIdentityInvitationRecord,
+    ) =>
+      bindings.some(
+        (binding) =>
+          binding.roleCode === invitation.roleCode &&
+          Boolean(binding.validTo) &&
+          Date.parse(binding.validTo!) > nowMs,
+      );
+
+    if (!this.isEnabled()) {
+      // No await between the checks and the writes: the offline repository
+      // keeps the same one-shot semantics for concurrent consumers.
+      const invitation = [...this.fallbackInvitations.values()].find(
+        (entry) => entry.tokenHash === tokenHash,
+      );
+      if (!invitation || !validInvitation(invitation)) return null;
+      const membership = this.fallbackMemberships.get(invitation.membershipId);
+      const principal =
+        membership && this.fallbackPrincipals.get(membership.principalId);
+      const bindings = [...this.fallbackRoleBindings.values()].filter(
+        (binding) => binding.membershipId === invitation.membershipId,
+      );
+      if (
+        !membership ||
+        !validMembership(membership, invitation) ||
+        !principal ||
+        !validPrincipal(principal) ||
+        !hasActiveAccess(bindings, invitation) ||
+        [...this.fallbackPrincipals.values()].some(
+          (entry) =>
+            entry.issuer === proof.issuer && entry.subject === proof.subject,
+        )
+      )
+        return null;
+      const activatedPrincipal = this.upsertFallbackPrincipal({
+        ...principal,
+        issuer: proof.issuer,
+        subject: proof.subject,
+        status: "active",
+        emailVerified: true,
+        updatedAt: now,
+      });
+      const activatedMembership = this.upsertFallbackMembership({
+        ...membership,
+        status: "active",
+        updatedAt: now,
+      });
+      this.upsertFallbackInvitation({
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      return {
+        principal: activatedPrincipal,
+        membership: activatedMembership,
+        roleBindings: bindings.map((binding) => ({ ...binding })),
+        agencyId: parseAgencyScopeRef(invitation.scopeRef)!,
+      };
+    }
+
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const invitationRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_invitations
+          WHERE token_hash = $1 AND realm = 'agency'
+            AND accepted_at IS NULL AND revoked_at IS NULL
+            AND expires_at > $2::timestamptz
+          FOR UPDATE`,
+        [tokenHash, now],
+      );
+      const invitation = invitationRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+            invitationRows.rows[0].record,
+            "iam.identity_invitations",
+          )
+        : null;
+      if (!invitation || !validInvitation(invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const agencyId = parseAgencyScopeRef(invitation.scopeRef)!;
+      const agencyRows = await client.query<{ status: string }>(
+        `SELECT status FROM core.regulatory_agencies WHERE agency_id = $1 FOR SHARE`,
+        [agencyId],
+      );
+      if (agencyRows.rows[0]?.status !== "active") {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const membershipRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships WHERE membership_id = $1 FOR UPDATE`,
+        [invitation.membershipId],
+      );
+      const membership = membershipRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+            membershipRows.rows[0].record,
+            "iam.identity_memberships",
+          )
+        : null;
+      if (!membership || !validMembership(membership, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const principalRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_principals WHERE principal_id = $1 FOR UPDATE`,
+        [membership.principalId],
+      );
+      const principal = principalRows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityPrincipalRecord>(
+            principalRows.rows[0].record,
+            "iam.identity_principals",
+          )
+        : null;
+      if (!principal || !validPrincipal(principal)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const bindingRows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_role_bindings WHERE membership_id = $1 FOR UPDATE`,
+        [membership.membershipId],
+      );
+      const bindings = bindingRows.rows.map((row) =>
+        this.parseRecord<CanonicalIdentityRoleBindingRecord>(
+          row.record,
+          "iam.identity_role_bindings",
+        ),
+      );
+      if (!hasActiveAccess(bindings, invitation)) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const activatedPrincipal = await this.upsertPrincipal(
+        client,
+        {
+          ...principal,
+          issuer: proof.issuer,
+          subject: proof.subject,
+          status: "active",
+          emailVerified: true,
+          updatedAt: now,
+        },
+        true,
+      );
+      const activatedMembership = await this.upsertMembership(
+        client,
+        { ...membership, status: "active", updatedAt: now },
+        true,
+      );
+      await this.upsertInvitation(client, {
+        ...invitation,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+      await client.query("COMMIT");
+      return {
+        principal: activatedPrincipal,
+        membership: activatedMembership,
+        roleBindings: bindings,
+        agencyId,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      // (issuer, sub) already bound to another principal: full rollback.
+      if ((error as { code?: string }).code === "23505") return null;
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Active agency membership of a principal plus its role bindings. */
+  async findAgencyMembershipForPrincipal(
+    principalId: string,
+  ): Promise<AgencyMembershipSnapshot | null> {
+    const principal = await this.findPrincipalById(principalId);
+    if (!principal) return null;
+    const memberships = (
+      await this.findMembershipsByPrincipalId(principal.principalId)
+    ).filter(
+      (membership) =>
+        membership.realm === "agency" &&
+        membership.status === "active" &&
+        parseAgencyScopeRef(membership.scopeRef),
+    );
+    // One verified identity is bound to exactly one agency.
+    if (memberships.length !== 1) return null;
+    const membership = memberships[0]!;
+    return {
+      principal,
+      membership,
+      roleBindings: await this.findRoleBindingsByMembershipId(
+        membership.membershipId,
+      ),
+      agencyId: parseAgencyScopeRef(membership.scopeRef)!,
+    };
+  }
+
+  async listAgencyMembers(agencyId: string): Promise<
+    Array<{
+      principal: CanonicalIdentityPrincipalRecord | null;
+      membership: CanonicalIdentityMembershipRecord;
+      roleBindings: CanonicalIdentityRoleBindingRecord[];
+    }>
+  > {
+    const memberships = await this.listMembershipsByScope(
+      buildAgencyScopeRef(agencyId),
+      ["agency"],
+    );
+    return Promise.all(
+      memberships.map(async (membership) => ({
+        principal: await this.findPrincipalById(membership.principalId),
+        membership,
+        roleBindings: await this.findRoleBindingsByMembershipId(
+          membership.membershipId,
+        ),
+      })),
+    );
+  }
+
+  async listAgencyInvitations(
+    agencyId: string,
+  ): Promise<CanonicalIdentityInvitationRecord[]> {
+    const scopeRef = buildAgencyScopeRef(agencyId);
+    if (!this.isEnabled()) {
+      return [...this.fallbackInvitations.values()]
+        .filter(
+          (invitation) =>
+            invitation.realm === "agency" && invitation.scopeRef === scopeRef,
+        )
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .map((invitation) => ({ ...invitation }));
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `SELECT record FROM iam.identity_invitations
+        WHERE realm = 'agency' AND scope_ref = $1
+        ORDER BY created_at DESC`,
+      [scopeRef],
+    );
+    return result.rows.map((row) =>
+      this.parseRecord<CanonicalIdentityInvitationRecord>(
+        row.record,
+        "iam.identity_invitations",
+      ),
+    );
+  }
+
+  async setAgencyInvitationDeliveryStatus(
+    invitationId: string,
+    deliveryStatus: "delivered" | "delivery_failed",
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    const now = new Date().toISOString();
+    if (!this.isEnabled()) {
+      const invitation = this.fallbackInvitations.get(invitationId);
+      if (!invitation || invitation.realm !== "agency") return null;
+      return this.upsertFallbackInvitation({
+        ...invitation,
+        deliveryStatus,
+        updatedAt: now,
+      });
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `UPDATE iam.identity_invitations
+          SET delivery_status = $2,
+              updated_at = $3::timestamptz,
+              record = jsonb_set(jsonb_set(record, '{deliveryStatus}', to_jsonb($2::text)), '{updatedAt}', to_jsonb($3::text))
+        WHERE invitation_id = $1 AND realm = 'agency'
+        RETURNING record`,
+      [invitationId, deliveryStatus, now],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+          result.rows[0].record,
+          "iam.identity_invitations",
+        )
+      : null;
+  }
+
+  /** Revokes a not-yet-accepted agency invitation of the given agency. */
+  async revokeAgencyInvitation(
+    agencyId: string,
+    invitationId: string,
+  ): Promise<CanonicalIdentityInvitationRecord | null> {
+    const now = new Date().toISOString();
+    const scopeRef = buildAgencyScopeRef(agencyId);
+    if (!this.isEnabled()) {
+      const invitation = this.fallbackInvitations.get(invitationId);
+      if (
+        !invitation ||
+        invitation.realm !== "agency" ||
+        invitation.scopeRef !== scopeRef ||
+        invitation.acceptedAt ||
+        invitation.revokedAt
+      )
+        return null;
+      return this.upsertFallbackInvitation({
+        ...invitation,
+        revokedAt: now,
+        updatedAt: now,
+      });
+    }
+    const result = await this.databaseService!.query<JsonRecordRow>(
+      `UPDATE iam.identity_invitations
+          SET revoked_at = $3::timestamptz,
+              updated_at = $3::timestamptz,
+              record = jsonb_set(jsonb_set(record, '{revokedAt}', to_jsonb($3::text)), '{updatedAt}', to_jsonb($3::text))
+        WHERE invitation_id = $1 AND realm = 'agency' AND scope_ref = $2
+          AND accepted_at IS NULL AND revoked_at IS NULL
+        RETURNING record`,
+      [invitationId, scopeRef, now],
+    );
+    return result.rows[0]?.record
+      ? this.parseRecord<CanonicalIdentityInvitationRecord>(
+          result.rows[0].record,
+          "iam.identity_invitations",
+        )
+      : null;
+  }
+
+  /**
+   * Disables an agency membership, revokes its pending invitations and every
+   * active session of the principal in the same transaction.
+   */
+  async deactivateAgencyMembership(
+    agencyId: string,
+    membershipId: string,
+    revokedByPrincipalId: string | null,
+  ): Promise<CanonicalIdentityMembershipRecord | null> {
+    const now = new Date().toISOString();
+    const scopeRef = buildAgencyScopeRef(agencyId);
+    if (!this.isEnabled()) {
+      const membership = this.fallbackMemberships.get(membershipId);
+      if (
+        !membership ||
+        membership.realm !== "agency" ||
+        membership.scopeRef !== scopeRef
+      )
+        return null;
+      const disabled = this.upsertFallbackMembership({
+        ...membership,
+        status: "disabled",
+        updatedAt: now,
+      });
+      for (const invitation of this.fallbackInvitations.values()) {
+        if (
+          invitation.membershipId === membershipId &&
+          !invitation.acceptedAt &&
+          !invitation.revokedAt
+        ) {
+          this.upsertFallbackInvitation({
+            ...invitation,
+            revokedAt: now,
+            updatedAt: now,
+          });
+        }
+      }
+      await this.revokeAllSessionsForPrincipal(
+        membership.principalId,
+        "agency_membership_deactivated",
+        revokedByPrincipalId ?? undefined,
+      );
+      return disabled;
+    }
+    const client = await this.databaseService!.connect();
+    try {
+      await client.query("BEGIN");
+      const rows = await client.query<JsonRecordRow>(
+        `SELECT record FROM iam.identity_memberships
+          WHERE membership_id = $1 AND realm = 'agency' AND scope_ref = $2
+          FOR UPDATE`,
+        [membershipId, scopeRef],
+      );
+      const membership = rows.rows[0]?.record
+        ? this.parseRecord<CanonicalIdentityMembershipRecord>(
+            rows.rows[0].record,
+            "iam.identity_memberships",
+          )
+        : null;
+      if (!membership) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      const disabled = await this.upsertMembership(
+        client,
+        { ...membership, status: "disabled", updatedAt: now },
+        true,
+      );
+      await client.query(
+        `UPDATE iam.identity_invitations
+            SET revoked_at = $2::timestamptz,
+                updated_at = $2::timestamptz,
+                record = jsonb_set(jsonb_set(record, '{revokedAt}', to_jsonb($2::text)), '{updatedAt}', to_jsonb($2::text))
+          WHERE membership_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL`,
+        [membershipId, now],
+      );
+      await this.revokePrincipalSessionsInTransaction(
+        client,
+        membership.principalId,
+        now,
+        "agency_membership_deactivated",
+        revokedByPrincipalId,
+      );
+      await client.query("COMMIT");
+      return disabled;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Only the role binding `valid_to` changes; validity must stay explicit. */
+  async updateAgencyAccessPeriod(
+    agencyId: string,
+    membershipId: string,
+    accessValidTo: string,
+  ): Promise<CanonicalIdentityRoleBindingRecord[] | null> {
+    const membership = await this.findMembershipById(membershipId);
+    if (
+      !membership ||
+      membership.realm !== "agency" ||
+      membership.scopeRef !== buildAgencyScopeRef(agencyId)
+    )
+      return null;
+    const now = new Date().toISOString();
+    const sourceBindings = (
+      await this.findRoleBindingsByMembershipId(membershipId)
+    ).filter((binding) => !binding.roleBindingId.startsWith("grant_binding_"));
+    if (sourceBindings.length === 0) return null;
+    const updated: CanonicalIdentityRoleBindingRecord[] = [];
+    for (const binding of sourceBindings) {
+      updated.push(
+        await this.ensureRoleBindingRecord({
+          ...binding,
+          validTo: accessValidTo,
+          updatedAt: now,
+        }),
+      );
+    }
+    return updated;
+  }
+
+  /** Revokes every active session of every member of one agency. */
+  async revokeAgencySessions(
+    agencyId: string,
+    reason: string,
+    revokedByPrincipalId: string | null,
+  ): Promise<number> {
+    const memberships = await this.listMembershipsByScope(
+      buildAgencyScopeRef(agencyId),
+      ["agency"],
+    );
+    let revoked = 0;
+    for (const principalId of new Set(
+      memberships.map((membership) => membership.principalId),
+    )) {
+      revoked += await this.revokeAllSessionsForPrincipal(
+        principalId,
+        reason,
+        revokedByPrincipalId ?? undefined,
+      );
+    }
+    return revoked;
+  }
+
+  private async revokePrincipalSessionsInTransaction(
+    client: PoolClient,
+    principalId: string,
+    revokedAt: string,
+    reason: string,
+    revokedByPrincipalId: string | null,
+  ) {
+    const result = await client.query<{ session_id: string }>(
+      `
+        UPDATE iam.identity_sessions
+        SET status = 'revoked',
+            revoked_at = $2::timestamptz,
+            revoked_by_principal_id = $3::text,
+            revoke_reason = $4::text,
+            updated_at = $2::timestamptz,
+            record = jsonb_set(
+              jsonb_set(
+                jsonb_set(
+                  jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"revoked"'::jsonb),
+                  '{revokedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
+                ),
+                '{revokedByPrincipalId}', COALESCE(to_jsonb($3::text), 'null'::jsonb)
+              ),
+              '{revokeReason}', COALESCE(to_jsonb($4::text), 'null'::jsonb)
+            )
+        WHERE principal_id = $1::text AND status = 'active'
+        RETURNING session_id
+      `,
+      [principalId, revokedAt, revokedByPrincipalId, reason],
+    );
+    const sessionIds = result.rows.map((row) => row.session_id);
+    if (sessionIds.length > 0) {
+      await client.query(
+        `
+          UPDATE iam.identity_refresh_families
+          SET status = 'revoked',
+              updated_at = $2::timestamptz,
+              record = jsonb_set(
+                jsonb_set(COALESCE(record, '{}'::jsonb), '{status}', '"revoked"'::jsonb),
+                '{updatedAt}', COALESCE(to_jsonb($2::text), 'null'::jsonb)
+              )
+          WHERE session_id = ANY($1::text[]) AND status = 'active'
+        `,
+        [sessionIds, revokedAt],
+      );
+    }
+    return sessionIds.length;
   }
 }

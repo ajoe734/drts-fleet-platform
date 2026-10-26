@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Headers,
+  HttpStatus,
   Optional,
   Param,
   Post,
@@ -42,6 +43,14 @@ import {
   toApiListData,
   toApiSuccessEnvelope,
 } from "../../common/api-envelope";
+import {
+  IdempotencyRepository,
+  IdempotencyService,
+} from "../../common/idempotency";
+import {
+  applyIdempotentResponseHeaders,
+  type PassthroughResponseLike,
+} from "../../common/idempotency-http";
 import { FleetPartnerService } from "./fleet-partner.service";
 import { FleetPartnerCaseService } from "./fleet-partner-case.service";
 import type {
@@ -57,17 +66,23 @@ import type {
   ConfirmSupplyDocumentUploadCommand,
   CreateDriverSupplySubmissionCommand,
   CreateSupplyDocumentUploadUrlCommand,
+  CreateSupplyRenewalDraftCommand,
   CreateVehicleSupplySubmissionCommand,
   DeleteSupplyDocumentCommand,
   SubmitSupplySubmissionCommand,
   SupplySubmissionFilters,
   UpdateDriverSupplySubmissionCommand,
+  UpdateSupplyRenewalDraftCommand,
   UpdateVehicleSupplySubmissionCommand,
   WithdrawSupplySubmissionCommand,
 } from "./supply-submission.types";
 
 @Controller()
 export class FleetPartnerController {
+  private readonly fallbackIdempotencyService = new IdempotencyService(
+    new IdempotencyRepository(),
+  );
+
   constructor(
     private readonly fleetPartnerService: FleetPartnerService,
     private readonly supplySubmissionService: SupplySubmissionService,
@@ -76,6 +91,8 @@ export class FleetPartnerController {
     private readonly supplyReadinessService: SupplyReadinessService,
     @Optional()
     private readonly fleetPartnerCaseService?: FleetPartnerCaseService,
+    @Optional()
+    private readonly idempotencyService?: IdempotencyService,
   ) {}
 
   private get caseService(): FleetPartnerCaseService {
@@ -755,6 +772,89 @@ export class FleetPartnerController {
   ) {
     return toApiSuccessEnvelope(
       await this.supplySubmissionService.updateVehicleDraft(
+        this.documentPartner(fleetPartnerId, identity),
+        submissionId,
+        this.requirePartnerActorId(identity),
+        command,
+        requestId,
+      ),
+      requestId,
+    );
+  }
+
+  @Get("fleet-partner/supply-renewals/targets")
+  async listSupplyRenewalTargets(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    const resolvedFleetPartnerId = this.requireFleetPartnerId(fleetPartnerId);
+    const readinessRecords =
+      typeof this.supplyReadinessService?.listFleetPartnerReadiness ===
+      "function"
+        ? await this.supplyReadinessService.listFleetPartnerReadiness(
+            resolvedFleetPartnerId,
+          )
+        : undefined;
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.listRenewalTargets(
+        resolvedFleetPartnerId,
+        readinessRecords,
+      ),
+      requestId,
+    );
+  }
+
+  @Post("fleet-partner/supply-submissions/renewals")
+  async createSupplyRenewalSubmission(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    _untrustedActorId: string | undefined,
+    @Body() command: CreateSupplyRenewalDraftCommand,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+    @Headers("idempotency-key") idempotencyKey?: string,
+    @Res({ passthrough: true }) response?: PassthroughResponseLike,
+  ) {
+    const resolvedFleetPartnerId = this.documentPartner(
+      fleetPartnerId,
+      identity,
+    );
+    const actorId = this.requirePartnerActorId(identity);
+    const idempotency =
+      this.idempotencyService ?? this.fallbackIdempotencyService;
+    const result = await idempotency.execute({
+      scope: `fleet-partner:${resolvedFleetPartnerId}:supply_renewal_create`,
+      idempotencyKey,
+      actorId,
+      requestPath: "fleet-partner/supply-submissions/renewals",
+      required: false,
+      payload: command,
+      execute: async () => ({
+        data: await this.supplySubmissionService.createRenewalDraft(
+          resolvedFleetPartnerId,
+          actorId,
+          command,
+          requestId,
+        ),
+        statusCode: HttpStatus.CREATED,
+      }),
+    });
+    if (response) {
+      applyIdempotentResponseHeaders(response, result);
+    }
+    return toApiSuccessEnvelope(result.data, requestId);
+  }
+
+  @Put("fleet-partner/supply-submissions/:submissionId/renewal")
+  async updateSupplyRenewalSubmission(
+    @Headers("x-fleet-partner-id") fleetPartnerId: string | undefined,
+    _untrustedActorId: string | undefined,
+    @Param("submissionId") submissionId: string,
+    @Body() command: UpdateSupplyRenewalDraftCommand,
+    @Headers("x-request-id") requestId?: string,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null = null,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.supplySubmissionService.updateRenewalDraft(
         this.documentPartner(fleetPartnerId, identity),
         submissionId,
         this.requirePartnerActorId(identity),

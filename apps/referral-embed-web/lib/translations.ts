@@ -792,7 +792,7 @@ const en = {
   "supportContact.close": "Close",
   "embed.card.negatives": "Test negative states",
   "embed.card.history": "Trip history",
-  "embed.card.historySubtitle": "persistent identity · reopen safe",
+  "embed.card.historySubtitle": "bound identity · same-identity lookup",
   "embed.card.receipt": "Receipt",
   "embed.card.completed": "Trip completed",
   "embed.card.cancelled": "Trip cancelled",
@@ -863,9 +863,9 @@ const en = {
   "embed.message.reauth":
     "To protect your resident account, return to {appName} and re-enter ride booking.",
   "embed.message.consent":
-    "First-time use requires consent confirmation. Trips and receipts stay linked to the existing resident identity.",
+    "First-time use requires consent confirmation. Trips and receipts are linked to your resident identity and require same-identity verification to view.",
   "embed.message.fallback":
-    "Ride booking cannot be completed inside the community app right now. The standalone website can still recover the same trips and receipts.",
+    "Ride booking cannot be completed inside the community app right now. You can re-authenticate on the standalone website to book a ride, or re-enter the community app with the same resident identity to view bound trips and receipts.",
   "embed.message.handoff":
     "No extra sign-in is needed. Resident identity is securely handed off from {appName}.",
   "embed.book.subtitle": "{name} · {unit}",
@@ -891,7 +891,7 @@ const en = {
   "embed.place.hospital": "Veterans General Hospital",
   "embed.trip.status.en_route": "Heading to pickup",
   "embed.trip.bound":
-    "This trip remains linked to the referral passenger identity and can be recovered after reopening the community app.",
+    "This trip is linked to your resident identity. Please re-authenticate with the same identity to view your trip and receipt.",
   "embed.field.tripId": "Trip ID",
   "embed.field.destination": "Destination",
   "embed.field.fareLocked": "Fare",
@@ -1670,7 +1670,7 @@ const zh: Record<keyof typeof en, string> = {
   "supportContact.close": "關閉",
   "embed.card.negatives": "測試負向狀態",
   "embed.card.history": "歷史行程",
-  "embed.card.historySubtitle": "持久身分 · reopen safe",
+  "embed.card.historySubtitle": "已綁定身分 · 同身分驗證查詢",
   "embed.card.receipt": "收據",
   "embed.card.completed": "行程已完成",
   "embed.card.cancelled": "行程已取消",
@@ -1740,9 +1740,9 @@ const zh: Record<keyof typeof en, string> = {
     "目前來源宿主不在授權白名單中，因此基於安全考量已阻擋內嵌載入。",
   "embed.message.reauth": "為保護您的住戶帳號，請回到 {appName} 重新進入叫車。",
   "embed.message.consent":
-    "首次使用需先確認授權範圍，行程與收據會綁定既有住戶身分。",
+    "首次使用需先確認授權範圍，行程與收據會綁定您的住戶身分，並須以同一身分驗證後查詢。",
   "embed.message.fallback":
-    "目前無法在社區 App 內完成叫車，但改用獨立網站後仍可找回同一批行程與收據。",
+    "目前無法在社區 App 內完成叫車。您可改用獨立叫車網站重新驗證身分後叫車；社區 App 內已綁定身分的行程與收據，請於恢復後以同一身分重新進入查詢。",
   "embed.message.handoff": "免再登入；住戶身分會由 {appName} 安全交接進來。",
   "embed.book.subtitle": "{name} · {unit}",
   "embed.book.identity": "已綁定 referral handoff session：{id}",
@@ -1766,7 +1766,7 @@ const zh: Record<keyof typeof en, string> = {
   "embed.place.hospital": "榮總醫院",
   "embed.trip.status.en_route": "前往上車",
   "embed.trip.bound":
-    "此行程會維持與 referral passenger 身分綁定，重開社區 App 後仍可找回。",
+    "此行程已綁定您的住戶身分，請以同一身分驗證後查詢行程與收據。",
   "embed.field.tripId": "行程編號",
   "embed.field.destination": "目的地",
   "embed.field.fareLocked": "費用",

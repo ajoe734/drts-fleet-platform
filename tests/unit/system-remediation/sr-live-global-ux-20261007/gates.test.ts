@@ -2,7 +2,16 @@ import {
   execFileSync,
   type ExecFileSyncOptionsWithStringEncoding,
 } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   automatedChecks,
@@ -18,20 +27,29 @@ import {
   type Applicability,
 } from "../../../e2e/system-remediation/sr-live-global-ux-20261007/model";
 import {
+  assertNonSecretBytes,
   expectedFormat,
   gate,
   isolatedHeaders,
   localRoute,
   origin,
+  safeRelativePath,
   validateDeployment,
+  validateInputManual,
   validatePlan,
   validateSessions,
 } from "../../../e2e/system-remediation/sr-live-global-ux-20261007/guards";
 import {
   hash,
   inventoryAt,
+  translationKeysForCase,
+  translationSourceAt,
 } from "../../../e2e/system-remediation/sr-live-global-ux-20261007/inventory";
-import { scaffoldPlan } from "../../../e2e/system-remediation/sr-live-global-ux-20261007/runner";
+import {
+  materializeGitInput,
+  packageInput,
+  scaffoldPlan,
+} from "../../../e2e/system-remediation/sr-live-global-ux-20261007/runner";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -51,12 +69,20 @@ function alterSource(head: string, path: string, alter: (s: string) => string) {
     args: string[],
     options: ExecFileSyncOptionsWithStringEncoding,
   ) => {
-    const result = realExecFileSync(command, args, options);
-    return command === "git" &&
+    if (
+      command === "git" &&
       args[0] === "show" &&
       args[1] === `${head}:${path}`
-      ? alter(result)
-      : result;
+    ) {
+      let existing = "";
+      try {
+        existing = realExecFileSync(command, args, options);
+      } catch {
+        existing = "";
+      }
+      return alter(existing);
+    }
+    return realExecFileSync(command, args, options);
   }) as typeof execFileSync);
 }
 
@@ -428,7 +454,19 @@ describe("locale intent and source mapping", () => {
       roles: ["first_party_passenger"],
       roleSource: "packages/contracts/src/passenger-app.ts",
     });
+    expect(manifest.surfaces).toContainEqual({
+      app: "agency-portal-web",
+      service: "drts-dev-agency-portal-web",
+      roles: ["agency_viewer", "agency_exporter"],
+      roleSource: "packages/contracts/src/iam-policy-catalog.ts",
+    });
+    for (const app of ["tenant-console-web", "enterprise-dispatch-web"]) {
+      const surface = manifest.surfaces.find((s) => s.app === app)!;
+      expect(surface.roles).not.toContain("agency_viewer");
+      expect(surface.roles).not.toContain("agency_exporter");
+    }
     expect(manifest.excluded).not.toHaveProperty("passenger-app-web");
+    expect(manifest.excluded).not.toHaveProperty("agency-portal-web");
     for (const app of ["passenger-web", "partner-booking-web"])
       expect(manifest.excluded).toHaveProperty(app);
     const plan = scaffoldPlan(manifest);
@@ -480,6 +518,24 @@ describe("locale intent and source mapping", () => {
     expect(
       cases(manifest).filter((c) => c.screen.app === "passenger-app-web"),
     ).toHaveLength(passengerPages.length * 8 * 2 * 3);
+    const agencyPages = pages.filter((file) =>
+      file.startsWith("apps/agency-portal-web/app/"),
+    );
+    const agencyScreens = manifest.screens.filter(
+      (screen) => screen.app === "agency-portal-web",
+    );
+    expect(agencyPages.length).toBeGreaterThan(0);
+    expect(agencyScreens.map((s) => s.source).sort()).toEqual(
+      agencyPages.sort(),
+    );
+    expect(
+      agencyScreens.every(
+        (s) => s.roles.join() === "agency_viewer,agency_exporter",
+      ),
+    ).toBe(true);
+    expect(
+      cases(manifest).filter((c) => c.screen.app === "agency-portal-web"),
+    ).toHaveLength(agencyPages.length * 2 * 8 * 2 * 3);
     expect(
       manifest.screens.every(
         (s) =>
@@ -491,7 +547,7 @@ describe("locale intent and source mapping", () => {
     // Full git page/blob discovery can exceed the default 5s on a busy VM.
     // Keep all pages and checks; bound only this complete inventory probe.
   }, 30_000);
-  it.each(["passenger-app-web", "tenant-console-web"])(
+  it.each(["passenger-app-web", "tenant-console-web", "agency-portal-web"])(
     "rejects missing active surface %s without shrinking the page denominator",
     (app) => {
       const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
@@ -513,6 +569,7 @@ describe("locale intent and source mapping", () => {
     "passenger-web",
     "partner-booking-web",
     "passenger-app-web",
+    "agency-portal-web",
   ])("rejects extra or duplicated active surface %s", (app) => {
     const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",
@@ -544,6 +601,117 @@ describe("locale intent and source mapping", () => {
       );
     },
   );
+  it("adapts inline-zh agency translation source honestly, blocks en-US per case, and prefers a real dictionary when present", () => {
+    const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const currentAgencySource = translationSourceAt(head, "agency-portal-web");
+    expect(currentAgencySource).toEqual({
+      app: "agency-portal-web",
+      kind: "dictionary",
+      source: "apps/agency-portal-web/lib/translations.ts",
+      locales: ["zh-TW", "en-US"],
+      keys: expect.arrayContaining(["app.title", "login.title", "shell.title"]),
+    });
+    expect(
+      translationKeysForCase(currentAgencySource, "zh-TW").length,
+    ).toBeGreaterThan(0);
+    expect(translationKeysForCase(currentAgencySource, "en-US")).toEqual(
+      translationKeysForCase(currentAgencySource, "zh-TW"),
+    );
+
+    vi.mocked(execFileSync).mockImplementation(((
+      command: string,
+      args: string[],
+      options: ExecFileSyncOptionsWithStringEncoding,
+    ) => {
+      if (command === "git" && args[0] === "show") {
+        if (args[1] === `${head}:apps/agency-portal-web/lib/translations.ts`) {
+          throw new Error("missing historical agency translations.ts");
+        }
+        if (args[1] === `${head}:apps/agency-portal-web/app/layout.tsx`) {
+          return '<html lang="zh-Hant"><body>{children}</body></html>\n';
+        }
+        if (args[1] === `${head}:apps/agency-portal-web/app/login/page.tsx`) {
+          return "<main><h1>主管機關唯讀查詢入口</h1></main>\n";
+        }
+      }
+      return realExecFileSync(command, args, options);
+    }) as typeof execFileSync);
+    const agencySource = translationSourceAt(head, "agency-portal-web");
+    expect(agencySource).toEqual({
+      app: "agency-portal-web",
+      kind: "inline-locale",
+      source: "apps/agency-portal-web/app/layout.tsx",
+      locales: ["zh-TW"],
+      keys: [],
+      unsupportedLocaleReason: "agency-en-us-translation-source-missing",
+    });
+    expect(translationKeysForCase(agencySource, "zh-TW")).toEqual([]);
+    expect(() => translationKeysForCase(agencySource, "en-US")).toThrow(
+      "agency-en-us-translation-source-missing",
+    );
+
+    // Unsupported en-US locale records per-case blocked evidence rather than N/A or vacuous PASS.
+    const e = evidence();
+    const enRow = e.rows.find((row) => row.locale === "en-US")!;
+    enRow.status = "blocked";
+    enRow.reason = "agency-en-us-translation-source-missing";
+    enRow.checks = [];
+    expect(() => runGate(e)).toThrow(`case not passed: ${enRow.id}`);
+
+    // Empty fake dictionary is rejected instead of vacuously passing.
+    alterSource(
+      head,
+      "apps/agency-portal-web/lib/translations.ts",
+      () => "export const translations = { en: {}, zh: {} } as const;\n",
+    );
+    const emptyDict = translationSourceAt(head, "agency-portal-web");
+    expect(emptyDict).toEqual({
+      app: "agency-portal-web",
+      kind: "unsupported",
+      source: "apps/agency-portal-web/lib/translations.ts",
+      locales: [],
+      keys: [],
+      reason: "translation-dictionary-empty",
+    });
+    expect(() => translationKeysForCase(emptyDict, "zh-TW")).toThrow(
+      "translation-dictionary-empty",
+    );
+    expect(() => translationKeysForCase(emptyDict, "en-US")).toThrow(
+      "translation-dictionary-empty",
+    );
+
+    // Real bilingual dictionary is preferred once provided.
+    alterSource(
+      head,
+      "apps/agency-portal-web/lib/translations.ts",
+      () =>
+        'const en = { "agency.login.title": "Agency Portal" };\nconst zh = { "agency.login.title": "主管機關唯讀查詢" };\nexport const translations = { en, zh } as const;\n',
+    );
+    const realDict = translationSourceAt(head, "agency-portal-web");
+    expect(realDict).toEqual({
+      app: "agency-portal-web",
+      kind: "dictionary",
+      source: "apps/agency-portal-web/lib/translations.ts",
+      locales: ["zh-TW", "en-US"],
+      keys: ["agency.login.title"],
+    });
+    expect(translationKeysForCase(realDict, "zh-TW")).toEqual([
+      "agency.login.title",
+    ]);
+    expect(translationKeysForCase(realDict, "en-US")).toEqual([
+      "agency.login.title",
+    ]);
+
+    // Unadapted surface without translations.ts does not throw at map construction time,
+    // and fails closed per case with translation-source-adapter-missing.
+    const unadapted = translationSourceAt(head, "unadapted-web");
+    expect(unadapted.kind).toBe("unsupported");
+    expect(() => translationKeysForCase(unadapted, "zh-TW")).toThrow(
+      "translation-source-adapter-missing",
+    );
+  });
   it("workflow never starts a local product server and keeps browser/manual gates distinct", () => {
     const workflow = readFileSync(
       ".github/workflows/live-global-ux-acceptance.yml",
@@ -552,10 +720,561 @@ describe("locale intent and source mapping", () => {
     expect(workflow).not.toMatch(
       /pnpm dev|docker compose|next start|playwright.*--ui/,
     );
+    expect(workflow).toContain("runner.ts package-input");
+    expect(workflow).toContain("name: global-ux-input");
+    expect(workflow).toContain("runner.ts prepare");
     expect(workflow).toContain("runner.ts gate");
     expect(workflow).toContain("pull_request:");
     expect(
       readFileSync("playwright.live-global-ux.config.ts", "utf8"),
     ).not.toMatch(/webServer\s*:/);
+  });
+});
+
+describe("nonsecret global-ux-input producer and consumer contract", () => {
+  function samplePlan(): Plan {
+    return {
+      runtimeSha: sha,
+      approvalRef: "REVIEWED-PLAN-20261025",
+      expiresAt: "2099-01-01T00:00:00Z",
+      sandboxOnly: true,
+      recipes: {
+        [`${inventory.screens[0]!.id}|tenant_admin|default`]: {
+          route: "/users",
+          finalPath: "/users",
+          ready: "h1",
+          expectedStatus: 200,
+          stateProof: {
+            selector: "h1",
+            source: inventory.screens[0]!.source,
+            text: { "zh-TW": "使用者管理", "en-US": "User Management" },
+          },
+          steps: { "zh-TW": [], "en-US": [] },
+          formats: { "zh-TW": [], "en-US": [] },
+          noFormatsReason: "No date or money columns in default header probe",
+          mask: [],
+        },
+      },
+    };
+  }
+
+  function withTempDirs(
+    fn: (dirs: { root: string; sourceDir: string; bundleDir: string }) => void,
+  ) {
+    const root = mkdtempSync(path.join(os.tmpdir(), "gux-input-"));
+    const sourceDir = path.join(root, "source");
+    const bundleDir = path.join(root, "bundle");
+    mkdirSync(sourceDir, { recursive: true });
+    try {
+      fn({ root, sourceDir, bundleDir });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  it("packages approved plan.json, manual.json and artifacts with exact byte-hash preservation and full consumer compatibility", () => {
+    withTempDirs(({ sourceDir, bundleDir }) => {
+      const plan = samplePlan();
+      // Deliberate custom formatting to verify byte-for-byte preservation rather than re-serialization.
+      const planBytes = Buffer.from(
+        `{\n  "runtimeSha": "${plan.runtimeSha}",\n  "approvalRef": "${plan.approvalRef}",\n  "expiresAt": "${plan.expiresAt}",\n  "sandboxOnly": true,\n  "recipes": ${JSON.stringify(plan.recipes, null, 4)}\n}\n\n`,
+        "utf8",
+      );
+      const planSha256 = hash(planBytes);
+      const e = evidence();
+      for (const row of e.rows) row.planHash = planSha256;
+      for (const m of e.manual) m.planHash = planSha256;
+      const manualBytes = Buffer.from(
+        JSON.stringify(e.manual, null, 2) + "\n",
+        "utf8",
+      );
+      const manualSha256 = hash(manualBytes);
+      writeFileSync(path.join(sourceDir, "plan.json"), planBytes);
+      writeFileSync(path.join(sourceDir, "manual.json"), manualBytes);
+      mkdirSync(path.join(sourceDir, "artifacts", "manual"), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(sourceDir, "artifacts", "manual", "report.txt"),
+        artifact,
+      );
+
+      const receipt = packageInput({
+        sourceDir,
+        bundleDir,
+        harnessSha: binding.harnessSha,
+        runtimeSha: sha,
+        expectedPlanSha256: planSha256,
+        inventory,
+        applicability: [],
+        runId: "40250000001",
+      });
+
+      expect(receipt).toEqual({
+        status: "packaged-input-only",
+        artifactName: "global-ux-input",
+        bundleRunId: "40250000001",
+        harnessSha: binding.harnessSha,
+        runtimeSha: sha,
+        planSha256,
+        planBytes: planBytes.length,
+        manualSha256,
+        manualBytes: manualBytes.length,
+        artifacts: [
+          {
+            path: "manual/report.txt",
+            bytes: artifact.length,
+            sha256: hash(artifact),
+          },
+        ],
+        totalCases: 48,
+        applicableCases: 48,
+        configuredRecipes: 1,
+        missingRecipeCount: 7,
+        manualEvidenceRows: 48,
+        completeManualCases: 48,
+        missingManualCases: 0,
+        liveAcceptance: "not-run",
+      });
+
+      expect(
+        Buffer.compare(
+          readFileSync(path.join(bundleDir, "plan.json")),
+          planBytes,
+        ),
+      ).toBe(0);
+      expect(
+        Buffer.compare(
+          readFileSync(path.join(bundleDir, "manual.json")),
+          manualBytes,
+        ),
+      ).toBe(0);
+      expect(
+        Buffer.compare(
+          readFileSync(
+            path.join(bundleDir, "artifacts", "manual", "report.txt"),
+          ),
+          artifact,
+        ),
+      ).toBe(0);
+
+      // Consumer contract directly reads the packaged bundle without modification.
+      const consumedPlan = JSON.parse(
+        readFileSync(path.join(bundleDir, "plan.json"), "utf8"),
+      ) as Plan;
+      validatePlan(consumedPlan, inventory);
+      const consumedManual = JSON.parse(
+        readFileSync(path.join(bundleDir, "manual.json"), "utf8"),
+      ) as ManualEvidence[];
+      const gateResult = gate(
+        inventory,
+        e.rows,
+        consumedManual,
+        { ...binding, planHash: planSha256 },
+        (file) => {
+          if (file === "screenshots/test.png") return artifact;
+          return readFileSync(path.join(bundleDir, "artifacts", file));
+        },
+      );
+      expect(gateResult.status).toBe("passed");
+    });
+  });
+
+  it("allows partial real input without synthesizing missing recipes or manual evidence, and consumer gate still fails closed", () => {
+    withTempDirs(({ sourceDir, bundleDir }) => {
+      const planBytes = Buffer.from(JSON.stringify(samplePlan(), null, 2));
+      const planSha256 = hash(planBytes);
+      const manualBytes = Buffer.from("[]\n");
+      writeFileSync(path.join(sourceDir, "plan.json"), planBytes);
+      writeFileSync(path.join(sourceDir, "manual.json"), manualBytes);
+
+      const receipt = packageInput({
+        sourceDir,
+        bundleDir,
+        harnessSha: binding.harnessSha,
+        runtimeSha: sha,
+        expectedPlanSha256: planSha256,
+        inventory,
+        applicability: [],
+      });
+      expect(receipt.configuredRecipes).toBe(1);
+      expect(receipt.missingRecipeCount).toBe(7);
+      expect(receipt.manualEvidenceRows).toBe(0);
+      expect(receipt.completeManualCases).toBe(0);
+      expect(receipt.missingManualCases).toBe(48);
+      expect(receipt.liveAcceptance).toBe("not-run");
+      expect(readFileSync(path.join(bundleDir, "manual.json"), "utf8")).toBe(
+        "[]\n",
+      );
+
+      const e = evidence();
+      for (const row of e.rows) row.planHash = planSha256;
+      const consumedManual = JSON.parse(
+        readFileSync(path.join(bundleDir, "manual.json"), "utf8"),
+      ) as ManualEvidence[];
+      expect(() =>
+        gate(
+          inventory,
+          e.rows,
+          consumedManual,
+          { ...binding, planHash: planSha256 },
+          () => artifact,
+        ),
+      ).toThrow("manual coverage incomplete");
+    });
+  });
+
+  it("rejects unapproved draft plans, digest/SHA mismatches, corrupt or unreferenced artifacts", () => {
+    withTempDirs(({ sourceDir, bundleDir }) => {
+      const draft: Plan = {
+        ...samplePlan(),
+        approvalRef: "",
+        expiresAt: "1970-01-01T00:00:00Z",
+      };
+      const draftBytes = Buffer.from(JSON.stringify(draft));
+      writeFileSync(path.join(sourceDir, "plan.json"), draftBytes);
+      writeFileSync(path.join(sourceDir, "manual.json"), "[]");
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: hash(draftBytes),
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("reviewed sandbox plan missing/expired");
+
+      const validBytes = Buffer.from(JSON.stringify(samplePlan()));
+      const validHash = hash(validBytes);
+      writeFileSync(path.join(sourceDir, "plan.json"), validBytes);
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: "0".repeat(64),
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("fixture plan digest mismatch");
+
+      // Unreferenced artifact in artifacts/ directory is rejected.
+      mkdirSync(path.join(sourceDir, "artifacts", "manual"), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(sourceDir, "artifacts", "manual", "stray.txt"),
+        "stray",
+      );
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: validHash,
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("unreferenced input artifact");
+
+      // Referenced manual artifact with mismatched sha256 is rejected.
+      const e = evidence();
+      const singleManual: ManualEvidence = {
+        ...e.manual[0]!,
+        planHash: validHash,
+      };
+      writeFileSync(
+        path.join(sourceDir, "manual.json"),
+        JSON.stringify([singleManual]),
+      );
+      rmSync(path.join(sourceDir, "artifacts", "manual", "stray.txt"));
+      writeFileSync(
+        path.join(sourceDir, "artifacts", "manual", "report.txt"),
+        "tampered bytes",
+      );
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: validHash,
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("manual artifact missing/corrupt");
+    });
+  });
+
+  it("rejects path traversal, symlinks, unexpected layout files, and private credential material", () => {
+    for (const badPath of [
+      "../secret.txt",
+      "/etc/passwd",
+      "manual/../../secret.txt",
+      ".env",
+      "manual/.hidden",
+      "sessions.json",
+      "tokens.json",
+      "manual/id_rsa",
+      "manual/cert.pem",
+      "manual\\report.txt",
+    ]) {
+      expect(() => safeRelativePath(badPath)).toThrow();
+    }
+
+    for (const secretPayload of [
+      '{"storageState":{"cookies":[]}}',
+      '{"X-Serverless-Authorization":"Bearer token"}',
+      "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0",
+      "ya29.a0AfH6SMBx-fake-google-oauth-token",
+      "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkq",
+      '{"GLOBAL_UX_SESSIONS":"secret"}',
+      '{"cookies":[{"name":"synthetic_fixture","value":"synthetic_not_a_credential"}]}',
+      '{"sessions":[{"id":"synthetic"}]}',
+      '{"tokens":["synthetic"]}',
+      '{"authorization":"Basic synthetic"}',
+      '{"proxy-authorization":"Basic synthetic"}',
+    ]) {
+      expect(() =>
+        assertNonSecretBytes(Buffer.from(secretPayload), "plan.json"),
+      ).toThrow("private credential material rejected");
+      expect(() =>
+        assertNonSecretBytes(Buffer.from(secretPayload), "artifact"),
+      ).toThrow("private credential material rejected in artifact");
+    }
+
+    withTempDirs(({ root, sourceDir, bundleDir }) => {
+      const planBytes = Buffer.from(JSON.stringify(samplePlan()));
+      const planSha256 = hash(planBytes);
+      writeFileSync(path.join(sourceDir, "plan.json"), planBytes);
+      writeFileSync(path.join(sourceDir, "manual.json"), "[]");
+
+      // Overlapping source and bundle directories rejected.
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir: sourceDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: planSha256,
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("distinct");
+
+      // Unexpected top-level file (e.g. sessions.json) rejected.
+      writeFileSync(path.join(sourceDir, "sessions.json"), "[]");
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: planSha256,
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("unexpected input bundle entry");
+      rmSync(path.join(sourceDir, "sessions.json"));
+
+      // Referenced manual/report.json artifact containing JSON sensitive keys (e.g. cookies)
+      // is rejected by both validateInputManual and packageInput, while safe JSON artifacts pass.
+      const cookieJarBytes = Buffer.from(
+        '{"cookies":[{"name":"synthetic_fixture","value":"synthetic_not_a_credential"}]}',
+        "utf8",
+      );
+      const cookieJarSha256 = hash(cookieJarBytes);
+      const e = evidence();
+      const cookieJarManual: ManualEvidence = {
+        ...e.manual[0]!,
+        planHash: planSha256,
+        checks: e.manual[0]!.checks.map((check) => ({
+          ...check,
+          artifact: "manual/report.json",
+          sha256: cookieJarSha256,
+        })),
+      };
+      expect(() =>
+        validateInputManual(
+          [cookieJarManual],
+          inventory,
+          { harnessSha: binding.harnessSha, planHash: planSha256 },
+          () => cookieJarBytes,
+        ),
+      ).toThrow("private credential material rejected in artifact");
+
+      mkdirSync(path.join(sourceDir, "artifacts", "manual"), {
+        recursive: true,
+      });
+      writeFileSync(
+        path.join(sourceDir, "artifacts", "manual", "report.json"),
+        cookieJarBytes,
+      );
+      writeFileSync(
+        path.join(sourceDir, "manual.json"),
+        JSON.stringify([cookieJarManual]),
+      );
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: planSha256,
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("private credential material rejected in artifact");
+
+      const safeReportBytes = Buffer.from(
+        '{"summary":"NVDA and contrast observations","measuredRatio":7.1}\n',
+        "utf8",
+      );
+      const safeReportSha256 = hash(safeReportBytes);
+      const safeManual: ManualEvidence = {
+        ...e.manual[0]!,
+        planHash: planSha256,
+        checks: e.manual[0]!.checks.map((check) => ({
+          ...check,
+          artifact: "manual/report.json",
+          sha256: safeReportSha256,
+        })),
+      };
+      expect(
+        validateInputManual(
+          [safeManual],
+          inventory,
+          { harnessSha: binding.harnessSha, planHash: planSha256 },
+          () => safeReportBytes,
+        ),
+      ).toEqual(new Set(["manual/report.json"]));
+      writeFileSync(
+        path.join(sourceDir, "artifacts", "manual", "report.json"),
+        safeReportBytes,
+      );
+      writeFileSync(
+        path.join(sourceDir, "manual.json"),
+        JSON.stringify([safeManual]),
+      );
+      const safeReceipt = packageInput({
+        sourceDir,
+        bundleDir,
+        harnessSha: binding.harnessSha,
+        runtimeSha: sha,
+        expectedPlanSha256: planSha256,
+        inventory,
+        applicability: [],
+      });
+      expect(safeReceipt.artifacts).toEqual([
+        {
+          path: "manual/report.json",
+          bytes: safeReportBytes.length,
+          sha256: safeReportSha256,
+        },
+      ]);
+      rmSync(path.join(sourceDir, "artifacts", "manual", "report.json"));
+      writeFileSync(path.join(sourceDir, "manual.json"), "[]");
+
+      // Symlink inside artifacts/ rejected.
+      const outside = path.join(root, "outside.txt");
+      writeFileSync(outside, "outside");
+      symlinkSync(
+        outside,
+        path.join(sourceDir, "artifacts", "manual", "report.txt"),
+      );
+      expect(() =>
+        packageInput({
+          sourceDir,
+          bundleDir,
+          harnessSha: binding.harnessSha,
+          runtimeSha: sha,
+          expectedPlanSha256: planSha256,
+          inventory,
+          applicability: [],
+        }),
+      ).toThrow("symlinks");
+    });
+
+    const e = evidence();
+    expect(() =>
+      validateInputManual(
+        [{ ...e.manual[0]!, runtimeSha: "f".repeat(40) }],
+        inventory,
+        { harnessSha: binding.harnessSha, planHash: binding.planHash },
+        () => artifact,
+      ),
+    ).toThrow("manual release/run/plan mismatch");
+  });
+
+  it("materializes nonsecret input from a same-repository git commit and rejects git symlinks", () => {
+    withTempDirs(({ root, bundleDir }) => {
+      const stagingDir = path.join(root, "staging");
+      const planBytes = Buffer.from(JSON.stringify(samplePlan()));
+      const planSha256 = hash(planBytes);
+      const manualBytes = Buffer.from("[]\n");
+      const planBlob = "1".repeat(40);
+      const manualBlob = "2".repeat(40);
+      const inputRef = "3".repeat(40);
+
+      vi.mocked(execFileSync).mockImplementation(((
+        command: string,
+        args: string[],
+        options?: ExecFileSyncOptionsWithStringEncoding,
+      ) => {
+        if (command === "git" && args[0] === "ls-tree") {
+          return (
+            `100644 blob ${planBlob}\tplan.json\0` +
+            `100644 blob ${manualBlob}\tmanual.json\0`
+          );
+        }
+        if (command === "git" && args[0] === "cat-file" && args[1] === "blob") {
+          if (args[2] === planBlob) return planBytes;
+          if (args[2] === manualBlob) return manualBytes;
+        }
+        return realExecFileSync(
+          command,
+          args,
+          options as ExecFileSyncOptionsWithStringEncoding,
+        );
+      }) as typeof execFileSync);
+
+      materializeGitInput(
+        inputRef,
+        "tests/e2e/system-remediation/sr-live-global-ux-20261007/input",
+        stagingDir,
+      );
+      const receipt = packageInput({
+        sourceDir: stagingDir,
+        bundleDir,
+        harnessSha: binding.harnessSha,
+        runtimeSha: sha,
+        expectedPlanSha256: planSha256,
+        inventory,
+        applicability: [],
+      });
+      expect(receipt.planSha256).toBe(planSha256);
+
+      // Git symlink entry (mode 120000) is rejected.
+      vi.mocked(execFileSync).mockImplementation(((
+        command: string,
+        args: string[],
+      ) => {
+        if (command === "git" && args[0] === "ls-tree") {
+          return `120000 blob ${planBlob}\tplan.json\0`;
+        }
+        throw new Error("unexpected git call");
+      }) as typeof execFileSync);
+      expect(() =>
+        materializeGitInput(
+          inputRef,
+          "tests/e2e/system-remediation/sr-live-global-ux-20261007/input",
+          stagingDir,
+        ),
+      ).toThrow("symlinks or submodules");
+    });
   });
 });

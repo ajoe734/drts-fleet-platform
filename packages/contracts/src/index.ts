@@ -809,15 +809,25 @@ export interface IdentityContext {
     | "driver_user"
     | "partner_api_key"
     | "partner_user"
-    | "referral_passenger";
+    | "referral_passenger"
+    | "agency_user";
   actorId: string | null;
-  realm: "system" | "platform" | "tenant" | "ops" | "driver" | "partner";
+  realm:
+    | "system"
+    | "platform"
+    | "tenant"
+    | "ops"
+    | "driver"
+    | "partner"
+    | "agency";
   authMode:
     | "bootstrap_headers"
     | "jwt_bearer"
     | "partner_api_key"
     | "referral_bearer";
-  roleFamilies: Array<"platform" | "tenant" | "ops" | "driver" | "partner">;
+  roleFamilies: Array<
+    "platform" | "tenant" | "ops" | "driver" | "partner" | "agency"
+  >;
   roles: string[];
   scopes: string[];
   tenantId: string | null;
@@ -838,6 +848,8 @@ export interface IdentityContext {
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
+  /** BUREAU-R13: the single regulatory agency an agency_user session is bound to. */
+  agencyId?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
   supportedExecutionModes: SupervisorExecutionMode[];
@@ -852,7 +864,8 @@ export type AuthPrimaryPath =
   | "control_plane_inner_bearer"
   | "tenant_bootstrap_bearer"
   | "partner_bootstrap_bearer"
-  | "driver_device_bearer";
+  | "driver_device_bearer"
+  | "agency_oidc_bearer";
 
 export interface AuthRealmPathRecord {
   realm: IdentityContext["realm"];
@@ -1348,7 +1361,8 @@ export interface AuditLogRecord {
     | "partner_api_key"
     | "partner_user"
     | "referral_passenger"
-    | "first_party_passenger";
+    | "first_party_passenger"
+    | "agency_user";
   tenantId: string | null;
   moduleName: string;
   actionName: string;
@@ -4325,6 +4339,8 @@ export type SupplyDispatchBlockReason =
   | "exclusivity_expired"
   | "exclusivity_revoked"
   | "exclusivity_rejected"
+  | "exclusivity_operator_unbound"
+  | "exclusivity_other_operator"
   | "offboarding_pending_debranding";
 
 export type VehicleOffboardingStatus =
@@ -4369,6 +4385,7 @@ export interface VehicleSupplyLifecycleRecord {
     declarationStatus: "missing" | "submitted";
     declarationFileId: string | null;
     reviewStatus: "draft" | "pending" | "approved" | "rejected";
+    operatorId?: string | null;
     providerName: string | null;
     effectiveStart: string | null;
     effectiveEnd: string | null;
@@ -4535,6 +4552,9 @@ export interface VehicleContractRecord {
   lifecycleStatus: VehicleContractLifecycleStatus;
   approvedBy: string | null;
   approvedAt: string | null;
+  sourceSubmissionId?: string | null;
+  supersededByContractId?: string | null;
+  supersededAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -4553,6 +4573,8 @@ export interface CreateVehicleContractCommand {
 export interface ActivateVehicleContractCommand {
   approvedBy?: string | null;
   approvedAt?: string;
+  startAt?: string;
+  endAt?: string;
 }
 
 export interface InsurancePolicyRecord {
@@ -4566,6 +4588,9 @@ export interface InsurancePolicyRecord {
   endAt: string;
   status: "pending" | "active" | "expired" | "cancelled";
   lifecycleStatus: InsurancePolicyLifecycleStatus;
+  sourceSubmissionId?: string | null;
+  supersededByPolicyId?: string | null;
+  supersededAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -4582,6 +4607,8 @@ export interface CreateInsurancePolicyCommand {
 
 export interface ActivateInsurancePolicyCommand {
   activatedAt?: string;
+  startAt?: string;
+  endAt?: string;
 }
 
 export interface DispatchExclusivityRecord {
@@ -4592,6 +4619,7 @@ export interface DispatchExclusivityRecord {
   lifecycleStatus: DispatchExclusivityLifecycleStatus;
   reviewerId: string | null;
   reviewedAt: string | null;
+  exclusiveOperatorId?: string | null;
   exclusiveProviderName: string | null;
   effectiveStart: string | null;
   effectiveEnd: string | null;
@@ -4601,6 +4629,7 @@ export interface DispatchExclusivityRecord {
 
 export interface SubmitExclusivityReviewCommand {
   declarationFileId?: string | null;
+  exclusiveOperatorId?: string | null;
   exclusiveProviderName?: string | null;
   effectiveStart?: string | null;
   effectiveEnd?: string | null;
@@ -4609,6 +4638,7 @@ export interface SubmitExclusivityReviewCommand {
 export interface ApproveExclusivityCommand {
   reviewerId?: string | null;
   reviewedAt?: string;
+  exclusiveOperatorId?: string | null;
 }
 
 export interface RejectExclusivityCommand {
@@ -6276,6 +6306,7 @@ export type ReportJobRowRecord =
   | DriverRosterRowRecord
   | InsuranceRosterRowRecord
   | import("./phase1-p5-s3-multi-taxi").MultiTaxiTripOperationalExportRow
+  | import("./phase1-delta-supply-eligibility").SixMonthMonthlyOperationsSummary
   | import("./phase1-delta-supply-eligibility").SixMonthOperationsSummary
   | TenantMonthlyTripReportRowRecord
   | VehicleMonthlyDeltaRowRecord
@@ -7815,3 +7846,386 @@ export * from "./passenger-notification-channel";
 export * from "./passenger-app";
 
 export * from "./referral-monthly-ratings";
+
+// ---------------------------------------------------------------------------
+// BUREAU-R13 regulatory agency read-only portal
+// (docs/02-architecture/bureau-agency-readonly-20261024.md)
+// ---------------------------------------------------------------------------
+
+export const REGULATORY_AGENCY_STATUSES = [
+  "active",
+  "suspended",
+  "retired",
+] as const;
+export type RegulatoryAgencyStatus =
+  (typeof REGULATORY_AGENCY_STATUSES)[number];
+
+export const AGENCY_ROLE_CODES = ["agency_viewer", "agency_exporter"] as const;
+export type AgencyRoleCode = (typeof AGENCY_ROLE_CODES)[number];
+
+export interface RegulatoryAgencyRecord {
+  agencyId: string;
+  agencyCode: string;
+  displayName: string;
+  status: RegulatoryAgencyStatus;
+  createdByPrincipalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateRegulatoryAgencyCommand {
+  agencyCode: string;
+  displayName: string;
+}
+
+export interface UpdateRegulatoryAgencyCommand {
+  displayName?: string;
+  status?: RegulatoryAgencyStatus;
+}
+
+export interface InviteAgencyMemberCommand {
+  email: string;
+  roleCode: AgencyRoleCode;
+  /** Required access expiry (open decision D9: no default or upper bound). */
+  accessValidTo: string;
+}
+
+export interface UpdateAgencyAccessPeriodCommand {
+  accessValidTo: string;
+}
+
+export interface AgencyMemberView {
+  membershipId: string;
+  principalId: string;
+  agencyId: string;
+  email: string | null;
+  displayName: string | null;
+  status: CanonicalAccountStatus;
+  roleCode: string | null;
+  accessValidFrom: string | null;
+  accessValidTo: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgencyInvitationView {
+  invitationId: string;
+  membershipId: string;
+  agencyId: string;
+  email: string;
+  roleCode: string;
+  deliveryStatus: CanonicalInvitationDeliveryStatus;
+  expiresAt: string;
+  acceptedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface AgencyInvitationIssued {
+  invitation: AgencyInvitationView;
+  member: AgencyMemberView;
+  /** Only "sent" means the mail transport acknowledged the message. */
+  deliveryOutcome: "sent" | "unavailable" | "failed";
+}
+
+export const AGENCY_ACCESS_LOG_ACTIONS = [
+  "list",
+  "detail",
+  "report_view",
+  "export_preview",
+  "export_create",
+  "export_status",
+  "export_download",
+] as const;
+export type AgencyAccessLogAction = (typeof AGENCY_ACCESS_LOG_ACTIONS)[number];
+
+export const AGENCY_ACCESS_LOG_RESOURCE_TYPES = [
+  "trip_record",
+  "operations_summary",
+  "monthly_operations_summary",
+  "daily_dispatch_record",
+  "complaint_monthly_statistics",
+  "vehicle_qualification",
+  "driver_qualification",
+  "trip_record_export",
+] as const;
+export type AgencyAccessLogResourceType =
+  (typeof AGENCY_ACCESS_LOG_RESOURCE_TYPES)[number];
+
+export const AGENCY_ACCESS_LOG_OUTCOMES = [
+  "success",
+  "denied",
+  "error",
+] as const;
+export type AgencyAccessLogOutcome =
+  (typeof AGENCY_ACCESS_LOG_OUTCOMES)[number];
+
+export interface AgencyAccessLogRecord {
+  accessId: string;
+  occurredAt: string;
+  agencyId: string;
+  principalId: string;
+  membershipId: string;
+  sessionId: string | null;
+  action: AgencyAccessLogAction;
+  resourceType: AgencyAccessLogResourceType;
+  routeKey: string;
+  resourceId: string | null;
+  filter: Record<string, string | number | boolean | null>;
+  rowCount: number | null;
+  totalCount: number | null;
+  outcome: AgencyAccessLogOutcome;
+  reasonCode: string | null;
+  exportManifestHash: string | null;
+  requestId: string | null;
+  sourceIpPrefix: string | null;
+  userAgentHash: string | null;
+}
+
+export interface AgencyAccessLogQuery {
+  agencyId?: string;
+  principalId?: string;
+  action?: AgencyAccessLogAction;
+  from?: string;
+  to?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface AgencyPage<T> {
+  items: T[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+/** Agency session profile (GET /api/auth/session is the source). */
+export interface AgencySessionProfile {
+  agencyId: string;
+  agencyDisplayName: string | null;
+  roleCode: string | null;
+  accessValidTo: string | null;
+}
+
+export interface AgencyTripRecordQuery {
+  month?: string;
+  reservedFrom?: string;
+  reservedTo?: string;
+  plateNo?: string;
+  orderNo?: string;
+  orderId?: string;
+  tripId?: string;
+  recordId?: string;
+  legalHold?: "all" | "active" | "none";
+  page?: number;
+  pageSize?: number;
+}
+
+/** §4.1 allowlist projection of MultiTaxiTripOperationalAdminView. */
+export interface AgencyTripRecordView {
+  recordId: string;
+  orderId: string;
+  tripId: string;
+  orderNoMasked: string | null;
+  plateNo: string | null;
+  plateNoMasked: string | null;
+  reservedAt: string;
+  pickupAt: string | null;
+  dropoffAt: string | null;
+  route: {
+    routeSummary: string | null;
+    source:
+      | "driver_gps"
+      | "provider_route"
+      | "mixed"
+      | "pickup_dropoff_summary"
+      | "unavailable";
+    distanceMeters: number | null;
+    durationSeconds: number | null;
+  };
+  payableFareMinor: number;
+  actualFareMinor: number;
+  collectedFareMinor: number | null;
+  paymentStatus:
+    | "not_selected"
+    | "authorized"
+    | "captured"
+    | "failed"
+    | "refunded"
+    | "manual_recovery"
+    | "unknown";
+  tollMinor: number | null;
+  tollSource:
+    | "driver_proof"
+    | "electronic_receipt"
+    | "none"
+    | "unavailable";
+  currency: string;
+  farePolicyVersion: string;
+  chargingMode: "meter" | "platform_quote";
+  generatedAt: string;
+  retainUntil: string;
+  legalHold: { state: "active" | "none" | "unavailable" };
+}
+
+export interface AgencyTripExportScope {
+  month?: string;
+  reservedFrom?: string;
+  reservedTo?: string;
+  plateNo?: string;
+  orderNo?: string;
+  orderId?: string;
+  tripId?: string;
+  recordId?: string;
+}
+
+export interface CreateAgencyTripExportJobCommand {
+  scope?: AgencyTripExportScope;
+  purpose: string;
+  idempotencyKey: string;
+}
+
+/** §4.2 aggregate figures; `snapshotCoverageRate` is null when no snapshot was expected. */
+export interface AgencyOperationsSummaryView {
+  from: string;
+  to: string;
+  businessArea: string | null;
+  serviceProductCode: string | null;
+  demandRequestCount: number;
+  actualDispatchCount: number;
+  completedTripCount: number;
+  cancelledOrderCount: number;
+  averageDispatchableVehicleCount: number | null;
+  validSnapshotCount: number;
+  expectedSnapshotCount: number;
+  snapshotCoverageRate: number | null;
+  complaintCount: number;
+  complaintsByCategory: Record<string, number>;
+  lateArrivalThresholdMinutes?: number;
+  onTimeTripCount?: number;
+  lateTripCount?: number;
+  noShowTripCount?: number;
+  punctualityUnknownTripCount?: number;
+  monthlySummaries?: AgencyMonthlyOperationsSummaryView[];
+  generatedAt: string;
+}
+
+export interface AgencyMonthlyOperationsSummaryView extends Omit<
+  AgencyOperationsSummaryView,
+  "from" | "to" | "monthlySummaries"
+> {
+  periodMonth: string;
+}
+
+/** §4.3 masked projection of DispatchDailyRecord. */
+export interface AgencyDailyDispatchRecordView {
+  serviceDate: string;
+  orderNoMasked: string | null;
+  orderSource: string;
+  serviceProductCode: string;
+  requestedAt: string;
+  reservationTime: string | null;
+  pickupAddressMasked: string | null;
+  dropoffAddressMasked: string | null;
+  firstDispatchAt: string | null;
+  firstAssignedAt: string | null;
+  finalDriverIdMasked: string | null;
+  finalPlateNoMasked: string | null;
+  etaSecondsAtAssignment: number | null;
+  arrivedPickupAt: string | null;
+  tripStartedAt: string | null;
+  tripCompletedAt: string | null;
+  finalStatus: string;
+  redispatchCount: number;
+  /** Only an allowlisted reason code; free text is withheld (null). */
+  cancellationReason: string | null;
+  complaintCount: number;
+}
+
+export interface AgencyComplaintCounts {
+  createdCount: number;
+  /** Cases with a case_closed timeline entry in the month. */
+  closedCount: number;
+  /** SLA due in the month, passed, and not closed (never all historical breaches). */
+  overdueCount: number;
+}
+
+/** §4.4 / D7: counts only, never case numbers or case detail. */
+export interface AgencyComplaintMonthlyStatisticsView {
+  periodMonth: string;
+  businessArea: string;
+  serviceProductCode: string;
+  complaintCount: number;
+  complaintsByCategory: Record<string, number>;
+  lowRatingAuto: AgencyComplaintCounts | null;
+  manual: AgencyComplaintCounts | null;
+  manualByCategory: Array<AgencyComplaintCounts & { category: string }>;
+}
+
+export interface AgencyComplaintMonthlyStatisticsResponse {
+  items: AgencyComplaintMonthlyStatisticsView[];
+  statisticsAsOf: string | null;
+  /** Metrics without an authoritative aggregate; shown as 未提供. */
+  unavailableMetrics: string[];
+}
+
+export const AGENCY_EXPIRY_STATUSES = [
+  "expired",
+  "expiring",
+  "valid",
+  "unavailable",
+] as const;
+export type AgencyExpiryStatus = (typeof AGENCY_EXPIRY_STATUSES)[number];
+
+/** §4.5 vehicle qualification projection. */
+export interface AgencyVehicleQualificationView {
+  plateNoMasked: string | null;
+  licenseType: string | null;
+  operatingArea: string;
+  dispatchableFlag: boolean;
+  insuranceStatus: "valid" | "expired";
+  dispatchEligible: boolean | null;
+  dispatchBlockedReasons: string[];
+  offboardingStatus: string | null;
+  insuranceEndAt: string | null;
+  insuranceLifecycleStatus: string | null;
+  insuranceExpiryStatus: AgencyExpiryStatus;
+  policyNoMasked: string | null;
+  /** VehicleRegistryRecord has no periodic inspection date (未提供). */
+  inspectionDueAt: null;
+  inspectionExpiryStatus: "unavailable";
+}
+
+/** §4.5 driver qualification projection. */
+export interface AgencyDriverQualificationView {
+  driverIdMasked: string | null;
+  nameMasked: string | null;
+  licensesValid: boolean;
+  licenseExpiry: string | null;
+  licenseExpiryStatus: AgencyExpiryStatus;
+  professionalDriverLicenseExpiry: string | null;
+  professionalDriverLicenseExpiryStatus: AgencyExpiryStatus;
+  taxiDriverRegistrationExpiry: string | null;
+  taxiDriverRegistrationExpiryStatus: AgencyExpiryStatus;
+  lifecycleStatus: string;
+  dispatchEligible: boolean;
+  eligibilityBlockedReasons: string[];
+}
+
+export interface AgencyQualificationQuery {
+  status?: AgencyExpiryStatus;
+  windowDays?: number;
+  page?: number;
+  pageSize?: number;
+}
+
+/** Session issued by POST /api/auth/agency/callback-session. */
+export interface AgencyBootstrapSession {
+  accessToken: string;
+  tokenType: "Bearer";
+  expiresIn: string;
+  identity: IdentityContext;
+  agency: { agencyId: string; displayName: string };
+  roleCode: string;
+  accessValidTo: string;
+}

@@ -46,14 +46,14 @@ function isRunAppTarget(targetUrl: URL): boolean {
   return targetUrl.hostname.endsWith(RUN_APP_HOST_SUFFIX);
 }
 
-function buildTargetUrl(request: NextRequest, path: string[]) {
+function buildTargetUrl(request: NextRequest, path: string[], body?: unknown) {
   const targetPath =
     path.length === 1 && path[0] === "health"
       ? "health"
       : ["api", ...path].join("/");
   const targetUrl = new URL(targetPath, `${resolveTargetOrigin()}/`);
   targetUrl.search = request.nextUrl.search;
-  stripControlPlaneAuthQueryParams(targetUrl);
+  stripControlPlaneAuthQueryParams(targetUrl, request.method, body);
   return targetUrl;
 }
 
@@ -179,7 +179,36 @@ async function forward(
 ) {
   const { path } = await params;
   const method = request.method.toUpperCase();
-  const targetUrl = buildTargetUrl(request, path);
+  const body =
+    method === "POST" &&
+    request.nextUrl.searchParams.has("tenantId") &&
+    request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ===
+      "application/json"
+      ? await request
+          .clone()
+          .json()
+          .catch(() => undefined)
+      : undefined;
+  let targetUrl: URL;
+  try {
+    targetUrl = buildTargetUrl(request, path, body);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "Invalid report tenantId filter."
+    ) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "REPORT_TENANT_FILTER_INVALID",
+            message: error.message,
+          },
+        },
+        { status: 400 },
+      );
+    }
+    throw error;
+  }
   const headers = copyRequestHeaders(request);
 
   try {

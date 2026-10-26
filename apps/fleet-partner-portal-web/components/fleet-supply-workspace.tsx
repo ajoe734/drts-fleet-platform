@@ -23,8 +23,12 @@ import type {
 import { cloneElement, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DriverSupplyDraft,
+  FleetSupplyRenewalTargetDriver,
+  FleetSupplyRenewalTargetVehicle,
+  FleetSupplyRenewalTargetsResponse,
   SupplyDocumentRecord,
   SupplyReadinessReasonCode,
+  SupplyRenewalSubmissionType,
   SupplySubmissionStatus,
   VehicleSupplyDraft,
 } from "@drts/contracts";
@@ -44,8 +48,12 @@ import type {
   SupplySubmissionDetail,
 } from "@/lib/fleet-portal-supply";
 import {
+  defaultDocumentTypeForSubmission,
   formatSupplySubject,
   isEditableStatus,
+  isRenewalSubmissionType,
+  isVehicleRenewalSubmissionType,
+  RENEWAL_SUBMISSION_TYPES,
   DRAFT_GUARD_STRINGS,
   fieldId,
   restoreSupplyDraft,
@@ -99,6 +107,8 @@ const VEHICLE_DOC_TYPES = [
   "vehicle_registration",
   "insurance_policy",
   "fleet_participation_contract",
+  "driver_management_contract",
+  "vehicle_management_contract",
   "other",
 ] as const;
 
@@ -219,14 +229,27 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     headers,
   });
   const payload = camelizeDeep<
-    ApiEnvelope<T> | { error: { code?: string; message: string } }
+    | ApiEnvelope<T>
+    | {
+        error: {
+          code?: string;
+          message: string;
+          details?: Record<string, unknown>;
+        };
+      }
   >(await response.json());
   if (!response.ok || !("data" in payload)) {
-    throw createFleetDocumentError(
+    const error = createFleetDocumentError(
       "error" in payload ? payload.error.message : `HTTP ${response.status}`,
       response.status,
       "error" in payload ? payload.error.code : undefined,
-    );
+    ) as ReturnType<typeof createFleetDocumentError> & {
+      details?: Record<string, unknown>;
+    };
+    if ("error" in payload && payload.error.details) {
+      error.details = payload.error.details;
+    }
+    throw error;
   }
   return payload.data;
 }
@@ -322,9 +345,9 @@ function FormField({
 }: {
   id: string;
   label: string;
-  required?: boolean;
-  error?: string | null;
-  hint?: string;
+  required?: boolean | undefined;
+  error?: string | null | undefined;
+  hint?: string | undefined;
   children: ReactNode;
 }) {
   const theme = buildFleetTheme();
@@ -543,6 +566,9 @@ export function SupplyDashboard({ data }: { data: SupplyDashboardView }) {
             <Link href="/supply/vehicles/new" style={cardLinkStyle(theme)}>
               {t("supply.dashboard.addVehicle")}
             </Link>
+            <Link href="/supply/renewals/new" style={cardLinkStyle(theme)}>
+              {t("supply.dashboard.renewSupply")}
+            </Link>
           </>
         }
       />
@@ -690,9 +716,14 @@ export function SupplySubmissionList({
         title={t("supply.submissions.title")}
         subtitle={t("supply.submissions.subtitle")}
         actions={
-          <Link href="/supply" style={cardLinkStyle(theme)}>
-            {t("supply.action.backDashboard")}
-          </Link>
+          <>
+            <Link href="/supply/renewals/new" style={cardLinkStyle(theme)}>
+              {t("supply.dashboard.renewSupply")}
+            </Link>
+            <Link href="/supply" style={cardLinkStyle(theme)}>
+              {t("supply.action.backDashboard")}
+            </Link>
+          </>
         }
       />
       <div style={{ padding: 24 }}>
@@ -1065,6 +1096,9 @@ export function NewVehicleSubmissionForm({
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plateExistsRenewalPlate, setPlateExistsRenewalPlate] = useState<
+    string | null
+  >(null);
   const { form, setForm, clearDraft, restoreVersion } = useSupplyDraft(
     `supply-draft:v1:${draftScope}:vehicle`,
     NEW_VEHICLE_INITIAL_FORM,
@@ -1078,6 +1112,7 @@ export function NewVehicleSubmissionForm({
   async function onCreate() {
     setSaving(true);
     setError(null);
+    setPlateExistsRenewalPlate(null);
     try {
       const created = await apiRequest<SupplySubmissionDetail>(
         "fleet-partner/supply-submissions/vehicles",
@@ -1089,7 +1124,12 @@ export function NewVehicleSubmissionForm({
       router.push(`/supply/submissions/${created.submission.submissionId}`);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const code = (err as { code?: string })?.code;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (code === "PLATE_ALREADY_EXISTS" || msg.includes("already registered")) {
+        setPlateExistsRenewalPlate(form.plateNo.trim().toUpperCase());
+      }
+      setError(msg);
     } finally {
       setSaving(false);
     }
@@ -1102,10 +1142,315 @@ export function NewVehicleSubmissionForm({
         title={t("supply.vehicleNew.title")}
         subtitle={t("supply.vehicleNew.subtitle")}
         actions={
+          <>
+            <Link href="/supply/renewals/new" style={cardLinkStyle(theme)}>
+              {t("supply.dashboard.renewSupply")}
+            </Link>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirmLeave()) router.back();
+              }}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: theme.accent,
+                fontWeight: 600,
+                fontSize: 12,
+                cursor: "pointer",
+                padding: 0,
+              }}
+            >
+              {t("supply.action.backDashboard")}
+            </button>
+          </>
+        }
+      />
+      <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
+        {plateExistsRenewalPlate ? (
+          <div
+            role="region"
+            aria-label={t("supply.vehicleNew.plateExistsRenewalTitle")}
+            style={{ display: "flex", flexDirection: "column", gap: 8 }}
+          >
+            <CanvasBanner
+              theme={theme}
+              tone="warn"
+              icon="warn"
+              title={t("supply.vehicleNew.plateExistsRenewalTitle")}
+              body={t("supply.vehicleNew.plateExistsRenewalBody")}
+            />
+            <div>
+              <Link
+                href={`/supply/renewals/new?plateNo=${encodeURIComponent(plateExistsRenewalPlate)}`}
+                style={cardLinkStyle(theme)}
+              >
+                {t("supply.vehicleNew.plateExistsRenewalAction")} ({plateExistsRenewalPlate})
+              </Link>
+            </div>
+          </div>
+        ) : null}
+        <DraftFormFrame
+          key={restoreVersion}
+          ready={restoreVersion > 0}
+          title={t("supply.vehicleNew.cardTitle")}
+          error={error}
+          saving={saving}
+          onSave={onCreate}
+          saveLabel={t("supply.action.createDraft")}
+        >
+          <VehicleDraftFields
+            form={form}
+            setForm={setForm}
+            formKey="new-vehicle"
+          />
+        </DraftFormFrame>
+      </div>
+    </>
+  );
+}
+
+function mapTargetVehicleToForm(
+  vehicle: FleetSupplyRenewalTargetVehicle | undefined,
+): VehicleDraftInput {
+  if (!vehicle) {
+    return { ...NEW_VEHICLE_INITIAL_FORM };
+  }
+  return {
+    plateNo: vehicle.plateNo,
+    licenseType: vehicle.licenseType || "taxi",
+    brand: vehicle.brand ?? "",
+    model: vehicle.model ?? "",
+    modelYear: vehicle.modelYear ?? 2024,
+    seatCount: vehicle.seatCount ?? 4,
+    luggageCapacity: vehicle.luggageCapacity ?? 2,
+    businessArea: vehicle.businessArea || "台北市",
+    supportedServiceProductCodes: vehicle.supportedServiceProductCodes?.length
+      ? [...vehicle.supportedServiceProductCodes]
+      : ["taxi_realtime"],
+    airportTransferEligible: Boolean(vehicle.airportTransferEligible),
+    fixedFareAllowed: Boolean(vehicle.fixedFareAllowed),
+    currentDriverSubmissionId: null,
+    doorCount: vehicle.doorCount ?? 4,
+    color: vehicle.color ?? "White",
+  };
+}
+
+function mapTargetDriverToForm(
+  driver: FleetSupplyRenewalTargetDriver | undefined,
+): DriverDraftInput {
+  if (!driver) {
+    return { ...NEW_DRIVER_INITIAL_FORM };
+  }
+  return {
+    name: driver.name,
+    mobile: driver.mobile || "0912345678",
+    professionalDriverLicenseNo: driver.professionalDriverLicenseNo || "",
+    professionalDriverLicenseExpiry:
+      driver.professionalDriverLicenseExpiry || "",
+    taxiDriverRegistrationNo: driver.taxiDriverRegistrationNo || "",
+    taxiDriverRegistrationArea: driver.taxiDriverRegistrationArea || "台北市",
+    taxiDriverRegistrationExpiry: driver.taxiDriverRegistrationExpiry || "",
+    supportedServiceProductCodes: driver.supportedServiceProductCodes?.length
+      ? [...driver.supportedServiceProductCodes]
+      : ["taxi_realtime"],
+    preferredVehicleSubmissionId: null,
+  };
+}
+
+function buildRenewalCreateIdempotencyKey(
+  draftScope: string,
+  submissionType: SupplyRenewalSubmissionType,
+  targetId: string,
+  payloadJson: string,
+): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  const input = `${draftScope}|${submissionType}|${targetId}|${payloadJson}`;
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193) >>> 0;
+    h2 ^= ch + ((i & 0xff) << 8);
+    h2 = Math.imul(h2, 0x85ebca6b) >>> 0;
+  }
+  const safeScope =
+    draftScope.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 32) || "fleet";
+  const safeTarget =
+    targetId.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 32) || "target";
+  return `supply-renewal-${safeScope}-${submissionType}-${safeTarget}-${h1.toString(16).padStart(8, "0")}${h2.toString(16).padStart(8, "0")}`;
+}
+
+export function NewSupplyRenewalForm({
+  draftScope,
+  initialTargets,
+  source = "live",
+  initialSubmissionType = "insurance_update",
+  initialVehicleId,
+  initialDriverId,
+  initialPlateNo,
+}: {
+  draftScope: string;
+  initialTargets: FleetSupplyRenewalTargetsResponse;
+  source?: "live" | "fallback" | undefined;
+  initialSubmissionType?: SupplyRenewalSubmissionType | undefined;
+  initialVehicleId?: string | undefined;
+  initialDriverId?: string | undefined;
+  initialPlateNo?: string | undefined;
+}) {
+  const router = useRouter();
+  const theme = buildFleetTheme();
+  const { t } = useTranslation();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [existingSubmissionId, setExistingSubmissionId] = useState<
+    string | null
+  >(null);
+
+  const normalizedInitialType: SupplyRenewalSubmissionType =
+    RENEWAL_SUBMISSION_TYPES.includes(initialSubmissionType)
+      ? initialSubmissionType
+      : "insurance_update";
+
+  const matchedVehicleByPlate = initialPlateNo
+    ? initialTargets.vehicles.find(
+        (v) =>
+          v.plateNo.trim().toUpperCase() ===
+          initialPlateNo.trim().toUpperCase(),
+      )
+    : undefined;
+  const defaultVehicleId =
+    initialVehicleId ??
+    matchedVehicleByPlate?.vehicleId ??
+    initialTargets.vehicles[0]?.vehicleId ??
+    "";
+  const defaultDriverId =
+    initialDriverId ?? initialTargets.drivers[0]?.driverId ?? "";
+
+  const [submissionType, setSubmissionType] =
+    useState<SupplyRenewalSubmissionType>(normalizedInitialType);
+  const [selectedVehicleId, setSelectedVehicleId] =
+    useState<string>(defaultVehicleId);
+  const [selectedDriverId, setSelectedDriverId] =
+    useState<string>(defaultDriverId);
+
+  const selectedVehicle = useMemo(
+    () =>
+      initialTargets.vehicles.find((v) => v.vehicleId === selectedVehicleId) ??
+      initialTargets.vehicles[0],
+    [initialTargets.vehicles, selectedVehicleId],
+  );
+  const selectedDriver = useMemo(
+    () =>
+      initialTargets.drivers.find((d) => d.driverId === selectedDriverId) ??
+      initialTargets.drivers[0],
+    [initialTargets.drivers, selectedDriverId],
+  );
+
+  const initialVehicleForm = useMemo(
+    () => mapTargetVehicleToForm(selectedVehicle),
+    [selectedVehicle],
+  );
+  const initialDriverForm = useMemo(
+    () => mapTargetDriverToForm(selectedDriver),
+    [selectedDriver],
+  );
+
+  const [vehicleForm, setVehicleForm] =
+    useState<VehicleDraftInput>(initialVehicleForm);
+  const [driverForm, setDriverForm] =
+    useState<DriverDraftInput>(initialDriverForm);
+
+  useEffect(() => {
+    setVehicleForm(mapTargetVehicleToForm(selectedVehicle));
+  }, [selectedVehicle]);
+
+  useEffect(() => {
+    setDriverForm(mapTargetDriverToForm(selectedDriver));
+  }, [selectedDriver]);
+
+  const isDriverRenewal = submissionType === "profile_correction";
+  const dirty = isDriverRenewal
+    ? hasUnsavedDraftChanges(driverForm, initialDriverForm)
+    : hasUnsavedDraftChanges(vehicleForm, initialVehicleForm);
+  const { confirmLeave } = useDraftGuard(dirty);
+
+  async function onCreate() {
+    setSaving(true);
+    setError(null);
+    setExistingSubmissionId(null);
+    try {
+      const targetId = isDriverRenewal
+        ? (selectedDriver?.driverId ?? selectedDriverId)
+        : (selectedVehicle?.vehicleId ?? selectedVehicleId);
+      const payload = isDriverRenewal
+        ? {
+            submissionType,
+            subjectDriverId: targetId,
+            driverDraft: driverForm,
+          }
+        : {
+            submissionType,
+            subjectVehicleId: targetId,
+            vehicleDraft: {
+              ...vehicleForm,
+              plateNo: selectedVehicle?.plateNo ?? vehicleForm.plateNo,
+            },
+          };
+      const bodyJson = JSON.stringify(payload);
+      const idempotencyKey = buildRenewalCreateIdempotencyKey(
+        draftScope,
+        submissionType,
+        targetId,
+        bodyJson,
+      );
+      const created = await apiRequest<SupplySubmissionDetail>(
+        "fleet-partner/supply-submissions/renewals",
+        {
+          method: "POST",
+          headers: {
+            "idempotency-key": idempotencyKey,
+          },
+          body: bodyJson,
+        },
+      );
+      router.push(`/supply/submissions/${created.submission.submissionId}`);
+      router.refresh();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const errWithMeta = err as {
+        code?: string;
+        details?: { existingSubmissionId?: unknown };
+      };
+      const detailExistingId =
+        typeof errWithMeta?.details?.existingSubmissionId === "string" &&
+        errWithMeta.details.existingSubmissionId.trim().length > 0
+          ? errWithMeta.details.existingSubmissionId.trim()
+          : null;
+      if (
+        errWithMeta?.code === "ACTIVE_RENEWAL_SUBMISSION_EXISTS" &&
+        detailExistingId
+      ) {
+        setExistingSubmissionId(detailExistingId);
+        router.push(`/supply/submissions/${detailExistingId}`);
+      }
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <CanvasPageHeader
+        theme={theme}
+        title={t("supply.renewalNew.title")}
+        subtitle={t("supply.renewalNew.subtitle")}
+        actions={
           <button
             type="button"
             onClick={() => {
-              if (confirmLeave()) router.back();
+              if (confirmLeave()) router.push("/supply");
             }}
             style={{
               background: "transparent",
@@ -1121,21 +1466,210 @@ export function NewVehicleSubmissionForm({
           </button>
         }
       />
-      <div style={{ padding: 24 }}>
+      <div
+        style={{
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 16,
+        }}
+      >
+        {source === "fallback" ? (
+          <CanvasBanner
+            theme={theme}
+            tone="info"
+            icon="info"
+            body={t("supply.renewalNew.fallback")}
+          />
+        ) : null}
+        <CanvasBanner
+          theme={theme}
+          tone="info"
+          icon="info"
+          body={t("supply.renewal.requiredDocsHint")}
+        />
+        {existingSubmissionId ? (
+          <div>
+            <Link
+              href={`/supply/submissions/${existingSubmissionId}`}
+              style={cardLinkStyle(theme)}
+            >
+              {t("supply.action.openSubmission")} ({existingSubmissionId})
+            </Link>
+          </div>
+        ) : null}
         <DraftFormFrame
-          key={restoreVersion}
-          ready={restoreVersion > 0}
-          title={t("supply.vehicleNew.cardTitle")}
+          ready={true}
+          title={t("supply.renewalNew.cardTitle")}
           error={error}
           saving={saving}
           onSave={onCreate}
           saveLabel={t("supply.action.createDraft")}
         >
-          <VehicleDraftFields
-            form={form}
-            setForm={setForm}
-            formKey="new-vehicle"
-          />
+          <div style={sectionGrid()}>
+            <FormField
+              id={fieldId("new-renewal", "submissionType")}
+              label={t("supply.renewal.typeLabel")}
+              required
+            >
+              <FieldSelect
+                id={fieldId("new-renewal", "submissionType")}
+                value={submissionType}
+                onChange={(e) =>
+                  setSubmissionType(
+                    e.currentTarget.value as SupplyRenewalSubmissionType,
+                  )
+                }
+                options={RENEWAL_SUBMISSION_TYPES.map((typeCode) => ({
+                  value: typeCode,
+                  label: t(`supply.renewal.type.${typeCode}`),
+                }))}
+              />
+            </FormField>
+            {isDriverRenewal ? (
+              <FormField
+                id={fieldId("new-renewal", "subjectDriverId")}
+                label={t("supply.renewal.targetDriverLabel")}
+                required
+              >
+                <FieldSelect
+                  id={fieldId("new-renewal", "subjectDriverId")}
+                  value={selectedDriver?.driverId ?? selectedDriverId}
+                  onChange={(e) => setSelectedDriverId(e.currentTarget.value)}
+                  options={
+                    initialTargets.drivers.length > 0
+                      ? initialTargets.drivers.map((d) => ({
+                          value: d.driverId,
+                          label: `${d.name} · ${d.professionalDriverLicenseNo || d.driverId} (${d.driverId})`,
+                        }))
+                      : [
+                          {
+                            value: "",
+                            label: t("supply.renewal.selectDriverPlaceholder"),
+                          },
+                        ]
+                  }
+                />
+              </FormField>
+            ) : (
+              <FormField
+                id={fieldId("new-renewal", "subjectVehicleId")}
+                label={t("supply.renewal.targetVehicleLabel")}
+                required
+              >
+                <FieldSelect
+                  id={fieldId("new-renewal", "subjectVehicleId")}
+                  value={selectedVehicle?.vehicleId ?? selectedVehicleId}
+                  onChange={(e) => setSelectedVehicleId(e.currentTarget.value)}
+                  options={
+                    initialTargets.vehicles.length > 0
+                      ? initialTargets.vehicles.map((v) => ({
+                          value: v.vehicleId,
+                          label: `${v.plateNo} · ${[v.brand, v.model].filter(Boolean).join(" ") || v.businessArea} (${v.vehicleId})`,
+                        }))
+                      : [
+                          {
+                            value: "",
+                            label: t("supply.renewal.selectVehiclePlaceholder"),
+                          },
+                        ]
+                  }
+                />
+              </FormField>
+            )}
+          </div>
+          {isDriverRenewal && selectedDriver ? (
+            <div
+              style={{
+                border: `1px solid ${theme.border}`,
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 14,
+                background: theme.surfaceLo,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                {t("supply.renewal.currentCanonicalSummary")} ({selectedDriver.driverId})
+              </div>
+              <div style={{ color: theme.textMuted }}>
+                {t("supply.driverField.licenseExpiry")}:{" "}
+                {selectedDriver.professionalDriverLicenseExpiry || "—"} ·{" "}
+                {t("supply.driverField.registrationExpiry")}:{" "}
+                {selectedDriver.taxiDriverRegistrationExpiry || "—"}
+              </div>
+              {selectedDriver.reasonCodes.length > 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    marginTop: 8,
+                  }}
+                >
+                  {selectedDriver.reasonCodes.map((reason) => (
+                    <CanvasPill key={reason} theme={theme} tone="warn">
+                      {t(REASON_LABEL_KEYS[reason])}
+                    </CanvasPill>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {!isDriverRenewal && selectedVehicle ? (
+            <div
+              style={{
+                border: `1px solid ${theme.border}`,
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 14,
+                background: theme.surfaceLo,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                {t("supply.renewal.currentCanonicalSummary")} ({selectedVehicle.vehicleId} · {selectedVehicle.plateNo})
+              </div>
+              <div style={{ color: theme.textMuted }}>
+                Policy: {selectedVehicle.activePolicyId || "—"} (
+                {selectedVehicle.activePolicyStatus || "—"} ·{" "}
+                {selectedVehicle.activePolicyEndAt?.slice(0, 10) || "—"}) · Contract:{" "}
+                {selectedVehicle.activeContractId || "—"} (
+                {selectedVehicle.activeContractStatus || "—"} ·{" "}
+                {selectedVehicle.activeContractEndAt?.slice(0, 10) || "—"})
+              </div>
+              {selectedVehicle.reasonCodes.length > 0 ? (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    marginTop: 8,
+                  }}
+                >
+                  {selectedVehicle.reasonCodes.map((reason) => (
+                    <CanvasPill key={reason} theme={theme} tone="warn">
+                      {t(REASON_LABEL_KEYS[reason])}
+                    </CanvasPill>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {isDriverRenewal ? (
+            <DriverDraftFields
+              form={driverForm}
+              setForm={setDriverForm}
+              formKey="new-renewal-driver"
+            />
+          ) : (
+            <VehicleDraftFields
+              form={vehicleForm}
+              setForm={setVehicleForm}
+              formKey="new-renewal-vehicle"
+              plateReadOnly
+            />
+          )}
         </DraftFormFrame>
       </div>
     </>
@@ -1422,11 +1956,13 @@ function VehicleDraftFields({
   form,
   setForm,
   formKey = "detail",
+  plateReadOnly = false,
 }: {
   form: VehicleDraftInput;
   setForm: Dispatch<SetStateAction<VehicleDraftInput>>;
   /** Unique key for this form instance; used as prefix for stable field IDs (R23). */
   formKey?: string;
+  plateReadOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const theme = buildFleetTheme();
@@ -1438,18 +1974,23 @@ function VehicleDraftFields({
           id={fid("plateNo")}
           label={t("supply.vehicleField.plateNo")}
           required
+          hint={
+            plateReadOnly ? t("supply.renewal.plateImmutableNote") : undefined
+          }
         >
           <FieldInput
             id={fid("plateNo")}
             value={form.plateNo}
             inputMode="text"
             autoComplete="off"
-            onChange={(e) =>
+            readOnly={plateReadOnly}
+            onChange={(e) => {
+              if (plateReadOnly) return;
               setForm((current) => ({
                 ...current,
                 plateNo: e.currentTarget.value,
-              }))
-            }
+              }));
+            }}
           />
         </FormField>
         <FormField
@@ -1739,7 +2280,7 @@ export function SupplySubmissionDetailView({
       : null,
   );
   const [docType, setDocType] = useState<string>(
-    initialDetail.driverDraft ? DRIVER_DOC_TYPES[0] : VEHICLE_DOC_TYPES[0],
+    defaultDocumentTypeForSubmission(initialDetail.submission.submissionType),
   );
   const [docFrom, setDocFrom] = useState("");
   const [docUntil, setDocUntil] = useState("");
@@ -1809,9 +2350,9 @@ export function SupplySubmissionDetailView({
         : null,
     );
     if (switchedSubmission) {
-      const nextDocType = initialDetail.driverDraft
-        ? DRIVER_DOC_TYPES[0]
-        : VEHICLE_DOC_TYPES[0];
+      const nextDocType = defaultDocumentTypeForSubmission(
+        initialDetail.submission.submissionType,
+      );
       uploadEpochRef.current += 1;
       uploadSessionRef.current = undefined;
       uploadInFlightRef.current = false;
@@ -1938,7 +2479,19 @@ export function SupplySubmissionDetailView({
   }
 
   async function saveDraft() {
-    if (driverForm) {
+    if (isRenewalSubmissionType(detail.submission.submissionType)) {
+      await apiRequest<SupplySubmissionDetail>(
+        `fleet-partner/supply-submissions/${detail.submission.submissionId}/renewal`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            expectedRevisionNo: detail.submission.revisionNo,
+            ...(driverForm ? { driverDraft: driverForm } : {}),
+            ...(vehicleForm ? { vehicleDraft: vehicleForm } : {}),
+          }),
+        },
+      );
+    } else if (driverForm) {
       await apiRequest<SupplySubmissionDetail>(
         `fleet-partner/supply-submissions/${detail.submission.submissionId}/driver`,
         {
@@ -2200,6 +2753,9 @@ export function SupplySubmissionDetailView({
               <VehicleDraftFields
                 form={vehicleForm}
                 setForm={setVehicleDraftSafe}
+                plateReadOnly={isVehicleRenewalSubmissionType(
+                  detail.submission.submissionType,
+                )}
               />
             ) : (
               <CanvasEmptyState

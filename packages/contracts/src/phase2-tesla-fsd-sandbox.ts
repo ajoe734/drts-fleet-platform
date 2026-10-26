@@ -2383,7 +2383,8 @@ export interface SandboxRegulatorCaseAccessLogRecord {
     | "partner_user"
     | "ops_observer"
     | "referral_passenger"
-    | "first_party_passenger";
+    | "first_party_passenger"
+    | "agency_user";
   actionName: string;
   resourceType: string;
   resourceId: string | null;

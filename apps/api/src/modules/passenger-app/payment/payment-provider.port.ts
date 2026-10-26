@@ -23,7 +23,28 @@ export type BindResult =
   | { status: "completed"; card: ProviderCard }
   | { status: "action_required"; nextActionUrl: string }
   | { status: "pending" }
-  | { status: "failed"; error: "card_declined" | "invalid_credential" };
+  | {
+      status: "failed";
+      error: "card_declined" | "invalid_credential" | "card_limit_exceeded";
+    };
+
+export type PaymentBindResult = BindResult;
+
+export interface PaymentBindContext {
+  passengerId?: string;
+}
+
+export interface OrphanedBindCardRollbackRecord {
+  passengerId: string;
+  memberId: string;
+  bindCardIdDigest: string;
+  merchantTradeNo: string | null;
+  tradeNo: string | null;
+  reason:
+    | "do_action_cancel_unconfirmed"
+    | "missing_trade_identifiers_for_cancel";
+  occurredAt: string;
+}
 
 /** An unacknowledged request is unknown, not declined and not captured. */
 export type MoneyResult =
@@ -41,11 +62,15 @@ export interface CaptureCommand {
   token: string;
   amountMinor: number;
   currency: "TWD";
+  /** Authenticated/durable passenger account ID for member-scoped PSPs (ECPay). */
+  passengerId?: string;
   /** Durable attempt metadata for an explicitly selected external simulator.
    * It is not part of the PSP operation identity or a request to charge twice.
    */
   attemptCount?: number;
 }
+
+export type PaymentCaptureCommand = CaptureCommand;
 
 export interface RefundCommand {
   idempotencyKey: string;
@@ -54,11 +79,68 @@ export interface RefundCommand {
   currency: "TWD";
 }
 
+export type PaymentRefundCommand = RefundCommand;
+
 export interface PaymentProviderPort {
   readonly name: string;
   readonly available: boolean;
+  readonly sandbox?: boolean;
   readonly captureAttemptMetadata?: boolean;
-  bind(credential: string, idempotencyKey: string): Promise<BindResult>;
+  readonly capturePassengerContext?: boolean;
+  bind(
+    credential: string,
+    idempotencyKey: string,
+    context?: PaymentBindContext,
+  ): Promise<BindResult>;
+  unbind?(token: string, context?: PaymentBindContext): Promise<boolean>;
+  createBindingSession?(
+    passengerId: string,
+    options?: {
+      email?: string;
+      phone?: string;
+      idempotencyKey?: string;
+      returnUrl?: string;
+      orderResultUrl?: string;
+      bindingAuthAmountTwd?: number;
+    },
+  ): Promise<{
+    provider: "ecpay";
+    merchantToken: string;
+    tokenExpireDate: string;
+    sandbox: boolean;
+    serverType: "Stage" | "Prod";
+    sdkScriptUrl: string;
+    approvedActionOrigins: readonly string[];
+  }>;
+  verifyNotification?(envelope: unknown): {
+    kind: "bind" | "payment";
+    rtnCode: number;
+    rtnMsg: string;
+    merchantTradeNo: string | null;
+    tradeNo: string | null;
+    merchantMemberId?: string | null;
+    passengerId?: string | null;
+    idempotencyKey?: string | null;
+    authorizedAmountMinor?: number | null;
+    bindResult?: BindResult;
+    paymentResult?: MoneyResult;
+  };
+  cancelBindingAuthorization?(params: {
+    merchantTradeNo: string;
+    tradeNo: string;
+    amountMinor: number;
+  }): Promise<boolean>;
+  rollbackOrphanedBinding?(params: {
+    token: string;
+    passengerId: string;
+    merchantTradeNo?: string | null;
+    tradeNo?: string | null;
+    reason:
+      | "do_action_cancel_unconfirmed"
+      | "missing_trade_identifiers_for_cancel";
+  }): Promise<boolean>;
+  getOrphanedBindCardRollbacks?(): readonly OrphanedBindCardRollbackRecord[];
+  deriveMerchantMemberId?(passengerId: string): string;
   capture(command: CaptureCommand): Promise<MoneyResult>;
   readCapture(idempotencyKey: string): Promise<MoneyResult>;
   refund(command: RefundCommand): Promise<MoneyResult>;

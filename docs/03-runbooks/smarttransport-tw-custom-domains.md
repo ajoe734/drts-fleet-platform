@@ -1,6 +1,6 @@
 # smarttransport.tw 自訂網域設定 Runbook
 
-**更新日期：** 2026-10-10（PAX-WEB-DEPLOY-20261009）
+**更新日期：** 2026-10-25（BUREAU-R13-AGENCY-PORTAL-DEPLOY-WIRING-20261025 / PAX-WEB-DEPLOY-20261009）
 **GCP Project：** 以 live `DEV_GCP_PROJECT_ID` 為準；2026-10-10 唯讀查詢為 `drts-dev-devcc-20260825`
 **Region：** `us-central1`
 **目標：** 記錄 shared dev 的部署／網域目標態及 DNS 交付；沒有部署或 DNS 生效證據前，不宣稱已上線。本機不部署、不改 DNS 或 billing。
@@ -38,15 +38,18 @@
 | `refer.smarttransport.tw`    | `drts-dev-referral-embed-web`       | 推薦嵌入                                        |
 | `api.smarttransport.tw`      | `drts-dev-api`                      | 後端 API                                        |
 | `ride.smarttransport.tw`     | `drts-dev-passenger-app-web`        | 第一方乘客網頁 App（2026-10-09 重開；部署待驗） |
+| 選配（建議 `agency.smarttransport.tw`，未預填 live） | `drts-dev-agency-portal-web` | 交通局與監理機關獨立唯讀查核網站（2026-10-25 接線；部署待驗） |
 
 > `passenger-web` 已於 2026-06-16 退休，`concierge-portal-web` / `assisted-entry-web`
 > 亦已退休；三者不得回到 authoritative domain mapping inventory、deploy workflow、smoke URL inventory。
 
 2026-10-09 使用者重開的是新 `passenger-app-web`，並沿用 `ride.smarttransport.tw`。
-原 `passenger-web` 仍退役；新的 inventory 為 10 個 Cloud Run 服務（9 web + API）。
-服務名稱從 `DEV_GCP_PASSENGER_APP_SERVICE` 解析，未設定時用
-`drts-dev-passenger-app-web`；workflow 拒絕其他 target。既有分類規則已由
+2026-10-25 依已審核設計 §7.6 補齊 `agency-portal-web`（`drts-dev-agency-portal-web`）部署接線。
+原 `passenger-web` 仍退役；新的 active inventory 為 11 個 Cloud Run 服務（10 web + API）。
+乘客服務名稱從 `DEV_GCP_PASSENGER_APP_SERVICE` 解析，未設定時用
+`drts-dev-passenger-app-web`；機關查核網站服務名稱從 `DEV_GCP_AGENCY_PORTAL_SERVICE` 解析，未設定時用 `drts-dev-agency-portal-web`；workflow 拒絕其他 target。既有分類規則已由
 PAX-WEB-SHELL 登記新 App，本 task 不重複改 `repo-classification.json`。
+`agency.smarttransport.tw` 僅為 D5 建議之選配自訂網域；未顯式設定 `DEV_AGENCY_PORTAL_HOST` 或 `DEV_AGENCY_PORTAL_ORIGIN` 時，`domain-mappings-dev.yml` 僅輸出 operator notice 並略過該選配 domain mapping，不將未配置之建議網域寫死為已生效。
 
 ### Partner Booking — PAUSED
 
@@ -156,6 +159,13 @@ health-check `Resolve service URLs`／Summary 取得，再以**同一 immutable
 publish reference** 重跑部署加入預設網域 callbacks。沒有新服務的 run
 evidence 前，Cloud Run 預設 callback URL 仍待交付，不猜 suffix。
 callback route 的產品驗證由 PAX-WEB-AUTH-UI／PAX-QA 提供，不以網址字串宣稱登入可用。
+
+### 4.1.1 交通局與監理機關獨立網站（`drts-dev-agency-portal-web`）部署與 OAuth / 邀請交付
+
+- **Cloud Run 服務與曝光控制：** `DEV_GCP_AGENCY_PORTAL_SERVICE` 預設為 `drts-dev-agency-portal-web`（container port `3012`）。`DEV_AGENCY_PORTAL_ALLOW_UNAUTHENTICATED` 預設為 `false`（即 `--no-allow-unauthenticated`），並於部署後執行 `enforce-no-public-access.sh` 撤除任何殘留 `allUsers` invoker binding。BFF 掛載 `steps.api_secrets.outputs.tenant_auth`（含 `JWT_SECRET` 與 OIDC 啟用時的 `BFF_STATE_SECRET`），並設定 `DRTS_API_URL` 與 `DRTS_API_AUTH_AUDIENCE`。
+- **OAuth Redirect URI 與 `AUTH_ALLOWED_ORIGINS`：** 機關網站使用既有 Google OIDC client（`DEV_OIDC_CLIENT_ID` / `drts-dev-oidc-client-secret`），BFF callback 路徑為 `<agency-origin>/api/auth/agency/callback`（例如 Cloud Run `status.url` 或已配置之 `DEV_AGENCY_PORTAL_ORIGIN` 下的 `/api/auth/agency/callback`）。API 的 `AUTH_ALLOWED_ORIGINS` 會納入已配置之 `DEV_AGENCY_PORTAL_ORIGIN` 與實際 Cloud Run `status.url`；Google Cloud Console OAuth 憑證須由具權限 operator 將對應的 `<agency-origin>/api/auth/agency/callback` 加入 Authorized redirect URIs。
+- **邀請信啟用入口（`AGENCY_INVITATION_ACCEPT_URL_BASE`）：** API 的 `AGENCY_INVITATION_ACCEPT_URL_BASE` 設為 `<selected-agency-origin>/invite`（優先採用 `DEV_AGENCY_PORTAL_ORIGIN`，未設定時採用 `drts-dev-agency-portal-web` 的實際 Cloud Run `status.url`）。首次部署（first activation）時若 `Build API env vars` 階段 `drts-dev-agency-portal-web` 尚未存在，workflow 會在 `Deploy — agency-portal-web` 與 `Enforce no public access — agency-portal-web` 完成後解析實際 `status.url`，並於同一趟 `deploy` job 內更新 API 的 `AUTH_ALLOWED_ORIGINS` 與 `AGENCY_INVITATION_ACCEPT_URL_BASE`。
+- **Health-check 探測：** `health-check` 以 WIF ID token（audience 為 `steps.urls.outputs.agency_portal`）探測公開登入／邀請頁 `/login` 與 `/invite` 回傳 **200** 且 `x-drts-candidate-sha` 與 candidate SHA 一致，不對外探測 Cloud Run GFE 保留的 `/healthz`。
 
 ### 4.2 Passenger optional secret reference 契約
 
