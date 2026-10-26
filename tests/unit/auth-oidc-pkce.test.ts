@@ -743,6 +743,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       );
       const guard = new BootstrapAuthGuard(new Reflector(), auth);
       const keys: string[] = [];
+      const issuers: string[] = [];
       for (const [index, entrySlug] of entries.entries()) {
         const entry = tenantPartnerService.getPartnerEntry(entrySlug!);
         expect(entry).toMatchObject({ status: "active", activeFlag: true });
@@ -783,6 +784,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           status: "active",
         });
         keys.push(`${principal!.issuer}:${principal!.subject}`);
+        issuers.push(principal!.issuer);
         const request = {
           method: "GET",
           url: "/api/auth/session",
@@ -819,6 +821,7 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
           }),
         );
       }
+      expect(new Set(issuers).size).toBe(1);
       expect(new Set(keys).size).toBe(2);
     });
   });
