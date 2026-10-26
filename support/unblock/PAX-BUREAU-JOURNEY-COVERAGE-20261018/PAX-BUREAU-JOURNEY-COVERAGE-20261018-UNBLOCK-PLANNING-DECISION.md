@@ -280,8 +280,80 @@ engineering/owner lane, not the reviewer.
 | Record the decision | Recorded here: no new product or contract decision is required for `PAX-BUREAU-JOURNEY-COVERAGE-20261018`. |
 | Scope cut | Recorded in "Scope cut and routing". This helper does not deploy, does not re-review the Source fix, does not perform the backfill and does not fix the eligibility defect. |
 | Or explicit follow-up needed by the parent task | Recorded in "Parent unblocked next step": fix the rehearsal-supply rejection in one engineering task, then the owner does a pinned same-SHA 16-case backfill. |
-| Produce task-scoped commit/push/PR evidence for any canonical change | This file is committed and pushed on `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision`. |
-| Update the parent task with the concrete unblocked next step | To be recorded on `PAX-BUREAU-JOURNEY-COVERAGE-20261018` via `ai-status.sh note` referencing this file. This is a machine-local board action, outside this branch. |
+| Produce task-scoped commit/push/PR evidence for any canonical change | PR [#3058](https://github.com/ajoe734/drts-fleet-platform/pull/3058) opened, base `dev`, head `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision`. Head was verified `== 3c6c713cb2e6dd3adae0b873e2fd42957bdb4d04` immediately after opening (`gh pr view 3058 --json headRefOid`); this file's own update commit supersedes that SHA with a new one, which the open PR picks up automatically on push. |
+| Update the parent task with the concrete unblocked next step | **Cannot be done directly by this dispatch; see "Parent update: dispatch-guard findings and required Supervisor action" below for the exact commands and message text Supervisor must run.** A direct `ai-status.sh note PAX-BUREAU-JOURNEY-COVERAGE-20261018 ...` from this worker was rejected by the dispatch guard (`Dispatched worker cannot mutate a different task`); an `assign` with `resolved_parent_*` metadata on this helper's own task was also rejected (`Dispatched workers must use their assigned task lifecycle commands` — `assign` is not in the dispatched-worker command set). Both are hard sandbox constraints in `control_plane/usecases/task_board_commands.py`, not a choice. |
+
+## Parent update: dispatch-guard findings and required Supervisor action
+
+This helper's dispatch runs with `ORCH_DISPATCH_ROLE=owner` and an
+`ORCH_RUN_ID`. `TaskBoardCommandExecutor._guard_worker_command`
+(`control_plane/usecases/task_board_commands.py:82-94`) therefore restricts
+every command to `{start, progress, note, handoff, approve, reopen, blocker,
+system-block, record-acceptance, request-acceptance-review,
+decline-acceptance-review}`, and requires `args[0]` to equal this helper's own
+task id. Both attempts below were made from this worktree and both failed for
+that reason, not from a missing flag or typo:
+
+1. `AI_NAME=Claude2 ai-status.sh note PAX-BUREAU-JOURNEY-COVERAGE-20261018
+   "..."` → `Dispatched worker cannot mutate a different task`.
+2. `TASK_METADATA_JSON='{"resolved_parent_status":"blocked", ...}' AI_NAME=Claude2
+   ai-status.sh assign PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION
+   Claude2 Pi` → `Dispatched workers must use their assigned task lifecycle
+   commands` (`assign` is simply not in the allowed set for a dispatched
+   owner/reviewer role).
+
+`apply_unblock_parent_resolution` (`control_plane/usecases/task_board_commands
+.py`, invoked from `transition_after_merge`) is the only in-repo mechanism that
+writes a parent task's `next`/`waiting_for`/`status` from an `unblock`-class
+helper, and it only fires when *this* helper itself reaches `done` through the
+normal candidate lifecycle (CI + merge, reconciled by Supervisor). If this
+helper merges before `resolved_parent_status` is pinned, the parent is reset
+to the default `resolved_parent_status="todo"` — i.e. unblocked — even though
+the real engineering defect is still open. That is the exact failure mode
+recorded in this project's `resolved_parent_waiting_for`/`resolved_parent_status`
+notes from an earlier incident ("a merged helper flips a still-blocked parent
+to todo").
+
+Supervisor (not subject to `ORCH_DISPATCH_ROLE`) is the only actor who can
+currently close this gap. Two commands, run once, are both needed — the first
+updates the parent's visible `next` now; the second prevents a later merge of
+this helper from mis-resolving the parent:
+
+```
+AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-22b51a04f524/tools/development-orchestrator/bin/ai-status.sh note PAX-BUREAU-JOURNEY-COVERAGE-20261018 "<MESSAGE>"
+```
+
+```
+TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting_for":"Claude","resolved_parent_next":"<MESSAGE>"}' AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-22b51a04f524/tools/development-orchestrator/bin/ai-status.sh assign PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION Claude2 Pi
+```
+
+`<MESSAGE>` (identical in both; keep it under 4000 characters, it already is):
+
+> PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION 路由結論（SHA
+> 3c6c713cb2e6dd3adae0b873e2fd42957bdb4d04 起，PR #3058
+> https://github.com/ajoe734/drts-fleet-platform/pull/3058）：本任務不需新產品/契約決策。第一個
+> required_acceptance key（each-finding-real-evidence-and-applicability，UC11
+> Source 修復）已透過 PR #3001／SHA 2a7ccb31 完整 review+CI+merge，視為
+> settled。真正卡點是 shared-dev 執行期缺陷：Ops rehearsal-supply 在 prepare
+> 步驟回 400 VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT（reason=unclassified），
+> 判定於 apps/api/src/modules/vehicle-eligibility/，對應
+> owned-mobility.service.ts。已在兩個已部署候選重現：9a0a4a69（deploy-dev run
+> 40310500957）quote-expiry trace
+> b2d371df-0ab2-4b7d-8e64-a8a1d809eee8；0e7243c5（run 40325789456）
+> quote-expiry trace 0ab2416e-13a2-41c4-b80a-ab74c59926c6、shared-order trace
+> c92f9536-259b-4a7f-80b7-eda1e9c740da。下一步：(1) 另開一個 engineering task
+> 修這個資格判定缺陷（可作 PAX-OPS-PREPARE-ERROR-DIAGNOSTIC-20261026 的
+> follow-up 或新 task，由 Supervisor/planning 決定，不要再開第二個
+> planning-decision helper），green 定義為 deploy-dev 的
+> operational-candidate-acceptance 與 operational-quote-expiry-acceptance 都
+> 通過。(2) 待該修復部署後，owner 在同一個 descendant-of-2a7ccb31 的 pinned
+> SHA 上做 16 案例同版本回填：新帳號、原單、真實 UI、真實截圖，每案記
+> pass/fail/未執行，走查前後以 /api/health 的 candidateSha 確認 served SHA
+> 未被夜間部署換掉。第二個 required_acceptance key
+> （same-release-hosted-journeys）在這兩步完成前仍不算過。保持 blocked，
+> waiting_for 改標 owner Claude（engineering/owner lane），不再是 reviewer
+> Gemini2。詳見
+> support/unblock/PAX-BUREAU-JOURNEY-COVERAGE-20261018/PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION.md。
 
 ## Verification basis
 
