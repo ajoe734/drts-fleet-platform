@@ -1,0 +1,328 @@
+{
+  "runtimeSha": "d3d6ce62221b49ac4faf0f27179289ee286927a9",
+  "approvalRef": "Root Codex operator source-recipe approval SHA256 2ffa219bf449d0d75a39a19f55d056bf88bf285827c5443f2c04c358ab3fdced",
+  "expiresAt": "2026-10-27T05:33:06.886137Z",
+  "sandboxOnly": true,
+  "recipes": {
+    "agency-portal-web:/login|agency_viewer|default": {
+      "route": "/login",
+      "finalPath": "/login",
+      "ready": "main h1",
+      "expectedStatus": 200,
+      "stateProof": {
+        "selector": "main h1",
+        "text": {
+          "zh-TW": "主管機關唯讀查詢",
+          "en-US": "Regulatory Agency Read-Only Portal"
+        },
+        "source": "apps/agency-portal-web/app/login/page.tsx"
+      },
+      "steps": {
+        "zh-TW": [
+          {
+            "kind": "visible",
+            "target": "main h1",
+            "text": "主管機關唯讀查詢"
+          },
+          {
+            "kind": "visible",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]",
+            "text": "使用 Google 帳號登入"
+          },
+          {
+            "kind": "tab",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]",
+            "max": 8
+          },
+          {
+            "kind": "focus",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]"
+          },
+          {
+            "kind": "press",
+            "key": "Shift+Tab"
+          },
+          {
+            "kind": "focus",
+            "target": "main button[aria-label=\"切換語言至 English\"]"
+          },
+          {
+            "kind": "press",
+            "key": "Tab"
+          },
+          {
+            "kind": "focus",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]"
+          }
+        ],
+        "en-US": [
+          {
+            "kind": "visible",
+            "target": "main h1",
+            "text": "Regulatory Agency Read-Only Portal"
+          },
+          {
+            "kind": "visible",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]",
+            "text": "Sign in with Google"
+          },
+          {
+            "kind": "tab",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]",
+            "max": 8
+          },
+          {
+            "kind": "focus",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]"
+          },
+          {
+            "kind": "press",
+            "key": "Shift+Tab"
+          },
+          {
+            "kind": "focus",
+            "target": "main button[aria-label=\"Switch language to Traditional Chinese\"]"
+          },
+          {
+            "kind": "press",
+            "key": "Tab"
+          },
+          {
+            "kind": "focus",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]"
+          }
+        ]
+      },
+      "formats": {
+        "zh-TW": [],
+        "en-US": []
+      },
+      "noFormatsReason": "D3 /login and its root layout render text and controls without a date/time or monetary value. This does not cover access-expiry values on authenticated agency pages.",
+      "mask": []
+    },
+    "agency-portal-web:/login|agency_exporter|default": {
+      "route": "/login",
+      "finalPath": "/login",
+      "ready": "main h1",
+      "expectedStatus": 200,
+      "stateProof": {
+        "selector": "main h1",
+        "text": {
+          "zh-TW": "主管機關唯讀查詢",
+          "en-US": "Regulatory Agency Read-Only Portal"
+        },
+        "source": "apps/agency-portal-web/app/login/page.tsx"
+      },
+      "steps": {
+        "zh-TW": [
+          {
+            "kind": "visible",
+            "target": "main h1",
+            "text": "主管機關唯讀查詢"
+          },
+          {
+            "kind": "visible",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]",
+            "text": "使用 Google 帳號登入"
+          },
+          {
+            "kind": "tab",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]",
+            "max": 8
+          },
+          {
+            "kind": "focus",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]"
+          },
+          {
+            "kind": "press",
+            "key": "Shift+Tab"
+          },
+          {
+            "kind": "focus",
+            "target": "main button[aria-label=\"切換語言至 English\"]"
+          },
+          {
+            "kind": "press",
+            "key": "Tab"
+          },
+          {
+            "kind": "focus",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]"
+          }
+        ],
+        "en-US": [
+          {
+            "kind": "visible",
+            "target": "main h1",
+            "text": "Regulatory Agency Read-Only Portal"
+          },
+          {
+            "kind": "visible",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]",
+            "text": "Sign in with Google"
+          },
+          {
+            "kind": "tab",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]",
+            "max": 8
+          },
+          {
+            "kind": "focus",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]"
+          },
+          {
+            "kind": "press",
+            "key": "Shift+Tab"
+          },
+          {
+            "kind": "focus",
+            "target": "main button[aria-label=\"Switch language to Traditional Chinese\"]"
+          },
+          {
+            "kind": "press",
+            "key": "Tab"
+          },
+          {
+            "kind": "focus",
+            "target": "main a[href=\"/api/auth/agency/login?redirect_uri=%2F\"]"
+          }
+        ]
+      },
+      "formats": {
+        "zh-TW": [],
+        "en-US": []
+      },
+      "noFormatsReason": "D3 /login and its root layout render text and controls without a date/time or monetary value. This does not cover access-expiry values on authenticated agency pages.",
+      "mask": []
+    },
+    "agency-portal-web:/invite|agency_viewer|default": {
+      "route": "/invite",
+      "finalPath": "/invite",
+      "ready": "main h1",
+      "expectedStatus": 200,
+      "stateProof": {
+        "selector": "main [role=\"alert\"]",
+        "text": {
+          "zh-TW": "邀請連結無效。請向平台管理者確認。",
+          "en-US": "Invalid invitation link. Please contact the platform administrator."
+        },
+        "source": "apps/agency-portal-web/app/invite/page.tsx"
+      },
+      "steps": {
+        "zh-TW": [
+          {
+            "kind": "visible",
+            "target": "main h1",
+            "text": "接受機關帳號邀請"
+          },
+          {
+            "kind": "visible",
+            "target": "main [role=\"alert\"]",
+            "text": "邀請連結無效。請向平台管理者確認。"
+          },
+          {
+            "kind": "tab",
+            "target": "main button[aria-label=\"切換語言至 English\"]",
+            "max": 8
+          },
+          {
+            "kind": "focus",
+            "target": "main button[aria-label=\"切換語言至 English\"]"
+          }
+        ],
+        "en-US": [
+          {
+            "kind": "visible",
+            "target": "main h1",
+            "text": "Accept Agency Account Invitation"
+          },
+          {
+            "kind": "visible",
+            "target": "main [role=\"alert\"]",
+            "text": "Invalid invitation link. Please contact the platform administrator."
+          },
+          {
+            "kind": "tab",
+            "target": "main button[aria-label=\"Switch language to Traditional Chinese\"]",
+            "max": 8
+          },
+          {
+            "kind": "focus",
+            "target": "main button[aria-label=\"Switch language to Traditional Chinese\"]"
+          }
+        ]
+      },
+      "formats": {
+        "zh-TW": [],
+        "en-US": []
+      },
+      "noFormatsReason": "D3 /invite and its root layout render text and controls without a date/time or monetary value. This does not cover access-expiry values on authenticated agency pages.",
+      "mask": []
+    },
+    "agency-portal-web:/invite|agency_exporter|default": {
+      "route": "/invite",
+      "finalPath": "/invite",
+      "ready": "main h1",
+      "expectedStatus": 200,
+      "stateProof": {
+        "selector": "main [role=\"alert\"]",
+        "text": {
+          "zh-TW": "邀請連結無效。請向平台管理者確認。",
+          "en-US": "Invalid invitation link. Please contact the platform administrator."
+        },
+        "source": "apps/agency-portal-web/app/invite/page.tsx"
+      },
+      "steps": {
+        "zh-TW": [
+          {
+            "kind": "visible",
+            "target": "main h1",
+            "text": "接受機關帳號邀請"
+          },
+          {
+            "kind": "visible",
+            "target": "main [role=\"alert\"]",
+            "text": "邀請連結無效。請向平台管理者確認。"
+          },
+          {
+            "kind": "tab",
+            "target": "main button[aria-label=\"切換語言至 English\"]",
+            "max": 8
+          },
+          {
+            "kind": "focus",
+            "target": "main button[aria-label=\"切換語言至 English\"]"
+          }
+        ],
+        "en-US": [
+          {
+            "kind": "visible",
+            "target": "main h1",
+            "text": "Accept Agency Account Invitation"
+          },
+          {
+            "kind": "visible",
+            "target": "main [role=\"alert\"]",
+            "text": "Invalid invitation link. Please contact the platform administrator."
+          },
+          {
+            "kind": "tab",
+            "target": "main button[aria-label=\"Switch language to Traditional Chinese\"]",
+            "max": 8
+          },
+          {
+            "kind": "focus",
+            "target": "main button[aria-label=\"Switch language to Traditional Chinese\"]"
+          }
+        ]
+      },
+      "formats": {
+        "zh-TW": [],
+        "en-US": []
+      },
+      "noFormatsReason": "D3 /invite and its root layout render text and controls without a date/time or monetary value. This does not cover access-expiry values on authenticated agency pages.",
+      "mask": []
+    }
+  }
+}
