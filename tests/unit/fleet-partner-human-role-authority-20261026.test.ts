@@ -393,6 +393,16 @@ describe("existing scoped credential guard compatibility without Referral/Host p
     await expect(
       activate(request("partner:read partner:write")),
     ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+    const previousEnv = process.env.DRTS_ENV;
+    process.env.DRTS_ENV = "staging";
+    try {
+      await expect(
+        activate(request("billing:read partner:read partner:write")),
+      ).rejects.toMatchObject({ code: "AUTH_BOOTSTRAP_HEADERS_FORBIDDEN" });
+    } finally {
+      if (previousEnv === undefined) delete process.env.DRTS_ENV;
+      else process.env.DRTS_ENV = previousEnv;
+    }
   });
 });
 
