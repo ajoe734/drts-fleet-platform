@@ -1272,24 +1272,47 @@ export class OidcPkceService {
       ],
     };
 
-    const token = this.jwtAuthService.sign(
+    // The partner entry version is the durable-state fingerprint checked by
+    // JwtAuthService.verifyAccessToken. A bare signed JWT lacks the canonical
+    // session claims and cannot be read back via /api/auth/session.
+    const issued = await this.jwtAuthService.issueSessionToken(
       {
         authMode: "jwt_bearer",
         actorType: "partner_user",
         actorId: identity.actorId,
+        principalId: identity.actorId,
+        subject: claims.sub,
         realm: "partner",
         tenantId: identity.tenantId,
         partnerId: matchedEntry.entrySlug,
+        partnerEntrySlug: matchedEntry.entrySlug,
         roleFamilies: ["partner"],
         roles: ["partner_admin"],
         scopes,
         requestId: meta?.requestId ?? null,
       },
-      { expiresIn: "8h" },
+      {
+        expiresIn: "8h",
+        ensurePrincipal: true,
+        tokenVersion: Date.parse(matchedEntry.updatedAt),
+        authTime: new Date((claims.auth_time ?? Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+        amr,
+        acr: claims.acr ?? "",
+        policyVersion: "v1",
+      },
     );
+    identity.principalId = identity.actorId;
+    identity.partnerEntrySlug = matchedEntry.entrySlug;
+    identity.sessionId = issued.sessionId;
+    identity.tokenId = issued.tokenId;
+    identity.tokenVersion = issued.tokenVersion;
+    identity.authTime = issued.authTime;
+    identity.amr = issued.amr;
+    identity.acr = issued.acr;
+    identity.policyVersion = issued.policyVersion;
 
     const session: PartnerBootstrapSession = {
-      accessToken: token,
+      accessToken: issued.token,
       tokenType: "Bearer",
       expiresIn: "8h",
       partnerEntry: matchedEntry,
@@ -1304,7 +1327,7 @@ export class OidcPkceService {
       actorId: identity.actorId,
       actorType: "partner_user",
       subjectId: claims.sub,
-      tokenId: token,
+      tokenId: issued.tokenId,
       afterSummary: {
         sub: claims.sub,
         amr,

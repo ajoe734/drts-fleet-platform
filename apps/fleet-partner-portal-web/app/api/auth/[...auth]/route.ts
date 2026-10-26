@@ -54,17 +54,17 @@ export async function GET(
     const res = await fetch(backendUrl.toString());
     const data = await res.json();
 
-    if (!res.ok || !data.data?.authorizationUrl) {
+    if (!res.ok || !data.data?.authorization_url) {
       return NextResponse.json(
         { error: "AUTH_LOGIN_FAILED", message: "Could not generate partner login URL" },
         { status: res.status },
       );
     }
 
-    const { authorizationUrl, stateToken } = data.data;
-    const cookiePayload = JSON.stringify({ stateToken, returnUrl });
+    const { authorization_url, state_token } = data.data;
+    const cookiePayload = JSON.stringify({ stateToken: state_token, returnUrl });
 
-    const redirectRes = NextResponse.redirect(authorizationUrl);
+    const redirectRes = NextResponse.redirect(authorization_url);
     redirectRes.cookies.set("drts_oidc_state", cookiePayload, {
       httpOnly: true,
       secure: isSecureEnvironment(request),
@@ -121,7 +121,7 @@ export async function GET(
     });
 
     const data = await exchangeRes.json();
-    if (!exchangeRes.ok || !data.data?.accessToken) {
+    if (!exchangeRes.ok || !data.data?.access_token) {
       return NextResponse.json(
         {
           error: data.error?.code || "AUTH_SESSION_EXCHANGE_DENIED",
@@ -136,7 +136,7 @@ export async function GET(
     const targetRedirect = sanitizeReturnPath(returnUrl, request.nextUrl.origin);
     const response = NextResponse.redirect(new URL(targetRedirect, request.nextUrl.origin));
 
-    response.cookies.set(SESSION_COOKIE_NAME, session.accessToken, {
+    response.cookies.set(SESSION_COOKIE_NAME, session.access_token, {
       httpOnly: true,
       secure: isSecureEnvironment(request),
       sameSite: "lax",

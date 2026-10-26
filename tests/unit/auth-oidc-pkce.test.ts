@@ -6,6 +6,7 @@ import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service"
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
+import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 
 describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   let oidcService: OidcPkceService;
@@ -516,7 +517,46 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
     });
   });
 
-  describe("6. Real OIDC HTTP Provider Exchange & JWT Token Verification", () => {
+  describe("6. Partner canonical session issuance and readback", () => {
+    it("issues a durable partner session bound to the real entry version, verifies it and rejects revocation, invalid JWT and entry changes", async () => {
+      const repository = new IdentityRepository(); // in-memory fallback; no PG or live issuer
+      const auth = new JwtAuthService(repository, tenantPartnerService);
+      const service = new OidcPkceService(auth, tenantPartnerService);
+      const code = "partner_canonical_valid_code";
+      const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
+      await (service as any).partnerUserIdentityLinkRepo.resolveOrCreate({ entrySlug: "yuhe-residence", partnerUserRef: sub });
+      const login = service.generateLoginParameters("partner", { partnerId: "yuhe-residence" });
+      const command = { provider: "oidc" as const, code, state: login.state, callbackUrl: "http://localhost:3000/api/auth/callback", partnerId: "yuhe-residence" };
+      const session = await service.exchangePartnerCallbackSession(command, { stateToken: login.stateToken });
+      const payload = auth.verify(session.accessToken)!;
+      const entry = tenantPartnerService.getPartnerEntry("yuhe-residence");
+      expect(payload).toMatchObject({ realm: "partner", actorType: "partner_user", partnerId: entry.entrySlug, partnerEntrySlug: entry.entrySlug, roles: ["partner_admin"], scopes: ["partner:read", "partner:write"], tokenVersion: Date.parse(entry.updatedAt) });
+      expect(payload.sid).toBeTruthy();
+      expect(payload.jti).toBeTruthy();
+      expect(payload.auth_time).toBeGreaterThan(0);
+      expect(payload.acr).toBeTypeOf("string");
+      expect(payload.policyVersion).toBeTruthy();
+      expect(await repository.getSession(payload.sid!)).toMatchObject({ status: "active", currentTokenId: payload.jti, partnerEntrySlug: entry.entrySlug, tokenVersion: payload.tokenVersion });
+      expect(await auth.verifyAccessToken(session.accessToken)).toMatchObject({ sid: payload.sid, sub: payload.sub });
+      expect(await auth.verifyAccessToken(`${session.accessToken}forged`)).toBeNull();
+      await auth.revokeCurrentSession(payload.sid!);
+      expect(await auth.verifyAccessToken(session.accessToken)).toBeNull();
+    });
+
+    it("denies mismatched partner scope, wrong state and replay without minting a session", async () => {
+      const repo = new IdentityRepository();
+      const auth = new JwtAuthService(repo, tenantPartnerService);
+      const service = new OidcPkceService(auth, tenantPartnerService);
+      const login = service.generateLoginParameters("partner", { partnerId: "yuhe-residence" });
+      const base = { provider: "oidc" as const, code: "partner_canonical_valid_code", state: login.state, callbackUrl: "http://localhost:3000/api/auth/callback" };
+      await expect(service.exchangePartnerCallbackSession({ ...base, state: "wrong" }, { stateToken: login.stateToken })).rejects.toThrow(ApiRequestError);
+      await expect(service.exchangePartnerCallbackSession({ ...base, partnerId: "other-entry" }, { stateToken: login.stateToken })).rejects.toThrow(ApiRequestError);
+      await expect(service.exchangePartnerCallbackSession({ ...base, code: "invalid_code", partnerId: "yuhe-residence" }, { stateToken: login.stateToken })).rejects.toThrow(ApiRequestError);
+      await expect(service.exchangePartnerCallbackSession({ ...base, partnerId: "yuhe-residence" }, { stateToken: login.stateToken })).rejects.toThrow(ApiRequestError);
+    });
+  });
+
+  describe("7. Real OIDC HTTP Provider Exchange & JWT Token Verification", () => {
     it("exchanges code with external OIDC token and userinfo endpoints via HTTP fetch and verifies JWT signature", async () => {
       const originalFetch = globalThis.fetch;
       const secret = "test_jwt_secret_key_32_characters_long_min!";
