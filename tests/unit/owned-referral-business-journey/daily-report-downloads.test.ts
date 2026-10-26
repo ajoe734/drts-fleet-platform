@@ -9,9 +9,11 @@ import {
   recordsToXlsx,
 } from "../../../apps/api/src/modules/reporting-filing/report-renderers";
 import {
+  assertDailyReportHttpStatus,
   buildDailyReportFilters,
   DAILY_REPORT_FORMATS,
   DAILY_REPORT_MIME_TYPES,
+  DailyReportHttpFailure,
   opsReportJobArtifactPathname,
   opsReportJobDetailPathname,
   parseCsvRecords,
@@ -181,6 +183,200 @@ async function renderFormatBytes(
 }
 
 describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contract", () => {
+  it("F6: captures only typed safe non-200 preview status/known route/code/trace before rejecting, never raw body or headers", () => {
+    const evidence = new Evidence();
+    const secret = "sensitive-customer-and-auth-material";
+    const traceId = "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55";
+    const exchange = {
+      status: 503,
+      method: "GET",
+      pathname: "/control-plane-proxy/reports/daily-dispatch-records",
+      runtimeSha: RUNTIME_SHA,
+      bytes: Buffer.from(
+        JSON.stringify({
+          error: {
+            code: "REPORT_READ_FAILED",
+            trace_id: traceId,
+            message: secret,
+            details: { authorization: secret },
+          },
+        }),
+      ),
+    };
+    expect(() =>
+      assertDailyReportHttpStatus(
+        exchange,
+        "preview",
+        [200],
+        RUNTIME_SHA,
+        evidence,
+      ),
+    ).toThrow("daily-report-preview-status-200: HTTP 503 REPORT_READ_FAILED");
+    expect(evidence.events).toEqual([
+      {
+        stage: "daily-report-http-preview-get-daily-dispatch-records",
+        status: 503,
+        code: "REPORT_READ_FAILED",
+        objectKey: traceId,
+        result: "failed",
+      },
+    ]);
+    expect(JSON.stringify(evidence.events)).not.toContain(secret);
+
+    for (const unsafe of [
+      { error: { code: secret, traceId, message: secret } },
+      {
+        error: { code: "REPORT_READ_FAILED", traceId: secret, message: secret },
+      },
+      { error: { code: "REPORT_READ_FAILED", traceId, message: secret } },
+    ]) {
+      const bounded = new Evidence();
+      const candidate = {
+        ...exchange,
+        bytes: Buffer.from(JSON.stringify(unsafe)),
+      };
+      expect(() =>
+        assertDailyReportHttpStatus(
+          candidate,
+          "preview",
+          [200],
+          RUNTIME_SHA,
+          bounded,
+        ),
+      ).toThrow(JourneyFailure);
+      expect(JSON.stringify(bounded.events)).not.toContain(secret);
+    }
+    const malformed = new Evidence();
+    expect(() =>
+      assertDailyReportHttpStatus(
+        { ...exchange, bytes: Buffer.from("<html>"), status: 502 },
+        "preview",
+        [200],
+        RUNTIME_SHA,
+        malformed,
+      ),
+    ).toThrow("HTTP 502");
+    expect(malformed.events).toEqual([
+      {
+        stage: "daily-report-http-preview-get-daily-dispatch-records",
+        status: 502,
+        result: "failed",
+      },
+    ]);
+  });
+
+  it.each([
+    ["initial-reports-page", "GET", "/reports", [200]],
+    ["initial-jobs", "GET", "/control-plane-proxy/reports/jobs", [200]],
+    [
+      "rebuild",
+      "POST",
+      "/control-plane-proxy/reports/daily-dispatch-records/rebuild",
+      [200, 201],
+    ],
+    [
+      "rebuilt-preview",
+      "GET",
+      "/control-plane-proxy/reports/daily-dispatch-records",
+      [200],
+    ],
+    ["create-job-csv", "POST", "/control-plane-proxy/reports/jobs", [200, 201]],
+    [
+      "create-job-xlsx",
+      "POST",
+      "/control-plane-proxy/reports/jobs",
+      [200, 201],
+    ],
+    ["create-job-pdf", "POST", "/control-plane-proxy/reports/jobs", [200, 201]],
+    ["reload-jobs", "GET", "/control-plane-proxy/reports/jobs", [200]],
+    [
+      "job-detail-csv",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_csv",
+      [200],
+    ],
+    [
+      "job-detail-xlsx",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_xlsx",
+      [200],
+    ],
+    [
+      "job-detail-pdf",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_pdf",
+      [200],
+    ],
+    [
+      "artifact-download-csv",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_csv/artifact",
+      [200],
+    ],
+    [
+      "artifact-download-xlsx",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_xlsx/artifact",
+      [200],
+    ],
+    [
+      "artifact-download-pdf",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_pdf/artifact",
+      [200],
+    ],
+  ] as const)(
+    "F6: %s non-200 is safely attributed and stops before body parse",
+    (phase, method, pathname, accepted) => {
+      const evidence = new Evidence();
+      const exchange = {
+        method,
+        pathname,
+        status: 403,
+        runtimeSha: RUNTIME_SHA,
+        bytes: Buffer.from(
+          JSON.stringify({
+            error: { code: "IAP_SUBJECT_FORBIDDEN", message: "private-value" },
+          }),
+        ),
+      };
+      expect(() =>
+        assertDailyReportHttpStatus(
+          exchange,
+          phase,
+          accepted,
+          RUNTIME_SHA,
+          evidence,
+        ),
+      ).toThrow(DailyReportHttpFailure);
+      expect(evidence.events).toMatchObject([
+        { status: 403, code: "IAP_SUBJECT_FORBIDDEN", result: "failed" },
+      ]);
+      expect(JSON.stringify(evidence.events)).not.toContain("private-value");
+      const passed = new Evidence();
+      assertDailyReportHttpStatus(
+        { ...exchange, status: accepted[0]! },
+        phase,
+        accepted,
+        RUNTIME_SHA,
+        passed,
+      );
+      expect(passed.events).toHaveLength(0);
+      expect(() =>
+        assertDailyReportHttpStatus(
+          {
+            ...exchange,
+            pathname:
+              "/control-plane-proxy/reports/other/artifact?token=secret",
+          },
+          phase,
+          accepted,
+          RUNTIME_SHA,
+          new Evidence(),
+        ),
+      ).toThrow("daily-report-http-known-route-and-runtime-required");
+    },
+  );
   it("F1 regression: resolves TripScreen rendered displayOrderNo instead of raw UUID while binding active trip and URL orderId", () => {
     const activeData: ObjectData = {
       trip: {
@@ -665,6 +861,41 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
   it.each([
     {
+      caseName:
+        "actual Ops reports page returns 500 without mounting the jobs list",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: false,
+      expectedRetained: false,
+      previewFailure: "page",
+    },
+    {
+      caseName:
+        "second Ops reports navigation returns 500 after three accepted jobs without mounting reload jobs",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: false,
+      previewFailure: "reload-page",
+    },
+    {
+      caseName:
+        "actual Ops job detail returns 404 without requesting the artifact",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+      previewFailure: "detail",
+    },
+    {
+      caseName: "actual Ops preview returns non-200 with private error payload",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: false,
+      expectedRetained: false,
+      previewFailure: true,
+    },
+    {
       caseName: "all sibling rows belong to controlled owned orders",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -702,6 +933,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       jobSiblingOrderId,
       expectedPreviewControlled,
       expectedRetained,
+      previewFailure,
     }) => {
       const tempDir = await mkdtemp(
         path.join(tmpdir(), "owned-daily-reports-test-"),
@@ -718,6 +950,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         const jobSiblingRow = siblingRow(jobSiblingOrderId);
 
         let routeHandler: ((route: Route) => Promise<void>) | undefined;
+        let unrouteCalled = false;
+        let artifactRequests = 0;
+        let initialJobsRequests = 0;
+        let pageVisits = 0;
         let rebuiltInBackend = false;
         let selectedFormat: DailyReportFormat = "csv";
         let dateFromVal = "";
@@ -807,14 +1043,24 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
         const fakePage: Partial<Page> = {
           goto: async (url: string) => {
+            pageVisits += 1;
+            const failedPage =
+              previewFailure === "page" ||
+              (previewFailure === "reload-page" && pageVisits === 2);
             await dispatchRoute(
               "GET",
               url,
               null,
-              200,
+              failedPage ? 500 : 200,
               { "content-type": "text/html" },
-              Buffer.from("<html></html>"),
+              failedPage
+                ? Buffer.from("<html>private-page-error</html>")
+                : Buffer.from("<html></html>"),
             );
+            // A failed document never mounts the real Ops page and therefore
+            // cannot issue the dependent client-side jobs list request.
+            if (failedPage) return null;
+            initialJobsRequests += 1;
             const jobsPayload = {
               ok: true,
               data: {
@@ -856,10 +1102,21 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     "GET",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records?${query.toString()}`,
                     null,
-                    200,
+                    previewFailure === true ? 503 : 200,
                     { "content-type": "application/json" },
                     Buffer.from(
-                      JSON.stringify({ ok: true, data: { items: rows } }),
+                      JSON.stringify(
+                        previewFailure === true
+                          ? {
+                              error: {
+                                code: "REPORT_READ_FAILED",
+                                trace_id:
+                                  "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                                message: "private-error-message",
+                              },
+                            }
+                          : { ok: true, data: { items: rows } },
+                      ),
                     ),
                   );
                 },
@@ -1035,15 +1292,27 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                             "GET",
                             `${OPS_ORIGIN}${opsReportJobDetailPathname(foundJob.jobId)}`,
                             null,
-                            200,
+                            previewFailure === "detail" ? 404 : 200,
                             { "content-type": "application/json" },
                             Buffer.from(
-                              JSON.stringify({
-                                ok: true,
-                                data: foundJob.detail,
-                              }),
+                              JSON.stringify(
+                                previewFailure === "detail"
+                                  ? {
+                                      error: {
+                                        code: "REPORT_JOB_NOT_FOUND",
+                                        trace_id:
+                                          "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                                        message: "private-detail-error",
+                                      },
+                                    }
+                                  : { ok: true, data: foundJob.detail },
+                              ),
                             ),
                           );
+                          // ApiClient.getReportJob throws for 404; the Ops
+                          // click handler never calls openDownload in this case.
+                          if (previewFailure === "detail") return;
+                          artifactRequests += 1;
                           const fileName = `daily_dispatch_record-${foundJob.jobId}.${foundJob.format}`;
                           await dispatchRoute(
                             "GET",
@@ -1072,13 +1341,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             routeHandler = handler as (route: Route) => Promise<void>;
           },
           unroute: async () => {
+            unrouteCalled = true;
             routeHandler = undefined;
           },
           pages: () => [fakePage as Page],
         } as unknown as BrowserContext;
 
         const evidence = new Evidence();
-        const result = await runOwnedDailyReportDownloads({
+        const run = runOwnedDailyReportDownloads({
           context: fakeContext,
           page: fakePage as Page,
           opsOrigin: OPS_ORIGIN,
@@ -1102,6 +1372,106 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           recoveryOnly: false,
           evidence,
         });
+        if (
+          previewFailure === "page" ||
+          previewFailure === "reload-page" ||
+          previewFailure === "detail"
+        ) {
+          const initialPage = previewFailure === "page";
+          const reloadPage = previewFailure === "reload-page";
+          await expect(run).rejects.toBeInstanceOf(DailyReportHttpFailure);
+          await expect(run).rejects.toMatchObject({
+            stage: initialPage
+              ? "daily-report-ops-reports-initial-load-200"
+              : reloadPage
+                ? "daily-report-reload-reports-page-status-200"
+                : "daily-report-job-detail-csv-http-status-200-required",
+            status: initialPage || reloadPage ? 500 : 404,
+            code:
+              initialPage || reloadPage ? undefined : "REPORT_JOB_NOT_FOUND",
+            context: {
+              phase: initialPage
+                ? "initial-reports-page"
+                : reloadPage
+                  ? "reload-reports-page"
+                  : "job-detail-csv",
+              method: "GET",
+              route: initialPage || reloadPage ? "reports-page" : "job-detail",
+              runtimeSha: RUNTIME_SHA,
+              ...(initialPage || reloadPage
+                ? {}
+                : {
+                    requestId: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                  }),
+            },
+          });
+          expect(evidence.events).toContainEqual(
+            initialPage || reloadPage
+              ? {
+                  stage: `daily-report-http-${initialPage ? "initial" : "reload"}-reports-page-get-reports-page`,
+                  status: 500,
+                  result: "failed",
+                }
+              : {
+                  stage: "daily-report-http-job-detail-csv-get-job-detail",
+                  status: 404,
+                  code: "REPORT_JOB_NOT_FOUND",
+                  objectKey: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                  result: "failed",
+                },
+          );
+          expect(initialJobsRequests).toBe(
+            initialPage ? 0 : reloadPage ? 1 : 2,
+          );
+          expect(pageVisits).toBe(initialPage ? 1 : 2);
+          expect(createdJobs.map((job) => job.jobId)).toEqual(
+            initialPage
+              ? []
+              : DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
+          );
+          expect(artifactRequests).toBe(0);
+          expect(unrouteCalled).toBe(true);
+          expect(JSON.stringify(evidence.events)).not.toContain(
+            "private-detail-error",
+          );
+          expect(JSON.stringify(evidence.events)).not.toContain(
+            "private-page-error",
+          );
+          await expect(
+            stat(path.join(tempDir, "daily-reports")),
+          ).rejects.toThrow();
+          return;
+        }
+        if (previewFailure === true) {
+          await expect(run).rejects.toMatchObject({
+            stage: "daily-report-preview-status-200",
+            status: 503,
+            code: "REPORT_READ_FAILED",
+            context: {
+              phase: "preview",
+              method: "GET",
+              route: "daily-dispatch-records",
+              runtimeSha: RUNTIME_SHA,
+              requestId: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+            },
+          });
+          expect(evidence.events).toContainEqual({
+            stage: "daily-report-http-preview-get-daily-dispatch-records",
+            status: 503,
+            code: "REPORT_READ_FAILED",
+            objectKey: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+            result: "failed",
+          });
+          expect(JSON.stringify(evidence.events)).not.toContain(
+            "private-error-message",
+          );
+          expect(createdJobs).toHaveLength(0);
+          await expect(
+            stat(path.join(tempDir, "daily-reports")),
+          ).rejects.toThrow();
+          return;
+        }
+        const result = await run;
 
         expect(result.orderId).toBe(ORDER_ID);
         expect(result.serviceDate).toBe("2026-10-26");
@@ -1155,5 +1525,6 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         await rm(tempDir, { recursive: true, force: true });
       }
     },
+    22_000,
   );
 });

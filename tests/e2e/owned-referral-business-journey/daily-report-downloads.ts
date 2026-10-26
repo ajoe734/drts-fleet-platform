@@ -228,10 +228,7 @@ export function resolveDailyServiceProductCode(order: ObjectData): string {
     );
   }
   const candidate =
-    explicitCode ??
-    subtype ??
-    order.taxiDispatchMode ??
-    order.serviceBucket;
+    explicitCode ?? subtype ?? order.taxiDispatchMode ?? order.serviceBucket;
   return text(candidate, "daily-report-service-product-code-required");
 }
 
@@ -1008,6 +1005,241 @@ function unwrapEnvelopeList(bytes: Buffer, stage: string): ObjectData[] {
   return records(dataObj.items);
 }
 
+type DailyReportHttpPhase =
+  | "initial-reports-page"
+  | "initial-jobs"
+  | "preview"
+  | "rebuild"
+  | "rebuilt-preview"
+  | "create-job-csv"
+  | "create-job-xlsx"
+  | "create-job-pdf"
+  | "reload-reports-page"
+  | "reload-jobs"
+  | "job-detail-csv"
+  | "job-detail-xlsx"
+  | "job-detail-pdf"
+  | "artifact-download-csv"
+  | "artifact-download-xlsx"
+  | "artifact-download-pdf";
+
+// Static route labels only: never use a response URL, query or job ID in evidence.
+const REPORT_HTTP_ROUTES = {
+  "initial-reports-page": {
+    method: "GET",
+    path: /^\/reports$/,
+    label: "reports-page",
+  },
+  "initial-jobs": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/jobs$/,
+    label: "jobs",
+  },
+  preview: {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/daily-dispatch-records$/,
+    label: "daily-dispatch-records",
+  },
+  rebuild: {
+    method: "POST",
+    path: /^\/control-plane-proxy\/reports\/daily-dispatch-records\/rebuild$/,
+    label: "daily-dispatch-rebuild",
+  },
+  "rebuilt-preview": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/daily-dispatch-records$/,
+    label: "daily-dispatch-records",
+  },
+  "create-job-csv": {
+    method: "POST",
+    path: /^\/control-plane-proxy\/reports\/jobs$/,
+    label: "jobs",
+  },
+  "create-job-xlsx": {
+    method: "POST",
+    path: /^\/control-plane-proxy\/reports\/jobs$/,
+    label: "jobs",
+  },
+  "create-job-pdf": {
+    method: "POST",
+    path: /^\/control-plane-proxy\/reports\/jobs$/,
+    label: "jobs",
+  },
+  "reload-reports-page": {
+    method: "GET",
+    path: /^\/reports$/,
+    label: "reports-page",
+  },
+  "reload-jobs": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/jobs$/,
+    label: "jobs",
+  },
+  "job-detail-csv": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/[^/]+$/,
+    label: "job-detail",
+  },
+  "job-detail-xlsx": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/[^/]+$/,
+    label: "job-detail",
+  },
+  "job-detail-pdf": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/[^/]+$/,
+    label: "job-detail",
+  },
+  "artifact-download-csv": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/[^/]+\/artifact$/,
+    label: "job-artifact",
+  },
+  "artifact-download-xlsx": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/[^/]+\/artifact$/,
+    label: "job-artifact",
+  },
+  "artifact-download-pdf": {
+    method: "GET",
+    path: /^\/control-plane-proxy\/reports\/[^/]+\/artifact$/,
+    label: "job-artifact",
+  },
+} as const satisfies Record<
+  DailyReportHttpPhase,
+  { method: string; path: RegExp; label: string }
+>;
+
+const SAFE_REPORT_ERROR_CODES = new Set([
+  "REPORT_READ_FAILED",
+  "REPORT_REBUILD_FAILED",
+  "REPORT_QUERY_INVALID",
+  "REPORT_WINDOW_TOO_LARGE",
+  "REPORT_SOURCE_UNAVAILABLE",
+  "REPORT_JOB_NOT_FOUND",
+  "REPORT_ARTIFACT_NOT_READY",
+  "REPORT_FORMAT_UNKNOWN",
+  "REPORT_FORMAT_NOT_IMPLEMENTED",
+  "REPORT_TENANT_SCOPE_MISMATCH",
+  "REPORT_JOB_TENANT_SCOPE_FORBIDDEN",
+  "FORBIDDEN",
+  "UNAUTHORIZED",
+  "IAP_AUDIENCE_MISMATCH",
+  "IAP_SUBJECT_FORBIDDEN",
+  "IAP_ASSERTION_INVALID",
+]);
+
+export type DailyReportHttpContext = Readonly<{
+  phase: DailyReportHttpPhase;
+  method: "GET" | "POST";
+  route: string;
+  runtimeSha: string;
+  status: number;
+  code?: string;
+  requestId?: string;
+}>;
+
+export class DailyReportHttpFailure extends JourneyFailure {
+  constructor(
+    stage: string,
+    public readonly context: DailyReportHttpContext,
+  ) {
+    super(stage, context.status, context.code);
+  }
+}
+
+/** Called on the captured real Ops exchange before any response-body unwrap.
+ * Reads ONLY a bounded error envelope; never expose arbitrary message, details,
+ * headers, response URL or raw bytes in thrown errors/journey evidence.
+ */
+export function assertDailyReportHttpStatus(
+  exchange: Pick<
+    CapturedOpsExchange,
+    "status" | "method" | "pathname" | "runtimeSha" | "bytes"
+  >,
+  phase: DailyReportHttpPhase,
+  accepted: readonly number[],
+  expectedRuntimeSha: string,
+  evidence: Evidence,
+): void {
+  const route = REPORT_HTTP_ROUTES[phase];
+  requireFact(
+    route.method === exchange.method &&
+      route.path.test(exchange.pathname) &&
+      /^[a-f0-9]{40}$/.test(expectedRuntimeSha) &&
+      exchange.runtimeSha === expectedRuntimeSha,
+    "daily-report-http-known-route-and-runtime-required",
+  );
+  if (accepted.includes(exchange.status)) return;
+  requireFact(
+    Number.isInteger(exchange.status) &&
+      exchange.status >= 100 &&
+      exchange.status <= 599,
+    "daily-report-http-valid-status-required",
+  );
+  let code: string | undefined;
+  let requestId: string | undefined;
+  if (exchange.bytes.length <= 4096) {
+    try {
+      const parsed: unknown = JSON.parse(exchange.bytes.toString("utf8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const error = (parsed as Record<string, unknown>).error;
+        if (error && typeof error === "object" && !Array.isArray(error)) {
+          const fields = error as Record<string, unknown>;
+          if (
+            typeof fields.code === "string" &&
+            SAFE_REPORT_ERROR_CODES.has(fields.code)
+          )
+            code = fields.code;
+          const trace = fields.traceId ?? fields.trace_id;
+          if (
+            typeof trace === "string" &&
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              trace,
+            )
+          )
+            requestId = trace;
+        }
+      }
+    } catch {
+      /* Non-JSON upstream errors only retain status and static route. */
+    }
+  }
+  const context: DailyReportHttpContext = Object.freeze({
+    phase,
+    method: route.method as "GET" | "POST",
+    route: route.label,
+    runtimeSha: expectedRuntimeSha,
+    status: exchange.status,
+    ...(code === undefined ? {} : { code }),
+    ...(requestId === undefined ? {} : { requestId }),
+  });
+  evidence.record({
+    stage: `daily-report-http-${phase}-${route.method.toLowerCase()}-${route.label}`,
+    status: context.status,
+    ...(code === undefined ? {} : { code }),
+    // SafeEvent is an existing fixed allowlist: objectKey carries validated trace UUID only.
+    ...(requestId === undefined ? {} : { objectKey: requestId }),
+    result: "failed",
+  });
+  const failureStage = {
+    "initial-reports-page": "daily-report-ops-reports-initial-load-200",
+    "initial-jobs": "daily-report-ops-reports-initial-load-200",
+    preview: "daily-report-preview-status-200",
+    rebuild: "daily-report-rebuild-status-200",
+    "rebuilt-preview": "daily-report-rebuilt-preview-status-200",
+    "reload-reports-page": "daily-report-reload-reports-page-status-200",
+    "reload-jobs": "daily-report-reload-jobs-status-200",
+  } as const;
+  const stage =
+    phase in failureStage
+      ? failureStage[phase as keyof typeof failureStage]
+      : phase.startsWith("create-job-")
+        ? `daily-report-${phase}-status`
+        : `daily-report-${phase}-http-status-200-required`;
+  throw new DailyReportHttpFailure(stage, context);
+}
+
 type CapturedOpsExchange = Readonly<{
   method: string;
   url: string;
@@ -1234,10 +1466,22 @@ export async function runOwnedDailyReportDownloads(
     );
     await page.goto(`${opsOrigin}/reports`);
     const openedPage = await initialPageExchange;
+    // The page must load before its client can issue the jobs request. Report
+    // the known page failure instead of waiting for a request that cannot run.
+    assertDailyReportHttpStatus(
+      openedPage,
+      "initial-reports-page",
+      [200],
+      runtimeSha,
+      evidence,
+    );
     const openedJobs = await initialJobsExchange;
-    requireFact(
-      openedPage.status === 200 && openedJobs.status === 200,
-      "daily-report-ops-reports-initial-load-200",
+    assertDailyReportHttpStatus(
+      openedJobs,
+      "initial-jobs",
+      [200],
+      runtimeSha,
+      evidence,
     );
 
     const operationalTab = page.getByRole("button", {
@@ -1311,9 +1555,12 @@ export async function runOwnedDailyReportDownloads(
     );
     await loadPreviewBtn.click();
     let previewExchange = await previewExchangePromise;
-    requireFact(
-      previewExchange.status === 200,
-      "daily-report-preview-status-200",
+    assertDailyReportHttpStatus(
+      previewExchange,
+      "preview",
+      [200],
+      runtimeSha,
+      evidence,
     );
     assertPreviewQueryParams(previewExchange.searchParams);
     let previewRows = unwrapEnvelopeList(
@@ -1342,9 +1589,12 @@ export async function runOwnedDailyReportDownloads(
       );
       await regenerateBtn.click();
       const rebuildExchange = await rebuildPostPromise;
-      requireFact(
-        rebuildExchange.status === 200 || rebuildExchange.status === 201,
-        "daily-report-rebuild-status-200",
+      assertDailyReportHttpStatus(
+        rebuildExchange,
+        "rebuild",
+        [200, 201],
+        runtimeSha,
+        evidence,
       );
       const rebuildBody = object(
         JSON.parse(
@@ -1365,9 +1615,12 @@ export async function runOwnedDailyReportDownloads(
         "daily-report-rebuild-filters-binding",
       );
       previewExchange = await rebuiltPreviewGetPromise;
-      requireFact(
-        previewExchange.status === 200,
-        "daily-report-rebuilt-preview-status-200",
+      assertDailyReportHttpStatus(
+        previewExchange,
+        "rebuilt-preview",
+        [200],
+        runtimeSha,
+        evidence,
       );
       assertPreviewQueryParams(previewExchange.searchParams);
       previewRows = unwrapEnvelopeList(
@@ -1441,9 +1694,12 @@ export async function runOwnedDailyReportDownloads(
       );
       await exportJobBtn.click();
       const createJobExchange = await createJobPromise;
-      requireFact(
-        createJobExchange.status === 200 || createJobExchange.status === 201,
-        `daily-report-create-job-${format}-status`,
+      assertDailyReportHttpStatus(
+        createJobExchange,
+        `create-job-${format}`,
+        [200, 201],
+        runtimeSha,
+        evidence,
       );
       const createJobReq = object(
         JSON.parse(
@@ -1497,6 +1753,10 @@ export async function runOwnedDailyReportDownloads(
 
     let listedJobs: ObjectData[] = [];
     for (let attempt = 0; attempt < 5; attempt += 1) {
+      const reloadPagePromise = waitForOpsExchange(
+        (ex) => ex.method === "GET" && ex.pathname === "/reports",
+        "daily-report-reload-reports-page",
+      );
       const reloadJobsPromise = waitForOpsExchange(
         (ex) =>
           ex.method === "GET" &&
@@ -1504,10 +1764,23 @@ export async function runOwnedDailyReportDownloads(
         "daily-report-reload-jobs-list",
       );
       await page.goto(`${opsOrigin}/reports`);
+      const reloadPageExchange = await reloadPagePromise;
+      // Each navigation must load before its client can issue the jobs list.
+      // Preserve a known document failure instead of awaiting absent jobs.
+      assertDailyReportHttpStatus(
+        reloadPageExchange,
+        "reload-reports-page",
+        [200],
+        runtimeSha,
+        evidence,
+      );
       const reloadJobsExchange = await reloadJobsPromise;
-      requireFact(
-        reloadJobsExchange.status === 200,
-        "daily-report-reload-jobs-status-200",
+      assertDailyReportHttpStatus(
+        reloadJobsExchange,
+        "reload-jobs",
+        [200],
+        runtimeSha,
+        evidence,
       );
       listedJobs = unwrapEnvelopeList(
         reloadJobsExchange.bytes,
@@ -1581,6 +1854,15 @@ export async function runOwnedDailyReportDownloads(
 
       await downloadBtn.click();
       const detailExchange = await detailPromise;
+      // ApiClient only opens the artifact after a successful detail GET. Keep
+      // the captured non-200 response visible if no download request follows.
+      assertDailyReportHttpStatus(
+        detailExchange,
+        `job-detail-${format}`,
+        [200],
+        runtimeSha,
+        evidence,
+      );
       const artifactExchange = await artifactPromise;
 
       for (const extraPage of context.pages()) {
@@ -1589,6 +1871,13 @@ export async function runOwnedDailyReportDownloads(
         }
       }
 
+      assertDailyReportHttpStatus(
+        artifactExchange,
+        `artifact-download-${format}`,
+        [200],
+        runtimeSha,
+        evidence,
+      );
       const jobDetail = unwrapEnvelopeObject(
         detailExchange.bytes,
         `daily-report-job-detail-${format}`,
