@@ -1111,11 +1111,64 @@ export class BootstrapAuthGuard implements CanActivate {
         );
       }
     }
+    // Academy's tenant/ops routes also admit explicitly scoped partner callers.
+    // Unlike tenant callers, its controller takes the Fleet selector directly
+    // from the query. Bind that selector to the verified partner for ALL
+    // authorized partner training identities (including legacy report credentials).
+    // Keep the existing scope-denial result for identities lacking either grant.
+    const trainingRoute = routePath.startsWith("fleet-partner/training/");
+    const assertPartnerTrainingSelector = () => {
+      if (identity.realm !== "partner" || !trainingRoute) return;
+      const url = request.originalUrl ?? request.url ?? "";
+      const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+      const rawQuery = asQueryRecord(request.query)["fleetPartnerId"];
+      const selected = params.getAll("fleetPartnerId");
+      if (
+        !identity.partnerId?.trim() ||
+        selected.length !== 1 ||
+        selected[0]?.trim() !== identity.partnerId ||
+        (rawQuery !== undefined &&
+          (Array.isArray(rawQuery) || rawQuery.trim() !== identity.partnerId))
+      ) {
+        throw new ApiRequestError(
+          403,
+          "ACADEMY_FORBIDDEN_FLEET_ACCESS",
+          "Fleet partners may only access their own training data.",
+        );
+      }
+    };
     if (requiredScopes.length === 0) {
+      assertPartnerTrainingSelector();
       return;
     }
 
     if (includesAll(identity.scopes, requiredScopes)) {
+      assertPartnerTrainingSelector();
+      return;
+    }
+
+    // A managed Ops membership receives only the own-Fleet Academy read
+    // capability, not billing:read or the global reports:read decorator.
+    // Match the three original GET handlers only; a future training write or
+    // report route must be explicitly classified before this exception applies.
+    if (
+      trainingRoute &&
+      (request.method ?? "GET").toUpperCase() === "GET" &&
+      (routePath === "fleet-partner/training/summary" ||
+        routePath === "fleet-partner/training/roster" ||
+        /^fleet-partner\/training\/drivers\/[^/]+\/attempts\/[^/]+$/.test(
+          routePath,
+        )) &&
+      identity.authMode === "jwt_bearer" &&
+      identity.actorType === "partner_user" &&
+      identity.realm === "partner" &&
+      Boolean(identity.membershipId) &&
+      identity.roles.includes("fleet_partner_ops") &&
+      identity.scopes.includes("fleet:training:read") &&
+      requiredScopes.length === 2 &&
+      includesAll(requiredScopes, ["billing:read", "reports:read"])
+    ) {
+      assertPartnerTrainingSelector();
       return;
     }
 

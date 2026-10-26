@@ -10,6 +10,8 @@ import { AuditNotificationService } from "../../apps/api/src/modules/audit-notif
 import { resolveRouteAuthPolicy } from "../../apps/api/src/common/auth/auth.policy";
 import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { FleetPartnerController } from "../../apps/api/src/modules/fleet-partner/fleet-partner.controller";
+import { FleetPartnerTrainingController } from "../../apps/api/src/modules/driver-academy/academy.controller";
+import { getIamFleetRoleScopes } from "../../packages/contracts/src/iam-policy-catalog";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 import type { CanonicalIdentityPrincipalRecord } from "../../packages/contracts/src";
@@ -123,7 +125,7 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
       partnerId: "fleet-test-001",
       partnerEntrySlug: ENTRY,
       roles: ["fleet_partner_ops"],
-      scopes: ["fleet:read", "fleet:supply:write"],
+      scopes: ["fleet:read", "fleet:training:read", "fleet:supply:write"],
     });
     expect(await jwt.verifyAccessToken(ops.accessToken)).not.toBeNull();
     const guard = new BootstrapAuthGuard(new Reflector(), jwt);
@@ -402,6 +404,76 @@ describe("existing scoped credential guard compatibility without Referral/Host p
     } finally {
       if (previousEnv === undefined) delete process.env.DRTS_ENV;
       else process.env.DRTS_ENV = previousEnv;
+    }
+  });
+});
+
+describe("managed Fleet ops training guard and own-partner boundary", () => {
+  it("permits only bounded managed Ops training and retains legacy training decorators", async () => {
+    const methods = [
+      ["summary", "/api/fleet-partner/training/summary"],
+      ["roster", "/api/fleet-partner/training/roster"],
+      ["driverAttempt", "/api/fleet-partner/training/drivers/d/attempts/a"],
+    ] as const;
+    const makeIdentity = (role: string, partnerId = "fleet-1") => ({
+      authMode: "jwt_bearer",
+      actorType: "partner_user",
+      actorId: "managed-human",
+      realm: "partner",
+      partnerId,
+      principalId: "principal-1",
+      membershipId: "membership-1" as string | null,
+      roleFamilies: ["partner"],
+      roles: [role],
+      scopes: [...(getIamFleetRoleScopes(role) ?? [])],
+    });
+    const activate = async (
+      identity: ReturnType<typeof makeIdentity>,
+      handler: (typeof methods)[number],
+      fleetPartnerId = "fleet-1",
+    ) => {
+      // JWT verifier is the only controlled boundary; the real policy,
+      // Academy decorator metadata and whole guard execute unchanged.
+      const jwtPort = {
+        verifyAccessToken: async () => identity,
+        toRequestIdentity: () => identity,
+      };
+      const guard = new BootstrapAuthGuard(new Reflector(), jwtPort as never);
+      const request = {
+        method: "GET",
+        url: `${handler[1]}?fleetPartnerId=${encodeURIComponent(fleetPartnerId)}`,
+        headers: { authorization: "Bearer controlled-fixture" },
+        query: { fleetPartnerId },
+      };
+      return guard.canActivate({
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => FleetPartnerTrainingController.prototype[handler[0]],
+        getClass: () => FleetPartnerTrainingController,
+      } as never);
+    };
+    for (const handler of methods) {
+      expect(await activate(makeIdentity("fleet_partner_ops"), handler)).toBe(
+        true,
+      );
+      await expect(
+        activate(makeIdentity("fleet_partner_ops"), handler, "other-fleet"),
+      ).rejects.toMatchObject({ code: "ACADEMY_FORBIDDEN_FLEET_ACCESS" });
+      await expect(
+        activate(makeIdentity("fleet_partner_finance"), handler),
+      ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+      await expect(
+        activate(makeIdentity("fleet_partner_admin"), handler),
+      ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+      const legacy = makeIdentity("partner_api_key");
+      legacy.actorType = "partner_api_key";
+      legacy.membershipId = null;
+      legacy.scopes = ["billing:read", "reports:read"];
+      expect(await activate(legacy, handler)).toBe(true);
+      await expect(
+        activate(legacy, handler, "other-fleet"),
+      ).rejects.toMatchObject({
+        code: "ACADEMY_FORBIDDEN_FLEET_ACCESS",
+      });
     }
   });
 });

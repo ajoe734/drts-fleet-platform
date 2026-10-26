@@ -86,6 +86,7 @@ describe("IAM policy catalog", () => {
     ]);
     expect(getIamFleetRoleScopes("fleet_partner_ops")).toEqual([
       "fleet:read",
+      "fleet:training:read",
       "fleet:supply:write",
     ]);
     expect(getIamFleetRoleScopes("fleet_partner_finance")).toEqual([
