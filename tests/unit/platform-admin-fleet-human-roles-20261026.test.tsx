@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -152,5 +153,84 @@ describe("manager UI -> existing shared SDK mutation -> canonical ACK/readback",
     fireEvent.click(screen.getByText("Save assignment"));
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
     await screen.findByText(/did not match the saved change/);
+  });
+
+  it("never lets a pre-save read replace the confirmed assignment after the mutation readback", async () => {
+    const saved = {
+      entrySlug: "entry-ui",
+      principalId: "human-1",
+      membershipId: "membership-1",
+      roleCode: "fleet_partner_ops",
+      status: "active",
+      validTo: null,
+    };
+    let releaseOldRead!: (response: Response) => void;
+    const oldRead = new Promise<Response>((resolve) => {
+      releaseOldRead = resolve;
+    });
+    let readCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.includes("human-roles")) {
+          if (init?.method === "PUT") {
+            return Response.json({ data: saved });
+          }
+          readCount++;
+          return readCount === 1
+            ? oldRead
+            : Response.json({ data: { items: [saved] } });
+        }
+        if (url.endsWith("/fleet-ui-001")) {
+          return Response.json({
+            data: {
+              fleetPartnerId: "fleet-ui-001",
+              legalName: "Unit Fleet",
+              displayName: "Unit Fleet",
+              businessRegistrationNo: "TEST",
+              contactName: "Test",
+              contactPhone: "none",
+              active: true,
+              partnershipType: "fleet_management",
+            },
+          });
+        }
+        return Response.json({ data: { items: [] } });
+      }),
+    );
+    state.client = new ApiClient({ baseUrl: "https://unit.invalid" });
+    render(<FleetPartnerDetailPage />);
+    await screen.findByText("Managed Fleet Staff Roles");
+    fireEvent.change(screen.getByLabelText("Fleet entry slug"), {
+      target: { value: "entry-ui" },
+    });
+    fireEvent.click(screen.getByText("Read assignments"));
+    await waitFor(() => expect(readCount).toBe(1));
+    fireEvent.change(screen.getByLabelText("Linked staff subject"), {
+      target: { value: "oidc-verified-1" },
+    });
+    fireEvent.click(screen.getByText("Save assignment"));
+    await screen.findByText("human-1: fleet_partner_ops / active");
+    expect(screen.getByRole("status").textContent).toContain(
+      "readback confirmed",
+    );
+    expect(readCount).toBe(2);
+    await act(async () => {
+      releaseOldRead(
+        Response.json({
+          data: { items: [{ ...saved, roleCode: "fleet_partner_admin" }] },
+        }),
+      );
+    });
+    expect(
+      screen.getByText("human-1: fleet_partner_ops / active"),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("human-1: fleet_partner_admin / active"),
+    ).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain(
+      "readback confirmed",
+    );
   });
 });

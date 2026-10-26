@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -143,6 +149,15 @@ export default function FleetPartnerDetailPage() {
   const [humanRoles, setHumanRoles] = useState<FleetHumanRoleRecord[]>([]);
   const [humanSaving, setHumanSaving] = useState(false);
   const [humanAck, setHumanAck] = useState<string | null>(null);
+  // A read started before a write (or an entry/partner switch) cannot replace
+  // the write's verified readback with older data while leaving its ACK visible.
+  const humanRequestVersion = useRef(0);
+  useEffect(
+    () => () => {
+      humanRequestVersion.current++;
+    },
+    [client, fleetPartnerId],
+  );
 
   const loadDetail = async () => {
     if (!fleetPartnerId) {
@@ -198,38 +213,44 @@ export default function FleetPartnerDetailPage() {
   };
 
   const handleReadHumanRoles = async () => {
+    const version = ++humanRequestVersion.current;
+    const entrySlug = humanEntrySlug.trim();
     setHumanAck(null);
     setError(null);
     try {
-      setHumanRoles(
-        await listFleetHumanRoles(
-          client,
-          fleetPartnerId,
-          humanEntrySlug.trim(),
-        ),
+      const roles = await listFleetHumanRoles(
+        client,
+        fleetPartnerId,
+        entrySlug,
       );
+      if (version === humanRequestVersion.current) setHumanRoles(roles);
     } catch (readError: any) {
-      setError(readError?.message ?? t("common.unknown"));
+      if (version === humanRequestVersion.current)
+        setError(readError?.message ?? t("common.unknown"));
     }
   };
 
   const handleManageHumanRole = async () => {
+    const version = ++humanRequestVersion.current;
+    const entrySlug = humanEntrySlug.trim();
     setHumanSaving(true);
     setHumanAck(null);
     setError(null);
     try {
       const ack = await manageFleetHumanRole(client, fleetPartnerId, {
-        entrySlug: humanEntrySlug.trim(),
+        entrySlug,
         partnerUserRef: humanSubject.trim(),
         roleCode: humanRole,
         enabled: humanEnabled,
         validTo: humanValidTo ? new Date(humanValidTo).toISOString() : null,
       });
+      if (version !== humanRequestVersion.current) return;
       const readback = await listFleetHumanRoles(
         client,
         fleetPartnerId,
-        humanEntrySlug.trim(),
+        entrySlug,
       );
+      if (version !== humanRequestVersion.current) return;
       setHumanRoles(readback);
       if (
         !readback.some(
@@ -250,7 +271,8 @@ export default function FleetPartnerDetailPage() {
         }),
       );
     } catch (saveError: any) {
-      setError(saveError?.message ?? t("common.unknown"));
+      if (version === humanRequestVersion.current)
+        setError(saveError?.message ?? t("common.unknown"));
     } finally {
       setHumanSaving(false);
     }
@@ -454,6 +476,7 @@ export default function FleetPartnerDetailPage() {
                   style={inputStyle()}
                   value={humanEntrySlug}
                   onChange={(event) => {
+                    humanRequestVersion.current++;
                     setHumanEntrySlug(event.target.value);
                     setHumanRoles([]);
                     setHumanAck(null);
