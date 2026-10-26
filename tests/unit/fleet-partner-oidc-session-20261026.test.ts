@@ -24,7 +24,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("Fleet production GET OIDC wire boundary (serializer, no local server)", () => {
   it("keeps opaque state in HttpOnly cookie and exchanges snake_case session for secure cookies and current session", async () => {
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
