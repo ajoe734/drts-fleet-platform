@@ -267,7 +267,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
               actorId: `user-${canonicalRole}`,
               actorType: "tenant_user",
               realm: "tenant",
-              tenantId: "tenant_acme",
+              tenantId: "tenant-demo-001",
               sessionId: `sess-${canonicalRole}`,
               roles: [canonicalRole],
               scopes: [...scopes],
@@ -308,7 +308,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
 
         const tenantJwt = makeTenantJwt({
           actorId: `user-${canonicalRole}`,
-          tenantId: "tenant_acme",
+          tenantId: "tenant-demo-001",
           sessionId: `sess-${canonicalRole}`,
           roles: [canonicalRole],
           scopes,
@@ -331,7 +331,6 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         );
 
         expect(response.status).toBe(200);
-        expect(response.headers.get("x-drts-candidate-sha")).toBe(runtimeSha);
         const body = (await response.json()) as {
           data: {
             identity: {
@@ -345,7 +344,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         };
         expect(body.data.identity).toMatchObject({
           actor_id: `user-${canonicalRole}`,
-          tenant_id: "tenant_acme",
+          tenant_id: "tenant-demo-001",
           roles: [canonicalRole],
           display_role: bankRole,
           display_roles: [bankRole],
@@ -368,9 +367,8 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
               {
                 expectedRole: bankRole,
                 status: response.status,
-                candidateSha:
-                  response.headers.get("x-drts-candidate-sha") ?? undefined,
-                expectedRuntimeSha: runtimeSha,
+                // Cloud Run ingress sets x-drts-candidate-sha, not this Next handler.
+                // The complete inventory probe below checks SHA enforcement.
               },
             ),
           ).toEqual({
@@ -406,7 +404,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
             actorId: "viewer-1",
             actorType: "tenant_user",
             realm: "tenant",
-            tenantId: "tenant_acme",
+            tenantId: "tenant-demo-001",
             sessionId: "sess-viewer-1",
             roles: ["tenant_viewer"],
             scopes: ["tenant:read"],
@@ -425,7 +423,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
       );
       const viewerJwt = makeTenantJwt({
         actorId: "viewer-1",
-        tenantId: "tenant_acme",
+        tenantId: "tenant-demo-001",
         sessionId: "sess-viewer-1",
         roles: ["tenant_viewer"],
         scopes: ["tenant:read"],
@@ -502,7 +500,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
               actor_id: "viewer-1",
               actor_type: "tenant_user",
               realm: "tenant",
-              tenant_id: "tenant_acme",
+              tenant_id: "tenant-demo-001",
               session_id: "sess-1",
               roles: badRoles,
               scopes: ["tenant:read"],
@@ -512,7 +510,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         expect(() => projectBankSessionReadback(badEnvelope)).toThrow();
         const badJwt = makeTenantJwt({
           actorId: "viewer-1",
-          tenantId: "tenant_acme",
+          tenantId: "tenant-demo-001",
           sessionId: "sess-1",
           roles: badRoles,
           scopes: ["tenant:read"],
@@ -535,8 +533,23 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
   });
 
   describe("Referral Embed (referral_passenger) GET /api/referral/session", () => {
+    function installAuthorityReadback(f: Awaited<ReturnType<typeof issueReferralFixture>>) {
+      vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+        if (new URL(url).pathname !== "/api/auth/session") throw new Error("unexpected authority route");
+        const token = new Headers(init?.headers).get("Authorization")?.replace(/^Bearer /, "");
+        const verified = token ? await f.jwt.verifyAccessToken(token) : null;
+        if (!verified) return new Response(JSON.stringify({ error: { code: "AUTHENTICATION_REQUIRED" } }), { status: 401 });
+        const body = deepToSnakeCase(toApiSuccessEnvelope({
+          active: true,
+          identity: f.jwt.toRequestIdentity(verified),
+        }));
+        return Response.json(body);
+      }));
+    }
+
     it("returns verified public session readback with opaque recoveryScope and referral_passenger classification without leaking accessToken or drtsPassengerId", async () => {
       const f = await issueReferralFixture(false);
+      installAuthorityReadback(f);
       await referralSessions.writeReferralEmbedSession(f.consumed);
       const expectedPublic = referralSessions.toPublicReferralEmbedSession(
         f.consumed,
@@ -569,7 +582,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
           headers: { Origin: "https://embed.example" },
         }),
       );
-      expect(response.status).toBe(200);
+      expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
       expect(response.headers.get("Cache-Control")).toContain("no-store");
       const payload = await response.json();
 
@@ -635,6 +648,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
 
       // 3. Active consented session -> cross-origin rejected with 403.
       const activeFixture = await issueReferralFixture(false);
+      installAuthorityReadback(activeFixture);
       await referralSessions.writeReferralEmbedSession(activeFixture.consumed);
       const crossOriginRes = await GET(
         new Request("https://embed.example/api/referral/session", {
@@ -687,20 +701,24 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         createdAt: "2026-10-01T00:00:00.000Z",
         updatedAt: "2026-10-20T00:00:00.000Z",
       };
-      const service = Object.assign(
-        Object.create(PassengerAccountService.prototype),
-        {
-          requireActivePassengerSession: vi
-            .fn()
-            .mockResolvedValue({ account: accountRecord, sessionFamily: {} }),
-        },
-      ) as PassengerAccountService;
-
+      // DB boundary only: production getMe/current still checks actor, expiry,
+      // active account and live family against the repository transaction.
+      const store = {
+        transaction: async (run: (tx: unknown) => Promise<unknown>) => run({
+          lockAccount: async () => accountRecord,
+          findLiveFamily: async () => ({ sessionId: "fam_001" }),
+        }),
+      };
+      const service = new PassengerAccountService(store as never, {} as never);
       const meResult = await service.getMe({
+        authMode: "jwt_bearer",
         actorId: accountRecord.drtsPassengerId,
+        subject: accountRecord.drtsPassengerId,
+        drtsPassengerId: accountRecord.drtsPassengerId,
         actorType: FIRST_PARTY_PASSENGER_ACTOR_TYPE,
         realm: "passenger",
         sessionId: "fam_001",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
       } as never);
       const wireEnvelope = deepToSnakeCase(
         toApiSuccessEnvelope(meResult),
@@ -897,7 +915,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
                     actor_id: session.identity.expectedSubject,
                     actor_type: "tenant_user",
                     realm: "tenant",
-                    tenant_id: "tenant_acme",
+                    tenant_id: "tenant-demo-001",
                     roles: [
                       session.role === "bank_program_admin"
                         ? "tenant_admin"

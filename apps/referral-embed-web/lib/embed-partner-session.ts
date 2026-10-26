@@ -8,6 +8,7 @@ import type {
 } from "@drts/contracts";
 import { REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES } from "@drts/contracts";
 import { getGoogleWorkloadIdentityHeader } from "./embed-api";
+import { getServerApiBaseUrl } from "./embed-runtime";
 
 const REFERRAL_EMBED_SESSION_COOKIE = "drts_referral_embed_session";
 const REFERRAL_EMBED_BEARER_COOKIE = "drts_referral_embed_bearer";
@@ -196,7 +197,7 @@ export async function readActiveReferralSession(): Promise<ServerReferralEmbedSe
   return session;
 }
 
-function verifyReferralBearerClaims(session: ServerReferralEmbedSession) {
+async function verifyReferralBearerClaims(session: ServerReferralEmbedSession) {
   if (
     !session.identityActive ||
     !session.accessToken ||
@@ -236,63 +237,47 @@ function verifyReferralBearerClaims(session: ServerReferralEmbedSession) {
   ) {
     throw authError();
   }
-  const jwtParts = session.accessToken.split(".");
-  if (jwtParts.length !== 3 || !jwtParts[0] || !jwtParts[1] || !jwtParts[2]) {
-    throw authError();
-  }
-  let header: { alg?: unknown } | null = null;
-  let payload: Record<string, unknown> | null = null;
-  try {
-    header = JSON.parse(
-      Buffer.from(jwtParts[0], "base64url").toString("utf8"),
-    ) as { alg?: unknown };
-    payload = JSON.parse(
-      Buffer.from(jwtParts[1], "base64url").toString("utf8"),
-    ) as Record<string, unknown>;
-  } catch {
-    throw authError();
-  }
-  const jwtSecret = process.env.JWT_SECRET?.trim();
+  // The authority's existing GET /api/auth/session verifies the signed JWT,
+  // durable session, revocation and entry tokenVersion. Never decode the bearer
+  // locally as proof (Cloud Run uses a key ring, not necessarily JWT_SECRET).
+  const response = await fetch(`${getServerApiBaseUrl()}/api/auth/session`, {
+    headers: {
+      Authorization: `Bearer ${session.accessToken}`,
+      ...(await getGoogleWorkloadIdentityHeader()),
+    },
+    cache: "no-store",
+    redirect: "error",
+  });
+  if (!response.ok) throw authError();
+  const envelope: unknown = await response.json().catch(() => null);
+  const root = envelope as { data?: { active?: unknown; identity?: Record<string, unknown> } } | null;
+  const identity = root?.data?.identity;
   if (
-    jwtSecret &&
-    !process.env.JWT_KEY_RING_JSON?.trim() &&
-    header?.alg === "HS256"
-  ) {
-    const expectedSig = Buffer.from(
-      createHmac("sha256", jwtSecret)
-        .update(`${jwtParts[0]}.${jwtParts[1]}`)
-        .digest("base64url"),
-    );
-    const actualSig = Buffer.from(jwtParts[2]);
-    if (
-      expectedSig.length !== actualSig.length ||
-      !timingSafeEqual(expectedSig, actualSig)
-    ) {
-      throw authError();
-    }
-  }
-  if (
-    !payload ||
-    payload.realm !== "partner" ||
-    payload.actorType !== "referral_passenger" ||
-    payload.partnerEntrySlug !== session.partnerEntrySlug ||
-    payload.drtsPassengerId !== session.drtsPassengerId ||
-    payload.tenantId !== session.identity.tenantId ||
-    payload.partnerId !== session.identity.partnerId ||
-    payload.partnerProgramId !== session.identity.partnerProgramId ||
-    !Array.isArray(payload.scopes) ||
-    !payload.scopes.includes("partner:book") ||
-    typeof payload.exp !== "number" ||
-    payload.exp * 1000 <= Date.now()
-  ) {
-    throw authError();
-  }
+    root?.data?.active !== true ||
+    !identity ||
+    identity.auth_mode !== "jwt_bearer" ||
+    identity.realm !== "partner" ||
+    identity.actor_type !== "referral_passenger" ||
+    identity.actor_id !== session.drtsPassengerId ||
+    identity.drts_passenger_id !== session.drtsPassengerId ||
+    identity.partner_entry_slug !== session.partnerEntrySlug ||
+    identity.tenant_id !== session.identity.tenantId ||
+    identity.partner_id !== session.identity.partnerId ||
+    identity.partner_program_id !== session.identity.partnerProgramId ||
+    typeof identity.session_id !== "string" ||
+    identity.session_id !== session.sessionId ||
+    !Array.isArray(identity.scopes) ||
+    !identity.scopes.includes("partner:book") ||
+    typeof identity.expires_at !== "string" ||
+    !Number.isFinite(Date.parse(identity.expires_at)) ||
+    Date.parse(identity.expires_at) <= Date.now()
+  ) throw authError();
 }
 
-export function toPublicReferralEmbedSessionReadback(
+export async function toPublicReferralEmbedSessionReadback(
   session: ServerReferralEmbedSession,
-): PublicReferralSessionReadback {
-  verifyReferralBearerClaims(session);
+): Promise<PublicReferralSessionReadback> {
+  await verifyReferralBearerClaims(session);
   const publicSession = toPublicReferralEmbedSession(session);
   return {
     ok: true,

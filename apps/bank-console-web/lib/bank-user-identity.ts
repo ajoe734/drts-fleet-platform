@@ -189,7 +189,7 @@ export function projectBankSessionReadback(
       verifiedRoleCookie &&
       verifiedSessionCookie &&
       (verifiedRoleCookie.role !== verifiedSessionCookie.role ||
-        (verifiedRoleCookie.bank ?? "") !== (verifiedSessionCookie.bank ?? ""))
+        verifiedRoleCookie.bankCode !== verifiedSessionCookie.bankCode)
     ) {
       bankUserError(
         401,
@@ -205,13 +205,12 @@ export function projectBankSessionReadback(
         "Bank console cookie role does not match canonical tenant role claims.",
       );
     }
-    const expectedDemoTenant = BANK_DEMO_TENANTS.find(
+    const expectedDemoTenant = Object.values(BANK_DEMO_TENANTS).find(
       (tenant) => tenant.tenantId === tenantId,
     );
     if (
-      verifiedCookie.bank &&
-      expectedDemoTenant &&
-      verifiedCookie.bank !== expectedDemoTenant.code
+      !expectedDemoTenant ||
+      verifiedCookie.bankCode !== expectedDemoTenant.code
     ) {
       bankUserError(
         403,
