@@ -1387,7 +1387,8 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                 ? "daily-report-reload-reports-page-status-200"
                 : "daily-report-job-detail-csv-http-status-200-required",
             status: initialPage || reloadPage ? 500 : 404,
-            code: initialPage || reloadPage ? undefined : "REPORT_JOB_NOT_FOUND",
+            code:
+              initialPage || reloadPage ? undefined : "REPORT_JOB_NOT_FOUND",
             context: {
               phase: initialPage
                 ? "initial-reports-page"
@@ -1419,10 +1420,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   result: "failed",
                 },
           );
-          expect(initialJobsRequests).toBe(initialPage ? 0 : reloadPage ? 1 : 2);
+          expect(initialJobsRequests).toBe(
+            initialPage ? 0 : reloadPage ? 1 : 2,
+          );
           expect(pageVisits).toBe(initialPage ? 1 : 2);
           expect(createdJobs.map((job) => job.jobId)).toEqual(
-            initialPage ? [] : DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
+            initialPage
+              ? []
+              : DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
           );
           expect(artifactRequests).toBe(0);
           expect(unrouteCalled).toBe(true);

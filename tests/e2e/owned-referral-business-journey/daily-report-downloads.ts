@@ -1014,6 +1014,7 @@ type DailyReportHttpPhase =
   | "create-job-csv"
   | "create-job-xlsx"
   | "create-job-pdf"
+  | "reload-reports-page"
   | "reload-jobs"
   | "job-detail-csv"
   | "job-detail-xlsx"
@@ -1063,6 +1064,11 @@ const REPORT_HTTP_ROUTES = {
     method: "POST",
     path: /^\/control-plane-proxy\/reports\/jobs$/,
     label: "jobs",
+  },
+  "reload-reports-page": {
+    method: "GET",
+    path: /^\/reports$/,
+    label: "reports-page",
   },
   "reload-jobs": {
     method: "GET",
@@ -1222,6 +1228,7 @@ export function assertDailyReportHttpStatus(
     preview: "daily-report-preview-status-200",
     rebuild: "daily-report-rebuild-status-200",
     "rebuilt-preview": "daily-report-rebuilt-preview-status-200",
+    "reload-reports-page": "daily-report-reload-reports-page-status-200",
     "reload-jobs": "daily-report-reload-jobs-status-200",
   } as const;
   const stage =
@@ -1746,6 +1753,10 @@ export async function runOwnedDailyReportDownloads(
 
     let listedJobs: ObjectData[] = [];
     for (let attempt = 0; attempt < 5; attempt += 1) {
+      const reloadPagePromise = waitForOpsExchange(
+        (ex) => ex.method === "GET" && ex.pathname === "/reports",
+        "daily-report-reload-reports-page",
+      );
       const reloadJobsPromise = waitForOpsExchange(
         (ex) =>
           ex.method === "GET" &&
@@ -1753,6 +1764,16 @@ export async function runOwnedDailyReportDownloads(
         "daily-report-reload-jobs-list",
       );
       await page.goto(`${opsOrigin}/reports`);
+      const reloadPageExchange = await reloadPagePromise;
+      // Each navigation must load before its client can issue the jobs list.
+      // Preserve a known document failure instead of awaiting absent jobs.
+      assertDailyReportHttpStatus(
+        reloadPageExchange,
+        "reload-reports-page",
+        [200],
+        runtimeSha,
+        evidence,
+      );
       const reloadJobsExchange = await reloadJobsPromise;
       assertDailyReportHttpStatus(
         reloadJobsExchange,
