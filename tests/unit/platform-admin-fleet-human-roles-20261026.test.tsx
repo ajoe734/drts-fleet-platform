@@ -10,6 +10,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import FleetPartnerDetailPage from "../../apps/platform-admin-web/app/fleet-partners/[fleetPartnerId]/page";
 import { ApiClient } from "../../packages/api-client/src";
+import { t } from "../../apps/platform-admin-web/lib/translations";
 
 const state = vi.hoisted(() => ({ client: null as any }));
 vi.mock("next/navigation", () => ({
@@ -39,6 +40,38 @@ afterEach(() => {
 });
 
 describe("manager UI -> existing shared SDK mutation -> canonical ACK/readback", () => {
+  it("resolves displayed controls and readback/error messages in both locales", () => {
+    for (const key of [
+      "title",
+      "subtitle",
+      "entrySlug",
+      "subject",
+      "role",
+      "admin",
+      "ops",
+      "finance",
+      "expiry",
+      "state",
+      "disabled",
+      "read",
+      "save",
+      "until",
+      "confirmed",
+      "readbackMismatch",
+    ]) {
+      const fullKey = `fleetPartners.humanRoles.${key}`;
+      for (const locale of ["en", "zh-TW"] as const) {
+        const value = t(fullKey, locale, {
+          date: "2027-01-01",
+          role: "fleet_partner_ops",
+          status: "active",
+          principal: "human-1",
+        });
+        expect(value).not.toBe(fullKey);
+        expect(value).not.toMatch(/\{(?:date|role|status|principal)\}/);
+      }
+    }
+  });
   it("only confirms after server readback and exposes failed/discordant writes", async () => {
     const result = {
       entrySlug: "entry-ui",
@@ -91,14 +124,14 @@ describe("manager UI -> existing shared SDK mutation -> canonical ACK/readback",
     );
     state.client = new ApiClient({ baseUrl: "https://unit.invalid" });
     render(<FleetPartnerDetailPage />);
-    await screen.findByText("Fleet human roles");
-    fireEvent.change(screen.getByLabelText("Canonical Fleet entry slug"), {
+    await screen.findByText("Managed Fleet Staff Roles");
+    fireEvent.change(screen.getByLabelText("Fleet entry slug"), {
       target: { value: "entry-ui" },
     });
-    fireEvent.change(screen.getByLabelText("Existing linked OIDC subject"), {
+    fireEvent.change(screen.getByLabelText("Linked staff subject"), {
       target: { value: "oidc-verified-1" },
     });
-    fireEvent.click(screen.getByText("Save human role"));
+    fireEvent.click(screen.getByText("Save assignment"));
     await screen.findByRole("status");
     expect(
       calls.find(
@@ -116,8 +149,8 @@ describe("manager UI -> existing shared SDK mutation -> canonical ACK/readback",
       ),
     ).toHaveLength(1);
     mismatch = true;
-    fireEvent.click(screen.getByText("Save human role"));
+    fireEvent.click(screen.getByText("Save assignment"));
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-    await screen.findByText(/not confirmed by canonical readback/);
+    await screen.findByText(/did not match the saved change/);
   });
 });
