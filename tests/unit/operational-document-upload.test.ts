@@ -2001,6 +2001,34 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     revokedAt:
       revokedKey || fault === "receipt-revoked" ? "2026-10-19T00:00:00Z" : null,
   });
+  const directScopes = [
+    "billing:read",
+    "fleet:read",
+    "fleet:finance:read",
+    "fleet:supply:write",
+  ];
+  const providedScopeSets: Record<string, string[]> = {
+    "provided-direct": directScopes,
+    "provided-direct-inactive": directScopes,
+    "provided-direct-foreign-tenant": directScopes,
+    "provided-direct-foreign-fleet": directScopes,
+    "provided-direct-revoked": directScopes,
+    "provided-mixed": ["billing:read", "partner:read", "fleet:supply:write"],
+    "provided-direct-read-only": directScopes.slice(0, 3),
+    "provided-direct-write-only": ["billing:read", "fleet:supply:write"],
+    "provided-finance-only": [
+      "billing:read",
+      "fleet:finance:read",
+      "fleet:supply:write",
+    ],
+    "provided-mixed-without-legacy-read": [
+      "billing:read",
+      "fleet:read",
+      "fleet:finance:read",
+      "partner:write",
+    ],
+    "provided-read-only": ["billing:read", "partner:read"],
+  };
   const identity = () => ({
     authMode: "jwt_bearer",
     realm: fault === "wrong-role" ? "tenant" : "partner",
@@ -2008,50 +2036,27 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     actorId: fault === "wrong-key" ? "foreign-key-dummy" : "own-key-dummy",
     principalId: "own-key-dummy",
     partnerId:
-      fault === "wrong-fleet"
+      fault === "wrong-fleet" || fault === "provided-direct-foreign-fleet"
         ? "foreign-fleet-dummy"
         : configuration.fleetPartnerId,
     partnerEntrySlug:
       fault === "foreign-entry" ? "foreign-entry" : entry.entrySlug,
     tenantId:
-      fault === "foreign-tenant" ? "foreign-tenant" : configuration.tenantId,
+      fault === "foreign-tenant" || fault === "provided-direct-foreign-tenant"
+        ? "foreign-tenant"
+        : configuration.tenantId,
     partnerProgramId:
       fault === "foreign-program" ? "foreign-program" : entry.programId,
     sessionId: "own-session-dummy",
     scopes:
-      fault === "provided-direct" || fault === "provided-direct-inactive"
-        ? [
-            "billing:read",
-            "fleet:read",
-            "fleet:finance:read",
-            "fleet:supply:write",
-          ]
-        : fault === "provided-mixed"
-          ? ["billing:read", "partner:read", "fleet:supply:write"]
-          : fault === "provided-direct-read-only"
-            ? ["billing:read", "fleet:read", "fleet:finance:read"]
-            : fault === "provided-direct-write-only"
-              ? ["billing:read", "fleet:supply:write"]
-              : fault === "provided-finance-only"
-                ? ["billing:read", "fleet:finance:read", "fleet:supply:write"]
-                : fault === "provided-mixed-without-legacy-read"
-                  ? [
-                      "billing:read",
-                      "fleet:read",
-                      "fleet:finance:read",
-                      "partner:write",
-                    ]
-                  : fault === "provided-read-only"
-                    ? ["billing:read", "partner:read"]
-                    : fault === "session-read-only"
-                      ? ["billing:read"]
-                      : fault === "session-extra"
-                        ? [...issuedScopes(), "billing:write"]
-                        : calls.some((c) =>
-                              c.path.endsWith("/credentials/issue"),
-                            )
-                          ? issuedScopes()
-                          : declaredScopes,
+      providedScopeSets[fault] ??
+      (fault === "session-read-only"
+        ? ["billing:read"]
+        : fault === "session-extra"
+          ? [...issuedScopes(), "billing:write"]
+          : calls.some((c) => c.path.endsWith("/credentials/issue"))
+            ? issuedScopes()
+            : declaredScopes),
   });
   const reply = (data: unknown, status = 200) =>
     new Response(JSON.stringify(deepToSnakeCase({ data })), {
@@ -2305,7 +2310,10 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
             `Bearer ${process.env.DRTS_OPERATIONAL_FLEET_SESSION_TOKEN || token}`,
           );
           if (fault === "session-denied") return reply({ error: token }, 401);
-          if (fault === "session-revoked")
+          if (
+            fault === "session-revoked" ||
+            fault === "provided-direct-revoked"
+          )
             return authError("SESSION_REVOKED", 401);
           return reply({
             active:
@@ -2738,7 +2746,7 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
         ["GET", "/api/fleet-partner/dashboard"],
         ["GET", "/api/fleet-partner/supply-submissions"],
         ["POST", "/api/fleet-partner/supply-submissions/drivers"],
-      ]) {
+      ] as const) {
         const policy = resolveRouteAuthPolicy(method, route)!;
         expect(policy).toBeTruthy();
         expect(() =>
@@ -2764,6 +2772,9 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
     "provided-finance-only",
     "provided-mixed-without-legacy-read",
     "provided-direct-inactive",
+    "provided-direct-foreign-tenant",
+    "provided-direct-foreign-fleet",
+    "provided-direct-revoked",
   ])(
     "rejects insufficient %s provided session without any mutation",
     async (variant) => {
@@ -2772,7 +2783,14 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
         "provided-session-dummy",
       );
       fault = variant;
-      if (variant !== "provided-direct-inactive") {
+      if (
+        ![
+          "provided-direct-inactive",
+          "provided-direct-foreign-tenant",
+          "provided-direct-foreign-fleet",
+          "provided-direct-revoked",
+        ].includes(variant)
+      ) {
         const route =
           variant === "provided-direct-write-only" ||
           variant === "provided-finance-only"
@@ -2791,7 +2809,11 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
       }
       await expect(
         prepareOperationalFleetSession(configuration),
-      ).rejects.toThrow(/verified session/);
+      ).rejects.toThrow(
+        variant === "provided-direct-revoked"
+          ? /provided session failed \(HTTP 401 code SESSION_REVOKED\)/
+          : /verified session/,
+      );
       expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
       expect(revokedKey || revokedEntry || adminRevoked).toBe(false);
     },
