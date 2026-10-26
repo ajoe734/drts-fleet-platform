@@ -395,6 +395,136 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
       },
     );
 
+    it("accepts normal non-demo canonical tenant self-readback without Bank UI cookies, and never treats demo branding as tenant authorization", async () => {
+      const tenantId = "6e02b64d-cb55-4e86-a54c-1d02dbf2bb91";
+      const actorId = "non-demo-bank-user";
+      const token = makeTenantJwt({
+        actorId,
+        tenantId,
+        sessionId: "non-demo-session",
+        roles: ["tenant_admin"],
+        scopes: ["tenant:read", "tenant:write"],
+      });
+      const wire = deepToSnakeCase(
+        toApiSuccessEnvelope({
+          active: true,
+          identity: {
+            actorId,
+            actorType: "tenant_user",
+            realm: "tenant",
+            tenantId,
+            sessionId: "non-demo-session",
+            roles: ["tenant_admin"],
+            scopes: ["tenant:read", "tenant:write"],
+          },
+        }),
+      );
+      const fetchAuthority = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (
+          new Headers(init?.headers).get("Authorization") !== `Bearer ${token}`
+        )
+          return Response.json(
+            { error: { code: "AUTHENTICATION_REQUIRED" } },
+            { status: 401 },
+          );
+        return Response.json(wire);
+      });
+      vi.stubGlobal("fetch", fetchAuthority);
+      const normal = await getBankUserIdentity(token);
+      expect(normal).toMatchObject({
+        tenantId,
+        userId: actorId,
+        displayRole: "bank_program_admin",
+      });
+      const spec: Pick<Session, "app" | "role" | "identity"> = {
+        app: "bank-console-web",
+        role: "bank_program_admin",
+        identity: {
+          path: "/api/auth/session",
+          subjectPath: "data.identity.actor_id",
+          rolePath: "data.identity.roles",
+          expectedSubject: actorId,
+        },
+      };
+      const { GET } =
+        await import("../../../../apps/bank-console-web/app/api/auth/[...auth]/route");
+      const request = (bankCookie?: string) =>
+        new NextRequest("https://bank-console.run.app/api/auth/session", {
+          headers: {
+            cookie: [
+              `drts_tenant_session=${token}`,
+              ...(bankCookie
+                ? [
+                    `${BANK_CONSOLE_ROLE_COOKIE}=${bankCookie}`,
+                    `${BANK_CONSOLE_SESSION_COOKIE}=${bankCookie}`,
+                  ]
+                : []),
+            ].join("; "),
+          },
+        });
+      const context = () => ({
+        params: Promise.resolve({ auth: ["session"] }),
+      });
+      const bare = await GET(request(), context());
+      expect(bare.status).toBe(200);
+      const bareBody = await bare.json();
+      expect(bareBody.data.identity).not.toHaveProperty("display_role");
+      expect(verifyIdentityReadback(spec, bareBody).effectiveRoles).toEqual([
+        "bank_program_admin",
+      ]);
+      expect(() =>
+        verifyIdentityReadback({ ...spec, role: "bank_finance" }, bareBody),
+      ).toThrow();
+      // Signed Bank cookies authorize a UI selection only when the real tenant
+      // can be bound to that Bank context. They cannot replace the tenant authority.
+      const signed = signSessionRole("bank_program_admin", "acme");
+      const withDemoCookie = await GET(request(signed), context());
+      expect(withDemoCookie.status).toBe(200);
+      const unknownBody = await withDemoCookie.json();
+      expect(unknownBody.data.identity).not.toHaveProperty("display_role");
+      expect(verifyIdentityReadback(spec, unknownBody).effectiveRoles).toEqual([
+        "bank_program_admin",
+      ]);
+      const escalation = await GET(
+        request(signSessionRole("bank_finance", "acme")),
+        context(),
+      );
+      expect(escalation.status).toBe(403);
+      await expect(escalation.json()).resolves.toMatchObject({
+        active: false,
+        error: { code: "ROLE_MISMATCH" },
+      });
+      expect(fetchAuthority).toHaveBeenCalledTimes(4);
+
+      // Known demo tenant keeps the pre-existing signed cookie binding and selected role.
+      const demoWire = structuredClone(wire) as {
+        data: { identity: { tenant_id: string } };
+      };
+      demoWire.data.identity.tenant_id = "tenant-demo-001";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json(demoWire)),
+      );
+      const demo = await GET(request(signed), context());
+      expect(demo.status).toBe(200);
+      expect((await demo.json()).data.identity.display_role).toBe(
+        "bank_program_admin",
+      );
+
+      // Without a verified UI selection, two different canonical display
+      // roles must not be chosen by the caller-supplied role in the plan.
+      const ambiguous = structuredClone(wire) as {
+        data: { identity: { roles: string[] } };
+      };
+      ambiguous.data.identity.roles = ["tenant_admin", "tenant_finance_admin"];
+      expect(() => verifyIdentityReadback(spec, ambiguous)).toThrow(
+        "bank unselected identity needs a unique canonical UI role",
+      );
+      expect(() =>
+        verifyIdentityReadback({ ...spec, role: "bank_finance" }, ambiguous),
+      ).toThrow();
+    });
+
     it("rejects a different selected UI role even when both roles occur in verified tenant claims", () => {
       const identity = {
         actor_id: "self-1",
@@ -522,16 +652,27 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
       // Tenant-only sessions remain valid upstream, but cannot claim a selected
       // Bank UI role; partial or disagreeing signed cookies are rejected.
       const noBankCookies = projectBankSessionReadback(viewerUpstream);
+      expect(noBankCookies).toEqual(viewerUpstream);
+      const canonicalOnly: Pick<Session, "app" | "role" | "identity"> = {
+        app: "bank-console-web",
+        role: "bank_ops_viewer",
+        identity: {
+          path: "/api/auth/session",
+          subjectPath: "data.identity.actor_id",
+          rolePath: "data.identity.roles",
+          expectedSubject: "viewer-1",
+        },
+      };
+      expect(
+        verifyIdentityReadback(canonicalOnly, noBankCookies).effectiveRoles,
+      ).toEqual(["bank_ops_viewer"]);
       expect(() =>
         verifyIdentityReadback(
           {
-            app: "bank-console-web",
-            role: "bank_ops_viewer",
+            ...canonicalOnly,
             identity: {
-              path: "/api/auth/session",
-              subjectPath: "data.identity.actor_id",
-              rolePath: "data.identity.roles",
-              expectedSubject: "viewer-1",
+              ...canonicalOnly.identity,
+              rolePath: "data.identity.display_role",
             },
           },
           noBankCookies,

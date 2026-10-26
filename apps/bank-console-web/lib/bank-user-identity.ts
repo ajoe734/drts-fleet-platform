@@ -218,10 +218,14 @@ export function projectBankSessionReadback(
     const expectedDemoTenant = Object.values(BANK_DEMO_TENANTS).find(
       (tenant) => tenant.tenantId === tenantId,
     );
-    if (
-      !expectedDemoTenant ||
-      verifiedCookie.bankCode !== expectedDemoTenant.code
-    ) {
+    if (!expectedDemoTenant) {
+      // The Bank cookie carries a demo branding code, not a canonical tenant
+      // binding. Preserve the verified tenant's own session response without
+      // claiming a selected Bank role for an unmapped real tenant. The GUX
+      // reader may classify a unique UI role from canonical tenant claims.
+      return root;
+    }
+    if (verifiedCookie.bankCode !== expectedDemoTenant.code) {
       bankUserError(
         403,
         "TENANT_MISMATCH",

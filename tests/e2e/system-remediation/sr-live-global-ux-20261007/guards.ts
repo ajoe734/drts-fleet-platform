@@ -318,16 +318,29 @@ export function verifyIdentityReadback(
       ),
       "bank canonical tenant role does not authorize requested bank UI role",
     );
-    assert(
-      typeof identity.display_role === "string" &&
-        canonicalDisplayRoles.includes(
-          identity.display_role as
-            | "bank_program_admin"
-            | "bank_ops_viewer"
-            | "bank_finance",
-        ),
-      "bank selected display_role requires signed Bank session and canonical tenant role",
-    );
+    const hasSelectedRole = identity.display_role !== undefined;
+    if (hasSelectedRole) {
+      assert(
+        typeof identity.display_role === "string" &&
+          canonicalDisplayRoles.includes(
+            identity.display_role as
+              | "bank_program_admin"
+              | "bank_ops_viewer"
+              | "bank_finance",
+          ),
+        "bank selected display_role requires signed Bank session and canonical tenant role",
+      );
+    } else {
+      // The normal tenant-auth self-readback has no Bank UI cookies/selection.
+      // Classify only a unique role from verified canonical claims; never let
+      // the fixture's requested role select among multiple possible UI roles.
+      assert(
+        session.identity.rolePath === "data.identity.roles" &&
+          identity.display_roles === undefined &&
+          canonicalDisplayRoles.length === 1,
+        "bank unselected identity needs a unique canonical UI role",
+      );
+    }
     if (identity.display_roles !== undefined) {
       assert(
         Array.isArray(identity.display_roles) &&
@@ -355,11 +368,19 @@ export function verifyIdentityReadback(
         "bank display_roles mismatch",
       );
     }
-    assert.equal(
-      identity.display_role,
-      expectedRole,
-      "bank selected display_role mismatch",
-    );
+    if (hasSelectedRole) {
+      assert.equal(
+        identity.display_role,
+        expectedRole,
+        "bank selected display_role mismatch",
+      );
+    } else {
+      assert.equal(
+        canonicalDisplayRoles[0],
+        expectedRole,
+        "bank canonical display role mismatch",
+      );
+    }
     return {
       subject: actualSubject,
       effectiveRoles: canonicalDisplayRoles,
