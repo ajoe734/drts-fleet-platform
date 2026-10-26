@@ -861,6 +861,22 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
   it.each([
     {
+      caseName: "actual Ops reports page returns 500 without mounting the jobs list",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: false,
+      expectedRetained: false,
+      previewFailure: "page",
+    },
+    {
+      caseName: "actual Ops job detail returns 404 without requesting the artifact",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+      previewFailure: "detail",
+    },
+    {
       caseName: "actual Ops preview returns non-200 with private error payload",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -923,6 +939,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         const jobSiblingRow = siblingRow(jobSiblingOrderId);
 
         let routeHandler: ((route: Route) => Promise<void>) | undefined;
+        let unrouteCalled = false;
+        let artifactRequests = 0;
+        let initialJobsRequests = 0;
         let rebuiltInBackend = false;
         let selectedFormat: DailyReportFormat = "csv";
         let dateFromVal = "";
@@ -1016,10 +1035,16 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               "GET",
               url,
               null,
-              200,
+              previewFailure === "page" ? 500 : 200,
               { "content-type": "text/html" },
-              Buffer.from("<html></html>"),
+              previewFailure === "page"
+                ? Buffer.from('<html>private-page-error</html>')
+                : Buffer.from("<html></html>"),
             );
+            // A failed document never mounts the real Ops page and therefore
+            // cannot issue the dependent client-side jobs list request.
+            if (previewFailure === "page") return null;
+            initialJobsRequests += 1;
             const jobsPayload = {
               ok: true,
               data: {
@@ -1061,11 +1086,11 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     "GET",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records?${query.toString()}`,
                     null,
-                    previewFailure ? 503 : 200,
+                    previewFailure === true ? 503 : 200,
                     { "content-type": "application/json" },
                     Buffer.from(
                       JSON.stringify(
-                        previewFailure
+                        previewFailure === true
                           ? {
                               error: {
                                 code: "REPORT_READ_FAILED",
@@ -1251,15 +1276,24 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                             "GET",
                             `${OPS_ORIGIN}${opsReportJobDetailPathname(foundJob.jobId)}`,
                             null,
-                            200,
+                            previewFailure === "detail" ? 404 : 200,
                             { "content-type": "application/json" },
                             Buffer.from(
-                              JSON.stringify({
-                                ok: true,
-                                data: foundJob.detail,
-                              }),
+                              JSON.stringify(
+                                previewFailure === "detail"
+                                  ? { error: {
+                                      code: "REPORT_NOT_FOUND",
+                                      trace_id: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                                      message: "private-detail-error",
+                                    } }
+                                  : { ok: true, data: foundJob.detail },
+                              ),
                             ),
                           );
+                          // ApiClient.getReportJob throws for 404; the Ops
+                          // click handler never calls openDownload in this case.
+                          if (previewFailure === "detail") return;
+                          artifactRequests += 1;
                           const fileName = `daily_dispatch_record-${foundJob.jobId}.${foundJob.format}`;
                           await dispatchRoute(
                             "GET",
@@ -1288,6 +1322,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             routeHandler = handler as (route: Route) => Promise<void>;
           },
           unroute: async () => {
+            unrouteCalled = true;
             routeHandler = undefined;
           },
           pages: () => [fakePage as Page],
@@ -1318,7 +1353,35 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           recoveryOnly: false,
           evidence,
         });
-        if (previewFailure) {
+        if (previewFailure === "page" || previewFailure === "detail") {
+          const initialPage = previewFailure === "page";
+          await expect(run).rejects.toBeInstanceOf(DailyReportHttpFailure);
+          await expect(run).rejects.toMatchObject({
+            stage: initialPage
+              ? "daily-report-ops-reports-initial-load-200"
+              : "daily-report-job-detail-csv-status-200",
+            status: initialPage ? 500 : 404,
+            code: initialPage ? undefined : "REPORT_NOT_FOUND",
+            context: {
+              phase: initialPage ? "initial-reports-page" : "job-detail-csv",
+              method: "GET",
+              route: initialPage ? "reports-page" : "job-detail",
+              runtimeSha: RUNTIME_SHA,
+              ...(initialPage ? {} : {
+                requestId: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+              }),
+            },
+          });
+          expect(initialJobsRequests).toBe(initialPage ? 0 : 2);
+          expect(createdJobs).toHaveLength(initialPage ? 0 : 3);
+          expect(artifactRequests).toBe(0);
+          expect(unrouteCalled).toBe(true);
+          expect(JSON.stringify(evidence.events)).not.toContain("private-detail-error");
+          expect(JSON.stringify(evidence.events)).not.toContain("private-page-error");
+          await expect(stat(path.join(tempDir, "daily-reports"))).rejects.toThrow();
+          return;
+        }
+        if (previewFailure === true) {
           await expect(run).rejects.toMatchObject({
             stage: "daily-report-preview-status-200",
             status: 503,
@@ -1401,5 +1464,6 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         await rm(tempDir, { recursive: true, force: true });
       }
     },
+    22_000,
   );
 });
