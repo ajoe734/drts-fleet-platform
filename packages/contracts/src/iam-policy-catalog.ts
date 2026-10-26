@@ -1,4 +1,5 @@
-export const IAM_POLICY_CATALOG_VERSION = "2026-08-01.rbac-001" as const;
+export const IAM_POLICY_CATALOG_VERSION =
+  "2026-10-26.fleet-human-roles" as const;
 
 export const IAM_ACTOR_TYPES = [
   "system",
@@ -84,6 +85,12 @@ export interface IamTenantRolePolicyDefinition {
 export interface IamAgencyRolePolicyDefinition {
   roleCode: string;
   roleFamily: "agency";
+  scopes: readonly string[];
+}
+
+export interface IamFleetRolePolicyDefinition {
+  roleCode: string;
+  roleFamily: "partner";
   scopes: readonly string[];
 }
 
@@ -319,6 +326,59 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT],
   },
   {
+    scope: "fleet:read",
+    allowedRealms: ["partner"],
+    description:
+      "Read own Fleet operational records, not Host or Referral data.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
+    scope: "fleet:training:read",
+    allowedRealms: ["partner"],
+    description: "Read own Fleet driver training summary, roster and attempts.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
+    scope: "fleet:finance:read",
+    allowedRealms: ["partner"],
+    description:
+      "Read own Fleet share, statements and revenue; never tenant invoices.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
+    scope: "fleet:finance:write",
+    allowedRealms: ["partner"],
+    description: "Decide own Fleet statements, not tenant billing or invoices.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
+    scope: "fleet:supply:write",
+    allowedRealms: ["partner"],
+    description:
+      "Manage own Fleet supply drafts and submissions, never approve registry changes.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
     scope: "billing:read",
     allowedRealms: ["system", "platform", "tenant", "ops", "partner"],
     description: "Read billing and settlement data within the caller boundary.",
@@ -330,10 +390,14 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
   },
   {
     scope: "billing:write",
-    allowedRealms: ["system", "platform", "tenant", "ops"],
+    allowedRealms: ["system", "platform", "tenant", "ops", "partner"],
     description:
       "Mutate billing and settlement data within the caller boundary.",
-    resourceConstraints: [TENANT_CONSTRAINT, OBJECT_CONSTRAINT],
+    resourceConstraints: [
+      TENANT_CONSTRAINT,
+      PARTNER_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
   },
   {
     scope: "billing:monthly:run",
@@ -991,6 +1055,39 @@ export const IAM_TENANT_ROLE_POLICY_BY_CODE = new Map(
 // tenant role codes from this file must not pick up agency roles.
 export const AGENCY_VIEWER_ROLE_CODE = "agency_viewer";
 export const AGENCY_EXPORTER_ROLE_CODE = "agency_exporter";
+
+export const IAM_FLEET_ROLE_POLICY_DEFINITIONS: readonly IamFleetRolePolicyDefinition[] =
+  [
+    {
+      roleCode: "fleet_partner_admin",
+      roleFamily: "partner",
+      scopes: [
+        "fleet:read",
+        "fleet:supply:write",
+        "fleet:finance:read",
+        "fleet:finance:write",
+      ],
+    },
+    {
+      roleCode: "fleet_partner_ops",
+      roleFamily: "partner",
+      scopes: ["fleet:read", "fleet:training:read", "fleet:supply:write"],
+    },
+    {
+      roleCode: "fleet_partner_finance",
+      roleFamily: "partner",
+      scopes: ["fleet:finance:read", "fleet:finance:write"],
+    },
+  ];
+
+export function getIamFleetRoleScopes(
+  roleCode: string,
+): readonly string[] | null {
+  return (
+    IAM_FLEET_ROLE_POLICY_DEFINITIONS.find((role) => role.roleCode === roleCode)
+      ?.scopes ?? null
+  );
+}
 
 export const IAM_AGENCY_ROLE_POLICY_DEFINITIONS: readonly IamAgencyRolePolicyDefinition[] =
   [

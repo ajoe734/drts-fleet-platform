@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getIamActorScopePreset,
+  getIamFleetRoleScopes,
   getIamScopeDefinition,
   getIamTenantRoleScopes,
   IAM_POLICY_CATALOG_VERSION,
@@ -76,7 +77,35 @@ describe("IAM policy catalog", () => {
     ).toEqual(["identity:read", "tenant:webhooks:write"]);
   });
 
+  it("keeps Fleet personas distinct from Referral, Host and tenant finance", () => {
+    expect(getIamFleetRoleScopes("fleet_partner_admin")).toEqual([
+      "fleet:read",
+      "fleet:supply:write",
+      "fleet:finance:read",
+      "fleet:finance:write",
+    ]);
+    expect(getIamFleetRoleScopes("fleet_partner_ops")).toEqual([
+      "fleet:read",
+      "fleet:training:read",
+      "fleet:supply:write",
+    ]);
+    expect(getIamFleetRoleScopes("fleet_partner_finance")).toEqual([
+      "fleet:finance:read",
+      "fleet:finance:write",
+    ]);
+    expect(getIamFleetRoleScopes("partner_finance")).toBeNull();
+    expect(getIamActorScopePreset("partner_user")).not.toContain("fleet:read");
+    expect(getIamActorScopePreset("partner_api_key")).not.toContain(
+      "fleet:supply:write",
+    );
+    expect(
+      getIamScopeDefinition("fleet:read")?.resourceConstraints.map(
+        ({ kind }) => kind,
+      ),
+    ).toEqual(["partner", "partner_entry", "object"]);
+  });
+
   it("exposes a stable catalog version for drift checks", () => {
-    expect(IAM_POLICY_CATALOG_VERSION).toBe("2026-08-01.rbac-001");
+    expect(IAM_POLICY_CATALOG_VERSION).toBe("2026-10-26.fleet-human-roles");
   });
 });

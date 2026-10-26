@@ -2949,6 +2949,25 @@ const en = {
     "Register legal identity, contact ownership, and partnership model before affiliations go live.",
   "fleetPartners.backToList": "Back to list",
   "fleetPartners.savePartner": "Save Partner",
+  "fleetPartners.humanRoles.title": "Managed Fleet Staff Roles",
+  "fleetPartners.humanRoles.subtitle":
+    "Assign a linked staff member's role for this fleet entry; changes take effect in the canonical identity store.",
+  "fleetPartners.humanRoles.entrySlug": "Fleet entry slug",
+  "fleetPartners.humanRoles.subject": "Linked staff subject",
+  "fleetPartners.humanRoles.role": "Staff role",
+  "fleetPartners.humanRoles.admin": "Fleet admin",
+  "fleetPartners.humanRoles.ops": "Fleet operations",
+  "fleetPartners.humanRoles.finance": "Fleet finance",
+  "fleetPartners.humanRoles.expiry": "Expires at",
+  "fleetPartners.humanRoles.state": "Assignment state",
+  "fleetPartners.humanRoles.disabled": "Disabled",
+  "fleetPartners.humanRoles.read": "Read assignments",
+  "fleetPartners.humanRoles.save": "Save assignment",
+  "fleetPartners.humanRoles.until": "until {date}",
+  "fleetPartners.humanRoles.confirmed":
+    "Saved {role} ({status}) for principal {principal}; readback confirmed.",
+  "fleetPartners.humanRoles.readbackMismatch":
+    "Assignment readback did not match the saved change.",
   "fleetPartners.partnerProfileTitle": "Partner Profile",
   "fleetPartners.partnerProfileSubtitle":
     "Editable fleet partner metadata used by admin, revenue share, and statement workflows.",
@@ -7618,6 +7637,25 @@ const zh: typeof en = {
     "在司機掛靠上線前先建立法人身份、聯絡窗口與合作模型。",
   "fleetPartners.backToList": "返回列表",
   "fleetPartners.savePartner": "儲存夥伴",
+  "fleetPartners.humanRoles.title": "車隊人員角色管理",
+  "fleetPartners.humanRoles.subtitle":
+    "為此車隊入口已連結的人員指派角色；變更寫入正式身分資料。",
+  "fleetPartners.humanRoles.entrySlug": "車隊入口代碼",
+  "fleetPartners.humanRoles.subject": "已連結人員識別碼",
+  "fleetPartners.humanRoles.role": "人員角色",
+  "fleetPartners.humanRoles.admin": "車隊管理員",
+  "fleetPartners.humanRoles.ops": "車隊營運人員",
+  "fleetPartners.humanRoles.finance": "車隊財務人員",
+  "fleetPartners.humanRoles.expiry": "有效期限",
+  "fleetPartners.humanRoles.state": "指派狀態",
+  "fleetPartners.humanRoles.disabled": "已停用",
+  "fleetPartners.humanRoles.read": "讀取指派",
+  "fleetPartners.humanRoles.save": "儲存指派",
+  "fleetPartners.humanRoles.until": "有效至 {date}",
+  "fleetPartners.humanRoles.confirmed":
+    "已儲存 {role}（{status}），人員 {principal}；讀回確認一致。",
+  "fleetPartners.humanRoles.readbackMismatch":
+    "角色指派讀回結果與儲存變更不符。",
   "fleetPartners.partnerProfileTitle": "夥伴檔案",
   "fleetPartners.partnerProfileSubtitle":
     "可編輯的車隊夥伴主檔，供平台治理、分潤與結算流程共用。",

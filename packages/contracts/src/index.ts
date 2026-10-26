@@ -5348,6 +5348,26 @@ export const FLEET_REVENUE_SHARE_FORMULAS = [
 export type FleetRevenueShareFormula =
   (typeof FLEET_REVENUE_SHARE_FORMULAS)[number];
 
+export interface ManageFleetHumanRoleCommand {
+  /** Existing active partner entry attached to this canonical Fleet. */
+  entrySlug: string;
+  /** Already-linked IdP subject, not an email or client-selected role claim. */
+  partnerUserRef: string;
+  roleCode: "fleet_partner_admin" | "fleet_partner_ops" | "fleet_partner_finance";
+  enabled: boolean;
+  /** Optional explicit expiry; null means the manager has not set an expiry. */
+  validTo?: string | null;
+}
+
+export interface FleetHumanRoleRecord {
+  entrySlug: string;
+  principalId: string;
+  membershipId: string;
+  roleCode: ManageFleetHumanRoleCommand["roleCode"];
+  status: CanonicalAccountStatus;
+  validTo: string | null;
+}
+
 export interface FleetPartnerRecord {
   fleetPartnerId: string;
   /** Explicit operating-authority operator IDs; never inferred from affiliation. */

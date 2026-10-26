@@ -15,6 +15,9 @@ import { FleetPartnerRepository } from "./fleet-partner.repository";
 import { FleetPartnerService } from "./fleet-partner.service";
 import { AuditNotificationModule } from "../audit-notification/audit-notification.module";
 import { CallcenterModule } from "../callcenter/callcenter.module";
+import { IdentityModule } from "../identity/identity.module";
+import { TenantPartnerModule } from "../tenant-partner/tenant-partner.module";
+import { SecurityEventsModule } from "../security-events/security-events.module";
 import { ComplaintModule } from "../complaint/complaint.module";
 import { FleetPartnerCaseService } from "./fleet-partner-case.service";
 import { SupplyDocumentService } from "./supply-document.service";
@@ -36,6 +39,9 @@ import { SupplySubmissionService } from "./supply-submission.service";
     AuditNotificationModule,
     ComplaintModule,
     CallcenterModule,
+    IdentityModule,
+    TenantPartnerModule,
+    SecurityEventsModule,
   ],
   controllers: [FleetPartnerController],
   providers: [

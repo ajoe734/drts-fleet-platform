@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import ts from "typescript";
 import type { Inventory, Locale, Surface } from "./model";
 
 export const hash = (value: string | Buffer) =>
@@ -139,15 +140,64 @@ export function translationKeysForCase(
   }
   return source.keys;
 }
+// Parse the immutable requested source, not the catalog exported by this
+// checkout: a historical deployment can have a different role inventory.
+function tenantRolesAt(runtimeSha: string, policy: string): string[] {
+  const source = ts.createSourceFile(
+    policy,
+    sourceAt(runtimeSha, policy),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const changed = () =>
+    new Error("tenant role source changed; review inventory parser");
+  // TypeScript exposes parser diagnostics at runtime, but not in SourceFile's
+  // public interface; refuse a recovered/partial AST rather than accepting it.
+  if (
+    (source as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] })
+      .parseDiagnostics.length
+  )
+    throw changed();
+  const declarations = source.statements
+    .filter(ts.isVariableStatement)
+    .flatMap((statement) => statement.declarationList.declarations)
+    .filter(
+      (declaration) =>
+        ts.isIdentifier(declaration.name) &&
+        declaration.name.text === "IAM_TENANT_ROLE_POLICY_DEFINITIONS",
+    );
+  if (declarations.length !== 1) throw changed();
+  const initializer = declarations[0]!.initializer;
+  if (!initializer || !ts.isArrayLiteralExpression(initializer))
+    throw changed();
+  const roles = initializer.elements.map((element) => {
+    if (!ts.isObjectLiteralExpression(element)) throw changed();
+    const value = (name: string) => {
+      const properties = element.properties.filter(
+        (property) =>
+          ts.isPropertyAssignment(property) &&
+          ts.isIdentifier(property.name) &&
+          property.name.text === name,
+      );
+      if (properties.length !== 1) throw changed();
+      const property = properties[0] as ts.PropertyAssignment;
+      if (!ts.isStringLiteral(property.initializer)) throw changed();
+      return property.initializer.text;
+    };
+    if (value("roleFamily") !== "tenant") throw changed();
+    const role = value("roleCode");
+    if (!/^[a-z_]+$/.test(role)) throw changed();
+    return role;
+  });
+  if (roles.length < 4 || new Set(roles).size !== roles.length) throw changed();
+  return roles;
+}
+
 export function inventoryAt(runtimeSha: string): Inventory {
   if (!fullSha(runtimeSha))
     throw new Error("runtimeSha must be immutable full SHA");
   const policy = "packages/contracts/src/iam-policy-catalog.ts";
-  const tenantRoles = [
-    ...sourceAt(runtimeSha, policy).matchAll(/roleCode: "([a-z_]+)"/g),
-  ].map((m) => m[1]!);
-  if (tenantRoles.length < 4)
-    throw new Error("tenant role source changed; review inventory parser");
+  const tenantRoles = tenantRolesAt(runtimeSha, policy);
   const passengerSource = "packages/contracts/src/passenger-app.ts";
   const passengerIdentity = sourceAt(runtimeSha, passengerSource);
   const passengerRealm = /^export const PASSENGER_REALM = "([^"]+)";/m.exec(
