@@ -1,4 +1,4 @@
-export const IAM_POLICY_CATALOG_VERSION = "2026-08-01.rbac-001" as const;
+export const IAM_POLICY_CATALOG_VERSION = "2026-10-26.fleet-human-roles" as const;
 
 export const IAM_ACTOR_TYPES = [
   "system",
@@ -1011,7 +1011,7 @@ export const AGENCY_VIEWER_ROLE_CODE = "agency_viewer";
 export const AGENCY_EXPORTER_ROLE_CODE = "agency_exporter";
 
 export const IAM_FLEET_ROLE_POLICY_DEFINITIONS: readonly IamFleetRolePolicyDefinition[] = [
-  { roleCode: "fleet_partner_admin", roleFamily: "partner", scopes: ["fleet:read", "fleet:supply:write", "billing:read"] },
+  { roleCode: "fleet_partner_admin", roleFamily: "partner", scopes: ["fleet:read", "fleet:supply:write", "billing:read", "billing:write"] },
   { roleCode: "fleet_partner_ops", roleFamily: "partner", scopes: ["fleet:read", "fleet:supply:write"] },
   { roleCode: "fleet_partner_finance", roleFamily: "partner", scopes: ["fleet:read", "billing:read", "billing:write"] },
 ];

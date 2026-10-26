@@ -143,7 +143,7 @@ export class FleetPartnerService implements OnModuleInit {
 
   async listFleetHumanRoles(fleetPartnerId: string, entrySlug: string): Promise<FleetHumanRoleRecord[]> {
     await this.requireManagedFleetEntry(fleetPartnerId, entrySlug);
-    const rows = await this.identityRepository!.listFleetHumanRoles(entrySlug);
+    const rows = await this.identityRepository!.listFleetHumanRoles(entrySlug, fleetPartnerId);
     return rows.map(({ membership, binding }) => ({
       entrySlug, principalId: membership.principalId, membershipId: membership.membershipId,
       roleCode: binding.roleCode as FleetHumanRoleRecord["roleCode"],
@@ -175,7 +175,7 @@ export class FleetPartnerService implements OnModuleInit {
       throw new ApiRequestError(409, "FLEET_ROLE_LINK_INVALID", "Target needs an existing active linked human account.");
     }
     const records = await this.identityRepository!.manageFleetHumanRole({
-      entrySlug, principalId: link.drtsPassengerId, roleCode: command.roleCode,
+      entrySlug, fleetPartnerId, principalId: link.drtsPassengerId, roleCode: command.roleCode,
       enabled: command.enabled, validTo: command.validTo ?? null,
       managerPrincipalId: manager.principalId,
       audit: async (client) => {

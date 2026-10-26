@@ -1224,6 +1224,7 @@ export class IdentityRepository implements OnModuleInit {
    */
   async manageFleetHumanRole(input: {
     entrySlug: string;
+    fleetPartnerId: string;
     principalId: string;
     roleCode: string;
     enabled: boolean;
@@ -1253,13 +1254,13 @@ export class IdentityRepository implements OnModuleInit {
         ? this.parseRecord<CanonicalIdentityMembershipRecord>(rows.rows[0].record, "iam.identity_memberships") : null;
       if (!input.enabled && !previous) throw new Error("Fleet membership does not exist.");
       if (previous && (previous.principalId !== input.principalId || previous.realm !== "partner" ||
-          previous.scopeRef !== `fleet:${input.entrySlug}` || previous.partnerId !== input.entrySlug)) {
+          previous.scopeRef !== `fleet:${input.entrySlug}` || previous.partnerId !== input.fleetPartnerId)) {
         throw new Error("Fleet membership binding mismatch.");
       }
       const membership = await this.upsertMembership(client, {
         membershipId: previous?.membershipId ?? `membership_${randomUUID().replace(/-/g, "")}`,
         sourceRef, principalId: input.principalId, realm: "partner",
-        scopeRef: `fleet:${input.entrySlug}`, tenantId: null, partnerId: input.entrySlug,
+        scopeRef: `fleet:${input.entrySlug}`, tenantId: null, partnerId: input.fleetPartnerId,
         status: input.enabled ? "active" : "disabled",
         invitedByPrincipalId: previous?.invitedByPrincipalId ?? input.managerPrincipalId,
         invitationId: null, createdAt: previous?.createdAt ?? now, updatedAt: now,
@@ -1289,7 +1290,7 @@ export class IdentityRepository implements OnModuleInit {
     } finally { client.release(); }
   }
 
-  async listFleetHumanRoles(entrySlug: string): Promise<Array<{
+  async listFleetHumanRoles(entrySlug: string, fleetPartnerId: string): Promise<Array<{
     membership: CanonicalIdentityMembershipRecord;
     binding: CanonicalIdentityRoleBindingRecord;
   }>> {
@@ -1298,10 +1299,10 @@ export class IdentityRepository implements OnModuleInit {
       `SELECT m.record AS membership_record, b.record AS binding_record
          FROM iam.identity_memberships m
          JOIN iam.identity_role_bindings b ON b.membership_id = m.membership_id
-        WHERE m.realm = 'partner' AND m.scope_ref = $1 AND m.partner_id = $2
+        WHERE m.realm = 'partner' AND m.scope_ref = $1 AND m.partner_id = $3
           AND m.source_ref = 'fleet_member:' || $2 || ':' || m.principal_id
           AND b.source_ref = 'fleet_role:' || $2 || ':' || m.principal_id
-        ORDER BY m.created_at`, [`fleet:${entrySlug}`, entrySlug],
+        ORDER BY m.created_at`, [`fleet:${entrySlug}`, entrySlug, fleetPartnerId],
     );
     return result.rows.map((row) => ({
       membership: this.parseRecord<CanonicalIdentityMembershipRecord>(row.membership_record, "iam.identity_memberships"),

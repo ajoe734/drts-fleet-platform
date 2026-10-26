@@ -1266,7 +1266,7 @@ export class OidcPkceService {
       ? await this.identityRepository?.findMembershipsByPrincipalId(principal.principalId) : [];
     const managedMembership = memberships?.find((candidate) =>
       candidate.realm === "partner" && candidate.scopeRef === `fleet:${matchedEntry.entrySlug}` &&
-      candidate.partnerId === matchedEntry.entrySlug &&
+      candidate.partnerId === matchedEntry.partnerId &&
       candidate.sourceRef === `fleet_member:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}`);
     // A disabled membership never silently falls back to a fresh human grant.
     const roleBindings = managedMembership?.status === "active"
@@ -1279,6 +1279,9 @@ export class OidcPkceService {
       (!binding.validTo || (Number.isFinite(Date.parse(binding.validTo)) && now < Date.parse(binding.validTo))));
     const managedRole = activeRoles.length === 1 ? activeRoles[0] : null;
     const scopes = managedRole ? [...getIamFleetRoleScopes(managedRole.roleCode)!] : ["partner:read", "partner:write"];
+    // The entry slug identifies the linked subject; the canonical Fleet
+    // master identifies the business selector and owned records.
+    const canonicalPartnerId = managedRole ? matchedEntry.partnerId : matchedEntry.entrySlug;
     // Preserve the legacy restricted entry role label for existing consumers;
     // it is not a Fleet human grant and has no business scopes.
     const roles = managedRole ? [managedRole.roleCode] : ["partner_admin"];
@@ -1293,7 +1296,7 @@ export class OidcPkceService {
       realm: "partner",
       tenantId:
         matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
-      partnerId: matchedEntry.entrySlug,
+      partnerId: canonicalPartnerId,
       partnerEntrySlug: matchedEntry.entrySlug,
       roleFamilies: ["partner"],
       roles,
@@ -1323,7 +1326,7 @@ export class OidcPkceService {
         subject: identity.actorId,
         realm: "partner",
         tenantId: identity.tenantId,
-        partnerId: matchedEntry.entrySlug,
+        partnerId: canonicalPartnerId,
         partnerEntrySlug: matchedEntry.entrySlug,
         roleFamilies: ["partner"],
         roles,

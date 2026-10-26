@@ -35,17 +35,17 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     const linked = await link.resolveOrCreate({ entrySlug: ENTRY, partnerUserRef: SUB });
     const jwt = new JwtAuthService(repository, tenant, undefined, undefined, link);
     const oidc = new OidcPkceService(jwt, tenant, undefined, link, undefined, repository);
-    async function login() {
-      const state = oidc.generateLoginParameters("partner", { partnerId: ENTRY });
+    async function login(entrySlug = ENTRY) {
+      const state = oidc.generateLoginParameters("partner", { partnerId: entrySlug });
       return oidc.exchangePartnerCallbackSession({ provider: "oidc", code: CODE,
-        state: state.state, partnerId: ENTRY,
+        state: state.state, partnerId: entrySlug,
         callbackUrl: "http://localhost:3000/api/auth/callback" }, { stateToken: state.stateToken });
     }
     return { repository, link, tenant, jwt, login, linked };
   }
 
   it("does not turn an active Referral link into general Fleet access, then grants only the managed SA role's operations", async () => {
-    const { repository, jwt, login, linked } = await setup();
+    const { repository, jwt, login, linked, tenant, link } = await setup();
     const unassigned = await login();
     expect(unassigned.identity.membershipId).toBeUndefined();
     expect(unassigned.identity.scopes).not.toContain("fleet:read");
@@ -54,7 +54,7 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     const membership = await repository.ensureMembershipRecord({
       membershipId: "fleet-test-membership", sourceRef: `fleet_member:${ENTRY}:${linked.drtsPassengerId}`,
       principalId: linked.drtsPassengerId, realm: "partner", scopeRef: `fleet:${ENTRY}`,
-      tenantId: null, partnerId: ENTRY, status: "active", invitedByPrincipalId: "manager", invitationId: null,
+      tenantId: null, partnerId: "fleet-test-001", status: "active", invitedByPrincipalId: "manager", invitationId: null,
       createdAt: now, updatedAt: now,
     });
     const binding = await repository.ensureRoleBindingRecord({
@@ -64,19 +64,35 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     });
     const ops = await login();
     expect(ops.identity).toMatchObject({ membershipId: membership.membershipId,
+      partnerId: "fleet-test-001", partnerEntrySlug: ENTRY,
       roles: ["fleet_partner_ops"], scopes: ["fleet:read", "fleet:supply:write"] });
     expect(await jwt.verifyAccessToken(ops.accessToken)).not.toBeNull();
     expect(resolveRouteAuthPolicy("GET", "/api/fleet-partner/drivers").requiredScopes).toEqual(["fleet:read"]);
     expect(resolveRouteAuthPolicy("POST", "/api/fleet-partner/supply-submissions/drivers").requiredScopes).toEqual(["fleet:supply:write"]);
     expect(resolveRouteAuthPolicy("GET", "/api/fleet-partner/statements").requiredScopes).toEqual(["billing:read"]);
     expect(ops.identity.scopes).not.toContain("billing:read");
+    await repository.ensureRoleBindingRecord({ ...binding, roleCode: "fleet_partner_admin",
+      updatedAt: new Date(Date.now() + 500).toISOString() });
+    expect(await jwt.verifyAccessToken(ops.accessToken)).toBeNull();
+    const admin = await login();
+    expect(admin.identity.roles).toEqual(["fleet_partner_admin"]);
+    expect(admin.identity.scopes).toContain("fleet:supply:write");
+    expect(admin.identity.scopes).toContain("billing:write");
     await repository.ensureRoleBindingRecord({ ...binding, roleCode: "fleet_partner_finance",
       updatedAt: new Date(Date.now() + 1000).toISOString() });
-    expect(await jwt.verifyAccessToken(ops.accessToken)).toBeNull();
+    expect(await jwt.verifyAccessToken(admin.accessToken)).toBeNull();
     const finance = await login();
     expect(finance.identity.roles).toEqual(["fleet_partner_finance"]);
     expect(finance.identity.scopes).toContain("billing:read");
     expect(finance.identity.scopes).not.toContain("fleet:supply:write");
+    // Another entry for the very same OIDC subject receives a different
+    // canonical link principal; entry-one membership cannot cross it.
+    const entries = (tenant as unknown as { partnerEntries: Array<{entrySlug: string; partnerType: string; partnerId: string}> }).partnerEntries;
+    entries.push({ ...entries.find((row) => row.entrySlug === ENTRY)!, entrySlug: "other-fleet-entry", partnerId: "other-fleet-id" });
+    await link.resolveOrCreate({ entrySlug: "other-fleet-entry", partnerUserRef: SUB });
+    const otherFleet = await login("other-fleet-entry");
+    expect(otherFleet.identity.scopes).not.toContain("billing:read");
+    expect(otherFleet.identity.membershipId).toBeUndefined();
     await repository.ensureMembershipRecord({ ...membership, status: "disabled",
       updatedAt: new Date(Date.now() + 2000).toISOString() });
     expect(await jwt.verifyAccessToken(finance.accessToken)).toBeNull();

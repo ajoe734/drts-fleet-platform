@@ -1239,9 +1239,9 @@ export class JwtAuthService {
     if (payload.actorType !== "partner_user" || !payload.partnerEntrySlug ||
         !payload.principalId || !payload.membershipId || !this.identityRepository ||
         !this.tenantPartnerService || !this.partnerUserIdentityLinkRepository ||
-        payload.partnerId !== payload.partnerEntrySlug ||
+        !payload.partnerId ||
         session.principalId !== payload.principalId || session.membershipId !== payload.membershipId ||
-        session.partnerId !== payload.partnerEntrySlug) return false;
+        session.partnerId !== payload.partnerId || session.partnerEntrySlug !== payload.partnerEntrySlug) return false;
     const entrySlug = payload.partnerEntrySlug;
     let state;
     try {
@@ -1257,9 +1257,9 @@ export class JwtAuthService {
         principal.sourceRef !== `jwt_principal:partner:${payload.principalId}` ||
         !link || link.status !== "active" ||
         !entry || entry.partnerType !== "fleet_partner" || entry.status !== "active" || !entry.activeFlag ||
-        entry.entrySlug !== entrySlug ||
+        entry.entrySlug !== entrySlug || entry.partnerId !== payload.partnerId ||
         !membership || membership.status !== "active" || membership.realm !== "partner" ||
-        membership.principalId !== principal.principalId || membership.partnerId !== entrySlug ||
+        membership.principalId !== principal.principalId || membership.partnerId !== entry.partnerId ||
         membership.scopeRef !== `fleet:${entrySlug}` ||
         membership.sourceRef !== `fleet_member:${entrySlug}:${principal.principalId}`) return false;
     const bindings = await this.identityRepository.findRoleBindingsByMembershipId(membership.membershipId);
