@@ -275,6 +275,26 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     expect(finance.identity.scopes).not.toContain("billing:read");
     expect(finance.identity.scopes).not.toContain("fleet:read");
     expect(finance.identity.scopes).not.toContain("fleet:supply:write");
+    const statementDecision = (selector: string) =>
+      guard.canActivate({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            method: "POST",
+            url: "/api/fleet-partner/statements/st-1/confirm",
+            headers: {
+              authorization: `Bearer ${finance.accessToken}`,
+              "x-fleet-partner-id": selector,
+            },
+          }),
+        }),
+        getHandler: () =>
+          FleetPartnerController.prototype.confirmPortalStatement,
+        getClass: () => FleetPartnerController,
+      } as never);
+    await expect(statementDecision("fleet-test-001")).resolves.toBe(true);
+    await expect(statementDecision("fleet-other")).rejects.toMatchObject({
+      code: "FLEET_SCOPE_DENIED",
+    });
     await expect(
       guardedGet(
         finance.accessToken,
