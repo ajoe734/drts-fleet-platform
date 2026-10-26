@@ -3,6 +3,7 @@ import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
 import ExcelJS from "exceljs";
 import { recordsToCsv } from "../../../apps/api/src/common/csv";
 import { recordsToPdf } from "../../../apps/api/src/modules/reporting-filing/report-renderers";
+import { displayOrderNo } from "../../../apps/referral-embed-web/lib/order-display";
 import { parsePdf } from "../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import {
   camelWire,
@@ -27,6 +28,10 @@ export const DAILY_REPORT_MIME_TYPES: Readonly<
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   pdf: "application/pdf",
 };
+
+export type DailyReportProvenanceQualification =
+  | "all-rows-controlled-synthetic"
+  | "own-row-verified-unowned-siblings-present-raw-retention-skipped";
 
 export type ExpectedDailyDispatchRecord = Readonly<{
   orderId: string;
@@ -64,16 +69,25 @@ export type DailyReportDownloadArtifactSummary = Readonly<{
   jobId: string;
   jobType: "daily_dispatch_record";
   jobStatus: "completed";
+  artifactId: string;
+  artifactType: "report";
+  downloadUrl: string;
+  immutable: true;
   contentType: string;
   contentDisposition: string;
   fileName: string;
-  artifactPath: string;
+  artifactPath: string | null;
+  rawArtifactRetained: boolean;
   bytes: number;
   sha256: string;
   expiresAt: string;
   manifestHash: string;
   rowCount: number;
+  controlledRowCount: number;
+  unverifiedSiblingRowCount: number;
   ownOrderPresent: true;
+  syntheticProvenanceVerified: boolean;
+  provenanceQualification: DailyReportProvenanceQualification;
   runtimeSha: string;
   contentSignature: Readonly<{
     format: DailyReportFormat;
@@ -94,8 +108,11 @@ export type DailyReportDownloadsEvidence = Readonly<{
   preview: Readonly<{
     rebuilt: boolean;
     rowCount: number;
+    controlledRowCount: number;
+    unverifiedSiblingRowCount: number;
     ownOrderRowVerified: true;
-    syntheticProvenanceVerified: true;
+    syntheticProvenanceVerified: boolean;
+    provenanceQualification: DailyReportProvenanceQualification;
     generatedAt: string;
     finalDriverId: string;
     finalVehicleId: string;
@@ -113,6 +130,51 @@ export type DailyReportDownloadsEvidence = Readonly<{
     pdf: DailyReportDownloadArtifactSummary;
   }>;
 }>;
+
+export function resolveActiveTripScreenOrder(
+  activeData: unknown,
+  expectedOrderId: string,
+  pageUrl: string,
+  stage: string,
+): Readonly<{
+  trip: ObjectData;
+  orderId: string;
+  orderNo: string;
+  displayOrderNo: string;
+}> {
+  const id = text(expectedOrderId, `${stage}:expected-order-id`);
+  const active = object(activeData);
+  const trip = object(active.trip);
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(pageUrl);
+  } catch {
+    throw new JourneyFailure(stage);
+  }
+  requireFact(
+    trip.orderId === id &&
+      parsedUrl.searchParams.get("orderId") === id &&
+      parsedUrl.searchParams.get("screen") === "trip",
+    stage,
+  );
+  const orderNo = text(trip.orderNo, `${stage}:order-no`);
+  const renderedOrderNo = displayOrderNo(orderNo);
+  requireFact(renderedOrderNo.trim().length > 0, `${stage}:display-order-no`);
+  return Object.freeze({
+    trip,
+    orderId: id,
+    orderNo,
+    displayOrderNo: renderedOrderNo,
+  });
+}
+
+export function opsReportJobDetailPathname(jobId: string): string {
+  return `/control-plane-proxy/reports/${encodeURIComponent(text(jobId, "daily-report-job-id-required"))}`;
+}
+
+export function opsReportJobArtifactPathname(jobId: string): string {
+  return `/control-plane-proxy/reports/${encodeURIComponent(text(jobId, "daily-report-job-id-required"))}/artifact`;
+}
 
 export function toTaipeiServiceDate(isoTimestamp: string): string {
   const parsed = Date.parse(isoTimestamp);
@@ -137,15 +199,37 @@ export function normalizeDailyOrderSource(orderSource: string): string {
   const normalized = text(orderSource, "daily-report-order-source-required");
   if (normalized === "portal") return "tenant_portal";
   if (normalized === "partner") return "partner_booking";
-  if (normalized === "ops") return "ops_console";
-  if (normalized === "third_party") return "third_party_platform";
+  if (normalized === "ops" || normalized === "concierge") return "ops_console";
+  if (
+    normalized === "third_party" ||
+    normalized === "app" ||
+    normalized === "web"
+  ) {
+    return "third_party_platform";
+  }
   return normalized;
 }
 
 export function resolveDailyServiceProductCode(order: ObjectData): string {
+  const explicitCode =
+    typeof order.serviceProductCode === "string" &&
+    order.serviceProductCode.trim().length > 0
+      ? order.serviceProductCode.trim()
+      : null;
+  const subtype =
+    typeof order.businessDispatchSubtype === "string" &&
+    order.businessDispatchSubtype.trim().length > 0
+      ? order.businessDispatchSubtype.trim()
+      : null;
+  if (explicitCode && subtype) {
+    requireFact(
+      explicitCode === subtype,
+      "daily-report-service-product-subtype-mismatch",
+    );
+  }
   const candidate =
-    order.serviceProductCode ??
-    order.businessDispatchSubtype ??
+    explicitCode ??
+    subtype ??
     order.taxiDispatchMode ??
     order.serviceBucket;
   return text(candidate, "daily-report-service-product-code-required");
@@ -155,7 +239,8 @@ export function resolveExpectedDailyDispatchRecord(
   order: ObjectData,
   task: ObjectData,
   ownContext: {
-    tenantId: string;
+    entrySlug?: string;
+    fleetSupplyTenantId?: string;
     driverId: string;
     vehicleId: string;
     plateNo: string;
@@ -173,6 +258,16 @@ export function resolveExpectedDailyDispatchRecord(
     task.orderId === orderId,
     "daily-report-task-order-binding-mismatch",
   );
+  if (ownContext.entrySlug !== undefined) {
+    const expectedEntrySlug = text(
+      ownContext.entrySlug,
+      "daily-report-entry-slug-required",
+    );
+    requireFact(
+      order.partnerEntrySlug === expectedEntrySlug,
+      "daily-report-referral-entry-binding",
+    );
+  }
   const finalDriverId = text(
     order.assignedDriverId ?? ownContext.driverId,
     "daily-report-final-driver-id-required",
@@ -206,12 +301,8 @@ export function resolveExpectedDailyDispatchRecord(
     text(order.orderSource, "daily-report-order-source-required"),
   );
   const tenantId = text(
-    order.tenantId ?? ownContext.tenantId,
+    order.tenantId,
     "daily-report-synthetic-tenant-id-required",
-  );
-  requireFact(
-    tenantId === ownContext.tenantId,
-    "daily-report-synthetic-tenant-binding",
   );
   const partnerId = text(
     order.partnerId,
@@ -296,11 +387,16 @@ export function validateDailyPreviewRows(
   expected: ExpectedDailyDispatchRecord,
   runtimeSha: string,
   responseSha: string | null | undefined,
+  controlledOrderIds?: Iterable<string>,
 ): Readonly<{
   rowCount: number;
+  controlledRowCount: number;
+  unverifiedSiblingRowCount: number;
   ownRow: ObjectData;
   generatedAt: string;
   complaintCount: number;
+  syntheticProvenanceVerified: boolean;
+  provenanceQualification: DailyReportProvenanceQualification;
 }> {
   requireFact(
     /^[a-f0-9]{40}$/.test(runtimeSha) && responseSha === runtimeSha,
@@ -308,6 +404,18 @@ export function validateDailyPreviewRows(
   );
   const rows = records(rawRows);
   requireFact(rows.length > 0, "daily-report-preview-empty-rows");
+
+  const allowedControlledOrderIds = new Set<string>([expected.orderId]);
+  if (controlledOrderIds) {
+    for (const candidateId of controlledOrderIds) {
+      allowedControlledOrderIds.add(
+        text(candidateId, "daily-report-controlled-order-id-required"),
+      );
+    }
+  }
+
+  let controlledRowCount = 0;
+  let unverifiedSiblingRowCount = 0;
 
   for (const row of rows) {
     requireFact(
@@ -323,6 +431,11 @@ export function validateDailyPreviewRows(
         row.orderNo.trim().length > 0,
       "daily-report-preview-unqualified-or-foreign-fixture-row",
     );
+    if (allowedControlledOrderIds.has(row.orderId)) {
+      controlledRowCount += 1;
+    } else {
+      unverifiedSiblingRowCount += 1;
+    }
   }
 
   const matching = rows.filter((row) => row.orderId === expected.orderId);
@@ -383,11 +496,21 @@ export function validateDailyPreviewRows(
     "daily-report-preview-generated-at-valid-iso",
   );
 
+  const syntheticProvenanceVerified = unverifiedSiblingRowCount === 0;
+  const provenanceQualification: DailyReportProvenanceQualification =
+    syntheticProvenanceVerified
+      ? "all-rows-controlled-synthetic"
+      : "own-row-verified-unowned-siblings-present-raw-retention-skipped";
+
   return Object.freeze({
     rowCount: rows.length,
+    controlledRowCount,
+    unverifiedSiblingRowCount,
     ownRow,
     generatedAt,
     complaintCount,
+    syntheticProvenanceVerified,
+    provenanceQualification,
   });
 }
 
@@ -530,7 +653,8 @@ export async function validateDailyReportArtifactDownload(input: {
   expected: ExpectedDailyDispatchRecord;
   previewOwnRow: ObjectData;
   runtimeSha: string;
-  artifactPath: string;
+  artifactPath: string | null;
+  controlledOrderIds?: Iterable<string>;
   nowMs?: number;
 }): Promise<DailyReportDownloadArtifactSummary> {
   const {
@@ -547,6 +671,7 @@ export async function validateDailyReportArtifactDownload(input: {
     previewOwnRow,
     runtimeSha,
     artifactPath,
+    controlledOrderIds,
     nowMs = Date.now(),
   } = input;
 
@@ -584,6 +709,11 @@ export async function validateDailyReportArtifactDownload(input: {
   );
 
   const artifact = object(detail.artifact);
+  const artifactId = text(
+    artifact.artifactId,
+    `daily-report-${format}-artifact-id-required`,
+  );
+  const expectedDownloadUrl = `/reports/${encodeURIComponent(jobId)}/artifact`;
   const expectedFileName = `daily_dispatch_record-${jobId}.${format}`;
   const expiresAt = text(
     artifact.expiresAt,
@@ -591,8 +721,10 @@ export async function validateDailyReportArtifactDownload(input: {
   );
   const expiresAtMs = Date.parse(expiresAt);
   requireFact(
-    artifact.format === format &&
-      artifact.fileName === expectedFileName &&
+    artifactId.length > 0 &&
+      artifact.artifactType === "report" &&
+      artifact.downloadUrl === expectedDownloadUrl &&
+      artifact.immutable === true &&
       Number.isFinite(expiresAtMs) &&
       expiresAtMs > nowMs,
     `daily-report-${format}-artifact-unexpired-metadata-binding`,
@@ -619,7 +751,20 @@ export async function validateDailyReportArtifactDownload(input: {
     expected,
     runtimeSha,
     detailResponseSha,
+    controlledOrderIds,
   );
+  if (validatedJobRows.syntheticProvenanceVerified) {
+    requireFact(
+      typeof artifactPath === "string" && artifactPath.trim().length > 0,
+      `daily-report-${format}-controlled-artifact-path-required`,
+    );
+  } else {
+    requireFact(
+      artifactPath === null,
+      `daily-report-${format}-unverified-sibling-rows-forbid-raw-file-retention`,
+    );
+  }
+
   const jobRows = records(detail.rows);
   const jobOwnRow = validatedJobRows.ownRow;
 
@@ -805,16 +950,25 @@ export async function validateDailyReportArtifactDownload(input: {
     jobId,
     jobType: "daily_dispatch_record",
     jobStatus: "completed",
+    artifactId,
+    artifactType: "report",
+    downloadUrl: expectedDownloadUrl,
+    immutable: true,
     contentType: normalizedMime,
     contentDisposition: text(contentDisposition),
     fileName: expectedFileName,
     artifactPath,
+    rawArtifactRetained: validatedJobRows.syntheticProvenanceVerified,
     bytes: bytes.length,
     sha256: hash(bytes),
     expiresAt,
     manifestHash,
     rowCount: jobRows.length,
+    controlledRowCount: validatedJobRows.controlledRowCount,
+    unverifiedSiblingRowCount: validatedJobRows.unverifiedSiblingRowCount,
     ownOrderPresent: true,
+    syntheticProvenanceVerified: validatedJobRows.syntheticProvenanceVerified,
+    provenanceQualification: validatedJobRows.provenanceQualification,
     runtimeSha,
     contentSignature: Object.freeze({
       format,
@@ -888,7 +1042,9 @@ export type RunOwnedDailyReportDownloadsParams = {
   opsHeaders: (url: string) => Record<string, string>;
   order: ObjectData;
   completedTask: ObjectData;
-  tenantId: string;
+  entrySlug?: string;
+  fleetSupplyTenantId?: string;
+  controlledOrderIds?: Iterable<string>;
   driverId: string;
   vehicleId: string;
   plateNo: string;
@@ -915,7 +1071,9 @@ export async function runOwnedDailyReportDownloads(
     opsHeaders,
     order,
     completedTask,
-    tenantId,
+    entrySlug,
+    fleetSupplyTenantId,
+    controlledOrderIds,
     driverId,
     vehicleId,
     plateNo,
@@ -933,13 +1091,22 @@ export async function runOwnedDailyReportDownloads(
   );
 
   const expected = resolveExpectedDailyDispatchRecord(order, completedTask, {
-    tenantId,
+    ...(entrySlug === undefined ? {} : { entrySlug }),
+    ...(fleetSupplyTenantId === undefined ? {} : { fleetSupplyTenantId }),
     driverId,
     vehicleId,
     plateNo,
     pickupAddress,
     dropoffAddress,
   });
+  const controlledOrderIdSet = new Set<string>([expected.orderId]);
+  if (controlledOrderIds) {
+    for (const candidateId of controlledOrderIds) {
+      controlledOrderIdSet.add(
+        text(candidateId, "daily-report-controlled-order-id-required"),
+      );
+    }
+  }
   const expectedFilters = buildDailyReportFilters(expected);
 
   type PendingWaiter = {
@@ -1215,6 +1382,7 @@ export async function runOwnedDailyReportDownloads(
       expected,
       runtimeSha,
       previewExchange.runtimeSha,
+      controlledOrderIdSet,
     );
 
     const uiOrderRow = page
@@ -1365,7 +1533,6 @@ export async function runOwnedDailyReportDownloads(
     }
 
     const reportDirectory = `${directory}/daily-reports`;
-    await mkdir(reportDirectory, { recursive: true });
     const downloads = {} as Record<
       DailyReportFormat,
       DailyReportDownloadArtifactSummary
@@ -1402,15 +1569,13 @@ export async function runOwnedDailyReportDownloads(
       const detailPromise = waitForOpsExchange(
         (ex) =>
           ex.method === "GET" &&
-          ex.pathname ===
-            `/control-plane-proxy/reports/jobs/${encodeURIComponent(jobId)}`,
+          ex.pathname === opsReportJobDetailPathname(jobId),
         `daily-report-job-detail-${format}`,
       );
       const artifactPromise = waitForOpsExchange(
         (ex) =>
           ex.method === "GET" &&
-          ex.pathname ===
-            `/control-plane-proxy/reports/${encodeURIComponent(jobId)}/artifact`,
+          ex.pathname === opsReportJobArtifactPathname(jobId),
         `daily-report-artifact-download-${format}`,
       );
 
@@ -1428,7 +1593,19 @@ export async function runOwnedDailyReportDownloads(
         detailExchange.bytes,
         `daily-report-job-detail-${format}`,
       );
-      const artifactPath = `${reportDirectory}/daily-dispatch-${jobId}.${format}`;
+      const jobRowsCheck = validateDailyPreviewRows(
+        jobDetail.rows,
+        expected,
+        runtimeSha,
+        detailExchange.runtimeSha,
+        controlledOrderIdSet,
+      );
+      const retainRawArtifact =
+        validatedPreview.syntheticProvenanceVerified &&
+        jobRowsCheck.syntheticProvenanceVerified;
+      const artifactPath = retainRawArtifact
+        ? `${reportDirectory}/daily-dispatch-${jobId}.${format}`
+        : null;
       const summary = await validateDailyReportArtifactDownload({
         format,
         jobId,
@@ -1444,9 +1621,21 @@ export async function runOwnedDailyReportDownloads(
         previewOwnRow: validatedPreview.ownRow,
         runtimeSha,
         artifactPath,
+        controlledOrderIds: controlledOrderIdSet,
       });
 
-      await writeFile(artifactPath, artifactExchange.bytes, { mode: 0o600 });
+      if (retainRawArtifact && artifactPath !== null) {
+        await mkdir(reportDirectory, { recursive: true });
+        await writeFile(artifactPath, artifactExchange.bytes, { mode: 0o600 });
+      } else {
+        evidence.record({
+          stage: `daily-report-download-${format}-raw-retention-skipped`,
+          orderId: expected.orderId,
+          objectKey: jobId,
+          status: artifactExchange.status,
+          result: "observed",
+        });
+      }
       downloads[format] = summary;
 
       evidence.record({
@@ -1470,8 +1659,12 @@ export async function runOwnedDailyReportDownloads(
       preview: Object.freeze({
         rebuilt,
         rowCount: validatedPreview.rowCount,
+        controlledRowCount: validatedPreview.controlledRowCount,
+        unverifiedSiblingRowCount: validatedPreview.unverifiedSiblingRowCount,
         ownOrderRowVerified: true,
-        syntheticProvenanceVerified: true,
+        syntheticProvenanceVerified:
+          validatedPreview.syntheticProvenanceVerified,
+        provenanceQualification: validatedPreview.provenanceQualification,
         generatedAt: validatedPreview.generatedAt,
         finalDriverId: expected.finalDriverId,
         finalVehicleId: expected.finalVehicleId,

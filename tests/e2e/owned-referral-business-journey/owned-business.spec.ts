@@ -66,6 +66,7 @@ import {
   type DisplayObservations,
 } from "./display-observations";
 import {
+  resolveActiveTripScreenOrder,
   runOwnedDailyReportDownloads,
   type DailyReportDownloadsEvidence,
 } from "./daily-report-downloads";
@@ -2083,17 +2084,21 @@ test(journeyName, async ({ browser, request }) => {
             const button = page.locator(
               '[data-drt-operation="referral-cancel"]',
             );
-            await expect(
-              page.getByText(id, { exact: false }).first(),
-            ).toBeVisible();
             const active = object(
               (await referral("/api/referral/active")).data,
             );
-            const current = object(active.trip);
-            requireFact(
-              current.orderId === id,
-              "current UI cancellation exact order",
+            const resolvedTrip = resolveActiveTripScreenOrder(
+              active,
+              id,
+              page.url(),
+              "current UI cancellation",
             );
+            await expect(
+              page
+                .getByText(resolvedTrip.displayOrderNo, { exact: false })
+                .first(),
+            ).toBeVisible();
+            const current = resolvedTrip.trip;
             const window = readCancellationWindowSnapshot(
               current.cancellationWindow,
             );
@@ -2280,14 +2285,21 @@ test(journeyName, async ({ browser, request }) => {
                 `${origins.referral}/embed/${ENTRY}?state=handoff&screen=${screen}&orderId=${encodeURIComponent(id)}`,
               );
             if (screen === "trip") {
-              await expect(
-                page.getByText(id, { exact: false }).first(),
-              ).toBeVisible();
               const active = object(
                 (await referral("/api/referral/active")).data,
               );
-              const current = object(active.trip);
-              requireFact(current.orderId === id, "capture exact active order");
+              const resolvedTrip = resolveActiveTripScreenOrder(
+                active,
+                id,
+                page.url(),
+                "capture active trip",
+              );
+              await expect(
+                page
+                  .getByText(resolvedTrip.displayOrderNo, { exact: false })
+                  .first(),
+              ).toBeVisible();
+              const current = resolvedTrip.trip;
               const window = readCancellationWindowSnapshot(
                 current.cancellationWindow,
               );
@@ -2348,6 +2360,15 @@ test(journeyName, async ({ browser, request }) => {
         runtimeSha: runtime,
       });
       const completedOrderForReport = await getOrder();
+      const controlledOrderIds = [
+        completedOrderId,
+        ...cancellations
+          .map((stage) => stage.orderId)
+          .filter(
+            (candidate): candidate is string =>
+              typeof candidate === "string" && candidate.trim().length > 0,
+          ),
+      ];
       dailyReportDownloads = await runOwnedDailyReportDownloads({
         context,
         page,
@@ -2355,7 +2376,9 @@ test(journeyName, async ({ browser, request }) => {
         opsHeaders: (url) => tx.headers("ops", url),
         order: completedOrderForReport,
         completedTask,
-        tenantId: TENANT,
+        entrySlug: ENTRY,
+        fleetSupplyTenantId: TENANT,
+        controlledOrderIds,
         driverId,
         vehicleId,
         plateNo: ownPlateNo,
