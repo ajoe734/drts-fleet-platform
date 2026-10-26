@@ -9,9 +9,11 @@ import {
   recordsToXlsx,
 } from "../../../apps/api/src/modules/reporting-filing/report-renderers";
 import {
+  assertDailyReportHttpStatus,
   buildDailyReportFilters,
   DAILY_REPORT_FORMATS,
   DAILY_REPORT_MIME_TYPES,
+  DailyReportHttpFailure,
   opsReportJobArtifactPathname,
   opsReportJobDetailPathname,
   parseCsvRecords,
@@ -181,6 +183,200 @@ async function renderFormatBytes(
 }
 
 describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contract", () => {
+  it("F6: captures only typed safe non-200 preview status/known route/code/trace before rejecting, never raw body or headers", () => {
+    const evidence = new Evidence();
+    const secret = "sensitive-customer-and-auth-material";
+    const traceId = "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55";
+    const exchange = {
+      status: 503,
+      method: "GET",
+      pathname: "/control-plane-proxy/reports/daily-dispatch-records",
+      runtimeSha: RUNTIME_SHA,
+      bytes: Buffer.from(
+        JSON.stringify({
+          error: {
+            code: "REPORT_READ_FAILED",
+            trace_id: traceId,
+            message: secret,
+            details: { authorization: secret },
+          },
+        }),
+      ),
+    };
+    expect(() =>
+      assertDailyReportHttpStatus(
+        exchange,
+        "preview",
+        [200],
+        RUNTIME_SHA,
+        evidence,
+      ),
+    ).toThrow("daily-report-preview-status-200: HTTP 503 REPORT_READ_FAILED");
+    expect(evidence.events).toEqual([
+      {
+        stage: "daily-report-http-preview-get-daily-dispatch-records",
+        status: 503,
+        code: "REPORT_READ_FAILED",
+        objectKey: traceId,
+        result: "failed",
+      },
+    ]);
+    expect(JSON.stringify(evidence.events)).not.toContain(secret);
+
+    for (const unsafe of [
+      { error: { code: secret, traceId, message: secret } },
+      {
+        error: { code: "REPORT_READ_FAILED", traceId: secret, message: secret },
+      },
+      { error: { code: "REPORT_READ_FAILED", traceId, message: secret } },
+    ]) {
+      const bounded = new Evidence();
+      const candidate = {
+        ...exchange,
+        bytes: Buffer.from(JSON.stringify(unsafe)),
+      };
+      expect(() =>
+        assertDailyReportHttpStatus(
+          candidate,
+          "preview",
+          [200],
+          RUNTIME_SHA,
+          bounded,
+        ),
+      ).toThrow(JourneyFailure);
+      expect(JSON.stringify(bounded.events)).not.toContain(secret);
+    }
+    const malformed = new Evidence();
+    expect(() =>
+      assertDailyReportHttpStatus(
+        { ...exchange, bytes: Buffer.from("<html>"), status: 502 },
+        "preview",
+        [200],
+        RUNTIME_SHA,
+        malformed,
+      ),
+    ).toThrow("HTTP 502");
+    expect(malformed.events).toEqual([
+      {
+        stage: "daily-report-http-preview-get-daily-dispatch-records",
+        status: 502,
+        result: "failed",
+      },
+    ]);
+  });
+
+  it.each([
+    ["initial-reports-page", "GET", "/reports", [200]],
+    ["initial-jobs", "GET", "/control-plane-proxy/reports/jobs", [200]],
+    [
+      "rebuild",
+      "POST",
+      "/control-plane-proxy/reports/daily-dispatch-records/rebuild",
+      [200, 201],
+    ],
+    [
+      "rebuilt-preview",
+      "GET",
+      "/control-plane-proxy/reports/daily-dispatch-records",
+      [200],
+    ],
+    ["create-job-csv", "POST", "/control-plane-proxy/reports/jobs", [200, 201]],
+    [
+      "create-job-xlsx",
+      "POST",
+      "/control-plane-proxy/reports/jobs",
+      [200, 201],
+    ],
+    ["create-job-pdf", "POST", "/control-plane-proxy/reports/jobs", [200, 201]],
+    ["reload-jobs", "GET", "/control-plane-proxy/reports/jobs", [200]],
+    [
+      "job-detail-csv",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_csv",
+      [200],
+    ],
+    [
+      "job-detail-xlsx",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_xlsx",
+      [200],
+    ],
+    [
+      "job-detail-pdf",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_pdf",
+      [200],
+    ],
+    [
+      "artifact-download-csv",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_csv/artifact",
+      [200],
+    ],
+    [
+      "artifact-download-xlsx",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_xlsx/artifact",
+      [200],
+    ],
+    [
+      "artifact-download-pdf",
+      "GET",
+      "/control-plane-proxy/reports/job_r12_pdf/artifact",
+      [200],
+    ],
+  ] as const)(
+    "F6: %s non-200 is safely attributed and stops before body parse",
+    (phase, method, pathname, accepted) => {
+      const evidence = new Evidence();
+      const exchange = {
+        method,
+        pathname,
+        status: 403,
+        runtimeSha: RUNTIME_SHA,
+        bytes: Buffer.from(
+          JSON.stringify({
+            error: { code: "IAP_SUBJECT_FORBIDDEN", message: "private-value" },
+          }),
+        ),
+      };
+      expect(() =>
+        assertDailyReportHttpStatus(
+          exchange,
+          phase,
+          accepted,
+          RUNTIME_SHA,
+          evidence,
+        ),
+      ).toThrow(DailyReportHttpFailure);
+      expect(evidence.events).toMatchObject([
+        { status: 403, code: "IAP_SUBJECT_FORBIDDEN", result: "failed" },
+      ]);
+      expect(JSON.stringify(evidence.events)).not.toContain("private-value");
+      const passed = new Evidence();
+      assertDailyReportHttpStatus(
+        { ...exchange, status: accepted[0]! },
+        phase,
+        accepted,
+        RUNTIME_SHA,
+        passed,
+      );
+      expect(passed.events).toHaveLength(0);
+      expect(() =>
+        assertDailyReportHttpStatus(
+          {
+            ...exchange,
+            pathname:
+              "/control-plane-proxy/reports/other/artifact?token=secret",
+          },
+          phase,
+          accepted,
+          RUNTIME_SHA,
+          new Evidence(),
+        ),
+      ).toThrow("daily-report-http-known-route-and-runtime-required");
+    },
+  );
   it("F1 regression: resolves TripScreen rendered displayOrderNo instead of raw UUID while binding active trip and URL orderId", () => {
     const activeData: ObjectData = {
       trip: {
