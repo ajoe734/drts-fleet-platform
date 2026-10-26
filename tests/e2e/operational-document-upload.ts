@@ -1789,17 +1789,20 @@ export async function prepareOperationalFleetSession(
     activeSession = true,
   ) => {
     const identity = objectValue(data.identity);
+    const grantedScopes = identity.scopes;
     requireValue(
       (!activeSession || data.active === true) &&
         identity.realm === "partner" &&
+        identity.authMode === "jwt_bearer" &&
+        identity.tenantId === configuration.tenantId &&
         ["partner_user", "partner_api_key"].includes(
           String(identity.actorType),
         ) &&
         typeof identity.actorId === "string" &&
         identity.actorId.trim() &&
         identity.partnerId === configuration.fleetPartnerId &&
-        Array.isArray(identity.scopes) &&
-        ownFleetScopes.every((scope) => identity.scopes.includes(scope)),
+        Array.isArray(grantedScopes) &&
+        ownFleetScopes.every((scope) => grantedScopes.includes(scope)),
       "verified session",
     );
     if (issued) {
@@ -2144,9 +2147,15 @@ export async function prepareOperationalFleetSession(
     );
     const identity = verifyIdentity(session, true);
     requireValue(
-      ["realm", "actorType", "actorId", "partnerId", "partnerEntrySlug", "tenantId", "partnerProgramId"].every(
-        (field) => identity[field] === bootstrapIdentity[field],
-      ) &&
+      [
+        "realm",
+        "actorType",
+        "actorId",
+        "partnerId",
+        "partnerEntrySlug",
+        "tenantId",
+        "partnerProgramId",
+      ].every((field) => identity[field] === bootstrapIdentity[field]) &&
         hasExactOwnScopes(bootstrapIdentity.scopes) &&
         hasExactOwnScopes(identity.scopes),
       "issued session echo",

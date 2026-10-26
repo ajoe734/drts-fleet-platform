@@ -1973,23 +1973,36 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
   let revokedEntry: boolean;
   const declaredScopes = ["billing:read", "partner:read", "partner:write"];
   const issuedScopes = () =>
-    (calls.find((c) => c.path.endsWith("/credentials/issue"))?.body.scopes as string[]) ??
-    ["billing:read"];
+    (calls.find((c) => c.path.endsWith("/credentials/issue"))?.body
+      .scopes as string[]) ?? ["billing:read"];
   const credential = () => ({
     keyId: "own-key-dummy",
-    entrySlug: entry.entrySlug,
+    entrySlug:
+      fault === "receipt-foreign-entry" ? "foreign-entry" : entry.entrySlug,
     realm: "partner",
-    ownerRef: entry.entrySlug,
+    ownerRef:
+      fault === "receipt-foreign-owner" ? "foreign-owner" : entry.entrySlug,
     ownerType: "operational_acceptance",
     resourceScope: `partner_entry:${String(entry.entrySlug)}`,
-    scopes: fault === "receipt-read-only" ? ["billing:read"] :
-      fault === "receipt-extra" ? [...issuedScopes(), "billing:write"] : issuedScopes(),
-    expiresAt: fault === "receipt-expiry" ? "2000-01-01T00:00:00.000Z" :
-      calls.find((c) => c.path.endsWith("/credentials/issue"))?.body.expiresAt,
-    status: revokedKey ? "revoked" : "active",
-    revokedAt: revokedKey ? "2026-10-19T00:00:00Z" : null,
+    scopes:
+      fault === "receipt-missing"
+        ? null
+        : fault === "receipt-read-only"
+          ? ["billing:read"]
+          : fault === "receipt-extra"
+            ? [...issuedScopes(), "billing:write"]
+            : issuedScopes(),
+    expiresAt:
+      fault === "receipt-expiry"
+        ? "2000-01-01T00:00:00.000Z"
+        : calls.find((c) => c.path.endsWith("/credentials/issue"))?.body
+            .expiresAt,
+    status: revokedKey || fault === "receipt-revoked" ? "revoked" : "active",
+    revokedAt:
+      revokedKey || fault === "receipt-revoked" ? "2026-10-19T00:00:00Z" : null,
   });
   const identity = () => ({
+    authMode: "jwt_bearer",
     realm: fault === "wrong-role" ? "tenant" : "partner",
     actorType: "partner_api_key",
     actorId: fault === "wrong-key" ? "foreign-key-dummy" : "own-key-dummy",
@@ -1998,14 +2011,23 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
       fault === "wrong-fleet"
         ? "foreign-fleet-dummy"
         : configuration.fleetPartnerId,
-    partnerEntrySlug: fault === "foreign-entry" ? "foreign-entry" : entry.entrySlug,
-    tenantId: fault === "foreign-tenant" ? "foreign-tenant" : configuration.tenantId,
-    partnerProgramId: fault === "foreign-program" ? "foreign-program" : entry.programId,
+    partnerEntrySlug:
+      fault === "foreign-entry" ? "foreign-entry" : entry.entrySlug,
+    tenantId:
+      fault === "foreign-tenant" ? "foreign-tenant" : configuration.tenantId,
+    partnerProgramId:
+      fault === "foreign-program" ? "foreign-program" : entry.programId,
     sessionId: "own-session-dummy",
-    scopes: fault === "provided-read-only" ? ["billing:read", "partner:read"] :
-      fault === "session-read-only" ? ["billing:read"] :
-      fault === "session-extra" ? [...issuedScopes(), "billing:write"] :
-      calls.some((c) => c.path.endsWith("/credentials/issue")) ? issuedScopes() : declaredScopes,
+    scopes:
+      fault === "provided-read-only"
+        ? ["billing:read", "partner:read"]
+        : fault === "session-read-only"
+          ? ["billing:read"]
+          : fault === "session-extra"
+            ? [...issuedScopes(), "billing:write"]
+            : calls.some((c) => c.path.endsWith("/credentials/issue"))
+              ? issuedScopes()
+              : declaredScopes,
   });
   const reply = (data: unknown, status = 200) =>
     new Response(JSON.stringify(deepToSnakeCase({ data })), {
@@ -2259,7 +2281,15 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
             `Bearer ${process.env.DRTS_OPERATIONAL_FLEET_SESSION_TOKEN || token}`,
           );
           if (fault === "session-denied") return reply({ error: token }, 401);
-          return reply({ active: true, identity: identity() });
+          if (fault === "session-revoked")
+            return authError("SESSION_REVOKED", 401);
+          return reply({
+            active: fault !== "session-inactive",
+            identity:
+              fault === "session-echo-actor"
+                ? { ...identity(), actorId: "other-key" }
+                : identity(),
+          });
         }
         if (
           url.pathname === "/api/auth/sessions/revoke" &&
@@ -2319,11 +2349,65 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
       "session",
     ]);
     expect(businessCalls()[2]?.body.scopes).toEqual(declaredScopes);
+    const expiry = Date.parse(String(businessCalls()[2]?.body.expiresAt));
+    expect(expiry - Date.now()).toBeGreaterThan(0);
+    expect(expiry - Date.now()).toBeLessThanOrEqual(60 * 60_000);
     const guard = new BootstrapAuthGuard({} as any) as any;
     const route = "/api/fleet-partner/supply-submissions/drivers";
-    const policy = resolveRouteAuthPolicy("POST", route);
+    const policy = resolveRouteAuthPolicy("POST", route)!;
     expect(policy.requiredScopes).toEqual(["fleet:supply:write"]);
-    expect(() => guard.assertScopesAllowed({ ...identity(), authMode: "jwt_bearer", membershipId: null, roles: [] }, policy.requiredScopes, { method: "POST", originalUrl: route, headers: {} })).not.toThrow();
+    const principal = { ...identity(), membershipId: null, roles: [] };
+    const req = { method: "POST", originalUrl: route, headers: {} };
+    const result = (subject: any, required: string[], request: any) => {
+      try {
+        guard.assertScopesAllowed(subject, required, request);
+        return "allowed";
+      } catch (error) {
+        return { status: (error as any).status, code: (error as any).code };
+      }
+    };
+    expect(
+      result(
+        { ...principal, scopes: ["billing:read"] },
+        policy.requiredScopes,
+        req,
+      ),
+    ).toEqual({ status: 403, code: "AUTH_SCOPE_DENIED" });
+    expect(result(principal, policy.requiredScopes, req)).toBe("allowed");
+    for (const scopes of [
+      ["billing:read", "partner:read"],
+      ["billing:read", "partner:write"],
+    ])
+      expect(
+        result({ ...principal, scopes }, policy.requiredScopes, req),
+      ).toEqual({ status: 403, code: "AUTH_SCOPE_DENIED" });
+    expect(
+      result(principal, policy.requiredScopes, {
+        ...req,
+        headers: { "x-fleet-partner-id": "foreign-fleet" },
+      }),
+    ).toEqual({ status: 403, code: "FLEET_SCOPE_DENIED" });
+    expect(
+      result(
+        {
+          ...principal,
+          actorType: "partner_user",
+          membershipId: "finance-member",
+          roles: ["fleet_partner_finance"],
+          scopes: ["fleet:finance:read"],
+        },
+        policy.requiredScopes,
+        req,
+      ),
+    ).toEqual({ status: 403, code: "AUTH_SCOPE_DENIED" });
+    const finance = "/api/fleet-partner/statements/test/dispute";
+    expect(
+      result(
+        principal,
+        resolveRouteAuthPolicy("POST", finance)!.requiredScopes,
+        { ...req, originalUrl: finance },
+      ),
+    ).toEqual({ status: 403, code: "AUTH_SCOPE_DENIED" });
     expect(
       operationalRequestHeaders(
         "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
@@ -2615,30 +2699,90 @@ describe("normal operational Fleet issuer and exact own cleanup", () => {
   });
 
   it("rejects a real provided read-only session before any mutation without minting or revoking it", async () => {
-    vi.stubEnv("DRTS_OPERATIONAL_FLEET_SESSION_TOKEN", "provided-session-dummy");
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+      "provided-session-dummy",
+    );
     fault = "provided-read-only";
-    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(/verified session/);
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /verified session/,
+    );
     expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
     expect(revokedKey || revokedEntry || adminRevoked).toBe(false);
   });
 
-  it.each(["receipt-read-only", "receipt-extra", "receipt-expiry"])(
-    "rejects %s after normal first-key issuance and cleans owned resources", async (failure) => {
+  it.each([
+    "receipt-missing",
+    "receipt-read-only",
+    "receipt-extra",
+    "receipt-expiry",
+    "receipt-foreign-owner",
+    "receipt-revoked",
+  ])(
+    "rejects %s after normal first-key issuance and cleans owned resources",
+    async (failure) => {
       fault = failure;
-      await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(/first key receipt/);
+      await expect(
+        prepareOperationalFleetSession(configuration),
+      ).rejects.toThrow(/first key receipt/);
       expect(revokedKey && revokedEntry && adminRevoked).toBe(true);
-      expect(calls.some((c) => c.path.endsWith("bootstrap-session"))).toBe(false);
+      expect(calls.some((c) => c.path.endsWith("bootstrap-session"))).toBe(
+        false,
+      );
     },
   );
 
-  it.each(["session-read-only", "session-extra", "foreign-entry", "foreign-tenant", "foreign-program"])(
-    "rejects %s bootstrap identity without leaking secrets, cleans own resources", async (failure) => {
+  it("does not revoke a key whose issue receipt names a foreign Entry", async () => {
+    fault = "receipt-foreign-entry";
+    await expect(prepareOperationalFleetSession(configuration)).rejects.toThrow(
+      /first key receipt/,
+    );
+    expect(revokedKey).toBe(false);
+    expect(revokedEntry && adminRevoked).toBe(true);
+    expect(
+      calls.some((c) => c.path.includes("foreign-entry/credentials")),
+    ).toBe(false);
+  });
+
+  it.each([
+    "session-read-only",
+    "session-extra",
+    "foreign-entry",
+    "foreign-tenant",
+    "foreign-program",
+    "session-inactive",
+    "session-echo-actor",
+  ])(
+    "rejects %s bootstrap identity without leaking secrets, cleans own resources",
+    async (failure) => {
       fault = failure;
-      const error = await prepareOperationalFleetSession(configuration).catch((e: unknown) => e);
+      const error = await prepareOperationalFleetSession(configuration).catch(
+        (e: unknown) => e,
+      );
       expect(String(error)).toMatch(/session/);
       expect(String(error)).not.toContain(plaintextKey);
       expect(String(error)).not.toContain(token);
       expect(revokedKey && revokedEntry && adminRevoked).toBe(true);
+    },
+  );
+
+  it.each([
+    "foreign-tenant",
+    "wrong-fleet",
+    "session-inactive",
+    "session-revoked",
+  ])(
+    "rejects %s supplied session without minting or revoking other resources",
+    async (failure) => {
+      vi.stubEnv(
+        "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+        "provided-session-dummy",
+      );
+      fault = failure;
+      await expect(
+        prepareOperationalFleetSession(configuration),
+      ).rejects.toThrow(/provided session|verified session/);
+      expect(calls.map((c) => c.path)).toEqual(["/api/auth/session"]);
     },
   );
 
