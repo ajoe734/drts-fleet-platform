@@ -639,3 +639,55 @@ describe.each(["platform-admin-web", "ops-console-web"])(
     });
   },
 );
+
+// Real proxy entry points; only the external API fetch is controlled. This
+// reproduces the report-filter loss before changing the shared query stripper.
+const REPORT_OPERATIONS = [
+  ["GET", "reports/daily-dispatch-records"],
+  ["GET", "reports/referral-monthly-ratings"],
+  ["GET", "reports/referral-monthly-ratings/governance"],
+  ["POST", "reports/referral-monthly-ratings/governance/evaluate"],
+] as const;
+const REPORT_APPS = ["platform-admin-web", "ops-console-web", "roc-console-web"] as const;
+
+async function reportProxy(app: (typeof REPORT_APPS)[number]) {
+  if (app === "platform-admin-web")
+    return import("../../apps/platform-admin-web/app/control-plane-proxy/[...path]/route");
+  if (app === "ops-console-web")
+    return import("../../apps/ops-console-web/app/control-plane-proxy/[...path]/route");
+  return import("../../apps/roc-console-web/app/control-plane-proxy/[...path]/route");
+}
+
+describe.each(REPORT_APPS)("%s report business query boundary", (app) => {
+  it.each(REPORT_OPERATIONS)("forwards legal tenantId on %s %s without promoting query identity", async (method, path) => {
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    const outbound = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      expect(url.pathname).toBe(`/api/${path}`);
+      expect(url.searchParams.get("tenantId")).toBe("tenant-business-a");
+      expect(url.searchParams.get("periodMonth")).toBe("2026-10");
+      expect(url.searchParams.has("actorId")).toBe(false);
+      expect(url.searchParams.has("realm")).toBe(false);
+      const headers = new Headers(init?.headers);
+      expect(headers.has("x-actor-id")).toBe(false);
+      expect(headers.has("x-tenant-id")).toBe(false);
+      expect(headers.get("x-drts-authorization")).toMatch(/^Bearer /);
+      if (method === "POST")
+        expect(await new Response(init?.body).text()).toBe('{"tenantId":"body-wins"}');
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", outbound);
+    const route = await reportProxy(app);
+    const request = new NextRequest(
+      `https://private.example.test/control-plane-proxy/${path}?tenantId=tenant-business-a&periodMonth=2026-10&actorId=forged&realm=agency`,
+      {
+        method,
+        headers: { "x-actor-id": "forged", "x-tenant-id": "forged" },
+        ...(method === "POST" ? { body: '{"tenantId":"body-wins"}' } : {}),
+      },
+    );
+    const response = await route[method](request, { params: Promise.resolve({ path: path.split("/") }) });
+    expect(response.status).toBe(200);
+    expect(outbound).toHaveBeenCalledTimes(1);
+  });
+});
