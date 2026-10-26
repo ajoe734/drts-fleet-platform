@@ -684,13 +684,6 @@ it("keeps default anti-spoof stripping and rejects unsupported methods, routes a
     ["GET", "/api/reports/dispatchable-supply-snapshots", "tenant-a"],
     ["GET", "/api/reports/jobs", "tenant-a"],
     ["GET", "/api/regulatory/reports/jobs", "tenant-a"],
-    ["GET", "/api/reports/daily-dispatch-records", ""],
-    ["GET", "/api/reports/daily-dispatch-records", "  "],
-    [
-      "GET",
-      "/api/reports/daily-dispatch-records",
-      "tenant-a&tenantId=tenant-b",
-    ],
   ] as const) {
     const url = new URL(
       `https://api.example.test${path}?tenantId=${value}&actorId=forged&realm=agency&roles=admin&scopes=reports:write&authMode=jwt_bearer&email=business%40example.test`,
@@ -706,6 +699,119 @@ it("keeps default anti-spoof stripping and rejects unsupported methods, routes a
 });
 
 describe.each(REPORT_APPS)("%s report business query boundary", (app) => {
+  it.each(REPORT_OPERATIONS)(
+    "rejects supplied invalid tenantId instead of forwarding unfiltered on %s %s",
+    async (method, path) => {
+      vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+      const outbound = vi.fn(async () => Response.json({ ok: true }));
+      vi.stubGlobal("fetch", outbound);
+      const route = await reportProxy(app);
+      for (const selector of [
+        "tenantId=",
+        "tenantId=%20%20",
+        "tenantId=tenant-a&tenantId=tenant-b",
+      ]) {
+        const response = await route[method](
+          new NextRequest(
+            `https://private.example.test/control-plane-proxy/${path}?periodMonth=2026-10&${selector}`,
+            {
+              method,
+              ...(method === "POST"
+                ? {
+                    body: '{"periodMonth":"2026-10"}',
+                    headers: { "content-type": "application/json" },
+                  }
+                : {}),
+            },
+          ),
+          { params: Promise.resolve({ path: path.split("/") }) },
+        );
+        expect(response.status).toBe(400);
+        expect(outbound).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("keeps evaluate body precedence when an invalid query selector is superseded", async () => {
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    const evaluateGovernance = vi.fn(async () => ({ records: [] }));
+    const controller = new ReferralMonthlyRatingController({
+      evaluateGovernance,
+    } as never);
+    const body = '{"periodMonth":"2026-10","tenantId":"body-tenant"}';
+    const outbound = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        expect(url.searchParams.has("tenantId")).toBe(false);
+        const bytes = await new Response(init?.body).text();
+        expect(bytes).toBe(body);
+        await controller.evaluateGovernance(
+          JSON.parse(bytes),
+          Object.fromEntries(url.searchParams),
+        );
+        return Response.json({ ok: true });
+      },
+    );
+    vi.stubGlobal("fetch", outbound);
+    const route = await reportProxy(app);
+    const path = "reports/referral-monthly-ratings/governance/evaluate";
+    for (const selector of [
+      "tenantId=",
+      "tenantId=%20%20",
+      "tenantId=tenant-a&tenantId=tenant-b",
+    ]) {
+      const response = await route.POST(
+        new NextRequest(
+          `https://private.example.test/control-plane-proxy/${path}?${selector}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+          },
+        ),
+        { params: Promise.resolve({ path: path.split("/") }) },
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(outbound).toHaveBeenCalledTimes(3);
+    expect(evaluateGovernance).toHaveBeenCalledTimes(3);
+    for (const [query] of evaluateGovernance.mock.calls)
+      expect(query).toMatchObject({
+        periodMonth: "2026-10",
+        tenantId: "body-tenant",
+      });
+  });
+
+  it.each(REPORT_OPERATIONS)(
+    "allows an omitted optional tenantId on %s %s",
+    async (method, path) => {
+      vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+      const outbound = vi.fn(async (input: string | URL | Request) => {
+        expect(new URL(String(input)).searchParams.has("tenantId")).toBe(false);
+        return Response.json({ ok: true });
+      });
+      vi.stubGlobal("fetch", outbound);
+      const route = await reportProxy(app);
+      const response = await route[method](
+        new NextRequest(
+          `https://private.example.test/control-plane-proxy/${path}?periodMonth=2026-10`,
+          {
+            method,
+            ...(method === "POST"
+              ? {
+                  body: '{"periodMonth":"2026-10"}',
+                  headers: { "content-type": "application/json" },
+                }
+              : {}),
+          },
+        ),
+        { params: Promise.resolve({ path: path.split("/") }) },
+      );
+      expect(response.status).toBe(200);
+      expect(outbound).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it.each(REPORT_OPERATIONS)(
     "forwards legal tenantId on %s %s without promoting query identity",
     async (method, path) => {

@@ -604,12 +604,34 @@ const REPORT_TENANT_QUERY_OPERATIONS = new Set([
 export function stripControlPlaneAuthQueryParams(
   targetUrl: URL,
   method?: string,
+  body?: unknown,
 ) {
   const tenantValues = targetUrl.searchParams.getAll("tenantId");
+  const operation = `${method} ${targetUrl.pathname}`;
+  const allowedReport = REPORT_TENANT_QUERY_OPERATIONS.has(operation);
   const preserveBusinessTenant =
-    REPORT_TENANT_QUERY_OPERATIONS.has(`${method} ${targetUrl.pathname}`) &&
+    allowedReport &&
     tenantValues.length === 1 &&
     Boolean(tenantValues[0]?.trim());
+  // The evaluate controller merges body over query before interpreting tenantId.
+  // A valid camel-case body selector therefore supersedes even an invalid query
+  // selector; otherwise a supplied invalid selector must not become "omitted".
+  const bodyOverridesTenant =
+    operation ===
+      "POST /api/reports/referral-monthly-ratings/governance/evaluate" &&
+    body !== null &&
+    typeof body === "object" &&
+    "tenantId" in body &&
+    typeof body.tenantId === "string" &&
+    Boolean(body.tenantId.trim());
+  if (
+    allowedReport &&
+    tenantValues.length > 0 &&
+    !preserveBusinessTenant &&
+    !bodyOverridesTenant
+  ) {
+    throw new Error("Invalid report tenantId filter.");
+  }
   for (const key of [
     "actorType",
     "actorId",
