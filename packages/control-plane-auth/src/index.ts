@@ -591,7 +591,22 @@ export function extractAuthenticatedUserEmail(
   );
 }
 
-export function stripControlPlaneAuthQueryParams(targetUrl: URL) {
+// Only these existing report operations interpret tenantId as a business filter.
+// Without a method context (or for any other route), it remains an auth-spoof
+// parameter and is stripped along with the other identity selectors.
+const REPORT_TENANT_QUERY_OPERATIONS = new Set([
+  "GET /api/reports/daily-dispatch-records",
+  "GET /api/reports/referral-monthly-ratings",
+  "GET /api/reports/referral-monthly-ratings/governance",
+  "POST /api/reports/referral-monthly-ratings/governance/evaluate",
+]);
+
+export function stripControlPlaneAuthQueryParams(targetUrl: URL, method?: string) {
+  const tenantValues = targetUrl.searchParams.getAll("tenantId");
+  const preserveBusinessTenant =
+    REPORT_TENANT_QUERY_OPERATIONS.has(`${method} ${targetUrl.pathname}`) &&
+    tenantValues.length === 1 &&
+    Boolean(tenantValues[0]?.trim());
   for (const key of [
     "actorType",
     "actorId",
@@ -603,7 +618,9 @@ export function stripControlPlaneAuthQueryParams(targetUrl: URL) {
     "authMode",
     "requestId",
   ]) {
-    targetUrl.searchParams.delete(key);
+    if (key !== "tenantId" || !preserveBusinessTenant) {
+      targetUrl.searchParams.delete(key);
+    }
   }
 }
 

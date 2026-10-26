@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import jwt from "jsonwebtoken";
 import {
   issueControlPlaneRequestAuth,
+  stripControlPlaneAuthQueryParams,
+  signTestIapJwtAssertion,
   DEFAULT_CONTROL_PLANE_JWT_AUDIENCE,
   DEFAULT_CONTROL_PLANE_JWT_ISSUER,
 } from "@drts/control-plane-auth";
@@ -658,6 +660,30 @@ async function reportProxy(app: (typeof REPORT_APPS)[number]) {
   return import("../../apps/roc-console-web/app/control-plane-proxy/[...path]/route");
 }
 
+it("keeps default anti-spoof stripping and rejects unsupported methods, routes and ambiguous business filters", () => {
+  for (const [method, path, value] of [
+    [undefined, "/api/reports/daily-dispatch-records", "tenant-a"],
+    ["POST", "/api/reports/daily-dispatch-records", "tenant-a"],
+    ["GET", "/api/reports/referral-monthly-ratings/governance/evaluate", "tenant-a"],
+    ["POST", "/api/reports/referral-monthly-ratings/governance/outcomes", "tenant-a"],
+    ["GET", "/api/reports/monthly-operations-summaries", "tenant-a"],
+    ["GET", "/api/reports/operations-summary/preview", "tenant-a"],
+    ["GET", "/api/reports/dispatchable-supply-snapshots", "tenant-a"],
+    ["GET", "/api/reports/jobs", "tenant-a"],
+    ["GET", "/api/regulatory/reports/jobs", "tenant-a"],
+    ["GET", "/api/reports/daily-dispatch-records", ""],
+    ["GET", "/api/reports/daily-dispatch-records", "  "],
+    ["GET", "/api/reports/daily-dispatch-records", "tenant-a&tenantId=tenant-b"],
+  ] as const) {
+    const url = new URL(`https://api.example.test${path}?tenantId=${value}&actorId=forged&realm=agency&roles=admin&scopes=reports:write&authMode=jwt_bearer&email=business%40example.test`);
+    stripControlPlaneAuthQueryParams(url, method);
+    expect(url.searchParams.has("tenantId"), `${method} ${path} ${value}`).toBe(false);
+    for (const key of ["actorId", "realm", "roles", "scopes", "authMode"])
+      expect(url.searchParams.has(key)).toBe(false);
+    expect(url.searchParams.get("email")).toBe("business@example.test");
+  }
+});
+
 describe.each(REPORT_APPS)("%s report business query boundary", (app) => {
   it.each(REPORT_OPERATIONS)("forwards legal tenantId on %s %s without promoting query identity", async (method, path) => {
     vi.stubEnv("DRTS_API_URL", "https://api.example.test");
@@ -682,12 +708,38 @@ describe.each(REPORT_APPS)("%s report business query boundary", (app) => {
       `https://private.example.test/control-plane-proxy/${path}?tenantId=tenant-business-a&periodMonth=2026-10&actorId=forged&realm=agency`,
       {
         method,
-        headers: { "x-actor-id": "forged", "x-tenant-id": "forged" },
+        headers: { "x-actor-id": "forged", "x-roles": "superadmin" },
         ...(method === "POST" ? { body: '{"tenantId":"body-wins"}' } : {}),
       },
     );
     const response = await route[method](request, { params: Promise.resolve({ path: path.split("/") }) });
     expect(response.status).toBe(200);
     expect(outbound).toHaveBeenCalledTimes(1);
+  });
+
+  it("strips tenantId on unsupported BFF paths/methods without dropping other filters", async () => {
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    const outbound = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.has("tenantId")).toBe(false);
+      expect(url.searchParams.get("periodMonth")).toBe("2026-10");
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", outbound);
+    const route = await reportProxy(app);
+    for (const [method, path] of [
+      ["POST", "reports/daily-dispatch-records"],
+      ["GET", "reports/jobs"],
+      ["GET", "reports/monthly-operations-summaries"],
+      ["GET", "reports/dispatchable-supply-snapshots"],
+      ["GET", "regulatory/reports/jobs"],
+    ] as const) {
+      const response = await route[method](
+        new NextRequest(`https://private.example.test/control-plane-proxy/${path}?tenantId=tenant-business-a&periodMonth=2026-10`, { method }),
+        { params: Promise.resolve({ path: path.split("/") }) },
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(outbound).toHaveBeenCalledTimes(5);
   });
 });

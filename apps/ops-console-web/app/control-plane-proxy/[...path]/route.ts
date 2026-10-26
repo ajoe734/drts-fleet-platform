@@ -49,7 +49,7 @@ function buildTargetUrl(request: NextRequest, path: string[]) {
       : ["api", ...path].join("/");
   const targetUrl = new URL(targetPath, `${resolveTargetOrigin()}/`);
   targetUrl.search = request.nextUrl.search;
-  stripControlPlaneAuthQueryParams(targetUrl);
+  stripControlPlaneAuthQueryParams(targetUrl, request.method);
   return targetUrl;
 }
 
