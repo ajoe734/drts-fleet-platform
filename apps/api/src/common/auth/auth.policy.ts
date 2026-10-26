@@ -588,11 +588,17 @@ export function resolveRouteAuthPolicy(
   if (routePath.startsWith("fleet-partner/")) {
     const routeSuffix = routePath.slice("fleet-partner/".length) || "root";
     const finance = routeSuffix.startsWith("statements") || routeSuffix.startsWith("revenue");
+    // Academy has its own @RequireScopes(reports:read) and independent
+    // tenant/ops selector. Preserve those existing callers while Fleet human
+    // training access is evaluated through that endpoint's own guard.
+    const training = routeSuffix.startsWith("training/");
     return {
       routeKey: `fleet-partner:${routeSuffix}:${upperMethod}`,
-      requiredScopes: finance
-        ? methodScope("billing:read", "billing:write", upperMethod)
-        : methodScope("fleet:read", "fleet:supply:write", upperMethod),
+      requiredScopes: training
+        ? ["billing:read"]
+        : finance
+          ? methodScope("billing:read", "billing:write", upperMethod)
+          : methodScope("fleet:read", "fleet:supply:write", upperMethod),
       allowedRealms: baseAllowedRealms("partner"),
       description: "Fleet partner self-service access",
     };

@@ -1093,6 +1093,29 @@ export class BootstrapAuthGuard implements CanActivate {
       return;
     }
 
+    // A preexisting explicitly scoped signed partner credential can still use
+    // its original own-Fleet operations after human roles move to fleet:*.
+    // This is NOT a role/Referral link grant: ordinary linked OIDC subjects
+    // have partner:read/write but no billing:read, managed finance has no
+    // partner:write, Host has neither. Do not relax other decorator scopes,
+    // training's separate reports:read rule, or canonical selector checks.
+    const route = normalizeRoutePath(request.originalUrl ?? request.url ?? "")
+      .replace(/^api\/+/, "");
+    const fleetOperation = route.startsWith("fleet-partner/") &&
+      !route.startsWith("fleet-partner/training/");
+    const scopedCredential = identity.authMode === "jwt_bearer" &&
+      identity.realm === "partner" &&
+      (identity.actorType === "partner_api_key" || identity.actorType === "partner_user") &&
+      !identity.membershipId && Boolean(identity.partnerId?.trim()) &&
+      identity.scopes.includes("billing:read") &&
+      identity.scopes.includes("partner:read");
+    if (fleetOperation && scopedCredential && requiredScopes.every((scope) =>
+      identity.scopes.includes(scope) ||
+      (scope === "fleet:read" && identity.scopes.includes("partner:read")) ||
+      (scope === "fleet:supply:write" && identity.scopes.includes("partner:write")))) {
+      return;
+    }
+
     throw new ApiRequestError(
       403,
       "AUTH_SCOPE_DENIED",

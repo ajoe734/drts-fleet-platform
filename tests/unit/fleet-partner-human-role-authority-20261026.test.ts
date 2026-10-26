@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
@@ -7,9 +8,12 @@ import { PartnerUserIdentityLinkRepository } from "../../apps/api/src/modules/te
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { resolveRouteAuthPolicy } from "../../apps/api/src/common/auth/auth.policy";
+import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
+import { FleetPartnerController } from "../../apps/api/src/modules/fleet-partner/fleet-partner.controller";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
 import type { CanonicalIdentityPrincipalRecord } from "../../packages/contracts/src";
 
+const { Reflector } = createRequire(new URL("../../apps/api/package.json", import.meta.url))("@nestjs/core");
 const ENTRY = "yuhe-residence";
 const CODE = "partner_fleet_human_subject";
 const SUB = `sub_oidc_${createHash("sha256").update(CODE).digest("hex").slice(0, 12)}`;
@@ -67,9 +71,9 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
       partnerId: "fleet-test-001", partnerEntrySlug: ENTRY,
       roles: ["fleet_partner_ops"], scopes: ["fleet:read", "fleet:supply:write"] });
     expect(await jwt.verifyAccessToken(ops.accessToken)).not.toBeNull();
-    expect(resolveRouteAuthPolicy("GET", "/api/fleet-partner/drivers").requiredScopes).toEqual(["fleet:read"]);
-    expect(resolveRouteAuthPolicy("POST", "/api/fleet-partner/supply-submissions/drivers").requiredScopes).toEqual(["fleet:supply:write"]);
-    expect(resolveRouteAuthPolicy("GET", "/api/fleet-partner/statements").requiredScopes).toEqual(["billing:read"]);
+    expect(resolveRouteAuthPolicy("GET", "/api/fleet-partner/drivers")?.requiredScopes).toEqual(["fleet:read"]);
+    expect(resolveRouteAuthPolicy("POST", "/api/fleet-partner/supply-submissions/drivers")?.requiredScopes).toEqual(["fleet:supply:write"]);
+    expect(resolveRouteAuthPolicy("GET", "/api/fleet-partner/statements")?.requiredScopes).toEqual(["billing:read"]);
     expect(ops.identity.scopes).not.toContain("billing:read");
     await repository.ensureRoleBindingRecord({ ...binding, roleCode: "fleet_partner_admin",
       updatedAt: new Date(Date.now() + 500).toISOString() });
@@ -85,6 +89,12 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     expect(finance.identity.roles).toEqual(["fleet_partner_finance"]);
     expect(finance.identity.scopes).toContain("billing:read");
     expect(finance.identity.scopes).not.toContain("fleet:supply:write");
+    const guard = new BootstrapAuthGuard(new Reflector(), jwt);
+    const request = { method: "POST", url: "/api/fleet-partner/supply-submissions/drivers",
+      headers: { authorization: `Bearer ${finance.accessToken}` } };
+    await expect(guard.canActivate({ switchToHttp: () => ({ getRequest: () => request }),
+      getHandler: () => FleetPartnerController.prototype.createDriverSupplySubmission,
+      getClass: () => FleetPartnerController } as never)).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
     // Another entry for the very same OIDC subject receives a different
     // canonical link principal; entry-one membership cannot cross it.
     const entries = (tenant as unknown as { partnerEntries: Array<{entrySlug: string; partnerType: string; partnerId: string}> }).partnerEntries;
@@ -96,6 +106,34 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     await repository.ensureMembershipRecord({ ...membership, status: "disabled",
       updatedAt: new Date(Date.now() + 2000).toISOString() });
     expect(await jwt.verifyAccessToken(finance.accessToken)).toBeNull();
+  });
+});
+
+describe("existing scoped credential guard compatibility without Referral/Host promotion", () => {
+  it("honors signed read/write scopes independently and rejects link-only or Host identity", async () => {
+    const jwt = new JwtAuthService();
+    const guard = new BootstrapAuthGuard(new Reflector(), jwt);
+    const issue = async (actorType: "partner_user" | "partner_api_key", scopes: string[]) =>
+      (await jwt.issueSessionToken({ authMode: "jwt_bearer", actorType,
+        actorId: `signed-${actorType}`, realm: "partner", partnerId: "fleet-test-001",
+        tenantId: null, roleFamilies: ["partner"], roles: [actorType], scopes })).token;
+    const guarded = async (token: string, method: "GET" | "POST") => {
+      const request = { method, url: method === "GET" ? "/api/fleet-partner/drivers" : "/api/fleet-partner/supply-submissions/drivers",
+        headers: { authorization: `Bearer ${token}` } };
+      return guard.canActivate({ switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => method === "GET" ? FleetPartnerController.prototype.listPortalDrivers
+          : FleetPartnerController.prototype.createDriverSupplySubmission,
+        getClass: () => FleetPartnerController } as never);
+    };
+    const scoped = await issue("partner_api_key", ["billing:read", "partner:read"]);
+    expect(await guarded(scoped, "GET")).toBe(true);
+    await expect(guarded(scoped, "POST")).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+    const writable = await issue("partner_user", ["billing:read", "partner:read", "partner:write"]);
+    expect(await guarded(writable, "POST")).toBe(true);
+    const referral = await issue("partner_user", ["partner:read", "partner:write"]);
+    await expect(guarded(referral, "GET")).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+    const host = await issue("partner_user", ["owned:read", "reports:read"]);
+    await expect(guarded(host, "GET")).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
   });
 });
 

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { ApiClientError } from "@drts/api-client";
 import { statementDisplayStatus } from "../../../lib/fleet-portal-statement-actions";
 import {
   loadStatementDetail,
@@ -119,8 +118,9 @@ export async function GET(request: NextRequest) {
     },
   });
   } catch (err) {
-    const status = err instanceof ApiClientError && [401, 403].includes(err.statusCode)
-      ? err.statusCode : 503;
+    const code = err && typeof err === "object" && "statusCode" in err
+      ? (err as { statusCode: unknown }).statusCode : null;
+    const status = code === 401 || code === 403 ? code : 503;
     return NextResponse.json({ ok: false, error: { code: "STATEMENT_EXPORT_UNAVAILABLE" } },
       { status, headers: { "Cache-Control": "no-store" } });
   }

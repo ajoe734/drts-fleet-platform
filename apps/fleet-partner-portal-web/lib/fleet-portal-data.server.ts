@@ -24,7 +24,6 @@
 // noted inline; they are follow-up work for the backend, not fabricated here.
 
 import "server-only";
-import { ApiClientError } from "@drts/api-client";
 
 import type {
   DriverWorkState,
@@ -737,7 +736,9 @@ function mapStatement(record: FleetPartnerStatementRecord): FleetStatement {
 }
 
 function isStatementAuthorityError(err: unknown) {
-  return err instanceof ApiClientError && (err.statusCode === 401 || err.statusCode === 403);
+  const status = err && typeof err === "object" && "statusCode" in err
+    ? (err as { statusCode: unknown }).statusCode : null;
+  return status === 401 || status === 403;
 }
 
 export async function loadStatements(): Promise<StatementsView> {
