@@ -57,6 +57,8 @@ const PUBLIC_PREPARE_CODES = new Set([
   "INVALID_COORDINATE",
   "INTERNAL_SERVER_ERROR",
 ]);
+// Accept only UUID-shaped public request traces; arbitrary IDs are not output.
+const PUBLIC_PREPARE_TRACE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
 // Diagnostic only: the caller still asserts response.ok() and never retries.
 async function opsPrepareDiagnostic(response: {
@@ -114,9 +116,9 @@ async function opsPrepareDiagnostic(response: {
             }
           }
           if (fields) {
-            const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
             const candidateTrace = [fields.trace_id, fields.traceId].find(
-              (value) => typeof value === "string" && uuid.test(value),
+              (value) =>
+                typeof value === "string" && PUBLIC_PREPARE_TRACE.test(value),
             );
             if (typeof candidateTrace === "string") trace = candidateTrace;
           }
