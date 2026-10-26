@@ -381,6 +381,7 @@ describe("manager producer through production repository SQL (transactional fake
       bindings: Map<string, Record<string, unknown>>;
     } | null = null;
     let failWrite = false;
+    let principalAvailable = true;
     const query = vi.fn(async (sql: string, params: unknown[] = []) => {
       if (sql === "BEGIN") {
         snapshot = { members: new Map(members), bindings: new Map(bindings) };
@@ -401,7 +402,10 @@ describe("manager producer through production repository SQL (transactional fake
       if (sql.startsWith("SAVEPOINT")) return { rows: [] };
       if (sql.includes("SELECT record FROM iam.identity_principals"))
         return {
-          rows: params[0] === principalId ? [{ record: principal }] : [],
+          rows:
+            principalAvailable && params[0] === principalId
+              ? [{ record: principal }]
+              : [],
         };
       if (sql.includes("SELECT record FROM iam.identity_memberships"))
         return {
@@ -515,6 +519,15 @@ describe("manager producer through production repository SQL (transactional fake
     await expect(
       service.manageFleetHumanRole("fleet-other", command, manager),
     ).rejects.toMatchObject({ code: "FLEET_ENTRY_NOT_FOUND" });
+    // An active Referral link alone cannot invent a Fleet staff principal.
+    principalAvailable = false;
+    await expect(
+      service.manageFleetHumanRole(fleet.fleetPartnerId, command, manager),
+    ).rejects.toThrow(
+      "Target must have an existing active linked partner-human principal.",
+    );
+    expect(members.size).toBe(0);
+    principalAvailable = true;
     const created = await service.manageFleetHumanRole(
       fleet.fleetPartnerId,
       command,
