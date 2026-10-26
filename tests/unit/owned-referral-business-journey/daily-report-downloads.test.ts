@@ -861,7 +861,8 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
   it.each([
     {
-      caseName: "actual Ops reports page returns 500 without mounting the jobs list",
+      caseName:
+        "actual Ops reports page returns 500 without mounting the jobs list",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       expectedPreviewControlled: false,
@@ -869,7 +870,8 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       previewFailure: "page",
     },
     {
-      caseName: "actual Ops job detail returns 404 without requesting the artifact",
+      caseName:
+        "actual Ops job detail returns 404 without requesting the artifact",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       expectedPreviewControlled: true,
@@ -1038,7 +1040,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               previewFailure === "page" ? 500 : 200,
               { "content-type": "text/html" },
               previewFailure === "page"
-                ? Buffer.from('<html>private-page-error</html>')
+                ? Buffer.from("<html>private-page-error</html>")
                 : Buffer.from("<html></html>"),
             );
             // A failed document never mounts the real Ops page and therefore
@@ -1281,11 +1283,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                             Buffer.from(
                               JSON.stringify(
                                 previewFailure === "detail"
-                                  ? { error: {
-                                      code: "REPORT_NOT_FOUND",
-                                      trace_id: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
-                                      message: "private-detail-error",
-                                    } }
+                                  ? {
+                                      error: {
+                                        code: "REPORT_JOB_NOT_FOUND",
+                                        trace_id:
+                                          "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                                        message: "private-detail-error",
+                                      },
+                                    }
                                   : { ok: true, data: foundJob.detail },
                               ),
                             ),
@@ -1359,26 +1364,50 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           await expect(run).rejects.toMatchObject({
             stage: initialPage
               ? "daily-report-ops-reports-initial-load-200"
-              : "daily-report-job-detail-csv-status-200",
+              : "daily-report-job-detail-csv-http-status-200-required",
             status: initialPage ? 500 : 404,
-            code: initialPage ? undefined : "REPORT_NOT_FOUND",
+            code: initialPage ? undefined : "REPORT_JOB_NOT_FOUND",
             context: {
               phase: initialPage ? "initial-reports-page" : "job-detail-csv",
               method: "GET",
               route: initialPage ? "reports-page" : "job-detail",
               runtimeSha: RUNTIME_SHA,
-              ...(initialPage ? {} : {
-                requestId: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
-              }),
+              ...(initialPage
+                ? {}
+                : {
+                    requestId: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                  }),
             },
           });
+          expect(evidence.events).toContainEqual(
+            initialPage
+              ? {
+                  stage:
+                    "daily-report-http-initial-reports-page-get-reports-page",
+                  status: 500,
+                  result: "failed",
+                }
+              : {
+                  stage: "daily-report-http-job-detail-csv-get-job-detail",
+                  status: 404,
+                  code: "REPORT_JOB_NOT_FOUND",
+                  objectKey: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                  result: "failed",
+                },
+          );
           expect(initialJobsRequests).toBe(initialPage ? 0 : 2);
           expect(createdJobs).toHaveLength(initialPage ? 0 : 3);
           expect(artifactRequests).toBe(0);
           expect(unrouteCalled).toBe(true);
-          expect(JSON.stringify(evidence.events)).not.toContain("private-detail-error");
-          expect(JSON.stringify(evidence.events)).not.toContain("private-page-error");
-          await expect(stat(path.join(tempDir, "daily-reports"))).rejects.toThrow();
+          expect(JSON.stringify(evidence.events)).not.toContain(
+            "private-detail-error",
+          );
+          expect(JSON.stringify(evidence.events)).not.toContain(
+            "private-page-error",
+          );
+          await expect(
+            stat(path.join(tempDir, "daily-reports")),
+          ).rejects.toThrow();
           return;
         }
         if (previewFailure === true) {

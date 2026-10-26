@@ -1459,7 +1459,8 @@ export async function runOwnedDailyReportDownloads(
     );
     await page.goto(`${opsOrigin}/reports`);
     const openedPage = await initialPageExchange;
-    const openedJobs = await initialJobsExchange;
+    // The page must load before its client can issue the jobs request. Report
+    // the known page failure instead of waiting for a request that cannot run.
     assertDailyReportHttpStatus(
       openedPage,
       "initial-reports-page",
@@ -1467,6 +1468,7 @@ export async function runOwnedDailyReportDownloads(
       runtimeSha,
       evidence,
     );
+    const openedJobs = await initialJobsExchange;
     assertDailyReportHttpStatus(
       openedJobs,
       "initial-jobs",
@@ -1831,6 +1833,15 @@ export async function runOwnedDailyReportDownloads(
 
       await downloadBtn.click();
       const detailExchange = await detailPromise;
+      // ApiClient only opens the artifact after a successful detail GET. Keep
+      // the captured non-200 response visible if no download request follows.
+      assertDailyReportHttpStatus(
+        detailExchange,
+        `job-detail-${format}`,
+        [200],
+        runtimeSha,
+        evidence,
+      );
       const artifactExchange = await artifactPromise;
 
       for (const extraPage of context.pages()) {
@@ -1839,13 +1850,6 @@ export async function runOwnedDailyReportDownloads(
         }
       }
 
-      assertDailyReportHttpStatus(
-        detailExchange,
-        `job-detail-${format}`,
-        [200],
-        runtimeSha,
-        evidence,
-      );
       assertDailyReportHttpStatus(
         artifactExchange,
         `artifact-download-${format}`,
