@@ -871,6 +871,15 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
     },
     {
       caseName:
+        "second Ops reports navigation returns 500 after three accepted jobs without mounting reload jobs",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: false,
+      previewFailure: "reload-page",
+    },
+    {
+      caseName:
         "actual Ops job detail returns 404 without requesting the artifact",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -944,6 +953,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         let unrouteCalled = false;
         let artifactRequests = 0;
         let initialJobsRequests = 0;
+        let pageVisits = 0;
         let rebuiltInBackend = false;
         let selectedFormat: DailyReportFormat = "csv";
         let dateFromVal = "";
@@ -1033,19 +1043,23 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
         const fakePage: Partial<Page> = {
           goto: async (url: string) => {
+            pageVisits += 1;
+            const failedPage =
+              previewFailure === "page" ||
+              (previewFailure === "reload-page" && pageVisits === 2);
             await dispatchRoute(
               "GET",
               url,
               null,
-              previewFailure === "page" ? 500 : 200,
+              failedPage ? 500 : 200,
               { "content-type": "text/html" },
-              previewFailure === "page"
+              failedPage
                 ? Buffer.from("<html>private-page-error</html>")
                 : Buffer.from("<html></html>"),
             );
             // A failed document never mounts the real Ops page and therefore
             // cannot issue the dependent client-side jobs list request.
-            if (previewFailure === "page") return null;
+            if (failedPage) return null;
             initialJobsRequests += 1;
             const jobsPayload = {
               ok: true,
@@ -1358,21 +1372,32 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           recoveryOnly: false,
           evidence,
         });
-        if (previewFailure === "page" || previewFailure === "detail") {
+        if (
+          previewFailure === "page" ||
+          previewFailure === "reload-page" ||
+          previewFailure === "detail"
+        ) {
           const initialPage = previewFailure === "page";
+          const reloadPage = previewFailure === "reload-page";
           await expect(run).rejects.toBeInstanceOf(DailyReportHttpFailure);
           await expect(run).rejects.toMatchObject({
             stage: initialPage
               ? "daily-report-ops-reports-initial-load-200"
-              : "daily-report-job-detail-csv-http-status-200-required",
-            status: initialPage ? 500 : 404,
-            code: initialPage ? undefined : "REPORT_JOB_NOT_FOUND",
+              : reloadPage
+                ? "daily-report-reload-reports-page-status-200"
+                : "daily-report-job-detail-csv-http-status-200-required",
+            status: initialPage || reloadPage ? 500 : 404,
+            code: initialPage || reloadPage ? undefined : "REPORT_JOB_NOT_FOUND",
             context: {
-              phase: initialPage ? "initial-reports-page" : "job-detail-csv",
+              phase: initialPage
+                ? "initial-reports-page"
+                : reloadPage
+                  ? "reload-reports-page"
+                  : "job-detail-csv",
               method: "GET",
-              route: initialPage ? "reports-page" : "job-detail",
+              route: initialPage || reloadPage ? "reports-page" : "job-detail",
               runtimeSha: RUNTIME_SHA,
-              ...(initialPage
+              ...(initialPage || reloadPage
                 ? {}
                 : {
                     requestId: "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
@@ -1380,10 +1405,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             },
           });
           expect(evidence.events).toContainEqual(
-            initialPage
+            initialPage || reloadPage
               ? {
-                  stage:
-                    "daily-report-http-initial-reports-page-get-reports-page",
+                  stage: `daily-report-http-${initialPage ? "initial" : "reload"}-reports-page-get-reports-page`,
                   status: 500,
                   result: "failed",
                 }
@@ -1395,8 +1419,11 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   result: "failed",
                 },
           );
-          expect(initialJobsRequests).toBe(initialPage ? 0 : 2);
-          expect(createdJobs).toHaveLength(initialPage ? 0 : 3);
+          expect(initialJobsRequests).toBe(initialPage ? 0 : reloadPage ? 1 : 2);
+          expect(pageVisits).toBe(initialPage ? 1 : 2);
+          expect(createdJobs.map((job) => job.jobId)).toEqual(
+            initialPage ? [] : DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
+          );
           expect(artifactRequests).toBe(0);
           expect(unrouteCalled).toBe(true);
           expect(JSON.stringify(evidence.events)).not.toContain(
