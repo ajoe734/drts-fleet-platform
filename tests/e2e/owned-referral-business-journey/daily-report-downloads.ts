@@ -1600,9 +1600,10 @@ export async function runOwnedDailyReportDownloads(
         detailExchange.runtimeSha,
         controlledOrderIdSet,
       );
-      const retainRawArtifact =
-        validatedPreview.syntheticProvenanceVerified &&
-        jobRowsCheck.syntheticProvenanceVerified;
+      // Preview GET and queued job execution are independent snapshots. Retain
+      // only when the actual job rows (the downloaded bytes' source) are all
+      // controlled; an unrelated preview sibling cannot veto safe job bytes.
+      const retainRawArtifact = jobRowsCheck.syntheticProvenanceVerified;
       const artifactPath = retainRawArtifact
         ? `${reportDirectory}/daily-dispatch-${jobId}.${format}`
         : null;

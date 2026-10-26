@@ -666,28 +666,56 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
   it.each([
     {
       caseName: "all sibling rows belong to controlled owned orders",
-      siblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
       expectedRetained: true,
     },
     {
       caseName:
         "unverified sibling row exists on the same filter scope (skips raw file persistence)",
-      siblingOrderId: "ord_unverified_sibling_999",
+      previewSiblingOrderId: "ord_unverified_sibling_999",
+      jobSiblingOrderId: "ord_unverified_sibling_999",
+      expectedPreviewControlled: false,
+      expectedRetained: false,
+    },
+    {
+      caseName:
+        "preview has unverified sibling but independently executed job has only controlled rows",
+      previewSiblingOrderId: "ord_unverified_sibling_999",
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: false,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "preview is controlled but independently executed job has unverified sibling",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: "ord_unverified_sibling_999",
+      expectedPreviewControlled: true,
       expectedRetained: false,
     },
   ])(
     "drives preview rebuild, 3-format job creation, /reports reload, and 3 artifact downloads in a socket-free harness ($caseName)",
-    async ({ siblingOrderId, expectedRetained }) => {
+    async ({
+      previewSiblingOrderId,
+      jobSiblingOrderId,
+      expectedPreviewControlled,
+      expectedRetained,
+    }) => {
       const tempDir = await mkdtemp(
         path.join(tmpdir(), "owned-daily-reports-test-"),
       );
       try {
         const ownRow = buildDailyDispatchRow();
-        const siblingRow = buildDailyDispatchRow({
-          recordId: `daily:${siblingOrderId}`,
-          orderId: siblingOrderId,
-          orderNo: "DRT-20261026-0000",
-        });
+        const siblingRow = (orderId: string) =>
+          buildDailyDispatchRow({
+            recordId: `daily:${orderId}`,
+            orderId,
+            orderNo: "DRT-20261026-0000",
+          });
+        const previewSiblingRow = siblingRow(previewSiblingOrderId);
+        const jobSiblingRow = siblingRow(jobSiblingOrderId);
 
         let routeHandler: ((route: Route) => Promise<void>) | undefined;
         let rebuiltInBackend = false;
@@ -822,8 +850,8 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     serviceProductCode: serviceProductVal,
                   });
                   const rows = rebuiltInBackend
-                    ? [siblingRow, ownRow]
-                    : [siblingRow];
+                    ? [previewSiblingRow, ownRow]
+                    : [previewSiblingRow];
                   await dispatchRoute(
                     "GET",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records?${query.toString()}`,
@@ -876,7 +904,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     Buffer.from(
                       JSON.stringify({
                         ok: true,
-                        data: { items: [siblingRow, ownRow] },
+                        data: { items: [previewSiblingRow, ownRow] },
                       }),
                     ),
                   );
@@ -889,7 +917,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   const format = selectedFormat;
                   const jobId = `job_harness_${format}`;
                   lastAcceptedJobId = jobId;
-                  const rows = [siblingRow, ownRow];
+                  const rows = [jobSiblingRow, ownRow];
                   const detail = buildJobDetailFixture(format, jobId, rows);
                   const bytes = await renderFormatBytes(format, jobId, rows);
                   createdJobs.push({ format, jobId, detail, bytes });
@@ -1081,7 +1109,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         expect(result.preview.rebuilt).toBe(true);
         expect(result.preview.rowCount).toBe(2);
         expect(result.preview.syntheticProvenanceVerified).toBe(
-          expectedRetained,
+          expectedPreviewControlled,
         );
         expect(result.preview.finalPlateNo).toBe(PLATE_NO);
 
