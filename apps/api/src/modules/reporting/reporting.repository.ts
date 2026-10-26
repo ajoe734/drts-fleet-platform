@@ -1,5 +1,6 @@
 import { Injectable, Logger, Optional } from "@nestjs/common";
 
+import { COMPLAINT_STATISTICS_TIME_ZONE } from "@drts/contracts";
 import type {
   ReferralMonthlyRatingQuery,
   ComplaintCaseRecord,
@@ -15,6 +16,29 @@ import type {
 
 import { DatabaseService } from "../../common/db";
 import type { ComplaintStatisticsSource } from "./operations-metrics";
+
+const TAIPEI_DATE_FORMATTER = new Intl.DateTimeFormat("en", {
+  timeZone: COMPLAINT_STATISTICS_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+function toTaipeiDate(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) {
+    const trimmed = value.trim();
+    return /^\d{4}-\d{2}-\d{2}/.test(trimmed) ? trimmed.slice(0, 10) : null;
+  }
+  const parts = TAIPEI_DATE_FORMATTER.formatToParts(new Date(time));
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  return year && month && day ? `${year}-${month}-${day}` : null;
+}
 
 type DispatchDailyRecordRow = {
   service_date: string;
@@ -155,95 +179,274 @@ export class ReportingRepository {
       return;
     }
 
-    await Promise.all(
-      records.map((record) =>
-        this.databaseService!.query(
-          `
-            INSERT INTO reporting.dispatch_daily_records (
-              service_date,
-              order_id,
-              order_no,
-              order_source,
-              tenant_id,
-              partner_id,
-              service_product_code,
-              requested_at,
-              reservation_time,
-              pickup_address_snapshot,
-              dropoff_address_snapshot,
-              first_dispatch_at,
-              first_assigned_at,
-              final_driver_id,
-              final_vehicle_id,
-              final_plate_no,
-              eta_seconds_at_assignment,
-              arrived_pickup_at,
-              trip_started_at,
-              trip_completed_at,
-              final_status,
-              redispatch_count,
-              cancellation_reason,
-              complaint_count,
-              generated_at
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-              $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-              $21, $22, $23, $24, $25
-            )
-            ON CONFLICT (service_date, order_id) DO UPDATE SET
-              order_no = EXCLUDED.order_no,
-              order_source = EXCLUDED.order_source,
-              tenant_id = EXCLUDED.tenant_id,
-              partner_id = EXCLUDED.partner_id,
-              service_product_code = EXCLUDED.service_product_code,
-              requested_at = EXCLUDED.requested_at,
-              reservation_time = EXCLUDED.reservation_time,
-              pickup_address_snapshot = EXCLUDED.pickup_address_snapshot,
-              dropoff_address_snapshot = EXCLUDED.dropoff_address_snapshot,
-              first_dispatch_at = EXCLUDED.first_dispatch_at,
-              first_assigned_at = EXCLUDED.first_assigned_at,
-              final_driver_id = EXCLUDED.final_driver_id,
-              final_vehicle_id = EXCLUDED.final_vehicle_id,
-              final_plate_no = EXCLUDED.final_plate_no,
-              eta_seconds_at_assignment = EXCLUDED.eta_seconds_at_assignment,
-              arrived_pickup_at = EXCLUDED.arrived_pickup_at,
-              trip_started_at = EXCLUDED.trip_started_at,
-              trip_completed_at = EXCLUDED.trip_completed_at,
-              final_status = EXCLUDED.final_status,
-              redispatch_count = EXCLUDED.redispatch_count,
-              cancellation_reason = EXCLUDED.cancellation_reason,
-              complaint_count = EXCLUDED.complaint_count,
-              generated_at = EXCLUDED.generated_at
-          `,
-          [
-            record.serviceDate,
-            record.orderId,
-            record.orderNo,
-            record.orderSource,
-            record.tenantId,
-            record.partnerId,
-            record.serviceProductCode,
-            record.requestedAt,
-            record.reservationTime,
-            record.pickupAddressSnapshot,
-            record.dropoffAddressSnapshot,
-            record.firstDispatchAt,
-            record.firstAssignedAt,
-            record.finalDriverId,
-            record.finalVehicleId,
-            record.finalPlateNo,
-            record.etaSecondsAtAssignment,
-            record.arrivedPickupAt,
-            record.tripStartedAt,
-            record.tripCompletedAt,
-            record.finalStatus,
-            record.redispatchCount,
-            record.cancellationReason,
-            record.complaintCount,
-            record.generatedAt,
-          ],
-        ),
-      ),
+    const deduplicatedByOrderId = new Map<string, DispatchDailyRecord>();
+    for (const record of records) {
+      const targetServiceDate =
+        toTaipeiDate(record.reservationTime ?? record.requestedAt) ??
+        this.normalizeServiceDate(record.serviceDate);
+      const normalizedRecord: DispatchDailyRecord =
+        record.serviceDate !== targetServiceDate
+          ? { ...record, serviceDate: targetServiceDate }
+          : record;
+      const prior = deduplicatedByOrderId.get(record.orderId);
+      if (!prior || prior.generatedAt <= normalizedRecord.generatedAt) {
+        deduplicatedByOrderId.set(record.orderId, normalizedRecord);
+      }
+    }
+
+    for (const record of deduplicatedByOrderId.values()) {
+      await this.upsertSingleDailyDispatchRecord(record);
+    }
+  }
+
+  private async upsertSingleDailyDispatchRecord(record: DispatchDailyRecord) {
+    const targetServiceDate =
+      toTaipeiDate(record.reservationTime ?? record.requestedAt) ??
+      this.normalizeServiceDate(record.serviceDate);
+    const rekeyExistingToTaipeiDaySql = `
+      INSERT INTO reporting.dispatch_daily_records (
+        service_date,
+        order_id,
+        order_no,
+        order_source,
+        tenant_id,
+        partner_id,
+        service_product_code,
+        requested_at,
+        reservation_time,
+        pickup_address_snapshot,
+        dropoff_address_snapshot,
+        first_dispatch_at,
+        first_assigned_at,
+        final_driver_id,
+        final_vehicle_id,
+        final_plate_no,
+        eta_seconds_at_assignment,
+        arrived_pickup_at,
+        trip_started_at,
+        trip_completed_at,
+        final_status,
+        redispatch_count,
+        cancellation_reason,
+        complaint_count,
+        generated_at
+      )
+      SELECT
+        (
+          COALESCE(existing.reservation_time, existing.requested_at)
+          AT TIME ZONE 'Asia/Taipei'
+        )::date AS service_date,
+        existing.order_id,
+        existing.order_no,
+        existing.order_source,
+        existing.tenant_id,
+        existing.partner_id,
+        existing.service_product_code,
+        existing.requested_at,
+        existing.reservation_time,
+        existing.pickup_address_snapshot,
+        existing.dropoff_address_snapshot,
+        existing.first_dispatch_at,
+        existing.first_assigned_at,
+        existing.final_driver_id,
+        existing.final_vehicle_id,
+        existing.final_plate_no,
+        existing.eta_seconds_at_assignment,
+        existing.arrived_pickup_at,
+        existing.trip_started_at,
+        existing.trip_completed_at,
+        existing.final_status,
+        existing.redispatch_count,
+        existing.cancellation_reason,
+        existing.complaint_count,
+        existing.generated_at
+      FROM (
+        SELECT *
+        FROM reporting.dispatch_daily_records
+        WHERE order_id = $1
+        ORDER BY generated_at DESC, service_date DESC
+        LIMIT 1
+      ) existing
+      WHERE existing.service_date <> (
+        COALESCE(existing.reservation_time, existing.requested_at)
+        AT TIME ZONE 'Asia/Taipei'
+      )::date
+      ON CONFLICT (service_date, order_id) DO UPDATE SET
+        order_no = EXCLUDED.order_no,
+        order_source = EXCLUDED.order_source,
+        tenant_id = EXCLUDED.tenant_id,
+        partner_id = EXCLUDED.partner_id,
+        service_product_code = EXCLUDED.service_product_code,
+        requested_at = EXCLUDED.requested_at,
+        reservation_time = EXCLUDED.reservation_time,
+        pickup_address_snapshot = EXCLUDED.pickup_address_snapshot,
+        dropoff_address_snapshot = EXCLUDED.dropoff_address_snapshot,
+        first_dispatch_at = EXCLUDED.first_dispatch_at,
+        first_assigned_at = EXCLUDED.first_assigned_at,
+        final_driver_id = EXCLUDED.final_driver_id,
+        final_vehicle_id = EXCLUDED.final_vehicle_id,
+        final_plate_no = EXCLUDED.final_plate_no,
+        eta_seconds_at_assignment = EXCLUDED.eta_seconds_at_assignment,
+        arrived_pickup_at = EXCLUDED.arrived_pickup_at,
+        trip_started_at = EXCLUDED.trip_started_at,
+        trip_completed_at = EXCLUDED.trip_completed_at,
+        final_status = EXCLUDED.final_status,
+        redispatch_count = EXCLUDED.redispatch_count,
+        cancellation_reason = EXCLUDED.cancellation_reason,
+        complaint_count = EXCLUDED.complaint_count,
+        generated_at = EXCLUDED.generated_at
+      WHERE reporting.dispatch_daily_records.generated_at <= EXCLUDED.generated_at
+    `;
+    const rekeyExistingToTaipeiDayValues = [record.orderId];
+    const upsertSql = `
+      INSERT INTO reporting.dispatch_daily_records (
+        service_date,
+        order_id,
+        order_no,
+        order_source,
+        tenant_id,
+        partner_id,
+        service_product_code,
+        requested_at,
+        reservation_time,
+        pickup_address_snapshot,
+        dropoff_address_snapshot,
+        first_dispatch_at,
+        first_assigned_at,
+        final_driver_id,
+        final_vehicle_id,
+        final_plate_no,
+        eta_seconds_at_assignment,
+        arrived_pickup_at,
+        trip_started_at,
+        trip_completed_at,
+        final_status,
+        redispatch_count,
+        cancellation_reason,
+        complaint_count,
+        generated_at
+      )
+      SELECT
+        $1::date, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+        $21, $22, $23, $24, $25::timestamptz
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM reporting.dispatch_daily_records existing
+        WHERE existing.order_id = $2
+          AND existing.service_date = (
+            COALESCE(existing.reservation_time, existing.requested_at)
+            AT TIME ZONE 'Asia/Taipei'
+          )::date
+          AND existing.generated_at > $25::timestamptz
+      )
+      ON CONFLICT (service_date, order_id) DO UPDATE SET
+        order_no = EXCLUDED.order_no,
+        order_source = EXCLUDED.order_source,
+        tenant_id = EXCLUDED.tenant_id,
+        partner_id = EXCLUDED.partner_id,
+        service_product_code = EXCLUDED.service_product_code,
+        requested_at = EXCLUDED.requested_at,
+        reservation_time = EXCLUDED.reservation_time,
+        pickup_address_snapshot = EXCLUDED.pickup_address_snapshot,
+        dropoff_address_snapshot = EXCLUDED.dropoff_address_snapshot,
+        first_dispatch_at = EXCLUDED.first_dispatch_at,
+        first_assigned_at = EXCLUDED.first_assigned_at,
+        final_driver_id = EXCLUDED.final_driver_id,
+        final_vehicle_id = EXCLUDED.final_vehicle_id,
+        final_plate_no = EXCLUDED.final_plate_no,
+        eta_seconds_at_assignment = EXCLUDED.eta_seconds_at_assignment,
+        arrived_pickup_at = EXCLUDED.arrived_pickup_at,
+        trip_started_at = EXCLUDED.trip_started_at,
+        trip_completed_at = EXCLUDED.trip_completed_at,
+        final_status = EXCLUDED.final_status,
+        redispatch_count = EXCLUDED.redispatch_count,
+        cancellation_reason = EXCLUDED.cancellation_reason,
+        complaint_count = EXCLUDED.complaint_count,
+        generated_at = EXCLUDED.generated_at
+      WHERE reporting.dispatch_daily_records.generated_at <= EXCLUDED.generated_at
+    `;
+    const upsertValues = [
+      targetServiceDate,
+      record.orderId,
+      record.orderNo,
+      record.orderSource,
+      record.tenantId,
+      record.partnerId,
+      record.serviceProductCode,
+      record.requestedAt,
+      record.reservationTime,
+      record.pickupAddressSnapshot,
+      record.dropoffAddressSnapshot,
+      record.firstDispatchAt,
+      record.firstAssignedAt,
+      record.finalDriverId,
+      record.finalVehicleId,
+      record.finalPlateNo,
+      record.etaSecondsAtAssignment,
+      record.arrivedPickupAt,
+      record.tripStartedAt,
+      record.tripCompletedAt,
+      record.finalStatus,
+      record.redispatchCount,
+      record.cancellationReason,
+      record.complaintCount,
+      record.generatedAt,
+    ];
+    const deleteStaleDaysSql = `
+      DELETE FROM reporting.dispatch_daily_records
+      WHERE order_id = $1
+        AND service_date <> $2::date
+        AND (
+          service_date <> (
+            COALESCE(reservation_time, requested_at)
+            AT TIME ZONE 'Asia/Taipei'
+          )::date
+          OR generated_at <= $3::timestamptz
+        )
+    `;
+    const deleteStaleDaysValues = [
+      record.orderId,
+      targetServiceDate,
+      record.generatedAt,
+    ];
+
+    if (typeof this.databaseService?.connect === "function") {
+      const client = await this.databaseService.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [`reporting.dispatch_daily_records:${record.orderId}`],
+        );
+        await client.query(
+          rekeyExistingToTaipeiDaySql,
+          rekeyExistingToTaipeiDayValues,
+        );
+        await client.query(upsertSql, upsertValues);
+        await client.query(deleteStaleDaysSql, deleteStaleDaysValues);
+        await client.query("COMMIT");
+      } catch (error) {
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          /* Keep the original persistence failure. */
+        }
+        throw error;
+      } finally {
+        client.release();
+      }
+      return;
+    }
+
+    await this.databaseService!.query(
+      rekeyExistingToTaipeiDaySql,
+      rekeyExistingToTaipeiDayValues,
+    );
+    await this.databaseService!.query(upsertSql, upsertValues);
+    await this.databaseService!.query(
+      deleteStaleDaysSql,
+      deleteStaleDaysValues,
     );
   }
 
@@ -638,16 +841,6 @@ export class ReportingRepository {
       return `$${values.length}`;
     };
 
-    if (query.serviceDate) {
-      whereClauses.push(`service_date = ${bind(query.serviceDate)}`);
-    } else {
-      if (query.serviceDateFrom) {
-        whereClauses.push(`service_date >= ${bind(query.serviceDateFrom)}`);
-      }
-      if (query.serviceDateTo) {
-        whereClauses.push(`service_date <= ${bind(query.serviceDateTo)}`);
-      }
-    }
     if (query.orderId) {
       whereClauses.push(`order_id = ${bind(query.orderId)}`);
     }
@@ -664,9 +857,6 @@ export class ReportingRepository {
       whereClauses.push(
         `service_product_code = ${bind(query.serviceProductCode)}`,
       );
-    }
-    if (query.finalStatus) {
-      whereClauses.push(`final_status = ${bind(query.finalStatus)}`);
     }
 
     const where =
@@ -706,7 +896,69 @@ export class ReportingRepository {
       values,
     );
 
-    return result.rows.map((row) => this.mapRow(row));
+    const matchesQueryRow = (candidate: DispatchDailyRecord) =>
+      this.matchesDateBounds(candidate, query) &&
+      (!query.finalStatus || candidate.finalStatus === query.finalStatus);
+
+    const mappedRows = result.rows.map((row) => this.mapRow(row));
+    const recordsToReconcileByOrderId = new Map<string, DispatchDailyRecord>();
+    const orderIdsWithMiskeyedRow = new Set<string>();
+    const orderIdsSeen = new Set<string>();
+    const orderIdsWithDuplicateRows = new Set<string>();
+    const orderIdsTouchingQuery = new Set<string>();
+
+    for (const record of mappedRows) {
+      if (orderIdsSeen.has(record.orderId)) {
+        orderIdsWithDuplicateRows.add(record.orderId);
+      }
+      orderIdsSeen.add(record.orderId);
+
+      const expectedServiceDate =
+        toTaipeiDate(record.reservationTime ?? record.requestedAt) ??
+        record.serviceDate;
+      if (record.serviceDate !== expectedServiceDate) {
+        orderIdsWithMiskeyedRow.add(record.orderId);
+      }
+
+      const corrected: DispatchDailyRecord =
+        record.serviceDate !== expectedServiceDate
+          ? { ...record, serviceDate: expectedServiceDate }
+          : record;
+      if (matchesQueryRow(record) || matchesQueryRow(corrected)) {
+        orderIdsTouchingQuery.add(record.orderId);
+      }
+
+      const existing = recordsToReconcileByOrderId.get(record.orderId);
+      if (
+        !existing ||
+        existing.generatedAt < corrected.generatedAt ||
+        (existing.generatedAt === corrected.generatedAt &&
+          record.serviceDate === expectedServiceDate)
+      ) {
+        recordsToReconcileByOrderId.set(record.orderId, corrected);
+      }
+    }
+
+    const dirtyOrderIds = new Set<string>(
+      [...orderIdsWithMiskeyedRow, ...orderIdsWithDuplicateRows].filter(
+        (orderId) => orderIdsTouchingQuery.has(orderId),
+      ),
+    );
+    if (dirtyOrderIds.size > 0) {
+      const dirtyRecords = Array.from(dirtyOrderIds)
+        .map((orderId) => recordsToReconcileByOrderId.get(orderId))
+        .filter((record): record is DispatchDailyRecord => Boolean(record));
+      await this.upsertDailyDispatchRecords(dirtyRecords);
+    }
+
+    return Array.from(recordsToReconcileByOrderId.values())
+      .filter(matchesQueryRow)
+      .sort(
+        (left, right) =>
+          right.serviceDate.localeCompare(left.serviceDate) ||
+          right.requestedAt.localeCompare(left.requestedAt) ||
+          right.orderId.localeCompare(left.orderId),
+      );
   }
 
   async listDispatchableSupplySnapshots(
@@ -838,9 +1090,35 @@ export class ReportingRepository {
     );
   }
 
+  private matchesDateBounds(
+    record: DispatchDailyRecord,
+    query: DailyDispatchRecordQuery,
+  ) {
+    if (query.serviceDate && record.serviceDate !== query.serviceDate) {
+      return false;
+    }
+    if (query.serviceDateFrom && record.serviceDate < query.serviceDateFrom) {
+      return false;
+    }
+    if (query.serviceDateTo && record.serviceDate > query.serviceDateTo) {
+      return false;
+    }
+    return true;
+  }
+
+  private normalizeServiceDate(value: string | Date): string {
+    if (value instanceof Date) {
+      const year = String(value.getFullYear()).padStart(4, "0");
+      const month = String(value.getMonth() + 1).padStart(2, "0");
+      const day = String(value.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+    return String(value).slice(0, 10);
+  }
+
   private mapRow(row: DispatchDailyRecordRow): DispatchDailyRecord {
     return {
-      serviceDate: row.service_date,
+      serviceDate: this.normalizeServiceDate(row.service_date),
       orderId: row.order_id,
       orderNo: row.order_no,
       orderSource: row.order_source,

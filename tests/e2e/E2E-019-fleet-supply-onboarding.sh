@@ -20,6 +20,9 @@ source "${SCRIPT_DIR}/lib/helpers.sh"
 SCENARIO="E2E-019"
 FLEET_PARTNER_ID="${E2E_SUPPLY_FLEET_PARTNER_ID:-fleet-demo-001}"
 READINESS_SCOPES="${E2E_SUPPLY_READINESS_SCOPES:-billing:read partner:entries:read}"
+# This scenario's partner_api_key actor writes supply drafts. Readiness alone is
+# deliberately read-only; the write actor must carry explicit own-partner scopes.
+SUPPLY_WRITER_SCOPES="${READINESS_SCOPES} partner:read partner:write"
 
 TMP_FILES=()
 cleanup() {
@@ -35,7 +38,7 @@ use_partner_actor() {
   switch_actor "partner_api_key" "e2e-fleet-partner-001"
   E2E_FLEET_PARTNER_ID="$FLEET_PARTNER_ID"
   E2E_PARTNER_ID="$FLEET_PARTNER_ID"
-  E2E_EXTRA_SCOPES="$READINESS_SCOPES"
+  E2E_EXTRA_SCOPES="$SUPPLY_WRITER_SCOPES"
 }
 
 write_json() { # json
@@ -146,6 +149,15 @@ echo -e "${BOLD}═════════════════════�
 
 log_surface "Fleet Partner Portal — driver write flow"
 log_step "LEG 1 — create/update/list/detail/upload/delete/submit/resubmit/approve driver"
+
+use_partner_actor
+E2E_EXTRA_SCOPES="$READINESS_SCOPES"
+post_json \
+  "/fleet-partner/supply-submissions/drivers" \
+  '{"name":"E2E Read Only Denial","mobile":"+886900111222"}'
+assert_status "403"
+assert_error_code "AUTH_SCOPE_DENIED"
+log_ok "Read-only readiness credential cannot create supply submissions"
 
 use_partner_actor
 post_json \

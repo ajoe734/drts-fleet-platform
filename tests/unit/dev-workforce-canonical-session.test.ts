@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import jwt from "jsonwebtoken";
 import {
   issueControlPlaneRequestAuth,
+  stripControlPlaneAuthQueryParams,
+  signTestIapJwtAssertion,
   DEFAULT_CONTROL_PLANE_JWT_AUDIENCE,
   DEFAULT_CONTROL_PLANE_JWT_ISSUER,
 } from "@drts/control-plane-auth";
@@ -19,6 +21,7 @@ import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service"
 import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { StepUpProofService } from "../../apps/api/src/common/auth/step-up-proof.service";
 import { SecurityEventsService } from "../../apps/api/src/modules/security-events/security-events.service";
+import { ReferralMonthlyRatingController } from "../../apps/api/src/modules/reporting/referral-monthly-rating.controller";
 import type { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
 
 const { Reflector } = createRequire(
@@ -637,5 +640,468 @@ describe.each(["platform-admin-web", "ops-console-web"])(
       expect(response.status).toBe(401);
       expect(network).not.toHaveBeenCalled();
     });
+  },
+);
+
+// Real proxy entry points; only the external API fetch is controlled. This
+// reproduces the report-filter loss before changing the shared query stripper.
+const REPORT_OPERATIONS = [
+  ["GET", "reports/daily-dispatch-records"],
+  ["GET", "reports/referral-monthly-ratings"],
+  ["GET", "reports/referral-monthly-ratings/governance"],
+  ["POST", "reports/referral-monthly-ratings/governance/evaluate"],
+] as const;
+const REPORT_APPS = [
+  "platform-admin-web",
+  "ops-console-web",
+  "roc-console-web",
+] as const;
+
+async function reportProxy(app: (typeof REPORT_APPS)[number]) {
+  if (app === "platform-admin-web")
+    return import("../../apps/platform-admin-web/app/control-plane-proxy/[...path]/route");
+  if (app === "ops-console-web")
+    return import("../../apps/ops-console-web/app/control-plane-proxy/[...path]/route");
+  return import("../../apps/roc-console-web/app/control-plane-proxy/[...path]/route");
+}
+
+it("keeps default anti-spoof stripping and rejects unsupported methods, routes and ambiguous business filters", () => {
+  for (const [method, path, value] of [
+    [undefined, "/api/reports/daily-dispatch-records", "tenant-a"],
+    ["POST", "/api/reports/daily-dispatch-records", "tenant-a"],
+    [
+      "GET",
+      "/api/reports/referral-monthly-ratings/governance/evaluate",
+      "tenant-a",
+    ],
+    [
+      "POST",
+      "/api/reports/referral-monthly-ratings/governance/outcomes",
+      "tenant-a",
+    ],
+    ["GET", "/api/reports/monthly-operations-summaries", "tenant-a"],
+    ["GET", "/api/reports/operations-summary/preview", "tenant-a"],
+    ["GET", "/api/reports/dispatchable-supply-snapshots", "tenant-a"],
+    ["GET", "/api/reports/jobs", "tenant-a"],
+    ["GET", "/api/regulatory/reports/jobs", "tenant-a"],
+  ] as const) {
+    const url = new URL(
+      `https://api.example.test${path}?tenantId=${value}&actorId=forged&realm=agency&roles=admin&scopes=reports:write&authMode=jwt_bearer&email=business%40example.test`,
+    );
+    stripControlPlaneAuthQueryParams(url, method);
+    expect(url.searchParams.has("tenantId"), `${method} ${path} ${value}`).toBe(
+      false,
+    );
+    for (const key of ["actorId", "realm", "roles", "scopes", "authMode"])
+      expect(url.searchParams.has(key)).toBe(false);
+    expect(url.searchParams.get("email")).toBe("business@example.test");
+  }
+});
+
+describe.each(REPORT_APPS)("%s report business query boundary", (app) => {
+  it.each(REPORT_OPERATIONS)(
+    "rejects supplied invalid tenantId instead of forwarding unfiltered on %s %s",
+    async (method, path) => {
+      vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+      const outbound = vi.fn(async () => Response.json({ ok: true }));
+      vi.stubGlobal("fetch", outbound);
+      const route = await reportProxy(app);
+      for (const selector of [
+        "tenantId=",
+        "tenantId=%20%20",
+        "tenantId=tenant-a&tenantId=tenant-b",
+      ]) {
+        const response = await route[method](
+          new NextRequest(
+            `https://private.example.test/control-plane-proxy/${path}?periodMonth=2026-10&${selector}`,
+            {
+              method,
+              ...(method === "POST"
+                ? {
+                    body: '{"periodMonth":"2026-10"}',
+                    headers: { "content-type": "application/json" },
+                  }
+                : {}),
+            },
+          ),
+          { params: Promise.resolve({ path: path.split("/") }) },
+        );
+        expect(response.status).toBe(400);
+        expect(outbound).not.toHaveBeenCalled();
+      }
+      if (method === "POST") {
+        // With a single empty camel query value, the controller chooses that
+        // string before the snake alias; this is not a valid body override.
+        const response = await route.POST(
+          new NextRequest(
+            `https://private.example.test/control-plane-proxy/${path}?tenantId=`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: '{"tenant_id":"alias-tenant"}',
+            },
+          ),
+          { params: Promise.resolve({ path: path.split("/") }) },
+        );
+        expect(response.status).toBe(400);
+        expect(outbound).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("keeps evaluate body precedence when an invalid query selector is superseded", async () => {
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    const evaluateGovernance = vi.fn(
+      async (query: { tenantId?: string; periodMonth?: string }) => {
+        expect(query.tenantId).toBe("body-tenant");
+        return { records: [] };
+      },
+    );
+    const controller = new ReferralMonthlyRatingController({
+      evaluateGovernance,
+    } as never);
+    const body = '{"periodMonth":"2026-10","tenantId":"body-tenant"}';
+    const outbound = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        expect(url.searchParams.has("tenantId")).toBe(false);
+        const bytes = await new Response(init?.body).text();
+        expect(bytes).toBe(body);
+        await controller.evaluateGovernance(
+          JSON.parse(bytes),
+          Object.fromEntries(url.searchParams),
+        );
+        return Response.json({ ok: true });
+      },
+    );
+    vi.stubGlobal("fetch", outbound);
+    const route = await reportProxy(app);
+    const path = "reports/referral-monthly-ratings/governance/evaluate";
+    for (const selector of [
+      "tenantId=",
+      "tenantId=%20%20",
+      "tenantId=tenant-a&tenantId=tenant-b",
+    ]) {
+      const response = await route.POST(
+        new NextRequest(
+          `https://private.example.test/control-plane-proxy/${path}?${selector}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body,
+          },
+        ),
+        { params: Promise.resolve({ path: path.split("/") }) },
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(outbound).toHaveBeenCalledTimes(3);
+    expect(evaluateGovernance).toHaveBeenCalledTimes(3);
+    for (const [query] of evaluateGovernance.mock.calls)
+      expect(query).toMatchObject({
+        periodMonth: "2026-10",
+        tenantId: "body-tenant",
+      });
+  });
+
+  it("preserves the evaluate controller snake alias fallback only when camel is not a string", async () => {
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    const evaluateGovernance = vi.fn(async () => ({ records: [] }));
+    const controller = new ReferralMonthlyRatingController({
+      evaluateGovernance,
+    } as never);
+    const outbound = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const body = JSON.parse(await new Response(init?.body).text());
+        expect(url.searchParams.has("tenantId")).toBe(false);
+        await controller.evaluateGovernance(
+          body,
+          Object.fromEntries(url.searchParams),
+        );
+        return Response.json({ ok: true });
+      },
+    );
+    vi.stubGlobal("fetch", outbound);
+    const path = "reports/referral-monthly-ratings/governance/evaluate";
+    const route = await reportProxy(app);
+    const response = await route.POST(
+      new NextRequest(
+        `https://private.example.test/control-plane-proxy/${path}?tenantId=tenant-a&tenantId=tenant-b`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: '{"periodMonth":"2026-10","tenant_id":"alias-tenant"}',
+        },
+      ),
+      { params: Promise.resolve({ path: path.split("/") }) },
+    );
+    expect(response.status).toBe(200);
+    expect(evaluateGovernance).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "alias-tenant" }),
+      expect.anything(),
+    );
+    expect(outbound).toHaveBeenCalledTimes(1);
+    // On the original repeated query the real controller also selects the
+    // snake alias because the camel value is an array, not a string.
+    await controller.evaluateGovernance(
+      { tenant_id: "alias-tenant" } as never,
+      { tenantId: ["tenant-a", "tenant-b"] as never },
+    );
+    expect(evaluateGovernance).toHaveBeenCalledTimes(2);
+    expect(evaluateGovernance).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tenantId: "alias-tenant" }),
+      expect.anything(),
+    );
+  });
+
+  it.each(REPORT_OPERATIONS)(
+    "allows an omitted optional tenantId on %s %s",
+    async (method, path) => {
+      vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+      const outbound = vi.fn(async (input: string | URL | Request) => {
+        expect(new URL(String(input)).searchParams.has("tenantId")).toBe(false);
+        return Response.json({ ok: true });
+      });
+      vi.stubGlobal("fetch", outbound);
+      const route = await reportProxy(app);
+      const response = await route[method](
+        new NextRequest(
+          `https://private.example.test/control-plane-proxy/${path}?periodMonth=2026-10`,
+          {
+            method,
+            ...(method === "POST"
+              ? {
+                  body: '{"periodMonth":"2026-10"}',
+                  headers: { "content-type": "application/json" },
+                }
+              : {}),
+          },
+        ),
+        { params: Promise.resolve({ path: path.split("/") }) },
+      );
+      expect(response.status).toBe(200);
+      expect(outbound).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(REPORT_OPERATIONS)(
+    "forwards legal tenantId on %s %s without promoting query identity",
+    async (method, path) => {
+      vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+      const outbound = vi.fn(
+        async (input: string | URL | Request, init?: RequestInit) => {
+          const url = new URL(String(input));
+          expect(url.pathname).toBe(`/api/${path}`);
+          expect(url.searchParams.get("tenantId")).toBe("tenant-business-a");
+          expect(url.searchParams.get("periodMonth")).toBe("2026-10");
+          if (path === "reports/daily-dispatch-records") {
+            for (const [key, value] of Object.entries({
+              serviceDateFrom: "2026-10-01",
+              serviceDateTo: "2026-10-31",
+              orderSource: "app",
+              partnerId: "partner-a",
+              serviceProductCode: "product-a",
+              finalStatus: "completed",
+            }))
+              expect(url.searchParams.get(key)).toBe(value);
+          }
+          expect(url.searchParams.has("actorId")).toBe(false);
+          expect(url.searchParams.has("realm")).toBe(false);
+          const headers = new Headers(init?.headers);
+          expect(headers.has("x-actor-id")).toBe(false);
+          expect(headers.has("x-tenant-id")).toBe(false);
+          expect(headers.get("x-drts-authorization")).toMatch(/^Bearer /);
+          if (method === "POST")
+            expect(await new Response(init?.body).text()).toBe(
+              '{"tenantId":"body-wins"}',
+            );
+          return Response.json({ ok: true });
+        },
+      );
+      vi.stubGlobal("fetch", outbound);
+      const route = await reportProxy(app);
+      const request = new NextRequest(
+        `https://private.example.test/control-plane-proxy/${path}?tenantId=tenant-business-a&periodMonth=2026-10&serviceDateFrom=2026-10-01&serviceDateTo=2026-10-31&orderSource=app&partnerId=partner-a&serviceProductCode=product-a&finalStatus=completed&actorId=forged&realm=agency`,
+        {
+          method,
+          headers: { "x-actor-id": "forged", "x-roles": "superadmin" },
+          ...(method === "POST" ? { body: '{"tenantId":"body-wins"}' } : {}),
+        },
+      );
+      const response = await route[method](request, {
+        params: Promise.resolve({ path: path.split("/") }),
+      });
+      expect(response.status).toBe(200);
+      expect(outbound).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("strips tenantId on unsupported BFF paths/methods without dropping other filters", async () => {
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    const outbound = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.has("tenantId")).toBe(false);
+      expect(url.searchParams.get("periodMonth")).toBe("2026-10");
+      return Response.json({ ok: true });
+    });
+    vi.stubGlobal("fetch", outbound);
+    const route = await reportProxy(app);
+    for (const [method, path] of [
+      ["POST", "reports/daily-dispatch-records"],
+      ["GET", "reports/jobs"],
+      ["GET", "reports/monthly-operations-summaries"],
+      ["GET", "reports/dispatchable-supply-snapshots"],
+      ["GET", "regulatory/reports/jobs"],
+    ] as const) {
+      const response = await route[method](
+        new NextRequest(
+          `https://private.example.test/control-plane-proxy/${path}?tenantId=tenant-business-a&periodMonth=2026-10`,
+          { method },
+        ),
+        { params: Promise.resolve({ path: path.split("/") }) },
+      );
+      expect(response.status).toBe(200);
+    }
+    expect(outbound).toHaveBeenCalledTimes(5);
+  });
+
+  it("requires a verified IAP assertion in strict mode; query identity cannot replace one", async () => {
+    vi.stubEnv("DRTS_ENV", "staging");
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    vi.stubEnv("IAP_JWT_SECRET_OR_PUBLIC_KEY", SECRET);
+    vi.stubEnv("IAP_EXPECTED_AUDIENCE", "unit-audience");
+    const outbound = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        const token = headers.get("x-drts-authorization")?.slice(7);
+        expect(token).toBeTruthy();
+        const claims = jwt.verify(token!, SECRET) as jwt.JwtPayload;
+        expect(claims.tenantId).toBeNull();
+        expect(claims.realm).toBe(
+          app === "platform-admin-web" ? "platform" : "ops",
+        );
+        expect(headers.has("x-actor-id")).toBe(false);
+        return Response.json({ ok: true });
+      },
+    );
+    vi.stubGlobal("fetch", outbound);
+    const route = await reportProxy(app);
+    const path = "reports/daily-dispatch-records";
+    const target = `https://private.example.test/control-plane-proxy/${path}?tenantId=business-a&actorId=spoofed`;
+    const params = { params: Promise.resolve({ path: path.split("/") }) };
+    const denied = await route.GET(
+      new NextRequest(target, {
+        headers: { "x-goog-authenticated-user-email": "admin@platform.drts" },
+      }),
+      params,
+    );
+    expect(denied.status).toBe(401);
+    expect(outbound).not.toHaveBeenCalled();
+    const assertion = signTestIapJwtAssertion(
+      {
+        sub: "verified-workforce-subject",
+        email: "admin@platform.drts",
+        aud: "unit-audience",
+      },
+      SECRET,
+    );
+    const accepted = await route.GET(
+      new NextRequest(target, {
+        headers: { "x-goog-iap-jwt-assertion": assertion },
+      }),
+      params,
+    );
+    expect(accepted.status).toBe(200);
+    expect(outbound).toHaveBeenCalledTimes(1);
+  });
+});
+
+it("retains the original governance evaluate controller body-over-query precedence", async () => {
+  const evaluateGovernance = vi.fn(async () => ({ records: [] }));
+  const controller = new ReferralMonthlyRatingController({
+    evaluateGovernance,
+  } as never);
+  await controller.evaluateGovernance(
+    { tenantId: "body-tenant" },
+    { periodMonth: "2026-10", tenantId: "query-tenant", driverId: "driver-a" },
+  );
+  expect(evaluateGovernance).toHaveBeenCalledWith(
+    expect.objectContaining({
+      periodMonth: "2026-10",
+      tenantId: "body-tenant",
+      driverId: "driver-a",
+    }),
+    expect.objectContaining({ auditEvaluation: true }),
+  );
+});
+
+it.each(["platform-admin-web", "ops-console-web"] as const)(
+  "%s retains the real API durable JWT validity, authorized realm/scopes and revocation for filtered requests",
+  async (app) => {
+    const f = fixture();
+    if (app === "ops-console-web") {
+      f.membership.realm = "ops";
+      f.binding.roleCode = "ops_user";
+    }
+    const token = signedProxy(
+      app === "ops-console-web" ? { actorType: "ops_user", realm: "ops" } : {},
+    );
+    const issued = await exchange(f, token);
+    vi.stubEnv("DRTS_API_URL", "https://api.example.test");
+    const outbound = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const request = {
+          method: init?.method ?? "GET",
+          originalUrl:
+            new URL(String(input)).pathname + new URL(String(input)).search,
+          headers: Object.fromEntries(new Headers(init?.headers)),
+          identity: undefined as
+            | ReturnType<JwtAuthService["toRequestIdentity"]>
+            | undefined,
+        };
+        try {
+          await f.guard.canActivate(context(request));
+        } catch (error: unknown) {
+          return Response.json(
+            {
+              error: {
+                code: (error as { code?: string }).code ?? "JWT_INVALID",
+              },
+            },
+            { status: 401 },
+          );
+        }
+        expect(request.identity?.tenantId).toBeNull();
+        expect(request.identity?.realm).toBe(
+          app === "platform-admin-web" ? "platform" : "ops",
+        );
+        expect(new URL(String(input)).searchParams.get("tenantId")).toBe(
+          "business-a",
+        );
+        return Response.json({ ok: true });
+      },
+    );
+    vi.stubGlobal("fetch", outbound);
+    const route = await reportProxy(app);
+    const path = "reports/referral-monthly-ratings/governance/evaluate";
+    const target = `https://private.example.test/control-plane-proxy/${path}?tenantId=business-a&scopes=reports:write`;
+    const params = { params: Promise.resolve({ path: path.split("/") }) };
+    const call = (bearer: string) =>
+      route.POST(
+        new NextRequest(target, {
+          method: "POST",
+          headers: { "x-drts-authorization": `Bearer ${bearer}` },
+          body: "{}",
+        }),
+        params,
+      );
+    expect((await call(issued.token)).status).toBe(200);
+    expect((await call("invalid-app-session")).status).toBe(401);
+    const session = (await f.service.verifyAccessToken(issued.token))?.sid;
+    expect(session).toBeTruthy();
+    f.sessions.get(session!)!.status = "revoked";
+    expect((await call(issued.token)).status).toBe(401);
+    expect(outbound).toHaveBeenCalledTimes(3);
   },
 );

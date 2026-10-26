@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   IAM_ACTOR_POLICY_DEFINITIONS,
+  IAM_AGENCY_ROLE_POLICY_DEFINITIONS,
   getIamActorScopePreset,
   getIamScopeDefinition,
   isKnownIamScope,
@@ -408,9 +409,17 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
   it("validates that every declared route scope is grantable to some actor", () => {
     const result = runDynamicRouteInventory();
 
-    const grantableScopes = new Set(
-      IAM_ACTOR_POLICY_DEFINITIONS.flatMap((definition) => definition.scopes),
-    );
+    // BUREAU-R13: agency_exporter's export scope is granted only through an
+    // explicit agency role binding (the agency_user actor ceiling is the
+    // least-privileged viewer role), so agency role policies count as grants.
+    const grantableScopes = new Set([
+      ...IAM_ACTOR_POLICY_DEFINITIONS.flatMap(
+        (definition) => definition.scopes,
+      ),
+      ...IAM_AGENCY_ROLE_POLICY_DEFINITIONS.flatMap(
+        (definition) => definition.scopes,
+      ),
+    ]);
 
     // A scope that exists in the catalogue but sits in no actor preset is
     // unreachable: the bootstrap guard denies every caller, so the surface
@@ -450,6 +459,64 @@ describe("IAM dynamic route inventory and catalogue verification", () => {
     );
 
     expect(uncontrolledExportRoutes).toEqual([]);
+  });
+
+  it("classifies every BUREAU-R13 agency route with an explicit agency or platform boundary", () => {
+    const result = runDynamicRouteInventory();
+    const agencyPortalRoutes = result.routesDiscovered.filter(
+      (route) => route.controller === "AgencyPortalController",
+    );
+    expect(
+      agencyPortalRoutes
+        .map((route) => `${route.httpMethod} ${route.routePath}`)
+        .sort(),
+    ).toEqual(
+      [
+        "GET /agency/qualifications/drivers",
+        "GET /agency/qualifications/vehicles",
+        "GET /agency/reports/complaint-monthly-statistics",
+        "GET /agency/reports/daily-dispatch-records",
+        "GET /agency/reports/monthly-operations-summaries",
+        "GET /agency/reports/operations-summary",
+        "GET /agency/trip-records",
+        "GET /agency/trip-records/:recordId",
+        "GET /agency/trip-records/export-jobs/:jobId",
+        "GET /agency/trip-records/export-jobs/:jobId/download",
+        "POST /agency/trip-records/export-jobs",
+        "POST /agency/trip-records/export-jobs/preview",
+      ].sort(),
+    );
+    for (const route of agencyPortalRoutes) {
+      expect(route.effectiveRealms).toEqual(["agency"]);
+      expect(route.effectiveScopes).toHaveLength(1);
+      expect(route.effectiveScopes[0]).toMatch(/^agency:/);
+      const policy = resolveRouteAuthPolicy(route.httpMethod, route.routePath);
+      expect(policy?.allowedRealms).toEqual(["system", "agency"]);
+      expect(policy?.requiredScopes).toEqual(route.effectiveScopes);
+    }
+
+    const platformAgencyRoutes = result.routesDiscovered.filter(
+      (route) => route.controller === "PlatformAdminAgenciesController",
+    );
+    expect(platformAgencyRoutes.length).toBeGreaterThanOrEqual(10);
+    for (const route of platformAgencyRoutes) {
+      expect(route.effectiveRealms).toEqual(["platform"]);
+      const policy = resolveRouteAuthPolicy(route.httpMethod, route.routePath);
+      expect(policy?.allowedRealms).toEqual(["system", "platform"]);
+      expect(policy?.allowedRealms).not.toContain("agency");
+    }
+
+    // Agency OIDC entry points are public OpenRoutes, like tenant/partner.
+    const agencyAuthRoutes = result.routesDiscovered.filter((route) =>
+      route.routePath.startsWith("/auth/agency/"),
+    );
+    expect(agencyAuthRoutes.map((route) => route.routePath).sort()).toEqual([
+      "/auth/agency/callback-session",
+      "/auth/agency/invitation-login",
+    ]);
+    for (const route of agencyAuthRoutes) {
+      expect(route.effectiveOpen).toBe(true);
+    }
   });
 
   it("validates that all declared realms are compatible with the scope catalogue", () => {

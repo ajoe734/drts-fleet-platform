@@ -52,6 +52,9 @@ import type {
   MultiTaxiTripOperationalLegalHoldFilter,
   MultiTaxiTripOperationalLegalHoldView,
   MultiTaxiTripOperationalRecordQuery,
+  MultiTaxiTripPaymentStatus,
+  MultiTaxiTripRouteSource,
+  MultiTaxiTripTollSource,
   ConsumerNotificationOutboxRecord,
   OwnedOrderRecord,
   PassengerContactUnavailableReason,
@@ -90,11 +93,13 @@ import { PartnerUserIdentityLinkRepository } from "../tenant-partner/partner-use
 import { TenantPartnerService } from "../tenant-partner/tenant-partner.service";
 import { InjectMaskedCallPort, type MaskedCallPort } from "./masked-call.port";
 import {
+  computeTwoCalendarYearRetentionFloorIso,
   MultiTaxiRepository,
   type PassengerNotificationChannelMetadata,
   type PassengerRatingReviewRepositoryDetail,
   type PassengerRatingReviewRepositoryQuery,
   type PassengerAccountRatingHook,
+  type StoredMultiTaxiTripOperationalRecord,
 } from "./multi-taxi.repository";
 import { resolveNonPartnerChannelOutcome } from "./passenger-notification-channel-router";
 import {
@@ -390,18 +395,81 @@ export class MultiTaxiService implements OnModuleInit {
   ): Promise<MultiTaxiTripOperationalAdminView[]> {
     const month = this.normalizeMonthFilter(query.month);
     const legalHold = this.normalizeLegalHoldFilter(query.legalHold);
+    const reservedFrom = this.normalizeReservedDateFilter(
+      query.reservedFrom,
+      "reservedFrom",
+    );
+    const reservedTo = this.normalizeReservedDateFilter(
+      query.reservedTo,
+      "reservedTo",
+    );
+    const plateNo = query.plateNo?.trim() ?? "";
+    const orderNo = query.orderNo?.trim() ?? "";
+    const orderId = query.orderId?.trim() ?? "";
+    const tripId = query.tripId?.trim() ?? "";
+    const recordId = query.recordId?.trim() ?? "";
     const needle = query.q?.trim().toLowerCase() ?? "";
-    const records = await Promise.all(
-      this.ownedMobilityService
-        .listOrders()
-        .filter((order) => this.isCompletedMultiTaxiOrder(order))
-        .map((order) => this.mapOrderToOperationalRecord(order)),
+
+    const committedRows =
+      typeof this.repository?.listTripOperationalRecords === "function"
+        ? await this.repository.listTripOperationalRecords()
+        : [];
+    const committedByOrderId = new Map<
+      string,
+      StoredMultiTaxiTripOperationalRecord
+    >();
+    for (const row of committedRows) {
+      committedByOrderId.set(row.orderId, row);
+    }
+
+    const committedViews = await Promise.all(
+      [...committedByOrderId.values()].map((stored) =>
+        this.toOperationalRecordAdminView(stored),
+      ),
     );
 
+    const legacyOrders =
+      typeof this.ownedMobilityService?.listOrders === "function"
+        ? this.ownedMobilityService
+            .listOrders()
+            .filter(
+              (order) =>
+                this.isCompletedMultiTaxiOrder(order) &&
+                !committedByOrderId.has(order.orderId),
+            )
+        : [];
+    const reconciledLegacyViews = await Promise.all(
+      legacyOrders.map((order) => this.mapOrderToOperationalRecord(order)),
+    );
+
+    const records = [...committedViews, ...reconciledLegacyViews];
+
+    // BUREAU-R13 / BUREAU-R11: reservedFrom/reservedTo are an inclusive date
+    // range on the same reservedAt field as `month`; exact plateNo/orderNo/
+    // orderId/tripId/recordId filters support statutory agency queries.
     return records
       .filter((record) =>
         month ? record.reservedAt.slice(0, 7) === month : true,
       )
+      .filter((record) =>
+        reservedFrom ? record.reservedAt.slice(0, 10) >= reservedFrom : true,
+      )
+      .filter((record) =>
+        reservedTo ? record.reservedAt.slice(0, 10) <= reservedTo : true,
+      )
+      .filter((record) =>
+        plateNo
+          ? record.plateNo.trim().toUpperCase() === plateNo.toUpperCase()
+          : true,
+      )
+      .filter((record) =>
+        orderNo
+          ? record.orderNo.trim().toUpperCase() === orderNo.toUpperCase()
+          : true,
+      )
+      .filter((record) => (orderId ? record.orderId === orderId : true))
+      .filter((record) => (tripId ? record.tripId === tripId : true))
+      .filter((record) => (recordId ? record.recordId === recordId : true))
       .filter((record) =>
         needle.length === 0
           ? true
@@ -419,6 +487,52 @@ export class MultiTaxiService implements OnModuleInit {
       .sort((left, right) => right.reservedAt.localeCompare(left.reservedAt));
   }
 
+  async getTripOperationalRecord(
+    recordId: string,
+  ): Promise<MultiTaxiTripOperationalAdminView | null> {
+    const trimmed = recordId.trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (typeof this.repository?.findTripOperationalRecordById === "function") {
+      const found = await this.repository.findTripOperationalRecordById(trimmed);
+      if (found) {
+        return this.toOperationalRecordAdminView(found);
+      }
+    }
+    const list = await this.listTripOperationalRecords({ recordId: trimmed });
+    return list[0] ?? null;
+  }
+
+  async purgeExpiredTripOperationalRecords(nowIso?: string): Promise<{
+    purgedRecordIds: string[];
+    skippedHeldRecordIds: string[];
+  }> {
+    if (
+      typeof this.repository?.purgeExpiredTripOperationalRecords !== "function"
+    ) {
+      return { purgedRecordIds: [], skippedHeldRecordIds: [] };
+    }
+    const effectiveNowIso = nowIso ?? new Date().toISOString();
+    const stored =
+      typeof this.repository.listTripOperationalRecords === "function"
+        ? await this.repository.listTripOperationalRecords()
+        : [];
+    const heldSubjects = new Set<string>();
+    for (const item of stored) {
+      const hold = this.readOperationalRecordLegalHold(item.orderId);
+      if (hold.state !== "none") {
+        heldSubjects.add(item.orderId);
+        heldSubjects.add(item.recordId);
+        heldSubjects.add(item.tripId);
+      }
+    }
+    return this.repository.purgeExpiredTripOperationalRecords({
+      nowIso: effectiveNowIso,
+      heldSubjects,
+    });
+  }
+
   async exportTripOperationalRecords(
     query: MultiTaxiTripOperationalRecordQuery,
   ): Promise<{
@@ -434,14 +548,28 @@ export class MultiTaxiService implements OnModuleInit {
       exportedAt: new Date().toISOString(),
       filename: `multi-taxi-trip-records-${suffix}.csv`,
       rows: records.map((record) => ({
+        recordId: record.recordId,
+        orderId: record.orderId,
+        tripId: record.tripId,
         orderNoMasked: maskOpaqueToken(record.orderNo, 3, 2) ?? "***",
+        plateNo: record.plateNo,
         plateNoMasked: maskOpaqueToken(record.plateNo, 2, 2) ?? "***",
         reservedAt: record.reservedAt,
         pickupAt: record.pickupAt,
         dropoffAt: record.dropoffAt,
+        routeSummary: record.route.routeSummary ?? null,
+        routeSource: record.route.source,
+        distanceMeters: record.route.distanceMeters,
+        durationSeconds: record.route.durationSeconds,
         payableFareMinor: record.payableFareMinor,
         actualFareMinor: record.actualFareMinor,
-        tollMinor: record.tollMinor,
+        collectedFareMinor: record.collectedFareMinor ?? null,
+        paymentStatus: record.paymentStatus ?? "unknown",
+        tollMinor:
+          (record.tollSource ?? "unavailable") === "unavailable"
+            ? null
+            : (record.tollMinor ?? 0),
+        tollSource: record.tollSource ?? "unavailable",
         currency: record.currency,
         farePolicyVersion: record.farePolicyVersion,
         chargingMode: record.chargingMode,
@@ -2478,6 +2606,27 @@ export class MultiTaxiService implements OnModuleInit {
     return normalized;
   }
 
+  private normalizeReservedDateFilter(
+    value: string | undefined,
+    field: "reservedFrom" | "reservedTo",
+  ) {
+    const normalized = value?.trim();
+    if (!normalized) {
+      return null;
+    }
+    if (
+      !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(normalized) ||
+      !Number.isFinite(Date.parse(`${normalized}T00:00:00.000Z`))
+    ) {
+      throw new ApiRequestError(
+        HttpStatus.BAD_REQUEST,
+        "MULTI_TAXI_RECORDS_DATE_INVALID",
+        `${field} must use YYYY-MM-DD format.`,
+      );
+    }
+    return normalized;
+  }
+
   private normalizeLegalHoldFilter(
     legalHold: MultiTaxiTripOperationalLegalHoldFilter | undefined,
   ): MultiTaxiTripOperationalLegalHoldFilter {
@@ -2525,54 +2674,231 @@ export class MultiTaxiService implements OnModuleInit {
         placedByActorId: hold.placedByActorId,
         placedAt: hold.placedAt,
       }));
+      const activeExceptions = Array.isArray(
+        governance.activeDeletionExceptions,
+      )
+        ? governance.activeDeletionExceptions.map((exc) => ({
+            holdId: exc.exceptionId,
+            caseNumber: exc.sourceResourceId ?? exc.exceptionId,
+            reasonCode: exc.reasonCode,
+            reasonNote: exc.reasonNote ?? null,
+            placedByActorId: exc.requestedByActorId ?? exc.reviewerActorId,
+            placedAt: exc.requestedAt,
+          }))
+        : [];
+      const combinedHolds = [...activeHolds, ...activeExceptions];
+      const isSuppressed =
+        combinedHolds.length > 0 || Boolean(governance.deletionSuppressed);
       return {
-        state: activeHolds.length > 0 ? "active" : "none",
+        state: isSuppressed ? "active" : "none",
         family: "proof_bundle",
         subjectId: orderId,
-        activeHoldCount: activeHolds.length,
-        activeHolds,
+        activeHoldCount: combinedHolds.length,
+        activeHolds: combinedHolds,
       };
     } catch {
       return unavailable;
     }
   }
 
+  private async toOperationalRecordAdminView(
+    stored: StoredMultiTaxiTripOperationalRecord,
+  ): Promise<MultiTaxiTripOperationalAdminView> {
+    let paymentStatus: MultiTaxiTripPaymentStatus =
+      stored.paymentStatus ?? "unknown";
+    let collectedFareMinor: number | null = stored.collectedFareMinor ?? null;
+
+    if (
+      paymentStatus === "unknown" &&
+      typeof this.repository?.findPassengerPayment === "function"
+    ) {
+      const payment = await this.repository.findPassengerPayment(stored.orderId);
+      if (payment) {
+        paymentStatus = payment.status;
+        collectedFareMinor =
+          payment.status === "captured"
+            ? (payment.amount?.amountMinor ?? stored.actualFareMinor)
+            : payment.status === "refunded"
+              ? 0
+              : null;
+      }
+    } else if (paymentStatus === "captured" && collectedFareMinor === null) {
+      collectedFareMinor = stored.actualFareMinor;
+    } else if (paymentStatus === "refunded") {
+      collectedFareMinor = 0;
+    } else if (paymentStatus !== "captured") {
+      collectedFareMinor = null;
+    }
+
+    return {
+      ...stored,
+      collectedFareMinor,
+      paymentStatus,
+      legalHold: this.readOperationalRecordLegalHold(stored.orderId),
+    };
+  }
+
   private async mapOrderToOperationalRecord(
     order: OwnedOrderRecord,
   ): Promise<MultiTaxiTripOperationalAdminView> {
     const assignment =
-      await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure(
+      (await this.ownedMobilityService.resolvePersistedPassengerAssignmentDisclosure?.(
         order.orderId,
-      );
+      )) ?? null;
     const receipt =
-      (await this.repository?.findElectronicReceipt(order.orderId)) ?? null;
-    const payableFareMinor = order.quotedFare?.amountMinor ?? 0;
-    const actualFareMinor = receipt?.amountMinor ?? payableFareMinor;
-    const completedAt = order.updatedAt;
+      (await this.repository?.findElectronicReceipt?.(order.orderId)) ?? null;
+    const payment =
+      typeof this.repository?.findPassengerPayment === "function"
+        ? await this.repository.findPassengerPayment(order.orderId)
+        : null;
+    const tasks =
+      typeof this.ownedMobilityService.getDriverTasksForOrder === "function"
+        ? this.ownedMobilityService.getDriverTasksForOrder(order.orderId)
+        : typeof this.ownedMobilityService.listDriverTasks === "function"
+          ? this.ownedMobilityService
+              .listDriverTasks()
+              .filter((task) => task.orderId === order.orderId)
+          : [];
+    const completedTask =
+      tasks.find((task) => task.status === "completed") ?? tasks[0] ?? null;
+
+    const receiptRecord =
+      receipt?.record && typeof receipt.record === "object"
+        ? (receipt.record as Record<string, unknown>)
+        : {};
+
+    const pickupAt =
+      completedTask?.startedAt ??
+      (typeof receiptRecord.pickupAt === "string" && receiptRecord.pickupAt
+        ? receiptRecord.pickupAt
+        : null) ??
+      null;
+    const dropoffAt =
+      completedTask?.completedAt ??
+      (typeof receiptRecord.dropoffAt === "string" && receiptRecord.dropoffAt
+        ? receiptRecord.dropoffAt
+        : null) ??
+      order.updatedAt ??
+      null;
+
+    const actualDistanceMeters =
+      completedTask?.actualDistanceKm !== undefined &&
+      completedTask?.actualDistanceKm !== null &&
+      Number.isFinite(completedTask.actualDistanceKm)
+        ? Math.max(0, Math.round(completedTask.actualDistanceKm * 1000))
+        : typeof receiptRecord.distanceMeters === "number" &&
+            Number.isFinite(receiptRecord.distanceMeters)
+          ? Math.max(0, Math.round(receiptRecord.distanceMeters))
+          : null;
+    const actualDurationSeconds =
+      completedTask?.actualDurationSec !== undefined &&
+      completedTask?.actualDurationSec !== null &&
+      Number.isFinite(completedTask.actualDurationSec)
+        ? Math.max(0, Math.round(completedTask.actualDurationSec))
+        : typeof receiptRecord.durationSeconds === "number" &&
+            Number.isFinite(receiptRecord.durationSeconds)
+          ? Math.max(0, Math.round(receiptRecord.durationSeconds))
+          : null;
+
+    const routeSummary =
+      (typeof receiptRecord.routeSummary === "string" &&
+      receiptRecord.routeSummary.trim()
+        ? receiptRecord.routeSummary.trim()
+        : null) ??
+      (order.pickup?.address && order.dropoff?.address
+        ? `${order.pickup.address} → ${order.dropoff.address}`
+        : null);
+
+    let routeSource: MultiTaxiTripRouteSource = "unavailable";
+    let distanceMeters: number | null = null;
+    let durationSeconds: number | null = null;
+
+    if (actualDistanceMeters !== null) {
+      routeSource = "pickup_dropoff_summary";
+      distanceMeters = actualDistanceMeters;
+      durationSeconds = actualDurationSeconds;
+    } else if (
+      assignment?.routeFare?.encodedPolyline ||
+      assignment?.routeFare?.estimatedDistanceMeters !== undefined
+    ) {
+      routeSource = "provider_route";
+      distanceMeters = assignment?.routeFare?.estimatedDistanceMeters ?? null;
+      durationSeconds = assignment?.routeFare?.estimatedDurationSeconds ?? null;
+    } else if (routeSummary) {
+      routeSource = "pickup_dropoff_summary";
+    }
+
+    const payableFareMinor =
+      assignment?.routeFare?.payableFareMinor ??
+      order.quotedFare?.amountMinor ??
+      receipt?.amountMinor ??
+      0;
+    const actualFareMinor =
+      completedTask?.fare?.amountMinor ??
+      receipt?.amountMinor ??
+      payableFareMinor;
+
+    const paymentStatus: MultiTaxiTripPaymentStatus =
+      payment?.status ?? "unknown";
+    const collectedFareMinor: number | null =
+      paymentStatus === "captured"
+        ? (payment?.amount?.amountMinor ?? actualFareMinor)
+        : paymentStatus === "refunded"
+          ? 0
+          : null;
+
+    let tollMinor: number | null = null;
+    let tollSource: MultiTaxiTripTollSource = "unavailable";
+    if (Array.isArray(completedTask?.proof?.expenseItems)) {
+      const tollItems = completedTask.proof.expenseItems.filter(
+        (item) => item.type.trim().toLowerCase() === "toll",
+      );
+      tollMinor = tollItems.reduce((sum, item) => sum + item.amountMinor, 0);
+      tollSource = tollItems.length > 0 ? "driver_proof" : "none";
+    } else if (
+      typeof receiptRecord.tollMinor === "number" &&
+      Number.isFinite(receiptRecord.tollMinor)
+    ) {
+      tollMinor = Math.max(0, Math.round(receiptRecord.tollMinor));
+      tollSource = "electronic_receipt";
+    }
+
+    const completedAt = dropoffAt ?? order.updatedAt;
     const generatedAt = completedAt;
 
     return {
       recordId: `mtr-${order.orderId}`,
       orderId: order.orderId,
       orderNo: order.orderNo,
-      tripId: assignment?.assignmentId ?? order.orderId,
-      assignmentId: assignment?.assignmentId ?? null,
-      vehicleId: assignment?.vehicle?.vehicleId ?? "unassigned",
+      tripId:
+        completedTask?.taskId ?? assignment?.assignmentId ?? order.orderId,
+      assignmentId:
+        completedTask?.assignmentId ?? assignment?.assignmentId ?? null,
+      vehicleId:
+        completedTask?.vehicleId ??
+        assignment?.vehicle?.vehicleId ??
+        "unassigned",
       plateNo: assignment?.vehicle?.plateNo ?? "—",
       reservedAt: order.reservationWindowStart ?? order.createdAt,
-      pickupAt: assignment?.createdAt ?? null,
-      dropoffAt: completedAt,
+      pickupAt,
+      dropoffAt,
       route: {
-        encodedPolyline: assignment?.routeFare?.encodedPolyline ?? null,
-        pointCount: assignment?.routeFare?.encodedPolyline ? 1 : 0,
-        distanceMeters: assignment?.routeFare?.estimatedDistanceMeters ?? null,
-        durationSeconds:
-          assignment?.routeFare?.estimatedDurationSeconds ?? null,
-        source: "provider_route",
+        encodedPolyline:
+          routeSource === "provider_route"
+            ? (assignment?.routeFare?.encodedPolyline ?? null)
+            : null,
+        pointCount: 0,
+        distanceMeters,
+        durationSeconds,
+        source: routeSource,
+        routeSummary,
       },
       payableFareMinor,
       actualFareMinor,
-      tollMinor: 0,
+      collectedFareMinor,
+      paymentStatus,
+      tollMinor,
+      tollSource,
       currency: PLATFORM_CURRENCY,
       farePolicyVersion:
         assignment?.routeFare?.farePolicyVersion ??
@@ -2580,15 +2906,13 @@ export class MultiTaxiService implements OnModuleInit {
         "active_authorization_fare",
       chargingMode: order.fixedPrice ? "platform_quote" : "meter",
       generatedAt,
-      retainUntil: this.plusRetentionDays(generatedAt, 730),
+      retainUntil: this.plusRetentionDays(generatedAt),
       legalHold: this.readOperationalRecordLegalHold(order.orderId),
     };
   }
 
-  private plusRetentionDays(iso: string, days: number) {
-    const date = new Date(iso);
-    date.setUTCDate(date.getUTCDate() + days);
-    return date.toISOString();
+  private plusRetentionDays(iso: string) {
+    return computeTwoCalendarYearRetentionFloorIso(iso);
   }
 
   private isPassengerCancelable(order: OwnedOrderRecord) {

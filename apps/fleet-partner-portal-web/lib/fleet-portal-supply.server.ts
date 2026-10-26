@@ -14,6 +14,7 @@ export async function getSupplyDraftScope(): Promise<string> {
 
 
 import type {
+  FleetSupplyRenewalTargetsResponse,
   SupplyDocumentRecord,
   SupplyDocumentType,
   SupplyReadinessRecord,
@@ -516,4 +517,86 @@ export async function loadSupplyDocuments(): Promise<SupplyDocumentsView> {
 export async function loadSupplyReadiness() {
   const bundle = await loadSupplyBundle();
   return { rows: bundle.readiness, source: bundle.source };
+}
+
+const FALLBACK_RENEWAL_TARGETS: FleetSupplyRenewalTargetsResponse = {
+  fleetPartnerId: "fleet-demo-001",
+  drivers: [
+    {
+      driverId: "d_9120",
+      fleetPartnerId: "fleet-demo-001",
+      name: "高至誠",
+      mobile: "0928-000-112",
+      professionalDriverLicenseNo: "A1-9910-11220",
+      professionalDriverLicenseExpiry: "2026-06-01",
+      taxiDriverRegistrationNo: "TXR-009120",
+      taxiDriverRegistrationArea: "台北市",
+      taxiDriverRegistrationExpiry: "2026-06-01",
+      supportedServiceProductCodes: ["taxi_realtime", "business_dispatch"],
+      lifecycleStatus: "suspended",
+      licensesValid: false,
+      ready: false,
+      reasonCodes: ["DRIVER_LICENSE_EXPIRED", "DRIVER_REGISTRATION_EXPIRED"],
+    },
+  ],
+  vehicles: [
+    {
+      vehicleId: "v_3308",
+      fleetPartnerId: "fleet-demo-001",
+      plateNo: "TDA-3308",
+      licenseType: "taxi",
+      brand: "Toyota",
+      model: "Corolla Cross",
+      modelYear: 2023,
+      seatCount: 4,
+      luggageCapacity: 2,
+      businessArea: "台北市",
+      supportedServiceProductCodes: ["taxi_realtime", "airport_transfer"],
+      airportTransferEligible: true,
+      fixedFareAllowed: false,
+      doorCount: 4,
+      color: "White",
+      supplyLifecycle: "suspended",
+      activeContractId: "vc-3308-prior",
+      activeContractStatus: "expired",
+      activeContractEndAt: "2026-06-01T00:00:00.000Z",
+      activePolicyId: "pol-3308-prior",
+      activePolicyNo: "POL-3308-2025",
+      activePolicyStatus: "expired",
+      activePolicyEndAt: "2026-06-01T00:00:00.000Z",
+      ready: false,
+      reasonCodes: ["INSURANCE_EXPIRED", "CONTRACT_INACTIVE"],
+    },
+  ],
+};
+
+export async function loadSupplyRenewalTargets(): Promise<{
+  targets: FleetSupplyRenewalTargetsResponse;
+  source: SupplyDataSource;
+}> {
+  try {
+    const { client } = await getServerFleetPartnerClient();
+    const targets = await client.listFleetPortalSupplyRenewalTargets();
+    return { targets, source: "live" };
+  } catch (err) {
+    if (isConfigError(err)) {
+      throw err;
+    }
+    return {
+      targets: {
+        fleetPartnerId: FALLBACK_RENEWAL_TARGETS.fleetPartnerId,
+        drivers: FALLBACK_RENEWAL_TARGETS.drivers.map((d) => ({
+          ...d,
+          supportedServiceProductCodes: [...d.supportedServiceProductCodes],
+          reasonCodes: [...d.reasonCodes],
+        })),
+        vehicles: FALLBACK_RENEWAL_TARGETS.vehicles.map((v) => ({
+          ...v,
+          supportedServiceProductCodes: [...v.supportedServiceProductCodes],
+          reasonCodes: [...v.reasonCodes],
+        })),
+      },
+      source: "fallback",
+    };
+  }
 }

@@ -345,6 +345,9 @@ jobs:
             .artifacts/owned-referral-business-journey/cancellations/*-booking-write-journal.json
             .artifacts/owned-referral-business-journey/cancellations/results.json
             .artifacts/owned-referral-business-journey/cancellations/*.png
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.pdf
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

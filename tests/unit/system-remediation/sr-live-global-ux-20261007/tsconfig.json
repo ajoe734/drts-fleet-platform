@@ -1,5 +1,18 @@
 {
   "extends": "../../../../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["apps/bank-console-web/*"],
+      "@drts/contracts": ["packages/contracts/src/index.ts"],
+      "@drts/control-plane-auth/review-driver-web": [
+        "packages/control-plane-auth/src/review-driver-web.ts"
+      ],
+      "@drts/control-plane-auth": ["packages/control-plane-auth/src/index.ts"],
+      "@drts/ui-tokens": ["packages/ui-tokens/src/index.ts"],
+      "@drts/tenant-auth": ["packages/tenant-auth/src/route-handlers.ts"],
+      "@drts/tenant-auth/*": ["packages/tenant-auth/src/*"]
+    }
+  },
   "include": [
     "../../../../tests/e2e/system-remediation/sr-live-global-ux-20261007/**/*.ts",
     "./*.test.ts",
