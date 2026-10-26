@@ -19,6 +19,7 @@ import {
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OidcPkceService } from "../../../apps/api/src/modules/auth/oidc-pkce.service";
 import { AuthController } from "../../../apps/api/src/modules/auth/auth.controller";
+import * as controlPlaneAuth from "../../../packages/control-plane-auth/src/index";
 import * as authHandlers from "../../../packages/tenant-auth/src/route-handlers";
 import * as constants from "../../../packages/tenant-auth/src/constants";
 import * as sessionHelpers from "../../../packages/tenant-auth/src/session";
@@ -41,6 +42,8 @@ const context = (...auth: string[]) => ({ params: Promise.resolve({ auth }) });
 const load = createUiModuleLoader(appRoot, {
   "server-only": {},
   "@drts/ui-tokens": uiTokens,
+  // The root CI shard does not build package dist; load the real verifier source.
+  "@drts/control-plane-auth": controlPlaneAuth,
   "next/server": { NextRequest, NextResponse },
   "next/headers": { cookies: async () => ({ get: () => undefined }) },
   "@drts/tenant-auth": authHandlers,

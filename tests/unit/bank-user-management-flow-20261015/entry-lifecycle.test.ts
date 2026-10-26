@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { CookieJar } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import * as controlPlaneAuth from "../../../packages/control-plane-auth/src/index";
 import * as constants from "../../../packages/tenant-auth/src/constants";
 import * as authHandlers from "../../../packages/tenant-auth/src/route-handlers";
 import * as sessionHelpers from "../../../packages/tenant-auth/src/session";
@@ -21,6 +22,8 @@ const load = createUiModuleLoader(appRoot, {
   "next/server": { NextRequest, NextResponse },
   "next/headers": { cookies: async () => ({ get: () => undefined }) },
   "@drts/ui-tokens": uiTokens,
+  // The root CI shard does not build package dist; load the real verifier source.
+  "@drts/control-plane-auth": controlPlaneAuth,
   "@drts/tenant-auth/api-fetch": apiFetch,
   "@drts/tenant-auth/verified-tenant-session.server": sessionVerifier,
   "@drts/tenant-auth/constants": constants,
