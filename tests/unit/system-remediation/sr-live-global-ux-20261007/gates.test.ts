@@ -566,6 +566,18 @@ describe("locale intent and source mapping", () => {
       expect(roles).toEqual(expected);
       expect(roles).not.toContain("fleet_partner_admin");
       expect(roles).not.toContain("agency_viewer");
+      expect(
+        manifest.surfaces.find((surface) => surface.app === app)!.roleSource,
+      ).toBe(policy);
+      expect(
+        manifest.screens
+          .filter((screen) => screen.app === app)
+          .every(
+            (screen) =>
+              screen.sourceCommit === head &&
+              /^[a-f0-9]{40}$/.test(screen.sourceBlob),
+          ),
+      ).toBe(true);
     }
     alterSource(head, policy, (source) =>
       source.replace('roleCode: "tenant_viewer"', 'roleCode: "tenant_auditor"'),
