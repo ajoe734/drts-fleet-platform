@@ -287,8 +287,8 @@ export function verifyIdentityReadback(
     if ("actor_type" in identity) {
       assert.equal(
         identity.actor_type,
-        "tenant_user",
-        "bank session actor_type must be tenant_user",
+        "tenant_admin",
+        "bank session actor_type must be tenant_admin",
       );
     }
     assert(

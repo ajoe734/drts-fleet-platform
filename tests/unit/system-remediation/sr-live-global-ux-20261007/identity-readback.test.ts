@@ -220,7 +220,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         JSON.stringify({
           sub: claims.actorId,
           actorId: claims.actorId,
-          actorType: "tenant_user",
+          actorType: "tenant_admin",
           realm: "tenant",
           tenantId: claims.tenantId,
           sessionId: claims.sessionId,
@@ -265,7 +265,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
             active: true,
             identity: {
               actorId: `user-${canonicalRole}`,
-              actorType: "tenant_user",
+              actorType: "tenant_admin",
               realm: "tenant",
               tenantId: "tenant-demo-001",
               sessionId: `sess-${canonicalRole}`,
@@ -410,7 +410,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
           active: true,
           identity: {
             actorId,
-            actorType: "tenant_user",
+            actorType: "tenant_admin",
             realm: "tenant",
             tenantId,
             sessionId: "non-demo-session",
@@ -530,7 +530,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
         actor_id: "self-1",
         tenant_id: "tenant-demo-001",
         realm: "tenant",
-        actor_type: "tenant_user",
+        actor_type: "tenant_admin",
         roles: ["tenant_admin", "tenant_finance_admin"],
       };
       const roleCookie = signSessionRole("bank_program_admin", "acme");
@@ -566,7 +566,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
           active: true,
           identity: {
             actorId: "viewer-1",
-            actorType: "tenant_user",
+            actorType: "tenant_admin",
             realm: "tenant",
             tenantId: "tenant-demo-001",
             sessionId: "sess-viewer-1",
@@ -709,7 +709,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
             active: true,
             identity: {
               actor_id: "viewer-1",
-              actor_type: "tenant_user",
+              actor_type: "tenant_admin",
               realm: "tenant",
               tenant_id: "tenant-demo-001",
               session_id: "sess-1",
@@ -1175,7 +1175,7 @@ describe("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026 identity readba
                   active: true,
                   identity: {
                     actor_id: session.identity.expectedSubject,
-                    actor_type: "tenant_user",
+                    actor_type: "tenant_admin",
                     realm: "tenant",
                     tenant_id: "tenant-demo-001",
                     roles: [

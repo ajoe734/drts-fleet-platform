@@ -150,7 +150,7 @@ export function projectBankSessionReadback(
     typeof tenantId !== "string" ||
     !tenantId.trim() ||
     (realm !== undefined && realm !== "tenant") ||
-    (actorType !== undefined && actorType !== "tenant_user") ||
+    (actorType !== undefined && actorType !== "tenant_admin") ||
     !Array.isArray(roles) ||
     (scopes !== undefined &&
       (!Array.isArray(scopes) ||
