@@ -356,7 +356,9 @@ describe("Bank managed caller -> production guards/commands/readback", () => {
     const f = await fixture();
     const response = await auth.GET(
       new NextRequest(`${bankOrigin}/api/auth/session`, {
-        headers: { cookie: `${constants.TENANT_SESSION_COOKIE_NAME}=${f.token}` },
+        headers: {
+          cookie: `${constants.TENANT_SESSION_COOKIE_NAME}=${f.token}`,
+        },
       }),
       context("session"),
     );
@@ -401,7 +403,12 @@ describe("Bank managed caller -> production guards/commands/readback", () => {
             expectedSubject: f.admin.userId,
           },
         },
-        { data: { ...body.data, identity: { ...body.data.identity, actor_type: "platform_admin" } } },
+        {
+          data: {
+            ...body.data,
+            identity: { ...body.data.identity, actor_type: "platform_admin" },
+          },
+        },
       ),
     ).toThrow("bank session actor_type must be tenant_admin");
   });
