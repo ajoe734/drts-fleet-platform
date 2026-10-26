@@ -592,9 +592,9 @@ export function resolveRouteAuthPolicy(
       routeSuffix.startsWith("statements/") ||
       routeSuffix === "revenue" ||
       routeSuffix.startsWith("revenue/");
-    // These views include statement counts, share and trip earnings even though
-    // their names suggest operational summaries. Ops must not see money, and
-    // finance needs no general driver/vehicle/supply read authority.
+    // These views combine Fleet operations and financial details. Both
+    // grants are necessary: Ops must not see money, while finance may read
+    // statements without gaining driver/trip/supply/quality details.
     const financialSummary =
       routeSuffix === "dashboard" || routeSuffix === "trips";
     const quality = routeSuffix === "quality-metrics";
@@ -615,7 +615,7 @@ export function resolveRouteAuthPolicy(
           : quality
             ? ["fleet:read", "fleet:finance:read"]
             : financialSummary
-              ? ["fleet:finance:read"]
+              ? ["fleet:read", "fleet:finance:read"]
               : methodScope("fleet:read", "fleet:supply:write", upperMethod),
       allowedRealms: baseAllowedRealms("partner"),
       description: "Fleet partner self-service access",

@@ -187,7 +187,7 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     const guardedGet = (
       token: string,
       path: string,
-      handler: Function,
+      handler: unknown,
       controller = FleetPartnerController,
     ) =>
       guard.canActivate({
@@ -249,6 +249,20 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
         FleetPartnerController.prototype.getPortalQualityMetrics,
       ),
     ).resolves.toBe(true);
+    for (const [path, handler] of [
+      [
+        "/api/fleet-partner/dashboard",
+        FleetPartnerController.prototype.getPortalDashboard,
+      ],
+      [
+        "/api/fleet-partner/trips",
+        FleetPartnerController.prototype.listPortalTrips,
+      ],
+    ] as const) {
+      await expect(guardedGet(admin.accessToken, path, handler)).resolves.toBe(
+        true,
+      );
+    }
     await repository.ensureRoleBindingRecord({
       ...binding,
       roleCode: "fleet_partner_finance",
@@ -270,11 +284,20 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     ).resolves.toBe(true);
     await expect(
       guardedGet(
+        admin.accessToken,
+        "/api/fleet-partner/dashboard",
+        FleetPartnerController.prototype.getPortalDashboard,
+      ),
+    ).rejects.toMatchObject({ code: "JWT_INVALID" });
+    // Admin's previous token is revoked on role change; finance cannot see
+    // the operational counts/driver detail bundled with the dashboard.
+    await expect(
+      guardedGet(
         finance.accessToken,
         "/api/fleet-partner/dashboard",
         FleetPartnerController.prototype.getPortalDashboard,
       ),
-    ).resolves.toBe(true);
+    ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
     for (const [path, handler] of [
       [
         "/api/fleet-partner/drivers",
@@ -295,6 +318,10 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
       [
         "/api/fleet-partner/quality-metrics",
         FleetPartnerController.prototype.getPortalQualityMetrics,
+      ],
+      [
+        "/api/fleet-partner/trips",
+        FleetPartnerController.prototype.listPortalTrips,
       ],
     ] as const) {
       await expect(
@@ -466,7 +493,7 @@ describe("existing scoped credential guard compatibility without Referral/Host p
     const guardedFinance = (
       token: string,
       path: string,
-      handler: Function,
+      handler: unknown,
       controller = FleetPartnerController,
     ) =>
       guard.canActivate({
