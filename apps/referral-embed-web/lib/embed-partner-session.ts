@@ -8,6 +8,7 @@ import type {
 } from "@drts/contracts";
 import { REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES } from "@drts/contracts";
 import { getGoogleWorkloadIdentityHeader } from "./embed-api";
+import { getServerApiBaseUrl } from "./embed-runtime";
 
 const REFERRAL_EMBED_SESSION_COOKIE = "drts_referral_embed_session";
 const REFERRAL_EMBED_BEARER_COOKIE = "drts_referral_embed_bearer";
@@ -30,6 +31,26 @@ export type PublicReferralEmbedSession = Pick<
   | "consent"
   | "navigationContext"
 > & { recoveryScope: string };
+export type PublicReferralSessionReadback = {
+  ok: true;
+  session: PublicReferralEmbedSession;
+  data: {
+    active: true;
+    session: PublicReferralEmbedSession;
+    identity: {
+      actor_id: string;
+      subject_alias: string;
+      recovery_scope: string;
+      actor_type: "referral_passenger";
+      realm: "partner";
+      roles: ["referral_passenger"];
+      partner_entry_slug: string;
+      entry_host: string;
+      handoff_id: string;
+      identity_active: true;
+    };
+  };
+};
 type SessionCookie = Omit<ServerReferralEmbedSession, "accessToken"> & {
   issuedAt: string;
   bearerDigest?: string;
@@ -174,6 +195,121 @@ export async function readActiveReferralSession(): Promise<ServerReferralEmbedSe
   )
     throw authError();
   return session;
+}
+
+async function verifyReferralBearerClaims(session: ServerReferralEmbedSession) {
+  if (
+    !session.identityActive ||
+    !session.accessToken ||
+    session.tokenType !== "Bearer" ||
+    !session.expiresAt ||
+    !Number.isFinite(Date.parse(session.expiresAt)) ||
+    Date.parse(session.expiresAt) <= Date.now() ||
+    typeof session.drtsPassengerId !== "string" ||
+    !session.drtsPassengerId.trim() ||
+    typeof session.partnerEntrySlug !== "string" ||
+    !session.partnerEntrySlug.trim() ||
+    typeof session.entryHost !== "string" ||
+    !session.entryHost.trim() ||
+    typeof session.handoffId !== "string" ||
+    !session.handoffId.trim() ||
+    !session.identity ||
+    session.identity.actorType !== "referral_passenger" ||
+    session.identity.realm !== "partner" ||
+    session.identity.actorId !== session.drtsPassengerId ||
+    session.identity.drtsPassengerId !== session.drtsPassengerId ||
+    session.identity.partnerEntrySlug !== session.partnerEntrySlug ||
+    typeof session.identity.tenantId !== "string" ||
+    !session.identity.tenantId.trim() ||
+    typeof session.identity.partnerId !== "string" ||
+    !session.identity.partnerId.trim() ||
+    typeof session.identity.partnerProgramId !== "string" ||
+    !session.identity.partnerProgramId.trim() ||
+    !Array.isArray(session.identity.scopes) ||
+    !session.identity.scopes.includes("partner:book") ||
+    !session.consent ||
+    typeof session.consent.grantedAt !== "string" ||
+    !session.consent.grantedAt.trim() ||
+    !Array.isArray(session.consent.requiredScopes) ||
+    !REFERRAL_EMBED_REQUIRED_CONSENT_SCOPES.every((scope) =>
+      session.consent.requiredScopes.includes(scope),
+    )
+  ) {
+    throw authError();
+  }
+  // The authority's existing GET /api/auth/session verifies the signed JWT,
+  // durable session, revocation and entry tokenVersion. Never decode the bearer
+  // locally as proof (Cloud Run uses a key ring, not necessarily JWT_SECRET).
+  const response = await fetch(`${getServerApiBaseUrl()}/api/auth/session`, {
+    headers: {
+      Authorization: `Bearer ${session.accessToken}`,
+      ...(await getGoogleWorkloadIdentityHeader()),
+    },
+    cache: "no-store",
+    redirect: "error",
+  });
+  if (!response.ok) throw authError();
+  const envelope: unknown = await response.json().catch(() => null);
+  const root = envelope as {
+    data?: { active?: unknown; identity?: Record<string, unknown> };
+  } | null;
+  const identity = root?.data?.identity;
+  if (
+    root?.data?.active !== true ||
+    !identity ||
+    identity.auth_mode !== "jwt_bearer" ||
+    identity.realm !== "partner" ||
+    identity.actor_type !== "referral_passenger" ||
+    identity.actor_id !== session.drtsPassengerId ||
+    identity.subject !== session.drtsPassengerId ||
+    identity.drts_passenger_id !== session.drtsPassengerId ||
+    !Array.isArray(identity.roles) ||
+    !identity.roles.includes("referral_passenger") ||
+    identity.partner_entry_slug !== session.partnerEntrySlug ||
+    identity.tenant_id !== session.identity.tenantId ||
+    identity.partner_id !== session.identity.partnerId ||
+    identity.partner_program_id !== session.identity.partnerProgramId ||
+    typeof identity.session_id !== "string" ||
+    identity.session_id !== session.sessionId ||
+    !Array.isArray(identity.scopes) ||
+    !identity.scopes.includes("partner:book") ||
+    typeof identity.expires_at !== "string" ||
+    !Number.isFinite(Date.parse(identity.expires_at)) ||
+    Date.parse(identity.expires_at) <= Date.now()
+  )
+    throw authError();
+}
+
+export async function toPublicReferralEmbedSessionReadback(
+  session: ServerReferralEmbedSession,
+): Promise<PublicReferralSessionReadback> {
+  await verifyReferralBearerClaims(session);
+  const publicSession = toPublicReferralEmbedSession(session);
+  return {
+    ok: true,
+    session: publicSession,
+    data: {
+      active: true,
+      session: publicSession,
+      identity: {
+        actor_id: publicSession.recoveryScope,
+        subject_alias: publicSession.recoveryScope,
+        recovery_scope: publicSession.recoveryScope,
+        actor_type: "referral_passenger",
+        realm: "partner",
+        roles: ["referral_passenger"],
+        partner_entry_slug: publicSession.partnerEntrySlug,
+        entry_host: publicSession.entryHost,
+        handoff_id: publicSession.handoffId,
+        identity_active: true,
+      },
+    },
+  };
+}
+
+export async function readPublicReferralEmbedSessionReadback(): Promise<PublicReferralSessionReadback> {
+  const session = await readActiveReferralSession();
+  return toPublicReferralEmbedSessionReadback(session);
 }
 
 export async function getReferralIdentityHeaders(

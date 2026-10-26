@@ -5,11 +5,14 @@ import { isDemoMode } from "../../../lib/demo/store";
 import { demoPaymentFields } from "../../../lib/demo/payment-fields";
 import { useEffect, useState } from "react";
 import type { PassengerPaymentFieldsAvailability } from "@drts/passenger-client";
+import { ECPAY_ACTION_ORIGINS } from "../../../components/payment/ecpay-csp";
+import { EcpayHostedFields } from "../../../components/payment/ecpay-hosted-fields";
 import { PaymentMethodsScreen } from "../../../components/payment/payment-methods-screen";
 import { useReviewDemo } from "../../../components/review-demo/review-context";
 import {
   paymentFieldsForRuntime,
   assertPaymentFieldsRuntimeConfiguration,
+  isEcpayHostedFieldsRuntime,
 } from "../../../lib/payment/runtime-fields";
 
 export default function PaymentMethodsPage() {
@@ -18,10 +21,18 @@ export default function PaymentMethodsPage() {
     "success",
   );
   assertPaymentFieldsRuntimeConfiguration(review);
+  const useEcpayHosted =
+    !isDemoMode() && isEcpayHostedFieldsRuntime({ reviewDemo: review });
   const [fields, setFields] = useState<PassengerPaymentFieldsAvailability>({
     status: "unavailable",
   });
+  const [sessionOrigins, setSessionOrigins] =
+    useState<readonly string[]>(ECPAY_ACTION_ORIGINS);
   useEffect(() => {
+    if (useEcpayHosted) {
+      setFields({ status: "unavailable" });
+      return;
+    }
     const owned = isDemoMode()
       ? demoPaymentFields()
       : paymentFieldsForRuntime({ reviewDemo: review, captureResult });
@@ -29,14 +40,20 @@ export default function PaymentMethodsPage() {
     return () => {
       if (owned.status === "ready") owned.port.dispose();
     };
-  }, [review, captureResult]);
+  }, [review, captureResult, useEcpayHosted]);
   // Actual contracted origins must be explicitly configured; none is inferred.
-  const approvedActionOrigins = (
+  const configuredActionOrigins = (
     process.env.NEXT_PUBLIC_PAYMENT_3DS_ORIGINS ?? ""
   )
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+  const approvedActionOrigins =
+    configuredActionOrigins.length > 0
+      ? configuredActionOrigins
+      : useEcpayHosted
+        ? sessionOrigins
+        : [];
   return (
     <>
       {review && (
@@ -57,6 +74,18 @@ export default function PaymentMethodsPage() {
       )}
       <PaymentMethodsScreen
         fields={fields}
+        hostedFieldsView={
+          useEcpayHosted ? (
+            <EcpayHostedFields
+              onReady={setFields}
+              onSessionLoaded={(session) =>
+                setSessionOrigins(
+                  session.approvedActionOrigins ?? ECPAY_ACTION_ORIGINS,
+                )
+              }
+            />
+          ) : undefined
+        }
         approvedActionOrigins={approvedActionOrigins}
       />
     </>

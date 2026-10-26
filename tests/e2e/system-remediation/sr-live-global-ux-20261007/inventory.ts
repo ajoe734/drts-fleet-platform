@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import type { Inventory, Surface } from "./model";
+import ts from "typescript";
+import type { Inventory, Locale, Surface } from "./model";
 
 export const hash = (value: string | Buffer) =>
   createHash("sha256").update(value).digest("hex");
@@ -12,15 +13,191 @@ const git = (...args: string[]) =>
   }).trim();
 export const sourceAt = (sha: string, file: string) =>
   git("show", `${sha}:${file}`);
+
+export type TranslationSource =
+  | {
+      app: string;
+      kind: "dictionary";
+      source: string;
+      locales: readonly Locale[];
+      keys: string[];
+    }
+  | {
+      app: string;
+      kind: "inline-locale";
+      source: string;
+      locales: readonly Locale[];
+      keys: string[];
+      unsupportedLocaleReason: string;
+    }
+  | {
+      app: string;
+      kind: "unsupported";
+      source: string;
+      locales: readonly [];
+      keys: string[];
+      reason: string;
+    };
+
+export function translationSourceAt(
+  runtimeSha: string,
+  app: string,
+): TranslationSource {
+  if (!fullSha(runtimeSha))
+    throw new Error("runtimeSha must be immutable full SHA");
+  const dictionaryPath = `apps/${app}/lib/translations.ts`;
+  try {
+    const dictionary = sourceAt(runtimeSha, dictionaryPath);
+    const keys = [
+      ...new Set(
+        [...dictionary.matchAll(/"([a-zA-Z][\w.-]*\.[\w.-]+)"\s*:/g)].map(
+          (m) => m[1]!,
+        ),
+      ),
+    ];
+    const hasZh =
+      /\b(?:const|let|var)\s+(?:zh|zhTW)\b|["']zh(?:-TW)?["']\s*:/m.test(
+        dictionary,
+      );
+    const hasEn =
+      /\b(?:const|let|var)\s+(?:en|enUS)\b|["']en(?:-US)?["']\s*:/m.test(
+        dictionary,
+      );
+    const locales: Locale[] = [
+      ...(hasZh ? (["zh-TW"] as const) : []),
+      ...(hasEn ? (["en-US"] as const) : []),
+    ];
+    if (keys.length === 0 || locales.length === 0) {
+      return {
+        app,
+        kind: "unsupported",
+        source: dictionaryPath,
+        locales: [],
+        keys: [],
+        reason: "translation-dictionary-empty",
+      };
+    }
+    return {
+      app,
+      kind: "dictionary",
+      source: dictionaryPath,
+      locales,
+      keys,
+    };
+  } catch {
+    if (app === "agency-portal-web") {
+      const layoutPath = "apps/agency-portal-web/app/layout.tsx";
+      try {
+        const layout = sourceAt(runtimeSha, layoutPath);
+        const loginPage = sourceAt(
+          runtimeSha,
+          "apps/agency-portal-web/app/login/page.tsx",
+        );
+        if (
+          /lang=["'](?:zh-Hant|zh-TW|zh)["']/i.test(layout) &&
+          /[\u4e00-\u9fff]/.test(loginPage)
+        ) {
+          return {
+            app,
+            kind: "inline-locale",
+            source: layoutPath,
+            locales: ["zh-TW"],
+            keys: [],
+            unsupportedLocaleReason: "agency-en-us-translation-source-missing",
+          };
+        }
+      } catch {
+        // Fall through to unsupported source adapter reason below.
+      }
+    }
+    return {
+      app,
+      kind: "unsupported",
+      source: dictionaryPath,
+      locales: [],
+      keys: [],
+      reason: "translation-source-adapter-missing",
+    };
+  }
+}
+
+export function translationKeysForCase(
+  source: TranslationSource | undefined,
+  locale: Locale,
+): string[] {
+  if (!source) {
+    throw new Error("translation-source-adapter-missing");
+  }
+  if (source.kind === "unsupported") {
+    throw new Error(source.reason);
+  }
+  if (!source.locales.includes(locale)) {
+    throw new Error(
+      source.kind === "inline-locale"
+        ? source.unsupportedLocaleReason
+        : `translation-locale-${locale.toLowerCase()}-missing`,
+    );
+  }
+  return source.keys;
+}
+// Parse the immutable requested source, not the catalog exported by this
+// checkout: a historical deployment can have a different role inventory.
+function tenantRolesAt(runtimeSha: string, policy: string): string[] {
+  const source = ts.createSourceFile(
+    policy,
+    sourceAt(runtimeSha, policy),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const changed = () =>
+    new Error("tenant role source changed; review inventory parser");
+  // TypeScript exposes parser diagnostics at runtime, but not in SourceFile's
+  // public interface; refuse a recovered/partial AST rather than accepting it.
+  if (
+    (source as ts.SourceFile & { parseDiagnostics: readonly ts.Diagnostic[] })
+      .parseDiagnostics.length
+  )
+    throw changed();
+  const declarations = source.statements
+    .filter(ts.isVariableStatement)
+    .flatMap((statement) => statement.declarationList.declarations)
+    .filter(
+      (declaration) =>
+        ts.isIdentifier(declaration.name) &&
+        declaration.name.text === "IAM_TENANT_ROLE_POLICY_DEFINITIONS",
+    );
+  if (declarations.length !== 1) throw changed();
+  const initializer = declarations[0]!.initializer;
+  if (!initializer || !ts.isArrayLiteralExpression(initializer))
+    throw changed();
+  const roles = initializer.elements.map((element) => {
+    if (!ts.isObjectLiteralExpression(element)) throw changed();
+    const value = (name: string) => {
+      const properties = element.properties.filter(
+        (property) =>
+          ts.isPropertyAssignment(property) &&
+          ts.isIdentifier(property.name) &&
+          property.name.text === name,
+      );
+      if (properties.length !== 1) throw changed();
+      const property = properties[0] as ts.PropertyAssignment;
+      if (!ts.isStringLiteral(property.initializer)) throw changed();
+      return property.initializer.text;
+    };
+    if (value("roleFamily") !== "tenant") throw changed();
+    const role = value("roleCode");
+    if (!/^[a-z_]+$/.test(role)) throw changed();
+    return role;
+  });
+  if (roles.length < 4 || new Set(roles).size !== roles.length) throw changed();
+  return roles;
+}
+
 export function inventoryAt(runtimeSha: string): Inventory {
   if (!fullSha(runtimeSha))
     throw new Error("runtimeSha must be immutable full SHA");
   const policy = "packages/contracts/src/iam-policy-catalog.ts";
-  const tenantRoles = [
-    ...sourceAt(runtimeSha, policy).matchAll(/roleCode: "([a-z_]+)"/g),
-  ].map((m) => m[1]!);
-  if (tenantRoles.length < 4)
-    throw new Error("tenant role source changed; review inventory parser");
+  const tenantRoles = tenantRolesAt(runtimeSha, policy);
   const passengerSource = "packages/contracts/src/passenger-app.ts";
   const passengerIdentity = sourceAt(runtimeSha, passengerSource);
   const passengerRealm = /^export const PASSENGER_REALM = "([^"]+)";/m.exec(
@@ -64,6 +241,7 @@ export function inventoryAt(runtimeSha: string): Inventory {
     // Harness roles are case/session labels. This actor is not a legacy IAM
     // role or a JWT roles claim; passenger JWTs reject legacy roles/scopes.
     surface("passenger-app-web", [passengerActor], passengerSource),
+    surface("agency-portal-web", ["agency_viewer", "agency_exporter"]),
   ];
   const workflow = sourceAt(runtimeSha, ".github/workflows/deploy-dev.yml");
   const deployed = [

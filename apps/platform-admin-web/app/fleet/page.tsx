@@ -39,6 +39,7 @@ import {
   OPS_LINK_ACTIONS,
   actionLabel,
   describeActionFailure,
+  describeExclusivityOperatorBinding,
   dispatchFlagForAction,
   isSupportedAction,
   makeAction,
@@ -740,6 +741,12 @@ export default function FleetPage() {
             }
             await client.approveExclusivity(context.exclusivity.vehicleId, {
               reviewerId: "platform-admin-web",
+              ...(context.exclusivity.exclusiveOperatorId
+                ? {
+                    exclusiveOperatorId:
+                      context.exclusivity.exclusiveOperatorId,
+                  }
+                : {}),
             });
             await loadFleet();
             break;
@@ -1335,13 +1342,34 @@ export default function FleetPage() {
       },
       {
         h: t("fleetUi.colProvider"),
-        w: 210,
-        r: (row) =>
-          renderStackedCell(
+        w: 220,
+        r: (row) => {
+          const operatorBinding = describeExclusivityOperatorBinding(row);
+          return renderStackedCell(
             row.exclusiveProviderName ?? "—",
+            `${t("multiTaxiAuth.field.operatorId")}: ${
+              operatorBinding.operatorId ?? "exclusivity_operator_unbound"
+            }`,
             `${row.effectiveStart ?? "—"} → ${row.effectiveEnd ?? "—"}`,
+          );
+        },
+      },
+      {
+        h: t("multiTaxiAuth.column.operator"),
+        w: 170,
+        r: (row) => {
+          const operatorBinding = describeExclusivityOperatorBinding(row);
+          return renderStackedCell(
+            <CanvasPill
+              theme={theme}
+              tone={operatorBinding.bound ? "success" : "warn"}
+              dot
+            >
+              {operatorBinding.operatorId ?? "exclusivity_operator_unbound"}
+            </CanvasPill>,
             row.reviewerId ?? "—",
-          ),
+          );
+        },
       },
       {
         h: t("fleetUi.colState"),

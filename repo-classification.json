@@ -83,6 +83,18 @@
       "status": "active"
     },
     {
+      "id": "agency-portal-build-and-deploy-config",
+      "pattern": "^apps/agency-portal-web/(?:Dockerfile|next\\.config\\.[^/]+|tsconfig(?:\\.[^/]+)?\\.json)$",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "agency-portal-app",
+      "pattern": "^apps/agency-portal-web/",
+      "classification": "product_runtime",
+      "status": "active"
+    },
+    {
       "id": "active-product-apps",
       "pattern": "^apps/(?:api|bank-console-web|channel-partner-portal-web|driver-app|enterprise-dispatch-web|fleet-partner-portal-web|ops-console-web|passenger-app|passenger-app-web|platform-admin-web|referral-embed-web|tenant-console-web|voice-media-worker)/",
       "classification": "product_runtime",
@@ -128,6 +140,18 @@
       "id": "package-tests",
       "pattern": "^packages/[^/]+/(?:tests?|__tests__)/|^packages/[^/]+/.*\\.(?:test|spec)\\.(?:ts|tsx|js|jsx|mjs|cjs)$",
       "classification": "test_only",
+      "status": "active"
+    },
+    {
+      "id": "agency-auth-package-build-config",
+      "pattern": "^packages/agency-auth/tsconfig(?:\\.[^/]+)?\\.json$",
+      "classification": "product_operations",
+      "status": "active"
+    },
+    {
+      "id": "agency-auth-package",
+      "pattern": "^packages/agency-auth/",
+      "classification": "product_runtime",
       "status": "active"
     },
     {

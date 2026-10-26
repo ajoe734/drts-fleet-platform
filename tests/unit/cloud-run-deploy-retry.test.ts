@@ -129,7 +129,7 @@ describe("Cloud Run deploy quota retry", () => {
 
     expect(
       workflow.match(/operations\/deployment\/deploy-cloud-run-service\.sh/g),
-    ).toHaveLength(10);
+    ).toHaveLength(11);
     expect(workflow).not.toMatch(/^\s+gcloud run deploy/m);
     // Retired surfaces must never be built or deployed. The candidate-bound
     // acceptance job may still derive their former service URLs to prove the
@@ -141,7 +141,7 @@ describe("Cloud Run deploy quota retry", () => {
         .filter((line) => line.includes("passenger-web"))
         .map((line) => line.trim()),
     ).toEqual([
-      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 10 active services plus drts-passenger-web."',
+      'description: "Fail-closed cleanup for the retired passenger service. Delete is allowed only when the regional Cloud Run inventory is exactly the intended 11 active services plus drts-passenger-web."',
       '- "delete-drts-passenger-web"',
       'vapid_public_secret="${secret_prefix}-passenger-webpush-vapid-public-key"',
       'vapid_private_secret="${secret_prefix}-passenger-webpush-vapid-private-key"',

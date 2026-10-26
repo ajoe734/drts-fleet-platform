@@ -4,13 +4,28 @@ import { resolve } from "node:path";
 import { CookieJar } from "jsdom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import * as controlPlaneAuth from "../../../packages/control-plane-auth/src/index";
 import * as constants from "../../../packages/tenant-auth/src/constants";
 import * as authHandlers from "../../../packages/tenant-auth/src/route-handlers";
 import * as sessionHelpers from "../../../packages/tenant-auth/src/session";
+import * as apiFetch from "../../../packages/tenant-auth/src/api-fetch";
+import * as sessionVerifier from "../../../packages/tenant-auth/src/verified-tenant-session.server";
 import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
 const appRoot = resolve("apps/bank-console-web");
+// Transpile the real branding package for the CommonJS UI loader; its ESM
+// extensionless exports cannot be loaded by Node's bare require in this test.
+const uiTokens = createUiModuleLoader(resolve("packages/ui-tokens"))<
+  typeof import("@drts/ui-tokens")
+>(resolve("packages/ui-tokens/src/index.ts"));
 const load = createUiModuleLoader(appRoot, {
+  "server-only": {},
   "next/server": { NextRequest, NextResponse },
+  "next/headers": { cookies: async () => ({ get: () => undefined }) },
+  "@drts/ui-tokens": uiTokens,
+  // The root CI shard does not build package dist; load the real verifier source.
+  "@drts/control-plane-auth": controlPlaneAuth,
+  "@drts/tenant-auth/api-fetch": apiFetch,
+  "@drts/tenant-auth/verified-tenant-session.server": sessionVerifier,
   "@drts/tenant-auth/constants": constants,
   "@drts/tenant-auth": authHandlers,
   "./lib/session": {

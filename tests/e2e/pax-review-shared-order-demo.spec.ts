@@ -18,6 +18,123 @@ import {
   assignInOrdinaryWorkspace,
 } from "./pax-review-shared-order/ordinary-ops-dispatch";
 
+// Only public codes reachable through the existing Ops prepare call chain may
+// leave the response boundary; validators can put persisted values in messages.
+const PUBLIC_PREPARE_CODES = new Set([
+  "review_supply_unavailable",
+  "not_found",
+  "NOT_FOUND",
+  "CONFLICT",
+  "VALIDATION_ERROR",
+  "INVALID_ARGUMENT",
+  "IAP_ASSERTION_INVALID",
+  "IAP_AUDIENCE_MISMATCH",
+  "IAP_SUBJECT_FORBIDDEN",
+  "AMBIGUOUS_OPERATOR_MAPPING",
+  "INVALID_DRIVER_PROFILE",
+  "DRIVER_PROFILE_STORAGE_UNAVAILABLE",
+  "VEHICLE_ELIGIBILITY_STORAGE_UNAVAILABLE",
+  "DRIVER_ALREADY_EXISTS",
+  "INVALID_VEHICLE_ELIGIBILITY_ITEM",
+  "INVALID_VEHICLE_ELIGIBILITY_CAPABILITY",
+  "INVALID_VEHICLE_LICENSE_TYPE",
+  "INVALID_SUPPORTED_PRODUCTS",
+  "INVALID_SERVICE_PRODUCT_TYPE",
+  "INVALID_SEAT_COUNT",
+  "INVALID_LUGGAGE_CAPACITY",
+  "INVALID_CONDITIONALLY_ALLOWED",
+  "INVALID_REQUIRED_DOCUMENTS",
+  "INVALID_TRAINING_REQUIRED",
+  "INVALID_PERMIT_REQUIRED",
+  "INVALID_EFFECTIVE_RANGE",
+  "INVALID_EFFECTIVE_TIMESTAMP",
+  "SERVICE_PRODUCT_INACTIVE",
+  "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+  "DRIVER_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT",
+  "TAXI_METER_REQUIRED",
+  "AIRPORT_PERMIT_REQUIRED",
+  "FIXED_FARE_NOT_ALLOWED",
+  "FIELD_REQUIRED",
+  "FIELD_INVALID",
+  "INVALID_NUMBER",
+  "INVALID_COORDINATE",
+  "INTERNAL_SERVER_ERROR",
+]);
+// Accept only UUID-shaped public request traces; arbitrary IDs are not output.
+const PUBLIC_PREPARE_TRACE = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+
+// Diagnostic only: the caller still asserts response.ok() and never retries.
+async function opsPrepareDiagnostic(response: {
+  status(): number;
+  json(): Promise<unknown>;
+}): Promise<string> {
+  const status = response.status();
+  let code = "unclassified";
+  let reason = "unclassified";
+  let trace = "unavailable";
+  if (status >= 400) {
+    try {
+      const body: unknown = await response.json();
+      if (
+        body === null ||
+        typeof body !== "object" ||
+        Array.isArray(body) ||
+        !("error" in body)
+      ) {
+        reason = "non-api-envelope";
+      } else {
+        const error = body.error;
+        if (
+          typeof error !== "string" &&
+          (error === null || typeof error !== "object" || Array.isArray(error))
+        ) {
+          reason = "non-api-envelope";
+        } else {
+          const fields =
+            typeof error === "string"
+              ? null
+              : (error as {
+                  code?: unknown;
+                  message?: unknown;
+                  trace_id?: unknown;
+                  traceId?: unknown;
+                });
+          const candidate = fields ? fields.code : error;
+          if (
+            typeof candidate === "string" &&
+            PUBLIC_PREPARE_CODES.has(candidate)
+          ) {
+            code = candidate;
+            if (code === "review_supply_unavailable" && fields) {
+              const message = fields.message;
+              reason =
+                message === "Rehearsal product storage is unavailable."
+                  ? "product-storage"
+                  : message === "Reservation product is unavailable."
+                    ? "reservation-product"
+                    : message ===
+                        "Established rehearsal supply templates are unavailable."
+                      ? "supply-templates"
+                      : "review_supply_unavailable";
+            }
+          }
+          if (fields) {
+            const candidateTrace = [fields.trace_id, fields.traceId].find(
+              (value) =>
+                typeof value === "string" && PUBLIC_PREPARE_TRACE.test(value),
+            );
+            if (typeof candidateTrace === "string") trace = candidateTrace;
+          }
+        }
+      }
+    } catch {
+      // Empty/HTML/unparseable response must not mask the original HTTP failure.
+      reason = "non-json";
+    }
+  }
+  return `Ops prepare status=${status} code=${code} reason=${reason} trace=${trace}`;
+}
+
 type JourneyStep = ReturnType<typeof createJourneyProgress>["step"];
 
 const sharedDev = process.env.PAX_REVIEW_SHARED_DEV_SMOKE === "true";
@@ -1221,23 +1338,9 @@ test("three new PG orders travel through real Passenger, Ops and Driver UIs, inc
       );
       await ops.getByRole("button", { name: "準備虛構演練車司" }).click();
       const preparedResponse = await preparing;
-      let prepareFailure = "unclassified";
-      if (!preparedResponse.ok()) {
-        const body = await preparedResponse.json().catch(() => null);
-        if (body?.error?.code === "review_supply_unavailable") {
-          const reasons: Record<string, string> = {
-            "Rehearsal product storage is unavailable.": "product-storage",
-            "Reservation product is unavailable.": "reservation-product",
-            "Established rehearsal supply templates are unavailable.":
-              "supply-templates",
-          };
-          prepareFailure =
-            reasons[body.error.message] ?? "review_supply_unavailable";
-        }
-      }
       expect(
         preparedResponse.ok(),
-        `Ops prepare status=${preparedResponse.status()} reason=${prepareFailure}`,
+        await opsPrepareDiagnostic(preparedResponse),
       ).toBe(true);
       await expect(
         ops.getByText("已準備兩組合成車司；未建立訂單、派遣或付款。"),
