@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { describe, expect, it, beforeEach } from "vitest";
 import * as jwt from "jsonwebtoken";
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
@@ -7,6 +8,12 @@ import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ApiRequestError } from "../../apps/api/src/common/api-envelope";
 import { IdentityRepository } from "../../apps/api/src/modules/identity/identity.repository";
+import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
+import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
+
+const { Reflector } = createRequire(
+  new URL("../../apps/api/package.json", import.meta.url),
+)("@nestjs/core");
 
 describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
   let oidcService: OidcPkceService;
@@ -524,35 +531,172 @@ describe("OidcPkceService & BFF Auth Flow (IAM-IDP-001)", () => {
       const service = new OidcPkceService(auth, tenantPartnerService);
       const code = "partner_canonical_valid_code";
       const sub = `sub_oidc_${createHash("sha256").update(code).digest("hex").slice(0, 12)}`;
-      await (service as any).partnerUserIdentityLinkRepo.resolveOrCreate({ entrySlug: "yuhe-residence", partnerUserRef: sub });
-      const login = service.generateLoginParameters("partner", { partnerId: "yuhe-residence" });
-      const command = { provider: "oidc" as const, code, state: login.state, callbackUrl: "http://localhost:3000/api/auth/callback", partnerId: "yuhe-residence" };
-      const session = await service.exchangePartnerCallbackSession(command, { stateToken: login.stateToken });
+      await (service as any).partnerUserIdentityLinkRepo.resolveOrCreate({
+        entrySlug: "yuhe-residence",
+        partnerUserRef: sub,
+      });
+      const login = service.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      const command = {
+        provider: "oidc" as const,
+        code,
+        state: login.state,
+        callbackUrl: "http://localhost:3000/api/auth/callback",
+        partnerId: "yuhe-residence",
+      };
+      const session = await service.exchangePartnerCallbackSession(command, {
+        stateToken: login.stateToken,
+      });
       const payload = auth.verify(session.accessToken)!;
       const entry = tenantPartnerService.getPartnerEntry("yuhe-residence");
-      expect(payload).toMatchObject({ realm: "partner", actorType: "partner_user", partnerId: entry.entrySlug, partnerEntrySlug: entry.entrySlug, roles: ["partner_admin"], scopes: ["partner:read", "partner:write"], tokenVersion: Date.parse(entry.updatedAt) });
+      expect(payload).toMatchObject({
+        realm: "partner",
+        actorType: "partner_user",
+        partnerId: entry.entrySlug,
+        partnerEntrySlug: entry.entrySlug,
+        roles: ["partner_admin"],
+        scopes: ["partner:read", "partner:write"],
+        tokenVersion: Date.parse(entry.updatedAt),
+      });
       expect(payload.sid).toBeTruthy();
       expect(payload.jti).toBeTruthy();
       expect(payload.auth_time).toBeGreaterThan(0);
       expect(payload.acr).toBeTypeOf("string");
       expect(payload.policyVersion).toBeTruthy();
-      expect(await repository.getSession(payload.sid!)).toMatchObject({ status: "active", currentTokenId: payload.jti, partnerEntrySlug: entry.entrySlug, tokenVersion: payload.tokenVersion });
-      expect(await auth.verifyAccessToken(session.accessToken)).toMatchObject({ sid: payload.sid, sub: payload.sub });
-      expect(await auth.verifyAccessToken(`${session.accessToken}forged`)).toBeNull();
+      expect(await repository.getSession(payload.sid!)).toMatchObject({
+        status: "active",
+        currentTokenId: payload.jti,
+        partnerEntrySlug: entry.entrySlug,
+        tokenVersion: payload.tokenVersion,
+      });
+      expect(await auth.verifyAccessToken(session.accessToken)).toMatchObject({
+        sid: payload.sid,
+        sub: payload.sub,
+      });
+      const controller = new AuthController(
+        auth,
+        tenantPartnerService,
+        {} as never,
+      );
+      const guard = new BootstrapAuthGuard(new Reflector(), auth);
+      const request = {
+        method: "GET",
+        url: "/api/auth/session",
+        headers: { authorization: `Bearer ${session.accessToken}` },
+        identity: null as ReturnType<
+          JwtAuthService["toRequestIdentity"]
+        > | null,
+      };
+      const context = {
+        switchToHttp: () => ({ getRequest: () => request }),
+        getHandler: () => AuthController.prototype.getAuthSession,
+        getClass: () => AuthController,
+      } as never;
+      expect(await guard.canActivate(context)).toBe(true);
+      expect(controller.getAuthSession(request.identity).data).toMatchObject({
+        active: true,
+        identity: {
+          realm: "partner",
+          actorType: "partner_user",
+          partnerEntrySlug: entry.entrySlug,
+          sessionId: payload.sid,
+        },
+      });
+      expect(
+        await auth.verifyAccessToken(`${session.accessToken}forged`),
+      ).toBeNull();
+      request.headers.authorization = `Bearer ${session.accessToken}forged`;
+      await expect(guard.canActivate(context)).rejects.toMatchObject({
+        code: "JWT_INVALID",
+      });
+      request.headers.authorization = `Bearer ${session.accessToken}`;
+      // Mutate only the in-memory entry fixture; production verifier still
+      // calls getPartnerEntry and compares its real updatedAt fingerprint.
+      const entries = (
+        tenantPartnerService as unknown as {
+          partnerEntries: { entrySlug: string; updatedAt: string }[];
+        }
+      ).partnerEntries;
+      const storedEntry = entries.find(
+        (item) => item.entrySlug === entry.entrySlug,
+      )!;
+      const originalVersion = storedEntry.updatedAt;
+      storedEntry.updatedAt = new Date(
+        Date.parse(originalVersion) + 1000,
+      ).toISOString();
+      try {
+        expect(await auth.verifyAccessToken(session.accessToken)).toBeNull();
+      } finally {
+        storedEntry.updatedAt = originalVersion;
+      }
       await auth.revokeCurrentSession(payload.sid!);
       expect(await auth.verifyAccessToken(session.accessToken)).toBeNull();
+      await expect(guard.canActivate(context)).rejects.toMatchObject({
+        code: "JWT_INVALID",
+      });
     });
 
     it("denies mismatched partner scope, wrong state and replay without minting a session", async () => {
       const repo = new IdentityRepository();
       const auth = new JwtAuthService(repo, tenantPartnerService);
       const service = new OidcPkceService(auth, tenantPartnerService);
-      const login = service.generateLoginParameters("partner", { partnerId: "yuhe-residence" });
-      const base = { provider: "oidc" as const, code: "partner_canonical_valid_code", state: login.state, callbackUrl: "http://localhost:3000/api/auth/callback" };
-      await expect(service.exchangePartnerCallbackSession({ ...base, state: "wrong" }, { stateToken: login.stateToken })).rejects.toThrow(ApiRequestError);
-      await expect(service.exchangePartnerCallbackSession({ ...base, partnerId: "other-entry" }, { stateToken: login.stateToken })).rejects.toThrow(ApiRequestError);
-      await expect(service.exchangePartnerCallbackSession({ ...base, code: "invalid_code", partnerId: "yuhe-residence" }, { stateToken: login.stateToken })).rejects.toThrow(ApiRequestError);
-      await expect(service.exchangePartnerCallbackSession({ ...base, partnerId: "yuhe-residence" }, { stateToken: login.stateToken })).rejects.toThrow(ApiRequestError);
+      const login = service.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      const base = {
+        provider: "oidc" as const,
+        code: "partner_canonical_valid_code",
+        state: login.state,
+        callbackUrl: "http://localhost:3000/api/auth/callback",
+      };
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, state: "wrong" },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, partnerId: "other-entry" },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, code: "invalid_code", partnerId: "yuhe-residence" },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toThrow(ApiRequestError);
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, partnerId: "yuhe-residence" },
+          { stateToken: login.stateToken },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: { message: expect.stringContaining("already been used") },
+        },
+      });
+
+      const expiredLogin = service.generateLoginParameters("partner", {
+        partnerId: "yuhe-residence",
+      });
+      const stateRecord = service.verifyStateToken(expiredLogin.stateToken)!;
+      const expiredToken = service.createSignedStateToken({
+        ...stateRecord,
+        expiresAt: Date.now() - 1,
+      });
+      await expect(
+        service.exchangePartnerCallbackSession(
+          { ...base, state: expiredLogin.state, partnerId: "yuhe-residence" },
+          { stateToken: expiredToken },
+        ),
+      ).rejects.toMatchObject({
+        response: {
+          error: { message: expect.stringContaining("invalid or expired") },
+        },
+      });
     });
   });
 

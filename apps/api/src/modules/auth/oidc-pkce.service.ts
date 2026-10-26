@@ -1295,7 +1295,9 @@ export class OidcPkceService {
         expiresIn: "8h",
         ensurePrincipal: true,
         tokenVersion: Date.parse(matchedEntry.updatedAt),
-        authTime: new Date((claims.auth_time ?? Math.floor(Date.now() / 1000)) * 1000).toISOString(),
+        authTime: new Date(
+          (claims.auth_time ?? Math.floor(Date.now() / 1000)) * 1000,
+        ).toISOString(),
         amr,
         acr: claims.acr ?? "",
         policyVersion: "v1",

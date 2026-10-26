@@ -7,8 +7,7 @@ const CSRF_COOKIE_NAME = "drts_csrf";
 
 function isSecureEnvironment(req: NextRequest): boolean {
   return (
-    process.env.NODE_ENV === "production" ||
-    req.nextUrl.protocol === "https:"
+    process.env.NODE_ENV === "production" || req.nextUrl.protocol === "https:"
   );
 }
 
@@ -56,13 +55,19 @@ export async function GET(
 
     if (!res.ok || !data.data?.authorization_url) {
       return NextResponse.json(
-        { error: "AUTH_LOGIN_FAILED", message: "Could not generate partner login URL" },
+        {
+          error: "AUTH_LOGIN_FAILED",
+          message: "Could not generate partner login URL",
+        },
         { status: res.status },
       );
     }
 
     const { authorization_url, state_token } = data.data;
-    const cookiePayload = JSON.stringify({ stateToken: state_token, returnUrl });
+    const cookiePayload = JSON.stringify({
+      stateToken: state_token,
+      returnUrl,
+    });
 
     const redirectRes = NextResponse.redirect(authorization_url);
     redirectRes.cookies.set("drts_oidc_state", cookiePayload, {
@@ -84,7 +89,8 @@ export async function GET(
       return NextResponse.json(
         {
           error: "AUTH_SESSION_EXCHANGE_DENIED",
-          message: "OIDC state cookie missing or expired. Managed HttpOnly BFF state boundary enforced.",
+          message:
+            "OIDC state cookie missing or expired. Managed HttpOnly BFF state boundary enforced.",
         },
         { status: 400 },
       );
@@ -105,27 +111,31 @@ export async function GET(
 
     const callbackUrl = `${request.nextUrl.origin}/api/auth/callback`;
 
-    const exchangeRes = await fetch(`${API_URL}/api/auth/partner/callback-session`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-oidc-state-token": stateToken,
+    const exchangeRes = await fetch(
+      `${API_URL}/api/auth/partner/callback-session`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-oidc-state-token": stateToken,
+        },
+        body: JSON.stringify({
+          provider: "oidc",
+          callbackUrl,
+          code,
+          state,
+          ...(pkceVerifier ? { pkceVerifier } : {}),
+        }),
       },
-      body: JSON.stringify({
-        provider: "oidc",
-        callbackUrl,
-        code,
-        state,
-        ...(pkceVerifier ? { pkceVerifier } : {}),
-      }),
-    });
+    );
 
     const data = await exchangeRes.json();
     if (!exchangeRes.ok || !data.data?.access_token) {
       return NextResponse.json(
         {
           error: data.error?.code || "AUTH_SESSION_EXCHANGE_DENIED",
-          message: data.error?.message || "Partner OIDC session exchange failed",
+          message:
+            data.error?.message || "Partner OIDC session exchange failed",
         },
         { status: exchangeRes.status },
       );
@@ -133,8 +143,13 @@ export async function GET(
 
     const session = data.data;
     const csrfToken = randomBytes(32).toString("base64url");
-    const targetRedirect = sanitizeReturnPath(returnUrl, request.nextUrl.origin);
-    const response = NextResponse.redirect(new URL(targetRedirect, request.nextUrl.origin));
+    const targetRedirect = sanitizeReturnPath(
+      returnUrl,
+      request.nextUrl.origin,
+    );
+    const response = NextResponse.redirect(
+      new URL(targetRedirect, request.nextUrl.origin),
+    );
 
     response.cookies.set(SESSION_COOKIE_NAME, session.access_token, {
       httpOnly: true,
