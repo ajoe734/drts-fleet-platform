@@ -1281,7 +1281,11 @@ export class OidcPkceService {
         actorType: "partner_user",
         actorId: identity.actorId,
         principalId: identity.actorId,
-        subject: claims.sub,
+        // The verified IdP sub selects the entry-scoped link above and stays
+        // in the OIDC audit. Canonical principals use the link's stable ID:
+        // two valid entries for one IdP sub must not collide on the global
+        // identity_principals UNIQUE(issuer, subject) constraint.
+        subject: identity.actorId,
         realm: "partner",
         tenantId: identity.tenantId,
         partnerId: matchedEntry.entrySlug,
