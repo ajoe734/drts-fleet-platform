@@ -3,7 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
 import { describe, expect, it } from "vitest";
-import { toApiListData, toApiSuccessEnvelope } from "../../../apps/api/src/common/api-envelope";
+import {
+  toApiErrorEnvelope,
+  toApiListData,
+  toApiSuccessEnvelope,
+} from "../../../apps/api/src/common/api-envelope";
 import { recordsToCsv } from "../../../apps/api/src/common/csv";
 import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import {
@@ -940,6 +944,55 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       expectedPreviewControlled: true,
       expectedRetained: false,
     },
+    ...(
+      [
+        ["preview-error-envelope", "daily-report-preview:envelope-not-ok"],
+        ["preview-invalid-json", "daily-report-preview:invalid-json"],
+        ["preview-missing-meta", "object response required"],
+        ["preview-invalid-meta", "daily-report-preview:invalid-success-meta"],
+        ["preview-error-with-data", "daily-report-preview:envelope-not-ok"],
+        ["preview-error-null", "daily-report-preview:envelope-not-ok"],
+        ["preview-missing-data", "object response required"],
+        ["preview-missing-page-info", "object response required"],
+        ["preview-invalid-page-info", "daily-report-preview:invalid-page-info"],
+        ["preview-wrong-items", "array response required"],
+        ["rebuilt-preview-wrong-data", "object response required"],
+        [
+          "reload-jobs-error-envelope",
+          "daily-report-reload-jobs:envelope-not-ok",
+        ],
+        [
+          "create-job-error-envelope",
+          "daily-report-create-job-csv:envelope-not-ok",
+        ],
+        ["create-job-invalid-json", "daily-report-create-job-csv:invalid-json"],
+        ["create-job-wrong-data", "object response required"],
+        ["create-job-missing-data", "object response required"],
+        [
+          "create-job-invalid-meta",
+          "daily-report-create-job-csv:invalid-success-meta",
+        ],
+        [
+          "job-detail-error-envelope",
+          "daily-report-job-detail-csv:envelope-not-ok",
+        ],
+        ["job-detail-wrong-data", "object response required"],
+      ] as const
+    ).map(([caseName, expectedFailureStage]) => ({
+      caseName,
+      expectedFailureStage,
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: false,
+    })),
+    {
+      caseName: "legacy ok:true list/object envelopes remain supported",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
   ])(
     "drives preview rebuild, 3-format job creation, /reports reload, and 3 artifact downloads in a socket-free harness ($caseName)",
     async ({
@@ -947,8 +1000,28 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       jobSiblingOrderId,
       expectedPreviewControlled,
       expectedRetained,
-      previewFailure,
+      caseName: failureCase,
+      ...scenario
     }) => {
+      const previewFailure =
+        "previewFailure" in scenario ? scenario.previewFailure : undefined;
+      const failureStage =
+        "expectedFailureStage" in scenario
+          ? scenario.expectedFailureStage
+          : undefined;
+      const legacy = failureCase.startsWith("legacy ok:true");
+      const wireBytes = (data: unknown) =>
+        legacy
+          ? Buffer.from(JSON.stringify({ ok: true, data }))
+          : successWireBytes(data);
+      const errorWireBytes = () =>
+        Buffer.from(
+          JSON.stringify(
+            deepToSnakeCase(
+              toApiErrorEnvelope("REPORT_READ_FAILED", "private-report-error"),
+            ),
+          ),
+        );
       const tempDir = await mkdtemp(
         path.join(tmpdir(), "owned-daily-reports-test-"),
       );
@@ -1081,7 +1154,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               null,
               200,
               { "content-type": "application/json" },
-              successWireBytes(toApiListData(createdJobs.map((j) => j.detail))),
+              failureCase === "reload-jobs-error-envelope" && pageVisits === 2
+                ? errorWireBytes()
+                : wireBytes(toApiListData(createdJobs.map((j) => j.detail))),
             );
             return null;
           },
@@ -1112,22 +1187,76 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     null,
                     previewFailure === true ? 503 : 200,
                     { "content-type": "application/json" },
-                    Buffer.from(
-                      JSON.stringify(
-                        previewFailure === true
-                          ? {
-                              error: {
-                                code: "REPORT_READ_FAILED",
-                                trace_id:
-                                  "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
-                                message: "private-error-message",
-                              },
-                            }
-                          : deepToSnakeCase(
-                              toApiSuccessEnvelope(toApiListData(rows)),
-                            ),
-                      ),
-                    ),
+                    failureCase === "preview-invalid-json"
+                      ? Buffer.from("not-json")
+                      : failureCase === "preview-error-envelope"
+                        ? errorWireBytes()
+                        : failureCase === "preview-missing-meta"
+                          ? Buffer.from(
+                              JSON.stringify({ data: toApiListData(rows) }),
+                            )
+                          : failureCase === "preview-invalid-meta"
+                            ? Buffer.from(
+                                JSON.stringify({
+                                  data: toApiListData(rows),
+                                  meta: { request_id: "x", timestamp: "bad" },
+                                }),
+                              )
+                            : failureCase === "preview-error-with-data"
+                              ? Buffer.from(
+                                  JSON.stringify({
+                                    ok: false,
+                                    data: toApiListData(rows),
+                                    error: {
+                                      code: "REPORT_READ_FAILED",
+                                      message: "private-report-error",
+                                    },
+                                  }),
+                                )
+                              : failureCase === "preview-error-null"
+                                ? Buffer.from(
+                                    JSON.stringify({
+                                      ...toApiSuccessEnvelope(
+                                        toApiListData(rows),
+                                      ),
+                                      error: null,
+                                    }),
+                                  )
+                                : failureCase === "preview-missing-data"
+                                  ? Buffer.from(
+                                      JSON.stringify({
+                                        meta: {
+                                          request_id: "x",
+                                          timestamp: new Date().toISOString(),
+                                        },
+                                      }),
+                                    )
+                                  : failureCase === "preview-missing-page-info"
+                                    ? wireBytes({ items: rows })
+                                    : failureCase ===
+                                        "preview-invalid-page-info"
+                                      ? wireBytes({
+                                          ...toApiListData(rows),
+                                          pageInfo: { page: 0 },
+                                        })
+                                      : failureCase === "preview-wrong-items"
+                                        ? wireBytes({
+                                            ...toApiListData(rows),
+                                            items: "not-an-array",
+                                          })
+                                        : previewFailure === true
+                                          ? Buffer.from(
+                                              JSON.stringify({
+                                                error: {
+                                                  code: "REPORT_READ_FAILED",
+                                                  trace_id:
+                                                    "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                                                  message:
+                                                    "private-error-message",
+                                                },
+                                              }),
+                                            )
+                                          : wireBytes(toApiListData(rows)),
                   );
                 },
               });
@@ -1163,9 +1292,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     null,
                     200,
                     { "content-type": "application/json" },
-                    successWireBytes(
-                      toApiListData([previewSiblingRow, ownRow]),
-                    ),
+                    failureCase === "rebuilt-preview-wrong-data"
+                      ? wireBytes("not-a-list")
+                      : wireBytes(toApiListData([previewSiblingRow, ownRow])),
                   );
                 },
               });
@@ -1199,11 +1328,38 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     JSON.stringify(reqBody),
                     201,
                     { "content-type": "application/json" },
-                    successWireBytes({
-                      jobId,
-                      status: "completed",
-                      acceptedAt: "2026-10-25T18:32:00.000Z",
-                    }),
+                    failureCase === "create-job-invalid-json" &&
+                      format === "csv"
+                      ? Buffer.from("not-json")
+                      : failureCase === "create-job-error-envelope" &&
+                          format === "csv"
+                        ? errorWireBytes()
+                        : failureCase === "create-job-wrong-data" &&
+                            format === "csv"
+                          ? wireBytes([jobId])
+                          : failureCase === "create-job-missing-data" &&
+                              format === "csv"
+                            ? Buffer.from(
+                                JSON.stringify({
+                                  meta: {
+                                    request_id: "x",
+                                    timestamp: new Date().toISOString(),
+                                  },
+                                }),
+                              )
+                            : failureCase === "create-job-invalid-meta" &&
+                                format === "csv"
+                              ? Buffer.from(
+                                  JSON.stringify({
+                                    data: { job_id: jobId },
+                                    meta: { request_id: "", timestamp: "bad" },
+                                  }),
+                                )
+                              : wireBytes({
+                                  jobId,
+                                  status: "completed",
+                                  acceptedAt: "2026-10-25T18:32:00.000Z",
+                                }),
                   );
                 },
               });
@@ -1302,9 +1458,21 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                                         message: "private-detail-error",
                                       },
                                     }
-                                  : deepToSnakeCase(
-                                      toApiSuccessEnvelope(foundJob.detail),
-                                    ),
+                                  : failureCase === "job-detail-error-envelope"
+                                    ? JSON.parse(
+                                        errorWireBytes().toString("utf8"),
+                                      )
+                                    : failureCase === "job-detail-wrong-data"
+                                      ? JSON.parse(
+                                          wireBytes([foundJob.detail]).toString(
+                                            "utf8",
+                                          ),
+                                        )
+                                      : JSON.parse(
+                                          wireBytes(foundJob.detail).toString(
+                                            "utf8",
+                                          ),
+                                        ),
                               ),
                             ),
                           );
@@ -1465,6 +1633,17 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             "private-error-message",
           );
           expect(createdJobs).toHaveLength(0);
+          await expect(
+            stat(path.join(tempDir, "daily-reports")),
+          ).rejects.toThrow();
+          return;
+        }
+        if (failureStage) {
+          await expect(run).rejects.toThrow(failureStage);
+          expect(unrouteCalled).toBe(true);
+          expect(JSON.stringify(evidence.events)).not.toContain(
+            "private-report-error",
+          );
           await expect(
             stat(path.join(tempDir, "daily-reports")),
           ).rejects.toThrow();
