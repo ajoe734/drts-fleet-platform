@@ -137,6 +137,11 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     await repository.ensureRoleBindingRecord({ ...binding, roleCode: "fleet_partner_finance",
       validTo: null, updatedAt: new Date(Date.now() + 7000).toISOString() });
     const linkedSession = await login();
+    const failingRead = vi.spyOn(repository, "findMembershipById")
+      .mockRejectedValueOnce(new Error("synthetic IAM read failure"));
+    expect(await jwt.verifyAccessToken(linkedSession.accessToken)).toBeNull();
+    failingRead.mockRestore();
+    expect(await jwt.verifyAccessToken(linkedSession.accessToken)).not.toBeNull();
     const fallbackLinks = (link as unknown as { fallbackLinks: Map<string, {status: string}> }).fallbackLinks;
     const linkedEntry = [...fallbackLinks.values()].find((candidate) =>
       (candidate as {drtsPassengerId?: string}).drtsPassengerId === linked.drtsPassengerId)!;
@@ -222,6 +227,10 @@ describe("manager producer through production repository SQL (transactional fake
     const manager = { realm: "platform", actorType: "platform_admin", actorId: "manager",
       principalId: "manager", scopes: ["foundation:write"], amr: [] } as never;
     const command = { entrySlug: ENTRY, partnerUserRef: SUB, roleCode: "fleet_partner_admin" as const, enabled: true };
+    await expect(service.manageFleetHumanRole(fleet.fleetPartnerId, command,
+      { ...(manager as object), realm: "partner", actorType: "partner_user" } as never)).rejects.toMatchObject({ code: "FLEET_ROLE_MANAGER_DENIED" });
+    await expect(service.manageFleetHumanRole("fleet-other", command, manager))
+      .rejects.toMatchObject({ code: "FLEET_ENTRY_NOT_FOUND" });
     const created = await service.manageFleetHumanRole(fleet.fleetPartnerId, command, manager);
     expect(created.status).toBe("active");
     expect((await service.listFleetHumanRoles(fleet.fleetPartnerId, ENTRY))[0]).toMatchObject({
