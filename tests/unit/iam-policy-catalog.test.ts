@@ -81,8 +81,8 @@ describe("IAM policy catalog", () => {
     expect(getIamFleetRoleScopes("fleet_partner_admin")).toEqual([
       "fleet:read",
       "fleet:supply:write",
-      "billing:read",
-      "billing:write",
+      "fleet:finance:read",
+      "fleet:finance:write",
     ]);
     expect(getIamFleetRoleScopes("fleet_partner_ops")).toEqual([
       "fleet:read",
@@ -90,9 +90,8 @@ describe("IAM policy catalog", () => {
       "fleet:supply:write",
     ]);
     expect(getIamFleetRoleScopes("fleet_partner_finance")).toEqual([
-      "fleet:read",
-      "billing:read",
-      "billing:write",
+      "fleet:finance:read",
+      "fleet:finance:write",
     ]);
     expect(getIamFleetRoleScopes("partner_finance")).toBeNull();
     expect(getIamActorScopePreset("partner_user")).not.toContain("fleet:read");

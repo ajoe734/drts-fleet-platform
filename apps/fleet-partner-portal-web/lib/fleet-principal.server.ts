@@ -204,6 +204,7 @@ export async function resolveFleetPrincipal(
     );
   if (
     !identity.scopes?.includes("fleet:read") &&
+    !identity.scopes?.includes("fleet:finance:read") &&
     !identity.scopes?.includes("billing:read")
   )
     throw fleetError(

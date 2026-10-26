@@ -347,6 +347,27 @@ export const IAM_SCOPE_DEFINITIONS: readonly IamScopeDefinition[] = [
     ],
   },
   {
+    scope: "fleet:finance:read",
+    allowedRealms: ["partner"],
+    description:
+      "Read own Fleet share, statements and revenue; never tenant invoices.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
+    scope: "fleet:finance:write",
+    allowedRealms: ["partner"],
+    description: "Decide own Fleet statements, not tenant billing or invoices.",
+    resourceConstraints: [
+      PARTNER_CONSTRAINT,
+      PARTNER_ENTRY_CONSTRAINT,
+      OBJECT_CONSTRAINT,
+    ],
+  },
+  {
     scope: "fleet:supply:write",
     allowedRealms: ["partner"],
     description:
@@ -1043,8 +1064,8 @@ export const IAM_FLEET_ROLE_POLICY_DEFINITIONS: readonly IamFleetRolePolicyDefin
       scopes: [
         "fleet:read",
         "fleet:supply:write",
-        "billing:read",
-        "billing:write",
+        "fleet:finance:read",
+        "fleet:finance:write",
       ],
     },
     {
@@ -1055,7 +1076,7 @@ export const IAM_FLEET_ROLE_POLICY_DEFINITIONS: readonly IamFleetRolePolicyDefin
     {
       roleCode: "fleet_partner_finance",
       roleFamily: "partner",
-      scopes: ["fleet:read", "billing:read", "billing:write"],
+      scopes: ["fleet:finance:read", "fleet:finance:write"],
     },
   ];
 

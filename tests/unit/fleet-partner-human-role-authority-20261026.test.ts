@@ -11,6 +11,7 @@ import { resolveRouteAuthPolicy } from "../../apps/api/src/common/auth/auth.poli
 import { BootstrapAuthGuard } from "../../apps/api/src/common/auth/bootstrap-auth.guard";
 import { FleetPartnerController } from "../../apps/api/src/modules/fleet-partner/fleet-partner.controller";
 import { FleetPartnerTrainingController } from "../../apps/api/src/modules/driver-academy/academy.controller";
+import { BillingSettlementController } from "../../apps/api/src/modules/billing-settlement/billing-settlement.controller";
 import { getIamFleetRoleScopes } from "../../packages/contracts/src/iam-policy-catalog";
 import { AuthController } from "../../apps/api/src/modules/auth/auth.controller";
 import { FleetPartnerService } from "../../apps/api/src/modules/fleet-partner/fleet-partner.service";
@@ -181,8 +182,56 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     expect(
       resolveRouteAuthPolicy("GET", "/api/fleet-partner/statements")
         ?.requiredScopes,
-    ).toEqual(["billing:read"]);
+    ).toEqual(["fleet:finance:read"]);
     expect(ops.identity.scopes).not.toContain("billing:read");
+    const guardedGet = (
+      token: string,
+      path: string,
+      handler: Function,
+      controller = FleetPartnerController,
+    ) =>
+      guard.canActivate({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            method: "GET",
+            url: path,
+            headers: {
+              authorization: `Bearer ${token}`,
+              "x-fleet-partner-id": "fleet-test-001",
+            },
+          }),
+        }),
+        getHandler: () => handler,
+        getClass: () => controller,
+      } as never);
+    // Old candidate: ops could read financial dashboard, trips and quality;
+    // the dashboard service actually aggregates gross/share/statement money.
+    for (const [path, handler] of [
+      [
+        "/api/fleet-partner/dashboard",
+        FleetPartnerController.prototype.getPortalDashboard,
+      ],
+      [
+        "/api/fleet-partner/trips",
+        FleetPartnerController.prototype.listPortalTrips,
+      ],
+      [
+        "/api/fleet-partner/quality-metrics",
+        FleetPartnerController.prototype.getPortalQualityMetrics,
+      ],
+    ] as const) {
+      await expect(
+        guardedGet(ops.accessToken, path, handler),
+      ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+    }
+    await expect(
+      guardedGet(
+        ops.accessToken,
+        "/api/fleet-partner/training/summary?fleetPartnerId=fleet-test-001",
+        FleetPartnerTrainingController.prototype.summary,
+        FleetPartnerTrainingController,
+      ),
+    ).resolves.toBe(true);
     await repository.ensureRoleBindingRecord({
       ...binding,
       roleCode: "fleet_partner_admin",
@@ -192,7 +241,14 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     const admin = await login();
     expect(admin.identity.roles).toEqual(["fleet_partner_admin"]);
     expect(admin.identity.scopes).toContain("fleet:supply:write");
-    expect(admin.identity.scopes).toContain("billing:write");
+    expect(admin.identity.scopes).toContain("fleet:finance:write");
+    await expect(
+      guardedGet(
+        admin.accessToken,
+        "/api/fleet-partner/quality-metrics",
+        FleetPartnerController.prototype.getPortalQualityMetrics,
+      ),
+    ).resolves.toBe(true);
     await repository.ensureRoleBindingRecord({
       ...binding,
       roleCode: "fleet_partner_finance",
@@ -201,8 +257,58 @@ describe("managed Fleet human source -> issuer -> durable verifier (in-memory po
     expect(await jwt.verifyAccessToken(admin.accessToken)).toBeNull();
     const finance = await login();
     expect(finance.identity.roles).toEqual(["fleet_partner_finance"]);
-    expect(finance.identity.scopes).toContain("billing:read");
+    expect(finance.identity.scopes).toContain("fleet:finance:read");
+    expect(finance.identity.scopes).not.toContain("billing:read");
+    expect(finance.identity.scopes).not.toContain("fleet:read");
     expect(finance.identity.scopes).not.toContain("fleet:supply:write");
+    await expect(
+      guardedGet(
+        finance.accessToken,
+        "/api/fleet-partner/statements",
+        FleetPartnerController.prototype.listPortalFleetPartnerStatements,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      guardedGet(
+        finance.accessToken,
+        "/api/fleet-partner/dashboard",
+        FleetPartnerController.prototype.getPortalDashboard,
+      ),
+    ).resolves.toBe(true);
+    for (const [path, handler] of [
+      [
+        "/api/fleet-partner/drivers",
+        FleetPartnerController.prototype.listPortalDrivers,
+      ],
+      [
+        "/api/fleet-partner/vehicles",
+        FleetPartnerController.prototype.listPortalVehicles,
+      ],
+      [
+        "/api/fleet-partner/supply-submissions",
+        FleetPartnerController.prototype.listSupplySubmissions,
+      ],
+      [
+        "/api/fleet-partner/cases",
+        FleetPartnerController.prototype.listPortalCases,
+      ],
+      [
+        "/api/fleet-partner/quality-metrics",
+        FleetPartnerController.prototype.getPortalQualityMetrics,
+      ],
+    ] as const) {
+      await expect(
+        guardedGet(finance.accessToken, path, handler),
+      ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+    }
+    await expect(
+      guardedGet(
+        finance.accessToken,
+        "/api/settlement/invoices",
+        BillingSettlementController.prototype.listPlatformInvoices,
+        BillingSettlementController,
+      ),
+    ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
     const request = {
       method: "POST",
       url: "/api/fleet-partner/supply-submissions/drivers",
@@ -357,6 +463,58 @@ describe("existing scoped credential guard compatibility without Referral/Host p
     await expect(guarded(host, "GET")).rejects.toMatchObject({
       code: "AUTH_SCOPE_DENIED",
     });
+    const guardedFinance = (
+      token: string,
+      path: string,
+      handler: Function,
+      controller = FleetPartnerController,
+    ) =>
+      guard.canActivate({
+        switchToHttp: () => ({
+          getRequest: () => ({
+            method: "GET",
+            url: path,
+            headers: {
+              authorization: `Bearer ${token}`,
+              "x-fleet-partner-id": "fleet-test-001",
+            },
+          }),
+        }),
+        getHandler: () => handler,
+        getClass: () => controller,
+      } as never);
+    // Finance-only signed credentials retain their pre-existing statement and
+    // invoice contracts; they cannot gain general Fleet operational views.
+    const legacyFinance = await issue("partner_api_key", ["billing:read"]);
+    await expect(
+      guardedFinance(
+        legacyFinance,
+        "/api/fleet-partner/statements",
+        FleetPartnerController.prototype.listPortalFleetPartnerStatements,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      guardedFinance(
+        legacyFinance,
+        "/api/settlement/invoices",
+        BillingSettlementController.prototype.listPlatformInvoices,
+        BillingSettlementController,
+      ),
+    ).resolves.toBe(true);
+    await expect(
+      guardedFinance(
+        legacyFinance,
+        "/api/fleet-partner/dashboard",
+        FleetPartnerController.prototype.getPortalDashboard,
+      ),
+    ).rejects.toMatchObject({ code: "AUTH_SCOPE_DENIED" });
+    await expect(
+      guardedFinance(
+        scoped,
+        "/api/fleet-partner/dashboard",
+        FleetPartnerController.prototype.getPortalDashboard,
+      ),
+    ).resolves.toBe(true);
   });
 
   it("retains explicitly scoped non-strict partner API key bootstrap supply without finance-only write", async () => {
@@ -451,6 +609,23 @@ describe("managed Fleet ops training guard and own-partner boundary", () => {
         getClass: () => FleetPartnerTrainingController,
       } as never);
     };
+    const academy = new FleetPartnerTrainingController({
+      fleetTrainingSummary: async (id: string) => ({ fleetPartnerId: id }),
+    } as never);
+    expect(
+      (
+        await academy.summary(
+          "fleet-1",
+          makeIdentity("fleet_partner_ops") as never,
+        )
+      ).data,
+    ).toMatchObject({ fleetPartnerId: "fleet-1" });
+    await expect(
+      academy.summary(
+        "other-fleet",
+        makeIdentity("fleet_partner_ops") as never,
+      ),
+    ).rejects.toMatchObject({ code: "ACADEMY_FORBIDDEN_FLEET_ACCESS" });
     for (const handler of methods) {
       expect(await activate(makeIdentity("fleet_partner_ops"), handler)).toBe(
         true,

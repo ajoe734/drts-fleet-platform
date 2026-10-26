@@ -1187,6 +1187,12 @@ export class BootstrapAuthGuard implements CanActivate {
     const fleetOperation =
       route.startsWith("fleet-partner/") &&
       !route.startsWith("fleet-partner/training/");
+    const financeOnly =
+      /^fleet-partner\/(?:statements|revenue)(?:\/|$)/.test(route) &&
+      requiredScopes.every(
+        (scope) =>
+          scope === "fleet:finance:read" || scope === "fleet:finance:write",
+      );
     const scopedCredential =
       ((identity.authMode === "jwt_bearer" &&
         (identity.actorType === "partner_api_key" ||
@@ -1198,13 +1204,17 @@ export class BootstrapAuthGuard implements CanActivate {
       !identity.membershipId &&
       Boolean(identity.partnerId?.trim()) &&
       identity.scopes.includes("billing:read") &&
-      identity.scopes.includes("partner:read");
+      (financeOnly || identity.scopes.includes("partner:read"));
     if (
       fleetOperation &&
       scopedCredential &&
       requiredScopes.every(
         (scope) =>
           identity.scopes.includes(scope) ||
+          (scope === "fleet:finance:read" &&
+            identity.scopes.includes("billing:read")) ||
+          (scope === "fleet:finance:write" &&
+            identity.scopes.includes("billing:write")) ||
           (scope === "fleet:read" &&
             identity.scopes.includes("partner:read")) ||
           (scope === "fleet:supply:write" &&
