@@ -2852,7 +2852,7 @@ function TripScreen({
           activeTrip.vehicleType,
           activeTrip.quote?.vehicleType,
         ),
-        driver: activeTrip.driverName || "媒合中",
+        driver: activeTrip.driverName || t("embed.trip.driverNameUnavailable"),
         plate: activeTrip.plateNumber || "待更新",
         rating: 0,
         etaMin: referralLiveMinutes(activeTrip),
