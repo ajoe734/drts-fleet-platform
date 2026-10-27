@@ -2472,6 +2472,7 @@ function NegativeScreen({
   );
 }
 
+// History still consumes zh; TripScreen translates key with its active locale.
 const tripStateLabel: Record<
   string,
   {

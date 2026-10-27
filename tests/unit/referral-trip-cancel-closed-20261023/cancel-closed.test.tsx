@@ -234,33 +234,57 @@ it.each(
   }
 });
 
-it("keeps English cancellation pending and shows the localized failure without changing the command", async () => {
-  let respond!: (value: Response) => void;
-  const fetch = vi.fn(
-    () => new Promise<Response>((resolve) => (respond = resolve)),
-  );
-  vi.stubGlobal("fetch", fetch);
-  const button = renderTrip(true, "en");
-  fireEvent.click(button);
-  expect(button.textContent).toBe("Cancelling…");
-  expect(button.disabled).toBe(true);
-  expect(fetch).toHaveBeenCalledTimes(1);
-  const [url, request] = fetch.mock.calls[0]! as unknown as [
-    string,
-    RequestInit,
-  ];
-  expect(url).toBe(`/api/referral/cancel/${trip(true).orderId}`);
-  expect(request.method).toBe("POST");
-  expect(JSON.parse(request.body as string)).toEqual({
-    idempotencyKey: expect.any(String),
-  });
-  await act(async () => {
-    respond(Response.json({ ok: false }, { status: 503 }));
-  });
-  expect(screen.getByText("Unable to cancel this trip")).toBeTruthy();
-  expect(button.textContent).toBe("Cancel trip");
-  expect(button.disabled).toBe(false);
-});
+it.each([503, 409])(
+  "keeps English cancellation pending and handles HTTP %s without changing the command",
+  async (status) => {
+    let respond!: (value: Response) => void;
+    const fetch = vi.fn(
+      () => new Promise<Response>((resolve) => (respond = resolve)),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const button = renderTrip(true, "en");
+    fireEvent.click(button);
+    expect(button.textContent).toBe("Cancelling…");
+    expect(button.disabled).toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, request] = fetch.mock.calls[0]! as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe(`/api/referral/cancel/${trip(true).orderId}`);
+    expect(request.method).toBe("POST");
+    expect(JSON.parse(request.body as string)).toEqual({
+      idempotencyKey: expect.any(String),
+    });
+    await act(async () => {
+      respond(
+        Response.json(
+          {
+            ok: false,
+            error: {
+              code:
+                status === 409
+                  ? "ORDER_NOT_CANCELABLE"
+                  : "UPSTREAM_UNAVAILABLE",
+            },
+          },
+          { status },
+        ),
+      );
+    });
+    expect(screen.getByText("Unable to cancel this trip")).toBeTruthy();
+    expect(button.textContent).toBe("Cancel trip");
+    expect(button.disabled).toBe(status === 409);
+    if (status === 409) {
+      expect(
+        screen.getByText(
+          "This trip can no longer be cancelled. Refer to the latest trip status.",
+        ),
+      ).toBeTruthy();
+      expect(button.style.background).toBe(rgb(theme.surfaceLo));
+    }
+  },
+);
 
 it("uses refreshed server cancellation authority while retaining the English locale", async () => {
   const active = trip(false, "on_trip");
