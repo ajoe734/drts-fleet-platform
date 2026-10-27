@@ -69,6 +69,7 @@ import {
   type DisplayObservations,
 } from "./display-observations";
 import {
+  ownedSupplementalArtifactPaths,
   resolveActiveTripScreenOrder,
   runOwnedDailyReportDownloads,
   type DailyReportDownloadsEvidence,
@@ -92,6 +93,9 @@ const SUBJECT = "referral-demo-yuhe-residence";
 const FLEET = "fleet-demo-001";
 const TENANT = "10000000-0000-0000-0000-000000000201";
 const DIRECTORY = ".artifacts/owned-referral-business-journey";
+const supplementalArtifacts = ownedSupplementalArtifactPaths(DIRECTORY);
+type SupplementalBookingName =
+  keyof typeof supplementalArtifacts.bookingJournals;
 const PHOTO =
   "apps/driver-app/android/app/src/main/res/drawable-mdpi/splashscreen_logo.png";
 const env = (key: string) => text(process.env[key], `configuration:${key}`);
@@ -289,7 +293,7 @@ test(journeyName, async ({ browser, request }) => {
     transport: new NativeTransport(origins, runtime, invocation),
   };
   const extraBookings: {
-    name: string;
+    name: SupplementalBookingName;
     journal?: BookingWriteJournal;
     quote?: ObjectData;
     orderId?: string;
@@ -2427,7 +2431,7 @@ test(journeyName, async ({ browser, request }) => {
       // TEN03–06 extend this same managed FULL caller. The original main order,
       // journal and all C1–C4 observations above retain their own custody.
       const reportCase = async (
-        name: string,
+        name: keyof typeof supplementalArtifacts.reportDirectories,
         source: ObjectData,
         expected: NonNullable<
           Parameters<
@@ -2452,7 +2456,7 @@ test(journeyName, async ({ browser, request }) => {
           plateNo: ownPlateNo,
           pickupAddress,
           dropoffAddress,
-          directory: `${DIRECTORY}/TEN03-06/${name}`,
+          directory: supplementalArtifacts.reportDirectories[name],
           definitionSha: definition,
           runtimeSha: runtime,
           recoveryOnly: RECOVERY_ONLY,
@@ -2470,7 +2474,10 @@ test(journeyName, async ({ browser, request }) => {
         );
         return source;
       };
-      const bookExtraFromUI = async (name: string, intendedInput?: string) => {
+      const bookExtraFromUI = async (
+        name: SupplementalBookingName,
+        intendedInput?: string,
+      ) => {
         const state: (typeof extraBookings)[number] = { name, actions: [] };
         extraBookings.push(state); // Custody exists even when response/storage fails.
         assertNoForeignActive((await referral("/api/referral/active")).data);
@@ -2568,7 +2575,7 @@ test(journeyName, async ({ browser, request }) => {
               },
               (snapshot) =>
                 persistPrivateJson(
-                  `${DIRECTORY}/TEN03-06/${name}/booking-write-journal.json`,
+                  supplementalArtifacts.bookingJournals[name],
                   snapshot,
                 ),
             );
@@ -2749,7 +2756,8 @@ test(journeyName, async ({ browser, request }) => {
         index,
         intendedInput,
       ] of futureTaipeiReservationIntents().entries()) {
-        const name = `reservation-${index + 1}`;
+        const name = (["reservation-1", "reservation-2"] as const)[index];
+        requireFact(name, "bounded two reservation cases");
         const booking = await bookExtraFromUI(name, intendedInput);
         const after = await verifyOwnedReservationCancellation({
           intendedInput,
@@ -3172,11 +3180,14 @@ test(journeyName, async ({ browser, request }) => {
           }),
         );
       await cleanup("supplemental-custody-persist", () =>
-        persistPrivateJson(`${DIRECTORY}/TEN03-06-custody.json`, {
+        persistPrivateJson(supplementalArtifacts.custody, {
           definitionSha: definition,
           runtimeSha: runtime,
           bookings: extraBookings.map((b) => ({
             name: b.name,
+            journalFile: b.journal?.current
+              ? supplementalArtifacts.bookingJournals[b.name]
+              : null,
             orderId: b.orderId,
             terminal: b.terminal ?? false,
             journalState: b.journal?.current?.state,

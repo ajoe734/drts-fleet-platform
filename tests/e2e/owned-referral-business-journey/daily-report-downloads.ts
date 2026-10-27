@@ -21,6 +21,27 @@ import {
 export const DAILY_REPORT_FORMATS = ["csv", "xlsx", "pdf"] as const;
 export type DailyReportFormat = (typeof DAILY_REPORT_FORMATS)[number];
 
+// Shared by the managed FULL writer and its hosted upload path regression.
+// Only these owned cases have public custody; private siblings stay excluded.
+export function ownedSupplementalArtifactPaths(directory: string) {
+  const root = `${directory}/TEN03-06`;
+  return {
+    custody: `${directory}/TEN03-06-custody.json`,
+    bookingJournals: {
+      "reservation-1": `${root}/reservation-1/booking-write-journal.json`,
+      "reservation-2": `${root}/reservation-2/booking-write-journal.json`,
+      redispatched: `${root}/redispatched/booking-write-journal.json`,
+    },
+    reportDirectories: {
+      "C1-cancelled-null": `${root}/C1-cancelled-null`,
+      "reservation-1": `${root}/reservation-1`,
+      "reservation-2": `${root}/reservation-2`,
+      "reservation-1-after-both": `${root}/reservation-1-after-both`,
+      redispatched: `${root}/redispatched`,
+    },
+  } as const;
+}
+
 export const DAILY_REPORT_MIME_TYPES: Readonly<
   Record<DailyReportFormat, string>
 > = {
