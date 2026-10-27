@@ -4655,6 +4655,7 @@ describe("original referral first-visit issuer and canonical zero-order evidence
     change: {
       entry?: unknown;
       issued?: unknown;
+      issueStatus?: number;
       orders?: unknown;
       orderStatus?: number;
       orderSha?: string;
@@ -4682,7 +4683,7 @@ describe("original referral first-visit issuer and canonical zero-order evidence
         if (url.pathname === "/api/partner/entries/yuhe-residence")
           return reply(change.entry ?? entry);
         if (url.pathname === "/api/partner/ingress/referral-embed-handoff")
-          return reply(change.issued ?? issued);
+          return reply(change.issued ?? issued, change.issueStatus ?? 201);
         if (url.pathname === "/api/auth/session")
           return reply(
             {
@@ -4766,6 +4767,12 @@ describe("original referral first-visit issuer and canonical zero-order evidence
     expect(JSON.stringify([before, after])).not.toMatch(
       /RAM|private|other-person|WIF|OPS/,
     );
+  });
+  it("rejects an issuer HTTP 200 in place of the formal Nest 201", async () => {
+    ports({ issueStatus: 200 });
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow("HTTP 200");
   });
   it.each([
     ["missing passenger", { drts_passenger_id: undefined }],
@@ -4874,7 +4881,7 @@ describe("original referral first-visit issuer and canonical zero-order evidence
     await expect(
       prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
     ).rejects.toThrow(
-      /^Referral evidence GET \/api\/partner\/entries\/yuhe-residence failed$/,
+      /^Referral evidence GET \/api\/partner\/entries\/yuhe-residence failed: transport or JSON unavailable$/,
     );
   });
 });

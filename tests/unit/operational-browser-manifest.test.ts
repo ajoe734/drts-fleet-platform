@@ -11,6 +11,7 @@ import {
   operationalRequestHeaders,
   prepareOperationalReferralHandoff,
   observeOperationalReferralZeroOrders,
+  OperationalReferralEvidenceError,
   requiredOrigin,
 } from "../e2e/operational-document-upload";
 
@@ -1537,15 +1538,15 @@ describe("actual original first-visit refusal chain", () => {
     let requests:
       | ((r: { url(): string; method(): string }) => void)
       | undefined;
-    let context: any;
     let orderReads = 0;
     vi.stubGlobal(
       "fetch",
       async (input: string | URL, options: RequestInit) => {
         const url = new URL(input);
         expect(url.origin).toBe(api);
-        const reply = (data: unknown) =>
+        const reply = (data: unknown, status = 200) =>
           new Response(JSON.stringify({ data }), {
+            status,
             headers: { "x-drts-candidate-sha": sha },
           });
         if (url.pathname.endsWith("/entries/yuhe-residence"))
@@ -1559,18 +1560,21 @@ describe("actual original first-visit refusal chain", () => {
         if (url.pathname.endsWith("referral-embed-handoff")) {
           sequence.push("issue");
           expect(JSON.parse(String(options.body)).consentBundle).toBeNull();
-          return reply({
-            handoff_id: handoffId,
-            artifact: "x".repeat(32),
-            token_type: "SingleUse",
-            expires_in: "120s",
-            expires_at: "2099-01-01T00:00:00Z",
-            partner_entry_slug: "yuhe-residence",
-            entry_host: host,
-            drts_passenger_id: "private-passenger",
-            consent_required: true,
-            consent_bundle_version: null,
-          });
+          return reply(
+            {
+              handoff_id: handoffId,
+              artifact: "x".repeat(32),
+              token_type: "SingleUse",
+              expires_in: "120s",
+              expires_at: "2099-01-01T00:00:00Z",
+              partner_entry_slug: "yuhe-residence",
+              entry_host: host,
+              drts_passenger_id: "private-passenger",
+              consent_required: true,
+              consent_bundle_version: null,
+            },
+            201,
+          );
         }
         if (url.pathname === "/api/auth/session") {
           sequence.push("ops-session");
@@ -1608,6 +1612,9 @@ describe("actual original first-visit refusal chain", () => {
     );
     const body = (fields: Record<string, unknown> = {}) => ({
       ok: true,
+      nextPath:
+        "/embed/yuhe-residence?state=consent&entryHost=" +
+        encodeURIComponent(host),
       session: {
         handoffId,
         recoveryScope: scope,
@@ -1660,6 +1667,10 @@ describe("actual original first-visit refusal chain", () => {
     });
     const activeGet = vi.fn(async (url: string, options: any) => {
       expect(sessionEstablished).toBe(true);
+      if (new URL(url).pathname === "/embed/yuhe-residence") {
+        sequence.push("fallback-read");
+        return response({}, change.fallbackStatus, change.fallbackSha);
+      }
       expect(url).toBe(origin + "/api/referral/active");
       expect(options.maxRedirects).toBe(0);
       sequence.push("active-rejection");
@@ -1693,9 +1704,10 @@ describe("actual original first-visit refusal chain", () => {
     const off = vi.fn(() => {
       requests = undefined;
     });
-    context = { request: { post } };
+    const context: any = { request: { post } };
     const page = {
       context: () => context,
+      url: () => fallbackUrl.toString(),
       request: { get: activeGet },
       on: (event: string, observer: typeof requests) => {
         expect(event).toBe("request");
@@ -1711,15 +1723,6 @@ describe("actual original first-visit refusal chain", () => {
       waitForURL: async (matches: (url: URL) => boolean) => {
         expect(matches(fallbackUrl)).toBe(true);
       },
-      waitForResponse: async (matches: (r: any) => boolean) => {
-        const r = {
-          ...response({}, change.fallbackStatus, change.fallbackSha),
-          url: () => fallbackUrl.toString(),
-          request: () => ({ method: () => "GET" }),
-        };
-        expect(matches(r)).toBe(true);
-        return r;
-      },
     };
     const browserExpect = (value: any, message?: string) =>
       value?.isControl
@@ -1731,6 +1734,7 @@ describe("actual original first-visit refusal chain", () => {
       interactionTimeoutMs: 10,
       prepareOperationalReferralHandoff,
       observeOperationalReferralZeroOrders,
+      OperationalReferralEvidenceError,
       referralSession: actualBrowserFunction("referralSession", { expect }),
       record: (entry: Record<string, unknown>) => records.push(entry),
       expectCandidateRevision: (headers: Record<string, string>) =>
@@ -1763,6 +1767,7 @@ describe("actual original first-visit refusal chain", () => {
       "ops-session",
       "orders",
       "click-refuse",
+      "fallback-read",
       "active-rejection",
       "same-context-readback",
       "ops-session",
@@ -1815,6 +1820,12 @@ describe("actual original first-visit refusal chain", () => {
     {
       label: "consent already granted",
       readFields: { consent: { grantedAt: "2026-10-27T01:00:00Z" } },
+    },
+    {
+      label: "inactive bundle",
+      readFields: {
+        consent: { grantedAt: null, bundleVersion: "private-value" },
+      },
     },
     { label: "after nonzero", afterOrder: true },
     { label: "active access accepted", activeStatus: 200 },

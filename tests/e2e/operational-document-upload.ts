@@ -2529,6 +2529,8 @@ export type OperationalReferralSubject = {
   entryHost: string;
 };
 
+export class OperationalReferralEvidenceError extends Error {}
+
 /** Native fetch keeps WIF, artifacts and unrelated order rows out of Playwright
  * request snapshots. Errors expose only fixed paths/status, never payloads. */
 async function referralEvidenceApi(
@@ -2540,6 +2542,7 @@ async function referralEvidenceApi(
   const sha = process.env.DRTS_CANDIDATE_SHA?.trim();
   if (!sha || !/^[a-f0-9]{40}$/.test(sha))
     throw new Error("Referral evidence requires immutable candidate SHA");
+  let failure = "transport or JSON unavailable";
   try {
     const response = await fetch(
       new URL(apiPath, requiredOrigin("DRTS_DEV_API_BASE_URL")),
@@ -2551,9 +2554,14 @@ async function referralEvidenceApi(
         signal: AbortSignal.timeout(30_000),
       },
     );
-    if (response.status !== 200) throw new Error(`HTTP ${response.status}`);
+    failure = `HTTP ${response.status}`;
+    // Nest's unchanged @Post handoff issuer returns 201; canonical GETs 200.
+    if (response.status !== (method === "POST" ? 201 : 200))
+      throw new Error(failure);
+    failure = "candidate mismatch";
     if (response.headers.get("x-drts-candidate-sha") !== sha)
       throw new Error("candidate mismatch");
+    failure = "invalid envelope or JSON";
     const payload = await response.json();
     if (
       !payload ||
@@ -2566,7 +2574,9 @@ async function referralEvidenceApi(
       throw new Error("invalid envelope");
     return payload.data;
   } catch {
-    throw new Error(`Referral evidence ${method} ${apiPath} failed`);
+    throw new OperationalReferralEvidenceError(
+      `Referral evidence ${method} ${apiPath} failed: ${failure}`,
+    );
   }
 }
 
@@ -2691,9 +2701,11 @@ export async function observeOperationalReferralZeroOrders(
     if (
       !row ||
       typeof row !== "object" ||
+      Array.isArray(row) ||
       !nonempty(row.order_id) ||
       !row.passenger ||
       typeof row.passenger !== "object" ||
+      Array.isArray(row.passenger) ||
       !(
         (row.passenger.passenger_id == null &&
           row.partner_entry_slug === null) ||
