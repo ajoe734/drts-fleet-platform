@@ -276,31 +276,30 @@ it.each(
       })),
     ),
   ),
-)(
-  "keeps $locale $status independent of driverName=$driverName",
-  (scenario) => {
-    const active = trip(scenario.canCancel, scenario.status);
-    active.driverName = scenario.driverName;
-    const button = renderTrip(scenario.canCancel, scenario.locale, active);
-    const missingName =
-      scenario.locale === "en" ? "Driver name unavailable" : "未提供司機姓名";
-    expect(screen.getByText(scenario.driverName ?? missingName)).toBeTruthy();
-    expect(screen.getByText(scenario[scenario.locale])).toBeTruthy();
-    if (scenario.status !== "matching" || scenario.locale === "en") {
-      expect(screen.queryByText("媒合中")).toBeNull();
-    }
-    if (scenario.driverName !== null) {
-      expect(screen.queryByText(missingName)).toBeNull();
-    }
-    expect(button.disabled).toBe(!scenario.canCancel);
-    expect(button.style.background).toBe(
-      rgb(scenario.canCancel ? theme.dangerFg : theme.surfaceLo),
-    );
-    expect(button.textContent).toBe(
-      scenario.locale === "en" ? "Cancel trip" : "取消行程",
-    );
-  },
-);
+)("keeps $locale $status independent of driverName=$driverName", (scenario) => {
+  const active = trip(scenario.canCancel, scenario.status);
+  active.driverName = scenario.driverName;
+  const button = renderTrip(scenario.canCancel, scenario.locale, active);
+  const missingName =
+    scenario.locale === "en" ? "Driver name unavailable" : "未提供司機姓名";
+  expect(screen.getByText(scenario.driverName ?? missingName)).toBeTruthy();
+  expect(
+    screen.getByText(scenario[scenario.locale], { selector: "span" }),
+  ).toBeTruthy();
+  if (scenario.status !== "matching" || scenario.locale === "en") {
+    expect(screen.queryByText("媒合中")).toBeNull();
+  }
+  if (scenario.driverName !== null) {
+    expect(screen.queryByText(missingName)).toBeNull();
+  }
+  expect(button.disabled).toBe(!scenario.canCancel);
+  expect(button.style.background).toBe(
+    rgb(scenario.canCancel ? theme.dangerFg : theme.surfaceLo),
+  );
+  expect(button.textContent).toBe(
+    scenario.locale === "en" ? "Cancel trip" : "取消行程",
+  );
+});
 
 it.each([503, 409])(
   "keeps English cancellation pending and handles HTTP %s without changing the command",
