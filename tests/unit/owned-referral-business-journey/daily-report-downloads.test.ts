@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   toApiErrorEnvelope,
   toApiListData,
@@ -1025,7 +1025,20 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       const tempDir = await mkdtemp(
         path.join(tmpdir(), "owned-daily-reports-test-"),
       );
+      let restoreClock: (() => void) | undefined;
       try {
+        if (!previewFailure) {
+          // Only positive fake-port runs need an unexpired artifact. Keep the
+          // original clock advancing so the helper's Date.now deadlines work;
+          // never fake timers or relax the production expiry check.
+          const realNow = Date.now.bind(Date);
+          const startedAt = realNow();
+          const shiftedStart = Date.parse("2026-10-25T19:00:00.000Z");
+          const clock = vi
+            .spyOn(Date, "now")
+            .mockImplementation(() => shiftedStart + (realNow() - startedAt));
+          restoreClock = () => clock.mockRestore();
+        }
         const ownRow = buildDailyDispatchRow();
         const siblingRow = (orderId: string) =>
           buildDailyDispatchRow({
@@ -1700,6 +1713,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           "synthetic-ops-jwt",
         );
       } finally {
+        restoreClock?.();
         await rm(tempDir, { recursive: true, force: true });
       }
     },
