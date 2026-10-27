@@ -106,7 +106,9 @@ export type DailyReportDownloadsEvidence = Readonly<{
   serviceDate: string;
   filters: DailyReportFilters;
   preview: Readonly<{
-    rebuilt: boolean;
+    rebuilt: true;
+    rebuildCount: number;
+    rebuildGeneratedAt: string;
     rowCount: number;
     controlledRowCount: number;
     unverifiedSiblingRowCount: number;
@@ -129,6 +131,43 @@ export type DailyReportDownloadsEvidence = Readonly<{
     xlsx: DailyReportDownloadArtifactSummary;
     pdf: DailyReportDownloadArtifactSummary;
   }>;
+  emptyDay: Readonly<{
+    serviceDate: string;
+    filters: DailyReportFilters;
+    sourceBefore: EmptyDaySourceControl;
+    sourceAfter: EmptyDaySourceControl;
+    previewBefore: 0;
+    rebuiltCount: 0;
+    rebuildGeneratedAt: string;
+    previewAfter: 0;
+    restoredPositiveRow: true;
+    downloads: Readonly<
+      Record<DailyReportFormat, EmptyDailyReportArtifactSummary>
+    >;
+  }>;
+}>;
+
+type EmptyDaySourceControl = Readonly<{
+  requestStartedAt: string;
+  readAt: string;
+  positiveDate: string;
+  positiveCount: number;
+  ownPositivePresent: true;
+  emptyDate: string;
+  emptyCount: 0;
+  runtimeSha: string;
+}>;
+
+export type EmptyDailyReportArtifactSummary = Readonly<{
+  format: DailyReportFormat;
+  jobId: string;
+  status: "completed";
+  rowCount: 0;
+  bytes: number;
+  sha256: string;
+  contentType: string;
+  magicHeader: string;
+  runtimeSha: string;
 }>;
 
 export function resolveActiveTripScreenOrder(
@@ -377,6 +416,87 @@ export function buildDailyReportFilters(
     serviceProductCode: expected.serviceProductCode,
     finalStatus: "completed",
   });
+}
+
+// Mirrors ReportingService.buildDispatchDailyRecord/resolveServiceDate,
+// normalizeOrderSource, resolveServiceProductCode and matchesQuery. The input
+// must be the complete committed GET /orders response, never a preview cache.
+export function countCanonicalDailySource(
+  source: unknown,
+  filters: DailyReportFilters,
+  ownOrderId: string,
+): Readonly<{ count: number; ownPresent: boolean }> {
+  const orders = records(object(source).items);
+  let count = 0;
+  let ownPresent = false;
+  for (const order of orders) {
+    if (
+      order.tenantId !== filters.tenantId ||
+      order.partnerId !== filters.partnerId ||
+      order.status !== filters.finalStatus
+    )
+      continue;
+    const orderSource = text(
+      order.orderSource,
+      "daily-report-source-order-source",
+    );
+    const normalizedSource =
+      orderSource === "portal"
+        ? "tenant_portal"
+        : orderSource === "concierge"
+          ? "ops_console"
+          : orderSource === "app" || orderSource === "web"
+            ? "third_party_platform"
+            : orderSource;
+    if (normalizedSource !== filters.orderSource) continue;
+    const bucket = text(order.serviceBucket, "daily-report-source-bucket");
+    const product =
+      typeof order.businessDispatchSubtype === "string" &&
+      order.businessDispatchSubtype
+        ? order.businessDispatchSubtype
+        : bucket === "standard_taxi"
+          ? order.dispatchSemantics === "reservation"
+            ? "taxi_reservation"
+            : "taxi_realtime"
+          : bucket === "business_dispatch"
+            ? "enterprise_dispatch"
+            : bucket;
+    if (product !== filters.serviceProductCode) continue;
+    const date = toTaipeiServiceDate(
+      text(
+        order.reservationWindowStart ?? order.createdAt,
+        "daily-report-source-service-time",
+      ),
+    );
+    if (date !== filters.serviceDateFrom || date !== filters.serviceDateTo)
+      continue;
+    count += 1;
+    if (order.orderId === ownOrderId) ownPresent = true;
+  }
+  return Object.freeze({ count, ownPresent });
+}
+
+export function adjacentEmptyDayFromSource(
+  source: unknown,
+  positive: DailyReportFilters,
+  ownOrderId: string,
+): string {
+  const positiveCount = countCanonicalDailySource(source, positive, ownOrderId);
+  requireFact(
+    positiveCount.ownPresent && positiveCount.count > 0,
+    "daily-report-authoritative-own-positive-source-required",
+  );
+  const ms = Date.parse(`${positive.serviceDateFrom}T00:00:00.000Z`);
+  requireFact(Number.isFinite(ms), "daily-report-valid-positive-date-required");
+  for (const offset of [-1, 1]) {
+    const day = new Date(ms + offset * 86_400_000).toISOString().slice(0, 10);
+    const empty = { ...positive, serviceDateFrom: day, serviceDateTo: day };
+    if (countCanonicalDailySource(source, empty, ownOrderId).count === 0)
+      return day;
+  }
+  throw new JourneyFailure(
+    "daily-report-no-authoritatively-empty-adjacent-day",
+  );
 }
 
 export function validateDailyPreviewRows(
@@ -1020,6 +1140,120 @@ export async function validateDailyReportArtifactDownload(input: {
   });
 }
 
+export async function validateEmptyDailyReportArtifactDownload(input: {
+  format: DailyReportFormat;
+  jobId: string;
+  jobDetail: unknown;
+  filters: DailyReportFilters;
+  ownOrderId: string;
+  detailStatus: number;
+  detailResponseSha: string;
+  artifactStatus: number;
+  artifactResponseSha: string;
+  contentType: string | undefined;
+  contentDisposition: string | undefined;
+  bytes: Buffer;
+  runtimeSha: string;
+  nowMs?: number;
+}): Promise<EmptyDailyReportArtifactSummary> {
+  const { format, jobId, runtimeSha, bytes } = input;
+  requireFact(
+    input.detailStatus === 200 &&
+      input.artifactStatus === 200 &&
+      input.detailResponseSha === runtimeSha &&
+      input.artifactResponseSha === runtimeSha &&
+      /^[a-f0-9]{40}$/.test(runtimeSha),
+    `daily-report-empty-${format}-status-runtime-binding`,
+  );
+  const detail = object(input.jobDetail);
+  requireFact(
+    detail.jobId === jobId &&
+      detail.jobType === "daily_dispatch_record" &&
+      detail.format === format &&
+      detail.status === "completed" &&
+      Object.entries(input.filters).every(
+        ([key, value]) => object(detail.filters)[key] === value,
+      ) &&
+      records(detail.rows).length === 0,
+    `daily-report-empty-${format}-completed-zero-row-job-binding`,
+  );
+  const artifact = object(detail.artifact);
+  requireFact(
+    typeof artifact.artifactId === "string" &&
+      artifact.artifactId.length > 0 &&
+      artifact.artifactType === "report" &&
+      artifact.immutable === true &&
+      artifact.downloadUrl ===
+        `/reports/${encodeURIComponent(jobId)}/artifact` &&
+      typeof artifact.manifestHash === "string" &&
+      artifact.manifestHash.length > 0 &&
+      typeof artifact.expiresAt === "string" &&
+      Date.parse(artifact.expiresAt) > (input.nowMs ?? Date.now()),
+    `daily-report-empty-${format}-immutable-artifact-binding`,
+  );
+  const normalizedMime = input.contentType?.split(";")[0]?.trim().toLowerCase();
+  requireFact(
+    normalizedMime === DAILY_REPORT_MIME_TYPES[format] &&
+      input.contentDisposition ===
+        `attachment; filename="daily_dispatch_record-${jobId}.${format}"`,
+    `daily-report-empty-${format}-download-headers-binding`,
+  );
+  let magicHeader: string;
+  if (format === "csv") {
+    // Production recordsToCsv([]) emits zero bytes: no invented header or own row.
+    requireFact(
+      bytes.toString("utf8") === recordsToCsv([]),
+      "daily-report-empty-csv-no-records-required",
+    );
+    magicHeader = "zero-byte-csv";
+  } else {
+    assertNotHtmlOrJsonErrorBody(bytes, format);
+    if (format === "xlsx") {
+      requireFact(
+        bytes.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])),
+        "daily-report-empty-xlsx-zip-header-required",
+      );
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(bytes as unknown as ExcelJS.Buffer);
+      requireFact(
+        workbook.worksheets.length === 1 &&
+          workbook.worksheets[0]!.name === "daily_dispatch_record" &&
+          workbook.worksheets[0]!.rowCount === 0,
+        "daily-report-empty-xlsx-zero-cells-required",
+      );
+      magicHeader = "PK\\x03\\x04";
+    } else {
+      requireFact(
+        bytes.subarray(0, 5).toString("ascii") === "%PDF-",
+        "daily-report-empty-pdf-header-required",
+      );
+      const parsed = await parsePdf(bytes);
+      const expected = await parsePdf(
+        await recordsToPdf([], `daily_dispatch_record — ${jobId}`),
+      );
+      requireFact(
+        parsed.pages.length >= 1 &&
+          parsed.text === expected.text &&
+          parsed.text.includes("No data.") &&
+          !parsed.text.includes(input.ownOrderId),
+        "daily-report-empty-pdf-no-data-render-required",
+      );
+      magicHeader = "%PDF-";
+    }
+  }
+  return Object.freeze({
+    format,
+    jobId,
+    status: "completed",
+    rowCount: 0,
+    bytes: bytes.length,
+    sha256: hash(bytes),
+    contentType: normalizedMime,
+    magicHeader,
+    runtimeSha,
+  });
+}
+
 function unwrapEnvelopeObject(bytes: Buffer, stage: string): ObjectData {
   let raw: unknown;
   try {
@@ -1363,6 +1597,9 @@ export type RunOwnedDailyReportDownloadsParams = {
   page: Page;
   opsOrigin: string;
   opsHeaders: (url: string) => Record<string, string>;
+  // Same already-authenticated Ops caller; GET /orders returns the full
+  // committed source in RAM (no pagination, no raw JSON artifact).
+  readCanonicalOrders: () => Promise<ObjectData>;
   order: ObjectData;
   completedTask: ObjectData;
   entrySlug?: string;
@@ -1392,6 +1629,7 @@ export async function runOwnedDailyReportDownloads(
     page,
     opsOrigin,
     opsHeaders,
+    readCanonicalOrders,
     order,
     completedTask,
     entrySlug,
@@ -1659,11 +1897,14 @@ export async function runOwnedDailyReportDownloads(
       "daily-report-preview",
     );
 
-    let rebuilt = false;
-    if (!previewRows.some((row) => row.orderId === expected.orderId)) {
-      const regenerateBtn = page.getByRole("button", {
-        name: /^(重算|Regenerate)$/,
-      });
+    // TEN01: an already-materialized own row is the positive control, not a
+    // reason to skip the normal Ops rebuild. The POST and its GET are mandatory.
+    const regenerateBtn = page.getByRole("button", {
+      name: /^(重算|Regenerate)$/,
+    });
+    let rebuildCount: number;
+    let rebuildGeneratedAt: string;
+    {
       await waitForEnabled(regenerateBtn, "daily-report-regenerate-button");
       const rebuildPostPromise = waitForOpsExchange(
         (ex) =>
@@ -1705,6 +1946,22 @@ export async function runOwnedDailyReportDownloads(
           rebuildBody.serviceProductCode === expectedFilters.serviceProductCode,
         "daily-report-rebuild-filters-binding",
       );
+      const rebuildResult = unwrapEnvelopeObject(
+        rebuildExchange.bytes,
+        "daily-report-rebuild-result",
+      );
+      rebuildCount = integer(
+        rebuildResult.rebuiltCount,
+        "daily-report-rebuild-count",
+      );
+      rebuildGeneratedAt = text(
+        rebuildResult.generatedAt,
+        "daily-report-rebuild-generated-at",
+      );
+      requireFact(
+        rebuildCount > 0 && Number.isFinite(Date.parse(rebuildGeneratedAt)),
+        "daily-report-positive-rebuild-result-required",
+      );
       previewExchange = await rebuiltPreviewGetPromise;
       assertDailyReportHttpStatus(
         previewExchange,
@@ -1718,7 +1975,6 @@ export async function runOwnedDailyReportDownloads(
         previewExchange.bytes,
         "daily-report-rebuilt-preview",
       );
-      rebuilt = true;
     }
 
     const validatedPreview = validateDailyPreviewRows(
@@ -2033,6 +2289,410 @@ export async function runOwnedDailyReportDownloads(
       });
     }
 
+    // TEN02: independent adjacent day, selected from a complete committed
+    // canonical read, NOT from an empty report preview. Keep full orders in RAM.
+    const beforeStartedAt = new Date().toISOString();
+    const beforeOrders = await readCanonicalOrders();
+    const beforeReadAt = new Date().toISOString();
+    const emptyDate = adjacentEmptyDayFromSource(
+      beforeOrders,
+      expectedFilters,
+      expected.orderId,
+    );
+    const emptyFilters: DailyReportFilters = Object.freeze({
+      ...expectedFilters,
+      serviceDateFrom: emptyDate,
+      serviceDateTo: emptyDate,
+    });
+    const sourceControl = (
+      source: ObjectData,
+      requestStartedAt: string,
+      readAt: string,
+    ): EmptyDaySourceControl => {
+      const positive = countCanonicalDailySource(
+        source,
+        expectedFilters,
+        expected.orderId,
+      );
+      const empty = countCanonicalDailySource(
+        source,
+        emptyFilters,
+        expected.orderId,
+      );
+      requireFact(
+        positive.count > 0 && positive.ownPresent && empty.count === 0,
+        "daily-report-empty-day-authoritative-source-control-required",
+      );
+      return Object.freeze({
+        requestStartedAt,
+        readAt,
+        positiveDate: expected.serviceDate,
+        positiveCount: positive.count,
+        ownPositivePresent: true,
+        emptyDate,
+        emptyCount: 0,
+        runtimeSha,
+      });
+    };
+    const sourceBefore = sourceControl(
+      beforeOrders,
+      beforeStartedAt,
+      beforeReadAt,
+    );
+    evidence.record({
+      stage: "daily-report-empty-source-before-zero-positive-own",
+      orderId: expected.orderId,
+      result: "observed",
+    });
+
+    await operationalTab.click();
+    await reportTypeSelect.first().selectOption("daily_dispatch_record");
+    await dateInputs.nth(0).fill(emptyDate);
+    await dateInputs.nth(1).fill(emptyDate);
+    await orderSourceSelect.first().selectOption(expected.orderSource);
+    await statusSelect.first().selectOption(expected.finalStatus);
+    await tenantInput.first().fill(expected.tenantId);
+    await partnerInput.first().fill(expected.partnerId);
+    await serviceProductInput.first().fill(expected.serviceProductCode);
+    const assertEmptyQuery = (query: URLSearchParams) => {
+      requireFact(
+        Object.entries(emptyFilters).every(
+          ([key, val]) => query.get(key) === val,
+        ),
+        "daily-report-empty-query-filters-binding",
+      );
+    };
+    const emptyPreview = async (phase: "preview" | "rebuilt-preview") => {
+      const pending = waitForOpsExchange(
+        (ex) =>
+          ex.method === "GET" &&
+          ex.pathname === "/control-plane-proxy/reports/daily-dispatch-records",
+        `daily-report-empty-${phase}-get`,
+      );
+      if (phase === "preview") await loadPreviewBtn.click();
+      const exchange = await pending;
+      assertDailyReportHttpStatus(exchange, phase, [200], runtimeSha, evidence);
+      assertEmptyQuery(exchange.searchParams);
+      requireFact(
+        unwrapEnvelopeList(exchange.bytes, `daily-report-empty-${phase}`)
+          .length === 0,
+        `daily-report-empty-${phase}-zero-rows-required`,
+      );
+    };
+    await waitForEnabled(loadPreviewBtn, "daily-report-empty-preview-button");
+    await emptyPreview("preview");
+    await page
+      .locator("tbody tr")
+      .filter({ hasText: expected.orderId })
+      .first()
+      .waitFor({ state: "detached", timeout: 15_000 });
+    const emptyRebuildPost = waitForOpsExchange(
+      (ex) =>
+        ex.method === "POST" &&
+        ex.pathname ===
+          "/control-plane-proxy/reports/daily-dispatch-records/rebuild",
+      "daily-report-empty-rebuild-post",
+    );
+    const emptyRebuiltGet = waitForOpsExchange(
+      (ex) =>
+        ex.method === "GET" &&
+        ex.pathname === "/control-plane-proxy/reports/daily-dispatch-records",
+      "daily-report-empty-rebuilt-preview-get",
+    );
+    await waitForEnabled(regenerateBtn, "daily-report-empty-rebuild-button");
+    await regenerateBtn.click();
+    const emptyRebuild = await emptyRebuildPost;
+    assertDailyReportHttpStatus(
+      emptyRebuild,
+      "rebuild",
+      [200, 201],
+      runtimeSha,
+      evidence,
+    );
+    const emptyBody = object(
+      JSON.parse(
+        text(emptyRebuild.requestBody, "daily-report-empty-rebuild-body"),
+      ),
+    );
+    requireFact(
+      Object.entries(emptyFilters).every(
+        ([key, val]) => emptyBody[key] === val,
+      ),
+      "daily-report-empty-rebuild-filters-binding",
+    );
+    const emptyResult = unwrapEnvelopeObject(
+      emptyRebuild.bytes,
+      "daily-report-empty-rebuild-result",
+    );
+    requireFact(
+      emptyResult.rebuiltCount === 0 &&
+        typeof emptyResult.generatedAt === "string" &&
+        Number.isFinite(Date.parse(emptyResult.generatedAt)),
+      "daily-report-empty-rebuilt-count-zero-required",
+    );
+    const rebuiltEmpty = await emptyRebuiltGet;
+    assertDailyReportHttpStatus(
+      rebuiltEmpty,
+      "rebuilt-preview",
+      [200],
+      runtimeSha,
+      evidence,
+    );
+    assertEmptyQuery(rebuiltEmpty.searchParams);
+    requireFact(
+      unwrapEnvelopeList(
+        rebuiltEmpty.bytes,
+        "daily-report-empty-rebuilt-preview",
+      ).length === 0,
+      "daily-report-empty-rebuilt-preview-zero-required",
+    );
+    await page
+      .locator("tbody tr")
+      .filter({ hasText: expected.orderId })
+      .first()
+      .waitFor({ state: "detached", timeout: 15_000 });
+
+    const emptyJobs = {} as Record<DailyReportFormat, string>;
+    for (const format of DAILY_REPORT_FORMATS) {
+      await waitForEnabled(exportJobBtn, `daily-report-empty-export-${format}`);
+      await formatSelect.first().selectOption(format);
+      const pending = waitForOpsExchange(
+        (ex) =>
+          ex.method === "POST" &&
+          ex.pathname === "/control-plane-proxy/reports/jobs",
+        `daily-report-empty-create-job-${format}`,
+      );
+      await exportJobBtn.click();
+      const exchange = await pending;
+      assertDailyReportHttpStatus(
+        exchange,
+        `create-job-${format}`,
+        [200, 201],
+        runtimeSha,
+        evidence,
+      );
+      const command = object(
+        JSON.parse(
+          text(exchange.requestBody, "daily-report-empty-job-command"),
+        ),
+      );
+      requireFact(
+        command.jobType === "daily_dispatch_record" &&
+          command.format === format &&
+          Object.entries(emptyFilters).every(
+            ([key, val]) => object(command.filters)[key] === val,
+          ),
+        `daily-report-empty-${format}-job-command-binding`,
+      );
+      const accepted = unwrapEnvelopeObject(
+        exchange.bytes,
+        `daily-report-empty-job-${format}`,
+      );
+      const jobId = text(accepted.jobId, `daily-report-empty-${format}-job-id`);
+      await page
+        .getByText(jobId, { exact: false })
+        .first()
+        .waitFor({ state: "visible", timeout: 15_000 });
+      emptyJobs[format] = jobId;
+    }
+    requireFact(
+      new Set([...Object.values(acceptedJobs), ...Object.values(emptyJobs)])
+        .size === 6,
+      "daily-report-empty-jobs-distinct-from-positive-required",
+    );
+    let emptyListed: ObjectData[] = [];
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const pagePending = waitForOpsExchange(
+        (ex) => ex.method === "GET" && ex.pathname === "/reports",
+        "daily-report-empty-reload-page",
+      );
+      const jobsPending = waitForOpsExchange(
+        (ex) =>
+          ex.method === "GET" &&
+          ex.pathname === "/control-plane-proxy/reports/jobs",
+        "daily-report-empty-reload-jobs",
+      );
+      await page.goto(`${opsOrigin}/reports`);
+      assertDailyReportHttpStatus(
+        await pagePending,
+        "reload-reports-page",
+        [200],
+        runtimeSha,
+        evidence,
+      );
+      const jobsExchange = await jobsPending;
+      assertDailyReportHttpStatus(
+        jobsExchange,
+        "reload-jobs",
+        [200],
+        runtimeSha,
+        evidence,
+      );
+      emptyListed = unwrapEnvelopeList(
+        jobsExchange.bytes,
+        "daily-report-empty-reload-jobs",
+      );
+      if (
+        DAILY_REPORT_FORMATS.every((format) => {
+          const found = emptyListed.find((j) => j.jobId === emptyJobs[format]);
+          requireFact(
+            found && found.status !== "failed" && found.status !== "expired",
+            `daily-report-empty-${format}-job-listed-not-failed`,
+          );
+          return found.status === "completed";
+        })
+      )
+        break;
+      if (attempt < 4)
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    const emptyDownloads = {} as Record<
+      DailyReportFormat,
+      EmptyDailyReportArtifactSummary
+    >;
+    for (const format of DAILY_REPORT_FORMATS) {
+      const jobId = emptyJobs[format];
+      requireFact(
+        emptyListed.some((j) => j.jobId === jobId && j.status === "completed"),
+        `daily-report-empty-${format}-job-completed-required`,
+      );
+      const jobRow = page.locator("tbody tr").filter({ hasText: jobId });
+      await jobRow.first().waitFor({ state: "visible", timeout: 15_000 });
+      requireFact(
+        (await jobRow.count()) === 1 &&
+          (await jobRow.first().innerText()).includes(format.toUpperCase()),
+        `daily-report-empty-${format}-ui-job-binding`,
+      );
+      const downloadBtn = jobRow
+        .first()
+        .getByRole("button", { name: /^(下載|Download)$/ });
+      await waitForEnabled(
+        downloadBtn,
+        `daily-report-empty-download-${format}`,
+      );
+      const detailPending = waitForOpsExchange(
+        (ex) =>
+          ex.method === "GET" &&
+          ex.pathname === opsReportJobDetailPathname(jobId),
+        `daily-report-empty-detail-${format}`,
+      );
+      const artifactPending = waitForOpsExchange(
+        (ex) =>
+          ex.method === "GET" &&
+          ex.pathname === opsReportJobArtifactPathname(jobId),
+        `daily-report-empty-artifact-${format}`,
+      );
+      await downloadBtn.click();
+      const detail = await detailPending;
+      assertDailyReportHttpStatus(
+        detail,
+        `job-detail-${format}`,
+        [200],
+        runtimeSha,
+        evidence,
+      );
+      const artifact = await artifactPending;
+      assertDailyReportHttpStatus(
+        artifact,
+        `artifact-download-${format}`,
+        [200],
+        runtimeSha,
+        evidence,
+      );
+      for (const extraPage of context.pages())
+        if (extraPage !== page) await extraPage.close().catch(() => undefined);
+      emptyDownloads[format] = await validateEmptyDailyReportArtifactDownload({
+        format,
+        jobId,
+        jobDetail: unwrapEnvelopeObject(
+          detail.bytes,
+          `daily-report-empty-detail-${format}`,
+        ),
+        filters: emptyFilters,
+        ownOrderId: expected.orderId,
+        detailStatus: detail.status,
+        detailResponseSha: detail.runtimeSha,
+        artifactStatus: artifact.status,
+        artifactResponseSha: artifact.runtimeSha,
+        contentType: artifact.headers["content-type"],
+        contentDisposition: artifact.headers["content-disposition"],
+        bytes: artifact.bytes,
+        runtimeSha,
+      });
+      evidence.record({
+        stage: `daily-report-empty-${format}-verified`,
+        objectKey: jobId,
+        bytes: artifact.bytes.length,
+        sha256: emptyDownloads[format].sha256,
+        result: "observed",
+      });
+    }
+    // The second complete source read is after all jobs: a concurrent writer
+    // cannot silently turn our selected day into a nonempty day.
+    const afterStartedAt = new Date().toISOString();
+    const afterOrders = await readCanonicalOrders();
+    const sourceAfter = sourceControl(
+      afterOrders,
+      afterStartedAt,
+      new Date().toISOString(),
+    );
+    requireFact(
+      sourceBefore.positiveCount === sourceAfter.positiveCount,
+      "daily-report-empty-positive-source-count-stable-required",
+    );
+    evidence.record({
+      stage: "daily-report-empty-source-after-zero-positive-own",
+      orderId: expected.orderId,
+      result: "observed",
+    });
+    await operationalTab.click();
+    await reportTypeSelect.first().selectOption("daily_dispatch_record");
+    await dateInputs.nth(0).fill(expected.serviceDate);
+    await dateInputs.nth(1).fill(expected.serviceDate);
+    await orderSourceSelect.first().selectOption(expected.orderSource);
+    await statusSelect.first().selectOption(expected.finalStatus);
+    await tenantInput.first().fill(expected.tenantId);
+    await partnerInput.first().fill(expected.partnerId);
+    await serviceProductInput.first().fill(expected.serviceProductCode);
+    const restorePending = waitForOpsExchange(
+      (ex) =>
+        ex.method === "GET" &&
+        ex.pathname === "/control-plane-proxy/reports/daily-dispatch-records",
+      "daily-report-restore-positive-preview",
+    );
+    await waitForEnabled(
+      loadPreviewBtn,
+      "daily-report-restore-positive-preview-button",
+    );
+    await loadPreviewBtn.click();
+    const restored = await restorePending;
+    assertDailyReportHttpStatus(
+      restored,
+      "preview",
+      [200],
+      runtimeSha,
+      evidence,
+    );
+    assertPreviewQueryParams(restored.searchParams);
+    validateDailyPreviewRows(
+      unwrapEnvelopeList(restored.bytes, "daily-report-restore-positive"),
+      expected,
+      runtimeSha,
+      restored.runtimeSha,
+      controlledOrderIdSet,
+      evidence,
+    );
+    await page
+      .locator("tbody tr")
+      .filter({ hasText: expected.orderId })
+      .first()
+      .waitFor({ state: "visible", timeout: 15_000 });
+    evidence.record({
+      stage: "daily-report-positive-after-empty-restored",
+      orderId: expected.orderId,
+      result: "observed",
+    });
+
     return Object.freeze({
       definitionSha,
       runtimeSha,
@@ -2041,7 +2701,9 @@ export async function runOwnedDailyReportDownloads(
       serviceDate: expected.serviceDate,
       filters: expectedFilters,
       preview: Object.freeze({
-        rebuilt,
+        rebuilt: true,
+        rebuildCount,
+        rebuildGeneratedAt,
         rowCount: validatedPreview.rowCount,
         controlledRowCount: validatedPreview.controlledRowCount,
         unverifiedSiblingRowCount: validatedPreview.unverifiedSiblingRowCount,
@@ -2064,6 +2726,18 @@ export async function runOwnedDailyReportDownloads(
         csv: downloads.csv,
         xlsx: downloads.xlsx,
         pdf: downloads.pdf,
+      }),
+      emptyDay: Object.freeze({
+        serviceDate: emptyDate,
+        filters: emptyFilters,
+        sourceBefore,
+        sourceAfter,
+        previewBefore: 0,
+        rebuiltCount: 0,
+        rebuildGeneratedAt: emptyResult.generatedAt as string,
+        previewAfter: 0,
+        restoredPositiveRow: true,
+        downloads: Object.freeze(emptyDownloads),
       }),
     });
   } finally {
