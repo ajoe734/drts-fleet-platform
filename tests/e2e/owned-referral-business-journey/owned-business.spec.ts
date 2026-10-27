@@ -2374,6 +2374,7 @@ test(journeyName, async ({ browser, request }) => {
         page,
         opsOrigin: origins.ops,
         opsHeaders: (url) => tx.headers("ops", url),
+        readCanonicalOrders: () => opsControl("/orders"),
         order: completedOrderForReport,
         completedTask,
         entrySlug: ENTRY,

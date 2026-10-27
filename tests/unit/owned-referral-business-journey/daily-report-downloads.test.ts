@@ -17,6 +17,9 @@ import {
 import {
   assertDailyReportHttpStatus,
   buildDailyReportFilters,
+  adjacentEmptyDayFromSource,
+  countCanonicalDailySource,
+  validateEmptyDailyReportArtifactDownload,
   DAILY_REPORT_FORMATS,
   DAILY_REPORT_MIME_TYPES,
   DailyReportHttpFailure,
@@ -994,6 +997,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         page: {} as Page,
         opsOrigin: OPS_ORIGIN,
         opsHeaders: () => ({}),
+        readCanonicalOrders: async () => { throw new Error("must not read source in recovery"); },
         order: buildOrderFixture(),
         completedTask: buildTaskFixture(),
         entrySlug: ENTRY_SLUG,
@@ -1068,6 +1072,13 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       expectedPreviewControlled: true,
       expectedRetained: false,
       previewFailure: "job-row-field",
+    },
+    {
+      caseName: "already materialized own row still executes normal rebuild POST and readback",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
     },
     {
       caseName: "all sibling rows belong to controlled owned orders",
@@ -1215,6 +1226,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         let initialJobsRequests = 0;
         let pageVisits = 0;
         let rebuiltInBackend = false;
+        let rebuildPosts = 0;
+        let rebuiltPreviewGets = 0;
+        const alreadyMaterialized = failureCase.startsWith("already materialized");
         let selectedFormat: DailyReportFormat = "csv";
         let dateFromVal = "";
         let dateToVal = "";
@@ -1351,9 +1365,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     partnerId: partnerVal,
                     serviceProductCode: serviceProductVal,
                   });
-                  const rows = rebuiltInBackend
-                    ? [previewSiblingRow, ownRow]
-                    : [previewSiblingRow];
+                  const rows = dateFromVal === "2026-10-25" ? []
+                    : rebuiltInBackend || alreadyMaterialized
+                      ? [previewSiblingRow, ownRow] : [previewSiblingRow];
                   await dispatchRoute(
                     "GET",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records?${query.toString()}`,
@@ -1438,6 +1452,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               return makeLocator({
                 click: async () => {
                   rebuiltInBackend = true;
+                  rebuildPosts += 1;
                   const bodyObj = {
                     serviceDateFrom: dateFromVal,
                     serviceDateTo: dateToVal,
@@ -1454,11 +1469,12 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     200,
                     { "content-type": "application/json" },
                     successWireBytes({
-                      rebuiltCount: 2,
+                      rebuiltCount: dateFromVal === "2026-10-25" ? 0 : 2,
                       generatedAt: "2026-10-25T18:31:00.000Z",
                     }),
                   );
                   const query = new URLSearchParams(bodyObj);
+                  rebuiltPreviewGets += 1;
                   await dispatchRoute(
                     "GET",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records?${query.toString()}`,
@@ -1467,7 +1483,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     { "content-type": "application/json" },
                     failureCase === "rebuilt-preview-wrong-data"
                       ? wireBytes("not-a-list")
-                      : wireBytes(toApiListData([previewSiblingRow, ownRow])),
+                      : wireBytes(toApiListData(dateFromVal === "2026-10-25" ? [] : [previewSiblingRow, ownRow])),
                   );
                 },
               });
@@ -1476,9 +1492,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               return makeLocator({
                 click: async () => {
                   const format = selectedFormat;
-                  const jobId = `job_harness_${format}`;
+                  const jobId = `job_harness_${dateFromVal === "2026-10-25" ? "empty_" : ""}${format}`;
                   lastAcceptedJobId = jobId;
-                  const rows = [
+                  const rows = dateFromVal === "2026-10-25" ? [] : [
                     jobSiblingRow,
                     previewFailure === "job-row-field" && format === "csv"
                       ? buildDailyDispatchRow({
@@ -1486,7 +1502,12 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                         })
                       : ownRow,
                   ];
-                  const detail = buildJobDetailFixture(format, jobId, rows);
+                  const detail = buildJobDetailFixture(format, jobId, rows,
+                    dateFromVal === "2026-10-25" ? { filters: {
+                      ...buildDailyReportFilters(resolveExpectedDailyDispatchRecord(
+                        buildOrderFixture(), buildTaskFixture(), buildOwnContext(),
+                      )), serviceDateFrom: dateFromVal, serviceDateTo: dateToVal,
+                    } } : {});
                   const bytes = await renderFormatBytes(format, jobId, rows);
                   createdJobs.push({ format, jobId, detail, bytes });
                   const reqBody = {
@@ -1605,7 +1626,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   const target = String(opts.hasText ?? "");
                   if (target === ORDER_ID) {
                     return makeLocator({
-                      count: async () => 1,
+                      count: async () => dateFromVal === "2026-10-25" ? 0 : 1,
                       innerText: async () =>
                         `${ORDER_ID} ${ORDER_NO} 2026-10-26 ${PICKUP_ADDRESS} ${DROPOFF_ADDRESS} ${DRIVER_ID} ${VEHICLE_ID} ${PLATE_NO}`,
                     });
@@ -1703,6 +1724,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             "X-Serverless-Authorization": "Bearer synthetic-ops-cloud",
             "x-drts-authorization": "Bearer synthetic-ops-jwt",
           }),
+          readCanonicalOrders: async () => ({ items: [buildOrderFixture()] }),
           order: buildOrderFixture(),
           completedTask: buildTaskFixture(),
           entrySlug: ENTRY_SLUG,
@@ -1882,6 +1904,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         expect(result.serviceDate).toBe("2026-10-26");
         expect(result.filters.tenantId).toBe(REFERRAL_TENANT_ID);
         expect(result.preview.rebuilt).toBe(true);
+        expect(result.preview.rebuildCount).toBe(2);
+        expect(rebuildPosts).toBe(2); // positive even when preexisting, then empty
+        expect(rebuiltPreviewGets).toBe(2);
         expect(result.preview.rowCount).toBe(2);
         expect(result.preview.syntheticProvenanceVerified).toBe(
           expectedPreviewControlled,
@@ -1893,6 +1918,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           expectedPreviewControlled ? 0 : 1,
         );
         expect(result.preview.finalPlateNo).toBe(PLATE_NO);
+        expect(result.emptyDay.serviceDate).toBe("2026-10-25");
+        expect(result.emptyDay.sourceBefore.emptyCount).toBe(0);
+        expect(result.emptyDay.sourceAfter.ownPositivePresent).toBe(true);
+        expect(result.emptyDay.restoredPositiveRow).toBe(true);
+        for (const format of DAILY_REPORT_FORMATS) {
+          expect(result.emptyDay.downloads[format].rowCount).toBe(0);
+          expect(result.emptyDay.downloads[format].jobId).toBe(`job_harness_empty_${format}`);
+        }
 
         for (const format of DAILY_REPORT_FORMATS) {
           const dl = result.downloads[format];
