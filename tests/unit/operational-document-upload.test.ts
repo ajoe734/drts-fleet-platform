@@ -29,6 +29,9 @@ import {
   type Route,
 } from "@playwright/test";
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { TenantPartnerController } from "../../apps/api/src/modules/tenant-partner/tenant-partner.controller";
 import journeysData from "../e2e/fixtures/operational-browser-journeys.json";
 import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
 import { resolveRouteAuthPolicy } from "../../apps/api/src/common/auth/auth.policy";
@@ -38,6 +41,10 @@ import { SupplySubmissionService } from "../../apps/api/src/modules/fleet-partne
 import { SupplySubmissionRepository } from "../../apps/api/src/modules/fleet-partner/supply-submission.repository";
 import { RegulatoryRegistryService } from "../../apps/api/src/modules/regulatory-registry/regulatory-registry.service";
 import { fleetStorageFixture } from "./helpers/fleet-document-fixture";
+
+const { Reflector } = createRequire(
+  new URL("../../apps/api/package.json", import.meta.url),
+)("@nestjs/core");
 
 function checkActualPdf(bytes: Buffer) {
   const text = bytes.toString("ascii");
@@ -4645,6 +4652,7 @@ describe("original referral first-visit issuer and canonical zero-order evidence
     vi.stubEnv("DRTS_CANDIDATE_SHA", sha);
     vi.stubEnv("DRTS_DEV_API_BASE_URL", origin);
     vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "WIF-RAM");
+    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "WIF-RAM");
     vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "OPS-RAM");
   });
   afterEach(() => {
@@ -4732,8 +4740,13 @@ describe("original referral first-visit issuer and canonical zero-order evidence
       consentBundle: null,
     });
     expect(commands[0].partnerUserRef).not.toBe(commands[1].partnerUserRef);
-    expect(issueCalls[0]!.options.headers).toMatchObject({
-      Authorization: "Bearer WIF-RAM",
+    for (const call of calls.filter((call) =>
+      call.path.includes("/entries/"),
+    )) {
+      expect(call.options.headers).toEqual({});
+    }
+    expect(issueCalls[0]!.options.headers).toEqual({
+      "content-type": "application/json",
       "x-drts-google-id-token": "WIF-RAM",
     });
     const before = await observeOperationalReferralZeroOrders(
@@ -4767,6 +4780,108 @@ describe("original referral first-visit issuer and canonical zero-order evidence
     expect(JSON.stringify([before, after])).not.toMatch(
       /RAM|private|other-person|WIF|OPS/,
     );
+  });
+  it.each(["entry", "issuer"] as const)(
+    "passes the actual %s open-route guard without treating WIF as an application JWT",
+    async (boundary) => {
+      ports();
+      const externalFetch = globalThis.fetch;
+      const guard = new BootstrapAuthGuard(
+        new Reflector(),
+        new JwtAuthService(),
+      );
+      const rejections: Array<{ status: number; code: string }> = [];
+      let guardedCalls = 0;
+      vi.stubGlobal(
+        "fetch",
+        async (input: string | URL, options: RequestInit) => {
+          const url = new URL(input);
+          const isIssuer = url.pathname.endsWith("handoff");
+          if ((boundary === "issuer") === isIssuer) {
+            guardedCalls++;
+            const request = {
+              method: options.method,
+              url: url.pathname,
+              headers: Object.fromEntries(
+                new Headers(options.headers).entries(),
+              ),
+            };
+            try {
+              await guard.canActivate({
+                switchToHttp: () => ({ getRequest: () => request }),
+                getClass: () => TenantPartnerController,
+                getHandler: () =>
+                  isIssuer
+                    ? TenantPartnerController.prototype
+                        .issueReferralEmbedHandoffArtifact
+                    : TenantPartnerController.prototype.getPartnerEntry,
+              } as never);
+            } catch (error) {
+              const rejection = error as { getStatus(): number; code: string };
+              rejections.push({
+                status: rejection.getStatus(),
+                code: rejection.code,
+              });
+              return new Response(
+                JSON.stringify({ error: { code: rejection.code } }),
+                { status: rejection.getStatus() },
+              );
+            }
+          }
+          return externalFetch(input, options);
+        },
+      );
+      let completed = false;
+      try {
+        await prepareOperationalReferralHandoff(
+          entry.entry_slug,
+          entry.entry_host,
+        );
+        completed = true;
+      } catch {
+        // Keep only the real guard's safe status/code as the red/green diagnosis.
+      }
+      expect(rejections).toEqual([]);
+      expect(guardedCalls).toBe(1);
+      expect(completed).toBe(true);
+    },
+  );
+  it.each(["before-refusal", "after-refusal"] as const)(
+    "accepts unrelated phone rows with absent/undefined passenger IDs during %s",
+    async (phase) => {
+      ports({
+        orders: {
+          items: [
+            { ...row, partner_entry_slug: null, passenger: {} },
+            {
+              ...row,
+              partner_entry_slug: null,
+              passenger: { passenger_id: undefined },
+            },
+          ],
+        },
+      });
+      expect(
+        await observeOperationalReferralZeroOrders(subject, phase),
+      ).toMatchObject({ count: 0, phase });
+    },
+  );
+  it("rejects a controlled-subject order after an unrelated phone row", async () => {
+    ports({
+      orders: {
+        items: [
+          { ...row, partner_entry_slug: null, passenger: {} },
+          {
+            ...row,
+            tenant_id: "other",
+            passenger: { passenger_id: subject.drtsPassengerId },
+          },
+        ],
+      },
+    });
+    await expect(
+      observeOperationalReferralZeroOrders(subject, "after-refusal"),
+    ).rejects.toThrow("Referral controlled subject has canonical orders");
   });
   // resolveTenantPassengerProfile explicitly returns passengerId:null for
   // bookings without a master passenger. _executeCreateTenantBooking can
@@ -4804,8 +4919,7 @@ describe("original referral first-visit issuer and canonical zero-order evidence
     "rejects missing/undefined/invalid passenger IDs with entry %s",
     async (partnerEntrySlug) => {
       for (const passenger of [
-        {},
-        { passenger_id: undefined },
+        ...(partnerEntrySlug === null ? [] : [{}, { passenger_id: undefined }]),
         { passenger_id: "" },
         { passenger_id: " " },
         { passenger_id: 0 },
