@@ -4793,6 +4793,24 @@ describe("original referral first-visit issuer and canonical zero-order evidence
         origin,
       ),
     ).toEqual({ Authorization: "Bearer OPS-RAM" });
+    expect(() =>
+      operationalRoleRequestHeaders(
+        "ops_non_reviewer",
+        "DRTS_DEV_API_BASE_URL",
+        "https://other.example.invalid",
+        {},
+        "WIF-RAM",
+      ),
+    ).toThrow("exact credential-free origin");
+    expect(() =>
+      operationalRoleRequestHeaders(
+        "ops_non_reviewer",
+        "DRTS_DEV_API_BASE_URL",
+        origin,
+        { "x-roles": "ops_user" },
+        "WIF-RAM",
+      ),
+    ).toThrow("Spoofed identity header");
     vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "WIF-RAM");
     await expect(
       observeOperationalReferralZeroOrders(subject, "before-refusal"),

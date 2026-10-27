@@ -1527,7 +1527,10 @@ describe("actual original first-visit refusal chain", () => {
   async function probe(change: Record<string, any> = {}) {
     vi.stubEnv("DRTS_CANDIDATE_SHA", sha);
     vi.stubEnv("DRTS_DEV_API_BASE_URL", api);
-    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "private-WIF");
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN",
+      "private-WIF",
+    );
     vi.stubEnv(
       "DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN",
       "private-Ops",
