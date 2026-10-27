@@ -4768,6 +4768,80 @@ describe("original referral first-visit issuer and canonical zero-order evidence
       /RAM|private|other-person|WIF|OPS/,
     );
   });
+  // resolveTenantPassengerProfile explicitly returns passengerId:null for
+  // bookings without a master passenger. _executeCreateTenantBooking can
+  // independently retain a partner entry; the canonical wire preserves null.
+  it.each([
+    [entry.entry_slug, "before-refusal"],
+    [entry.entry_slug, "after-refusal"],
+    [null, "before-refusal"],
+    [null, "after-refusal"],
+  ] as const)(
+    "accepts an unrelated explicit-null passenger with entry %s during %s",
+    async (partnerEntrySlug, phase) => {
+      const calls = ports({
+        orders: {
+          items: [
+            row,
+            {
+              ...row,
+              partner_entry_slug: partnerEntrySlug,
+              passenger: { passenger_id: null, name: "private-name" },
+            },
+          ],
+        },
+      });
+      const result = await observeOperationalReferralZeroOrders(subject, phase);
+      expect(result).toMatchObject({ count: 0, phase, status: 200 });
+      expect(calls.map(({ path }) => path)).toEqual([
+        "/api/auth/session",
+        "/api/orders",
+      ]);
+      expect(JSON.stringify(result)).not.toMatch(/private|RAM|other-person/);
+    },
+  );
+  it.each([entry.entry_slug, null])(
+    "rejects missing/undefined/invalid passenger IDs with entry %s",
+    async (partnerEntrySlug) => {
+      for (const passenger of [
+        {},
+        { passenger_id: undefined },
+        { passenger_id: "" },
+        { passenger_id: " " },
+        { passenger_id: 0 },
+        { passenger_id: false },
+        { passenger_id: {} },
+        { passenger_id: [] },
+      ]) {
+        ports({
+          orders: {
+            items: [{ ...row, partner_entry_slug: partnerEntrySlug, passenger }],
+          },
+        });
+        await expect(
+          observeOperationalReferralZeroOrders(subject, "before-refusal"),
+        ).rejects.toThrow("Referral canonical orders row malformed");
+      }
+    },
+  );
+  it("still rejects a controlled-subject order after an unrelated explicit-null passenger", async () => {
+    ports({
+      orders: {
+        items: [
+          { ...row, passenger: { passenger_id: null } },
+          {
+            ...row,
+            tenant_id: "other",
+            partner_entry_slug: "other",
+            passenger: { passenger_id: subject.drtsPassengerId },
+          },
+        ],
+      },
+    });
+    await expect(
+      observeOperationalReferralZeroOrders(subject, "after-refusal"),
+    ).rejects.toThrow("Referral controlled subject has canonical orders");
+  });
   it("retains only a safe issuer 403 status and rejects invalid JSON without payload leakage", async () => {
     ports({ issueStatus: 403 });
     await expect(

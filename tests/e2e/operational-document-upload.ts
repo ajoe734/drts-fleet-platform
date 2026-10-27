@@ -2707,8 +2707,9 @@ export async function observeOperationalReferralZeroOrders(
       typeof row.passenger !== "object" ||
       Array.isArray(row.passenger) ||
       !(
-        (row.passenger.passenger_id == null &&
-          row.partner_entry_slug === null) ||
+        // Tenant bookings may retain a partner entry without a master
+        // passenger. Only explicit null is valid; missing IDs remain malformed.
+        row.passenger.passenger_id === null ||
         nonempty(row.passenger.passenger_id)
       ) ||
       ![
