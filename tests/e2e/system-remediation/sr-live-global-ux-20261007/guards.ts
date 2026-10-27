@@ -6,6 +6,8 @@ import {
   recipeKey,
   type CaseEvidence,
   type Deployment,
+  type IdentityReadbackClassification,
+  type IdentityReadbackResult,
   type Inventory,
   type ManualEvidence,
   type Plan,
@@ -13,6 +15,605 @@ import {
   type Applicability,
 } from "./model";
 import { fullSha, hash } from "./inventory";
+
+const BANK_TENANT_ROLE_TO_DISPLAY_ROLE: Record<
+  string,
+  "bank_program_admin" | "bank_ops_viewer" | "bank_finance"
+> = {
+  tenant_admin: "bank_program_admin",
+  tenant_finance_admin: "bank_finance",
+  tenant_ops_admin: "bank_ops_viewer",
+  tenant_viewer: "bank_ops_viewer",
+};
+
+const VALID_CLASSIFICATIONS: readonly IdentityReadbackClassification[] = [
+  "direct",
+  "bank_ui_role",
+  "referral_public_session",
+  "first_party_passenger_account",
+];
+
+export function getIdentityField(value: unknown, field: string): unknown {
+  assert(
+    typeof field === "string" &&
+      field.trim().length > 0 &&
+      !field.startsWith(".") &&
+      !field.endsWith(".") &&
+      !field.includes(".."),
+    "invalid identity field path",
+  );
+  return field
+    .split(".")
+    .reduce<unknown>(
+      (v, key) =>
+        v && typeof v === "object" && !Array.isArray(v)
+          ? (v as Record<string, unknown>)[key]
+          : undefined,
+      value,
+    );
+}
+
+function validateSessionIdentityContract(
+  session: Pick<Session, "app" | "role" | "identity">,
+  inventory: Inventory,
+) {
+  if (session.identity.classification !== undefined) {
+    assert(
+      VALID_CLASSIFICATIONS.includes(session.identity.classification),
+      "invalid identity readback classification",
+    );
+  }
+  if (session.app === "bank-console-web") {
+    assert(
+      session.identity.path === "/api/auth/session" &&
+        session.identity.subjectPath === "data.identity.actor_id" &&
+        [
+          "data.identity.roles",
+          "data.identity.display_role",
+          "data.identity.display_roles",
+        ].includes(session.identity.rolePath) &&
+        (!session.identity.classification ||
+          ["bank_ui_role", "direct"].includes(session.identity.classification)),
+      "bank session identity contract mismatch",
+    );
+    return;
+  }
+  if (session.app === "referral-embed-web") {
+    assert(
+      session.identity.path === "/api/referral/session" &&
+        [
+          "data.identity.actor_id",
+          "data.identity.subject_alias",
+          "data.identity.recovery_scope",
+          "data.session.recoveryScope",
+          "session.recoveryScope",
+        ].includes(session.identity.subjectPath) &&
+        ["data.identity.actor_type", "data.identity.roles"].includes(
+          session.identity.rolePath,
+        ) &&
+        /^[0-9a-f]{64}$/.test(session.identity.expectedSubject) &&
+        (!session.identity.classification ||
+          ["referral_public_session", "direct"].includes(
+            session.identity.classification,
+          )),
+      "referral session identity contract mismatch",
+    );
+    return;
+  }
+  if (session.app === "passenger-app-web") {
+    assert(
+      session.identity.path === "/api/passenger-app/me" &&
+        session.identity.subjectPath === "data.account.drts_passenger_id" &&
+        ["data.account.status", "data.account"].includes(
+          session.identity.rolePath,
+        ) &&
+        (!session.identity.classification ||
+          session.identity.classification === "first_party_passenger_account"),
+      "passenger session identity contract mismatch",
+    );
+    return;
+  }
+  if (session.app === "ops-console-web" && session.role === "ops_observer") {
+    assert(
+      session.identity.path === "/control-plane-proxy/auth/session" &&
+        session.identity.subjectPath === "data.identity.actor_id" &&
+        session.identity.rolePath === "data.identity.roles" &&
+        (!session.identity.classification ||
+          session.identity.classification === "direct"),
+      "ops_observer session identity contract mismatch",
+    );
+    return;
+  }
+  const surface = inventory.surfaces.find((s) => s.app === session.app);
+  if (!surface || surface.roleSource === "policy.ts") {
+    return;
+  }
+  const directExpected: Record<
+    string,
+    { path: string; subjectPath: string; rolePath: string }
+  > = {
+    "tenant-console-web": {
+      path: "/api/auth/session",
+      subjectPath: "data.identity.actor_id",
+      rolePath: "data.identity.roles",
+    },
+    "enterprise-dispatch-web": {
+      path: "/api/auth/session",
+      subjectPath: "data.identity.actor_id",
+      rolePath: "data.identity.roles",
+    },
+    "agency-portal-web": {
+      path: "/api/auth/session",
+      subjectPath: "data.identity.actor_id",
+      rolePath: "data.identity.roles",
+    },
+    "fleet-partner-portal-web": {
+      path: "/api/auth/session",
+      subjectPath: "data.identity.actor_id",
+      rolePath: "data.identity.actor_type",
+    },
+    "platform-admin-web": {
+      path: "/control-plane-proxy/auth/session",
+      subjectPath: "data.identity.actor_id",
+      rolePath: "data.identity.actor_type",
+    },
+    "ops-console-web": {
+      path: "/control-plane-proxy/auth/session",
+      subjectPath: "data.identity.actor_id",
+      rolePath: "data.identity.actor_type",
+    },
+    "channel-partner-portal-web": {
+      path: "/control-plane-proxy/identity/context",
+      subjectPath: "data.actor_id",
+      rolePath: "data.actor_type",
+    },
+  };
+  const contract = directExpected[session.app];
+  if (contract) {
+    assert(
+      session.identity.path === contract.path &&
+        session.identity.subjectPath === contract.subjectPath &&
+        session.identity.rolePath === contract.rolePath &&
+        (!session.identity.classification ||
+          session.identity.classification === "direct"),
+      `session identity contract mismatch for ${session.app}`,
+    );
+  }
+}
+
+export function verifyIdentityReadback(
+  session: Pick<Session, "app" | "role" | "identity">,
+  body: unknown,
+  options?: {
+    expectedRole?: string | undefined;
+    status?: number | undefined;
+    candidateSha?: string | undefined;
+    expectedRuntimeSha?: string | undefined;
+  },
+): IdentityReadbackResult {
+  if (options?.status !== undefined) {
+    assert.equal(options.status, 200, "identity readback HTTP 200 required");
+  }
+  if (options?.expectedRuntimeSha !== undefined) {
+    assert.equal(
+      options.candidateSha,
+      options.expectedRuntimeSha,
+      "identity readback runtime SHA mismatch",
+    );
+  }
+  const expectedRole = options?.expectedRole ?? session.role;
+  assert(
+    typeof expectedRole === "string" &&
+      expectedRole.trim().length > 0 &&
+      session.role === expectedRole,
+    "session role mismatch",
+  );
+  localRoute(session.identity.path);
+  assert(
+    session.identity.subjectPath?.trim() &&
+      session.identity.rolePath?.trim() &&
+      session.identity.expectedSubject?.trim(),
+    "server identity readback required",
+  );
+  if (session.identity.classification !== undefined) {
+    assert(
+      VALID_CLASSIFICATIONS.includes(session.identity.classification),
+      "invalid identity readback classification",
+    );
+  }
+  assert(
+    body && typeof body === "object" && !Array.isArray(body),
+    "identity response body must be an object",
+  );
+  const actualSubject = getIdentityField(body, session.identity.subjectPath);
+  assert(
+    typeof actualSubject === "string" && actualSubject.trim().length > 0,
+    "identity subject missing",
+  );
+  assert.equal(
+    actualSubject,
+    session.identity.expectedSubject,
+    "identity subject mismatch",
+  );
+
+  if (session.app === "bank-console-web") {
+    assert(
+      !session.identity.classification ||
+        ["bank_ui_role", "direct"].includes(session.identity.classification),
+      "bank identity classification mismatch",
+    );
+    assert.equal(
+      session.identity.path,
+      "/api/auth/session",
+      "bank identity endpoint must be /api/auth/session",
+    );
+    assert.equal(
+      session.identity.subjectPath,
+      "data.identity.actor_id",
+      "bank subjectPath must be data.identity.actor_id",
+    );
+    assert(
+      [
+        "data.identity.roles",
+        "data.identity.display_role",
+        "data.identity.display_roles",
+      ].includes(session.identity.rolePath),
+      "bank rolePath must read data.identity.roles or data.identity.display_role(s)",
+    );
+    assert(
+      ["bank_program_admin", "bank_ops_viewer", "bank_finance"].includes(
+        expectedRole,
+      ),
+      "unknown bank role",
+    );
+    const root = body as Record<string, unknown>;
+    const data = root.data as Record<string, unknown> | undefined;
+    const identity = data?.identity as Record<string, unknown> | undefined;
+    assert(
+      root.active !== false &&
+        data?.active !== false &&
+        identity &&
+        typeof identity === "object" &&
+        !Array.isArray(identity),
+      "bank session identity envelope missing or inactive",
+    );
+    if ("realm" in identity) {
+      assert.equal(
+        identity.realm,
+        "tenant",
+        "bank session realm must be tenant",
+      );
+    }
+    if ("actor_type" in identity) {
+      assert.equal(
+        identity.actor_type,
+        "tenant_admin",
+        "bank session actor_type must be tenant_admin",
+      );
+    }
+    assert(
+      typeof identity.tenant_id === "string" &&
+        identity.tenant_id.trim().length > 0,
+      "bank session tenant_id required",
+    );
+    const rawRoles = identity.roles;
+    assert(
+      Array.isArray(rawRoles) &&
+        rawRoles.length > 0 &&
+        rawRoles.every(
+          (r): r is string =>
+            typeof r === "string" && r in BANK_TENANT_ROLE_TO_DISPLAY_ROLE,
+        ),
+      "bank session requires canonical tenant roles",
+    );
+    const canonicalDisplayRoles = Array.from(
+      new Set(rawRoles.map((r) => BANK_TENANT_ROLE_TO_DISPLAY_ROLE[r]!)),
+    );
+    assert(
+      canonicalDisplayRoles.includes(
+        expectedRole as
+          | "bank_program_admin"
+          | "bank_ops_viewer"
+          | "bank_finance",
+      ),
+      "bank canonical tenant role does not authorize requested bank UI role",
+    );
+    const hasSelectedRole = identity.display_role !== undefined;
+    if (hasSelectedRole) {
+      assert(
+        typeof identity.display_role === "string" &&
+          canonicalDisplayRoles.includes(
+            identity.display_role as
+              | "bank_program_admin"
+              | "bank_ops_viewer"
+              | "bank_finance",
+          ),
+        "bank selected display_role requires signed Bank session and canonical tenant role",
+      );
+    } else {
+      // The normal tenant-auth self-readback has no Bank UI cookies/selection.
+      // Classify only a unique role from verified canonical claims; never let
+      // the fixture's requested role select among multiple possible UI roles.
+      assert(
+        session.identity.rolePath === "data.identity.roles" &&
+          identity.display_roles === undefined &&
+          canonicalDisplayRoles.length === 1,
+        "bank unselected identity needs a unique canonical UI role",
+      );
+    }
+    if (identity.display_roles !== undefined) {
+      assert(
+        Array.isArray(identity.display_roles) &&
+          identity.display_roles.length > 0 &&
+          identity.display_roles.every(
+            (r) =>
+              typeof r === "string" &&
+              canonicalDisplayRoles.includes(
+                r as "bank_program_admin" | "bank_ops_viewer" | "bank_finance",
+              ),
+          ),
+        "bank display_roles disagrees with canonical tenant roles",
+      );
+    }
+    if (session.identity.rolePath === "data.identity.display_role") {
+      assert.equal(
+        identity.display_role,
+        expectedRole,
+        "bank display_role mismatch",
+      );
+    } else if (session.identity.rolePath === "data.identity.display_roles") {
+      assert(
+        Array.isArray(identity.display_roles) &&
+          identity.display_roles.includes(expectedRole),
+        "bank display_roles mismatch",
+      );
+    }
+    if (hasSelectedRole) {
+      assert.equal(
+        identity.display_role,
+        expectedRole,
+        "bank selected display_role mismatch",
+      );
+    } else {
+      assert.equal(
+        canonicalDisplayRoles[0],
+        expectedRole,
+        "bank canonical display role mismatch",
+      );
+    }
+    return {
+      subject: actualSubject,
+      effectiveRoles: canonicalDisplayRoles,
+      classification: "bank_ui_role",
+    };
+  }
+
+  if (session.app === "referral-embed-web") {
+    assert(
+      !session.identity.classification ||
+        ["referral_public_session", "direct"].includes(
+          session.identity.classification,
+        ),
+      "referral identity classification mismatch",
+    );
+    assert.equal(
+      session.identity.path,
+      "/api/referral/session",
+      "referral identity endpoint must be /api/referral/session",
+    );
+    assert(
+      [
+        "data.identity.actor_id",
+        "data.identity.subject_alias",
+        "data.identity.recovery_scope",
+        "data.session.recoveryScope",
+        "session.recoveryScope",
+      ].includes(session.identity.subjectPath),
+      "referral subjectPath must read opaque recoveryScope",
+    );
+    assert(
+      ["data.identity.actor_type", "data.identity.roles"].includes(
+        session.identity.rolePath,
+      ),
+      "referral rolePath must read data.identity.actor_type or data.identity.roles",
+    );
+    assert.equal(
+      expectedRole,
+      "referral_passenger",
+      "unknown referral embed role",
+    );
+    assert(
+      /^[0-9a-f]{64}$/.test(actualSubject),
+      "referral subject readback must be a 64-hex opaque recoveryScope",
+    );
+    const serialized = JSON.stringify(body);
+    assert(
+      !/"(?:accessToken|access_token|drtsPassengerId|drts_passenger_id)"\s*:/.test(
+        serialized,
+      ),
+      "referral public readback must not expose bearer or raw drtsPassengerId",
+    );
+    const root = body as Record<string, unknown>;
+    const data = (root.data as Record<string, unknown> | undefined) ?? {};
+    const pubSession = (data.session ?? root.session) as
+      | Record<string, unknown>
+      | undefined;
+    const identity = data.identity as Record<string, unknown> | undefined;
+    assert(
+      root.ok !== false &&
+        data.active !== false &&
+        pubSession &&
+        typeof pubSession === "object" &&
+        !Array.isArray(pubSession),
+      "referral public session missing or inactive",
+    );
+    assert.equal(
+      pubSession.identityActive,
+      true,
+      "referral session identityActive must be true",
+    );
+    assert.equal(
+      pubSession.recoveryScope,
+      actualSubject,
+      "referral recoveryScope mismatch",
+    );
+    assert(
+      typeof pubSession.partnerEntrySlug === "string" &&
+        pubSession.partnerEntrySlug.trim().length > 0 &&
+        typeof pubSession.entryHost === "string" &&
+        pubSession.entryHost.trim().length > 0 &&
+        typeof pubSession.handoffId === "string" &&
+        pubSession.handoffId.trim().length > 0,
+      "referral public session entry metadata missing",
+    );
+    const consent = pubSession.consent as Record<string, unknown> | undefined;
+    assert(
+      consent &&
+        typeof consent === "object" &&
+        typeof consent.grantedAt === "string" &&
+        consent.grantedAt.trim().length > 0,
+      "referral session consent grantedAt required",
+    );
+    assert(
+      identity &&
+        typeof identity === "object" &&
+        !Array.isArray(identity) &&
+        identity.actor_id === actualSubject &&
+        identity.actor_type === "referral_passenger" &&
+        identity.realm === "partner" &&
+        identity.identity_active === true,
+      "referral identity projection missing or invalid",
+    );
+    const roleField = getIdentityField(body, session.identity.rolePath);
+    const roleList = Array.isArray(roleField) ? roleField : [roleField];
+    assert(
+      roleList.includes("referral_passenger"),
+      "referral role readback mismatch",
+    );
+    return {
+      subject: actualSubject,
+      effectiveRoles: ["referral_passenger"],
+      classification: "referral_public_session",
+    };
+  }
+
+  if (session.app === "passenger-app-web") {
+    assert(
+      !session.identity.classification ||
+        session.identity.classification === "first_party_passenger_account",
+      "passenger identity classification mismatch",
+    );
+    assert.equal(
+      session.identity.path,
+      "/api/passenger-app/me",
+      "passenger identity endpoint must be /api/passenger-app/me",
+    );
+    assert.equal(
+      session.identity.subjectPath,
+      "data.account.drts_passenger_id",
+      "passenger subjectPath must be data.account.drts_passenger_id",
+    );
+    assert(
+      ["data.account.status", "data.account"].includes(
+        session.identity.rolePath,
+      ),
+      "passenger rolePath must be data.account.status",
+    );
+    assert.equal(
+      expectedRole,
+      "first_party_passenger",
+      "unknown passenger-app role",
+    );
+    const root = body as Record<string, unknown>;
+    const data = root.data as Record<string, unknown> | undefined;
+    const account = data?.account as Record<string, unknown> | undefined;
+    assert(
+      account && typeof account === "object" && !Array.isArray(account),
+      "passenger account envelope missing",
+    );
+    assert.equal(
+      account.drts_passenger_id,
+      actualSubject,
+      "passenger drts_passenger_id mismatch",
+    );
+    assert.equal(
+      account.status,
+      "active",
+      "first_party_passenger requires active account status",
+    );
+    assert.equal(
+      typeof account.contact_phone_verified,
+      "boolean",
+      "passenger account contact_phone_verified boolean required",
+    );
+    assert(
+      typeof account.created_at === "string" &&
+        !Number.isNaN(Date.parse(account.created_at)),
+      "passenger account created_at timestamp required",
+    );
+    assert(
+      !("tenant_id" in account) &&
+        !("partner_id" in account) &&
+        !("partner_entry_slug" in account) &&
+        !("agency_id" in account),
+      "first_party_passenger account must not carry cross-realm claims",
+    );
+    return {
+      subject: actualSubject,
+      effectiveRoles: ["first_party_passenger"],
+      classification: "first_party_passenger_account",
+    };
+  }
+
+  assert(
+    !session.identity.classification ||
+      session.identity.classification === "direct",
+    "direct identity classification mismatch",
+  );
+  const root = body as Record<string, unknown>;
+  const data = root.data as Record<string, unknown> | undefined;
+  assert(
+    root.active !== false && data?.active !== false,
+    "identity session inactive",
+  );
+  const roleField = getIdentityField(body, session.identity.rolePath);
+  if (session.app === "ops-console-web" && expectedRole === "ops_observer") {
+    assert.equal(
+      session.identity.path,
+      "/control-plane-proxy/auth/session",
+      "ops_observer requires /control-plane-proxy/auth/session",
+    );
+    assert.equal(
+      session.identity.rolePath,
+      "data.identity.roles",
+      "ops_observer requires data.identity.roles",
+    );
+    const identity = data?.identity as Record<string, unknown> | undefined;
+    if (identity && "realm" in identity) {
+      assert.equal(identity.realm, "ops", "ops_observer realm must be ops");
+    }
+    assert(
+      Array.isArray(roleField) &&
+        (roleField.includes("ops_observer") || roleField.includes("observer")),
+      "ops_observer requires observer role in data.identity.roles",
+    );
+    return {
+      subject: actualSubject,
+      effectiveRoles: ["ops_observer"],
+      classification: "direct",
+    };
+  }
+  const roleList = Array.isArray(roleField) ? roleField : [roleField];
+  assert(
+    roleList.includes(expectedRole),
+    `identity role mismatch for ${session.app}|${expectedRole}`,
+  );
+  return {
+    subject: actualSubject,
+    effectiveRoles: roleList.filter((r): r is string => typeof r === "string"),
+    classification: "direct",
+  };
+}
 
 export function origin(value: string): string {
   const url = new URL(value);
@@ -162,6 +763,7 @@ export function validateSessions(
         session.identity.expectedSubject,
       "server identity readback required",
     );
+    validateSessionIdentityContract(session, inventory);
     assert(
       session.storageState.cookies.length > 0,
       "provisioned application session required; invoker token alone is not login",

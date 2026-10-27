@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { formatDateTime, usePlatformAdminClient } from "@/lib/admin-client";
 import { useTranslation } from "@/lib/i18n";
 import {
@@ -27,6 +33,10 @@ import {
   formatMoneyMinor,
   getFleetPartner,
   listFleetPartnerDrivers,
+  listFleetHumanRoles,
+  manageFleetHumanRole,
+  type FleetHumanRoleRecord,
+  type ManageFleetHumanRoleCommand,
   listFleetStatements,
   listRevenueShareRules,
   PARTNERSHIP_TYPES,
@@ -130,6 +140,24 @@ export default function FleetPartnerDetailPage() {
   const [creatingAffiliation, setCreatingAffiliation] = useState(false);
   const [creatingRule, setCreatingRule] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [humanEntrySlug, setHumanEntrySlug] = useState("");
+  const [humanSubject, setHumanSubject] = useState("");
+  const [humanRole, setHumanRole] =
+    useState<ManageFleetHumanRoleCommand["roleCode"]>("fleet_partner_ops");
+  const [humanEnabled, setHumanEnabled] = useState(true);
+  const [humanValidTo, setHumanValidTo] = useState("");
+  const [humanRoles, setHumanRoles] = useState<FleetHumanRoleRecord[]>([]);
+  const [humanSaving, setHumanSaving] = useState(false);
+  const [humanAck, setHumanAck] = useState<string | null>(null);
+  // A read started before a write (or an entry/partner switch) cannot replace
+  // the write's verified readback with older data while leaving its ACK visible.
+  const humanRequestVersion = useRef(0);
+  useEffect(
+    () => () => {
+      humanRequestVersion.current++;
+    },
+    [client, fleetPartnerId],
+  );
 
   const loadDetail = async () => {
     if (!fleetPartnerId) {
@@ -181,6 +209,72 @@ export default function FleetPartnerDetailPage() {
       setError(saveError?.message ?? t("common.unknown"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReadHumanRoles = async () => {
+    const version = ++humanRequestVersion.current;
+    const entrySlug = humanEntrySlug.trim();
+    setHumanAck(null);
+    setError(null);
+    try {
+      const roles = await listFleetHumanRoles(
+        client,
+        fleetPartnerId,
+        entrySlug,
+      );
+      if (version === humanRequestVersion.current) setHumanRoles(roles);
+    } catch (readError: any) {
+      if (version === humanRequestVersion.current)
+        setError(readError?.message ?? t("common.unknown"));
+    }
+  };
+
+  const handleManageHumanRole = async () => {
+    const version = ++humanRequestVersion.current;
+    const entrySlug = humanEntrySlug.trim();
+    setHumanSaving(true);
+    setHumanAck(null);
+    setError(null);
+    try {
+      const ack = await manageFleetHumanRole(client, fleetPartnerId, {
+        entrySlug,
+        partnerUserRef: humanSubject.trim(),
+        roleCode: humanRole,
+        enabled: humanEnabled,
+        validTo: humanValidTo ? new Date(humanValidTo).toISOString() : null,
+      });
+      if (version !== humanRequestVersion.current) return;
+      const readback = await listFleetHumanRoles(
+        client,
+        fleetPartnerId,
+        entrySlug,
+      );
+      if (version !== humanRequestVersion.current) return;
+      setHumanRoles(readback);
+      if (
+        !readback.some(
+          (row) =>
+            row.membershipId === ack.membershipId &&
+            row.roleCode === ack.roleCode &&
+            row.status === ack.status &&
+            row.validTo === ack.validTo,
+        )
+      ) {
+        throw new Error(t("fleetPartners.humanRoles.readbackMismatch"));
+      }
+      setHumanAck(
+        t("fleetPartners.humanRoles.confirmed", {
+          role: ack.roleCode,
+          status: ack.status,
+          principal: ack.principalId,
+        }),
+      );
+    } catch (saveError: any) {
+      if (version === humanRequestVersion.current)
+        setError(saveError?.message ?? t("common.unknown"));
+    } finally {
+      setHumanSaving(false);
     }
   };
 
@@ -371,6 +465,111 @@ export default function FleetPartnerDetailPage() {
         <CanvasCard>{t("fleetPartners.detail.loading")}</CanvasCard>
       ) : (
         <>
+          <CanvasCard
+            title={t("fleetPartners.humanRoles.title")}
+            subtitle={t("fleetPartners.humanRoles.subtitle")}
+          >
+            <div style={formGridStyle}>
+              <CanvasField label={t("fleetPartners.humanRoles.entrySlug")}>
+                <input
+                  aria-label={t("fleetPartners.humanRoles.entrySlug")}
+                  style={inputStyle()}
+                  value={humanEntrySlug}
+                  onChange={(event) => {
+                    humanRequestVersion.current++;
+                    setHumanEntrySlug(event.target.value);
+                    setHumanRoles([]);
+                    setHumanAck(null);
+                  }}
+                />
+              </CanvasField>
+              <CanvasField label={t("fleetPartners.humanRoles.subject")}>
+                <input
+                  aria-label={t("fleetPartners.humanRoles.subject")}
+                  style={inputStyle()}
+                  value={humanSubject}
+                  onChange={(event) => setHumanSubject(event.target.value)}
+                />
+              </CanvasField>
+              <CanvasField label={t("fleetPartners.humanRoles.role")}>
+                <select
+                  aria-label={t("fleetPartners.humanRoles.role")}
+                  style={inputStyle()}
+                  value={humanRole}
+                  onChange={(event) =>
+                    setHumanRole(
+                      event.target
+                        .value as ManageFleetHumanRoleCommand["roleCode"],
+                    )
+                  }
+                >
+                  <option value="fleet_partner_admin">
+                    {t("fleetPartners.humanRoles.admin")}
+                  </option>
+                  <option value="fleet_partner_ops">
+                    {t("fleetPartners.humanRoles.ops")}
+                  </option>
+                  <option value="fleet_partner_finance">
+                    {t("fleetPartners.humanRoles.finance")}
+                  </option>
+                </select>
+              </CanvasField>
+              <CanvasField label={t("fleetPartners.humanRoles.expiry")}>
+                <input
+                  aria-label={t("fleetPartners.humanRoles.expiry")}
+                  type="datetime-local"
+                  style={inputStyle()}
+                  value={humanValidTo}
+                  onChange={(event) => setHumanValidTo(event.target.value)}
+                />
+              </CanvasField>
+              <CanvasField label={t("fleetPartners.humanRoles.state")}>
+                <select
+                  aria-label={t("fleetPartners.humanRoles.state")}
+                  style={inputStyle()}
+                  value={humanEnabled ? "active" : "disabled"}
+                  onChange={(event) =>
+                    setHumanEnabled(event.target.value === "active")
+                  }
+                >
+                  <option value="active">
+                    {t("fleetPartners.status.active")}
+                  </option>
+                  <option value="disabled">
+                    {t("fleetPartners.humanRoles.disabled")}
+                  </option>
+                </select>
+              </CanvasField>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <CanvasBtn
+                disabled={!humanEntrySlug || humanSaving}
+                onClick={() => void handleReadHumanRoles()}
+              >
+                {t("fleetPartners.humanRoles.read")}
+              </CanvasBtn>
+              <CanvasBtn
+                variant="primary"
+                disabled={!humanEntrySlug || !humanSubject || humanSaving}
+                onClick={() => void handleManageHumanRole()}
+              >
+                {humanSaving
+                  ? t("common.saving")
+                  : t("fleetPartners.humanRoles.save")}
+              </CanvasBtn>
+            </div>
+            {humanAck ? <p role="status">{humanAck}</p> : null}
+            <ul>
+              {humanRoles.map((row) => (
+                <li key={row.membershipId}>
+                  {row.principalId}: {row.roleCode} / {row.status}
+                  {row.validTo
+                    ? t("fleetPartners.humanRoles.until", { date: row.validTo })
+                    : ""}
+                </li>
+              ))}
+            </ul>
+          </CanvasCard>
           <div style={heroStyle}>
             <CanvasCard
               title={t("fleetPartners.partnerProfileTitle")}

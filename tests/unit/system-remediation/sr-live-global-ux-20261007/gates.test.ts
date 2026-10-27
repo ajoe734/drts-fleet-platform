@@ -547,6 +547,79 @@ describe("locale intent and source mapping", () => {
     // Full git page/blob discovery can exceed the default 5s on a busy VM.
     // Keep all pages and checks; bound only this complete inventory probe.
   }, 30_000);
+  it("binds tenant role discovery to the requested catalog SHA and rejects Fleet/Agency roles", () => {
+    const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const policy = "packages/contracts/src/iam-policy-catalog.ts";
+    const manifest = inventoryAt(head);
+    const expected = [
+      "tenant_admin",
+      "tenant_ops_admin",
+      "tenant_finance_admin",
+      "tenant_viewer",
+    ];
+    for (const app of ["tenant-console-web", "enterprise-dispatch-web"]) {
+      const roles = manifest.surfaces.find(
+        (surface) => surface.app === app,
+      )!.roles;
+      expect(roles).toEqual(expected);
+      expect(roles).not.toContain("fleet_partner_admin");
+      expect(roles).not.toContain("agency_viewer");
+      expect(
+        manifest.surfaces.find((surface) => surface.app === app)!.roleSource,
+      ).toBe(policy);
+      expect(
+        manifest.screens
+          .filter((screen) => screen.app === app)
+          .every(
+            (screen) =>
+              screen.sourceCommit === head &&
+              /^[a-f0-9]{40}$/.test(screen.sourceBlob),
+          ),
+      ).toBe(true);
+    }
+    alterSource(head, policy, (source) =>
+      source.replace('roleCode: "tenant_viewer"', 'roleCode: "tenant_auditor"'),
+    );
+    const altered = inventoryAt(head);
+    for (const app of ["tenant-console-web", "enterprise-dispatch-web"])
+      expect(altered.surfaces.find((s) => s.app === app)!.roles).toEqual(
+        expected.map((role) =>
+          role === "tenant_viewer" ? "tenant_auditor" : role,
+        ),
+      );
+  }, 30_000);
+  it("fails closed when the historical tenant declaration is malformed or crosses realms", () => {
+    const head = realExecFileSync("git", ["rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const policy = "packages/contracts/src/iam-policy-catalog.ts";
+    for (const alter of [
+      (source: string) =>
+        source.replace(
+          "IAM_TENANT_ROLE_POLICY_DEFINITIONS",
+          "IAM_LOST_TENANT_ROLES",
+        ),
+      (source: string) =>
+        source.replace('roleCode: "tenant_viewer"', 'roleCode: "tenant_admin"'),
+      (source: string) =>
+        source.replace(
+          'roleCode: "tenant_viewer",\n      roleFamily: "tenant"',
+          'roleCode: "tenant_viewer",\n      roleFamily: "partner"',
+        ),
+      (source: string) =>
+        source.replace('roleCode: "tenant_viewer"', "roleCode: unknownRole"),
+      (source: string) =>
+        source.replace(
+          'roleCode: "tenant_viewer",',
+          'roleCode: "tenant_viewer",,',
+        ),
+    ]) {
+      alterSource(head, policy, alter);
+      expect(() => inventoryAt(head)).toThrow("tenant role source changed");
+    }
+  });
   it.each(["passenger-app-web", "tenant-console-web", "agency-portal-web"])(
     "rejects missing active surface %s without shrinking the page denominator",
     (app) => {

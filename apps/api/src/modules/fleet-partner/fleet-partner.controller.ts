@@ -28,6 +28,7 @@ import type {
   CreateFleetPartnerCommand,
   CreateFleetPartnerRevenueShareRuleCommand,
   FleetPartnerRecord,
+  ManageFleetHumanRoleCommand,
   SupplyReviewActionCommand,
   UpdateFleetPartnerCommand,
   UpdateFleetPartnerRevenueShareRuleCommand,
@@ -380,6 +381,42 @@ export class FleetPartnerController {
   ) {
     return toApiSuccessEnvelope(
       await this.fleetPartnerService.createFleetPartner(command),
+      requestId,
+    );
+  }
+
+  @Get("admin/fleet-partners/:fleetPartnerId/human-roles")
+  @RequireRealms("platform", "ops")
+  async listFleetHumanRoles(
+    @Param("fleetPartnerId") fleetPartnerId: string,
+    @Query("entrySlug") entrySlug: string,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      toApiListData(
+        await this.fleetPartnerService.listFleetHumanRoles(
+          fleetPartnerId,
+          entrySlug,
+        ),
+      ),
+      requestId,
+    );
+  }
+
+  @Put("admin/fleet-partners/:fleetPartnerId/human-roles")
+  @RequireRealms("platform", "ops")
+  async manageFleetHumanRole(
+    @Param("fleetPartnerId") fleetPartnerId: string,
+    @Body() command: ManageFleetHumanRoleCommand,
+    @CurrentIdentity() identity: BootstrapRequestIdentity | null,
+    @Headers("x-request-id") requestId?: string,
+  ) {
+    return toApiSuccessEnvelope(
+      await this.fleetPartnerService.manageFleetHumanRole(
+        fleetPartnerId,
+        command,
+        identity,
+      ),
       requestId,
     );
   }

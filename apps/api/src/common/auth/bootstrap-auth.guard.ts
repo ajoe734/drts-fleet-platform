@@ -1085,11 +1085,142 @@ export class BootstrapAuthGuard implements CanActivate {
     requiredScopes: string[],
     request: AuthenticatedRequestLike,
   ) {
+    // A directly called API is not obliged to use the portal's Fleet client.
+    // Bind the Fleet selector at the backend guard as well: scope possession
+    // alone never permits an own-Fleet token to query another Fleet by header.
+    const routePath = normalizeRoutePath(
+      request.originalUrl ?? request.url ?? "",
+    ).replace(/^api\/+/, "");
+    if (
+      identity.realm === "partner" &&
+      routePath.startsWith("fleet-partner/") &&
+      !routePath.startsWith("fleet-partner/training/")
+    ) {
+      const headers = asHeaderRecord(request.headers);
+      const rawSelector =
+        headers["x-fleet-partner-id"] ?? headers["X-Fleet-Partner-Id"];
+      const selector = Array.isArray(rawSelector) ? null : rawSelector?.trim();
+      if (
+        rawSelector !== undefined &&
+        (!selector || selector !== identity.partnerId)
+      ) {
+        throw new ApiRequestError(
+          403,
+          "FLEET_SCOPE_DENIED",
+          "The Fleet selector differs from the verified partner.",
+        );
+      }
+    }
+    // Academy's tenant/ops routes also admit explicitly scoped partner callers.
+    // Unlike tenant callers, its controller takes the Fleet selector directly
+    // from the query. Bind that selector to the verified partner for ALL
+    // authorized partner training identities (including legacy report credentials).
+    // Keep the existing scope-denial result for identities lacking either grant.
+    const trainingRoute = routePath.startsWith("fleet-partner/training/");
+    const assertPartnerTrainingSelector = () => {
+      if (identity.realm !== "partner" || !trainingRoute) return;
+      const url = request.originalUrl ?? request.url ?? "";
+      const params = new URLSearchParams(url.split("?", 2)[1] ?? "");
+      const rawQuery = asQueryRecord(
+        (request as AuthenticatedRequestLike & { query?: unknown }).query,
+      )["fleetPartnerId"];
+      const selected = params.getAll("fleetPartnerId");
+      if (
+        !identity.partnerId?.trim() ||
+        selected.length !== 1 ||
+        selected[0]?.trim() !== identity.partnerId ||
+        (rawQuery !== undefined &&
+          (Array.isArray(rawQuery) || rawQuery.trim() !== identity.partnerId))
+      ) {
+        throw new ApiRequestError(
+          403,
+          "ACADEMY_FORBIDDEN_FLEET_ACCESS",
+          "Fleet partners may only access their own training data.",
+        );
+      }
+    };
     if (requiredScopes.length === 0) {
+      assertPartnerTrainingSelector();
       return;
     }
 
     if (includesAll(identity.scopes, requiredScopes)) {
+      assertPartnerTrainingSelector();
+      return;
+    }
+
+    // A managed Ops membership receives only the own-Fleet Academy read
+    // capability, not billing:read or the global reports:read decorator.
+    // Match the three original GET handlers only; a future training write or
+    // report route must be explicitly classified before this exception applies.
+    if (
+      trainingRoute &&
+      (request.method ?? "GET").toUpperCase() === "GET" &&
+      (routePath === "fleet-partner/training/summary" ||
+        routePath === "fleet-partner/training/roster" ||
+        /^fleet-partner\/training\/drivers\/[^/]+\/attempts\/[^/]+$/.test(
+          routePath,
+        )) &&
+      identity.authMode === "jwt_bearer" &&
+      identity.actorType === "partner_user" &&
+      identity.realm === "partner" &&
+      Boolean(identity.membershipId) &&
+      identity.roles.includes("fleet_partner_ops") &&
+      identity.scopes.includes("fleet:training:read") &&
+      requiredScopes.length === 2 &&
+      includesAll(requiredScopes, ["billing:read", "reports:read"])
+    ) {
+      assertPartnerTrainingSelector();
+      return;
+    }
+
+    // Explicitly scoped partner credentials retain original own-Fleet operations
+    // after human roles move to fleet:*. Non-strict deployments also accept the
+    // existing partner_api_key bootstrap fixture when it explicitly carries
+    // read AND write scopes. Strict deployments reject bootstrap headers above.
+    // This is NOT a Referral/finance grant: ordinary linked subjects lack
+    // billing:read and finance cannot write supply. Keep decorator, training
+    // reports:read and canonical selector checks intact.
+    const route = normalizeRoutePath(
+      request.originalUrl ?? request.url ?? "",
+    ).replace(/^api\/+/, "");
+    const fleetOperation =
+      route.startsWith("fleet-partner/") &&
+      !route.startsWith("fleet-partner/training/");
+    const financeOnly =
+      /^fleet-partner\/(?:statements|revenue)(?:\/|$)/.test(route) &&
+      requiredScopes.every(
+        (scope) =>
+          scope === "fleet:finance:read" || scope === "fleet:finance:write",
+      );
+    const scopedCredential =
+      ((identity.authMode === "jwt_bearer" &&
+        (identity.actorType === "partner_api_key" ||
+          identity.actorType === "partner_user")) ||
+        (identity.authMode === "bootstrap_headers" &&
+          !isStrictAuthEnvironment() &&
+          identity.actorType === "partner_api_key")) &&
+      identity.realm === "partner" &&
+      !identity.membershipId &&
+      Boolean(identity.partnerId?.trim()) &&
+      identity.scopes.includes("billing:read") &&
+      (financeOnly || identity.scopes.includes("partner:read"));
+    if (
+      fleetOperation &&
+      scopedCredential &&
+      requiredScopes.every(
+        (scope) =>
+          identity.scopes.includes(scope) ||
+          (scope === "fleet:finance:read" &&
+            identity.scopes.includes("billing:read")) ||
+          (scope === "fleet:finance:write" &&
+            identity.scopes.includes("billing:write")) ||
+          (scope === "fleet:read" &&
+            identity.scopes.includes("partner:read")) ||
+          (scope === "fleet:supply:write" &&
+            identity.scopes.includes("partner:write")),
+      )
+    ) {
       return;
     }
 

@@ -85,6 +85,9 @@ import { PassengerAppModule } from "./modules/passenger-app/passenger-app.module
       throttlers: [...GLOBAL_RATE_LIMIT],
       storage: new KeyScopedThrottlerStorage(),
     }),
+    // Register static /reports readers before the generic /reports/:jobId
+    // controller, also reached indirectly through PassengerApp/MultiTaxi.
+    ReportingModule,
     LlmGatewayModule,
     AuthModule,
     PassengerAppModule,
@@ -108,7 +111,6 @@ import { PassengerAppModule } from "./modules/passenger-app/passenger-app.module
     PlatformAdminModule,
     PlatformAdminAssistantModule,
     BillingSettlementModule,
-    ReportingModule,
     ReportingFilingModule,
     SecurityEventsModule,
     ServiceAreaModule,

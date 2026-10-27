@@ -12,12 +12,12 @@ import {
   type Plan,
   type Session,
 } from "./model";
+import { hash, translationKeysForCase, translationSourceAt } from "./inventory";
 import {
-  hash,
-  translationKeysForCase,
-  translationSourceAt,
-} from "./inventory";
-import { expectedFormat, isolatedHeaders } from "./guards";
+  expectedFormat,
+  isolatedHeaders,
+  verifyIdentityReadback,
+} from "./guards";
 import {
   keyboardSteps,
   measureContrast,
@@ -66,16 +66,6 @@ function tokenFor(target: string): string {
     ).trim();
   return tokens[target]!;
 }
-const getField = (value: unknown, field: string): unknown =>
-  field
-    .split(".")
-    .reduce<unknown>(
-      (v, key) =>
-        v && typeof v === "object"
-          ? (v as Record<string, unknown>)[key]
-          : undefined,
-      value,
-    );
 const keys = new Map(
   inventory.surfaces.map(
     (s) => [s.app, translationSourceAt(inventory.runtimeSha, s.app)] as const,
@@ -147,16 +137,15 @@ for (const c of cases(inventory)) {
           maxRedirects: 0,
         },
       );
-      expect(identity.status()).toBe(200);
-      expect(identity.headers()["x-drts-candidate-sha"]).toBe(
-        inventory.runtimeSha,
-      );
       const identityBody: unknown = await identity.json();
-      expect(getField(identityBody, session.identity.subjectPath)).toBe(
-        session.identity.expectedSubject,
-      );
-      const roles = getField(identityBody, session.identity.rolePath);
-      expect(Array.isArray(roles) ? roles : [roles]).toContain(c.role);
+      const verifiedReadback = verifyIdentityReadback(session, identityBody, {
+        expectedRole: c.role,
+        status: identity.status(),
+        candidateSha: identity.headers()["x-drts-candidate-sha"],
+        expectedRuntimeSha: inventory.runtimeSha,
+      });
+      expect(verifiedReadback.subject).toBe(session.identity.expectedSubject);
+      expect(verifiedReadback.effectiveRoles).toContain(c.role);
       if (c.state === "expired" || c.state === "permission") {
         stage = "negative-session-variant-missing";
         expect(session.variants?.[c.state]).toBeDefined();

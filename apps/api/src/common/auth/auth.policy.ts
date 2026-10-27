@@ -587,9 +587,36 @@ export function resolveRouteAuthPolicy(
 
   if (routePath.startsWith("fleet-partner/")) {
     const routeSuffix = routePath.slice("fleet-partner/".length) || "root";
+    const finance =
+      routeSuffix === "statements" ||
+      routeSuffix.startsWith("statements/") ||
+      routeSuffix === "revenue" ||
+      routeSuffix.startsWith("revenue/");
+    // These views combine Fleet operations and financial details. Both
+    // grants are necessary: Ops must not see money, while finance may read
+    // statements without gaining driver/trip/supply/quality details.
+    const financialSummary =
+      routeSuffix === "dashboard" || routeSuffix === "trips";
+    const quality = routeSuffix === "quality-metrics";
+    // Academy has its own @RequireScopes(reports:read) and independent
+    // tenant/ops selector. Preserve those existing callers while Fleet human
+    // training access is evaluated through that endpoint's own guard.
+    const training = routeSuffix.startsWith("training/");
     return {
       routeKey: `fleet-partner:${routeSuffix}:${upperMethod}`,
-      requiredScopes: ["billing:read"],
+      requiredScopes: training
+        ? ["billing:read"]
+        : finance
+          ? methodScope(
+              "fleet:finance:read",
+              "fleet:finance:write",
+              upperMethod,
+            )
+          : quality
+            ? ["fleet:read", "fleet:finance:read"]
+            : financialSummary
+              ? ["fleet:read", "fleet:finance:read"]
+              : methodScope("fleet:read", "fleet:supply:write", upperMethod),
       allowedRealms: baseAllowedRealms("partner"),
       description: "Fleet partner self-service access",
     };

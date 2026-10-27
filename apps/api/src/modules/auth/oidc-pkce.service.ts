@@ -14,6 +14,7 @@ import type {
   TenantPortalProfile,
 } from "@drts/contracts";
 
+import { getIamFleetRoleScopes } from "@drts/contracts";
 import { ApiRequestError } from "../../common/api-envelope";
 import { JwtAuthService } from "../../common/auth/jwt-auth.service";
 import { hasTrustedMfa } from "../../common/auth/trusted-mfa.policy";
@@ -1253,7 +1254,78 @@ export class OidcPkceService {
       );
     }
 
-    const scopes = ["partner:read", "partner:write"];
+    // An active Referral link is not a Fleet staff grant. Resolve only the
+    // exact linked canonical human and its manager-created bounded membership.
+    const principal = await this.identityRepository?.findPrincipalById(
+      linkRecord.drtsPassengerId,
+    );
+    if (principal && principal.status !== "active") {
+      throw new ApiRequestError(
+        403,
+        "IAM_PRINCIPAL_NOT_ACTIVE",
+        "Linked principal is not active.",
+      );
+    }
+    const memberships =
+      matchedEntry.partnerType === "fleet_partner" &&
+      principal?.status === "active" &&
+      principal.principalType === "human" &&
+      principal.sourceRef ===
+        `jwt_principal:partner:${linkRecord.drtsPassengerId}`
+        ? await this.identityRepository?.findMembershipsByPrincipalId(
+            principal.principalId,
+          )
+        : [];
+    const managedMembership = memberships?.find(
+      (candidate) =>
+        candidate.realm === "partner" &&
+        candidate.scopeRef === `fleet:${matchedEntry.entrySlug}` &&
+        candidate.partnerId === matchedEntry.partnerId &&
+        candidate.sourceRef ===
+          `fleet_member:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}`,
+    );
+    // A disabled membership never silently falls back to a fresh human grant.
+    const roleBindings =
+      managedMembership?.status === "active"
+        ? await this.identityRepository!.findRoleBindingsByMembershipId(
+            managedMembership.membershipId,
+          )
+        : [];
+    const now = Date.now();
+    const activeRoles = roleBindings.filter(
+      (binding) =>
+        Boolean(getIamFleetRoleScopes(binding.roleCode)) &&
+        binding.sourceRef ===
+          `fleet_role:${matchedEntry.entrySlug}:${linkRecord.drtsPassengerId}` &&
+        Number.isFinite(Date.parse(binding.validFrom)) &&
+        Date.parse(binding.validFrom) <= now &&
+        (!binding.validTo ||
+          (Number.isFinite(Date.parse(binding.validTo)) &&
+            now < Date.parse(binding.validTo))),
+    );
+    const managedRole = activeRoles.length === 1 ? activeRoles[0] : null;
+    const scopes = managedRole
+      ? [...getIamFleetRoleScopes(managedRole.roleCode)!]
+      : ["partner:read", "partner:write"];
+    // The entry slug identifies the linked subject; the canonical Fleet
+    // master identifies the business selector and owned records.
+    const canonicalPartnerId = managedRole
+      ? matchedEntry.partnerId
+      : matchedEntry.entrySlug;
+    // Preserve the legacy restricted entry role label for existing consumers;
+    // it is not a Fleet human grant and has no business scopes.
+    const roles = managedRole ? [managedRole.roleCode] : ["partner_admin"];
+    const managedVersion =
+      managedRole && principal && managedMembership
+        ? Math.max(
+            ...[
+              matchedEntry.updatedAt,
+              principal.updatedAt,
+              managedMembership.updatedAt,
+              ...roleBindings.map((binding) => binding.updatedAt),
+            ].map((stamp) => Date.parse(stamp)),
+          )
+        : Date.parse(matchedEntry.updatedAt);
     const identity: IdentityContext = {
       authMode: "jwt_bearer",
       actorType: "partner_user",
@@ -1261,35 +1333,71 @@ export class OidcPkceService {
       realm: "partner",
       tenantId:
         matchedEntry.tenantId ?? this.tenantPartnerService.getDefaultTenantId(),
-      partnerId: matchedEntry.entrySlug,
+      partnerId: canonicalPartnerId,
       partnerEntrySlug: matchedEntry.entrySlug,
       roleFamilies: ["partner"],
-      roles: ["partner_admin"],
+      roles,
       scopes,
+      ...(managedRole && principal && managedMembership
+        ? {
+            principalId: principal.principalId,
+            membershipId: managedMembership.membershipId,
+          }
+        : {}),
       supportedExecutionModes: [
         "discussion_planning",
         "supervisor_managed_execution",
       ],
     };
 
-    const token = this.jwtAuthService.sign(
+    // The partner entry version is the durable-state fingerprint checked by
+    // JwtAuthService.verifyAccessToken. A bare signed JWT lacks the canonical
+    // session claims and cannot be read back via /api/auth/session.
+    const issued = await this.jwtAuthService.issueSessionToken(
       {
         authMode: "jwt_bearer",
         actorType: "partner_user",
         actorId: identity.actorId,
+        principalId: identity.actorId,
+        // The verified IdP sub selects the entry-scoped link above and stays
+        // in the OIDC audit. Canonical principals use the link's stable ID:
+        // two valid entries for one IdP sub must not collide on the global
+        // identity_principals UNIQUE(issuer, subject) constraint.
+        subject: identity.actorId,
         realm: "partner",
         tenantId: identity.tenantId,
-        partnerId: matchedEntry.entrySlug,
+        partnerId: canonicalPartnerId,
+        partnerEntrySlug: matchedEntry.entrySlug,
         roleFamilies: ["partner"],
-        roles: ["partner_admin"],
+        roles,
         scopes,
+        membershipId: managedRole ? managedMembership!.membershipId : null,
         requestId: meta?.requestId ?? null,
       },
-      { expiresIn: "8h" },
+      {
+        expiresIn: "8h",
+        ensurePrincipal: !managedRole,
+        tokenVersion: managedVersion,
+        authTime: new Date(
+          (claims.auth_time ?? Math.floor(Date.now() / 1000)) * 1000,
+        ).toISOString(),
+        amr,
+        acr: claims.acr ?? "",
+        policyVersion: "v1",
+      },
     );
+    identity.principalId = identity.actorId;
+    identity.partnerEntrySlug = matchedEntry.entrySlug;
+    identity.sessionId = issued.sessionId;
+    identity.tokenId = issued.tokenId;
+    identity.tokenVersion = issued.tokenVersion;
+    identity.authTime = issued.authTime;
+    identity.amr = issued.amr;
+    identity.acr = issued.acr;
+    identity.policyVersion = issued.policyVersion;
 
     const session: PartnerBootstrapSession = {
-      accessToken: token,
+      accessToken: issued.token,
       tokenType: "Bearer",
       expiresIn: "8h",
       partnerEntry: matchedEntry,
@@ -1304,7 +1412,7 @@ export class OidcPkceService {
       actorId: identity.actorId,
       actorType: "partner_user",
       subjectId: claims.sub,
-      tokenId: token,
+      tokenId: issued.tokenId,
       afterSummary: {
         sub: claims.sub,
         amr,
