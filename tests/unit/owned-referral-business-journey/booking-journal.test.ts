@@ -19,6 +19,7 @@ import {
 } from "../../e2e/owned-referral-business-journey/protocol";
 
 import { parseOriginalUnknownBookingJournal } from "../../e2e/owned-referral-business-journey/original-journal-recovery";
+import { ownedSupplementalArtifactPaths } from "../../e2e/owned-referral-business-journey/daily-report-downloads";
 
 const context: BookingJournalContext = {
   definitionSha: "a".repeat(40),
@@ -287,6 +288,78 @@ describe("exact scheduled booking custody", () => {
       null,
       2,
     );
+
+  it.each(["reservation-1", "reservation-2", "redispatched"] as const)(
+    "retains all three original disk journals when %s loses its ACK",
+    async (unknownCase) => {
+      const directory = await mkdtemp(join(tmpdir(), "owned-three-journals-"));
+      const paths = ownedSupplementalArtifactPaths(directory).bookingJournals;
+      const originals = new Map<
+        string,
+        { body: string; idempotencyKey: string }
+      >();
+      try {
+        for (const name of Object.keys(paths) as (keyof typeof paths)[]) {
+          const scheduled =
+            name === "reservation-1"
+              ? scheduledAt
+              : name === "reservation-2"
+                ? "2027-01-01T16:05:00.000Z"
+                : undefined;
+          const binding = {
+            ...expected,
+            expectedScheduledAt: scheduled,
+            quoteId: `quote-${name}`,
+          };
+          const key = `original-key-${name}`;
+          const raw = body({
+            scheduledAt: scheduled,
+            quoteId: binding.quoteId,
+            idempotencyKey: key,
+          });
+          originals.set(name, { body: raw, idempotencyKey: key });
+          const journal = new BookingWriteJournal(binding, (snapshot) =>
+            persistPrivateJson(paths[name], snapshot),
+          );
+          const sent = journal.beforeSend(raw, key, async () => {
+            expect(
+              JSON.parse(await readFile(paths[name], "utf8")),
+            ).toMatchObject({
+              state: "ack_unknown",
+              body: raw,
+              idempotencyKey: key,
+            });
+            if (name === unknownCase) throw new Error("hosted ACK lost");
+          });
+          if (name === unknownCase) {
+            await expect(sent).rejects.toThrow("hosted ACK lost");
+            await expect(
+              journal.beforeSend(raw, key, async () => undefined),
+            ).rejects.toThrow("one frozen booking send");
+          } else {
+            await sent;
+            await journal.acknowledge(`order-${name}`, binding.quoteId);
+          }
+        }
+        // A failure in any independent send cannot replace or erase its own
+        // journal or either sibling's exact original command and key.
+        for (const [name, file] of Object.entries(paths)) {
+          const original = originals.get(name)!;
+          const persisted = JSON.parse(await readFile(file, "utf8"));
+          expect(persisted).toMatchObject({
+            ...original,
+            state: name === unknownCase ? "ack_unknown" : "acknowledged",
+            bodySha256: hash(Buffer.from(original.body)),
+            quoteId: `quote-${name}`,
+          });
+          expect((await stat(file)).mode & 0o777).toBe(0o600);
+          if (name === unknownCase) expect(persisted.orderId).toBeUndefined();
+        }
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("persists each independent raw scheduled intent before send and retains unknown ACK", async () => {
     const snapshots: BookingJournalSnapshot[] = [];

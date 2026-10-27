@@ -1,4 +1,12 @@
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { globSync } from "node:fs";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
@@ -29,6 +37,7 @@ import {
   resolveActiveTripScreenOrder,
   resolveExpectedDailyDispatchRecord,
   runOwnedDailyReportDownloads,
+  ownedSupplementalArtifactPaths,
   toTaipeiServiceDate,
   validateDailyPreviewRows,
   validateSupplementalDailyPreviewRows,
@@ -58,6 +67,90 @@ const VEHICLE_ID = "veh_synthetic_owned_001";
 const PLATE_NO = "SIM-R12A0001";
 const PICKUP_ADDRESS = "新北市板橋區縣民大道二段7號";
 const DROPOFF_ADDRESS = "臺北市信義區市府路1號";
+
+describe("managed FULL hosted supplemental artifact custody", () => {
+  it("selects every controlled format, independent journal and custody while excluding private siblings", async () => {
+    const workflow = await readFile(
+      new URL("../../../.github/workflows/ci-integ.yml", import.meta.url),
+      "utf8",
+    );
+    // Exercise the actual existing upload block, not a copied allowlist.
+    const upload = workflow.match(
+      /- name: Preserve only this consumer's allowlisted evidence\n([\s\S]*?)retention-days: 14/,
+    )?.[1];
+    expect(upload).toBeDefined();
+    const paths = upload!.match(
+      /          path: \|\n((?:            [^\n]+\n)+)/,
+    )?.[1];
+    expect(paths).toBeDefined();
+    const patterns = paths!
+      .trim()
+      .split("\n")
+      .map((line) => line.trim());
+    const root = ".artifacts/owned-referral-business-journey";
+    const supplemental = ownedSupplementalArtifactPaths(root);
+    const legacy = [
+      "runtime-before.json",
+      "runtime-after.json",
+      "journey-evidence.json",
+      "booking-write-journal.json",
+      "own-receipt.txt",
+      "cancellations/unassigned-facts.json",
+      "cancellations/unassigned-booking-write-journal.json",
+      "cancellations/results.json",
+      "cancellations/unassigned.png",
+      ...DAILY_REPORT_FORMATS.map(
+        (format) => `daily-reports/daily-dispatch-original.${format}`,
+      ),
+    ].map((file) => `${root}/${file}`);
+    const retained = [
+      ...legacy,
+      supplemental.custody,
+      ...Object.values(supplemental.bookingJournals),
+      ...Object.values(supplemental.reportDirectories).flatMap((directory) =>
+        DAILY_REPORT_FORMATS.map(
+          (format) =>
+            `${directory}/daily-reports/daily-dispatch-job-owned.${format}`,
+        ),
+      ),
+    ];
+    const excluded = [
+      `${root}/TEN03-06/reservation-1/quote.json`,
+      `${root}/TEN03-06/reservation-2/cancellation.json`,
+      `${root}/TEN03-06/redispatched/assignment-trace.json`,
+      `${root}/TEN03-06/redispatched/actions.json`,
+      `${root}/TEN03-06/C1-no-dispatch-source.json`,
+      `${root}/TEN03-06/reservation-1/order.json`,
+      `${root}/TEN03-06/reservation-1/session.json`,
+      `${root}/TEN03-06/reservation-1/tokens.json`,
+      `${root}/TEN03-06/reservation-1/booking-write-journal.json.tmp`,
+      `${root}/TEN03-06/reservation-1/daily-reports/raw-unowned.csv`,
+      `${root}/TEN03-06/reservation-1/daily-reports/daily-dispatch-owned.json`,
+      `${root}/TEN03-06/reservation-1/private/daily-reports/daily-dispatch-job.csv`,
+      `${root}/TEN03-06/unregistered-case/booking-write-journal.json`,
+      `${root}/TEN03-06/unregistered-case/daily-reports/daily-dispatch-job.csv`,
+      `${root}/session.json`,
+      `${root}/order.json`,
+    ];
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "owned-upload-custody-"),
+    );
+    try {
+      // Glob selection has no content knowledge. The original renderer/row
+      // orchestration tests below verify that unowned bytes are never written.
+      for (const file of [...retained, ...excluded]) {
+        const target = path.join(directory, file);
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, `fixture:${file}`, { mode: 0o600 });
+      }
+      const selected = globSync(patterns, { cwd: directory }).sort();
+      expect(selected).toEqual([...retained].sort());
+      for (const file of excluded) expect(selected).not.toContain(file);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 function buildOrderFixture(overrides: Partial<ObjectData> = {}): ObjectData {
   return {
