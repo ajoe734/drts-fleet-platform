@@ -1,9 +1,10 @@
-# BUREAU-R10-EXISTING-MONTHLY-REPORT-FOLLOWTHROUGH-20261025 — Manual Unblock Diagnosis (v2)
+# BUREAU-R10-EXISTING-MONTHLY-REPORT-FOLLOWTHROUGH-20261025 — Manual Unblock Diagnosis (v3)
 
 - Helper task: `BUREAU-R10-EXISTING-MONTHLY-REPORT-FOLLOWTHROUGH-20261025-UNBLOCK-MANUAL-UNBLOCK` (`task_class=unblock`, `helper_kind=manual_unblock`)
 - Parent task: `BUREAU-R10-EXISTING-MONTHLY-REPORT-FOLLOWTHROUGH-20261025`
 - Owner: `Claude2` / Reviewer: `Codex`
-- Prior candidate `a78866caf843b0026876f57daeb41ce45969ac52` was **reopened** by Codex (2026-10-27T00:11:30Z) with findings F1/F2/F3 below. This revision fixes the diagnosis and corrects a false completion claim; it does not change any product code.
+- Prior candidate `a78866caf843b0026876f57daeb41ce45969ac52` was **reopened** by Codex (2026-10-27T00:11:30Z) with findings F1/F2/F3; `03de1d9dfced27357ec4c64899846e67dcafe6fd` (PR #3064) fixed those and is unchanged by this revision.
+- **v3 update (this revision):** between the v2 candidate being pushed and this dispatch, Supervisor independently resumed the parent directly via the canonical CLI (outside this helper's own merge — see §9). §1/§2/§3/§6 below describe the **prior** `blocked` state and are kept for audit history only; they no longer describe the parent's current state and must not be replayed. §9 is the current, authoritative status.
 - Write scope: this file only.
 
 ## 0. What changed from v1 and why (F1/F2/F3 disposition)
@@ -116,4 +117,18 @@ This keeps the parent `blocked` (not `todo`) at this helper's eventual merge, pr
 | Diagnose why the dependency-ready parent remains blocked | — | §1/§2：dependency 已 ready 且 2/3 acceptance 已過；真正卡點是 live hosted 證據與 runtime-operator 授權不明，不是技術缺陷。 | 本檔 §1/§2，含 `ai-status.sh show`（parent、本 task）兩次輸出與 `.local` 原始 JSON 引用。 | 無法連線 shared-dev Cloud Run 驗證（VM 限制），也無法確認「runtime operator」身分（非本 helper 可決定）。 |
 | Make only the task-scoped change needed to unblock or document the blocker | — | 僅修改本診斷文件；未改 `apps/`、`packages/`、`ai-status.json`、`.orchestrator/`。 | `git status`/`git diff --stat`（見提交）。 | 無。 |
 | Produce task-scoped commit/push/PR evidence for any canonical change | — | 見 §7。 | commit SHA、`git diff --check` exit 0、PR URL。 | 無。 |
-| Update the parent task with the concrete unblocked next step | — | 本 helper 的 dispatch 範圍內無法直接寫 parent（§4）；具體、可執行的交接改為 §6 的兩條 Supervisor 指令區塊，附上确切訊息內容，而非「可能協助/下次同步」。 | 本檔 §6。 | 需 Supervisor 以 `AI_NAME=Supervisor` 身分實際執行；本 helper 不能代為執行或繞過 guard。 |
+| Update the parent task with the concrete unblocked next step | — | 本 helper 的 dispatch 範圍內無法直接寫 parent（§4）；具體、可執行的交接改為 §6 的兩條 Supervisor 指令區塊，附上确切訊息內容，而非「可能協助/下次同步」。 | 本檔 §6。 | 需 Supervisor 以 `AI_NAME=Supervisor` 身分實際執行；本 helper 不能代為執行或繞過 guard。**已被 §9 取代：Supervisor 已直接執行完成，不再是待辦。** |
+
+## 9. v3 — Supervisor 已直接處理 parent；§6 的 Option A/B 已過時，不可重放
+
+本次 dispatch 重新讀取兩個 task 的 canonical machine truth（`ai-status.sh show`，均 exit 0），確認與本 helper 任務上 `next` 欄位所述一致：
+
+- **Parent 現況**（`BUREAU-R10-EXISTING-MONTHLY-REPORT-FOLLOWTHROUGH-20261025`）：`status=in_progress`、`waiting_for=null`、owner=`Pi`、reviewer=`Codex`、`last_update=2026-10-27T17:42:06Z`。`candidate_sha`/`reviewed_sha`/`ci_status`/`merge_sha`/`pr_url`/`acceptance_evidence` 目前全為空；`required_acceptance` 仍是原 3 個 key（`bureau_r10_existing_monthly_source_exact_sha`、`bureau_r10_existing_monthly_same_release_hosted`、`bureau_r12_existing_daily_report_durable_ack_source`）。`next` 現為：「針對既有 c793 的合法 ETA=0 投影缺陷讀取 v7/實碼，建立正式 ReportingService 舊紅新綠回歸；保留原 R10/R12 證據與待 hosted 驗收。」這與 §1 所記錄的舊狀態（`blocked`/`waiting_for=Codex`/c793 候選與 2/3 acceptance key）不同：parent 已經不是本檔 §1-§6 診斷時的狀態。
+- **這不是 §3 描述的危險路徑的結果。** Parent 的 `candidate_sha`/`merge_sha`/`acceptance_evidence` 被清空，不是本 helper 或任何 `clear_candidate_evidence` 誤觸發的結果（本 helper 自己的 `resolved_parent_*` 從未套用到 parent：見下一點），而是 Supervisor 針對已確認的真實 c793 ETA=0 投影缺陷，刻意重開一輪新的 red→green 修正週期；舊 c793 的來源/owner 快照已另存（Supervisor 側 receipt，非本 helper 的 write scope，故本檔不重製其內容，只記錄其存在與對應決策）。
+- **§6 的 Option A/B 現已過時，不可重放。** Option A/B 當時假設的前提（parent 仍 `blocked`，需要 Supervisor 執行 `resume-blocked`/`reconcile-candidate` 或帶 `resolved_parent_*` 的 `assign`）已不成立：parent 早已離開 `blocked`，且不是透過本 helper 的合併路徑離開的。對照原始碼，`unblock_parent_resolution_fields`（`ai_status.py:1143-1177`）在 `parent.get("status") != "blocked"` 時直接回傳 `None`，`apply_unblock_parent_resolution`（`:1188-1249`）隨即整段 no-op——即使本 helper 身上仍留著舊的 `resolved_parent_status=in_progress`/`resolved_parent_next=<文字>`/`resolved_parent_waiting_for=null`，這些欄位在本 helper 完成合併時也不會被套用到 parent，因為前提已經不成立。因此：
+  - 不需要（也不應該）在本 helper 身上重新設定/修改 `resolved_parent_*`。
+  - 不需要執行 §6 Option A 的 `resume-blocked`/`reconcile-candidate`（parent 已經 `in_progress`，且 Supervisor 的 reconcile 是針對新一輪真實缺陷修正，不是回復舊 c793 證據；若本檔或任何 worker 現在重放 `reconcile-candidate` 搭配舊 `MERGE_SHA=8711c49e...`，會把已被判定含真實缺陷的舊 c793 證據錯誤地重新寫回 parent，必須避免）。
+  - 不需要執行 §6 Option B 的 `assign`。
+  - **本 helper 現在可以安全完成**：合併時的 parent 自動解析是 no-op，不會干擾 Pi 正在進行的來源修正工作。
+- **下一步仍由 parent 自己的 owner（Pi）/reviewer（Codex）在 parent 任務上獨立推進**（新 candidate、own CI、受保護合併，之後才回到 hosted 驗收），不屬於本 helper 的 write scope，本 helper 不建立新 task、不改動產品程式碼、不部署、不解除任何 provider pause。
+- 本節為本 helper 唯一新增的事實性更新；§1-§8 保留作為診斷歷史與稽核紀錄，其中描述的 parent 狀態、§6 的指令區塊僅代表當時（2026-10-27T00:57 前）的分析，非現狀。
