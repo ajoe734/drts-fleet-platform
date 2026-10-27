@@ -1258,6 +1258,108 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["candidate_lifecycle_migrated_at"], migrated_at)
 
 
+
+class CandidateCiResumeTransactionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory(prefix="chair-ci-board-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.task = {
+            "id": "CI-RECOVERY-EXAMPLE", "title": "Existing candidate", "phase": "test",
+            "summary_zh": "CI recovery", "owner": "Pi", "reviewer": "Codex",
+            "status": "blocked", "waiting_for": "Gemini", "depends_on": [],
+            "artifacts": [], "acceptance": [], "next": "CI transport failed; root cause unknown",
+            "candidate_sha": "a" * 40, "candidate_generation": "generation-one",
+            "candidate_branch": "pi/existing-candidate", "pr_url": "https://github.com/acme/fleet/pull/31",
+            "ci_sha": "a" * 40, "ci_status": "failure", "last_update": "2026-10-27T00:00:00Z",
+        }
+        self.task["candidate_review_handoff"] = {k: self.task[k] for k in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"
+        )}
+        self.state = ai_status.default_state()
+        self.state.update({"tasks": [self.task], "agents": [], "handoffs": [], "blockers": [{
+            "task_id": self.task["id"], "owner": "Pi", "waiting_for": "Gemini",
+            "message": "Original failure", "status": "open", "created_at": "2026-10-27T00:00:00Z",
+        }]})
+        self.path = self.root / "ai-status.json"
+        self.path.write_text(json.dumps(self.state))
+        for key, value in {
+            "ROOT": self.root, "STATUS_FILE": self.path, "LOG_FILE": self.root / "ai-activity-log.jsonl",
+            "TASK_ARCHIVE_FILE": self.root / "ai-task-archive.jsonl",
+            "CURRENT_WORK_FILE": self.root / "current-work.md", "DASHBOARD_DIR": self.root / "dashboard",
+        }.items():
+            mock.patch.object(ai_status, key, value).start()
+        self.addCleanup(mock.patch.stopall)
+        self.env = {
+            "ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root), "AI_NAME": "Supervisor",
+            "TASK_RESUME_BASIS": "candidate_ci_recovered",
+            "TASK_RESUME_CANDIDATE_IDENTITY_JSON": json.dumps({k: self.task[k] for k in (
+                "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation", "pr_url"
+            )}),
+            "CANDIDATE_HEAD_SHA": self.task["candidate_sha"], "CANDIDATE_BRANCH": self.task["candidate_branch"],
+            "PR_URL": self.task["pr_url"], "CANDIDATE_CI_STATUS": "success",
+        }
+
+    def execute(self, command: str, *args: str, env: dict | None = None) -> None:
+        with mock.patch.dict(os.environ, self.env if env is None else env, clear=True):
+            ai_status.execute_command(command, [self.task["id"], *args])
+
+    def test_real_transaction_restores_review_without_changing_original_handoff(self) -> None:
+        before = copy.deepcopy(self.task)
+        self.execute("resume-blocked", "in_progress", "Actual Chair confirmed recovered CI")
+        state = json.loads(self.path.read_text()); task = state["tasks"][0]
+        self.assertEqual((task["status"], task["ci_status"], task["ci_sha"]), ("review", "success", before["candidate_sha"]))
+        for key in ("owner", "reviewer", "candidate_sha", "candidate_generation", "candidate_branch", "candidate_review_handoff"):
+            self.assertEqual(task[key], before[key])
+        self.assertNotIn("waiting_for", task)
+        self.assertEqual(state["blockers"][0]["status"], "resolved")
+        self.assertEqual(state["blockers"][0]["message"], "Original failure")
+        self.assertEqual(len(state["tasks"]), 1)
+        for key in ("reviewed_sha", "merge_sha", "acceptance_evidence"):
+            self.assertNotIn(key, task)
+        logs = [json.loads(line) for line in (self.root / "ai-activity-log.jsonl").read_text().splitlines()]
+        self.assertTrue(any(row["type"] == "blocked_task_resumed" for row in logs))
+        self.assertFalse(any(row["type"] in {"candidate_approved", "handoff"} for row in logs))
+
+    def test_stale_generation_invalid_handoff_failure_and_wrong_actor_do_not_write(self) -> None:
+        for kind in ("generation", "handoff", "failure", "branch", "owner", "external_gate"):
+            with self.subTest(kind=kind):
+                state = copy.deepcopy(self.state); env = dict(self.env)
+                if kind == "generation": state["tasks"][0]["candidate_generation"] = "new-generation-same-H"
+                if kind == "handoff": state["tasks"][0]["candidate_review_handoff"] = None
+                if kind == "failure": env["CANDIDATE_CI_STATUS"] = "failure"
+                if kind == "branch": env["CANDIDATE_BRANCH"] = "pi/other"
+                if kind == "owner": env["AI_NAME"] = "Pi"
+                if kind == "external_gate": state["tasks"][0]["external_gate"] = True
+                self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+                with self.assertRaises(SystemExit):
+                    self.execute("resume-blocked", "in_progress", "Stale or invalid recovery", env=env)
+                self.assertEqual(self.path.read_bytes(), before)
+
+    def test_owner_progress_and_start_and_normal_helper_resume_keep_original_semantics(self) -> None:
+        owner = {"AI_NAME": "Pi", "ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root)}
+        self.execute("progress", "Waiting for real CI decision", env=owner)
+        task = json.loads(self.path.read_text())["tasks"][0]
+        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(task["candidate_review_handoff"], self.task["candidate_review_handoff"])
+        self.execute("start", "Explicit authoring", env=owner)
+        task = json.loads(self.path.read_text())["tasks"][0]
+        self.assertEqual(task["status"], "in_progress")
+        self.assertIsNone(task["candidate_review_handoff"])
+        state = copy.deepcopy(self.state)
+        helper = {"id": "DONE-HELPER", "owner": "Codex", "reviewer": "Pi", "title": "Helper", "phase": "test",
+                  "status": "done", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Resolved",
+                  "task_class": "unblock", "helper_parent": self.task["id"], "resolved_parent_status": "todo",
+                  "resolved_parent_at": "2026-10-27T01:00:00Z"}
+        state["tasks"].append(helper); self.path.write_text(json.dumps(state))
+        self.execute("resume-blocked", "todo", "Completed helper route", env={
+            "AI_NAME": "Supervisor", "TASK_RESUME_HELPER_ID": "DONE-HELPER",
+            "ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root),
+        })
+        task = json.loads(self.path.read_text())["tasks"][0]
+        self.assertEqual((task["status"], task["ci_status"]), ("todo", "failure"))
+        self.assertEqual(task["candidate_review_handoff"], self.task["candidate_review_handoff"])
+
 if __name__ == "__main__":
     unittest.main()
 

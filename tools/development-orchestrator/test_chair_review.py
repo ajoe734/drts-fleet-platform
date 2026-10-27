@@ -3681,3 +3681,149 @@ class IdleOperationalReviewTests(unittest.TestCase):
 
         enqueue_event.assert_not_called()
         self.assertNotIn("last_operational_fingerprint", state["chair_review"])
+
+
+class CandidateCiResumeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import os
+        self.tmp = tempfile.TemporaryDirectory(prefix="chair-ci-native-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.task = {
+            "id": "CI-RECOVERY-EXAMPLE", "title": "Original candidate", "phase": "test",
+            "owner": "Pi", "reviewer": "Codex", "status": "blocked", "waiting_for": "Gemini",
+            "depends_on": [], "artifacts": [], "acceptance": [], "next": "Original CI error; cause unknown",
+            "candidate_sha": "a" * 40, "candidate_generation": "generation-one",
+            "candidate_branch": "pi/existing-candidate", "pr_url": "https://github.com/acme/fleet/pull/31",
+            "ci_status": "failure", "ci_sha": "a" * 40, "last_update": "2026-10-27T00:00:00Z",
+        }
+        self.task["candidate_review_handoff"] = {k: self.task[k] for k in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"
+        )}
+        from test_ai_status import ai_status as board_commands
+        self.board = board_commands.default_state()
+        self.board.update({"tasks": [self.task], "agents": [], "handoffs": [], "blockers": [{
+            "task_id": self.task["id"], "owner": "Pi", "waiting_for": "Gemini", "status": "open",
+            "message": "Preserved original failure", "created_at": "2026-10-27T00:00:00Z",
+        }]})
+        self.path = self.root / "ai-status.json"
+        self.path.write_text(json.dumps(self.board))
+        self.config = {"paths": {"status_file": str(self.path), "activity_log": str(self.root / "runtime-log.jsonl")},
+                       "github_bus": {"repo": "acme/fleet"}}
+        self.action = {"task_id": self.task["id"], "action": "resume_parent_task", "resume_status": "in_progress",
+                       "resume_basis": "candidate_ci_recovered", "candidate_sha": self.task["candidate_sha"],
+                       "candidate_generation": self.task["candidate_generation"], "reason": "Actual Chair confirmed original CI blocker resolved"}
+        mock.patch.dict(os.environ, {"ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root)}, clear=True).start()
+        self.addCleanup(mock.patch.stopall)
+        self.pr = {"url": self.task["pr_url"], "state": "OPEN", "headRefOid": self.task["candidate_sha"],
+                   "headRefName": self.task["candidate_branch"], "mergeStateStatus": "CLEAN",
+                   "statusCheckRollup": [{"detailsUrl": "https://github.com/acme/fleet/actions/runs/81/job/12",
+                                          "status": "COMPLETED", "conclusion": "SUCCESS"}]}
+        self.run = {"id": 81, "workflow_id": 7, "event": "pull_request", "head_sha": self.task["candidate_sha"],
+                    "head_branch": self.task["candidate_branch"], "pull_requests": [{"number": 31}],
+                    "created_at": "2026-10-27T01:00:00Z", "status": "completed", "conclusion": "success"}
+
+    def observe(self, argv):
+        import copy
+        return copy.deepcopy(self.pr if argv[0] == "pr" else [{"workflow_runs": [self.run]}])
+
+    def test_actual_chair_path_uses_real_GH_classifier_and_temp_board_writer(self) -> None:
+        import github_bus
+        import copy
+        before = copy.deepcopy(self.task)
+        with mock.patch.object(github_bus, "gh_json", side_effect=self.observe) as reads:
+            self.assertTrue(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+        self.assertEqual(reads.call_count, 2)
+        task = json.loads(self.path.read_text())["tasks"][0]
+        self.assertEqual((task["status"], task["ci_status"]), ("review", "success"))
+        for key in ("candidate_sha", "candidate_generation", "candidate_branch", "candidate_review_handoff"):
+            self.assertEqual(task[key], before[key])
+        self.assertNotIn("waiting_for", task)
+        self.assertNotIn("reviewed_sha", task)
+        self.assertNotIn("merge_sha", task)
+        self.assertEqual(len(json.loads(self.path.read_text())["tasks"]), 1)
+        self.assertTrue((self.root / "ai-activity-log.jsonl").is_file())
+
+    def test_pending_failure_foreign_provenance_head_branch_and_PR_do_not_resume(self) -> None:
+        import github_bus
+        import copy
+        for kind in ("pending", "failure", "foreign_workflow", "head", "branch", "PR", "lookup_failed"):
+            with self.subTest(kind=kind):
+                pr, run = copy.deepcopy(self.pr), copy.deepcopy(self.run)
+                if kind == "pending": run.update(status="in_progress", conclusion=None)
+                if kind == "failure": run["conclusion"] = "failure"
+                if kind == "foreign_workflow": run["head_sha"] = "b" * 40
+                if kind == "head": pr["headRefOid"] = "b" * 40
+                if kind == "branch": pr["headRefName"] = "pi/other"
+                if kind == "PR": pr["url"] = "https://github.com/acme/fleet/pull/32"
+                def external(argv):
+                    if argv[0] == "pr": return pr
+                    if kind == "lookup_failed": raise github_bus.GitHubBusError("Unavailable")
+                    return [{"workflow_runs": [run]}]
+                before = self.path.read_bytes()
+                with mock.patch.object(github_bus, "gh_json", side_effect=external):
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+                self.assertEqual(self.path.read_bytes(), before)
+
+    def test_same_H_new_generation_between_read_and_transaction_remains_blocked(self) -> None:
+        import github_bus
+        def external(argv):
+            data = self.observe(argv)
+            if argv[0] == "api":
+                state = json.loads(self.path.read_text())
+                state["tasks"][0]["candidate_generation"] = "new-generation-same-H"
+                self.path.write_text(json.dumps(state))
+            return data
+        with mock.patch.object(github_bus, "gh_json", side_effect=external):
+            self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+        task = json.loads(self.path.read_text())["tasks"][0]
+        self.assertEqual((task["status"], task["candidate_generation"]), ("blocked", "new-generation-same-H"))
+        self.assertEqual(task["ci_status"], "failure")
+
+    def test_no_explicit_basis_or_invalidated_handoff_does_not_resume(self) -> None:
+        import github_bus
+        for kind in ("no_basis", "invalidated_handoff", "external_gate", "release"):
+            with self.subTest(kind=kind):
+                action = dict(self.action); board = json.loads(json.dumps(self.board))
+                if kind == "no_basis": action.pop("resume_basis")
+                if kind == "invalidated_handoff": board["tasks"][0]["candidate_review_handoff"] = None
+                if kind == "external_gate": board["tasks"][0]["external_gate"] = True
+                if kind == "release": board["tasks"][0].update(task_class="release", mutates_canonical=False)
+                self.path.write_text(json.dumps(board)); before = self.path.read_bytes()
+                with mock.patch.object(github_bus, "gh_json") as reads:
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
+                reads.assert_not_called()
+                self.assertEqual(self.path.read_bytes(), before)
+
+
+    def test_completed_native_chair_decision_reaches_real_transaction(self) -> None:
+        import github_bus
+        review = self.root / "chair-reviews"
+        review.mkdir()
+        markdown = review / "decision.md"; markdown.write_text("# Actual decision-port fixture\n")
+        decision = review / "decision.json"
+        payload = {"version": 1, "decision": "blocked_task_triage", "approval_ttl_minutes": 45,
+                   "reason": "Specific original CI blocker is resolved", "blocked_by": [], "approval_actions": [],
+                   "reassignment_actions": [], "task_actions": [self.action], "provider_actions": [],
+                   "recommended_focus": [self.task["id"]]}
+        approval = self.root / "approval-queue.json"
+        approval.write_text(json.dumps({"pending": [], "history": []}))
+        self.config["paths"]["approval_queue"] = str(approval)
+        self.config["chair_review"] = {"enabled": True, "cooldown_seconds": 900}
+        for reason in ("blocked_task_triage", "reassignment_triage"):
+            with self.subTest(reason=reason):
+                self.path.write_text(json.dumps(self.board))
+                payload["decision"] = reason; decision.write_text(json.dumps(payload))
+                runtime = {"queue": {"events": {"chair-case": {"status": "completed"}}}, "workers": {},
+                           "chair_review": {"active_review": {"agent": "Codex", "agent_id": "codex", "reason": reason,
+                                "queue_event_id": "chair-case", "markdown_path": str(markdown), "json_path": str(decision)}}}
+                with mock.patch.object(github_bus, "gh_json", side_effect=self.observe):
+                    self.assertTrue(supervisor.refresh_chair_review_state(self.config, runtime, provider_report={}))
+                self.assertEqual(json.loads(self.path.read_text())["tasks"][0]["status"], "review")
+                self.assertIsNone(runtime["chair_review"]["active_review"])
+                actions = runtime["chair_review"]["last_decision"]["task_actions"]
+                self.assertEqual(actions, [self.action])  # no synthesized helper
+        for key, value in (("resume_basis", "unrelated_blocker"), ("candidate_sha", "short"), ("candidate_generation", ""), ("resume_status", "todo")):
+            with self.subTest(invalid_field=key):
+                payload["task_actions"] = [{**self.action, key: value}]
+                self.assertIsNotNone(supervisor.validate_chair_review_payload(payload))

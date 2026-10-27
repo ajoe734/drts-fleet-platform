@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 
@@ -115,6 +116,16 @@ def validate_review_payload(payload: Any) -> str | None:
             action.get("resume_status") or ""
         ).strip().lower() not in {"backlog", "todo", "in_progress"}:
             return "task_actions resume_status must be backlog, todo, or in_progress when provided"
+
+        if "resume_basis" in action:
+            if action.get("action") != "resume_parent_task" or action["resume_basis"] != "candidate_ci_recovered":
+                return "resume_basis is only candidate_ci_recovered for resume_parent_task"
+            if action.get("resume_status", "in_progress") != "in_progress":
+                return "candidate CI recovery resumes in_progress before restoring review"
+            if not isinstance(action.get("candidate_sha"), str) or not re.fullmatch(r"[0-9a-f]{40}", action["candidate_sha"]):
+                return "candidate CI recovery requires a full candidate_sha"
+            if not isinstance(action.get("candidate_generation"), str) or not action["candidate_generation"].strip():
+                return "candidate CI recovery requires candidate_generation"
 
     for action in payload.get("provider_actions", []):
         if not isinstance(action, dict):

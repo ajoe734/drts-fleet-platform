@@ -207,7 +207,14 @@ from common import (
     utc_now,
     write_activity_log,
 )
-from github_bus import sync_github_bus
+from github_bus import (
+    GitHubBusError,
+    bound_task_pr,
+    candidate_ci_status,
+    candidate_pr_observation,
+    infer_repo_slug,
+    sync_github_bus,
+)
 from provider_permissions import provider_capabilities as build_provider_capabilities, write_provider_capabilities
 from watch_events import queue_delivery_event, run_scan, trim_seen_events
 
@@ -6403,6 +6410,20 @@ def reassignment_followup_task_records(
     ]
 
 
+def has_explicit_candidate_ci_resume(payload: dict[str, Any], task: dict[str, Any]) -> bool:
+    """Recognize the Chair decision, not proof that GitHub CI recovered."""
+    return any(
+        isinstance(action, dict)
+        and action.get("task_id") == task.get("id")
+        and action.get("action") == "resume_parent_task"
+        and action.get("resume_basis") == "candidate_ci_recovered"
+        and action.get("resume_status", "in_progress") == "in_progress"
+        and action.get("candidate_sha") == task.get("candidate_sha")
+        and action.get("candidate_generation") == task.get("candidate_generation")
+        for action in payload.get("task_actions", []) or []
+    )
+
+
 def synthesize_reassignment_followup_task_actions(
     config: dict[str, Any],
     payload: dict[str, Any],
@@ -6416,6 +6437,8 @@ def synthesize_reassignment_followup_task_actions(
         task_id = str(item.get("task_id") or "").strip()
         action_name = str(item.get("action") or "").strip()
         if not task_id or not action_name or action_name in action_index.get(task_id, set()):
+            continue
+        if has_explicit_candidate_ci_resume(payload, item["task"]):
             continue
         if action_name == "create_unblock_task":
             unblock_kind = str(item.get("kind") or "manual_unblock").strip() or "manual_unblock"
@@ -6537,7 +6560,8 @@ def _chair_review_summary_lines(
         action_label = str(item.get("action") or "-")
         helper_label = str(item.get("helper_task_id") or "-")
         blocked_task_lines.append(
-            f"- {item.get('task_id')}: kind={item.get('kind')} action={action_label} helper={helper_label} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'} next={item.get('next') or '-'}"
+            f"- {item.get('task_id')}: kind={item.get('kind')} action={action_label} helper={helper_label} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'} "
+            f"candidate={item['task'].get('candidate_sha') or '-'} generation={item['task'].get('candidate_generation') or '-'} ci={item['task'].get('ci_status') or '-'} next={item.get('next') or '-'}"
         )
     if not blocked_task_lines:
         blocked_task_lines.append("- none")
@@ -6635,7 +6659,8 @@ def build_chair_review_message(
         "- `task_actions` 目前只允許 `dispatch_now` / `create_unblock_task` / `resume_parent_task`；不能繞過 dependency gate 或 commit gate。\n"
         "- `dispatch_now` 只能對 machine truth 已符合派工條件的非 blocked 任務觸發。\n"
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
-        "- `resume_parent_task` 只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
+        "- `resume_parent_task` 一般用在已有 completed unblock child 的 blocked parent，保持既有 helper 流程。\n"
+        "- 若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 已恢復，可明確輸出既有 `resume_parent_task`，附 `resume_basis=candidate_ci_recovered`、當前完整 `candidate_sha` / `candidate_generation`、`resume_status=in_progress` 與具體 reason，不需新 helper；Supervisor 會重讀同 PR/head/branch 的真 CI，沿原 handoff 恢復獨立 review。這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
         "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
@@ -7069,7 +7094,7 @@ def validate_chair_review_context(
                 expected_action = str(item.get("action") or "").strip()
                 if not task_id or not expected_action:
                     continue
-                if expected_action not in action_index.get(task_id, set()):
+                if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item["task"]):
                     missing.append(f"{task_id}:{expected_action}")
             if missing:
                 return "blocked_task_triage must resolve blocked tasks via " + ", ".join(missing[:6])
@@ -7083,7 +7108,7 @@ def validate_chair_review_context(
                 expected_action = str(item.get("action") or "").strip()
                 if not task_id or not expected_action:
                     continue
-                if expected_action not in action_index.get(task_id, set()):
+                if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item["task"]):
                     missing.append(f"{task_id}:{expected_action}")
             if missing:
                 return "reassignment_triage must materialize follow-up task actions via " + ", ".join(missing[:6])
@@ -7931,6 +7956,59 @@ def apply_chair_parent_resume_action(
     }
     if not dependencies_satisfied(parent, task_map, dependency_done_statuses):
         return False
+
+    resume_basis = action.get("resume_basis")
+    if resume_basis is not None:
+        if resume_basis != "candidate_ci_recovered":
+            return False
+        if action.get("resume_status", "in_progress") != "in_progress":
+            return False
+        identity = {key: parent.get(key) for key in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation", "pr_url"
+        )}
+        if any(not isinstance(value, str) or not value for value in identity.values()):
+            return False
+        if any(action.get(key) != identity[key] for key in ("candidate_sha", "candidate_generation")):
+            return False
+        handoff = {key: identity[key] for key in identity if key != "pr_url"}
+        if parent.get("candidate_review_handoff") != handoff:
+            return False
+        repo = infer_repo_slug(config, {})
+        pr = bound_task_pr(parent, identity["candidate_branch"], identity["candidate_sha"])
+        if not repo or not pr:
+            return False
+        try:
+            observation = candidate_pr_observation(repo, int(pr["number"]))
+            if (
+                observation.get("state") != "OPEN"
+                or observation.get("url") != identity["pr_url"]
+                or observation.get("headRefOid") != identity["candidate_sha"]
+                or observation.get("headRefName") != identity["candidate_branch"]
+            ):
+                return False
+            ci_status, ci_url = candidate_ci_status(observation)
+        except (GitHubBusError, ValueError, TypeError):
+            return False
+        if ci_status != "success":
+            return False
+        # This is an explicit actual Chair decision, not an automatic CI poll.
+        # Recheck the decision identity inside the normal locked transaction.
+        result = run_task_board_command(
+            config, "resume-blocked", [task_id, "in_progress", chair_reason],
+            environ={
+                "AI_NAME": "Supervisor",
+                "TASK_RESUME_BASIS": resume_basis,
+                "TASK_RESUME_CANDIDATE_IDENTITY_JSON": json.dumps(identity),
+                "CANDIDATE_HEAD_SHA": identity["candidate_sha"],
+                "CANDIDATE_BRANCH": identity["candidate_branch"],
+                "CANDIDATE_CI_STATUS": ci_status,
+                "PR_URL": identity["pr_url"],
+                "CI_RUN_URL": ci_url,
+            },
+        )
+        if not result.ok:
+            write_activity_log(config, {"type": "chair_parent_resume_failed", "task_id": task_id, "message": result.error})
+        return result.ok
 
     unblock_kind = blocked_task_triage_kind(parent)
     completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)

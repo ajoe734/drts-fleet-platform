@@ -1990,8 +1990,28 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("status") != "blocked":
         raise SystemExit(f"{task_id} is not blocked")
+    resume_basis = os.environ.get("TASK_RESUME_BASIS", "").strip()
+    if resume_basis:
+        if resume_basis != "candidate_ci_recovered" or resume_status != "in_progress":
+            raise SystemExit("Unsupported candidate CI recovery disposition")
+        identity = {key: task.get(key) for key in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation", "pr_url"
+        )}
+        if parse_json_env("TASK_RESUME_CANDIDATE_IDENTITY_JSON") != identity:
+            raise SystemExit("Candidate identity changed before CI recovery")
+        if not candidate_review_handoff_is_current(task):
+            raise SystemExit("Candidate CI recovery requires the original current owner handoff")
+        if task.get("external_gate") or (task.get("task_class") == "release" and task.get("mutates_canonical") is False):
+            raise SystemExit("Candidate CI recovery cannot resume an external release gate")
+        if (
+            os.environ.get("CANDIDATE_HEAD_SHA") != identity["candidate_sha"]
+            or os.environ.get("CANDIDATE_BRANCH") != identity["candidate_branch"]
+            or os.environ.get("PR_URL") != identity["pr_url"]
+            or os.environ.get("CANDIDATE_CI_STATUS") != "success"
+        ):
+            raise SystemExit("Candidate CI recovery requires matching successful PR observation")
     helper_id = os.environ.get("TASK_RESUME_HELPER_ID", "").strip()
-    if helper_id:
+    if helper_id and not resume_basis:
         reason = parent_resume_blocker(state, task, get_task(state, helper_id))
         if reason:
             raise SystemExit(f"Cannot resume {task_id} via {helper_id}: {reason}")
@@ -2011,8 +2031,13 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
             "message": message,
             "resume_status": resume_status,
             "helper_task_id": os.environ.get("TASK_RESUME_HELPER_ID", "").strip() or None,
+            **({"resume_basis": resume_basis} if resume_basis else {}),
         }
     )
+    if resume_basis:
+        # Same locked state transaction: restore the retained review route,
+        # never wake the owner to start authoring or generate another handoff.
+        command_reconcile_candidate(state, [task_id, message])
 
 
 def command_start(state: dict[str, Any], args: list[str]) -> None:
