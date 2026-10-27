@@ -475,7 +475,10 @@ export function validateDailyPreviewRows(
   const etaFinite =
     typeof ownRow.etaSecondsAtAssignment === "number" &&
     Number.isFinite(ownRow.etaSecondsAtAssignment);
-  const etaNonnegative = etaFinite && ownRow.etaSecondsAtAssignment >= 0;
+  const etaNonnegative =
+    typeof ownRow.etaSecondsAtAssignment === "number" &&
+    etaFinite &&
+    ownRow.etaSecondsAtAssignment >= 0;
   if (!(dispatchParseable && assignedParseable && etaNonnegative) && evidence) {
     // Fixed field names and primitive classifications only. Never serialize
     // the row or values (including timestamps, IDs, or arbitrary objects).

@@ -654,6 +654,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       "string",
       false,
     ],
+    ["firstAssignedAt", {}, "absent", "undefined", false],
+    ["firstAssignedAt", { firstAssignedAt: null }, "present", "null", false],
+    ["firstAssignedAt", { firstAssignedAt: 123 }, "present", "number", false],
     [
       "firstAssignedAt",
       { firstAssignedAt: "secret-invalid-assignment" },
@@ -661,6 +664,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       "string",
       false,
     ],
+    ["etaSecondsAtAssignment", {}, "absent", "undefined", false],
     [
       "etaSecondsAtAssignment",
       { etaSecondsAtAssignment: null },
@@ -673,6 +677,13 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       { etaSecondsAtAssignment: "secret-invalid-eta" },
       "present",
       "string",
+      false,
+    ],
+    [
+      "etaSecondsAtAssignment",
+      { etaSecondsAtAssignment: NaN },
+      "present",
+      "number",
       false,
     ],
     [
@@ -711,6 +722,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         ),
       ).toThrow("daily-report-preview-dispatch-assignment-fields-required");
       const diagnostic = JSON.stringify(evidence.events);
+      expect(evidence.events).toHaveLength(7);
       expect(diagnostic).toContain(
         `daily-report-preview-field-${field}-${presence}-type-${kind}`,
       );
@@ -718,8 +730,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         expect(diagnostic).toContain(
           `daily-report-preview-field-${field}-finite-${finite}`,
         );
+        const etaValue = row[field];
         expect(diagnostic).toContain(
-          `daily-report-preview-field-${field}-nonnegative-${finite && row[field] >= 0}`,
+          `daily-report-preview-field-${field}-nonnegative-${finite && typeof etaValue === "number" && etaValue >= 0}`,
         );
       } else {
         expect(diagnostic).toContain(
@@ -1161,7 +1174,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       );
       let restoreClock: (() => void) | undefined;
       try {
-        if (!previewFailure) {
+        if (!previewFailure && !failureStage) {
           // Only positive fake-port runs need an unexpired artifact. Keep the
           // original clock advancing so the helper's Date.now deadlines work;
           // never fake timers or relax the production expiry check.
