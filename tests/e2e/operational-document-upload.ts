@@ -2520,6 +2520,227 @@ export function operationalRoleRequestHeaders(
   return headers;
 }
 
+export type OperationalReferralSubject = {
+  drtsPassengerId: string; // Issuer authority, RAM only; never recoveryScope.
+  tenantId: string;
+  partnerId: string;
+  partnerProgramId: string;
+  entrySlug: string;
+  entryHost: string;
+};
+
+export class OperationalReferralEvidenceError extends Error {}
+
+/** Native fetch keeps WIF, artifacts and unrelated order rows out of Playwright
+ * request snapshots. Errors expose only fixed paths/status, never payloads. */
+async function referralEvidenceApi(
+  apiPath: string,
+  method: "GET" | "POST",
+  headers: Record<string, string>,
+  body?: unknown,
+): Promise<Record<string, any>> {
+  const sha = process.env.DRTS_CANDIDATE_SHA?.trim();
+  if (!sha || !/^[a-f0-9]{40}$/.test(sha))
+    throw new Error("Referral evidence requires immutable candidate SHA");
+  let failure = "transport or JSON unavailable";
+  try {
+    const response = await fetch(
+      new URL(apiPath, requiredOrigin("DRTS_DEV_API_BASE_URL")),
+      {
+        method,
+        headers,
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        redirect: "manual",
+        signal: AbortSignal.timeout(30_000),
+      },
+    );
+    failure = `HTTP ${response.status}`;
+    // Nest's unchanged @Post handoff issuer returns 201; canonical GETs 200.
+    if (response.status !== (method === "POST" ? 201 : 200))
+      throw new Error(failure);
+    failure = "candidate mismatch";
+    if (response.headers.get("x-drts-candidate-sha") !== sha)
+      throw new Error("candidate mismatch");
+    failure = "invalid envelope or JSON";
+    const payload = await response.json();
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      payload.error ||
+      !payload.data ||
+      typeof payload.data !== "object" ||
+      Array.isArray(payload.data)
+    )
+      throw new Error("invalid envelope");
+    return payload.data;
+  } catch {
+    throw new OperationalReferralEvidenceError(
+      `Referral evidence ${method} ${apiPath} failed: ${failure}`,
+    );
+  }
+}
+
+export async function prepareOperationalReferralHandoff(
+  entrySlug: string,
+  entryHost: string,
+) {
+  const base = "DRTS_DEV_API_BASE_URL";
+  const origin = requiredOrigin(base);
+  const token = getIdentityToken(base)?.trim();
+  if (!token) throw new Error("Referral issuer requires API-audience WIF");
+  if (
+    new URL(origin).protocol !== "https:" ||
+    !/^[a-z0-9][a-z0-9-]*$/.test(entrySlug) ||
+    !entryHost
+  )
+    throw new Error("Invalid referral issuer target");
+  const entryPath = `/api/partner/entries/${entrySlug}`;
+  const entry = await referralEvidenceApi(
+    entryPath,
+    "GET",
+    operationalRequestHeaders(base, new URL(entryPath, origin).toString()),
+  );
+  const validId = (value: unknown): value is string =>
+    typeof value === "string" &&
+    value.trim() === value &&
+    value.length > 0 &&
+    value.length <= 200;
+  if (
+    entry.entry_slug !== entrySlug ||
+    entry.entry_host !== entryHost ||
+    !validId(entry.tenant_id) ||
+    !validId(entry.partner_id) ||
+    !validId(entry.program_id)
+  )
+    throw new Error("Referral canonical entry binding invalid");
+  const issuePath = "/api/partner/ingress/referral-embed-handoff";
+  const issued = await referralEvidenceApi(
+    issuePath,
+    "POST",
+    operationalRequestHeaders(base, new URL(issuePath, origin).toString(), {
+      "content-type": "application/json",
+      "x-drts-google-id-token": token,
+    }),
+    {
+      entrySlug,
+      entryHost,
+      partnerUserRef: `operational-refusal-${randomUUID()}`,
+      consentBundle: null,
+    },
+  );
+  if (
+    issued.partner_entry_slug !== entrySlug ||
+    issued.entry_host !== entryHost ||
+    !validId(issued.drts_passenger_id) ||
+    typeof issued.handoff_id !== "string" ||
+    !/^ref_handoff_[0-9a-f-]{36}$/i.test(issued.handoff_id) ||
+    typeof issued.artifact !== "string" ||
+    !/^[A-Za-z0-9_-]{32}$/.test(issued.artifact) ||
+    issued.token_type !== "SingleUse" ||
+    issued.expires_in !== "120s" ||
+    typeof issued.expires_at !== "string" ||
+    !(Date.parse(issued.expires_at) > Date.now()) ||
+    issued.consent_required !== true ||
+    issued.consent_bundle_version !== null
+  )
+    throw new Error("Referral handoff issuance contract invalid");
+  return {
+    artifact: issued.artifact as string,
+    handoffId: issued.handoff_id as string,
+    subject: {
+      drtsPassengerId: issued.drts_passenger_id,
+      tenantId: entry.tenant_id,
+      partnerId: entry.partner_id,
+      partnerProgramId: entry.program_id,
+      entrySlug,
+      entryHost,
+    } as OperationalReferralSubject,
+  };
+}
+
+export async function observeOperationalReferralZeroOrders(
+  subject: OperationalReferralSubject,
+  phase: "before-refusal" | "after-refusal",
+) {
+  if (!getIdentityToken("DRTS_DEV_API_BASE_URL")?.trim())
+    throw new Error("Referral zero-orders requires API invocation proof");
+  // Independent live canonical session check on each side of refusal. A Cloud
+  // Run invocation token cannot stand in for Ops application authority.
+  const identity = await verifyOperationalRoleSession(
+    "ops_non_reviewer",
+    "DRTS_DEV_API_BASE_URL",
+  );
+  if (
+    !Array.isArray(identity.scopes) ||
+    !identity.scopes.includes("owned:read")
+  )
+    throw new Error("Referral zero-orders requires live Ops owned:read");
+  const url = new URL(
+    "/api/orders",
+    requiredOrigin("DRTS_DEV_API_BASE_URL"),
+  ).toString();
+  const data = await referralEvidenceApi(
+    "/api/orders",
+    "GET",
+    operationalRoleRequestHeaders(
+      "ops_non_reviewer",
+      "DRTS_DEV_API_BASE_URL",
+      url,
+    ),
+  );
+  // This canonical endpoint returns the complete list, with no pagination.
+  // Reject partial/paged substitutes instead of calling an absent list empty.
+  if (Object.keys(data).length !== 1 || !Array.isArray(data.items))
+    throw new Error("Referral canonical orders list incomplete");
+  const nonempty = (v: unknown): v is string =>
+    typeof v === "string" && v.trim().length > 0;
+  if (!Object.values(subject).every(nonempty))
+    throw new Error("Referral issued subject binding missing");
+  let count = 0;
+  for (const row of data.items) {
+    if (
+      !row ||
+      typeof row !== "object" ||
+      Array.isArray(row) ||
+      !nonempty(row.order_id) ||
+      !row.passenger ||
+      typeof row.passenger !== "object" ||
+      Array.isArray(row.passenger) ||
+      !(
+        (row.passenger.passenger_id == null &&
+          row.partner_entry_slug === null) ||
+        nonempty(row.passenger.passenger_id)
+      ) ||
+      ![
+        "tenant_id",
+        "partner_id",
+        "partner_program_id",
+        "partner_entry_slug",
+      ].every((key) => row[key] === null || nonempty(row[key]))
+    )
+      throw new Error("Referral canonical orders row malformed");
+    // Reject ANY order for this legally issued fresh subject, including one
+    // incorrectly stamped with a different entry/partner/tenant.
+    if (row.passenger.passenger_id === subject.drtsPassengerId) count++;
+  }
+  if (count !== 0)
+    throw new Error("Referral controlled subject has canonical orders");
+  return {
+    kind: "referral-first-refusal-zero-orders",
+    phase,
+    subjectKey: createHash("sha256")
+      .update(JSON.stringify(subject))
+      .digest("hex"),
+    path: "/api/orders",
+    sessionPath: "/api/auth/session",
+    status: 200,
+    sessionStatus: 200,
+    count,
+    observation: "bounded-controlled-subject",
+    durableSourceProof: "pending-original-deployment-record",
+  };
+}
+
 export async function verifyOperationalRoleSession(
   role: Exclude<OperationalProbeRole, "unauthenticated" | "invalid_session">,
   baseUrlEnv: string,
