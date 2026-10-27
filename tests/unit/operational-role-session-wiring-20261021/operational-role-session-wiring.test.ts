@@ -1072,18 +1072,22 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(workflow).toContain(
         "Revoke operational role sessions and driver device invitation",
       );
-      // The former global API-token prohibition gains only this authorized
-      // first-visit browser consumer; no other job or runner gets a new binding.
+      // Public routes must not inherit an application Bearer containing WIF.
+      // Only the named first-visit consumer receives this dedicated proof.
       const browserStep = workflow
         .split("      - name: Execute candidate-bound operational journeys")[1]!
         .split("      - name:")[0]!;
       expect(browserStep).toContain(
-        "DRTS_OPERATIONAL_API_ID_TOKEN: ${{ steps.id_token_api_referral_first_visit.outputs.id_token }}",
+        "DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN: ${{ steps.id_token_api_referral_first_visit.outputs.id_token }}",
       );
       expect(browserStep).toContain(
         "DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}",
       );
-      expect(workflow.match(/DRTS_OPERATIONAL_API_ID_TOKEN:/g)).toHaveLength(1);
+      expect(
+        workflow.match(/DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN:/g),
+      ).toHaveLength(1);
+      // Must not set generic API ID tokens on open API routes.
+      expect(workflow).not.toContain("DRTS_OPERATIONAL_API_ID_TOKEN");
       expect(workflow).not.toContain("DRTS_DEV_API_ID_TOKEN");
       expect(runner).not.toContain("DRTS_OPERATIONAL_API_ID_TOKEN");
       const mintStep = workflow

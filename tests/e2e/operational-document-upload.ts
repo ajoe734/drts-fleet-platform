@@ -2431,6 +2431,7 @@ export function operationalRoleRequestHeaders(
   baseUrlEnv: string,
   requestUrl: string,
   suppliedHeaders: Record<string, string> = {},
+  invocationToken?: string,
 ): Record<string, string> {
   const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
   const target = new URL(requestUrl, origin);
@@ -2446,7 +2447,11 @@ export function operationalRoleRequestHeaders(
   }
   rejectSpoofedIdentityHeaders(suppliedHeaders);
   const headers = { ...suppliedHeaders };
-  const setupIdToken = getIdentityToken(baseUrlEnv)?.trim();
+  // First-visit evidence supplies its own API proof per call. Other consumers
+  // retain their original environment contract; no process-wide API injection.
+  const setupIdToken = (
+    invocationToken ?? getIdentityToken(baseUrlEnv)
+  )?.trim();
   const isDirectApiOrigin =
     baseUrlEnv === "DRTS_OPERATIONAL_API_URL" ||
     baseUrlEnv === "DRTS_DEV_API_BASE_URL";
@@ -2586,7 +2591,8 @@ export async function prepareOperationalReferralHandoff(
 ) {
   const base = "DRTS_DEV_API_BASE_URL";
   const origin = requiredOrigin(base);
-  const token = getIdentityToken(base)?.trim();
+  const token =
+    process.env.DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN?.trim();
   if (!token) throw new Error("Referral issuer requires API-audience WIF");
   if (
     new URL(origin).protocol !== "https:" ||
@@ -2598,7 +2604,7 @@ export async function prepareOperationalReferralHandoff(
   const entry = await referralEvidenceApi(
     entryPath,
     "GET",
-    operationalRequestHeaders(base, new URL(entryPath, origin).toString()),
+    {}, // Public entry lookup: WIF is not an application Bearer.
   );
   const validId = (value: unknown): value is string =>
     typeof value === "string" &&
@@ -2617,10 +2623,10 @@ export async function prepareOperationalReferralHandoff(
   const issued = await referralEvidenceApi(
     issuePath,
     "POST",
-    operationalRequestHeaders(base, new URL(issuePath, origin).toString(), {
+    {
       "content-type": "application/json",
       "x-drts-google-id-token": token,
-    }),
+    },
     {
       entrySlug,
       entryHost,
@@ -2662,13 +2668,17 @@ export async function observeOperationalReferralZeroOrders(
   subject: OperationalReferralSubject,
   phase: "before-refusal" | "after-refusal",
 ) {
-  if (!getIdentityToken("DRTS_DEV_API_BASE_URL")?.trim())
+  const token =
+    process.env.DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN?.trim();
+  if (!token)
     throw new Error("Referral zero-orders requires API invocation proof");
   // Independent live canonical session check on each side of refusal. A Cloud
   // Run invocation token cannot stand in for Ops application authority.
   const identity = await verifyOperationalRoleSession(
     "ops_non_reviewer",
     "DRTS_DEV_API_BASE_URL",
+    undefined,
+    token,
   );
   if (
     !Array.isArray(identity.scopes) ||
@@ -2686,6 +2696,8 @@ export async function observeOperationalReferralZeroOrders(
       "ops_non_reviewer",
       "DRTS_DEV_API_BASE_URL",
       url,
+      {},
+      token,
     ),
   );
   // This canonical endpoint returns the complete list, with no pagination.
@@ -2707,11 +2719,13 @@ export async function observeOperationalReferralZeroOrders(
       typeof row.passenger !== "object" ||
       Array.isArray(row.passenger) ||
       !(
-        // Tenant bookings may retain a partner entry without a master
-        // passenger. Only explicit null is valid; missing IDs remain malformed.
+        // Partner bookings can have an explicitly unlinked passenger. Phone
+        // and first-party bookings (entry=null) also permit an omitted ID.
         (
           row.passenger.passenger_id === null ||
-          nonempty(row.passenger.passenger_id)
+          nonempty(row.passenger.passenger_id) ||
+          (row.partner_entry_slug === null &&
+            row.passenger.passenger_id === undefined)
         )
       ) ||
       ![
@@ -2748,6 +2762,7 @@ export async function verifyOperationalRoleSession(
   role: Exclude<OperationalProbeRole, "unauthenticated" | "invalid_session">,
   baseUrlEnv: string,
   expectedOwnFleetId = "fleet-demo-001",
+  invocationToken?: string,
 ): Promise<Record<string, unknown>> {
   const origin = new URL(requiredOrigin(baseUrlEnv)).origin;
   const sessionPath =
@@ -2756,7 +2771,13 @@ export async function verifyOperationalRoleSession(
       ? "/api/auth/session"
       : "/control-plane-proxy/auth/session";
   const sessionUrl = new URL(sessionPath, origin).toString();
-  const headers = operationalRoleRequestHeaders(role, baseUrlEnv, sessionUrl);
+  const headers = operationalRoleRequestHeaders(
+    role,
+    baseUrlEnv,
+    sessionUrl,
+    {},
+    invocationToken,
+  );
   const response = await fetch(sessionUrl, {
     method: "GET",
     headers,

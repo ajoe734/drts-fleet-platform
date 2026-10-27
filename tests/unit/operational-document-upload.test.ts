@@ -4651,7 +4651,7 @@ describe("original referral first-visit issuer and canonical zero-order evidence
   beforeEach(() => {
     vi.stubEnv("DRTS_CANDIDATE_SHA", sha);
     vi.stubEnv("DRTS_DEV_API_BASE_URL", origin);
-    vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "WIF-RAM");
+    vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "");
     vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "WIF-RAM");
     vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "OPS-RAM");
   });
@@ -4781,9 +4781,29 @@ describe("original referral first-visit issuer and canonical zero-order evidence
       /RAM|private|other-person|WIF|OPS/,
     );
   });
+  it("isolates named WIF from other API consumers and rejects using it as an Ops session", async () => {
+    ports();
+    expect(operationalRequestHeaders("DRTS_DEV_API_BASE_URL", origin)).toEqual(
+      {},
+    );
+    expect(
+      operationalRoleRequestHeaders(
+        "ops_non_reviewer",
+        "DRTS_DEV_API_BASE_URL",
+        origin,
+      ),
+    ).toEqual({ Authorization: "Bearer OPS-RAM" });
+    vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "WIF-RAM");
+    await expect(
+      observeOperationalReferralZeroOrders(subject, "before-refusal"),
+    ).rejects.toThrow("must be distinct from Cloud Run invocation proof");
+  });
   it.each(["entry", "issuer"] as const)(
     "passes the actual %s open-route guard without treating WIF as an application JWT",
     async (boundary) => {
+      // Even if a caller's environment has generic API WIF, neither open
+      // route may feed it into application Bearer verification.
+      vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "WIF-RAM");
       ports();
       const externalFetch = globalThis.fetch;
       const guard = new BootstrapAuthGuard(
@@ -5066,11 +5086,11 @@ describe("original referral first-visit issuer and canonical zero-order evidence
   });
   it("rejects missing credentials, invalid candidate and absent issued subject without exposing transport data", async () => {
     ports();
-    vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "");
+    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "");
     await expect(
       prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
     ).rejects.toThrow("WIF");
-    vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "WIF-RAM");
+    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "WIF-RAM");
     vi.stubEnv("DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN", "");
     await expect(
       observeOperationalReferralZeroOrders(subject, "after-refusal"),

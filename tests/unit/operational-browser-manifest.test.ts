@@ -1527,7 +1527,7 @@ describe("actual original first-visit refusal chain", () => {
   async function probe(change: Record<string, any> = {}) {
     vi.stubEnv("DRTS_CANDIDATE_SHA", sha);
     vi.stubEnv("DRTS_DEV_API_BASE_URL", api);
-    vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "private-WIF");
+    vi.stubEnv("DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN", "private-WIF");
     vi.stubEnv(
       "DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN",
       "private-Ops",
@@ -1549,7 +1549,8 @@ describe("actual original first-visit refusal chain", () => {
             status,
             headers: { "x-drts-candidate-sha": sha },
           });
-        if (url.pathname.endsWith("/entries/yuhe-residence"))
+        if (url.pathname.endsWith("/entries/yuhe-residence")) {
+          expect(options.headers).toEqual({});
           return reply({
             entry_slug: "yuhe-residence",
             entry_host: host,
@@ -1557,7 +1558,12 @@ describe("actual original first-visit refusal chain", () => {
             partner_id: "private-partner",
             program_id: "private-program",
           });
+        }
         if (url.pathname.endsWith("referral-embed-handoff")) {
+          expect(options.headers).toEqual({
+            "content-type": "application/json",
+            "x-drts-google-id-token": "private-WIF",
+          });
           sequence.push("issue");
           expect(JSON.parse(String(options.body)).consentBundle).toBeNull();
           return reply(
