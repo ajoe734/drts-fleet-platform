@@ -4781,6 +4781,21 @@ describe("original referral first-visit issuer and canonical zero-order evidence
       /RAM|private|other-person|WIF|OPS/,
     );
   });
+  it.each([
+    "http://api.example.invalid",
+    "https://user:private@api.example.invalid",
+    "https://api.example.invalid/#private",
+  ])(
+    "rejects an unsafe issuer target before transporting proof: %s",
+    async (target) => {
+      const calls = ports();
+      vi.stubEnv("DRTS_DEV_API_BASE_URL", target);
+      await expect(
+        prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+      ).rejects.toThrow("Invalid referral issuer target");
+      expect(calls).toHaveLength(0);
+    },
+  );
   it("isolates named WIF from other API consumers and rejects using it as an Ops session", async () => {
     ports();
     expect(operationalRequestHeaders("DRTS_DEV_API_BASE_URL", origin)).toEqual(

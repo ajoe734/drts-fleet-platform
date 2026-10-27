@@ -2594,8 +2594,12 @@ export async function prepareOperationalReferralHandoff(
   const token =
     process.env.DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN?.trim();
   if (!token) throw new Error("Referral issuer requires API-audience WIF");
+  const target = new URL(origin);
   if (
-    new URL(origin).protocol !== "https:" ||
+    target.protocol !== "https:" ||
+    target.username ||
+    target.password ||
+    target.hash ||
     !/^[a-z0-9][a-z0-9-]*$/.test(entrySlug) ||
     !entryHost
   )
