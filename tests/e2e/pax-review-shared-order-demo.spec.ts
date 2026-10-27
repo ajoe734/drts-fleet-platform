@@ -96,6 +96,7 @@ async function opsPrepareDiagnostic(response: {
               : (error as {
                   code?: unknown;
                   message?: unknown;
+                  details?: unknown;
                   trace_id?: unknown;
                   traceId?: unknown;
                 });
@@ -116,6 +117,25 @@ async function opsPrepareDiagnostic(response: {
                         "Established rehearsal supply templates are unavailable."
                       ? "supply-templates"
                       : "review_supply_unavailable";
+            } else if (code === "VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT") {
+              const details = fields?.details;
+              const candidateReason =
+                details !== null &&
+                typeof details === "object" &&
+                !Array.isArray(details) &&
+                "reason" in details
+                  ? details.reason
+                  : undefined;
+              reason =
+                candidateReason === "inactive" ||
+                candidateReason === "unsupported_product" ||
+                candidateReason === "license_type" ||
+                candidateReason === "business_dispatch_eligibility" ||
+                candidateReason === "platform_forwarding_not_allowed"
+                  ? candidateReason
+                  : candidateReason === undefined
+                    ? "missing-domain-reason"
+                    : "unrecognized-domain-reason";
             }
           }
           if (fields) {
