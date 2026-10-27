@@ -161,5 +161,27 @@ handoff, because its default merge resolution could otherwise resume the parent.
 
 No tests of product code are needed for this documentation-only change. No
 browser/server checks were started, and no in-progress background test is being
-reported as passed. Final narrow check results and publication receipt follow
-once available; a PR is not itself a completed helper or parent acceptance.
+reported as passed. A PR is not itself a completed helper or parent acceptance.
+
+## Publication and scoped check receipt
+
+- Anchor `1ca1f44a1f1686421d205dcfb6cf6dc7c1529149` was committed on the assigned
+  branch and normally pushed to origin; push exit 0.
+- [Draft PR #3089](https://github.com/ajoe734/drts-fleet-platform/pull/3089)
+  targets `dev`. The draft explicitly holds for the two Supervisor state writes.
+- `pnpm exec prettier --check PHASE1_OPEN_QUESTIONS.md support/unblock/BUREAU-R12-SUBMITTED-DAILY-REPORT-TEMPLATE-20261025/BUREAU-R12-SUBMITTED-DAILY-REPORT-TEMPLATE-20261025-UNBLOCK-PLANNING-DECISION.md`:
+  PASS, exit 0.
+- `git diff origin/dev...HEAD --check`: PASS, exit 0.
+- `python3 tools/ci/git/check_commit_trailers.py --base 51628b2b078d07ec759e0804448f7815bbc812ee --head HEAD`:
+  PASS, exit 0 on the anchor; repeat on the final publication below.
+- Only the two planning files above are changed. Four existing evidence hashes
+  were checked successfully; no product tests, hosted dispatch or deployment
+  were initiated by this worker. Automatic PR CI is separate, not claimed PASS.
+- This receipt is committed separately after the anchor. The resulting final
+  full SHA, ordinary push result, remote branch / PR-head equality and repeated
+  narrow checks are captured without self-referential hashes in
+  `/home/lupin/workspace/drts-fleet-platform/.local/unblock/BUREAU-R12-SUBMITTED-DAILY-REPORT-TEMPLATE-20261025-UNBLOCK-PLANNING-DECISION/publication.json`
+  and the helper's release-CLI progress note.
+- `CANDIDATE_SHA` / `CANDIDATE_BRANCH` handoff to Claude2 remains pending the
+  Supervisor writes and readback. No candidate was locked and no `done` command
+  was called. The original parent remains blocked on actual hosted evidence.
