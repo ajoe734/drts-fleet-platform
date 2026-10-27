@@ -3171,42 +3171,46 @@ test(journeyName, async ({ browser, request }) => {
             headers: { "x-idempotency-key": `${nonce}-second-invite-revoke` },
           }),
         );
-      await persistPrivateJson(`${DIRECTORY}/TEN03-06-custody.json`, {
-        definitionSha: definition,
-        runtimeSha: runtime,
-        bookings: extraBookings.map((b) => ({
-          name: b.name,
-          orderId: b.orderId,
-          terminal: b.terminal ?? false,
-          journalState: b.journal?.current?.state,
-          bodySha256: b.journal?.current?.bodySha256,
-          actions: b.actions,
-          recovery: b.journal?.current?.recovery,
-        })),
-        exactOwnedOrderIds: extraBookings.map((b) => b.orderId).filter(Boolean),
-        secondSupply: {
-          driverId: extraSupply.driverId,
-          vehicleId: extraSupply.vehicleId,
-          deviceId: extraSupply.deviceId,
-          bindingId: extraSupply.bindingId,
-          plateNo: extraSupply.plateNo,
-          driverSubmissionId: extraSupply.driverSubmissionId,
-          vehicleSubmissionId: extraSupply.vehicleSubmissionId,
-          retainedApprovedSupplyAndDocuments: Boolean(
-            extraSupply.driverId || extraSupply.vehicleId,
-          ),
-        },
-        reports: supplementalReports,
-        sourceAuthority: {
-          canonicalReads:
-            "normal same-runtime GET /orders/:id and report repository path when enabled",
-          pgEnabledDeploymentProof:
-            "pending external same-release operator evidence",
-          dispatchTrace: "instance-local-memory; not durable global proof",
-          noAssignment:
-            "own journaled no-dispatch sequence and report null facts only; global absence pending complete authority",
-        },
-      });
+      await cleanup("supplemental-custody-persist", () =>
+        persistPrivateJson(`${DIRECTORY}/TEN03-06-custody.json`, {
+          definitionSha: definition,
+          runtimeSha: runtime,
+          bookings: extraBookings.map((b) => ({
+            name: b.name,
+            orderId: b.orderId,
+            terminal: b.terminal ?? false,
+            journalState: b.journal?.current?.state,
+            bodySha256: b.journal?.current?.bodySha256,
+            actions: b.actions,
+            recovery: b.journal?.current?.recovery,
+          })),
+          exactOwnedOrderIds: extraBookings
+            .map((b) => b.orderId)
+            .filter(Boolean),
+          secondSupply: {
+            driverId: extraSupply.driverId,
+            vehicleId: extraSupply.vehicleId,
+            deviceId: extraSupply.deviceId,
+            bindingId: extraSupply.bindingId,
+            plateNo: extraSupply.plateNo,
+            driverSubmissionId: extraSupply.driverSubmissionId,
+            vehicleSubmissionId: extraSupply.vehicleSubmissionId,
+            retainedApprovedSupplyAndDocuments: Boolean(
+              extraSupply.driverId || extraSupply.vehicleId,
+            ),
+          },
+          reports: supplementalReports,
+          sourceAuthority: {
+            canonicalReads:
+              "normal same-runtime GET /orders/:id and report repository path when enabled",
+            pgEnabledDeploymentProof:
+              "pending external same-release operator evidence",
+            dispatchTrace: "instance-local-memory; not durable global proof",
+            noAssignment:
+              "own journaled no-dispatch sequence and report null facts only; global absence pending complete authority",
+          },
+        }),
+      );
     }
     const ownDriverForCleanup = driverId;
     if (ownDriverForCleanup)
