@@ -2652,6 +2652,8 @@ export async function observeOperationalReferralZeroOrders(
   subject: OperationalReferralSubject,
   phase: "before-refusal" | "after-refusal",
 ) {
+  if (!getIdentityToken("DRTS_DEV_API_BASE_URL")?.trim())
+    throw new Error("Referral zero-orders requires API invocation proof");
   // Independent live canonical session check on each side of refusal. A Cloud
   // Run invocation token cannot stand in for Ops application authority.
   const identity = await verifyOperationalRoleSession(
@@ -2693,7 +2695,8 @@ export async function observeOperationalReferralZeroOrders(
       !row.passenger ||
       typeof row.passenger !== "object" ||
       !(
-        row.passenger.passenger_id === null ||
+        (row.passenger.passenger_id == null &&
+          row.partner_entry_slug === null) ||
         nonempty(row.passenger.passenger_id)
       ) ||
       ![

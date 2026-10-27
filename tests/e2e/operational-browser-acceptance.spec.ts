@@ -8,7 +8,6 @@ import * as path from "node:path";
 import {
   expect,
   test,
-  type APIRequestContext,
   type APIResponse,
   type Locator,
   type Page,
@@ -16,6 +15,9 @@ import {
 import { createOperationalEvidenceJournal } from "./operational-evidence-journal";
 import {
   runSetup,
+  prepareOperationalReferralHandoff,
+  observeOperationalReferralZeroOrders,
+  type OperationalReferralSubject,
   runOperationalDocumentAcceptance,
   requiredOrigin,
   operationalRequestHeaders,
@@ -93,6 +95,7 @@ type Journey = {
   route: string;
   actorScope: string;
   firstVisitConsentEvidence?: "privacy-fee-return-same-owner";
+  firstVisitRefusalEvidence?: "fallback-inactive-same-subject-zero-orders";
   environmentVariables?: Record<string, string>;
   browserSession?: BrowserSession;
   setup?: SetupRequest[];
@@ -243,6 +246,7 @@ type FirstReferralVisit = {
   recoveryScope: string; // RAM only; compared against authenticated session readbacks.
   handoffId: string; // RAM only; never journal this identifier.
   entryHost: string;
+  subject?: OperationalReferralSubject; // Issued subject + canonical entry, RAM only.
   fee?: {
     disclosureVersion: string;
     contentHash: string;
@@ -279,10 +283,19 @@ function referralSession(
   } | null;
   const session = root?.session;
   expect(root?.ok).toBe(true);
-  expect(session?.handoffId).toBe(visit.handoffId);
-  expect(session?.recoveryScope).toBe(visit.recoveryScope);
+  expect(
+    session?.handoffId === visit.handoffId,
+    "same referral handoffId",
+  ).toBe(true);
+  expect(
+    session?.recoveryScope === visit.recoveryScope,
+    "same referral recoveryScope",
+  ).toBe(true);
   expect(session?.partnerEntrySlug).toBe("yuhe-residence");
-  expect(session?.entryHost).toBe(visit.entryHost);
+  expect(
+    session?.entryHost === visit.entryHost,
+    "same referral entryHost",
+  ).toBe(true);
   expect(session?.identityActive).toBe(active);
   expect(
     session?.consent?.grantedAt === null,
@@ -325,6 +338,186 @@ function referralFee(body: unknown) {
     contentHash: data!.contentHash as string,
     acknowledgedAt: data!.acknowledgedAt as string | null,
   };
+}
+
+async function prepareFirstReferralVisit(
+  page: Page,
+  origin: string,
+  entryHost: string,
+): Promise<FirstReferralVisit> {
+  try {
+    const issued = await prepareOperationalReferralHandoff(
+      "yuhe-residence",
+      entryHost,
+    );
+    const exchange = await page
+      .context()
+      .request.post(new URL("/api/referral/session", origin).toString(), {
+        data: {
+          action: "exchange",
+          artifact: issued.artifact,
+          entrySlug: "yuhe-residence",
+          entryHost,
+        },
+        maxRedirects: 0,
+      });
+    expect(exchange.status()).toBe(200);
+    expectCandidateRevision(exchange.headers(), "referral single-use exchange");
+    const body = await exchange.json();
+    const scope = body?.session?.recoveryScope;
+    expect(typeof scope === "string" && /^[a-f0-9]{64}$/.test(scope)).toBe(
+      true,
+    );
+    const visit: FirstReferralVisit = {
+      recoveryScope: scope,
+      handoffId: issued.handoffId,
+      entryHost,
+      visitKey: createHash("sha256").update(scope).digest("hex"),
+      subject: issued.subject,
+    };
+    referralSession(body, visit, false);
+    record({
+      kind: "referral-first-handoff-exchanged",
+      visitKey: visit.visitKey,
+      status: 200,
+      path: "/api/referral/session",
+      identityActive: false,
+    });
+    return visit;
+  } catch {
+    throw new Error("Referral legal first-visit handoff/exchange failed");
+  }
+}
+
+async function observeReferralRefusal(
+  page: Page,
+  origin: string,
+  visit: FirstReferralVisit,
+) {
+  const writes: string[] = [];
+  const observe = (request: import("@playwright/test").Request) => {
+    const url = new URL(request.url());
+    if (
+      url.origin === new URL(origin).origin &&
+      request.method() === "POST" &&
+      url.pathname.startsWith("/api/referral/")
+    )
+      writes.push(url.pathname);
+  };
+  // Observe before click and keep observing through readback/after0/return to
+  // consent. No grant, fees, quote or booking POST belongs in this interval.
+  page.on("request", observe);
+  try {
+    expect(
+      visit.subject?.entrySlug === "yuhe-residence" &&
+        visit.subject.entryHost === visit.entryHost,
+    ).toBe(true);
+    const before = await observeOperationalReferralZeroOrders(
+      visit.subject!,
+      "before-refusal",
+    );
+    record({ ...before, visitKey: visit.visitKey });
+    const control = page.getByRole("link", { name: "暫不使用", exact: true });
+    await expect(control).toBeVisible();
+    const isFallback = (url: URL) =>
+      url.origin === new URL(origin).origin &&
+      url.pathname === "/embed/yuhe-residence" &&
+      url.searchParams.get("state") === "fallback" &&
+      url.searchParams.get("entryHost") === visit.entryHost;
+    const navigation = page.waitForURL(isFallback, {
+      timeout: interactionTimeoutMs,
+    });
+    const response = page.waitForResponse(
+      (r) => r.request().method() === "GET" && isFallback(new URL(r.url())),
+    );
+    void navigation.catch(() => {});
+    void response.catch(() => {});
+    await control.click({ noWaitAfter: true });
+    await navigation;
+    const fallback = await response;
+    expect(fallback.status()).toBe(200);
+    expectCandidateRevision(fallback.headers(), "referral refusal fallback");
+    const active = await page.request.get(
+      new URL("/api/referral/active", origin).toString(),
+      { maxRedirects: 0 },
+    );
+    expect(active.status()).toBe(401);
+    expectCandidateRevision(active.headers(), "referral inactive active route");
+    const rejected = await active.json();
+    expect(
+      rejected?.ok === false &&
+        rejected?.error?.code === "REFERRAL_SESSION_REQUIRED",
+    ).toBe(true);
+    // Existing development endpoint reads the signed inactive cookie FIRST.
+    // No cookie clearing, new context, second issuance or artifact replay.
+    const read = await page
+      .context()
+      .request.post(new URL("/api/referral/session", origin).toString(), {
+        data: {
+          action: "demo-bootstrap",
+          entrySlug: "yuhe-residence",
+          entryHost: visit.entryHost,
+        },
+        maxRedirects: 0,
+      });
+    expect(read.status()).toBe(200);
+    expectCandidateRevision(
+      read.headers(),
+      "referral same-subject inactive readback",
+    );
+    const inactive = referralSession(await read.json(), visit, false);
+    record({
+      kind: "referral-first-refusal-inactive-readback",
+      visitKey: visit.visitKey,
+      path: "/api/referral/session",
+      status: 200,
+      ...inactive,
+    });
+    const after = await observeOperationalReferralZeroOrders(
+      visit.subject!,
+      "after-refusal",
+    );
+    expect(after.subjectKey).toBe(before.subjectKey);
+    record({ ...after, visitKey: visit.visitKey });
+    const returned = await navigate(
+      page,
+      origin,
+      "/embed/yuhe-residence?state=consent&entryHost=" +
+        encodeURIComponent(visit.entryHost),
+    );
+    expect(returned?.status()).toBe(200);
+    expectCandidateRevision(
+      returned?.headers() ?? {},
+      "referral refusal return to consent",
+    );
+    await expect(
+      page.locator(
+        "form[action='/api/referral/session'] button[type='submit']",
+      ),
+    ).toBeVisible();
+    expect(
+      writes.length,
+      "refusal interval must contain no browser referral POST",
+    ).toBe(0);
+    record({
+      kind: "referral-first-refusal",
+      visitKey: visit.visitKey,
+      path: "/embed/yuhe-residence",
+      status: 200,
+      state: "fallback",
+      activePath: "/api/referral/active",
+      activeStatus: 401,
+      activeError: "REFERRAL_SESSION_REQUIRED",
+      grantConsentPosts: 0,
+      bookingPosts: 0,
+      semantics: "navigation-only-no-server-refusal-record",
+    });
+  } catch {
+    // Never attach a response body, subject, cookie, artifact or assertion diff.
+    throw new Error("Referral same-subject refusal evidence failed");
+  } finally {
+    page.off("request", observe);
+  }
 }
 
 async function observeReferralPrivacyConsent(
@@ -616,6 +809,19 @@ test("requires a single immutable candidate SHA and complete formal journey mani
   ).toEqual([
     ["referral-create-read-cancel-receipt", "privacy-fee-return-same-owner"],
   ]);
+  expect(
+    manifest.journeys
+      .filter((journey) => journey.firstVisitRefusalEvidence)
+      .map(({ id, firstVisitRefusalEvidence }) => [
+        id,
+        firstVisitRefusalEvidence,
+      ]),
+  ).toEqual([
+    [
+      "referral-create-read-cancel-receipt",
+      "fallback-inactive-same-subject-zero-orders",
+    ],
+  ]);
   expect(manifest.journeys.map(({ id }) => id)).toEqual([
     "referral-create-read-cancel-receipt",
     "enterprise-create-read-update-cancel",
@@ -692,29 +898,37 @@ test("requires a single immutable candidate SHA and complete formal journey mani
   expect(manifest.documentAcceptance.setup.length).toBeGreaterThan(0);
 });
 
+// Signed handoff/session traffic must never enter trace request snapshots.
+// The synchronous allowlisted journal remains the durable referral evidence.
+const privateReferralTest = test.extend({ trace: "off", screenshot: "off" });
 for (const journey of manifest.journeys) {
-  test(`${journey.id} executes its declared operational contract`, async ({
-    page,
-  }) => {
-    const origin = requiredOrigin(journey.baseUrlEnv);
-    const variables: TemplateVariables = {
-      runId: `${journey.id}-${Date.now().toString(36)}`,
-    };
-    installEnvironmentVariables(journey, variables);
-    await installOperationalBrowserHeaders(page, journey.baseUrlEnv);
-    await installBrowserSession(page, journey, origin, variables);
-    // Observe the normal runSetup request, not a second bootstrap. The real
-    // APIRequestContext owns the cookie; only the response is inspected here.
-    let bootstrap: APIResponse | undefined;
-    const request = page.context().request;
-    const setupRequest =
-      journey.firstVisitConsentEvidence === "privacy-fee-return-same-owner"
+  const run = journey.firstVisitRefusalEvidence ? privateReferralTest : test;
+  run(
+    `${journey.id} executes its declared operational contract`,
+    async ({ page }) => {
+      const origin = requiredOrigin(journey.baseUrlEnv);
+      const variables: TemplateVariables = {
+        runId: `${journey.id}-${Date.now().toString(36)}`,
+      };
+      installEnvironmentVariables(journey, variables);
+      await installOperationalBrowserHeaders(page, journey.baseUrlEnv);
+      await installBrowserSession(page, journey, origin, variables);
+      const visit = journey.firstVisitRefusalEvidence
+        ? await prepareFirstReferralVisit(
+            page,
+            origin,
+            String(variables.referralEntryHost),
+          )
+        : undefined;
+      // Normal setup now reads the already exchanged signed session. It must not
+      // issue another random Demo identity or silently replace our known subject.
+      let bootstrap: APIResponse | undefined;
+      const request = page.context().request;
+      const setupRequest = visit
         ? new Proxy(request, {
             get(target, key) {
               if (key === "fetch")
-                return async (
-                  ...args: Parameters<APIRequestContext["fetch"]>
-                ) => {
+                return async (...args: Parameters<typeof target.fetch>) => {
                   const response = await target.fetch(...args);
                   if (
                     args[0] ===
@@ -729,318 +943,312 @@ for (const journey of manifest.journeys) {
             },
           })
         : request;
-    await runSetup({ request: setupRequest, record }, journey, variables);
-    let visit: FirstReferralVisit | undefined;
-    if (journey.firstVisitConsentEvidence === "privacy-fee-return-same-owner") {
-      expect(
-        bootstrap,
-        "normal setup must issue one Demo bootstrap",
-      ).toBeDefined();
-      expect(bootstrap!.status()).toBe(200);
-      expectCandidateRevision(bootstrap!.headers(), "referral Demo bootstrap");
-      const body = (await bootstrap!.json()) as {
-        session?: { recoveryScope?: string; handoffId?: string };
-      };
-      const scope = body.session?.recoveryScope;
-      const handoffId = body.session?.handoffId;
-      expect(scope).toMatch(/^[0-9a-f]{64}$/);
-      expect(handoffId).toMatch(/^ref_handoff_[0-9a-f-]{36}$/i);
-      visit = {
-        recoveryScope: scope!,
-        handoffId: handoffId!,
-        entryHost: String(variables.referralEntryHost),
-        visitKey: createHash("sha256").update(scope!).digest("hex"),
-      };
-      const state = referralSession(body, visit, false);
-      record({
-        kind: "referral-first-privacy-initial",
-        visitKey: visit.visitKey,
-        status: bootstrap!.status(),
-        path: "/api/referral/session",
-        ...state,
-      });
-    }
-    await navigate(
-      page,
-      origin,
-      interpolatePath(journey.route, null, variables),
-    );
-    if (visit) {
-      await expect(
-        page.locator(
-          "form[action='/api/referral/session'] button[type='submit']",
-        ),
-      ).toBeVisible();
-      const preConsent = await page.request.get(
-        new URL("/api/referral/session", origin).toString(),
-        { maxRedirects: 0 },
-      );
-      expect(preConsent.status()).toBe(401);
-      expectCandidateRevision(
-        preConsent.headers(),
-        "referral unconsented session GET",
-      );
-      record({
-        kind: "referral-first-privacy-inactive-read",
-        visitKey: visit.visitKey,
-        status: preConsent.status(),
-        path: "/api/referral/session",
-      });
-    }
-
-    let lastResultId: unknown = null;
-    for (const operation of journey.operations) {
-      if (operation.kind === "intent") {
-        const control = page.locator(operation.control).first();
-        await expect(
-          control,
-          `${journey.id}/${operation.name} control`,
-        ).toBeVisible({
-          timeout: interactionTimeoutMs,
-        });
-        const href = await control.getAttribute("href");
-        expect(href, `${journey.id}/${operation.name} target`).toBeTruthy();
-        const target = new URL(href as string, origin);
+      await runSetup({ request: setupRequest, record }, journey, variables);
+      if (visit) {
         expect(
-          target.origin,
-          `${journey.id}/${operation.name} target origin`,
-        ).toBe(new URL(requiredOrigin(operation.targetBaseUrlEnv)).origin);
-        expect(
-          target.pathname,
-          `${journey.id}/${operation.name} target path`,
-        ).toMatch(new RegExp(operation.expectedPathPattern));
+          bootstrap,
+          "normal setup must read the exchanged session",
+        ).toBeDefined();
+        expect(bootstrap!.status()).toBe(200);
+        expectCandidateRevision(
+          bootstrap!.headers(),
+          "referral existing Demo session",
+        );
+        const state = referralSession(await bootstrap!.json(), visit, false);
         record({
-          kind: "cross-app-intent",
-          journey: journey.id,
-          surface: journey.surface,
-          actorScope: journey.actorScope,
-          operation: operation.name,
-          target: target.toString(),
+          kind: "referral-first-privacy-initial",
+          visitKey: visit.visitKey,
+          status: bootstrap!.status(),
+          path: "/api/referral/session",
+          ...state,
         });
-        continue;
       }
-
-      if (operation.kind === "absence") {
-        await expect(
-          page.locator(operation.control),
-          `${journey.id}/${operation.name} must not be offered`,
-        ).toHaveCount(0);
-        record({
-          kind: "control-absence",
-          journey: journey.id,
-          surface: journey.surface,
-          actorScope: journey.actorScope,
-          operation: operation.name,
-          control: operation.control,
-        });
-        continue;
-      }
-
-      await runSteps(
+      await navigate(
         page,
         origin,
-        operation.before ?? [],
-        lastResultId,
-        variables,
-        visit,
+        interpolatePath(journey.route, null, variables),
       );
-      const activeControl = page.locator(operation.control).first();
-      await expect(
-        activeControl,
-        `${journey.id}/${operation.name} control after preconditions`,
-      ).toBeVisible({ timeout: interactionTimeoutMs });
-
-      if (operation.kind === "navigation") {
-        const expectedQuery = Object.fromEntries(
-          Object.entries(operation.expectedQuery).map(([key, value]) => [
-            key,
-            interpolateOperationValue(value, lastResultId, variables),
-          ]),
+      if (visit) {
+        await expect(
+          page.locator(
+            "form[action='/api/referral/session'] button[type='submit']",
+          ),
+        ).toBeVisible();
+        const preConsent = await page.request.get(
+          new URL("/api/referral/session", origin).toString(),
+          { maxRedirects: 0 },
         );
-        const navigation = page.waitForURL(
-          (url) => {
-            if (
-              url.origin !== new URL(origin).origin ||
-              url.pathname !== operation.expectedPath
-            ) {
-              return false;
-            }
-            return Object.entries(expectedQuery).every(
-              ([key, value]) => url.searchParams.get(key) === value,
-            );
-          },
-          { timeout: interactionTimeoutMs },
-        );
-        if (visit && operation.name === "explicit-consent")
-          await observeReferralPrivacyConsent(
-            page,
-            origin,
-            visit,
-            activeControl,
-            navigation,
-          );
-        else {
-          await activeControl.click({ noWaitAfter: true });
-          await navigation;
-        }
-        // URL convergence plus authority readback is the contract. Some target
-        // screens keep background requests open and never become network-idle.
-        const target = page.url();
-        if (operation.readback) {
-          await assertReadback(
-            page,
-            origin,
-            journey,
-            operation.name,
-            target,
-            lastResultId,
-            operation.readback,
-            variables,
-          );
-        }
-        record({
-          kind: "navigation",
-          journey: journey.id,
-          surface: journey.surface,
-          actorScope: journey.actorScope,
-          operation: operation.name,
-          target,
-        });
-        continue;
-      }
-
-      if (operation.responseKind === "download") {
-        const downloadPromise = page.waitForEvent("download", {
-          timeout: interactionTimeoutMs,
-        });
-        await activeControl.click({ noWaitAfter: true });
-        const download = await downloadPromise;
-        expect(
-          await download.failure(),
-          `${journey.id}/${operation.name} download failure`,
-        ).toBeNull();
-        expect(
-          (await download.createReadStream()) !== null,
-          `${journey.id}/${operation.name} artifact stream`,
-        ).toBeTruthy();
-
-        const downloadUrl = download.url();
-        const downloadHeaders = operationalRequestHeaders(
-          journey.baseUrlEnv,
-          downloadUrl,
-        );
-        const downloadResponse = await fetchOperationalSurface(
-          page.context().request,
-          journey.baseUrlEnv,
-          downloadUrl,
-          {
-            headers: downloadHeaders,
-          },
-        );
-        expect(
-          downloadResponse.ok(),
-          `${journey.id}/${operation.name} download response ok`,
-        ).toBeTruthy();
+        expect(preConsent.status()).toBe(401);
         expectCandidateRevision(
-          downloadResponse.headers(),
-          `${journey.id}/${operation.name} download candidate revision`,
+          preConsent.headers(),
+          "referral unconsented session GET",
         );
-        expect(
-          downloadResponse.headers()["content-type"] ?? "",
-          `${journey.id}/${operation.name} content type`,
-        ).toContain(operation.expectedContentTypeIncludes as string);
-        expect(
-          downloadResponse.headers()["content-disposition"] ?? "",
-          `${journey.id}/${operation.name} attachment`,
-        ).toContain("attachment");
-
         record({
-          kind: "download",
-          journey: journey.id,
-          surface: journey.surface,
-          actorScope: journey.actorScope,
-          operation: operation.name,
-          requestUrl: downloadUrl,
-          contentType: downloadResponse.headers()["content-type"],
+          kind: "referral-first-privacy-inactive-read",
+          visitKey: visit.visitKey,
+          status: preConsent.status(),
+          path: "/api/referral/session",
         });
-        continue;
       }
 
-      const resultIdLocationPromise = operation.resultIdQueryParam
-        ? page.waitForURL(
-            (url) => url.searchParams.has(operation.resultIdQueryParam!),
+      if (visit) await observeReferralRefusal(page, origin, visit);
+
+      let lastResultId: unknown = null;
+      for (const operation of journey.operations) {
+        if (operation.kind === "intent") {
+          const control = page.locator(operation.control).first();
+          await expect(
+            control,
+            `${journey.id}/${operation.name} control`,
+          ).toBeVisible({
+            timeout: interactionTimeoutMs,
+          });
+          const href = await control.getAttribute("href");
+          expect(href, `${journey.id}/${operation.name} target`).toBeTruthy();
+          const target = new URL(href as string, origin);
+          expect(
+            target.origin,
+            `${journey.id}/${operation.name} target origin`,
+          ).toBe(new URL(requiredOrigin(operation.targetBaseUrlEnv)).origin);
+          expect(
+            target.pathname,
+            `${journey.id}/${operation.name} target path`,
+          ).toMatch(new RegExp(operation.expectedPathPattern));
+          record({
+            kind: "cross-app-intent",
+            journey: journey.id,
+            surface: journey.surface,
+            actorScope: journey.actorScope,
+            operation: operation.name,
+            target: target.toString(),
+          });
+          continue;
+        }
+
+        if (operation.kind === "absence") {
+          await expect(
+            page.locator(operation.control),
+            `${journey.id}/${operation.name} must not be offered`,
+          ).toHaveCount(0);
+          record({
+            kind: "control-absence",
+            journey: journey.id,
+            surface: journey.surface,
+            actorScope: journey.actorScope,
+            operation: operation.name,
+            control: operation.control,
+          });
+          continue;
+        }
+
+        await runSteps(
+          page,
+          origin,
+          operation.before ?? [],
+          lastResultId,
+          variables,
+          visit,
+        );
+        const activeControl = page.locator(operation.control).first();
+        await expect(
+          activeControl,
+          `${journey.id}/${operation.name} control after preconditions`,
+        ).toBeVisible({ timeout: interactionTimeoutMs });
+
+        if (operation.kind === "navigation") {
+          const expectedQuery = Object.fromEntries(
+            Object.entries(operation.expectedQuery).map(([key, value]) => [
+              key,
+              interpolateOperationValue(value, lastResultId, variables),
+            ]),
+          );
+          const navigation = page.waitForURL(
+            (url) => {
+              if (
+                url.origin !== new URL(origin).origin ||
+                url.pathname !== operation.expectedPath
+              ) {
+                return false;
+              }
+              return Object.entries(expectedQuery).every(
+                ([key, value]) => url.searchParams.get(key) === value,
+              );
+            },
             { timeout: interactionTimeoutMs },
-          )
-        : null;
-      const responsePromise = page.waitForResponse(
-        (response) =>
-          response.request().method() === operation.requestMethod &&
-          response
-            .url()
-            .includes(
-              interpolatePath(
-                operation.requestUrlIncludes,
-                lastResultId,
-                variables,
-              ),
-            ),
-        { timeout: interactionTimeoutMs },
-      );
-      // Begin reading before a mutation-triggered navigation can detach the
-      // Chromium response body from its request identifier.
-      const responseBodyPromise =
-        operation.responseKind === "json" && !operation.resultIdQueryParam
-          ? responsePromise.then(
-              (response) => response.json() as Promise<unknown>,
+          );
+          if (visit && operation.name === "explicit-consent")
+            await observeReferralPrivacyConsent(
+              page,
+              origin,
+              visit,
+              activeControl,
+              navigation,
+            );
+          else {
+            await activeControl.click({ noWaitAfter: true });
+            await navigation;
+          }
+          // URL convergence plus authority readback is the contract. Some target
+          // screens keep background requests open and never become network-idle.
+          const target = page.url();
+          if (operation.readback) {
+            await assertReadback(
+              page,
+              origin,
+              journey,
+              operation.name,
+              target,
+              lastResultId,
+              operation.readback,
+              variables,
+            );
+          }
+          record({
+            kind: "navigation",
+            journey: journey.id,
+            surface: journey.surface,
+            actorScope: journey.actorScope,
+            operation: operation.name,
+            target,
+          });
+          continue;
+        }
+
+        if (operation.responseKind === "download") {
+          const downloadPromise = page.waitForEvent("download", {
+            timeout: interactionTimeoutMs,
+          });
+          await activeControl.click({ noWaitAfter: true });
+          const download = await downloadPromise;
+          expect(
+            await download.failure(),
+            `${journey.id}/${operation.name} download failure`,
+          ).toBeNull();
+          expect(
+            (await download.createReadStream()) !== null,
+            `${journey.id}/${operation.name} artifact stream`,
+          ).toBeTruthy();
+
+          const downloadUrl = download.url();
+          const downloadHeaders = operationalRequestHeaders(
+            journey.baseUrlEnv,
+            downloadUrl,
+          );
+          const downloadResponse = await fetchOperationalSurface(
+            page.context().request,
+            journey.baseUrlEnv,
+            downloadUrl,
+            {
+              headers: downloadHeaders,
+            },
+          );
+          expect(
+            downloadResponse.ok(),
+            `${journey.id}/${operation.name} download response ok`,
+          ).toBeTruthy();
+          expectCandidateRevision(
+            downloadResponse.headers(),
+            `${journey.id}/${operation.name} download candidate revision`,
+          );
+          expect(
+            downloadResponse.headers()["content-type"] ?? "",
+            `${journey.id}/${operation.name} content type`,
+          ).toContain(operation.expectedContentTypeIncludes as string);
+          expect(
+            downloadResponse.headers()["content-disposition"] ?? "",
+            `${journey.id}/${operation.name} attachment`,
+          ).toContain("attachment");
+
+          record({
+            kind: "download",
+            journey: journey.id,
+            surface: journey.surface,
+            actorScope: journey.actorScope,
+            operation: operation.name,
+            requestUrl: downloadUrl,
+            contentType: downloadResponse.headers()["content-type"],
+          });
+          continue;
+        }
+
+        const resultIdLocationPromise = operation.resultIdQueryParam
+          ? page.waitForURL(
+              (url) => url.searchParams.has(operation.resultIdQueryParam!),
+              { timeout: interactionTimeoutMs },
             )
           : null;
-      // Mutations can navigate the page. Do not wait for that navigation before
-      // reading JSON, otherwise Chromium may discard the response body.
-      await activeControl.click({ noWaitAfter: true });
-      const response = await responsePromise;
-      expect(
-        response.ok(),
-        `${journey.id}/${operation.name} response`,
-      ).toBeTruthy();
-      expectCandidateRevision(
-        response.headers(),
-        `${journey.id}/${operation.name} response`,
-      );
+        const responsePromise = page.waitForResponse(
+          (response) =>
+            response.request().method() === operation.requestMethod &&
+            response
+              .url()
+              .includes(
+                interpolatePath(
+                  operation.requestUrlIncludes,
+                  lastResultId,
+                  variables,
+                ),
+              ),
+          { timeout: interactionTimeoutMs },
+        );
+        // Begin reading before a mutation-triggered navigation can detach the
+        // Chromium response body from its request identifier.
+        const responseBodyPromise =
+          operation.responseKind === "json" && !operation.resultIdQueryParam
+            ? responsePromise.then(
+                (response) => response.json() as Promise<unknown>,
+              )
+            : null;
+        // Mutations can navigate the page. Do not wait for that navigation before
+        // reading JSON, otherwise Chromium may discard the response body.
+        await activeControl.click({ noWaitAfter: true });
+        const response = await responsePromise;
+        expect(
+          response.ok(),
+          `${journey.id}/${operation.name} response`,
+        ).toBeTruthy();
+        expectCandidateRevision(
+          response.headers(),
+          `${journey.id}/${operation.name} response`,
+        );
 
-      const resultId = operation.resultIdQueryParam
-        ? await resultIdLocationPromise!.then(() =>
-            new URL(page.url()).searchParams.get(operation.resultIdQueryParam!),
-          )
-        : valueAtPath(
-            await responseBodyPromise!,
-            operation.resultIdPath as string,
-          );
-      expect(
-        resultId,
-        `${journey.id}/${operation.name} result ID`,
-      ).toBeTruthy();
-      lastResultId = resultId;
-      await assertReadback(
-        page,
-        origin,
-        journey,
-        operation.name,
-        response.url(),
-        resultId,
-        operation.readback as Readback,
-        variables,
-      );
-    }
+        const resultId = operation.resultIdQueryParam
+          ? await resultIdLocationPromise!.then(() =>
+              new URL(page.url()).searchParams.get(
+                operation.resultIdQueryParam!,
+              ),
+            )
+          : valueAtPath(
+              await responseBodyPromise!,
+              operation.resultIdPath as string,
+            );
+        expect(
+          resultId,
+          `${journey.id}/${operation.name} result ID`,
+        ).toBeTruthy();
+        lastResultId = resultId;
+        await assertReadback(
+          page,
+          origin,
+          journey,
+          operation.name,
+          response.url(),
+          resultId,
+          operation.readback as Readback,
+          variables,
+        );
+      }
 
-    if (visit) await observeReferralReturn(page, origin, visit);
-    if (journey.id === "admin-review-approve-readback") {
-      await runOperationalDocumentAcceptance(
-        { request: page.context().request, record },
-        manifest.documentAcceptance,
-        variables,
-      );
-    }
-  });
+      if (visit) await observeReferralReturn(page, origin, visit);
+      if (journey.id === "admin-review-approve-readback") {
+        await runOperationalDocumentAcceptance(
+          { request: page.context().request, record },
+          manifest.documentAcceptance,
+          variables,
+        );
+      }
+    },
+  );
 }
 
 for (const journey of manifest.journeys) {

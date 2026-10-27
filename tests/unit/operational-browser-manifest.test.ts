@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import * as ts from "typescript";
@@ -8,6 +9,8 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   operationalRequestHeaders,
+  prepareOperationalReferralHandoff,
+  observeOperationalReferralZeroOrders,
   requiredOrigin,
 } from "../e2e/operational-document-upload";
 
@@ -289,6 +292,9 @@ describe("operational browser journeys manifest guard", () => {
     ).toEqual([referralJourney]);
     expect(referralJourney.firstVisitConsentEvidence).toBe(
       "privacy-fee-return-same-owner",
+    );
+    expect(referralJourney.firstVisitRefusalEvidence).toBe(
+      "fallback-inactive-same-subject-zero-orders",
     );
     expect(referralJourney.setup).toEqual([
       expect.objectContaining({
@@ -1501,5 +1507,326 @@ describe("C125 full document family, Case attachment, and cross-role manifest co
         (item) => item.baseUrlEnv === "DRTS_DEV_PLATFORM_ADMIN_BASE_URL",
       ),
     ).toBe(true);
+  });
+});
+
+// Execute the actual first-visit runner functions and actual API helpers. Only
+// external Page/HTTP ports are controlled, with the canonical wire contracts.
+describe("actual original first-visit refusal chain", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+  const origin = "https://referral.example.invalid";
+  const host = "host.example.invalid";
+  const api = "https://api.example.invalid";
+  const sha = "a".repeat(40);
+  const handoffId = "ref_handoff_00000000-0000-4000-8000-000000000001";
+  const scope = "c".repeat(64);
+  async function probe(change: Record<string, any> = {}) {
+    vi.stubEnv("DRTS_CANDIDATE_SHA", sha);
+    vi.stubEnv("DRTS_DEV_API_BASE_URL", api);
+    vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "private-WIF");
+    vi.stubEnv(
+      "DRTS_OPERATIONAL_OPS_NON_REVIEWER_SESSION_TOKEN",
+      "private-Ops",
+    );
+    const records: Array<Record<string, unknown>> = [];
+    const sequence: string[] = [];
+    let sessionEstablished = false;
+    let requests:
+      | ((r: { url(): string; method(): string }) => void)
+      | undefined;
+    let context: any;
+    let orderReads = 0;
+    vi.stubGlobal(
+      "fetch",
+      async (input: string | URL, options: RequestInit) => {
+        const url = new URL(input);
+        expect(url.origin).toBe(api);
+        const reply = (data: unknown) =>
+          new Response(JSON.stringify({ data }), {
+            headers: { "x-drts-candidate-sha": sha },
+          });
+        if (url.pathname.endsWith("/entries/yuhe-residence"))
+          return reply({
+            entry_slug: "yuhe-residence",
+            entry_host: host,
+            tenant_id: "private-tenant",
+            partner_id: "private-partner",
+            program_id: "private-program",
+          });
+        if (url.pathname.endsWith("referral-embed-handoff")) {
+          sequence.push("issue");
+          expect(JSON.parse(String(options.body)).consentBundle).toBeNull();
+          return reply({
+            handoff_id: handoffId,
+            artifact: "x".repeat(32),
+            token_type: "SingleUse",
+            expires_in: "120s",
+            expires_at: "2099-01-01T00:00:00Z",
+            partner_entry_slug: "yuhe-residence",
+            entry_host: host,
+            drts_passenger_id: "private-passenger",
+            consent_required: true,
+            consent_bundle_version: null,
+          });
+        }
+        if (url.pathname === "/api/auth/session") {
+          sequence.push("ops-session");
+          return reply({
+            active: true,
+            identity: {
+              realm: "ops",
+              actor_type: "ops_user",
+              roles: ["ops_user"],
+              scopes: ["owned:read"],
+            },
+          });
+        }
+        if (url.pathname === "/api/orders") {
+          sequence.push("orders");
+          orderReads++;
+          return reply({
+            items:
+              change.afterOrder && orderReads === 2
+                ? [
+                    {
+                      order_id: "private-order",
+                      passenger: { passenger_id: "private-passenger" },
+                      tenant_id: "private-tenant",
+                      partner_id: "private-partner",
+                      partner_program_id: "private-program",
+                      partner_entry_slug: "yuhe-residence",
+                    },
+                  ]
+                : [],
+          });
+        }
+        throw new Error("unexpected external request");
+      },
+    );
+    const body = (fields: Record<string, unknown> = {}) => ({
+      ok: true,
+      session: {
+        handoffId,
+        recoveryScope: scope,
+        partnerEntrySlug: "yuhe-residence",
+        entryHost: host,
+        identityActive: false,
+        consent: { grantedAt: null, bundleVersion: null },
+        ...fields,
+      },
+    });
+    const response = (payload: unknown, status = 200, revision = sha) => ({
+      status: () => status,
+      headers: () => ({ "x-drts-candidate-sha": revision }),
+      json: async () => payload,
+    });
+    const post = vi.fn(async (url: string, options: any) => {
+      expect(url).toBe(origin + "/api/referral/session");
+      expect(options.maxRedirects).toBe(0);
+      expect(options.data.entrySlug).toBe("yuhe-residence");
+      expect(options.data.entryHost).toBe(host);
+      if (options.data.action === "exchange") {
+        expect(sessionEstablished).toBe(false);
+        expect(options.data.artifact).toBe("x".repeat(32));
+        sequence.push("exchange");
+        sessionEstablished = true;
+        return response(
+          body(change.exchangeFields),
+          change.exchangeStatus,
+          change.exchangeSha,
+        );
+      }
+      expect(options.data).toEqual({
+        action: "demo-bootstrap",
+        entrySlug: "yuhe-residence",
+        entryHost: host,
+      });
+      expect(sessionEstablished).toBe(true);
+      expect(page.context()).toBe(context);
+      sequence.push("same-context-readback");
+      if (change.readPost)
+        requests?.({
+          url: () => origin + change.readPost,
+          method: () => "POST",
+        });
+      return response(
+        change.readBody ?? body(change.readFields),
+        change.readStatus,
+        change.readSha,
+      );
+    });
+    const activeGet = vi.fn(async (url: string, options: any) => {
+      expect(sessionEstablished).toBe(true);
+      expect(url).toBe(origin + "/api/referral/active");
+      expect(options.maxRedirects).toBe(0);
+      sequence.push("active-rejection");
+      return response(
+        {
+          ok: false,
+          error: { code: change.activeCode ?? "REFERRAL_SESSION_REQUIRED" },
+        },
+        change.activeStatus ?? 401,
+        change.activeSha,
+      );
+    });
+    const visible = { isControl: true };
+    const control = {
+      ...visible,
+      click: vi.fn(async () => {
+        expect(requests).toBeDefined();
+        expect(sequence.slice(-2)).toEqual(["ops-session", "orders"]);
+        sequence.push("click-refuse");
+        if (change.clickPost)
+          requests?.({
+            url: () => origin + change.clickPost,
+            method: () => "POST",
+          });
+      }),
+    };
+    const fallbackUrl = new URL(
+      `/embed/yuhe-residence?state=${change.fallbackState ?? "fallback"}&entryHost=${host}`,
+      origin,
+    );
+    const off = vi.fn(() => {
+      requests = undefined;
+    });
+    context = { request: { post } };
+    const page = {
+      context: () => context,
+      request: { get: activeGet },
+      on: (event: string, observer: typeof requests) => {
+        expect(event).toBe("request");
+        requests = observer;
+      },
+      off,
+      getByRole: (role: string, options: any) => {
+        expect(role).toBe("link");
+        expect(options).toEqual({ name: "暫不使用", exact: true });
+        return control;
+      },
+      locator: () => visible,
+      waitForURL: async (matches: (url: URL) => boolean) => {
+        expect(matches(fallbackUrl)).toBe(true);
+      },
+      waitForResponse: async (matches: (r: any) => boolean) => {
+        const r = {
+          ...response({}, change.fallbackStatus, change.fallbackSha),
+          url: () => fallbackUrl.toString(),
+          request: () => ({ method: () => "GET" }),
+        };
+        expect(matches(r)).toBe(true);
+        return r;
+      },
+    };
+    const browserExpect = (value: any, message?: string) =>
+      value?.isControl
+        ? { toBeVisible: async () => {} }
+        : expect(value, message);
+    const deps = {
+      expect: browserExpect,
+      createHash,
+      interactionTimeoutMs: 10,
+      prepareOperationalReferralHandoff,
+      observeOperationalReferralZeroOrders,
+      referralSession: actualBrowserFunction("referralSession", { expect }),
+      record: (entry: Record<string, unknown>) => records.push(entry),
+      expectCandidateRevision: (headers: Record<string, string>) =>
+        expect(headers["x-drts-candidate-sha"]).toBe(sha),
+      navigate: async (_page: unknown, _origin: string, route: string) => {
+        expect(route).toContain("state=consent");
+        sequence.push("return-consent");
+        if (change.returnPost)
+          requests?.({
+            url: () => origin + change.returnPost,
+            method: () => "POST",
+          });
+        return response({}, change.returnStatus, change.returnSha);
+      },
+    };
+    const prepare = actualBrowserFunction("prepareFirstReferralVisit", deps);
+    const refuse = actualBrowserFunction("observeReferralRefusal", deps);
+    const result = (async () => {
+      const visit = await prepare(page, origin, host);
+      await refuse(page, origin, visit);
+    })();
+    return { result, records, sequence, post, activeGet, control, off };
+  }
+  it("executes one issuer/exchange, visible refusal, same-session inactive readback, before0/after0 then preserves consent continuation", async () => {
+    const { result, records, sequence, post, off } = await probe();
+    await result;
+    expect(sequence).toEqual([
+      "issue",
+      "exchange",
+      "ops-session",
+      "orders",
+      "click-refuse",
+      "active-rejection",
+      "same-context-readback",
+      "ops-session",
+      "orders",
+      "return-consent",
+    ]);
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(off).toHaveBeenCalledOnce();
+    expect(
+      records
+        .filter((r) => r.kind === "referral-first-refusal-zero-orders")
+        .map((r) => [r.phase, r.count]),
+    ).toEqual([
+      ["before-refusal", 0],
+      ["after-refusal", 0],
+    ]);
+    expect(records.at(-1)).toMatchObject({
+      state: "fallback",
+      grantConsentPosts: 0,
+      bookingPosts: 0,
+      activeStatus: 401,
+    });
+    expect(new Set(records.map((r) => r.visitKey)).size).toBe(1);
+    expect(JSON.stringify(records)).not.toMatch(
+      /private-|ref_handoff_|xxxx|cccc|cookie|artifact/i,
+    );
+  });
+  it.each([
+    { label: "exchange non-200", exchangeStatus: 403 },
+    { label: "exchange wrong SHA", exchangeSha: "b".repeat(40) },
+    { label: "exchange wrong handoff", exchangeFields: { handoffId: "other" } },
+    { label: "fallback mismatch", fallbackState: "consent" },
+    { label: "fallback non-200", fallbackStatus: 503 },
+    { label: "fallback wrong SHA", fallbackSha: "b".repeat(40) },
+    { label: "grant consent on click", clickPost: "/api/referral/session" },
+    { label: "booking during readback", readPost: "/api/referral/booking" },
+    { label: "grant consent on return", returnPost: "/api/referral/session" },
+    { label: "read non-200", readStatus: 401 },
+    { label: "read wrong SHA", readSha: "b".repeat(40) },
+    { label: "missing readback", readBody: { ok: true } },
+    { label: "changed subject scope", readFields: { recoveryScope: "other" } },
+    {
+      label: "missing subject scope",
+      readFields: { recoveryScope: undefined },
+    },
+    { label: "changed handoff", readFields: { handoffId: "other" } },
+    { label: "changed entry", readFields: { partnerEntrySlug: "other" } },
+    { label: "changed host", readFields: { entryHost: "other" } },
+    { label: "active identity", readFields: { identityActive: true } },
+    {
+      label: "consent already granted",
+      readFields: { consent: { grantedAt: "2026-10-27T01:00:00Z" } },
+    },
+    { label: "after nonzero", afterOrder: true },
+    { label: "active access accepted", activeStatus: 200 },
+    { label: "wrong active rejection", activeCode: "UPSTREAM_UNAVAILABLE" },
+    { label: "active wrong SHA", activeSha: "b".repeat(40) },
+    { label: "return non-200", returnStatus: 503 },
+    { label: "return wrong SHA", returnSha: "b".repeat(40) },
+  ])("rejects $label without publishing successful refusal", async (change) => {
+    const { result, records } = await probe(change);
+    await expect(result).rejects.toThrow();
+    expect(records.some((r) => r.kind === "referral-first-refusal")).toBe(
+      false,
+    );
   });
 });
