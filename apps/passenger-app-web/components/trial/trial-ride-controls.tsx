@@ -30,10 +30,23 @@ export function TrialRideControls({ orderId }: { orderId: string }) {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const inFlight = useRef(false);
+  // A tap is never dropped because a background heartbeat is in flight; a
+  // heartbeat simply skips while anything else is. Each read is numbered and
+  // only a newer one may set the status, so a slow heartbeat that started
+  // before a tap cannot roll the card back.
+  const actionInFlight = useRef(false);
+  const heartbeatInFlight = useRef(false);
+  const requestSeq = useRef(0);
+  const appliedSeq = useRef(0);
   const ride = encodeURIComponent(orderId);
+  const apply = useCallback((seq: number, value: unknown) => {
+    if (typeof value !== "string" || seq < appliedSeq.current) return;
+    appliedSeq.current = seq;
+    setStatus(value);
+  }, []);
 
   const read = useCallback(async () => {
+    const seq = ++requestSeq.current;
     try {
       const response = await passengerFetch(
         `/api/passenger-app/rides/${ride}`,
@@ -43,21 +56,24 @@ export function TrialRideControls({ orderId }: { orderId: string }) {
       );
       if (!response.ok) return;
       const body = await response.json().catch(() => null);
-      const value = body?.data?.ride?.order?.status;
-      if (typeof value === "string") setStatus(value);
+      apply(seq, body?.data?.ride?.order?.status);
     } catch {
       /* The ride page shows its own connection state. */
     }
-  }, [ride]);
+  }, [ride, apply]);
 
   const act = useCallback(
     async (action: TrialAction, quiet = false) => {
-      if (inFlight.current) return;
-      inFlight.current = true;
-      if (!quiet) {
+      if (quiet) {
+        if (actionInFlight.current || heartbeatInFlight.current) return;
+        heartbeatInFlight.current = true;
+      } else {
+        if (actionInFlight.current) return;
+        actionInFlight.current = true;
         setBusy(true);
         setError("");
       }
+      const seq = ++requestSeq.current;
       try {
         const response = await passengerFetch(
           `/api/passenger-app/review-demo/rides/${ride}/trial/${action}`,
@@ -79,16 +95,18 @@ export function TrialRideControls({ orderId }: { orderId: string }) {
           await read();
           return;
         }
-        const value = body?.data?.status;
-        if (typeof value === "string") setStatus(value);
+        apply(seq, body?.data?.status);
       } catch {
         if (!quiet) setError(trialT.actionFailed);
       } finally {
-        inFlight.current = false;
-        if (!quiet) setBusy(false);
+        if (quiet) heartbeatInFlight.current = false;
+        else {
+          actionInFlight.current = false;
+          setBusy(false);
+        }
       }
     },
-    [ride, read],
+    [ride, read, apply],
   );
 
   useEffect(() => {

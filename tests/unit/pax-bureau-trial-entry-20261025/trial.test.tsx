@@ -154,6 +154,37 @@ describe("TrialRideControls", () => {
     );
   });
 
+  it("never drops a tap behind a pending heartbeat, nor lets it roll back", async () => {
+    let releaseHeartbeat: (response: Response) => void = () => {};
+    state.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === `/api/passenger-app/rides/${ORDER}`)
+        return json({
+          data: { ride: { order: { status: "arrived_pickup" } } },
+        });
+      if (url.endsWith("/trial/heartbeat"))
+        return new Promise<Response>((resolve) => {
+          releaseHeartbeat = resolve;
+        });
+      if (init?.method === "POST" && url.endsWith("/trial/board"))
+        return json({ data: { status: "on_trip" } });
+      return json({}, 404);
+    });
+    render(<TrialRideControls orderId={ORDER} />);
+    const board = await screen.findByRole("button", { name: "我已上車" });
+    await waitFor(() =>
+      expect(state.fetch).toHaveBeenCalledWith(
+        `/api/passenger-app/review-demo/rides/${ORDER}/trial/heartbeat`,
+        expect.anything(),
+      ),
+    );
+    fireEvent.click(board);
+    await screen.findByRole("button", { name: "立即抵達目的地" });
+    await act(async () => {
+      releaseHeartbeat(json({ data: { status: "arrived_pickup" } }));
+    });
+    expect(screen.getByRole("button", { name: "立即抵達目的地" })).toBeTruthy();
+  });
+
   it("shows the finished state without further driver buttons", async () => {
     rideStatus("completed");
     render(<TrialRideControls orderId={ORDER} />);
