@@ -2,6 +2,8 @@
 import {
   PASSENGER_FEE_DISCLOSURE_VERSION,
   PASSENGER_FEE_CONTENT_HASH,
+  type ReferralPassengerReceipt,
+  type ReferralPassengerTripSnapshot,
 } from "@drts/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import { flushSync } from "react-dom";
@@ -16,10 +18,15 @@ vi.mock("next/link", async () => {
       React.createElement("a", { href, ...props }, children),
   };
 });
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 import {
   BookScreen,
   PassengerEmbed,
 } from "../../../apps/referral-embed-web/components/passenger-embed";
+import { LanguageProvider } from "../../../apps/referral-embed-web/lib/i18n";
+import { PASSENGER_LOCALE_COOKIE } from "../../../apps/referral-embed-web/lib/locale-config";
 
 const context = {
   entry: {
@@ -56,6 +63,7 @@ afterEach(() => {
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
   sessionStorage.clear();
+  localStorage.removeItem(PASSENGER_LOCALE_COOKIE);
 });
 
 function mount(node: React.ReactNode) {
@@ -350,6 +358,391 @@ function completedData(status = "completed") {
       ],
     },
   };
+}
+
+// Controlled server snapshots/transport only; provider, dictionaries, UI and
+// ETA/status/nullable-data decisions remain the production implementations.
+it.each(["zh", "en"] as const)(
+  "localizes ordinary booking labels with the actual %s provider and retains SSR/quote readiness",
+  async (locale) => {
+    const fetch = vi.fn(() => new Promise<Response>(() => {}));
+    stubFeeAwareFetch("fetch", fetch);
+    const node = (
+      <LanguageProvider defaultLocale={locale}>
+        <BookScreen context={context as never} />
+      </LanguageProvider>
+    );
+    const ssr = document.createElement("div");
+    ssr.innerHTML = renderToString(node);
+    expect(submit(ssr).disabled).toBe(true);
+    const host = mount(node);
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(submit(host).disabled).toBe(true);
+    for (const rendered of [ssr, host]) {
+      // Existing translated controls qualify the real provider independently.
+      expect(
+        getByRole(rendered, "button", {
+          name: locale === "en" ? "Use current location" : "使用目前位置",
+        }),
+      ).toBeTruthy();
+      expect(rendered.textContent).toContain(
+        locale === "en" ? "Vehicle type" : "車種",
+      );
+      expect
+        .soft(submit(rendered).textContent)
+        .toContain(locale === "en" ? "Confirm ride request" : "確認叫車");
+      expect
+        .soft(
+          [...rendered.querySelectorAll("input[aria-label]")].map((input) =>
+            input.getAttribute("aria-label"),
+          ),
+        )
+        .toEqual(
+          expect.arrayContaining(
+            locale === "en"
+              ? [
+                  "Pickup",
+                  "Drop-off",
+                  "Trip time",
+                  "Passenger name",
+                  "Contact phone",
+                ]
+              : ["上車地點", "下車地點", "用車時間", "乘客姓名", "聯絡電話"],
+          ),
+        );
+      expect(
+        rendered.querySelector<HTMLInputElement>('[name="pickupAddress"]')
+          ?.value,
+      ).toBe("新北市板橋區縣民大道二段7號");
+    }
+  },
+);
+
+it.each(["zh", "en"] as const)(
+  "localizes the actual %s history heading and canonical completed/cancelled badges without changing links or fares",
+  (locale) => {
+    const data = completedData();
+    data.history.items.push({
+      ...completedData("cancelled").history.items[0]!,
+      orderId: "cancelled-order",
+      orderNo: "CANCELLED-1",
+    });
+    const host = mount(
+      <LanguageProvider defaultLocale={locale}>
+        <PassengerEmbed
+          context={{ ...context, screen: "trips" } as never}
+          liveData={data as never}
+        />
+      </LanguageProvider>,
+    );
+    expect
+      .soft(host.textContent)
+      .toContain(locale === "en" ? "My trips" : "我的行程");
+    for (const [orderId, screen, label] of [
+      ["owned-order", "completed", locale === "en" ? "Completed" : "已完成"],
+      [
+        "cancelled-order",
+        "cancelled",
+        locale === "en" ? "Cancelled" : "已取消",
+      ],
+    ]) {
+      const card = [
+        ...host.querySelectorAll<HTMLAnchorElement>("a[href]"),
+      ].find((a) => new URL(a.href).searchParams.get("orderId") === orderId)!;
+      expect(new URL(card.href).searchParams.get("screen")).toBe(screen);
+      expect.soft(card.textContent).toContain(label);
+      expect(card.textContent).toContain("Owned origin → Owned destination");
+      expect(card.textContent).toContain("實際車資待確認");
+    }
+  },
+);
+
+const localeReceipt: ReferralPassengerReceipt = {
+  orderId: "owned-order",
+  orderNo: "OWNED-1",
+  status: "completed",
+  completedAt: "2026-10-20T02:00:00Z",
+  passengerNameMasked: "乘○○",
+  passengerPhoneMasked: "09*****820",
+  driverName: "Controlled driver",
+  plateNumber: "TEST-1234",
+  vehicleType: "standard",
+  pickupAddress: "Owned origin",
+  dropoffAddress: "Owned destination",
+  fareBase: 85,
+  fareDistance: 180,
+  fareTime: 0,
+  totalFare: 265,
+  formattedTotal: "NT$ 265",
+  paymentChannel: "Controlled payment channel",
+  downloadUrl: "/api/referral/receipt?orderId=owned-order&download=1",
+};
+
+it.each(["zh", "en"] as const)(
+  "localizes the actual %s receipt actions/ordinary labels while retaining same-order masks and legal fields",
+  (locale) => {
+    const host = mount(
+      <LanguageProvider defaultLocale={locale}>
+        <PassengerEmbed
+          context={{ ...context, screen: "receipt" } as never}
+          liveData={{ ...completedData(), receipt: localeReceipt } as never}
+        />
+      </LanguageProvider>,
+    );
+    expect(
+      getByRole(host, "button", {
+        name: locale === "en" ? "Download PDF details" : "下載 PDF 明細",
+      }),
+    ).toBeTruthy();
+    expect(
+      getByRole(host, "button", {
+        name: locale === "en" ? "Prepare PDF sharing" : "準備分享 PDF",
+      }),
+    ).toBeTruthy();
+    expect(host.textContent).toContain(
+      locale === "en" ? "Order OWNED-1" : "訂單 OWNED-1",
+    );
+    const download = host.querySelector<HTMLAnchorElement>(
+      'a[href="/api/referral/receipt?orderId=owned-order&download=1"]',
+    )!;
+    expect
+      .soft(download.textContent)
+      .toContain(locale === "en" ? "Download receipt" : "下載收據");
+    for (const label of locale === "en"
+      ? ["Contact phone", "Driver / plate", "Vehicle type"]
+      : ["聯絡電話", "司機 / 車牌", "車種"])
+      expect.soft(host.textContent).toContain(label);
+    for (const value of [
+      "乘○○",
+      "09*****820",
+      "Controlled driver · TEST-1234",
+      "NT$ 265",
+      "本頁為乘車紀錄，非正式稅務憑證；付款及結算狀態以實際通知為準。",
+    ])
+      expect(host.textContent).toContain(value);
+    expect(host.querySelector("[data-drt-receipt-e04]")?.textContent).toContain(
+      "未提供",
+    );
+  },
+);
+
+it.each(["zh", "en"] as const)(
+  "localizes actual %s completed receipt/rebook/rating names and preserves the submitted score/contact contract",
+  async (locale) => {
+    const fetch = vi.fn(async (_url, init) =>
+      ok({
+        ...JSON.parse(init.body),
+        complaintCaseNo: "PAX-owned",
+        submittedAt: "2026-10-20T02:00:00Z",
+      }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const host = mount(
+      <LanguageProvider defaultLocale={locale}>
+        <PassengerEmbed
+          context={{ ...context, screen: "completed" } as never}
+          liveData={completedData() as never}
+        />
+      </LanguageProvider>,
+    );
+    expect(
+      getByRole(host, "button", {
+        name:
+          locale === "en"
+            ? "Trip complaints and lost property"
+            : "行程申訴與失物協尋",
+      }),
+    ).toBeTruthy();
+    const receipt = host.querySelector<HTMLAnchorElement>(
+      '[data-drt-operation="referral-receipt"]',
+    )!;
+    expect
+      .soft(receipt.textContent)
+      .toContain(locale === "en" ? "View receipt" : "查看收據");
+    expect(new URL(receipt.href).searchParams.get("orderId")).toBe(
+      "owned-order",
+    );
+    expect
+      .soft(host.textContent)
+      .toContain(locale === "en" ? "Ride again" : "再叫一次");
+    const stars = [
+      ...host.querySelectorAll<HTMLButtonElement>(
+        '[data-drt-operation="referral-rate"]',
+      ),
+    ];
+    expect
+      .soft(stars.map((button) => button.getAttribute("aria-label")))
+      .toEqual(
+        [1, 2, 3, 4, 5].map((n) =>
+          locale === "en" ? `Rate ${n} stars` : `評分 ${n} 星`,
+        ),
+      );
+    flushSync(() => fireEvent.click(stars[1]!));
+    const contact = getByRole(host, "switch", {
+      name: "需要客服聯絡",
+    }) as HTMLInputElement;
+    expect(contact.checked).toBe(true);
+    flushSync(() => fireEvent.click(contact));
+    flushSync(() =>
+      fireEvent.click(getByRole(host, "button", { name: "送出評分" })),
+    );
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual({
+      orderId: "owned-order",
+      score: 2,
+      contactRequested: false,
+      idempotencyKey: expect.any(String),
+    });
+  },
+);
+
+it.each(["zh", "en"] as const)(
+  "localizes the actual %s cancelled rebooking action without creating rating or receipt actions",
+  (locale) => {
+    const host = mount(
+      <LanguageProvider defaultLocale={locale}>
+        <PassengerEmbed
+          context={{ ...context, screen: "cancelled" } as never}
+          liveData={completedData("cancelled") as never}
+        />
+      </LanguageProvider>,
+    );
+    const rebook = [
+      ...host.querySelectorAll<HTMLAnchorElement>("a[href]"),
+    ].find((a) => new URL(a.href).searchParams.get("screen") === "book")!;
+    expect
+      .soft(rebook.textContent)
+      .toContain(locale === "en" ? "Request another ride" : "重新叫車");
+    expect(
+      host.querySelector('[data-drt-operation="referral-rate"]'),
+    ).toBeNull();
+    expect(
+      host.querySelector('[data-drt-operation="referral-receipt"]'),
+    ).toBeNull();
+    expect(host.textContent).toContain("Owned origin → Owned destination");
+  },
+);
+
+for (const locale of ["zh", "en"] as const) {
+  it.each(["fresh", "zero", "unknown", "stale", "on_trip"] as const)(
+    `localizes the actual ${locale} Trip ETA/plate card with %s data without inventing values`,
+    (mode) => {
+      const at = "2026-10-27T02:00:00Z";
+      const trip: ReferralPassengerTripSnapshot = {
+        orderId: "owned-order",
+        orderNo: "OWNED-1",
+        status: mode === "on_trip" ? "on_trip" : "assigned",
+        statusCode: mode === "on_trip" ? "on_trip" : "assigned",
+        etaMin: mode === "unknown" ? null : mode === "zero" ? 0 : 2,
+        cancelWindowMin: 0,
+        pickupAddress: "Owned origin",
+        dropoffAddress: "Owned destination",
+        driverName: "Controlled driver",
+        driverPhoneMasked: "09*****123",
+        plateNumber: mode === "fresh" ? null : "TEST-1234",
+        vehicleType: "standard",
+        estimatedFare: 265,
+        createdAt: at,
+        updatedAt: at,
+        rated: false,
+        cancellationWindow: {
+          canCancel: false,
+          cancelableUntil: null,
+          asOf: at,
+        },
+        liveTracking:
+          mode === "unknown"
+            ? null
+            : {
+                assignmentId: "controlled-assignment",
+                driverId: "controlled-driver",
+                vehicleId: "controlled-vehicle",
+                observedAt: at,
+                locationFreshness: mode === "stale" ? "stale" : "fresh",
+                location: null,
+                pickupEta: {
+                  minutes: mode === "zero" ? 0 : 2,
+                  calculatedAt: at,
+                  estimatedArrivalAt: at,
+                },
+                dropoffRoute: {
+                  remainingDistanceMeters: 1000,
+                  remainingDurationSeconds: 420,
+                  generatedAt: at,
+                  estimatedArrivalAt: at,
+                  provider: "controlled-route",
+                },
+              },
+      };
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      const host = mount(
+        <LanguageProvider defaultLocale={locale}>
+          <PassengerEmbed
+            context={{ ...context, screen: "trip" } as never}
+            liveData={{
+              activeTrip: { active: true, trip },
+              selectedOrderId: trip.orderId,
+              history: null,
+              receipt: null,
+            }}
+          />
+        </LanguageProvider>,
+      );
+      // Scope assertions to the existing driver/ETA card, not the separate
+      // live-tracking panel, which already has translated pending/ETA controls.
+      const name = [...host.querySelectorAll("div")].find(
+        (element) => element.textContent === "Controlled driver",
+      )!;
+      const card = name.closest("section")!;
+      expect(card.textContent).toContain(
+        locale === "en" ? "Standard" : "標準車",
+      );
+      expect(host.textContent).toContain(
+        mode === "on_trip"
+          ? locale === "en"
+            ? "Trip in progress"
+            : "行程中"
+          : locale === "en"
+            ? "Vehicle assigned"
+            : "已派車",
+      );
+      expect
+        .soft(card.textContent)
+        .toContain(
+          mode === "fresh"
+            ? locale === "en"
+              ? "Standard · Awaiting update"
+              : "標準車 · 待更新"
+            : "TEST-1234",
+        );
+      const eta = name.parentElement!.parentElement!.lastElementChild!;
+      expect
+        .soft(eta.firstElementChild?.textContent)
+        .toBe(
+          mode === "unknown" || mode === "stale"
+            ? locale === "en"
+              ? "Awaiting update"
+              : "待更新"
+            : mode === "on_trip"
+              ? "7"
+              : mode === "zero"
+                ? "0"
+                : "2",
+        );
+      expect
+        .soft(eta.lastElementChild?.textContent)
+        .toBe(locale === "en" ? "min · estimated" : "分鐘 · 估計");
+      expect(
+        (
+          getByRole(host, "button", {
+            name: locale === "en" ? "Cancel trip" : "取消行程",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(true);
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
 }
 it("uses a default-ON native low-rating switch, explicit opt-out and same-order CRM receipt", async () => {
   const fetch = vi.fn(async (_url, init) => {
