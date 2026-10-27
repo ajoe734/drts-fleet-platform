@@ -2087,7 +2087,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
                 ? "送出中…"
                 : pendingCommand
                   ? "重送原叫車要求"
-                  : "確認叫車"
+                  : t("embed.field.confirmRide")
             }
             theme={theme}
             variant="primary"
@@ -2199,7 +2199,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         <div style={{ display: "grid", gap: 10 }}>
           <ReferralPlaceField
             theme={theme}
-            label="上車地點"
+            label={t("book.summary.pickup.label")}
             icon={<Icon name="pin" size={15} />}
             name="pickupAddress"
             value={form.pickupAddress}
@@ -2210,7 +2210,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
           />
           <ReferralPlaceField
             theme={theme}
-            label="下車地點"
+            label={t("book.summary.dropoff.label")}
             icon={<Icon name="pin" size={15} />}
             name="dropoffAddress"
             value={form.dropoffAddress}
@@ -2227,7 +2227,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
           >
             <EditableField
               theme={theme}
-              label="用車時間"
+              label={t("embed.field.when")}
               icon="clock"
               name="scheduledAt"
               value={form.scheduledAt}
@@ -2236,7 +2236,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             />
             <EditableField
               theme={theme}
-              label="乘客姓名"
+              label={t("embed.field.passengerName")}
               icon="user"
               name="passengerName"
               value={form.passengerName}
@@ -2245,7 +2245,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             />
             <EditableField
               theme={theme}
-              label="聯絡電話"
+              label={t("embed.field.contactPhone")}
               icon="phone"
               name="passengerPhone"
               value={form.passengerPhone}
@@ -2472,7 +2472,7 @@ function NegativeScreen({
   );
 }
 
-// History still consumes zh; TripScreen translates key with its active locale.
+// Canonical dispatch aliases share translation keys and existing tone metadata.
 const tripStateLabel: Record<
   string,
   {
@@ -2853,7 +2853,7 @@ function TripScreen({
           activeTrip.quote?.vehicleType,
         ),
         driver: activeTrip.driverName || t("embed.trip.driverNameUnavailable"),
-        plate: activeTrip.plateNumber || "待更新",
+        plate: activeTrip.plateNumber || t("referralLive.pending"),
         rating: 0,
         etaMin: referralLiveMinutes(activeTrip),
         cancellationWindow: activeTrip.cancellationWindow,
@@ -3060,10 +3060,11 @@ function TripScreen({
                 lineHeight: 1,
               }}
             >
-              {trip.etaMin ?? "待更新"}
+              {trip.etaMin ?? t("referralLive.pending")}
             </div>
             <div style={{ fontSize: 10, color: theme.muted, marginTop: 3 }}>
-              分鐘 · 估計
+              {t("embed.field.minuteUnit")} ·{" "}
+              {t("embed.trip.estimateQualifier")}
             </div>
           </div>
         </div>
@@ -3235,6 +3236,7 @@ function TripsScreen({
   context: EmbedContext;
   liveData: PassengerEmbedLiveData;
 }) {
+  const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
   const historyItems =
     liveData?.history?.items.map((trip) => ({
@@ -3261,7 +3263,9 @@ function TripsScreen({
           justifyContent: "space-between",
         }}
       >
-        <div style={{ fontSize: 17, fontWeight: 800 }}>我的行程</div>
+        <div style={{ fontSize: 17, fontWeight: 800 }}>
+          {t("embed.history.title")}
+        </div>
         <Pill theme={theme} tone="neutral">
           本工作階段行程
         </Pill>
@@ -3287,10 +3291,7 @@ function TripsScreen({
         </Card>
       ) : null}
       {historyItems.map((trip) => {
-        const tripState = tripStateLabel[trip.state] || {
-          zh: "狀態未知",
-          tone: "neutral" as const,
-        };
+        const tripState = tripStateLabel[trip.state];
         const tone =
           trip.state === "completed"
             ? "success"
@@ -3371,7 +3372,7 @@ function TripsScreen({
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
                   <Pill theme={theme} tone={tone} dot>
-                    {tripState.zh}
+                    {tripState ? t(tripState.key) : "狀態未知"}
                   </Pill>
                   <div
                     style={{
@@ -3452,7 +3453,7 @@ function ReceiptScreen({
             receipt.downloadUrl ||
             buildHref(context, { screen: "receipt", state: "handoff" })
           }
-          label="下載收據"
+          label={t("embed.field.downloadReceipt")}
           theme={theme}
           icon="download"
         />
@@ -3533,16 +3534,21 @@ function ReceiptScreen({
         <DetailRow theme={theme} label="乘客" value={receipt.passenger} />
         <DetailRow
           theme={theme}
-          label="聯絡電話"
+          label={t("embed.field.contactPhone")}
           value={receipt.maskedPhone}
           mono
         />
         <DetailRow
           theme={theme}
-          label="司機 / 車牌"
+          label={t("embed.field.driverPlate")}
           value={`${receipt.driver} · ${receipt.plate}`}
         />
-        <DetailRow theme={theme} label="車種" value={receipt.vehicle} last />
+        <DetailRow
+          theme={theme}
+          label={t("embed.card.vehicles")}
+          value={receipt.vehicle}
+          last
+        />
         <DetailRow theme={theme} label="客服" value={REFERRAL_SUPPORT_PHONE} />
         <DetailRow
           theme={theme}
@@ -3646,6 +3652,7 @@ function OutcomeScreen({
   kind: "completed" | "cancelled";
   liveData: PassengerEmbedLiveData;
 }) {
+  const { t } = useTranslation();
   const mountedRatingUi = useRef(false);
   useEffect(() => {
     mountedRatingUi.current = true;
@@ -3825,7 +3832,7 @@ function OutcomeScreen({
                 state: "handoff",
                 ...(trip ? { orderId: trip.orderId } : {}),
               })}
-              label="查看收據"
+              label={t("embed.field.viewReceipt")}
               theme={theme}
               icon="receipt"
               dataDrtOperation="referral-receipt"
@@ -3833,7 +3840,9 @@ function OutcomeScreen({
           ) : null}
           <ActionButton
             href={buildHref(context, { screen: "book", state: "handoff" })}
-            label={completed ? "再叫一次" : "重新叫車"}
+            label={t(
+              completed ? "embed.field.rideAgain" : "embed.field.rebook",
+            )}
             theme={theme}
             variant="ghost"
           />
@@ -3917,7 +3926,7 @@ function OutcomeScreen({
                   Boolean(submitted) ||
                   Boolean(originalRating)
                 }
-                aria-label={`評分 ${n} 星`}
+                aria-label={t("embed.rating.stars", { count: n })}
                 style={{
                   border: 0,
                   padding: 0,
