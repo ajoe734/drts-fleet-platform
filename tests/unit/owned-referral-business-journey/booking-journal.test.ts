@@ -307,8 +307,9 @@ describe("exact scheduled booking custody", () => {
                 ? "2027-01-01T16:05:00.000Z"
                 : undefined;
           const binding = {
-            ...expected,
-            expectedScheduledAt: scheduled,
+            ...context,
+            feeDisclosureVersion: expected.feeDisclosureVersion,
+            ...(scheduled ? { expectedScheduledAt: scheduled } : {}),
             quoteId: `quote-${name}`,
           };
           const key = `original-key-${name}`;

@@ -79,9 +79,7 @@ describe("managed FULL hosted supplemental artifact custody", () => {
       /- name: Preserve only this consumer's allowlisted evidence\n([\s\S]*?)retention-days: 14/,
     )?.[1];
     expect(upload).toBeDefined();
-    const paths = upload!.match(
-      /          path: \|\n((?:            [^\n]+\n)+)/,
-    )?.[1];
+    const paths = upload!.match(/ {10}path: \|\n((?: {12}[^\n]+\n)+)/)?.[1];
     expect(paths).toBeDefined();
     const patterns = paths!
       .trim()
@@ -1479,6 +1477,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       const tempDir = await mkdtemp(
         path.join(tmpdir(), "owned-daily-reports-test-"),
       );
+      const reportDirectory =
+        ownedSupplementalArtifactPaths(tempDir).reportDirectories[
+          "reservation-1"
+        ];
       let restoreClock: (() => void) | undefined;
       try {
         if (!previewFailure && !failureStage) {
@@ -2076,7 +2078,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           plateNo: PLATE_NO,
           pickupAddress: PICKUP_ADDRESS,
           dropoffAddress: DROPOFF_ADDRESS,
-          directory: tempDir,
+          directory: reportDirectory,
           definitionSha: DEFINITION_SHA,
           runtimeSha: RUNTIME_SHA,
           recoveryOnly: false,
@@ -2148,7 +2150,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             "private-page-error",
           );
           await expect(
-            stat(path.join(tempDir, "daily-reports")),
+            stat(path.join(reportDirectory, "daily-reports")),
           ).rejects.toThrow();
           return;
         }
@@ -2178,7 +2180,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           expect(artifactRequests).toBe(1);
           expect(unrouteCalled).toBe(true);
           await expect(
-            stat(path.join(tempDir, "daily-reports")),
+            stat(path.join(reportDirectory, "daily-reports")),
           ).rejects.toThrow();
           return;
         }
@@ -2195,7 +2197,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           expect(createdJobs).toHaveLength(0);
           expect(unrouteCalled).toBe(true);
           await expect(
-            stat(path.join(tempDir, "daily-reports")),
+            stat(path.join(reportDirectory, "daily-reports")),
           ).rejects.toThrow();
           return;
         }
@@ -2224,7 +2226,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           );
           expect(createdJobs).toHaveLength(0);
           await expect(
-            stat(path.join(tempDir, "daily-reports")),
+            stat(path.join(reportDirectory, "daily-reports")),
           ).rejects.toThrow();
           return;
         }
@@ -2250,7 +2252,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             "private-report-error",
           );
           await expect(
-            stat(path.join(tempDir, "daily-reports")),
+            stat(path.join(reportDirectory, "daily-reports")),
           ).rejects.toThrow();
           return;
         }
@@ -2304,14 +2306,16 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             ),
           ).toBe(!expectedRetained);
           if (expectedRetained) {
-            expect(dl.artifactPath).not.toBeNull();
+            expect(dl.artifactPath).toBe(
+              `${reportDirectory}/daily-reports/daily-dispatch-${dl.jobId}.${format}`,
+            );
             const onDisk = await readFile(dl.artifactPath!);
             expect(hash(onDisk)).toBe(dl.sha256);
             expect(onDisk.length).toBe(dl.bytes);
           } else {
             expect(dl.artifactPath).toBeNull();
             await expect(
-              stat(path.join(tempDir, "daily-reports")),
+              stat(path.join(reportDirectory, "daily-reports")),
             ).rejects.toThrow();
           }
         }
