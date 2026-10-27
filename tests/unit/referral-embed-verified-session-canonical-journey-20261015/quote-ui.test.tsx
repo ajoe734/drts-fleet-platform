@@ -452,7 +452,9 @@ it.each(["zh", "en"] as const)(
       expect(new URL(card.href).searchParams.get("screen")).toBe(screen);
       expect.soft(card.textContent).toContain(label);
       expect(card.textContent).toContain("Owned origin → Owned destination");
-      expect(card.textContent).toContain("實際車資待確認");
+      expect(card.textContent).toContain(
+        screen === "completed" ? "實際車資待確認" : "—",
+      );
     }
   },
 );
@@ -490,7 +492,7 @@ it.each(["zh", "en"] as const)(
       </LanguageProvider>,
     );
     expect(
-      getByRole(host, "button", {
+      getByRole(host, "link", {
         name: locale === "en" ? "Download PDF details" : "下載 PDF 明細",
       }),
     ).toBeTruthy();
@@ -550,7 +552,7 @@ it.each(["zh", "en"] as const)(
         name:
           locale === "en"
             ? "Trip complaints and lost property"
-            : "行程申訴與失物協尋",
+            : "行程申訴與遺失物",
       }),
     ).toBeTruthy();
     const receipt = host.querySelector<HTMLAnchorElement>(
