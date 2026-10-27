@@ -985,7 +985,22 @@ function unwrapEnvelopeObject(bytes: Buffer, stage: string): ObjectData {
     throw new JourneyFailure(`${stage}:invalid-json`);
   }
   const envelope = object(raw);
-  requireFact(envelope.ok === true, `${stage}:envelope-not-ok`);
+  requireFact(
+    !("error" in envelope) &&
+      (envelope.ok === undefined || envelope.ok === true),
+    `${stage}:envelope-not-ok`,
+  );
+  if (envelope.ok === undefined) {
+    const meta = object(envelope.meta);
+    requireFact(
+      typeof meta.requestId === "string" &&
+        meta.requestId.trim().length > 0 &&
+        typeof meta.timestamp === "string" &&
+        /^\d{4}-\d{2}-\d{2}T/.test(meta.timestamp) &&
+        Number.isFinite(Date.parse(meta.timestamp)),
+      `${stage}:invalid-success-meta`,
+    );
+  }
   return object(envelope.data);
 }
 
@@ -997,11 +1012,44 @@ function unwrapEnvelopeList(bytes: Buffer, stage: string): ObjectData[] {
     throw new JourneyFailure(`${stage}:invalid-json`);
   }
   const envelope = object(raw);
-  requireFact(envelope.ok === true, `${stage}:envelope-not-ok`);
-  if (Array.isArray(envelope.data)) {
+  requireFact(
+    !("error" in envelope) &&
+      (envelope.ok === undefined || envelope.ok === true),
+    `${stage}:envelope-not-ok`,
+  );
+  if (envelope.ok === undefined) {
+    const meta = object(envelope.meta);
+    requireFact(
+      typeof meta.requestId === "string" &&
+        meta.requestId.trim().length > 0 &&
+        typeof meta.timestamp === "string" &&
+        /^\d{4}-\d{2}-\d{2}T/.test(meta.timestamp) &&
+        Number.isFinite(Date.parse(meta.timestamp)),
+      `${stage}:invalid-success-meta`,
+    );
+  }
+  if (Array.isArray(envelope.data) && envelope.ok === true) {
     return records(envelope.data);
   }
   const dataObj = object(envelope.data);
+  if (envelope.ok === undefined) {
+    const pageInfo = object(dataObj.pageInfo);
+    requireFact(
+      typeof pageInfo.page === "number" &&
+        Number.isSafeInteger(pageInfo.page) &&
+        pageInfo.page >= 1 &&
+        typeof pageInfo.pageSize === "number" &&
+        Number.isSafeInteger(pageInfo.pageSize) &&
+        pageInfo.pageSize >= 1 &&
+        typeof pageInfo.totalItems === "number" &&
+        Number.isSafeInteger(pageInfo.totalItems) &&
+        pageInfo.totalItems >= 0 &&
+        typeof pageInfo.totalPages === "number" &&
+        Number.isSafeInteger(pageInfo.totalPages) &&
+        pageInfo.totalPages >= 0,
+      `${stage}:invalid-page-info`,
+    );
+  }
   return records(dataObj.items);
 }
 

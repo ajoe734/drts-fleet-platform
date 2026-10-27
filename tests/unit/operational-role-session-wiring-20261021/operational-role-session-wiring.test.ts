@@ -100,24 +100,19 @@ const OPS_ORIGIN = "https://drts-dev-ops-console-web-uc.a.run.app";
 const ADMIN_ORIGIN = "https://drts-dev-platform-admin-web-uc.a.run.app";
 const GCP_PROJECT_ID = "drts-dev-devcc-20260825";
 
-// Of the five files the original C125 task accepted at commit 348b7d3c, only this one
-// has never been touched by a later authorized functional correction: it must remain
-// byte-for-byte identical to that historical snapshot forever.
-const C125_UNCHANGED_FILES = [
+// All five C125 files have since received authorized functional corrections. The runner
+// gained first-visit consent/readback coverage in REFERRAL-FIRST-VISIT-CONSENT-READBACK-COVERAGE-20261026;
+// the other four gained the own_fleet upload-probe correction in
+// C125-EXISTING-UPLOAD-PROBE-CONTRACT-20261023. Keep each original 348b7d3c
+// blob/bytes/sha256 as immutable historical evidence when its blob is locally reachable,
+// never as an assertion that the corrected working tree still has those bytes.
+const C125_HISTORICALLY_CORRECTED_FILES = [
   {
     path: "tests/e2e/operational-browser-acceptance.spec.ts",
     bytes: 23626,
     blob: "83926082888a8140246a96a9de080429f7685200",
     sha256: "6ad1b38cfd921a36866eca9844a504b552676d530afb30dddfca7dc38d1c46b2",
   },
-] as const;
-
-// These four were later authorized (C125-EXISTING-UPLOAD-PROBE-CONTRACT-20261023) to move past
-// their 348b7d3c snapshot to correct own_fleet upload probes that the diagnosed existing API
-// contract actually accepted. The recorded blob/bytes/sha256 below are kept only as immutable
-// historical evidence that the pre-correction state is still reachable in git history — they are
-// intentionally NOT asserted against the current working tree, which is expected to differ.
-const C125_HISTORICALLY_CORRECTED_FILES = [
   {
     path: "tests/e2e/operational-document-upload.ts",
     bytes: 111023,
@@ -916,7 +911,7 @@ function createStandardMockFetch(
 }
 
 describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
-  describe("immutable baseline gap proof and C125 5-file byte-for-byte preservation", () => {
+  describe("immutable baseline gap proof and C125 five-file historical preservation", () => {
     it("proves immutable baseline 337f3dd7fb530b44f4e65875dd03c7a2191e3706 lacked the four role-session producers/forwarders in deploy-dev.yml and run-operational-browser-acceptance.sh", () => {
       const { baselineWorkflow, baselineRunner } =
         reconstructImmutable337CallerSources();
@@ -978,27 +973,7 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       );
     });
 
-    it("preserves the unchanged C125 file byte-for-byte, keeps the four later-corrected C125 files' pre-correction evidence reachable without reverting to it, and keeps 7 journeys / 16 browser tests / 69 steps / 15 uploads / 37 role probes / 16 lineage checks intact", () => {
-      const hasCommit = hasLocalBaselineCommit(IMMUTABLE_BASELINE_REF);
-      for (const spec of C125_UNCHANGED_FILES) {
-        const currentBytes = readFileSync(path.join(process.cwd(), spec.path));
-        expect(currentBytes.byteLength).toBe(spec.bytes);
-        expect(gitBlobSha1Hex(currentBytes)).toBe(spec.blob);
-        expect(sha256Hex(currentBytes)).toBe(spec.sha256);
-
-        // Even in shallow fetch-depth: 1 checkouts, unchanged file blobs exist in HEAD.
-        const blobBytes = execFileSync("git", ["cat-file", "blob", spec.blob]);
-        expect(sha256Hex(currentBytes)).toBe(sha256Hex(blobBytes));
-
-        if (hasCommit) {
-          const baselineBytes = execFileSync("git", [
-            "show",
-            `${IMMUTABLE_BASELINE_REF}:${spec.path}`,
-          ]);
-          expect(sha256Hex(currentBytes)).toBe(sha256Hex(baselineBytes));
-        }
-      }
-
+    it("keeps all five corrected C125 files' pre-correction evidence reachable when available without reverting to it, and keeps 7 journeys / 16 browser tests / 69 steps / 15 uploads / 37 role probes / 16 lineage checks intact", () => {
       for (const spec of C125_HISTORICALLY_CORRECTED_FILES) {
         // The pre-correction blob is only guaranteed reachable when full history is present:
         // a changed file's pre-correction blob is no longer referenced by HEAD's tree, so a
@@ -4910,7 +4885,10 @@ process.exit(99);
                   ?.Authorization);
           if (authHeader !== `Bearer ${newToken}`) {
             return jsonResponse(
-              { code: "SESSION_EXPIRED", message: "Prior recovery token expired" },
+              {
+                code: "SESSION_EXPIRED",
+                message: "Prior recovery token expired",
+              },
               { status: 401 },
             );
           }
