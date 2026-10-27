@@ -405,6 +405,9 @@ export type BookingJournalContext = {
   passengerPhone: string;
   vehicleType: string | null;
   feeDisclosureVersion?: string;
+  // Only new reservation callers set this, from the actual UI quote intent.
+  // Historical immediate journals and their recovery parser remain unchanged.
+  expectedScheduledAt?: string;
 };
 export type BookingJournalSnapshot = Readonly<{
   version: 1;
@@ -519,10 +522,23 @@ export class BookingWriteJournal {
         body.partnerUserRef === this.expected.partnerUserRef,
       "booking fixed Demo subject binding",
     );
-    requireFact(
-      body.scheduledAt === undefined,
-      "booking immediate intent required",
-    );
+    if (this.expected.expectedScheduledAt === undefined) {
+      requireFact(
+        body.scheduledAt === undefined,
+        "booking immediate intent required",
+      );
+    } else {
+      const scheduled = this.expected.expectedScheduledAt;
+      requireFact(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(scheduled) &&
+          Number.isFinite(Date.parse(scheduled)) &&
+          new Date(scheduled).toISOString() === scheduled &&
+          body.scheduledAt === scheduled &&
+          Boolean(this.expected.quoteId.trim()) &&
+          Boolean(this.expected.feeDisclosureVersion?.trim()),
+        "booking exact quoted scheduled intent and fee confirmation required",
+      );
+    }
     const key = text(body.idempotencyKey, "booking idempotency key required");
     requireFact(
       /^[a-zA-Z0-9_-]{1,255}$/.test(key) && key === headerKey,

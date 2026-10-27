@@ -260,3 +260,121 @@ describe("new fee intent journal retains exact original business bytes", () => {
     ).rejects.toThrow("one frozen booking send");
   });
 });
+
+describe("exact scheduled booking custody", () => {
+  const scheduledAt = "2027-01-01T15:55:00.000Z";
+  const expected = {
+    ...context,
+    expectedScheduledAt: scheduledAt,
+    feeDisclosureVersion: "reservation-fee-version",
+  };
+  const body = (patch: Record<string, unknown> = {}) =>
+    JSON.stringify(
+      command({
+        scheduledAt,
+        feeDisclosureVersion: expected.feeDisclosureVersion,
+        feeConfirmed: true,
+        ...patch,
+      }),
+      null,
+      2,
+    );
+
+  it("persists each independent raw scheduled intent before send and retains unknown ACK", async () => {
+    const snapshots: BookingJournalSnapshot[] = [];
+    const first = new BookingWriteJournal(expected, async (s) => {
+      snapshots.push(s);
+    });
+    const second = new BookingWriteJournal(
+      { ...expected, expectedScheduledAt: "2027-01-01T16:05:00.000Z" },
+      async (s) => {
+        snapshots.push(s);
+      },
+    );
+    const raw = body();
+    await first.beforeSend(raw, "own-key-1", async () => {
+      expect(snapshots[0]?.body).toBe(raw);
+      expect(snapshots[0]?.state).toBe("ack_unknown");
+    });
+    await first.acknowledge("reservation-one", context.quoteId);
+    const other = body({
+      scheduledAt: "2027-01-01T16:05:00.000Z",
+      idempotencyKey: "own-key-2",
+    });
+    await expect(
+      second.beforeSend(other, "own-key-2", async () => {
+        throw new Error("lost ACK");
+      }),
+    ).rejects.toThrow("lost ACK");
+    expect(first.current).toMatchObject({
+      state: "acknowledged",
+      orderId: "reservation-one",
+      body: raw,
+    });
+    expect(second.current).toMatchObject({
+      state: "ack_unknown",
+      body: other,
+      idempotencyKey: "own-key-2",
+    });
+    await expect(
+      second.beforeSend(other, "own-key-2", async () => undefined),
+    ).rejects.toThrow("one frozen booking send");
+  });
+
+  it.each([
+    { scheduledAt: undefined },
+    { scheduledAt: "invalid" },
+    { scheduledAt: "2027-01-01T23:55:00+08:00" },
+    { scheduledAt: "2027-01-01T16:05:00.000Z" },
+    { quoteId: undefined },
+    { quoteId: "other" },
+    { entrySlug: "other" },
+    { partnerUserRef: "other" },
+    { passengerPhone: "0999999999" },
+    { idempotencyKey: "other" },
+    { feeConfirmed: false },
+    { feeConfirmed: undefined },
+    { feeDisclosureVersion: "other" },
+  ])(
+    "rejects changed scheduled/subject/quote/key/fee intent before persistence %#",
+    async (patch) => {
+      const persist = vi.fn(),
+        send = vi.fn();
+      await expect(
+        new BookingWriteJournal(expected, persist).beforeSend(
+          body(patch),
+          "own-key-1",
+          send,
+        ),
+      ).rejects.toThrow();
+      expect(persist).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { expectedScheduledAt: "2027-02-30T15:55:00.000Z" },
+    { expectedScheduledAt: "invalid" },
+    { quoteId: "" },
+    { feeDisclosureVersion: undefined },
+  ])(
+    "does not turn an invalid expected context into a scheduled bypass %#",
+    async (patch) => {
+      const persist = vi.fn(),
+        send = vi.fn();
+      const invalid = { ...expected, ...patch };
+      await expect(
+        new BookingWriteJournal(invalid, persist).beforeSend(
+          body({
+            scheduledAt: invalid.expectedScheduledAt,
+            quoteId: invalid.quoteId,
+          }),
+          "own-key-1",
+          send,
+        ),
+      ).rejects.toThrow();
+      expect(persist).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+});
