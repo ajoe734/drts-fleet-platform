@@ -3681,3 +3681,287 @@ class IdleOperationalReviewTests(unittest.TestCase):
 
         enqueue_event.assert_not_called()
         self.assertNotIn("last_operational_fingerprint", state["chair_review"])
+
+
+class CandidateCiResumeTests(unittest.TestCase):
+    """Explicit Chair `resume_parent_task` with resume_basis=candidate_ci_recovered."""
+
+    def setUp(self) -> None:
+        import os
+        from control_plane.domain.chair_policy import open_blocker_fingerprint
+
+        self.tmp = tempfile.TemporaryDirectory(prefix="chair-ci-native-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.task = {
+            "id": "CI-RECOVERY-EXAMPLE", "title": "Original candidate", "phase": "test",
+            "owner": "Pi", "reviewer": "Codex", "status": "blocked", "waiting_for": "Gemini",
+            "depends_on": [], "artifacts": [], "acceptance": [], "next": "Original CI error; cause unknown",
+            "candidate_sha": "a" * 40, "candidate_generation": "generation-one",
+            "candidate_branch": "pi/existing-candidate", "pr_url": "https://github.com/acme/fleet/pull/31",
+            "ci_status": "failure", "ci_sha": "a" * 40, "last_update": "2026-10-27T00:00:00Z",
+        }
+        self.task["candidate_review_handoff"] = {k: self.task[k] for k in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"
+        )}
+        from test_ai_status import ai_status as board_commands
+        self.board = board_commands.default_state()
+        self.board.update({"tasks": [self.task], "agents": [], "handoffs": [], "blockers": [{
+            "task_id": self.task["id"], "owner": "Pi", "waiting_for": "Gemini", "status": "open",
+            "message": "Preserved original failure", "created_at": "2026-10-27T00:00:00Z",
+        }]})
+        self.fingerprint = open_blocker_fingerprint(self.board["blockers"], self.task["id"])[0]
+        self.path = self.root / "ai-status.json"
+        self.path.write_text(json.dumps(self.board))
+        self.runtime_log = self.root / "runtime-log.jsonl"
+        self.board_log = self.root / "ai-activity-log.jsonl"
+        self.config = {"paths": {"status_file": str(self.path), "activity_log": str(self.runtime_log)},
+                       "github_bus": {"repo": "acme/fleet"}}
+        self.action = {"task_id": self.task["id"], "action": "resume_parent_task", "resume_status": "in_progress",
+                       "resume_basis": "candidate_ci_recovered", "candidate_sha": self.task["candidate_sha"],
+                       "candidate_generation": self.task["candidate_generation"],
+                       "blocker_fingerprint": self.fingerprint,
+                       "reason": "Actual Chair confirmed original CI blocker resolved"}
+        mock.patch.dict(os.environ, {"ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root)}, clear=True).start()
+        self.addCleanup(mock.patch.stopall)
+        self.pr = {"url": self.task["pr_url"], "state": "OPEN", "headRefOid": self.task["candidate_sha"],
+                   "headRefName": self.task["candidate_branch"], "mergeStateStatus": "CLEAN",
+                   "statusCheckRollup": [{"detailsUrl": "https://github.com/acme/fleet/actions/runs/81/job/12",
+                                          "name": "unit", "workflowName": "CI",
+                                          "status": "COMPLETED", "conclusion": "SUCCESS"}]}
+        self.run = {"id": 81, "workflow_id": 7, "event": "pull_request", "head_sha": self.task["candidate_sha"],
+                    "head_branch": self.task["candidate_branch"], "pull_requests": [{"number": 31}],
+                    "created_at": "2026-10-27T01:00:00Z", "status": "completed", "conclusion": "success"}
+
+    def observe(self, argv):
+        import copy
+        return copy.deepcopy(self.pr if argv[0] == "pr" else [{"workflow_runs": [self.run]}])
+
+    def assert_untouched(self, before: bytes) -> None:
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse(self.runtime_log.exists(), "rejected recovery wrote a Supervisor activity log")
+        self.assertFalse(self.board_log.exists(), "rejected recovery wrote a board activity log")
+
+    def test_actual_chair_path_uses_real_GH_classifier_and_temp_board_writer(self) -> None:
+        import github_bus
+        import copy
+        before = copy.deepcopy(self.task)
+        with mock.patch.object(github_bus, "gh_json", side_effect=self.observe) as reads:
+            self.assertTrue(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+        self.assertEqual(reads.call_count, 2)
+        state = json.loads(self.path.read_text())
+        task = state["tasks"][0]
+        self.assertEqual((task["status"], task["ci_status"], task["ci_sha"]), ("review", "success", before["candidate_sha"]))
+        for key in ("owner", "reviewer", "candidate_sha", "candidate_generation", "candidate_branch",
+                    "candidate_review_handoff", "pr_url"):
+            self.assertEqual(task[key], before[key])
+        self.assertEqual(task["ci_run_url"], "https://github.com/acme/fleet/actions/runs/81/job/12")
+        for key in ("waiting_for", "reviewed_sha", "merge_sha", "acceptance_evidence"):
+            self.assertNotIn(key, task)
+        self.assertEqual(len(state["tasks"]), 1)
+        self.assertEqual(state["blockers"][0]["status"], "resolved")
+        board_rows = [json.loads(line)["type"] for line in self.board_log.read_text().splitlines()]
+        self.assertEqual(board_rows, ["candidate_reconciled", "blocked_task_resumed"])
+        runtime_rows = [json.loads(line) for line in self.runtime_log.read_text().splitlines()]
+        self.assertEqual([(row["type"], row["resume_basis"]) for row in runtime_rows],
+                         [("chair_parent_resume_applied", "candidate_ci_recovered")])
+
+    def test_pending_failure_foreign_provenance_head_branch_and_PR_do_not_resume(self) -> None:
+        import github_bus
+        import copy
+        for kind in ("pending", "failure", "foreign_workflow", "head", "branch", "PR", "lookup_failed"):
+            with self.subTest(kind=kind):
+                pr, run = copy.deepcopy(self.pr), copy.deepcopy(self.run)
+                if kind == "pending": run.update(status="in_progress", conclusion=None)
+                if kind == "failure": run["conclusion"] = "failure"
+                if kind == "foreign_workflow": run["head_sha"] = "b" * 40
+                if kind == "head": pr["headRefOid"] = "b" * 40
+                if kind == "branch": pr["headRefName"] = "pi/other"
+                if kind == "PR": pr["url"] = "https://github.com/acme/fleet/pull/32"
+                def external(argv, kind=kind, pr=pr, run=run):
+                    if argv[0] == "pr": return pr
+                    if kind == "lookup_failed": raise github_bus.GitHubBusError("Unavailable")
+                    return [{"workflow_runs": [run]}]
+                before = self.path.read_bytes()
+                with mock.patch.object(github_bus, "gh_json", side_effect=external):
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+                self.assert_untouched(before)
+
+    def test_merged_all_skipped_neutral_and_absent_own_ci_do_not_count_as_recovered(self) -> None:
+        import github_bus
+        import copy
+        for kind in ("merged", "closed", "all_skipped_jobs", "neutral_jobs", "skipped_run", "neutral_run",
+                     "no_own_workflow", "external_check_only", "stale_conclusion", "run_without_rows"):
+            with self.subTest(kind=kind):
+                pr, run = copy.deepcopy(self.pr), copy.deepcopy(self.run)
+                rows = pr["statusCheckRollup"]
+                if kind == "merged": pr["state"] = "MERGED"
+                if kind == "closed": pr["state"] = "CLOSED"
+                if kind == "all_skipped_jobs": rows[0]["conclusion"] = "SKIPPED"
+                if kind == "neutral_jobs": rows[0]["conclusion"] = "NEUTRAL"
+                if kind == "skipped_run": run["conclusion"] = "skipped"
+                if kind == "neutral_run": run["conclusion"] = "neutral"
+                if kind == "no_own_workflow": pr["statusCheckRollup"] = []
+                if kind == "external_check_only":
+                    pr["statusCheckRollup"] = [{"detailsUrl": "https://ci.example/build/1", "name": "ext",
+                                                "status": "COMPLETED", "conclusion": "SUCCESS"}]
+                if kind == "stale_conclusion": rows[0]["conclusion"] = "STALE"
+                if kind == "run_without_rows":
+                    # A newer equivalent rerun with no job rows yet cannot prove success.
+                    newer = {**run, "id": 82, "created_at": "2026-10-27T02:00:00Z"}
+                runs = [run, newer] if kind == "run_without_rows" else [run]
+                def external(argv, pr=pr, runs=runs):
+                    return copy.deepcopy(pr if argv[0] == "pr" else [{"workflow_runs": runs}])
+                if kind in {"merged", "all_skipped_jobs", "neutral_run", "skipped_run", "external_check_only"}:
+                    # The shared classifier calls these "success"; recovery must not trust that alone.
+                    with mock.patch.object(github_bus, "gh_json", side_effect=external):
+                        observation = github_bus.candidate_pr_observation("acme/fleet", 31)
+                    self.assertEqual(github_bus.candidate_ci_status(observation)[0], "success")
+                before = self.path.read_bytes()
+                with mock.patch.object(github_bus, "gh_json", side_effect=external):
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+                self.assert_untouched(before)
+
+    def test_same_H_new_generation_between_read_and_transaction_remains_blocked(self) -> None:
+        import github_bus
+        def external(argv):
+            data = self.observe(argv)
+            if argv[0] == "api":
+                state = json.loads(self.path.read_text())
+                state["tasks"][0]["candidate_generation"] = "new-generation-same-H"
+                self.path.write_text(json.dumps(state))
+            return data
+        with mock.patch.object(github_bus, "gh_json", side_effect=external):
+            self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+        task = json.loads(self.path.read_text())["tasks"][0]
+        self.assertEqual((task["status"], task["candidate_generation"]), ("blocked", "new-generation-same-H"))
+        self.assertEqual(task["ci_status"], "failure")
+        self.assertFalse(self.runtime_log.exists())
+        self.assertFalse(self.board_log.exists())
+
+    def test_blocker_added_or_edited_after_chair_snapshot_fails_closed(self) -> None:
+        import github_bus
+        for kind in ("added_before_apply", "added_during_github_read", "edited_during_github_read"):
+            with self.subTest(kind=kind):
+                board = json.loads(json.dumps(self.board))
+                if kind == "added_before_apply":
+                    board["blockers"].append({"task_id": self.task["id"], "owner": "Pi", "waiting_for": "Codex",
+                                              "status": "open", "message": "New product blocker",
+                                              "created_at": "2026-10-27T02:00:00Z"})
+                self.path.write_text(json.dumps(board))
+                def external(argv, kind=kind):
+                    data = self.observe(argv)
+                    if argv[0] == "api" and kind != "added_before_apply":
+                        state = json.loads(self.path.read_text())
+                        if kind == "added_during_github_read":
+                            state["blockers"].append({"task_id": self.task["id"], "owner": "Pi", "waiting_for": "Codex",
+                                                      "status": "open", "message": "Late blocker",
+                                                      "created_at": "2026-10-27T02:00:00Z"})
+                        else:
+                            state["blockers"][0]["message"] = "Different open blocker"
+                        self.path.write_text(json.dumps(state))
+                    return data
+                with mock.patch.object(github_bus, "gh_json", side_effect=external):
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+                state = json.loads(self.path.read_text())
+                self.assertEqual(state["tasks"][0]["status"], "blocked")
+                self.assertTrue(all(row["status"] == "open" for row in state["blockers"]))
+                self.assertFalse(self.runtime_log.exists())
+                self.assertFalse(self.board_log.exists())
+
+    def test_no_explicit_basis_or_invalidated_handoff_does_not_resume(self) -> None:
+        import github_bus
+        for kind in ("no_basis", "invalidated_handoff", "external_gate", "release", "stale_fingerprint",
+                     "reviewed", "no_open_blocker", "helper_named"):
+            with self.subTest(kind=kind):
+                action = dict(self.action); board = json.loads(json.dumps(self.board))
+                if kind == "no_basis": action.pop("resume_basis")
+                if kind == "invalidated_handoff": board["tasks"][0]["candidate_review_handoff"] = None
+                if kind == "external_gate": board["tasks"][0]["external_gate"] = True
+                if kind == "release": board["tasks"][0].update(task_class="release", mutates_canonical=False)
+                if kind == "stale_fingerprint": action["blocker_fingerprint"] = "0" * 64
+                if kind == "reviewed": board["tasks"][0]["reviewed_sha"] = "a" * 40
+                if kind == "no_open_blocker": board["blockers"][0]["status"] = "resolved"
+                if kind == "helper_named": action["helper_task_id"] = "DONE-HELPER"
+                self.path.write_text(json.dumps(board)); before = self.path.read_bytes()
+                with mock.patch.object(github_bus, "gh_json") as reads:
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
+                reads.assert_not_called()
+                self.assert_untouched(before)
+
+    def test_chair_context_recognizes_explicit_variant_without_changing_helper_route(self) -> None:
+        status = json.loads(json.dumps(self.board))
+        records = supervisor.dependency_ready_blocked_task_records({}, status)
+        self.assertEqual([(r["task_id"], r["action"]) for r in records], [(self.task["id"], "create_unblock_task")])
+        recovery = records[0]["candidate_ci_recovery"]
+        self.assertEqual((recovery["candidate_sha"], recovery["blocker_fingerprint"]),
+                         (self.task["candidate_sha"], self.fingerprint))
+        message = supervisor.build_chair_review_message(
+            {}, reason="blocked_task_triage", markdown_path=self.root / "d.md", json_path=self.root / "d.json",
+            approval_state={"pending": [], "history": []}, state={}, provider_report={}, status=status)
+        self.assertIn(f"ci_recovery=eligible candidate_sha={self.task['candidate_sha']}", message)
+        self.assertIn(f"blocker_fingerprint={self.fingerprint}", message)
+        self.assertIn("resume_basis=candidate_ci_recovered", message)
+        base = {"version": 1, "approval_ttl_minutes": 45, "reason": "r", "blocked_by": [], "approval_actions": [],
+                "reassignment_actions": [], "provider_actions": [], "recommended_focus": [self.task["id"]]}
+        for reason in ("blocked_task_triage", "reassignment_triage"):
+            with self.subTest(reason=reason):
+                explicit = {**base, "decision": reason, "task_actions": [self.action]}
+                normalized = supervisor.normalize_chair_review_payload_for_reason(explicit, reason=reason, config={}, status=status)
+                self.assertEqual(normalized["task_actions"], [self.action])
+                self.assertIsNone(supervisor.validate_chair_review_context(
+                    normalized, reason=reason, approval_state={"pending": []}, config={}, status=status))
+                # Existing helper route is unchanged without the explicit, matching decision.
+                for drift in ({}, {"blocker_fingerprint": "0" * 64}, {"candidate_generation": "other"}):
+                    payload = {**base, "decision": reason,
+                               "task_actions": [{**self.action, **drift}] if drift else []}
+                    normalized = supervisor.normalize_chair_review_payload_for_reason(payload, reason=reason, config={}, status=status)
+                    if reason == "reassignment_triage":
+                        self.assertIn("create_unblock_task", [a["action"] for a in normalized["task_actions"]])
+                    else:
+                        self.assertIn(f"{self.task['id']}:create_unblock_task", supervisor.validate_chair_review_context(
+                            normalized, reason=reason, approval_state={"pending": []}, config={}, status=status) or "")
+        ineligible = json.loads(json.dumps(status))
+        ineligible["tasks"][0]["candidate_review_handoff"] = None
+        self.assertIsNone(supervisor.dependency_ready_blocked_task_records({}, ineligible)[0]["candidate_ci_recovery"])
+        self.assertIsNotNone(supervisor.validate_chair_review_context(
+            {**base, "decision": "blocked_task_triage", "task_actions": [self.action]},
+            reason="blocked_task_triage", approval_state={"pending": []}, config={}, status=ineligible))
+
+    def test_completed_native_chair_decision_reaches_real_transaction(self) -> None:
+        import github_bus
+        review = self.root / "chair-reviews"
+        review.mkdir()
+        markdown = review / "decision.md"; markdown.write_text("# Actual decision-port fixture\n")
+        decision = review / "decision.json"
+        payload = {"version": 1, "decision": "blocked_task_triage", "approval_ttl_minutes": 45,
+                   "reason": "Specific original CI blocker is resolved", "blocked_by": [], "approval_actions": [],
+                   "reassignment_actions": [], "task_actions": [self.action], "provider_actions": [],
+                   "recommended_focus": [self.task["id"]]}
+        approval = self.root / "approval-queue.json"
+        approval.write_text(json.dumps({"pending": [], "history": []}))
+        self.config["paths"]["approval_queue"] = str(approval)
+        self.config["chair_review"] = {"enabled": True, "cooldown_seconds": 900}
+        for reason in ("blocked_task_triage", "reassignment_triage"):
+            with self.subTest(reason=reason):
+                self.path.write_text(json.dumps(self.board))
+                payload["decision"] = reason; decision.write_text(json.dumps(payload))
+                runtime = {"queue": {"events": {"chair-case": {"status": "completed"}}}, "workers": {},
+                           "chair_review": {"active_review": {"agent": "Codex", "agent_id": "codex", "reason": reason,
+                                "queue_event_id": "chair-case", "markdown_path": str(markdown), "json_path": str(decision)}}}
+                with mock.patch.object(github_bus, "gh_json", side_effect=self.observe):
+                    self.assertTrue(supervisor.refresh_chair_review_state(self.config, runtime, provider_report={}))
+                state = json.loads(self.path.read_text())
+                self.assertEqual(state["tasks"][0]["status"], "review")
+                self.assertEqual(len(state["tasks"]), 1)  # no helper task created
+                self.assertIsNone(runtime["chair_review"]["active_review"])
+                actions = runtime["chair_review"]["last_decision"]["task_actions"]
+                self.assertEqual(actions, [self.action])  # no synthesized helper
+        for key, value in (("resume_basis", "unrelated_blocker"), ("candidate_sha", "short"),
+                           ("candidate_generation", ""), ("resume_status", "todo"),
+                           ("blocker_fingerprint", None), ("blocker_fingerprint", "x")):
+            with self.subTest(invalid_field=key, value=value):
+                payload["task_actions"] = [{**self.action, key: value}]
+                self.assertIsNotNone(supervisor.validate_chair_review_payload(payload))
+        payload["task_actions"] = [{**self.action, "action": "create_unblock_task"}]
+        self.assertIsNotNone(supervisor.validate_chair_review_payload(payload))

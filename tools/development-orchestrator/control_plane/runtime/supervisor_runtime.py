@@ -65,7 +65,10 @@ from control_plane.domain.resource_admission import decide as resource_admission
 from control_plane.domain.lane_health import pause_matches_lane
 from control_plane.domain.unblock_resolution import parent_resume_blocker
 from control_plane.domain.chair_policy import (
+    CANDIDATE_CI_RECOVERED,
+    candidate_ci_recovery_identity,
     normalize_review_defaults as normalize_domain_review_defaults,
+    open_blocker_fingerprint,
 )
 from control_plane.infra.approval_repo import load_approval_state
 from control_plane.domain.task_records import (
@@ -207,7 +210,17 @@ from common import (
     utc_now,
     write_activity_log,
 )
-from github_bus import sync_github_bus
+from github_bus import (
+    GitHubBusError,
+    action_run_id,
+    bound_task_pr,
+    candidate_ci_status,
+    candidate_pr_observation,
+    infer_repo_slug,
+    latest_check_runs,
+    latest_workflow_checks,
+    sync_github_bus,
+)
 from provider_permissions import provider_capabilities as build_provider_capabilities, write_provider_capabilities
 from watch_events import queue_delivery_event, run_scan, trim_seen_events
 
@@ -6360,6 +6373,7 @@ def dependency_ready_blocked_task_records(
                 "action": action,
                 "helper_task_id": helper_task_id,
                 "next": brief_reason_text(task.get("next"), max_length=220),
+                "candidate_ci_recovery": candidate_ci_recovery_context(status, task),
             }
         )
     records.sort(key=lambda item: (
@@ -6367,6 +6381,41 @@ def dependency_ready_blocked_task_records(
         task_phase_priority(item["task"], task_map, dependency_done_statuses),
     ))
     return records[:limit]
+
+
+def candidate_ci_recovery_context(status: dict[str, Any], task: dict[str, Any]) -> dict[str, Any] | None:
+    """Structural eligibility for the explicit Chair CI-recovery resume.
+
+    Only exposes the option; the Chair decides whether CI is the sole
+    remaining blocker, and the Supervisor re-verifies GitHub at apply time.
+    """
+    if task.get("external_gate") or blocked_task_holds_delivery(task):
+        return None
+    identity = candidate_ci_recovery_identity(task)
+    if identity is None:
+        return None
+    fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), str(task.get("id") or ""))
+    if not open_count:
+        return None
+    return {**identity, "blocker_fingerprint": fingerprint, "open_blockers": open_count}
+
+
+def has_explicit_candidate_ci_resume(payload: dict[str, Any], record: dict[str, Any]) -> bool:
+    """Recognize the matching Chair decision, not proof that GitHub CI recovered."""
+    recovery = record.get("candidate_ci_recovery")
+    if not isinstance(recovery, dict):
+        return False
+    return any(
+        isinstance(action, dict)
+        and action.get("task_id") == record.get("task_id")
+        and action.get("action") == "resume_parent_task"
+        and action.get("resume_basis") == CANDIDATE_CI_RECOVERED
+        and str(action.get("resume_status") or "in_progress").strip().lower() == "in_progress"
+        and action.get("candidate_sha") == recovery["candidate_sha"]
+        and action.get("candidate_generation") == recovery["candidate_generation"]
+        and action.get("blocker_fingerprint") == recovery["blocker_fingerprint"]
+        for action in payload.get("task_actions", []) or []
+    )
 
 
 def reassignment_followup_task_records(
@@ -6416,6 +6465,8 @@ def synthesize_reassignment_followup_task_actions(
         task_id = str(item.get("task_id") or "").strip()
         action_name = str(item.get("action") or "").strip()
         if not task_id or not action_name or action_name in action_index.get(task_id, set()):
+            continue
+        if has_explicit_candidate_ci_resume(payload, item):
             continue
         if action_name == "create_unblock_task":
             unblock_kind = str(item.get("kind") or "manual_unblock").strip() or "manual_unblock"
@@ -6536,8 +6587,14 @@ def _chair_review_summary_lines(
     for item in dependency_ready_blocked_task_records(config, status, include_held=True):
         action_label = str(item.get("action") or "-")
         helper_label = str(item.get("helper_task_id") or "-")
+        recovery = item.get("candidate_ci_recovery")
+        recovery_label = (
+            f" ci_recovery=eligible candidate_sha={recovery['candidate_sha']} candidate_generation={recovery['candidate_generation']}"
+            f" ci={item['task'].get('ci_status') or '-'} blocker_fingerprint={recovery['blocker_fingerprint']} open_blockers={recovery['open_blockers']}"
+            if isinstance(recovery, dict) else ""
+        )
         blocked_task_lines.append(
-            f"- {item.get('task_id')}: kind={item.get('kind')} action={action_label} helper={helper_label} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'} next={item.get('next') or '-'}"
+            f"- {item.get('task_id')}: kind={item.get('kind')} action={action_label} helper={helper_label} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'}{recovery_label} next={item.get('next') or '-'}"
         )
     if not blocked_task_lines:
         blocked_task_lines.append("- none")
@@ -6635,7 +6692,8 @@ def build_chair_review_message(
         "- `task_actions` 目前只允許 `dispatch_now` / `create_unblock_task` / `resume_parent_task`；不能繞過 dependency gate 或 commit gate。\n"
         "- `dispatch_now` 只能對 machine truth 已符合派工條件的非 blocked 任務觸發。\n"
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
-        "- `resume_parent_task` 只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
+        "- `resume_parent_task` 一般只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
+        "- 唯一例外：摘要標示 `ci_recovery=eligible` 的 blocked task，若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 且已恢復，可明確輸出 `resume_parent_task` 並附 `resume_basis=candidate_ci_recovered`、`resume_status=in_progress`、摘要中的完整 `candidate_sha` / `candidate_generation` / `blocker_fingerprint` 與具體 reason，不需新 helper。Supervisor 會重讀同 PR/head/branch 的 own-workflow CI 並比對 open blocker 集合，只沿原 handoff 恢復獨立 review；這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
         "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
@@ -7069,7 +7127,7 @@ def validate_chair_review_context(
                 expected_action = str(item.get("action") or "").strip()
                 if not task_id or not expected_action:
                     continue
-                if expected_action not in action_index.get(task_id, set()):
+                if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item):
                     missing.append(f"{task_id}:{expected_action}")
             if missing:
                 return "blocked_task_triage must resolve blocked tasks via " + ", ".join(missing[:6])
@@ -7083,7 +7141,7 @@ def validate_chair_review_context(
                 expected_action = str(item.get("action") or "").strip()
                 if not task_id or not expected_action:
                     continue
-                if expected_action not in action_index.get(task_id, set()):
+                if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item):
                     missing.append(f"{task_id}:{expected_action}")
             if missing:
                 return "reassignment_triage must materialize follow-up task actions via " + ", ".join(missing[:6])
@@ -7931,6 +7989,8 @@ def apply_chair_parent_resume_action(
     }
     if not dependencies_satisfied(parent, task_map, dependency_done_statuses):
         return False
+    if "resume_basis" in action:
+        return apply_chair_candidate_ci_resume_action(config, status, parent, action, chair_reason)
 
     unblock_kind = blocked_task_triage_kind(parent)
     completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
@@ -7975,6 +8035,120 @@ def apply_chair_parent_resume_action(
             "task_id": task_id,
             "helper_task_id": helper_id,
             "resume_status": resume_status,
+            "message": message,
+        },
+    )
+    return True
+
+
+def candidate_ci_recovery_observation_succeeded(observation: dict[str, Any]) -> tuple[bool, str]:
+    """Stricter than candidate_ci_status, for explicit CI recovery only.
+
+    candidate_ci_status maps MERGED to success and accepts SKIPPED/NEUTRAL
+    workflow runs; it also passes when no Actions run exists at all. Recovery
+    needs an OPEN PR whose own workflow runs each completed with SUCCESS and
+    produced at least one SUCCESS job row for this head.
+    """
+    if str(observation.get("state") or "").upper() != "OPEN":
+        return False, ""
+    ci_status, ci_url = candidate_ci_status(observation)
+    if ci_status != "success":
+        return False, ""
+    try:
+        checks, workflow_runs = latest_workflow_checks(observation)
+    except (ValueError, TypeError):
+        return False, ""
+    if not workflow_runs:
+        return False, ""
+    rows = latest_check_runs(checks, separate_runs=True)
+    for row in rows:
+        if (
+            str(row.get("status") or "").upper() != "COMPLETED"
+            or str(row.get("conclusion") or "").upper() not in {"SUCCESS", "SKIPPED", "NEUTRAL"}
+        ):
+            return False, ""
+    for run in workflow_runs:
+        if str(run.get("status") or "").upper() != "COMPLETED" or str(run.get("conclusion") or "").upper() != "SUCCESS":
+            return False, ""
+        if not any(
+            action_run_id(row) == run.get("id") and str(row.get("conclusion") or "").upper() == "SUCCESS"
+            for row in rows
+        ):
+            return False, ""
+    return True, ci_url
+
+
+def apply_chair_candidate_ci_resume_action(
+    config: dict[str, Any],
+    status: dict[str, Any],
+    parent: dict[str, Any],
+    action: dict[str, Any],
+    chair_reason: str,
+) -> bool:
+    """Explicit Chair decision: restore the original review route after CI recovered.
+
+    All checks finish before any board write or activity-log entry, so a
+    rejected decision leaves no partial-resume residue.
+    """
+    task_id = str(parent.get("id") or "")
+    if action.get("resume_basis") != CANDIDATE_CI_RECOVERED or "helper_task_id" in action:
+        return False
+    if str(action.get("resume_status") or "in_progress").strip().lower() != "in_progress":
+        return False
+    identity = candidate_ci_recovery_identity(parent)
+    if identity is None:
+        return False
+    if any(action.get(key) != identity[key] for key in ("candidate_sha", "candidate_generation")):
+        return False
+    fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), task_id)
+    if not open_count or action.get("blocker_fingerprint") != fingerprint:
+        return False
+    repo = infer_repo_slug(config, {})
+    pr = bound_task_pr(parent, identity["candidate_branch"], identity["candidate_sha"])
+    if not repo or not pr:
+        return False
+    try:
+        observation = candidate_pr_observation(repo, int(pr["number"]))
+        if (
+            observation.get("url") != identity["pr_url"]
+            or observation.get("headRefOid") != identity["candidate_sha"]
+            or observation.get("headRefName") != identity["candidate_branch"]
+        ):
+            return False
+        succeeded, ci_url = candidate_ci_recovery_observation_succeeded(observation)
+    except (GitHubBusError, ValueError, TypeError):
+        return False
+    if not succeeded:
+        return False
+    message = brief_reason_text(f"Chairman restored review after candidate CI recovered: {chair_reason}", max_length=280)
+    # The board transaction re-checks identity, handoff and blocker set under its lock.
+    result = run_task_board_command(
+        config,
+        "resume-blocked",
+        [task_id, "in_progress", message],
+        environ={
+            "AI_NAME": "Supervisor",
+            "TASK_RESUME_BASIS": CANDIDATE_CI_RECOVERED,
+            "TASK_RESUME_CANDIDATE_IDENTITY_JSON": json.dumps(identity),
+            "TASK_RESUME_BLOCKER_FINGERPRINT": fingerprint,
+            "CANDIDATE_HEAD_SHA": identity["candidate_sha"],
+            "CANDIDATE_BRANCH": identity["candidate_branch"],
+            "CANDIDATE_CI_STATUS": "success",
+            "PR_URL": identity["pr_url"],
+            "CI_RUN_URL": ci_url,
+        },
+    )
+    if not result.ok:
+        return False
+    write_activity_log(
+        config,
+        {
+            "type": "chair_parent_resume_applied",
+            "task_id": task_id,
+            "resume_basis": CANDIDATE_CI_RECOVERED,
+            "candidate_sha": identity["candidate_sha"],
+            "candidate_generation": identity["candidate_generation"],
+            "resume_status": "review",
             "message": message,
         },
     )
