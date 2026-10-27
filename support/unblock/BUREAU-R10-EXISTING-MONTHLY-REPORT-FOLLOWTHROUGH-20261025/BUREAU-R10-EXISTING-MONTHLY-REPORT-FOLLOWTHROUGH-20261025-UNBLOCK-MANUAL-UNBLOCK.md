@@ -132,3 +132,13 @@ This keeps the parent `blocked` (not `todo`) at this helper's eventual merge, pr
   - **本 helper 現在可以安全完成**：合併時的 parent 自動解析是 no-op，不會干擾 Pi 正在進行的來源修正工作。
 - **下一步仍由 parent 自己的 owner（Pi）/reviewer（Codex）在 parent 任務上獨立推進**（新 candidate、own CI、受保護合併，之後才回到 hosted 驗收），不屬於本 helper 的 write scope，本 helper 不建立新 task、不改動產品程式碼、不部署、不解除任何 provider pause。
 - 本節為本 helper 唯一新增的事實性更新；§1-§8 保留作為診斷歷史與稽核紀錄，其中描述的 parent 狀態、§6 的指令區塊僅代表當時（2026-10-27T00:57 前）的分析，非現狀。
+
+## 10. CI 紅燈為 trunk 既有問題，已隨 dev 合併解除
+
+- **候選與阻塞現況**：本 helper 候選 `0f47b7a687dabb986affc4516c069a50aba63064` 已獲 reviewer Codex APPROVE；該 commit 相對其 base `2bb73091a279551c0134abc5e845b51db9480ec8` 只新增本檔（`git diff --stat` = 1 file changed, 134 insertions）。PR #3064 的 `mergeStateStatus=BLOCKED` 來自兩個跑在舊 `dev` base 上、與本檔無關的 trunk 既有紅燈：
+  1. `dependency-security`：`qs` 套件 moderate DoS（`ID1243452`）無 exception。
+  2. `Product root unit tests shard1/4`：`tests/unit/owned-referral-business-journey/daily-report-downloads.test.ts` 5 個案例失敗，屬 `BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025` 範圍，非本 helper 程式碼。
+- **上游修正已進 trunk**：`DEPENDENCY-QS-1243452-REMEDIATION-20261027`（PR #3073，PR head `b17c683e4019390c89e25c027d8a3c59187cab6f`）於 2026-10-27T18:56:54Z 合併進 `dev`，合併結果 commit 為 `a086b02f94073b304c1ab9a075bce8c486b95657`（parent `2bb73091a279551c0134abc5e845b51db9480ec8`）。該變更只觸及 `package.json`、`pnpm-lock.yaml`、`tests/unit/owned-referral-business-journey/daily-report-downloads.test.ts` 三個檔案，同時消除上述兩個 CI 失敗來源；上游自身的 `CI` 與 `CI (integration trunk)` 兩條 own CI 在該 SHA 上皆為 terminal success。
+- **本次動作**：以普通 `--no-ff` merge 將 `origin/dev`（`a086b02f94073b304c1ab9a075bce8c486b95657`）併入本 branch，merge commit 為 `4d1bcd52279b91fcc346e79b8023c06539d1b1ba`，自動合併無衝突。上述三個 trunk 檔案的內容與 `origin/dev` 完全一致，本 helper 未手動修改；本節以獨立 commit 追加於 merge commit 之後（該 commit SHA 見本次 push 的 HEAD）。未 rebase、未 amend、未 force push 任何已推送 commit（含 `0f47b7a687dabb986affc4516c069a50aba63064`）。
+- **不改變 §9 結論**：parent `BUREAU-R10-EXISTING-MONTHLY-REPORT-FOLLOWTHROUGH-20261025` 已不在 `blocked`，`unblock_parent_resolution_fields`（`ai_status.py:1143-1177`）對非 `blocked` parent 直接回傳 `None`，`apply_unblock_parent_resolution`（`:1188-1249`）整段為 no-op；本 helper 的 `resolved_parent_status` 維持 `in_progress`。本次 merge 不把 parent 重設為 `todo`、不重放 §6 的 Option A/B、不建立新 task、不改動產品程式碼。
+- **目的**：讓本 helper 候選在已修正的 trunk 基礎上重新跑一次 CI，經正常 review/CI/受保護合併流程完成；不繞過、不停用、不跳過任何檢查，不觸發 workflow_dispatch。
