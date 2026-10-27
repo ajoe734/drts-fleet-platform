@@ -282,6 +282,8 @@ test(journeyName, async ({ browser, request }) => {
     bindingId?: string;
     invitation?: string;
     plateNo?: string;
+    driverSubmissionId?: string;
+    vehicleSubmissionId?: string;
   };
   const extraSupply: ExtraSupply = {
     transport: new NativeTransport(origins, runtime, invocation),
@@ -714,6 +716,7 @@ test(journeyName, async ({ browser, request }) => {
         const driverSubmissionId = text(
           object(driverDraft.submission).submissionId,
         );
+        supply.driverSubmissionId = driverSubmissionId;
         const approve = async (submissionId: string, types: string[]) => {
           const path = `/control-plane-proxy/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`;
           for (const documentType of types) {
@@ -829,6 +832,7 @@ test(journeyName, async ({ browser, request }) => {
         const vehicleSubmissionId = text(
           object(vehicleDraft.submission).submissionId,
         );
+        supply.vehicleSubmissionId = vehicleSubmissionId;
         const approvedVehicle = await approve(vehicleSubmissionId, [
           "vehicle_registration",
           "insurance_policy",
@@ -2425,9 +2429,11 @@ test(journeyName, async ({ browser, request }) => {
       const reportCase = async (
         name: string,
         source: ObjectData,
-        expected: Parameters<
-          typeof runOwnedDailyReportDownloads
-        >[0]["supplementalExpected"],
+        expected: NonNullable<
+          Parameters<
+            typeof runOwnedDailyReportDownloads
+          >[0]["supplementalExpected"]
+        >,
         task = completedTask,
       ) => {
         const report = await runOwnedDailyReportDownloads({
@@ -2529,6 +2535,11 @@ test(journeyName, async ({ browser, request }) => {
         const handle = async (route: Route) => {
           try {
             requireFact(
+              route.request().method() === "POST" &&
+                route.request().url() === url,
+              "supplemental original UI POST route binding",
+            );
+            requireFact(
               !state.journal,
               "one supplemental original UI booking only",
             );
@@ -2550,7 +2561,9 @@ test(journeyName, async ({ browser, request }) => {
                 partnerUserRef: SUBJECT,
                 quoteId: text(quote.quoteId),
                 feeDisclosureVersion: text(quote.feeDisclosureVersion),
-                expectedScheduledAt: scheduled,
+                ...(scheduled === undefined
+                  ? {}
+                  : { expectedScheduledAt: scheduled }),
                 pickupAddress,
                 dropoffAddress,
                 passengerName,
@@ -2639,6 +2652,11 @@ test(journeyName, async ({ browser, request }) => {
           const create = page.locator('[data-drt-operation="referral-create"]');
           await expect(create).toBeEnabled();
           await page.route(url, handle);
+          deadline = setTimeout(
+            () =>
+              fail(new JourneyFailure("supplemental-original-booking-timeout")),
+            25_000,
+          );
           await clickAndSettleOriginalBookingAck(() => create.click(), settled);
           requireFact(
             state.orderId && state.journal && state.quote,
@@ -2680,6 +2698,26 @@ test(journeyName, async ({ browser, request }) => {
           `${DIRECTORY}/cancellations/unassigned-booking-write-journal.json`,
           "utf8",
         ),
+      );
+      await persistPrivateJson(
+        `${DIRECTORY}/TEN03-06/C1-no-dispatch-source.json`,
+        {
+          definitionSha: definition,
+          runtimeSha: runtime,
+          orderId: c1.orderId,
+          originalCaseFactsFile: unassignedCancellation.factsFile,
+          originalBookingBodySha256: c1Journal.bodySha256,
+          observedSameRunActions: ["booking", "cancel"],
+          provenance:
+            "original runFourStageOwnedCancellations unassigned branch; no dispatch action in this caller",
+          canonical: {
+            status: c1.status,
+            cancelledAt: c1.cancelledAt,
+            reservationWindowStart: c1.reservationWindowStart,
+          },
+          absenceQualification:
+            "bounded caller sequence plus canonical/report facts; global task/trace absence pending complete authorized source",
+        },
       );
       await reportCase(
         "C1-cancelled-null",
@@ -2805,6 +2843,25 @@ test(journeyName, async ({ browser, request }) => {
           ),
         );
       }
+      const firstReservation = extraBookings.find(
+        (b) => b.name === "reservation-1",
+      );
+      requireFact(
+        firstReservation?.orderId && firstReservation.journal?.current,
+        "first reservation original custody retained",
+      );
+      const firstReservationAfterBoth = await getExtraOrder(
+        firstReservation.orderId,
+      );
+      await reportCase(
+        "reservation-1-after-both",
+        firstReservationAfterBoth,
+        resolveExpectedCancelledDailyDispatchRecord(
+          firstReservationAfterBoth,
+          firstReservation.journal.current,
+          { entrySlug: ENTRY, pickupAddress, dropoffAddress },
+        ),
+      );
       // Provision SECOND real supply through the original upload/review flow.
       const secondPhone = `${phone.slice(0, -1)}${(Number(phone.slice(-1)) + 1) % 10}`;
       await provisionSupply(extraSupply, `${nonce}-second`, secondPhone);
@@ -2816,28 +2873,43 @@ test(journeyName, async ({ browser, request }) => {
         object(
           (await extraSupply.transport.call("driver", path, options)).data,
         );
-      await driver2("/api/driver/location-heartbeats/batch", {
-        method: "POST",
-        body: {
-          items: [
-            {
-              eventId: randomUUID(),
-              deviceId: extraSupply.deviceId,
-              ...second,
-              taskId: null,
-              sequenceNo: 1,
-              recordedAt: now(),
-              lat: pickup.lat,
-              lng: pickup.lng,
-              accuracyM: 5,
-              workState: "available",
-              appState: "foreground",
-              transportMode: "foreground",
-              networkType: "wifi",
+      let secondSequence = 0;
+      const heartbeatSecond = async (
+        taskId: string | null,
+        workState: string,
+      ) => {
+        const accepted = await driver2(
+          "/api/driver/location-heartbeats/batch",
+          {
+            method: "POST",
+            body: {
+              items: [
+                {
+                  eventId: randomUUID(),
+                  deviceId: extraSupply.deviceId,
+                  ...second,
+                  taskId,
+                  sequenceNo: ++secondSequence,
+                  recordedAt: now(),
+                  lat: pickup.lat,
+                  lng: pickup.lng,
+                  accuracyM: 5,
+                  workState,
+                  appState: "foreground",
+                  transportMode: "foreground",
+                  networkType: "wifi",
+                },
+              ],
             },
-          ],
-        },
-      });
+          },
+        );
+        const item = object(records(accepted.items)[0]);
+        requireFact(
+          item.accepted === true && item.currentLocationUpdated === true,
+          "second own actor bound heartbeat accepted",
+        );
+      };
+      await heartbeatSecond(null, "available");
       await heartbeat(null, "available", ++cancellationSequence);
       const redispatchBooking = await bookExtraFromUI("redispatched");
       const redispatchResult = await runOwnedRedispatchToSecond({
@@ -2845,7 +2917,24 @@ test(journeyName, async ({ browser, request }) => {
         nonce: `${nonce}-redispatched`,
         first: { driverId, vehicleId },
         second,
-        ops: opsControl,
+        ops: async (path, options) => {
+          if (options?.method === "POST") {
+            redispatchBooking.actions.push(path);
+            await persistPrivateJson(
+              `${DIRECTORY}/TEN03-06/redispatched/actions.json`,
+              {
+                orderId: redispatchBooking.orderId,
+                actions: redispatchBooking.actions,
+                nextOriginalCommand: {
+                  path,
+                  body: options.body,
+                  idempotencyKey: options.headers?.["Idempotency-Key"],
+                },
+              },
+            );
+          }
+          return opsControl(path, options);
+        },
         firstDriver: (path, options) => call("driver", path, options),
         secondDriver: driver2,
         persist: (facts) =>
@@ -2855,22 +2944,32 @@ test(journeyName, async ({ browser, request }) => {
           ),
         completeSecond: async (task) => {
           const id = text(task.taskId);
-          for (const [action, key] of [
-            ["accept", "acceptedAt"],
-            ["depart", "departedAt"],
-            ["arrived_pickup", "arrivedAt"],
-            ["start", "startedAt"],
-          ]) {
+          for (const [action, key, state] of [
+            ["accept", "acceptedAt", "assigned"],
+            ["depart", "departedAt", "enroute"],
+            ["arrived_pickup", "arrivedAt", "arrived"],
+            ["start", "startedAt", "on_trip"],
+          ] as const) {
             await driver2(
               `/api/driver/tasks/${encodeURIComponent(id)}/${action}`,
               {
                 method: "POST",
                 body: {
-                  [key!]: now(),
+                  [key]: now(),
                   ...(action === "depart" ? { currentLocation: pickup } : {}),
                 },
               },
             );
+            const current = await driver2(
+              `/api/driver/tasks/${encodeURIComponent(id)}`,
+            );
+            requireFact(
+              current.orderId === redispatchBooking.orderId &&
+                current.driverId === second.driverId &&
+                current.assignmentId === task.assignmentId,
+              "second progression same owned task assignment",
+            );
+            await heartbeatSecond(id, state);
           }
           await driver2(
             `/api/driver/tasks/${encodeURIComponent(id)}/complete`,
@@ -2990,74 +3089,129 @@ test(journeyName, async ({ browser, request }) => {
           );
         });
       });
-    for (const booking of extraBookings) {
-      if (
-        booking.journal?.current?.state === "ack_unknown" ||
-        (booking.orderId && !booking.terminal)
-      ) {
-        cleanupErrors.push(`supplemental-${booking.name}-retained-unresolved`);
-        evidence.record({
-          stage: `supplemental-${booking.name}-retained-unresolved`,
-          result: "retained",
-        });
+    if (!RECOVERY_ONLY) {
+      for (const booking of extraBookings) {
+        // Resolve known owned orders only through the ordinary passenger cancel
+        // policy. Closed windows or a lost ACK stay retained; never complete a
+        // future reservation early or issue a replacement booking.
+        if (booking.orderId && !booking.terminal) {
+          const ownId = booking.orderId;
+          await cleanup(
+            `supplemental-${booking.name}-normal-terminalization`,
+            async () => {
+              const read = async () => {
+                const source = await opsControl(
+                  `/orders/${encodeURIComponent(ownId)}`,
+                );
+                requireFact(
+                  source.orderId === ownId &&
+                    source.partnerEntrySlug === ENTRY &&
+                    object(source.passenger).passengerId === passengerId,
+                  "supplemental cleanup exact owned subject",
+                );
+                return source;
+              };
+              await terminalizeOwnOrder(ownId, read, async (action) => {
+                if (action === "resolve-exception-hold")
+                  return opsControl(
+                    `/orders/${encodeURIComponent(ownId)}/resolve-exception-hold`,
+                    {
+                      method: "POST",
+                      body: {
+                        resolution: "cancel_order",
+                        reason: "Own supplemental synthetic cleanup",
+                        traceId: `${nonce}-${booking.name}-cleanup`,
+                      },
+                    },
+                  );
+                return cancelReferralOrder(
+                  ownId,
+                  "Own supplemental synthetic normal cleanup",
+                );
+              });
+              booking.terminal = true;
+            },
+          );
+        }
+        if (
+          booking.journal?.current?.state === "ack_unknown" ||
+          (booking.orderId && !booking.terminal)
+        ) {
+          cleanupErrors.push(
+            `supplemental-${booking.name}-retained-unresolved`,
+          );
+          evidence.record({
+            stage: `supplemental-${booking.name}-retained-unresolved`,
+            result: "retained",
+          });
+        }
       }
+      if (extraSupply.driverId)
+        await cleanup("second-own-driver-offline", () =>
+          adminControl(
+            `/regulatory-registry/drivers/${encodeURIComponent(text(extraSupply.driverId))}/work-state`,
+            { method: "POST", body: { workState: "offline" } },
+          ),
+        );
+      if (extraSupply.bindingId && extraSupply.deviceId)
+        await cleanup("second-own-binding-revoked-by-second-driver", () =>
+          extraSupply.transport.call(
+            "driver",
+            "/api/auth/driver/device/revoke",
+            {
+              method: "POST",
+              body: {
+                bindingId: extraSupply.bindingId,
+                deviceId: extraSupply.deviceId,
+              },
+            },
+          ),
+        );
+      else if (extraSupply.invitation)
+        await cleanup("second-unused-invitation-revoked", () =>
+          call("api", "/api/auth/driver/device/invite/revoke", {
+            method: "POST",
+            body: { registrationCode: extraSupply.invitation },
+            headers: { "x-idempotency-key": `${nonce}-second-invite-revoke` },
+          }),
+        );
+      await persistPrivateJson(`${DIRECTORY}/TEN03-06-custody.json`, {
+        definitionSha: definition,
+        runtimeSha: runtime,
+        bookings: extraBookings.map((b) => ({
+          name: b.name,
+          orderId: b.orderId,
+          terminal: b.terminal ?? false,
+          journalState: b.journal?.current?.state,
+          bodySha256: b.journal?.current?.bodySha256,
+          actions: b.actions,
+          recovery: b.journal?.current?.recovery,
+        })),
+        exactOwnedOrderIds: extraBookings.map((b) => b.orderId).filter(Boolean),
+        secondSupply: {
+          driverId: extraSupply.driverId,
+          vehicleId: extraSupply.vehicleId,
+          deviceId: extraSupply.deviceId,
+          bindingId: extraSupply.bindingId,
+          plateNo: extraSupply.plateNo,
+          driverSubmissionId: extraSupply.driverSubmissionId,
+          vehicleSubmissionId: extraSupply.vehicleSubmissionId,
+          retainedApprovedSupplyAndDocuments: Boolean(
+            extraSupply.driverId || extraSupply.vehicleId,
+          ),
+        },
+        reports: supplementalReports,
+        sourceAuthority: {
+          canonicalReads:
+            "normal same-runtime GET /orders/:id and report repository path when enabled",
+          pgEnabledDeploymentProof:
+            "pending external same-release operator evidence",
+          dispatchTrace: "instance-local-memory; not durable global proof",
+          noAssignment:
+            "own journaled no-dispatch sequence and report null facts only; global absence pending complete authority",
+        },
+      });
     }
-    if (extraSupply.driverId)
-      await cleanup("second-own-driver-offline", () =>
-        adminControl(
-          `/regulatory-registry/drivers/${encodeURIComponent(text(extraSupply.driverId))}/work-state`,
-          { method: "POST", body: { workState: "offline" } },
-        ),
-      );
-    if (extraSupply.bindingId && extraSupply.deviceId)
-      await cleanup("second-own-binding-revoked-by-second-driver", () =>
-        extraSupply.transport.call("driver", "/api/auth/driver/device/revoke", {
-          method: "POST",
-          body: {
-            bindingId: extraSupply.bindingId,
-            deviceId: extraSupply.deviceId,
-          },
-        }),
-      );
-    else if (extraSupply.invitation)
-      await cleanup("second-unused-invitation-revoked", () =>
-        call("api", "/api/auth/driver/device/invite/revoke", {
-          method: "POST",
-          body: { registrationCode: extraSupply.invitation },
-          headers: { "x-idempotency-key": `${nonce}-second-invite-revoke` },
-        }),
-      );
-    await persistPrivateJson(`${DIRECTORY}/TEN03-06-custody.json`, {
-      definitionSha: definition,
-      runtimeSha: runtime,
-      bookings: extraBookings.map((b) => ({
-        name: b.name,
-        orderId: b.orderId,
-        terminal: b.terminal ?? false,
-        journalState: b.journal?.current?.state,
-        bodySha256: b.journal?.current?.bodySha256,
-        actions: b.actions,
-        recovery: b.journal?.current?.recovery,
-      })),
-      exactOwnedOrderIds: extraBookings.map((b) => b.orderId).filter(Boolean),
-      secondSupply: {
-        driverId: extraSupply.driverId,
-        vehicleId: extraSupply.vehicleId,
-        deviceId: extraSupply.deviceId,
-        bindingId: extraSupply.bindingId,
-        retainedApprovedSupplyAndDocuments: true,
-      },
-      reports: supplementalReports,
-      sourceAuthority: {
-        canonicalReads:
-          "normal same-runtime GET /orders/:id and report repository path when enabled",
-        pgEnabledDeploymentProof:
-          "pending external same-release operator evidence",
-        dispatchTrace: "instance-local-memory; not durable global proof",
-        noAssignment:
-          "own journaled no-dispatch sequence and report null facts only; global absence pending complete authority",
-      },
-    });
     const ownDriverForCleanup = driverId;
     if (ownDriverForCleanup)
       await cleanup("own-synthetic-driver-offline", () =>
@@ -3186,6 +3340,16 @@ test(journeyName, async ({ browser, request }) => {
             : cancellations,
           displayObservations: displayObservations ?? null,
           dailyReportDownloads: dailyReportDownloads ?? null,
+          ...(!RECOVERY_ONLY
+            ? {
+                supplementalDailyReportCustody: {
+                  file: "TEN03-06-custody.json",
+                  reportsObserved: supplementalReports.length,
+                  runtimeAcceptance:
+                    "pending same-release PG-enabled durable-source/deployment proof and operator cleanup verification",
+                },
+              }
+            : {}),
         },
         null,
         2,

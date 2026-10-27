@@ -5,6 +5,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BookingWriteJournal,
+  NativeTransport,
+  futureTaipeiReservationIntents,
+  verifyOwnedReservationCancellation,
+  runOwnedRedispatchToSecond,
+  type ObjectData,
+  type CallOptions,
   hash,
   persistPrivateJson,
   requireFact,
@@ -364,7 +370,10 @@ describe("exact scheduled booking custody", () => {
         send = vi.fn();
       const invalid = { ...expected, ...patch };
       await expect(
-        new BookingWriteJournal(invalid, persist).beforeSend(
+        new BookingWriteJournal(
+          invalid as BookingJournalContext,
+          persist,
+        ).beforeSend(
           body({
             scheduledAt: invalid.expectedScheduledAt,
             quoteId: invalid.quoteId,
@@ -377,4 +386,285 @@ describe("exact scheduled booking custody", () => {
       expect(send).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("reservation orchestration through public ports", () => {
+  it("uses future Taipei 23:55 and next 00:05 with explicit offsets across UTC year boundary", () => {
+    expect(
+      futureTaipeiReservationIntents(Date.parse("2026-12-29T20:00:00Z")),
+    ).toEqual(["2027-01-01T23:55:00+08:00", "2027-01-02T00:05:00+08:00"]);
+  });
+  it.each([
+    "open",
+    "closed",
+    "mismatched-order",
+    "mismatched-quote",
+    "bad-ACK",
+  ])(
+    "binds real before-window -> original cancel -> canonical terminal readback (%s)",
+    async (scenario) => {
+      const intendedInput = futureTaipeiReservationIntents()[0]!;
+      const scheduled = new Date(intendedInput).toISOString();
+      const expected = {
+        ...context,
+        expectedScheduledAt: scheduled,
+        feeDisclosureVersion: "fee-reservation",
+      };
+      const journal = new BookingWriteJournal(expected, async () => undefined);
+      await journal.beforeSend(
+        JSON.stringify(
+          command({
+            scheduledAt: scheduled,
+            feeDisclosureVersion: "fee-reservation",
+            feeConfirmed: true,
+          }),
+        ),
+        "own-key-1",
+        async () => undefined,
+      );
+      await journal.acknowledge("reservation", context.quoteId);
+      const cutoff = new Date(
+        Date.parse(scheduled) - 30 * 60_000,
+      ).toISOString();
+      const events: string[] = [];
+      const order = {
+        orderId: scenario === "mismatched-order" ? "foreign" : "reservation",
+        status: "created",
+        reservationWindowStart: scheduled,
+        cancelableUntil: cutoff,
+        referralPassengerLifecycle: { quote: { quoteId: context.quoteId } },
+      };
+      let terminal = false;
+      const run = verifyOwnedReservationCancellation({
+        intendedInput,
+        journal,
+        orderId: "reservation",
+        quote: {
+          quoteId:
+            scenario === "mismatched-quote" ? "foreign" : context.quoteId,
+          requestedScheduledAt: scheduled,
+          timingMode: "scheduled",
+        },
+        readOrder: async () => {
+          events.push("read");
+          return terminal
+            ? {
+                ...order,
+                status: "cancelled",
+                cancelledAt: "2026-10-27T00:00:00Z",
+              }
+            : order;
+        },
+        readWindow: async () => ({
+          canCancel: scenario !== "closed",
+          cancelableUntil: cutoff,
+        }),
+        cancel: async () => {
+          events.push("cancel");
+          terminal = true;
+          return {
+            orderId: scenario === "bad-ACK" ? "foreign" : "reservation",
+            status: "cancelled",
+            cancelledAt: "2026-10-27T00:00:00Z",
+          };
+        },
+        persist: async (facts) => {
+          events.push(facts.terminal ? "persist-terminal" : "persist-before");
+        },
+      });
+      if (scenario === "open") {
+        await run;
+        expect(events).toEqual([
+          "read",
+          "persist-before",
+          "cancel",
+          "read",
+          "persist-terminal",
+        ]);
+      } else {
+        await expect(run).rejects.toThrow();
+        expect(events).not.toContain("persist-terminal");
+        if (scenario !== "bad-ACK") expect(events).not.toContain("cancel");
+      }
+    },
+  );
+});
+
+describe("true redispatch orchestration and independent Driver actors", () => {
+  it.each([
+    "normal",
+    "second-ineligible",
+    "old-task-not-cancelled",
+    "wrong-second-actor",
+  ])(
+    "uses actual redispatch command/guard and separate task readbacks (%s)",
+    async (scenario) => {
+      const first = { driverId: "first-driver", vehicleId: "first-vehicle" };
+      const second = { driverId: "second-driver", vehicleId: "second-vehicle" };
+      const commands: { path: string; options: CallOptions | undefined }[] = [];
+      const firstTask = {
+        taskId: "first-task",
+        assignmentId: "first-assignment",
+        dispatchJobId: "job-1",
+        orderId: "order",
+        ...first,
+        status: "pending_acceptance",
+      };
+      const secondTask = {
+        taskId: "second-task",
+        assignmentId: "second-assignment",
+        dispatchJobId: "job-2",
+        orderId: "order",
+        ...second,
+        status: "pending_acceptance",
+      };
+      let redispatched = false;
+      const ops = async (
+        path: string,
+        options?: CallOptions,
+      ): Promise<ObjectData> => {
+        commands.push({ path, options });
+        if (path.includes("/candidates"))
+          return {
+            items: [first, second].map((pair) => ({
+              ...pair,
+              serviceBuckets: ["business_dispatch"],
+              eligibilityDecision:
+                scenario === "second-ineligible" && pair === second
+                  ? "ineligible"
+                  : "eligible",
+              etaMinutes: 1,
+              hardReasonCodes: [],
+            })),
+          };
+        if (path.endsWith("/redispatch")) {
+          redispatched = true;
+          return { dispatchJobId: "job-2" };
+        }
+        if (path.endsWith("/dispatch")) return { dispatchJobId: "job-1" };
+        if (path === "/dispatch/assign")
+          return redispatched ? secondTask : firstTask;
+        if (path.endsWith("/dispatch-trace")) return { items: [] }; // instance memory absence is qualified, never a PG/global proof
+        throw new Error("unexpected path");
+      };
+      const firstDriver = vi.fn(async () => ({
+        ...firstTask,
+        status:
+          redispatched && scenario !== "old-task-not-cancelled"
+            ? "cancelled"
+            : "pending_acceptance",
+      }));
+      const secondDriver = vi.fn(async () => ({
+        ...secondTask,
+        driverId:
+          scenario === "wrong-second-actor" ? "first-driver" : second.driverId,
+      }));
+      const persist = vi.fn(async () => undefined);
+      const complete = vi.fn(async () => ({
+        ...secondTask,
+        status: "completed",
+      }));
+      const run = runOwnedRedispatchToSecond({
+        orderId: "order",
+        nonce: "own-rd",
+        first,
+        second,
+        ops,
+        firstDriver,
+        secondDriver,
+        persist,
+        completeSecond: complete,
+      });
+      if (scenario === "normal") {
+        expect(await run).toMatchObject({
+          traceObservedRedispatchCount: 0,
+          completedTask: { driverId: second.driverId },
+        });
+        expect(firstDriver).toHaveBeenCalledWith(
+          "/api/driver/tasks/first-task",
+        );
+        expect(secondDriver).toHaveBeenCalledWith(
+          "/api/driver/tasks/second-task",
+        );
+        expect(
+          commands.find((c) => c.path.endsWith("/redispatch"))?.options,
+        ).toMatchObject({
+          method: "POST",
+          body: {
+            expectedAssignmentVersion: 1,
+            reasonCode: "synthetic_owned_second_supply",
+            idempotencyKey: "own-rd-redispatch",
+          },
+          headers: { "Idempotency-Key": "own-rd-redispatch" },
+        });
+        expect(persist).toHaveBeenCalledTimes(2);
+      } else {
+        await expect(run).rejects.toThrow();
+        expect(complete).not.toHaveBeenCalled();
+      }
+      expect(commands.some((c) => c.path.includes("reassign_driver"))).toBe(
+        false,
+      );
+      if (scenario === "second-ineligible")
+        expect(commands.some((c) => c.path.endsWith("/redispatch"))).toBe(
+          false,
+        );
+    },
+  );
+});
+
+describe("two owned Driver transports keep actor authority separate", () => {
+  it("uses each original actor token for its own task and binding revocation", async () => {
+    const requests: { url: string; auth: string | null; body: unknown }[] = [];
+    const fetcher = (async (url, init) => {
+      requests.push({
+        url: String(url),
+        auth: new Headers(init?.headers).get("authorization"),
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+      return new Response(
+        JSON.stringify({ ok: true, data: { accepted: true } }),
+        {
+          status: 200,
+          headers: { "x-drts-candidate-sha": context.runtimeSha },
+        },
+      );
+    }) as typeof fetch;
+    const origins = {
+      api: "https://api.example.test",
+      admin: "https://admin.example.test",
+      ops: "https://ops.example.test",
+      fleet: "https://fleet.example.test",
+      referral: "https://referral.example.test",
+    };
+    const first = new NativeTransport(origins, context.runtimeSha, {}, fetcher);
+    const second = new NativeTransport(
+      origins,
+      context.runtimeSha,
+      {},
+      fetcher,
+    );
+    first.setSession("driver", "first-private-token");
+    second.setSession("driver", "second-private-token");
+    await first.call("driver", "/api/driver/tasks/first");
+    await second.call("driver", "/api/driver/tasks/second");
+    for (const [transport, bindingId, deviceId] of [
+      [first, "first-binding", "first-device"],
+      [second, "second-binding", "second-device"],
+    ] as const)
+      await transport.call("driver", "/api/auth/driver/device/revoke", {
+        method: "POST",
+        body: { bindingId, deviceId },
+      });
+    expect(requests.map((r) => r.auth)).toEqual([
+      "Bearer first-private-token",
+      "Bearer second-private-token",
+      "Bearer first-private-token",
+      "Bearer second-private-token",
+    ]);
+    expect(requests.slice(2).map((r) => r.body)).toEqual([
+      { bindingId: "first-binding", deviceId: "first-device" },
+      { bindingId: "second-binding", deviceId: "second-device" },
+    ]);
+  });
 });

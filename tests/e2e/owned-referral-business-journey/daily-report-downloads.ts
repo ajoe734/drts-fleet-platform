@@ -658,6 +658,28 @@ function validateReportRows(
     /^[a-f0-9]{40}$/.test(runtimeSha) && responseSha === runtimeSha,
     "daily-report-preview-runtime-sha-mismatch",
   );
+  if ("caseKind" in expected) {
+    const cancelled = expected.caseKind === "cancelled-unassigned";
+    requireFact(
+      expected.finalStatus === (cancelled ? "cancelled" : "completed") &&
+        expected.redispatchCount === (cancelled ? 0 : 1),
+      "daily-report-explicit-supplemental-case-policy",
+    );
+    for (const key of [
+      "finalDriverId",
+      "finalVehicleId",
+      "finalPlateNo",
+      "arrivedPickupAt",
+      "tripStartedAt",
+      "tripCompletedAt",
+    ] as const)
+      requireFact(
+        cancelled
+          ? expected[key] === null
+          : typeof expected[key] === "string" && expected[key]!.length > 0,
+        "daily-report-explicit-supplemental-source-values",
+      );
+  }
   const rows = records(rawRows);
   requireFact(rows.length > 0, "daily-report-preview-empty-rows");
 
@@ -1827,6 +1849,16 @@ export async function runOwnedDailyReportDownloads(
       pickupAddress,
       dropoffAddress,
     });
+  requireFact(
+    expected.orderId === order.orderId &&
+      expected.orderNo === order.orderNo &&
+      expected.finalStatus === order.status &&
+      expected.serviceDate ===
+        toTaipeiServiceDate(
+          text(order.reservationWindowStart ?? order.createdAt),
+        ),
+    "daily-report-supplemental-canonical-order-binding",
+  );
   const controlledOrderIdSet = new Set<string>([expected.orderId]);
   if (controlledOrderIds) {
     for (const candidateId of controlledOrderIds) {
@@ -2399,7 +2431,7 @@ export async function runOwnedDailyReportDownloads(
         detailExchange.bytes,
         `daily-report-job-detail-${format}`,
       );
-      const jobRowsCheck = validateDailyPreviewRows(
+      const jobRowsCheck = validateReportRows(
         jobDetail.rows,
         expected,
         runtimeSha,

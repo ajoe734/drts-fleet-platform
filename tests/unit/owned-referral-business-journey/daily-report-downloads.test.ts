@@ -31,6 +31,8 @@ import {
   runOwnedDailyReportDownloads,
   toTaipeiServiceDate,
   validateDailyPreviewRows,
+  validateSupplementalDailyPreviewRows,
+  resolveExpectedCancelledDailyDispatchRecord,
   validateDailyReportArtifactDownload,
   type DailyReportFormat,
 } from "../../e2e/owned-referral-business-journey/daily-report-downloads";
@@ -201,6 +203,39 @@ async function renderFormatBytes(
     return recordsToXlsx(plainRows, "daily_dispatch_record");
   }
   return recordsToPdf(plainRows, `daily_dispatch_record — ${jobId}`);
+}
+
+function cancelledCase() {
+  const raw = JSON.stringify({ entrySlug: ENTRY_SLUG, quoteId: "quote-C1" });
+  const order = buildOrderFixture({
+    status: "cancelled",
+    assignedDriverId: null,
+    assignedVehicleId: null,
+    tripCompletion: null,
+    cancelledAt: "2026-10-25T18:11:00.000Z",
+    cancelReason: null,
+  });
+  const expected = resolveExpectedCancelledDailyDispatchRecord(
+    order,
+    {
+      state: "acknowledged",
+      orderId: ORDER_ID,
+      quoteId: "quote-C1",
+      entrySlug: ENTRY_SLUG,
+      body: raw,
+      bodySha256: hash(Buffer.from(raw)),
+    },
+    buildOwnContext(),
+  );
+  const row = buildDailyDispatchRow({
+    ...expected,
+    firstDispatchAt: null,
+    firstAssignedAt: null,
+    etaSecondsAtAssignment: null,
+    complaintCount: 0,
+  });
+  delete row.caseKind;
+  return { order, expected, row };
 }
 
 describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contract", () => {
@@ -1232,6 +1267,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       expectedRetained: true,
     },
     {
+      caseName:
+        "cancelled null row uses normal UI filter rebuild and all immutable formats",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
       caseName: "all sibling rows belong to controlled owned orders",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -1357,17 +1400,21 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             .mockImplementation(() => shiftedStart + (realNow() - startedAt));
           restoreClock = () => clock.mockRestore();
         }
-        const ownRow = buildDailyDispatchRow(
-          previewFailure === "row-field"
-            ? { firstAssignedAt: "secret-invalid-assignment" }
-            : {},
-        );
-        const siblingRow = (orderId: string) =>
-          buildDailyDispatchRow({
-            recordId: `daily:${orderId}`,
-            orderId,
-            orderNo: "DRT-20261026-0000",
-          });
+        const cancelled = failureCase.startsWith("cancelled null");
+        const cancelledSource = cancelledCase();
+        const ownRow = cancelled
+          ? cancelledSource.row
+          : buildDailyDispatchRow(
+              previewFailure === "row-field"
+                ? { firstAssignedAt: "secret-invalid-assignment" }
+                : {},
+            );
+        const siblingRow = (orderId: string) => ({
+          ...ownRow,
+          recordId: `daily:${orderId}`,
+          orderId,
+          orderNo: "DRT-20261026-0000",
+        });
         const previewSiblingRow = siblingRow(previewSiblingOrderId);
         const jobSiblingRow = siblingRow(jobSiblingOrderId);
 
@@ -1673,7 +1720,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     format,
                     jobId,
                     rows,
-                    dateFromVal === "2026-10-25"
+                    dateFromVal === "2026-10-25" || cancelled
                       ? {
                           filters: {
                             ...buildDailyReportFilters(
@@ -1683,6 +1730,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                                 buildOwnContext(),
                               ),
                             ),
+                            finalStatus: statusVal,
                             serviceDateFrom: dateFromVal,
                             serviceDateTo: dateToVal,
                           },
@@ -1909,7 +1957,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             sourceReads += 1;
             return {
               items: [
-                buildOrderFixture(),
+                cancelled ? cancelledSource.order : buildOrderFixture(),
                 ...(failureCase.startsWith("source changes") &&
                 sourceReads === 2
                   ? [
@@ -1922,7 +1970,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               ],
             };
           },
-          order: buildOrderFixture(),
+          order: cancelled ? cancelledSource.order : buildOrderFixture(),
+          ...(cancelled
+            ? { supplementalExpected: cancelledSource.expected }
+            : {}),
           completedTask: buildTaskFixture(),
           entrySlug: ENTRY_SLUG,
           fleetSupplyTenantId: FLEET_SUPPLY_TENANT_ID,
@@ -2129,7 +2180,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         expect(result.preview.unverifiedSiblingRowCount).toBe(
           expectedPreviewControlled ? 0 : 1,
         );
-        expect(result.preview.finalPlateNo).toBe(PLATE_NO);
+        expect(result.preview.finalPlateNo).toBe(cancelled ? null : PLATE_NO);
+        expect(result.filters.finalStatus).toBe(
+          cancelled ? "cancelled" : "completed",
+        );
         expect(result.emptyDay.serviceDate).toBe("2026-10-25");
         expect(result.emptyDay.sourceBefore.emptyCount).toBe(0);
         expect(result.emptyDay.sourceAfter.ownPositivePresent).toBe(true);
@@ -2180,4 +2234,235 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
     },
     22_000,
   );
+});
+
+describe("explicit supplemental rows preserve strict completed controls", () => {
+  it("requires a real owned acknowledged journal and canonical cancelled source", () => {
+    const { expected, row } = cancelledCase();
+    expect(
+      validateSupplementalDailyPreviewRows(
+        [row],
+        expected,
+        RUNTIME_SHA,
+        RUNTIME_SHA,
+      ).ownRow,
+    ).toEqual(row);
+    expect(() =>
+      validateDailyPreviewRows(
+        [row],
+        expected as never,
+        RUNTIME_SHA,
+        RUNTIME_SHA,
+      ),
+    ).toThrow("strict-completed");
+    const main = resolveExpectedDailyDispatchRecord(
+      buildOrderFixture(),
+      buildTaskFixture(),
+      buildOwnContext(),
+    );
+    expect(() =>
+      validateDailyPreviewRows([row], main, RUNTIME_SHA, RUNTIME_SHA),
+    ).toThrow();
+  });
+  it.each([
+    "firstDispatchAt",
+    "firstAssignedAt",
+    "finalDriverId",
+    "finalVehicleId",
+    "finalPlateNo",
+    "etaSecondsAtAssignment",
+    "arrivedPickupAt",
+    "tripStartedAt",
+    "tripCompletedAt",
+  ])("does not infer cancelled %s null from another missing event", (key) => {
+    const { expected, row } = cancelledCase();
+    for (const value of [undefined, "", "2026-10-25T18:20:00.000Z", DRIVER_ID])
+      expect(() =>
+        validateSupplementalDailyPreviewRows(
+          [{ ...row, [key]: value }],
+          expected,
+          RUNTIME_SHA,
+          RUNTIME_SHA,
+        ),
+      ).toThrow();
+  });
+  it("rejects completed leakage, duplicate/missing own row, wrong date and count", () => {
+    const { expected, row } = cancelledCase();
+    for (const rows of [
+      [row, row],
+      [],
+      [row, buildDailyDispatchRow()],
+      [{ ...row, serviceDate: "2026-10-27" }],
+      [{ ...row, redispatchCount: 1 }],
+    ])
+      expect(() =>
+        validateSupplementalDailyPreviewRows(
+          rows,
+          expected,
+          RUNTIME_SHA,
+          RUNTIME_SHA,
+        ),
+      ).toThrow();
+  });
+  it("requires redispatch count one, second pair and real arrival while allowing zero complaints", () => {
+    const main = resolveExpectedDailyDispatchRecord(
+      buildOrderFixture(),
+      buildTaskFixture(),
+      buildOwnContext(),
+    );
+    const expected = {
+      ...main,
+      caseKind: "redispatched" as const,
+      redispatchCount: 1,
+      cancellationReason: null,
+    };
+    const row = buildDailyDispatchRow({
+      redispatchCount: 1,
+      complaintCount: 0,
+    });
+    expect(
+      validateSupplementalDailyPreviewRows(
+        [row],
+        expected,
+        RUNTIME_SHA,
+        RUNTIME_SHA,
+      ).complaintCount,
+    ).toBe(0);
+    for (const patch of [
+      { redispatchCount: 0 },
+      { redispatchCount: 2 },
+      { arrivedPickupAt: null },
+      { finalDriverId: "first-driver" },
+    ])
+      expect(() =>
+        validateSupplementalDailyPreviewRows(
+          [{ ...row, ...patch }],
+          expected,
+          RUNTIME_SHA,
+          RUNTIME_SHA,
+        ),
+      ).toThrow();
+    expect(() =>
+      validateDailyPreviewRows([row], main, RUNTIME_SHA, RUNTIME_SHA),
+    ).toThrow("complaint-count");
+  });
+  it.each(DAILY_REPORT_FORMATS)(
+    "checks actual cancelled %s bytes and rejects a nonempty arrival",
+    async (format) => {
+      const { expected, row } = cancelledCase();
+      const jobId = `cancelled-${format}`;
+      const detail = buildJobDetailFixture(format, jobId, [row], {
+        filters: buildDailyReportFilters(expected),
+      });
+      const input = {
+        format,
+        jobId,
+        jobDetail: detail,
+        expected,
+        previewOwnRow: row,
+        runtimeSha: RUNTIME_SHA,
+        detailStatus: 200,
+        detailResponseSha: RUNTIME_SHA,
+        artifactStatus: 200,
+        artifactResponseSha: RUNTIME_SHA,
+        contentType: DAILY_REPORT_MIME_TYPES[format],
+        contentDisposition: `attachment; filename="daily_dispatch_record-${jobId}.${format}"`,
+        bytes: await renderFormatBytes(format, jobId, [row]),
+        artifactPath: "private/cancelled",
+        nowMs: Date.parse("2026-10-25T19:00:00Z"),
+      };
+      expect(
+        (await validateDailyReportArtifactDownload(input)).ownOrderPresent,
+      ).toBe(true);
+      await expect(
+        validateDailyReportArtifactDownload({
+          ...input,
+          bytes: await renderFormatBytes(format, jobId, [
+            { ...row, arrivedPickupAt: "2026-10-25T18:20:00.000Z" },
+          ]),
+        }),
+      ).rejects.toThrow();
+    },
+  );
+});
+
+describe("two true Taipei reservation service days in all three formats", () => {
+  for (const intended of [
+    "2027-01-01T23:55:00+08:00",
+    "2027-01-02T00:05:00+08:00",
+  ]) {
+    it.each(DAILY_REPORT_FORMATS)(
+      `${intended} binds original schedule in %s`,
+      async (format) => {
+        const original = cancelledCase();
+        const reservationWindowStart = new Date(intended).toISOString();
+        const raw = JSON.stringify({
+          entrySlug: ENTRY_SLUG,
+          quoteId: "quote-scheduled",
+          scheduledAt: reservationWindowStart,
+        });
+        const order = { ...original.order, reservationWindowStart };
+        const expected = resolveExpectedCancelledDailyDispatchRecord(
+          order,
+          {
+            state: "acknowledged",
+            orderId: ORDER_ID,
+            quoteId: "quote-scheduled",
+            entrySlug: ENTRY_SLUG,
+            body: raw,
+            bodySha256: hash(Buffer.from(raw)),
+          },
+          buildOwnContext(),
+        );
+        expect(expected.serviceDate).toBe(intended.slice(0, 10));
+        const row = {
+          ...original.row,
+          serviceDate: expected.serviceDate,
+          reservationTime: reservationWindowStart,
+        };
+        validateSupplementalDailyPreviewRows(
+          [row],
+          expected,
+          RUNTIME_SHA,
+          RUNTIME_SHA,
+        );
+        expect(() =>
+          validateSupplementalDailyPreviewRows(
+            [
+              {
+                ...row,
+                serviceDate: intended.startsWith("2027-01-01")
+                  ? "2027-01-02"
+                  : "2027-01-01",
+              },
+            ],
+            expected,
+            RUNTIME_SHA,
+            RUNTIME_SHA,
+          ),
+        ).toThrow();
+        const jobId = `scheduled-${intended.slice(8, 10)}-${format}`;
+        const result = await validateDailyReportArtifactDownload({
+          format,
+          jobId,
+          expected,
+          previewOwnRow: row,
+          jobDetail: buildJobDetailFixture(format, jobId, [row], {
+            filters: buildDailyReportFilters(expected),
+          }),
+          detailStatus: 200,
+          detailResponseSha: RUNTIME_SHA,
+          artifactStatus: 200,
+          artifactResponseSha: RUNTIME_SHA,
+          contentType: DAILY_REPORT_MIME_TYPES[format],
+          contentDisposition: `attachment; filename="daily_dispatch_record-${jobId}.${format}"`,
+          bytes: await renderFormatBytes(format, jobId, [row]),
+          artifactPath: "private/reservation",
+          runtimeSha: RUNTIME_SHA,
+          nowMs: Date.parse("2026-10-25T19:00:00Z"),
+        });
+        expect(result.rowCount).toBe(1);
+      },
+    );
+  }
 });
