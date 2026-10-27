@@ -1794,7 +1794,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             stage: "daily-report-preview-dispatch-assignment-fields-required",
           });
           const diagnostic = JSON.stringify(evidence.events);
-          expect(diagnostic).toContain("daily-report-preview-own-order-verified");
+          expect(diagnostic).toContain(
+            "daily-report-preview-own-order-verified",
+          );
           expect(diagnostic).toContain("daily-report-job-csv-accepted");
           expect(diagnostic).toContain(
             "daily-report-job-detail-field-firstAssignedAt-parseable-false",
@@ -1812,7 +1814,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           );
           expect(artifactRequests).toBe(1);
           expect(unrouteCalled).toBe(true);
-          await expect(stat(path.join(tempDir, "daily-reports"))).rejects.toThrow();
+          await expect(
+            stat(path.join(tempDir, "daily-reports")),
+          ).rejects.toThrow();
           return;
         }
         if (previewFailure === "row-field") {
