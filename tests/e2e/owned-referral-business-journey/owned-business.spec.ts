@@ -2526,11 +2526,7 @@ test(journeyName, async ({ browser, request }) => {
           fail = reject;
         });
         void settled.catch(() => undefined);
-        const deadline = setTimeout(
-          () =>
-            fail(new JourneyFailure("supplemental-original-booking-timeout")),
-          25_000,
-        );
+        let deadline: ReturnType<typeof setTimeout> | undefined;
         const url = `${origins.referral}/api/referral/booking`;
         const handle = async (route: Route) => {
           try {

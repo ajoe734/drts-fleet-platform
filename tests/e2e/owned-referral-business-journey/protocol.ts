@@ -1555,6 +1555,8 @@ export async function runOwnedRedispatchToSecond(p: {
     firstTask.orderId === p.orderId &&
       firstTask.driverId === p.first.driverId &&
       firstTask.vehicleId === p.first.vehicleId &&
+      firstTask.taskId === firstAck.taskId &&
+      firstTask.dispatchJobId === firstJobId &&
       firstTask.assignmentId === firstAck.assignmentId &&
       firstTask.status === "pending_acceptance",
     "redispatch original first assignment/task binding",
@@ -1577,6 +1579,8 @@ export async function runOwnedRedispatchToSecond(p: {
     secondPair: p.second,
     command,
     traceAuthority: "instance-local-memory-only",
+    assignmentVersionProvenance:
+      "version 1 guard from this sole original assignment ACK; task API has no assignmentVersion field",
   });
   const redispatched = await p.ops(
     `/orders/${encodeURIComponent(p.orderId)}/redispatch`,
@@ -1620,11 +1624,17 @@ export async function runOwnedRedispatchToSecond(p: {
   requireFact(
     oldTask.orderId === p.orderId &&
       oldTask.assignmentId === firstTask.assignmentId &&
+      oldTask.taskId === firstTask.taskId &&
+      oldTask.driverId === p.first.driverId &&
+      oldTask.vehicleId === p.first.vehicleId &&
+      oldTask.dispatchJobId === firstJobId &&
       oldTask.status === "cancelled" &&
       secondTask.orderId === p.orderId &&
       secondTask.driverId === p.second.driverId &&
       secondTask.vehicleId === p.second.vehicleId &&
       secondTask.assignmentId === secondAck.assignmentId &&
+      secondTask.taskId === secondAck.taskId &&
+      secondTask.status === "pending_acceptance" &&
       secondTask.dispatchJobId === nextJobId &&
       secondTask.taskId !== firstTask.taskId &&
       secondTask.assignmentId !== firstTask.assignmentId,
@@ -1647,7 +1657,13 @@ export async function runOwnedRedispatchToSecond(p: {
     traceAuthority: "instance-local-memory-only; durable completeness pending",
   });
   requireFact(
-    completedTask.status === "completed" && completedTask.orderId === p.orderId,
+    completedTask.status === "completed" &&
+      completedTask.orderId === p.orderId &&
+      completedTask.taskId === secondTask.taskId &&
+      completedTask.assignmentId === secondTask.assignmentId &&
+      completedTask.dispatchJobId === nextJobId &&
+      completedTask.driverId === p.second.driverId &&
+      completedTask.vehicleId === p.second.vehicleId,
     "redispatch second driver normal completion readback",
   );
   // Missing per-instance events are diagnostic, never proof of global absence.

@@ -18,6 +18,8 @@ import {
   type BookingJournalSnapshot,
 } from "../../e2e/owned-referral-business-journey/protocol";
 
+import { parseOriginalUnknownBookingJournal } from "../../e2e/owned-referral-business-journey/original-journal-recovery";
+
 const context: BookingJournalContext = {
   definitionSha: "a".repeat(40),
   runtimeSha: "b".repeat(40),
@@ -496,6 +498,7 @@ describe("true redispatch orchestration and independent Driver actors", () => {
     "second-ineligible",
     "old-task-not-cancelled",
     "wrong-second-actor",
+    "wrong-completed-task",
   ])(
     "uses actual redispatch command/guard and separate task readbacks (%s)",
     async (scenario) => {
@@ -562,6 +565,10 @@ describe("true redispatch orchestration and independent Driver actors", () => {
       const persist = vi.fn(async () => undefined);
       const complete = vi.fn(async () => ({
         ...secondTask,
+        taskId:
+          scenario === "wrong-completed-task"
+            ? "foreign-task"
+            : secondTask.taskId,
         status: "completed",
       }));
       const run = runOwnedRedispatchToSecond({
@@ -600,7 +607,8 @@ describe("true redispatch orchestration and independent Driver actors", () => {
         expect(persist).toHaveBeenCalledTimes(2);
       } else {
         await expect(run).rejects.toThrow();
-        expect(complete).not.toHaveBeenCalled();
+        if (scenario !== "wrong-completed-task")
+          expect(complete).not.toHaveBeenCalled();
       }
       expect(commands.some((c) => c.path.includes("reassign_driver"))).toBe(
         false,
@@ -666,5 +674,50 @@ describe("two owned Driver transports keep actor authority separate", () => {
       { bindingId: "first-binding", deviceId: "first-device" },
       { bindingId: "second-binding", deviceId: "second-device" },
     ]);
+  });
+});
+
+describe("historical recovery remains immediate and immutable", () => {
+  it("does not recover a new scheduled unknown ACK even with an otherwise matching test binding", async () => {
+    const expected = {
+      ...context,
+      nonce: "owned-referral-123-new-reservation",
+      expectedScheduledAt: "2027-01-01T15:55:00.000Z",
+      feeDisclosureVersion: "fee-reservation",
+    };
+    const journal = new BookingWriteJournal(expected, async () => undefined);
+    await expect(
+      journal.beforeSend(
+        JSON.stringify(
+          command({
+            scheduledAt: expected.expectedScheduledAt,
+            feeDisclosureVersion: expected.feeDisclosureVersion,
+            feeConfirmed: true,
+          }),
+        ),
+        "own-key-1",
+        async () => {
+          throw new Error("lost ACK");
+        },
+      ),
+    ).rejects.toThrow("lost ACK");
+    const snapshot = journal.current!;
+    expect(() =>
+      parseOriginalUnknownBookingJournal(snapshot, expected.runtimeSha, {
+        originalRun: 123,
+        definitionSha: expected.definitionSha,
+        runtimeSha: expected.runtimeSha,
+        entrySlug: expected.entrySlug,
+        partnerUserRef: expected.partnerUserRef,
+        quoteId: expected.quoteId,
+        bodySha256: snapshot.bodySha256,
+        keySha256: hash(Buffer.from(snapshot.idempotencyKey)),
+      }),
+    ).toThrow("original exact immediate business command required");
+    expect(journal.current).toMatchObject({
+      state: "ack_unknown",
+      body: snapshot.body,
+      idempotencyKey: "own-key-1",
+    });
   });
 });
