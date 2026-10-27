@@ -385,6 +385,7 @@ export function validateDailyPreviewRows(
   runtimeSha: string,
   responseSha: string | null | undefined,
   controlledOrderIds?: Iterable<string>,
+  evidence?: Evidence,
 ): Readonly<{
   rowCount: number;
   controlledRowCount: number;
@@ -465,14 +466,52 @@ export function validateDailyPreviewRows(
     "daily-report-preview-own-order-field-mismatch",
   );
 
-  requireFact(
+  const dispatchParseable =
     typeof ownRow.firstDispatchAt === "string" &&
-      Number.isFinite(Date.parse(ownRow.firstDispatchAt)) &&
-      typeof ownRow.firstAssignedAt === "string" &&
-      Number.isFinite(Date.parse(ownRow.firstAssignedAt)) &&
-      typeof ownRow.etaSecondsAtAssignment === "number" &&
-      Number.isFinite(ownRow.etaSecondsAtAssignment) &&
-      ownRow.etaSecondsAtAssignment >= 0,
+    Number.isFinite(Date.parse(ownRow.firstDispatchAt));
+  const assignedParseable =
+    typeof ownRow.firstAssignedAt === "string" &&
+    Number.isFinite(Date.parse(ownRow.firstAssignedAt));
+  const etaFinite =
+    typeof ownRow.etaSecondsAtAssignment === "number" &&
+    Number.isFinite(ownRow.etaSecondsAtAssignment);
+  const etaNonnegative = etaFinite && ownRow.etaSecondsAtAssignment >= 0;
+  if (!(dispatchParseable && assignedParseable && etaNonnegative) && evidence) {
+    // Fixed field names and primitive classifications only. Never serialize
+    // the row or values (including timestamps, IDs, or arbitrary objects).
+    for (const field of [
+      "firstDispatchAt",
+      "firstAssignedAt",
+      "etaSecondsAtAssignment",
+    ] as const) {
+      const value = ownRow[field];
+      const presence = Object.prototype.hasOwnProperty.call(ownRow, field)
+        ? "present"
+        : "absent";
+      const kind = value === null ? "null" : typeof value;
+      evidence.record({
+        stage: `daily-report-preview-field-${field}-${presence}-type-${kind}`,
+        result: "failed",
+      });
+      if (field === "etaSecondsAtAssignment") {
+        evidence.record({
+          stage: `daily-report-preview-field-${field}-finite-${etaFinite}`,
+          result: "failed",
+        });
+        evidence.record({
+          stage: `daily-report-preview-field-${field}-nonnegative-${etaNonnegative}`,
+          result: "failed",
+        });
+      } else {
+        evidence.record({
+          stage: `daily-report-preview-field-${field}-parseable-${field === "firstDispatchAt" ? dispatchParseable : assignedParseable}`,
+          result: "failed",
+        });
+      }
+    }
+  }
+  requireFact(
+    dispatchParseable && assignedParseable && etaNonnegative,
     "daily-report-preview-dispatch-assignment-fields-required",
   );
 
@@ -1636,6 +1675,7 @@ export async function runOwnedDailyReportDownloads(
       runtimeSha,
       previewExchange.runtimeSha,
       controlledOrderIdSet,
+      evidence,
     );
 
     const uiOrderRow = page
@@ -1888,6 +1928,7 @@ export async function runOwnedDailyReportDownloads(
         runtimeSha,
         detailExchange.runtimeSha,
         controlledOrderIdSet,
+        evidence,
       );
       // Preview GET and queued job execution are independent snapshots. Retain
       // only when the actual job rows (the downloaded bytes' source) are all
