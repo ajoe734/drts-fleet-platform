@@ -643,6 +643,144 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
     ).toThrow("daily-report-preview-own-order-field-mismatch");
   });
 
+  it.each([
+    ["firstDispatchAt", {}, "absent", "undefined", false],
+    ["firstDispatchAt", { firstDispatchAt: null }, "present", "null", false],
+    ["firstDispatchAt", { firstDispatchAt: 123 }, "present", "number", false],
+    [
+      "firstDispatchAt",
+      { firstDispatchAt: "secret-invalid-dispatch" },
+      "present",
+      "string",
+      false,
+    ],
+    ["firstAssignedAt", {}, "absent", "undefined", false],
+    ["firstAssignedAt", { firstAssignedAt: null }, "present", "null", false],
+    ["firstAssignedAt", { firstAssignedAt: 123 }, "present", "number", false],
+    [
+      "firstAssignedAt",
+      { firstAssignedAt: "secret-invalid-assignment" },
+      "present",
+      "string",
+      false,
+    ],
+    ["etaSecondsAtAssignment", {}, "absent", "undefined", false],
+    [
+      "etaSecondsAtAssignment",
+      { etaSecondsAtAssignment: null },
+      "present",
+      "null",
+      false,
+    ],
+    [
+      "etaSecondsAtAssignment",
+      { etaSecondsAtAssignment: "secret-invalid-eta" },
+      "present",
+      "string",
+      false,
+    ],
+    [
+      "etaSecondsAtAssignment",
+      { etaSecondsAtAssignment: NaN },
+      "present",
+      "number",
+      false,
+    ],
+    [
+      "etaSecondsAtAssignment",
+      { etaSecondsAtAssignment: Infinity },
+      "present",
+      "number",
+      false,
+    ],
+    [
+      "etaSecondsAtAssignment",
+      { etaSecondsAtAssignment: -1 },
+      "present",
+      "number",
+      true,
+    ],
+  ] as const)(
+    "classifies invalid own row %s at real preview validator boundary (%s)",
+    (field, overrides, presence, kind, finite) => {
+      const expected = resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      );
+      const row = buildDailyDispatchRow(overrides);
+      if (presence === "absent") delete row[field];
+      const evidence = new Evidence();
+      expect(() =>
+        validateDailyPreviewRows(
+          [row],
+          expected,
+          RUNTIME_SHA,
+          RUNTIME_SHA,
+          [ORDER_ID],
+          evidence,
+        ),
+      ).toThrow("daily-report-preview-dispatch-assignment-fields-required");
+      const diagnostic = JSON.stringify(evidence.events);
+      expect(evidence.events).toHaveLength(7);
+      expect(diagnostic).toContain(
+        `daily-report-preview-field-${field}-${presence}-type-${kind}`,
+      );
+      if (field === "etaSecondsAtAssignment") {
+        expect(diagnostic).toContain(
+          `daily-report-preview-field-${field}-finite-${finite}`,
+        );
+        const etaValue = row[field];
+        expect(diagnostic).toContain(
+          `daily-report-preview-field-${field}-nonnegative-${finite && typeof etaValue === "number" && etaValue >= 0}`,
+        );
+      } else {
+        expect(diagnostic).toContain(
+          `daily-report-preview-field-${field}-parseable-false`,
+        );
+      }
+      // All three fixed fields must be classified; no raw value or identifier is logged.
+      for (const key of [
+        "firstDispatchAt",
+        "firstAssignedAt",
+        "etaSecondsAtAssignment",
+      ]) {
+        expect(diagnostic).toContain(`daily-report-preview-field-${key}-`);
+      }
+      for (const privateValue of [
+        "secret-invalid",
+        ORDER_ID,
+        PICKUP_ADDRESS,
+        "2026-10-25T18:11:00.000Z",
+      ]) {
+        expect(diagnostic).not.toContain(privateValue);
+      }
+    },
+  );
+
+  it.each([0, 180])(
+    "accepts valid ETA %i with parseable timestamps without diagnostic events",
+    (eta) => {
+      const expected = resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      );
+      const evidence = new Evidence();
+      expect(
+        validateDailyPreviewRows(
+          [buildDailyDispatchRow({ etaSecondsAtAssignment: eta })],
+          expected,
+          RUNTIME_SHA,
+          RUNTIME_SHA,
+          [ORDER_ID],
+          evidence,
+        ).ownRow.etaSecondsAtAssignment,
+      ).toBe(eta);
+      expect(evidence.events).toEqual([]);
+    },
+  );
+
   it.each(DAILY_REPORT_FORMATS)(
     "F4 regression: validates genuine %s artifact download against actual ReportArtifactRecord contract and owned order content",
     async (format) => {
@@ -914,6 +1052,24 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       previewFailure: true,
     },
     {
+      caseName:
+        "actual Ops preview has invalid assignment field with no raw retention",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: false,
+      previewFailure: "row-field",
+    },
+    {
+      caseName:
+        "valid preview then independently executed job has invalid assignment field",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: false,
+      previewFailure: "job-row-field",
+    },
+    {
       caseName: "all sibling rows belong to controlled owned orders",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -1027,7 +1183,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       );
       let restoreClock: (() => void) | undefined;
       try {
-        if (!previewFailure) {
+        if (!previewFailure && !failureStage) {
           // Only positive fake-port runs need an unexpired artifact. Keep the
           // original clock advancing so the helper's Date.now deadlines work;
           // never fake timers or relax the production expiry check.
@@ -1039,7 +1195,11 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             .mockImplementation(() => shiftedStart + (realNow() - startedAt));
           restoreClock = () => clock.mockRestore();
         }
-        const ownRow = buildDailyDispatchRow();
+        const ownRow = buildDailyDispatchRow(
+          previewFailure === "row-field"
+            ? { firstAssignedAt: "secret-invalid-assignment" }
+            : {},
+        );
         const siblingRow = (orderId: string) =>
           buildDailyDispatchRow({
             recordId: `daily:${orderId}`,
@@ -1318,7 +1478,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   const format = selectedFormat;
                   const jobId = `job_harness_${format}`;
                   lastAcceptedJobId = jobId;
-                  const rows = [jobSiblingRow, ownRow];
+                  const rows = [
+                    jobSiblingRow,
+                    previewFailure === "job-row-field" && format === "csv"
+                      ? buildDailyDispatchRow({
+                          firstAssignedAt: "secret-invalid-job-assignment",
+                        })
+                      : ownRow,
+                  ];
                   const detail = buildJobDetailFixture(format, jobId, rows);
                   const bytes = await renderFormatBytes(format, jobId, rows);
                   createdJobs.push({ format, jobId, detail, bytes });
@@ -1617,6 +1784,53 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           expect(JSON.stringify(evidence.events)).not.toContain(
             "private-page-error",
           );
+          await expect(
+            stat(path.join(tempDir, "daily-reports")),
+          ).rejects.toThrow();
+          return;
+        }
+        if (previewFailure === "job-row-field") {
+          await expect(run).rejects.toMatchObject({
+            stage: "daily-report-preview-dispatch-assignment-fields-required",
+          });
+          const diagnostic = JSON.stringify(evidence.events);
+          expect(diagnostic).toContain(
+            "daily-report-preview-own-order-verified",
+          );
+          expect(diagnostic).toContain("daily-report-job-csv-accepted");
+          expect(diagnostic).toContain(
+            "daily-report-job-detail-field-firstAssignedAt-parseable-false",
+          );
+          expect(diagnostic).not.toContain("daily-report-preview-field-");
+          expect(diagnostic).not.toContain("secret-invalid-job-assignment");
+          const fieldEvents = evidence.events.filter((event) =>
+            event.stage.startsWith("daily-report-job-detail-field-"),
+          );
+          expect(fieldEvents).toHaveLength(7);
+          expect(JSON.stringify(fieldEvents)).not.toContain(ORDER_ID);
+          expect(JSON.stringify(fieldEvents)).not.toContain(PICKUP_ADDRESS);
+          expect(createdJobs.map((job) => job.jobId)).toEqual(
+            DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
+          );
+          expect(artifactRequests).toBe(1);
+          expect(unrouteCalled).toBe(true);
+          await expect(
+            stat(path.join(tempDir, "daily-reports")),
+          ).rejects.toThrow();
+          return;
+        }
+        if (previewFailure === "row-field") {
+          await expect(run).rejects.toMatchObject({
+            stage: "daily-report-preview-dispatch-assignment-fields-required",
+          });
+          const diagnostic = JSON.stringify(evidence.events);
+          expect(diagnostic).toContain(
+            "daily-report-preview-field-firstAssignedAt-parseable-false",
+          );
+          expect(diagnostic).not.toContain("secret-invalid-assignment");
+          expect(diagnostic).not.toContain(ORDER_ID);
+          expect(createdJobs).toHaveLength(0);
+          expect(unrouteCalled).toBe(true);
           await expect(
             stat(path.join(tempDir, "daily-reports")),
           ).rejects.toThrow();
