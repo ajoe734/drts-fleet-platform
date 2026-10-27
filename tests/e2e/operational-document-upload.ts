@@ -2709,8 +2709,10 @@ export async function observeOperationalReferralZeroOrders(
       !(
         // Tenant bookings may retain a partner entry without a master
         // passenger. Only explicit null is valid; missing IDs remain malformed.
-        row.passenger.passenger_id === null ||
-        nonempty(row.passenger.passenger_id)
+        (
+          row.passenger.passenger_id === null ||
+          nonempty(row.passenger.passenger_id)
+        )
       ) ||
       ![
         "tenant_id",

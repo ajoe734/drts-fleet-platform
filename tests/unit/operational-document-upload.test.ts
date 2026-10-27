@@ -4815,7 +4815,9 @@ describe("original referral first-visit issuer and canonical zero-order evidence
       ]) {
         ports({
           orders: {
-            items: [{ ...row, partner_entry_slug: partnerEntrySlug, passenger }],
+            items: [
+              { ...row, partner_entry_slug: partnerEntrySlug, passenger },
+            ],
           },
         });
         await expect(
