@@ -21,6 +21,27 @@ import {
 export const DAILY_REPORT_FORMATS = ["csv", "xlsx", "pdf"] as const;
 export type DailyReportFormat = (typeof DAILY_REPORT_FORMATS)[number];
 
+// Shared by the managed FULL writer and its hosted upload path regression.
+// Only these owned cases have public custody; private siblings stay excluded.
+export function ownedSupplementalArtifactPaths(directory: string) {
+  const root = `${directory}/TEN03-06`;
+  return {
+    custody: `${directory}/TEN03-06-custody.json`,
+    bookingJournals: {
+      "reservation-1": `${root}/reservation-1/booking-write-journal.json`,
+      "reservation-2": `${root}/reservation-2/booking-write-journal.json`,
+      redispatched: `${root}/redispatched/booking-write-journal.json`,
+    },
+    reportDirectories: {
+      "C1-cancelled-null": `${root}/C1-cancelled-null`,
+      "reservation-1": `${root}/reservation-1`,
+      "reservation-2": `${root}/reservation-2`,
+      "reservation-1-after-both": `${root}/reservation-1-after-both`,
+      redispatched: `${root}/redispatched`,
+    },
+  } as const;
+}
+
 export const DAILY_REPORT_MIME_TYPES: Readonly<
   Record<DailyReportFormat, string>
 > = {
@@ -54,6 +75,103 @@ export type ExpectedDailyDispatchRecord = Readonly<{
   finalStatus: "completed";
 }>;
 
+// These cases do not relax the original completed/complaint positive control.
+export type SupplementalDailyDispatchRecord = Readonly<
+  Omit<
+    ExpectedDailyDispatchRecord,
+    | "finalDriverId"
+    | "finalVehicleId"
+    | "finalPlateNo"
+    | "arrivedPickupAt"
+    | "tripStartedAt"
+    | "tripCompletedAt"
+    | "finalStatus"
+  > & {
+    caseKind: "cancelled-unassigned" | "redispatched";
+    finalDriverId: string | null;
+    finalVehicleId: string | null;
+    finalPlateNo: string | null;
+    arrivedPickupAt: string | null;
+    tripStartedAt: string | null;
+    tripCompletedAt: string | null;
+    finalStatus: "cancelled" | "completed";
+    redispatchCount: number;
+    cancellationReason: string | null;
+  }
+>;
+type DailyRowExpectation =
+  | ExpectedDailyDispatchRecord
+  | SupplementalDailyDispatchRecord;
+
+/** Bounded source facts only: this does not assert durable global task/trace absence. */
+export function resolveExpectedCancelledDailyDispatchRecord(
+  order: ObjectData,
+  journal: {
+    state: string;
+    orderId?: string;
+    quoteId: string;
+    entrySlug: string;
+    body: string;
+    bodySha256: string;
+  },
+  own: { entrySlug: string; pickupAddress: string; dropoffAddress: string },
+): SupplementalDailyDispatchRecord {
+  const command = object(JSON.parse(journal.body));
+  requireFact(
+    journal.state === "acknowledged" &&
+      journal.orderId === order.orderId &&
+      journal.entrySlug === own.entrySlug &&
+      order.partnerEntrySlug === own.entrySlug &&
+      command.entrySlug === own.entrySlug &&
+      command.quoteId === journal.quoteId &&
+      hash(Buffer.from(journal.body)) === journal.bodySha256,
+    "cancelled-report-original-owned-journal-binding",
+  );
+  requireFact(
+    order.status === "cancelled" &&
+      typeof order.cancelledAt === "string" &&
+      Number.isFinite(Date.parse(order.cancelledAt)) &&
+      order.assignedDriverId == null &&
+      order.assignedVehicleId == null &&
+      order.tripCompletion == null,
+    "cancelled-report-canonical-terminal-unassigned-source",
+  );
+  requireFact(
+    object(order.pickup).address === own.pickupAddress &&
+      object(order.dropoff).address === own.dropoffAddress,
+    "cancelled-report-original-address-binding",
+  );
+  const requestedAt = text(order.createdAt);
+  const reservationTime =
+    order.reservationWindowStart == null
+      ? null
+      : text(order.reservationWindowStart);
+  return Object.freeze({
+    caseKind: "cancelled-unassigned",
+    orderId: text(order.orderId),
+    orderNo: text(order.orderNo),
+    serviceDate: toTaipeiServiceDate(reservationTime ?? requestedAt),
+    orderSource: normalizeDailyOrderSource(text(order.orderSource)),
+    tenantId: text(order.tenantId),
+    partnerId: text(order.partnerId),
+    serviceProductCode: resolveDailyServiceProductCode(order),
+    requestedAt,
+    reservationTime,
+    pickupAddressSnapshot: own.pickupAddress,
+    dropoffAddressSnapshot: own.dropoffAddress,
+    finalDriverId: null,
+    finalVehicleId: null,
+    finalPlateNo: null,
+    arrivedPickupAt: null,
+    tripStartedAt: null,
+    tripCompletedAt: null,
+    finalStatus: "cancelled",
+    redispatchCount: 0,
+    cancellationReason:
+      order.cancelReason == null ? null : text(order.cancelReason),
+  });
+}
+
 export type DailyReportFilters = Readonly<{
   serviceDateFrom: string;
   serviceDateTo: string;
@@ -61,7 +179,7 @@ export type DailyReportFilters = Readonly<{
   tenantId: string;
   partnerId: string;
   serviceProductCode: string;
-  finalStatus: "completed";
+  finalStatus: "completed" | "cancelled";
 }>;
 
 export type DailyReportDownloadArtifactSummary = Readonly<{
@@ -116,13 +234,13 @@ export type DailyReportDownloadsEvidence = Readonly<{
     syntheticProvenanceVerified: boolean;
     provenanceQualification: DailyReportProvenanceQualification;
     generatedAt: string;
-    finalDriverId: string;
-    finalVehicleId: string;
-    finalPlateNo: string;
-    arrivedPickupAt: string;
-    tripStartedAt: string;
-    tripCompletedAt: string;
-    finalStatus: "completed";
+    finalDriverId: string | null;
+    finalVehicleId: string | null;
+    finalPlateNo: string | null;
+    arrivedPickupAt: string | null;
+    tripStartedAt: string | null;
+    tripCompletedAt: string | null;
+    finalStatus: "completed" | "cancelled";
     complaintCount: number;
     runtimeSha: string;
   }>;
@@ -405,7 +523,7 @@ export function resolveExpectedDailyDispatchRecord(
 }
 
 export function buildDailyReportFilters(
-  expected: ExpectedDailyDispatchRecord,
+  expected: DailyRowExpectation,
 ): DailyReportFilters {
   return Object.freeze({
     serviceDateFrom: expected.serviceDate,
@@ -414,7 +532,7 @@ export function buildDailyReportFilters(
     tenantId: expected.tenantId,
     partnerId: expected.partnerId,
     serviceProductCode: expected.serviceProductCode,
-    finalStatus: "completed",
+    finalStatus: expected.finalStatus,
   });
 }
 
@@ -507,6 +625,46 @@ export function validateDailyPreviewRows(
   controlledOrderIds?: Iterable<string>,
   evidence?: Evidence,
   diagnosticSource: "preview" | "job-detail" = "preview",
+) {
+  requireFact(
+    !("caseKind" in expected),
+    "daily-report-strict-completed-control-required",
+  );
+  return validateReportRows(
+    rawRows,
+    expected,
+    runtimeSha,
+    responseSha,
+    controlledOrderIds,
+    evidence,
+    diagnosticSource,
+  );
+}
+
+export function validateSupplementalDailyPreviewRows(
+  rawRows: unknown,
+  expected: SupplementalDailyDispatchRecord,
+  runtimeSha: string,
+  responseSha: string | null | undefined,
+  controlledOrderIds?: Iterable<string>,
+) {
+  return validateReportRows(
+    rawRows,
+    expected,
+    runtimeSha,
+    responseSha,
+    controlledOrderIds,
+  );
+}
+
+function validateReportRows(
+  rawRows: unknown,
+  expected: DailyRowExpectation,
+  runtimeSha: string,
+  responseSha: string | null | undefined,
+  controlledOrderIds?: Iterable<string>,
+  evidence?: Evidence,
+  diagnosticSource: "preview" | "job-detail" = "preview",
 ): Readonly<{
   rowCount: number;
   controlledRowCount: number;
@@ -521,6 +679,28 @@ export function validateDailyPreviewRows(
     /^[a-f0-9]{40}$/.test(runtimeSha) && responseSha === runtimeSha,
     "daily-report-preview-runtime-sha-mismatch",
   );
+  if ("caseKind" in expected) {
+    const cancelled = expected.caseKind === "cancelled-unassigned";
+    requireFact(
+      expected.finalStatus === (cancelled ? "cancelled" : "completed") &&
+        expected.redispatchCount === (cancelled ? 0 : 1),
+      "daily-report-explicit-supplemental-case-policy",
+    );
+    for (const key of [
+      "finalDriverId",
+      "finalVehicleId",
+      "finalPlateNo",
+      "arrivedPickupAt",
+      "tripStartedAt",
+      "tripCompletedAt",
+    ] as const)
+      requireFact(
+        cancelled
+          ? expected[key] === null
+          : typeof expected[key] === "string" && expected[key]!.length > 0,
+        "daily-report-explicit-supplemental-source-values",
+      );
+  }
   const rows = records(rawRows);
   requireFact(rows.length > 0, "daily-report-preview-empty-rows");
 
@@ -583,68 +763,95 @@ export function validateDailyPreviewRows(
       ownRow.arrivedPickupAt === expected.arrivedPickupAt &&
       ownRow.tripStartedAt === expected.tripStartedAt &&
       ownRow.tripCompletedAt === expected.tripCompletedAt &&
-      ownRow.finalStatus === "completed",
+      ownRow.finalStatus === expected.finalStatus,
     "daily-report-preview-own-order-field-mismatch",
   );
 
-  const dispatchParseable =
-    typeof ownRow.firstDispatchAt === "string" &&
-    Number.isFinite(Date.parse(ownRow.firstDispatchAt));
-  const assignedParseable =
-    typeof ownRow.firstAssignedAt === "string" &&
-    Number.isFinite(Date.parse(ownRow.firstAssignedAt));
-  const etaFinite =
-    typeof ownRow.etaSecondsAtAssignment === "number" &&
-    Number.isFinite(ownRow.etaSecondsAtAssignment);
-  const etaNonnegative =
-    typeof ownRow.etaSecondsAtAssignment === "number" &&
-    etaFinite &&
-    ownRow.etaSecondsAtAssignment >= 0;
-  if (!(dispatchParseable && assignedParseable && etaNonnegative) && evidence) {
-    // Fixed field names and primitive classifications only. Never serialize
-    // the row or values (including timestamps, IDs, or arbitrary objects).
-    for (const field of [
+  if ("caseKind" in expected && expected.caseKind === "cancelled-unassigned") {
+    for (const key of [
       "firstDispatchAt",
       "firstAssignedAt",
+      "finalDriverId",
+      "finalVehicleId",
+      "finalPlateNo",
       "etaSecondsAtAssignment",
-    ] as const) {
-      const value = ownRow[field];
-      const presence = Object.prototype.hasOwnProperty.call(ownRow, field)
-        ? "present"
-        : "absent";
-      const kind = value === null ? "null" : typeof value;
-      evidence.record({
-        stage: `daily-report-${diagnosticSource}-field-${field}-${presence}-type-${kind}`,
-        result: "failed",
-      });
-      if (field === "etaSecondsAtAssignment") {
+      "arrivedPickupAt",
+      "tripStartedAt",
+      "tripCompletedAt",
+    ])
+      requireFact(
+        ownRow[key] === null,
+        `daily-report-cancelled-${key}-explicit-null-required`,
+      );
+  } else {
+    const dispatchParseable =
+      typeof ownRow.firstDispatchAt === "string" &&
+      Number.isFinite(Date.parse(ownRow.firstDispatchAt));
+    const assignedParseable =
+      typeof ownRow.firstAssignedAt === "string" &&
+      Number.isFinite(Date.parse(ownRow.firstAssignedAt));
+    const etaFinite =
+      typeof ownRow.etaSecondsAtAssignment === "number" &&
+      Number.isFinite(ownRow.etaSecondsAtAssignment);
+    const etaNonnegative =
+      typeof ownRow.etaSecondsAtAssignment === "number" &&
+      etaFinite &&
+      ownRow.etaSecondsAtAssignment >= 0;
+    if (
+      !(dispatchParseable && assignedParseable && etaNonnegative) &&
+      evidence
+    ) {
+      // Fixed field names and primitive classifications only. Never serialize
+      // the row or values (including timestamps, IDs, or arbitrary objects).
+      for (const field of [
+        "firstDispatchAt",
+        "firstAssignedAt",
+        "etaSecondsAtAssignment",
+      ] as const) {
+        const value = ownRow[field];
+        const presence = Object.prototype.hasOwnProperty.call(ownRow, field)
+          ? "present"
+          : "absent";
+        const kind = value === null ? "null" : typeof value;
         evidence.record({
-          stage: `daily-report-${diagnosticSource}-field-${field}-finite-${etaFinite}`,
+          stage: `daily-report-${diagnosticSource}-field-${field}-${presence}-type-${kind}`,
           result: "failed",
         });
-        evidence.record({
-          stage: `daily-report-${diagnosticSource}-field-${field}-nonnegative-${etaNonnegative}`,
-          result: "failed",
-        });
-      } else {
-        evidence.record({
-          stage: `daily-report-${diagnosticSource}-field-${field}-parseable-${field === "firstDispatchAt" ? dispatchParseable : assignedParseable}`,
-          result: "failed",
-        });
+        if (field === "etaSecondsAtAssignment") {
+          evidence.record({
+            stage: `daily-report-${diagnosticSource}-field-${field}-finite-${etaFinite}`,
+            result: "failed",
+          });
+          evidence.record({
+            stage: `daily-report-${diagnosticSource}-field-${field}-nonnegative-${etaNonnegative}`,
+            result: "failed",
+          });
+        } else {
+          evidence.record({
+            stage: `daily-report-${diagnosticSource}-field-${field}-parseable-${field === "firstDispatchAt" ? dispatchParseable : assignedParseable}`,
+            result: "failed",
+          });
+        }
       }
     }
+    requireFact(
+      dispatchParseable && assignedParseable && etaNonnegative,
+      "daily-report-preview-dispatch-assignment-fields-required",
+    );
   }
-  requireFact(
-    dispatchParseable && assignedParseable && etaNonnegative,
-    "daily-report-preview-dispatch-assignment-fields-required",
-  );
-
+  if ("caseKind" in expected) {
+    requireFact(
+      ownRow.redispatchCount === expected.redispatchCount &&
+        ownRow.cancellationReason === expected.cancellationReason,
+      "daily-report-supplemental-redispatch-cancellation-source-binding",
+    );
+  }
   const complaintCount = integer(
     ownRow.complaintCount,
     "daily-report-preview-complaint-count-integer",
   );
   requireFact(
-    complaintCount >= 1,
+    complaintCount >= ("caseKind" in expected ? 0 : 1),
     "daily-report-preview-complaint-count-from-two-star-rating",
   );
   const generatedAt = text(
@@ -743,7 +950,7 @@ export function parseCsvRecords(csvText: string): Record<string, string>[] {
 
 function assertExpectedOrderStringRecord(
   record: Record<string, string>,
-  expected: ExpectedDailyDispatchRecord,
+  expected: DailyRowExpectation,
   stagePrefix: string,
 ) {
   requireFact(
@@ -758,12 +965,12 @@ function assertExpectedOrderStringRecord(
       record.reservationTime === (expected.reservationTime ?? "") &&
       record.pickupAddressSnapshot === expected.pickupAddressSnapshot &&
       record.dropoffAddressSnapshot === expected.dropoffAddressSnapshot &&
-      record.finalDriverId === expected.finalDriverId &&
-      record.finalVehicleId === expected.finalVehicleId &&
-      record.finalPlateNo === expected.finalPlateNo &&
-      record.arrivedPickupAt === expected.arrivedPickupAt &&
-      record.tripStartedAt === expected.tripStartedAt &&
-      record.tripCompletedAt === expected.tripCompletedAt &&
+      record.finalDriverId === (expected.finalDriverId ?? "") &&
+      record.finalVehicleId === (expected.finalVehicleId ?? "") &&
+      record.finalPlateNo === (expected.finalPlateNo ?? "") &&
+      record.arrivedPickupAt === (expected.arrivedPickupAt ?? "") &&
+      record.tripStartedAt === (expected.tripStartedAt ?? "") &&
+      record.tripCompletedAt === (expected.tripCompletedAt ?? "") &&
       record.finalStatus === expected.finalStatus,
     `${stagePrefix}-own-order-fields-mismatch`,
   );
@@ -810,7 +1017,7 @@ export async function validateDailyReportArtifactDownload(input: {
   contentType: string | null | undefined;
   contentDisposition: string | null | undefined;
   bytes: Buffer;
-  expected: ExpectedDailyDispatchRecord;
+  expected: DailyRowExpectation;
   previewOwnRow: ObjectData;
   runtimeSha: string;
   artifactPath: string | null;
@@ -906,7 +1113,7 @@ export async function validateDailyReportArtifactDownload(input: {
 
   assertNotHtmlOrJsonErrorBody(bytes, format);
 
-  const validatedJobRows = validateDailyPreviewRows(
+  const validatedJobRows = validateReportRows(
     detail.rows,
     expected,
     runtimeSha,
@@ -1099,7 +1306,7 @@ export async function validateDailyReportArtifactDownload(input: {
       expected.finalStatus,
     ]) {
       requireFact(
-        compactPdfText.includes(token),
+        token === null || compactPdfText.includes(token),
         "daily-report-pdf-missing-expected-field-token",
       );
     }
@@ -1602,6 +1809,7 @@ export type RunOwnedDailyReportDownloadsParams = {
   readCanonicalOrders: () => Promise<ObjectData>;
   order: ObjectData;
   completedTask: ObjectData;
+  supplementalExpected?: SupplementalDailyDispatchRecord;
   entrySlug?: string;
   fleetSupplyTenantId?: string;
   controlledOrderIds?: Iterable<string>;
@@ -1651,15 +1859,27 @@ export async function runOwnedDailyReportDownloads(
     "daily-report-immutable-shas-required",
   );
 
-  const expected = resolveExpectedDailyDispatchRecord(order, completedTask, {
-    ...(entrySlug === undefined ? {} : { entrySlug }),
-    ...(fleetSupplyTenantId === undefined ? {} : { fleetSupplyTenantId }),
-    driverId,
-    vehicleId,
-    plateNo,
-    pickupAddress,
-    dropoffAddress,
-  });
+  const expected =
+    params.supplementalExpected ??
+    resolveExpectedDailyDispatchRecord(order, completedTask, {
+      ...(entrySlug === undefined ? {} : { entrySlug }),
+      ...(fleetSupplyTenantId === undefined ? {} : { fleetSupplyTenantId }),
+      driverId,
+      vehicleId,
+      plateNo,
+      pickupAddress,
+      dropoffAddress,
+    });
+  requireFact(
+    expected.orderId === order.orderId &&
+      expected.orderNo === order.orderNo &&
+      expected.finalStatus === order.status &&
+      expected.serviceDate ===
+        toTaipeiServiceDate(
+          text(order.reservationWindowStart ?? order.createdAt),
+        ),
+    "daily-report-supplemental-canonical-order-binding",
+  );
   const controlledOrderIdSet = new Set<string>([expected.orderId]);
   if (controlledOrderIds) {
     for (const candidateId of controlledOrderIds) {
@@ -1977,7 +2197,7 @@ export async function runOwnedDailyReportDownloads(
       );
     }
 
-    const validatedPreview = validateDailyPreviewRows(
+    const validatedPreview = validateReportRows(
       previewRows,
       expected,
       runtimeSha,
@@ -2006,7 +2226,7 @@ export async function runOwnedDailyReportDownloads(
       expected.finalPlateNo,
     ]) {
       requireFact(
-        uiOrderRowText.includes(expectedToken),
+        expectedToken === null || uiOrderRowText.includes(expectedToken),
         "daily-report-ui-preview-row-text-binding",
       );
     }
@@ -2014,8 +2234,10 @@ export async function runOwnedDailyReportDownloads(
     evidence.record({
       stage: "daily-report-preview-own-order-verified",
       orderId: expected.orderId,
-      driverId: expected.finalDriverId,
-      vehicleId: expected.finalVehicleId,
+      ...(expected.finalDriverId ? { driverId: expected.finalDriverId } : {}),
+      ...(expected.finalVehicleId
+        ? { vehicleId: expected.finalVehicleId }
+        : {}),
       status: previewExchange.status,
       result: "observed",
     });
@@ -2230,7 +2452,7 @@ export async function runOwnedDailyReportDownloads(
         detailExchange.bytes,
         `daily-report-job-detail-${format}`,
       );
-      const jobRowsCheck = validateDailyPreviewRows(
+      const jobRowsCheck = validateReportRows(
         jobDetail.rows,
         expected,
         runtimeSha,
@@ -2674,7 +2896,7 @@ export async function runOwnedDailyReportDownloads(
       evidence,
     );
     assertPreviewQueryParams(restored.searchParams);
-    validateDailyPreviewRows(
+    validateReportRows(
       unwrapEnvelopeList(restored.bytes, "daily-report-restore-positive"),
       expected,
       runtimeSha,
@@ -2718,7 +2940,7 @@ export async function runOwnedDailyReportDownloads(
         arrivedPickupAt: expected.arrivedPickupAt,
         tripStartedAt: expected.tripStartedAt,
         tripCompletedAt: expected.tripCompletedAt,
-        finalStatus: "completed",
+        finalStatus: expected.finalStatus,
         complaintCount: validatedPreview.complaintCount,
         runtimeSha,
       }),

@@ -56,6 +56,9 @@ import {
   type ObjectData,
   type Role,
   type CallOptions,
+  futureTaipeiReservationIntents,
+  verifyOwnedReservationCancellation,
+  runOwnedRedispatchToSecond,
 } from "./protocol";
 import {
   cancellationResults,
@@ -66,9 +69,13 @@ import {
   type DisplayObservations,
 } from "./display-observations";
 import {
+  ownedSupplementalArtifactPaths,
   resolveActiveTripScreenOrder,
   runOwnedDailyReportDownloads,
   type DailyReportDownloadsEvidence,
+  resolveExpectedCancelledDailyDispatchRecord,
+  resolveExpectedDailyDispatchRecord,
+  toTaipeiServiceDate,
 } from "./daily-report-downloads";
 import {
   RETAINED_REFERRAL_ORDER,
@@ -86,6 +93,9 @@ const SUBJECT = "referral-demo-yuhe-residence";
 const FLEET = "fleet-demo-001";
 const TENANT = "10000000-0000-0000-0000-000000000201";
 const DIRECTORY = ".artifacts/owned-referral-business-journey";
+const supplementalArtifacts = ownedSupplementalArtifactPaths(DIRECTORY);
+type SupplementalBookingName =
+  keyof typeof supplementalArtifacts.bookingJournals;
 const PHOTO =
   "apps/driver-app/android/app/src/main/res/drawable-mdpi/splashscreen_logo.png";
 const env = (key: string) => text(process.env[key], `configuration:${key}`);
@@ -268,6 +278,29 @@ test(journeyName, async ({ browser, request }) => {
     routeError: unknown;
     quote: ObjectData | undefined;
   } = { journal: undefined, routeError: undefined, quote: undefined };
+  type ExtraSupply = {
+    transport: NativeTransport;
+    driverId?: string;
+    vehicleId?: string;
+    deviceId?: string;
+    bindingId?: string;
+    invitation?: string;
+    plateNo?: string;
+    driverSubmissionId?: string;
+    vehicleSubmissionId?: string;
+  };
+  const extraSupply: ExtraSupply = {
+    transport: new NativeTransport(origins, runtime, invocation),
+  };
+  const extraBookings: {
+    name: SupplementalBookingName;
+    journal?: BookingWriteJournal;
+    quote?: ObjectData;
+    orderId?: string;
+    terminal?: boolean;
+    actions: string[];
+  }[] = [];
+  const supplementalReports: DailyReportDownloadsEvidence[] = [];
   const cleanupErrors: string[] = [];
   const cancellations = cancellationResults();
 
@@ -661,213 +694,238 @@ test(journeyName, async ({ browser, request }) => {
         stage: "normal-own-first-key-Fleet-session",
         result: "observed",
       });
-      const driverDraft = await call(
-        "fleet",
-        "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
-        {
-          method: "POST",
-          body: {
-            name: `合成測試司機 ${nonce.slice(-12)}`,
-            mobile: phone,
-            professionalDriverLicenseNo: `SIM-DL-${nonce}`,
-            professionalDriverLicenseExpiry: future(),
-            taxiDriverRegistrationNo: `SIM-REG-${nonce}`,
-            taxiDriverRegistrationArea: "TPE",
-            taxiDriverRegistrationExpiry: future(),
-            supportedServiceProductCodes: ["enterprise_dispatch"],
-            preferredVehicleSubmissionId: null,
-          },
-        },
-      );
-      const driverSubmissionId = text(
-        object(driverDraft.submission).submissionId,
-      );
-      const approve = async (submissionId: string, types: string[]) => {
-        const path = `/control-plane-proxy/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`;
-        for (const documentType of types) {
-          const detail = await call("fleet", path);
-          const submission = object(detail.submission);
-          requireFact(
-            submission.submissionId === submissionId &&
-              submission.fleetPartnerId === FLEET,
-            "exact own submission binding",
-          );
-          const revision = integer(submission.revisionNo);
-          const proof = await uploadOperationalDocument(
-            request as APIRequestContext,
-            origins.fleet,
-            `${path}/documents/upload-url`,
-            { expectedRevisionNo: revision, documentType },
-            `${path}/documents/confirm`,
-            {
-              expectedRevisionNo: revision,
-              documentType,
-              effectiveFrom: start(),
-              effectiveUntil: future(),
+      const provisionSupply = async (
+        supply: ExtraSupply,
+        nonce: string,
+        phone: string,
+      ) => {
+        const driverDraft = await call(
+          "fleet",
+          "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+          {
+            method: "POST",
+            body: {
+              name: `合成測試司機 ${nonce.slice(-12)}`,
+              mobile: phone,
+              professionalDriverLicenseNo: `SIM-DL-${nonce}`,
+              professionalDriverLicenseExpiry: future(),
+              taxiDriverRegistrationNo: `SIM-REG-${nonce}`,
+              taxiDriverRegistrationArea: "TPE",
+              taxiDriverRegistrationExpiry: future(),
+              supportedServiceProductCodes: ["enterprise_dispatch"],
+              preferredVehicleSubmissionId: null,
             },
-            operationalRequestHeaders(
-              "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
-              `${origins.fleet}${path}`,
-            ),
-          );
+          },
+        );
+        const driverSubmissionId = text(
+          object(driverDraft.submission).submissionId,
+        );
+        supply.driverSubmissionId = driverSubmissionId;
+        const approve = async (submissionId: string, types: string[]) => {
+          const path = `/control-plane-proxy/fleet-partner/supply-submissions/${encodeURIComponent(submissionId)}`;
+          for (const documentType of types) {
+            const detail = await call("fleet", path);
+            const submission = object(detail.submission);
+            requireFact(
+              submission.submissionId === submissionId &&
+                submission.fleetPartnerId === FLEET,
+              "exact own submission binding",
+            );
+            const revision = integer(submission.revisionNo);
+            const proof = await uploadOperationalDocument(
+              request as APIRequestContext,
+              origins.fleet,
+              `${path}/documents/upload-url`,
+              { expectedRevisionNo: revision, documentType },
+              `${path}/documents/confirm`,
+              {
+                expectedRevisionNo: revision,
+                documentType,
+                effectiveFrom: start(),
+                effectiveUntil: future(),
+              },
+              operationalRequestHeaders(
+                "DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL",
+                `${origins.fleet}${path}`,
+              ),
+            );
+            requireFact(
+              proof.putScanState === "clean" &&
+                proof.readbackSha256 === proof.sha256,
+              "actual document clean byte-equal receipt",
+            );
+            evidence.record({
+              stage: "synthetic-document-upload-confirm-download",
+              submissionId,
+              documentId: text(
+                proof.documentId,
+                "actual confirmed document ID required",
+              ),
+              objectKey: proof.objectKey,
+              sha256: proof.sha256,
+              bytes: proof.fileSize,
+            });
+          }
+          let detail = await call("fleet", path);
+          await call("fleet", `${path}/submit`, {
+            method: "POST",
+            body: {
+              expectedRevisionNo: integer(object(detail.submission).revisionNo),
+            },
+          });
+          for (const action of ["start", "approve"]) {
+            detail = await call("fleet", path);
+            await call(
+              "admin",
+              `/control-plane-proxy/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/${action}`,
+              {
+                method: "POST",
+                body: {
+                  expectedRevisionNo: integer(
+                    object(detail.submission).revisionNo,
+                  ),
+                  reasonCode: "synthetic_dev_demo",
+                  comment: "明示合成開發示範；非正式證照或真實營運資格聲明。",
+                },
+              },
+            );
+          }
+          const result = object((await call("fleet", path)).submission);
           requireFact(
-            proof.putScanState === "clean" &&
-              proof.readbackSha256 === proof.sha256,
-            "actual document clean byte-equal receipt",
+            result.status === "approved" && result.fleetPartnerId === FLEET,
+            "normal same-Fleet review approval",
           );
           evidence.record({
-            stage: "synthetic-document-upload-confirm-download",
+            stage: "own-submission-approved-retained",
             submissionId,
-            documentId: text(
-              proof.documentId,
-              "actual confirmed document ID required",
-            ),
-            objectKey: proof.objectKey,
-            sha256: proof.sha256,
-            bytes: proof.fileSize,
+            result: "retained",
           });
-        }
-        let detail = await call("fleet", path);
-        await call("fleet", `${path}/submit`, {
+          return result;
+        };
+        const approvedDriver = await approve(driverSubmissionId, [
+          "professional_driver_license",
+          "taxi_driver_registration",
+        ]);
+        supply.driverId = text(approvedDriver.canonicalDriverId);
+        const driverId = supply.driverId;
+        const ownPlateNo =
+          (supply.plateNo = `SIM-${randomUUID().slice(0, 8).toUpperCase()}`);
+        const vehicleDraft = await call(
+          "fleet",
+          "/control-plane-proxy/fleet-partner/supply-submissions/vehicles",
+          {
+            method: "POST",
+            body: {
+              plateNo: ownPlateNo,
+              licenseType: "business_vehicle",
+              brand: "合成示範",
+              model: "非正式測試車",
+              modelYear: new Date().getUTCFullYear(),
+              seatCount: 5,
+              luggageCapacity: 4,
+              businessArea: "TPE",
+              supportedServiceProductCodes: ["enterprise_dispatch"],
+              airportTransferEligible: false,
+              fixedFareAllowed: false,
+              currentDriverSubmissionId: driverSubmissionId,
+              doorCount: 4,
+              color: "白色",
+            },
+          },
+        );
+        const vehicleSubmissionId = text(
+          object(vehicleDraft.submission).submissionId,
+        );
+        supply.vehicleSubmissionId = vehicleSubmissionId;
+        const approvedVehicle = await approve(vehicleSubmissionId, [
+          "vehicle_registration",
+          "insurance_policy",
+          "fleet_participation_contract",
+        ]);
+        supply.vehicleId = text(approvedVehicle.canonicalVehicleId);
+        const vehicleId = supply.vehicleId;
+        text(approvedVehicle.canonicalContractId);
+        text(approvedVehicle.canonicalPolicyId);
+        const exclusion = `/regulatory-registry/exclusivities/${encodeURIComponent(vehicleId)}`;
+        await adminControl(`${exclusion}/submit-review`, {
           method: "POST",
           body: {
-            expectedRevisionNo: integer(object(detail.submission).revisionNo),
+            exclusiveProviderName: "合成開發示範車隊（非正式營運聲明）",
+            effectiveStart: `${start()}T00:00:00.000Z`,
+            effectiveEnd: `${future()}T23:59:59.000Z`,
           },
         });
-        for (const action of ["start", "approve"]) {
-          detail = await call("fleet", path);
-          await call(
-            "admin",
-            `/control-plane-proxy/admin/supply-review/submissions/${encodeURIComponent(submissionId)}/${action}`,
-            {
-              method: "POST",
-              body: {
-                expectedRevisionNo: integer(
-                  object(detail.submission).revisionNo,
-                ),
-                reasonCode: "synthetic_dev_demo",
-                comment: "明示合成開發示範；非正式證照或真實營運資格聲明。",
-              },
-            },
-          );
-        }
-        const result = object((await call("fleet", path)).submission);
-        requireFact(
-          result.status === "approved" && result.fleetPartnerId === FLEET,
-          "normal same-Fleet review approval",
+        const proof = await stepUp(
+          `/api${exclusion}/approve`,
+          "platform:regulatory-exclusivities:approve",
+        );
+        await adminControl(`${exclusion}/approve`, {
+          method: "POST",
+          body: {},
+          headers: { "x-drts-step-up-reference": proof },
+        });
+        await adminControl(
+          `/regulatory-registry/drivers/${encodeURIComponent(driverId)}/work-state`,
+          { method: "POST", body: { workState: "available" } },
         );
         evidence.record({
-          stage: "own-submission-approved-retained",
-          submissionId,
+          stage: "own-supply-exclusivity-approved",
+          driverId,
+          vehicleId,
           result: "retained",
         });
-        return result;
-      };
-      const approvedDriver = await approve(driverSubmissionId, [
-        "professional_driver_license",
-        "taxi_driver_registration",
-      ]);
-      driverId = text(approvedDriver.canonicalDriverId);
-      const ownPlateNo = `SIM-${randomUUID().slice(0, 8).toUpperCase()}`;
-      const vehicleDraft = await call(
-        "fleet",
-        "/control-plane-proxy/fleet-partner/supply-submissions/vehicles",
-        {
-          method: "POST",
-          body: {
-            plateNo: ownPlateNo,
-            licenseType: "business_vehicle",
-            brand: "合成示範",
-            model: "非正式測試車",
-            modelYear: new Date().getUTCFullYear(),
-            seatCount: 5,
-            luggageCapacity: 4,
-            businessArea: "TPE",
-            supportedServiceProductCodes: ["enterprise_dispatch"],
-            airportTransferEligible: false,
-            fixedFareAllowed: false,
-            currentDriverSubmissionId: driverSubmissionId,
-            doorCount: 4,
-            color: "白色",
-          },
-        },
-      );
-      const vehicleSubmissionId = text(
-        object(vehicleDraft.submission).submissionId,
-      );
-      const approvedVehicle = await approve(vehicleSubmissionId, [
-        "vehicle_registration",
-        "insurance_policy",
-        "fleet_participation_contract",
-      ]);
-      vehicleId = text(approvedVehicle.canonicalVehicleId);
-      text(approvedVehicle.canonicalContractId);
-      text(approvedVehicle.canonicalPolicyId);
-      const exclusion = `/regulatory-registry/exclusivities/${encodeURIComponent(vehicleId)}`;
-      await adminControl(`${exclusion}/submit-review`, {
-        method: "POST",
-        body: {
-          exclusiveProviderName: "合成開發示範車隊（非正式營運聲明）",
-          effectiveStart: `${start()}T00:00:00.000Z`,
-          effectiveEnd: `${future()}T23:59:59.000Z`,
-        },
-      });
-      const proof = await stepUp(
-        `/api${exclusion}/approve`,
-        "platform:regulatory-exclusivities:approve",
-      );
-      await adminControl(`${exclusion}/approve`, {
-        method: "POST",
-        body: {},
-        headers: { "x-drts-step-up-reference": proof },
-      });
-      await adminControl(
-        `/regulatory-registry/drivers/${encodeURIComponent(driverId)}/work-state`,
-        { method: "POST", body: { workState: "available" } },
-      );
-      evidence.record({
-        stage: "own-supply-exclusivity-approved",
-        driverId,
-        vehicleId,
-        result: "retained",
-      });
 
-      const invite = await call("api", "/api/auth/driver/device/invite", {
-        method: "POST",
-        body: { driverId },
-        headers: { "x-idempotency-key": `${nonce}-invite` },
-      });
-      invitation = text(invite.registrationCode);
-      mask(invitation);
-      deviceId = `${nonce}-device`;
-      const driver = await call(
-        "publicApi",
-        "/api/auth/driver/device/register",
-        {
+        const invite = await call("api", "/api/auth/driver/device/invite", {
           method: "POST",
-          body: {
-            registrationCode: invitation,
-            deviceId,
-            deviceLabel: "明示合成示範裝置",
+          body: { driverId },
+          headers: { "x-idempotency-key": `${nonce}-invite` },
+        });
+        const invitation = (supply.invitation = text(invite.registrationCode));
+        mask(invitation);
+        const deviceId = (supply.deviceId = `${nonce}-device`);
+        const driver = await call(
+          "publicApi",
+          "/api/auth/driver/device/register",
+          {
+            method: "POST",
+            body: {
+              registrationCode: invitation,
+              deviceId,
+              deviceLabel: "明示合成示範裝置",
+            },
           },
-        },
-      );
-      const driverToken = text(driver.accessToken);
-      mask(driverToken);
-      mask(text(driver.refreshToken));
-      requireFact(
-        driver.driverId === driverId && driver.deviceId === deviceId,
-        "actual bound Driver registration",
-      );
-      bindingId = text(driver.bindingId);
-      tx.setSession("driver", driverToken);
-      const driverSession = await call("driver", "/api/auth/session");
-      requireFact(
-        driverSession.active === true &&
-          object(driverSession.identity).realm === "driver" &&
-          object(driverSession.identity).actorId === driverId,
-        "actual Driver session identity",
-      );
+        );
+        const driverToken = text(driver.accessToken);
+        mask(driverToken);
+        mask(text(driver.refreshToken));
+        requireFact(
+          driver.driverId === driverId && driver.deviceId === deviceId,
+          "actual bound Driver registration",
+        );
+        supply.bindingId = text(driver.bindingId);
+        supply.transport.setSession("driver", driverToken);
+        const driverSession = object(
+          (await supply.transport.call("driver", "/api/auth/session")).data,
+        );
+        requireFact(
+          driverSession.active === true &&
+            object(driverSession.identity).realm === "driver" &&
+            object(driverSession.identity).actorId === driverId,
+          "actual Driver session identity",
+        );
+      };
+      const firstSupply: ExtraSupply = { transport: tx };
+      try {
+        await provisionSupply(firstSupply, nonce, phone);
+      } finally {
+        driverId = firstSupply.driverId;
+        vehicleId = firstSupply.vehicleId;
+        deviceId = firstSupply.deviceId;
+        bindingId = firstSupply.bindingId;
+        invitation = firstSupply.invitation;
+      }
+      requireFact(driverId && vehicleId, "first approved own supply required");
+      const ownPlateNo = text(firstSupply.plateNo);
 
       const currentFees = object((await referral("/api/referral/fees")).data);
       requireFact(
@@ -1168,6 +1226,7 @@ test(journeyName, async ({ browser, request }) => {
       } finally {
         if (routeStarted) await originalRouteFinished;
       }
+      await page.unroute(`${origins.referral}/api/referral/booking`);
       if (bookingState.routeError) throw bookingState.routeError;
       requireFact(
         orderId && bookingState.quote,
@@ -2369,6 +2428,594 @@ test(journeyName, async ({ browser, request }) => {
               typeof candidate === "string" && candidate.trim().length > 0,
           ),
       ];
+      // TEN03–06 extend this same managed FULL caller. The original main order,
+      // journal and all C1–C4 observations above retain their own custody.
+      const reportCase = async (
+        name: keyof typeof supplementalArtifacts.reportDirectories,
+        source: ObjectData,
+        expected: NonNullable<
+          Parameters<
+            typeof runOwnedDailyReportDownloads
+          >[0]["supplementalExpected"]
+        >,
+        task = completedTask,
+      ) => {
+        const report = await runOwnedDailyReportDownloads({
+          context,
+          page,
+          opsOrigin: origins.ops,
+          opsHeaders: (url) => tx.headers("ops", url),
+          readCanonicalOrders: () => opsControl("/orders"),
+          order: source,
+          completedTask: task,
+          supplementalExpected: expected,
+          entrySlug: ENTRY,
+          controlledOrderIds,
+          driverId: text(driverId),
+          vehicleId: text(vehicleId),
+          plateNo: ownPlateNo,
+          pickupAddress,
+          dropoffAddress,
+          directory: supplementalArtifacts.reportDirectories[name],
+          definitionSha: definition,
+          runtimeSha: runtime,
+          recoveryOnly: RECOVERY_ONLY,
+          evidence,
+        });
+        supplementalReports.push(report);
+      };
+      const getExtraOrder = async (id: string) => {
+        const source = await opsControl(`/orders/${encodeURIComponent(id)}`);
+        requireFact(
+          source.orderId === id &&
+            source.partnerEntrySlug === ENTRY &&
+            object(source.passenger).passengerId === passengerId,
+          "supplemental canonical same-subject ownership",
+        );
+        return source;
+      };
+      const bookExtraFromUI = async (
+        name: SupplementalBookingName,
+        intendedInput?: string,
+      ) => {
+        const state: (typeof extraBookings)[number] = { name, actions: [] };
+        extraBookings.push(state); // Custody exists even when response/storage fails.
+        assertNoForeignActive((await referral("/api/referral/active")).data);
+        const scheduled = intendedInput
+          ? new Date(intendedInput).toISOString()
+          : undefined;
+        const proposals = new Map<string, ObjectData>();
+        const quoteTasks: Promise<void>[] = [];
+        const observeQuote = (response: PlaywrightResponse) => {
+          if (
+            response.url() !== `${origins.referral}/api/referral/quote` ||
+            response.request().method() !== "POST"
+          )
+            return;
+          const requested = object(response.request().postDataJSON());
+          if (
+            requested.entrySlug !== ENTRY ||
+            requested.pickupAddress !== pickupAddress ||
+            requested.dropoffAddress !== dropoffAddress ||
+            requested.vehicleType !== "standard" ||
+            requested.scheduledAt !== scheduled
+          )
+            return;
+          const pending = (async () => {
+            requireFact(
+              response.status() === 200 &&
+                response.headers()["x-drts-candidate-sha"] === runtime,
+              "supplemental actual UI quote runtime",
+            );
+            const proposal = object(object(await response.json()).data);
+            requireFact(
+              proposal.requestedScheduledAt === (scheduled ?? null) &&
+                proposal.timingMode ===
+                  (scheduled ? "scheduled" : "immediate") &&
+                proposal.pickupAddress === pickupAddress &&
+                proposal.dropoffAddress === dropoffAddress &&
+                proposal.fixedPrice === false &&
+                proposal.isGuaranteed === false &&
+                proposal.feeDisclosureVersion ===
+                  feesReadback.disclosureVersion &&
+                proposal.feeContentHash === feesReadback.contentHash,
+              "supplemental actual UI quote intent",
+            );
+            proposals.set(text(proposal.quoteId), proposal);
+          })();
+          quoteTasks.push(pending);
+          void pending.catch(() => undefined);
+        };
+        page.on("response", observeQuote);
+        let finish!: () => void, fail!: (e: unknown) => void;
+        const settled = new Promise<void>((resolve, reject) => {
+          finish = resolve;
+          fail = reject;
+        });
+        void settled.catch(() => undefined);
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        const url = `${origins.referral}/api/referral/booking`;
+        const handle = async (route: Route) => {
+          try {
+            requireFact(
+              route.request().method() === "POST" &&
+                route.request().url() === url,
+              "supplemental original UI POST route binding",
+            );
+            requireFact(
+              !state.journal,
+              "one supplemental original UI booking only",
+            );
+            const raw = text(route.request().postData());
+            const command = object(JSON.parse(raw));
+            await Promise.all([...quoteTasks]);
+            const quote = proposals.get(text(command.quoteId));
+            requireFact(
+              quote,
+              "supplemental UI consumes actual observed quote",
+            );
+            state.quote = quote;
+            state.journal = new BookingWriteJournal(
+              {
+                definitionSha: definition,
+                runtimeSha: runtime,
+                nonce: `${nonce}-${name}`,
+                entrySlug: ENTRY,
+                partnerUserRef: SUBJECT,
+                quoteId: text(quote.quoteId),
+                feeDisclosureVersion: text(quote.feeDisclosureVersion),
+                ...(scheduled === undefined
+                  ? {}
+                  : { expectedScheduledAt: scheduled }),
+                pickupAddress,
+                dropoffAddress,
+                passengerName,
+                passengerPhone: phone,
+                vehicleType: "standard",
+              },
+              (snapshot) =>
+                persistPrivateJson(
+                  supplementalArtifacts.bookingJournals[name],
+                  snapshot,
+                ),
+            );
+            await persistPrivateJson(
+              `${DIRECTORY}/TEN03-06/${name}/quote.json`,
+              {
+                definitionSha: definition,
+                runtimeSha: runtime,
+                intendedInput: intendedInput ?? null,
+                quote,
+              },
+            );
+            await state.journal.beforeSend(
+              raw,
+              text(route.request().headers()["idempotency-key"]),
+              async () => {
+                state.actions.push("booking");
+                const original = await route.fetch({
+                  maxRedirects: 0,
+                  maxRetries: 0,
+                  timeout: 15000,
+                });
+                try {
+                  await settleRoutedOriginalBookingAck(
+                    original,
+                    route.request(),
+                    (response) =>
+                      observeOriginalBookingAck(
+                        Promise.resolve(response),
+                        () => ({
+                          url,
+                          runtimeSha: runtime,
+                          journal: state.journal,
+                          quote: state.quote,
+                        }),
+                        (id) => {
+                          state.orderId = id;
+                        },
+                        evidence,
+                      ),
+                    (bytes) =>
+                      route.fulfill({ response: original, body: bytes }),
+                  );
+                } finally {
+                  await original.dispose();
+                }
+              },
+            );
+            finish();
+          } catch (error) {
+            fail(originalBookingRouteFailure(error));
+            await route.abort().catch(() => undefined);
+          }
+        };
+        try {
+          await page.goto(
+            `${origins.referral}/embed/${ENTRY}?state=handoff&screen=book`,
+          );
+          await page.locator('input[name="passengerName"]').fill(passengerName);
+          await page.locator('input[name="passengerPhone"]').fill(phone);
+          await page
+            .getByRole("radio", { name: "標準車", exact: true })
+            .check();
+          await page
+            .locator('input[name="scheduledAt"]')
+            .fill(intendedInput ?? "現在出發");
+          await page.locator('input[name="pickupAddress"]').fill(pickupAddress);
+          await page
+            .locator('input[name="dropoffAddress"]')
+            .fill(dropoffAddress);
+          const agree = page.getByRole("checkbox", {
+            name: "我已確認費用與優惠說明",
+            exact: true,
+          });
+          await expect(agree).not.toBeChecked();
+          await agree.check();
+          const create = page.locator('[data-drt-operation="referral-create"]');
+          await expect(create).toBeEnabled();
+          await page.route(url, handle);
+          deadline = setTimeout(
+            () =>
+              fail(new JourneyFailure("supplemental-original-booking-timeout")),
+            25_000,
+          );
+          await clickAndSettleOriginalBookingAck(() => create.click(), settled);
+          requireFact(
+            state.orderId && state.journal && state.quote,
+            "supplemental original booking ACK custody",
+          );
+          requireFact(
+            state.orderId !== completedOrderId &&
+              extraBookings.filter((b) => b.orderId === state.orderId)
+                .length === 1,
+            "supplemental independent exact order ID set",
+          );
+          controlledOrderIds.push(state.orderId);
+          return state as typeof state & {
+            orderId: string;
+            journal: BookingWriteJournal;
+            quote: ObjectData;
+          };
+        } finally {
+          clearTimeout(deadline);
+          page.off("response", observeQuote);
+          await page.unroute(url, handle);
+          await Promise.all(quoteTasks);
+        }
+      };
+      // Original C1 is the legal real null-final-driver/no-arrival source. Read
+      // its original private journal; neither a one-driver list nor memory trace
+      // is authority for durable global absence.
+      requireFact(
+        unassignedCancellation?.orderId &&
+          unassignedCancellation.result === "observed" &&
+          !unassignedCancellation.taskId &&
+          !unassignedCancellation.assignmentId &&
+          !unassignedCancellation.dispatchJobId,
+        "original same-run C1 unassigned cancellation required",
+      );
+      const c1 = await getExtraOrder(unassignedCancellation.orderId);
+      const c1Journal = JSON.parse(
+        await readFile(
+          `${DIRECTORY}/cancellations/unassigned-booking-write-journal.json`,
+          "utf8",
+        ),
+      );
+      await persistPrivateJson(
+        `${DIRECTORY}/TEN03-06/C1-no-dispatch-source.json`,
+        {
+          definitionSha: definition,
+          runtimeSha: runtime,
+          orderId: c1.orderId,
+          originalCaseFactsFile: unassignedCancellation.factsFile,
+          originalBookingBodySha256: c1Journal.bodySha256,
+          observedSameRunActions: ["booking", "cancel"],
+          provenance:
+            "original runFourStageOwnedCancellations unassigned branch; no dispatch action in this caller",
+          canonical: {
+            status: c1.status,
+            cancelledAt: c1.cancelledAt,
+            reservationWindowStart: c1.reservationWindowStart,
+          },
+          absenceQualification:
+            "bounded caller sequence plus canonical/report facts; global task/trace absence pending complete authorized source",
+        },
+      );
+      await reportCase(
+        "C1-cancelled-null",
+        c1,
+        resolveExpectedCancelledDailyDispatchRecord(c1, c1Journal, {
+          entrySlug: ENTRY,
+          pickupAddress,
+          dropoffAddress,
+        }),
+      );
+
+      // Read actual approved/available owned supply separately from quotes.
+      await adminControl(
+        `/regulatory-registry/drivers/${encodeURIComponent(driverId)}/work-state`,
+        {
+          method: "POST",
+          body: { workState: "available" },
+        },
+      );
+      await heartbeat(null, "available", ++cancellationSequence);
+      const actualOwnDriver = records(
+        (await adminControl("/regulatory-registry/drivers")).items,
+      ).find((d) => d.driverId === driverId);
+      const actualOwnVehicle = records(
+        (await adminControl("/regulatory-registry/vehicles")).items,
+      ).find((v) => v.vehicleId === vehicleId);
+      requireFact(
+        actualOwnDriver?.workState === "available" &&
+          actualOwnVehicle?.plateNo === ownPlateNo,
+        "scheduled separate approved own available registry supply readback",
+      );
+      for (const [
+        index,
+        intendedInput,
+      ] of futureTaipeiReservationIntents().entries()) {
+        const name = (["reservation-1", "reservation-2"] as const)[index];
+        requireFact(name, "bounded two reservation cases");
+        const booking = await bookExtraFromUI(name, intendedInput);
+        const after = await verifyOwnedReservationCancellation({
+          intendedInput,
+          journal: booking.journal,
+          quote: booking.quote,
+          orderId: booking.orderId,
+          readOrder: () => getExtraOrder(booking.orderId),
+          readWindow: async () => {
+            const active = object(
+              (await referral("/api/referral/active")).data,
+            );
+            const trip = object(active.trip);
+            requireFact(
+              trip.orderId === booking.orderId,
+              "scheduled current own trip window",
+            );
+            return object(trip.cancellationWindow);
+          },
+          cancel: async () => {
+            const url = `${origins.referral}/api/referral/cancel/${encodeURIComponent(booking.orderId)}`;
+            let resolve!: (v: ObjectData) => void,
+              reject!: (e: unknown) => void;
+            const ack = new Promise<ObjectData>((yes, no) => {
+              resolve = yes;
+              reject = no;
+            });
+            void ack.catch(() => undefined);
+            const timer = setTimeout(
+              () =>
+                reject(new JourneyFailure("scheduled-original-cancel-timeout")),
+              20_000,
+            );
+            const handle = async (route: Route) => {
+              try {
+                booking.actions.push("cancel");
+                const result = await captureOriginalUiCancellation(route, {
+                  url,
+                  orderId: booking.orderId,
+                  runtime,
+                });
+                requireFact(
+                  result.status === 200,
+                  "scheduled original UI cancellation success",
+                );
+                resolve(object(result.data));
+              } catch (error) {
+                reject(error);
+                await route.abort().catch(() => undefined);
+              }
+            };
+            try {
+              await page.goto(
+                `${origins.referral}/embed/${ENTRY}?state=handoff&screen=trip&orderId=${encodeURIComponent(booking.orderId)}`,
+              );
+              await page.route(url, handle);
+              return await clickAndSettleOriginalBookingAck(
+                () =>
+                  page
+                    .locator('[data-drt-operation="referral-cancel"]')
+                    .click(),
+                ack,
+              );
+            } finally {
+              clearTimeout(timer);
+              await page.unroute(url, handle);
+            }
+          },
+          persist: (facts) =>
+            persistPrivateJson(
+              `${DIRECTORY}/TEN03-06/${name}/cancellation.json`,
+              facts,
+            ),
+        });
+        booking.terminal = true;
+        requireFact(
+          toTaipeiServiceDate(text(after.reservationWindowStart)) ===
+            intendedInput.slice(0, 10),
+          "true Taipei scheduled report service day",
+        );
+        await reportCase(
+          name,
+          after,
+          resolveExpectedCancelledDailyDispatchRecord(
+            after,
+            booking.journal.current!,
+            { entrySlug: ENTRY, pickupAddress, dropoffAddress },
+          ),
+        );
+      }
+      const firstReservation = extraBookings.find(
+        (b) => b.name === "reservation-1",
+      );
+      requireFact(
+        firstReservation?.orderId && firstReservation.journal?.current,
+        "first reservation original custody retained",
+      );
+      const firstReservationAfterBoth = await getExtraOrder(
+        firstReservation.orderId,
+      );
+      await reportCase(
+        "reservation-1-after-both",
+        firstReservationAfterBoth,
+        resolveExpectedCancelledDailyDispatchRecord(
+          firstReservationAfterBoth,
+          firstReservation.journal.current,
+          { entrySlug: ENTRY, pickupAddress, dropoffAddress },
+        ),
+      );
+      // Provision SECOND real supply through the original upload/review flow.
+      const secondPhone = `${phone.slice(0, -1)}${(Number(phone.slice(-1)) + 1) % 10}`;
+      await provisionSupply(extraSupply, `${nonce}-second`, secondPhone);
+      const second = {
+        driverId: text(extraSupply.driverId),
+        vehicleId: text(extraSupply.vehicleId),
+      };
+      const driver2 = async (path: string, options: CallOptions = {}) =>
+        object(
+          (await extraSupply.transport.call("driver", path, options)).data,
+        );
+      let secondSequence = 0;
+      const heartbeatSecond = async (
+        taskId: string | null,
+        workState: string,
+      ) => {
+        const accepted = await driver2(
+          "/api/driver/location-heartbeats/batch",
+          {
+            method: "POST",
+            body: {
+              items: [
+                {
+                  eventId: randomUUID(),
+                  deviceId: extraSupply.deviceId,
+                  ...second,
+                  taskId,
+                  sequenceNo: ++secondSequence,
+                  recordedAt: now(),
+                  lat: pickup.lat,
+                  lng: pickup.lng,
+                  accuracyM: 5,
+                  workState,
+                  appState: "foreground",
+                  transportMode: "foreground",
+                  networkType: "wifi",
+                },
+              ],
+            },
+          },
+        );
+        const item = object(records(accepted.items)[0]);
+        requireFact(
+          item.accepted === true && item.currentLocationUpdated === true,
+          "second own actor bound heartbeat accepted",
+        );
+      };
+      await heartbeatSecond(null, "available");
+      await heartbeat(null, "available", ++cancellationSequence);
+      const redispatchBooking = await bookExtraFromUI("redispatched");
+      const redispatchResult = await runOwnedRedispatchToSecond({
+        orderId: redispatchBooking.orderId,
+        nonce: `${nonce}-redispatched`,
+        first: { driverId, vehicleId },
+        second,
+        ops: async (path, options) => {
+          if (options?.method === "POST") {
+            redispatchBooking.actions.push(path);
+            await persistPrivateJson(
+              `${DIRECTORY}/TEN03-06/redispatched/actions.json`,
+              {
+                orderId: redispatchBooking.orderId,
+                actions: redispatchBooking.actions,
+                nextOriginalCommand: {
+                  path,
+                  body: options.body,
+                  idempotencyKey: options.headers?.["Idempotency-Key"],
+                },
+              },
+            );
+          }
+          return opsControl(path, options);
+        },
+        firstDriver: (path, options) => call("driver", path, options),
+        secondDriver: driver2,
+        persist: (facts) =>
+          persistPrivateJson(
+            `${DIRECTORY}/TEN03-06/redispatched/assignment-trace.json`,
+            facts,
+          ),
+        completeSecond: async (task) => {
+          const id = text(task.taskId);
+          for (const [action, key, state] of [
+            ["accept", "acceptedAt", "assigned"],
+            ["depart", "departedAt", "enroute"],
+            ["arrived_pickup", "arrivedAt", "arrived"],
+            ["start", "startedAt", "on_trip"],
+          ] as const) {
+            await driver2(
+              `/api/driver/tasks/${encodeURIComponent(id)}/${action}`,
+              {
+                method: "POST",
+                body: {
+                  [key]: now(),
+                  ...(action === "depart" ? { currentLocation: pickup } : {}),
+                },
+              },
+            );
+            const current = await driver2(
+              `/api/driver/tasks/${encodeURIComponent(id)}`,
+            );
+            requireFact(
+              current.orderId === redispatchBooking.orderId &&
+                current.driverId === second.driverId &&
+                current.assignmentId === task.assignmentId,
+              "second progression same owned task assignment",
+            );
+            await heartbeatSecond(id, state);
+          }
+          await driver2(
+            `/api/driver/tasks/${encodeURIComponent(id)}/complete`,
+            {
+              method: "POST",
+              body: simulationCompletion(
+                await getExtraOrder(redispatchBooking.orderId),
+                `data:image/png;base64,${png.toString("base64")}`,
+              ),
+            },
+          );
+          const completed = await driver2(
+            `/api/driver/tasks/${encodeURIComponent(id)}`,
+          );
+          redispatchBooking.terminal = completed.status === "completed";
+          return completed;
+        },
+      });
+      const finalRedispatched = await getExtraOrder(redispatchBooking.orderId);
+      const expectedRedispatched = resolveExpectedDailyDispatchRecord(
+        finalRedispatched,
+        redispatchResult.completedTask,
+        {
+          entrySlug: ENTRY,
+          ...second,
+          plateNo: text(extraSupply.plateNo),
+          pickupAddress,
+          dropoffAddress,
+        },
+      );
+      await reportCase(
+        "redispatched",
+        finalRedispatched,
+        {
+          ...expectedRedispatched,
+          caseKind: "redispatched",
+          redispatchCount: 1,
+          cancellationReason: null,
+        },
+        redispatchResult.completedTask,
+      );
+      // Restore the original completed positive filter/page/readback last.
       dailyReportDownloads = await runOwnedDailyReportDownloads({
         context,
         page,
@@ -2446,6 +3093,136 @@ test(journeyName, async ({ browser, request }) => {
           );
         });
       });
+    if (!RECOVERY_ONLY) {
+      for (const booking of extraBookings) {
+        // Resolve known owned orders only through the ordinary passenger cancel
+        // policy. Closed windows or a lost ACK stay retained; never complete a
+        // future reservation early or issue a replacement booking.
+        if (booking.orderId && !booking.terminal) {
+          const ownId = booking.orderId;
+          await cleanup(
+            `supplemental-${booking.name}-normal-terminalization`,
+            async () => {
+              const read = async () => {
+                const source = await opsControl(
+                  `/orders/${encodeURIComponent(ownId)}`,
+                );
+                requireFact(
+                  source.orderId === ownId &&
+                    source.partnerEntrySlug === ENTRY &&
+                    object(source.passenger).passengerId === passengerId,
+                  "supplemental cleanup exact owned subject",
+                );
+                return source;
+              };
+              await terminalizeOwnOrder(ownId, read, async (action) => {
+                if (action === "resolve-exception-hold")
+                  return opsControl(
+                    `/orders/${encodeURIComponent(ownId)}/resolve-exception-hold`,
+                    {
+                      method: "POST",
+                      body: {
+                        resolution: "cancel_order",
+                        reason: "Own supplemental synthetic cleanup",
+                        traceId: `${nonce}-${booking.name}-cleanup`,
+                      },
+                    },
+                  );
+                return cancelReferralOrder(
+                  ownId,
+                  "Own supplemental synthetic normal cleanup",
+                );
+              });
+              booking.terminal = true;
+            },
+          );
+        }
+        if (
+          booking.journal?.current?.state === "ack_unknown" ||
+          (booking.orderId && !booking.terminal)
+        ) {
+          cleanupErrors.push(
+            `supplemental-${booking.name}-retained-unresolved`,
+          );
+          evidence.record({
+            stage: `supplemental-${booking.name}-retained-unresolved`,
+            result: "retained",
+          });
+        }
+      }
+      if (extraSupply.driverId)
+        await cleanup("second-own-driver-offline", () =>
+          adminControl(
+            `/regulatory-registry/drivers/${encodeURIComponent(text(extraSupply.driverId))}/work-state`,
+            { method: "POST", body: { workState: "offline" } },
+          ),
+        );
+      if (extraSupply.bindingId && extraSupply.deviceId)
+        await cleanup("second-own-binding-revoked-by-second-driver", () =>
+          extraSupply.transport.call(
+            "driver",
+            "/api/auth/driver/device/revoke",
+            {
+              method: "POST",
+              body: {
+                bindingId: extraSupply.bindingId,
+                deviceId: extraSupply.deviceId,
+              },
+            },
+          ),
+        );
+      else if (extraSupply.invitation)
+        await cleanup("second-unused-invitation-revoked", () =>
+          call("api", "/api/auth/driver/device/invite/revoke", {
+            method: "POST",
+            body: { registrationCode: extraSupply.invitation },
+            headers: { "x-idempotency-key": `${nonce}-second-invite-revoke` },
+          }),
+        );
+      await cleanup("supplemental-custody-persist", () =>
+        persistPrivateJson(supplementalArtifacts.custody, {
+          definitionSha: definition,
+          runtimeSha: runtime,
+          bookings: extraBookings.map((b) => ({
+            name: b.name,
+            journalFile: b.journal?.current
+              ? supplementalArtifacts.bookingJournals[b.name]
+              : null,
+            orderId: b.orderId,
+            terminal: b.terminal ?? false,
+            journalState: b.journal?.current?.state,
+            bodySha256: b.journal?.current?.bodySha256,
+            actions: b.actions,
+            recovery: b.journal?.current?.recovery,
+          })),
+          exactOwnedOrderIds: extraBookings
+            .map((b) => b.orderId)
+            .filter(Boolean),
+          secondSupply: {
+            driverId: extraSupply.driverId,
+            vehicleId: extraSupply.vehicleId,
+            deviceId: extraSupply.deviceId,
+            bindingId: extraSupply.bindingId,
+            plateNo: extraSupply.plateNo,
+            driverSubmissionId: extraSupply.driverSubmissionId,
+            vehicleSubmissionId: extraSupply.vehicleSubmissionId,
+            retainedApprovedSupplyAndDocuments: Boolean(
+              extraSupply.driverId || extraSupply.vehicleId,
+            ),
+          },
+          reports: supplementalReports,
+          sourceAuthority: {
+            canonicalReads:
+              "normal same-runtime GET /orders/:id and report repository path when enabled",
+            pgEnabledDeploymentProof:
+              "pending external same-release operator evidence",
+            dispatchTrace: "instance-local-memory; not durable global proof",
+            noAssignment:
+              "own journaled no-dispatch sequence and report null facts only; global absence pending complete authority",
+          },
+        }),
+      );
+    }
     const ownDriverForCleanup = driverId;
     if (ownDriverForCleanup)
       await cleanup("own-synthetic-driver-offline", () =>
@@ -2574,6 +3351,16 @@ test(journeyName, async ({ browser, request }) => {
             : cancellations,
           displayObservations: displayObservations ?? null,
           dailyReportDownloads: dailyReportDownloads ?? null,
+          ...(!RECOVERY_ONLY
+            ? {
+                supplementalDailyReportCustody: {
+                  file: "TEN03-06-custody.json",
+                  reportsObserved: supplementalReports.length,
+                  runtimeAcceptance:
+                    "pending same-release PG-enabled durable-source/deployment proof and operator cleanup verification",
+                },
+              }
+            : {}),
         },
         null,
         2,
