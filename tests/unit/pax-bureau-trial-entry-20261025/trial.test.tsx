@@ -101,15 +101,25 @@ afterEach(() => {
 });
 
 describe("TrialRideControls", () => {
+  const ACTION_STATUS: Record<string, string | null> = {
+    assign: "enroute_pickup",
+    arrive: "arrived_pickup",
+    board: "on_trip",
+    complete: "completed",
+    heartbeat: null,
+  };
   function rideStatus(status: string) {
+    // A stateful stand-in for the server: each action moves the ride and the
+    // heartbeat reports wherever it currently is, as the API does.
+    let current = status;
     state.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url === `/api/passenger-app/rides/${ORDER}`)
-        return json({ data: { ride: { order: { status } } } });
-      if (init?.method === "POST" && url.endsWith("/trial/assign"))
-        return json({ data: { status: "enroute_pickup" } });
-      if (init?.method === "POST" && url.endsWith("/trial/heartbeat"))
-        return json({ data: { status: "enroute_pickup" } });
-      return json({}, 404);
+        return json({ data: { ride: { order: { status: current } } } });
+      const action = init?.method === "POST" ? url.split("/trial/")[1] : "";
+      const next = action ? ACTION_STATUS[action] : undefined;
+      if (next === undefined) return json({}, 404);
+      if (next) current = next;
+      return json({ data: { status: current } });
     });
   }
 
