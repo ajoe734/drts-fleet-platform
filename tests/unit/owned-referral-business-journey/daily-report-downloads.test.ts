@@ -989,6 +989,146 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
     ]);
   });
 
+  it("TEN02: selects only a genuinely empty adjacent day from complete canonical owned orders with exact Taipei/source/product/status filters", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const source = {
+      items: [
+        buildOrderFixture(),
+        buildOrderFixture({
+          orderId: "unrelated-product",
+          serviceProductCode: "other",
+          businessDispatchSubtype: "other",
+          createdAt: "2026-10-24T18:10:00.000Z",
+        }),
+        buildOrderFixture({
+          orderId: "unrelated-status",
+          status: "cancelled",
+          createdAt: "2026-10-24T18:10:00.000Z",
+        }),
+        buildOrderFixture({
+          orderId: "unrelated-tenant",
+          tenantId: "other",
+          createdAt: "2026-10-24T18:10:00.000Z",
+        }),
+      ],
+    };
+    expect(countCanonicalDailySource(source, positive, ORDER_ID)).toEqual({
+      count: 1,
+      ownPresent: true,
+    });
+    expect(adjacentEmptyDayFromSource(source, positive, ORDER_ID)).toBe(
+      "2026-10-25",
+    );
+    const occupied = {
+      ...source,
+      items: [
+        ...source.items,
+        buildOrderFixture({
+          orderId: "occupied-prior",
+          createdAt: "2026-10-24T18:10:00.000Z",
+        }),
+        buildOrderFixture({
+          orderId: "occupied-next",
+          createdAt: "2026-10-26T18:10:00.000Z",
+        }),
+      ],
+    };
+    expect(
+      countCanonicalDailySource(
+        occupied,
+        {
+          ...positive,
+          serviceDateFrom: "2026-10-25",
+          serviceDateTo: "2026-10-25",
+        },
+        ORDER_ID,
+      ).count,
+    ).toBe(1);
+    expect(() =>
+      adjacentEmptyDayFromSource(occupied, positive, ORDER_ID),
+    ).toThrow("daily-report-no-authoritatively-empty-adjacent-day");
+    expect(() =>
+      adjacentEmptyDayFromSource({ items: [] }, positive, ORDER_ID),
+    ).toThrow("daily-report-authoritative-own-positive-source-required");
+    expect(() =>
+      adjacentEmptyDayFromSource({ rows: [] }, positive, ORDER_ID),
+    ).toThrow(JourneyFailure);
+  });
+
+  it.each(DAILY_REPORT_FORMATS)(
+    "TEN02: empty %s bytes require actual zero-row immutable job, no prior own order content",
+    async (format) => {
+      const expected = resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      );
+      const filters = {
+        ...buildDailyReportFilters(expected),
+        serviceDateFrom: "2026-10-25",
+        serviceDateTo: "2026-10-25",
+      };
+      const jobId = `job_empty_${format}`;
+      const detail = buildJobDetailFixture(format, jobId, [], { filters });
+      const bytes = await renderFormatBytes(format, jobId, []);
+      const base = {
+        format,
+        jobId,
+        jobDetail: detail,
+        filters,
+        ownOrderId: ORDER_ID,
+        detailStatus: 200,
+        detailResponseSha: RUNTIME_SHA,
+        artifactStatus: 200,
+        artifactResponseSha: RUNTIME_SHA,
+        contentType: DAILY_REPORT_MIME_TYPES[format],
+        contentDisposition: `attachment; filename="daily_dispatch_record-${jobId}.${format}"`,
+        bytes,
+        runtimeSha: RUNTIME_SHA,
+        nowMs: Date.parse("2026-10-25T19:00:00.000Z"),
+      };
+      expect(
+        await validateEmptyDailyReportArtifactDownload(base),
+      ).toMatchObject({
+        format,
+        jobId,
+        status: "completed",
+        rowCount: 0,
+        bytes: bytes.length,
+        sha256: hash(bytes),
+        runtimeSha: RUNTIME_SHA,
+      });
+      await expect(
+        validateEmptyDailyReportArtifactDownload({
+          ...base,
+          jobDetail: { ...detail, rows: [buildDailyDispatchRow()] },
+        }),
+      ).rejects.toThrow(
+        `daily-report-empty-${format}-completed-zero-row-job-binding`,
+      );
+      await expect(
+        validateEmptyDailyReportArtifactDownload({
+          ...base,
+          artifactResponseSha: "f".repeat(40),
+        }),
+      ).rejects.toThrow(`daily-report-empty-${format}-status-runtime-binding`);
+      await expect(
+        validateEmptyDailyReportArtifactDownload({
+          ...base,
+          bytes: await renderFormatBytes(format, jobId, [
+            buildDailyDispatchRow(),
+          ]),
+        }),
+      ).rejects.toThrow();
+    },
+  );
+
   it("blocks RECOVERY_ONLY from running the full-journey daily report phase", async () => {
     const evidence = new Evidence();
     await expect(
@@ -997,7 +1137,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         page: {} as Page,
         opsOrigin: OPS_ORIGIN,
         opsHeaders: () => ({}),
-        readCanonicalOrders: async () => { throw new Error("must not read source in recovery"); },
+        readCanonicalOrders: async () => {
+          throw new Error("must not read source in recovery");
+        },
         order: buildOrderFixture(),
         completedTask: buildTaskFixture(),
         entrySlug: ENTRY_SLUG,
@@ -1074,7 +1216,16 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       previewFailure: "job-row-field",
     },
     {
-      caseName: "already materialized own row still executes normal rebuild POST and readback",
+      caseName:
+        "already materialized own row still executes normal rebuild POST and readback",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "source changes to nonempty adjacent day after empty jobs must fail",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       expectedPreviewControlled: true,
@@ -1228,7 +1379,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         let rebuiltInBackend = false;
         let rebuildPosts = 0;
         let rebuiltPreviewGets = 0;
-        const alreadyMaterialized = failureCase.startsWith("already materialized");
+        const alreadyMaterialized = failureCase.startsWith(
+          "already materialized",
+        );
+        let sourceReads = 0;
         let selectedFormat: DailyReportFormat = "csv";
         let dateFromVal = "";
         let dateToVal = "";
@@ -1365,9 +1519,12 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     partnerId: partnerVal,
                     serviceProductCode: serviceProductVal,
                   });
-                  const rows = dateFromVal === "2026-10-25" ? []
-                    : rebuiltInBackend || alreadyMaterialized
-                      ? [previewSiblingRow, ownRow] : [previewSiblingRow];
+                  const rows =
+                    dateFromVal === "2026-10-25"
+                      ? []
+                      : rebuiltInBackend || alreadyMaterialized
+                        ? [previewSiblingRow, ownRow]
+                        : [previewSiblingRow];
                   await dispatchRoute(
                     "GET",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records?${query.toString()}`,
@@ -1483,7 +1640,13 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     { "content-type": "application/json" },
                     failureCase === "rebuilt-preview-wrong-data"
                       ? wireBytes("not-a-list")
-                      : wireBytes(toApiListData(dateFromVal === "2026-10-25" ? [] : [previewSiblingRow, ownRow])),
+                      : wireBytes(
+                          toApiListData(
+                            dateFromVal === "2026-10-25"
+                              ? []
+                              : [previewSiblingRow, ownRow],
+                          ),
+                        ),
                   );
                 },
               });
@@ -1494,20 +1657,38 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   const format = selectedFormat;
                   const jobId = `job_harness_${dateFromVal === "2026-10-25" ? "empty_" : ""}${format}`;
                   lastAcceptedJobId = jobId;
-                  const rows = dateFromVal === "2026-10-25" ? [] : [
-                    jobSiblingRow,
-                    previewFailure === "job-row-field" && format === "csv"
-                      ? buildDailyDispatchRow({
-                          firstAssignedAt: "secret-invalid-job-assignment",
-                        })
-                      : ownRow,
-                  ];
-                  const detail = buildJobDetailFixture(format, jobId, rows,
-                    dateFromVal === "2026-10-25" ? { filters: {
-                      ...buildDailyReportFilters(resolveExpectedDailyDispatchRecord(
-                        buildOrderFixture(), buildTaskFixture(), buildOwnContext(),
-                      )), serviceDateFrom: dateFromVal, serviceDateTo: dateToVal,
-                    } } : {});
+                  const rows =
+                    dateFromVal === "2026-10-25"
+                      ? []
+                      : [
+                          jobSiblingRow,
+                          previewFailure === "job-row-field" && format === "csv"
+                            ? buildDailyDispatchRow({
+                                firstAssignedAt:
+                                  "secret-invalid-job-assignment",
+                              })
+                            : ownRow,
+                        ];
+                  const detail = buildJobDetailFixture(
+                    format,
+                    jobId,
+                    rows,
+                    dateFromVal === "2026-10-25"
+                      ? {
+                          filters: {
+                            ...buildDailyReportFilters(
+                              resolveExpectedDailyDispatchRecord(
+                                buildOrderFixture(),
+                                buildTaskFixture(),
+                                buildOwnContext(),
+                              ),
+                            ),
+                            serviceDateFrom: dateFromVal,
+                            serviceDateTo: dateToVal,
+                          },
+                        }
+                      : {},
+                  );
                   const bytes = await renderFormatBytes(format, jobId, rows);
                   createdJobs.push({ format, jobId, detail, bytes });
                   const reqBody = {
@@ -1626,7 +1807,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   const target = String(opts.hasText ?? "");
                   if (target === ORDER_ID) {
                     return makeLocator({
-                      count: async () => dateFromVal === "2026-10-25" ? 0 : 1,
+                      count: async () => (dateFromVal === "2026-10-25" ? 0 : 1),
                       innerText: async () =>
                         `${ORDER_ID} ${ORDER_NO} 2026-10-26 ${PICKUP_ADDRESS} ${DROPOFF_ADDRESS} ${DRIVER_ID} ${VEHICLE_ID} ${PLATE_NO}`,
                     });
@@ -1724,7 +1905,23 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             "X-Serverless-Authorization": "Bearer synthetic-ops-cloud",
             "x-drts-authorization": "Bearer synthetic-ops-jwt",
           }),
-          readCanonicalOrders: async () => ({ items: [buildOrderFixture()] }),
+          readCanonicalOrders: async () => {
+            sourceReads += 1;
+            return {
+              items: [
+                buildOrderFixture(),
+                ...(failureCase.startsWith("source changes") &&
+                sourceReads === 2
+                  ? [
+                      buildOrderFixture({
+                        orderId: "writer-created-order",
+                        createdAt: "2026-10-24T18:10:00.000Z",
+                      }),
+                    ]
+                  : []),
+              ],
+            };
+          },
           order: buildOrderFixture(),
           completedTask: buildTaskFixture(),
           entrySlug: ENTRY_SLUG,
@@ -1887,6 +2084,21 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           ).rejects.toThrow();
           return;
         }
+        if (failureCase.startsWith("source changes")) {
+          await expect(run).rejects.toThrow(
+            "daily-report-empty-day-authoritative-source-control-required",
+          );
+          expect(sourceReads).toBe(2);
+          expect(unrouteCalled).toBe(true);
+          expect(
+            evidence.events.some(
+              (event) =>
+                event.stage ===
+                "daily-report-empty-source-after-zero-positive-own",
+            ),
+          ).toBe(false);
+          return;
+        }
         if (failureStage) {
           await expect(run).rejects.toThrow(failureStage);
           expect(unrouteCalled).toBe(true);
@@ -1924,7 +2136,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         expect(result.emptyDay.restoredPositiveRow).toBe(true);
         for (const format of DAILY_REPORT_FORMATS) {
           expect(result.emptyDay.downloads[format].rowCount).toBe(0);
-          expect(result.emptyDay.downloads[format].jobId).toBe(`job_harness_empty_${format}`);
+          expect(result.emptyDay.downloads[format].jobId).toBe(
+            `job_harness_empty_${format}`,
+          );
         }
 
         for (const format of DAILY_REPORT_FORMATS) {
