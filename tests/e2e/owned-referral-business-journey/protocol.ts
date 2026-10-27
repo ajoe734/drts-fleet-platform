@@ -1401,3 +1401,260 @@ export async function adoptReferralSession(
     ]);
   }
 }
+
+/** Real future instants; never dependent on browser/runner local time. */
+export function futureTaipeiReservationIntents(
+  nowMs = Date.now(),
+): readonly string[] {
+  requireFact(Number.isFinite(nowMs), "reservation real clock required");
+  const day = new Date(nowMs + 2 * 86_400_000 + 8 * 3600_000)
+    .toISOString()
+    .slice(0, 10);
+  const next = new Date(Date.parse(`${day}T00:00:00Z`) + 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  return Object.freeze([`${day}T23:55:00+08:00`, `${next}T00:05:00+08:00`]);
+}
+
+export async function verifyOwnedReservationCancellation(p: {
+  intendedInput: string;
+  journal: BookingWriteJournal;
+  quote: ObjectData;
+  orderId: string;
+  readOrder: () => Promise<ObjectData>;
+  readWindow: () => Promise<ObjectData>;
+  cancel: () => Promise<ObjectData>;
+  persist: (facts: ObjectData) => Promise<void>;
+}) {
+  const scheduled = new Date(p.intendedInput).toISOString();
+  requireFact(
+    p.intendedInput.endsWith("+08:00"),
+    "explicit Taipei offset input required",
+  );
+  const snapshot = p.journal.current;
+  requireFact(
+    snapshot?.state === "acknowledged" && snapshot.orderId === p.orderId,
+    "scheduled original independent acknowledged journal required",
+  );
+  const command = object(JSON.parse(snapshot.body));
+  const before = await p.readOrder();
+  requireFact(
+    command.scheduledAt === scheduled &&
+      command.quoteId === p.quote.quoteId &&
+      p.quote.requestedScheduledAt === scheduled &&
+      p.quote.timingMode === "scheduled" &&
+      before.orderId === p.orderId &&
+      before.reservationWindowStart === scheduled &&
+      object(object(before.referralPassengerLifecycle).quote).quoteId ===
+        p.quote.quoteId,
+    "scheduled exact UI quote canonical reservation binding",
+  );
+  const window = await p.readWindow();
+  const facts: ObjectData = {
+    orderId: p.orderId,
+    intendedInput: p.intendedInput,
+    scheduledAt: scheduled,
+    quoteId: p.quote.quoteId,
+    journalBodySha256: snapshot.bodySha256,
+    before: {
+      status: before.status,
+      reservationWindowStart: before.reservationWindowStart,
+      cancelableUntil: before.cancelableUntil,
+    },
+    window,
+    observedAt: new Date().toISOString(),
+    terminal: false,
+  };
+  // Persist before policy-dependent action. A closed window retains custody;
+  // no early completion, fake clock or replacement order is permitted.
+  await p.persist(facts);
+  requireFact(
+    window.canCancel === true &&
+      typeof window.cancelableUntil === "string" &&
+      window.cancelableUntil === before.cancelableUntil &&
+      Date.parse(window.cancelableUntil) > Date.now(),
+    "scheduled cancellation window closed; retain unresolved custody",
+  );
+  const ack = await p.cancel();
+  const after = await p.readOrder();
+  requireFact(
+    ack.orderId === p.orderId &&
+      ack.status === "cancelled" &&
+      after.orderId === p.orderId &&
+      after.status === "cancelled" &&
+      typeof ack.cancelledAt === "string" &&
+      after.cancelledAt === ack.cancelledAt,
+    "scheduled same-order cancellation ACK canonical readback",
+  );
+  await p.persist({
+    ...facts,
+    cancelACK: ack,
+    terminal: true,
+    after: { status: after.status, cancelledAt: after.cancelledAt },
+  });
+  return after;
+}
+
+/** Actual redispatch endpoint; each Driver port belongs to a different actor. */
+export async function runOwnedRedispatchToSecond(p: {
+  orderId: string;
+  nonce: string;
+  first: { driverId: string; vehicleId: string };
+  second: { driverId: string; vehicleId: string };
+  ops: (path: string, options?: CallOptions) => Promise<ObjectData>;
+  firstDriver: (path: string, options?: CallOptions) => Promise<ObjectData>;
+  secondDriver: (path: string, options?: CallOptions) => Promise<ObjectData>;
+  completeSecond: (task: ObjectData) => Promise<ObjectData>;
+  persist: (facts: ObjectData) => Promise<void>;
+}) {
+  requireFact(
+    p.first.driverId !== p.second.driverId &&
+      p.first.vehicleId !== p.second.vehicleId,
+    "redispatch requires two distinct owned approved pairs",
+  );
+  const firstJob = await p.ops(
+    `/orders/${encodeURIComponent(p.orderId)}/dispatch`,
+    {
+      method: "POST",
+      body: { mode: "auto" },
+      headers: { "Idempotency-Key": `${p.nonce}-dispatch` },
+    },
+  );
+  const firstJobId = text(firstJob.dispatchJobId);
+  const candidates = records(
+    (
+      await p.ops(
+        `/dispatch/tasks/${encodeURIComponent(firstJobId)}/candidates?includeIneligible=true`,
+      )
+    ).items,
+  );
+  // Prove BOTH available candidates before redispatch; a quote is not supply proof.
+  for (const pair of [p.first, p.second]) {
+    const candidate = candidates.find(
+      (c) => c.driverId === pair.driverId && c.vehicleId === pair.vehicleId,
+    );
+    requireFact(
+      candidate,
+      "both approved available owned candidates required before redispatch",
+    );
+    assertOwnPair(candidate, pair);
+    requireFact(
+      candidate.eligibilityDecision === "eligible",
+      "explicit actual owned candidate eligibility required",
+    );
+  }
+  const firstAck = await p.ops("/dispatch/assign", {
+    method: "POST",
+    body: { dispatchJobId: firstJobId, ...p.first },
+    headers: { "Idempotency-Key": `${p.nonce}-assign-first` },
+  });
+  const firstTask = await p.firstDriver(
+    `/api/driver/tasks/${encodeURIComponent(text(firstAck.taskId))}`,
+  );
+  requireFact(
+    firstTask.orderId === p.orderId &&
+      firstTask.driverId === p.first.driverId &&
+      firstTask.vehicleId === p.first.vehicleId &&
+      firstTask.assignmentId === firstAck.assignmentId &&
+      firstTask.status === "pending_acceptance",
+    "redispatch original first assignment/task binding",
+  );
+  // The normal enterprise task contract exposes no assignmentVersion. This is
+  // the sole original assignment in this journaled sequence; guard against any
+  // newer assignment with version 1, never omit the guard or invent a readback.
+  const version = 1;
+  const command = {
+    reasonCode: "synthetic_owned_second_supply",
+    reasonNote: "合成同單真重派驗證",
+    expectedAssignmentVersion: version,
+    idempotencyKey: `${p.nonce}-redispatch`,
+  };
+  await p.persist({
+    phase: "before-redispatch",
+    orderId: p.orderId,
+    firstAck,
+    firstTask,
+    secondPair: p.second,
+    command,
+    traceAuthority: "instance-local-memory-only",
+  });
+  const redispatched = await p.ops(
+    `/orders/${encodeURIComponent(p.orderId)}/redispatch`,
+    {
+      method: "POST",
+      body: command,
+      headers: { "Idempotency-Key": command.idempotencyKey },
+    },
+  );
+  const nextJobId = text(redispatched.dispatchJobId);
+  requireFact(
+    nextJobId !== firstJobId,
+    "redispatch distinct new dispatch job required",
+  );
+  const nextCandidate = records(
+    (
+      await p.ops(
+        `/dispatch/tasks/${encodeURIComponent(nextJobId)}/candidates?includeIneligible=true`,
+      )
+    ).items,
+  ).find(
+    (c) =>
+      c.driverId === p.second.driverId && c.vehicleId === p.second.vehicleId,
+  );
+  requireFact(
+    nextCandidate,
+    "second candidate required after actual redispatch",
+  );
+  assertOwnPair(nextCandidate, p.second);
+  const secondAck = await p.ops("/dispatch/assign", {
+    method: "POST",
+    body: { dispatchJobId: nextJobId, ...p.second },
+    headers: { "Idempotency-Key": `${p.nonce}-assign-second` },
+  });
+  const secondTask = await p.secondDriver(
+    `/api/driver/tasks/${encodeURIComponent(text(secondAck.taskId))}`,
+  );
+  const oldTask = await p.firstDriver(
+    `/api/driver/tasks/${encodeURIComponent(text(firstTask.taskId))}`,
+  );
+  requireFact(
+    oldTask.orderId === p.orderId &&
+      oldTask.assignmentId === firstTask.assignmentId &&
+      oldTask.status === "cancelled" &&
+      secondTask.orderId === p.orderId &&
+      secondTask.driverId === p.second.driverId &&
+      secondTask.vehicleId === p.second.vehicleId &&
+      secondTask.assignmentId === secondAck.assignmentId &&
+      secondTask.dispatchJobId === nextJobId &&
+      secondTask.taskId !== firstTask.taskId &&
+      secondTask.assignmentId !== firstTask.assignmentId,
+    "redispatch old/new same-order task assignment readback",
+  );
+  const completedTask = await p.completeSecond(secondTask);
+  const trace = await p.ops(
+    `/orders/${encodeURIComponent(p.orderId)}/dispatch-trace`,
+  );
+  const events = records(trace.items).filter((e) => e.orderId === p.orderId);
+  await p.persist({
+    phase: "completed",
+    orderId: p.orderId,
+    command,
+    firstAck,
+    oldTask,
+    secondAck,
+    completedTask,
+    trace: events,
+    traceAuthority: "instance-local-memory-only; durable completeness pending",
+  });
+  requireFact(
+    completedTask.status === "completed" && completedTask.orderId === p.orderId,
+    "redispatch second driver normal completion readback",
+  );
+  // Missing per-instance events are diagnostic, never proof of global absence.
+  return {
+    completedTask,
+    traceObservedRedispatchCount: events.filter(
+      (e) => e.eventType === "dispatch.redispatch_required",
+    ).length,
+  };
+}
