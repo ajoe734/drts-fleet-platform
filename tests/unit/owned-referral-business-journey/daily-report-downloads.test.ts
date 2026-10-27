@@ -1061,6 +1061,15 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       previewFailure: "row-field",
     },
     {
+      caseName:
+        "valid preview then independently executed job has invalid assignment field",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: false,
+      previewFailure: "job-row-field",
+    },
+    {
       caseName: "all sibling rows belong to controlled owned orders",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -1469,7 +1478,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   const format = selectedFormat;
                   const jobId = `job_harness_${format}`;
                   lastAcceptedJobId = jobId;
-                  const rows = [jobSiblingRow, ownRow];
+                  const rows = [
+                    jobSiblingRow,
+                    previewFailure === "job-row-field" && format === "csv"
+                      ? buildDailyDispatchRow({
+                          firstAssignedAt: "secret-invalid-job-assignment",
+                        })
+                      : ownRow,
+                  ];
                   const detail = buildJobDetailFixture(format, jobId, rows);
                   const bytes = await renderFormatBytes(format, jobId, rows);
                   createdJobs.push({ format, jobId, detail, bytes });
@@ -1771,6 +1787,32 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           await expect(
             stat(path.join(tempDir, "daily-reports")),
           ).rejects.toThrow();
+          return;
+        }
+        if (previewFailure === "job-row-field") {
+          await expect(run).rejects.toMatchObject({
+            stage: "daily-report-preview-dispatch-assignment-fields-required",
+          });
+          const diagnostic = JSON.stringify(evidence.events);
+          expect(diagnostic).toContain("daily-report-preview-own-order-verified");
+          expect(diagnostic).toContain("daily-report-job-csv-accepted");
+          expect(diagnostic).toContain(
+            "daily-report-job-detail-field-firstAssignedAt-parseable-false",
+          );
+          expect(diagnostic).not.toContain("daily-report-preview-field-");
+          expect(diagnostic).not.toContain("secret-invalid-job-assignment");
+          const fieldEvents = evidence.events.filter((event) =>
+            event.stage.startsWith("daily-report-job-detail-field-"),
+          );
+          expect(fieldEvents).toHaveLength(7);
+          expect(JSON.stringify(fieldEvents)).not.toContain(ORDER_ID);
+          expect(JSON.stringify(fieldEvents)).not.toContain(PICKUP_ADDRESS);
+          expect(createdJobs.map((job) => job.jobId)).toEqual(
+            DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
+          );
+          expect(artifactRequests).toBe(1);
+          expect(unrouteCalled).toBe(true);
+          await expect(stat(path.join(tempDir, "daily-reports"))).rejects.toThrow();
           return;
         }
         if (previewFailure === "row-field") {

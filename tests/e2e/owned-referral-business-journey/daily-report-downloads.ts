@@ -386,6 +386,7 @@ export function validateDailyPreviewRows(
   responseSha: string | null | undefined,
   controlledOrderIds?: Iterable<string>,
   evidence?: Evidence,
+  diagnosticSource: "preview" | "job-detail" = "preview",
 ): Readonly<{
   rowCount: number;
   controlledRowCount: number;
@@ -493,21 +494,21 @@ export function validateDailyPreviewRows(
         : "absent";
       const kind = value === null ? "null" : typeof value;
       evidence.record({
-        stage: `daily-report-preview-field-${field}-${presence}-type-${kind}`,
+        stage: `daily-report-${diagnosticSource}-field-${field}-${presence}-type-${kind}`,
         result: "failed",
       });
       if (field === "etaSecondsAtAssignment") {
         evidence.record({
-          stage: `daily-report-preview-field-${field}-finite-${etaFinite}`,
+          stage: `daily-report-${diagnosticSource}-field-${field}-finite-${etaFinite}`,
           result: "failed",
         });
         evidence.record({
-          stage: `daily-report-preview-field-${field}-nonnegative-${etaNonnegative}`,
+          stage: `daily-report-${diagnosticSource}-field-${field}-nonnegative-${etaNonnegative}`,
           result: "failed",
         });
       } else {
         evidence.record({
-          stage: `daily-report-preview-field-${field}-parseable-${field === "firstDispatchAt" ? dispatchParseable : assignedParseable}`,
+          stage: `daily-report-${diagnosticSource}-field-${field}-parseable-${field === "firstDispatchAt" ? dispatchParseable : assignedParseable}`,
           result: "failed",
         });
       }
@@ -1980,6 +1981,7 @@ export async function runOwnedDailyReportDownloads(
         detailExchange.runtimeSha,
         controlledOrderIdSet,
         evidence,
+        "job-detail",
       );
       // Preview GET and queued job execution are independent snapshots. Retain
       // only when the actual job rows (the downloaded bytes' source) are all
