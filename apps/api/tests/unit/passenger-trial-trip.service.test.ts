@@ -338,6 +338,134 @@ describe("PassengerTrialTripService", () => {
     );
   });
 
+  /** Registry records of both listed templates, minus the given pieces. */
+  function templates(missing: Record<string, string[]> = {}) {
+    const ids = ["pax-review-vehicle-a", "veh-demo-001"];
+    const present = (piece: string) =>
+      ids.filter((id) => !missing[id]?.includes(piece));
+    return {
+      vehicles: present("vehicle").map((vehicleId) => ({
+        vehicleId,
+        make: `make-${vehicleId}`,
+      })),
+      contracts: present("contract").map((vehicleId) => ({
+        contractId: `contract-${vehicleId}`,
+        vehicleId,
+      })),
+      policies: present("policy").map((vehicleId) => ({
+        policyId: `policy-${vehicleId}`,
+        vehicleId,
+        coverage: `coverage-${vehicleId}`,
+      })),
+      exclusivities: present("exclusivity").map((vehicleId) => ({
+        vehicleId,
+        exclusiveProviderId: `provider-${vehicleId}`,
+      })),
+    };
+  }
+
+  function withTemplates(
+    h: ReturnType<typeof harness>,
+    records: ReturnType<typeof templates>,
+  ) {
+    h.registry.listVehicles.mockReturnValue(records.vehicles as never);
+    h.registry.listContracts.mockReturnValue(records.contracts as never);
+    h.registry.listPolicies.mockReturnValue(records.policies as never);
+    h.registry.listExclusivities.mockReturnValue(
+      records.exclusivities as never,
+    );
+    return h;
+  }
+
+  function clonedChanges(h: ReturnType<typeof harness>) {
+    return h.registryRepository.persistChanges.mock.calls
+      .map(([changes]) => changes as Record<string, unknown[] | undefined>)
+      .find((changes) => changes.vehicles)!;
+  }
+
+  it("keeps the preferred template when it is complete", async () => {
+    const h = withTemplates(withTaxi(harness()), templates());
+    await h.service.prepareSupply();
+    const changes = clonedChanges(h);
+    expect(changes.vehicles).toEqual(
+      PASSENGER_TRIAL_SUPPLY.map((pair) =>
+        expect.objectContaining({
+          vehicleId: pair.vehicleId,
+          make: "make-pax-review-vehicle-a",
+        }),
+      ),
+    );
+    expect(changes.policies).toEqual(
+      PASSENGER_TRIAL_SUPPLY.map(() =>
+        expect.objectContaining({ coverage: "coverage-pax-review-vehicle-a" }),
+      ),
+    );
+  });
+
+  it.each(["contract", "policy", "exclusivity"])(
+    "clones the complete second template when the first lacks its %s",
+    async (piece) => {
+      const h = withTemplates(
+        withTaxi(harness()),
+        templates({ "pax-review-vehicle-a": [piece] }),
+      );
+      await h.service.prepareSupply();
+      const changes = clonedChanges(h);
+      const trialIds = PASSENGER_TRIAL_SUPPLY.map((pair) => pair.vehicleId);
+      expect(changes.vehicles).toEqual(
+        trialIds.map((vehicleId) =>
+          expect.objectContaining({ vehicleId, make: "make-veh-demo-001" }),
+        ),
+      );
+      expect(changes.contracts).toEqual(
+        trialIds.map((vehicleId) =>
+          expect.objectContaining({
+            vehicleId,
+            contractId: `passenger-trial-contract-${vehicleId}`,
+          }),
+        ),
+      );
+      expect(changes.policies).toEqual(
+        trialIds.map((vehicleId) =>
+          expect.objectContaining({
+            vehicleId,
+            coverage: "coverage-veh-demo-001",
+          }),
+        ),
+      );
+      expect(changes.exclusivities).toEqual(
+        trialIds.map((vehicleId) =>
+          expect.objectContaining({
+            vehicleId,
+            exclusiveProviderId: "provider-veh-demo-001",
+          }),
+        ),
+      );
+      expect(h.persistVehicle).toHaveBeenCalledTimes(3);
+      expect(h.eligibility.enableServiceProductForSupply).toHaveBeenCalledTimes(
+        1,
+      );
+    },
+  );
+
+  it("still refuses when no listed template is complete", async () => {
+    const h = withTemplates(
+      withTaxi(harness()),
+      templates({
+        "pax-review-vehicle-a": ["policy"],
+        "veh-demo-001": ["exclusivity"],
+      }),
+    );
+    const error = await h.service.prepareSupply().catch((e: unknown) => e);
+    expect(error).toMatchObject({
+      code: "PASSENGER_TRIAL_TRIP_SUPPLY_UNAVAILABLE",
+    });
+    expect((error as { getStatus: () => number }).getStatus()).toBe(503);
+    expect(h.registryRepository.persistChanges).not.toHaveBeenCalled();
+    expect(h.persistVehicle).not.toHaveBeenCalled();
+    expect(h.eligibility.enableServiceProductForSupply).not.toHaveBeenCalled();
+  });
+
   it("lets the review preparation create a missing authorization first", async () => {
     const h = withTaxi(harness({ authorizationExists: false }));
     await h.service.prepareSupply();
