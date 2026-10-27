@@ -78,6 +78,7 @@ const starTone = passengerChrome.driverRealm.fg;
 function Shell({ children }: { children: ReactNode }) {
   return (
     <main
+      className="pax-device-stage"
       style={{
         minHeight: "100dvh",
         display: "flex",
@@ -89,6 +90,7 @@ function Shell({ children }: { children: ReactNode }) {
     >
       <div style={{ width: "100%", maxWidth: 430 }}>
         <div
+          className="pax-device"
           style={{
             width: "100%",
             maxWidth: 390,
@@ -125,6 +127,7 @@ function TopChrome({
   return (
     <>
       <div
+        className="pax-statusbar"
         style={{
           height: 40,
           background: passengerChrome.headerBg,
