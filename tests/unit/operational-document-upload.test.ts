@@ -4768,6 +4768,26 @@ describe("original referral first-visit issuer and canonical zero-order evidence
       /RAM|private|other-person|WIF|OPS/,
     );
   });
+  it("retains only a safe issuer 403 status and rejects invalid JSON without payload leakage", async () => {
+    ports({ issueStatus: 403 });
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow(
+      /^Referral evidence POST \/api\/partner\/ingress\/referral-embed-handoff failed: HTTP 403$/,
+    );
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response("private-not-json", {
+          headers: { "x-drts-candidate-sha": sha },
+        }),
+    );
+    await expect(
+      prepareOperationalReferralHandoff(entry.entry_slug, entry.entry_host),
+    ).rejects.toThrow(
+      /^Referral evidence GET \/api\/partner\/entries\/yuhe-residence failed: invalid envelope or JSON$/,
+    );
+  });
   it("rejects an issuer HTTP 200 in place of the formal Nest 201", async () => {
     ports({ issueStatus: 200 });
     await expect(
@@ -4838,6 +4858,8 @@ describe("original referral first-visit issuer and canonical zero-order evidence
       orders: { items: [{ ...row, tenant_id: undefined }] },
     },
     { label: "orders non-200", orderStatus: 403 },
+    { label: "orders partial HTTP", orderStatus: 206 },
+    { label: "orders redirect", orderStatus: 307 },
     { label: "orders wrong SHA", orderSha: "b".repeat(40) },
     { label: "session rejected", sessionStatus: 401 },
     { label: "session wrong SHA", sessionSha: "b".repeat(40) },

@@ -1573,7 +1573,7 @@ describe("actual original first-visit refusal chain", () => {
               consent_required: true,
               consent_bundle_version: null,
             },
-            201,
+            change.issueStatus ?? 201,
           );
         }
         if (url.pathname === "/api/auth/session") {
@@ -1794,6 +1794,13 @@ describe("actual original first-visit refusal chain", () => {
     expect(JSON.stringify(records)).not.toMatch(
       /private-|ref_handoff_|xxxx|cccc|cookie|artifact/i,
     );
+  });
+  it("keeps route-scope 403 actionable without recording a refusal pass or leaking issuer payload", async () => {
+    const { result, records } = await probe({ issueStatus: 403 });
+    await expect(result).rejects.toThrow(
+      /^Referral evidence POST \/api\/partner\/ingress\/referral-embed-handoff failed: HTTP 403$/,
+    );
+    expect(records).toEqual([]);
   });
   it.each([
     { label: "exchange non-200", exchangeStatus: 403 },
