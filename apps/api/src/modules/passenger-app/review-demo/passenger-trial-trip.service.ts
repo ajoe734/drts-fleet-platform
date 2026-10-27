@@ -202,8 +202,13 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
       (pair) => !state.vehicles.some((v) => v.vehicleId === pair.vehicleId),
     );
     if (missingVehicles.length > 0) {
-      const templateId = TEMPLATE_VEHICLE_IDS.find((id) =>
-        this.registry.listVehicles().some((v) => v.vehicleId === id),
+      // The first listed vehicle with the full tuple the clone below needs.
+      const templateId = TEMPLATE_VEHICLE_IDS.find(
+        (id) =>
+          this.registry.listVehicles().some((v) => v.vehicleId === id) &&
+          this.registry.listContracts().some((c) => c.vehicleId === id) &&
+          this.registry.listPolicies().some((p) => p.vehicleId === id) &&
+          this.registry.listExclusivities().some((e) => e.vehicleId === id),
       );
       const template = this.registry
         .listVehicles()
