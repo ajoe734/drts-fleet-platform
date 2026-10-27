@@ -1,16 +1,17 @@
 import { HttpStatus, Injectable, Optional } from "@nestjs/common";
 
-import type {
-  DriverFleetAffiliationRecord,
-  DriverRegistryRecord,
-  Phase1ServiceBucket,
-  SupplyDocumentRecord,
-  SupplyReadinessReasonCode,
-  SupplyReadinessRecord,
-  SupplyReadinessState,
-  SupplySubmissionRecord,
-  VehicleFleetAffiliationRecord,
-  VehicleRegistryRecord,
+import {
+  isSupplyRenewalSubmissionType,
+  type DriverFleetAffiliationRecord,
+  type DriverRegistryRecord,
+  type Phase1ServiceBucket,
+  type SupplyDocumentRecord,
+  type SupplyReadinessReasonCode,
+  type SupplyReadinessRecord,
+  type SupplyReadinessState,
+  type SupplySubmissionRecord,
+  type VehicleFleetAffiliationRecord,
+  type VehicleRegistryRecord,
 } from "@drts/contracts";
 
 import { ApiRequestError } from "../../common/api-envelope";
@@ -254,12 +255,32 @@ export class SupplyReadinessService {
     fleetPartnerId: string,
   ) {
     const approvedSubmissions = state.submissions
+      .map((submission, index) => ({ submission, index }))
       .filter(
-        (submission) =>
+        ({ submission }) =>
           submission.fleetPartnerId === fleetPartnerId &&
           submission.status === "approved",
       )
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      .sort((left, right) => {
+        const leftTime = left.submission.reviewedAt ?? left.submission.updatedAt;
+        const rightTime =
+          right.submission.reviewedAt ?? right.submission.updatedAt;
+        const cmp = rightTime.localeCompare(leftTime);
+        if (cmp !== 0) {
+          return cmp;
+        }
+        const leftRenewal = isSupplyRenewalSubmissionType(
+          left.submission.submissionType,
+        );
+        const rightRenewal = isSupplyRenewalSubmissionType(
+          right.submission.submissionType,
+        );
+        if (leftRenewal !== rightRenewal) {
+          return rightRenewal ? 1 : -1;
+        }
+        return right.index - left.index;
+      })
+      .map(({ submission }) => submission);
     const driverArtifactsByCanonicalId = new Map<
       string,
       ApprovedSubmissionArtifacts
@@ -270,40 +291,89 @@ export class SupplyReadinessService {
     >();
 
     for (const submission of approvedSubmissions) {
-      const artifacts: ApprovedSubmissionArtifacts = {
-        submission,
-        driverDraft:
-          state.driverDrafts.find(
-            (candidate) => candidate.submissionId === submission.submissionId,
-          ) ?? null,
-        vehicleDraft:
-          state.vehicleDrafts.find(
-            (candidate) => candidate.submissionId === submission.submissionId,
-          ) ?? null,
-        documents: state.documents.filter(
-          (document) =>
-            document.submissionId === submission.submissionId &&
-            document.fleetPartnerId === fleetPartnerId,
-        ),
-      };
+      const driverDraft =
+        state.driverDrafts.find(
+          (candidate) => candidate.submissionId === submission.submissionId,
+        ) ?? null;
+      const vehicleDraft =
+        state.vehicleDrafts.find(
+          (candidate) => candidate.submissionId === submission.submissionId,
+        ) ?? null;
+      const documents = state.documents.filter(
+        (document) =>
+          document.submissionId === submission.submissionId &&
+          document.fleetPartnerId === fleetPartnerId,
+      );
 
-      if (
-        submission.canonicalDriverId &&
-        !driverArtifactsByCanonicalId.has(submission.canonicalDriverId)
-      ) {
-        driverArtifactsByCanonicalId.set(
-          submission.canonicalDriverId,
-          artifacts,
-        );
+      const canonicalDriverId =
+        submission.canonicalDriverId ??
+        (submission.submissionType === "profile_correction"
+          ? submission.subjectDriverId
+          : null);
+      if (canonicalDriverId) {
+        const existing = driverArtifactsByCanonicalId.get(canonicalDriverId);
+        if (!existing) {
+          driverArtifactsByCanonicalId.set(canonicalDriverId, {
+            submission,
+            driverDraft: driverDraft ? { ...driverDraft } : null,
+            vehicleDraft: null,
+            documents: [...documents],
+          });
+        } else {
+          existing.documents.push(...documents);
+          if (!existing.driverDraft && driverDraft) {
+            existing.driverDraft = { ...driverDraft };
+          } else if (existing.driverDraft && driverDraft) {
+            existing.driverDraft = {
+              ...driverDraft,
+              ...existing.driverDraft,
+              name: existing.driverDraft.name.trim() || driverDraft.name,
+              mobile: existing.driverDraft.mobile.trim() || driverDraft.mobile,
+              professionalDriverLicenseNo:
+                existing.driverDraft.professionalDriverLicenseNo.trim() ||
+                driverDraft.professionalDriverLicenseNo,
+              professionalDriverLicenseExpiry:
+                existing.driverDraft.professionalDriverLicenseExpiry.trim() ||
+                driverDraft.professionalDriverLicenseExpiry,
+              taxiDriverRegistrationNo:
+                existing.driverDraft.taxiDriverRegistrationNo.trim() ||
+                driverDraft.taxiDriverRegistrationNo,
+              taxiDriverRegistrationArea:
+                existing.driverDraft.taxiDriverRegistrationArea.trim() ||
+                driverDraft.taxiDriverRegistrationArea,
+              taxiDriverRegistrationExpiry:
+                existing.driverDraft.taxiDriverRegistrationExpiry.trim() ||
+                driverDraft.taxiDriverRegistrationExpiry,
+              supportedServiceProductCodes:
+                existing.driverDraft.supportedServiceProductCodes.length > 0
+                  ? existing.driverDraft.supportedServiceProductCodes
+                  : driverDraft.supportedServiceProductCodes,
+            };
+          }
+        }
       }
-      if (
-        submission.canonicalVehicleId &&
-        !vehicleArtifactsByCanonicalId.has(submission.canonicalVehicleId)
-      ) {
-        vehicleArtifactsByCanonicalId.set(
-          submission.canonicalVehicleId,
-          artifacts,
-        );
+
+      const canonicalVehicleId =
+        submission.canonicalVehicleId ??
+        (submission.submissionType === "insurance_update" ||
+        submission.submissionType === "contract_update"
+          ? submission.subjectVehicleId
+          : null);
+      if (canonicalVehicleId) {
+        const existing = vehicleArtifactsByCanonicalId.get(canonicalVehicleId);
+        if (!existing) {
+          vehicleArtifactsByCanonicalId.set(canonicalVehicleId, {
+            submission,
+            driverDraft: null,
+            vehicleDraft: vehicleDraft ? { ...vehicleDraft } : null,
+            documents: [...documents],
+          });
+        } else {
+          existing.documents.push(...documents);
+          if (!existing.vehicleDraft && vehicleDraft) {
+            existing.vehicleDraft = { ...vehicleDraft };
+          }
+        }
       }
     }
 
@@ -423,17 +493,29 @@ export class SupplyReadinessService {
     }
 
     const contractLifecycle = vehicle.supplyLifecycle.contract.lifecycleStatus;
+    const contractEndAt = vehicle.supplyLifecycle.contract.endAt;
+    const isContractDateExpired = Boolean(
+      contractEndAt &&
+        new Date(contractEndAt).getTime() <
+          new Date(context.evaluatedAt).getTime(),
+    );
     if (contractLifecycle === "missing") {
       this.pushReason(reasonCodes, "CONTRACT_MISSING");
-    } else if (contractLifecycle !== "active") {
+    } else if (contractLifecycle !== "active" || isContractDateExpired) {
       this.pushReason(reasonCodes, "CONTRACT_INACTIVE");
     }
 
     const insuranceLifecycle =
       vehicle.supplyLifecycle.insurance.lifecycleStatus;
+    const insuranceEndAt = vehicle.supplyLifecycle.insurance.endAt;
+    const isInsuranceDateExpired = Boolean(
+      insuranceEndAt &&
+        new Date(insuranceEndAt).getTime() <
+          new Date(context.evaluatedAt).getTime(),
+    );
     if (insuranceLifecycle === "missing" || insuranceLifecycle === "pending") {
       this.pushReason(reasonCodes, "INSURANCE_MISSING");
-    } else if (insuranceLifecycle !== "active") {
+    } else if (insuranceLifecycle !== "active" || isInsuranceDateExpired) {
       this.pushReason(reasonCodes, "INSURANCE_EXPIRED");
     }
 
@@ -508,47 +590,93 @@ export class SupplyReadinessService {
     context: PartnerReadinessContext,
     reasonCodes: SupplyReadinessReasonCode[],
   ) {
+    const allDocs = artifacts?.documents ?? [];
+    const anyApprovedLicenseDoc = allDocs.find(
+      (doc) =>
+        doc.documentType === "professional_driver_license" &&
+        doc.reviewStatus === "approved",
+    );
     const licenseDocument = this.findApprovedDocument(
-      artifacts?.documents ?? [],
+      allDocs,
       "professional_driver_license",
       context.evaluatedAt,
     );
+    const anyApprovedRegDoc = allDocs.find(
+      (doc) =>
+        doc.documentType === "taxi_driver_registration" &&
+        doc.reviewStatus === "approved",
+    );
     const registrationDocument = this.findApprovedDocument(
-      artifacts?.documents ?? [],
+      allDocs,
       "taxi_driver_registration",
       context.evaluatedAt,
     );
     const driverDraft = artifacts?.driverDraft ?? null;
 
     if (driverDraft) {
-      if (!driverDraft.professionalDriverLicenseNo.trim() || !licenseDocument) {
+      const effectiveLicenseExpiry =
+        driver.professionalDriverLicenseExpiry ??
+        driver.licenseExpiry ??
+        driverDraft.professionalDriverLicenseExpiry;
+      if (
+        !driverDraft.professionalDriverLicenseNo.trim() ||
+        !anyApprovedLicenseDoc
+      ) {
         this.pushReason(reasonCodes, "DRIVER_LICENSE_MISSING");
       } else if (
-        this.isDateOnlyExpired(
-          driverDraft.professionalDriverLicenseExpiry,
-          context.evaluatedAt,
-        )
+        !licenseDocument ||
+        (effectiveLicenseExpiry &&
+          this.isDateOnlyExpired(
+            effectiveLicenseExpiry.slice(0, 10),
+            context.evaluatedAt,
+          ))
       ) {
         this.pushReason(reasonCodes, "DRIVER_LICENSE_EXPIRED");
       }
 
+      const effectiveRegExpiry =
+        driver.taxiDriverRegistrationExpiry ??
+        driverDraft.taxiDriverRegistrationExpiry;
       if (
         !driverDraft.taxiDriverRegistrationNo.trim() ||
-        !registrationDocument
+        !anyApprovedRegDoc
       ) {
         this.pushReason(reasonCodes, "DRIVER_REGISTRATION_MISSING");
       } else if (
-        this.isDateOnlyExpired(
-          driverDraft.taxiDriverRegistrationExpiry,
-          context.evaluatedAt,
-        )
+        !registrationDocument ||
+        (effectiveRegExpiry &&
+          this.isDateOnlyExpired(
+            effectiveRegExpiry.slice(0, 10),
+            context.evaluatedAt,
+          ))
       ) {
         this.pushReason(reasonCodes, "DRIVER_REGISTRATION_EXPIRED");
       }
       return;
     }
 
-    if (!driver.licensesValid) {
+    if (
+      driver.taxiDriverRegistrationExpiry &&
+      this.isDateOnlyExpired(
+        driver.taxiDriverRegistrationExpiry.slice(0, 10),
+        context.evaluatedAt,
+      )
+    ) {
+      this.pushReason(reasonCodes, "DRIVER_REGISTRATION_EXPIRED");
+    }
+    if (
+      (driver.professionalDriverLicenseExpiry &&
+        this.isDateOnlyExpired(
+          driver.professionalDriverLicenseExpiry.slice(0, 10),
+          context.evaluatedAt,
+        )) ||
+      (driver.licenseExpiry &&
+        this.isDateOnlyExpired(
+          driver.licenseExpiry.slice(0, 10),
+          context.evaluatedAt,
+        )) ||
+      !driver.licensesValid
+    ) {
       this.pushReason(reasonCodes, "DRIVER_LICENSE_EXPIRED");
     }
   }

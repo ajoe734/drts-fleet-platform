@@ -218,7 +218,7 @@ describe("CallcenterService evidence access", () => {
     expect(completeAudit?.resourceId).toBe(callback.callbackTaskId);
   });
 
-  it("links a complaint case number to the call session for handoff tracking", () => {
+  it("links a complaint case number to the call session for handoff tracking", async () => {
     const auditNotificationService = new AuditNotificationService();
     const service = new CallcenterService(auditNotificationService);
 
@@ -228,11 +228,11 @@ describe("CallcenterService evidence access", () => {
       agentId: "ops-complaint-001",
     });
 
-    service.linkOrderToExistingSession(session.callId, {
+    await service.linkOrderToExistingSession(session.callId, {
       orderId: "ORD-COMPLAINT-001",
     });
 
-    const updated = service.linkCaseToCallSession(
+    const updated = await service.linkCaseToCallSession(
       session.callId,
       "CASE-20260430-001",
       "req-complaint-handoff-001",

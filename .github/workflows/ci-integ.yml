@@ -345,6 +345,28 @@ jobs:
             .artifacts/owned-referral-business-journey/cancellations/*-booking-write-journal.json
             .artifacts/owned-referral-business-journey/cancellations/results.json
             .artifacts/owned-referral-business-journey/cancellations/*.png
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06-custody.json
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1/booking-write-journal.json
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-2/booking-write-journal.json
+            .artifacts/owned-referral-business-journey/TEN03-06/redispatched/booking-write-journal.json
+            .artifacts/owned-referral-business-journey/TEN03-06/C1-cancelled-null/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/C1-cancelled-null/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/C1-cancelled-null/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-2/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-2/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-2/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1-after-both/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1-after-both/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/reservation-1-after-both/daily-reports/daily-dispatch-*.pdf
+            .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.csv
+            .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.xlsx
+            .artifacts/owned-referral-business-journey/TEN03-06/redispatched/daily-reports/daily-dispatch-*.pdf
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 14

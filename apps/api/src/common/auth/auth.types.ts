@@ -8,6 +8,7 @@ export const AUTH_ACTOR_TYPES = [
   "partner_api_key",
   "partner_user",
   "referral_passenger",
+  "agency_user",
 ] as const;
 
 export type AuthActorType = (typeof AUTH_ACTOR_TYPES)[number];
@@ -19,6 +20,7 @@ export const AUTH_REALMS = [
   "ops",
   "driver",
   "partner",
+  "agency",
 ] as const;
 
 export type AuthRealm = (typeof AUTH_REALMS)[number];
@@ -37,6 +39,7 @@ export const AUTH_ROLE_FAMILIES = [
   "ops",
   "driver",
   "partner",
+  "agency",
 ] as const;
 
 export type AuthRoleFamily = (typeof AUTH_ROLE_FAMILIES)[number];
@@ -64,6 +67,8 @@ export interface BootstrapRequestIdentity {
   partnerId?: string | null;
   partnerProgramId?: string | null;
   partnerEntrySlug?: string | null;
+  /** BUREAU-R13: regulatory agency bound to an agency_user session. */
+  agencyId?: string | null;
   drtsPassengerId?: string | null;
   sessionId?: string | null;
   tokenId?: string | null;

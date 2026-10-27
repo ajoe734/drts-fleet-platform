@@ -735,6 +735,14 @@ function mapStatement(record: FleetPartnerStatementRecord): FleetStatement {
   };
 }
 
+function isStatementAuthorityError(err: unknown) {
+  const status =
+    err && typeof err === "object" && "statusCode" in err
+      ? (err as { statusCode: unknown }).statusCode
+      : null;
+  return status === 401 || status === 403;
+}
+
 export async function loadStatements(): Promise<StatementsView> {
   try {
     const { client } = await getServerFleetPartnerClient();
@@ -742,7 +750,7 @@ export async function loadStatements(): Promise<StatementsView> {
     // Empty but reachable === legitimate zero data; keep it live.
     return { rows: records.map(mapStatement), source: "live" };
   } catch (err) {
-    if (isConfigError(err)) {
+    if (isConfigError(err) || isStatementAuthorityError(err)) {
       throw err;
     }
     return { rows: FX_FLEET_STATEMENTS, source: "fallback" };
@@ -820,7 +828,7 @@ export async function loadStatementDetail(
       source: "live",
     };
   } catch (err) {
-    if (isConfigError(err)) {
+    if (isConfigError(err) || isStatementAuthorityError(err)) {
       throw err;
     }
     const fixture = FX_FLEET_STATEMENTS.find((row) => row.id === statementId);

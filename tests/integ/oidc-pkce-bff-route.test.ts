@@ -8,6 +8,7 @@ import {
 import { GET as partnerAuthGet } from "../../apps/fleet-partner-portal-web/app/api/auth/[...auth]/route";
 import { OidcPkceService } from "../../apps/api/src/modules/auth/oidc-pkce.service";
 import { JwtAuthService } from "../../apps/api/src/common/auth/jwt-auth.service";
+import { deepToSnakeCase } from "../../apps/api/src/common/snake-case.interceptor";
 import { TenantPartnerService } from "../../apps/api/src/modules/tenant-partner/tenant-partner.service";
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 
@@ -207,10 +208,13 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE Route Handler Integrat
           partnerId: "yuhe-residence",
           redirectUri: "http://localhost:3001/api/auth/callback",
         });
-        return new Response(JSON.stringify({ data: loginParams }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify(deepToSnakeCase({ data: loginParams })),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
       if (url.toString().includes("/api/auth/partner/callback-session")) {
         const command = JSON.parse((init?.body as string) || "{}");
@@ -219,10 +223,13 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE Route Handler Integrat
           command,
           { stateToken },
         );
-        return new Response(JSON.stringify({ data: session }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify(deepToSnakeCase({ data: session })),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
       return new Response("Not found", { status: 404 });
     });
@@ -284,10 +291,13 @@ describe("E2E-IAM-IDP-001: Web App BFF Cookie & OIDC PKCE Route Handler Integrat
           command,
           { stateToken },
         );
-        return new Response(JSON.stringify({ data: session }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
+        return new Response(
+          JSON.stringify(deepToSnakeCase({ data: session })),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
       }
       return new Response("Not found", { status: 404 });
     });
