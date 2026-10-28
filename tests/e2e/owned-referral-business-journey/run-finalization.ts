@@ -133,8 +133,8 @@ export type FinalizationPorts = {
 
 // Outbound authority of one finalizer scope. Closed when its step settles or
 // its budget expires; a closed lease never sends a request again and never
-// delivers a late response to the abandoned action.
-type Lease = { open: boolean };
+// delivers a late response (headers or any body byte) to the abandoned action.
+type Lease = { open: boolean; onClose: Set<() => void> };
 type FactsStatus = "running" | "finalizing" | "finalized";
 // One durable file. Writes run strictly one after another in real completion
 // order and coalesce to the newest snapshot, so a write abandoned by its wait
@@ -218,7 +218,7 @@ export class RunFinalizer {
           throw new JourneyFailure(
             "finalization-response-after-budget-exhausted",
           );
-        return response;
+        return leasedResponse(response, lease);
       });
     }) as typeof fetch;
   }
@@ -288,14 +288,17 @@ export class RunFinalizer {
   }
 
   private openLease(): Lease {
-    const lease = { open: true };
+    const lease: Lease = { open: true, onClose: new Set() };
     this.leases.add(lease);
     return lease;
   }
 
   private closeLease(lease: Lease) {
+    if (!lease.open) return;
     lease.open = false;
     this.leases.delete(lease);
+    for (const close of [...lease.onClose]) close();
+    lease.onClose.clear();
   }
 
   private async execute(root: Lease) {
@@ -412,6 +415,7 @@ export class RunFinalizer {
     let first = !this.finished;
     for (;;) {
       const reason = this.reason;
+      const failuresAtBuild = this.checkpointWriteFailures;
       const artifacts: FinalizationResult["artifacts"] = [];
       for (const artifact of this.ports.artifacts) {
         let outcome: ArtifactOutcome = "failed";
@@ -446,8 +450,20 @@ export class RunFinalizer {
       result.unresolved = unresolvedFacts(this.ports.custody(), result);
       this.finished = result;
       await this.writeFacts("finalized");
+      // A failed final facts write is a real failure of this run, never a
+      // pass already claimed by the artifacts written before it.
       result.checkpointWriteFailures = this.checkpointWriteFailures;
-      if (this.reason === reason || this.remainingHardMs() <= 0) return result;
+      result.unresolved = unresolvedFacts(this.ports.custody(), result);
+      result.wholeRunPassed &&= result.unresolved.length === 0;
+      // Artifacts built while the facts were still durable are re-persisted
+      // once with the failure; a persistent disk error is not retried again.
+      const factsFailedAfterBuild =
+        failuresAtBuild === 0 && this.checkpointWriteFailures > 0;
+      if (
+        (this.reason === reason && !factsFailedAfterBuild) ||
+        this.remainingHardMs() <= 0
+      )
+        return result;
       first = false;
     }
   }
@@ -473,6 +489,7 @@ export class RunFinalizer {
           steps,
           artifacts,
           planError,
+          checkpointWriteFailures: this.checkpointWriteFailures,
         }).length === 0,
     };
   }
@@ -555,8 +572,8 @@ export class RunFinalizer {
     })();
   }
 
-  // Disk errors are counted, never thrown from the finalizer, so later steps
-  // still run; a body checkpoint fails closed on its own outcome.
+  // Disk errors are counted and reported, never thrown from the finalizer, so
+  // later steps still run; a body checkpoint fails closed on its own outcome.
   private async writeFacts(status: FactsStatus) {
     let snapshot: unknown;
     try {
@@ -570,8 +587,21 @@ export class RunFinalizer {
       };
     }
     const outcome = await this.durable(this.ports.checkpointFile, snapshot);
-    if (outcome !== "written" && status !== "running")
+    if (outcome !== "written" && status !== "running") {
+      // Reported once while finalizing and once for the final snapshot.
+      if (status === "finalized" || this.checkpointWriteFailures === 0)
+        this.ports.onFailed(
+          status === "finalized"
+            ? "run-finalization-final-facts-persist"
+            : "run-finalization-facts-persist",
+          new JourneyFailure(
+            `run-finalization-${status}-facts-${
+              outcome === "failed" ? "write-failed" : "write-budget-exhausted"
+            }`,
+          ),
+        );
       this.checkpointWriteFailures++;
+    }
     return outcome;
   }
 
@@ -645,6 +675,55 @@ export class RunFinalizer {
           : false,
     };
   }
+}
+
+// The body of a response received under a lease stays bound to that lease: every
+// chunk and the end of stream are only delivered while it is open, and closing
+// it rejects a read already waiting, so an abandoned action can never complete
+// (or record custody) from bytes that arrive after its budget. The transport's
+// own signal, byte limits and checks still apply to the delivered bytes.
+function leasedResponse(response: Response, lease: Lease): Response {
+  const source = response.body;
+  if (!source) return response;
+  const reader = source.getReader();
+  const expired = () =>
+    new JourneyFailure("finalization-response-body-after-lease-closed");
+  let close: (() => void) | undefined;
+  const body = new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        close = () => {
+          controller.error(expired());
+          void reader.cancel().catch(() => undefined);
+        };
+        lease.onClose.add(close);
+      },
+      async pull(controller) {
+        if (!lease.open) throw expired();
+        const part = await reader.read();
+        if (!lease.open) throw expired();
+        if (part.done) {
+          lease.onClose.delete(close!);
+          controller.close();
+        } else controller.enqueue(part.value);
+      },
+      cancel(reason) {
+        lease.onClose.delete(close!);
+        return reader.cancel(reason);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const read = () => new Response(body, { headers: response.headers });
+  // Same status/headers/url; only the body consumers are rebound.
+  return Object.defineProperties(response, {
+    body: { value: body },
+    arrayBuffer: { value: () => read().arrayBuffer() },
+    blob: { value: () => read().blob() },
+    bytes: { value: () => read().bytes() },
+    json: { value: () => read().json() },
+    text: { value: () => read().text() },
+  });
 }
 
 // Lends one finalizer step's lease to cleanup that an original helper performs
@@ -782,11 +861,14 @@ export function unresolvedFacts(
   custody: RunCustodySnapshot,
   result: Pick<FinalizationResult, "steps" | "artifacts" | "reason"> & {
     planError?: string | undefined;
+    checkpointWriteFailures?: number | undefined;
   },
 ) {
   const unresolved: string[] = [];
   if (result.reason !== "completed") unresolved.push(`run-${result.reason}`);
   if (result.planError) unresolved.push("finalization-plan-aborted");
+  if (result.checkpointWriteFailures)
+    unresolved.push("run-finalization-facts-not-durable");
   for (const order of custody.orders) {
     if (order.journalState === "ack_unknown" && !order.orderId)
       unresolved.push(

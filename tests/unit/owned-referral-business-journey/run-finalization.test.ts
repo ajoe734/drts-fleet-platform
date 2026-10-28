@@ -14,8 +14,10 @@ import {
 import {
   Evidence,
   JourneyFailure,
+  NativeTransport,
   object,
   persistPrivateJson,
+  terminalizeOwnOrder,
   type CallOptions,
   type CallResult,
   type ObjectData,
@@ -446,9 +448,13 @@ describe("owned FULL run finalization custody", () => {
         "journey-evidence-persist-not-written",
       ]),
     );
+    expect(result.unresolved).toContain("run-finalization-facts-not-durable");
+    expect(result.wholeRunPassed).toBe(false);
     expect(h.cleanupErrors).toEqual([
+      "run-finalization-facts-persist",
       "supplemental-custody-persist",
       "journey-evidence-persist",
+      "run-finalization-final-facts-persist",
     ]);
     // The same private custody through a working disk never reaches the file.
     const clean = await harness(async () => undefined, {}, h.custody.orders);
@@ -1248,5 +1254,247 @@ describe("C1–C4 per-case cleanup through the real caller wiring", () => {
     );
     expect(calls).toBe(1);
     expect(cancellationCleanupNeeded(handoff, results)).toBe(false);
+  });
+});
+
+// The actual main-order cleanup caller: NativeTransport over the finalizer's
+// guarded fetch, terminalizeOwnOrder, then the owner-recorded terminal fact.
+function terminalReadbackCaller(readback: () => ReadableStream<Uint8Array>) {
+  const sent: string[] = [];
+  const signals: (AbortSignal | null | undefined)[] = [];
+  const envelope = (data: ObjectData, body?: ReadableStream<Uint8Array>) =>
+    new Response(body ?? JSON.stringify({ data }), {
+      headers: {
+        "content-type": "application/json",
+        "x-drts-candidate-sha": RUNTIME,
+      },
+    });
+  let reads = 0;
+  const inner = (async (input: unknown, init?: RequestInit) => {
+    sent.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
+    signals.push(init?.signal);
+    if (init?.method === "POST")
+      return envelope({ orderId: id(1), status: "cancelled" });
+    return ++reads === 1
+      ? envelope({ orderId: id(1), status: "created" })
+      : envelope({}, readback());
+  }) as typeof fetch;
+  return { sent, signals, inner };
+}
+
+function gatedStream(chunks: string[]) {
+  const gate = deferred();
+  const stream = () =>
+    new ReadableStream<Uint8Array>({
+      async start(controller) {
+        await gate.promise;
+        for (const chunk of chunks)
+          controller.enqueue(new TextEncoder().encode(chunk));
+        controller.close();
+      },
+    });
+  return { gate, stream };
+}
+
+const TERMINAL_READBACK = [
+  '{"data":{"orderId":"',
+  `${id(1)}","status":"cancelled"}}`,
+];
+
+async function mainCleanupHarness(
+  readback: () => ReadableStream<Uint8Array>,
+  budgetMs: number,
+) {
+  const caller = terminalReadbackCaller(readback);
+  const order: OrderCustody = {
+    slot: "main",
+    orderId: id(1),
+    journalState: "acknowledged",
+    ownerTerminal: false,
+  };
+  const h = await harness(
+    async (step) => {
+      await step("own-order-normal-terminalization", async () => {
+        await terminalizeOwnOrder(
+          id(1),
+          async () =>
+            object((await tx.call("opsApi", `/api/orders/${id(1)}`)).data),
+          () =>
+            tx.call("opsApi", `/api/orders/${id(1)}/cancel`, {
+              method: "POST",
+              body: { reason: "Own synthetic consumer cleanup" },
+            }),
+        );
+        order.ownerTerminal = true;
+      });
+    },
+    { budgetMs },
+    [order],
+  );
+  // Invoked only from the plan, after construction.
+  const tx = new NativeTransport(
+    {
+      api: "https://api.example.test",
+      admin: "https://admin.example.test",
+      ops: "https://ops.example.test",
+      fleet: "https://fleet.example.test",
+      referral: "https://referral.example.test",
+    },
+    RUNTIME,
+    {},
+    h.finalizer.guardFetch(caller.inner),
+  );
+  return { ...caller, h, order };
+}
+
+describe("Codex round-2 finalization regressions", () => {
+  it("(R2) a terminal readback whose body arrives after the lease never back-fills custody", async () => {
+    const readback = gatedStream(TERMINAL_READBACK);
+    const { h, order, sent, signals } = await mainCleanupHarness(
+      readback.stream,
+      300,
+    );
+    const result = await h.finalizer.run("failed");
+    expect(result.steps).toEqual([
+      {
+        stage: "own-order-normal-terminalization",
+        outcome: "unknown-budget-exhausted",
+      },
+    ]);
+    // Headers resolved inside the lease; only the body is late.
+    expect(sent).toEqual([
+      `GET /api/orders/${id(1)}`,
+      `POST /api/orders/${id(1)}/cancel`,
+      `GET /api/orders/${id(1)}`,
+    ]);
+    readback.gate.resolve();
+    await sleep(30);
+    expect(order.ownerTerminal).toBe(false);
+    expect(result.unresolved).toEqual(
+      expect.arrayContaining([
+        "main-owned-order-terminal-not-observed",
+        "own-order-normal-terminalization-unknown-budget-exhausted",
+      ]),
+    );
+    expect(result.wholeRunPassed).toBe(false);
+    // The original per-request 15 s transport deadline is still applied.
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+    expect(h.cleanupErrors).toEqual(["own-order-normal-terminalization"]);
+  });
+
+  it("(R2) a normal chunked terminal readback inside the lease is adopted", async () => {
+    const readback = gatedStream(TERMINAL_READBACK);
+    readback.gate.resolve();
+    const { h, order } = await mainCleanupHarness(readback.stream, 5_000);
+    const result = await h.finalizer.run("completed");
+    expect(result.steps).toEqual([
+      { stage: "own-order-normal-terminalization", outcome: "cleaned" },
+    ]);
+    expect(order.ownerTerminal).toBe(true);
+    expect(result.unresolved).toEqual([]);
+    expect(result.wholeRunPassed).toBe(true);
+  });
+
+  it("(R2) a body read already waiting when the lease closes is rejected, not left to deliver", async () => {
+    const readback = gatedStream(TERMINAL_READBACK);
+    let rejected: unknown;
+    const h = await harness(
+      async (step) => {
+        await step("own-Driver-binding-revoked", async () => {
+          const response = await guarded("https://driver.invalid/revoke");
+          await response.text().catch((error: unknown) => {
+            rejected = error;
+            throw error;
+          });
+        });
+      },
+      { budgetMs: 300 },
+    );
+    const guarded = h.finalizer.guardFetch(
+      (async () => new Response(readback.stream())) as typeof fetch,
+    );
+    await h.finalizer.run("failed");
+    await sleep(10);
+    expect(rejected).toBeInstanceOf(JourneyFailure);
+    expect((rejected as JourneyFailure).stage).toBe(
+      "finalization-response-body-after-lease-closed",
+    );
+    readback.gate.resolve();
+    await sleep(20);
+  });
+
+  it("(R5) failed custody facts writes are explicit failures and never a passed run", async () => {
+    const h = await harness(
+      async (step) => {
+        await step("own-Ops-session-self-revoked", async () => undefined);
+        await step("own-Admin-session-revoked", async () => undefined);
+      },
+      {
+        persist: async (path, value) => {
+          if (path.endsWith("run-finalization-facts.json"))
+            throw Object.assign(new Error("disk"), { code: "EIO" });
+          return persistPrivateJson(path, value);
+        },
+      },
+      sevenAcknowledged().map((order) => ({ ...order, ownerTerminal: true })),
+    );
+    const result = await h.finalizer.run("completed");
+    expect(result.checkpointWriteFailures).toBeGreaterThan(0);
+    // Every later step and both artifacts still ran.
+    expect(result.steps.map((step) => step.outcome)).toEqual([
+      "cleaned",
+      "cleaned",
+    ]);
+    expect(result.artifacts.map((artifact) => artifact.outcome)).toEqual([
+      "written",
+      "written",
+    ]);
+    expect(h.cleanupErrors).toContain("run-finalization-facts-persist");
+    expect(result.unresolved).toContain("run-finalization-facts-not-durable");
+    expect(result.wholeRunPassed).toBe(false);
+    const journey = await h.artifact("journey-evidence.json");
+    expect(journey.finalization).toMatchObject({ wholeRunPassed: false });
+    expect(journey.cleanupErrors).toContain("run-finalization-facts-persist");
+    const custody = await h.artifact("TEN03-06-custody.json");
+    expect(custody.finalization).toMatchObject({ wholeRunPassed: false });
+  });
+
+  it("(R5) only the final facts write failing re-persists the artifacts as not passed", async () => {
+    const h = await harness(
+      async (step) => {
+        await step("own-Ops-session-self-revoked", async () => undefined);
+      },
+      {
+        persist: async (path, value) => {
+          if (
+            path.endsWith("run-finalization-facts.json") &&
+            (value as { status?: string }).status === "finalized"
+          )
+            throw Object.assign(new Error("disk"), { code: "ENOSPC" });
+          return persistPrivateJson(path, value);
+        },
+      },
+      sevenAcknowledged().map((order) => ({ ...order, ownerTerminal: true })),
+    );
+    const result = await h.finalizer.run("completed");
+    expect(result.steps).toEqual([
+      { stage: "own-Ops-session-self-revoked", outcome: "cleaned" },
+    ]);
+    expect(result.checkpointWriteFailures).toBeGreaterThan(0);
+    expect(h.cleanupErrors).toContain("run-finalization-final-facts-persist");
+    expect(result.unresolved).toContain("run-finalization-facts-not-durable");
+    expect(result.wholeRunPassed).toBe(false);
+    const journey = await h.artifact("journey-evidence.json");
+    expect(journey.finalization).toMatchObject({ wholeRunPassed: false });
+    // The last durable facts are the earlier finalizing snapshot, never a pass.
+    const facts = await h.facts();
+    expect(facts.status).toBe("finalizing");
+    expect(facts.wholeRunPassed).toBe(false);
+    // Bounded: a persistent final-facts failure is not retried in a loop.
+    expect(
+      h.evidence.events.filter(
+        (event) => event.stage === "journey-evidence-persist",
+      ).length,
+    ).toBe(1);
   });
 });
