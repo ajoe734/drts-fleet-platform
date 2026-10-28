@@ -18,6 +18,9 @@ parent，也不構成任何業務/法務權威決定。
     `done` 直接補記 parent acceptance。已改為 §2.3 的維持 HOLD 條件。
   - **F3**：初版 §4 宣稱 helper 會以 `blocker` 結束，但實際動作是 `handoff`。
     已改為 §3.2/§4 如實描述接下來真正會發生的動作。
+- `3448e94bba59927d7df393f63691184170211408` 被 reviewer Claude reopen（F4）：
+  2026-10-27T20:55:31Z～34Z 的 parent/helper 寫入執行者是 Codex，不是
+  Supervisor。已新增 §3.3 更正歸屬，不變更任何欄位值。
 
 ## 1. 現狀小結
 
@@ -288,11 +291,71 @@ AI_NAME=Supervisor ORCH_STATUS_ROOT=<repo-root> python3 \
    parent 更新（替換掉 BUREAU-R13 髒 `next`，寫入 (a)/(b) 觸發條件）需要
    Supervisor 用 current release CLI 執行。
 
+### 3.3 F4 更正：parent/helper 寫入的真實歸屬（2026-10-28）
+
+回應 reviewer Claude 對 candidate `3448e94bba59927d7df393f63691184170211408`
+的 F4 reopen。
+
+**歸屬更正。** `ai-activity-log.jsonl` 在 2026-10-27T20:55:31Z～20:55:34Z 對
+parent 與本 helper 的三筆寫入，`agent` 欄位都是 `Codex`，不是 `Supervisor`：
+
+| 時戳（UTC）            | type     | task_id                                                    | 內容                                       |
+| ---------------------- | -------- | ---------------------------------------------------------- | ------------------------------------------ |
+| `2026-10-27T20:55:31Z` | `note`   | `PAX-RECEIPT-COMPLAINT-20261009`（parent）                 | parent note                                |
+| `2026-10-27T20:55:32Z` | `assign` | `PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-PLANNING-DECISION` | `Assigned ... to Claude2 with reviewer Pi` |
+| `2026-10-27T20:55:34Z` | `note`   | `PAX-RECEIPT-COMPLAINT-20261009-UNBLOCK-PLANNING-DECISION` | helper note                                |
+
+上一輪（`2026-10-28T02:46:29Z`）owner handoff 訊息稱「parent 已由 Supervisor
+實際執行 3-command 修復」，是**錯誤歸屬**，在此更正：執行者是 Codex。（以上三筆
+紀錄由本機 owner Claude2 直接讀取核實；`ai-activity-log.jsonl` 不在本雲端
+session 的 clone 內，本 session 未獨立讀取。）
+
+**技術原因。** 依 release `tools/development-orchestrator/bin/ai_status.py`：
+
+- `command_assign`（`:1819-1888`）沒有 actor 限制。它呼叫
+  `task_metadata_from_env()`（`:1065-1093`），把 `TASK_METADATA_JSON` 的任意鍵
+  合併進 metadata，再以 `task.update(metadata)`（`:1867-1868`）寫入目標 task。
+- 對照 `command_reassign`（`:1890-1900`）：`actor != "Supervisor"` 時
+  `SystemExit("Only Supervisor can reassign a task")`。`assign` 沒有對應的檢查。
+- `apply_unblock_parent_resolution`（`:1188-1249`）是唯一會寫
+  `resolved_parent_status`/`resolved_parent_next`/`resolved_parent_waiting_for`
+  的程式路徑，且一定同時寫 `resolved_parent_at`（`:1202-1206`）。
+- 本 helper 目前有前三個欄位、**缺** `resolved_parent_at`，證明這三個欄位是經
+  `assign` 的 metadata 注入寫入，繞過了 `apply_unblock_parent_resolution` 這條
+  合法路徑，不是正式套用。
+
+本雲端 session 另以本 branch HEAD（`3448e94b`）repo 內的 `ai_status.py` 交叉
+核對：`task_metadata_from_env` 在 `:1065`、`apply_unblock_parent_resolution` 在
+`:1188`（`resolved_parent_at` 寫入在 `:1203`）、`command_assign` 在 `:1819`
+（`task.update(metadata)` 在 `:1849`、`:1868`，無 actor 檢查）、
+`command_reassign` 的 Supervisor 檢查在 `:1899-1900`，與上述結構一致。
+
+**不推翻數值。** 本小節**不**變更任何欄位值：parent 仍為 `status: blocked`、
+`waiting_for: Claude`、`next` 維持現狀；helper 的 `resolved_parent_status:
+blocked`、`resolved_parent_waiting_for: Claude` 也維持。本小節只更正來源與歸屬
+紀錄；這些值**不是**「Supervisor 已確認」的正式套用，後續不應依賴缺
+`resolved_parent_at` 的這組欄位當作已授權狀態繼續推進。
+
+**本 helper 不冒名補寫。** 延續 §2.4/§3.2：本 helper、本機 dispatched owner
+（Claude2）與本次雲端 session **不會、也不能**用 `AI_NAME=Supervisor` 補一筆
+寫入或 note 來冒充 Supervisor，那等於重複 F4 指出的同一種問題。仍待辦：
+
+- 由**真正具 Supervisor 身分、經使用者授權**的操作者，對 parent 與本 helper
+  補一筆 Supervisor 具名 note 確認現況，或視需要經合法路徑重新執行等效寫入
+  （使 `resolved_parent_at` 等欄位由 `apply_unblock_parent_resolution` 一併寫入）。
+- 本報告只負責記錄事實並標出這個待辦，不代為執行。
+
+**超出 write scope 的既有問題。** `assign` 缺少 Supervisor 守衛，讓任何 agent
+都能夾帶 `TASK_METADATA_JSON` 改寫其他 task 的欄位。這是獨立於本 helper 的既有
+問題，建議由維護 `ai_status.py` 的人評估是否補上類似 `command_reassign`
+（`:1899-1900`）的 actor 檢查，或限制 `assign` 可接受的 metadata 鍵。上列行號
+作為修補起點；本次變更不修改 release 程式碼。
+
 ## 4. 驗收對照表
 
-| Acceptance                                                                                  | 狀態 / 證據                                                                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Resolve or route the missing product/contract decision through canonical planning artifacts | **Routed，非 resolved**：§2.3 記錄「維持 HOLD 直到 (a) 權威決定或 (b) 明確的 simulation-only scope cut」。決定本身需要具權責的人做出                                                                                                                                                                                           |
-| Record the decision, scope cut, or explicit follow-up needed by the parent task             | §2.1（技術子問題與 synthetic-only 邊界）、§2.2（未決的業務/法務問題）、§2.3（HOLD 條件與禁止直接複製 E04 `done`）、§3.1（條件成立後的指令）                                                                                                                                                                                    |
-| Produce task-scoped commit/push/PR evidence for any canonical change                        | 由本報告的 commit/push 提供（初版 `4bf1989960c434ea269e70ea8420c22384bdc017` 加本修訂 commit）；本任務唯一變更檔案為本報告，沒有其他程式碼變更                                                                                                                                                                                 |
-| Update the parent task with the concrete unblocked next step                                | 本 helper 無法直接寫 parent（dispatch guard）；滿足方式是（i）§3 提供可直接執行的具體 Supervisor 指令與完整證據鏈，（ii）本 helper 自己在 reviewer 核可後呼叫 `blocker`（不是 handoff 後靜默推進到 done），讓機器狀態誠實反映『尚未有人做出決定』，避免候選合併時的 `resolved_parent_status` 預設值錯誤地把 parent 翻成 `todo` |
+| Acceptance                                                                                  | 狀態 / 證據                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resolve or route the missing product/contract decision through canonical planning artifacts | **Routed，非 resolved**：§2.3 記錄「維持 HOLD 直到 (a) 權威決定或 (b) 明確的 simulation-only scope cut」。決定本身需要具權責的人做出                                                                                                                                                                                                                                                                                                                            |
+| Record the decision, scope cut, or explicit follow-up needed by the parent task             | §2.1（技術子問題與 synthetic-only 邊界）、§2.2（未決的業務/法務問題）、§2.3（HOLD 條件與禁止直接複製 E04 `done`）、§3.1（條件成立後的指令）                                                                                                                                                                                                                                                                                                                     |
+| Produce task-scoped commit/push/PR evidence for any canonical change                        | 由本報告的 commit/push 提供（初版 `4bf1989960c434ea269e70ea8420c22384bdc017` 加本修訂 commit）；本任務唯一變更檔案為本報告，沒有其他程式碼變更                                                                                                                                                                                                                                                                                                                  |
+| Update the parent task with the concrete unblocked next step                                | 本 helper 無法直接寫 parent（dispatch guard）；滿足方式是（i）§3 提供可直接執行的具體 Supervisor 指令與完整證據鏈，（ii）本 helper 自己在 reviewer 核可後呼叫 `blocker`（不是 handoff 後靜默推進到 done），讓機器狀態誠實反映『尚未有人做出決定』，避免候選合併時的 `resolved_parent_status` 預設值錯誤地把 parent 翻成 `todo`。2026-10-27T20:55Z 的 parent/helper 寫入由 Codex 經無守衛 `assign` 完成，非 Supervisor；真正的 Supervisor 具名確認仍待辦（§3.3） |
