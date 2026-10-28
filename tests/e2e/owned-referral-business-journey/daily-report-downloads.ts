@@ -6,6 +6,10 @@ import { recordsToPdf } from "../../../apps/api/src/modules/reporting-filing/rep
 import { displayOrderNo } from "../../../apps/referral-embed-web/lib/order-display";
 import { parsePdf } from "../../unit/billing-pdf-chinese-printable-content-20261016/pdf-parser";
 import {
+  probeOperationalDocumentRoleAccess,
+  verifyOperationalRoleSession,
+} from "../operational-document-upload";
+import {
   camelWire,
   Evidence,
   hash,
@@ -263,7 +267,49 @@ export type DailyReportDownloadsEvidence = Readonly<{
       Record<DailyReportFormat, EmptyDailyReportArtifactSummary>
     >;
   }>;
+  // Main path only (original R12-10); supplemental cases omit this field.
+  nonReportRoleDenial?: NonReportRoleDownloadDenialEvidence;
 }>;
+
+export type NonReportRoleDeniedProbe = Readonly<{
+  method: "GET";
+  route: "report-job-detail" | "report-job-artifact";
+  status: 403;
+  code: "AUTH_REALM_DENIED" | "AUTH_SCOPE_DENIED";
+}>;
+
+export type NonReportRoleDenialProbeResult = Readonly<{
+  originalCase: "R12-10";
+  role: "own_fleet";
+  session: Readonly<{
+    status: 200;
+    active: true;
+    realm: "partner";
+    authMode: "jwt_bearer";
+    actorType: "partner_api_key" | "partner_user";
+    partnerId: string;
+    tenantId: string;
+    scopes: readonly string[];
+    reportScopesGranted: false;
+  }>;
+  runtimeSha: string;
+  jobs: Readonly<
+    Record<
+      DailyReportFormat,
+      Readonly<{
+        jobId: string;
+        artifactId: string;
+        manifestHash: string;
+        detail: NonReportRoleDeniedProbe;
+        artifact: NonReportRoleDeniedProbe;
+      }>
+    >
+  >;
+}>;
+
+export type NonReportRoleDownloadDenialEvidence = Readonly<
+  NonReportRoleDenialProbeResult & { ownJobsUnchangedAfterDenial: true }
+>;
 
 type EmptyDaySourceControl = Readonly<{
   requestStartedAt: string;
@@ -1817,6 +1863,196 @@ async function waitForEnabled(
   requireFact(await locator.first().isEnabled(), `${stage}:button-not-enabled`);
 }
 
+// Same direct API origin the existing Fleet setup issued and verified against.
+const NONREPORT_ROLE_API_ENV = "DRTS_OPERATIONAL_API_URL";
+const NONREPORT_ROLE_DENIAL_CODES = new Set([
+  "AUTH_REALM_DENIED",
+  "AUTH_SCOPE_DENIED",
+]);
+
+/** Original R12-10 (no-report-permission alternative): the existing verified
+ * own-Fleet partner session is denied this run's own completed main jobs.
+ * Authority stays in the existing operational role verification/probe; this
+ * only binds their results. Never reads or returns token material, and never
+ * forwards their native messages (they carry origin/URLs) into failures.
+ */
+export async function probeOwnedReportJobsWithNonReportRole(input: {
+  acceptedJobs: Readonly<Record<DailyReportFormat, string>>;
+  downloads: Readonly<
+    Record<DailyReportFormat, DailyReportDownloadArtifactSummary>
+  >;
+  fleetSupplyTenantId: string;
+  runtimeSha: string;
+  evidence: Evidence;
+}): Promise<NonReportRoleDenialProbeResult> {
+  const { acceptedJobs, downloads, runtimeSha, evidence } = input;
+  // The existing probe enforces x-drts-candidate-sha only via this variable.
+  requireFact(
+    /^[a-f0-9]{40}$/.test(runtimeSha) &&
+      process.env.DRTS_CANDIDATE_SHA?.trim() === runtimeSha,
+    "daily-report-nonreport-role-runtime-binding-required",
+  );
+  const jobIds = DAILY_REPORT_FORMATS.map((format) => acceptedJobs[format]);
+  requireFact(
+    new Set(jobIds).size === DAILY_REPORT_FORMATS.length &&
+      DAILY_REPORT_FORMATS.every((format) => {
+        const summary = downloads[format];
+        return (
+          typeof acceptedJobs[format] === "string" &&
+          summary !== undefined &&
+          summary.format === format &&
+          summary.jobId === acceptedJobs[format] &&
+          summary.jobStatus === "completed" &&
+          summary.ownOrderPresent === true &&
+          summary.runtimeSha === runtimeSha
+        );
+      }),
+    "daily-report-nonreport-role-own-completed-main-jobs-required",
+  );
+  let apiOrigin: string;
+  try {
+    const url = new URL(process.env[NONREPORT_ROLE_API_ENV]?.trim() ?? "");
+    requireFact(
+      url.protocol === "https:" &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash &&
+        url.pathname === "/",
+      "daily-report-nonreport-role-api-origin-required",
+    );
+    apiOrigin = url.origin;
+  } catch {
+    throw new JourneyFailure("daily-report-nonreport-role-api-origin-required");
+  }
+  const tenantId = text(
+    input.fleetSupplyTenantId,
+    "daily-report-nonreport-role-fleet-tenant-required",
+  );
+
+  let identity: Record<string, unknown>;
+  try {
+    identity = await verifyOperationalRoleSession(
+      "own_fleet",
+      NONREPORT_ROLE_API_ENV,
+    );
+  } catch {
+    throw new JourneyFailure(
+      "daily-report-nonreport-role-session-200-required",
+    );
+  }
+  const scopes = identity.scopes;
+  const actorType = identity.actorType;
+  requireFact(
+    identity.realm === "partner" &&
+      identity.authMode === "jwt_bearer" &&
+      (actorType === "partner_api_key" || actorType === "partner_user") &&
+      identity.tenantId === tenantId &&
+      typeof identity.partnerId === "string" &&
+      identity.partnerId.trim().length > 0 &&
+      Array.isArray(scopes) &&
+      scopes.length > 0 &&
+      scopes.every((scope) => typeof scope === "string") &&
+      !scopes.some(
+        (scope: string) =>
+          scope === "*" ||
+          scope.endsWith(":*") ||
+          /(^|:)reports(:|$)/.test(scope),
+      ),
+    "daily-report-nonreport-role-session-qualification-required",
+  );
+  const sessionActorType = actorType as "partner_api_key" | "partner_user";
+  evidence.record({
+    stage: "daily-report-nonreport-role-session-verified",
+    status: 200,
+    realm: "partner",
+    actorType: sessionActorType,
+    result: "observed",
+  });
+
+  const jobs = {} as Record<
+    DailyReportFormat,
+    NonReportRoleDenialProbeResult["jobs"][DailyReportFormat]
+  >;
+  for (const format of DAILY_REPORT_FORMATS) {
+    const jobId = acceptedJobs[format];
+    const denied = {} as Record<
+      "detail" | "artifact",
+      NonReportRoleDeniedProbe
+    >;
+    for (const kind of ["detail", "artifact"] as const) {
+      const path = `/api/reports/${encodeURIComponent(jobId)}${kind === "artifact" ? "/artifact" : ""}`;
+      let probe: Awaited<ReturnType<typeof probeOperationalDocumentRoleAccess>>;
+      try {
+        // Re-verifies the same active session, then one GET without redirects.
+        probe = await probeOperationalDocumentRoleAccess({
+          kind: "role-access-probe",
+          baseUrlEnv: NONREPORT_ROLE_API_ENV,
+          role: "own_fleet",
+          path,
+          method: "GET",
+          expectedStatus: 403,
+        });
+      } catch {
+        throw new JourneyFailure(
+          `daily-report-nonreport-role-${format}-${kind}-403-required`,
+        );
+      }
+      requireFact(
+        probe.role === "own_fleet" &&
+          probe.method === "GET" &&
+          probe.url === new URL(path, apiOrigin).toString() &&
+          probe.status === 403 &&
+          typeof probe.errorCode === "string" &&
+          NONREPORT_ROLE_DENIAL_CODES.has(probe.errorCode),
+        `daily-report-nonreport-role-${format}-${kind}-auth-denial-required`,
+      );
+      const code = probe.errorCode as NonReportRoleDeniedProbe["code"];
+      denied[kind] = Object.freeze({
+        method: "GET",
+        route:
+          kind === "artifact" ? "report-job-artifact" : "report-job-detail",
+        status: 403,
+        code,
+      });
+      evidence.record({
+        stage: `daily-report-nonreport-role-${format}-${kind}-denied`,
+        status: 403,
+        code,
+        objectKey: jobId,
+        realm: "partner",
+        actorType: sessionActorType,
+        requestMethod: "GET",
+        result: "observed",
+      });
+    }
+    jobs[format] = Object.freeze({
+      jobId,
+      artifactId: downloads[format].artifactId,
+      manifestHash: downloads[format].manifestHash,
+      detail: denied.detail,
+      artifact: denied.artifact,
+    });
+  }
+  return Object.freeze({
+    originalCase: "R12-10",
+    role: "own_fleet",
+    session: Object.freeze({
+      status: 200,
+      active: true,
+      realm: "partner",
+      authMode: "jwt_bearer",
+      actorType: sessionActorType,
+      partnerId: identity.partnerId as string,
+      tenantId,
+      scopes: Object.freeze([...(scopes as string[])].sort()),
+      reportScopesGranted: false,
+    }),
+    runtimeSha,
+    jobs: Object.freeze(jobs),
+  });
+}
+
 export type RunOwnedDailyReportDownloadsParams = {
   context: BrowserContext;
   page: Page;
@@ -2623,6 +2859,22 @@ export async function runOwnedDailyReportDownloads(
       });
     }
 
+    // Original R12-10 runs once, on the main path only, after all three own
+    // jobs were accepted, completed and their bytes verified by Ops above.
+    const nonReportRoleDenial =
+      params.supplementalExpected === undefined
+        ? await probeOwnedReportJobsWithNonReportRole({
+            acceptedJobs,
+            downloads,
+            fleetSupplyTenantId: text(
+              fleetSupplyTenantId,
+              "daily-report-nonreport-role-fleet-tenant-required",
+            ),
+            runtimeSha,
+            evidence,
+          })
+        : undefined;
+
     // TEN02: independent adjacent day, selected from a complete committed
     // canonical read, NOT from an empty report preview. Keep full orders in RAM.
     const beforeStartedAt = new Date().toISOString();
@@ -3003,6 +3255,30 @@ export async function runOwnedDailyReportDownloads(
       });
     }
     emptyDayConsumerPhase = undefined;
+    // Ops readback after the denials: the same own main jobs remain listed,
+    // completed, with their original artifact and manifest. No new export.
+    if (nonReportRoleDenial) {
+      for (const format of DAILY_REPORT_FORMATS) {
+        const listed = emptyListed.find(
+          (job) => job.jobId === acceptedJobs[format],
+        );
+        const artifact =
+          listed?.artifact && typeof listed.artifact === "object"
+            ? object(listed.artifact)
+            : {};
+        requireFact(
+          listed?.status === "completed" &&
+            artifact.artifactId === downloads[format].artifactId &&
+            artifact.manifestHash === downloads[format].manifestHash,
+          `daily-report-nonreport-role-${format}-own-job-unchanged-after-denial`,
+        );
+      }
+      evidence.record({
+        stage: "daily-report-nonreport-role-own-jobs-unchanged-after-denial",
+        orderId: expected.orderId,
+        result: "observed",
+      });
+    }
     // The second complete source read is after all jobs: a concurrent writer
     // cannot silently turn our selected day into a nonempty day.
     const afterStartedAt = new Date().toISOString();
@@ -3115,6 +3391,14 @@ export async function runOwnedDailyReportDownloads(
         restoredPositiveRow: true,
         downloads: Object.freeze(emptyDownloads),
       }),
+      ...(nonReportRoleDenial
+        ? {
+            nonReportRoleDenial: Object.freeze({
+              ...nonReportRoleDenial,
+              ownJobsUnchangedAfterDenial: true as const,
+            }),
+          }
+        : {}),
     });
   } catch (error) {
     // Existing typed failures retain their exact identity/status/code/context.

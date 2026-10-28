@@ -19,6 +19,7 @@ import {
   toApiSuccessEnvelope,
 } from "../../../apps/api/src/common/api-envelope";
 import { recordsToCsv } from "../../../apps/api/src/common/csv";
+import { resolveRouteAuthPolicy } from "../../../apps/api/src/common/auth/auth.policy";
 import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
 import {
   recordsToPdf,
@@ -36,6 +37,7 @@ import {
   opsReportJobArtifactPathname,
   opsReportJobDetailPathname,
   parseCsvRecords,
+  probeOwnedReportJobsWithNonReportRole,
   resolveActiveTripScreenOrder,
   resolveExpectedDailyDispatchRecord,
   runOwnedDailyReportDownloads,
@@ -45,6 +47,7 @@ import {
   validateSupplementalDailyPreviewRows,
   resolveExpectedCancelledDailyDispatchRecord,
   validateDailyReportArtifactDownload,
+  type DailyReportDownloadArtifactSummary,
   type DailyReportFormat,
 } from "../../e2e/owned-referral-business-journey/daily-report-downloads";
 import {
@@ -330,6 +333,162 @@ function cancelledCase() {
   });
   delete row.caseKind;
   return { order, expected, row };
+}
+
+// R12-10 external API port. Only fetch/env are controlled: the helper, the
+// existing operational session verification/probe, the production route auth
+// policy and the API envelope/wire producers all stay real. No socket opens.
+const NONREPORT_API_ORIGIN = "https://api.example.test";
+const NONREPORT_FLEET_SESSION_TOKEN = "synthetic-own-fleet-session-secret";
+const NONREPORT_FLEET_IDENTITY = {
+  realm: "partner",
+  authMode: "jwt_bearer",
+  actorType: "partner_api_key",
+  actorId: "pk_synthetic_own_fleet",
+  principalId: "pk_synthetic_own_fleet",
+  sessionId: "sess_synthetic_own_fleet",
+  partnerId: "fleet-demo-001",
+  tenantId: FLEET_SUPPLY_TENANT_ID,
+  scopes: ["billing:read", "partner:read", "partner:write"],
+} as const;
+
+type NonReportApiScenario = {
+  identity?: Partial<Record<keyof typeof NONREPORT_FLEET_IDENTITY, unknown>>;
+  active?: boolean;
+  sessionStatus?: number;
+  sessionSha?: string;
+  reportSha?: string;
+  // Replaces the production-policy decision for report routes only.
+  report?: (pathname: string) => {
+    status: number;
+    body?: unknown;
+    headers?: Record<string, string>;
+  };
+  onReport?: (pathname: string) => void;
+};
+
+function installNonReportRoleApi(scenario: NonReportApiScenario = {}) {
+  const calls: Array<{
+    method: string;
+    pathname: string;
+    redirect: RequestRedirect | undefined;
+    authorization: string | null;
+  }> = [];
+  const identity = { ...NONREPORT_FLEET_IDENTITY, ...scenario.identity };
+  const wire = (
+    status: number,
+    body: unknown,
+    sha: string,
+    headers: Record<string, string> = {},
+  ) =>
+    new Response(
+      body === undefined ? null : JSON.stringify(deepToSnakeCase(body)),
+      {
+        status,
+        headers: {
+          "content-type": "application/json",
+          "x-drts-candidate-sha": sha,
+          ...headers,
+        },
+      },
+    );
+  const fetchImpl = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+      const headers = new Headers(init?.headers);
+      calls.push({
+        method,
+        pathname: url.pathname,
+        redirect: init?.redirect,
+        authorization: headers.get("authorization"),
+      });
+      if (url.origin !== NONREPORT_API_ORIGIN || method !== "GET")
+        throw new TypeError("socket-free harness: unexpected external request");
+      const authorized =
+        headers.get("authorization") ===
+        `Bearer ${NONREPORT_FLEET_SESSION_TOKEN}`;
+      if (url.pathname === "/api/auth/session") {
+        const sha = scenario.sessionSha ?? RUNTIME_SHA;
+        if (!authorized)
+          return wire(
+            401,
+            toApiErrorEnvelope("AUTHENTICATION_REQUIRED", "private-auth"),
+            sha,
+          );
+        if (scenario.sessionStatus !== undefined)
+          return wire(
+            scenario.sessionStatus,
+            toApiErrorEnvelope("SESSION_REVOKED", "private-session-error"),
+            sha,
+          );
+        return wire(
+          200,
+          toApiSuccessEnvelope({ active: scenario.active ?? true, identity }),
+          sha,
+        );
+      }
+      if (/^\/api\/reports\/[^/]+(\/artifact)?$/.test(url.pathname)) {
+        scenario.onReport?.(url.pathname);
+        const sha = scenario.reportSha ?? RUNTIME_SHA;
+        if (scenario.report) {
+          const forced = scenario.report(url.pathname);
+          return wire(forced.status, forced.body, sha, forced.headers);
+        }
+        if (!authorized)
+          return wire(
+            401,
+            toApiErrorEnvelope("AUTHENTICATION_REQUIRED", "private-auth"),
+            sha,
+          );
+        const policy = resolveRouteAuthPolicy("GET", url.pathname);
+        if (!policy) throw new TypeError("report route policy missing");
+        if (!policy.allowedRealms.includes(identity.realm as never))
+          return wire(
+            403,
+            toApiErrorEnvelope("AUTH_REALM_DENIED", "private-denial", {
+              route: url.toString(),
+              realm: identity.realm,
+            }),
+            sha,
+          );
+        if (
+          !policy.requiredScopes.every((scope) =>
+            (identity.scopes as readonly string[]).includes(scope),
+          )
+        )
+          return wire(
+            403,
+            toApiErrorEnvelope("AUTH_SCOPE_DENIED", "private-denial"),
+            sha,
+          );
+        return wire(
+          200,
+          toApiSuccessEnvelope({ rows: [{ orderId: "private-other-row" }] }),
+          sha,
+        );
+      }
+      throw new TypeError("socket-free harness: unexpected API path");
+    },
+  );
+  vi.stubEnv("DRTS_OPERATIONAL_API_URL", `${NONREPORT_API_ORIGIN}/`);
+  vi.stubEnv("DRTS_OPERATIONAL_API_ID_TOKEN", "");
+  vi.stubEnv("DRTS_DEV_API_ID_TOKEN", "");
+  vi.stubEnv(
+    "DRTS_OPERATIONAL_FLEET_SESSION_TOKEN",
+    NONREPORT_FLEET_SESSION_TOKEN,
+  );
+  vi.stubEnv("DRTS_CANDIDATE_SHA", RUNTIME_SHA);
+  vi.stubGlobal("fetch", fetchImpl);
+  return {
+    calls,
+    reportCalls: () =>
+      calls.filter((call) => call.pathname.startsWith("/api/reports/")),
+    restore: () => {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    },
+  };
 }
 
 describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contract", () => {
@@ -1644,6 +1803,14 @@ ${inner}
       expectedPreviewControlled: true,
       expectedRetained: true,
     },
+    ...(["bypass-200", "manifest-changed"] as const).map((nonReportApi) => ({
+      caseName: `R12-10 nonreport role ${nonReportApi}`,
+      nonReportApi,
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    })),
   ])(
     "drives preview rebuild, 3-format job creation, /reports reload, and 3 artifact downloads in a socket-free harness ($caseName)",
     async ({
@@ -1666,6 +1833,9 @@ ${inner}
         "typedFault" in scenario ? scenario.typedFault : undefined;
       const routeFault =
         "routeFault" in scenario ? scenario.routeFault : undefined;
+      const nonReportApi =
+        "nonReportApi" in scenario ? scenario.nonReportApi : undefined;
+      let api: ReturnType<typeof installNonReportRoleApi> | undefined;
       const routeNativeFailure: unknown =
         routeFault === "matching-hostile"
           ? Object.defineProperties(
@@ -2410,6 +2580,29 @@ ${inner}
           pages: () => [fakePage as Page],
         } as unknown as BrowserContext;
 
+        api = installNonReportRoleApi(
+          nonReportApi === "bypass-200"
+            ? {
+                report: () => ({
+                  status: 200,
+                  body: toApiSuccessEnvelope({ jobId: "private-bypass" }),
+                }),
+              }
+            : nonReportApi === "manifest-changed"
+              ? {
+                  // A denial must not mutate own custody; simulate a backend
+                  // side effect to prove the post-denial Ops readback catches it.
+                  onReport: (pathname) => {
+                    if (pathname === "/api/reports/job_harness_pdf/artifact")
+                      (
+                        createdJobs.find(
+                          (job) => job.jobId === "job_harness_csv",
+                        )!.detail.artifact as ObjectData
+                      ).manifestHash = "d".repeat(64);
+                  },
+                }
+              : {},
+        );
         const evidence = new Evidence();
         const run = runOwnedDailyReportDownloads({
           context: fakeContext,
@@ -2455,8 +2648,61 @@ ${inner}
           recoveryOnly: false,
           evidence,
         });
+        if (nonReportApi === "bypass-200") {
+          // A 200 is never an expected R12-10 PASS: fail at the first probe,
+          // after positive custody, before TEN02 or any further export.
+          await expect(run).rejects.toMatchObject({
+            stage: "daily-report-nonreport-role-csv-detail-403-required",
+          });
+          expect(api!.reportCalls()).toEqual([
+            expect.objectContaining({
+              pathname: "/api/reports/job_harness_csv",
+              redirect: "manual",
+            }),
+          ]);
+          expect(sourceReads).toBe(0);
+          expect(createdJobs.map((job) => job.jobId)).toEqual(
+            DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
+          );
+          for (const format of DAILY_REPORT_FORMATS)
+            expect(
+              evidence.events.some(
+                (event) =>
+                  event.stage === `daily-report-download-${format}-verified`,
+              ),
+            ).toBe(true);
+          expect(
+            evidence.events.some((event) =>
+              /^daily-report-nonreport-role-.*-denied$/.test(event.stage),
+            ),
+          ).toBe(false);
+          expect(unrouteCalled).toBe(true);
+          expect(JSON.stringify(evidence.events)).not.toContain(
+            "private-bypass",
+          );
+          return;
+        }
+        if (nonReportApi === "manifest-changed") {
+          await expect(run).rejects.toMatchObject({
+            stage:
+              "daily-report-nonreport-role-csv-own-job-unchanged-after-denial",
+          });
+          expect(api!.reportCalls()).toHaveLength(6);
+          expect(sourceReads).toBe(1);
+          expect(unrouteCalled).toBe(true);
+          expect(
+            evidence.events.some(
+              (event) =>
+                event.stage ===
+                "daily-report-nonreport-role-own-jobs-unchanged-after-denial",
+            ),
+          ).toBe(false);
+          return;
+        }
         if (routeFault?.startsWith("matching-")) {
           const failure = await run.catch((error: unknown) => error);
+          // The empty-day CSV fault happens after the single main R12-10 run.
+          expect(api!.reportCalls()).toHaveLength(6);
           if (routeFault === "matching-command-binding") {
             expect(failure).toMatchObject({
               stage: "daily-report-empty-csv-job-command-binding",
@@ -2516,6 +2762,7 @@ ${inner}
             (error: unknown) => error,
           );
           evidence.failure(failure);
+          expect(api!.reportCalls()).toHaveLength(6);
           const expectedStage = typedFault
             ? (injectedFailure as JourneyFailure).stage
             : faultPoint === "artifact-body"
@@ -2628,6 +2875,8 @@ ${inner}
               : DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
           );
           expect(artifactRequests).toBe(0);
+          // No completed, verified own main jobs: the denial never runs.
+          expect(api!.calls).toHaveLength(0);
           expect(unrouteCalled).toBe(true);
           expect(JSON.stringify(evidence.events)).not.toContain(
             "private-detail-error",
@@ -2664,6 +2913,7 @@ ${inner}
             DAILY_REPORT_FORMATS.map((format) => `job_harness_${format}`),
           );
           expect(artifactRequests).toBe(1);
+          expect(api!.calls).toHaveLength(0);
           expect(unrouteCalled).toBe(true);
           await expect(
             stat(path.join(reportDirectory, "daily-reports")),
@@ -2720,6 +2970,7 @@ ${inner}
           await expect(run).rejects.toThrow(
             "daily-report-empty-day-authoritative-source-control-required",
           );
+          expect(api!.reportCalls()).toHaveLength(6);
           expect(sourceReads).toBe(2);
           expect(unrouteCalled).toBe(true);
           expect(
@@ -2733,6 +2984,7 @@ ${inner}
         }
         if (failureStage) {
           await expect(run).rejects.toThrow(failureStage);
+          expect(api!.calls).toHaveLength(0);
           expect(unrouteCalled).toBe(true);
           expect(JSON.stringify(evidence.events)).not.toContain(
             "private-report-error",
@@ -2826,7 +3078,99 @@ ${inner}
         expect(JSON.stringify(evidence.events)).not.toContain(
           "synthetic-ops-jwt",
         );
+
+        // Original R12-10: once, main path only, after positive custody.
+        if (cancelled) {
+          expect(result.nonReportRoleDenial).toBeUndefined();
+          expect(api!.calls).toHaveLength(0);
+        } else {
+          const ownJobIds = DAILY_REPORT_FORMATS.map(
+            (format) => `job_harness_${format}`,
+          );
+          expect(api!.calls.map((call) => call.pathname)).toEqual([
+            "/api/auth/session",
+            ...ownJobIds.flatMap((jobId) => [
+              "/api/auth/session",
+              `/api/reports/${jobId}`,
+              "/api/auth/session",
+              `/api/reports/${jobId}/artifact`,
+            ]),
+          ]);
+          for (const call of api!.calls) {
+            expect(call).toMatchObject({
+              method: "GET",
+              redirect: "manual",
+              authorization: `Bearer ${NONREPORT_FLEET_SESSION_TOKEN}`,
+            });
+          }
+          const denial = result.nonReportRoleDenial!;
+          expect(denial).toMatchObject({
+            originalCase: "R12-10",
+            role: "own_fleet",
+            runtimeSha: RUNTIME_SHA,
+            ownJobsUnchangedAfterDenial: true,
+            session: {
+              status: 200,
+              active: true,
+              realm: "partner",
+              authMode: "jwt_bearer",
+              actorType: "partner_api_key",
+              partnerId: "fleet-demo-001",
+              tenantId: FLEET_SUPPLY_TENANT_ID,
+              scopes: ["billing:read", "partner:read", "partner:write"],
+              reportScopesGranted: false,
+            },
+          });
+          for (const format of DAILY_REPORT_FORMATS) {
+            expect(denial.jobs[format]).toEqual({
+              jobId: result.downloads[format].jobId,
+              artifactId: result.downloads[format].artifactId,
+              manifestHash: result.downloads[format].manifestHash,
+              detail: {
+                method: "GET",
+                route: "report-job-detail",
+                status: 403,
+                code: "AUTH_REALM_DENIED",
+              },
+              artifact: {
+                method: "GET",
+                route: "report-job-artifact",
+                status: 403,
+                code: "AUTH_REALM_DENIED",
+              },
+            });
+          }
+          const stages = evidence.events.map((event) => event.stage);
+          const sessionAt = stages.indexOf(
+            "daily-report-nonreport-role-session-verified",
+          );
+          expect(sessionAt).toBeGreaterThan(
+            stages.indexOf("daily-report-download-pdf-verified"),
+          );
+          expect(sessionAt).toBeLessThan(
+            stages.indexOf(
+              "daily-report-empty-source-before-zero-positive-own",
+            ),
+          );
+          expect(
+            stages.indexOf(
+              "daily-report-nonreport-role-own-jobs-unchanged-after-denial",
+            ),
+          ).toBeGreaterThan(stages.indexOf("daily-report-empty-pdf-verified"));
+          expect(
+            evidence.events.filter((event) =>
+              /^daily-report-nonreport-role-.*-denied$/.test(event.stage),
+            ),
+          ).toHaveLength(6);
+          // Denial adds no export: only 3 positive + 3 empty jobs exist.
+          expect(createdJobs).toHaveLength(6);
+          const persisted = JSON.stringify([result, evidence.events]);
+          expect(persisted).not.toContain(NONREPORT_FLEET_SESSION_TOKEN);
+          expect(persisted).not.toContain("private-");
+          expect(persisted).not.toContain(NONREPORT_API_ORIGIN);
+        }
       } finally {
+        api?.restore();
         restoreClock?.();
         await rm(tempDir, { recursive: true, force: true });
       }
@@ -3064,4 +3408,431 @@ describe("two true Taipei reservation service days in all three formats", () => 
       },
     );
   }
+});
+
+describe("BUREAU-R12-EXISTING-NONREPORT-ROLE-DOWNLOAD-DENIAL-COVERAGE-20261028 original R12-10", () => {
+  const acceptedJobs = {
+    csv: "job_main_csv",
+    xlsx: "job_main_xlsx",
+    pdf: "job_main_pdf",
+  } as const;
+  // The full-helper harness above binds real validated summaries; these only
+  // carry the fields the denial binds to (format/job/status/runtime/custody).
+  const summaries = (
+    overrides: Partial<
+      Record<DailyReportFormat, Partial<DailyReportDownloadArtifactSummary>>
+    > = {},
+  ) =>
+    Object.fromEntries(
+      DAILY_REPORT_FORMATS.map((format) => [
+        format,
+        {
+          format,
+          jobId: acceptedJobs[format],
+          jobStatus: "completed",
+          ownOrderPresent: true,
+          runtimeSha: RUNTIME_SHA,
+          artifactId: `art_${acceptedJobs[format]}`,
+          manifestHash: "c".repeat(64),
+          ...overrides[format],
+        },
+      ]),
+    ) as unknown as Record<
+      DailyReportFormat,
+      DailyReportDownloadArtifactSummary
+    >;
+  const probe = (
+    evidence: Evidence,
+    input: Partial<
+      Parameters<typeof probeOwnedReportJobsWithNonReportRole>[0]
+    > = {},
+  ) =>
+    probeOwnedReportJobsWithNonReportRole({
+      acceptedJobs,
+      downloads: summaries(),
+      fleetSupplyTenantId: FLEET_SUPPLY_TENANT_ID,
+      runtimeSha: RUNTIME_SHA,
+      evidence,
+      ...input,
+    });
+  const expectNoLeak = (failure: unknown, evidence: Evidence) => {
+    const diagnostic = JSON.stringify([failure, evidence.events]);
+    for (const secret of [
+      NONREPORT_FLEET_SESSION_TOKEN,
+      NONREPORT_API_ORIGIN,
+      "private-",
+    ]) {
+      expect(diagnostic).not.toContain(secret);
+      expect((failure as Error).message).not.toContain(secret);
+      expect((failure as Error).stack ?? "").not.toContain(secret);
+    }
+    expect((failure as Error).cause).toBeUndefined();
+  };
+
+  it("verifies the actual own-Fleet session (200, partner, no reports grant) then gets real 403 on every own main job detail and artifact", async () => {
+    const api = installNonReportRoleApi();
+    try {
+      const evidence = new Evidence();
+      const result = await probe(evidence);
+      expect(api.calls.map((call) => call.pathname)).toEqual([
+        "/api/auth/session",
+        ...Object.values(acceptedJobs).flatMap((jobId) => [
+          "/api/auth/session",
+          `/api/reports/${jobId}`,
+          "/api/auth/session",
+          `/api/reports/${jobId}/artifact`,
+        ]),
+      ]);
+      expect(result.session).toEqual({
+        status: 200,
+        active: true,
+        realm: "partner",
+        authMode: "jwt_bearer",
+        actorType: "partner_api_key",
+        partnerId: "fleet-demo-001",
+        tenantId: FLEET_SUPPLY_TENANT_ID,
+        scopes: ["billing:read", "partner:read", "partner:write"],
+        reportScopesGranted: false,
+      });
+      for (const format of DAILY_REPORT_FORMATS) {
+        expect(result.jobs[format]).toMatchObject({
+          jobId: acceptedJobs[format],
+          artifactId: `art_${acceptedJobs[format]}`,
+          detail: { status: 403, code: "AUTH_REALM_DENIED" },
+          artifact: { status: 403, code: "AUTH_REALM_DENIED" },
+        });
+        for (const kind of ["detail", "artifact"])
+          expect(evidence.events).toContainEqual({
+            stage: `daily-report-nonreport-role-${format}-${kind}-denied`,
+            status: 403,
+            code: "AUTH_REALM_DENIED",
+            objectKey: acceptedJobs[format],
+            realm: "partner",
+            actorType: "partner_api_key",
+            requestMethod: "GET",
+            result: "observed",
+          });
+      }
+      expect(evidence.events[0]).toEqual({
+        stage: "daily-report-nonreport-role-session-verified",
+        status: 200,
+        realm: "partner",
+        actorType: "partner_api_key",
+        result: "observed",
+      });
+      const persisted = JSON.stringify([result, evidence.events]);
+      expect(persisted).not.toContain(NONREPORT_FLEET_SESSION_TOKEN);
+      expect(persisted).not.toContain("private-");
+      expect(persisted).not.toContain(NONREPORT_API_ORIGIN);
+      expect(Object.isFrozen(result)).toBe(true);
+    } finally {
+      api.restore();
+    }
+  });
+
+  it("accepts the documented AUTH_SCOPE_DENIED denial with the same session qualification", async () => {
+    const api = installNonReportRoleApi({
+      report: () => ({
+        status: 403,
+        body: toApiErrorEnvelope("AUTH_SCOPE_DENIED", "private-denial"),
+      }),
+    });
+    try {
+      const result = await probe(new Evidence());
+      for (const format of DAILY_REPORT_FORMATS) {
+        expect(result.jobs[format].detail.code).toBe("AUTH_SCOPE_DENIED");
+        expect(result.jobs[format].artifact.code).toBe("AUTH_SCOPE_DENIED");
+      }
+    } finally {
+      api.restore();
+    }
+  });
+
+  it.each([
+    ["session 401", { sessionStatus: 401 }, "session-200-required"],
+    ["session 500", { sessionStatus: 500 }, "session-200-required"],
+    ["inactive session", { active: false }, "session-200-required"],
+    [
+      "platform realm",
+      { identity: { realm: "platform" } },
+      "session-200-required",
+    ],
+    [
+      "foreign Fleet partner",
+      { identity: { partnerId: "fleet-foreign-002" } },
+      "session-200-required",
+    ],
+    [
+      "wrong session SHA",
+      { sessionSha: "c".repeat(40) },
+      "session-200-required",
+    ],
+    [
+      "wrong Fleet tenant",
+      { identity: { tenantId: "10000000-0000-0000-0000-000000000999" } },
+      "session-qualification-required",
+    ],
+    [
+      "has reports:read grant",
+      {
+        identity: { scopes: ["billing:read", "partner:read", "reports:read"] },
+      },
+      "session-qualification-required",
+    ],
+    [
+      "has reports:write grant",
+      { identity: { scopes: ["partner:read", "reports:write"] } },
+      "session-qualification-required",
+    ],
+    [
+      "wildcard grant",
+      { identity: { scopes: ["*"] } },
+      "session-qualification-required",
+    ],
+    [
+      "namespace wildcard grant",
+      { identity: { scopes: ["partner:read", "billing:*"] } },
+      "session-qualification-required",
+    ],
+    [
+      "no scopes",
+      { identity: { scopes: [] } },
+      "session-qualification-required",
+    ],
+    [
+      "malformed scopes",
+      { identity: { scopes: "billing:read partner:read" } },
+      "session-qualification-required",
+    ],
+    [
+      "non-JWT auth mode",
+      { identity: { authMode: "dev_header" } },
+      "session-qualification-required",
+    ],
+    [
+      "wrong actor type",
+      { identity: { actorType: "platform_admin" } },
+      "session-qualification-required",
+    ],
+  ] as const)(
+    "never probes reports without a qualified active session: %s",
+    async (_name, scenario, stage) => {
+      const api = installNonReportRoleApi(scenario as NonReportApiScenario);
+      try {
+        const evidence = new Evidence();
+        const failure = await probe(evidence).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(JourneyFailure);
+        expect(failure).toMatchObject({
+          stage: `daily-report-nonreport-role-${stage}`,
+        });
+        expect(api.reportCalls()).toHaveLength(0);
+        expect(api.calls).toHaveLength(1);
+        expect(evidence.events).toHaveLength(0);
+        expectNoLeak(failure, evidence);
+      } finally {
+        api.restore();
+      }
+    },
+  );
+
+  it.each([
+    [
+      "401",
+      { status: 401, body: toApiErrorEnvelope("UNAUTHORIZED", "private-x") },
+      "403-required",
+    ],
+    [
+      "404",
+      {
+        status: 404,
+        body: toApiErrorEnvelope("REPORT_JOB_NOT_FOUND", "private-x"),
+      },
+      "403-required",
+    ],
+    [
+      "500",
+      { status: 500, body: toApiErrorEnvelope("INTERNAL", "private-x") },
+      "403-required",
+    ],
+    [
+      "redirect",
+      {
+        status: 302,
+        headers: { location: "https://login.example.test/private-redirect" },
+      },
+      "403-required",
+    ],
+    [
+      "authorization bypass 200",
+      { status: 200, body: toApiSuccessEnvelope({ rows: ["private-row"] }) },
+      "403-required",
+    ],
+    [
+      "resource-level 403 instead of auth denial",
+      {
+        status: 403,
+        body: toApiErrorEnvelope(
+          "REPORT_JOB_TENANT_SCOPE_FORBIDDEN",
+          "private-x",
+        ),
+      },
+      "auth-denial-required",
+    ],
+    [
+      "generic FORBIDDEN 403",
+      { status: 403, body: toApiErrorEnvelope("FORBIDDEN", "private-x") },
+      "auth-denial-required",
+    ],
+    ["403 without error body", { status: 403 }, "auth-denial-required"],
+  ] as const)(
+    "rejects a non-auth-denial report response: %s",
+    async (_name, response, stage) => {
+      const api = installNonReportRoleApi({ report: () => response });
+      try {
+        const evidence = new Evidence();
+        const failure = await probe(evidence).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(JourneyFailure);
+        expect(failure).toMatchObject({
+          stage: `daily-report-nonreport-role-csv-detail-${stage}`,
+        });
+        expect(api.reportCalls()).toEqual([
+          expect.objectContaining({
+            pathname: "/api/reports/job_main_csv",
+            redirect: "manual",
+          }),
+        ]);
+        expect(
+          evidence.events.some((event) => event.stage.endsWith("-denied")),
+        ).toBe(false);
+        expectNoLeak(failure, evidence);
+      } finally {
+        api.restore();
+      }
+    },
+  );
+
+  it("rejects a correct-looking 403 served by a different runtime SHA", async () => {
+    const api = installNonReportRoleApi({ reportSha: "c".repeat(40) });
+    try {
+      const evidence = new Evidence();
+      const failure = await probe(evidence).catch((error: unknown) => error);
+      expect(failure).toMatchObject({
+        stage: "daily-report-nonreport-role-csv-detail-403-required",
+      });
+      expect(api.reportCalls()).toHaveLength(1);
+      expectNoLeak(failure, evidence);
+    } finally {
+      api.restore();
+    }
+  });
+
+  it.each([
+    [
+      "candidate SHA not bound to runtime",
+      (): unknown => vi.stubEnv("DRTS_CANDIDATE_SHA", "c".repeat(40)),
+      {},
+      "runtime-binding-required",
+    ],
+    [
+      "candidate SHA unset",
+      (): unknown => vi.stubEnv("DRTS_CANDIDATE_SHA", ""),
+      {},
+      "runtime-binding-required",
+    ],
+    [
+      "unowned job ID not accepted by this run",
+      (): unknown => undefined,
+      { acceptedJobs: { ...acceptedJobs, csv: "job_foreign_csv" } },
+      "own-completed-main-jobs-required",
+    ],
+    [
+      "no prior ACK/verified download",
+      (): unknown => undefined,
+      {
+        downloads: (({ csv, xlsx }) => ({ csv, xlsx }))(
+          summaries(),
+        ) as unknown as Record<
+          DailyReportFormat,
+          DailyReportDownloadArtifactSummary
+        >,
+      },
+      "own-completed-main-jobs-required",
+    ],
+    [
+      "job not completed",
+      (): unknown => undefined,
+      {
+        downloads: summaries({
+          xlsx: { jobStatus: "queued" as unknown as "completed" },
+        }),
+      },
+      "own-completed-main-jobs-required",
+    ],
+    [
+      "download from another runtime",
+      (): unknown => undefined,
+      { downloads: summaries({ pdf: { runtimeSha: "c".repeat(40) } }) },
+      "own-completed-main-jobs-required",
+    ],
+    [
+      "duplicate job IDs",
+      (): unknown => undefined,
+      {
+        acceptedJobs: { csv: "job_x", xlsx: "job_x", pdf: "job_x" },
+        downloads: summaries({
+          csv: { jobId: "job_x" },
+          xlsx: { jobId: "job_x" },
+          pdf: { jobId: "job_x" },
+        }),
+      },
+      "own-completed-main-jobs-required",
+    ],
+    [
+      "plain-http API origin",
+      (): unknown =>
+        vi.stubEnv("DRTS_OPERATIONAL_API_URL", "http://api.example.test/"),
+      {},
+      "api-origin-required",
+    ],
+    [
+      "API origin with path",
+      (): unknown =>
+        vi.stubEnv(
+          "DRTS_OPERATIONAL_API_URL",
+          `${NONREPORT_API_ORIGIN}/private-path`,
+        ),
+      {},
+      "api-origin-required",
+    ],
+    [
+      "missing Fleet tenant",
+      (): unknown => undefined,
+      { fleetSupplyTenantId: "" },
+      "fleet-tenant-required",
+    ],
+  ] as const)(
+    "binds only this run's own completed main jobs before any network: %s",
+    async (_name, mutateEnv, input, stage) => {
+      const api = installNonReportRoleApi();
+      try {
+        mutateEnv();
+        const evidence = new Evidence();
+        const failure = await probe(
+          evidence,
+          input as Partial<
+            Parameters<typeof probeOwnedReportJobsWithNonReportRole>[0]
+          >,
+        ).catch((error: unknown) => error);
+        expect(failure).toBeInstanceOf(JourneyFailure);
+        expect(failure).toMatchObject({
+          stage: `daily-report-nonreport-role-${stage}`,
+        });
+        expect(api.calls).toHaveLength(0);
+        expect(evidence.events).toHaveLength(0);
+        expectNoLeak(failure, evidence);
+      } finally {
+        api.restore();
+      }
+    },
+  );
 });
