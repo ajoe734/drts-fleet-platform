@@ -93,7 +93,11 @@ import {
 } from "./original-journal-recovery";
 import {
   RunFinalizer,
+  cancellationCleanupNeeded,
+  cancellationCleanupPhase,
+  completeOwnCancellationCleanup,
   finalizeAfterRunner,
+  handoffOwnCancellations,
   type FinalizationResult,
   type FinalizationSummary,
   type StepRunner,
@@ -442,6 +446,11 @@ test(journeyName, async ({ browser, request }) => {
   const cleanupErrors: string[] = [];
   const cancellations = cancellationResults();
   const lowRatings = lowRatingResults();
+  // C1–C4 terminalize in the helper's own per-case `finally`; after a runner
+  // abandon that cleanup runs only under the finalizer step lent to it.
+  const cancellationHandoff = finalizer.handoff(
+    cancellationCleanupPhase(cancellations),
+  );
 
   const call = async (role: Role, path: string, options: CallOptions = {}) =>
     object((await tx.call(role, path, options)).data);
@@ -2245,7 +2254,11 @@ test(journeyName, async ({ browser, request }) => {
       // owned orders. Immediate quote timing still creates reservation semantics.
       let cancellationSequence = 5; // Same real bound device, after main heartbeat 5.
       await finalizer.checkpoint("four-stage-cancellations");
-      await runFourStageOwnedCancellations(
+      const runCancellations = handoffOwnCancellations(
+        cancellationHandoff,
+        runFourStageOwnedCancellations,
+      );
+      await runCancellations(
         {
           definitionSha: definition,
           runtimeSha: runtime,
@@ -3393,6 +3406,10 @@ test(journeyName, async ({ browser, request }) => {
     finalization?.artifacts.every((artifact) => artifact.outcome === "written"),
     "final evidence and custody persisted",
   );
+  requireFact(
+    finalization?.wholeRunPassed,
+    "authoritative whole-run finalization passed",
+  );
 
   // The original finally cleanup with the same order and ownership guards; it
   // now runs inside the finalizer budget with per-step durable outcomes. The
@@ -3407,6 +3424,12 @@ test(journeyName, async ({ browser, request }) => {
         result: "retained",
       });
     }
+    // Original C1–C4 per-case terminalization, before any supply offline or
+    // binding/session revoke it depends on.
+    if (cancellationCleanupNeeded(cancellationHandoff, cancellations))
+      await cleanup("own-cancellation-cases-normal-terminalization", () =>
+        completeOwnCancellationCleanup(cancellationHandoff, cancellations),
+      );
     if (browserRatingState.current?.state === "ack_unknown") {
       cleanupErrors.push(
         "browser-rating-ACK-unknown-original-command-retained",
@@ -3677,7 +3700,9 @@ test(journeyName, async ({ browser, request }) => {
             terminalStatus: recoveryResult?.status ?? null,
           }
         : null,
-      completed: RECOVERY_ONLY ? false : completed,
+      // Whole-run truth; the main order's own completion stays a separate fact.
+      completed: !RECOVERY_ONLY && summary.wholeRunPassed,
+      mainOrderCompleted: RECOVERY_ONLY ? false : completed,
       cleanupErrors,
       bookingWrite: bookingState.journal?.current
         ? {
