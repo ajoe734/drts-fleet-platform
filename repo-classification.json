@@ -59,6 +59,12 @@
   },
   "rules": [
     {
+      "id": "deepmerge-runtime-security-patch",
+      "pattern": "^patches/deepmerge@4\\.3\\.1\\.patch$",
+      "classification": "product_runtime",
+      "status": "active"
+    },
+    {
       "id": "app-documentation",
       "pattern": "^apps/[^/]+/(?:README|AGENTS|CLAUDE)\\.md$",
       "classification": "documentation",
