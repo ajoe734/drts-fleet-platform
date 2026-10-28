@@ -510,7 +510,9 @@ describe("complete canonical orders bounded native read", () => {
       const { tx, fetcher } = setup();
       tx.setSession(role, "synthetic-ops-session");
       const source = fullSource(size);
-      const fixture = streamResponse(source);
+      const fixture = streamResponse(source, {
+        "content-type": "application/json; charset=utf-8",
+      });
       fetcher.mockResolvedValueOnce(fixture.result);
       const result = await tx.call(role, path);
       expect(Buffer.from(result.bytes).toString("utf8")).toBe(source);
@@ -532,6 +534,10 @@ describe("complete canonical orders bounded native read", () => {
     ["admin", canonicalPath, {}],
     ["api", canonicalPath, {}],
     ["referral", canonicalPath, {}],
+    ["fleet", canonicalPath, {}],
+    ["driver", "/api/orders", {}],
+    ["publicApi", "/api/orders", {}],
+    ["referralApi", "/api/orders", {}],
     ["opsApi", canonicalPath, {}],
     ["ops", "/api/orders", {}],
     ["api", "/api/orders", {}],
@@ -541,12 +547,14 @@ describe("complete canonical orders bounded native read", () => {
     ["ops", `${canonicalPath}/`, {}],
     ["ops", `${canonicalPath}/synthetic-own`, {}],
     ["ops", `${canonicalPath}-other`, {}],
+    ["ops", "/control-plane-proxy/other/../orders", {}],
     ["ops", `${canonicalPath}?order_ids=synthetic-own`, {}],
     ["ops", `${canonicalPath}?`, {}],
     ["opsApi", "/api/orders?limit=1", {}],
     ["ops", "/control-plane-proxy/reports/daily-dispatch/preview", {}],
     ["ops", canonicalPath, { raw: true }],
     ["ops", canonicalPath, {}, { "content-type": "application/pdf" }],
+    ["ops", canonicalPath, {}, { "content-type": "text/plain" }],
     ["ops", canonicalPath, {}, { "content-type": "application/octet-stream" }],
     ["ops", canonicalPath, {}, {}, 403],
   ])(
@@ -568,6 +576,34 @@ describe("complete canonical orders bounded native read", () => {
       expect(fixture.stream.locked).toBe(false);
     },
   );
+
+  it("rejects foreign/shadow origins and forged authority before fetching the full-list route", async () => {
+    const { tx, fetcher } = setup();
+    for (const url of [
+      `https://ops.example.test.foreign.test${canonicalPath}`,
+      `https://api.example.test${canonicalPath}`,
+      `https://user:secret@ops.example.test${canonicalPath}`,
+      `${origins.ops}${canonicalPath}#fragment`,
+    ]) {
+      await expect(tx.call("ops", url)).rejects.toThrow(
+        "role origin isolation",
+      );
+    }
+    for (const header of [
+      "authorization",
+      "x-serverless-authorization",
+      "x-drts-authorization",
+      "x-actor-id",
+      "x-roles",
+    ]) {
+      await expect(
+        tx.call("ops", canonicalPath, {
+          headers: { [header]: "synthetic-forged" },
+        }),
+      ).rejects.toThrow("caller cannot replace authority headers");
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 
   it.each(["ops", "opsApi"] as const)(
     "fails closed above the dedicated cap for %s without leaking source rows",
