@@ -21,6 +21,11 @@ overrides:
   vite: 8.0.11
   vitest: 4.1.4
 
+patchedDependencies:
+  deepmerge@4.3.1:
+    hash: 6241e75cd0ebdeefbe93564d0f9a0da153bc6608add12970bd3c390910e7e4f4
+    path: patches/deepmerge@4.3.1.patch
+
 importers:
   .:
     devDependencies:
@@ -15195,7 +15200,7 @@ snapshots:
       "@expo/config-plugins": 54.0.5
       "@expo/config-types": 54.0.10
       "@expo/json-file": 10.2.0
-      deepmerge: 4.3.1
+      deepmerge: 4.3.1(patch_hash=6241e75cd0ebdeefbe93564d0f9a0da153bc6608add12970bd3c390910e7e4f4)
       getenv: 2.0.0
       glob: 13.0.6
       require-from-string: 2.0.2
@@ -18208,7 +18213,8 @@ snapshots:
 
   deep-is@0.1.4: {}
 
-  deepmerge@4.3.1: {}
+  deepmerge@4.3.1(patch_hash=6241e75cd0ebdeefbe93564d0f9a0da153bc6608add12970bd3c390910e7e4f4):
+    {}
 
   default-browser-id@5.0.1: {}
 
