@@ -911,6 +911,12 @@ export type CallOptions = {
   expected?: number[];
   raw?: boolean;
 };
+const DEFAULT_RESPONSE_BYTE_LIMIT = 1024 * 1024;
+// TEN02 reads all committed orders, including historical/sibling rows, in RAM.
+// 8 MiB gives this growing source bounded headroom; chunks and the concatenated
+// buffer each retain at most 8 MiB (JSON parsing/conversion also uses memory).
+// Never expose a caller-selected limit or widen ordinary JSON/binary downloads.
+const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 8 * DEFAULT_RESPONSE_BYTE_LIMIT;
 export class NativeTransport {
   private readonly sessions = new Map<Role, string>();
   constructor(
@@ -1024,6 +1030,22 @@ export class NativeTransport {
         ),
       );
     }
+    const canonicalOrdersRead =
+      ((role === "ops" && path === "/control-plane-proxy/orders") ||
+        (role === "opsApi" && path === "/api/orders")) &&
+      (options.method ?? "GET") === "GET" &&
+      options.body === undefined &&
+      !options.raw &&
+      response.status === 200 &&
+      /^application\/json(?:\s*;|$)/i.test(
+        response.headers.get("content-type") ?? "",
+      );
+    // headers() has already enforced the role's exact configured origin before
+    // fetch. These are the existing Ops BFF and same-session direct API caller;
+    // literal paths exclude sibling routes, queries and URL-normalized aliases.
+    const responseByteLimit = canonicalOrdersRead
+      ? CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT
+      : DEFAULT_RESPONSE_BYTE_LIMIT;
     const reader = response.body?.getReader();
     const chunks: Uint8Array[] = [];
     let length = 0;
@@ -1033,7 +1055,7 @@ export class NativeTransport {
           const part = await reader.read();
           if (part.done) break;
           length += part.value.length;
-          requireFact(length <= 1024 * 1024, "bounded response exceeded");
+          requireFact(length <= responseByteLimit, "bounded response exceeded");
           chunks.push(part.value);
         }
     } finally {
