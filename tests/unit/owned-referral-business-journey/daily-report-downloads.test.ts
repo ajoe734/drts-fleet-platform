@@ -1288,6 +1288,53 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
   });
 
   it.each([
+    // Fault only external ports after the actual canonical empty-day control.
+    // The helper, exchange validation, renderers and Evidence.failure stay real.
+    ...(
+      [
+        ["tab-click", "filters-tab"],
+        ["report-type-selectOption", "filters-report-type"],
+        ["date-from-fill", "filters-date-from"],
+        ["date-to-fill", "filters-date-to"],
+        ["source-selectOption", "filters-source"],
+        ["status-selectOption", "filters-status"],
+        ["tenant-fill", "filters-tenant"],
+        ["partner-fill", "filters-partner"],
+        ["product-fill", "filters-service-product"],
+        ["preview-waitFor", "preview-ready"],
+        ["preview-click", "preview-exchange"],
+        ["own-row-waitFor", "preview-row-detached"],
+        ["rebuild-waitFor", "rebuild-ready"],
+        ["rebuild-click", "rebuild-submit"],
+        ["rebuild-command-json", "rebuild-command"],
+        ["format-selectOption", "export-csv-select"],
+        ["export-click", "export-csv-submit"],
+        ["notice-waitFor", "export-csv-notice"],
+        ["reload-goto", "reload-page"],
+        ["job-row-waitFor", "download-csv-row"],
+        ["download-waitFor", "download-csv-ready"],
+        ["download-click", "download-csv-submit"],
+        ["artifact-body", "download-csv-artifact"],
+      ] as const
+    ).map(([faultPoint, expectedPhase]) => ({
+      caseName: `empty native fault at ${faultPoint}`,
+      faultPoint,
+      expectedPhase,
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    })),
+    ...(["journey", "http"] as const).map((typedFault) => ({
+      caseName: `empty typed ${typedFault} fault preserves identity`,
+      faultPoint: "preview-click",
+      typedFault,
+      expectedPhase: "preview-exchange",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    })),
     {
       caseName:
         "actual Ops reports page returns 500 without mounting the jobs list",
@@ -1461,6 +1508,28 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         "expectedFailureStage" in scenario
           ? scenario.expectedFailureStage
           : undefined;
+      const faultPoint =
+        "faultPoint" in scenario ? scenario.faultPoint : undefined;
+      const typedFault =
+        "typedFault" in scenario ? scenario.typedFault : undefined;
+      const privateMarker = "private-native-token-url-order-actor-sql-body";
+      const injectedFailure =
+        typedFault === "http"
+          ? new DailyReportHttpFailure("daily-report-preview-status-200", {
+              phase: "preview",
+              method: "GET",
+              route: "daily-dispatch-records",
+              runtimeSha: RUNTIME_SHA,
+              status: 503,
+              code: "REPORT_READ_FAILED",
+            })
+          : typedFault === "journey"
+            ? new JourneyFailure(
+                "daily-report-empty-preview-get:timeout",
+                504,
+                "REPORT_READ_FAILED",
+              )
+            : new Error(privateMarker);
       const legacy = failureCase.startsWith("legacy ok:true");
       const wireBytes = (data: unknown) =>
         legacy
@@ -1571,7 +1640,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   "x-drts-candidate-sha": RUNTIME_SHA,
                   ...responseHeaders,
                 }),
-                body: async () => responseBytes,
+                body: async () => {
+                  if (url.includes("/artifact")) faultAt("artifact-body");
+                  return responseBytes;
+                },
               };
             },
             fulfill: async () => undefined,
@@ -1580,7 +1652,20 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           await routeHandler(route);
         };
 
+        const faultAt = (point: string) => {
+          if (
+            faultPoint === point &&
+            evidence.events.some(
+              (event) =>
+                event.stage ===
+                "daily-report-empty-source-before-zero-positive-own",
+            )
+          ) {
+            throw injectedFailure;
+          }
+        };
         const makeLocator = (spec: {
+          point?: string;
           count?: () => Promise<number>;
           innerText?: () => Promise<string>;
           click?: () => Promise<void>;
@@ -1593,19 +1678,30 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             nth: (idx: number) =>
               makeLocator({
                 ...spec,
+                point: idx === 0 ? "date-from" : "date-to",
                 fill: async (val: string) => {
                   if (idx === 0) dateFromVal = val;
                   else dateToVal = val;
                 },
               }),
-            waitFor: async () => undefined,
+            waitFor: async () => {
+              faultAt(`${spec.point}-waitFor`);
+            },
             isEnabled: async () => true,
             count: spec.count ?? (async () => 1),
             innerText: spec.innerText ?? (async () => ""),
-            click: spec.click ?? (async () => undefined),
-            fill: spec.fill ?? (async () => undefined),
-            selectOption:
-              spec.selectOption ?? (async (val: unknown) => [String(val)]),
+            click: async () => {
+              faultAt(`${spec.point}-click`);
+              await spec.click?.();
+            },
+            fill: async (val: string) => {
+              faultAt(`${spec.point}-fill`);
+              await spec.fill?.(val);
+            },
+            selectOption: async (val: string) => {
+              faultAt(`${spec.point}-selectOption`);
+              return spec.selectOption ? spec.selectOption(val) : [val];
+            },
             getByRole: spec.getByRole,
           };
           return self as unknown as Locator;
@@ -1613,6 +1709,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
         const fakePage: Partial<Page> = {
           goto: async (url: string) => {
+            faultAt("reload-goto");
             pageVisits += 1;
             const failedPage =
               previewFailure === "page" ||
@@ -1649,8 +1746,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               namePattern instanceof RegExp
                 ? namePattern.test(textVal)
                 : namePattern === textVal;
+            if (matches("營運報表")) return makeLocator({ point: "tab" });
             if (matches("載入預覽")) {
               return makeLocator({
+                point: "preview",
                 click: async () => {
                   const query = new URLSearchParams({
                     serviceDateFrom: dateFromVal,
@@ -1749,6 +1848,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             }
             if (matches("重算")) {
               return makeLocator({
+                point: "rebuild",
                 click: async () => {
                   rebuiltInBackend = true;
                   rebuildPosts += 1;
@@ -1764,7 +1864,10 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   await dispatchRoute(
                     "POST",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records/rebuild`,
-                    JSON.stringify(bodyObj),
+                    faultPoint === "rebuild-command-json" &&
+                      dateFromVal === "2026-10-25"
+                      ? privateMarker
+                      : JSON.stringify(bodyObj),
                     200,
                     { "content-type": "application/json" },
                     successWireBytes({
@@ -1795,6 +1898,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             }
             if (matches("匯出工作")) {
               return makeLocator({
+                point: "export",
                 click: async () => {
                   const format = selectedFormat;
                   const jobId = `job_harness_${dateFromVal === "2026-10-25" ? "empty_" : ""}${format}`;
@@ -1893,6 +1997,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           },
           getByText: (textVal) =>
             makeLocator({
+              point: "notice",
               innerText: async () => String(textVal),
               count: async () =>
                 String(textVal) === lastAcceptedJobId ? 1 : 0,
@@ -1903,6 +2008,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             }
             if (selector === 'input[placeholder="tenant_001"]') {
               return makeLocator({
+                point: "tenant",
                 fill: async (val) => {
                   tenantVal = val;
                 },
@@ -1910,6 +2016,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             }
             if (selector === 'input[placeholder="partner_001"]') {
               return makeLocator({
+                point: "partner",
                 fill: async (val) => {
                   partnerVal = val;
                 },
@@ -1917,6 +2024,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             }
             if (selector === 'input[placeholder="wheelchair_van"]') {
               return makeLocator({
+                point: "product",
                 fill: async (val) => {
                   serviceProductVal = val;
                 },
@@ -1928,6 +2036,14 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   const tag = (opts.has as unknown as { _option?: string })
                     ?._option;
                   return makeLocator({
+                    point:
+                      tag === "tenant_portal"
+                        ? "source"
+                        : tag === "completed"
+                          ? "status"
+                          : tag === "xlsx"
+                            ? "format"
+                            : "report-type",
                     selectOption: async (val) => {
                       const str = String(val);
                       if (tag === "tenant_portal") orderSourceVal = str;
@@ -1950,6 +2066,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   const target = String(opts.hasText ?? "");
                   if (target === ORDER_ID) {
                     return makeLocator({
+                      point: "own-row",
                       count: async () => (dateFromVal === "2026-10-25" ? 0 : 1),
                       innerText: async () =>
                         `${ORDER_ID} ${ORDER_NO} 2026-10-26 ${PICKUP_ADDRESS} ${DROPOFF_ADDRESS} ${DRIVER_ID} ${VEHICLE_ID} ${PLATE_NO}`,
@@ -1957,6 +2074,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   }
                   const foundJob = createdJobs.find((j) => j.jobId === target);
                   return makeLocator({
+                    point: "job-row",
                     count: async () => (foundJob ? 1 : 0),
                     innerText: async () =>
                       foundJob
@@ -1964,6 +2082,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                         : "",
                     getByRole: () =>
                       makeLocator({
+                        point: "download",
                         click: async () => {
                           if (!foundJob) throw new Error("missing job");
                           await dispatchRoute(
@@ -2084,6 +2203,59 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           recoveryOnly: false,
           evidence,
         });
+        if (faultPoint) {
+          const failure = await run.then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+          evidence.failure(failure);
+          const expectedStage = typedFault
+            ? (injectedFailure as JourneyFailure).stage
+            : `daily-report-empty-${"expectedPhase" in scenario ? scenario.expectedPhase : ""}`;
+          expect(evidence.events.at(-1)).toEqual({
+            stage: expectedStage,
+            ...(typedFault
+              ? {
+                  status:
+                    injectedFailure instanceof JourneyFailure
+                      ? injectedFailure.status
+                      : undefined,
+                  code: "REPORT_READ_FAILED",
+                }
+              : {}),
+            result: "failed",
+          });
+          expect(failure).toBeInstanceOf(JourneyFailure);
+          if (typedFault) expect(failure).toBe(injectedFailure);
+          else {
+            expect(Object.keys(failure as object)).toEqual([
+              "stage",
+              "status",
+              "code",
+              "transportFacts",
+            ]);
+            expect((failure as Error).message).toBe(expectedStage);
+            expect((failure as Error).cause).toBeUndefined();
+          }
+          expect(JSON.stringify(evidence.events)).not.toContain(privateMarker);
+          expect((failure as Error).stack).not.toContain(privateMarker);
+          expect(unrouteCalled).toBe(true);
+          expect(sourceReads).toBe(1);
+          expect(evidence.events).toContainEqual({
+            stage: "daily-report-empty-source-before-zero-positive-own",
+            orderId: ORDER_ID,
+            result: "observed",
+          });
+          // The original positive report bytes were verified before any injection.
+          for (const format of DAILY_REPORT_FORMATS)
+            expect(
+              evidence.events.some(
+                (event) =>
+                  event.stage === `daily-report-download-${format}-verified`,
+              ),
+            ).toBe(true);
+          return;
+        }
         if (
           previewFailure === "page" ||
           previewFailure === "reload-page" ||
