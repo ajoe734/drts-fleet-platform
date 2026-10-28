@@ -103,7 +103,7 @@ from its own authorized context to store these helper metadata fields:
 ```json
 {
   "resolved_parent_status": "blocked",
-  "resolved_parent_waiting_for": "Supervisor",
+  "resolved_parent_waiting_for": "Claude2",
   "resolved_parent_next": "Source fix accepted at candidate 19534ba2c83ef768019d4a961bfe8acf6cb9aa55 / merge 22b51a04f52409c92ba1cab5989bd35ab51e1f4e. Genuine 2026-10-26T04:06Z native bare quota receipts caused authorized rotation and Gemini lane pause. Runtime key remains pending: review actual immutable worker pin and genuine matching quota-pool identity/exclusion evidence; separate lane pauses and cached predicate readback do not satisfy it. Preserve candidate and pauses. Evidence: support/unblock/ORCH-AGY-BARE-TERMINAL-QUOTA-PROVENANCE-20261026/ORCH-AGY-BARE-TERMINAL-QUOTA-PROVENANCE-20261026-UNBLOCK-MANUAL-UNBLOCK.md"
 }
 ```
@@ -114,6 +114,13 @@ the parent with that concrete next step. Both operations are unavailable to
 this dispatched worker; neither dispatch variables nor roles may be changed
 to bypass the guard. Do not set `resolved_parent_at` manually: the helper's
 merge transaction owns that timestamp.
+
+`waiting_for` must name a registered lane: Claude2 coordinates the remaining
+review/operator decision. `Supervisor` is an operator role, not a registered
+lane accepted by `ensure_agent`. An attempted helper blocker naming Supervisor
+was rejected with `Unknown agent: Supervisor` (exit 1); the helper remained
+in progress. The corrected helper blocker names Claude2 and requests the
+Supervisor transaction in its message.
 
 Without the stored disposition, `apply_unblock_parent_resolution` defaults to
 `todo` on helper completion. Therefore this helper's PR stays draft and the
