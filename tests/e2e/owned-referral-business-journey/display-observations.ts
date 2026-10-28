@@ -381,7 +381,13 @@ async function observeManualComplaintPanel(
 
   // Always runs, including when an existing case was reused above: an
   // already-listed case never stands in for a fresh per-category submission.
-  const categories = await observeManualComplaintCategories(p, orderId);
+  // The primary case detail is restored afterwards, so the mobile evidence
+  // below shows the same case this function records and returns.
+  const categories = await observeManualComplaintCategoriesForPrimaryCase(
+    p,
+    orderId,
+    caseNo,
+  );
 
   const viewCaseButton = p.page.getByRole("button", {
     name: `查看案件 ${caseNo}`,
@@ -410,6 +416,51 @@ async function observeManualComplaintPanel(
     mobileScreenshot,
     categories,
   };
+}
+
+// Each per-category readback opens its own new case, leaving the detail panel
+// on the last one (lost_item). Re-open the primary UI03/UI04 case and verify
+// its binding before any caller captures evidence for it.
+export async function observeManualComplaintCategoriesForPrimaryCase(
+  p: DisplayObservationsParams,
+  orderId: string,
+  primaryCaseNo: string,
+): Promise<ManualComplaintCategoryObservation[]> {
+  const categories = await observeManualComplaintCategories(p, orderId);
+  const complaintsUrl = `${p.referralOrigin}/api/referral/complaints/${encodeURIComponent(orderId)}`;
+  const detailUrl = `${complaintsUrl}/${encodeURIComponent(primaryCaseNo)}`;
+  const detailResponsePromise = p.page.waitForResponse(
+    (response) =>
+      response.url() === detailUrl && response.request().method() === "GET",
+    { timeout: 15_000 },
+  );
+  await p.page
+    .getByRole("button", { name: `查看案件 ${primaryCaseNo}`, exact: true })
+    .click();
+  const detailResponse = await detailResponsePromise;
+  requireFact(
+    detailResponse.ok(),
+    "primary manual case detail re-read must succeed",
+  );
+  const detailPayload = object(await detailResponse.json());
+  requireFact(
+    detailPayload.ok === true,
+    "primary manual case detail re-read envelope",
+  );
+  const detail = object(detailPayload.data);
+  requireFact(
+    detail.orderId === orderId && detail.caseNo === primaryCaseNo,
+    "restored primary manual case detail binding",
+  );
+  const article = p.page.getByRole("article", {
+    name: "申訴案件詳情",
+    exact: true,
+  });
+  await article.waitFor({ state: "visible", timeout: 15_000 });
+  await article
+    .getByText(primaryCaseNo, { exact: true })
+    .waitFor({ state: "visible", timeout: 15_000 });
+  return categories;
 }
 
 // P5 fare / P6 service / P7 lost_item: on the already-expanded panel of the

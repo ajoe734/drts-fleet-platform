@@ -1,11 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Page } from "@playwright/test";
 import {
   MANUAL_COMPLAINT_CATEGORIES,
   observeManualComplaintCategories,
+  observeManualComplaintCategoriesForPrimaryCase,
   submitSyntheticComplaint,
   type DisplayObservationsParams,
   type ManualComplaintCategory,
@@ -139,6 +151,7 @@ class FakePanel {
   readonly cases: CaseRecord[] = [];
   readonly posts: FakeRequest[] = [];
   readonly selectedLabels: string[] = [];
+  readonly viewed: string[] = [];
   detail: CaseRecord | null = null;
   private sequence = 0;
   private requestListeners: RequestListener[] = [];
@@ -308,6 +321,9 @@ class FakePanel {
     const found = this.cases.find((item) => item.caseNo === caseNo);
     if (!found) throw new Error(`no listed case ${caseNo}`);
     const record = this.options.detailOverride?.(found) ?? found;
+    // Like ReferralComplaintPanel.showCase, the detail article shows the
+    // most recently opened case.
+    this.viewed.push(caseNo);
     this.detail = record;
     queueMicrotask(() =>
       this.emitResponse(
@@ -587,6 +603,177 @@ describe("observeManualComplaintCategories (P5/P6/P7 explicit UI submissions)", 
           ORDER_ID,
         ),
       ).rejects.toThrow("service manual case detail");
+    });
+  });
+});
+
+describe("observeManualComplaintCategoriesForPrimaryCase (parent UI03/UI04 evidence after the category pass)", () => {
+  it("leaves the detail panel on the primary case, not the last category case it opened", async () => {
+    await withDirectory("p5p7-primary-", async (directory) => {
+      const panel = new FakePanel();
+      const primary = seedExistingServiceCase(panel);
+      panel.detail = primary;
+      const categories = await observeManualComplaintCategoriesForPrimaryCase(
+        makeParams(panel, directory),
+        ORDER_ID,
+        primary.caseNo,
+      );
+
+      expect(categories.map((c) => c.category)).toEqual([
+        "service",
+        "fare",
+        "lost_item",
+      ]);
+      // The article the mobile screenshot captures shows the primary case the
+      // parent records and returns, not the last category case opened...
+      const lostCaseNo = categories[2]!.caseNo;
+      expect(panel.detail?.caseNo).not.toBe(lostCaseNo);
+      expect(panel.detail?.caseNo).toBe(primary.caseNo);
+      // ...while each category was still read back on its own new case.
+      expect(panel.viewed).toEqual([
+        ...categories.map((c) => c.caseNo),
+        primary.caseNo,
+      ]);
+    });
+  });
+
+  it("rejects a restored detail read bound to another case", async () => {
+    await withDirectory("p5p7-primary-bad-", async (directory) => {
+      let primaryCaseNo = "";
+      const panel = new FakePanel({
+        detailOverride: (record) =>
+          record.caseNo === primaryCaseNo
+            ? { ...record, caseNo: "CASE-OTHER" }
+            : record,
+      });
+      primaryCaseNo = seedExistingServiceCase(panel).caseNo;
+      await expect(
+        observeManualComplaintCategoriesForPrimaryCase(
+          makeParams(panel, directory),
+          ORDER_ID,
+          primaryCaseNo,
+        ),
+      ).rejects.toThrow("restored primary manual case detail binding");
+    });
+  });
+});
+
+// Q2: executes the immutable original source, not a description of it. The
+// original display-observations.ts (plus the two modules it imports, at the
+// same commit) is read with `git show`, written to a temp tree with the same
+// relative layout, and imported. The only source rewrite is the bare
+// "@playwright/test" specifier, pointed at this repo's installed package.
+const ORIGINAL_SOURCE_SHA = "40bdf7d15da3d1e81ba9aa2bac22f8cc96a12073";
+const ORIGINAL_SOURCE_SHA256 =
+  "a60e212e1f878712529eb8a65800329251a91c6873ddb2e4c0e7519093a7ab72";
+const ORIGINAL_HELPER_PATH =
+  "tests/e2e/owned-referral-business-journey/display-observations.ts";
+const ORIGINAL_SOURCE_PATHS = [
+  ORIGINAL_HELPER_PATH,
+  "tests/e2e/owned-referral-business-journey/protocol.ts",
+  "apps/referral-embed-web/lib/embed-fixtures.ts",
+] as const;
+
+type SubmitHelper = (
+  p: DisplayObservationsParams,
+  orderId: string,
+  options?: SyntheticComplaintOptions,
+) => Promise<{ caseNo: string }>;
+
+async function importOriginalHelper(
+  root: string,
+): Promise<Record<string, unknown>> {
+  const playwrightEntry = createRequire(import.meta.url).resolve(
+    "@playwright/test",
+  );
+  for (const path of ORIGINAL_SOURCE_PATHS) {
+    let source = execFileSync(
+      "git",
+      ["show", `${ORIGINAL_SOURCE_SHA}:${path}`],
+      { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+    );
+    if (path === ORIGINAL_HELPER_PATH) {
+      expect(createHash("sha256").update(source).digest("hex")).toBe(
+        ORIGINAL_SOURCE_SHA256,
+      );
+      const specifier = '} from "@playwright/test";';
+      expect(source.split(specifier)).toHaveLength(2);
+      source = source.replace(
+        specifier,
+        `} from ${JSON.stringify(playwrightEntry)};`,
+      );
+    }
+    await mkdir(dirname(join(root, path)), { recursive: true });
+    await writeFile(join(root, path), source, "utf8");
+  }
+  return (await import(
+    /* @vite-ignore */ pathToFileURL(join(root, ORIGINAL_HELPER_PATH)).href
+  )) as Record<string, unknown>;
+}
+
+// The task's expectation, applied identically to either helper version:
+// one UI submission per category, each with its own case and journal.
+async function submitThreeCategoryIntents(
+  submit: SubmitHelper,
+  directory: string,
+): Promise<FakePanel> {
+  const panel = new FakePanel();
+  const params = makeParams(panel, directory);
+  const caseNos: string[] = [];
+  for (const category of MANUAL_COMPLAINT_CATEGORIES)
+    caseNos.push((await submit(params, ORDER_ID, optionsFor(category))).caseNo);
+  const submitted = panel.posts.map((post) => post.body.category);
+  if (JSON.stringify(submitted) !== JSON.stringify(MANUAL_COMPLAINT_CATEGORIES))
+    throw new Error(
+      `three-category expectation failed: submitted categories ${JSON.stringify(submitted)}`,
+    );
+  if (new Set(caseNos).size !== MANUAL_COMPLAINT_CATEGORIES.length)
+    throw new Error("three-category expectation failed: cases not distinct");
+  for (const category of MANUAL_COMPLAINT_CATEGORIES)
+    if (!(await exists(journalPath(directory, category))))
+      throw new Error(
+        `three-category expectation failed: no ${category} journal`,
+      );
+  return panel;
+}
+
+describe(`original helper ${ORIGINAL_SOURCE_SHA} vs candidate (three-category coverage)`, () => {
+  it("the original helper fails the three-category expectation; the candidate passes it", async () => {
+    await withDirectory("p5p7-original-", async (root) => {
+      const original = await importOriginalHelper(join(root, "source"));
+      expect(typeof original.submitSyntheticComplaint).toBe("function");
+      expect(original.observeManualComplaintCategories).toBeUndefined();
+
+      const originalJournals = join(root, "original-run");
+      await expect(
+        submitThreeCategoryIntents(
+          original.submitSyntheticComplaint as SubmitHelper,
+          originalJournals,
+        ),
+      ).rejects.toThrow(
+        'three-category expectation failed: submitted categories ["service","service","service"]',
+      );
+      // The original only ever wrote its single service-default journal.
+      expect(await exists(journalPath(originalJournals))).toBe(true);
+      for (const category of MANUAL_COMPLAINT_CATEGORIES)
+        expect(await exists(journalPath(originalJournals, category))).toBe(
+          false,
+        );
+
+      const candidatePanel = await submitThreeCategoryIntents(
+        submitSyntheticComplaint,
+        join(root, "candidate-run"),
+      );
+      expect(candidatePanel.posts.map((post) => post.body.category)).toEqual([
+        "service",
+        "fare",
+        "lost_item",
+      ]);
+      expect(candidatePanel.selectedLabels).toEqual([
+        "服務申訴",
+        "車資申訴",
+        "遺失物",
+      ]);
     });
   });
 });
