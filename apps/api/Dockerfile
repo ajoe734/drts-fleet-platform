@@ -39,7 +39,9 @@ RUN pnpm --filter @drts/contracts build && \
 
 # pnpm deploy creates a self-contained flat node_modules (no workspace symlinks)
 # that is safe to COPY into the runtime stage
-RUN pnpm --filter @drts/api --prod deploy --legacy /deploy/api
+# Expo's deepmerge patch is unused in the API's production dependency closure.
+# Permit unused patches only for packaging; the frozen install above stays strict.
+RUN pnpm --filter @drts/api --prod deploy --legacy --config.allow-unused-patches=true /deploy/api
 
 FROM node:${NODE_VERSION} AS runtime
 ENV NODE_ENV=production \
