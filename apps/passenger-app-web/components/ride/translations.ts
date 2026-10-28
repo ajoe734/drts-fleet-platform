@@ -43,7 +43,7 @@ export const t = {
   SeatbeltReminder: "上車後請全程繫妥安全帶",
   SeatbeltBoth: "前後座乘客都需要繫安全帶。",
   ReservationOnly: "本服務僅提供預約叫車",
-  AuthoritativeContact: "聯絡與申訴資訊以本趟權威資料為準",
+  AuthoritativeContact: "聯絡與申訴資訊以本趟行程資料為準",
   CancelRide: "取消行程",
   CancelFree: "取消不收費",
   CancelFreeDuringReassign: "改派期間取消不收費",

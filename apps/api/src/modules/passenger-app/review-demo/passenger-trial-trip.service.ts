@@ -263,10 +263,13 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
           createdAt: now,
           updatedAt: now,
         })),
+        // One vehicle, one dispatch operator (BUREAU-R02): bound to the
+        // review operator whose authorization the passenger app books on.
         exclusivities: missingVehicles.map((pair) => ({
           ...exclusivity,
           vehicleId: pair.vehicleId,
           declarationFileId: "passenger-trial-simulated-document",
+          exclusiveOperatorId: REVIEW_OPERATOR_ID,
           exclusiveProviderName: "測試車隊",
           effectiveStart: start,
           effectiveEnd: end,
@@ -294,6 +297,21 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
         })),
       });
     }
+    // Trial vehicles created before that rule carry the template's unbound
+    // exclusivity; bind them too (an upsert per vehicle, read from storage).
+    const unbound = (state.exclusivities ?? []).filter(
+      (e) =>
+        PASSENGER_TRIAL_SUPPLY.some((pair) => pair.vehicleId === e.vehicleId) &&
+        e.exclusiveOperatorId !== REVIEW_OPERATOR_ID,
+    );
+    if (unbound.length > 0)
+      await this.registryRepository.persistChanges({
+        exclusivities: unbound.map((e) => ({
+          ...e,
+          exclusiveOperatorId: REVIEW_OPERATOR_ID,
+          updatedAt: now,
+        })),
+      });
     for (const pair of PASSENGER_TRIAL_SUPPLY) {
       await this.profiles.prepareProfileAuthority(pair.driverId);
       await this.profiles.updateProfile(pair.driverId, {

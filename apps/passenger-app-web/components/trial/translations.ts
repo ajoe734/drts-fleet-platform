@@ -55,9 +55,11 @@ export const trialT = {
   supplyBusy: "測試車輛都在服務其他試用行程，請稍後再試。",
 } as const;
 
-/** Banqiao meeting points for the trial selector: illustrative locations,
- * not geocoder results. Labels avoid rehearsal wording because the address
- * text is stored on the order and printed on the ride certificate. */
+/** Meeting points for the trial selector: illustrative locations, not
+ * geocoder results, all inside the shared-dev TAIPEI_CORE service area
+ * (lat 25.0005–25.125, lng 121.4505–121.625). Labels avoid rehearsal wording
+ * because the address text is stored on the order and printed on the ride
+ * certificate. 西門站 gives a ride long enough to watch live tracking. */
 export const TRIAL_STOPS = [
   {
     addressId: "trial-banqiao-station",
@@ -78,9 +80,15 @@ export const TRIAL_STOPS = [
     lng: 121.4593,
   },
   {
-    addressId: "trial-far-eastern-hospital",
-    address: "新北市板橋區 亞東醫院（示範地點）",
-    lat: 24.9968,
-    lng: 121.4528,
+    addressId: "trial-jiangzicui-station",
+    address: "新北市板橋區 江子翠站（示範地點）",
+    lat: 25.0302,
+    lng: 121.4722,
+  },
+  {
+    addressId: "trial-ximen-station",
+    address: "臺北市萬華區 西門站（示範地點）",
+    lat: 25.0421,
+    lng: 121.5082,
   },
 ] as const;
