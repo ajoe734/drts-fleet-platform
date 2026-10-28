@@ -6542,6 +6542,8 @@ def chair_reasoned_deferral_task_ids(
     expected route is create_unblock_task and that has no action of its own,
     and the record must be either
     - a governance artifact the recursion guard would refuse a helper for, or
+    - a record whose default helper the creator would refuse because its
+      stable ID is already reserved (archived or still on the board), or
     - any other record, but only inside a mixed recovery batch: the same
       payload carries an explicit candidate CI recovery that matches a
       selected record's current recovery context.
@@ -6564,7 +6566,13 @@ def chair_reasoned_deferral_task_ids(
         if record.get("action") == "create_unblock_task"
         and str(record.get("task_id") or "") not in action_index
         and str(record.get("task_id") or "") not in recovery_targets
-        and (recovery_targets or chair_unblock_recursion_guarded(config, record.get("task") or {}, task_map))
+        and (
+            recovery_targets
+            or chair_unblock_recursion_guarded(config, record.get("task") or {}, task_map)
+            or chair_unblock_helper_reserved(
+                status, task_map, str(record.get("task_id") or ""), str(record.get("kind") or "")
+            )
+        )
     }
     return chair_deferral_entry_task_ids(payload) & set(guarded)
 
@@ -7716,6 +7724,32 @@ def open_unblock_task_for_parent(status: dict[str, Any], parent_task_id: str, un
     return None
 
 
+def chair_unblock_helper_reserved(
+    status: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+    parent_task_id: str,
+    unblock_kind: str,
+) -> bool:
+    """True when create_unblock_task cannot materialize this parent's helper of
+    this kind: an open helper exists, or its stable ID is taken on the board or
+    reserved by the archive. Completed helpers leave the live task map when
+    archived; their stable IDs must remain reserved, otherwise each chair tick
+    can resurrect the same work. Reservation alone never resolves the parent."""
+    unblock_id = chair_unblock_task_id(parent_task_id, unblock_kind)
+    archived_task_ids = status.get("archived_task_ids", []) or []
+    if isinstance(archived_task_ids, dict):
+        archived_ids = {str(task_id) for task_id, archived in archived_task_ids.items() if archived}
+    elif isinstance(archived_task_ids, (list, tuple, set)):
+        archived_ids = {str(task_id) for task_id in archived_task_ids}
+    else:
+        archived_ids = set()
+    return (
+        open_unblock_task_for_parent(status, parent_task_id, unblock_kind) is not None
+        or task_map.get(unblock_id) is not None
+        or unblock_id in archived_ids
+    )
+
+
 def blocked_task_triage_action(
     status: dict[str, Any],
     task: dict[str, Any],
@@ -8084,20 +8118,7 @@ def create_chair_unblock_task(
     if unblock_kind not in {"history_repair", "planning_decision", "manual_unblock"}:
         unblock_kind = blocked_task_triage_kind(parent)
     unblock_id = chair_unblock_task_id(parent_id, unblock_kind)
-    # Completed helpers leave the live task map when archived. Their stable IDs
-    # must remain reserved, otherwise each chair tick can resurrect the same work.
-    archived_task_ids = status.get("archived_task_ids", []) or []
-    if isinstance(archived_task_ids, dict):
-        archived_ids = {str(task_id) for task_id, archived in archived_task_ids.items() if archived}
-    elif isinstance(archived_task_ids, (list, tuple, set)):
-        archived_ids = {str(task_id) for task_id in archived_task_ids}
-    else:
-        archived_ids = set()
-    if (
-        open_unblock_task_for_parent(status, parent_id, unblock_kind) is not None
-        or task_map.get(unblock_id) is not None
-        or unblock_id in archived_ids
-    ):
+    if chair_unblock_helper_reserved(status, task_map, parent_id, unblock_kind):
         return False
 
     requested_owner = str(action.get("target_agent") or "").strip()
