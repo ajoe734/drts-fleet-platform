@@ -516,7 +516,7 @@ describe("complete canonical orders bounded native read", () => {
       fetcher.mockResolvedValueOnce(fixture.result);
       const result = await tx.call(role, path);
       expect(Buffer.from(result.bytes).toString("utf8")).toBe(source);
-      expect(result.data).toEqual(camelWire(JSON.parse(source)).data);
+      expect(result.data).toEqual(camelWire(JSON.parse(source).data));
       expect(fetcher).toHaveBeenCalledOnce();
       expect(at(fetcher.mock.calls, 0)[1]).toMatchObject({
         method: "GET",
