@@ -78,6 +78,11 @@ import {
   toTaipeiServiceDate,
 } from "./daily-report-downloads";
 import {
+  LOW_RATING_MATRIX_SCOPE,
+  lowRatingResults,
+  runLowRatingMatrix,
+} from "./low-rating-matrix";
+import {
   RETAINED_REFERRAL_ORDER,
   recoverRetainedReferralOrder,
 } from "./retained-order-recovery";
@@ -303,6 +308,7 @@ test(journeyName, async ({ browser, request }) => {
   const supplementalReports: DailyReportDownloadsEvidence[] = [];
   const cleanupErrors: string[] = [];
   const cancellations = cancellationResults();
+  const lowRatings = lowRatingResults();
 
   const call = async (role: Role, path: string, options: CallOptions = {}) =>
     object((await tx.call(role, path, options)).data);
@@ -2399,6 +2405,201 @@ test(journeyName, async ({ browser, request }) => {
         },
         cancellations,
       );
+      // BUREAU-EXISTING-LOW-RATING-FOUR-CONTACT-COMBINATIONS-COVERAGE-20261028:
+      // main keeps its original 2/false browserRatingWrite; the other three <=2
+      // combinations use the same-run C2/C3/C4 orders after their normal Driver
+      // completion. Same real OutcomeScreen controls, one original POST each.
+      const lowRatingPrefix = `${origins.referral}/api/referral/rating/`;
+      const lowRatingPosts = new Map<string, number>();
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          request.url().startsWith(lowRatingPrefix)
+        ) {
+          const id = decodeURIComponent(
+            request.url().slice(lowRatingPrefix.length),
+          );
+          lowRatingPosts.set(id, (lowRatingPosts.get(id) ?? 0) + 1);
+        }
+      });
+      let lowRatingOrderId = "";
+      const lowRatingPostCount = () =>
+        lowRatingPosts.get(lowRatingOrderId) ?? 0;
+      const lowRatingSubmit = () =>
+        page.getByRole("button", {
+          name: /^(送出評分|重送原評分|評分已送出|送出中…)$/,
+        });
+      const lowRatingContact = () =>
+        page.getByRole("switch", { name: "需要客服聯絡", exact: true });
+      // OutcomeScreen colors the selected prefix of its five star buttons.
+      const readSelectedStars = async () => {
+        const stars = page.getByRole("button", { name: /^評分 [1-5] 星$/ });
+        await expect(stars).toHaveCount(5);
+        const colors = await stars.evaluateAll((buttons) =>
+          buttons.map((button) => window.getComputedStyle(button).color),
+        );
+        const boundary = colors.findIndex((color) => color !== colors[0]);
+        const selected = boundary === -1 ? colors.length : boundary;
+        return colors
+          .slice(selected)
+          .every((color) => color === colors[selected])
+          ? selected
+          : -1;
+      };
+      await runLowRatingMatrix(
+        {
+          definitionSha: definition,
+          runtimeSha: runtime,
+          directory: DIRECTORY,
+          mainOrderId: completedOrderId,
+          mainRating: browserRatingState.current,
+          cancellations,
+          evidence,
+          referral,
+          opsControl,
+          browser: {
+            open: async (id) => {
+              lowRatingOrderId = id;
+              await page.goto(
+                `${origins.referral}/embed/${ENTRY}?state=handoff&screen=completed&entryHost=${encodeURIComponent(host)}&orderId=${encodeURIComponent(id)}`,
+              );
+              await expect(page).toHaveURL(
+                (value) =>
+                  value.origin === origins.referral &&
+                  value.searchParams.get("screen") === "completed" &&
+                  value.searchParams.get("orderId") === id,
+              );
+              await expect(
+                page.getByText("行程已完成", { exact: true }),
+              ).toBeVisible();
+              const submit = lowRatingSubmit();
+              await expect(submit).toHaveCount(1);
+              return {
+                submitLabel: ((await submit.textContent()) ?? "").trim(),
+                submitDisabled: await submit.isDisabled(),
+                contactSwitchCount: await lowRatingContact().count(),
+                ratingPostCount: lowRatingPostCount(),
+              };
+            },
+            selectScore: async (score) => {
+              await page
+                .getByRole("button", { name: `評分 ${score} 星`, exact: true })
+                .click();
+              await expect(lowRatingContact()).toHaveCount(1);
+              await expect(lowRatingSubmit()).toBeEnabled();
+              return {
+                selectedStars: await readSelectedStars(),
+                contactChecked: await lowRatingContact().isChecked(),
+                submitEnabled: await lowRatingSubmit().isEnabled(),
+                ratingPostCount: lowRatingPostCount(),
+              };
+            },
+            toggleContact: async () => {
+              const contact = lowRatingContact();
+              const before = await contact.isChecked();
+              await contact.click();
+              if (before) await expect(contact).not.toBeChecked();
+              else await expect(contact).toBeChecked();
+              return {
+                contactChecked: await contact.isChecked(),
+                ratingPostCount: lowRatingPostCount(),
+              };
+            },
+            submit: async (id, beforeForward) => {
+              const url = `${lowRatingPrefix}${encodeURIComponent(id)}`;
+              type Captured = {
+                status: number;
+                runtimeSha: string | undefined;
+                bytes: Uint8Array;
+              };
+              let resolveResponse!: (value: Captured) => void;
+              let rejectResponse!: (error: unknown) => void;
+              const waiting = new Promise<Captured>((resolve, reject) => {
+                resolveResponse = resolve;
+                rejectResponse = reject;
+              });
+              void waiting.catch(() => undefined);
+              // Journal the original UI body/key before it is forwarded; a
+              // journal failure aborts it. No retry or replacement command.
+              const observe = async (route: Route) => {
+                try {
+                  const request = route.request();
+                  requireFact(
+                    request.method() === "POST" && request.url() === url,
+                    "low-rating exact original browser POST",
+                  );
+                  await beforeForward(
+                    text(request.postData(), "actual browser rating body"),
+                  );
+                  const response = await route.fetch({
+                    maxRedirects: 0,
+                    maxRetries: 0,
+                    timeout: 15000,
+                  });
+                  const bytes = await response.body();
+                  requireFact(
+                    bytes.length <= 1024 * 1024,
+                    "bounded low-rating response",
+                  );
+                  const captured = {
+                    status: response.status(),
+                    runtimeSha: response.headers()["x-drts-candidate-sha"],
+                    bytes: new Uint8Array(bytes),
+                  };
+                  await route.fulfill({ response, body: bytes });
+                  resolveResponse(captured);
+                } catch (error) {
+                  rejectResponse(error);
+                  await route.abort("failed").catch(() => undefined);
+                }
+              };
+              await page.route(url, observe, { times: 1 });
+              const deadline = setTimeout(
+                () =>
+                  rejectResponse(
+                    new JourneyFailure("low-rating-response-timeout"),
+                  ),
+                15_000,
+              );
+              try {
+                await lowRatingSubmit().click({ timeout: 15_000 });
+                const captured = await waiting;
+                return { ...captured, ratingPostCount: lowRatingPostCount() };
+              } finally {
+                clearTimeout(deadline);
+                await page.unroute(url, observe);
+              }
+            },
+            readLocked: async (id, caseNo) => {
+              requireFact(
+                id === lowRatingOrderId,
+                "low-rating same open order",
+              );
+              const submit = page.getByRole("button", {
+                name: "評分已送出",
+                exact: true,
+              });
+              await expect(submit).toBeDisabled();
+              const status = page
+                .getByRole("status")
+                .filter({ hasText: caseNo });
+              await expect(status).toHaveCount(1);
+              const contact = lowRatingContact();
+              await expect(contact).toHaveCount(1);
+              return {
+                submitLabel: ((await submit.textContent()) ?? "").trim(),
+                submitDisabled: await submit.isDisabled(),
+                selectedStars: await readSelectedStars(),
+                contactChecked: await contact.isChecked(),
+                contactDisabled: await contact.isDisabled(),
+                statusText: (await status.textContent()) ?? "",
+                ratingPostCount: lowRatingPostCount(),
+              };
+            },
+          },
+        },
+        lowRatings,
+      );
       // Supplemental observations on the same completed order/session; see
       // REFERRAL-DEMO-HOSTED-DISPLAY-OBSERVATIONS-20261023. No extra booking.
       const unassignedCancellation = cancellations.find(
@@ -3062,6 +3263,19 @@ test(journeyName, async ({ browser, request }) => {
         result: "retained",
       });
     }
+    for (const lowRating of lowRatings) {
+      if (lowRating.slot === "main" || lowRating.state !== "ack_unknown")
+        continue;
+      cleanupErrors.push(
+        `low-rating-${lowRating.slot}-ACK-unknown-original-command-retained`,
+      );
+      evidence.record({
+        stage: `low-rating-${lowRating.slot}-ACK-unknown-original-command-retained`,
+        ...(lowRating.orderId ? { orderId: lowRating.orderId } : {}),
+        ...(lowRating.bodySha256 ? { sha256: lowRating.bodySha256 } : {}),
+        result: "retained",
+      });
+    }
     if (bookingState.journal?.current?.state === "ack_unknown") {
       cleanupErrors.push("booking-ACK-unknown-possible-write");
       evidence.record({
@@ -3319,6 +3533,9 @@ test(journeyName, async ({ browser, request }) => {
               }
             : null,
           browserRatingWrite: browserRatingState.current ?? null,
+          lowRatingMatrix: RECOVERY_ONLY
+            ? null
+            : { scope: LOW_RATING_MATRIX_SCOPE, cases: lowRatings },
           events: evidence.events,
           simulation: RECOVERY_ONLY
             ? "Recovery of the exact pre-existing synthetic Referral order only; no new supply/documents/quote/booking, Driver progression, trip completion, rating/CRM or receipt/TXT execution."
