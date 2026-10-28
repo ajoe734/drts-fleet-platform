@@ -1178,6 +1178,96 @@ describe("R2: supply writes keep durable attempted/ACK custody", () => {
     });
   });
 
+  // R4: same device, but the readback carries a different bindingId; the
+  // original ACKed binding is absent and must never read as revoked.
+  async function revokeActor(actorName: "first" | "second") {
+    const w = world();
+    const second = {
+      driverId: "drv_second_own",
+      workState: "offline",
+      deviceBindings: [
+        {
+          bindingId: "drvbind_second",
+          deviceId: FULL.secondSupply.deviceId,
+          status: "active",
+        },
+      ],
+    };
+    w.drivers.push(second);
+    const { state } = await gated(w);
+    if (actorName === "second")
+      expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+        true,
+      );
+    const index = actorName === "first" ? 0 : 2;
+    const deviceId =
+      actorName === "first"
+        ? FULL.firstSupply.deviceId
+        : FULL.secondSupply.deviceId;
+    const bindingId =
+      actorName === "first" ? "drvbind_first" : "drvbind_second";
+    w.log.length = 0;
+    w.persisted.length = 0;
+    return { w, state, index, deviceId, bindingId };
+  }
+  const bindingAt = (w: ReturnType<typeof world>, actor: number) =>
+    w.persisted.map(
+      (facts) => (facts.supply as ObjectData[])[actor === 0 ? 0 : 1]!.binding,
+    );
+
+  it.each(["first", "second"] as const)(
+    "%s revoke readback with the same device but another bindingId is readback-missing",
+    async (actorName) => {
+      const { w, state, index, deviceId, bindingId } =
+        await revokeActor(actorName);
+      readbackThen((world) =>
+        Promise.resolve({
+          items: [
+            {
+              ...structuredClone(world.drivers[index]!),
+              deviceBindings: [
+                { bindingId: "drvbind_other", deviceId, status: "revoked" },
+              ],
+            },
+          ],
+        }),
+      )(w);
+      await expect(
+        recovery.cleanExactSevenSupply(state, actorName, "revoke", w.ports),
+      ).rejects.toThrow(`${actorName}-revoke-readback-missing`);
+      const actor = state.supply[index === 0 ? 0 : 1]!;
+      expect(actor).toMatchObject({ bindingId, binding: "readback-missing" });
+      expect(bindingAt(w, index)).toEqual([
+        "attempted",
+        "acknowledged-readback-pending",
+        "readback-missing",
+      ]);
+      expect(w.writes()).toEqual([`write:revoke:${bindingId}:${deviceId}`]);
+      await expect(
+        recovery.cleanExactSevenSupply(state, actorName, "revoke", w.ports),
+      ).rejects.toThrow("at-most-once-after-orders");
+      expect(w.ports.revokeBinding).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["first", "second"] as const)(
+    "%s revoke readback of the same bindingId revoked is verified",
+    async (actorName) => {
+      const { w, state, index, deviceId, bindingId } =
+        await revokeActor(actorName);
+      await recovery.cleanExactSevenSupply(state, actorName, "revoke", w.ports);
+      expect(state.supply[index === 0 ? 0 : 1]!.binding).toBe(
+        "revoked-verified",
+      );
+      expect(bindingAt(w, index)).toEqual([
+        "attempted",
+        "acknowledged-readback-pending",
+        "revoked-verified",
+      ]);
+      expect(w.writes()).toEqual([`write:revoke:${bindingId}:${deviceId}`]);
+    },
+  );
+
   it("records a verified offline and revoke with both checkpoints", async () => {
     const { w, state } = await gated();
     await recovery.cleanExactSevenSupply(state, "first", "offline", w.ports);

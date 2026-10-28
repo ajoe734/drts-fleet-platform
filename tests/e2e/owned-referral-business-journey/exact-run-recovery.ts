@@ -764,6 +764,23 @@ function deviceBinding(driver: ObjectData, deviceId: string) {
   return bindings[0]!;
 }
 
+// Terminal readback of the exact qualified/ACKed binding: another binding on
+// the same device (or the original one missing) is never this revoke's proof.
+function sameBindingRevoked(
+  driver: ObjectData,
+  bindingId: string,
+  deviceId: string,
+) {
+  const same = records(driver.deviceBindings ?? []).filter(
+    (binding) => binding.bindingId === bindingId,
+  );
+  return (
+    same.length === 1 &&
+    same[0]!.deviceId === deviceId &&
+    same[0]!.status === "revoked"
+  );
+}
+
 /**
  * Second supply: the artifact holds no ID. Only a single registry driver that
  * already carries the exact original deterministic device binding qualifies;
@@ -909,7 +926,7 @@ export async function cleanExactSevenSupply(
         : ack.bindingId === actor.bindingId &&
           ack.deviceId === actor.deviceId &&
           ack.driverId === driverId &&
-          deviceBinding(readback, actor.deviceId).status === "revoked";
+          sameBindingRevoked(readback, actor.bindingId!, actor.deviceId);
   } catch {
     verified = false;
   }
