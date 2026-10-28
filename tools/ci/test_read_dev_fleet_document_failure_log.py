@@ -1488,28 +1488,106 @@ class OpsDashboardTimeoutReadbackTests(unittest.TestCase):
         self.assertIn("raise SystemExit(main_with_ops_dashboard_profile())",
                       SOURCE.read_text().rsplit("\n", 3)[-2])
 
-    def test_workflow_job_is_opt_in_fixed_and_prevalidated(self):
+    def test_original_fleet_job_selects_exactly_one_profile_before_authentication(self):
         workflow = (ROOT / ".github/workflows/ci-integ.yml").read_text()
         self.assertIn("      readonly_ops_dashboard_timeout_failure:\n"
                       "        description: \"Read only the fixed original Ops GET /dashboard "
                       "client-timeout window records; never replays\"\n"
                       "        required: false\n        default: false\n        type: boolean\n",
                       workflow)
-        job = workflow.split("  readonly-ops-dashboard-timeout-failure-readback:\n", 1)[1]
+        jobs = re.findall(r"^  ([a-z0-9-]+):\n", workflow.split("\njobs:\n", 1)[1], re.M)
+        self.assertEqual(sorted(job for job in jobs if "readback" in job), [
+            "readonly-admin-root-failure-readback",
+            "readonly-admin-root-instance-failure-readback",
+            "readonly-api-startup-readback",
+            "readonly-fleet-document-failure-readback",
+        ])
+        self.assertNotIn("readonly-ops-dashboard-timeout-failure-readback", workflow)
+        self.assertEqual(workflow.count("--profile ops-dashboard-timeout-40647433932-v1"), 1)
+        job = workflow.split("  readonly-fleet-document-failure-readback:\n", 1)[1]
         job = job.split("\n\n", 1)[0]
-        self.assertIn("if: github.event_name == 'workflow_dispatch' && "
-                      "inputs.readonly_ops_dashboard_timeout_failure == true", job)
-        self.assertIn("--profile ops-dashboard-timeout-40647433932-v1", job)
+        # The original condition is kept verbatim; the new input only adds an OR.
+        self.assertIn("    if: (github.event_name == 'workflow_dispatch' && "
+                      "inputs.readonly_fleet_failure == true) || "
+                      "(github.event_name == 'workflow_dispatch' && "
+                      "inputs.readonly_ops_dashboard_timeout_failure == true)\n", job)
         self.assertIn("timeout-minutes: 10", job)
-        validate = job.index('[[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]')
-        self.assertLess(validate, job.index("actions/checkout@v4"))
-        self.assertLess(job.index('[[ "$DEV_GCP_REGION" == us-central1 ]]'),
-                        job.index("google-github-actions/auth@v2"))
-        self.assertLess(job.index("git rev-parse HEAD"), job.index("google-github-actions/auth@v2"))
         for absent in ["pnpm", "playwright", "curl", "gcloud run", "owned_referral_business"]:
             self.assertNotIn(absent, job)
-        self.assertIn("name: dev-ops-dashboard-timeout-failure-readback-${{ github.run_id }}", job)
-        self.assertIn("path: .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json", job)
+        steps = []
+        for block in ("\n" + job.split("\n    steps:\n", 1)[1]).split("\n      - ")[1:]:
+            name = re.search(r"(?:^|\n\s+)(?:name|uses): (.+)", block)[1]
+            condition = re.search(r"\n        if: (.+)", block)
+            steps.append((name, condition[1] if condition else None, block))
+        names = [name for name, _condition, _block in steps]
+        auth = names.index("Authenticate existing deploy identity for read-only request diagnostics")
+        for before in ["Validate immutable diagnostic definition and dev target before authentication",
+                       "Select exactly one fixed readback profile before authentication",
+                       "actions/checkout@v4", "Verify actual diagnostic checkout"]:
+            self.assertLess(names.index(before), auth)
+        selector = steps[names.index("Select exactly one fixed readback profile before authentication")][2]
+        script = selector.split("run: |\n", 1)[1]
+        script = "\n".join(line[10:] for line in script.splitlines())
+
+        def evaluate(condition, inputs):
+            expression = condition.replace("github.event_name == 'workflow_dispatch'", "True")
+            expression = expression.replace("always()", "True")
+            expression = re.sub(r"inputs\.([a-z_]+) (==|!=) true",
+                                lambda m: f"({inputs.get(m[1], False)} {m[2]} True)", expression)
+            expression = expression.replace("&&", " and ").replace("||", " or ")
+            self.assertTrue(re.fullmatch(r"[()TrueFals=! andor]+", expression), expression)
+            return eval(expression, {"__builtins__": {}})
+
+        job_condition = re.search(r"\n    if: (.+)", "\n" + job)[1]
+        fleet_run = ("python3 operations/verification/read-dev-fleet-document-failure-log.py\n"
+                     "          --output .artifacts/dev-fleet-document-failure-readback/snapshot.json")
+        ops_run = ("python3 operations/verification/read-dev-fleet-document-failure-log.py\n"
+                   "          --profile ops-dashboard-timeout-40647433932-v1\n"
+                   "          --output .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json")
+        fleet_artifact = ("name: dev-fleet-document-failure-readback-${{ github.run_id }}\n"
+                          "          path: .artifacts/dev-fleet-document-failure-readback/snapshot.json")
+        ops_artifact = ("name: dev-ops-dashboard-timeout-failure-readback-${{ github.run_id }}\n"
+                        "          path: .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json")
+        cases = [((False, False), False, None), ((True, False), True, "fleet"),
+                 ((False, True), True, "ops"), ((True, True), True, "rejected")]
+        for (fleet, ops), runs, expected in cases:
+            with self.subTest(fleet=fleet, ops=ops):
+                inputs = {"readonly_fleet_failure": fleet,
+                          "readonly_ops_dashboard_timeout_failure": ops}
+                self.assertEqual(evaluate(job_condition, inputs), runs)
+                if not runs:
+                    continue
+                selected = subprocess.run(
+                    ["bash", "-c", script], capture_output=True, text=True, timeout=10,
+                    env={"PATH": "/usr/bin:/bin", "FLEET_SELECTED": str(fleet).lower(),
+                         "OPS_SELECTED": str(ops).lower()},
+                )
+                self.assertEqual(selected.returncode == 0, expected != "rejected")
+                failed, executed = False, []
+                for name, condition, block in steps:
+                    always = condition is not None and "always()" in condition
+                    if (failed and not always) or (condition and not evaluate(condition, inputs)):
+                        continue
+                    executed.append(block)
+                    if name.startswith("Select exactly one") and selected.returncode:
+                        failed = True
+                reads = [block for block in executed if "read-dev-fleet-document-failure-log.py" in block]
+                uploads = [block for block in executed if "upload-artifact" in block]
+                if expected == "rejected":
+                    self.assertEqual(reads, [])
+                    self.assertFalse(any("google-github-actions/auth" in block for block in executed))
+                    continue
+                self.assertEqual(len(reads), 1)
+                self.assertEqual(len(uploads), 1)
+                if expected == "fleet":
+                    self.assertIn(fleet_run, reads[0])
+                    self.assertNotIn("--profile", reads[0])
+                    self.assertIn(fleet_artifact, uploads[0])
+                else:
+                    self.assertIn(ops_run, reads[0])
+                    self.assertIn(ops_artifact, uploads[0])
+                self.assertIn("if-no-files-found: error", uploads[0])
+                self.assertIn("retention-days: 14", uploads[0])
 
 
 MODULE_COLLECT_OPS = MODULE.collect_ops_dashboard_timeout

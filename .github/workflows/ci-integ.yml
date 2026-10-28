@@ -587,7 +587,7 @@ jobs:
           retention-days: 14
 
   readonly-fleet-document-failure-readback:
-    if: github.event_name == 'workflow_dispatch' && inputs.readonly_fleet_failure == true
+    if: (github.event_name == 'workflow_dispatch' && inputs.readonly_fleet_failure == true) || (github.event_name == 'workflow_dispatch' && inputs.readonly_ops_dashboard_timeout_failure == true)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -606,6 +606,15 @@ jobs:
           [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
           [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
           [[ "$DEV_GCP_REGION" == us-central1 ]]
+      - name: Select exactly one fixed readback profile before authentication
+        shell: bash
+        env:
+          FLEET_SELECTED: ${{ inputs.readonly_fleet_failure }}
+          OPS_SELECTED: ${{ inputs.readonly_ops_dashboard_timeout_failure }}
+        run: |
+          set -euo pipefail
+          [[ "$FLEET_SELECTED" == true && "$OPS_SELECTED" != true ]] ||
+            [[ "$FLEET_SELECTED" != true && "$OPS_SELECTED" == true ]]
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -620,15 +629,30 @@ jobs:
           service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
       - uses: google-github-actions/setup-gcloud@v2
       - name: Read only the fixed failure window without invoking the product
+        if: inputs.readonly_ops_dashboard_timeout_failure != true
         run: >-
           python3 operations/verification/read-dev-fleet-document-failure-log.py
           --output .artifacts/dev-fleet-document-failure-readback/snapshot.json
       - name: Preserve only the safe diagnostic projection
-        if: always()
+        if: always() && inputs.readonly_ops_dashboard_timeout_failure != true
         uses: actions/upload-artifact@v4
         with:
           name: dev-fleet-document-failure-readback-${{ github.run_id }}
           path: .artifacts/dev-fleet-document-failure-readback/snapshot.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Read the fixed Ops dashboard window and only observed trace or instance context
+        if: inputs.readonly_ops_dashboard_timeout_failure == true
+        run: >-
+          python3 operations/verification/read-dev-fleet-document-failure-log.py
+          --profile ops-dashboard-timeout-40647433932-v1
+          --output .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json
+      - name: Preserve only the closed Ops diagnostic projection
+        if: always() && inputs.readonly_ops_dashboard_timeout_failure == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-ops-dashboard-timeout-failure-readback-${{ github.run_id }}
+          path: .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json
           if-no-files-found: error
           retention-days: 14
 
@@ -723,53 +747,6 @@ jobs:
         with:
           name: dev-admin-root-instance-failure-readback-${{ github.run_id }}
           path: .artifacts/dev-admin-root-instance-failure-readback/snapshot.json
-          if-no-files-found: error
-          retention-days: 14
-
-  readonly-ops-dashboard-timeout-failure-readback:
-    if: github.event_name == 'workflow_dispatch' && inputs.readonly_ops_dashboard_timeout_failure == true
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      EXPECTED_DEFINITION_SHA: ${{ inputs.ref }}
-      DEV_GCP_PROJECT_ID: ${{ vars.DEV_GCP_PROJECT_ID }}
-      DEV_GCP_REGION: ${{ vars.DEV_GCP_REGION }}
-    steps:
-      - name: Validate immutable Ops diagnostic definition and fixed dev target
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$EXPECTED_DEFINITION_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$EXPECTED_DEFINITION_SHA" == "$GITHUB_SHA" ]]
-          [[ "$DEV_GCP_PROJECT_ID" == drts-dev-devcc-20260825 ]]
-          [[ "$DEV_GCP_REGION" == us-central1 ]]
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Verify actual Ops diagnostic checkout
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_DEFINITION_SHA"
-      - name: Authenticate existing deploy identity for read-only Ops diagnostics
-        uses: google-github-actions/auth@v2
-        with:
-          project_id: ${{ vars.DEV_GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ secrets.DEV_WIF_PROVIDER }}
-          service_account: ${{ secrets.DEV_WIF_SERVICE_ACCOUNT }}
-      - uses: google-github-actions/setup-gcloud@v2
-      - name: Read the fixed Ops dashboard window and only observed trace or instance context
-        run: >-
-          python3 operations/verification/read-dev-fleet-document-failure-log.py
-          --profile ops-dashboard-timeout-40647433932-v1
-          --output .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json
-      - name: Preserve only the closed Ops diagnostic projection
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: dev-ops-dashboard-timeout-failure-readback-${{ github.run_id }}
-          path: .artifacts/dev-ops-dashboard-timeout-failure-readback/snapshot.json
           if-no-files-found: error
           retention-days: 14
 
