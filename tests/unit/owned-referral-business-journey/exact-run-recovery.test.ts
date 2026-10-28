@@ -627,16 +627,11 @@ function actualExactSevenPlan(deps: {
   const { outputText } = ts.transpileModule(declaration.getText(source), {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   });
+  // Every runtime export the spec imports from the adapter, plus its closures.
   const names = {
+    ...recovery,
     ...deps,
     DIRECTORY: ".artifacts/owned-referral-business-journey",
-    EXACT_SEVEN_RECOVERY_FACTS: recovery.EXACT_SEVEN_RECOVERY_FACTS,
-    exactSevenFacts: recovery.exactSevenFacts,
-    terminalizeExactSevenOrder: recovery.terminalizeExactSevenOrder,
-    verifyExactSevenFinalActive: recovery.verifyExactSevenFinalActive,
-    exactSevenOrdersAllTerminal: recovery.exactSevenOrdersAllTerminal,
-    cleanExactSevenSupply: recovery.cleanExactSevenSupply,
-    qualifyExactSevenSecondSupply: recovery.qualifyExactSevenSecondSupply,
   };
   return new Function(
     ...Object.keys(names),
@@ -675,7 +670,7 @@ async function finalize(
         slot: `exact-seven-${item.slot}`,
         orderId: item.orderId,
         journalState: "acknowledged",
-        ownerTerminal: item.terminalVerified,
+        ownerTerminal: item.terminalVerified && !item.finalLive,
         ownerRecovery: item.outcome,
       })),
       supply: [],
@@ -893,6 +888,309 @@ describe("FULL 40689200536 recovery under the actual finalizer plan", () => {
         `.artifacts/owned-referral-business-journey/${recovery.EXACT_SEVEN_RECOVERY_FACTS}`,
       ),
     ).toMatchObject({ phase: "unverified", fullJourneyClaimed: false });
+  });
+});
+
+describe("R1: the final own-set readback gates every supply write", () => {
+  const live = (w: ReturnType<typeof world>) =>
+    vi.mocked(w.ports.readHistoryList);
+  async function prechecked(w = world()) {
+    const state = createExactSevenRecoveryState();
+    await precheckExactSevenOrders(state, w.ports);
+    return { w, state };
+  }
+
+  it.each([
+    [
+      "transport failure",
+      (w: ReturnType<typeof world>) =>
+        live(w).mockRejectedValueOnce(new JourneyFailure("referral:transport")),
+      "failed",
+    ],
+    [
+      "shape mismatch",
+      (w: ReturnType<typeof world>) =>
+        live(w).mockResolvedValueOnce({ items: "not-a-list" }),
+      "failed",
+    ],
+    [
+      "missing own row",
+      (w: ReturnType<typeof world>) =>
+        live(w).mockResolvedValueOnce({
+          items: FULL.journals
+            .filter((journal) => journal.slot !== "on-trip")
+            .map((journal) => ({
+              orderId: journal.orderId,
+              status: "completed",
+            })),
+        }),
+      "own-row-missing",
+    ],
+    [
+      "own order live again",
+      (w: ReturnType<typeof world>) =>
+        live(w).mockResolvedValueOnce({
+          items: FULL.journals.map((journal) => ({
+            orderId: journal.orderId,
+            status: journal.slot === "main" ? "created" : "completed",
+          })),
+        }),
+      "own-still-live",
+    ],
+  ])(
+    "preserves supply after a final readback %s, keeping per-order terminal evidence",
+    async (_label, fail, status) => {
+      const { w, state } = await prechecked();
+      fail(w);
+      const { result, cleanupErrors } = await finalize(w, state);
+      expect(w.writes()).toEqual([]);
+      expect(w.ports.setOffline).not.toHaveBeenCalled();
+      expect(w.ports.revokeBinding).not.toHaveBeenCalled();
+      expect(state.finalReadback).toBe(status);
+      expect(recovery.exactSevenSupplyGate(state)).toBe(false);
+      // Each order's own earlier terminal readback stays recorded.
+      expect(state.orders.every((item) => item.terminalVerified)).toBe(true);
+      expect(
+        state.orders.every((item) => item.outcome === "already-terminal"),
+      ).toBe(true);
+      expect(order(state, "main").finalLive === true).toBe(
+        status === "own-still-live",
+      );
+      expect(cleanupErrors).toEqual(
+        expect.arrayContaining([
+          "exact-seven-final-own-set-readback",
+          `exact-seven-supply-retained-final-readback-${status}`,
+        ]),
+      );
+      expect(state.supply.map((actor) => actor.qualification)).toEqual([
+        "blocked-final-readback-unqualified",
+        "blocked-final-readback-unqualified",
+      ]);
+      // Later safe finalization (facts persistence) still runs.
+      expect(result.steps.map((step) => [step.stage, step.outcome])).toEqual([
+        ["exact-seven-final-own-set-readback", "failed"],
+        ["exact-seven-recovery-facts-persist", "cleaned"],
+      ]);
+      expect(result.wholeRunPassed).toBe(false);
+    },
+  );
+
+  it("opens the supply gate only after a successful complete final readback", async () => {
+    const { w, state } = await prechecked();
+    expect(recovery.exactSevenSupplyGate(state)).toBe(false);
+    await expect(
+      recovery.cleanExactSevenSupply(state, "first", "offline", w.ports),
+    ).rejects.toThrow("at-most-once-after-orders");
+    await recovery.verifyExactSevenFinalActive(state, w.ports);
+    expect(state.finalReadback).toBe("verified");
+    expect(recovery.exactSevenSupplyGate(state)).toBe(true);
+    expect(w.persisted.at(-1)).toMatchObject({ finalReadback: "verified" });
+    await expect(
+      recovery.verifyExactSevenFinalActive(state, w.ports),
+    ).rejects.toThrow("final-readback-once");
+  });
+
+  it("does not open the gate when the verified result cannot be persisted", async () => {
+    const { w, state } = await prechecked();
+    vi.mocked(w.ports.persist).mockRejectedValueOnce(new Error("disk"));
+    await expect(
+      recovery.verifyExactSevenFinalActive(state, w.ports),
+    ).rejects.toThrow("disk");
+    expect(state.finalReadback).toBe("failed");
+    expect(recovery.exactSevenSupplyGate(state)).toBe(false);
+  });
+});
+
+describe("R2: supply writes keep durable attempted/ACK custody", () => {
+  async function gated(w = world()) {
+    const state = createExactSevenRecoveryState();
+    await precheckExactSevenOrders(state, w.ports);
+    await recovery.verifyExactSevenFinalActive(state, w.ports);
+    w.log.length = 0;
+    w.persisted.length = 0;
+    return { w, state };
+  }
+  const supplyAt = (w: ReturnType<typeof world>, index: number) =>
+    w.persisted.map(
+      (facts) =>
+        (facts.supply as ObjectData[])[0]![index === 0 ? "offline" : "binding"],
+    );
+  // The second registry read is the post-ACK readback; the first qualifies.
+  const readbackThen =
+    (next: (w: ReturnType<typeof world>) => Promise<unknown>) =>
+    (w: ReturnType<typeof world>) => {
+      const real = vi.mocked(w.ports.readDrivers).getMockImplementation()!;
+      let calls = 0;
+      vi.mocked(w.ports.readDrivers).mockImplementation(async () => {
+        if (++calls !== 2) return real();
+        w.log.push("read:drivers");
+        return next(w);
+      });
+    };
+  const own = (patch: Partial<DriverRow>) => (w: ReturnType<typeof world>) =>
+    Promise.resolve({
+      items: [{ ...structuredClone(w.drivers[0]!), ...patch }],
+    });
+  const readbackFailures = [
+    [
+      "offline",
+      "transport failure",
+      readbackThen(() => Promise.reject(new JourneyFailure("api:transport"))),
+    ],
+    [
+      "revoke",
+      "transport failure",
+      readbackThen(() => Promise.reject(new JourneyFailure("api:transport"))),
+    ],
+    [
+      "offline",
+      "missing driver",
+      readbackThen(() => Promise.resolve({ items: [] })),
+    ],
+    [
+      "revoke",
+      "missing driver",
+      readbackThen(() => Promise.resolve({ items: [] })),
+    ],
+    [
+      "offline",
+      "malformed registry",
+      readbackThen(() => Promise.resolve({ items: "x" })),
+    ],
+    [
+      "offline",
+      "still available",
+      readbackThen(own({ workState: "available" })),
+    ],
+    [
+      "revoke",
+      "binding mismatch",
+      readbackThen(
+        own({
+          deviceBindings: [
+            {
+              bindingId: "drvbind_first",
+              deviceId: `${FULL.firstSupply.deviceId}-other`,
+              status: "revoked",
+            },
+          ],
+        }),
+      ),
+    ],
+    [
+      "revoke",
+      "binding still active",
+      readbackThen(
+        own({
+          deviceBindings: [
+            {
+              bindingId: "drvbind_first",
+              deviceId: FULL.firstSupply.deviceId,
+              status: "active",
+            },
+          ],
+        }),
+      ),
+    ],
+  ] as const;
+
+  it.each(readbackFailures)(
+    "%s ACK followed by readback %s is recorded readback-missing, never pending",
+    async (part, _label, fail) => {
+      const { w, state } = await gated();
+      fail(w);
+      const write =
+        part === "offline" ? w.ports.setOffline : w.ports.revokeBinding;
+      await expect(
+        recovery.cleanExactSevenSupply(state, "first", part, w.ports),
+      ).rejects.toThrow(`first-${part}-readback-missing`);
+      const field = part === "offline" ? "offline" : "binding";
+      expect(write).toHaveBeenCalledOnce();
+      expect(state.supply[0]![field]).toBe("readback-missing");
+      // Durable order: attempted before the write, ACK checkpoint after it.
+      expect(supplyAt(w, part === "offline" ? 0 : 1)).toEqual([
+        "attempted",
+        "acknowledged-readback-pending",
+        "readback-missing",
+      ]);
+      const sent = w.log.indexOf(
+        w.log.find((entry) => entry.startsWith("write:"))!,
+      );
+      expect(w.log.slice(sent - 1, sent + 3)).toEqual([
+        "persist",
+        w.log[sent],
+        "persist",
+        "read:drivers",
+      ]);
+      await expect(
+        recovery.cleanExactSevenSupply(state, "first", part, w.ports),
+      ).rejects.toThrow("at-most-once-after-orders");
+      expect(write).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["offline", "revoke"] as const)(
+    "sends no %s when the attempted intent cannot be persisted",
+    async (part) => {
+      const { w, state } = await gated();
+      vi.mocked(w.ports.persist).mockRejectedValueOnce(new Error("disk"));
+      await expect(
+        recovery.cleanExactSevenSupply(state, "first", part, w.ports),
+      ).rejects.toThrow("disk");
+      expect(w.writes()).toEqual([]);
+      expect(state.supply[0]![part === "offline" ? "offline" : "binding"]).toBe(
+        "intent-not-durable-not-sent",
+      );
+      await expect(
+        recovery.cleanExactSevenSupply(state, "first", part, w.ports),
+      ).rejects.toThrow("at-most-once-after-orders");
+      expect(w.writes()).toEqual([]);
+    },
+  );
+
+  it("keeps an ACKed write as acknowledged when the ACK checkpoint fails", async () => {
+    const { w, state } = await gated();
+    vi.mocked(w.ports.persist)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("disk"));
+    await expect(
+      recovery.cleanExactSevenSupply(state, "first", "offline", w.ports),
+    ).rejects.toThrow("disk");
+    expect(w.ports.setOffline).toHaveBeenCalledOnce();
+    expect(state.supply[0]!.offline).toBe("acknowledged-readback-pending");
+  });
+
+  it("classifies a pre-write registry transport failure as unknown, not mismatch", async () => {
+    const { w, state } = await gated();
+    vi.mocked(w.ports.readDrivers).mockRejectedValueOnce(
+      new JourneyFailure("api:transport"),
+    );
+    await expect(
+      recovery.cleanExactSevenSupply(state, "first", "offline", w.ports),
+    ).rejects.toThrow("api:transport");
+    expect(w.writes()).toEqual([]);
+    expect(state.supply[0]!.qualification).toBe("qualification-unknown");
+    expect(w.persisted.at(-1)).toMatchObject({
+      supply: [
+        expect.objectContaining({ qualification: "qualification-unknown" }),
+        expect.anything(),
+      ],
+    });
+  });
+
+  it("records a verified offline and revoke with both checkpoints", async () => {
+    const { w, state } = await gated();
+    await recovery.cleanExactSevenSupply(state, "first", "offline", w.ports);
+    await recovery.cleanExactSevenSupply(state, "first", "revoke", w.ports);
+    expect(supplyAt(w, 0).slice(0, 3)).toEqual([
+      "attempted",
+      "acknowledged-readback-pending",
+      "offline-verified",
+    ]);
+    expect(state.supply[0]).toMatchObject({
+      offline: "offline-verified",
+      binding: "revoked-verified",
+    });
   });
 });
 

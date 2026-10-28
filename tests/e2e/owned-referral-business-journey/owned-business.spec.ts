@@ -109,6 +109,7 @@ import {
   createExactSevenRecoveryState,
   exactSevenFacts,
   exactSevenOrdersAllTerminal,
+  exactSevenSupplyGate,
   parseExactSevenAckManifest,
   precheckExactSevenOrders,
   qualifyExactSevenSecondSupply,
@@ -332,7 +333,8 @@ test(journeyName, async ({ browser, request }) => {
           orderId: order.orderId,
           journalState: "acknowledged" as const,
           bodySha256: order.bodySha256,
-          ownerTerminal: order.terminalVerified,
+          // A final whole-set readback that saw it live again reopens it.
+          ownerTerminal: order.terminalVerified && !order.finalLive,
           ownerRecovery: order.outcome,
         })),
         ...extraBookings.map((booking) => ({
@@ -3792,6 +3794,21 @@ test(journeyName, async ({ browser, request }) => {
       for (const actor of state.supply)
         actor.qualification = "blocked-orders-unresolved";
       cleanupErrors.push("exact-seven-supply-retained-orders-unresolved");
+      await persistFacts();
+      return;
+    }
+    // The step runner absorbs a failed final readback; only its own durable
+    // success opens supply. Later session/artifact cleanup still runs.
+    if (!exactSevenSupplyGate(state)) {
+      for (const actor of state.supply)
+        actor.qualification = "blocked-final-readback-unqualified";
+      cleanupErrors.push(
+        `exact-seven-supply-retained-final-readback-${state.finalReadback}`,
+      );
+      evidence.record({
+        stage: `exact-seven-supply-retained-final-readback-${state.finalReadback}`,
+        result: "retained",
+      });
       await persistFacts();
       return;
     }

@@ -283,7 +283,10 @@ export type ExactOrderState = {
   decision?: "readonly" | "cancel" | "resolve-hold" | "retain";
   outcome: ExactOrderOutcome;
   terminalStatus?: "cancelled" | "completed";
+  // This order's own terminal readback; never erased by a later set readback.
   terminalVerified: boolean;
+  // Set only by the final whole-set readback that saw this order live again.
+  finalLive?: boolean;
   write?: {
     action: "cancel" | "resolve-hold";
     acknowledged: boolean;
@@ -302,10 +305,17 @@ export type ExactSupplyState = {
     | "qualified"
     | "not-observed-unknown"
     | "ambiguous-unknown"
+    | "qualification-unknown"
     | "mismatch-preserved"
-    | "blocked-orders-unresolved";
+    | "blocked-orders-unresolved"
+    | "blocked-final-readback-unqualified";
+  // "attempted" is durable before the request; "acknowledged-readback-pending"
+  // is durable right after its ACK. Neither ever reads as not attempted.
   offline:
     | "pending"
+    | "intent-not-durable-not-sent"
+    | "attempted"
+    | "acknowledged-readback-pending"
     | "already-offline"
     | "offline-verified"
     | "write-denied"
@@ -313,6 +323,9 @@ export type ExactSupplyState = {
     | "readback-missing";
   binding:
     | "pending"
+    | "intent-not-durable-not-sent"
+    | "attempted"
+    | "acknowledged-readback-pending"
     | "already-revoked"
     | "revoked-verified"
     | "write-denied"
@@ -324,6 +337,13 @@ export type ExactSevenRecoveryState = {
   phase: "unverified" | "prechecked" | "precheck-refused";
   orders: ExactOrderState[];
   supply: ExactSupplyState[];
+  // The single final whole-own-set readback; only "verified" opens supply.
+  finalReadback:
+    | "pending"
+    | "verified"
+    | "failed"
+    | "own-row-missing"
+    | "own-still-live";
   foreignLiveAfter: number | null;
 };
 
@@ -358,6 +378,7 @@ export function createExactSevenRecoveryState(): ExactSevenRecoveryState {
         binding: "pending",
       },
     ],
+    finalReadback: "pending",
     foreignLiveAfter: null,
   };
 }
@@ -401,9 +422,11 @@ export function exactSevenFacts(state: ExactSevenRecoveryState): ObjectData {
       outcome: order.outcome,
       terminalStatus: order.terminalStatus ?? null,
       terminalVerified: order.terminalVerified,
+      finalLive: order.finalLive ?? false,
       write: order.write ?? null,
     })),
     supply: state.supply.map((actor) => ({ ...actor })),
+    finalReadback: state.finalReadback,
     foreignLiveAfter: state.foreignLiveAfter,
   };
 }
@@ -663,26 +686,61 @@ export function exactSevenOrdersAllTerminal(state: ExactSevenRecoveryState) {
   );
 }
 
-/** Read-only: verified own orders stay not live; later foreign ones are kept. */
+/**
+ * Read-only, once: every one of the seven must appear exactly once in the
+ * subject's history with its own verified terminal status and not live. Only
+ * a complete success that is durably persisted opens the supply gate; each
+ * order's earlier terminal evidence stays recorded either way.
+ */
 export async function verifyExactSevenFinalActive(
   state: ExactSevenRecoveryState,
   ports: ExactSevenPorts,
 ) {
-  requireFact(state.phase === "prechecked", "exact-seven:precheck-required");
-  const live = liveIds(await ports.readHistoryList());
-  const stillLive = state.orders.filter(
-    (order) => order.terminalVerified && live.includes(order.orderId),
+  requireFact(
+    state.phase === "prechecked" && state.finalReadback === "pending",
+    "exact-seven:final-readback-once-after-precheck",
   );
+  state.finalReadback = "failed";
+  const value = await ports.readHistoryList();
+  const listed = records(object(value).items);
+  const live = liveIds(value);
   state.foreignLiveAfter = live.filter((id) => !isOwnId(state, id)).length;
-  if (stillLive.length) {
-    for (const order of stillLive) {
-      order.terminalVerified = false;
-      order.outcome = "terminal-readback-missing";
-    }
+  const missing = state.orders.filter(
+    (order) =>
+      listed.filter((item) => item.orderId === order.orderId).length !== 1,
+  );
+  for (const order of state.orders)
+    order.finalLive = live.includes(order.orderId);
+  const stillLive = state.orders.filter((order) => order.finalLive);
+  const changed = state.orders.filter(
+    (order) =>
+      order.terminalVerified &&
+      !order.finalLive &&
+      listed.find((item) => item.orderId === order.orderId)?.status !==
+        order.terminalStatus,
+  );
+  state.finalReadback = missing.length
+    ? "own-row-missing"
+    : stillLive.length
+      ? "own-still-live"
+      : changed.length
+        ? "failed"
+        : "verified";
+  const result = state.finalReadback;
+  try {
     await ports.persist(exactSevenFacts(state));
-    throw new JourneyFailure("exact-seven:verified-own-order-still-live");
+  } catch (error) {
+    state.finalReadback = "failed";
+    throw error;
   }
-  await ports.persist(exactSevenFacts(state));
+  requireFact(result === "verified", `exact-seven:final-readback-${result}`);
+}
+
+/** Supply may be touched only after this explicit, successful custody gate. */
+export function exactSevenSupplyGate(state: ExactSevenRecoveryState) {
+  return (
+    exactSevenOrdersAllTerminal(state) && state.finalReadback === "verified"
+  );
 }
 
 function driverRecord(value: unknown, driverId: string) {
@@ -717,26 +775,36 @@ export async function qualifyExactSevenSecondSupply(
 ) {
   const actor = state.supply.find((item) => item.actor === "second")!;
   requireFact(
-    exactSevenOrdersAllTerminal(state) && actor.qualification === "pending",
+    exactSevenSupplyGate(state) && actor.qualification === "pending",
     "exact-seven:second-supply-qualification-once-after-orders",
   );
-  const matches = records(object(await ports.readDrivers()).items).filter(
-    (driver) =>
-      Array.isArray(driver.deviceBindings) &&
-      records(driver.deviceBindings).some(
-        (binding) => binding.deviceId === actor.deviceId,
-      ),
-  );
-  if (matches.length !== 1) {
-    actor.qualification = matches.length
-      ? "ambiguous-unknown"
-      : "not-observed-unknown";
-    await ports.persist(exactSevenFacts(state));
-    return false;
+  actor.qualification = "qualification-unknown";
+  let driverId: string;
+  let bindingId: string;
+  try {
+    const matches = records(object(await ports.readDrivers()).items).filter(
+      (driver) =>
+        Array.isArray(driver.deviceBindings) &&
+        records(driver.deviceBindings).some(
+          (binding) => binding.deviceId === actor.deviceId,
+        ),
+    );
+    if (matches.length !== 1) {
+      actor.qualification = matches.length
+        ? "ambiguous-unknown"
+        : "not-observed-unknown";
+      await ports.persist(exactSevenFacts(state));
+      return false;
+    }
+    const binding = deviceBinding(matches[0]!, actor.deviceId);
+    driverId = text(matches[0]!.driverId);
+    bindingId = text(binding.bindingId);
+  } catch (error) {
+    await ports.persist(exactSevenFacts(state)).catch(() => undefined);
+    throw error;
   }
-  const binding = deviceBinding(matches[0]!, actor.deviceId);
-  actor.driverId = text(matches[0]!.driverId);
-  actor.bindingId = text(binding.bindingId);
+  actor.driverId = driverId;
+  actor.bindingId = bindingId;
   actor.qualification = "qualified";
   await ports.persist(exactSevenFacts(state));
   return true;
@@ -754,9 +822,9 @@ export async function cleanExactSevenSupply(
   ports: ExactSevenPorts,
 ) {
   const actor = state.supply.find((item) => item.actor === actorName)!;
+  const field = part === "offline" ? "offline" : "binding";
   requireFact(
-    exactSevenOrdersAllTerminal(state) &&
-      actor[part === "offline" ? "offline" : "binding"] === "pending",
+    exactSevenSupplyGate(state) && actor[field] === "pending",
     `exact-seven:${actorName}-${part}-at-most-once-after-orders`,
   );
   requireFact(
@@ -765,6 +833,9 @@ export async function cleanExactSevenSupply(
     `exact-seven:${actorName}-supply-not-qualified`,
   );
   const driverId = text(actor.driverId);
+  // Persisted best-effort after a failure; the original error is what throws.
+  const record = () =>
+    ports.persist(exactSevenFacts(state)).catch(() => undefined);
   let driver: ObjectData;
   let binding: ObjectData;
   try {
@@ -782,13 +853,17 @@ export async function cleanExactSevenSupply(
         "exact-seven:first-vehicle-registry-readback",
       );
   } catch (error) {
-    actor.qualification = "mismatch-preserved";
-    await ports.persist(exactSevenFacts(state));
+    // A typed mismatch of the exact registry fields is a refusal; anything
+    // else (transport, shape) leaves the qualification unknown.
+    actor.qualification =
+      error instanceof JourneyFailure && error.stage.startsWith("exact-seven:")
+        ? "mismatch-preserved"
+        : "qualification-unknown";
+    await record();
     throw error;
   }
   actor.bindingId = text(binding.bindingId);
   actor.qualification = "qualified";
-  const field = part === "offline" ? "offline" : "binding";
   if (part === "offline" && driver.workState === "offline") {
     actor.offline = "already-offline";
     await ports.persist(exactSevenFacts(state));
@@ -799,7 +874,14 @@ export async function cleanExactSevenSupply(
     await ports.persist(exactSevenFacts(state));
     return;
   }
-  await ports.persist(exactSevenFacts(state));
+  // Durable attempted intent before the request; without it nothing is sent.
+  actor[field] = "attempted";
+  try {
+    await ports.persist(exactSevenFacts(state));
+  } catch (error) {
+    actor[field] = "intent-not-durable-not-sent";
+    throw error;
+  }
   let ack: ObjectData;
   try {
     ack = object(
@@ -809,23 +891,36 @@ export async function cleanExactSevenSupply(
     );
   } catch (error) {
     actor[field] = writeFailure(error).outcome;
-    await ports.persist(exactSevenFacts(state));
+    await record();
     throw new JourneyFailure(
       `exact-seven:${actorName}-${part}-${actor[field]}-preserved`,
     );
   }
-  const readback = driverRecord(await ports.readDrivers(), driverId);
-  const verified =
-    part === "offline"
-      ? (ack.driverId === undefined || ack.driverId === driverId) &&
-        readback.workState === "offline"
-      : ack.bindingId === actor.bindingId &&
-        ack.deviceId === actor.deviceId &&
-        ack.driverId === driverId &&
-        deviceBinding(readback, actor.deviceId).status === "revoked";
-  if (part === "offline")
-    actor.offline = verified ? "offline-verified" : "readback-missing";
-  else actor.binding = verified ? "revoked-verified" : "readback-missing";
+  // ACK checkpoint before any readback can fail.
+  actor[field] = "acknowledged-readback-pending";
   await ports.persist(exactSevenFacts(state));
-  requireFact(verified, `exact-seven:${actorName}-${part}-readback-missing`);
+  let verified = false;
+  try {
+    const readback = driverRecord(await ports.readDrivers(), driverId);
+    verified =
+      part === "offline"
+        ? (ack.driverId === undefined || ack.driverId === driverId) &&
+          readback.workState === "offline"
+        : ack.bindingId === actor.bindingId &&
+          ack.deviceId === actor.deviceId &&
+          ack.driverId === driverId &&
+          deviceBinding(readback, actor.deviceId).status === "revoked";
+  } catch {
+    verified = false;
+  }
+  if (!verified) {
+    actor[field] = "readback-missing";
+    await record();
+    throw new JourneyFailure(
+      `exact-seven:${actorName}-${part}-readback-missing`,
+    );
+  }
+  if (part === "offline") actor.offline = "offline-verified";
+  else actor.binding = "revoked-verified";
+  await ports.persist(exactSevenFacts(state));
 }
