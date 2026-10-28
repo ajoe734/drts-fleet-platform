@@ -4167,6 +4167,116 @@ class CandidateCiResumeTests(unittest.TestCase):
         self.assertEqual([a["action"] for a in normalized["task_actions"]], ["create_unblock_task"])
 
 
+    HELD_DEFERRAL = ("HELD-UNBLOCK: Existing governance helper requires original human triage; no nested helper "
+                     "is permitted. Keep its blocker, owner, reviewer and waiting_for unchanged.")
+
+    def add_held_governance_helper(self, **changes) -> dict:
+        held = {"id": "HELD-UNBLOCK", "title": "Existing blocked governance helper", "phase": "test", "owner": "Pi",
+                "reviewer": "Codex", "status": "blocked", "task_class": "unblock", "helper_parent": "ORIGINAL-PARENT",
+                "helper_kind": "manual_unblock", "depends_on": [], "artifacts": [], "acceptance": [],
+                "waiting_for": "Claude2", "next": "Needs original human triage."}
+        held.update(changes)
+        self.board["tasks"].append(held)
+        self.board["blockers"].append({"task_id": held["id"], "owner": "Pi", "waiting_for": "Claude2",
+                                       "status": "open", "message": "Original manual governance hold",
+                                       "created_at": "2026-10-27T00:00:00Z"})
+        self.path.write_text(json.dumps(self.board))
+        return held
+
+    def mixed_payload(self, reason: str, blocked_by: list) -> dict:
+        return {"version": 1, "decision": reason, "approval_ttl_minutes": 45,
+                "reason": "Original candidate CI alone recovered; unrelated governance helper must remain held.",
+                "blocked_by": blocked_by, "approval_actions": [], "reassignment_actions": [],
+                "task_actions": [self.action], "provider_actions": [], "recommended_focus": []}
+
+    def runtime_rows(self) -> list:
+        return [json.loads(line)["type"] for line in self.runtime_log.read_text().splitlines()] if self.runtime_log.exists() else []
+
+    def test_R6_mixed_recovery_and_reasoned_governance_deferral_survive_both_reasons(self) -> None:
+        import github_bus
+        held = self.add_held_governance_helper()
+        snapshot = json.loads(json.dumps(self.board))
+        for reason in ("blocked_task_triage", "reassignment_triage"):
+            with self.subTest(reason=reason):
+                self.path.write_text(json.dumps(snapshot)); self.runtime_log.unlink(missing_ok=True)
+                payload = self.mixed_payload(reason, [self.HELD_DEFERRAL])
+                normalized = supervisor.normalize_chair_review_payload_for_reason(
+                    payload, reason=reason, config=self.config, status=snapshot)
+                self.assertEqual(normalized["task_actions"], [self.action])  # no synthesized helper
+                with mock.patch.object(github_bus, "gh_json", side_effect=self.observe) as reads, \
+                        mock.patch.object(supervisor, "queue_delivery_event") as wake:
+                    runtime = self.run_refresh(reason, payload)
+                self.assertEqual(reads.call_count, 2)
+                wake.assert_not_called()
+                state = json.loads(self.path.read_text())
+                self.assertEqual(state["tasks"][0]["status"], "review")
+                self.assertEqual(state["tasks"][1], held)  # owner/reviewer/waiting_for untouched
+                self.assertEqual(len(state["tasks"]), 2)
+                self.assertEqual(state["blockers"][1], snapshot["blockers"][1])
+                self.assertEqual(self.runtime_rows(), ["chair_parent_resume_applied", "chair_review_applied"])
+                self.assertEqual(runtime.get("governance_escalations", {}), {})
+                self.assertEqual(runtime["chair_review"]["last_decision"]["task_actions"], [self.action])
+
+    def test_R6_generic_or_unmatched_deferrals_keep_existing_behavior(self) -> None:
+        import github_bus
+        self.add_held_governance_helper()
+        snapshot = json.loads(json.dumps(self.board))
+        generic = {
+            "id_only": ["HELD-UNBLOCK"],
+            "short_reason": ["HELD-UNBLOCK: hold it"],
+            "no_task_named": ["Governance helpers stay held for human triage; no nested helpers."],
+            "names_other_task": ["HELD-UNBLOCK: same reason as ORIGINAL-PARENT, keep everything unchanged"],
+            "not_first": ["Keep HELD-UNBLOCK: needs original human triage, no nested helper"],
+        }
+        for kind, blocked_by in generic.items():
+            with self.subTest(kind=kind):
+                self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(
+                    self.config, {"blocked_by": blocked_by}, supervisor.chair_blocked_task_selection(self.config, snapshot),
+                    snapshot), set())
+                # blocked_task_triage: still rejected as a whole, before any GitHub read.
+                self.path.write_text(json.dumps(snapshot)); before = self.path.read_bytes()
+                self.runtime_log.unlink(missing_ok=True)
+                with mock.patch.object(github_bus, "gh_json") as reads:
+                    self.run_refresh("blocked_task_triage", self.mixed_payload("blocked_task_triage", blocked_by))
+                reads.assert_not_called()
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.runtime_rows(), ["chair_review_invalid_schema"])
+                # reassignment_triage: a named task still gets the existing synthesized helper route.
+                normalized = supervisor.normalize_chair_review_payload_for_reason(
+                    self.mixed_payload("reassignment_triage", blocked_by), reason="reassignment_triage",
+                    config=self.config, status=snapshot)
+                synthesized = [a["task_id"] for a in normalized["task_actions"] if a["action"] == "create_unblock_task"]
+                self.assertEqual(synthesized, [] if kind == "no_task_named" else ["HELD-UNBLOCK"])
+
+    def test_R6_deferral_never_waives_an_ordinary_or_non_blocked_task(self) -> None:
+        # Ordinary blocked task (helper route can succeed): a reasoned deferral is not a waiver.
+        ordinary = {"blocked_by": ["CI-RECOVERY-EXAMPLE: needs original human triage, no helper wanted here"]}
+        selection = supervisor.chair_blocked_task_selection(self.config, self.board)
+        self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(self.config, ordinary, selection, self.board), set())
+        payload = {"version": 1, "decision": "blocked_task_triage", "approval_ttl_minutes": 45, "reason": "r",
+                   "blocked_by": ordinary["blocked_by"], "approval_actions": [], "reassignment_actions": [],
+                   "task_actions": [], "provider_actions": [], "recommended_focus": []}
+        self.assertEqual(supervisor.validate_chair_review_context(
+            payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config, status=self.board),
+            "blocked_task_triage must resolve blocked tasks via CI-RECOVERY-EXAMPLE:create_unblock_task")
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            {**payload, "decision": "reassignment_triage"}, reason="reassignment_triage", config=self.config, status=self.board)
+        self.assertEqual([a["action"] for a in normalized["task_actions"]], ["create_unblock_task"])
+        # Named governance task that is not actually blocked: nothing to defer, nothing changes.
+        self.add_held_governance_helper(status="in_progress")
+        selection = supervisor.chair_blocked_task_selection(self.config, self.board)
+        self.assertNotIn("HELD-UNBLOCK", [r["task_id"] for r in selection])
+        self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(
+            self.config, {"blocked_by": [self.HELD_DEFERRAL]}, selection, self.board), set())
+        # Without any deferral the recursion guard keeps escalating instead of nesting a helper.
+        self.board["tasks"][-1]["status"] = "blocked"; self.path.write_text(json.dumps(self.board))
+        state: dict = {}
+        self.assertFalse(supervisor.create_chair_unblock_task(
+            self.config, state, {"task_id": "HELD-UNBLOCK", "reason": "route"}, {}))
+        self.assertIn("HELD-UNBLOCK", state["governance_escalations"])
+        self.assertIn("governance_recursion_blocked", self.runtime_rows())
+
+
 class ChairBlockedSelectionReachabilityTests(unittest.TestCase):
     """R5: a fixed Chair window must not starve an explicit-positive CI recovery."""
 
@@ -4296,3 +4406,48 @@ class ChairBlockedSelectionReachabilityTests(unittest.TestCase):
         small = {"tasks": status["tasks"][:3], "blockers": status["blockers"]}
         self.assertEqual(supervisor.chair_blocked_task_selection({}, small),
                          supervisor.dependency_ready_blocked_task_records({}, small))
+
+    def test_R5_many_ready_records_are_admitted_bounded_and_rotate(self) -> None:
+        board = self.board()
+        ordinary = board["tasks"][:11]  # 8 in the window, 3 ordinary beyond it
+        target = board["tasks"][-1]
+        tasks = list(ordinary)
+        blockers = [b for b in board["blockers"] if b["task_id"] != self.TARGET]
+        # Interleave ineligible records ahead of the ready ones; they must not use the reserve.
+        for kind, changes in (("red", {"ci_status": "failure"}), ("pending", {"ci_status": "running"}),
+                              ("hold", {"task_class": "release", "mutates_canonical": False}),
+                              ("dependency", {"depends_on": ["PLAIN-00"]}), ("two-blockers", {})):
+            tasks.append({**json.loads(json.dumps(target)), "id": f"INELIGIBLE-{kind.upper()}", **changes})
+            blockers.append({"task_id": tasks[-1]["id"], "owner": "Pi", "waiting_for": "Gemini", "status": "open",
+                             "message": "Blocker", "created_at": "2026-10-27T00:00:00Z"})
+        blockers.append({**blockers[-1], "message": "Second blocker"})
+        for index in range(64):
+            tasks.append({**json.loads(json.dumps(target)), "id": f"RECOVERY-{index:03d}"})
+            blockers.append({"task_id": tasks[-1]["id"], "owner": "Pi", "waiting_for": "Gemini", "status": "open",
+                             "message": "CI blocker", "created_at": "2026-10-27T00:00:00Z"})
+        status = {"tasks": tasks, "blockers": blockers}
+        window = [f"PLAIN-{i:02d}" for i in range(8)]
+        expected = [*window, "RECOVERY-000", "RECOVERY-001"]
+        # Prompt: bounded batch; the first eight are byte-identical to the plain window.
+        lines = self.blocked_lines(status)
+        self.assertEqual([line[2:].split(":", 1)[0] for line in lines], expected)
+        self.assertEqual(lines[:8], self.blocked_lines({"tasks": ordinary[:8], "blockers": blockers[:8]}))
+        # Context: only the admitted two are required, and their explicit routes satisfy it.
+        error = supervisor.validate_chair_review_context(
+            self.payload("blocked_task_triage", self.window_helpers(), []), reason="blocked_task_triage",
+            approval_state={"pending": []}, config={}, status=status)
+        self.assertEqual(error, "blocked_task_triage must resolve blocked tasks via "
+                                "RECOVERY-000:create_unblock_task, RECOVERY-001:create_unblock_task")
+        # Synthesis: an admitted record is reachable; one beyond the reserve is not.
+        records = supervisor.reassignment_followup_task_records(
+            {}, self.payload("reassignment_triage", [], ["RECOVERY-001", "RECOVERY-005"]), status)
+        self.assertEqual([r["task_id"] for r in records], ["RECOVERY-001"])
+        for consumer_view in (supervisor.chair_blocked_task_selection({}, status),):
+            self.assertEqual([r["task_id"] for r in consumer_view], expected)
+        # Rotation: once the admitted ones leave blocked, the next ones are admitted.
+        for task in tasks:
+            if task["id"] in {"RECOVERY-000", "RECOVERY-001"}:
+                task["status"] = "review"
+        self.assertEqual([r["task_id"] for r in supervisor.chair_blocked_task_selection({}, status)],
+                         [*window, "RECOVERY-002", "RECOVERY-003"])
+        self.assertEqual(supervisor.CHAIR_CI_RECOVERY_RESERVE, 2)

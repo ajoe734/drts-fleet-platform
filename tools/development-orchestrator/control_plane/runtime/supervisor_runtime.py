@@ -6420,6 +6420,10 @@ def has_explicit_candidate_ci_resume(payload: dict[str, Any], record: dict[str, 
 
 
 CHAIR_BLOCKED_TASK_WINDOW = 8
+# Bounded admission past the window: at most this many recovery-ready records
+# are appended per review. Any Chair action on one (resume, or a helper) takes
+# it out of the dependency-ready set, so the next ones rotate in.
+CHAIR_CI_RECOVERY_RESERVE = 2
 
 
 def candidate_ci_recovery_ready(record: dict[str, Any]) -> bool:
@@ -6445,14 +6449,69 @@ def chair_blocked_task_selection(
     reassignment synthesis share.
 
     Keeps the held/phase-sorted window unchanged, then appends, in their
-    original relative order, only out-of-window records that are ready for
-    explicit candidate CI recovery, so a fixed window cannot starve them.
+    original relative order, at most CHAIR_CI_RECOVERY_RESERVE out-of-window
+    records that are ready for explicit candidate CI recovery, so a fixed
+    window cannot starve them while the batch stays bounded.
     """
     records = dependency_ready_blocked_task_records(config, status, limit=None, include_held=include_held)
     window = records[:CHAIR_BLOCKED_TASK_WINDOW]
-    return window + [
+    admitted = [
         record for record in records[CHAIR_BLOCKED_TASK_WINDOW:] if candidate_ci_recovery_ready(record)
-    ]
+    ][:CHAIR_CI_RECOVERY_RESERVE]
+    return window + admitted
+
+
+# A reasoned deferral must name exactly one task and say why, e.g.
+# "HELD-UNBLOCK: needs original human triage; no nested helper permitted".
+CHAIR_DEFERRAL_ENTRY_PATTERN = re.compile(r"\s*([A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+)\s*:\s*(\S.*?)\s*", re.DOTALL)
+CHAIR_DEFERRAL_MIN_REASON_CHARS = 24
+
+
+def chair_unblock_recursion_guarded(
+    config: dict[str, Any] | None,
+    task: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+) -> bool:
+    """True when create_unblock_task can never materialize for this task: the
+    recursion guard escalates a governance artifact (or a deep lineage)
+    instead of generating a nested helper."""
+    max_depth = int(chair_review_settings(config or {}).get("max_unblock_lineage_depth", 1))
+    return is_governance_artifact(task) or governance_lineage_depth(task, task_map) >= max_depth
+
+
+def chair_reasoned_deferral_task_ids(
+    config: dict[str, Any] | None,
+    payload: dict[str, Any],
+    records: list[dict[str, Any]],
+    status: dict[str, Any] | None,
+) -> set[str]:
+    """Selected blocked records the Chair explicitly and specifically deferred.
+
+    Not a generic missing-action waiver: it only applies to a listed record
+    whose expected route is create_unblock_task yet the recursion guard would
+    refuse it, and only when a blocked_by entry is exactly "TASK-ID: reason"
+    with a specific reason. Such a deferral must leave the record untouched
+    instead of rejecting the review or synthesizing a doomed helper.
+    """
+    if not isinstance(status, dict):
+        return set()
+    task_map = task_index_from_status(config or {}, status)
+    guarded = {
+        str(record.get("task_id") or ""): record
+        for record in records
+        if record.get("action") == "create_unblock_task"
+        and chair_unblock_recursion_guarded(config, record.get("task") or {}, task_map)
+    }
+    deferred: set[str] = set()
+    for entry in payload.get("blocked_by") or []:
+        match = CHAIR_DEFERRAL_ENTRY_PATTERN.fullmatch(entry) if isinstance(entry, str) else None
+        if match is None or match.group(1) not in guarded:
+            continue
+        reason = match.group(2)
+        if len(reason) < CHAIR_DEFERRAL_MIN_REASON_CHARS or TASK_ID_MENTION_PATTERN.search(reason):
+            continue
+        deferred.add(match.group(1))
+    return deferred
 
 
 def reassignment_followup_task_records(
@@ -6498,12 +6557,14 @@ def synthesize_reassignment_followup_task_actions(
         return []
     action_index = chair_task_action_index(payload)
     synthesized: list[dict[str, Any]] = []
-    for item in reassignment_followup_task_records(config, payload, status):
+    followup_records = reassignment_followup_task_records(config, payload, status)
+    deferred = chair_reasoned_deferral_task_ids(config, payload, followup_records, status)
+    for item in followup_records:
         task_id = str(item.get("task_id") or "").strip()
         action_name = str(item.get("action") or "").strip()
         if not task_id or not action_name or action_name in action_index.get(task_id, set()):
             continue
-        if has_explicit_candidate_ci_resume(payload, item):
+        if has_explicit_candidate_ci_resume(payload, item) or task_id in deferred:
             continue
         if action_name == "create_unblock_task":
             unblock_kind = str(item.get("kind") or "manual_unblock").strip() or "manual_unblock"
@@ -7158,11 +7219,12 @@ def validate_chair_review_context(
         ready_blocked = chair_blocked_task_selection(config, status)
         if ready_blocked:
             action_index = chair_task_action_index(payload)
+            deferred = chair_reasoned_deferral_task_ids(config, payload, ready_blocked, status)
             missing: list[str] = []
             for item in ready_blocked:
                 task_id = str(item.get("task_id") or "").strip()
                 expected_action = str(item.get("action") or "").strip()
-                if not task_id or not expected_action:
+                if not task_id or not expected_action or task_id in deferred:
                     continue
                 if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item):
                     missing.append(f"{task_id}:{expected_action}")
@@ -7172,11 +7234,12 @@ def validate_chair_review_context(
         followup_records = reassignment_followup_task_records(config, payload, status)
         if followup_records:
             action_index = chair_task_action_index(payload)
+            deferred = chair_reasoned_deferral_task_ids(config, payload, followup_records, status)
             missing: list[str] = []
             for item in followup_records:
                 task_id = str(item.get("task_id") or "").strip()
                 expected_action = str(item.get("action") or "").strip()
-                if not task_id or not expected_action:
+                if not task_id or not expected_action or task_id in deferred:
                     continue
                 if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item):
                     missing.append(f"{task_id}:{expected_action}")
@@ -7862,8 +7925,7 @@ def create_chair_unblock_task(
     # child. Without this, a blocked `X-UNBLOCK` triages into `X-UNBLOCK-UNBLOCK`
     # and the pipeline self-reproduces. Escalate to a human instead of digging the
     # auto-repair lineage deeper.
-    max_depth = int(chair_review_settings(config).get("max_unblock_lineage_depth", 1))
-    if is_governance_artifact(parent) or governance_lineage_depth(parent, task_map) >= max_depth:
+    if chair_unblock_recursion_guarded(config, parent, task_map):
         escalate_governance_recursion_for_human(config, state, parent, chair_reason)
         return False
     dependency_done_statuses = {
