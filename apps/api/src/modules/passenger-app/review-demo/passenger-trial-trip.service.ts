@@ -219,7 +219,10 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
       const policy = this.registry
         .listPolicies()
         .find((p) => p.vehicleId === templateId);
-      if (!template || !contract || !policy)
+      const exclusivity = this.registry
+        .listExclusivities()
+        .find((e) => e.vehicleId === templateId);
+      if (!template || !contract || !policy || !exclusivity)
         throw new ApiRequestError(
           HttpStatus.SERVICE_UNAVAILABLE,
           this.code("SUPPLY_UNAVAILABLE"),
@@ -260,6 +263,18 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
           createdAt: now,
           updatedAt: now,
         })),
+        // One vehicle, one dispatch operator (BUREAU-R02): bound to the
+        // review operator whose authorization the passenger app books on.
+        exclusivities: missingVehicles.map((pair) => ({
+          ...exclusivity,
+          vehicleId: pair.vehicleId,
+          declarationFileId: "passenger-trial-simulated-document",
+          exclusiveOperatorId: REVIEW_OPERATOR_ID,
+          exclusiveProviderName: "測試車隊",
+          effectiveStart: start,
+          effectiveEnd: end,
+          updatedAt: now,
+        })),
         supplyPairs: missingVehicles.map((pair) => ({
           vehicleId: pair.vehicleId,
           driverId: pair.driverId,
@@ -282,40 +297,21 @@ export class PassengerTrialTripService extends DemoTripEngine<RequestIdentity | 
         })),
       });
     }
-    // One vehicle, one dispatch operator (BUREAU-R02): every trial vehicle's
-    // exclusivity is bound to the review operator whose authorization the
-    // passenger app books against. Rewritten each time (an upsert per
-    // vehicle) so pairs created before that rule are repaired too.
-    const exclusivities = this.registry.listExclusivities();
-    const templateExclusivity = TEMPLATE_VEHICLE_IDS.map((id) =>
-      exclusivities.find((e) => e.vehicleId === id),
-    ).find(Boolean);
-    const trialExclusivities = PASSENGER_TRIAL_SUPPLY.map((pair) => {
-      const base =
-        exclusivities.find((e) => e.vehicleId === pair.vehicleId) ??
-        templateExclusivity;
-      return base
-        ? {
-            ...base,
-            vehicleId: pair.vehicleId,
-            declarationFileId: "passenger-trial-simulated-document",
-            exclusiveOperatorId: REVIEW_OPERATOR_ID,
-            exclusiveProviderName: "測試車隊",
-            effectiveStart: start,
-            effectiveEnd: end,
-            updatedAt: now,
-          }
-        : null;
-    });
-    if (trialExclusivities.some((item) => item === null))
-      throw new ApiRequestError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        this.code("SUPPLY_UNAVAILABLE"),
-        "No existing exclusivity can serve as the test vehicle template.",
-      );
-    await this.registryRepository.persistChanges({
-      exclusivities: trialExclusivities.filter((item) => item !== null),
-    });
+    // Trial vehicles created before that rule carry the template's unbound
+    // exclusivity; bind them too (an upsert per vehicle, read from storage).
+    const unbound = (state.exclusivities ?? []).filter(
+      (e) =>
+        PASSENGER_TRIAL_SUPPLY.some((pair) => pair.vehicleId === e.vehicleId) &&
+        e.exclusiveOperatorId !== REVIEW_OPERATOR_ID,
+    );
+    if (unbound.length > 0)
+      await this.registryRepository.persistChanges({
+        exclusivities: unbound.map((e) => ({
+          ...e,
+          exclusiveOperatorId: REVIEW_OPERATOR_ID,
+          updatedAt: now,
+        })),
+      });
     for (const pair of PASSENGER_TRIAL_SUPPLY) {
       await this.profiles.prepareProfileAuthority(pair.driverId);
       await this.profiles.updateProfile(pair.driverId, {

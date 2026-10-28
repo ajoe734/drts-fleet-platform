@@ -485,6 +485,49 @@ describe("PassengerTrialTripService", () => {
     expect(h.eligibility.enableServiceProductForSupply).not.toHaveBeenCalled();
   });
 
+  it("binds trial vehicles created before the one-operator rule", async () => {
+    const h = withTaxi(harness());
+    const existing = PASSENGER_TRIAL_SUPPLY.map((pair) => ({
+      vehicleId: pair.vehicleId,
+    }));
+    h.registryRepository.loadState.mockResolvedValue({
+      drivers: PASSENGER_TRIAL_SUPPLY.map((pair) => ({
+        driverId: pair.driverId,
+      })),
+      vehicles: existing,
+      exclusivities: [
+        { vehicleId: "pax-trial-vehicle-1", exclusiveOperatorId: null },
+        {
+          vehicleId: "pax-trial-vehicle-2",
+          exclusiveOperatorId: REVIEW_OPERATOR_ID,
+        },
+        { vehicleId: "pax-trial-vehicle-3" },
+        { vehicleId: "unrelated-vehicle", exclusiveOperatorId: null },
+      ],
+    } as never);
+    await h.service.prepareSupply();
+    const written = h.registryRepository.persistChanges.mock.calls
+      .map(
+        ([changes]) => (changes as { exclusivities?: unknown[] }).exclusivities,
+      )
+      .filter(Boolean) as Array<
+      Array<{ vehicleId: string; exclusiveOperatorId: string }>
+    >;
+    expect(written).toEqual([
+      [
+        expect.objectContaining({
+          vehicleId: "pax-trial-vehicle-1",
+          exclusiveOperatorId: REVIEW_OPERATOR_ID,
+        }),
+        expect.objectContaining({
+          vehicleId: "pax-trial-vehicle-3",
+          exclusiveOperatorId: REVIEW_OPERATOR_ID,
+        }),
+      ],
+    ]);
+    expect(h.registry.createDriver).not.toHaveBeenCalled();
+  });
+
   it("lets the review preparation create a missing authorization first", async () => {
     const h = withTaxi(harness({ authorizationExists: false }));
     await h.service.prepareSupply();
