@@ -1288,16 +1288,18 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
   });
 
   it.each([
-    ...([
-      "unrelated-fetch",
-      "unrelated-body",
-      "unrelated-proxy",
-      "unrelated-runtime",
-      "matching-fetch",
-      "matching-body",
-      "matching-runtime",
-      "matching-typed",
-    ] as const).map((routeFault) => ({
+    ...(
+      [
+        "unrelated-fetch",
+        "unrelated-body",
+        "unrelated-proxy",
+        "unrelated-runtime",
+        "matching-fetch",
+        "matching-body",
+        "matching-runtime",
+        "matching-typed",
+      ] as const
+    ).map((routeFault) => ({
       caseName: `request isolation ${routeFault}`,
       routeFault,
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -1529,12 +1531,17 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         "faultPoint" in scenario ? scenario.faultPoint : undefined;
       const typedFault =
         "typedFault" in scenario ? scenario.typedFault : undefined;
-      const routeFault = "routeFault" in scenario ? scenario.routeFault : undefined;
+      const routeFault =
+        "routeFault" in scenario ? scenario.routeFault : undefined;
       const routeNativeFailure = new TypeError(
         "private-native-token-url-order-actor-sql-body",
         { cause: { code: "ECONNRESET", secret: "private-cause" } },
       );
-      const routeTypedFailure = new JourneyFailure("daily-report-test-typed", 503, "REPORT_READ_FAILED");
+      const routeTypedFailure = new JourneyFailure(
+        "daily-report-test-typed",
+        503,
+        "REPORT_READ_FAILED",
+      );
       const privateMarker = "private-native-token-url-order-actor-sql-body";
       const injectedFailure =
         typedFault === "http" || typedFault === "exchange-http"
@@ -1675,7 +1682,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               };
             },
             fulfill: async () => undefined,
-            abort: async () => { abortedRoutes += 1; },
+            abort: async () => {
+              abortedRoutes += 1;
+            },
           } as unknown as Route;
           await routeHandler(route);
         };
@@ -1938,21 +1947,35 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                 point: "export",
                 click: async () => {
                   const format = selectedFormat;
-                  if (routeFault && dateFromVal === "2026-10-25" && format === "csv") {
+                  if (
+                    routeFault &&
+                    dateFromVal === "2026-10-25" &&
+                    format === "csv"
+                  ) {
                     const unrelated = routeFault.startsWith("unrelated-");
                     const runtimeFault = routeFault.endsWith("runtime");
                     await dispatchRoute(
                       unrelated ? "GET" : "POST",
-                      `${OPS_ORIGIN}${unrelated
-                        ? routeFault === "unrelated-proxy" || runtimeFault
-                          ? "/control-plane-proxy/reports/jobs?private-query"
-                          : "/_next/private-asset.js?private-query"
-                        : "/control-plane-proxy/reports/jobs"}`,
+                      `${OPS_ORIGIN}${
+                        unrelated
+                          ? routeFault === "unrelated-proxy" || runtimeFault
+                            ? "/control-plane-proxy/reports/jobs?private-query"
+                            : "/_next/private-asset.js?private-query"
+                          : "/control-plane-proxy/reports/jobs"
+                      }`,
                       unrelated ? null : JSON.stringify({ privateMarker }),
                       200,
-                      runtimeFault ? { "x-drts-candidate-sha": "c".repeat(40) } : {},
+                      runtimeFault
+                        ? { "x-drts-candidate-sha": "c".repeat(40) }
+                        : {},
                       Buffer.from("private-response"),
-                      runtimeFault ? undefined : routeFault.endsWith("typed") ? "typed" : routeFault.endsWith("body") ? "body" : "fetch",
+                      runtimeFault
+                        ? undefined
+                        : routeFault.endsWith("typed")
+                          ? "typed"
+                          : routeFault.endsWith("body")
+                            ? "body"
+                            : "fetch",
                     );
                     if (!unrelated) return;
                   }
@@ -2260,12 +2283,17 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         });
         if (routeFault?.startsWith("matching-")) {
           const failure = await run.catch((error: unknown) => error);
-          if (routeFault === "matching-typed") expect(failure).toBe(routeTypedFailure);
+          if (routeFault === "matching-typed")
+            expect(failure).toBe(routeTypedFailure);
           else if (routeFault === "matching-runtime")
-            expect(failure).toMatchObject({ stage: "daily-report-ops-runtime-sha-mismatch" });
+            expect(failure).toMatchObject({
+              stage: "daily-report-ops-runtime-sha-mismatch",
+            });
           else {
             expect(failure).toBeInstanceOf(JourneyFailure);
-            expect((failure as Error).message).toContain("daily-report-ops-post-jobs");
+            expect((failure as Error).message).toContain(
+              "daily-report-ops-post-jobs",
+            );
           }
           const diagnostic = JSON.stringify([failure, evidence.events]);
           expect(diagnostic).not.toContain(privateMarker);
@@ -2509,9 +2537,16 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         const result = await run;
         if (routeFault?.startsWith("unrelated-")) {
           expect(abortedRoutes).toBe(1);
-          const failures = evidence.events.filter((event) => event.stage.startsWith("daily-report-ops-") && event.result === "failed");
+          const failures = evidence.events.filter(
+            (event) =>
+              event.stage.startsWith("daily-report-ops-") &&
+              event.result === "failed",
+          );
           expect(failures).toHaveLength(1);
-          expect(failures[0]).toMatchObject({ requestMethod: "GET", result: "failed" });
+          expect(failures[0]).toMatchObject({
+            requestMethod: "GET",
+            result: "failed",
+          });
           expect(JSON.stringify(failures)).not.toContain(privateMarker);
           expect(JSON.stringify(failures)).not.toContain("private-query");
           expect(JSON.stringify(failures)).not.toContain("private-cause");
