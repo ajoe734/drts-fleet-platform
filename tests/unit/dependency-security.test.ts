@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
 
 describe("Dependency Security Exceptions", () => {
   it("should be valid JSON with correct fields", () => {
@@ -119,8 +120,8 @@ for (const app of ["driver-app", "passenger-app"]) {
     });
   }
 
-  it(`${app} preserves Expo mergeConfigModifications including plugin props`, () => {
-    const { mergeConfigModifications } = expoRequire("@expo/config");
+  it(`${app} preserves Expo modifyConfigAsync including plugin props`, async () => {
+    const { modifyConfigAsync } = expoRequire("@expo/config");
     const rootConfig = {
       expo: {
         name: "dependency regression",
@@ -129,18 +130,35 @@ for (const app of ["driver-app", "passenger-app"]) {
         plugins: [["example-plugin", { nested: { first: 1 }, values: [1] }]],
       },
     };
-    const config = { rootConfig };
-    const result = mergeConfigModifications(config, {
-      ios: { bundleIdentifier: "invalid.example.regression" },
-      plugins: [["example-plugin", { nested: { second: 2 }, values: [2] }]],
-    });
-    expect(result.expo.ios).toEqual({
-      supportsTablet: true,
-      bundleIdentifier: "invalid.example.regression",
-    });
-    expect(result.expo.plugins).toEqual([
-      ["example-plugin", { nested: { first: 1, second: 2 }, values: [1, 2] }],
-    ]);
-    expect(rootConfig.expo.ios).toEqual({ supportsTablet: true });
+    const directory = fs.mkdtempSync(path.join(tmpdir(), "deepmerge-expo-"));
+    try {
+      fs.writeFileSync(path.join(directory, "package.json"), "{}");
+      fs.writeFileSync(
+        path.join(directory, "app.json"),
+        JSON.stringify(rootConfig),
+      );
+      const result = await modifyConfigAsync(
+        directory,
+        {
+          ios: { bundleIdentifier: "invalid.example.regression" },
+          plugins: [["example-plugin", { nested: { second: 2 }, values: [2] }]],
+        },
+        { skipPlugins: true, skipSDKVersionRequirement: true },
+        { dryRun: true },
+      );
+      expect(result.type).toBe("success");
+      expect(result.config.ios).toEqual({
+        supportsTablet: true,
+        bundleIdentifier: "invalid.example.regression",
+      });
+      expect(result.config.plugins).toEqual([
+        ["example-plugin", { nested: { first: 1, second: 2 }, values: [1, 2] }],
+      ]);
+      expect(
+        JSON.parse(fs.readFileSync(path.join(directory, "app.json"), "utf8")),
+      ).toEqual(rootConfig);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
   });
 }

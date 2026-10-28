@@ -2,7 +2,116 @@ import subprocess
 import json
 import sys
 import datetime
+import hashlib
+import re
 from pathlib import Path
+
+# npm still publishes 4.3.1. This is a verified local mitigation, not a claim
+# that the upstream version is fixed. Review these pins together with the patch.
+DEEPMERGE_PATCH = 'patches/deepmerge@4.3.1.patch'
+DEEPMERGE_PATCH_SHA256 = '6241e75cd0ebdeefbe93564d0f9a0da153bc6608add12970bd3c390910e7e4f4'
+DEEPMERGE_MITIGATION = 'deepmerge-4.3.1-prototype-poisoning'
+DEEPMERGE_FILES = {
+    'index.js': 'dbef7cab6abdd1338228a08297f0047b3f56c9d7533b38358629b6024c78dbc7',
+    'dist/cjs.js': '8983763adcccc772c023cb97bbf8830de52f7eeaa3c997b867345e1e62dd9d3b',
+    'dist/umd.js': '61f125f6ee85c534ddafcd12d2e89c52acd0cd2c9cd292b111cd403ab58e5172',
+    'package.json': 'f56978e7a6da1a3c6edee41abb54f98584a2fa2680458c48db820ae772fef0c9',
+}
+
+# Resolve from both real applications through Expo and its CLI. Also inspect
+# every installed pnpm dependent link, so another consumer cannot silently use
+# an unpatched copy. Hash the distributed entrypoints before executing them.
+DEEPMERGE_INSTALLED_CHECK = r"""
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { createRequire } = require('node:module');
+const { createHash } = require('node:crypto');
+const [root, patchHash, files] = JSON.parse(process.argv[1]);
+const virtual = path.join(root, 'node_modules/.pnpm');
+const expected = fs.realpathSync(path.join(virtual,
+  `deepmerge@4.3.1_patch_hash=${patchHash}/node_modules/deepmerge`));
+const checked = new Set();
+function check(consumerRequire) {
+  const entry = fs.realpathSync(consumerRequire.resolve('deepmerge'));
+  assert.equal(entry, path.join(expected, 'dist/cjs.js'), 'unexpected deepmerge resolution');
+  if (checked.has(entry)) return;
+  for (const [file, hash] of Object.entries(files)) {
+    assert.equal(createHash('sha256').update(fs.readFileSync(path.join(expected, file)))
+      .digest('hex'), hash, `installed deepmerge integrity: ${file}`);
+  }
+  for (const file of ['dist/cjs.js', 'dist/umd.js']) {
+    const merge = consumerRequire(path.join(expected, file));
+    const attack = () => JSON.parse('{"__proto__":{"injectedAdmin":true},"safe":42}');
+    const safe = result => {
+      assert.equal(Object.getPrototypeOf(result), Object.prototype);
+      assert.equal(result.injectedAdmin, undefined);
+      assert.equal(Object.hasOwn(result, '__proto__'), false);
+      assert.equal(result.safe, 42);
+    };
+    safe(merge(Object.create(null), attack()));
+    safe(merge(attack(), {}));
+    safe(merge(attack(), attack()));
+    for (const value of [null, undefined, false, 0, 'placeholder']) {
+      safe(merge({session: value}, {session: attack()}).session);
+    }
+    safe(merge({}, {list: [attack()]}).list[0]);
+    assert.deepEqual(merge({a: {b: 1}, list: [1]}, {a: {c: 2}, list: [2]}),
+      {a: {b: 1, c: 2}, list: [1, 2]});
+    assert.equal(({}).injectedAdmin, undefined);
+  }
+  checked.add(entry);
+}
+const consumers = [];
+for (const app of ['driver-app', 'passenger-app']) {
+  const appRequire = createRequire(path.join(root, 'apps', app, 'package.json'));
+  const expoRequire = createRequire(appRequire.resolve('expo/package.json'));
+  const cliRequire = createRequire(expoRequire.resolve('@expo/cli/package.json'));
+  for (const parent of [expoRequire, cliRequire]) {
+    const configEntry = parent.resolve('@expo/config');
+    check(createRequire(configEntry));
+    consumers.push({app, configEntry});
+  }
+}
+for (const directory of fs.readdirSync(virtual)) {
+  const dependent = path.join(virtual, directory, 'node_modules/deepmerge');
+  if (fs.existsSync(dependent)) {
+    check(createRequire(path.join(virtual, directory, 'node_modules/__probe__.cjs')));
+  }
+}
+assert.equal(checked.size, 1);
+console.log(JSON.stringify({entry: [...checked][0], files, consumers}));
+"""
+
+
+def verify_deepmerge_patch(root):
+    """Fail closed unless manifest, lock and effective consumers bind this patch."""
+    if hashlib.sha256((root / DEEPMERGE_PATCH).read_bytes()).hexdigest() != DEEPMERGE_PATCH_SHA256:
+        raise ValueError('deepmerge patch integrity mismatch')
+    manifest = json.loads((root / 'package.json').read_text())
+    if manifest.get('pnpm', {}).get('patchedDependencies', {}).get('deepmerge@4.3.1') != DEEPMERGE_PATCH:
+        raise ValueError('deepmerge manifest patch binding missing')
+    lock = (root / 'pnpm-lock.yaml').read_text()
+    # Deliberately accept only the reviewed pnpm 9 lock stanza, not arbitrary
+    # YAML spellings/aliases. No YAML dependency is needed before install in CI.
+    stanza = (f'patchedDependencies:\n  deepmerge@4.3.1:\n'
+              f'    hash: {DEEPMERGE_PATCH_SHA256}\n    path: {DEEPMERGE_PATCH}\n')
+    version = f'4.3.1(patch_hash={DEEPMERGE_PATCH_SHA256})'
+    references = re.findall(r'^      deepmerge: (.+)$', lock, re.MULTILINE)
+    package_keys = re.findall(r'^  deepmerge@([^\n]+):(?: \{\})?$', lock, re.MULTILINE)
+    if (lock.count(stanza) != 1 or lock.count('\npatchedDependencies:\n') != 1
+            or not references or any(ref != version for ref in references)
+            or sorted(package_keys) != sorted(['4.3.1', '4.3.1', version])):
+        raise ValueError('deepmerge lock patch binding mismatch')
+    result = subprocess.run(
+        ['node', '-e', DEEPMERGE_INSTALLED_CHECK,
+         json.dumps([str(root), DEEPMERGE_PATCH_SHA256, DEEPMERGE_FILES])],
+        cwd=root, capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise ValueError(f'deepmerge installed patch verification failed: {result.stderr}')
+    print(f'Verified effective deepmerge patch: {result.stdout.strip()}')
+
 
 def run_audit():
     result = subprocess.run(
@@ -126,6 +235,21 @@ def main():
             
         if now > expiry:
             print(f"Exception for advisory {adv_id} has expired!")
+            sys.exit(1)
+
+        mitigation = exc.get('verified_patch')
+        if adv_id == '1243505':
+            if (exc['module_name'] != 'deepmerge' or exc['versions'] != ['4.3.1']
+                    or mitigation != DEEPMERGE_MITIGATION):
+                print('Advisory 1243505 requires the verified deepmerge patch condition')
+                sys.exit(1)
+            try:
+                verify_deepmerge_patch(Path(__file__).resolve().parents[2])
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                print(f'Cannot accept deepmerge mitigation: {error}')
+                sys.exit(1)
+        elif mitigation is not None:
+            print(f'Unsupported verified_patch condition for advisory {adv_id}')
             sys.exit(1)
             
         valid_exceptions[adv_id] = exc
