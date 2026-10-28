@@ -1039,6 +1039,257 @@ describe("native fetch failure diagnostics", () => {
   });
 });
 
+describe("startup Ops HTML readiness deadline", () => {
+  // Drives the actual NativeTransport.call with only the external ports
+  // controlled: AbortSignal.timeout (chosen deadline), performance.now
+  // (virtual clock) and fetch (a server ready at readyAtMs). No timer waits.
+  async function runVirtual(
+    readyAtMs: number,
+    request: (tx: NativeTransport) => Promise<unknown>,
+    prepare: (tx: NativeTransport) => void = () => undefined,
+  ) {
+    const { tx, fetcher } = setup();
+    prepare(tx);
+    let now = 0;
+    let deadline = Number.POSITIVE_INFINITY;
+    let controller = new AbortController();
+    const timeout = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation((ms) => {
+        deadline = ms;
+        controller = new AbortController();
+        return controller.signal;
+      });
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+    fetcher.mockImplementation(async (_url, options) => {
+      expect(options?.signal).toBe(controller.signal);
+      if (readyAtMs <= deadline) {
+        now = readyAtMs;
+        return new Response("<html>synthetic dashboard</html>", {
+          status: 200,
+          headers: { "x-drts-candidate-sha": SHA, "content-type": "text/html" },
+        });
+      }
+      now = deadline;
+      controller.abort(new DOMException("synthetic", "TimeoutError"));
+      throw new DOMException("synthetic", "TimeoutError");
+    });
+    try {
+      const outcome = await request(tx).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      return {
+        outcome,
+        chosen: timeout.mock.calls.map(([ms]) => ms),
+        fetcher,
+      };
+    } finally {
+      timeout.mockRestore();
+      clock.mockRestore();
+    }
+  }
+  const startup = (tx: NativeTransport) =>
+    tx.call("ops", "/dashboard", { raw: true, expected: [200] });
+
+  it("lets the exact pre-session startup Ops dashboard HTML 200 at 20s pass on the 30s readiness budget", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(20_000, startup);
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({
+      value: expect.objectContaining({ status: 200, data: null }),
+    });
+    const [url, init] = at(fetcher.mock.calls, 0);
+    expect(url).toBe("https://ops.example.test/dashboard");
+    expect(init?.method).toBe("GET");
+    expect(init?.redirect).toBe("manual");
+    expect(init?.body).toBeUndefined();
+    const headers = new Headers(init?.headers);
+    expect(headers.get("x-drts-authorization")).toBeNull();
+    expect(headers.get("x-serverless-authorization")).toBe("Bearer cloud-ops");
+  });
+
+  it("still fails the exact startup probe once at 30s with the original timeout facts", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(31_000, startup);
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const failure = (outcome as { error: unknown }).error;
+    expect(failure).toBeInstanceOf(JourneyFailure);
+    expect((failure as JourneyFailure).transportFacts).toEqual(
+      expect.objectContaining({
+        nativeFailureClass: "TimeoutError",
+        requestAborted: true,
+        requestDurationMs: 30_000,
+        requestMethod: "GET",
+      }),
+    );
+  });
+
+  it("keeps a fast startup positive to a single 200 fetch", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(5_000, startup);
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(outcome).toEqual({
+      value: expect.objectContaining({ status: 200 }),
+    });
+  });
+
+  it("does not turn a startup 200 with the wrong runtime SHA into readiness", async () => {
+    const { tx, fetcher } = setup();
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      fetcher.mockImplementationOnce(
+        async () =>
+          new Response("<html></html>", {
+            status: 200,
+            headers: { "x-drts-candidate-sha": "b".repeat(40) },
+          }),
+      );
+      await expect(startup(tx)).rejects.toThrow("ops:runtime SHA mismatch");
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(30_000);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("does not turn a startup HTTP failure into readiness", async () => {
+    const { tx, fetcher } = setup();
+    fetcher.mockImplementationOnce(
+      async () =>
+        new Response("unavailable", {
+          status: 503,
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+    );
+    await expect(startup(tx)).rejects.toMatchObject({
+      stage: "ops:request",
+      status: 503,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the default byte bound on the startup HTML", async () => {
+    const { tx, fetcher } = setup();
+    fetcher.mockImplementationOnce(
+      async () =>
+        new Response(new Uint8Array(1024 * 1024 + 1), {
+          status: 200,
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+    );
+    await expect(startup(tx)).rejects.toThrow("bounded response exceeded");
+  });
+
+  it.each([
+    [
+      "authenticated Ops dashboard reread",
+      (tx: NativeTransport) => startup(tx),
+      (tx: NativeTransport) => tx.setSession("ops", "synthetic-ops-session"),
+    ],
+    [
+      "Ops business POST",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/control-plane-proxy/auth/token", {
+          method: "POST",
+          body: {},
+        }),
+    ],
+    [
+      "Ops dashboard POST",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", {
+          method: "POST",
+          raw: true,
+          expected: [200],
+        }),
+    ],
+    [
+      "Ops dashboard GET with a body",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", {
+          body: {},
+          raw: true,
+          expected: [200],
+        }),
+    ],
+    [
+      "Ops dashboard with a query",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard?x=1", { raw: true, expected: [200] }),
+    ],
+    [
+      "Ops dashboard trailing slash alias",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard/", { raw: true, expected: [200] }),
+    ],
+    [
+      "Ops root",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/", { raw: true, expected: [200] }),
+    ],
+    [
+      "Ops dashboard not raw",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", { expected: [200] }),
+    ],
+    [
+      "Ops dashboard raw false",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", { raw: false, expected: [200] }),
+    ],
+    [
+      "Ops dashboard default expected statuses",
+      (tx: NativeTransport) => tx.call("ops", "/dashboard", { raw: true }),
+    ],
+    [
+      "Ops dashboard widened expected statuses",
+      (tx: NativeTransport) =>
+        tx.call("ops", "/dashboard", { raw: true, expected: [200, 503] }),
+    ],
+    [
+      "Admin dashboard",
+      (tx: NativeTransport) =>
+        tx.call("admin", "/dashboard", { raw: true, expected: [200] }),
+    ],
+    [
+      "Fleet dashboard",
+      (tx: NativeTransport) =>
+        tx.call("fleet", "/dashboard", { raw: true, expected: [200] }),
+    ],
+    [
+      "Referral dashboard",
+      (tx: NativeTransport) =>
+        tx.call("referral", "/dashboard", { raw: true, expected: [200] }),
+    ],
+    [
+      "opsApi dashboard",
+      (tx: NativeTransport) =>
+        tx.call("opsApi", "/dashboard", { raw: true, expected: [200] }),
+    ],
+  ] as const)(
+    "keeps the original 15s deadline for %s: a 20s response times out once",
+    async (_name, request, prepare?: (tx: NativeTransport) => void) => {
+      const { outcome, chosen, fetcher } = await runVirtual(
+        20_000,
+        request,
+        prepare,
+      );
+      expect(chosen).toEqual([15_000]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const failure = (outcome as { error: unknown }).error;
+      expect(failure).toBeInstanceOf(JourneyFailure);
+      expect((failure as JourneyFailure).transportFacts).toEqual(
+        expect.objectContaining({
+          nativeFailureClass: "TimeoutError",
+          requestAborted: true,
+          requestDurationMs: 15_000,
+        }),
+      );
+    },
+  );
+});
+
 // Reads the real production classifier straight from the actual e2e consumer
 // source (the same AST-extraction technique already used by
 // tests/unit/operational-browser-manifest.test.ts for the same function), so
