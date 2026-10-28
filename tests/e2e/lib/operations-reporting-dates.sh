@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Helper to compute UTC dates based on system time and offsets.
+# Helper to compute UTC timestamps and Asia/Taipei reporting calendar dates/months.
 
 get_current_time() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -7,12 +7,14 @@ get_current_time() {
 
 get_date_from_iso() {
   local iso_time="$1"
-  echo "${iso_time:0:10}"
+  TZ=Asia/Taipei date -d "$iso_time" +"%Y-%m-%d" 2>/dev/null \
+    || python3 -c 'import datetime, sys; from zoneinfo import ZoneInfo; raw = sys.argv[1].strip(); dt = datetime.datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith(("Z", "z")) else raw); dt = dt.replace(tzinfo=datetime.timezone.utc) if dt.tzinfo is None else dt; print(dt.astimezone(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d"))' "$iso_time"
 }
 
 get_month_from_iso() {
   local iso_time="$1"
-  echo "${iso_time:0:7}"
+  TZ=Asia/Taipei date -d "$iso_time" +"%Y-%m" 2>/dev/null \
+    || python3 -c 'import datetime, sys; from zoneinfo import ZoneInfo; raw = sys.argv[1].strip(); dt = datetime.datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith(("Z", "z")) else raw); dt = dt.replace(tzinfo=datetime.timezone.utc) if dt.tzinfo is None else dt; print(dt.astimezone(ZoneInfo("Asia/Taipei")).strftime("%Y-%m"))' "$iso_time"
 }
 
 get_time_with_offset() {

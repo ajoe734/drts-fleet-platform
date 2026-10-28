@@ -29,6 +29,87 @@ function baseAllowedRealms(...realms: AuthRealm[]): AuthRealm[] {
   return ["system", ...realms];
 }
 
+/**
+ * BUREAU-R13 agency portal and platform-side agency administration routes.
+ * Agency data routes are the only routes that name the `agency` realm (plus
+ * auth/session and logout); BootstrapAuthGuard denies an agency session
+ * everywhere else and on every non-allowlisted write.
+ */
+function resolveAgencyRouteAuthPolicy(
+  upperMethod: string,
+  routePath: string,
+): ResolvedRouteAuthPolicy | null {
+  if (routePath === "agency" || routePath.startsWith("agency/")) {
+    if (
+      routePath === "agency/trip-records/export-jobs" ||
+      routePath.startsWith("agency/trip-records/export-jobs/")
+    ) {
+      return {
+        routeKey: `agency:trip-records:export:${upperMethod}`,
+        requiredScopes: ["agency:trip_records:export"],
+        allowedRealms: baseAllowedRealms("agency"),
+        description:
+          "Agency controlled export of retained trip records (owner-bound jobs)",
+      };
+    }
+    if (
+      routePath === "agency/trip-records" ||
+      /^agency\/trip-records\/[^/]+$/.test(routePath)
+    ) {
+      return {
+        routeKey: `agency:trip-records:read:${upperMethod}`,
+        requiredScopes: ["agency:trip_records:read"],
+        allowedRealms: baseAllowedRealms("agency"),
+        description: "Agency read-only retained trip records (R11)",
+      };
+    }
+    if (routePath.startsWith("agency/reports/")) {
+      return {
+        routeKey: `agency:reports:read:${upperMethod}`,
+        requiredScopes: ["agency:reports:read"],
+        allowedRealms: baseAllowedRealms("agency"),
+        description: "Agency read-only aggregate reports (R09/R10/R12)",
+      };
+    }
+    if (routePath.startsWith("agency/qualifications/")) {
+      return {
+        routeKey: `agency:qualifications:read:${upperMethod}`,
+        requiredScopes: ["agency:qualifications:read"],
+        allowedRealms: baseAllowedRealms("agency"),
+        description: "Agency read-only qualification expiry status (R14)",
+      };
+    }
+    return null;
+  }
+
+  if (routePath === "platform-admin/agency-access-logs") {
+    return {
+      routeKey: `platform-admin:agency-access-logs:${upperMethod}`,
+      requiredScopes: ["agency:access_audit:read"],
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Platform review of the append-only agency access log",
+    };
+  }
+
+  if (
+    routePath === "platform-admin/agencies" ||
+    routePath.startsWith("platform-admin/agencies/")
+  ) {
+    return {
+      routeKey: `platform-admin:agencies:${upperMethod}`,
+      requiredScopes: methodScope(
+        "agency:directory:read",
+        "agency:directory:write",
+        upperMethod,
+      ),
+      allowedRealms: baseAllowedRealms("platform"),
+      description: "Platform regulatory agency directory and invitations",
+    };
+  }
+
+  return null;
+}
+
 export function resolveRouteAuthPolicy(
   method: string,
   url: string,
@@ -130,6 +211,11 @@ export function resolveRouteAuthPolicy(
     };
   }
 
+  const agencyPolicy = resolveAgencyRouteAuthPolicy(upperMethod, routePath);
+  if (agencyPolicy) {
+    return agencyPolicy;
+  }
+
   if (routePath === "audit" && upperMethod === "GET") {
     return {
       routeKey: "audit:list",
@@ -149,6 +235,7 @@ export function resolveRouteAuthPolicy(
         "ops",
         "driver",
         "partner",
+        "agency",
       ),
       description:
         "Caller reads its own session; the route returns 401 when there is no identity and discloses nothing about any other",
@@ -174,6 +261,7 @@ export function resolveRouteAuthPolicy(
         "tenant",
         "partner",
         "driver",
+        "agency",
       ),
       description: "Authenticated self session logout",
     };
@@ -189,6 +277,7 @@ export function resolveRouteAuthPolicy(
         "tenant",
         "partner",
         "driver",
+        "agency",
       ),
       description: "Authenticated self session logout-all",
     };
@@ -498,9 +587,36 @@ export function resolveRouteAuthPolicy(
 
   if (routePath.startsWith("fleet-partner/")) {
     const routeSuffix = routePath.slice("fleet-partner/".length) || "root";
+    const finance =
+      routeSuffix === "statements" ||
+      routeSuffix.startsWith("statements/") ||
+      routeSuffix === "revenue" ||
+      routeSuffix.startsWith("revenue/");
+    // These views combine Fleet operations and financial details. Both
+    // grants are necessary: Ops must not see money, while finance may read
+    // statements without gaining driver/trip/supply/quality details.
+    const financialSummary =
+      routeSuffix === "dashboard" || routeSuffix === "trips";
+    const quality = routeSuffix === "quality-metrics";
+    // Academy has its own @RequireScopes(reports:read) and independent
+    // tenant/ops selector. Preserve those existing callers while Fleet human
+    // training access is evaluated through that endpoint's own guard.
+    const training = routeSuffix.startsWith("training/");
     return {
       routeKey: `fleet-partner:${routeSuffix}:${upperMethod}`,
-      requiredScopes: ["billing:read"],
+      requiredScopes: training
+        ? ["billing:read"]
+        : finance
+          ? methodScope(
+              "fleet:finance:read",
+              "fleet:finance:write",
+              upperMethod,
+            )
+          : quality
+            ? ["fleet:read", "fleet:finance:read"]
+            : financialSummary
+              ? ["fleet:read", "fleet:finance:read"]
+              : methodScope("fleet:read", "fleet:supply:write", upperMethod),
       allowedRealms: baseAllowedRealms("partner"),
       description: "Fleet partner self-service access",
     };

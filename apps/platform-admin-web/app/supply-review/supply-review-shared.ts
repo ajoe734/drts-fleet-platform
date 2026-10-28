@@ -216,6 +216,12 @@ export function classifySupplyReviewError(
 
 export function mapSubmissionToTypeZh(type?: string, t?: TranslateFn): string {
   if (!type) return t ? t("supplyReview.type.object") : "物件";
+  if (type === "profile_correction")
+    return t ? t("supplyReview.type.profile_correction") : "司機證照續期";
+  if (type === "insurance_update")
+    return t ? t("supplyReview.type.insurance_update") : "同車續保更新";
+  if (type === "contract_update")
+    return t ? t("supplyReview.type.contract_update") : "同車續約更新";
   if (type.includes("driver"))
     return t ? t("supplyReview.type.driver") : "司機";
   if (type.includes("vehicle"))
@@ -259,7 +265,18 @@ export function buildSideBySideDiff(
 
   if (vehicleDraft) {
     const insDoc = documents?.find((d) => d.documentType.includes("insurance"));
-    return [
+    const contractDoc = documents?.find((d) =>
+      d.documentType.includes("contract"),
+    );
+    const canonicalInsUntil = canonicalVehicle?.supplyLifecycle?.insurance
+      ?.endAt
+      ? String(canonicalVehicle.supplyLifecycle.insurance.endAt).slice(0, 10)
+      : canonicalVehicle?.insuranceEffectiveUntil;
+    const canonicalContractUntil = canonicalVehicle?.supplyLifecycle?.contract
+      ?.endAt
+      ? String(canonicalVehicle.supplyLifecycle.contract.endAt).slice(0, 10)
+      : canonicalVehicle?.contractEffectiveUntil;
+    const rows: DiffRow[] = [
       {
         label: t ? t("supplyReview.diff.plateNo") : "車牌號碼 · plate no",
         submitted: vehicleDraft.plateNo || "—",
@@ -351,15 +368,32 @@ export function buildSideBySideDiff(
         submitted: insDoc?.effectiveUntil || "—",
         canonical:
           canonicalVehicle?.insuranceStatus === "expired"
-            ? canonicalVehicle?.insuranceEffectiveUntil || expiredText
-            : canonicalVehicle?.insuranceEffectiveUntil || "—",
-        changed: Boolean(insDoc),
+            ? canonicalInsUntil || expiredText
+            : canonicalInsUntil || "—",
+        changed: Boolean(insDoc && insDoc.effectiveUntil !== canonicalInsUntil),
       },
     ];
+    if (
+      contractDoc ||
+      canonicalContractUntil ||
+      submissionType === "contract_update"
+    ) {
+      rows.push({
+        label: t
+          ? t("supplyReview.diff.contractUntil")
+          : "合約到期 · contract until",
+        submitted: contractDoc?.effectiveUntil || "—",
+        canonical: canonicalContractUntil || "—",
+        changed: Boolean(
+          contractDoc && contractDoc.effectiveUntil !== canonicalContractUntil,
+        ),
+      });
+    }
+    return rows;
   }
 
   if (driverDraft) {
-    return [
+    const rows: DiffRow[] = [
       {
         label: t ? t("supplyReview.diff.driverName") : "司機姓名 · name",
         submitted: driverDraft.name || "—",
@@ -423,6 +457,24 @@ export function buildSideBySideDiff(
         changed: Boolean(canonicalDriver),
       },
     ];
+    if (
+      submissionType === "profile_correction" ||
+      canonicalDriver?.taxiDriverRegistrationExpiry
+    ) {
+      rows.splice(6, 0, {
+        label: t
+          ? t("supplyReview.diff.registrationExpiry")
+          : "執照到期日 · registration expiry",
+        submitted: driverDraft.taxiDriverRegistrationExpiry || "—",
+        canonical: canonicalDriver?.taxiDriverRegistrationExpiry || "—",
+        changed: Boolean(
+          canonicalDriver &&
+            driverDraft.taxiDriverRegistrationExpiry !==
+              canonicalDriver.taxiDriverRegistrationExpiry,
+        ),
+      });
+    }
+    return rows;
   }
 
   return [];

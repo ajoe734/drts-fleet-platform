@@ -1,12 +1,27 @@
 import type {
+  CreateSupplyRenewalDraftCommand,
   DriverSupplyDraft,
+  FleetSupplyRenewalTargetDriver,
+  FleetSupplyRenewalTargetVehicle,
+  FleetSupplyRenewalTargetsResponse,
   SupplyDocumentRecord,
   SupplyReadinessRecord,
+  SupplyRenewalSubmissionType,
   SupplySubmissionRecord,
   SupplySubmissionStatus,
   SupplySubmissionType,
+  UpdateSupplyRenewalDraftCommand,
   VehicleSupplyDraft,
 } from "@drts/contracts";
+
+export type {
+  CreateSupplyRenewalDraftCommand,
+  FleetSupplyRenewalTargetDriver,
+  FleetSupplyRenewalTargetVehicle,
+  FleetSupplyRenewalTargetsResponse,
+  SupplyRenewalSubmissionType,
+  UpdateSupplyRenewalDraftCommand,
+};
 
 import type { SupplyReviewEventRecord } from "./supply-submission.repository";
 

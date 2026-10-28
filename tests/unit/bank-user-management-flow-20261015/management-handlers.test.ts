@@ -19,14 +19,21 @@ import {
 import { AuditNotificationService } from "../../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { OidcPkceService } from "../../../apps/api/src/modules/auth/oidc-pkce.service";
 import { AuthController } from "../../../apps/api/src/modules/auth/auth.controller";
+import * as controlPlaneAuth from "../../../packages/control-plane-auth/src/index";
 import * as authHandlers from "../../../packages/tenant-auth/src/route-handlers";
 import * as constants from "../../../packages/tenant-auth/src/constants";
 import * as sessionHelpers from "../../../packages/tenant-auth/src/session";
 import * as apiFetch from "../../../packages/tenant-auth/src/api-fetch";
 import * as sessionVerifier from "../../../packages/tenant-auth/src/verified-tenant-session.server";
 import { createUiModuleLoader } from "../system-remediation/sr-wire-001/ui-module-loader";
+import { verifyIdentityReadback } from "../../e2e/system-remediation/sr-live-global-ux-20261007/guards";
 
 const appRoot = resolve("apps/bank-console-web");
+// Supply the actual TS source to the CommonJS UI loader; bare Node require
+// cannot resolve ui-tokens' extensionless ESM exports in this fixture.
+const uiTokens = createUiModuleLoader(resolve("packages/ui-tokens"))<
+  typeof import("@drts/ui-tokens")
+>(resolve("packages/ui-tokens/src/index.ts"));
 const bankOrigin = "https://bank.example";
 const issuer = "https://accounts.google.com";
 const tenantId = "bank-issuer-test";
@@ -34,6 +41,9 @@ const pair = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const context = (...auth: string[]) => ({ params: Promise.resolve({ auth }) });
 const load = createUiModuleLoader(appRoot, {
   "server-only": {},
+  "@drts/ui-tokens": uiTokens,
+  // The root CI shard does not build package dist; load the real verifier source.
+  "@drts/control-plane-auth": controlPlaneAuth,
   "next/server": { NextRequest, NextResponse },
   "next/headers": { cookies: async () => ({ get: () => undefined }) },
   "@drts/tenant-auth": authHandlers,
@@ -345,6 +355,67 @@ afterEach(() => {
 });
 
 describe("Bank managed caller -> production guards/commands/readback", () => {
+  it("reads the normal OIDC-issued tenant_admin actor on the Bank session route without inventing a selected UI role", async () => {
+    const f = await fixture();
+    const response = await auth.GET(
+      new NextRequest(`${bankOrigin}/api/auth/session`, {
+        headers: {
+          cookie: `${constants.TENANT_SESSION_COOKIE_NAME}=${f.token}`,
+        },
+      }),
+      context("session"),
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.data.identity).toMatchObject({
+      actor_id: f.admin.userId,
+      actor_type: "tenant_admin",
+      realm: "tenant",
+      tenant_id: tenantId,
+      roles: ["tenant_admin"],
+    });
+    expect(body.data.identity).not.toHaveProperty("display_role");
+    expect(
+      verifyIdentityReadback(
+        {
+          app: "bank-console-web",
+          role: "bank_program_admin",
+          identity: {
+            path: "/api/auth/session",
+            subjectPath: "data.identity.actor_id",
+            rolePath: "data.identity.roles",
+            expectedSubject: f.admin.userId,
+          },
+        },
+        body,
+        { status: response.status },
+      ),
+    ).toMatchObject({
+      subject: f.admin.userId,
+      effectiveRoles: ["bank_program_admin"],
+    });
+    expect(() =>
+      verifyIdentityReadback(
+        {
+          app: "bank-console-web",
+          role: "bank_program_admin",
+          identity: {
+            path: "/api/auth/session",
+            subjectPath: "data.identity.actor_id",
+            rolePath: "data.identity.roles",
+            expectedSubject: f.admin.userId,
+          },
+        },
+        {
+          data: {
+            ...body.data,
+            identity: { ...body.data.identity, actor_type: "platform_admin" },
+          },
+        },
+      ),
+    ).toThrow("bank session actor_type must be tenant_admin");
+  });
+
   it("invites, changes canonical role, suspends and reactivates through the Bank BFF with scoped readback", async () => {
     const f = await fixture();
     const invited = await f.request({

@@ -11,6 +11,7 @@ import {
 import {
   buildReferralEmbedConsentCommand,
   getReferralEmbedSession,
+  readPublicReferralEmbedSessionReadback,
   writeReferralEmbedSession,
   toPublicReferralEmbedSession,
   type ServerReferralEmbedSession,
@@ -156,6 +157,60 @@ async function buildDemoSession(
     entrySlug,
     entryHost,
   });
+}
+
+export async function GET(request: Request) {
+  try {
+    const origin = request.headers.get("origin");
+    const requestUrl = resolveReferralRequestUrl(
+      new URL(request.url),
+      request.headers,
+    );
+    if (!requestUrl || (origin && origin !== requestUrl.origin)) {
+      return jsonResponse(
+        { ok: false, message: "Cross-origin session request is not allowed." },
+        403,
+      );
+    }
+    const readback = await readPublicReferralEmbedSessionReadback();
+    const requestedEntrySlug = requestUrl.searchParams.get("entrySlug")?.trim();
+    const requestedEntryHost = requestUrl.searchParams.get("entryHost")?.trim();
+    if (
+      (requestedEntrySlug &&
+        requestedEntrySlug !== readback.session.partnerEntrySlug) ||
+      (requestedEntryHost && requestedEntryHost !== readback.session.entryHost)
+    ) {
+      return jsonResponse(
+        {
+          ok: false,
+          code: "SESSION_MISMATCH",
+          message: "Existing referral session belongs to another entry.",
+        },
+        403,
+      );
+    }
+    return jsonResponse(readback, 200);
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "An active referral session is required.";
+    const status = isEmbedAuthorityError(error)
+      ? error.status
+      : error instanceof Error &&
+          "status" in error &&
+          typeof error.status === "number"
+        ? error.status
+        : 401;
+    const code = isEmbedAuthorityError(error)
+      ? error.code
+      : error instanceof Error &&
+          "code" in error &&
+          typeof error.code === "string"
+        ? error.code
+        : "REFERRAL_SESSION_REQUIRED";
+    return jsonResponse({ ok: false, code, message }, status);
+  }
 }
 
 export async function POST(request: Request) {

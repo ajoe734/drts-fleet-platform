@@ -24,6 +24,8 @@ export type MultiTaxiTripExportJobMetadata = {
   idempotencyKey: string;
   requestedByActorId: string;
   recordCount: number;
+  /** BUREAU-R13: agency that owns the job; absent for platform jobs. */
+  agencyId?: string;
 };
 
 type ReportArtifactView = ReportArtifactRecord & {
