@@ -4165,3 +4165,134 @@ class CandidateCiResumeTests(unittest.TestCase):
             {**payload, "decision": "reassignment_triage", "task_actions": [], "blocked_by": [self.task["id"]]},
             reason="reassignment_triage", config=self.config, status=board)
         self.assertEqual([a["action"] for a in normalized["task_actions"]], ["create_unblock_task"])
+
+
+class ChairBlockedSelectionReachabilityTests(unittest.TestCase):
+    """R5: a fixed Chair window must not starve an explicit-positive CI recovery."""
+
+    TARGET = "OUT-OF-WINDOW-RECOVERY"
+
+    def plain(self, index: int) -> dict:
+        return {"id": f"PLAIN-{index:02d}", "title": "Ordinary blocked", "phase": "test", "owner": "Pi",
+                "reviewer": "Codex", "status": "blocked", "depends_on": [], "next": f"Ordinary blocker {index}"}
+
+    def board(self, **target_changes) -> dict:
+        target = {
+            "id": self.TARGET, "title": "Recovered candidate", "phase": "test", "owner": "Pi", "reviewer": "Codex",
+            "status": "blocked", "waiting_for": "Gemini", "depends_on": [], "next": "Blocked",
+            "candidate_sha": "a" * 40, "candidate_generation": "generation-one",
+            "candidate_branch": "pi/existing-candidate", "pr_url": "https://github.com/acme/fleet/pull/31",
+            "ci_status": "success", "ci_sha": "a" * 40,
+        }
+        target["candidate_review_handoff"] = {k: target[k] for k in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation")}
+        extra_blockers = target_changes.pop("_extra_blockers", 0)
+        target.update(target_changes)
+        tasks = [self.plain(i) for i in range(11)] + [target]  # target is record 12 of 12
+        blockers = [{"task_id": t["id"], "owner": "Pi", "waiting_for": "Gemini", "status": "open",
+                     "message": f"Blocker for {t['id']}", "created_at": "2026-10-27T00:00:00Z"} for t in tasks]
+        blockers += [{"task_id": self.TARGET, "owner": "Pi", "waiting_for": "Codex", "status": "open",
+                      "message": f"Second blocker {i}", "created_at": "2026-10-27T00:10:00Z"} for i in range(extra_blockers)]
+        return {"tasks": tasks, "blockers": blockers}
+
+    def blocked_lines(self, status: dict) -> list[str]:
+        message = supervisor.build_chair_review_message(
+            {}, reason="blocked_task_triage", markdown_path=Path("d.md"), json_path=Path("d.json"),
+            approval_state={"pending": [], "history": []}, state={}, provider_report={}, status=status)
+        section = message.split("Dependency-ready blocked tasks requiring chair repair:\n", 1)[1]
+        return [line for line in section.splitlines() if line.startswith("- ")]
+
+    def explicit_action(self, status: dict) -> dict:
+        from control_plane.domain.chair_policy import open_blocker_fingerprint
+        target = status["tasks"][-1]
+        return {"task_id": self.TARGET, "action": "resume_parent_task", "resume_basis": "candidate_ci_recovered",
+                "resume_status": "in_progress", "candidate_sha": target.get("candidate_sha"),
+                "candidate_generation": target.get("candidate_generation"), "pr_url": target.get("pr_url"),
+                "blocker_fingerprint": open_blocker_fingerprint(status["blockers"], self.TARGET)[0],
+                "reason": "Original CI blocker recovered"}
+
+    def payload(self, reason: str, actions: list, mentioned: list) -> dict:
+        return {"version": 1, "decision": reason, "approval_ttl_minutes": 45, "reason": "r",
+                "blocked_by": mentioned, "approval_actions": [], "reassignment_actions": [],
+                "task_actions": actions, "provider_actions": [], "recommended_focus": []}
+
+    def window_helpers(self) -> list[dict]:
+        return [{"task_id": f"PLAIN-{i:02d}", "action": "create_unblock_task", "reason": "route"} for i in range(8)]
+
+    def test_explicit_positive_record_beyond_window_reaches_prompt_context_and_synthesis(self) -> None:
+        status = self.board()
+        window = [f"PLAIN-{i:02d}" for i in range(8)]
+        # Prompt: the unchanged first eight in order, then the recovery record appended last.
+        lines = self.blocked_lines(status)
+        self.assertEqual([line[2:].split(":", 1)[0] for line in lines], [*window, self.TARGET])
+        self.assertIn("ci_recovery=eligible candidate_sha=" + "a" * 40, lines[-1])
+        self.assertTrue(all("ci_recovery=eligible" not in line for line in lines[:-1]))
+        self.assertEqual(lines[:-1], self.blocked_lines({**status, "tasks": status["tasks"][:8],
+                                                         "blockers": status["blockers"][:8]}))
+        # Context: the Chair must now resolve it like any listed record; the explicit route does.
+        error = supervisor.validate_chair_review_context(
+            self.payload("blocked_task_triage", self.window_helpers(), []), reason="blocked_task_triage",
+            approval_state={"pending": []}, config={}, status=status)
+        self.assertEqual(error, f"blocked_task_triage must resolve blocked tasks via {self.TARGET}:create_unblock_task")
+        self.assertIsNone(supervisor.validate_chair_review_context(
+            self.payload("blocked_task_triage", [*self.window_helpers(), self.explicit_action(status)], []),
+            reason="blocked_task_triage", approval_state={"pending": []}, config={}, status=status))
+        # Reassignment synthesis: the mentioned record is reachable; an explicit decision adds no helper.
+        records = supervisor.reassignment_followup_task_records({}, self.payload("reassignment_triage", [], [self.TARGET]), status)
+        self.assertEqual([r["task_id"] for r in records], [self.TARGET])
+        self.assertIsNotNone(records[0]["candidate_ci_recovery"])
+        explicit = self.payload("reassignment_triage", [self.explicit_action(status)], [self.TARGET])
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            explicit, reason="reassignment_triage", config={}, status=status)
+        self.assertEqual(normalized["task_actions"], [self.explicit_action(status)])
+        self.assertIsNone(supervisor.validate_chair_review_context(
+            normalized, reason="reassignment_triage", approval_state={"pending": []}, config={}, status=status))
+        # One source for all three sites.
+        self.assertEqual([r["task_id"] for r in supervisor.chair_blocked_task_selection({}, status)], [*window, self.TARGET])
+
+    def test_beyond_window_records_without_explicit_positive_state_stay_truncated(self) -> None:
+        cases = {
+            "no_recovery_route": {"candidate_sha": None, "candidate_review_handoff": None},
+            "ci_running": {"ci_status": "running"},
+            "ci_failure": {"ci_status": "failure"},
+            "ci_for_other_candidate": {"ci_sha": "b" * 40},
+            "ci_missing": {"ci_status": None},
+            "two_open_blockers": {"_extra_blockers": 1},
+            "handoff_missing": {"candidate_review_handoff": None},
+            "pr_missing": {"pr_url": None},
+            "branch_missing": {"candidate_branch": None},
+            "generation_mismatch": {"candidate_generation": "generation-two"},
+            "release_hold": {"task_class": "release", "mutates_canonical": False},
+        }
+        window = [f"PLAIN-{i:02d}" for i in range(8)]
+        for kind, changes in cases.items():
+            with self.subTest(kind=kind):
+                status = self.board(**dict(changes))
+                lines = self.blocked_lines(status)
+                self.assertEqual([line[2:].split(":", 1)[0] for line in lines], window)
+                self.assertIsNone(supervisor.validate_chair_review_context(
+                    self.payload("blocked_task_triage", self.window_helpers(), []), reason="blocked_task_triage",
+                    approval_state={"pending": []}, config={}, status=status))
+                # Even a Chair payload naming it explicitly does not drag it into the window.
+                explicit = self.explicit_action(status)
+                records = supervisor.reassignment_followup_task_records(
+                    {}, self.payload("reassignment_triage", [explicit], [self.TARGET]), status)
+                self.assertEqual(records, [])
+                normalized = supervisor.normalize_chair_review_payload_for_reason(
+                    self.payload("reassignment_triage", [], [self.TARGET]), reason="reassignment_triage",
+                    config={}, status=status)
+                self.assertEqual(normalized["task_actions"], [])
+
+    def test_window_and_trigger_checks_unchanged_when_recovery_is_inside_or_absent(self) -> None:
+        # Inside the window: no duplication and ordinary order.
+        status = self.board()
+        status["tasks"] = [status["tasks"][-1], *status["tasks"][:-1]]
+        selection = supervisor.chair_blocked_task_selection({}, status)
+        self.assertEqual([r["task_id"] for r in selection], [self.TARGET, *[f"PLAIN-{i:02d}" for i in range(7)]])
+        self.assertEqual(selection, supervisor.dependency_ready_blocked_task_records({}, status))
+        # Existence/trigger callers keep their limit=1 view.
+        self.assertEqual(len(supervisor.dependency_ready_blocked_task_records({}, status, limit=1)), 1)
+        # Fewer than eight records: nothing appended or reordered.
+        small = {"tasks": status["tasks"][:3], "blockers": status["blockers"]}
+        self.assertEqual(supervisor.chair_blocked_task_selection({}, small),
+                         supervisor.dependency_ready_blocked_task_records({}, small))

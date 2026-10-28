@@ -6343,7 +6343,7 @@ def dependency_ready_blocked_task_records(
     config: dict[str, Any],
     status: dict[str, Any] | None,
     *,
-    limit: int = 8,
+    limit: int | None = 8,
     include_held: bool = False,
 ) -> list[dict[str, Any]]:
     if not isinstance(status, dict):
@@ -6419,6 +6419,42 @@ def has_explicit_candidate_ci_resume(payload: dict[str, Any], record: dict[str, 
     )
 
 
+CHAIR_BLOCKED_TASK_WINDOW = 8
+
+
+def candidate_ci_recovery_ready(record: dict[str, Any]) -> bool:
+    """Structurally explicit-positive: eligible recovery context (identity,
+    retained handoff, exactly one open blocker) whose board CI evidence is
+    success for that exact candidate. No free text is inspected."""
+    recovery = record.get("candidate_ci_recovery")
+    task = record.get("task") or {}
+    return (
+        isinstance(recovery, dict)
+        and str(task.get("ci_status") or "").lower() == "success"
+        and task.get("ci_sha") == recovery["candidate_sha"]
+    )
+
+
+def chair_blocked_task_selection(
+    config: dict[str, Any],
+    status: dict[str, Any] | None,
+    *,
+    include_held: bool = False,
+) -> list[dict[str, Any]]:
+    """The bounded blocked-task list the Chair prompt, context validation and
+    reassignment synthesis share.
+
+    Keeps the held/phase-sorted window unchanged, then appends, in their
+    original relative order, only out-of-window records that are ready for
+    explicit candidate CI recovery, so a fixed window cannot starve them.
+    """
+    records = dependency_ready_blocked_task_records(config, status, limit=None, include_held=include_held)
+    window = records[:CHAIR_BLOCKED_TASK_WINDOW]
+    return window + [
+        record for record in records[CHAIR_BLOCKED_TASK_WINDOW:] if candidate_ci_recovery_ready(record)
+    ]
+
+
 def reassignment_followup_task_records(
     config: dict[str, Any],
     payload: dict[str, Any],
@@ -6440,7 +6476,7 @@ def reassignment_followup_task_records(
         return []
     ready_blocked = {
         str(item.get("task_id") or "").strip(): item
-        for item in dependency_ready_blocked_task_records(config, status)
+        for item in chair_blocked_task_selection(config, status)
         if str(item.get("task_id") or "").strip()
     }
     return [
@@ -6585,7 +6621,7 @@ def _chair_review_summary_lines(
         dispatch_pause_lines.append("- none")
 
     blocked_task_lines: list[str] = []
-    for item in dependency_ready_blocked_task_records(config, status, include_held=True):
+    for item in chair_blocked_task_selection(config, status, include_held=True):
         action_label = str(item.get("action") or "-")
         helper_label = str(item.get("helper_task_id") or "-")
         recovery = item.get("candidate_ci_recovery")
@@ -7119,7 +7155,7 @@ def validate_chair_review_context(
             if missing:
                 return f"approval_triage must resolve pending approvals: {', '.join(missing[:6])}"
     if reason == "blocked_task_triage" and config is not None:
-        ready_blocked = dependency_ready_blocked_task_records(config, status)
+        ready_blocked = chair_blocked_task_selection(config, status)
         if ready_blocked:
             action_index = chair_task_action_index(payload)
             missing: list[str] = []
