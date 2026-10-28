@@ -4463,6 +4463,118 @@ class CandidateCiResumeTests(unittest.TestCase):
                          [(self.task["id"], "resume_parent_task"), ("ORDINARY-ACTIONABLE", "create_unblock_task")])
 
 
+class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
+    """Supervisor-authority merged-acceptance resume through the real board writer."""
+
+    def setUp(self) -> None:
+        import copy
+        import os
+        from test_ai_status import MERGED_BLOCKED_ACCEPTANCE_TASK, ai_status as board_commands
+
+        self.tmp = tempfile.TemporaryDirectory(prefix="merged-acceptance-native-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.task = copy.deepcopy(MERGED_BLOCKED_ACCEPTANCE_TASK)
+        self.board = board_commands.default_state()
+        self.board.update({"tasks": [self.task], "agents": [], "handoffs": [], "blockers": [{
+            "task_id": self.task["id"], "owner": "Claude", "waiting_for": "Codex", "status": "open",
+            "message": "Runtime evidence blocker", "created_at": "2026-10-27T00:00:00Z",
+        }]})
+        self.path = self.root / "ai-status.json"
+        self.path.write_text(json.dumps(self.board))
+        self.runtime_log = self.root / "runtime-log.jsonl"
+        self.board_log = self.root / "ai-activity-log.jsonl"
+        self.config = {"paths": {"status_file": str(self.path), "activity_log": str(self.runtime_log)},
+                       "github_bus": {"repo": "acme/fleet"}}
+        mock.patch.dict(os.environ, {"ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root)}, clear=True).start()
+        self.addCleanup(mock.patch.stopall)
+
+    def assert_untouched(self, before: bytes) -> None:
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse(self.runtime_log.exists(), "rejected resume wrote a Supervisor activity log")
+        self.assertFalse(self.board_log.exists(), "rejected resume wrote a board activity log")
+
+    def test_supervisor_route_restores_acceptance_without_github_or_identity_change(self) -> None:
+        import copy
+        import github_bus
+        before = copy.deepcopy(self.task)
+        with mock.patch.object(github_bus, "gh_json") as reads, \
+                mock.patch.object(supervisor, "queue_delivery_event") as wake:
+            self.assertTrue(supervisor.apply_supervisor_merged_acceptance_resume(
+                self.config, self.task["id"], "Runtime evidence exists for the original keys"))
+        reads.assert_not_called()
+        wake.assert_not_called()
+        state = json.loads(self.path.read_text()); task = state["tasks"][0]
+        self.assertEqual(task["status"], "acceptance")
+        for key in ("owner", "reviewer", "candidate_sha", "candidate_generation", "candidate_branch",
+                    "reviewed_sha", "ci_sha", "ci_status", "merge_sha", "required_acceptance"):
+            self.assertEqual(task[key], before[key])
+        self.assertNotIn("acceptance_evidence", task)
+        self.assertEqual(len(state["tasks"]), 1)
+        self.assertEqual([row["status"] for row in state["blockers"]], ["resolved"])
+        rows = [json.loads(line) for line in self.runtime_log.read_text().splitlines()]
+        self.assertEqual([(row["type"], row["resume_basis"], row["merge_sha"]) for row in rows],
+                         [("supervisor_merged_acceptance_resumed", "merged_runtime_acceptance_ready", before["merge_sha"])])
+        # Second call is a no-op: the task is no longer blocked.
+        snapshot = self.path.read_bytes()
+        self.assertFalse(supervisor.apply_supervisor_merged_acceptance_resume(self.config, self.task["id"], "Again"))
+        self.assertEqual(self.path.read_bytes(), snapshot)
+
+    def test_ineligible_or_gated_tasks_stay_blocked_without_residue(self) -> None:
+        import copy
+        second = {"task_id": self.task["id"], "owner": "Claude", "waiting_for": "Codex", "status": "open",
+                  "message": "Second blocker", "created_at": "2026-10-27T01:00:00Z"}
+        dependency = {"id": "DEP-A", "title": "Dependency", "phase": "test", "owner": "Codex", "reviewer": "Claude",
+                      "status": "in_progress", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Open"}
+        cases = {
+            "unmerged": {"merge_sha": None}, "ci_red": {"ci_status": "failure"}, "ci_pending": {"ci_status": "queued"},
+            "no_review": {"reviewed_sha": None}, "self_review": {"reviewer": "Claude"},
+            "external_gate": {"external_gate": True}, "release_gate": {"task_class": "release", "mutates_canonical": False},
+            "evidence_complete": {"acceptance_evidence": {key: "ref" for key in self.task["required_acceptance"]}},
+            "done": {"status": "done"}, "in_progress": {"status": "in_progress"},
+        }
+        for kind, changes in [*cases.items(), ("second_blocker", None), ("dependency", None), ("empty_reason", None)]:
+            with self.subTest(kind=kind):
+                board = copy.deepcopy(self.board)
+                if changes:
+                    board["tasks"][0].update(changes)
+                    board["tasks"][0] = {k: v for k, v in board["tasks"][0].items() if v is not None}
+                if kind == "second_blocker":
+                    board["blockers"].append(second)
+                if kind == "dependency":
+                    board["tasks"][0]["depends_on"] = ["DEP-A"]; board["tasks"].append(dependency)
+                self.path.write_text(json.dumps(board)); before = self.path.read_bytes()
+                reason = "" if kind == "empty_reason" else "Runtime evidence exists"
+                self.assertFalse(supervisor.apply_supervisor_merged_acceptance_resume(self.config, self.task["id"], reason))
+                self.assert_untouched(before)
+
+    def test_routes_stay_separate_from_candidate_ci_recovery_and_chair_schema(self) -> None:
+        from control_plane.domain.chair_policy import open_blocker_fingerprint, validate_review_payload
+
+        # A merged task has no CI-recovery route; a CI-recovery task has no merged-acceptance route.
+        self.assertIsNone(supervisor.candidate_ci_recovery_context(self.board, self.task))
+        self.assertIsNotNone(supervisor.merged_acceptance_resume_context(self.board, self.task))
+        ci_task = {key: value for key, value in self.task.items() if key not in ("reviewed_sha", "merge_sha")}
+        ci_task.update(ci_status="failure", pr_url="https://github.com/acme/fleet/pull/31",
+                       candidate_review_handoff={k: self.task[k] for k in (
+                           "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation")})
+        self.assertIsNone(supervisor.merged_acceptance_resume_context(self.board, ci_task))
+        self.assertIsNotNone(supervisor.candidate_ci_recovery_context(self.board, ci_task))
+        # The Chair cannot carry the new basis or status: its schema is unchanged.
+        fingerprint = open_blocker_fingerprint(self.board["blockers"], self.task["id"])[0]
+        action = {"task_id": self.task["id"], "action": "resume_parent_task", "resume_status": "acceptance",
+                  "resume_basis": "merged_runtime_acceptance_ready", "candidate_sha": self.task["candidate_sha"],
+                  "candidate_generation": self.task["candidate_generation"], "blocker_fingerprint": fingerprint,
+                  "reason": "Chair attempts merged acceptance"}
+        payload = {"version": 1, "decision": "blocked_task_triage", "approval_ttl_minutes": 45, "reason": "x",
+                   "blocked_by": [], "approval_actions": [], "reassignment_actions": [], "task_actions": [action],
+                   "provider_actions": [], "recommended_focus": []}
+        self.assertIsNotNone(validate_review_payload(payload))
+        before = self.path.read_bytes()
+        self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
+        self.assert_untouched(before)
+
+
 class ChairBlockedSelectionReachabilityTests(unittest.TestCase):
     """R5: a fixed Chair window must not starve an explicit-positive CI recovery."""
 
