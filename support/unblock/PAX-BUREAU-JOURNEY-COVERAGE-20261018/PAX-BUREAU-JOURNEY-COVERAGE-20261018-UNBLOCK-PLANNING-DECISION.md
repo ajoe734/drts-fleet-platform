@@ -5,7 +5,8 @@
 - Task: `PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION`
 - Parent: `PAX-BUREAU-JOURNEY-COVERAGE-20261018`
 - Owner: `Claude2`
-- Reviewer: `Pi`
+- Reviewer: `Claude` (reassigned from `Pi` on `2026-10-28`; see "Parent update:
+  resolution confirmed" below)
 - Decision date: `2026-10-26`
 - Live state last re-verified: `2026-10-26` after `deploy-dev` run
   `40325789456` completed (`updated_at 2026-10-26T13:13:55Z`)
@@ -281,7 +282,7 @@ engineering/owner lane, not the reviewer.
 | Scope cut | Recorded in "Scope cut and routing". This helper does not deploy, does not re-review the Source fix, does not perform the backfill and does not fix the eligibility defect. |
 | Or explicit follow-up needed by the parent task | Recorded in "Parent unblocked next step": fix the rehearsal-supply rejection in one engineering task, then the owner does a pinned same-SHA 16-case backfill. |
 | Produce task-scoped commit/push/PR evidence for any canonical change | PR [#3058](https://github.com/ajoe734/drts-fleet-platform/pull/3058) opened, base `dev`, head `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision`. Head was verified `== 3c6c713cb2e6dd3adae0b873e2fd42957bdb4d04` immediately after opening (`gh pr view 3058 --json headRefOid`); this file's own update commit supersedes that SHA with a new one, which the open PR picks up automatically on push. |
-| Update the parent task with the concrete unblocked next step | **Cannot be done directly by this dispatch; see "Parent update: dispatch-guard findings and required Supervisor action" below for the exact commands and message text Supervisor must run.** A direct `ai-status.sh note PAX-BUREAU-JOURNEY-COVERAGE-20261018 ...` from this worker was rejected by the dispatch guard (`Dispatched worker cannot mutate a different task`); an `assign` with `resolved_parent_*` metadata on this helper's own task was also rejected (`Dispatched workers must use their assigned task lifecycle commands` — `assign` is not in the dispatched-worker command set). Both are hard sandbox constraints in `control_plane/usecases/task_board_commands.py`, not a choice. |
+| Update the parent task with the concrete unblocked next step | Done. Codex (as Root, not subject to `ORCH_DISPATCH_ROLE`) ran the two commands documented below on `2026-10-27T20:55:39Z`; see "Parent update: resolution confirmed (2026-10-28)". `resolved_parent_status`/`resolved_parent_waiting_for`/`resolved_parent_next` are now pinned on this helper. The commands/message text below are retained as the record of exactly what was run and why a dispatched owner/reviewer could not run them directly. |
 
 ## Parent update: dispatch-guard findings and required Supervisor action
 
@@ -354,6 +355,27 @@ TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting
 > waiting_for 改標 owner Claude（engineering/owner lane），不再是 reviewer
 > Gemini2。詳見
 > support/unblock/PAX-BUREAU-JOURNEY-COVERAGE-20261018/PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION.md。
+
+## Parent update: resolution confirmed (2026-10-28)
+
+The Supervisor-only action requested above has been performed. `ai-activity-
+log.jsonl` records, at `2026-10-27T20:55:39Z`, agent `Codex` (acting as Root,
+not subject to `ORCH_DISPATCH_ROLE`) posting a `note` stating the upstream
+parent `note` and the same-owner helper `assign` with `resolved_parent_*`
+metadata were both completed, explicitly describing this as normal
+Supervisor-equivalent coordination, not a resume, acceptance, or Source
+change. `ai-status.sh show PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION`
+now reports `resolved_parent_status: blocked`, `resolved_parent_waiting_for:
+Claude`, and `resolved_parent_next` holding this routing message, matching
+what the two pinned commands above were meant to set. This closes the second
+acceptance gap from the `2026-10-26T15:18:13Z` reviewer reopen (the first
+gap, PR #3058, was already closed). The parent task itself has since moved
+on to a newer, more specific Root diagnostic note (`2026-10-28T01:21:04Z`, a
+different and later finding than this helper's routing); that is expected
+task evolution on the parent and does not reopen this helper's own scope.
+
+No product code, deploy, or Source change was made in this update; only this
+artifact file.
 
 ## Verification basis
 
