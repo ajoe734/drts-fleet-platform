@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 
 describe("Dependency Security Exceptions", () => {
   it("should be valid JSON with correct fields", () => {
@@ -162,3 +163,148 @@ for (const app of ["driver-app", "passenger-app"]) {
     }
   });
 }
+
+describe("dependency gate effective installed patch verification", () => {
+  const root = path.resolve(__dirname, "../..");
+  const appRequire = createRequire(
+    path.join(root, "apps/driver-app/package.json"),
+  );
+  const expoRequire = createRequire(appRequire.resolve("expo/package.json"));
+  const cliRequire = createRequire(
+    expoRequire.resolve("@expo/cli/package.json"),
+  );
+  const configRequire = createRequire(expoRequire.resolve("@expo/config"));
+  const configDirectory = path.dirname(
+    expoRequire.resolve("@expo/config/package.json"),
+  );
+  const mergeDirectory = path.dirname(
+    configRequire.resolve("deepmerge/package.json"),
+  );
+  const patchHash = path
+    .basename(path.dirname(path.dirname(mergeDirectory)))
+    .split("patch_hash=")[1];
+
+  function fixture(
+    run: (directory: string, installed: string, config: string) => void,
+  ) {
+    const directory = fs.mkdtempSync(path.join(tmpdir(), "deepmerge-gate-"));
+    try {
+      for (const file of [
+        "package.json",
+        "pnpm-lock.yaml",
+        "patches/deepmerge@4.3.1.patch",
+      ]) {
+        const target = path.join(directory, file);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(path.join(root, file), target);
+      }
+      // Only the package layout is synthetic. Use unchanged real published
+      // package metadata and patched library bytes; do not mock the verifier.
+      const installed = path.join(
+        directory,
+        `node_modules/.pnpm/deepmerge@4.3.1_patch_hash=${patchHash}/node_modules/deepmerge`,
+      );
+      fs.cpSync(mergeDirectory, installed, { recursive: true });
+      const config = path.join(directory, "config");
+      fs.cpSync(configDirectory, config, { recursive: true });
+      fs.mkdirSync(path.join(config, "node_modules"), { recursive: true });
+      fs.symlinkSync(installed, path.join(config, "node_modules/deepmerge"));
+      for (const app of ["driver-app", "passenger-app"]) {
+        const appDir = path.join(directory, "apps", app);
+        fs.mkdirSync(appDir, { recursive: true });
+        fs.copyFileSync(
+          path.join(root, "apps", app, "package.json"),
+          path.join(appDir, "package.json"),
+        );
+        const expo = path.join(appDir, "node_modules/expo");
+        const cli = path.join(expo, "node_modules/@expo/cli");
+        fs.mkdirSync(path.join(cli, "node_modules/@expo"), { recursive: true });
+        fs.copyFileSync(
+          expoRequire.resolve("expo/package.json"),
+          path.join(expo, "package.json"),
+        );
+        fs.copyFileSync(
+          cliRequire.resolve("@expo/cli/package.json"),
+          path.join(cli, "package.json"),
+        );
+        fs.symlinkSync(config, path.join(expo, "node_modules/@expo/config"));
+        fs.symlinkSync(config, path.join(cli, "node_modules/@expo/config"));
+      }
+      run(directory, installed, config);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  function verify(directory: string) {
+    const result = spawnSync(
+      "python3",
+      [
+        "-c",
+        "import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); " +
+          "from dependency_security import verify_deepmerge_patch; verify_deepmerge_patch(Path(sys.argv[2]))",
+        path.join(root, "tools/ci"),
+        directory,
+      ],
+      { encoding: "utf8", timeout: 10000 },
+    );
+    expect(result.error).toBeUndefined();
+    return result;
+  }
+
+  it("accepts real installed bytes bound to the manifest, lock and all consumers", () => {
+    fixture((directory) => {
+      const result = verify(directory);
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Verified effective deepmerge patch");
+    });
+  });
+
+  it.each(["index.js", "dist/cjs.js", "dist/umd.js", "package.json"])(
+    "rejects tampered installed %s even with matching patch label",
+    (file) => {
+      fixture((directory, installed) => {
+        fs.appendFileSync(path.join(installed, file), "\n");
+        const result = verify(directory);
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("installed deepmerge integrity");
+      });
+    },
+  );
+
+  it("rejects an unapplied installed guard even when metadata claims the patch", () => {
+    fixture((directory, installed) => {
+      const entry = path.join(installed, "dist/cjs.js");
+      fs.writeFileSync(
+        entry,
+        fs
+          .readFileSync(entry, "utf8")
+          .replace("return key === '__proto__'", "return false"),
+      );
+      const result = verify(directory);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("installed deepmerge integrity");
+    });
+  });
+
+  it("rejects another resolved copy even if it has identical patched bytes", () => {
+    fixture((directory, installed, config) => {
+      const alternate = path.join(directory, "another-deepmerge");
+      fs.cpSync(installed, alternate, { recursive: true });
+      const link = path.join(config, "node_modules/deepmerge");
+      fs.unlinkSync(link);
+      fs.symlinkSync(alternate, link);
+      const result = verify(directory);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("unexpected deepmerge resolution");
+    });
+  });
+
+  it("rejects missing installed bytes", () => {
+    fixture((directory, installed) => {
+      fs.rmSync(path.join(installed, "dist/cjs.js"));
+      expect(verify(directory).status).toBe(1);
+    });
+  });
+});

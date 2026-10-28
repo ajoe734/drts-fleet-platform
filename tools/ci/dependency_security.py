@@ -3,7 +3,6 @@ import json
 import sys
 import datetime
 import hashlib
-import re
 from pathlib import Path
 
 # npm still publishes 4.3.1. This is a verified local mitigation, not a claim
@@ -18,9 +17,9 @@ DEEPMERGE_FILES = {
     'package.json': 'f56978e7a6da1a3c6edee41abb54f98584a2fa2680458c48db820ae772fef0c9',
 }
 
-# Resolve from both real applications through Expo and its CLI. Also inspect
-# every installed pnpm dependent link, so another consumer cannot silently use
-# an unpatched copy. Hash the distributed entrypoints before executing them.
+# Resolve the sole locked dependent (@expo/config) from both real applications
+# through Expo and its CLI. Hash distributed entrypoints before executing them.
+# Unreachable old virtual-store directories are not installed consumer evidence.
 DEEPMERGE_INSTALLED_CHECK = r"""
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -69,14 +68,13 @@ for (const app of ['driver-app', 'passenger-app']) {
   const cliRequire = createRequire(expoRequire.resolve('@expo/cli/package.json'));
   for (const parent of [expoRequire, cliRequire]) {
     const configEntry = parent.resolve('@expo/config');
-    check(createRequire(configEntry));
+    const configRequire = createRequire(configEntry);
+    const config = parent('@expo/config/package.json');
+    assert.equal(config.name, '@expo/config');
+    assert.equal(config.version, '12.0.14');
+    assert.equal(config.dependencies.deepmerge, '^4.3.1');
+    check(configRequire);
     consumers.push({app, configEntry});
-  }
-}
-for (const directory of fs.readdirSync(virtual)) {
-  const dependent = path.join(virtual, directory, 'node_modules/deepmerge');
-  if (fs.existsSync(dependent)) {
-    check(createRequire(path.join(virtual, directory, 'node_modules/__probe__.cjs')));
   }
 }
 assert.equal(checked.size, 1);
@@ -97,11 +95,13 @@ def verify_deepmerge_patch(root):
     stanza = (f'patchedDependencies:\n  deepmerge@4.3.1:\n'
               f'    hash: {DEEPMERGE_PATCH_SHA256}\n    path: {DEEPMERGE_PATCH}\n')
     version = f'4.3.1(patch_hash={DEEPMERGE_PATCH_SHA256})'
-    references = re.findall(r'^      deepmerge: (.+)$', lock, re.MULTILINE)
-    package_keys = re.findall(r'^  deepmerge@([^\n]+):(?: \{\})?$', lock, re.MULTILINE)
+    mentions = [line.strip().removesuffix(' {}')
+                for line in lock.splitlines() if 'deepmerge' in line]
+    expected_mentions = ['deepmerge@4.3.1:', f'path: {DEEPMERGE_PATCH}',
+                         'deepmerge@4.3.1:', f'deepmerge: {version}',
+                         f'deepmerge@{version}:']
     if (lock.count(stanza) != 1 or lock.count('\npatchedDependencies:\n') != 1
-            or not references or any(ref != version for ref in references)
-            or sorted(package_keys) != sorted(['4.3.1', '4.3.1', version])):
+            or mentions != expected_mentions):
         raise ValueError('deepmerge lock patch binding mismatch')
     result = subprocess.run(
         ['node', '-e', DEEPMERGE_INSTALLED_CHECK,
