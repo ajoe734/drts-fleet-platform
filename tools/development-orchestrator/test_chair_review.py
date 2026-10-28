@@ -4462,6 +4462,280 @@ class CandidateCiResumeTests(unittest.TestCase):
         self.assertEqual([(a["task_id"], a["action"]) for a in normalized["task_actions"]],
                          [(self.task["id"], "resume_parent_task"), ("ORDINARY-ACTIONABLE", "create_unblock_task")])
 
+    # Compact adaptation of the native 20261028T104828Z-claude.json blocked_by, not a verbatim copy:
+    # the fourth entry's ancestor/next wording differs from the on-disk original. It keeps the
+    # structural traits under test (full-width colons, the "PD-4" milestone label).
+    NATIVE_1048_HELPER_DEFERRALS = [
+        "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-MANUAL-UNBLOCK：自身即 parent 的既有 helper，next 明載 H3/H4 HOLD 與 recursion base-case 禁止 lineage>=maxdepth1 的再生 helper；不可再建 helper-of-helper。",
+        "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-HISTORY-REPAIR：已於 2026-10-11 DONE 並歸檔（PR #2549 merge 7f39917），因 create_chair_unblock_task 未檢查 archived_task_ids 的已知 bug 於 2026-10-21 被誤重建；重複 create_unblock_task 只會再餵同一個 bug，需 Supervisor 層級修正或人工歸檔。",
+        "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-PLANNING-DECISION：next 自述是 2026-10-24 由 synthesize_reassignment_followup_task_actions 誤建（當時 chair review 已明示 blocked_by 不應新建 unblock task），且現行 governance 規格明文禁止在 parent 的 all-writer exclusion/publication HOLD 未解除前新增 helper/handoff。",
+        "PAX-WEB-RIDE-UI-20261009-UNBLOCK-PLANNING-DECISION：自身即 parent 的既有 helper，卡在 PD-4（已發佈 ancestor bbc358cbda65 缺 Reviewer trailer），需要既有的人類/治理權責處理，不是可再派一層 helper 解的執行性缺口。",
+    ]
+    NATIVE_1048_HELPERS = [
+        ("SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-MANUAL-UNBLOCK",
+         "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010", "manual_unblock"),
+        ("SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-HISTORY-REPAIR",
+         "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010", "history_repair"),
+        ("SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-PLANNING-DECISION",
+         "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010", "planning_decision"),
+        ("PAX-WEB-RIDE-UI-20261009-UNBLOCK-PLANNING-DECISION", "PAX-WEB-RIDE-UI-20261009", "planning_decision"),
+    ]
+    NATIVE_1048_PARENT_ACTIONS = [
+        ("DOC-LIVE-RUNNER-UPGRADE-20261005", "manual_unblock", "Codex", "Claude2"),
+        ("SR-LIVE-INVOICE-MAIL-20261007", "manual_unblock", "Claude", "Codex"),
+        ("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025", "planning_decision", "Codex", "Claude2"),
+        ("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026", "manual_unblock", "Claude", "Codex"),
+    ]
+
+    def native_1048_board(self) -> dict:
+        """Compact board for the actual native 10:48 blocked_task_triage: the b93 candidate,
+        the four existing helper rows and the four ordinary first-line parents."""
+        from control_plane.domain.chair_policy import open_blocker_fingerprint
+        self.use_real_agent_config()
+        self.config["github_bus"]["repo"] = "ajoe734/drts-fleet-platform"
+        b93 = "b93ea337b030ec41e198ab8007418a06eb07efce"
+        pr_url = "https://github.com/ajoe734/drts-fleet-platform/pull/3081"
+        # Board CI already reconciled to the same-run green rerun, so the record is
+        # recovery-ready and admitted past the 8-record window, as natively.
+        self.task.update(id="PAX-OPS-PREPARE-ERROR-DIAGNOSTIC-20261026", candidate_sha=b93, ci_sha=b93,
+                         ci_status="success",
+                         candidate_generation="62efb825eb934848bf16327124af1ba1", pr_url=pr_url,
+                         candidate_branch="pi/pax-ops-prepare-error-diagnostic")
+        self.task["candidate_review_handoff"] = {k: self.task[k] for k in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation")}
+        def row(task_id, **changes):
+            task = {"id": task_id, "title": task_id, "phase": "test", "owner": "Pi", "reviewer": "Codex",
+                    "status": "blocked", "task_class": "implementation", "mutates_canonical": True,
+                    "depends_on": [], "artifacts": [], "acceptance": [], "waiting_for": "Claude2",
+                    "next": "Original blocker."}
+            task.update(changes)
+            return task
+        tasks = [row(task_id, task_class="unblock", helper_parent=parent, helper_kind=kind)
+                 for task_id, parent, kind in self.NATIVE_1048_HELPERS]
+        tasks += [row(task_id) for task_id, *_ in self.NATIVE_1048_PARENT_ACTIONS]
+        tasks.append(self.task)
+        blockers = [{"task_id": task["id"], "owner": task["owner"], "waiting_for": task["waiting_for"],
+                     "status": "open", "message": f"Original blocker for {task['id']}",
+                     "created_at": "2026-10-27T00:00:00Z"} for task in tasks]
+        self.board.update(tasks=tasks, blockers=blockers)
+        self.path.write_text(json.dumps(self.board))
+        fingerprint = open_blocker_fingerprint(blockers, self.task["id"])[0]
+        self.action.update(task_id=self.task["id"], candidate_sha=b93, pr_url=pr_url, blocker_fingerprint=fingerprint,
+                           candidate_generation=self.task["candidate_generation"])
+        self.pr.update(url=pr_url, headRefOid=b93, headRefName=self.task["candidate_branch"])
+        self.pr["statusCheckRollup"][0]["detailsUrl"] = \
+            "https://github.com/ajoe734/drts-fleet-platform/actions/runs/40589219996/job/12"
+        self.run.update(id=40589219996, head_sha=b93, head_branch=self.task["candidate_branch"],
+                        pull_requests=[{"number": 3081}])
+        return json.loads(json.dumps(self.board))
+
+    def native_1048_payload(self, blocked_by: list) -> dict:
+        actions = [self.action] + [
+            {"task_id": task_id, "action": "create_unblock_task", "unblock_kind": kind, "target_agent": agent,
+             "reviewer": reviewer, "reason": "Parent 非 helper 本身；建立 task-scoped helper 交健康 lane。"}
+            for task_id, kind, agent, reviewer in self.NATIVE_1048_PARENT_ACTIONS]
+        return {"version": 1, "decision": "operational_review", "approval_ttl_minutes": 45,
+                "reason": "blocked_task_triage：b93 CI 恢復；四個一線 parent 建 helper；四個既有 helper 維持 blocked。",
+                "blocked_by": blocked_by, "approval_actions": [], "reassignment_actions": [], "task_actions": actions,
+                "provider_actions": [], "recommended_focus": []}
+
+    def test_R6_native_1048_helper_dispositions_with_b93_recovery_pass_unchanged(self) -> None:
+        snapshot = self.native_1048_board()
+        helper_ids = [task_id for task_id, *_ in self.NATIVE_1048_HELPERS]
+        selection = supervisor.chair_blocked_task_selection(self.config, snapshot)
+        expected = {r["task_id"]: r["action"] for r in selection}
+        self.assertEqual(len(selection), 9)
+        self.assertTrue(all(expected[task_id] == "create_unblock_task" for task_id in helper_ids))
+        task_map = supervisor.task_index_from_status(self.config, snapshot)
+        self.assertTrue(all(supervisor.chair_unblock_recursion_guarded(self.config, task_map[task_id], task_map)
+                            for task_id in helper_ids))
+        payload = self.native_1048_payload(self.NATIVE_1048_HELPER_DEFERRALS)
+        self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(self.config, payload, selection, snapshot),
+                         set(helper_ids))
+        self.assertIsNone(supervisor.validate_chair_review_context(
+            payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config, status=snapshot))
+        effects = self.refresh_side_effects("blocked_task_triage", payload, gh=self.observe)
+        state = {task["id"]: task for task in effects["state"]["tasks"]}
+        self.assertEqual(effects["reads"], 2)
+        self.assertEqual(state[self.task["id"]]["status"], "review")
+        self.assertEqual([state[task_id] for task_id in helper_ids],
+                         [task for task in snapshot["tasks"] if task["id"] in helper_ids])  # untouched, still blocked
+        self.assertEqual(sorted(effects["helpers"]), sorted(
+            helper_ids + [f"{task_id}-UNBLOCK-{kind.upper().replace('_', '-')}"
+                          for task_id, kind, *_ in self.NATIVE_1048_PARENT_ACTIONS]))  # no helper-of-helper
+        self.assertEqual(effects["escalations"], {})
+        self.assertIn("chair_parent_resume_applied", effects["rows"])
+        self.assertEqual(effects["rows"].count("chair_unblock_task_created"), 4)
+        self.assertNotIn("governance_recursion_blocked", effects["rows"])
+        self.assertNotIn("chair_review_invalid_schema", effects["rows"])
+
+    def test_R6_native_1048_deferral_format_keeps_anti_abuse_rejections(self) -> None:
+        snapshot = self.native_1048_board()
+        helper = self.NATIVE_1048_HELPERS[0][0]
+        selection = supervisor.chair_blocked_task_selection(self.config, snapshot)
+        reason = "自身即 parent 的既有 helper，recursion base-case 禁止再生 helper；不可再建 helper-of-helper。"
+        accepted = {"ascii_colon": f"{helper}: {reason}", "full_width_colon": f"{helper}：{reason}",
+                    "milestone_label": f"{helper}：卡在 PD-4 與 H3/H4 HOLD，需要既有的人類/治理權責處理。"}
+        rejected = {"short_reason": f"{helper}：維持 blocked",
+                    "names_other_task": f"{helper}：same reason as SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010",
+                    "names_numbered_task": f"{helper}：wait for RGP-002 and keep the existing helper blocked",
+                    "label_prefixed_task": f"{helper}：wait for PD-4-RELEASE and keep the existing helper blocked",
+                    "other_separator": f"{helper}；{reason}",
+                    "not_first": f"維持 {helper}：{reason}"}
+        for kind, entry in {**accepted, **rejected}.items():
+            with self.subTest(kind=kind):
+                deferred = supervisor.chair_reasoned_deferral_task_ids(
+                    self.config, {**self.native_1048_payload([entry])}, selection, snapshot)
+                self.assertEqual(deferred, {helper} if kind in accepted else set())
+        # Whole-batch rejection stays for a malformed disposition, before any GitHub read or write.
+        blocked_by = [rejected["names_other_task"], *self.NATIVE_1048_HELPER_DEFERRALS[1:]]
+        payload = self.native_1048_payload(blocked_by)
+        self.assertEqual(supervisor.validate_chair_review_context(
+            payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config, status=snapshot),
+            f"blocked_task_triage must resolve blocked tasks via {helper}:create_unblock_task")
+        effects = self.refresh_side_effects("blocked_task_triage", payload, gh=self.observe)
+        self.assertEqual((effects["reads"], effects["wakes"], effects["unchanged"]), (0, 0, True))
+        self.assertEqual(effects["rows"], ["chair_review_invalid_schema"])
+        # Outside a mixed recovery batch an ordinary actionable parent is never waived by a
+        # well-formed full-width deferral; the protected helpers stay deferrable on their own.
+        ordinary = self.NATIVE_1048_PARENT_ACTIONS[0][0]
+        payload = self.native_1048_payload(self.NATIVE_1048_HELPER_DEFERRALS + [f"{ordinary}：{reason}"])
+        payload["task_actions"] = [a for a in payload["task_actions"]
+                                   if a["task_id"] not in {ordinary, self.task["id"]}]
+        payload["task_actions"].append({"task_id": self.task["id"], "action": "create_unblock_task",
+                                        "reason": "Ordinary helper route for the candidate"})
+        self.assertEqual(supervisor.validate_chair_review_context(
+            payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config, status=snapshot),
+            f"blocked_task_triage must resolve blocked tasks via {ordinary}:create_unblock_task")
+
+    ARCHIVE_DEFERRAL = ("ARCHIVE-PARENT: Existing helper is archived and reserved; preserve blocked state until new "
+                        "valid resolution evidence is available.")
+
+    def archive_parent_board(self, archived_kind: str | None = None, **changes) -> dict:
+        """Ordinary blocked parent whose only prior helper ID is archive-reserved."""
+        self.use_real_agent_config()
+        parent = {"id": "ARCHIVE-PARENT", "title": "Ordinary parent", "phase": "test", "owner": "Pi",
+                  "reviewer": "Codex", "status": "blocked", "task_class": "implementation", "depends_on": [],
+                  "artifacts": [], "acceptance": [], "waiting_for": "Claude2", "next": "Original blocker."}
+        parent.update(changes)
+        kind = archived_kind or supervisor.blocked_task_triage_kind(parent)
+        self.board.update(tasks=[parent], archived_task_ids=[supervisor.chair_unblock_task_id(parent["id"], kind)],
+                          blockers=[{"task_id": parent["id"], "owner": "Pi", "waiting_for": "Claude2",
+                                     "status": "open", "message": "Original blocker",
+                                     "created_at": "2026-10-27T00:00:00Z"}])
+        self.path.write_text(json.dumps(self.board))
+        return json.loads(json.dumps(self.board))
+
+    def triage_payload(self, blocked_by: list, actions: list | None = None) -> dict:
+        return {"version": 1, "decision": "blocked_task_triage", "approval_ttl_minutes": 45,
+                "reason": "Archived helper stays reserved.", "blocked_by": blocked_by, "approval_actions": [],
+                "reassignment_actions": [], "task_actions": actions or [], "provider_actions": [],
+                "recommended_focus": []}
+
+    def triage_verdict(self, snapshot: dict, blocked_by: list, actions: list | None = None) -> str | None:
+        return supervisor.validate_chair_review_context(
+            self.triage_payload(blocked_by, actions), reason="blocked_task_triage",
+            approval_state={"pending": []}, config=self.config, status=snapshot)
+
+    def test_R6_archive_reserved_helper_parent_defers_without_recreate_or_resume(self) -> None:
+        snapshot = self.archive_parent_board()
+        selection = supervisor.chair_blocked_task_selection(self.config, snapshot)
+        self.assertEqual([(r["task_id"], r["action"]) for r in selection], [("ARCHIVE-PARENT", "create_unblock_task")])
+        # The real creator refuses the selected action: the stable helper ID is archive-reserved.
+        before = self.path.read_bytes(); state: dict = {}
+        self.assertFalse(supervisor.create_chair_unblock_task(
+            self.config, state, {"task_id": "ARCHIVE-PARENT", "reason": "route"}, {}))
+        self.assertEqual((self.path.read_bytes(), state, self.runtime_rows()), (before, {}, []))
+        # A specific reasoned deferral is eligible; nothing else is waived.
+        self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(
+            self.config, {"blocked_by": [self.ARCHIVE_DEFERRAL]}, selection, snapshot), {"ARCHIVE-PARENT"})
+        self.assertIsNone(self.triage_verdict(snapshot, [self.ARCHIVE_DEFERRAL]))
+        missing = "blocked_task_triage must resolve blocked tasks via ARCHIVE-PARENT:create_unblock_task"
+        for kind, blocked_by in {"no_disposition": [], "id_only": ["ARCHIVE-PARENT"],
+                                 "short_reason": ["ARCHIVE-PARENT: archived"],
+                                 "names_other_task": ["ARCHIVE-PARENT: same as ARCHIVE-PARENT-UNBLOCK-MANUAL-UNBLOCK "
+                                                      "which is archived, keep it blocked"]}.items():
+            with self.subTest(kind=kind):
+                self.assertEqual(self.triage_verdict(snapshot, blocked_by), missing)
+        # Full refresh: the parent stays blocked, the archived ID is not recreated, nothing resumes.
+        effects = self.refresh_side_effects("blocked_task_triage", self.triage_payload([self.ARCHIVE_DEFERRAL]))
+        self.assertEqual((effects["reads"], effects["wakes"], effects["helpers"]), (0, 0, []))
+        self.assertTrue(effects["unchanged"])
+        self.assertEqual(effects["rows"], ["chair_review_applied"])
+        self.assertEqual(effects["state"]["tasks"][0]["status"], "blocked")
+        self.assertFalse(effects["board_log"])
+        # reassignment_triage synthesizes no doomed helper for the deferred parent.
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            {**self.triage_payload([self.ARCHIVE_DEFERRAL]), "decision": "reassignment_triage"},
+            reason="reassignment_triage", config=self.config, status=snapshot)
+        self.assertEqual(normalized["task_actions"], [])
+
+    def test_R6_unreserved_helper_route_and_structural_selection_controls(self) -> None:
+        missing = "blocked_task_triage must resolve blocked tasks via ARCHIVE-PARENT:create_unblock_task"
+        # Another kind archived: the default helper is still creatable, so the parent stays actionable.
+        snapshot = self.archive_parent_board(archived_kind="history_repair")
+        self.assertNotEqual(supervisor.blocked_task_triage_kind(snapshot["tasks"][0]), "history_repair")
+        self.assertEqual(self.triage_verdict(snapshot, [self.ARCHIVE_DEFERRAL]), missing)
+        self.assertIsNone(self.triage_verdict(snapshot, [], [{"task_id": "ARCHIVE-PARENT",
+                                                              "action": "create_unblock_task", "reason": "route"}]))
+        self.assertTrue(supervisor.create_chair_unblock_task(
+            self.config, {}, {"task_id": "ARCHIVE-PARENT", "reason": "route"}, {}))
+        self.assertIn("ARCHIVE-PARENT-UNBLOCK-MANUAL-UNBLOCK", [t["id"] for t in json.loads(self.path.read_text())["tasks"]])
+        # Nothing archived: ordinary actionable enforcement is unchanged.
+        snapshot = self.archive_parent_board(); snapshot["archived_task_ids"] = []
+        self.assertEqual(self.triage_verdict(snapshot, [self.ARCHIVE_DEFERRAL]), missing)
+        helper_row = {"title": "Helper", "phase": "test", "owner": "Codex", "reviewer": "Claude",
+                      "task_class": "unblock", "helper_parent": "ARCHIVE-PARENT", "helper_kind": "manual_unblock",
+                      "depends_on": [], "artifacts": [], "acceptance": [], "next": "Helper work"}
+        controls = {
+            # Existing open helper: wait_for_unblock_task, out of the required-action selection.
+            "open_helper": ({"tasks_extra": [{**helper_row, "id": "ARCHIVE-PARENT-UNBLOCK-MANUAL-UNBLOCK",
+                                              "status": "in_progress"}], "archive": False}, None),
+            # Completed helper with a verifiable resolution: the existing resume route is still
+            # required, never a deferral (its ID is reserved, but the action is not create_unblock_task).
+            "completed_helper": ({"tasks_extra": [{**helper_row, "id": "ARCHIVE-PARENT-UNBLOCK-MANUAL-UNBLOCK",
+                                                   "status": "done", "resolved_parent_status": "in_progress",
+                                                   "resolved_parent_at": "2026-10-27T01:00:00Z"}],
+                                  "archive": False},
+                                 "blocked_task_triage must resolve blocked tasks via ARCHIVE-PARENT:resume_parent_task"),
+            # Completed helper without a resolution clock: advisory wait, out of the selection.
+            "unverified_completed_helper": ({"tasks_extra": [{**helper_row, "status": "done",
+                                                              "id": "ARCHIVE-PARENT-UNBLOCK-MANUAL-UNBLOCK"}],
+                                             "archive": False}, None),
+            # Delivery HOLD / external gate: wait_for_parent_resolution, out of the selection.
+            "hold": ({"parent": {"external_gate": True}}, None),
+            # Dependency not done: not dependency-ready, out of the selection.
+            "dependency": ({"parent": {"depends_on": ["DEP-OPEN"]},
+                            "tasks_extra": [{**helper_row, "id": "DEP-OPEN", "task_class": "implementation",
+                                             "helper_parent": "", "helper_kind": "", "status": "in_progress"}]}, None),
+        }
+        for kind, (spec, expected) in controls.items():
+            with self.subTest(control=kind):
+                snapshot = self.archive_parent_board(**spec.get("parent", {}))
+                if spec.get("archive") is False:
+                    snapshot["archived_task_ids"] = []
+                snapshot["tasks"] += spec.get("tasks_extra", [])
+                self.path.write_text(json.dumps(snapshot)); self.board = json.loads(json.dumps(snapshot))
+                self.assertEqual(self.triage_verdict(snapshot, [self.ARCHIVE_DEFERRAL]), expected)
+                if kind == "completed_helper":
+                    selection = supervisor.chair_blocked_task_selection(self.config, snapshot)
+                    self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(
+                        self.config, {"blocked_by": [self.ARCHIVE_DEFERRAL]}, selection, snapshot), set())
+                if kind in {"hold", "dependency"}:
+                    before = self.path.read_bytes()
+                    self.assertFalse(supervisor.create_chair_unblock_task(
+                        self.config, {}, {"task_id": "ARCHIVE-PARENT", "reason": "route"}, {}))
+                    self.assertEqual(self.path.read_bytes(), before)
+        # Lineage depth: a helper-of-helper parent is recursion guarded and escalates, never nests.
+        snapshot = self.archive_parent_board(task_class="unblock", helper_parent="ROOT-PARENT",
+                                             helper_kind="manual_unblock")
+        snapshot["archived_task_ids"] = []; self.path.write_text(json.dumps(snapshot))
+        self.assertIsNone(self.triage_verdict(snapshot, [self.ARCHIVE_DEFERRAL]))
+        state: dict = {}
+        self.assertFalse(supervisor.create_chair_unblock_task(
+            self.config, state, {"task_id": "ARCHIVE-PARENT", "reason": "route"}, {}))
+        self.assertIn("ARCHIVE-PARENT", state["governance_escalations"])
+
 
 class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
     """Supervisor-authority merged-acceptance resume through the real board writer."""
