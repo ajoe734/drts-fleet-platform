@@ -6,7 +6,7 @@
 - Parent: `PAX-BUREAU-JOURNEY-COVERAGE-20261018`
 - Owner: `Claude2`
 - Reviewer: `Claude` (reassigned from `Pi` on `2026-10-28`; see "Parent update:
-  resolution confirmed" below)
+  third-round reopen correction" below)
 - Decision date: `2026-10-26`
 - Live state last re-verified: `2026-10-26` after `deploy-dev` run
   `40325789456` completed (`updated_at 2026-10-26T13:13:55Z`)
@@ -282,7 +282,7 @@ engineering/owner lane, not the reviewer.
 | Scope cut | Recorded in "Scope cut and routing". This helper does not deploy, does not re-review the Source fix, does not perform the backfill and does not fix the eligibility defect. |
 | Or explicit follow-up needed by the parent task | Recorded in "Parent unblocked next step": fix the rehearsal-supply rejection in one engineering task, then the owner does a pinned same-SHA 16-case backfill. |
 | Produce task-scoped commit/push/PR evidence for any canonical change | PR [#3058](https://github.com/ajoe734/drts-fleet-platform/pull/3058) opened, base `dev`, head `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision`. Head was verified `== 3c6c713cb2e6dd3adae0b873e2fd42957bdb4d04` immediately after opening (`gh pr view 3058 --json headRefOid`); this file's own update commit supersedes that SHA with a new one, which the open PR picks up automatically on push. |
-| Update the parent task with the concrete unblocked next step | Done. Codex (as Root, not subject to `ORCH_DISPATCH_ROLE`) ran the two commands documented below on `2026-10-27T20:55:39Z`; see "Parent update: resolution confirmed (2026-10-28)". `resolved_parent_status`/`resolved_parent_waiting_for`/`resolved_parent_next` are now pinned on this helper. The commands/message text below are retained as the record of exactly what was run and why a dispatched owner/reviewer could not run them directly. |
+| Update the parent task with the concrete unblocked next step | Root 的獨立診斷已經在父任務的 `next` 欄位上，比這個 helper 原本的路由訊息更深入地覆蓋了同一個缺陷（見下方第三輪修正小節的核實證據）；`resolved_parent_next`／`resolved_parent_status` 因此已經是對父任務的 no-op。還差一個欄位：`resolved_parent_waiting_for` 需要 Supervisor 執行一行 `assign` 指令從 `Claude` 改成 `Gemini2`，避免未來 merge 打斷父任務目前正在等待的交接。見「Parent update: third-round reopen correction」。 |
 
 ## Parent update: dispatch-guard findings and required Supervisor action
 
@@ -356,26 +356,84 @@ TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting
 > Gemini2。詳見
 > support/unblock/PAX-BUREAU-JOURNEY-COVERAGE-20261018/PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION.md。
 
-## Parent update: resolution confirmed (2026-10-28)
+## Parent update: third-round reopen correction (2026-10-28)
 
-The Supervisor-only action requested above has been performed. `ai-activity-
-log.jsonl` records, at `2026-10-27T20:55:39Z`, agent `Codex` (acting as Root,
-not subject to `ORCH_DISPATCH_ROLE`) posting a `note` stating the upstream
-parent `note` and the same-owner helper `assign` with `resolved_parent_*`
-metadata were both completed, explicitly describing this as normal
-Supervisor-equivalent coordination, not a resume, acceptance, or Source
-change. `ai-status.sh show PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION`
-now reports `resolved_parent_status: blocked`, `resolved_parent_waiting_for:
-Claude`, and `resolved_parent_next` holding this routing message, matching
-what the two pinned commands above were meant to set. This closes the second
-acceptance gap from the `2026-10-26T15:18:13Z` reviewer reopen (the first
-gap, PR #3058, was already closed). The parent task itself has since moved
-on to a newer, more specific Root diagnostic note (`2026-10-28T01:21:04Z`, a
-different and later finding than this helper's routing); that is expected
-task evolution on the parent and does not reopen this helper's own scope.
+Reviewer Claude reopened `b35e15e92784a26e49b9fd3230a3f879b8eef618` at
+`2026-10-28T02:38:36Z` (finding recorded `2026-10-28T02:51:14Z`). The
+previous section's claim that `resolved_parent_next` "holds this routing
+message" was **factually wrong** at the moment it was written. Re-verified
+again now, `2026-10-28`:
 
-No product code, deploy, or Source change was made in this update; only this
-artifact file.
+- `ai-status.sh show PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION`
+  reports `resolved_parent_status: blocked`, `resolved_parent_waiting_for:
+  Claude`, and `resolved_parent_next` equal, character for character, to
+  the parent's own live `next` field (`PAX-BUREAU-JOURNEY-COVERAGE-20261018`,
+  `last_update: 2026-10-28T01:21:04Z`) — the Root Registry/`vehicle` GET
+  process-cache diagnostic, not the routing message quoted in the
+  Supervisor command block above.
+- `ai-status.sh show PAX-BUREAU-JOURNEY-COVERAGE-20261018` reports
+  `waiting_for: Gemini2`, not `Claude`.
+
+What actually happened: the `2026-10-27T20:55:39Z` Codex/Root action did pin
+`resolved_parent_next` to the routing message, correctly, as described
+above. A later, unrelated `assign` on this same helper task at
+`2026-10-28T02:32:16Z` (not run by this helper's owner/reviewer — this role
+cannot run `assign` at all, see dispatch-guard findings above) reset
+`resolved_parent_next` to match the parent's `next` at that moment. The
+previous section's author (this helper's owner, `2026-10-28T02:33:33Z`
+handoff) did not catch that the pin had been overwritten 77 seconds
+earlier, and wrote a claim that was already false when written.
+
+**Decision: do not restore the routing message.** The parent's current
+`next` is not an unrelated overwrite to undo. It is Root's own,
+independent, and materially deeper continuation of the exact defect this
+helper routed to engineering:
+
+- Root's diagnostic spec
+  (`.local/goal-continuation-20261015T-current-frontier/Root-PAX-accepted516-existing-GET-prospective-read-spec-process-cache-and-fresh-product-policy-boundary-20261028.json`,
+  `accepted_source 51628b2b078d07ec759e0804448f7815bbc812ee`) explicitly
+  names `VehicleEligibilityService711-736` emitting `400
+  VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT` and targets the same fixture
+  vehicles (`pax-review-vehicle-a` / `pax-review-vehicle-b`, the "A/B" in
+  the parent's current `next`) that back the two e2e specs this helper's
+  "Current live state" section cites.
+- It chains from two earlier same-day Root artifacts
+  (`Root-PAX-no-formal3072-handoff-accepted0ec-existing-readonly-eligibility-frontier-20261027.json`,
+  `Root-PAX-existing-eligibility-read-chain-accepted0ec-and-last-served2bb-ten-blob-equivalence-20261027.json`),
+  i.e. Root has been independently root-causing this exact rejection since
+  `2026-10-27`, in parallel with and more rigorously than this helper's
+  "open one engineering task" proposal.
+- Forcing `resolved_parent_next` back to this helper's shorter routing
+  message would regress the parent's visible `next` to less specific
+  guidance than what Root has already produced for the same defect. The
+  routing decision's actual intent — get this treated as an engineering
+  defect and not a product/contract gap, and don't spawn a second
+  planning-decision helper — is already satisfied, more thoroughly than
+  this helper could satisfy it directly.
+
+**What is still a real defect, and the one remaining Supervisor action:**
+`resolved_parent_waiting_for` is pinned to `Claude`, but the parent's live
+`waiting_for` is `Gemini2`. If this helper merges unchanged,
+`apply_unblock_parent_resolution` will overwrite the parent's
+`waiting_for` from `Gemini2` to `Claude`, interrupting whatever hand-off
+Root's diagnostic is currently waiting on. `resolved_parent_next` and
+`resolved_parent_status` are already a no-op against the parent's live
+state (`blocked` / Root's current `next`, both already verified
+character-for-character above), so only this one field needs correction:
+
+```
+TASK_METADATA_JSON='{"resolved_parent_waiting_for":"Gemini2"}' AI_NAME=Supervisor /home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-22b51a04f524/tools/development-orchestrator/bin/ai-status.sh assign PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION Claude2 Pi
+```
+
+This should be run as close to this helper's actual merge as practical,
+since the parent's `next`/`waiting_for` can keep moving while Root
+continues its own diagnostic; whoever runs it should re-diff this helper's
+`resolved_parent_next`/`resolved_parent_waiting_for` against
+`PAX-BUREAU-JOURNEY-COVERAGE-20261018`'s live `next`/`waiting_for`
+immediately before merging, not rely on this snapshot.
+
+No product code, deploy, or Source change was made in this correction;
+only this artifact file.
 
 ## Verification basis
 
