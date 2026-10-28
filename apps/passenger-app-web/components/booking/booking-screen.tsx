@@ -27,6 +27,7 @@ import { BOOK_T as T } from "../../lib/booking/translations";
 import {
   useReviewDemo,
   useReviewDemoPending,
+  useTrialMode,
 } from "../review-demo/review-context";
 import {
   clearBookingRecovery,
@@ -69,6 +70,7 @@ export function BookingScreen({
   const router = useRouter();
   const review = useReviewDemo();
   const reviewPending = useReviewDemoPending();
+  const trial = useTrialMode();
   const [client] = useState(() => supplied ?? createBookingClient());
   const [account, setAccount] = useState<PassengerAccount>();
   const [fare, setFare] = useState<FareVersion>();
@@ -652,8 +654,10 @@ export function BookingScreen({
         </>
       ) : (
         <>
+          {/* A trial account signed in with its verified test phone. */}
           {!account.contactPhoneVerified &&
-            !settings.requireSmsVerification && (
+            !settings.requireSmsVerification &&
+            !trial && (
               <>
                 <AuthAlert kind="warn">{T.unverifiedPhone}</AuthAlert>
                 <a href="/account">{T.account}</a>
