@@ -5405,8 +5405,8 @@ class ExistingMergedAcceptanceBoundedAdmissionTests(unittest.TestCase):
     def window(self) -> list[str]:
         return [f"PLAIN-{index:02d}" for index in range(8)]
 
-    def selected(self, status: dict, **kwargs) -> list[str]:
-        return [r["task_id"] for r in supervisor.chair_blocked_task_selection(self.config, status, **kwargs)]
+    def selected(self, status: dict) -> list[str]:
+        return [r["task_id"] for r in supervisor.chair_blocked_task_selection(self.config, status)]
 
     def blocked_lines(self, status: dict) -> list[str]:
         message = supervisor.build_chair_review_message(
@@ -5475,7 +5475,6 @@ class ExistingMergedAcceptanceBoundedAdmissionTests(unittest.TestCase):
         self.assertFalse([r for r in records if supervisor.candidate_ci_recovery_ready(r)])
         # After: the unchanged first eight, then the merged record from the shared reserve.
         self.assertEqual(self.selected(status), [*self.window(), self.TARGET])
-        self.assertEqual(self.selected(status, include_held=True), [*self.window(), self.TARGET])
         lines = self.blocked_lines(status)
         self.assertEqual([line[2:].split(":", 1)[0] for line in lines], [*self.window(), self.TARGET])
         self.assertIn(f"merged_acceptance=eligible candidate_sha={self.merged_template['candidate_sha']}", lines[-1])
@@ -5642,7 +5641,6 @@ class ExistingMergedAcceptanceBoundedAdmissionTests(unittest.TestCase):
         for kind, board in boards.items():
             with self.subTest(kind=kind):
                 self.assertEqual(self.selected(board), self.window())
-                self.assertEqual(self.selected(board, include_held=True), self.window())
                 self.assertTrue(all("merged_acceptance=eligible" not in line for line in self.blocked_lines(board)))
                 self.assertIsNone(self.context_error(self.payload("blocked_task_triage", self.window_helpers()), board))
 
@@ -5765,4 +5763,102 @@ class ExistingMergedAcceptanceBoundedAdmissionTests(unittest.TestCase):
                                            "task_class": "unblock", "helper_parent": self.TARGET,
                                            "helper_kind": "planning_decision"})
                 self.assertEqual(self.selected(board), self.window())
-                self.assertEqual(self.selected(board, include_held=True), self.window())
+
+    def held_merged_board(self, extra: int) -> dict:
+        """Seven ordinary records, TARGET held by its completed helper, and
+        `extra` more held merged-eligible copies, each with its own helper and one open blocker."""
+        import copy
+        board = self.completed_helper_board()
+        keep = {f"PLAIN-{index:02d}" for index in range(7)} | {self.TARGET, f"{self.TARGET}-UNBLOCK-MANUAL-UNBLOCK"}
+        board["tasks"] = [task for task in board["tasks"] if task["id"] in keep]
+        board["blockers"] = [b for b in board["blockers"] if b["task_id"] in keep]
+        target = next(task for task in board["tasks"] if task["id"] == self.TARGET)
+        helper = next(task for task in board["tasks"] if task["id"] == f"{self.TARGET}-UNBLOCK-MANUAL-UNBLOCK")
+        for name in ("SECOND", "THIRD", "FOURTH")[:extra]:
+            task_id = f"MERGED-{name}-HELD"
+            board["tasks"].append({**copy.deepcopy(target), "id": task_id})
+            board["tasks"].append({**copy.deepcopy(helper), "id": f"{task_id}-UNBLOCK-MANUAL-UNBLOCK", "helper_parent": task_id})
+            board["blockers"].append(self.blocker(task_id))
+        return board
+
+    def prompt_ids(self, board: dict) -> list[str]:
+        return [line[2:].split(":", 1)[0] for line in self.blocked_lines(board)]
+
+    def test_prompt_and_validator_share_one_selection_with_held_merged_candidates(self) -> None:
+        board = self.held_merged_board(extra=3)
+        ordinary = [f"PLAIN-{index:02d}" for index in range(7)]
+        expected = [*ordinary, self.TARGET, "MERGED-SECOND-HELD", "MERGED-THIRD-HELD"]
+        # Same task ids, same order, on every path: prompt, context validation, deferral, stale check.
+        self.assertEqual(self.prompt_ids(board), expected)
+        self.assertEqual(self.selected(board), expected)
+        self.assertNotIn("MERGED-FOURTH-HELD", self.prompt_ids(board))  # still 8 + reserve 2
+        lines = self.blocked_lines(board)
+        advertised = [line[2:].split(":", 1)[0] for line in lines if "merged_acceptance=eligible" in line]
+        self.assertEqual(advertised, expected[7:])
+        deferrals = self.deferrals()[:7]
+        selection = supervisor.chair_blocked_task_selection(self.config, board)
+        # Every advertised merged route is accepted with the same deferrals; none is required.
+        self.assertIsNone(self.context_error(self.payload("blocked_task_triage", [
+            {"task_id": task_id, "action": "create_unblock_task", "reason": "route"} for task_id in ordinary]), board))
+        for task_id in advertised:
+            for reason in ("blocked_task_triage", "reassignment_triage"):
+                with self.subTest(task_id=task_id, reason=reason):
+                    payload = self.payload(reason, [self.merged_action(board, task_id)], deferrals)
+                    self.assertEqual(supervisor.stale_mixed_recovery_deferrals(self.config, payload, board), [])
+                    self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(
+                        self.config, payload, selection, board), set(ordinary))
+                    normalized = supervisor.normalize_chair_review_payload_for_reason(
+                        payload, reason=reason, config=self.config, status=board)
+                    self.assertEqual(normalized["task_actions"], payload["task_actions"])  # nothing synthesized
+                    self.assertIsNone(self.context_error(normalized, board, reason))
+        # A held record without a merged route is tracked on both paths and never requires an action.
+        tracking = self.held_merged_board(extra=0)
+        tracking["tasks"][7].pop("merge_sha")
+        self.assertEqual(self.prompt_ids(tracking), self.selected(tracking))
+        self.assertEqual(self.selected(tracking), [*ordinary, self.TARGET])
+        self.assertNotIn("merged_acceptance=eligible", self.blocked_lines(tracking)[-1])
+        self.assertIn(f"{ordinary[0]}:create_unblock_task", self.context_error(
+            self.payload("blocked_task_triage", [], deferrals), tracking) or "")
+
+    def test_mixed_apply_with_third_held_merged_record_and_out_of_set_no_write(self) -> None:
+        import github_bus
+        board = self.held_merged_board(extra=3)
+        deferrals = self.deferrals()[:7]
+        # Beyond the shared bound: not advertised, so its mixed batch is refused with no write.
+        before = self.write(board)
+        outside = self.payload("blocked_task_triage", [self.merged_action(board, "MERGED-FOURTH-HELD")], deferrals)
+        with mock.patch.object(supervisor, "apply_supervisor_merged_acceptance_resume") as gateway:
+            error, changed = self.run_native_chair_review(outside)
+        self.assertIn("mixed recovery batch is stale", error or "")
+        self.assertFalse(changed)
+        gateway.assert_not_called()
+        self.assert_untouched(before)
+        # A stale snapshot of an advertised record is refused the same way.
+        stale = self.payload("blocked_task_triage",
+                             [self.merged_action(board, "MERGED-THIRD-HELD", merge_sha="e" * 40)], deferrals)
+        error, changed = self.run_native_chair_review(stale)
+        self.assertIn("mixed recovery batch is stale", error or "")
+        self.assertFalse(changed)
+        self.assert_untouched(before)
+        # The advertised third record: ordinary deferrals + one exact merged resume apply once.
+        action = self.merged_action(board, "MERGED-THIRD-HELD")
+        gateway = supervisor.apply_supervisor_merged_acceptance_resume
+        with mock.patch.object(github_bus, "gh_json") as reads, \
+                mock.patch.object(supervisor, "queue_delivery_event") as wake, \
+                mock.patch.object(supervisor, "apply_supervisor_merged_acceptance_resume", wraps=gateway) as spy:
+            error, changed = self.run_native_chair_review(self.payload("blocked_task_triage", [action], deferrals))
+        self.assertIsNone(error)
+        self.assertTrue(changed)
+        spy.assert_called_once_with(self.config, "MERGED-THIRD-HELD", action["reason"], chair_observation={
+            key: action[key] for key in supervisor.MERGED_ACCEPTANCE_OBSERVATION_KEYS})
+        reads.assert_not_called()
+        wake.assert_not_called()
+        state = json.loads(self.path.read_text())
+        by_id = {task["id"]: task for task in state["tasks"]}
+        self.assertEqual(by_id["MERGED-THIRD-HELD"]["status"], "acceptance")
+        self.assertEqual([t for t in state["tasks"] if t["id"] != "MERGED-THIRD-HELD"],
+                         [t for t in board["tasks"] if t["id"] != "MERGED-THIRD-HELD"])
+        self.assertEqual(len(state["tasks"]), len(board["tasks"]))  # no helper
+        opened = [b["task_id"] for b in state["blockers"] if b["status"] == "open"]
+        self.assertNotIn("MERGED-THIRD-HELD", opened)
+        self.assertEqual(len(opened), len(board["blockers"]) - 1)

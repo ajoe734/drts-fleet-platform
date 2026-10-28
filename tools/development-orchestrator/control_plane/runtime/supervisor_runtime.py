@@ -6489,11 +6489,15 @@ def merged_acceptance_resume_ready(record: dict[str, Any]) -> bool:
 def chair_blocked_task_selection(
     config: dict[str, Any],
     status: dict[str, Any] | None,
-    *,
-    include_held: bool = False,
 ) -> list[dict[str, Any]]:
-    """The bounded blocked-task list the Chair prompt, context validation and
-    reassignment synthesis share.
+    """The one bounded blocked-task list the Chair prompt, context validation,
+    stale mixed-batch check and reassignment synthesis share.
+
+    Every caller gets the same set from the same arguments: no path chooses
+    its own held view, so whatever the prompt lists as an explicit route is
+    exactly what validation, deferral and synthesis admit. Held records
+    (wait_for_parent_resolution) are kept for tracking, sorted after
+    actionable ones, and never require or synthesize an action.
 
     Keeps the held/phase-sorted window unchanged, then appends, in their
     original relative order, at most CHAIR_CI_RECOVERY_RESERVE out-of-window
@@ -6510,15 +6514,10 @@ def chair_blocked_task_selection(
     through that helper (and refuses an unfinished one), so only the explicit
     merged route is exposed, with the helper history left as it is.
     """
-    candidates = dependency_ready_blocked_task_records(config, status, limit=None, include_held=True)
-    records = candidates if include_held else [
-        record for record in candidates if record["action"] != "wait_for_parent_resolution"
-    ]
+    records = dependency_ready_blocked_task_records(config, status, limit=None, include_held=True)
     window = records[:CHAIR_BLOCKED_TASK_WINDOW]
-    window_ids = {record["task_id"] for record in window}
-    record_ids = {record["task_id"] for record in records}
-    beyond = [(index, record) for index, record in enumerate(candidates) if record["task_id"] not in window_ids]
-    ci_ready = [item for item in beyond if item[1]["task_id"] in record_ids and candidate_ci_recovery_ready(item[1])]
+    beyond = list(enumerate(records))[CHAIR_BLOCKED_TASK_WINDOW:]
+    ci_ready = [item for item in beyond if candidate_ci_recovery_ready(item[1])]
     merged_ready = [item for item in beyond if merged_acceptance_resume_ready(item[1])]
     prioritized = [item for item in ci_ready if candidate_ci_recovery_requested(item[1])]
     unrequested = [item for item in ci_ready if not candidate_ci_recovery_requested(item[1])]
@@ -6862,7 +6861,7 @@ def _chair_review_summary_lines(
         dispatch_pause_lines.append("- none")
 
     blocked_task_lines: list[str] = []
-    for item in chair_blocked_task_selection(config, status, include_held=True):
+    for item in chair_blocked_task_selection(config, status):
         action_label = str(item.get("action") or "-")
         helper_label = str(item.get("helper_task_id") or "-")
         recovery = item.get("candidate_ci_recovery")
@@ -7425,8 +7424,8 @@ def validate_chair_review_context(
                 expected_action = str(item.get("action") or "").strip()
                 if not task_id or not expected_action or task_id in deferred:
                     continue
-                # Admitted only for its optional explicit merged route; there is
-                # no wait_for_parent_resolution action to require.
+                # Held: listed for tracking or for its optional explicit merged
+                # route; there is no wait_for_parent_resolution action to require.
                 if expected_action == "wait_for_parent_resolution":
                     continue
                 if expected_action not in action_index.get(task_id, set()) and not has_explicit_parent_resume(payload, item):
