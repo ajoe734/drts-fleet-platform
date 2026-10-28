@@ -4,6 +4,38 @@ These questions are intentionally isolated here so the repo does not silently in
 
 ## Open Items
 
+### Q-BUREAU-R12-20261025 — planning settled; original hosted acceptance remains blocked
+
+The R12 v5 task specification and recorded user instruction already settle the
+unsupported daily Attachment 5 format: keep it superseded/SKIP, while retaining
+the applicable daily-record requirements and existing downloads. The recorded
+Asia/Taipei date policy also remains binding. This planning helper introduces no
+new product decision, scope cut, exporter, authentication route or runtime gate.
+All three parent acceptance keys and the original ten cases remain binding;
+the accepted first two keys do not establish the remaining same-release download
+key. Parent owner/reviewer remain Codex/Claude2.
+
+Supervisor must coordinate the original sole shared-dev operator to establish
+the original managed FULL prerequisites: an immutable deployed source with the
+accepted fixes and PG enabled; a lawful isolated, reversible source-failure
+fixture for TEN08; actual daily-table retention/backup/restore evidence for
+TEN09; and two active principals in different tenants with exact existing issuer
+grants for TEN10. First confirm whether those tenant fixtures already exist,
+without printing secrets. If absent, coordinate the original IAM/setup owner
+and precise scope before changes. Neither same-tenant actors nor another job's
+sessions satisfy this prerequisite. Preserve accepted source work, including
+`e412842e72a50d30ce3d1382b48870720ed27729` / PR #3082, which is now reviewed,
+CI green and merged; do not reopen it for missing runtime evidence.
+
+Keep the parent blocked. Both dispatched-worker attempts to write the parent
+note and helper disposition metadata were rejected by the current release guard.
+Genuine Supervisor must persist `resolved_parent_status: blocked`,
+`resolved_parent_waiting_for: Codex`, and the packet's exact
+`resolved_parent_next`, plus the matching parent note, before helper handoff or
+merge. Only new actionable same-release evidence permits the original lifecycle
+to resume acceptance. See the [decision packet, source and evidence inventory,
+verification ledger and exact guarded-write request](support/unblock/BUREAU-R12-SUBMITTED-DAILY-REPORT-TEMPLATE-20261025/BUREAU-R12-SUBMITTED-DAILY-REPORT-TEMPLATE-20261025-UNBLOCK-PLANNING-DECISION.md).
+
 ### Q-PAX-DESIGN-V2-20261015 — AU-04 source supplement
 
 The original design specification already requires AU-04 to show the AU-02
