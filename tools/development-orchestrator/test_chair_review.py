@@ -4099,3 +4099,69 @@ class CandidateCiResumeTests(unittest.TestCase):
         with mock.patch.object(github_bus, "gh_json", side_effect=self.observe):
             self.assertTrue(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
         self.assertEqual(json.loads(self.path.read_text())["tasks"][0]["status"], "review")
+
+    def test_R4_two_stable_preexisting_blockers_never_resume_through_completed_chair(self) -> None:
+        import github_bus
+        from control_plane.domain.chair_policy import open_blocker_fingerprint
+        board = json.loads(json.dumps(self.board))
+        # Both exist at the Chair snapshot and never change. The wording is
+        # irrelevant: only "not exactly one open blocker" may decide this.
+        board["blockers"] = [
+            {**board["blockers"][0], "message": "Candidate CI failed on transport error"},
+            {"task_id": self.task["id"], "owner": "Pi", "waiting_for": "Codex", "status": "open",
+             "message": "Product decision on fare rounding pending", "created_at": "2026-10-27T00:10:00Z"},
+        ]
+        stable_fingerprint = open_blocker_fingerprint(board["blockers"], self.task["id"])[0]
+        action = {**self.action, "blocker_fingerprint": stable_fingerprint}
+        self.path.write_text(json.dumps(board))
+        records = supervisor.dependency_ready_blocked_task_records({}, board)
+        self.assertIsNone(records[0]["candidate_ci_recovery"])
+        message = supervisor.build_chair_review_message(
+            {}, reason="blocked_task_triage", markdown_path=self.root / "d.md", json_path=self.root / "d.json",
+            approval_state={"pending": [], "history": []}, state={}, provider_report={}, status=board)
+        self.assertNotIn("ci_recovery=eligible candidate_sha=", message)
+        self.assertIn(f"- {self.task['id']}: kind=manual_unblock action=create_unblock_task", message)
+        payload = {"version": 1, "approval_ttl_minutes": 45, "reason": "Chair judged CI the sole blocker",
+                   "blocked_by": [], "approval_actions": [], "reassignment_actions": [],
+                   "task_actions": [action], "provider_actions": [], "recommended_focus": [self.task["id"]]}
+        for reason in ("blocked_task_triage", "reassignment_triage"):
+            with self.subTest(reason=reason):
+                before = self.path.read_bytes()
+                with mock.patch.object(github_bus, "gh_json", side_effect=self.observe) as reads, \
+                        mock.patch.object(supervisor, "queue_delivery_event") as wake:
+                    runtime = self.run_refresh(reason, {**payload, "decision": reason})
+                reads.assert_not_called()  # rejected in preflight, before any GitHub read
+                wake.assert_not_called()
+                self.assertEqual(self.path.read_bytes(), before)
+                state = json.loads(self.path.read_text())
+                self.assertEqual(state["tasks"][0]["status"], "blocked")
+                self.assertEqual([row["status"] for row in state["blockers"]], ["open", "open"])
+                self.assertEqual(len(state["tasks"]), 1)
+                self.assertEqual(set(runtime["queue"]["events"]), {"chair-case"})
+                self.assertEqual(runtime["chair_review"]["last_decision"]["task_actions"], [action])
+                # Only the review's own completion record; no resume/helper side effects.
+                rows = [json.loads(line)["type"] for line in self.runtime_log.read_text().splitlines()]
+                self.assertFalse([row for row in rows if "resume" in row or "unblock" in row], rows)
+                self.runtime_log.unlink()
+                self.assertFalse(self.board_log.exists())
+        # Even with the preflight bypassed, the real board transaction refuses it.
+        identity = {k: self.task[k] for k in ("owner", "reviewer", "candidate_sha", "candidate_branch",
+                                                "candidate_generation", "pr_url")}
+        result = supervisor.run_task_board_command(
+            self.config, "resume-blocked", [self.task["id"], "in_progress", "Bypassed preflight"],
+            environ={"AI_NAME": "Supervisor", "TASK_RESUME_BASIS": "candidate_ci_recovered",
+                     "TASK_RESUME_CANDIDATE_IDENTITY_JSON": json.dumps(identity),
+                     "TASK_RESUME_BLOCKER_FINGERPRINT": stable_fingerprint,
+                     "TASK_RESUME_CHAIR_PR_URL": self.task["pr_url"],
+                     "TASK_RESUME_DEPENDS_ON_JSON": "[]", "TASK_RESUME_DEPENDENCY_DONE_STATUSES": '["done"]',
+                     "CANDIDATE_HEAD_SHA": self.task["candidate_sha"], "CANDIDATE_BRANCH": self.task["candidate_branch"],
+                     "CANDIDATE_CI_STATUS": "success", "PR_URL": self.task["pr_url"]})
+        self.assertFalse(result.ok)
+        self.assertIn("exactly one open blocker", result.error)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse(self.board_log.exists())
+        # The ordinary helper route for such a task is unchanged.
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            {**payload, "decision": "reassignment_triage", "task_actions": [], "blocked_by": [self.task["id"]]},
+            reason="reassignment_triage", config=self.config, status=board)
+        self.assertEqual([a["action"] for a in normalized["task_actions"]], ["create_unblock_task"])

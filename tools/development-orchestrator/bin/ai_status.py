@@ -2071,7 +2071,10 @@ def validate_candidate_ci_resume(
     if task.get("merge_sha") or not candidate_review_handoff_is_current(task):
         raise SystemExit("Candidate CI recovery requires the original current owner handoff")
     fingerprint, open_count = open_blocker_fingerprint(state.get("blockers"), task_id)
-    if not open_count or os.environ.get("TASK_RESUME_BLOCKER_FINGERPRINT", "").strip() != fingerprint:
+    if open_count != 1:
+        # Never resolve an unrelated co-existing blocker along with the CI one.
+        raise SystemExit("Candidate CI recovery requires exactly one open blocker")
+    if os.environ.get("TASK_RESUME_BLOCKER_FINGERPRINT", "").strip() != fingerprint:
         raise SystemExit("Open blockers changed after the Chair observation")
     if (
         os.environ.get("CANDIDATE_HEAD_SHA", "").strip() != identity["candidate_sha"]

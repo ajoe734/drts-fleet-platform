@@ -6395,7 +6395,9 @@ def candidate_ci_recovery_context(status: dict[str, Any], task: dict[str, Any]) 
     if identity is None:
         return None
     fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), str(task.get("id") or ""))
-    if not open_count:
+    # Narrow variant: exactly one open blocker. With 0 or 2+ the task has no
+    # explicit CI-recovery route (blockers carry no typed kind to pick from).
+    if open_count != 1:
         return None
     return {**identity, "blocker_fingerprint": fingerprint, "open_blockers": open_count}
 
@@ -6692,7 +6694,7 @@ def build_chair_review_message(
         "- `dispatch_now` 只能對 machine truth 已符合派工條件的非 blocked 任務觸發。\n"
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
         "- `resume_parent_task` 一般只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
-        "- 唯一例外：摘要標示 `ci_recovery=eligible` 的 blocked task，若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 且已恢復，可明確輸出 `resume_parent_task` 並附 `resume_basis=candidate_ci_recovered`、`resume_status=in_progress`、摘要中的完整 `candidate_sha` / `candidate_generation` / `pr_url` / `blocker_fingerprint` 與具體 reason，不需新 helper。Supervisor 會重讀同 PR/head/branch 的 own-workflow CI 並比對 open blocker 集合，只沿原 handoff 恢復獨立 review；這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
+        "- 唯一例外：摘要標示 `ci_recovery=eligible` 的 blocked task（僅限剛好一個 open blocker），若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 且已恢復，可明確輸出 `resume_parent_task` 並附 `resume_basis=candidate_ci_recovered`、`resume_status=in_progress`、摘要中的完整 `candidate_sha` / `candidate_generation` / `pr_url` / `blocker_fingerprint` 與具體 reason，不需新 helper。Supervisor 會重讀同 PR/head/branch 的 own-workflow CI 並比對 open blocker 集合，只沿原 handoff 恢復獨立 review；這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
         "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
@@ -8104,7 +8106,7 @@ def apply_chair_candidate_ci_resume_action(
     if any(action.get(key) != identity[key] for key in ("candidate_sha", "candidate_generation", "pr_url")):
         return False
     fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), task_id)
-    if not open_count or action.get("blocker_fingerprint") != fingerprint:
+    if open_count != 1 or action.get("blocker_fingerprint") != fingerprint:
         return False
     repo = infer_repo_slug(config, {})
     pr = bound_task_pr(parent, identity["candidate_branch"], identity["candidate_sha"])

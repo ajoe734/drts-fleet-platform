@@ -1411,6 +1411,26 @@ class CandidateCiResumeTransactionTests(unittest.TestCase):
                 self.assertEqual(self.path.read_bytes(), before)
                 self.assertFalse(self.log.exists())
 
+    def test_R4_exactly_one_open_blocker_required_under_lock(self) -> None:
+        second = {"task_id": self.task["id"], "owner": "Pi", "waiting_for": "Codex", "status": "open",
+                  "message": "Unrelated product blocker", "created_at": "2026-10-27T00:10:00Z"}
+        state = copy.deepcopy(self.state)
+        state["blockers"].append(second)
+        env = dict(self.env)
+        # Stable since the Chair snapshot: the fingerprint matches both blockers.
+        env["TASK_RESUME_BLOCKER_FINGERPRINT"] = self.fingerprint_of(state["blockers"], self.task["id"])[0]
+        self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+        with self.assertRaises(SystemExit) as raised:
+            self.execute("resume-blocked", "in_progress", "Two stable blockers", env=env)
+        self.assertIn("exactly one open blocker", str(raised.exception.code))
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse(self.log.exists())
+        # The b93 single-blocker shape still resumes.
+        self.path.write_text(json.dumps(self.state))
+        self.execute("resume-blocked", "in_progress", "Single original blocker")
+        state = json.loads(self.path.read_text())
+        self.assertEqual((state["tasks"][0]["status"], state["blockers"][0]["status"]), ("review", "resolved"))
+
     def test_R3_bound_PR_must_equal_chair_observed_PR_under_lock(self) -> None:
         pr32 = "https://github.com/acme/fleet/pull/32"
         for kind in ("task_rebound", "chair_observed_other", "missing"):
