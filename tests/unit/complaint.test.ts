@@ -1,4 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import type {
+  ComplaintCaseRecord,
+  ComplaintTimelineEntry,
+} from "@drts/contracts";
+import type { PoolClient } from "pg";
+import type { DatabaseService } from "../../apps/api/src/common/db";
 
 import { AuditNotificationService } from "../../apps/api/src/modules/audit-notification/audit-notification.service";
 import { ComplaintRepository } from "../../apps/api/src/modules/complaint/complaint.repository";
@@ -259,5 +265,221 @@ describe("complaint service", () => {
         ],
       }),
     );
+  });
+});
+
+/** Only the external SQL port is modeled. Production producer, repository and
+ * Ops service reads run unchanged; this is not PostgreSQL/runtime evidence. */
+function referralCrmFixture() {
+  const cases = new Map<string, ComplaintCaseRecord>();
+  const timelines = new Map<string, ComplaintTimelineEntry>();
+  const reads: string[] = [];
+  let failReads = false;
+  const query = async (sql: string, values: readonly unknown[] = []) => {
+    const text = sql.replace(/\s+/g, " ").trim();
+    if (text.startsWith("INSERT INTO crm.phase1_complaint_cases")) {
+      cases.set(String(values[0]), JSON.parse(String(values[5])));
+      return { rows: [] };
+    }
+    if (text.startsWith("INSERT INTO crm.phase1_complaint_timelines")) {
+      timelines.set(String(values[0]), JSON.parse(String(values[4])));
+      return { rows: [] };
+    }
+    reads.push(text);
+    if (failReads) throw new Error("canonical SQL read failed");
+    const caseRows = [...cases.values()];
+    const timelineRows = [...timelines.values()];
+    if (text.startsWith("SELECT kind, record FROM ("))
+      return {
+        rows: [
+          ...caseRows
+            .filter((c) => c.caseNo === values[0])
+            .map((record) => ({ kind: "case", record })),
+          ...timelineRows
+            .filter((t) => t.caseNo === values[0])
+            .map((record) => ({ kind: "timeline", record })),
+        ],
+      };
+    if (text.startsWith("SELECT record FROM crm.phase1_complaint_cases"))
+      return { rows: caseRows.map((record) => ({ record })) };
+    if (text.startsWith("SELECT record FROM crm.phase1_complaint_timelines"))
+      return { rows: timelineRows.map((record) => ({ record })) };
+    // Referral hooks write neither Passenger membership table. Model the old
+    // membership restriction as well as the corrected canonical queries.
+    if (text.startsWith("SELECT c.record")) {
+      const eligible = text.includes("EXISTS") ? [] : caseRows;
+      const records = text.includes("c.case_no > $1")
+        ? eligible
+            .filter((c) => c.caseNo > String(values[0]))
+            .sort((a, b) => a.caseNo.localeCompare(b.caseNo))
+            .slice(0, Number(values[1]))
+        : eligible.filter((c) => c.caseNo === values[0]);
+      return { rows: records.map((record) => ({ record })) };
+    }
+    if (text.startsWith("SELECT t.record"))
+      return {
+        rows: (text.includes("EXISTS")
+          ? []
+          : timelineRows.filter((t) => t.caseNo === values[0])
+        ).map((record) => ({ record })),
+      };
+    throw new Error(`Unmodeled SQL: ${text}`);
+  };
+  const repository = new ComplaintRepository({
+    isEnabled: () => true,
+    query,
+  } as unknown as DatabaseService);
+  const audit = new AuditNotificationService();
+  const create = () => new ComplaintService(audit, repository);
+  const client = { query } as unknown as PoolClient;
+  const scope = {
+    orderId: "00000000-0000-4000-8000-000000000001",
+    passengerId: "referral-unit-passenger",
+    tenantId: "referral-unit-tenant",
+  };
+  const produce = async (
+    origin: ComplaintService,
+    source: "rating" | "manual",
+  ) => {
+    if (source === "rating") {
+      const hook = origin.prepareReferralRatingHook(scope, {
+        score: 2,
+        comment: null,
+        contactRequested: false,
+      });
+      await hook.execute(client);
+      await origin.publishReferralRatingCase({
+        ...scope,
+        caseNo: hook.caseNo!,
+        createdTimelineId: hook.createdTimelineId!,
+      });
+      return hook.caseNo!;
+    }
+    const command = {
+      orderId: scope.orderId,
+      category: "service" as const,
+      content: "轉介客服案件",
+      contactRequested: false,
+      idempotencyKey: "referral-manual-unit",
+    };
+    const hook = origin.prepareReferralComplaintHook(scope.orderId, command);
+    await hook.execute(client);
+    await origin.publishReferralComplaintCase(scope, {
+      caseNo: hook.caseNo,
+      createdTimelineId: hook.createdTimelineId,
+      command,
+      submittedAt: cases.get(hook.caseNo)!.createdAt,
+    });
+    return hook.caseNo;
+  };
+  return {
+    cases,
+    timelines,
+    reads,
+    create,
+    produce,
+    failReads: () => {
+      failReads = true;
+    },
+  };
+}
+
+describe("Referral CRM-only cases on existing Ops reads", () => {
+  const read = async (
+    service: ComplaintService,
+    route: "list" | "detail" | "timeline",
+    caseNo: string,
+  ) => {
+    if (route === "list")
+      return (await service.listComplaintCasesForOps()).filter(
+        (c) => c.caseNo === caseNo,
+      );
+    if (route === "detail")
+      return [await service.getComplaintCaseForOps(caseNo)];
+    return service.getComplaintTimelineForOps(caseNo);
+  };
+
+  for (const source of ["rating", "manual"] as const) {
+    it.each(["list", "detail", "timeline"] as const)(
+      `${source}: %s sees a later commit on an already initialized peer`,
+      async (route) => {
+        const f = referralCrmFixture();
+        const origin = f.create();
+        const peer = f.create();
+        await origin.onModuleInit();
+        await peer.onModuleInit();
+        const caseNo = await f.produce(origin, source);
+        expect(caseNo).toMatch(/^PAX-[0-9a-f-]{36}$/i);
+        expect(f.cases.get(caseNo)?.description).toContain("同意客服聯繫：否");
+        expect(
+          [...f.timelines.values()].filter((t) => t.caseNo === caseNo),
+        ).toHaveLength(1);
+        const restarted = f.create();
+        await restarted.onModuleInit();
+        const expected =
+          route === "timeline"
+            ? [...f.timelines.values()].filter((t) => t.caseNo === caseNo)
+            : [f.cases.get(caseNo)];
+        // Same-instance and start-after-commit controls run before the warm peer.
+        expect(await read(origin, route, caseNo)).toEqual(expected);
+        expect(await read(restarted, route, caseNo)).toEqual(expected);
+        expect(await read(peer, route, caseNo)).toEqual(expected);
+      },
+    );
+  }
+
+  it.each(["list", "detail", "timeline"] as const)(
+    "%s propagates canonical failure even with a populated local cache",
+    async (route) => {
+      const f = referralCrmFixture();
+      const origin = f.create();
+      const caseNo = await f.produce(origin, "rating");
+      expect(await read(origin, route, caseNo)).toHaveLength(1);
+      f.failReads();
+      await expect(read(origin, route, caseNo)).rejects.toThrow(
+        "canonical SQL read failed",
+      );
+    },
+  );
+
+  it("keeps unknown cases absent and noDB Ops behavior intact", async () => {
+    const f = referralCrmFixture();
+    const peer = f.create();
+    const missing = "PAX-22222222-2222-4222-8222-222222222222";
+    expect(await peer.listComplaintCasesForOps()).toEqual([]);
+    await expect(peer.getComplaintCaseForOps(missing)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    await expect(
+      peer.getComplaintTimelineForOps(missing),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const { complaintService } = createService();
+    const c = complaintService.createComplaintCase({
+      caseSource: "ops",
+      category: "other",
+      severity: "normal",
+      description: "noDB control",
+    });
+    expect(await complaintService.listComplaintCasesForOps()).toEqual([c]);
+    expect(await complaintService.getComplaintCaseForOps(c.caseNo)).toEqual(c);
+    expect(
+      await complaintService.getComplaintTimelineForOps(c.caseNo),
+    ).toHaveLength(1);
+  });
+
+  it("pages every canonical case once across the existing 500-row keyset boundary", async () => {
+    const f = referralCrmFixture();
+    const origin = f.create();
+    const peer = f.create();
+    await peer.onModuleInit();
+    for (let n = 0; n < 501; n++) await f.produce(origin, "rating");
+    const result = await peer.listComplaintCasesForOps();
+    expect(new Set(result.map((c) => c.caseNo))).toEqual(
+      new Set(f.cases.keys()),
+    );
+    expect(result).toHaveLength(501);
+    expect(
+      f.reads.filter((sql) => sql.includes("c.case_no > $1")),
+    ).toHaveLength(2);
   });
 });
