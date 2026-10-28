@@ -6426,10 +6426,15 @@ def has_explicit_candidate_ci_resume(payload: dict[str, Any], record: dict[str, 
 
 
 def has_explicit_merged_acceptance_resume(payload: dict[str, Any], record: dict[str, Any]) -> bool:
-    """The Chair chose the merged-acceptance route for a record it was shown
-    as eligible. Like the CI-recovery route, a stale decision is rejected at
-    apply time and the task stays blocked; no helper is synthesized for it."""
-    return isinstance(record.get("merged_acceptance_resume"), dict) and any(
+    """The Chair chose the explicit merged-acceptance route for this task.
+
+    Explicit intent only, like has_explicit_candidate_ci_resume: fresh
+    eligibility is not re-checked here. A stale decision (second blocker,
+    merge/CI/review drift, evidence already recorded) is rejected by the
+    apply-time gateway with no residue and the task stays blocked; it must
+    never fall back to a synthesized or required unblock helper.
+    """
+    return any(
         isinstance(action, dict)
         and action.get("task_id") == record.get("task_id")
         and action.get("action") == "resume_parent_task"

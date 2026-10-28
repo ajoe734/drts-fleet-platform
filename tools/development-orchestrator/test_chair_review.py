@@ -4692,7 +4692,7 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
         self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
         self.assertEqual(self.path.read_bytes(), snapshot)
 
-    def test_explicit_merged_decision_replaces_helper_route_only_when_shown_eligible(self) -> None:
+    def test_explicit_merged_decision_replaces_helper_route(self) -> None:
         for reason in ("blocked_task_triage", "reassignment_triage"):
             with self.subTest(reason=reason):
                 status = supervisor.load_status(self.config)
@@ -4709,13 +4709,81 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
                 else:
                     self.assertIn(f"{self.task['id']}:create_unblock_task", supervisor.validate_chair_review_context(
                         plain, reason=reason, approval_state={"pending": []}, config=self.config, status=status) or "")
-        # A task not shown as eligible keeps requiring its helper route.
+        # A task no longer eligible still requires its helper route when the Chair
+        # made no explicit decision; an explicit (now stale) one is not overridden.
         ineligible = json.loads(json.dumps(self.board))
         ineligible["tasks"][0].pop("merge_sha")
         self.assertIsNone(supervisor.dependency_ready_blocked_task_records(self.config, ineligible)[0]["merged_acceptance_resume"])
         self.assertIn(f"{self.task['id']}:create_unblock_task", supervisor.validate_chair_review_context(
-            self.chair_payload(self.chair_action()), reason="blocked_task_triage", approval_state={"pending": []},
+            self.chair_payload(), reason="blocked_task_triage", approval_state={"pending": []},
             config=self.config, status=ineligible) or "")
+        self.assertIsNone(supervisor.validate_chair_review_context(
+            self.chair_payload(self.chair_action()), reason="blocked_task_triage", approval_state={"pending": []},
+            config=self.config, status=ineligible))
+
+    def r3_stale_boards(self) -> dict[str, dict]:
+        """Boards re-read after the Chair saw an eligible task; each makes the
+        fresh merged-acceptance context None while the task stays blocked."""
+        import copy
+        boards = {}
+        for kind, changes in {
+            "second_open_blocker": None, "merge_sha_cleared": {"merge_sha": None},
+            "ci_red": {"ci_status": "failure"}, "review_missing_self_review": {"reviewer": self.task["owner"]},
+            "evidence_recorded": {"acceptance_evidence": {key: "ref" for key in self.task["required_acceptance"]}},
+        }.items():
+            board = copy.deepcopy(self.board)
+            if changes is None:
+                board["blockers"].append({"task_id": self.task["id"], "owner": "Claude", "waiting_for": "Codex",
+                                          "status": "open", "message": "Second blocker",
+                                          "created_at": "2026-10-27T01:00:00Z"})
+            else:
+                board["tasks"][0].update(changes)
+                board["tasks"][0] = {k: v for k, v in board["tasks"][0].items() if v is not None}
+            boards[kind] = board
+        return boards
+
+    def test_r3_stale_explicit_merged_resume_never_synthesizes_helper(self) -> None:
+        explicit = self.chair_action()  # what the Chair saw: eligible, one open blocker
+        self.assertIsNotNone(supervisor.merged_acceptance_resume_context(self.board, self.task))
+        for kind, board in self.r3_stale_boards().items():
+            for reason in ("reassignment_triage", "blocked_task_triage"):
+                with self.subTest(kind=kind, reason=reason):
+                    self.path.write_text(json.dumps(board)); before = self.path.read_bytes()
+                    status = supervisor.load_status(self.config)
+                    # Step 1: the fresh context really is gone.
+                    self.assertIsNone(supervisor.merged_acceptance_resume_context(status, status["tasks"][0]))
+                    # Step 2: the explicit decision is kept; no helper is synthesized or required.
+                    normalized = supervisor.normalize_chair_review_payload_for_reason(
+                        self.chair_payload(explicit, reason=reason), reason=reason, config=self.config, status=status)
+                    self.assertEqual(normalized["task_actions"], [explicit])
+                    self.assertEqual(supervisor.synthesize_reassignment_followup_task_actions(
+                        self.config, self.chair_payload(explicit, reason=reason), status), [])
+                    with mock.patch.object(supervisor, "queue_delivery_event") as wake:
+                        error, changed = self.run_native_chair_review(self.chair_payload(explicit, reason=reason), reason)
+                    self.assertIsNone(error)
+                    self.assertFalse(changed)
+                    wake.assert_not_called()
+                    self.assert_untouched(before)
+                    # The ordinary no-explicit helper route is unchanged.
+                    plain = supervisor.normalize_chair_review_payload_for_reason(
+                        self.chair_payload(reason=reason), reason=reason, config=self.config, status=status)
+                    if reason == "reassignment_triage":
+                        self.assertEqual([a["action"] for a in plain["task_actions"]], ["create_unblock_task"])
+                    else:
+                        self.assertIn(f"{self.task['id']}:create_unblock_task", supervisor.validate_chair_review_context(
+                            plain, reason=reason, approval_state={"pending": []}, config=self.config, status=status) or "")
+
+    def test_r3_gateway_freshness_still_rejects_the_same_stale_boards(self) -> None:
+        explicit = self.chair_action()
+        for kind, board in self.r3_stale_boards().items():
+            with self.subTest(kind=kind):
+                self.path.write_text(json.dumps(board)); before = self.path.read_bytes()
+                with mock.patch.object(supervisor, "queue_delivery_event") as wake:
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, explicit))
+                    self.assertFalse(supervisor.apply_supervisor_merged_acceptance_resume(
+                        self.config, self.task["id"], "stale Chair decision"))
+                wake.assert_not_called()
+                self.assert_untouched(before)
 
     def test_existing_chair_merged_acceptance_wiring_exact_review_own_CI_normal_protected_merge(self) -> None:
         import copy
