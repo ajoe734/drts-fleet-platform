@@ -6533,16 +6533,57 @@ def chair_reasoned_deferral_task_ids(
         and str(record.get("task_id") or "") not in recovery_targets
         and (recovery_targets or chair_unblock_recursion_guarded(config, record.get("task") or {}, task_map))
     }
-    deferred: set[str] = set()
+    return chair_deferral_entry_task_ids(payload) & set(guarded)
+
+
+def chair_deferral_entry_task_ids(payload: dict[str, Any]) -> set[str]:
+    """Task ids named by well-formed "TASK-ID: specific reason" blocked_by entries."""
+    named: set[str] = set()
     for entry in payload.get("blocked_by") or []:
         match = CHAIR_DEFERRAL_ENTRY_PATTERN.fullmatch(entry) if isinstance(entry, str) else None
-        if match is None or match.group(1) not in guarded:
+        if match is None:
             continue
         reason = match.group(2)
         if len(reason) < CHAIR_DEFERRAL_MIN_REASON_CHARS or TASK_ID_MENTION_PATTERN.search(reason):
             continue
-        deferred.add(match.group(1))
-    return deferred
+        named.add(match.group(1))
+    return named
+
+
+def stale_mixed_recovery_deferrals(
+    config: dict[str, Any] | None,
+    payload: dict[str, Any],
+    status: dict[str, Any] | None,
+) -> list[str]:
+    """Deferred task ids of a mixed batch whose explicit CI recovery is stale.
+
+    A mixed batch pairs an explicit candidate_ci_recovered resume with
+    reasoned deferrals. If any explicit recovery no longer matches a selected
+    record's current recovery context (new blocker, fingerprint/generation/PR
+    drift, dependency not done...), the batch's premise is gone: the whole
+    review is refused before any GitHub read, and nothing is synthesized for
+    its deferred records. Ordinary batches are unaffected.
+    """
+    if not isinstance(payload, dict) or not isinstance(status, dict):
+        return []
+    explicit = {
+        str(action.get("task_id") or "")
+        for action in payload.get("task_actions", []) or []
+        if isinstance(action, dict)
+        and action.get("action") == "resume_parent_task"
+        and action.get("resume_basis") == CANDIDATE_CI_RECOVERED
+    }
+    if not explicit:
+        return []
+    named = chair_deferral_entry_task_ids(payload)
+    if not named:
+        return []
+    selection = chair_blocked_task_selection(config or {}, status)
+    matched = {str(record.get("task_id") or "") for record in selection if matching_candidate_ci_resume(payload, record)}
+    if explicit <= matched:
+        return []
+    selected = {str(record.get("task_id") or "") for record in selection}
+    return sorted(named & selected)
 
 
 def matching_candidate_ci_resume(payload: dict[str, Any], record: dict[str, Any]) -> bool:
@@ -6607,6 +6648,7 @@ def synthesize_reassignment_followup_task_actions(
     synthesized: list[dict[str, Any]] = []
     followup_records = reassignment_followup_task_records(config, payload, status)
     deferred = chair_reasoned_deferral_task_ids(config, payload, followup_records, status)
+    deferred |= set(stale_mixed_recovery_deferrals(config, payload, status))
     for item in followup_records:
         task_id = str(item.get("task_id") or "").strip()
         action_name = str(item.get("action") or "").strip()
@@ -7263,6 +7305,13 @@ def validate_chair_review_context(
             missing = [approval_id for approval_id in pending_ids if approval_id not in action_ids]
             if missing:
                 return f"approval_triage must resolve pending approvals: {', '.join(missing[:6])}"
+    if reason in {"blocked_task_triage", "reassignment_triage"} and config is not None:
+        stale_deferrals = stale_mixed_recovery_deferrals(config, payload, status)
+        if stale_deferrals:
+            return (
+                f"{reason} mixed recovery batch is stale; refusing it without deferring "
+                + ", ".join(stale_deferrals[:6])
+            )
     if reason == "blocked_task_triage" and config is not None:
         ready_blocked = chair_blocked_task_selection(config, status)
         if ready_blocked:

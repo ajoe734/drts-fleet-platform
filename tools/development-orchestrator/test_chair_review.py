@@ -4317,9 +4317,17 @@ class CandidateCiResumeTests(unittest.TestCase):
         self.add_operator_hold()
         snapshot = json.loads(json.dumps(self.board))
         stale = {**self.action, "blocker_fingerprint": "0" * 64}
+        # A stale mixed batch is refused as a whole and synthesizes nothing.
+        for reason in ("blocked_task_triage", "reassignment_triage"):
+            payload = {**self.mixed_payload(reason, [self.OPERATOR_DEFERRAL]), "task_actions": [stale]}
+            normalized = supervisor.normalize_chair_review_payload_for_reason(
+                payload, reason=reason, config=self.config, status=snapshot)
+            self.assertEqual(normalized["task_actions"], [stale])
+            self.assertEqual(supervisor.validate_chair_review_context(
+                normalized, reason=reason, approval_state={"pending": []}, config=self.config, status=snapshot),
+                f"{reason} mixed recovery batch is stale; refusing it without deferring OPERATOR-ONLY")
         cases = {
             "no_recovery_action": ([], [self.OPERATOR_DEFERRAL]),
-            "stale_recovery_action": ([stale], [self.OPERATOR_DEFERRAL]),
             "short_reason": ([self.action], ["OPERATOR-ONLY: keep it held"]),
             "id_only": ([self.action], ["OPERATOR-ONLY"]),
             "names_other_task": ([self.action], ["OPERATOR-ONLY: wait for ORIGINAL-PARENT, keep blocker and routing"]),
@@ -4340,14 +4348,104 @@ class CandidateCiResumeTests(unittest.TestCase):
                 if kind != "unmatched_id":
                     self.assertIn(("OPERATOR-ONLY", "create_unblock_task"),
                                   [(a["task_id"], a["action"]) for a in normalized["task_actions"]])
-        # Full refresh, blocked_task_triage, stale recovery: whole review rejected before any GitHub read.
-        self.path.write_text(json.dumps(snapshot)); before = self.path.read_bytes()
-        payload = {**self.mixed_payload("blocked_task_triage", [self.OPERATOR_DEFERRAL]), "task_actions": [stale]}
-        with mock.patch.object(github_bus, "gh_json") as reads:
-            self.run_refresh("blocked_task_triage", payload)
-        reads.assert_not_called()
-        self.assertEqual(self.path.read_bytes(), before)
-        self.assertEqual(self.runtime_rows(), ["chair_review_invalid_schema"])
+
+    def use_real_agent_config(self) -> None:
+        self.config["agents"] = {name.lower(): {"display_name": name, "provider": name.lower().rstrip("2"),
+                                                "file_inbox_path": str(self.root / f"{name.lower()}.md")}
+                                 for name in ("Claude", "Claude2", "Codex", "Gemini", "Pi")}
+        self.config["paths"]["event_queue"] = str(self.root / "events.jsonl")
+        self.config["schema"] = {"tasks_path": "tasks", "task_id_field": "id", "status_field": "status",
+                                 "assignee_field": "owner", "reviewer_field": "reviewer"}
+
+    def refresh_side_effects(self, reason: str, payload: dict, gh=None) -> dict:
+        import github_bus
+        self.runtime_log.unlink(missing_ok=True)
+        before = self.path.read_bytes()
+        with mock.patch.object(github_bus, "gh_json", side_effect=gh) as reads, \
+                mock.patch.object(supervisor, "queue_delivery_event", return_value=True) as wake:
+            runtime = self.run_refresh(reason, payload)
+        state = json.loads(self.path.read_text())
+        return {"reads": reads.call_count, "wakes": wake.call_count, "unchanged": self.path.read_bytes() == before,
+                "rows": self.runtime_rows(), "helpers": [t["id"] for t in state["tasks"] if "-UNBLOCK-" in t["id"]],
+                "escalations": runtime.get("governance_escalations", {}), "state": state,
+                "board_log": self.board_log.exists()}
+
+    def test_R6_stale_mixed_batch_full_refresh_has_no_side_effects_for_either_reason(self) -> None:
+        self.use_real_agent_config()
+        base = json.loads(json.dumps(self.board))
+        dependency = {"id": "DEP-OPEN", "title": "Dependency", "phase": "test", "owner": "Codex", "reviewer": "Pi",
+                      "status": "in_progress", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Working"}
+        deferrals = {"governance": ({}, self.HELD_DEFERRAL),
+                     "operator": ({"id": "OPERATOR-ONLY", "task_class": "verification", "helper_parent": "",
+                                   "helper_kind": ""}, self.OPERATOR_DEFERRAL)}
+        staleness = {
+            "new_blocker_after_snapshot": {},
+            "fingerprint": {"blocker_fingerprint": "0" * 64},
+            "generation": {"candidate_generation": "generation-two"},
+            "pr": {"pr_url": "https://github.com/acme/fleet/pull/32"},
+            "dependency_not_done": {},
+        }
+        for deferral_kind, (held_changes, deferral) in deferrals.items():
+            for stale_kind, action_changes in staleness.items():
+                for reason in ("blocked_task_triage", "reassignment_triage"):
+                    with self.subTest(deferral=deferral_kind, stale=stale_kind, reason=reason):
+                        self.board = json.loads(json.dumps(base))
+                        self.add_held_governance_helper(**held_changes)
+                        if stale_kind == "new_blocker_after_snapshot":
+                            self.board["blockers"].append({"task_id": self.task["id"], "owner": "Pi",
+                                                           "waiting_for": "Codex", "status": "open",
+                                                           "message": "Blocker after Chair snapshot",
+                                                           "created_at": "2026-10-27T02:00:00Z"})
+                        if stale_kind == "dependency_not_done":
+                            self.board["tasks"][0]["depends_on"] = ["DEP-OPEN"]
+                            self.board["tasks"].append(dependency)
+                        self.path.write_text(json.dumps(self.board))
+                        payload = {**self.mixed_payload(reason, [deferral]),
+                                   "task_actions": [{**self.action, **action_changes}]}
+                        self.assertIn("mixed recovery batch is stale", supervisor.validate_chair_review_context(
+                            supervisor.normalize_chair_review_payload_for_reason(
+                                payload, reason=reason, config=self.config, status=self.board),
+                            reason=reason, approval_state={"pending": []}, config=self.config, status=self.board) or "")
+                        effects = self.refresh_side_effects(reason, payload, gh=self.observe)
+                        self.assertEqual((effects["reads"], effects["wakes"], effects["helpers"]), (0, 0, []))
+                        self.assertTrue(effects["unchanged"])
+                        self.assertEqual(effects["rows"], ["chair_review_invalid_schema"])
+                        self.assertEqual(effects["escalations"], {})
+                        self.assertFalse(effects["board_log"])
+
+    def test_R6_real_agent_config_valid_mixed_batch_and_ordinary_helper_route(self) -> None:
+        self.use_real_agent_config()
+        base = json.loads(json.dumps(self.board))
+        # Valid mixed batch: recovery applies, both deferred records untouched, no helper or wake.
+        for reason in ("blocked_task_triage", "reassignment_triage"):
+            with self.subTest(valid=reason):
+                self.board = json.loads(json.dumps(base))
+                governance = self.add_held_governance_helper()
+                operator = self.add_operator_hold()
+                effects = self.refresh_side_effects(
+                    reason, self.mixed_payload(reason, [self.HELD_DEFERRAL, self.OPERATOR_DEFERRAL]), gh=self.observe)
+                self.assertEqual((effects["reads"], effects["wakes"], effects["helpers"]), (2, 0, []))
+                self.assertEqual(effects["state"]["tasks"][0]["status"], "review")
+                self.assertEqual(effects["state"]["tasks"][1:], [governance, operator])
+                self.assertEqual(effects["rows"], ["chair_parent_resume_applied", "chair_review_applied"])
+        # Ordinary batch without recovery: the existing synthesized helper route still materializes,
+        # which also shows this config really reaches the assign writer and queue port.
+        self.board = json.loads(json.dumps(base))
+        self.add_operator_hold()
+        payload = {**self.mixed_payload("reassignment_triage", [self.OPERATOR_DEFERRAL]), "task_actions": []}
+        effects = self.refresh_side_effects("reassignment_triage", payload)
+        self.assertEqual(effects["helpers"], ["OPERATOR-ONLY-UNBLOCK-MANUAL-UNBLOCK"])
+        self.assertEqual(effects["wakes"], 1)
+        self.assertIn("chair_unblock_task_created", effects["rows"])
+        # An explicit helper action in an otherwise valid mixed batch keeps its normal path too.
+        self.board = json.loads(json.dumps(base))
+        self.add_operator_hold()
+        payload = self.mixed_payload("reassignment_triage", [])
+        payload["task_actions"] = [self.action, {"task_id": "OPERATOR-ONLY", "action": "create_unblock_task",
+                                                 "reason": "Chair wants a source repair helper here"}]
+        effects = self.refresh_side_effects("reassignment_triage", payload, gh=self.observe)
+        self.assertEqual(effects["state"]["tasks"][0]["status"], "review")
+        self.assertEqual(effects["helpers"], ["OPERATOR-ONLY-UNBLOCK-MANUAL-UNBLOCK"])
 
     def test_R6_mixed_batch_still_requires_undeferred_ordinary_tasks(self) -> None:
         self.add_operator_hold()
