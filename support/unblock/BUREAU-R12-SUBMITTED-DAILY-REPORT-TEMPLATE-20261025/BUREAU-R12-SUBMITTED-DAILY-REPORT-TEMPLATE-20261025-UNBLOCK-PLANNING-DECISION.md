@@ -8,6 +8,89 @@
 - Read baseline: `51628b2b078d07ec759e0804448f7815bbc812ee` (`origin/dev` at fetch).
 - Delivery state: planning documents prepared; guarded machine-truth writes below remain a prerequisite to handoff. Parent runtime acceptance remains blocked.
 
+## Current addendum — 2026-10-28 accepted Source integration
+
+This addendum supersedes the dated delivery-state, guarded-write-pending and
+publication statements below. Those statements and both original planning
+leaves are retained as history; no product decision or acceptance scope changes.
+
+The real Supervisor already applied the guarded metadata writes. Current-release
+readback confirms helper disposition `blocked` / `Codex`, with
+`resolved_parent_next` exactly equal to the current parent `next`. Parent remains
+`blocked`, candidate `not_applicable`, generation
+`92fbfe27458243e48650b5dab21bd7bd`; its three required keys and the first two
+accepted evidence records remain intact. Helper merge must not resume the parent.
+The old guarded-write commands are historical requests, not commands to replay
+over the newer parent next step.
+
+The old published candidate `bc33182ccb02c140e28ef4274fce00b9c98e1e69`
+actually failed `dependency-security`, run `40604360486`, job `122541386322`,
+on deepmerge 4.3.1 advisory 1243505. Its PR test merge
+`471cdc61aa924c425aaeada35c3015366a4cb889` had parents M516 and bc331 and
+the same tree as bc331; it did not contain the later repair. The accepted peer
+[PR #3097](https://github.com/ajoe734/drts-fleet-platform/pull/3097), candidate
+`38339417e84abddaceb27c3173c57c407feccdeb`, was protected-merged as
+`6c6b990348219fd45a08258f852cbf1f55491881` at `2026-10-28T01:22:59Z`.
+That accepted source supplies the verified patch, installed-consumer verification,
+lock/build inputs and security condition. This helper does not independently edit
+those files or relax that condition.
+
+Normal merge `3eb0459ae7699fdeabf5d4572647b1b366e44d18` has exact parents
+`bc33182ccb02c140e28ef4274fce00b9c98e1e69` and
+`6c6b990348219fd45a08258f852cbf1f55491881`, and tree
+`140585d05646c984e43b2783e64fda6c1846b465`. It was normally pushed on the
+existing branch. Both published planning commits remain ancestors. All 26 peer
+files are byte-identical to the accepted merge; the merge-stage tree differs
+from that peer only in the original two planning leaves. This is a real Source
+integration and changed tree, not an empty commit or resubmission of old CI.
+The final candidate adds this current addendum and requires fresh independent
+Claude2 review, its own hosted CI and normal protected merge on
+[PR #3089](https://github.com/ajoe734/drts-fleet-platform/pull/3089).
+
+Current parent runtime evidence is bounded: original managed FULL `40605219501`
+on M516 proves five distinct booking writes/COMMIT/readbacks through PG-enabled
+paths, one own-row preview and three durable jobs/verified format downloads.
+Only C1 had a successful UI cancellation; three other cancellation attempts
+were UI-disabled/API 409. Report detail/download uses published cache, raw files
+were skipped for unowned siblings, `finaldailyReportDownloads=null`, and the
+later full GET exceeded the 1 MiB bound. Both deploy `40602479407` and owned FULL
+`40605219501` are terminal failures, not still-running executions. These partial
+positives do not satisfy runtime Key3, all TEN01–10, restart persistence or
+daily-table retention/restore. Their qualification receipt is
+`Root-original-M516-owned-five-bookings-PG-enabled-write-and-readback-independent-qualification-20261028.json`
+under the evidence root below, SHA256
+`bcd294ade0a8280a40f44fadcc704ace8b369694cf10f8fbabb6054f6f003cf1`.
+
+The parent next-step text still contains its earlier wait for the dependency
+peer review/merge; PR #3097 now supplies that Source prerequisite. The original
+reader repair still requires its new candidate, own CI, review and merge. Then
+the sole original operator follows the existing FULL route with a new immutable
+definition H and freshly verified runtime S under the original rules (H and S
+may differ). Do not deploy solely for testing or replay the old journal.
+Empty-day/source-before-after, later reservations, second supply/reassignment,
+main report and TEN08 fault/recovery, TEN09 three-month retention/restore and
+TEN10 real cross-tenant actors remain outstanding. The Attachment 5 format stays
+only SKIP; daily fields/retention, all ten cases, full denominators and the APP
+next-phase boundary remain unchanged. This worker performs no dispatch, deploy,
+VM product/browser/PG/Docker execution or scanner run.
+
+### Current delivery-quality ledger — guide §0.7
+
+| Finding / acceptance                                     | Source and change                                                                     | Before → current result                                                                                        | Verification / evidence                                                                                                               | Remaining boundary                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Real accepted-peer integration; preserve publication     | Original bc331 planning commits; accepted PR #3097; normal merge above                | Old test merge lacked the patch → new tree contains the complete accepted peer and both planning leaves        | Exact merge parents, ancestor checks and peer-file blob equality; final receipt below                                                 | Fresh candidate review, hosted CI and protected merge remain required; old green checks cannot transfer. |
+| Resolve/record decision; scope cut or explicit follow-up | Original authority and follow-through tables; this addendum only                      | Planning remains settled; no new scope cut; partial PG evidence qualified without granting full runtime credit | Four original evidence hashes plus the new qualification receipt; original Open Questions leaf retained unchanged                     | Runtime Key3 and original TEN01–10/full denominators remain binding.                                     |
+| Parent concrete next step and safe merge disposition     | Release CLI parent/helper readback and Supervisor's existing metadata synchronization | Historical guarded writes rejected → real Supervisor writes already applied; exact current next-step equality  | Before/after parent snapshot equality, three keys/two accepted records, helper blocked/Codex and exact next equality in final receipt | Do not rewrite parent from historical commands or resume it on helper merge.                             |
+| Task-scoped commit/push/PR evidence                      | Original PR #3089 and branch; normal merge plus this addendum commit                  | Preserve both published commits → publish new candidate H with no independent dependency/security delta        | Scoped Prettier, diff and trailer checks; local/remote/PR-head equality and final tree recorded below                                 | Automatic hosted CI is separate and pending until terminal results; no runtime acceptance claimed.       |
+
+Checks for this documentation and merge unit are content/hash/ancestry checks;
+no new product regression test is needed. The old failure is the actual hosted
+job above; the new candidate's dependency-security result must come from its
+own hosted CI. Full candidate SHA, tree, commands/exit codes, parent preservation
+and publication readback are recorded without self-referential commit hashes in
+`/home/lupin/workspace/drts-fleet-platform/.local/unblock/BUREAU-R12-SUBMITTED-DAILY-REPORT-TEMPLATE-20261025-UNBLOCK-PLANNING-DECISION/dispatch-20261028-peer-integration.json`.
+The remaining sections record the original 2026-10-27 investigation.
+
 ## Decision and authority
 
 There is no outstanding product/contract choice in the current parent blocker.
