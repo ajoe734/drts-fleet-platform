@@ -4,7 +4,7 @@ import {
   type Page,
   type Request,
 } from "@playwright/test";
-import { mkdir } from "node:fs/promises";
+import { access, mkdir } from "node:fs/promises";
 import {
   EMBED_TRIP_FALLBACK_SCREENS,
   embedTripFallbackStates,
@@ -50,6 +50,9 @@ export type DisplayObservations = {
     caseNo: string;
     caseSource: "existing" | "synthetic";
     mobileScreenshot: string;
+    // P5/P6/P7: one fresh, explicitly selected UI submission per category on
+    // the same order, independent of the existing/synthetic case above.
+    categories: readonly ManualComplaintCategoryObservation[];
   };
   noUnsupportedPromises: { result: "observed"; screens: readonly string[] };
   fallbackScenesLabelled: { result: "observed"; screens: readonly string[] };
@@ -58,6 +61,58 @@ export type DisplayObservations = {
     screens: readonly string[];
   };
 };
+
+// Mirrors ReferralPassengerComplaintCategory and the panel's fixed option order.
+export const MANUAL_COMPLAINT_CATEGORIES = [
+  "service",
+  "fare",
+  "lost_item",
+] as const;
+export type ManualComplaintCategory =
+  (typeof MANUAL_COMPLAINT_CATEGORIES)[number];
+
+export type ManualComplaintCategoryObservation = {
+  result: "observed";
+  category: ManualComplaintCategory;
+  orderId: string;
+  caseNo: string;
+  idempotencyKey: string;
+  bodySha256: string;
+  journalPath: string;
+};
+
+export type SyntheticComplaintOptions = {
+  category?: ManualComplaintCategory;
+  lostItemDescription?: string;
+};
+
+export type SyntheticComplaintResult = {
+  caseNo: string;
+  category?: ManualComplaintCategory;
+  idempotencyKey: string;
+  bodySha256: string;
+  journalPath: string;
+};
+
+// zh-TW manualComplaint.category.* option labels in referral-complaint-panel.
+const MANUAL_COMPLAINT_CATEGORY_LABELS: Record<
+  ManualComplaintCategory,
+  string
+> = {
+  service: "服務申訴",
+  fare: "車資申訴",
+  lost_item: "遺失物",
+};
+const MANUAL_COMPLAINT_COMMAND_KEYS = [
+  "orderId",
+  "category",
+  "content",
+  "lostItemDescription",
+  "contactRequested",
+  "idempotencyKey",
+] as const;
+const SYNTHETIC_LOST_ITEM_DESCRIPTION =
+  "display-observations synthetic test item; not a real lost item";
 
 // Existing product copy that must not promise an automatic ACK/redispatch the
 // canonical order never issued (recipe UI05).
@@ -324,6 +379,10 @@ async function observeManualComplaintPanel(
     text(detail.updatedAt, "case updatedAt required"),
   );
 
+  // Always runs, including when an existing case was reused above: an
+  // already-listed case never stands in for a fresh per-category submission.
+  const categories = await observeManualComplaintCategories(p, orderId);
+
   const viewCaseButton = p.page.getByRole("button", {
     name: `查看案件 ${caseNo}`,
     exact: true,
@@ -343,7 +402,175 @@ async function observeManualComplaintPanel(
     caseNo,
     result: "observed",
   });
-  return { result: "observed", orderId, caseNo, caseSource, mobileScreenshot };
+  return {
+    result: "observed",
+    orderId,
+    caseNo,
+    caseSource,
+    mobileScreenshot,
+    categories,
+  };
+}
+
+// P5 fare / P6 service / P7 lost_item: on the already-expanded panel of the
+// same completed order, each category is explicitly selected in the visible
+// <select> and submitted exactly once through the UI, then its new case is
+// read back through the same order's list and detail. A case listed before
+// the submission can never satisfy a category.
+export async function observeManualComplaintCategories(
+  p: DisplayObservationsParams,
+  orderId: string,
+): Promise<ManualComplaintCategoryObservation[]> {
+  const complaintsUrl = `${p.referralOrigin}/api/referral/complaints/${encodeURIComponent(orderId)}`;
+  const reload = p.page.getByRole("button", {
+    name: "重新讀取案件",
+    exact: true,
+  });
+  const observations: ManualComplaintCategoryObservation[] = [];
+  for (const category of MANUAL_COMPLAINT_CATEGORIES) {
+    const before = await reloadComplaintList(p, reload, complaintsUrl, orderId);
+    const priorCaseNos = new Set(
+      before.map((item) => text(item.caseNo, "listed case number required")),
+    );
+    const lostItemDescription =
+      category === "lost_item" ? SYNTHETIC_LOST_ITEM_DESCRIPTION : undefined;
+    const submitted = await submitSyntheticComplaint(p, orderId, {
+      category,
+      ...(lostItemDescription === undefined ? {} : { lostItemDescription }),
+    });
+    requireFact(
+      !priorCaseNos.has(submitted.caseNo),
+      `${category} manual complaint ACK must create a new case, not an already-listed one`,
+    );
+    requireFact(
+      observations.every(
+        (observed) =>
+          observed.caseNo !== submitted.caseNo &&
+          observed.idempotencyKey !== submitted.idempotencyKey &&
+          observed.journalPath !== submitted.journalPath,
+      ),
+      `${category} manual complaint must have its own case, key and journal`,
+    );
+
+    const after = await reloadComplaintList(p, reload, complaintsUrl, orderId);
+    const listed = after.filter((item) => item.caseNo === submitted.caseNo);
+    const [listedCase] = listed;
+    requireFact(
+      listed.length === 1 &&
+        listedCase !== undefined &&
+        listedCase.orderId === orderId &&
+        listedCase.category === category &&
+        listedCase.idempotencyKey === submitted.idempotencyKey &&
+        listedCase.contactRequested === false,
+      `${category} manual case must be listed once on the same order with its own category/key`,
+    );
+    await readBackCategoryCaseDetail(p, complaintsUrl, orderId, {
+      category,
+      caseNo: submitted.caseNo,
+      idempotencyKey: submitted.idempotencyKey,
+      lostItemDescription,
+    });
+
+    observations.push({
+      result: "observed",
+      category,
+      orderId,
+      caseNo: submitted.caseNo,
+      idempotencyKey: submitted.idempotencyKey,
+      bodySha256: submitted.bodySha256,
+      journalPath: submitted.journalPath,
+    });
+    p.evidence.record({
+      stage: `display-manual-complaint-${category}-readback`,
+      orderId,
+      caseNo: submitted.caseNo,
+      sha256: submitted.bodySha256,
+      result: "observed",
+    });
+  }
+  requireFact(
+    observations.length === MANUAL_COMPLAINT_CATEGORIES.length &&
+      new Set(observations.map((observed) => observed.caseNo)).size ===
+        MANUAL_COMPLAINT_CATEGORIES.length,
+    "all three manual complaint categories observed as distinct cases",
+  );
+  return observations;
+}
+
+async function readBackCategoryCaseDetail(
+  p: DisplayObservationsParams,
+  complaintsUrl: string,
+  orderId: string,
+  expected: {
+    category: ManualComplaintCategory;
+    caseNo: string;
+    idempotencyKey: string;
+    lostItemDescription: string | undefined;
+  },
+): Promise<void> {
+  const { category, caseNo } = expected;
+  const detailUrl = `${complaintsUrl}/${encodeURIComponent(caseNo)}`;
+  const detailResponsePromise = p.page.waitForResponse(
+    (response) =>
+      response.url() === detailUrl && response.request().method() === "GET",
+    { timeout: 15_000 },
+  );
+  await p.page
+    .getByRole("button", { name: `查看案件 ${caseNo}`, exact: true })
+    .click();
+  const detailResponse = await detailResponsePromise;
+  requireFact(
+    detailResponse.ok(),
+    `${category} manual case detail read must succeed`,
+  );
+  const detailPayload = object(await detailResponse.json());
+  requireFact(
+    detailPayload.ok === true,
+    `${category} manual case detail envelope`,
+  );
+  const detail = object(detailPayload.data);
+  requireFact(
+    detail.orderId === orderId &&
+      detail.caseNo === caseNo &&
+      detail.category === category &&
+      detail.idempotencyKey === expected.idempotencyKey &&
+      detail.contactRequested === false &&
+      (expected.lostItemDescription === undefined
+        ? detail.lostItemDescription === null ||
+          detail.lostItemDescription === undefined
+        : detail.lostItemDescription === expected.lostItemDescription),
+    `${category} manual case detail must bind the same order/case/category/key`,
+  );
+
+  const article = p.page.getByRole("article", {
+    name: "申訴案件詳情",
+    exact: true,
+  });
+  await article.waitFor({ state: "visible", timeout: 15_000 });
+  const visibleLines = [
+    caseNo,
+    `類別：${MANUAL_COMPLAINT_CATEGORY_LABELS[category]}`,
+    "已記錄不需客服聯絡",
+    ...(expected.lostItemDescription === undefined
+      ? []
+      : [`遺失物：${expected.lostItemDescription}`]),
+  ];
+  for (const line of visibleLines)
+    await article
+      .getByText(line, { exact: true })
+      .waitFor({ state: "visible", timeout: 15_000 });
+  for (const [prefix, sourceIso] of [
+    ["送出時間：", text(detail.submittedAt, "case submittedAt required")],
+    ["案件更新：", text(detail.updatedAt, "case updatedAt required")],
+  ] as const) {
+    const line = article.getByText(new RegExp(`^${prefix}`));
+    await line.waitFor({ state: "visible", timeout: 15_000 });
+    assertTaipeiTimestampValue(
+      text(await line.innerText(), `${prefix} line text required`),
+      prefix,
+      sourceIso,
+    );
+  }
 }
 
 async function reloadComplaintList(
@@ -373,13 +600,78 @@ async function reloadComplaintList(
 // Exactly one synthetic command, never resent: the actual request body/key is
 // persisted before the ACK is awaited, so a lost response still leaves a
 // recoverable unknown-ACK journal instead of silently losing it in cleanup.
+// Without options this is the original service-default command and journal.
+// With an explicit category, the visible category <select> is operated (never
+// an implicit default), the body/ACK are bound to that category, and the
+// command gets its own journal so one category never overwrites another.
 export async function submitSyntheticComplaint(
   p: DisplayObservationsParams,
   orderId: string,
-): Promise<{ caseNo: string }> {
-  await p.page
-    .getByLabel("申訴內容", { exact: true })
-    .fill(`display-observations ${p.nonce}`);
+  options: SyntheticComplaintOptions = {},
+): Promise<SyntheticComplaintResult> {
+  const explicit =
+    options.category !== undefined || options.lostItemDescription !== undefined;
+  const category = options.category;
+  let expectedLostItemDescription: string | undefined;
+  let journalName = "manual-complaint-command-facts.json";
+  let stagePrefix = "display-manual-complaint";
+  let content = `display-observations ${p.nonce}`;
+  if (explicit) {
+    requireFact(
+      category !== undefined &&
+        (MANUAL_COMPLAINT_CATEGORIES as readonly string[]).includes(category),
+      "synthetic manual complaint category must be a known product category",
+    );
+    if (category === "lost_item") {
+      expectedLostItemDescription = text(
+        options.lostItemDescription,
+        "lost_item synthetic complaint requires a lost item description",
+      ).trim();
+    } else {
+      requireFact(
+        options.lostItemDescription === undefined,
+        "only lost_item synthetic complaints carry a lost item description",
+      );
+    }
+    journalName = `manual-complaint-command-${category}-facts.json`;
+    stagePrefix = `display-manual-complaint-${category}`;
+    content = `display-observations ${p.nonce} ${category} synthetic test complaint; no contact requested`;
+  }
+  const journalPath = `${p.directory}/cancellations/${journalName}`;
+  if (explicit) {
+    // A retained journal is a possible earlier own write: never replace its
+    // body/key with a new command for the same category.
+    const retained = await access(journalPath).then(
+      () => true,
+      () => false,
+    );
+    requireFact(
+      !retained,
+      `${category} manual complaint journal already retained; do not resend`,
+    );
+    const select = p.page.getByLabel(/^申訴類別/);
+    const selected = await select.selectOption({
+      label: MANUAL_COMPLAINT_CATEGORY_LABELS[category!],
+    });
+    requireFact(
+      selected.length === 1 &&
+        selected[0] === category &&
+        (await select.inputValue()) === category,
+      `${category} must be explicitly selected in the visible category control`,
+    );
+  }
+  await p.page.getByLabel("申訴內容", { exact: true }).fill(content);
+  if (explicit) {
+    const lostField = p.page.getByLabel("遺失物描述", { exact: true });
+    if (expectedLostItemDescription !== undefined) {
+      await lostField.fill(expectedLostItemDescription);
+    } else {
+      requireFact(
+        (await lostField.count()) === 0,
+        `${category} complaint form must not render a lost item description field`,
+      );
+    }
+  }
   const submitUrl = `${p.referralOrigin}/api/referral/complaints/${encodeURIComponent(orderId)}`;
   // A same-URL response filter alone cannot tell the original POST apart from
   // a stray duplicate that happens to echo the same orderId/idempotencyKey,
@@ -406,6 +698,19 @@ export async function submitSyntheticComplaint(
       requestBody.orderId === orderId && requestBody.contactRequested === false,
       "synthetic manual complaint command is same-order and contactfalse",
     );
+    if (explicit)
+      requireFact(
+        requestBody.category === category &&
+          requestBody.content === content &&
+          (expectedLostItemDescription === undefined
+            ? !Object.hasOwn(requestBody, "lostItemDescription")
+            : requestBody.lostItemDescription ===
+              expectedLostItemDescription) &&
+          Object.keys(requestBody).every((key) =>
+            (MANUAL_COMPLAINT_COMMAND_KEYS as readonly string[]).includes(key),
+          ),
+        `${category} manual complaint command carries the selected category and its own fields only`,
+      );
     const idempotencyKey = text(
       requestBody.idempotencyKey,
       "synthetic manual complaint idempotency key required",
@@ -419,10 +724,10 @@ export async function submitSyntheticComplaint(
     // body is persisted (not only its hash/key): a hash alone cannot
     // reconstruct the original command for recovery.
     await mkdir(`${p.directory}/cancellations`, { recursive: true });
-    const journalPath = `${p.directory}/cancellations/manual-complaint-command-facts.json`;
     await persistPrivateJson(journalPath, {
       state: "ack_unknown",
       orderId,
+      ...(explicit ? { category } : {}),
       idempotencyKey,
       bodySha256,
       definitionSha: p.definitionSha,
@@ -435,7 +740,7 @@ export async function submitSyntheticComplaint(
     const response = await request.response().catch(() => null);
     if (response === null) {
       p.evidence.record({
-        stage: "display-manual-complaint-ACK-unknown",
+        stage: `${stagePrefix}-ACK-unknown`,
         orderId,
         sha256: bodySha256,
         result: "retained",
@@ -461,6 +766,16 @@ export async function submitSyntheticComplaint(
         data.idempotencyKey === idempotencyKey,
       "synthetic manual complaint ACK matches the same request",
     );
+    if (explicit)
+      requireFact(
+        data.category === category &&
+          data.contactRequested === false &&
+          (expectedLostItemDescription === undefined
+            ? data.lostItemDescription === null ||
+              data.lostItemDescription === undefined
+            : data.lostItemDescription === expectedLostItemDescription),
+        `${category} manual complaint ACK matches the selected category command`,
+      );
     const caseNo = text(data.caseNo);
     // Re-checked here, after every await that could race with a late-arriving
     // duplicate, not before response.json(): a second matching POST observed
@@ -473,6 +788,7 @@ export async function submitSyntheticComplaint(
     await persistPrivateJson(journalPath, {
       state: "acknowledged",
       orderId,
+      ...(explicit ? { category } : {}),
       idempotencyKey,
       bodySha256,
       definitionSha: p.definitionSha,
@@ -481,13 +797,19 @@ export async function submitSyntheticComplaint(
       caseNo,
     });
     p.evidence.record({
-      stage: "display-manual-complaint-synthetic-submitted",
+      stage: `${stagePrefix}-synthetic-submitted`,
       orderId,
       caseNo,
       sha256: bodySha256,
       result: "observed",
     });
-    return { caseNo };
+    return {
+      caseNo,
+      ...(explicit ? { category } : {}),
+      idempotencyKey,
+      bodySha256,
+      journalPath,
+    };
   } finally {
     p.page.off("request", onRequest);
   }
@@ -499,10 +821,18 @@ async function assertTaipeiTimestampLine(
   sourceIso: string,
 ): Promise<void> {
   await expect(locator).toBeVisible();
-  const rendered = text(
-    await locator.innerText(),
-    `${prefix} line text required`,
+  assertTaipeiTimestampValue(
+    text(await locator.innerText(), `${prefix} line text required`),
+    prefix,
+    sourceIso,
   );
+}
+
+function assertTaipeiTimestampValue(
+  rendered: string,
+  prefix: string,
+  sourceIso: string,
+): void {
   const value = rendered.slice(prefix.length).trim();
   requireFact(
     value !== sourceIso,
