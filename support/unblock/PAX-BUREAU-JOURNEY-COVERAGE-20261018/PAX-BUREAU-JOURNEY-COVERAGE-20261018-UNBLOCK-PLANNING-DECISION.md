@@ -435,6 +435,63 @@ immediately before merging, not rely on this snapshot.
 No product code, deploy, or Source change was made in this correction;
 only this artifact file.
 
+## Blocker: PR #3058 required check "Commit trailers" fails, no fix available
+without an amend exception (2026-10-28)
+
+CI run `40624463861` job `122606581990` (`Commit trailers`) fails on PR #3058
+with:
+
+```
+check_commit_trailers: 1 commit(s) failed trailer validation.
+  commit a110532e0b74:
+    - subject must be `<TASK-ID>: <summary>`, got: 'docs(unblock): correct
+      false PAX parent-update resolution claim'
+```
+
+Root cause: this helper's own previous handoff commit
+`a110532e0b7401e2769198e8e9b7e0c6b63c8847` used subject
+`docs(unblock): correct false PAX parent-update resolution claim`.
+`tools/ci/git/check_commit_trailers.py`'s `SUBJECT_RE` requires the
+parenthesized or bare prefix to be the literal `TASK-ID`
+(`[A-Z][A-Z0-9-]*[A-Z0-9]`); `unblock` is lowercase and not the task ID, so
+the subject does not match. The script walks every non-merge commit in
+`git rev-list --no-merges origin/dev..HEAD`, not just the branch tip, so
+this one malformed commit fails the gate regardless of what is pushed on
+top of it.
+
+Why this cannot be fixed by pushing another commit: `dev` branch protection
+(`gh api repos/.../branches/dev/protection`) lists `Commit trailers` as a
+required status check with `required_linear_history: true` and
+`allow_force_pushes: false`. The only way to remove a bad commit from
+`origin/dev..HEAD` is to rewrite it out of history (`commit --amend`,
+`rebase`, or `reset` + force-push). `docs/ops/branch-strategy.md` §11.4 and
+this task's own dispatch brief both state unconditionally that **published
+commits, including anchors, must not be rebased, amended, or force-pushed**,
+with rebase permitted only for a branch confirmed never published and
+carrying no PR/candidate — not this branch, which has open PR #3058 and a
+locked `candidate_sha`. The `COMMIT_TRAILER_BYPASS=1` escape in the script
+is an environment variable read inside the CI job; it is not something a
+pushed commit or PR description can set, so it is not available here either.
+
+This is a genuine policy conflict, not a missing product/contract decision
+and not something this helper's routing scope can resolve: fixing the gate
+requires exactly the action (amend/rebase of a published commit) the
+no-rewrite policy forbids. It needs one of:
+
+1. Supervisor/user grants a one-time, explicitly-scoped exception to amend
+   only `a110532e0`'s subject line (no content change) and force-push,
+   since this exact SHA has not yet received a reviewer approval (no
+   `worker_outcomes` entry for `a110532e0` as of this writing) — i.e. no
+   approved candidate is being invalidated; or
+2. Someone with `COMMIT_TRAILER_BYPASS` access to the CI job config applies
+   it for this PR; or
+3. Some other merge path this helper is not aware of.
+
+No product code, deploy, or Source change. Filed as `blocker` against
+reviewer `Claude` (this task's reviewer) to carry the decision request,
+since this helper's owner/reviewer roles have no write path to amend a
+published commit or to change branch-protection/CI config.
+
 ## Verification basis
 
 - Read-only re-verification on 2026-10-26, after run `40325789456`
