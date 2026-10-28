@@ -70,6 +70,7 @@ from control_plane.domain.unblock_resolution import (
 )
 from control_plane.domain.chair_policy import (
     CANDIDATE_CI_RECOVERED,
+    MERGED_ACCEPTANCE_RESUME_ACTION_KEYS,
     candidate_ci_recovery_identity,
     normalize_review_defaults as normalize_domain_review_defaults,
     open_blocker_fingerprint,
@@ -6378,6 +6379,7 @@ def dependency_ready_blocked_task_records(
                 "helper_task_id": helper_task_id,
                 "next": brief_reason_text(task.get("next"), max_length=220),
                 "candidate_ci_recovery": candidate_ci_recovery_context(status, task),
+                "merged_acceptance_resume": merged_acceptance_resume_context(status, task),
             }
         )
     records.sort(key=lambda item: (
@@ -6421,6 +6423,28 @@ def has_explicit_candidate_ci_resume(payload: dict[str, Any], record: dict[str, 
         and action.get("resume_basis") == CANDIDATE_CI_RECOVERED
         for action in payload.get("task_actions", []) or []
     )
+
+
+def has_explicit_merged_acceptance_resume(payload: dict[str, Any], record: dict[str, Any]) -> bool:
+    """The Chair chose the explicit merged-acceptance route for this task.
+
+    Explicit intent only, like has_explicit_candidate_ci_resume: fresh
+    eligibility is not re-checked here. A stale decision (second blocker,
+    merge/CI/review drift, evidence already recorded) is rejected by the
+    apply-time gateway with no residue and the task stays blocked; it must
+    never fall back to a synthesized or required unblock helper.
+    """
+    return any(
+        isinstance(action, dict)
+        and action.get("task_id") == record.get("task_id")
+        and action.get("action") == "resume_parent_task"
+        and action.get("resume_basis") == MERGED_RUNTIME_ACCEPTANCE_READY
+        for action in payload.get("task_actions", []) or []
+    )
+
+
+def has_explicit_parent_resume(payload: dict[str, Any], record: dict[str, Any]) -> bool:
+    return has_explicit_candidate_ci_resume(payload, record) or has_explicit_merged_acceptance_resume(payload, record)
 
 
 CHAIR_BLOCKED_TASK_WINDOW = 8
@@ -6658,7 +6682,7 @@ def synthesize_reassignment_followup_task_actions(
         action_name = str(item.get("action") or "").strip()
         if not task_id or not action_name or action_name in action_index.get(task_id, set()):
             continue
-        if has_explicit_candidate_ci_resume(payload, item) or task_id in deferred:
+        if has_explicit_parent_resume(payload, item) or task_id in deferred:
             continue
         if action_name == "create_unblock_task":
             unblock_kind = str(item.get("kind") or "manual_unblock").strip() or "manual_unblock"
@@ -6785,8 +6809,19 @@ def _chair_review_summary_lines(
             f" ci={item['task'].get('ci_status') or '-'} blocker_fingerprint={recovery['blocker_fingerprint']} open_blockers={recovery['open_blockers']}"
             if isinstance(recovery, dict) else ""
         )
+        merged = item.get("merged_acceptance_resume")
+        merged_acceptance_label = (
+            f" merged_acceptance=eligible candidate_sha={merged['identity']['candidate_sha']}"
+            f" candidate_generation={merged['identity']['candidate_generation']} merge_sha={merged['identity']['merge_sha']}"
+            f" candidate_branch={merged['identity']['candidate_branch']} owner={merged['identity']['owner']}"
+            f" reviewer={merged['identity']['reviewer']}"
+            f" required_acceptance={'|'.join(merged['identity']['required_acceptance'])}"
+            f" depends_on={'|'.join(merged['depends_on']) or '-'}"
+            f" blocker_fingerprint={merged['blocker_fingerprint']}"
+            if isinstance(merged, dict) else ""
+        )
         blocked_task_lines.append(
-            f"- {item.get('task_id')}: kind={item.get('kind')} action={action_label} helper={helper_label} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'}{recovery_label} next={item.get('next') or '-'}"
+            f"- {item.get('task_id')}: kind={item.get('kind')} action={action_label} helper={helper_label} owner={item.get('owner') or '-'} reviewer={item.get('reviewer') or '-'}{recovery_label}{merged_acceptance_label} next={item.get('next') or '-'}"
         )
     if not blocked_task_lines:
         blocked_task_lines.append("- none")
@@ -6886,6 +6921,7 @@ def build_chair_review_message(
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
         "- `resume_parent_task` 一般只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
         "- 唯一例外：摘要標示 `ci_recovery=eligible` 的 blocked task（僅限剛好一個 open blocker），若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 且已恢復，可明確輸出 `resume_parent_task` 並附 `resume_basis=candidate_ci_recovered`、`resume_status=in_progress`、摘要中的完整 `candidate_sha` / `candidate_generation` / `pr_url` / `blocker_fingerprint` 與具體 reason，不需新 helper。Supervisor 會重讀同 PR/head/branch 的 own-workflow CI 並比對 open blocker 集合，只沿原 handoff 恢復獨立 review；這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
+        "- 另一對等例外：摘要標示 `merged_acceptance=eligible` 的 blocked task（剛好一個 open blocker、已獨立 review、同 SHA own CI 成功、已 merge、仍有 outstanding required acceptance keys），若你實際確認該 blocker 是唯一剩餘阻礙，可明確輸出 `resume_parent_task` 並附 `resume_basis=merged_runtime_acceptance_ready`、`resume_status=acceptance`、以及摘要中那一行完整的 `candidate_sha` / `candidate_generation` / `merge_sha` / `candidate_branch` / `owner` / `reviewer` / `required_acceptance`（字串陣列）/ `depends_on`（字串陣列，可為空）/ `blocker_fingerprint` 與具體 reason，不需新 helper、不要附 `pr_url` 或 helper。這九項必須原樣抄自同一行摘要，任何一項與 Supervisor 重讀的現況不符都會整個拒絕、零殘留，不會改用重讀到的新值。Supervisor 會在既有 taskboard lock 下重新核對這個完整快照，只讓原 owner/reviewer 繼續記錄 required acceptance；這不核准任何 acceptance key、不寫 evidence、不適用仍有其他未解 blocker 或尚未 merge 的任務。\n"
         "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
@@ -7327,7 +7363,7 @@ def validate_chair_review_context(
                 expected_action = str(item.get("action") or "").strip()
                 if not task_id or not expected_action or task_id in deferred:
                     continue
-                if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item):
+                if expected_action not in action_index.get(task_id, set()) and not has_explicit_parent_resume(payload, item):
                     missing.append(f"{task_id}:{expected_action}")
             if missing:
                 return "blocked_task_triage must resolve blocked tasks via " + ", ".join(missing[:6])
@@ -7342,7 +7378,7 @@ def validate_chair_review_context(
                 expected_action = str(item.get("action") or "").strip()
                 if not task_id or not expected_action or task_id in deferred:
                     continue
-                if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item):
+                if expected_action not in action_index.get(task_id, set()) and not has_explicit_parent_resume(payload, item):
                     missing.append(f"{task_id}:{expected_action}")
             if missing:
                 return "reassignment_triage must materialize follow-up task actions via " + ", ".join(missing[:6])
@@ -8190,9 +8226,13 @@ def apply_chair_parent_resume_action(
     if not dependencies_satisfied(parent, task_map, dependency_done_statuses):
         return False
     if "resume_basis" in action:
-        return apply_chair_candidate_ci_resume_action(
-            config, status, parent, action, chair_reason, dependency_done_statuses
-        )
+        if action.get("resume_basis") == CANDIDATE_CI_RECOVERED:
+            return apply_chair_candidate_ci_resume_action(
+                config, status, parent, action, chair_reason, dependency_done_statuses
+            )
+        if action.get("resume_basis") == MERGED_RUNTIME_ACCEPTANCE_READY:
+            return apply_chair_merged_acceptance_resume_action(config, status, parent, action, chair_reason)
+        return False
 
     unblock_kind = blocked_task_triage_kind(parent)
     completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
@@ -8376,18 +8416,104 @@ def merged_acceptance_resume_context(status: dict[str, Any], task: dict[str, Any
     identity = merged_acceptance_resume_identity(task)
     if identity is None:
         return None
-    fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), str(task.get("id") or ""))
+    # Mirror the board's locked refusals so the Chair is only shown real routes:
+    # outstanding required keys, no live acceptance-review request, no open helper.
+    if not set(identity["required_acceptance"]) - set(identity["recorded_acceptance"]):
+        return None
+    request = task.get("acceptance_review_request")
+    if request is not None and (not isinstance(request, dict) or request.get("state") != "declined"):
+        return None
+    task_id = str(task.get("id") or "")
+    if any(
+        isinstance(row, dict) and row.get("task_class") == "unblock"
+        and row.get("helper_parent") == task_id and row.get("status") != "done"
+        for row in status.get("tasks", []) or []
+    ):
+        return None
+    fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), task_id)
     if open_count != 1:
         return None
-    return {"identity": identity, "blocker_fingerprint": fingerprint}
+    return {
+        "identity": identity,
+        "blocker_fingerprint": fingerprint,
+        "depends_on": sorted(str(value) for value in task.get("depends_on") or []),
+    }
 
 
-def apply_supervisor_merged_acceptance_resume(config: dict[str, Any], task_id: str, reason: str) -> bool:
+# Scalar identity fields the Chair must echo back exactly. branch/owner/reviewer
+# join candidate_sha/candidate_generation/merge_sha so a reassignment or branch
+# rename between the Chair's view and either gateway reread is caught the same
+# way a stale candidate_sha would be; required_acceptance and depends_on are
+# list-valued and compared separately below.
+MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS = (
+    "candidate_sha", "candidate_generation", "merge_sha", "candidate_branch", "owner", "reviewer",
+)
+
+
+def merged_acceptance_observation_matches(context: dict[str, Any], observed: dict[str, Any]) -> bool:
+    identity = context["identity"]
+    if any(observed.get(key) != identity[key] for key in MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS):
+        return False
+    if observed.get("blocker_fingerprint") != context["blocker_fingerprint"]:
+        return False
+    required = observed.get("required_acceptance")
+    if not isinstance(required, list) or sorted(str(v) for v in required) != sorted(
+        str(v) for v in identity["required_acceptance"]
+    ):
+        return False
+    depends_on = observed.get("depends_on")
+    if not isinstance(depends_on, list) or sorted(str(v) for v in depends_on) != context["depends_on"]:
+        return False
+    return True
+
+
+MERGED_ACCEPTANCE_OBSERVATION_KEYS = (
+    *MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS, "blocker_fingerprint", "required_acceptance", "depends_on",
+)
+
+
+def apply_chair_merged_acceptance_resume_action(
+    config: dict[str, Any],
+    status: dict[str, Any],
+    parent: dict[str, Any],
+    action: dict[str, Any],
+    chair_reason: str,
+) -> bool:
+    """Explicit Chair decision bound to the one existing merged-acceptance gateway.
+
+    Writes nothing itself: the Chair's observed snapshot (full merged
+    identity, required_acceptance and depends_on, not just candidate_sha/
+    generation/merge_sha) must match the current context here, and is handed
+    to the gateway so its own re-read (and the board's locked re-check)
+    cannot silently switch to a different branch/owner/reviewer/requiredkeys/
+    depends_on tuple just because it reloaded fresh data.
+    """
+    if action.get("resume_basis") != MERGED_RUNTIME_ACCEPTANCE_READY or any(
+        key not in MERGED_ACCEPTANCE_RESUME_ACTION_KEYS for key in action
+    ):
+        return False
+    if action.get("resume_status") != "acceptance":
+        return False
+    context = merged_acceptance_resume_context(status, parent)
+    if context is None or not merged_acceptance_observation_matches(context, action):
+        return False
+    observed = {key: action[key] for key in MERGED_ACCEPTANCE_OBSERVATION_KEYS}
+    return apply_supervisor_merged_acceptance_resume(
+        config, str(parent.get("id") or ""), chair_reason, chair_observation=observed
+    )
+
+
+def apply_supervisor_merged_acceptance_resume(
+    config: dict[str, Any], task_id: str, reason: str, *, chair_observation: dict[str, Any] | None = None
+) -> bool:
     """Supervisor authority: return a blocked, already merged task to acceptance.
 
-    Not a Chair task action and never invoked by a tick: it only lets the
-    original owner/reviewer record the remaining required evidence. A rejected
-    resume leaves no board write and no Supervisor activity-log entry.
+    Never invoked by a tick. The only Chair route is an explicit
+    resume_parent_task with resume_basis=merged_runtime_acceptance_ready,
+    whose observed snapshot (chair_observation) must still match this re-read.
+    It only lets the original owner/reviewer record the remaining required
+    evidence. A rejected resume leaves no board write and no Supervisor
+    activity-log entry.
     """
     task_id = str(task_id or "").strip()
     reason = str(reason or "").strip()
@@ -8405,6 +8531,8 @@ def apply_supervisor_merged_acceptance_resume(config: dict[str, Any], task_id: s
         return False
     context = merged_acceptance_resume_context(status, task)
     if context is None:
+        return False
+    if chair_observation is not None and not merged_acceptance_observation_matches(context, chair_observation):
         return False
     identity = context["identity"]
     message = brief_reason_text(f"Supervisor resumed merged acceptance: {reason}", max_length=280)
