@@ -1325,7 +1325,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
       expectedPreviewControlled: true,
       expectedRetained: true,
     })),
-    ...(["journey", "http"] as const).map((typedFault) => ({
+    ...(["journey", "http", "exchange-http"] as const).map((typedFault) => ({
       caseName: `empty typed ${typedFault} fault preserves identity`,
       faultPoint: "preview-click",
       typedFault,
@@ -1514,7 +1514,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         "typedFault" in scenario ? scenario.typedFault : undefined;
       const privateMarker = "private-native-token-url-order-actor-sql-body";
       const injectedFailure =
-        typedFault === "http"
+        typedFault === "http" || typedFault === "exchange-http"
           ? new DailyReportHttpFailure("daily-report-preview-status-200", {
               phase: "preview",
               method: "GET",
@@ -1654,6 +1654,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
         const faultAt = (point: string) => {
           if (
+            typedFault !== "exchange-http" &&
             faultPoint === point &&
             evidence.events.some(
               (event) =>
@@ -1770,78 +1771,86 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                     "GET",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records?${query.toString()}`,
                     null,
-                    previewFailure === true ? 503 : 200,
+                    previewFailure === true ||
+                      (typedFault === "exchange-http" &&
+                        dateFromVal === "2026-10-25")
+                      ? 503
+                      : 200,
                     { "content-type": "application/json" },
-                    failureCase === "preview-invalid-json"
-                      ? Buffer.from("not-json")
-                      : failureCase === "preview-error-envelope"
-                        ? errorWireBytes()
-                        : failureCase === "preview-missing-meta"
-                          ? Buffer.from(
-                              JSON.stringify({ data: toApiListData(rows) }),
-                            )
-                          : failureCase === "preview-invalid-meta"
+                    typedFault === "exchange-http" &&
+                      dateFromVal === "2026-10-25"
+                      ? errorWireBytes()
+                      : failureCase === "preview-invalid-json"
+                        ? Buffer.from("not-json")
+                        : failureCase === "preview-error-envelope"
+                          ? errorWireBytes()
+                          : failureCase === "preview-missing-meta"
                             ? Buffer.from(
-                                JSON.stringify({
-                                  data: toApiListData(rows),
-                                  meta: { request_id: "x", timestamp: "bad" },
-                                }),
+                                JSON.stringify({ data: toApiListData(rows) }),
                               )
-                            : failureCase === "preview-error-with-data"
+                            : failureCase === "preview-invalid-meta"
                               ? Buffer.from(
                                   JSON.stringify({
-                                    ok: false,
                                     data: toApiListData(rows),
-                                    error: {
-                                      code: "REPORT_READ_FAILED",
-                                      message: "private-report-error",
-                                    },
+                                    meta: { request_id: "x", timestamp: "bad" },
                                   }),
                                 )
-                              : failureCase === "preview-error-null"
+                              : failureCase === "preview-error-with-data"
                                 ? Buffer.from(
                                     JSON.stringify({
-                                      ...toApiSuccessEnvelope(
-                                        toApiListData(rows),
-                                      ),
-                                      error: null,
+                                      ok: false,
+                                      data: toApiListData(rows),
+                                      error: {
+                                        code: "REPORT_READ_FAILED",
+                                        message: "private-report-error",
+                                      },
                                     }),
                                   )
-                                : failureCase === "preview-missing-data"
+                                : failureCase === "preview-error-null"
                                   ? Buffer.from(
                                       JSON.stringify({
-                                        meta: {
-                                          request_id: "x",
-                                          timestamp: new Date().toISOString(),
-                                        },
+                                        ...toApiSuccessEnvelope(
+                                          toApiListData(rows),
+                                        ),
+                                        error: null,
                                       }),
                                     )
-                                  : failureCase === "preview-missing-page-info"
-                                    ? wireBytes({ items: rows })
+                                  : failureCase === "preview-missing-data"
+                                    ? Buffer.from(
+                                        JSON.stringify({
+                                          meta: {
+                                            request_id: "x",
+                                            timestamp: new Date().toISOString(),
+                                          },
+                                        }),
+                                      )
                                     : failureCase ===
-                                        "preview-invalid-page-info"
-                                      ? wireBytes({
-                                          ...toApiListData(rows),
-                                          pageInfo: { page: 0 },
-                                        })
-                                      : failureCase === "preview-wrong-items"
+                                        "preview-missing-page-info"
+                                      ? wireBytes({ items: rows })
+                                      : failureCase ===
+                                          "preview-invalid-page-info"
                                         ? wireBytes({
                                             ...toApiListData(rows),
-                                            items: "not-an-array",
+                                            pageInfo: { page: 0 },
                                           })
-                                        : previewFailure === true
-                                          ? Buffer.from(
-                                              JSON.stringify({
-                                                error: {
-                                                  code: "REPORT_READ_FAILED",
-                                                  trace_id:
-                                                    "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
-                                                  message:
-                                                    "private-error-message",
-                                                },
-                                              }),
-                                            )
-                                          : wireBytes(toApiListData(rows)),
+                                        : failureCase === "preview-wrong-items"
+                                          ? wireBytes({
+                                              ...toApiListData(rows),
+                                              items: "not-an-array",
+                                            })
+                                          : previewFailure === true
+                                            ? Buffer.from(
+                                                JSON.stringify({
+                                                  error: {
+                                                    code: "REPORT_READ_FAILED",
+                                                    trace_id:
+                                                      "b7e78ce8-82c1-46fb-a457-1f90ee7cdf55",
+                                                    message:
+                                                      "private-error-message",
+                                                  },
+                                                }),
+                                              )
+                                            : wireBytes(toApiListData(rows)),
                   );
                 },
               });
@@ -2226,14 +2235,19 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
             result: "failed",
           });
           expect(failure).toBeInstanceOf(JourneyFailure);
-          if (typedFault) expect(failure).toBe(injectedFailure);
+          if (typedFault === "exchange-http") {
+            expect(failure).toBeInstanceOf(DailyReportHttpFailure);
+            expect(failure).toMatchObject({
+              context: (injectedFailure as DailyReportHttpFailure).context,
+            });
+            expect(JSON.stringify(evidence.events)).not.toContain(
+              "private-report-error",
+            );
+          } else if (typedFault) expect(failure).toBe(injectedFailure);
           else {
-            expect(Object.keys(failure as object)).toEqual([
-              "stage",
-              "status",
-              "code",
-              "transportFacts",
-            ]);
+            expect(JSON.parse(JSON.stringify(failure))).toEqual({
+              stage: expectedStage,
+            });
             expect((failure as Error).message).toBe(expectedStage);
             expect((failure as Error).cause).toBeUndefined();
           }
