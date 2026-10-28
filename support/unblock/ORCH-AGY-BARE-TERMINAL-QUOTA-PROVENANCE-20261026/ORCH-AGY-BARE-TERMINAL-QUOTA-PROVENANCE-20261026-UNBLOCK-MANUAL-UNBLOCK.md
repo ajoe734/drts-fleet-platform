@@ -1,6 +1,6 @@
 # Bare terminal quota provenance: remaining blocker
 
-Task: `ORCH-AGY-BARE-TERMINAL-QUOTA-PROVENANCE-20261026-UNBLOCK-MANUAL-UNBLOCK`  
+Task: `ORCH-AGY-BARE-TERMINAL-QUOTA-PROVENANCE-20261026-UNBLOCK-MANUAL-UNBLOCK`
 Owner: Codex; reviewer: Claude2. Readback: 2026-10-28 UTC.
 
 ## Diagnosis
