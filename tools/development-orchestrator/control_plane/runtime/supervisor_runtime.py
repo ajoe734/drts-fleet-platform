@@ -6401,19 +6401,18 @@ def candidate_ci_recovery_context(status: dict[str, Any], task: dict[str, Any]) 
 
 
 def has_explicit_candidate_ci_resume(payload: dict[str, Any], record: dict[str, Any]) -> bool:
-    """Recognize the matching Chair decision, not proof that GitHub CI recovered."""
-    recovery = record.get("candidate_ci_recovery")
-    if not isinstance(recovery, dict):
-        return False
+    """The Chair chose the explicit CI-recovery route for this task.
+
+    Presence of the decision, not proof it is still valid: a stale decision
+    (blocker set, generation, PR or dependencies changed since the Chair
+    snapshot) is rejected at apply time and the task simply stays blocked.
+    It must never fall back to a synthesized or required unblock helper.
+    """
     return any(
         isinstance(action, dict)
         and action.get("task_id") == record.get("task_id")
         and action.get("action") == "resume_parent_task"
         and action.get("resume_basis") == CANDIDATE_CI_RECOVERED
-        and str(action.get("resume_status") or "in_progress").strip().lower() == "in_progress"
-        and action.get("candidate_sha") == recovery["candidate_sha"]
-        and action.get("candidate_generation") == recovery["candidate_generation"]
-        and action.get("blocker_fingerprint") == recovery["blocker_fingerprint"]
         for action in payload.get("task_actions", []) or []
     )
 
@@ -6589,7 +6588,7 @@ def _chair_review_summary_lines(
         helper_label = str(item.get("helper_task_id") or "-")
         recovery = item.get("candidate_ci_recovery")
         recovery_label = (
-            f" ci_recovery=eligible candidate_sha={recovery['candidate_sha']} candidate_generation={recovery['candidate_generation']}"
+            f" ci_recovery=eligible candidate_sha={recovery['candidate_sha']} candidate_generation={recovery['candidate_generation']} pr_url={recovery['pr_url']}"
             f" ci={item['task'].get('ci_status') or '-'} blocker_fingerprint={recovery['blocker_fingerprint']} open_blockers={recovery['open_blockers']}"
             if isinstance(recovery, dict) else ""
         )
@@ -6693,7 +6692,7 @@ def build_chair_review_message(
         "- `dispatch_now` 只能對 machine truth 已符合派工條件的非 blocked 任務觸發。\n"
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
         "- `resume_parent_task` 一般只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
-        "- 唯一例外：摘要標示 `ci_recovery=eligible` 的 blocked task，若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 且已恢復，可明確輸出 `resume_parent_task` 並附 `resume_basis=candidate_ci_recovered`、`resume_status=in_progress`、摘要中的完整 `candidate_sha` / `candidate_generation` / `blocker_fingerprint` 與具體 reason，不需新 helper。Supervisor 會重讀同 PR/head/branch 的 own-workflow CI 並比對 open blocker 集合，只沿原 handoff 恢復獨立 review；這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
+        "- 唯一例外：摘要標示 `ci_recovery=eligible` 的 blocked task，若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 且已恢復，可明確輸出 `resume_parent_task` 並附 `resume_basis=candidate_ci_recovered`、`resume_status=in_progress`、摘要中的完整 `candidate_sha` / `candidate_generation` / `pr_url` / `blocker_fingerprint` 與具體 reason，不需新 helper。Supervisor 會重讀同 PR/head/branch 的 own-workflow CI 並比對 open blocker 集合，只沿原 handoff 恢復獨立 review；這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
         "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
@@ -7990,7 +7989,9 @@ def apply_chair_parent_resume_action(
     if not dependencies_satisfied(parent, task_map, dependency_done_statuses):
         return False
     if "resume_basis" in action:
-        return apply_chair_candidate_ci_resume_action(config, status, parent, action, chair_reason)
+        return apply_chair_candidate_ci_resume_action(
+            config, status, parent, action, chair_reason, dependency_done_statuses
+        )
 
     unblock_kind = blocked_task_triage_kind(parent)
     completed_helper = completed_unblock_task_for_parent(status, task_id, unblock_kind)
@@ -8084,6 +8085,7 @@ def apply_chair_candidate_ci_resume_action(
     parent: dict[str, Any],
     action: dict[str, Any],
     chair_reason: str,
+    dependency_done_statuses: set[str],
 ) -> bool:
     """Explicit Chair decision: restore the original review route after CI recovered.
 
@@ -8098,7 +8100,8 @@ def apply_chair_candidate_ci_resume_action(
     identity = candidate_ci_recovery_identity(parent)
     if identity is None:
         return False
-    if any(action.get(key) != identity[key] for key in ("candidate_sha", "candidate_generation")):
+    # Bind the Chair's observation: the same candidate on the same PR it saw.
+    if any(action.get(key) != identity[key] for key in ("candidate_sha", "candidate_generation", "pr_url")):
         return False
     fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), task_id)
     if not open_count or action.get("blocker_fingerprint") != fingerprint:
@@ -8131,6 +8134,11 @@ def apply_chair_candidate_ci_resume_action(
             "TASK_RESUME_BASIS": CANDIDATE_CI_RECOVERED,
             "TASK_RESUME_CANDIDATE_IDENTITY_JSON": json.dumps(identity),
             "TASK_RESUME_BLOCKER_FINGERPRINT": fingerprint,
+            "TASK_RESUME_CHAIR_PR_URL": str(action["pr_url"]),
+            # Dependencies were checked before the GitHub read; the board
+            # re-checks this exact list and its completion under its lock.
+            "TASK_RESUME_DEPENDS_ON_JSON": json.dumps(list(parent.get("depends_on") or [])),
+            "TASK_RESUME_DEPENDENCY_DONE_STATUSES": json.dumps(sorted(dependency_done_statuses)),
             "CANDIDATE_HEAD_SHA": identity["candidate_sha"],
             "CANDIDATE_BRANCH": identity["candidate_branch"],
             "CANDIDATE_CI_STATUS": "success",

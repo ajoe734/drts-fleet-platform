@@ -1300,6 +1300,8 @@ class CandidateCiResumeTransactionTests(unittest.TestCase):
                 "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation", "pr_url"
             )}),
             "TASK_RESUME_BLOCKER_FINGERPRINT": open_blocker_fingerprint(self.state["blockers"], self.task["id"])[0],
+            "TASK_RESUME_CHAIR_PR_URL": self.task["pr_url"],
+            "TASK_RESUME_DEPENDS_ON_JSON": "[]", "TASK_RESUME_DEPENDENCY_DONE_STATUSES": '["done"]',
             "CANDIDATE_HEAD_SHA": self.task["candidate_sha"], "CANDIDATE_BRANCH": self.task["candidate_branch"],
             "PR_URL": self.task["pr_url"], "CANDIDATE_CI_STATUS": "success",
         }
@@ -1378,6 +1380,56 @@ class CandidateCiResumeTransactionTests(unittest.TestCase):
         state = json.loads(self.path.read_text())
         self.assertEqual(state["tasks"][0]["status"], "review")
         self.assertEqual([row["status"] for row in state["blockers"]], ["open", "resolved"])
+
+    def test_R1_dependencies_rechecked_under_lock(self) -> None:
+        dependency = {"id": "DEP-A", "title": "Dependency", "phase": "test", "owner": "Codex", "reviewer": "Pi",
+                      "status": "done", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Done"}
+        for kind in ("regressed", "added_unfinished", "added_done_after_snapshot", "missing_snapshot", "positive"):
+            with self.subTest(kind=kind):
+                state = copy.deepcopy(self.state); env = dict(self.env)
+                state["tasks"][0]["depends_on"] = ["DEP-A"]
+                state["tasks"].append(dict(dependency))
+                env["TASK_RESUME_DEPENDS_ON_JSON"] = '["DEP-A"]'
+                if kind == "regressed":
+                    state["tasks"][1]["status"] = "in_progress"
+                if kind == "added_unfinished":
+                    state["tasks"][0]["depends_on"].append("DEP-B")
+                    state["tasks"].append({**dependency, "id": "DEP-B", "status": "todo"})
+                if kind == "added_done_after_snapshot":
+                    state["tasks"][0]["depends_on"].append("DEP-B")
+                    state["tasks"].append({**dependency, "id": "DEP-B"})
+                if kind == "missing_snapshot":
+                    env.pop("TASK_RESUME_DEPENDS_ON_JSON")
+                self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+                self.log.unlink(missing_ok=True)
+                if kind == "positive":
+                    self.execute("resume-blocked", "in_progress", "Dependencies intact", env=env)
+                    self.assertEqual(json.loads(self.path.read_text())["tasks"][0]["status"], "review")
+                    continue
+                with self.assertRaises(SystemExit):
+                    self.execute("resume-blocked", "in_progress", "Dependency drifted", env=env)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertFalse(self.log.exists())
+
+    def test_R3_bound_PR_must_equal_chair_observed_PR_under_lock(self) -> None:
+        pr32 = "https://github.com/acme/fleet/pull/32"
+        for kind in ("task_rebound", "chair_observed_other", "missing"):
+            with self.subTest(kind=kind):
+                state = copy.deepcopy(self.state); env = dict(self.env)
+                if kind == "task_rebound":
+                    # Same H/generation; identity and observation describe PR32, Chair saw PR31.
+                    state["tasks"][0]["pr_url"] = pr32
+                    identity = json.loads(env["TASK_RESUME_CANDIDATE_IDENTITY_JSON"]); identity["pr_url"] = pr32
+                    env.update(TASK_RESUME_CANDIDATE_IDENTITY_JSON=json.dumps(identity), PR_URL=pr32)
+                if kind == "chair_observed_other":
+                    env["TASK_RESUME_CHAIR_PR_URL"] = pr32
+                if kind == "missing":
+                    env.pop("TASK_RESUME_CHAIR_PR_URL")
+                self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+                with self.assertRaises(SystemExit):
+                    self.execute("resume-blocked", "in_progress", "PR identity drifted", env=env)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertFalse(self.log.exists())
 
     def test_owner_progress_and_start_and_normal_helper_resume_keep_original_semantics(self) -> None:
         owner = {"AI_NAME": "Pi", "ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root)}

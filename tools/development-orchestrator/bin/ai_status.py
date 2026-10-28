@@ -37,7 +37,11 @@ from control_plane.usecases.task_board_commands import (  # noqa: E402
 )
 from control_plane.domain.task_records import validate_task_eligibility
 from control_plane.domain.handoff_context import validate_next_text
-from control_plane.domain.dispatch_policy import acceptance_review_snapshot, pending_acceptance_review
+from control_plane.domain.dispatch_policy import (
+    acceptance_review_snapshot,
+    dependencies_satisfied,
+    pending_acceptance_review,
+)
 from control_plane.domain.unblock_resolution import parent_resume_blocker  # noqa: E402
 from control_plane.domain.chair_policy import (  # noqa: E402
     CANDIDATE_CI_RECOVERED,
@@ -2050,6 +2054,20 @@ def validate_candidate_ci_resume(
         raise SystemExit("Candidate CI recovery requires a complete candidate identity")
     if parse_json_env("TASK_RESUME_CANDIDATE_IDENTITY_JSON") != identity:
         raise SystemExit("Candidate identity changed before CI recovery")
+    if os.environ.get("TASK_RESUME_CHAIR_PR_URL", "").strip() != identity["pr_url"]:
+        raise SystemExit("Bound candidate PR differs from the Chair-observed PR")
+    try:
+        observed_depends_on = json.loads(os.environ.get("TASK_RESUME_DEPENDS_ON_JSON", ""))
+        done_statuses = set(json.loads(os.environ.get("TASK_RESUME_DEPENDENCY_DONE_STATUSES", "")))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise SystemExit("Candidate CI recovery requires the observed dependency snapshot") from exc
+    if (
+        not isinstance(observed_depends_on, list)
+        or list(task.get("depends_on") or []) != observed_depends_on
+        or not done_statuses
+        or not dependencies_satisfied(task, {str(row.get("id")): row for row in state.get("tasks", [])}, done_statuses)
+    ):
+        raise SystemExit("Dependencies changed or are no longer complete")
     if task.get("merge_sha") or not candidate_review_handoff_is_current(task):
         raise SystemExit("Candidate CI recovery requires the original current owner handoff")
     fingerprint, open_count = open_blocker_fingerprint(state.get("blockers"), task_id)

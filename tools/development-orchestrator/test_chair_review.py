@@ -3720,7 +3720,7 @@ class CandidateCiResumeTests(unittest.TestCase):
         self.action = {"task_id": self.task["id"], "action": "resume_parent_task", "resume_status": "in_progress",
                        "resume_basis": "candidate_ci_recovered", "candidate_sha": self.task["candidate_sha"],
                        "candidate_generation": self.task["candidate_generation"],
-                       "blocker_fingerprint": self.fingerprint,
+                       "blocker_fingerprint": self.fingerprint, "pr_url": self.task["pr_url"],
                        "reason": "Actual Chair confirmed original CI blocker resolved"}
         mock.patch.dict(os.environ, {"ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root)}, clear=True).start()
         self.addCleanup(mock.patch.stopall)
@@ -3911,22 +3911,27 @@ class CandidateCiResumeTests(unittest.TestCase):
                 self.assertEqual(normalized["task_actions"], [self.action])
                 self.assertIsNone(supervisor.validate_chair_review_context(
                     normalized, reason=reason, approval_state={"pending": []}, config={}, status=status))
-                # Existing helper route is unchanged without the explicit, matching decision.
-                for drift in ({}, {"blocker_fingerprint": "0" * 64}, {"candidate_generation": "other"}):
-                    payload = {**base, "decision": reason,
-                               "task_actions": [{**self.action, **drift}] if drift else []}
+                # A stale explicit decision stays on the explicit route: no helper is
+                # synthesized or required; apply alone rejects it (fail closed).
+                for drift in ({"blocker_fingerprint": "0" * 64}, {"candidate_generation": "other"},
+                              {"pr_url": "https://github.com/acme/fleet/pull/32"}):
+                    payload = {**base, "decision": reason, "task_actions": [{**self.action, **drift}]}
                     normalized = supervisor.normalize_chair_review_payload_for_reason(payload, reason=reason, config={}, status=status)
-                    if reason == "reassignment_triage":
-                        self.assertIn("create_unblock_task", [a["action"] for a in normalized["task_actions"]])
-                    else:
-                        self.assertIn(f"{self.task['id']}:create_unblock_task", supervisor.validate_chair_review_context(
-                            normalized, reason=reason, approval_state={"pending": []}, config={}, status=status) or "")
+                    self.assertEqual(normalized["task_actions"], [{**self.action, **drift}])
+                    self.assertIsNone(supervisor.validate_chair_review_context(
+                        normalized, reason=reason, approval_state={"pending": []}, config={}, status=status))
+                # Without any explicit decision the existing helper route is unchanged.
+                payload = {**base, "decision": reason, "task_actions": []}
+                normalized = supervisor.normalize_chair_review_payload_for_reason(payload, reason=reason, config={}, status=status)
+                if reason == "reassignment_triage":
+                    self.assertEqual([a["action"] for a in normalized["task_actions"]], ["create_unblock_task"])
+                else:
+                    self.assertIn(f"{self.task['id']}:create_unblock_task", supervisor.validate_chair_review_context(
+                        normalized, reason=reason, approval_state={"pending": []}, config={}, status=status) or "")
+        self.assertIn(f"pr_url={self.task['pr_url']}", message)
         ineligible = json.loads(json.dumps(status))
         ineligible["tasks"][0]["candidate_review_handoff"] = None
         self.assertIsNone(supervisor.dependency_ready_blocked_task_records({}, ineligible)[0]["candidate_ci_recovery"])
-        self.assertIsNotNone(supervisor.validate_chair_review_context(
-            {**base, "decision": "blocked_task_triage", "task_actions": [self.action]},
-            reason="blocked_task_triage", approval_state={"pending": []}, config={}, status=ineligible))
 
     def test_completed_native_chair_decision_reaches_real_transaction(self) -> None:
         import github_bus
@@ -3959,9 +3964,138 @@ class CandidateCiResumeTests(unittest.TestCase):
                 self.assertEqual(actions, [self.action])  # no synthesized helper
         for key, value in (("resume_basis", "unrelated_blocker"), ("candidate_sha", "short"),
                            ("candidate_generation", ""), ("resume_status", "todo"),
-                           ("blocker_fingerprint", None), ("blocker_fingerprint", "x")):
+                           ("blocker_fingerprint", None), ("blocker_fingerprint", "x"),
+                           ("pr_url", None), ("pr_url", "https://example.com/acme/fleet/pull/31")):
             with self.subTest(invalid_field=key, value=value):
                 payload["task_actions"] = [{**self.action, key: value}]
                 self.assertIsNotNone(supervisor.validate_chair_review_payload(payload))
         payload["task_actions"] = [{**self.action, "action": "create_unblock_task"}]
         self.assertIsNotNone(supervisor.validate_chair_review_payload(payload))
+
+    def run_refresh(self, reason: str, payload: dict) -> dict:
+        review = self.root / "chair-reviews"
+        review.mkdir(exist_ok=True)
+        markdown = review / "decision.md"; markdown.write_text("# Actual decision-port fixture\n")
+        decision = review / "decision.json"; decision.write_text(json.dumps(payload))
+        approval = self.root / "approval-queue.json"
+        approval.write_text(json.dumps({"pending": [], "history": []}))
+        self.config["paths"]["approval_queue"] = str(approval)
+        self.config["chair_review"] = {"enabled": True, "cooldown_seconds": 900}
+        runtime = {"queue": {"events": {"chair-case": {"status": "completed"}}}, "workers": {},
+                   "chair_review": {"active_review": {"agent": "Codex", "agent_id": "codex", "reason": reason,
+                        "queue_event_id": "chair-case", "markdown_path": str(markdown), "json_path": str(decision)}}}
+        supervisor.refresh_chair_review_state(self.config, runtime, provider_report={})
+        return runtime
+
+    def test_R2_stale_explicit_decision_after_new_blocker_never_falls_back_to_helper(self) -> None:
+        import github_bus
+        payload = {"version": 1, "approval_ttl_minutes": 45, "reason": "Specific original CI blocker is resolved",
+                   "blocked_by": [], "approval_actions": [], "reassignment_actions": [],
+                   "task_actions": [self.action], "provider_actions": [], "recommended_focus": [self.task["id"]]}
+        for reason in ("reassignment_triage", "blocked_task_triage"):
+            with self.subTest(reason=reason):
+                # A blocker arrives after the Chair snapshot the decision fingerprinted.
+                board = json.loads(json.dumps(self.board))
+                board["blockers"].append({"task_id": self.task["id"], "owner": "Pi", "waiting_for": "Codex",
+                                          "status": "open", "message": "Blocker after Chair snapshot",
+                                          "created_at": "2026-10-27T02:00:00Z"})
+                self.path.write_text(json.dumps(board))
+                before = self.path.read_bytes()
+                with mock.patch.object(github_bus, "gh_json") as reads, \
+                        mock.patch.object(supervisor, "queue_delivery_event") as wake:
+                    runtime = self.run_refresh(reason, {**payload, "decision": reason})
+                reads.assert_not_called()
+                wake.assert_not_called()
+                self.assertEqual(self.path.read_bytes(), before)  # no helper, no assignment, still blocked
+                self.assertEqual(set(runtime["queue"]["events"]), {"chair-case"})
+                self.assertIsNone(runtime["chair_review"]["active_review"])
+                self.assertEqual(runtime["chair_review"]["last_decision"]["task_actions"], [self.action])
+                rows = self.runtime_log.read_text().splitlines() if self.runtime_log.exists() else []
+                self.assertFalse(any("chair_unblock" in row or "chair_parent_resume" in row for row in rows))
+                self.assertFalse(self.board_log.exists())
+
+    def test_R2_task_without_explicit_decision_still_gets_reassignment_helper(self) -> None:
+        payload = {"version": 1, "decision": "reassignment_triage", "approval_ttl_minutes": 45,
+                   "reason": "Route the blocked task", "blocked_by": [self.task["id"]], "approval_actions": [],
+                   "reassignment_actions": [], "task_actions": [], "provider_actions": [],
+                   "recommended_focus": [self.task["id"]]}
+        normalized = supervisor.normalize_chair_review_payload_for_reason(
+            payload, reason="reassignment_triage", config=self.config, status=json.loads(self.path.read_text()))
+        self.assertEqual([(a["task_id"], a["action"]) for a in normalized["task_actions"]],
+                         [(self.task["id"], "create_unblock_task")])
+
+    def test_R1_dependency_regressed_or_added_during_github_read_fails_closed(self) -> None:
+        import github_bus
+        dependency = {"id": "DEP-A", "title": "Dependency", "phase": "test", "owner": "Codex", "reviewer": "Pi",
+                      "status": "done", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Done"}
+        for kind in ("regressed", "added_unfinished", "positive"):
+            with self.subTest(kind=kind):
+                board = json.loads(json.dumps(self.board))
+                board["tasks"][0]["depends_on"] = ["DEP-A"]
+                board["tasks"].append(dict(dependency))
+                if kind == "added_unfinished":
+                    board["tasks"].append({**dependency, "id": "DEP-B", "status": "in_progress"})
+                self.path.write_text(json.dumps(board))
+                before = self.path.read_bytes()
+                for log in (self.runtime_log, self.board_log):
+                    log.unlink(missing_ok=True)
+                def external(argv, kind=kind):
+                    data = self.observe(argv)
+                    if argv[0] == "api" and kind != "positive":
+                        state = json.loads(self.path.read_text())
+                        if kind == "regressed":
+                            state["tasks"][1]["status"] = "in_progress"
+                        else:
+                            state["tasks"][0]["depends_on"].append("DEP-B")
+                        self.path.write_text(json.dumps(state))
+                    return data
+                with mock.patch.object(github_bus, "gh_json", side_effect=external):
+                    resumed = supervisor.apply_chair_parent_resume_action(self.config, {}, self.action)
+                state = json.loads(self.path.read_text())
+                if kind == "positive":
+                    self.assertTrue(resumed)
+                    self.assertEqual(state["tasks"][0]["status"], "review")
+                    continue
+                self.assertFalse(resumed)
+                task = state["tasks"][0]
+                self.assertEqual((task["status"], task["waiting_for"], task["ci_status"]), ("blocked", "Gemini", "failure"))
+                self.assertTrue(all(row["status"] == "open" for row in state["blockers"]))
+                self.assertNotEqual(self.path.read_bytes(), before)  # only the concurrent edit landed
+                self.assertFalse(self.runtime_log.exists())
+                self.assertFalse(self.board_log.exists())
+
+    def test_R3_bound_PR_changed_from_chair_observation_fails_closed(self) -> None:
+        import github_bus
+        pr32 = "https://github.com/acme/fleet/pull/32"
+        green_pr32 = {**self.pr, "url": pr32}
+        run32 = {**self.run, "pull_requests": [{"number": 32}]}
+        def observe32(argv):
+            return json.loads(json.dumps(green_pr32 if argv[0] == "pr" else [{"workflow_runs": [run32]}]))
+        for kind in ("before_apply", "during_github_read"):
+            with self.subTest(kind=kind):
+                board = json.loads(json.dumps(self.board))
+                if kind == "before_apply":
+                    board["tasks"][0]["pr_url"] = pr32  # same H/generation/handoff, different PR
+                self.path.write_text(json.dumps(board))
+                for log in (self.runtime_log, self.board_log):
+                    log.unlink(missing_ok=True)
+                def external(argv, kind=kind):
+                    if kind == "during_github_read" and argv[0] == "api":
+                        state = json.loads(self.path.read_text())
+                        state["tasks"][0]["pr_url"] = pr32
+                        self.path.write_text(json.dumps(state))
+                        return self.observe(argv)
+                    return observe32(argv) if kind == "before_apply" else self.observe(argv)
+                with mock.patch.object(github_bus, "gh_json", side_effect=external) as reads:
+                    self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+                if kind == "before_apply":
+                    reads.assert_not_called()  # never substitutes PR32's green CI
+                task = json.loads(self.path.read_text())["tasks"][0]
+                self.assertEqual((task["status"], task["pr_url"], task["ci_status"]), ("blocked", pr32, "failure"))
+                self.assertFalse(self.runtime_log.exists())
+                self.assertFalse(self.board_log.exists())
+        # Same PR as observed by the Chair still resumes.
+        self.path.write_text(json.dumps(self.board))
+        with mock.patch.object(github_bus, "gh_json", side_effect=self.observe):
+            self.assertTrue(supervisor.apply_chair_parent_resume_action(self.config, {}, self.action))
+        self.assertEqual(json.loads(self.path.read_text())["tasks"][0]["status"], "review")

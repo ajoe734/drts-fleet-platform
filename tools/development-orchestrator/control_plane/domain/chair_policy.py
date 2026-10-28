@@ -14,6 +14,7 @@ CANDIDATE_CI_RECOVERY_IDENTITY_KEYS = (
 )
 _FULL_SHA = re.compile(r"[0-9a-f]{40}")
 _FINGERPRINT = re.compile(r"[0-9a-f]{64}")
+_PR_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/[1-9][0-9]*")
 
 
 CHAIR_REVIEW_OUTPUT_KEYS = frozenset(
@@ -173,6 +174,8 @@ def validate_review_payload(payload: Any) -> str | None:
                 return "candidate CI recovery requires candidate_generation"
             if not isinstance(action.get("blocker_fingerprint"), str) or not _FINGERPRINT.fullmatch(action["blocker_fingerprint"]):
                 return "candidate CI recovery requires the observed blocker_fingerprint"
+            if not isinstance(action.get("pr_url"), str) or not _PR_URL.fullmatch(action["pr_url"]):
+                return "candidate CI recovery requires the observed candidate pr_url"
 
     for action in payload.get("provider_actions", []):
         if not isinstance(action, dict):
