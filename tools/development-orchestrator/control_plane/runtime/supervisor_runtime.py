@@ -63,7 +63,11 @@ from control_plane.domain.failure_policy import (
 )
 from control_plane.domain.resource_admission import decide as resource_admission_decision
 from control_plane.domain.lane_health import pause_matches_lane
-from control_plane.domain.unblock_resolution import parent_resume_blocker
+from control_plane.domain.unblock_resolution import (
+    MERGED_RUNTIME_ACCEPTANCE_READY,
+    merged_acceptance_resume_identity,
+    parent_resume_blocker,
+)
 from control_plane.domain.chair_policy import (
     CANDIDATE_CI_RECOVERED,
     candidate_ci_recovery_identity,
@@ -8354,6 +8358,81 @@ def apply_chair_candidate_ci_resume_action(
             "candidate_sha": identity["candidate_sha"],
             "candidate_generation": identity["candidate_generation"],
             "resume_status": "review",
+            "message": message,
+        },
+    )
+    return True
+
+
+def merged_acceptance_resume_context(status: dict[str, Any], task: dict[str, Any]) -> dict[str, Any] | None:
+    """Structural eligibility for the Supervisor merged-acceptance resume.
+
+    Separate from candidate_ci_recovery_context: the candidate is already
+    reviewed, green and merged, so nothing is re-observed on GitHub. The board
+    re-checks this snapshot, outstanding evidence and dependencies under lock.
+    """
+    if task.get("external_gate") or blocked_task_holds_delivery(task):
+        return None
+    identity = merged_acceptance_resume_identity(task)
+    if identity is None:
+        return None
+    fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), str(task.get("id") or ""))
+    if open_count != 1:
+        return None
+    return {"identity": identity, "blocker_fingerprint": fingerprint}
+
+
+def apply_supervisor_merged_acceptance_resume(config: dict[str, Any], task_id: str, reason: str) -> bool:
+    """Supervisor authority: return a blocked, already merged task to acceptance.
+
+    Not a Chair task action and never invoked by a tick: it only lets the
+    original owner/reviewer record the remaining required evidence. A rejected
+    resume leaves no board write and no Supervisor activity-log entry.
+    """
+    task_id = str(task_id or "").strip()
+    reason = str(reason or "").strip()
+    if not task_id or not reason:
+        return False
+    status = load_status(config)
+    task_map = task_index_from_status(config, status)
+    task = task_map.get(task_id)
+    if task is None or str(task.get("status") or "").lower() != "blocked":
+        return False
+    dependency_done_statuses = {
+        str(value).lower() for value in ready_dispatch_settings(config).get("dependency_done_statuses", ["done"])
+    }
+    if not dependencies_satisfied(task, task_map, dependency_done_statuses):
+        return False
+    context = merged_acceptance_resume_context(status, task)
+    if context is None:
+        return False
+    identity = context["identity"]
+    message = brief_reason_text(f"Supervisor resumed merged acceptance: {reason}", max_length=280)
+    result = run_task_board_command(
+        config,
+        "resume-blocked",
+        [task_id, "acceptance", message],
+        environ={
+            "AI_NAME": "Supervisor",
+            "TASK_RESUME_BASIS": MERGED_RUNTIME_ACCEPTANCE_READY,
+            "TASK_RESUME_ACCEPTANCE_IDENTITY_JSON": json.dumps(identity),
+            "TASK_RESUME_BLOCKER_FINGERPRINT": context["blocker_fingerprint"],
+            "TASK_RESUME_DEPENDS_ON_JSON": json.dumps(list(task.get("depends_on") or [])),
+            "TASK_RESUME_DEPENDENCY_DONE_STATUSES": json.dumps(sorted(dependency_done_statuses)),
+        },
+    )
+    if not result.ok:
+        return False
+    write_activity_log(
+        config,
+        {
+            "type": "supervisor_merged_acceptance_resumed",
+            "task_id": task_id,
+            "resume_basis": MERGED_RUNTIME_ACCEPTANCE_READY,
+            "candidate_sha": identity["candidate_sha"],
+            "candidate_generation": identity["candidate_generation"],
+            "merge_sha": identity["merge_sha"],
+            "resume_status": "acceptance",
             "message": message,
         },
     )

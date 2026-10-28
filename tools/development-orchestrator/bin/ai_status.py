@@ -42,7 +42,11 @@ from control_plane.domain.dispatch_policy import (
     dependencies_satisfied,
     pending_acceptance_review,
 )
-from control_plane.domain.unblock_resolution import parent_resume_blocker  # noqa: E402
+from control_plane.domain.unblock_resolution import (  # noqa: E402
+    MERGED_RUNTIME_ACCEPTANCE_READY,
+    merged_acceptance_resume_identity,
+    parent_resume_blocker,
+)
 from control_plane.domain.chair_policy import (  # noqa: E402
     CANDIDATE_CI_RECOVERED,
     CANDIDATE_CI_RECOVERY_IDENTITY_KEYS,
@@ -1992,15 +1996,21 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
     actor = current_actor()
     if actor != "Supervisor":
         raise SystemExit("Only Supervisor can resume a blocked task")
-    if resume_status not in {"backlog", "todo", "in_progress"}:
+    if resume_status not in {"backlog", "todo", "in_progress", "acceptance"}:
+        raise SystemExit(f"Unsupported resume status: {resume_status}")
+    resume_basis = os.environ.get("TASK_RESUME_BASIS", "").strip()
+    merged_acceptance = resume_basis == MERGED_RUNTIME_ACCEPTANCE_READY
+    if (resume_status == "acceptance") != merged_acceptance:
+        # Acceptance is reachable only for an already merged candidate.
         raise SystemExit(f"Unsupported resume status: {resume_status}")
     task = get_task(state, task_id)
     if task is None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("status") != "blocked":
         raise SystemExit(f"{task_id} is not blocked")
-    resume_basis = os.environ.get("TASK_RESUME_BASIS", "").strip()
-    if resume_basis:
+    if merged_acceptance:
+        validate_merged_acceptance_resume(state, task)
+    elif resume_basis:
         # Every check runs before any mutation or log append: a rejected
         # recovery leaves neither board state nor activity-log residue.
         validate_candidate_ci_resume(state, task, resume_status, resume_basis)
@@ -2018,7 +2028,13 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
     # For candidate CI recovery this resolves exactly the fingerprinted set,
     # re-read under the same lock above.
     mark_blockers_resolved(state, task_id)
-    if resume_basis:
+    if merged_acceptance:
+        # The phase the merge would have entered had the task not been
+        # blocked; candidate, review, CI and merge evidence stay as recorded.
+        transition_after_merge(state, task, message=message, timestamp=timestamp)
+        if task.get("status") != "acceptance":
+            raise SystemExit("Merged acceptance resume did not restore the acceptance phase")
+    elif resume_basis:
         # Same locked transaction: restore the retained review route through
         # the canonical reconcile path. No new handoff or owner authoring.
         command_reconcile_candidate(state, [task_id, message])
@@ -2035,8 +2051,59 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
             "helper_task_id": helper_id or None,
             **({"resume_basis": resume_basis, "candidate_sha": task.get("candidate_sha"),
                 "candidate_generation": task.get("candidate_generation")} if resume_basis else {}),
+            **({"merge_sha": task.get("merge_sha")} if merged_acceptance else {}),
         }
     )
+
+
+def validate_merged_acceptance_resume(state: dict[str, Any], task: dict[str, Any]) -> None:
+    """Admit a blocked, already merged task back into its acceptance phase.
+
+    Only the structured board record decides: free-text next/messages never
+    grant the route. Every check runs before any mutation or log append.
+    """
+    task_id = str(task.get("id") or "")
+    if any(os.environ.get(name, "").strip() for name in (
+        "TASK_RESUME_HELPER_ID", "MERGE_SHA", "CANDIDATE_HEAD_SHA", "CANDIDATE_CI_STATUS",
+    )):
+        raise SystemExit("Merged acceptance resume cannot use a helper or new candidate observations")
+    if task.get("external_gate") or (task.get("task_class") == "release" and task.get("mutates_canonical") is False):
+        raise SystemExit("Merged acceptance resume cannot resume an external release gate")
+    identity = merged_acceptance_resume_identity(task)
+    if identity is None:
+        raise SystemExit(
+            "Merged acceptance resume requires an independently reviewed, same-SHA green and merged candidate"
+        )
+    if not required_acceptance(task) or acceptance_complete(task):
+        raise SystemExit("Merged acceptance resume requires outstanding required acceptance evidence")
+    request = task.get("acceptance_review_request")
+    if request is not None and (not isinstance(request, dict) or request.get("state") != "declined"):
+        raise SystemExit("Merged acceptance resume cannot override an acceptance review request")
+    if parse_json_env("TASK_RESUME_ACCEPTANCE_IDENTITY_JSON") != identity:
+        raise SystemExit("Merged candidate identity changed before acceptance resume")
+    try:
+        observed_depends_on = json.loads(os.environ.get("TASK_RESUME_DEPENDS_ON_JSON", ""))
+        done_statuses = set(json.loads(os.environ.get("TASK_RESUME_DEPENDENCY_DONE_STATUSES", "")))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise SystemExit("Merged acceptance resume requires the observed dependency snapshot") from exc
+    if (
+        not isinstance(observed_depends_on, list)
+        or list(task.get("depends_on") or []) != observed_depends_on
+        or not done_statuses
+        or not dependencies_satisfied(task, {str(row.get("id")): row for row in state.get("tasks", [])}, done_statuses)
+    ):
+        raise SystemExit("Dependencies changed or are no longer complete")
+    if any(
+        isinstance(row, dict) and row.get("task_class") == "unblock"
+        and row.get("helper_parent") == task_id and row.get("status") != "done"
+        for row in state.get("tasks", [])
+    ):
+        raise SystemExit("Merged acceptance resume cannot bypass an unfinished unblock helper")
+    fingerprint, open_count = open_blocker_fingerprint(state.get("blockers"), task_id)
+    if open_count != 1:
+        raise SystemExit("Merged acceptance resume requires exactly one open blocker")
+    if os.environ.get("TASK_RESUME_BLOCKER_FINGERPRINT", "").strip() != fingerprint:
+        raise SystemExit("Open blockers changed after the Supervisor observation")
 
 
 def validate_candidate_ci_resume(
