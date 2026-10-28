@@ -120,6 +120,9 @@
       "ajv>fast-uri": "^3.1.9",
       "vite": "8.0.11",
       "vitest": "4.1.4"
+    },
+    "patchedDependencies": {
+      "deepmerge@4.3.1": "patches/deepmerge@4.3.1.patch"
     }
   }
 }

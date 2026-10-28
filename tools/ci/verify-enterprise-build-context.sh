@@ -14,7 +14,7 @@ echo "Context (retained for inspection): $context_dir"
 
 git archive "$source_sha" -- \
   package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json \
-  packages apps/enterprise-dispatch-web | tar -x -C "$context_dir"
+  packages patches apps/enterprise-dispatch-web | tar -x -C "$context_dir"
 cd "$context_dir"
 test "$(find apps -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1
 test ! -e apps/tenant-console-web

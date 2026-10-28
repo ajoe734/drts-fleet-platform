@@ -20,6 +20,7 @@ FROM base AS deps
 
 # Install dependencies for the whole workspace (pnpm workspaces)
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY patches/ patches/
 COPY packages/ packages/
 COPY apps/voice-media-worker/package.json apps/voice-media-worker/
 
@@ -36,7 +37,9 @@ RUN pnpm --filter @drts/contracts build && \
     pnpm --filter @drts/voice-media-worker build
 
 # pnpm deploy creates a self-contained flat node_modules (no workspace symlinks)
-RUN pnpm --filter @drts/voice-media-worker --prod deploy --legacy /deploy/worker
+# Expo's deepmerge patch is unused in the worker's production dependency closure.
+# Permit unused patches only for packaging; the frozen install above stays strict.
+RUN pnpm --filter @drts/voice-media-worker --prod deploy --legacy --config.allow-unused-patches=true /deploy/worker
 
 FROM node:${NODE_VERSION} AS runtime
 ENV NODE_ENV=production \
