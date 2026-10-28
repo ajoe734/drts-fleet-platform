@@ -281,7 +281,7 @@ engineering/owner lane, not the reviewer.
 | Record the decision | Recorded here: no new product or contract decision is required for `PAX-BUREAU-JOURNEY-COVERAGE-20261018`. |
 | Scope cut | Recorded in "Scope cut and routing". This helper does not deploy, does not re-review the Source fix, does not perform the backfill and does not fix the eligibility defect. |
 | Or explicit follow-up needed by the parent task | Recorded in "Parent unblocked next step": fix the rehearsal-supply rejection in one engineering task, then the owner does a pinned same-SHA 16-case backfill. |
-| Produce task-scoped commit/push/PR evidence for any canonical change | PR [#3058](https://github.com/ajoe734/drts-fleet-platform/pull/3058) was opened from the original branch, base `dev`. That branch is permanently blocked by a malformed commit trailer (see "Blocker" and "Resolution: branch recovery" sections below); a new PR from branch `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision-recovered` supersedes it. See "Resolution: branch recovery" for the new PR number/URL and head SHA. |
+| Produce task-scoped commit/push/PR evidence for any canonical change | PR [#3058](https://github.com/ajoe734/drts-fleet-platform/pull/3058) was opened from the original branch, base `dev`. That branch is permanently blocked by a malformed commit trailer (see "Blocker" and "Resolution: branch recovery" sections below); PR [#3105](https://github.com/ajoe734/drts-fleet-platform/pull/3105) from branch `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision-recovered` supersedes it. See "Verification basis" for its head SHA and checks. |
 | Update the parent task with the concrete unblocked next step | Root's independent diagnostic is already on the parent's `next` field, covering the same defect more deeply than this helper's original routing message (see "Parent update: third-round reopen correction" below for the character-for-character verification). `resolved_parent_next`/`resolved_parent_status` are therefore a no-op against the parent's current state. `resolved_parent_waiting_for: Claude` is an intentionally pinned future-merge value, not a remaining gap — see "Parent update: fourth-round correction" below. Do not run an `assign` changing it to `Gemini2` or `Pi`. |
 
 ## Parent update: dispatch-guard findings and required Supervisor action
@@ -525,7 +525,8 @@ itself, as fresh, correctly-formatted commit(s). The porting read prior
 content via `git show <old-sha>:<path>`, not `git merge`,
 `git cherry-pick`, or `git checkout <sha> -- <path>`.
 
-A new PR from this recovered branch to `dev` supersedes #3058. #3058 is
+PR [#3105](https://github.com/ajoe734/drts-fleet-platform/pull/3105), from
+this recovered branch to `dev`, supersedes #3058. #3058 is
 left open with a comment pointing at the new PR, rather than closed by this
 helper, since closing another already-opened PR is a board/lifecycle
 action outside this helper's write scope.
@@ -559,6 +560,18 @@ run against it.
   metadata/log reads were used.
 - 2026-10-28 branch recovery: new branch
   `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision-recovered`
-  created from `b35e15e92784a26e49b9fd3230a3f879b8eef618`. Recovery evidence
-  (new PR, head SHA, history and whitespace checks) is recorded by the
-  follow-up evidence commit on this branch.
+  created from `b35e15e92784a26e49b9fd3230a3f879b8eef618`.
+  - Content commit `1f251eff7c79ee1b7d2a1b41b2e74d40ee42c320` carries the
+    ported `a110532e0`/`a9683c57a` content plus the fourth-round correction.
+    This evidence line is added by the single commit directly on top of it,
+    which is the branch head; it cannot name its own SHA.
+  - `git log --oneline b35e15e92784a26e49b9fd3230a3f879b8eef618..HEAD`
+    lists only `PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION:`
+    subjects; `a110532e0` and `a9683c57a` are absent.
+  - `python3 tools/ci/git/check_commit_trailers.py --base origin/dev --head
+    HEAD`: `5 commit(s) OK`, exit `0` (at `1f251eff`).
+  - `git diff --check origin/dev...HEAD`: no output, exit `0`.
+  - New PR [#3105](https://github.com/ajoe734/drts-fleet-platform/pull/3105),
+    base `dev`, head this branch. Its `head.sha` read back from GitHub right
+    after opening was `1f251eff7c79ee1b7d2a1b41b2e74d40ee42c320`, equal to
+    the local push.
