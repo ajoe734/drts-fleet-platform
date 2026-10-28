@@ -37,8 +37,17 @@ from control_plane.usecases.task_board_commands import (  # noqa: E402
 )
 from control_plane.domain.task_records import validate_task_eligibility
 from control_plane.domain.handoff_context import validate_next_text
-from control_plane.domain.dispatch_policy import acceptance_review_snapshot, pending_acceptance_review
+from control_plane.domain.dispatch_policy import (
+    acceptance_review_snapshot,
+    dependencies_satisfied,
+    pending_acceptance_review,
+)
 from control_plane.domain.unblock_resolution import parent_resume_blocker  # noqa: E402
+from control_plane.domain.chair_policy import (  # noqa: E402
+    CANDIDATE_CI_RECOVERED,
+    CANDIDATE_CI_RECOVERY_IDENTITY_KEYS,
+    open_blocker_fingerprint,
+)
 
 
 STATUS_FILE = ROOT / "ai-status.json"
@@ -1990,6 +1999,11 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
         raise SystemExit(f"Unknown task: {task_id}")
     if task.get("status") != "blocked":
         raise SystemExit(f"{task_id} is not blocked")
+    resume_basis = os.environ.get("TASK_RESUME_BASIS", "").strip()
+    if resume_basis:
+        # Every check runs before any mutation or log append: a rejected
+        # recovery leaves neither board state nor activity-log residue.
+        validate_candidate_ci_resume(state, task, resume_status, resume_basis)
     helper_id = os.environ.get("TASK_RESUME_HELPER_ID", "").strip()
     if helper_id:
         reason = parent_resume_blocker(state, task, get_task(state, helper_id))
@@ -2001,7 +2015,15 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
     task["next"] = message
     task.pop("waiting_for", None)
     task.setdefault("candidate_lifecycle_version", 1)
+    # For candidate CI recovery this resolves exactly the fingerprinted set,
+    # re-read under the same lock above.
     mark_blockers_resolved(state, task_id)
+    if resume_basis:
+        # Same locked transaction: restore the retained review route through
+        # the canonical reconcile path. No new handoff or owner authoring.
+        command_reconcile_candidate(state, [task_id, message])
+        if task.get("status") != "review":
+            raise SystemExit("Candidate CI recovery did not restore the original review route")
     append_log(
         {
             "ts": timestamp,
@@ -2010,9 +2032,57 @@ def command_resume_blocked(state: dict[str, Any], args: list[str]) -> None:
             "task_id": task_id,
             "message": message,
             "resume_status": resume_status,
-            "helper_task_id": os.environ.get("TASK_RESUME_HELPER_ID", "").strip() or None,
+            "helper_task_id": helper_id or None,
+            **({"resume_basis": resume_basis, "candidate_sha": task.get("candidate_sha"),
+                "candidate_generation": task.get("candidate_generation")} if resume_basis else {}),
         }
     )
+
+
+def validate_candidate_ci_resume(
+    state: dict[str, Any], task: dict[str, Any], resume_status: str, resume_basis: str
+) -> None:
+    task_id = str(task.get("id") or "")
+    if resume_basis != CANDIDATE_CI_RECOVERED or resume_status != "in_progress":
+        raise SystemExit("Unsupported candidate CI recovery disposition")
+    if os.environ.get("TASK_RESUME_HELPER_ID", "").strip() or os.environ.get("MERGE_SHA", "").strip():
+        raise SystemExit("Candidate CI recovery cannot use a helper or merge observation")
+    if task.get("external_gate") or (task.get("task_class") == "release" and task.get("mutates_canonical") is False):
+        raise SystemExit("Candidate CI recovery cannot resume an external release gate")
+    identity = {key: task.get(key) for key in CANDIDATE_CI_RECOVERY_IDENTITY_KEYS}
+    if any(not isinstance(value, str) or not value.strip() for value in identity.values()):
+        raise SystemExit("Candidate CI recovery requires a complete candidate identity")
+    if parse_json_env("TASK_RESUME_CANDIDATE_IDENTITY_JSON") != identity:
+        raise SystemExit("Candidate identity changed before CI recovery")
+    if os.environ.get("TASK_RESUME_CHAIR_PR_URL", "").strip() != identity["pr_url"]:
+        raise SystemExit("Bound candidate PR differs from the Chair-observed PR")
+    try:
+        observed_depends_on = json.loads(os.environ.get("TASK_RESUME_DEPENDS_ON_JSON", ""))
+        done_statuses = set(json.loads(os.environ.get("TASK_RESUME_DEPENDENCY_DONE_STATUSES", "")))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise SystemExit("Candidate CI recovery requires the observed dependency snapshot") from exc
+    if (
+        not isinstance(observed_depends_on, list)
+        or list(task.get("depends_on") or []) != observed_depends_on
+        or not done_statuses
+        or not dependencies_satisfied(task, {str(row.get("id")): row for row in state.get("tasks", [])}, done_statuses)
+    ):
+        raise SystemExit("Dependencies changed or are no longer complete")
+    if task.get("merge_sha") or not candidate_review_handoff_is_current(task):
+        raise SystemExit("Candidate CI recovery requires the original current owner handoff")
+    fingerprint, open_count = open_blocker_fingerprint(state.get("blockers"), task_id)
+    if open_count != 1:
+        # Never resolve an unrelated co-existing blocker along with the CI one.
+        raise SystemExit("Candidate CI recovery requires exactly one open blocker")
+    if os.environ.get("TASK_RESUME_BLOCKER_FINGERPRINT", "").strip() != fingerprint:
+        raise SystemExit("Open blockers changed after the Chair observation")
+    if (
+        os.environ.get("CANDIDATE_HEAD_SHA", "").strip() != identity["candidate_sha"]
+        or os.environ.get("CANDIDATE_BRANCH", "").strip() != identity["candidate_branch"]
+        or os.environ.get("PR_URL", "").strip() != identity["pr_url"]
+        or os.environ.get("CANDIDATE_CI_STATUS", "").strip().lower() != "success"
+    ):
+        raise SystemExit("Candidate CI recovery requires matching successful PR observation")
 
 
 def command_start(state: dict[str, Any], args: list[str]) -> None:

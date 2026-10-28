@@ -1,6 +1,20 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+import hashlib
+import json
+import re
+from typing import Any, Iterable, Mapping
+
+
+# Explicit Chair-only resume basis: the original review candidate's own CI has
+# recovered at the exact same SHA/generation. Never inferred from CI polling.
+CANDIDATE_CI_RECOVERED = "candidate_ci_recovered"
+CANDIDATE_CI_RECOVERY_IDENTITY_KEYS = (
+    "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation", "pr_url"
+)
+_FULL_SHA = re.compile(r"[0-9a-f]{40}")
+_FINGERPRINT = re.compile(r"[0-9a-f]{64}")
+_PR_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/[1-9][0-9]*")
 
 
 CHAIR_REVIEW_OUTPUT_KEYS = frozenset(
@@ -17,6 +31,38 @@ CHAIR_REVIEW_OUTPUT_KEYS = frozenset(
         "recommended_focus",
     }
 )
+
+
+def open_blocker_fingerprint(blockers: Iterable[Any] | None, task_id: str) -> tuple[str, int]:
+    """Digest the exact open blocker records of one task, order-independently.
+
+    Compares whole structured records (not task.next or any free text), so an
+    added, removed, or edited open blocker changes the fingerprint.
+    """
+    rows = sorted(
+        json.dumps(blocker, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        for blocker in blockers or []
+        if isinstance(blocker, dict)
+        and blocker.get("task_id") == task_id
+        and str(blocker.get("status") or "").lower() == "open"
+    )
+    digest = hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return digest, len(rows)
+
+
+def candidate_ci_recovery_identity(task: Mapping[str, Any]) -> dict[str, str] | None:
+    """Return the retained review identity, or None if no original handoff stands."""
+    identity = {key: task.get(key) for key in CANDIDATE_CI_RECOVERY_IDENTITY_KEYS}
+    if any(not isinstance(value, str) or not value.strip() for value in identity.values()):
+        return None
+    if not _FULL_SHA.fullmatch(identity["candidate_sha"]) or identity["owner"] == identity["reviewer"]:
+        return None
+    if task.get("reviewed_sha") or task.get("merge_sha"):
+        return None
+    handoff = {key: identity[key] for key in identity if key != "pr_url"}
+    if task.get("candidate_review_handoff") != handoff:
+        return None
+    return identity
 
 
 def validate_string_list(value: Any) -> bool:
@@ -115,6 +161,21 @@ def validate_review_payload(payload: Any) -> str | None:
             action.get("resume_status") or ""
         ).strip().lower() not in {"backlog", "todo", "in_progress"}:
             return "task_actions resume_status must be backlog, todo, or in_progress when provided"
+        if "resume_basis" in action:
+            if action.get("action") != "resume_parent_task" or action.get("resume_basis") != CANDIDATE_CI_RECOVERED:
+                return f"task_actions resume_basis is only {CANDIDATE_CI_RECOVERED} for resume_parent_task"
+            if "helper_task_id" in action:
+                return "candidate CI recovery must not name an unblock helper"
+            if str(action.get("resume_status") or "in_progress").strip().lower() != "in_progress":
+                return "candidate CI recovery resumes in_progress before restoring review"
+            if not isinstance(action.get("candidate_sha"), str) or not _FULL_SHA.fullmatch(action["candidate_sha"]):
+                return "candidate CI recovery requires a full candidate_sha"
+            if not isinstance(action.get("candidate_generation"), str) or not action["candidate_generation"].strip():
+                return "candidate CI recovery requires candidate_generation"
+            if not isinstance(action.get("blocker_fingerprint"), str) or not _FINGERPRINT.fullmatch(action["blocker_fingerprint"]):
+                return "candidate CI recovery requires the observed blocker_fingerprint"
+            if not isinstance(action.get("pr_url"), str) or not _PR_URL.fullmatch(action["pr_url"]):
+                return "candidate CI recovery requires the observed candidate pr_url"
 
     for action in payload.get("provider_actions", []):
         if not isinstance(action, dict):

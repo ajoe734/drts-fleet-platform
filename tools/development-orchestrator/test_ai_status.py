@@ -1258,6 +1258,230 @@ class CandidateLifecycleTest(unittest.TestCase):
         self.assertEqual(task["candidate_lifecycle_migrated_at"], migrated_at)
 
 
+class CandidateCiResumeTransactionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from control_plane.domain.chair_policy import open_blocker_fingerprint
+
+        self.fingerprint_of = open_blocker_fingerprint
+        self.tmp = tempfile.TemporaryDirectory(prefix="chair-ci-board-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.task = {
+            "id": "CI-RECOVERY-EXAMPLE", "title": "Existing candidate", "phase": "test",
+            "summary_zh": "CI recovery", "owner": "Pi", "reviewer": "Codex",
+            "status": "blocked", "waiting_for": "Gemini", "depends_on": [],
+            "artifacts": [], "acceptance": [], "next": "CI transport failed; root cause unknown",
+            "candidate_sha": "a" * 40, "candidate_generation": "generation-one",
+            "candidate_branch": "pi/existing-candidate", "pr_url": "https://github.com/acme/fleet/pull/31",
+            "ci_sha": "a" * 40, "ci_status": "failure", "last_update": "2026-10-27T00:00:00Z",
+        }
+        self.task["candidate_review_handoff"] = {k: self.task[k] for k in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation"
+        )}
+        self.state = ai_status.default_state()
+        self.state.update({"tasks": [self.task], "agents": [], "handoffs": [], "blockers": [{
+            "task_id": self.task["id"], "owner": "Pi", "waiting_for": "Gemini",
+            "message": "Original failure", "status": "open", "created_at": "2026-10-27T00:00:00Z",
+        }]})
+        self.path = self.root / "ai-status.json"
+        self.log = self.root / "ai-activity-log.jsonl"
+        self.path.write_text(json.dumps(self.state))
+        for key, value in {
+            "ROOT": self.root, "STATUS_FILE": self.path, "LOG_FILE": self.log,
+            "TASK_ARCHIVE_FILE": self.root / "ai-task-archive.jsonl",
+            "CURRENT_WORK_FILE": self.root / "current-work.md", "DASHBOARD_DIR": self.root / "dashboard",
+        }.items():
+            mock.patch.object(ai_status, key, value).start()
+        self.addCleanup(mock.patch.stopall)
+        self.env = {
+            "ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root), "AI_NAME": "Supervisor",
+            "TASK_RESUME_BASIS": "candidate_ci_recovered",
+            "TASK_RESUME_CANDIDATE_IDENTITY_JSON": json.dumps({k: self.task[k] for k in (
+                "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation", "pr_url"
+            )}),
+            "TASK_RESUME_BLOCKER_FINGERPRINT": open_blocker_fingerprint(self.state["blockers"], self.task["id"])[0],
+            "TASK_RESUME_CHAIR_PR_URL": self.task["pr_url"],
+            "TASK_RESUME_DEPENDS_ON_JSON": "[]", "TASK_RESUME_DEPENDENCY_DONE_STATUSES": '["done"]',
+            "CANDIDATE_HEAD_SHA": self.task["candidate_sha"], "CANDIDATE_BRANCH": self.task["candidate_branch"],
+            "PR_URL": self.task["pr_url"], "CANDIDATE_CI_STATUS": "success",
+        }
+
+    def execute(self, command: str, *args: str, env: dict | None = None) -> None:
+        with mock.patch.dict(os.environ, self.env if env is None else env, clear=True):
+            ai_status.execute_command(command, [self.task["id"], *args])
+
+    def test_real_transaction_restores_review_without_changing_original_handoff(self) -> None:
+        before = copy.deepcopy(self.task)
+        self.execute("resume-blocked", "in_progress", "Actual Chair confirmed recovered CI")
+        state = json.loads(self.path.read_text()); task = state["tasks"][0]
+        self.assertEqual((task["status"], task["ci_status"], task["ci_sha"]), ("review", "success", before["candidate_sha"]))
+        for key in ("owner", "reviewer", "candidate_sha", "candidate_generation", "candidate_branch", "candidate_review_handoff"):
+            self.assertEqual(task[key], before[key])
+        self.assertNotIn("waiting_for", task)
+        self.assertEqual(state["blockers"][0]["status"], "resolved")
+        self.assertEqual(state["blockers"][0]["message"], "Original failure")
+        self.assertEqual(len(state["tasks"]), 1)
+        self.assertEqual(state["handoffs"], [])
+        for key in ("reviewed_sha", "merge_sha", "acceptance_evidence"):
+            self.assertNotIn(key, task)
+        logs = [json.loads(line) for line in self.log.read_text().splitlines()]
+        resumed = [row for row in logs if row["type"] == "blocked_task_resumed"]
+        self.assertEqual([row.get("resume_basis") for row in resumed], ["candidate_ci_recovered"])
+        self.assertFalse(any(row["type"] in {"candidate_approved", "handoff"} for row in logs))
+
+    def test_stale_generation_invalid_handoff_failure_and_wrong_actor_do_not_write(self) -> None:
+        for kind in ("generation", "handoff", "failure", "branch", "head", "pr", "owner", "external_gate",
+                     "release", "reviewed", "helper", "merge", "todo"):
+            with self.subTest(kind=kind):
+                state = copy.deepcopy(self.state); env = dict(self.env); status = "in_progress"
+                if kind == "generation": state["tasks"][0]["candidate_generation"] = "new-generation-same-H"
+                if kind == "handoff": state["tasks"][0]["candidate_review_handoff"] = None
+                if kind == "failure": env["CANDIDATE_CI_STATUS"] = "failure"
+                if kind == "branch": env["CANDIDATE_BRANCH"] = "pi/other"
+                if kind == "head": env["CANDIDATE_HEAD_SHA"] = "b" * 40
+                if kind == "pr": env["PR_URL"] = "https://github.com/acme/fleet/pull/32"
+                if kind == "owner": env["AI_NAME"] = "Pi"
+                if kind == "external_gate": state["tasks"][0]["external_gate"] = True
+                if kind == "release": state["tasks"][0].update(task_class="release", mutates_canonical=False)
+                if kind == "reviewed": state["tasks"][0]["reviewed_sha"] = "a" * 40
+                if kind == "helper": env["TASK_RESUME_HELPER_ID"] = "DONE-HELPER"
+                if kind == "merge": env["MERGE_SHA"] = "c" * 40
+                if kind == "todo": status = "todo"
+                self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+                with self.assertRaises(SystemExit):
+                    self.execute("resume-blocked", status, "Stale or invalid recovery", env=env)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertFalse(self.log.exists(), "rejected recovery appended an activity log entry")
+
+    def test_open_blocker_set_must_match_chair_snapshot_inside_lock(self) -> None:
+        extra = {"task_id": self.task["id"], "owner": "Pi", "waiting_for": "Codex", "status": "open",
+                 "message": "New product blocker", "created_at": "2026-10-27T02:00:00Z"}
+        other_task = {**extra, "task_id": "OTHER-TASK"}
+        for kind in ("added", "edited", "removed", "missing_env", "no_open_blockers"):
+            with self.subTest(kind=kind):
+                state = copy.deepcopy(self.state); env = dict(self.env)
+                if kind == "added": state["blockers"].append(extra)
+                if kind == "edited": state["blockers"][0]["message"] = "Different original failure"
+                if kind == "removed": state["blockers"][0]["status"] = "resolved"
+                if kind == "missing_env": env.pop("TASK_RESUME_BLOCKER_FINGERPRINT")
+                if kind == "no_open_blockers":
+                    state["blockers"][0]["status"] = "resolved"
+                    env["TASK_RESUME_BLOCKER_FINGERPRINT"] = self.fingerprint_of(state["blockers"], self.task["id"])[0]
+                self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+                with self.assertRaises(SystemExit):
+                    self.execute("resume-blocked", "in_progress", "Chair snapshot drifted", env=env)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertFalse(self.log.exists())
+        # Other tasks' blockers and blocker order do not affect this task's fingerprint.
+        state = copy.deepcopy(self.state)
+        state["blockers"] = [other_task, *state["blockers"]]
+        self.path.write_text(json.dumps(state))
+        self.execute("resume-blocked", "in_progress", "Unrelated blocker elsewhere")
+        state = json.loads(self.path.read_text())
+        self.assertEqual(state["tasks"][0]["status"], "review")
+        self.assertEqual([row["status"] for row in state["blockers"]], ["open", "resolved"])
+
+    def test_R1_dependencies_rechecked_under_lock(self) -> None:
+        dependency = {"id": "DEP-A", "title": "Dependency", "phase": "test", "owner": "Codex", "reviewer": "Pi",
+                      "status": "done", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Done"}
+        for kind in ("regressed", "added_unfinished", "added_done_after_snapshot", "missing_snapshot", "positive"):
+            with self.subTest(kind=kind):
+                state = copy.deepcopy(self.state); env = dict(self.env)
+                state["tasks"][0]["depends_on"] = ["DEP-A"]
+                state["tasks"].append(dict(dependency))
+                env["TASK_RESUME_DEPENDS_ON_JSON"] = '["DEP-A"]'
+                if kind == "regressed":
+                    state["tasks"][1]["status"] = "in_progress"
+                if kind == "added_unfinished":
+                    state["tasks"][0]["depends_on"].append("DEP-B")
+                    state["tasks"].append({**dependency, "id": "DEP-B", "status": "todo"})
+                if kind == "added_done_after_snapshot":
+                    state["tasks"][0]["depends_on"].append("DEP-B")
+                    state["tasks"].append({**dependency, "id": "DEP-B"})
+                if kind == "missing_snapshot":
+                    env.pop("TASK_RESUME_DEPENDS_ON_JSON")
+                self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+                self.log.unlink(missing_ok=True)
+                if kind == "positive":
+                    self.execute("resume-blocked", "in_progress", "Dependencies intact", env=env)
+                    self.assertEqual(json.loads(self.path.read_text())["tasks"][0]["status"], "review")
+                    continue
+                with self.assertRaises(SystemExit):
+                    self.execute("resume-blocked", "in_progress", "Dependency drifted", env=env)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertFalse(self.log.exists())
+
+    def test_R4_exactly_one_open_blocker_required_under_lock(self) -> None:
+        second = {"task_id": self.task["id"], "owner": "Pi", "waiting_for": "Codex", "status": "open",
+                  "message": "Unrelated product blocker", "created_at": "2026-10-27T00:10:00Z"}
+        state = copy.deepcopy(self.state)
+        state["blockers"].append(second)
+        env = dict(self.env)
+        # Stable since the Chair snapshot: the fingerprint matches both blockers.
+        env["TASK_RESUME_BLOCKER_FINGERPRINT"] = self.fingerprint_of(state["blockers"], self.task["id"])[0]
+        self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+        with self.assertRaises(SystemExit) as raised:
+            self.execute("resume-blocked", "in_progress", "Two stable blockers", env=env)
+        self.assertIn("exactly one open blocker", str(raised.exception.code))
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertFalse(self.log.exists())
+        # The b93 single-blocker shape still resumes.
+        self.path.write_text(json.dumps(self.state))
+        self.execute("resume-blocked", "in_progress", "Single original blocker")
+        state = json.loads(self.path.read_text())
+        self.assertEqual((state["tasks"][0]["status"], state["blockers"][0]["status"]), ("review", "resolved"))
+
+    def test_R3_bound_PR_must_equal_chair_observed_PR_under_lock(self) -> None:
+        pr32 = "https://github.com/acme/fleet/pull/32"
+        for kind in ("task_rebound", "chair_observed_other", "missing"):
+            with self.subTest(kind=kind):
+                state = copy.deepcopy(self.state); env = dict(self.env)
+                if kind == "task_rebound":
+                    # Same H/generation; identity and observation describe PR32, Chair saw PR31.
+                    state["tasks"][0]["pr_url"] = pr32
+                    identity = json.loads(env["TASK_RESUME_CANDIDATE_IDENTITY_JSON"]); identity["pr_url"] = pr32
+                    env.update(TASK_RESUME_CANDIDATE_IDENTITY_JSON=json.dumps(identity), PR_URL=pr32)
+                if kind == "chair_observed_other":
+                    env["TASK_RESUME_CHAIR_PR_URL"] = pr32
+                if kind == "missing":
+                    env.pop("TASK_RESUME_CHAIR_PR_URL")
+                self.path.write_text(json.dumps(state)); before = self.path.read_bytes()
+                with self.assertRaises(SystemExit):
+                    self.execute("resume-blocked", "in_progress", "PR identity drifted", env=env)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertFalse(self.log.exists())
+
+    def test_owner_progress_and_start_and_normal_helper_resume_keep_original_semantics(self) -> None:
+        owner = {"AI_NAME": "Pi", "ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root)}
+        self.execute("progress", "Waiting for real CI decision", env=owner)
+        task = json.loads(self.path.read_text())["tasks"][0]
+        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(task["candidate_review_handoff"], self.task["candidate_review_handoff"])
+        self.execute("start", "Explicit authoring", env=owner)
+        task = json.loads(self.path.read_text())["tasks"][0]
+        self.assertEqual(task["status"], "in_progress")
+        self.assertIsNone(task["candidate_review_handoff"])
+        state = copy.deepcopy(self.state)
+        state["blockers"].append({"task_id": self.task["id"], "owner": "Pi", "waiting_for": "Codex",
+                                  "message": "Second blocker", "status": "open", "created_at": "2026-10-27T00:30:00Z"})
+        helper = {"id": "DONE-HELPER", "owner": "Codex", "reviewer": "Pi", "title": "Helper", "phase": "test",
+                  "status": "done", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Resolved",
+                  "task_class": "unblock", "helper_parent": self.task["id"], "resolved_parent_status": "todo",
+                  "resolved_parent_at": "2026-10-27T01:00:00Z"}
+        state["tasks"].append(helper); self.path.write_text(json.dumps(state))
+        self.execute("resume-blocked", "todo", "Completed helper route", env={
+            "AI_NAME": "Supervisor", "TASK_RESUME_HELPER_ID": "DONE-HELPER",
+            "ORCH_STATUS_ROOT": str(self.root), "AI_STATUS_ROOT": str(self.root),
+        })
+        state = json.loads(self.path.read_text()); task = state["tasks"][0]
+        self.assertEqual((task["status"], task["ci_status"]), ("todo", "failure"))
+        self.assertEqual(task["candidate_review_handoff"], self.task["candidate_review_handoff"])
+        # Helper-backed resume still resolves every open blocker, as before.
+        self.assertEqual([row["status"] for row in state["blockers"]], ["resolved", "resolved"])
+        resumed = [json.loads(line) for line in self.log.read_text().splitlines() if '"blocked_task_resumed"' in line]
+        self.assertNotIn("resume_basis", resumed[-1])
+
+
 if __name__ == "__main__":
     unittest.main()
 
