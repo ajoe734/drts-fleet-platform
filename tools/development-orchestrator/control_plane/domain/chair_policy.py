@@ -71,13 +71,16 @@ MERGED_ACCEPTANCE_RESUME_ACTION_KEYS = frozenset(
     {
         "task_id", "action", "reason", "resume_basis", "resume_status",
         "candidate_sha", "candidate_generation", "merge_sha", "blocker_fingerprint",
+        "candidate_branch", "owner", "reviewer", "required_acceptance", "depends_on",
     }
 )
 
 
 def _merged_acceptance_resume_error(action: Mapping[str, Any]) -> str | None:
     """Exact shape of the Chair's merged-acceptance resume; the Supervisor
-    re-binds every observed value to the locked board before any write."""
+    re-binds every observed value (including the identity and dependency
+    fields the gateway recomputes on its own reread) to the locked board
+    before any write."""
     if "helper_task_id" in action:
         return "merged acceptance resume must not name an unblock helper"
     extra = sorted(str(key) for key in action if key not in MERGED_ACCEPTANCE_RESUME_ACTION_KEYS)
@@ -93,6 +96,16 @@ def _merged_acceptance_resume_error(action: Mapping[str, Any]) -> str | None:
         return "merged acceptance resume requires a full merge_sha"
     if not isinstance(action.get("blocker_fingerprint"), str) or not _FINGERPRINT.fullmatch(action["blocker_fingerprint"]):
         return "merged acceptance resume requires the observed blocker_fingerprint"
+    if not isinstance(action.get("candidate_branch"), str) or not action["candidate_branch"].strip():
+        return "merged acceptance resume requires the observed candidate_branch"
+    if not isinstance(action.get("owner"), str) or not action["owner"].strip():
+        return "merged acceptance resume requires the observed owner"
+    if not isinstance(action.get("reviewer"), str) or not action["reviewer"].strip():
+        return "merged acceptance resume requires the observed reviewer"
+    if not validate_string_list(action.get("required_acceptance")) or not action.get("required_acceptance"):
+        return "merged acceptance resume requires the observed required_acceptance list"
+    if not validate_string_list(action.get("depends_on")):
+        return "merged acceptance resume requires the observed depends_on list"
     return None
 
 
@@ -188,14 +201,16 @@ def validate_review_payload(payload: Any) -> str | None:
                 or not str(action.get(key)).strip()
             ):
                 return f"task_actions {key} must be a non-empty string when provided"
-        merged_acceptance = action.get("resume_basis") == MERGED_RUNTIME_ACCEPTANCE_READY
+        resume_basis = action.get("resume_basis")
+        merged_acceptance = resume_basis == MERGED_RUNTIME_ACCEPTANCE_READY
         if "resume_status" in action and not merged_acceptance and str(
             action.get("resume_status") or ""
         ).strip().lower() not in {"backlog", "todo", "in_progress"}:
             return "task_actions resume_status must be backlog, todo, or in_progress when provided"
         if "resume_basis" in action and (
             action.get("action") != "resume_parent_task"
-            or action.get("resume_basis") not in {CANDIDATE_CI_RECOVERED, MERGED_RUNTIME_ACCEPTANCE_READY}
+            or not isinstance(resume_basis, str)
+            or resume_basis not in {CANDIDATE_CI_RECOVERED, MERGED_RUNTIME_ACCEPTANCE_READY}
         ):
             return (
                 f"task_actions resume_basis is only {CANDIDATE_CI_RECOVERED} or "

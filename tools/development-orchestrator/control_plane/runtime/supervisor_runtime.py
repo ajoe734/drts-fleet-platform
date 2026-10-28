@@ -6808,6 +6808,10 @@ def _chair_review_summary_lines(
         merged_acceptance_label = (
             f" merged_acceptance=eligible candidate_sha={merged['identity']['candidate_sha']}"
             f" candidate_generation={merged['identity']['candidate_generation']} merge_sha={merged['identity']['merge_sha']}"
+            f" candidate_branch={merged['identity']['candidate_branch']} owner={merged['identity']['owner']}"
+            f" reviewer={merged['identity']['reviewer']}"
+            f" required_acceptance={'|'.join(merged['identity']['required_acceptance'])}"
+            f" depends_on={'|'.join(merged['depends_on']) or '-'}"
             f" blocker_fingerprint={merged['blocker_fingerprint']}"
             if isinstance(merged, dict) else ""
         )
@@ -6912,7 +6916,7 @@ def build_chair_review_message(
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
         "- `resume_parent_task` 一般只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
         "- 唯一例外：摘要標示 `ci_recovery=eligible` 的 blocked task（僅限剛好一個 open blocker），若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 且已恢復，可明確輸出 `resume_parent_task` 並附 `resume_basis=candidate_ci_recovered`、`resume_status=in_progress`、摘要中的完整 `candidate_sha` / `candidate_generation` / `pr_url` / `blocker_fingerprint` 與具體 reason，不需新 helper。Supervisor 會重讀同 PR/head/branch 的 own-workflow CI 並比對 open blocker 集合，只沿原 handoff 恢復獨立 review；這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
-        "- 另一對等例外：摘要標示 `merged_acceptance=eligible` 的 blocked task（剛好一個 open blocker、已獨立 review、同 SHA own CI 成功、已 merge、仍有 outstanding required acceptance keys），若你實際確認該 blocker 是唯一剩餘阻礙，可明確輸出 `resume_parent_task` 並附 `resume_basis=merged_runtime_acceptance_ready`、`resume_status=acceptance`、摘要中的完整 `candidate_sha` / `candidate_generation` / `merge_sha` / `blocker_fingerprint` 與具體 reason，不需新 helper、不要附 `pr_url` 或 helper。Supervisor 會在既有 taskboard lock 下重新核對這個快照，只讓原 owner/reviewer 繼續記錄 required acceptance；這不核准任何 acceptance key、不寫 evidence、不適用仍有其他未解 blocker 或尚未 merge 的任務。\n"
+        "- 另一對等例外：摘要標示 `merged_acceptance=eligible` 的 blocked task（剛好一個 open blocker、已獨立 review、同 SHA own CI 成功、已 merge、仍有 outstanding required acceptance keys），若你實際確認該 blocker 是唯一剩餘阻礙，可明確輸出 `resume_parent_task` 並附 `resume_basis=merged_runtime_acceptance_ready`、`resume_status=acceptance`、以及摘要中那一行完整的 `candidate_sha` / `candidate_generation` / `merge_sha` / `candidate_branch` / `owner` / `reviewer` / `required_acceptance`（字串陣列）/ `depends_on`（字串陣列，可為空）/ `blocker_fingerprint` 與具體 reason，不需新 helper、不要附 `pr_url` 或 helper。這九項必須原樣抄自同一行摘要，任何一項與 Supervisor 重讀的現況不符都會整個拒絕、零殘留，不會改用重讀到的新值。Supervisor 會在既有 taskboard lock 下重新核對這個完整快照，只讓原 owner/reviewer 繼續記錄 required acceptance；這不核准任何 acceptance key、不寫 evidence、不適用仍有其他未解 blocker 或尚未 merge 的任務。\n"
         "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
@@ -8424,17 +8428,43 @@ def merged_acceptance_resume_context(status: dict[str, Any], task: dict[str, Any
     fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), task_id)
     if open_count != 1:
         return None
-    return {"identity": identity, "blocker_fingerprint": fingerprint}
+    return {
+        "identity": identity,
+        "blocker_fingerprint": fingerprint,
+        "depends_on": sorted(str(value) for value in task.get("depends_on") or []),
+    }
 
 
-MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS = ("candidate_sha", "candidate_generation", "merge_sha")
+# Scalar identity fields the Chair must echo back exactly. branch/owner/reviewer
+# join candidate_sha/candidate_generation/merge_sha so a reassignment or branch
+# rename between the Chair's view and either gateway reread is caught the same
+# way a stale candidate_sha would be; required_acceptance and depends_on are
+# list-valued and compared separately below.
+MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS = (
+    "candidate_sha", "candidate_generation", "merge_sha", "candidate_branch", "owner", "reviewer",
+)
 
 
 def merged_acceptance_observation_matches(context: dict[str, Any], observed: dict[str, Any]) -> bool:
     identity = context["identity"]
-    return all(observed.get(key) == identity[key] for key in MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS) and (
-        observed.get("blocker_fingerprint") == context["blocker_fingerprint"]
-    )
+    if any(observed.get(key) != identity[key] for key in MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS):
+        return False
+    if observed.get("blocker_fingerprint") != context["blocker_fingerprint"]:
+        return False
+    required = observed.get("required_acceptance")
+    if not isinstance(required, list) or sorted(str(v) for v in required) != sorted(
+        str(v) for v in identity["required_acceptance"]
+    ):
+        return False
+    depends_on = observed.get("depends_on")
+    if not isinstance(depends_on, list) or sorted(str(v) for v in depends_on) != context["depends_on"]:
+        return False
+    return True
+
+
+MERGED_ACCEPTANCE_OBSERVATION_KEYS = (
+    *MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS, "blocker_fingerprint", "required_acceptance", "depends_on",
+)
 
 
 def apply_chair_merged_acceptance_resume_action(
@@ -8446,9 +8476,12 @@ def apply_chair_merged_acceptance_resume_action(
 ) -> bool:
     """Explicit Chair decision bound to the one existing merged-acceptance gateway.
 
-    Writes nothing itself: the Chair's observed snapshot must match the
-    current context here, and is handed to the gateway so its own re-read
-    (and the board's locked re-check) cannot switch to a different tuple.
+    Writes nothing itself: the Chair's observed snapshot (full merged
+    identity, required_acceptance and depends_on, not just candidate_sha/
+    generation/merge_sha) must match the current context here, and is handed
+    to the gateway so its own re-read (and the board's locked re-check)
+    cannot silently switch to a different branch/owner/reviewer/requiredkeys/
+    depends_on tuple just because it reloaded fresh data.
     """
     if action.get("resume_basis") != MERGED_RUNTIME_ACCEPTANCE_READY or any(
         key not in MERGED_ACCEPTANCE_RESUME_ACTION_KEYS for key in action
@@ -8459,7 +8492,7 @@ def apply_chair_merged_acceptance_resume_action(
     context = merged_acceptance_resume_context(status, parent)
     if context is None or not merged_acceptance_observation_matches(context, action):
         return False
-    observed = {key: action[key] for key in (*MERGED_ACCEPTANCE_OBSERVED_IDENTITY_KEYS, "blocker_fingerprint")}
+    observed = {key: action[key] for key in MERGED_ACCEPTANCE_OBSERVATION_KEYS}
     return apply_supervisor_merged_acceptance_resume(
         config, str(parent.get("id") or ""), chair_reason, chair_observation=observed
     )

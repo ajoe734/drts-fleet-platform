@@ -4566,6 +4566,9 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
         action = {"task_id": self.task["id"], "action": "resume_parent_task", "resume_status": "acceptance",
                   "resume_basis": "merged_runtime_acceptance_ready", "candidate_sha": self.task["candidate_sha"],
                   "candidate_generation": self.task["candidate_generation"], "merge_sha": self.task["merge_sha"],
+                  "candidate_branch": self.task["candidate_branch"], "owner": self.task["owner"],
+                  "reviewer": self.task["reviewer"], "required_acceptance": list(self.task["required_acceptance"]),
+                  "depends_on": list(self.task["depends_on"]),
                   "blocker_fingerprint": open_blocker_fingerprint(board["blockers"], self.task["id"])[0],
                   "reason": "Chair confirmed the runtime evidence blocker is the only remaining one"}
         action.update(changes)
@@ -4602,6 +4605,9 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
             approval_state={"pending": [], "history": []}, state={}, provider_report={}, status=self.board)
         self.assertIn(f"merged_acceptance=eligible candidate_sha={self.task['candidate_sha']} "
                       f"candidate_generation={self.task['candidate_generation']} merge_sha={self.task['merge_sha']} "
+                      f"candidate_branch={self.task['candidate_branch']} owner={self.task['owner']} "
+                      f"reviewer={self.task['reviewer']} "
+                      f"required_acceptance={'|'.join(self.task['required_acceptance'])} depends_on=- "
                       f"blocker_fingerprint={action['blocker_fingerprint']}", message)
         self.assertIn("resume_basis=merged_runtime_acceptance_ready", message)
         self.assertNotIn("ci_recovery=eligible candidate_sha=", message)
@@ -4613,6 +4619,11 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
             "stale_generation": ({"candidate_generation": "other-generation"}, None),
             "stale_merge_sha": ({"merge_sha": "e" * 40}, None),
             "stale_fingerprint": ({"blocker_fingerprint": "0" * 64}, None),
+            "stale_branch": ({"candidate_branch": "claude/some-other-branch"}, None),
+            "stale_owner": ({"owner": "Gemini"}, None),
+            "stale_reviewer": ({"reviewer": "Gemini2"}, None),
+            "stale_required_acceptance": ({"required_acceptance": ["a different key"]}, None),
+            "stale_depends_on": ({"depends_on": ["SOME-OTHER-DEP"]}, None),
             "wrong_status": ({"resume_status": "in_progress"}, "merged acceptance resume only resumes acceptance"),
             "helper": ({"helper_task_id": "UNBLOCK-1"}, "merged acceptance resume must not name an unblock helper"),
             "pr_url": ({"pr_url": "https://github.com/acme/fleet/pull/31"},
@@ -4660,7 +4671,9 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertTrue(changed)
         spy.assert_called_once_with(self.config, self.task["id"], action["reason"], chair_observation={
-            key: action[key] for key in ("candidate_sha", "candidate_generation", "merge_sha", "blocker_fingerprint")})
+            key: action[key] for key in (
+                "candidate_sha", "candidate_generation", "merge_sha", "candidate_branch", "owner", "reviewer",
+                "blocker_fingerprint", "required_acceptance", "depends_on")})
         reads.assert_not_called()
         wake.assert_not_called()
         state = json.loads(self.path.read_text()); task = state["tasks"][0]

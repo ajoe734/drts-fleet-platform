@@ -58,6 +58,8 @@ def merged_acceptance_action(**changes) -> dict:
         "resume_basis": MERGED_RUNTIME_ACCEPTANCE_READY, "resume_status": "acceptance",
         "candidate_sha": "a" * 40, "candidate_generation": "generation-one",
         "merge_sha": "b" * 40, "blocker_fingerprint": "c" * 64,
+        "candidate_branch": "claude/merged-example", "owner": "Claude", "reviewer": "Codex",
+        "required_acceptance": ["evidence_key_one"], "depends_on": [],
     }
     action.update(changes)
     return {key: value for key, value in action.items() if value is not None}
@@ -93,6 +95,30 @@ class MergedAcceptanceResumeSchemaTests(unittest.TestCase):
             "pr_url": ({"pr_url": "https://github.com/acme/fleet/pull/1"},
                        "merged acceptance resume has unexpected fields: pr_url"),
             "unknown field": ({"approved": True}, "merged acceptance resume has unexpected fields: approved"),
+            "missing candidate_branch": ({"candidate_branch": None},
+                                         "merged acceptance resume requires the observed candidate_branch"),
+            "blank candidate_branch": ({"candidate_branch": " "},
+                                       "merged acceptance resume requires the observed candidate_branch"),
+            "missing owner": ({"owner": None}, "merged acceptance resume requires the observed owner"),
+            "blank owner": ({"owner": " "}, "merged acceptance resume requires the observed owner"),
+            "missing reviewer": ({"reviewer": None}, "merged acceptance resume requires the observed reviewer"),
+            # "reviewer" is also validated generically for every task_actions
+            # kind (line ~198), so a present-but-blank value is caught there first.
+            "blank reviewer": ({"reviewer": " "}, "task_actions reviewer must be a non-empty string when provided"),
+            "missing required_acceptance": ({"required_acceptance": None},
+                                            "merged acceptance resume requires the observed required_acceptance list"),
+            "empty required_acceptance": ({"required_acceptance": []},
+                                          "merged acceptance resume requires the observed required_acceptance list"),
+            "non-string required_acceptance item": ({"required_acceptance": ["ok", 1]},
+                                                     "merged acceptance resume requires the observed required_acceptance list"),
+            "required_acceptance not a list": ({"required_acceptance": "key-one"},
+                                               "merged acceptance resume requires the observed required_acceptance list"),
+            "missing depends_on": ({"depends_on": None},
+                                   "merged acceptance resume requires the observed depends_on list"),
+            "non-string depends_on item": ({"depends_on": ["DEP-A", 2]},
+                                           "merged acceptance resume requires the observed depends_on list"),
+            "depends_on not a list": ({"depends_on": "DEP-A"},
+                                      "merged acceptance resume requires the observed depends_on list"),
         }
         for kind, (changes, error) in cases.items():
             with self.subTest(kind=kind):
@@ -103,6 +129,19 @@ class MergedAcceptanceResumeSchemaTests(unittest.TestCase):
                  "merged_runtime_acceptance_ready for resume_parent_task")
         self.assertEqual(validate_review_payload(with_task_action(merged_acceptance_action(action="dispatch_now"))), error)
         self.assertEqual(validate_review_payload(with_task_action(merged_acceptance_action(resume_basis="merged", resume_status=None))), error)
+
+    def test_malformed_resume_basis_types_are_rejected_not_raised(self) -> None:
+        """Regression: resume_basis=[]/{} used to hit `not in {set}` and raise
+        TypeError (unhashable type) instead of returning a validation error."""
+        error = ("task_actions resume_basis is only candidate_ci_recovered or "
+                 "merged_runtime_acceptance_ready for resume_parent_task")
+        for basis in ([], {}, ["merged_runtime_acceptance_ready"], {"basis": "merged_runtime_acceptance_ready"}, 1, False):
+            with self.subTest(basis=basis):
+                action = {"task_id": "T-1", "action": "resume_parent_task", "reason": "x", "resume_basis": basis}
+                self.assertEqual(validate_review_payload(with_task_action(action)), error)
+        # A full revalidation afterwards (fresh payload, no leftover state) still works.
+        self.assertIsNone(validate_review_payload(with_task_action(merged_acceptance_action())))
+        self.assertIsNone(validate_review_payload(valid_payload()))
 
     def test_acceptance_status_needs_the_merged_basis(self) -> None:
         action = {"task_id": "T-1", "action": "resume_parent_task", "resume_status": "acceptance", "reason": "x"}
