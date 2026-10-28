@@ -917,6 +917,10 @@ const DEFAULT_RESPONSE_BYTE_LIMIT = 1024 * 1024;
 // buffer each retain at most 8 MiB (JSON parsing/conversion also uses memory).
 // Never expose a caller-selected limit or widen ordinary JSON/binary downloads.
 const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 8 * DEFAULT_RESPONSE_BYTE_LIMIT;
+const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
+// Mirrors deploy-dev.yml curl_ready/curl_ready_auth --max-time 30 (readiness,
+// not a business deadline). No retry is added; one request, one deadline.
+const STARTUP_OPS_READINESS_TIMEOUT_MS = 30_000;
 export class NativeTransport {
   private readonly sessions = new Map<Role, string>();
   constructor(
@@ -998,7 +1002,24 @@ export class NativeTransport {
       !Object.keys(extra).some((key) => key.toLowerCase() === "origin"),
       "caller cannot replace browser origin",
     );
-    const requestSignal = AbortSignal.timeout(15_000);
+    // Only the startup served-runtime GET of the raw Ops dashboard HTML, before
+    // any Ops application session exists, uses the existing deploy-dev
+    // curl_ready_auth Ops readiness budget (30s per request). Every business,
+    // POST/ACK, authenticated page, other role/route or variant keeps 15s.
+    const preSessionOpsStartupProbe =
+      role === "ops" &&
+      path === "/dashboard" &&
+      (options.method ?? "GET") === "GET" &&
+      options.body === undefined &&
+      options.raw === true &&
+      options.expected?.length === 1 &&
+      options.expected[0] === 200 &&
+      !this.sessions.has("ops");
+    const requestSignal = AbortSignal.timeout(
+      preSessionOpsStartupProbe
+        ? STARTUP_OPS_READINESS_TIMEOUT_MS
+        : NATIVE_REQUEST_TIMEOUT_MS,
+    );
     const requestStartedAt = performance.now();
     let response: Response;
     try {
