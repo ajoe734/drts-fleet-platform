@@ -96,6 +96,19 @@ function isAllowedPassengerPath(path: string[], method: string) {
       (method === "GET" && path[3] === "record"))
   )
     return true;
+  // The self-serve trial's test driver for the passenger's own reservation.
+  if (
+    method === "POST" &&
+    path.length === 5 &&
+    path[0] === "review-demo" &&
+    path[1] === "rides" &&
+    /^[0-9a-f-]{36}$/i.test(path[2] ?? "") &&
+    path[3] === "trial" &&
+    ["assign", "heartbeat", "arrive", "board", "complete"].includes(
+      path[4] ?? "",
+    )
+  )
+    return true;
   if (method === "POST" && fullPath === "auth/refresh") return true;
   if (method === "POST" && fullPath === "auth/logout") return true;
   if (method === "GET" && fullPath === "me") return true;

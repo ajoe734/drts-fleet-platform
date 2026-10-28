@@ -8,7 +8,11 @@ import type { PassengerPaymentFieldsAvailability } from "@drts/passenger-client"
 import { ECPAY_ACTION_ORIGINS } from "../../../components/payment/ecpay-csp";
 import { EcpayHostedFields } from "../../../components/payment/ecpay-hosted-fields";
 import { PaymentMethodsScreen } from "../../../components/payment/payment-methods-screen";
-import { useReviewDemo } from "../../../components/review-demo/review-context";
+import {
+  useReviewDemo,
+  useTrialMode,
+} from "../../../components/review-demo/review-context";
+import { trialT } from "../../../components/trial/translations";
 import {
   paymentFieldsForRuntime,
   assertPaymentFieldsRuntimeConfiguration,
@@ -17,6 +21,7 @@ import {
 
 export default function PaymentMethodsPage() {
   const review = useReviewDemo();
+  const trial = useTrialMode();
   const [captureResult, setCaptureResult] = useState<"success" | "retry_once">(
     "success",
   );
@@ -56,7 +61,12 @@ export default function PaymentMethodsPage() {
         : [];
   return (
     <>
-      {review && (
+      {trial && (
+        <p style={{ margin: "12px 14px 0", fontSize: 14 }}>
+          {trialT.paymentNotice}
+        </p>
+      )}
+      {review && !trial && (
         <label>
           {t.pspScenario}
           <select

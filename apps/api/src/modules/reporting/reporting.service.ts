@@ -1088,9 +1088,10 @@ export class ReportingService implements OnModuleInit, OnModuleDestroy {
       finalPlateNo: finalAssignment
         ? (vehiclePlateById.get(finalAssignment.vehicleId) ?? null)
         : null,
-      etaSecondsAtAssignment: firstDispatch?.latestEtaMinutes
-        ? firstDispatch.latestEtaMinutes * 60
-        : null,
+      etaSecondsAtAssignment:
+        firstDispatch?.latestEtaMinutes != null
+          ? firstDispatch.latestEtaMinutes * 60
+          : null,
       arrivedPickupAt: this.resolveEventTimestamp(
         sortedOrderTraceLogs,
         "driver.arrived_pickup",
