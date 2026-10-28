@@ -4462,6 +4462,150 @@ class CandidateCiResumeTests(unittest.TestCase):
         self.assertEqual([(a["task_id"], a["action"]) for a in normalized["task_actions"]],
                          [(self.task["id"], "resume_parent_task"), ("ORDINARY-ACTIONABLE", "create_unblock_task")])
 
+    # Actual native 20261028T104828Z-claude.json blocked_by, verbatim (full-width colons, "PD-4" label).
+    NATIVE_1048_HELPER_DEFERRALS = [
+        "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-MANUAL-UNBLOCK：自身即 parent 的既有 helper，next 明載 H3/H4 HOLD 與 recursion base-case 禁止 lineage>=maxdepth1 的再生 helper；不可再建 helper-of-helper。",
+        "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-HISTORY-REPAIR：已於 2026-10-11 DONE 並歸檔（PR #2549 merge 7f39917），因 create_chair_unblock_task 未檢查 archived_task_ids 的已知 bug 於 2026-10-21 被誤重建；重複 create_unblock_task 只會再餵同一個 bug，需 Supervisor 層級修正或人工歸檔。",
+        "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-PLANNING-DECISION：next 自述是 2026-10-24 由 synthesize_reassignment_followup_task_actions 誤建（當時 chair review 已明示 blocked_by 不應新建 unblock task），且現行 governance 規格明文禁止在 parent 的 all-writer exclusion/publication HOLD 未解除前新增 helper/handoff。",
+        "PAX-WEB-RIDE-UI-20261009-UNBLOCK-PLANNING-DECISION：自身即 parent 的既有 helper，卡在 PD-4（已發佈 ancestor bbc358cbda65 缺 Reviewer trailer），需要既有的人類/治理權責處理，不是可再派一層 helper 解的執行性缺口。",
+    ]
+    NATIVE_1048_HELPERS = [
+        ("SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-MANUAL-UNBLOCK",
+         "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010", "manual_unblock"),
+        ("SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-HISTORY-REPAIR",
+         "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010", "history_repair"),
+        ("SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010-UNBLOCK-PLANNING-DECISION",
+         "SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010", "planning_decision"),
+        ("PAX-WEB-RIDE-UI-20261009-UNBLOCK-PLANNING-DECISION", "PAX-WEB-RIDE-UI-20261009", "planning_decision"),
+    ]
+    NATIVE_1048_PARENT_ACTIONS = [
+        ("DOC-LIVE-RUNNER-UPGRADE-20261005", "manual_unblock", "Codex", "Claude2"),
+        ("SR-LIVE-INVOICE-MAIL-20261007", "manual_unblock", "Claude", "Codex"),
+        ("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025", "planning_decision", "Codex", "Claude2"),
+        ("SR-LIVE-GLOBAL-UX-ROLE-READBACK-COMPATIBILITY-20261026", "manual_unblock", "Claude", "Codex"),
+    ]
+
+    def native_1048_board(self) -> dict:
+        """Compact board for the actual native 10:48 blocked_task_triage: the b93 candidate,
+        the four existing helper rows and the four ordinary first-line parents."""
+        from control_plane.domain.chair_policy import open_blocker_fingerprint
+        self.use_real_agent_config()
+        self.config["github_bus"]["repo"] = "ajoe734/drts-fleet-platform"
+        b93 = "b93ea337b030ec41e198ab8007418a06eb07efce"
+        pr_url = "https://github.com/ajoe734/drts-fleet-platform/pull/3081"
+        # Board CI already reconciled to the same-run green rerun, so the record is
+        # recovery-ready and admitted past the 8-record window, as natively.
+        self.task.update(id="PAX-OPS-PREPARE-ERROR-DIAGNOSTIC-20261026", candidate_sha=b93, ci_sha=b93,
+                         ci_status="success",
+                         candidate_generation="62efb825eb934848bf16327124af1ba1", pr_url=pr_url,
+                         candidate_branch="pi/pax-ops-prepare-error-diagnostic")
+        self.task["candidate_review_handoff"] = {k: self.task[k] for k in (
+            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation")}
+        def row(task_id, **changes):
+            task = {"id": task_id, "title": task_id, "phase": "test", "owner": "Pi", "reviewer": "Codex",
+                    "status": "blocked", "task_class": "implementation", "mutates_canonical": True,
+                    "depends_on": [], "artifacts": [], "acceptance": [], "waiting_for": "Claude2",
+                    "next": "Original blocker."}
+            task.update(changes)
+            return task
+        tasks = [row(task_id, task_class="unblock", helper_parent=parent, helper_kind=kind)
+                 for task_id, parent, kind in self.NATIVE_1048_HELPERS]
+        tasks += [row(task_id) for task_id, *_ in self.NATIVE_1048_PARENT_ACTIONS]
+        tasks.append(self.task)
+        blockers = [{"task_id": task["id"], "owner": task["owner"], "waiting_for": task["waiting_for"],
+                     "status": "open", "message": f"Original blocker for {task['id']}",
+                     "created_at": "2026-10-27T00:00:00Z"} for task in tasks]
+        self.board.update(tasks=tasks, blockers=blockers)
+        self.path.write_text(json.dumps(self.board))
+        fingerprint = open_blocker_fingerprint(blockers, self.task["id"])[0]
+        self.action.update(task_id=self.task["id"], candidate_sha=b93, pr_url=pr_url, blocker_fingerprint=fingerprint,
+                           candidate_generation=self.task["candidate_generation"])
+        self.pr.update(url=pr_url, headRefOid=b93, headRefName=self.task["candidate_branch"])
+        self.pr["statusCheckRollup"][0]["detailsUrl"] = \
+            "https://github.com/ajoe734/drts-fleet-platform/actions/runs/40589219996/job/12"
+        self.run.update(id=40589219996, head_sha=b93, head_branch=self.task["candidate_branch"],
+                        pull_requests=[{"number": 3081}])
+        return json.loads(json.dumps(self.board))
+
+    def native_1048_payload(self, blocked_by: list) -> dict:
+        actions = [self.action] + [
+            {"task_id": task_id, "action": "create_unblock_task", "unblock_kind": kind, "target_agent": agent,
+             "reviewer": reviewer, "reason": "Parent 非 helper 本身；建立 task-scoped helper 交健康 lane。"}
+            for task_id, kind, agent, reviewer in self.NATIVE_1048_PARENT_ACTIONS]
+        return {"version": 1, "decision": "operational_review", "approval_ttl_minutes": 45,
+                "reason": "blocked_task_triage：b93 CI 恢復；四個一線 parent 建 helper；四個既有 helper 維持 blocked。",
+                "blocked_by": blocked_by, "approval_actions": [], "reassignment_actions": [], "task_actions": actions,
+                "provider_actions": [], "recommended_focus": []}
+
+    def test_R6_native_1048_helper_dispositions_with_b93_recovery_pass_unchanged(self) -> None:
+        snapshot = self.native_1048_board()
+        helper_ids = [task_id for task_id, *_ in self.NATIVE_1048_HELPERS]
+        selection = supervisor.chair_blocked_task_selection(self.config, snapshot)
+        expected = {r["task_id"]: r["action"] for r in selection}
+        self.assertEqual(len(selection), 9)
+        self.assertTrue(all(expected[task_id] == "create_unblock_task" for task_id in helper_ids))
+        task_map = supervisor.task_index_from_status(self.config, snapshot)
+        self.assertTrue(all(supervisor.chair_unblock_recursion_guarded(self.config, task_map[task_id], task_map)
+                            for task_id in helper_ids))
+        payload = self.native_1048_payload(self.NATIVE_1048_HELPER_DEFERRALS)
+        self.assertEqual(supervisor.chair_reasoned_deferral_task_ids(self.config, payload, selection, snapshot),
+                         set(helper_ids))
+        self.assertIsNone(supervisor.validate_chair_review_context(
+            payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config, status=snapshot))
+        effects = self.refresh_side_effects("blocked_task_triage", payload, gh=self.observe)
+        state = {task["id"]: task for task in effects["state"]["tasks"]}
+        self.assertEqual(effects["reads"], 2)
+        self.assertEqual(state[self.task["id"]]["status"], "review")
+        self.assertEqual([state[task_id] for task_id in helper_ids],
+                         [task for task in snapshot["tasks"] if task["id"] in helper_ids])  # untouched, still blocked
+        self.assertEqual(sorted(effects["helpers"]), sorted(
+            helper_ids + [f"{task_id}-UNBLOCK-{kind.upper().replace('_', '-')}"
+                          for task_id, kind, *_ in self.NATIVE_1048_PARENT_ACTIONS]))  # no helper-of-helper
+        self.assertEqual(effects["escalations"], {})
+        self.assertIn("chair_parent_resume_applied", effects["rows"])
+        self.assertEqual(effects["rows"].count("chair_unblock_task_created"), 4)
+        self.assertNotIn("governance_recursion_blocked", effects["rows"])
+        self.assertNotIn("chair_review_invalid_schema", effects["rows"])
+
+    def test_R6_native_1048_deferral_format_keeps_anti_abuse_rejections(self) -> None:
+        snapshot = self.native_1048_board()
+        helper = self.NATIVE_1048_HELPERS[0][0]
+        selection = supervisor.chair_blocked_task_selection(self.config, snapshot)
+        reason = "自身即 parent 的既有 helper，recursion base-case 禁止再生 helper；不可再建 helper-of-helper。"
+        accepted = {"ascii_colon": f"{helper}: {reason}", "full_width_colon": f"{helper}：{reason}",
+                    "milestone_label": f"{helper}：卡在 PD-4 與 H3/H4 HOLD，需要既有的人類/治理權責處理。"}
+        rejected = {"short_reason": f"{helper}：維持 blocked",
+                    "names_other_task": f"{helper}：same reason as SR-DEV-OWNED-OPERATIONAL-FIXTURE-ASSESSMENT-20261010",
+                    "names_numbered_task": f"{helper}：wait for RGP-002 and keep the existing helper blocked",
+                    "label_prefixed_task": f"{helper}：wait for PD-4-RELEASE and keep the existing helper blocked",
+                    "other_separator": f"{helper}；{reason}",
+                    "not_first": f"維持 {helper}：{reason}"}
+        for kind, entry in {**accepted, **rejected}.items():
+            with self.subTest(kind=kind):
+                deferred = supervisor.chair_reasoned_deferral_task_ids(
+                    self.config, {**self.native_1048_payload([entry])}, selection, snapshot)
+                self.assertEqual(deferred, {helper} if kind in accepted else set())
+        # Whole-batch rejection stays for a malformed disposition, before any GitHub read or write.
+        blocked_by = [rejected["names_other_task"], *self.NATIVE_1048_HELPER_DEFERRALS[1:]]
+        payload = self.native_1048_payload(blocked_by)
+        self.assertEqual(supervisor.validate_chair_review_context(
+            payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config, status=snapshot),
+            f"blocked_task_triage must resolve blocked tasks via {helper}:create_unblock_task")
+        effects = self.refresh_side_effects("blocked_task_triage", payload, gh=self.observe)
+        self.assertEqual((effects["reads"], effects["wakes"], effects["unchanged"]), (0, 0, True))
+        self.assertEqual(effects["rows"], ["chair_review_invalid_schema"])
+        # Outside a mixed recovery batch an ordinary actionable parent is never waived by a
+        # well-formed full-width deferral; the protected helpers stay deferrable on their own.
+        ordinary = self.NATIVE_1048_PARENT_ACTIONS[0][0]
+        payload = self.native_1048_payload(self.NATIVE_1048_HELPER_DEFERRALS + [f"{ordinary}：{reason}"])
+        payload["task_actions"] = [a for a in payload["task_actions"]
+                                   if a["task_id"] not in {ordinary, self.task["id"]}]
+        payload["task_actions"].append({"task_id": self.task["id"], "action": "create_unblock_task",
+                                        "reason": "Ordinary helper route for the candidate"})
+        self.assertEqual(supervisor.validate_chair_review_context(
+            payload, reason="blocked_task_triage", approval_state={"pending": []}, config=self.config, status=snapshot),
+            f"blocked_task_triage must resolve blocked tasks via {ordinary}:create_unblock_task")
+
 
 class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
     """Supervisor-authority merged-acceptance resume through the real board writer."""

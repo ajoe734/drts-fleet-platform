@@ -6508,8 +6508,13 @@ def chair_blocked_task_selection(
 
 # A reasoned deferral must name exactly one task and say why, e.g.
 # "HELD-UNBLOCK: needs original human triage; no nested helper permitted".
-CHAIR_DEFERRAL_ENTRY_PATTERN = re.compile(r"\s*([A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+)\s*:\s*(\S.*?)\s*", re.DOTALL)
+# The separator is an ASCII or full-width (U+FF1A) colon, as Chairs write in Chinese.
+CHAIR_DEFERRAL_ENTRY_PATTERN = re.compile(r"\s*([A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+)\s*[:：]\s*(\S.*?)\s*", re.DOTALL)
 CHAIR_DEFERRAL_MIN_REASON_CHARS = 24
+# A short milestone label such as "PD-4" (letters plus a one- or two-digit
+# number) is not a task id; any other id-shaped token in a reason still names
+# another task and disqualifies the deferral.
+CHAIR_DEFERRAL_LABEL_PATTERN = re.compile(r"[A-Z]+-\d{1,2}")
 
 
 def chair_unblock_recursion_guarded(
@@ -6565,14 +6570,17 @@ def chair_reasoned_deferral_task_ids(
 
 
 def chair_deferral_entry_task_ids(payload: dict[str, Any]) -> set[str]:
-    """Task ids named by well-formed "TASK-ID: specific reason" blocked_by entries."""
+    """Task ids named by well-formed "TASK-ID: specific reason" (or full-width "TASK-ID：") blocked_by entries."""
     named: set[str] = set()
     for entry in payload.get("blocked_by") or []:
         match = CHAIR_DEFERRAL_ENTRY_PATTERN.fullmatch(entry) if isinstance(entry, str) else None
         if match is None:
             continue
         reason = match.group(2)
-        if len(reason) < CHAIR_DEFERRAL_MIN_REASON_CHARS or TASK_ID_MENTION_PATTERN.search(reason):
+        names_other_task = any(
+            not CHAIR_DEFERRAL_LABEL_PATTERN.fullmatch(token) for token in TASK_ID_MENTION_PATTERN.findall(reason)
+        )
+        if len(reason) < CHAIR_DEFERRAL_MIN_REASON_CHARS or names_other_task:
             continue
         named.add(match.group(1))
     return named
