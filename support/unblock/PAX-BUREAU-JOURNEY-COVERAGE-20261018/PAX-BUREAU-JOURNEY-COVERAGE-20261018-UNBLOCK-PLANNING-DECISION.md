@@ -6,7 +6,7 @@
 - Parent: `PAX-BUREAU-JOURNEY-COVERAGE-20261018`
 - Owner: `Claude2`
 - Reviewer: `Claude` (reassigned from `Pi` on `2026-10-28`; see "Parent update:
-  resolution confirmed" below)
+  third-round reopen correction" below)
 - Decision date: `2026-10-26`
 - Live state last re-verified: `2026-10-26` after `deploy-dev` run
   `40325789456` completed (`updated_at 2026-10-26T13:13:55Z`)
@@ -281,8 +281,8 @@ engineering/owner lane, not the reviewer.
 | Record the decision | Recorded here: no new product or contract decision is required for `PAX-BUREAU-JOURNEY-COVERAGE-20261018`. |
 | Scope cut | Recorded in "Scope cut and routing". This helper does not deploy, does not re-review the Source fix, does not perform the backfill and does not fix the eligibility defect. |
 | Or explicit follow-up needed by the parent task | Recorded in "Parent unblocked next step": fix the rehearsal-supply rejection in one engineering task, then the owner does a pinned same-SHA 16-case backfill. |
-| Produce task-scoped commit/push/PR evidence for any canonical change | PR [#3058](https://github.com/ajoe734/drts-fleet-platform/pull/3058) opened, base `dev`, head `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision`. Head was verified `== 3c6c713cb2e6dd3adae0b873e2fd42957bdb4d04` immediately after opening (`gh pr view 3058 --json headRefOid`); this file's own update commit supersedes that SHA with a new one, which the open PR picks up automatically on push. |
-| Update the parent task with the concrete unblocked next step | Done. Codex (as Root, not subject to `ORCH_DISPATCH_ROLE`) ran the two commands documented below on `2026-10-27T20:55:39Z`; see "Parent update: resolution confirmed (2026-10-28)". `resolved_parent_status`/`resolved_parent_waiting_for`/`resolved_parent_next` are now pinned on this helper. The commands/message text below are retained as the record of exactly what was run and why a dispatched owner/reviewer could not run them directly. |
+| Produce task-scoped commit/push/PR evidence for any canonical change | PR [#3058](https://github.com/ajoe734/drts-fleet-platform/pull/3058) was opened from the original branch, base `dev`. That branch is permanently blocked by a malformed commit trailer (see "Blocker" and "Resolution: branch recovery" sections below); a new PR from branch `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision-recovered` supersedes it. See "Resolution: branch recovery" for the new PR number/URL and head SHA. |
+| Update the parent task with the concrete unblocked next step | Root's independent diagnostic is already on the parent's `next` field, covering the same defect more deeply than this helper's original routing message (see "Parent update: third-round reopen correction" below for the character-for-character verification). `resolved_parent_next`/`resolved_parent_status` are therefore a no-op against the parent's current state. `resolved_parent_waiting_for: Claude` is an intentionally pinned future-merge value, not a remaining gap — see "Parent update: fourth-round correction" below. Do not run an `assign` changing it to `Gemini2` or `Pi`. |
 
 ## Parent update: dispatch-guard findings and required Supervisor action
 
@@ -356,26 +356,185 @@ TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting
 > Gemini2。詳見
 > support/unblock/PAX-BUREAU-JOURNEY-COVERAGE-20261018/PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION.md。
 
-## Parent update: resolution confirmed (2026-10-28)
+## Parent update: third-round reopen correction (2026-10-28)
 
-The Supervisor-only action requested above has been performed. `ai-activity-
-log.jsonl` records, at `2026-10-27T20:55:39Z`, agent `Codex` (acting as Root,
-not subject to `ORCH_DISPATCH_ROLE`) posting a `note` stating the upstream
-parent `note` and the same-owner helper `assign` with `resolved_parent_*`
-metadata were both completed, explicitly describing this as normal
-Supervisor-equivalent coordination, not a resume, acceptance, or Source
-change. `ai-status.sh show PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION`
-now reports `resolved_parent_status: blocked`, `resolved_parent_waiting_for:
-Claude`, and `resolved_parent_next` holding this routing message, matching
-what the two pinned commands above were meant to set. This closes the second
-acceptance gap from the `2026-10-26T15:18:13Z` reviewer reopen (the first
-gap, PR #3058, was already closed). The parent task itself has since moved
-on to a newer, more specific Root diagnostic note (`2026-10-28T01:21:04Z`, a
-different and later finding than this helper's routing); that is expected
-task evolution on the parent and does not reopen this helper's own scope.
+Reviewer Claude reopened `b35e15e92784a26e49b9fd3230a3f879b8eef618` at
+`2026-10-28T02:38:36Z` (finding recorded `2026-10-28T02:51:14Z`). The
+previous section's claim that `resolved_parent_next` "holds this routing
+message" was **factually wrong** at the moment it was written. Re-verified
+again now, `2026-10-28`:
 
-No product code, deploy, or Source change was made in this update; only this
-artifact file.
+- `ai-status.sh show PAX-BUREAU-JOURNEY-COVERAGE-20261018-UNBLOCK-PLANNING-DECISION`
+  reports `resolved_parent_status: blocked`, `resolved_parent_waiting_for:
+  Claude`, and `resolved_parent_next` equal, character for character, to
+  the parent's own live `next` field (`PAX-BUREAU-JOURNEY-COVERAGE-20261018`,
+  `last_update: 2026-10-28T01:21:04Z`) — the Root Registry/`vehicle` GET
+  process-cache diagnostic, not the routing message quoted in the
+  Supervisor command block above.
+- `ai-status.sh show PAX-BUREAU-JOURNEY-COVERAGE-20261018` reports
+  `waiting_for: Gemini2`, not `Claude`.
+
+What actually happened: the `2026-10-27T20:55:39Z` Codex/Root action did pin
+`resolved_parent_next` to the routing message, correctly, as described
+above. A later, unrelated `assign` on this same helper task at
+`2026-10-28T02:32:16Z` (not run by this helper's owner/reviewer — this role
+cannot run `assign` at all, see dispatch-guard findings above) reset
+`resolved_parent_next` to match the parent's `next` at that moment. The
+previous section's author (this helper's owner, `2026-10-28T02:33:33Z`
+handoff) did not catch that the pin had been overwritten 77 seconds
+earlier, and wrote a claim that was already false when written.
+
+**Decision: do not restore the routing message.** The parent's current
+`next` is not an unrelated overwrite to undo. It is Root's own,
+independent, and materially deeper continuation of the exact defect this
+helper routed to engineering:
+
+- Root's diagnostic spec
+  (`.local/goal-continuation-20261015T-current-frontier/Root-PAX-accepted516-existing-GET-prospective-read-spec-process-cache-and-fresh-product-policy-boundary-20261028.json`,
+  `accepted_source 51628b2b078d07ec759e0804448f7815bbc812ee`) explicitly
+  names `VehicleEligibilityService711-736` emitting `400
+  VEHICLE_NOT_ELIGIBLE_FOR_SERVICE_PRODUCT` and targets the same fixture
+  vehicles (`pax-review-vehicle-a` / `pax-review-vehicle-b`, the "A/B" in
+  the parent's current `next`) that back the two e2e specs this helper's
+  "Current live state" section cites.
+- It chains from two earlier same-day Root artifacts
+  (`Root-PAX-no-formal3072-handoff-accepted0ec-existing-readonly-eligibility-frontier-20261027.json`,
+  `Root-PAX-existing-eligibility-read-chain-accepted0ec-and-last-served2bb-ten-blob-equivalence-20261027.json`),
+  i.e. Root has been independently root-causing this exact rejection since
+  `2026-10-27`, in parallel with and more rigorously than this helper's
+  "open one engineering task" proposal.
+- Forcing `resolved_parent_next` back to this helper's shorter routing
+  message would regress the parent's visible `next` to less specific
+  guidance than what Root has already produced for the same defect. The
+  routing decision's actual intent — get this treated as an engineering
+  defect and not a product/contract gap, and don't spawn a second
+  planning-decision helper — is already satisfied, more thoroughly than
+  this helper could satisfy it directly.
+
+**What was flagged as a remaining gap, now withdrawn:** this section
+previously recommended one more Supervisor command, re-pinning
+`resolved_parent_waiting_for` from `Claude` to `Gemini2`. See "Parent
+update: fourth-round correction" immediately below — that recommendation
+was wrong and must not be run.
+
+No product code, deploy, or Source change was made in this correction;
+only this artifact file.
+
+## Parent update: fourth-round correction (2026-10-28) — `resolved_parent_waiting_for` is an intentional future-merge value, not a gap
+
+The previous section's closing recommendation (re-pin
+`resolved_parent_waiting_for` from `Claude` to `Gemini2` via a Supervisor
+`assign`) is withdrawn. It was based on comparing this helper's pinned
+metadata against the parent's *currently live* `waiting_for` (`Gemini2`)
+as if the two had to match right now. That comparison is the wrong test.
+
+`apply_unblock_parent_resolution` only writes `resolved_parent_status` /
+`resolved_parent_waiting_for` / `resolved_parent_next` onto the parent at
+*this helper's own merge* (via `transition_after_merge`), not before. Until
+that merge, those fields have no effect on the parent at all. This
+helper's `resolved_parent_at` is still `null`, which is exactly the
+evidence that none of the three fields has been applied yet — the parent's
+live `blocked` / `waiting_for: Gemini2` state (and its `required_acceptance`
+keys, still `0/2`) is untouched by whatever this helper has pinned.
+
+`resolved_parent_waiting_for: Claude` is deliberate, not stale: when this
+helper's own routing resolution is eventually applied (at this helper's
+merge), the parent should move to the engineering/owner lane (`Claude`),
+per "Parent unblocked next step" above — not back to the reviewer lane
+(`Gemini2`) the parent happens to be sitting on right now for an unrelated,
+still-open reason (Root's live Registry/`vehicle`-GET diagnostic). Re-pinning
+it to `Gemini2` now would make this helper's *own future* merge resolve the
+parent to the wrong lane. Do not run the `assign` command the previous
+section proposed. The previous section's verification that
+`resolved_parent_next` / `resolved_parent_status` already match the
+parent's live `next` / `status` character-for-character stands unchanged;
+only its closing recommendation is corrected here.
+
+No product code, deploy, Source, or `ai-status.json`/`.orchestrator/`
+change was made for this correction; only this artifact file and the
+"Produce task-scoped commit/push/PR evidence" / "Update the parent task"
+rows of the acceptance-mapping table above.
+
+## Blocker: PR #3058 required check "Commit trailers" fails, no fix available
+without an amend exception (2026-10-28)
+
+CI run `40624463861` job `122606581990` (`Commit trailers`) fails on PR #3058
+with:
+
+```
+check_commit_trailers: 1 commit(s) failed trailer validation.
+  commit a110532e0b74:
+    - subject must be `<TASK-ID>: <summary>`, got: 'docs(unblock): correct
+      false PAX parent-update resolution claim'
+```
+
+Root cause: this helper's own previous handoff commit
+`a110532e0b7401e2769198e8e9b7e0c6b63c8847` used subject
+`docs(unblock): correct false PAX parent-update resolution claim`.
+`tools/ci/git/check_commit_trailers.py`'s `SUBJECT_RE` requires the
+parenthesized or bare prefix to be the literal `TASK-ID`
+(`[A-Z][A-Z0-9-]*[A-Z0-9]`); `unblock` is lowercase and not the task ID, so
+the subject does not match. The script walks every non-merge commit in
+`git rev-list --no-merges origin/dev..HEAD`, not just the branch tip, so
+this one malformed commit fails the gate regardless of what is pushed on
+top of it.
+
+Why this cannot be fixed by pushing another commit: `dev` branch protection
+(`gh api repos/.../branches/dev/protection`) lists `Commit trailers` as a
+required status check with `required_linear_history: true` and
+`allow_force_pushes: false`. The only way to remove a bad commit from
+`origin/dev..HEAD` is to rewrite it out of history (`commit --amend`,
+`rebase`, or `reset` + force-push). `docs/ops/branch-strategy.md` §11.4 and
+this task's own dispatch brief both state unconditionally that **published
+commits, including anchors, must not be rebased, amended, or force-pushed**,
+with rebase permitted only for a branch confirmed never published and
+carrying no PR/candidate — not this branch, which has open PR #3058 and a
+locked `candidate_sha`. The `COMMIT_TRAILER_BYPASS=1` escape in the script
+is an environment variable read inside the CI job; it is not something a
+pushed commit or PR description can set, so it is not available here either.
+
+This is a genuine policy conflict, not a missing product/contract decision
+and not something this helper's routing scope can resolve: fixing the gate
+requires exactly the action (amend/rebase of a published commit) the
+no-rewrite policy forbids. See "Resolution: branch recovery" immediately
+below for how this is actually resolved, without an amend exception or CI
+bypass.
+
+## Resolution: branch recovery after malformed commit trailer (2026-10-28)
+
+The blocker above is resolved without an amend exception, a CI bypass, or
+any rewrite of a published commit, consistent with
+`docs/ops/branch-strategy.md` §11.4 and this task's own no-rewrite rule.
+
+`claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision`
+(PR #3058) cannot pass the `Commit trailers` required check: the malformed
+commit `a110532e0b7401e2769198e8e9b7e0c6b63c8847` is permanently inside that
+branch's `origin/dev..HEAD` range, and the no-rewrite policy forbids
+removing it by amend, rebase, reset, or force-push.
+
+Instead, a new branch,
+`claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision-recovered`,
+was created from the last well-formed commit on the old branch,
+`b35e15e92784a26e49b9fd3230a3f879b8eef618` — not from `a110532e0` or
+`a9683c57a`, and not from `origin/dev` — so the malformed commit is simply
+absent from this branch's history rather than rewritten out of it. This
+file's content changes from `a110532e0` (the parent-update correction) and
+`a9683c57a` (the commit-trailer blocker writeup) were ported onto this new
+branch, plus this "fourth-round correction" section and this section
+itself, as fresh, correctly-formatted commit(s). The porting read prior
+content via `git show <old-sha>:<path>`, not `git merge`,
+`git cherry-pick`, or `git checkout <sha> -- <path>`.
+
+A new PR from this recovered branch to `dev` supersedes #3058. #3058 is
+left open with a comment pointing at the new PR, rather than closed by this
+helper, since closing another already-opened PR is a board/lifecycle
+action outside this helper's write scope.
+
+No product code, deploy, Source, or `ai-status.json`/`.orchestrator/`
+change was made; only this single artifact file, delivered through
+well-formed commits on the recovered branch. See "Verification basis"
+below for the new branch's head SHA, the new PR reference, and the checks
+run against it.
 
 ## Verification basis
 
@@ -398,3 +557,8 @@ artifact file.
 - No product runtime, browser, payment, deploy, workflow or cloud-credential
   action was executed by this helper. Only read-only `git` and GitHub Actions
   metadata/log reads were used.
+- 2026-10-28 branch recovery: new branch
+  `claude2/pax-bureau-journey-coverage-20261018-unblock-planning-decision-recovered`
+  created from `b35e15e92784a26e49b9fd3230a3f879b8eef618`. Recovery evidence
+  (new PR, head SHA, history and whitespace checks) is recorded by the
+  follow-up evidence commit on this branch.
