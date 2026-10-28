@@ -1034,7 +1034,7 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(lineageSetupRequests).toHaveLength(16);
     });
 
-    it("wires driver-provisioning WIF assertion, four role-session bindings, and always-teardown in deploy-dev.yml and run-operational-browser-acceptance.sh without setting API_ID_TOKEN", () => {
+    it("wires driver-provisioning WIF assertion, four role-session bindings, and always-teardown with API WIF limited to the original operational browser step", () => {
       const workflow = readFileSync(
         path.join(process.cwd(), ".github/workflows/deploy-dev.yml"),
         "utf8",
@@ -1072,9 +1072,37 @@ describe("C125-OPERATIONAL-ROLE-SESSION-WIRING-20261021", () => {
       expect(workflow).toContain(
         "Revoke operational role sessions and driver device invitation",
       );
-      // Must not set DRTS_DEV_API_ID_TOKEN or DRTS_OPERATIONAL_API_ID_TOKEN on open API routes.
-      expect(workflow).not.toContain("DRTS_DEV_API_ID_TOKEN");
+      // Public routes must not inherit an application Bearer containing WIF.
+      // Only the named first-visit consumer receives this dedicated proof.
+      const browserStep = workflow
+        .split("      - name: Execute candidate-bound operational journeys")[1]!
+        .split("      - name:")[0]!;
+      expect(browserStep).toContain(
+        "DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN: ${{ steps.id_token_api_referral_first_visit.outputs.id_token }}",
+      );
+      expect(browserStep).toContain(
+        "DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}",
+      );
+      expect(
+        workflow.match(/DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN:/g),
+      ).toHaveLength(1);
+      // Must not set generic API ID tokens on open API routes.
       expect(workflow).not.toContain("DRTS_OPERATIONAL_API_ID_TOKEN");
+      expect(workflow).not.toContain("DRTS_DEV_API_ID_TOKEN");
+      expect(runner).not.toContain("DRTS_OPERATIONAL_API_ID_TOKEN");
+      const mintStep = workflow
+        .split(
+          "      - name: Mint identity token — referral first-visit evidence (operational candidate)",
+        )[1]!
+        .split("      - name:")[0]!;
+      expect(mintStep).toContain(
+        "id_token_audience: ${{ needs.health-check.outputs.api }}",
+      );
+      expect(mintStep).toContain(
+        "service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}",
+      );
+      expect(mintStep).toContain("create_credentials_file: false");
+      expect(mintStep).toContain("export_environment_variables: false");
       expect(runner).toContain(
         "operations/verification/prepare-operational-role-sessions.ts",
       );

@@ -11,26 +11,34 @@ const harness = vi.hoisted(() => ({
 }));
 vi.mock("@playwright/test", async () => {
   const { expect } = await import("vitest");
+  // Only Playwright registration is mocked; real spec callbacks and journal
+  // persistence still execute, including reload and worker attribution.
+  const test = Object.assign(
+    (title: string, callback: (fixtures: unknown) => Promise<void>) => {
+      harness.callbacks.set(title, callback);
+    },
+    {
+      beforeAll: (callback: () => void | Promise<void>) => {
+        harness.beforeAllCallbacks.push(callback);
+      },
+      afterAll: (callback: () => void | Promise<void>) => {
+        harness.flush = callback;
+      },
+      info: () => ({
+        workerIndex: harness.workerIndex,
+        testId: "retired-surface-test",
+        retry: 0,
+      }),
+    },
+  );
   return {
     expect,
-    test: Object.assign(
-      (title: string, callback: (fixtures: unknown) => Promise<void>) => {
-        harness.callbacks.set(title, callback);
+    test: Object.assign(test, {
+      extend: (options: unknown) => {
+        expect(options).toEqual({ trace: "off", screenshot: "off" });
+        return test;
       },
-      {
-        beforeAll: (callback: () => void | Promise<void>) => {
-          harness.beforeAllCallbacks.push(callback);
-        },
-        afterAll: (callback: () => void | Promise<void>) => {
-          harness.flush = callback;
-        },
-        info: () => ({
-          workerIndex: harness.workerIndex,
-          testId: "retired-surface-test",
-          retry: 0,
-        }),
-      },
-    ),
+    }),
   };
 });
 

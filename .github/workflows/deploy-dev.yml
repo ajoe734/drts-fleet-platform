@@ -2679,8 +2679,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
+      # Fresh API audience proof for the original referral first-visit journey.
+      # This transports invocation/issuer proof only; Ops uses its own verified
+      # application session. A missing issuer route grant remains a hard failure.
+      - name: Mint identity token — referral first-visit evidence (operational candidate)
+        id: id_token_api_referral_first_visit
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.DEV_WIF_PROVIDER || env.WIF_PROVIDER }}
+          service_account: ${{ env.DEV_WIF_SERVICE_ACCOUNT || env.WIF_SERVICE_ACCOUNT }}
+          project_id: ${{ needs.prepare.outputs.project_id }}
+          token_format: id_token
+          id_token_audience: ${{ needs.health-check.outputs.api }}
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
       - name: Execute candidate-bound operational journeys
         env:
+          DRTS_OPERATIONAL_REFERRAL_FIRST_VISIT_API_ID_TOKEN: ${{ steps.id_token_api_referral_first_visit.outputs.id_token }}
           DRTS_OPERATIONAL_REFERRAL_ENTRY_HOST: ${{ needs.health-check.outputs.referral_entry_host }}
           DRTS_DEV_API_BASE_URL: ${{ needs.health-check.outputs.api }}
           DRTS_DEV_OPS_CONSOLE_BASE_URL: ${{ needs.health-check.outputs.ops_console }}
