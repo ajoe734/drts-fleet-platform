@@ -44,7 +44,8 @@ class TestVerifiedDeepmergeMitigation(unittest.TestCase):
         self.assertEqual(self.run_main(exc), (1, 0))
 
     def test_verification_errors_fail_closed(self):
-        for error in [ValueError('tampered'), FileNotFoundError('missing')]:
+        for error in [ValueError('tampered'), FileNotFoundError('missing'),
+                      dependency_security.subprocess.TimeoutExpired('node', 30)]:
             with self.subTest(error=error):
                 self.assertEqual(self.run_main(verification_error=error), (1, 1))
 
@@ -86,6 +87,7 @@ class TestVerifiedDeepmergeMitigation(unittest.TestCase):
                     ('pnpm-lock.yaml', lambda text: text.replace(dependency_security.DEEPMERGE_PATCH, 'wrong.patch')),
                     ('pnpm-lock.yaml', lambda text: text.replace('deepmerge: 4.3.1(patch_hash=', 'deepmerge: 4.3.2(patch_hash=')),
                     ('pnpm-lock.yaml', lambda text: text + '\n      deepmerge: 4.3.1\n'),
+                    ('pnpm-lock.yaml', lambda text: text + '\n      "deepmerge": 4.3.1\n'),
                     ('pnpm-lock.yaml', lambda text: text + '\npatchedDependencies:\n'),
                 ]
                 for name, mutate in mutations:
