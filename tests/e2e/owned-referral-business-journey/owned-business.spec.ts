@@ -91,6 +91,17 @@ import {
   parseOriginalUnknownBookingJournal,
   recoverOriginalUnknownBookingAck,
 } from "./original-journal-recovery";
+import {
+  RunFinalizer,
+  cancellationCleanupNeeded,
+  cancellationCleanupPhase,
+  completeOwnCancellationCleanup,
+  finalizeAfterRunner,
+  handoffOwnCancellations,
+  type FinalizationResult,
+  type FinalizationSummary,
+  type StepRunner,
+} from "./run-finalization";
 
 const RECOVERY_ONLY = process.env.OWNED_REFERRAL_RECOVERY_ONLY === "true";
 const ENTRY = "yuhe-residence";
@@ -202,6 +213,16 @@ const journeyName = RECOVERY_ONLY
   ? "recovery-only original retained Referral order; no full business journey completion claim"
   : "owned synthetic business ride uses the public Demo identity through completion, TXT and no-contact CRM";
 
+// Set only while the single journey owns live state. The afterEach backstop
+// finalizes when the runner timeout abandons the body before its finally ran.
+let activeFinalizer: RunFinalizer | undefined;
+// eslint-disable-next-line no-empty-pattern
+test.afterEach(async ({}, testInfo) => {
+  const finalizer = activeFinalizer;
+  activeFinalizer = undefined;
+  await finalizeAfterRunner(finalizer, testInfo.status ?? "failed");
+});
+
 test(journeyName, async ({ browser, request }) => {
   requireFact(
     process.env.OWNED_REFERRAL_HOSTED_OPT_IN === "true" &&
@@ -232,10 +253,119 @@ test(journeyName, async ({ browser, request }) => {
   const evidence = new Evidence();
   const nonce = `owned-referral-${process.env.GITHUB_RUN_ID}-${randomUUID()}`;
   const phone = `090000${String(process.env.GITHUB_RUN_ID).slice(-4).padStart(4, "0")}`;
+  // Closures below are only invoked after registration before the main try.
+  const finalizer = new RunFinalizer({
+    definitionSha: definition,
+    runtimeSha: runtime,
+    nonce,
+    checkpointFile: `${DIRECTORY}/cancellations/run-finalization-facts.json`,
+    persist: persistPrivateJson,
+    custody: () => ({
+      orders: [
+        {
+          slot: "main",
+          orderId,
+          journalState: bookingState.journal?.current?.state,
+          bodySha256: bookingState.journal?.current?.bodySha256,
+          journalFile: bookingState.journal?.current
+            ? `${DIRECTORY}/booking-write-journal.json`
+            : undefined,
+          ownerTerminal: RECOVERY_ONLY
+            ? recoveryResolved
+            : completed || mainCleanupTerminal,
+          ownerRecovery: bookingState.journal?.current?.recovery,
+        },
+        ...cancellations.map((stage) => ({
+          slot: stage.stage,
+          orderId: stage.orderId,
+          journalState: stage.journalState,
+          journalFile: stage.journalState
+            ? `${DIRECTORY}/cancellations/${stage.stage}-booking-write-journal.json`
+            : undefined,
+          taskId: stage.taskId,
+          assignmentId: stage.assignmentId,
+          // Each recovery label is set only after the case's own readback.
+          ownerTerminal: [
+            "already-terminal",
+            "normal-passenger-cancel",
+            "normal-driver-completion",
+          ].includes(String(stage.recovery)),
+          ownerRecovery: stage.recovery,
+        })),
+        ...extraBookings.map((booking) => ({
+          slot: booking.name,
+          orderId: booking.orderId,
+          journalState: booking.journal?.current?.state,
+          bodySha256: booking.journal?.current?.bodySha256,
+          journalFile: booking.journal?.current
+            ? supplementalArtifacts.bookingJournals[booking.name]
+            : undefined,
+          ownerTerminal: booking.terminal === true,
+          ownerRecovery: booking.journal?.current?.recovery,
+        })),
+      ],
+      supply: [
+        {
+          actor: "first",
+          driverId,
+          vehicleId,
+          deviceId,
+          bindingId,
+          invitationIssued: Boolean(invitation),
+        },
+        {
+          actor: "second",
+          driverId: extraSupply.driverId,
+          vehicleId: extraSupply.vehicleId,
+          deviceId: extraSupply.deviceId,
+          bindingId: extraSupply.bindingId,
+          invitationIssued: Boolean(extraSupply.invitation),
+        },
+      ],
+      sessions: [
+        { role: "admin", sessionId: adminSessionId },
+        { role: "ops", sessionId: opsSessionId },
+        { role: "referral", sessionId: referralSessionId },
+      ],
+    }),
+    secrets: () => [
+      ...Object.values(invocation),
+      invitation,
+      extraSupply.invitation,
+    ],
+    onCleaned: (stage) => evidence.record({ stage, result: "cleaned" }),
+    onFailed: (stage, error) => {
+      cleanupErrors.push(stage);
+      evidence.failure(error);
+    },
+    stopInterruptedBody: () => page.close(),
+    plan: (cleanup) => finalizationPlan(cleanup),
+    artifacts: [
+      ...(RECOVERY_ONLY
+        ? []
+        : [
+            {
+              name: "supplemental-custody-persist",
+              path: supplementalArtifacts.custody,
+              build: supplementalCustody,
+            },
+          ]),
+      {
+        name: "journey-evidence-persist",
+        path: `${DIRECTORY}/journey-evidence.json`,
+        build: journeyEvidence,
+      },
+    ],
+  });
   const context = await browser.newContext();
   const page = await context.newPage();
-  const tx = new NativeTransport(origins, runtime, invocation, fetch, (url) =>
-    operationalRequestHeaders("DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL", url),
+  const tx = new NativeTransport(
+    origins,
+    runtime,
+    invocation,
+    finalizer.guardFetch(fetch),
+    (url) =>
+      operationalRequestHeaders("DRTS_DEV_FLEET_PARTNER_PORTAL_BASE_URL", url),
   );
   let fleet: PreparedOperationalFleetSession | undefined;
   let adminSessionId: string | undefined;
@@ -249,6 +379,7 @@ test(journeyName, async ({ browser, request }) => {
   let passengerId: string | undefined;
   let referralSessionId: string | undefined;
   let completed = false;
+  let mainCleanupTerminal = false;
   let recoveryResolved = false;
   let displayObservations: DisplayObservations | undefined;
   let dailyReportDownloads: DailyReportDownloadsEvidence | undefined;
@@ -278,6 +409,7 @@ test(journeyName, async ({ browser, request }) => {
   } = { current: undefined };
   let opsControlRole: "opsApi" | "ops" = "opsApi";
   let mainError: unknown;
+  let finalization: FinalizationResult | undefined;
   const bookingState: {
     journal: BookingWriteJournal | undefined;
     routeError: unknown;
@@ -295,7 +427,12 @@ test(journeyName, async ({ browser, request }) => {
     vehicleSubmissionId?: string;
   };
   const extraSupply: ExtraSupply = {
-    transport: new NativeTransport(origins, runtime, invocation),
+    transport: new NativeTransport(
+      origins,
+      runtime,
+      invocation,
+      finalizer.guardFetch(fetch),
+    ),
   };
   const extraBookings: {
     name: SupplementalBookingName;
@@ -309,6 +446,11 @@ test(journeyName, async ({ browser, request }) => {
   const cleanupErrors: string[] = [];
   const cancellations = cancellationResults();
   const lowRatings = lowRatingResults();
+  // C1–C4 terminalize in the helper's own per-case `finally`; after a runner
+  // abandon that cleanup runs only under the finalizer step lent to it.
+  const cancellationHandoff = finalizer.handoff(
+    cancellationCleanupPhase(cancellations),
+  );
 
   const call = async (role: Role, path: string, options: CallOptions = {}) =>
     object((await tx.call(role, path, options)).data);
@@ -392,16 +534,8 @@ test(journeyName, async ({ browser, request }) => {
     );
     return reference;
   };
-  const cleanup = async (stage: string, action: () => Promise<unknown>) => {
-    try {
-      await action();
-      evidence.record({ stage, result: "cleaned" });
-    } catch (error) {
-      cleanupErrors.push(stage);
-      evidence.failure(error);
-    }
-  };
 
+  activeFinalizer = finalizer;
   try {
     // Verify served headers separately from the gcloud metadata revision fence.
     for (const [role, path] of [
@@ -460,6 +594,7 @@ test(journeyName, async ({ browser, request }) => {
     mask(opsSessionId);
     tx.setSession("ops", opsToken);
     tx.setSession("opsApi", opsToken);
+    await finalizer.checkpoint("own-admin-ops-sessions-issued");
     const opsPrincipalId = text(opsAck.principalId);
     requireFact(
       opsAck.realm === "ops" && opsAck.actorType === "ops_user",
@@ -921,6 +1056,7 @@ test(journeyName, async ({ browser, request }) => {
         );
       };
       const firstSupply: ExtraSupply = { transport: tx };
+      await finalizer.checkpoint("first-supply-provisioning");
       try {
         await provisionSupply(firstSupply, nonce, phone);
       } finally {
@@ -1224,6 +1360,7 @@ test(journeyName, async ({ browser, request }) => {
       ).toBeDisabled();
       await feeCheckbox.check();
       await expect(feeCheckbox).toBeChecked();
+      await finalizer.checkpoint("main-original-booking");
       try {
         await clickAndSettleOriginalBookingAck(
           () => page.locator('[data-drt-operation="referral-create"]').click(),
@@ -1348,6 +1485,7 @@ test(journeyName, async ({ browser, request }) => {
         "canonical same-order completed readback",
       );
       completed = true;
+      await finalizer.checkpoint("main-order-completed");
       const completedOrderId = text(orderId);
       const history = object(
         (await referral(`/api/referral/history/${encodeURIComponent(orderId)}`))
@@ -2115,7 +2253,12 @@ test(journeyName, async ({ browser, request }) => {
       // Preserve the minimum main journey above, then observe four independent
       // owned orders. Immediate quote timing still creates reservation semantics.
       let cancellationSequence = 5; // Same real bound device, after main heartbeat 5.
-      await runFourStageOwnedCancellations(
+      await finalizer.checkpoint("four-stage-cancellations");
+      const runCancellations = handoffOwnCancellations(
+        cancellationHandoff,
+        runFourStageOwnedCancellations,
+      );
+      await runCancellations(
         {
           definitionSha: definition,
           runtimeSha: runtime,
@@ -2446,6 +2589,7 @@ test(journeyName, async ({ browser, request }) => {
           ? selected
           : -1;
       };
+      await finalizer.checkpoint("low-rating-matrix");
       await runLowRatingMatrix(
         {
           definitionSha: definition,
@@ -2855,6 +2999,7 @@ test(journeyName, async ({ browser, request }) => {
           await agree.check();
           const create = page.locator('[data-drt-operation="referral-create"]');
           await expect(create).toBeEnabled();
+          await finalizer.checkpoint(`supplemental-${name}-original-booking`);
           await page.route(url, handle);
           deadline = setTimeout(
             () =>
@@ -3069,6 +3214,7 @@ test(journeyName, async ({ browser, request }) => {
       );
       // Provision SECOND real supply through the original upload/review flow.
       const secondPhone = `${phone.slice(0, -1)}${(Number(phone.slice(-1)) + 1) % 10}`;
+      await finalizer.checkpoint("second-supply-provisioning");
       await provisionSupply(extraSupply, `${nonce}-second`, secondPhone);
       const second = {
         driverId: text(extraSupply.driverId),
@@ -3117,6 +3263,7 @@ test(journeyName, async ({ browser, request }) => {
       await heartbeatSecond(null, "available");
       await heartbeat(null, "available", ++cancellationSequence);
       const redispatchBooking = await bookExtraFromUI("redispatched");
+      await finalizer.checkpoint("redispatch-to-second");
       const redispatchResult = await runOwnedRedispatchToSecond({
         orderId: redispatchBooking.orderId,
         nonce: `${nonce}-redispatched`,
@@ -3217,6 +3364,7 @@ test(journeyName, async ({ browser, request }) => {
         redispatchResult.completedTask,
       );
       // Restore the original completed positive filter/page/readback last.
+      await finalizer.checkpoint("final-daily-report-readback");
       dailyReportDownloads = await runOwnedDailyReportDownloads({
         context,
         page,
@@ -3244,6 +3392,30 @@ test(journeyName, async ({ browser, request }) => {
     mainError = bookingState.routeError ?? error;
     evidence.failure(mainError);
   } finally {
+    finalization = await finalizer.run(mainError ? "failed" : "completed");
+  }
+  if (mainError)
+    throw mainError instanceof JourneyFailure
+      ? mainError
+      : new JourneyFailure("consumer-check-failed-see-allowlisted-evidence");
+  requireFact(
+    cleanupErrors.length === 0,
+    "normal owned cleanup has unresolved failures",
+  );
+  requireFact(
+    finalization?.artifacts.every((artifact) => artifact.outcome === "written"),
+    "final evidence and custody persisted",
+  );
+  requireFact(
+    finalization?.wholeRunPassed,
+    "authoritative whole-run finalization passed",
+  );
+
+  // The original finally cleanup with the same order and ownership guards; it
+  // now runs inside the finalizer budget with per-step durable outcomes. The
+  // TEN03-06 custody and journey evidence are written afterwards as final
+  // artifacts, so an exhausted budget can never drop them.
+  async function finalizationPlan(cleanup: StepRunner) {
     if (RECOVERY_ONLY && orderId && !recoveryResolved) {
       cleanupErrors.push("recovery-only-original-order-not-terminal");
       evidence.record({
@@ -3252,6 +3424,12 @@ test(journeyName, async ({ browser, request }) => {
         result: "retained",
       });
     }
+    // Original C1–C4 per-case terminalization, before any supply offline or
+    // binding/session revoke it depends on.
+    if (cancellationCleanupNeeded(cancellationHandoff, cancellations))
+      await cleanup("own-cancellation-cases-normal-terminalization", () =>
+        completeOwnCancellationCleanup(cancellationHandoff, cancellations),
+      );
     if (browserRatingState.current?.state === "ack_unknown") {
       cleanupErrors.push(
         "browser-rating-ACK-unknown-original-command-retained",
@@ -3306,6 +3484,7 @@ test(journeyName, async ({ browser, request }) => {
             "Own synthetic consumer cleanup",
           );
         });
+        mainCleanupTerminal = true;
       });
     if (!RECOVERY_ONLY) {
       for (const booking of extraBookings) {
@@ -3393,49 +3572,6 @@ test(journeyName, async ({ browser, request }) => {
             headers: { "x-idempotency-key": `${nonce}-second-invite-revoke` },
           }),
         );
-      await cleanup("supplemental-custody-persist", () =>
-        persistPrivateJson(supplementalArtifacts.custody, {
-          definitionSha: definition,
-          runtimeSha: runtime,
-          bookings: extraBookings.map((b) => ({
-            name: b.name,
-            journalFile: b.journal?.current
-              ? supplementalArtifacts.bookingJournals[b.name]
-              : null,
-            orderId: b.orderId,
-            terminal: b.terminal ?? false,
-            journalState: b.journal?.current?.state,
-            bodySha256: b.journal?.current?.bodySha256,
-            actions: b.actions,
-            recovery: b.journal?.current?.recovery,
-          })),
-          exactOwnedOrderIds: extraBookings
-            .map((b) => b.orderId)
-            .filter(Boolean),
-          secondSupply: {
-            driverId: extraSupply.driverId,
-            vehicleId: extraSupply.vehicleId,
-            deviceId: extraSupply.deviceId,
-            bindingId: extraSupply.bindingId,
-            plateNo: extraSupply.plateNo,
-            driverSubmissionId: extraSupply.driverSubmissionId,
-            vehicleSubmissionId: extraSupply.vehicleSubmissionId,
-            retainedApprovedSupplyAndDocuments: Boolean(
-              extraSupply.driverId || extraSupply.vehicleId,
-            ),
-          },
-          reports: supplementalReports,
-          sourceAuthority: {
-            canonicalReads:
-              "normal same-runtime GET /orders/:id and report repository path when enabled",
-            pgEnabledDeploymentProof:
-              "pending external same-release operator evidence",
-            dispatchTrace: "instance-local-memory; not durable global proof",
-            noAssignment:
-              "own journaled no-dispatch sequence and report null facts only; global absence pending complete authority",
-          },
-        }),
-      );
     }
     const ownDriverForCleanup = driverId;
     if (ownDriverForCleanup)
@@ -3500,97 +3636,129 @@ test(journeyName, async ({ browser, request }) => {
         }),
       );
     await cleanup("browser-context-closed", () => context.close());
-    await mkdir(DIRECTORY, { recursive: true });
-    await writeFile(
-      `${DIRECTORY}/journey-evidence.json`,
-      JSON.stringify(
-        {
-          definitionSha: definition,
-          runtimeSha: runtime,
-          nonce,
-          entrySlug: ENTRY,
-          subject: SUBJECT,
-          mode: RECOVERY_ONLY ? "recovery-only" : "full-journey",
-          recovery: RECOVERY_ONLY
-            ? {
-                originalRun: retainedRecovery.originalRun,
-                orderId: retainedRecovery.orderId,
-                quoteId: retainedRecovery.quoteId,
-                bodySha256: retainedRecovery.bodySha256,
-                claimedOrderId: orderId ?? null,
-                resolved: recoveryResolved,
-                terminalStatus: recoveryResult?.status ?? null,
-              }
-            : null,
-          completed: RECOVERY_ONLY ? false : completed,
-          cleanupErrors,
-          bookingWrite: bookingState.journal?.current
-            ? {
-                state: bookingState.journal.current.state,
-                bodySha256: bookingState.journal.current.bodySha256,
-                journal: "booking-write-journal.json",
-                recovery: bookingState.journal.current.recovery,
-              }
-            : null,
-          browserRatingWrite: browserRatingState.current ?? null,
-          lowRatingMatrix: RECOVERY_ONLY
-            ? null
-            : { scope: LOW_RATING_MATRIX_SCOPE, cases: lowRatings },
-          events: evidence.events,
-          simulation: RECOVERY_ONLY
-            ? "Recovery of the exact pre-existing synthetic Referral order only; no new supply/documents/quote/booking, Driver progression, trip completion, rating/CRM or receipt/TXT execution."
-            : "Synthetic dev driver/vehicle/documents/GPS/project PNG and Driver-declared fare; no physical ride, legal approval, PSP debit, E04 or formal PDF claim.",
-          declaredActualFare:
-            !RECOVERY_ONLY && completed
-              ? {
-                  currency: "TWD",
-                  amountMinor: 12000,
-                  source: "synthetic_driver_report",
-                  notEstimateOrPayment: true,
-                }
-              : null,
-          retained: RECOVERY_ONLY
-            ? "Only this run's own new Admin/Referral sessions are revoked. Original approved supply/documents and fixed Demo identity remain; unresolved own order is preserved, never broad-cleaned. No H3 or full-journey claim."
-            : "Approved own supply/documents, completed order/CRM and fixed Demo identity remain. No inherited H3 cleanup claim.",
-          cancellations: RECOVERY_ONLY
-            ? [
-                "unassigned",
-                "assigned-not-arrived",
-                "arrived-not-started",
-                "on-trip",
-              ].map((stage) => ({
-                stage,
-                result: "unexecuted",
-                reason: RECOVERY_ONLY
-                  ? "Retained-order cleanup only; no staged passenger-cancellation scenario PASS."
-                  : "Minimum same-order completion scenario; no cancellation pass borrowed.",
-              }))
-            : cancellations,
-          displayObservations: displayObservations ?? null,
-          dailyReportDownloads: dailyReportDownloads ?? null,
-          ...(!RECOVERY_ONLY
-            ? {
-                supplementalDailyReportCustody: {
-                  file: "TEN03-06-custody.json",
-                  reportsObserved: supplementalReports.length,
-                  runtimeAcceptance:
-                    "pending same-release PG-enabled durable-source/deployment proof and operator cleanup verification",
-                },
-              }
-            : {}),
-        },
-        null,
-        2,
-      ),
-      { mode: 0o600 },
-    );
   }
-  if (mainError)
-    throw mainError instanceof JourneyFailure
-      ? mainError
-      : new JourneyFailure("consumer-check-failed-see-allowlisted-evidence");
-  requireFact(
-    cleanupErrors.length === 0,
-    "normal owned cleanup has unresolved failures",
-  );
+
+  function supplementalCustody(summary: FinalizationSummary) {
+    return {
+      definitionSha: definition,
+      runtimeSha: runtime,
+      bookings: extraBookings.map((b) => ({
+        name: b.name,
+        journalFile: b.journal?.current
+          ? supplementalArtifacts.bookingJournals[b.name]
+          : null,
+        orderId: b.orderId,
+        terminal: b.terminal ?? false,
+        journalState: b.journal?.current?.state,
+        bodySha256: b.journal?.current?.bodySha256,
+        actions: b.actions,
+        recovery: b.journal?.current?.recovery,
+      })),
+      exactOwnedOrderIds: extraBookings.map((b) => b.orderId).filter(Boolean),
+      secondSupply: {
+        driverId: extraSupply.driverId,
+        vehicleId: extraSupply.vehicleId,
+        deviceId: extraSupply.deviceId,
+        bindingId: extraSupply.bindingId,
+        plateNo: extraSupply.plateNo,
+        driverSubmissionId: extraSupply.driverSubmissionId,
+        vehicleSubmissionId: extraSupply.vehicleSubmissionId,
+        retainedApprovedSupplyAndDocuments: Boolean(
+          extraSupply.driverId || extraSupply.vehicleId,
+        ),
+      },
+      reports: supplementalReports,
+      sourceAuthority: {
+        canonicalReads:
+          "normal same-runtime GET /orders/:id and report repository path when enabled",
+        pgEnabledDeploymentProof:
+          "pending external same-release operator evidence",
+        dispatchTrace: "instance-local-memory; not durable global proof",
+        noAssignment:
+          "own journaled no-dispatch sequence and report null facts only; global absence pending complete authority",
+      },
+      finalization: summary,
+    };
+  }
+
+  function journeyEvidence(summary: FinalizationSummary) {
+    return {
+      definitionSha: definition,
+      runtimeSha: runtime,
+      nonce,
+      entrySlug: ENTRY,
+      subject: SUBJECT,
+      mode: RECOVERY_ONLY ? "recovery-only" : "full-journey",
+      recovery: RECOVERY_ONLY
+        ? {
+            originalRun: retainedRecovery.originalRun,
+            orderId: retainedRecovery.orderId,
+            quoteId: retainedRecovery.quoteId,
+            bodySha256: retainedRecovery.bodySha256,
+            claimedOrderId: orderId ?? null,
+            resolved: recoveryResolved,
+            terminalStatus: recoveryResult?.status ?? null,
+          }
+        : null,
+      // Whole-run truth; the main order's own completion stays a separate fact.
+      completed: !RECOVERY_ONLY && summary.wholeRunPassed,
+      mainOrderCompleted: RECOVERY_ONLY ? false : completed,
+      cleanupErrors,
+      bookingWrite: bookingState.journal?.current
+        ? {
+            state: bookingState.journal.current.state,
+            bodySha256: bookingState.journal.current.bodySha256,
+            journal: "booking-write-journal.json",
+            recovery: bookingState.journal.current.recovery,
+          }
+        : null,
+      browserRatingWrite: browserRatingState.current ?? null,
+      lowRatingMatrix: RECOVERY_ONLY
+        ? null
+        : { scope: LOW_RATING_MATRIX_SCOPE, cases: lowRatings },
+      events: evidence.events,
+      simulation: RECOVERY_ONLY
+        ? "Recovery of the exact pre-existing synthetic Referral order only; no new supply/documents/quote/booking, Driver progression, trip completion, rating/CRM or receipt/TXT execution."
+        : "Synthetic dev driver/vehicle/documents/GPS/project PNG and Driver-declared fare; no physical ride, legal approval, PSP debit, E04 or formal PDF claim.",
+      declaredActualFare:
+        !RECOVERY_ONLY && completed
+          ? {
+              currency: "TWD",
+              amountMinor: 12000,
+              source: "synthetic_driver_report",
+              notEstimateOrPayment: true,
+            }
+          : null,
+      retained: RECOVERY_ONLY
+        ? "Only this run's own new Admin/Referral sessions are revoked. Original approved supply/documents and fixed Demo identity remain; unresolved own order is preserved, never broad-cleaned. No H3 or full-journey claim."
+        : "Approved own supply/documents, completed order/CRM and fixed Demo identity remain. No inherited H3 cleanup claim.",
+      cancellations: RECOVERY_ONLY
+        ? [
+            "unassigned",
+            "assigned-not-arrived",
+            "arrived-not-started",
+            "on-trip",
+          ].map((stage) => ({
+            stage,
+            result: "unexecuted",
+            reason: RECOVERY_ONLY
+              ? "Retained-order cleanup only; no staged passenger-cancellation scenario PASS."
+              : "Minimum same-order completion scenario; no cancellation pass borrowed.",
+          }))
+        : cancellations,
+      displayObservations: displayObservations ?? null,
+      dailyReportDownloads: dailyReportDownloads ?? null,
+      ...(!RECOVERY_ONLY
+        ? {
+            supplementalDailyReportCustody: {
+              file: "TEN03-06-custody.json",
+              reportsObserved: supplementalReports.length,
+              runtimeAcceptance:
+                "pending same-release PG-enabled durable-source/deployment proof and operator cleanup verification",
+            },
+          }
+        : {}),
+      finalization: summary,
+    };
+  }
 });
