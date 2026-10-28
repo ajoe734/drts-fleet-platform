@@ -8,6 +8,8 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import path from "node:path";
 import type { BrowserContext, Locator, Page, Route } from "@playwright/test";
 import { describe, expect, it, vi } from "vitest";
@@ -49,6 +51,7 @@ import {
   Evidence,
   hash,
   JourneyFailure,
+  requireFact,
   type ObjectData,
 } from "../../e2e/owned-referral-business-journey/protocol";
 
@@ -330,6 +333,132 @@ function cancelledCase() {
 }
 
 describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contract", () => {
+  it("actual inner selectors isolate concurrent same-path queries and methods, and remove timed-out waiters", async () => {
+    // Supplement the complete runOwnedDailyReportDownloads fake-port runs below
+    // with overlapping selectors. Execute the original inner source verbatim;
+    // only Route ports/clock are controlled, no copied selector/handler logic.
+    const source = await readFile(
+      new URL(
+        "../../e2e/owned-referral-business-journey/daily-report-downloads.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const routes = source.slice(
+      source.indexOf("const REPORT_HTTP_ROUTES ="),
+      source.indexOf("const SAFE_REPORT_ERROR_CODES"),
+    );
+    const inner = source.slice(
+      source.indexOf("  type PendingWaiter ="),
+      source.indexOf("  await context.route("),
+    );
+    const code = ts.transpileModule(
+      `${routes}
+${inner}
+({ waitForOpsExchange, routeHandler, pending: () => waiters.length });`,
+      {
+        compilerOptions: {
+          target: ts.ScriptTarget.ES2022,
+          module: ts.ModuleKind.None,
+        },
+      },
+    ).outputText;
+    const evidence = new Evidence();
+    vi.useFakeTimers();
+    try {
+      const actual = runInNewContext(code, {
+        JourneyFailure,
+        requireFact,
+        URL,
+        opsOrigin: OPS_ORIGIN,
+        opsHeaders: () => ({}),
+        runtimeSha: RUNTIME_SHA,
+        evidence,
+        performance,
+        setTimeout,
+        clearTimeout,
+      }) as {
+        waitForOpsExchange: (
+          predicate: (request: {
+            method: string;
+            pathname: string;
+            searchParams: URLSearchParams;
+          }) => boolean,
+          stage: string,
+          timeout?: number,
+        ) => Promise<unknown>;
+        routeHandler: (route: Route) => Promise<void>;
+        pending: () => number;
+      };
+      const settled = ["pending", "pending", "pending"];
+      const requests = ["one", "two", "post"].map((query, index) =>
+        actual
+          .waitForOpsExchange(
+            (request) =>
+              request.method === (query === "post" ? "POST" : "GET") &&
+              request.pathname === "/control-plane-proxy/reports/jobs" &&
+              request.searchParams.get("q") === query,
+            "query-control",
+          )
+          .then(
+            () => {
+              settled[index] = "resolved";
+            },
+            () => {
+              settled[index] = "rejected";
+            },
+          ),
+      );
+      let aborts = 0;
+      const dispatch = (method: string, query: string, fail: boolean) =>
+        actual.routeHandler({
+          request: () => ({
+            method: () => method,
+            url: () =>
+              `${OPS_ORIGIN}/control-plane-proxy/reports/jobs?q=${query}`,
+            postData: () => null,
+            headers: () => ({}),
+          }),
+          fetch: async () => {
+            if (fail) throw new TypeError("private-error");
+            return {
+              body: async () => Buffer.from("ok"),
+              status: () => 200,
+              url: () => OPS_ORIGIN,
+              headers: () => ({ "x-drts-candidate-sha": RUNTIME_SHA }),
+            };
+          },
+          fulfill: async () => undefined,
+          abort: async () => {
+            aborts += 1;
+          },
+        } as unknown as Route);
+      await dispatch("GET", "other", true);
+      expect(settled).toEqual(["pending", "pending", "pending"]);
+      await dispatch("GET", "one", true);
+      expect(settled).toEqual(["rejected", "pending", "pending"]);
+      await dispatch("GET", "two", false);
+      expect(settled).toEqual(["rejected", "resolved", "pending"]);
+      await dispatch("POST", "post", false);
+      await Promise.all(requests);
+      expect(settled).toEqual(["rejected", "resolved", "resolved"]);
+      expect(aborts).toBe(2);
+      expect(actual.pending()).toBe(0);
+      const timeout = actual.waitForOpsExchange(
+        () => false,
+        "query-timeout-control",
+      );
+      const rejection = expect(timeout).rejects.toMatchObject({
+        stage: "query-timeout-control:timeout",
+      });
+      await vi.advanceTimersByTimeAsync(15_000);
+      await rejection;
+      expect(actual.pending()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("F6: captures only typed safe non-200 preview status/known route/code/trace before rejecting, never raw body or headers", () => {
     const evidence = new Evidence();
     const secret = "sensitive-customer-and-auth-material";
@@ -1288,6 +1417,29 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
   });
 
   it.each([
+    ...(
+      [
+        "unrelated-fetch",
+        "unrelated-body",
+        "unrelated-proxy",
+        "unrelated-runtime",
+        "matching-fetch",
+        "matching-body",
+        "matching-runtime",
+        "matching-typed",
+        "matching-http",
+        "matching-hostile",
+        "matching-private-name",
+        "matching-command-binding",
+      ] as const
+    ).map((routeFault) => ({
+      caseName: `request isolation ${routeFault}`,
+      routeFault,
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    })),
     // Fault only external ports after the actual canonical empty-day control.
     // The helper, exchange validation, renderers and Evidence.failure stay real.
     ...(
@@ -1512,6 +1664,45 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
         "faultPoint" in scenario ? scenario.faultPoint : undefined;
       const typedFault =
         "typedFault" in scenario ? scenario.typedFault : undefined;
+      const routeFault =
+        "routeFault" in scenario ? scenario.routeFault : undefined;
+      const routeNativeFailure: unknown =
+        routeFault === "matching-hostile"
+          ? Object.defineProperties(
+              {},
+              {
+                name: {
+                  get() {
+                    throw new Error("private-name-accessor");
+                  },
+                },
+                cause: {
+                  get() {
+                    throw new Error("private-cause-accessor");
+                  },
+                },
+              },
+            )
+          : routeFault === "matching-private-name"
+            ? { name: "private-name", cause: { code: "private-code" } }
+            : new TypeError("private-native-token-url-order-actor-sql-body", {
+                cause: { code: "ECONNRESET", secret: "private-cause" },
+              });
+      const routeTypedFailure =
+        routeFault === "matching-http"
+          ? new DailyReportHttpFailure("daily-report-test-http", {
+              phase: "create-job-csv",
+              method: "POST",
+              route: "jobs",
+              runtimeSha: RUNTIME_SHA,
+              status: 503,
+              code: "REPORT_READ_FAILED",
+            })
+          : new JourneyFailure(
+              "daily-report-test-typed",
+              503,
+              "REPORT_READ_FAILED",
+            );
       const privateMarker = "private-native-token-url-order-actor-sql-body";
       const injectedFailure =
         typedFault === "http" || typedFault === "exchange-http"
@@ -1584,6 +1775,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
 
         let routeHandler: ((route: Route) => Promise<void>) | undefined;
         let unrouteCalled = false;
+        let abortedRoutes = 0;
         let artifactRequests = 0;
         let initialJobsRequests = 0;
         let pageVisits = 0;
@@ -1617,6 +1809,7 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           responseStatus: number,
           responseHeaders: Record<string, string>,
           responseBytes: Buffer,
+          nativeFault?: "fetch" | "body" | "typed",
         ) => {
           if (!routeHandler) throw new Error("routeHandler not registered");
           const route = {
@@ -1633,6 +1826,8 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
               expect(options?.headers?.["X-Serverless-Authorization"]).toBe(
                 "Bearer synthetic-ops-cloud",
               );
+              if (nativeFault === "fetch") throw routeNativeFailure;
+              if (nativeFault === "typed") throw routeTypedFailure;
               return {
                 status: () => responseStatus,
                 url: () => url,
@@ -1641,13 +1836,16 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   ...responseHeaders,
                 }),
                 body: async () => {
+                  if (nativeFault === "body") throw routeNativeFailure;
                   if (url.includes("/artifact")) faultAt("artifact-body");
                   return responseBytes;
                 },
               };
             },
             fulfill: async () => undefined,
-            abort: async () => undefined,
+            abort: async () => {
+              abortedRoutes += 1;
+            },
           } as unknown as Route;
           await routeHandler(route);
         };
@@ -1910,6 +2108,40 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                 point: "export",
                 click: async () => {
                   const format = selectedFormat;
+                  if (
+                    routeFault &&
+                    routeFault !== "matching-command-binding" &&
+                    dateFromVal === "2026-10-25" &&
+                    format === "csv"
+                  ) {
+                    const unrelated = routeFault.startsWith("unrelated-");
+                    const runtimeFault = routeFault.endsWith("runtime");
+                    await dispatchRoute(
+                      unrelated ? "GET" : "POST",
+                      `${OPS_ORIGIN}${
+                        unrelated
+                          ? routeFault === "unrelated-proxy" || runtimeFault
+                            ? "/control-plane-proxy/reports/jobs?private-query"
+                            : "/_next/private-asset.js?private-query"
+                          : "/control-plane-proxy/reports/jobs"
+                      }`,
+                      unrelated ? null : JSON.stringify({ privateMarker }),
+                      200,
+                      runtimeFault
+                        ? { "x-drts-candidate-sha": "c".repeat(40) }
+                        : {},
+                      Buffer.from("private-response"),
+                      runtimeFault
+                        ? undefined
+                        : routeFault.endsWith("typed") ||
+                            routeFault.endsWith("http")
+                          ? "typed"
+                          : routeFault.endsWith("body")
+                            ? "body"
+                            : "fetch",
+                    );
+                    if (!unrelated) return;
+                  }
                   const jobId = `job_harness_${dateFromVal === "2026-10-25" ? "empty_" : ""}${format}`;
                   lastAcceptedJobId = jobId;
                   const rows =
@@ -1963,7 +2195,18 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
                   await dispatchRoute(
                     "POST",
                     `${OPS_ORIGIN}/control-plane-proxy/reports/jobs`,
-                    JSON.stringify(reqBody),
+                    JSON.stringify(
+                      routeFault === "matching-command-binding" &&
+                        dateFromVal === "2026-10-25"
+                        ? {
+                            ...reqBody,
+                            filters: {
+                              ...reqBody.filters,
+                              serviceDateFrom: "2026-10-26",
+                            },
+                          }
+                        : reqBody,
+                    ),
                     201,
                     { "content-type": "application/json" },
                     failureCase === "create-job-invalid-json" &&
@@ -2212,6 +2455,61 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           recoveryOnly: false,
           evidence,
         });
+        if (routeFault?.startsWith("matching-")) {
+          const failure = await run.catch((error: unknown) => error);
+          if (routeFault === "matching-command-binding") {
+            expect(failure).toMatchObject({
+              stage: "daily-report-empty-csv-job-command-binding",
+            });
+            expect(abortedRoutes).toBe(0);
+            expect(unrouteCalled).toBe(true);
+            expect(sourceReads).toBe(1);
+            return;
+          }
+          if (routeFault === "matching-typed" || routeFault === "matching-http")
+            expect(failure).toBe(routeTypedFailure);
+          else if (routeFault === "matching-runtime")
+            expect(failure).toMatchObject({
+              stage: "daily-report-ops-runtime-sha-mismatch",
+            });
+          else {
+            expect(failure).toBeInstanceOf(JourneyFailure);
+            expect((failure as Error).message).toContain(
+              "daily-report-ops-post-jobs",
+            );
+          }
+          const event = evidence.events.find((event) =>
+            event.stage.startsWith("daily-report-ops-post-jobs-"),
+          );
+          expect(event).toMatchObject({
+            requestMethod: "POST",
+            requestDurationMs: expect.any(Number),
+            result: "failed",
+          });
+          expect(event).not.toHaveProperty("requestAborted");
+          if (routeFault === "matching-fetch" || routeFault === "matching-body")
+            expect(event).toMatchObject({
+              stage: `daily-report-ops-post-jobs-${routeFault === "matching-fetch" ? "fetch" : "body"}-native`,
+              nativeFailureClass: "TypeError",
+              nativeCauseCode: "ECONNRESET",
+            });
+          if (
+            routeFault === "matching-hostile" ||
+            routeFault === "matching-private-name"
+          )
+            expect(event).toMatchObject({
+              nativeFailureClass: "UNKNOWN",
+              nativeCauseCode: "UNKNOWN",
+            });
+          const diagnostic = JSON.stringify([failure, evidence.events]);
+          expect(diagnostic).not.toContain(privateMarker);
+          expect(diagnostic).not.toContain("private-cause");
+          expect(diagnostic).not.toContain("private-response");
+          expect(abortedRoutes).toBe(1);
+          expect(unrouteCalled).toBe(true);
+          expect(sourceReads).toBe(1);
+          return;
+        }
         if (faultPoint) {
           const failure = await run.then(
             () => undefined,
@@ -2220,7 +2518,9 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           evidence.failure(failure);
           const expectedStage = typedFault
             ? (injectedFailure as JourneyFailure).stage
-            : `daily-report-empty-${"expectedPhase" in scenario ? scenario.expectedPhase : ""}`;
+            : faultPoint === "artifact-body"
+              ? "daily-report-ops-get-job-artifact-body-native"
+              : `daily-report-empty-${"expectedPhase" in scenario ? scenario.expectedPhase : ""}`;
           expect(evidence.events.at(-1)).toEqual({
             stage: expectedStage,
             ...(typedFault
@@ -2443,6 +2743,22 @@ describe("BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025 unit contr
           return;
         }
         const result = await run;
+        if (routeFault?.startsWith("unrelated-")) {
+          expect(abortedRoutes).toBe(1);
+          const failures = evidence.events.filter(
+            (event) =>
+              event.stage.startsWith("daily-report-ops-") &&
+              event.result === "failed",
+          );
+          expect(failures).toHaveLength(1);
+          expect(failures[0]).toMatchObject({
+            requestMethod: "GET",
+            result: "failed",
+          });
+          expect(JSON.stringify(failures)).not.toContain(privateMarker);
+          expect(JSON.stringify(failures)).not.toContain("private-query");
+          expect(JSON.stringify(failures)).not.toContain("private-cause");
+        }
 
         expect(result.orderId).toBe(ORDER_ID);
         expect(result.serviceDate).toBe("2026-10-26");

@@ -1783,6 +1783,13 @@ type EmptyDayConsumerPhase =
   | `reload-${"page" | "page-status" | "jobs" | "completed" | "poll"}`
   | `download-${DailyReportFormat}-${"completed" | "row" | "row-binding" | "ready" | "submit" | "detail" | "artifact" | "close-pages" | "validate"}`;
 
+// Waiters select request identity before any response exists. Keeping this
+// response-free prevents failed routes from fabricating status/body/SHA facts.
+type CapturedOpsRequest = Pick<
+  CapturedOpsExchange,
+  "method" | "url" | "pathname" | "searchParams" | "requestBody"
+>;
+
 type CapturedOpsExchange = Readonly<{
   method: string;
   url: string;
@@ -1902,7 +1909,7 @@ export async function runOwnedDailyReportDownloads(
   const expectedFilters = buildDailyReportFilters(expected);
 
   type PendingWaiter = {
-    predicate: (exchange: CapturedOpsExchange) => boolean;
+    predicate: (request: CapturedOpsRequest) => boolean;
     resolve: (exchange: CapturedOpsExchange) => void;
     reject: (error: unknown) => void;
     timer: ReturnType<typeof setTimeout>;
@@ -1910,7 +1917,7 @@ export async function runOwnedDailyReportDownloads(
   const waiters: PendingWaiter[] = [];
 
   const waitForOpsExchange = (
-    predicate: (exchange: CapturedOpsExchange) => boolean,
+    predicate: (request: CapturedOpsRequest) => boolean,
     stage: string,
     timeoutMs = 15_000,
   ): Promise<CapturedOpsExchange> => {
@@ -1922,7 +1929,7 @@ export async function runOwnedDailyReportDownloads(
     });
     void promise.catch(() => undefined);
     const timer = setTimeout(() => {
-      const idx = waiters.findIndex((item) => item.resolve === resolveFn);
+      const idx = waiters.findIndex((item) => item.timer === timer);
       if (idx >= 0) waiters.splice(idx, 1);
       rejectFn(new JourneyFailure(`${stage}:timeout`));
     }, timeoutMs);
@@ -1947,6 +1954,15 @@ export async function runOwnedDailyReportDownloads(
     const method = request.method().toUpperCase();
     const requestBody = request.postData();
     const parsedUrl = new URL(url);
+    const requestIdentity: CapturedOpsRequest = {
+      method,
+      url,
+      pathname: parsedUrl.pathname,
+      searchParams: parsedUrl.searchParams,
+      requestBody,
+    };
+    const startedAt = performance.now();
+    let failurePhase: "fetch" | "body" | "validate" = "fetch";
 
     try {
       requireFact(
@@ -1965,7 +1981,9 @@ export async function runOwnedDailyReportDownloads(
         maxRetries: 0,
         timeout: 15_000,
       });
+      failurePhase = "body";
       const bytes = await response.body();
+      failurePhase = "validate";
       const status = response.status();
       const responseUrl = response.url();
       const headers = response.headers();
@@ -2005,9 +2023,91 @@ export async function runOwnedDailyReportDownloads(
         }
       }
     } catch (error) {
-      for (const waiter of waiters.splice(0, waiters.length)) {
-        waiter.reject(error);
+      // Classify only with closed labels; never persist request identities,
+      // messages, stacks, headers, bytes or arbitrary native cause objects.
+      const safeMethod = [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS",
+      ].includes(method)
+        ? method
+        : "OTHER";
+      const routeClass =
+        Object.values(REPORT_HTTP_ROUTES).find((candidate) =>
+          candidate.path.test(parsedUrl.pathname),
+        )?.label ?? "other";
+      let nativeFailureClass = "UNKNOWN";
+      let nativeCauseCode = "UNKNOWN";
+      if (!(error instanceof JourneyFailure)) {
+        try {
+          const name = (error as { name?: unknown } | null)?.name;
+          if (
+            typeof name === "string" &&
+            [
+              "Error",
+              "TypeError",
+              "RangeError",
+              "SyntaxError",
+              "AbortError",
+              "TimeoutError",
+              "AggregateError",
+            ].includes(name)
+          )
+            nativeFailureClass = name;
+        } catch {
+          /* hostile accessor is unknown */
+        }
+        try {
+          const code = (error as { cause?: { code?: unknown } } | null)?.cause
+            ?.code;
+          if (
+            typeof code === "string" &&
+            [
+              "ECONNRESET",
+              "ECONNREFUSED",
+              "ETIMEDOUT",
+              "ENOTFOUND",
+              "EAI_AGAIN",
+              "UND_ERR_CONNECT_TIMEOUT",
+              "UND_ERR_HEADERS_TIMEOUT",
+              "UND_ERR_BODY_TIMEOUT",
+              "UND_ERR_SOCKET",
+              "CERT_HAS_EXPIRED",
+              "ERR_TLS_CERT_ALTNAME_INVALID",
+              "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+            ].includes(code)
+          )
+            nativeCauseCode = code;
+        } catch {
+          /* hostile accessor is unknown */
+        }
       }
+      const stage = `daily-report-ops-${safeMethod.toLowerCase()}-${routeClass}-${failurePhase}-${error instanceof JourneyFailure ? "typed" : "native"}`;
+      const elapsed = performance.now() - startedAt;
+      evidence.record({
+        stage,
+        requestMethod: safeMethod,
+        requestDurationMs:
+          Number.isFinite(elapsed) && elapsed >= 0
+            ? Math.min(Math.floor(elapsed), 86_400_000)
+            : 0,
+        ...(error instanceof JourneyFailure
+          ? {}
+          : { nativeFailureClass, nativeCauseCode }),
+        result: "failed",
+      });
+      const failure =
+        error instanceof JourneyFailure ? error : new JourneyFailure(stage);
+      // Mirror successful delivery: only the waiter for this actual request
+      // settles. Other pending requests keep their own response/failure path.
+      const index = waiters.findIndex((waiter) =>
+        waiter.predicate(requestIdentity),
+      );
+      if (index >= 0) waiters.splice(index, 1)[0]!.reject(failure);
       await route.abort("failed").catch(() => undefined);
     }
   };
