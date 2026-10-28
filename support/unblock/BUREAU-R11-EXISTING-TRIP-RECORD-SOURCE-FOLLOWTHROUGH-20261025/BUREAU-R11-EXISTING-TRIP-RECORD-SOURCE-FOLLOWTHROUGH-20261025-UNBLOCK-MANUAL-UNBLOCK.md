@@ -148,3 +148,60 @@ They retain commands, exit codes and readback; parent snapshots are single-task 
 No repeated product rework is submitted: final accepted review already closed the
 source findings. This helper preserves that history and documents the remaining
 operator and control-plane boundaries.
+
+## Current addendum — 2026-10-28 UTC
+
+The 2026-10-27 observations above remain historical evidence. In particular,
+the metadata-coordination wait and `.4` latest-rollout observation are no
+longer the current disposition. Supervisor has already persisted the parent
+note and this helper's complete resolution floor. Fresh release-CLI `show`
+slices are saved under
+`/home/lupin/workspace/drts-fleet-platform/.local/bureau-r11-unblock-manual-20261028/`:
+`parent-before.json` and `helper-before.json`. The parent remains `blocked`,
+`waiting_for: Codex`, with its original candidate/generation, review, CI, merge,
+four required keys and three accepted evidence values unchanged. The helper's
+`resolved_parent_status: blocked`, `resolved_parent_waiting_for: Codex`, and
+complete `resolved_parent_next` equal the parent's current status/waiting/next
+respectively. Preserve these values verbatim through helper review and merge;
+the completion transaction owns `resolved_parent_at`. No further cross-task
+parent write or metadata coordination is needed from this worker. Absent legacy
+helper spec/scope/key fields remain absent.
+
+Continued the published draft `304293df3ecd951d810f479b6ced78202e182dbc` /
+[#3066](https://github.com/ajoe734/drts-fleet-platform/pull/3066) on its original
+branch. A normal merge of accepted dev
+`6c6b990348219fd45a08258f852cbf1f55491881` produced anchor
+`2048ade44979dc22d0ae095e5e6c904cbdba5dcc`, retaining the published ancestry.
+It includes accepted qs remediation `a086b02f9` (#3073), advancing-clock repair
+`da7c5d8c9` (#3074), and the actual installed deepmerge patch (#3097).
+Deepmerge's original Claude2 review, three own successful CI workflows and
+protected squash merge bind candidate `38339417e84abddaceb27c3173c57c407feccdeb`
+to merge `6c6b990348219fd45a08258f852cbf1f55491881`; both have tree
+`f823a660f7cac68ff946097c6c46554f2d866170`. Its two Source keys are `done`.
+The authoritative Source proof is
+`/home/lupin/workspace/drts-fleet-platform/.local/goal-continuation-20261015T-current-frontier/DEPENDENCY-DEEPMERGE-1243505-PATCH-REMEDIATION-20261028.source-evidence.json`.
+That Source credit does not supply this helper's review/CI/merge or the parent's
+hosted-operation key. This artifact addendum and the accepted source integration
+produce an actual new tree; no empty commit or old-head CI retry is used.
+
+| Finding / acceptance                                           | Current verification / evidence                                                                                                                                               | Remaining gate                                                                                                        |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Dependency-ready parent diagnosis and scoped remaining blocker | Fresh parent slice still has exactly three accepted keys; original controller/service/UI contracts above remain applicable                                                    | Only `bureau_r11_existing_trip_same_release_hosted_operation` is missing                                              |
+| Parent action and helper resolution floor                      | `parent-before.json`, `helper-before.json`; full floor and parent invariants checked again after handoff in `floor-preservation.json`                                         | Helper completion must return the same blocked floor, never resume the parent                                         |
+| Old candidate's CI failure                                     | `old-304293-ci-failures.txt`: run 40447399842 shard 1 failed five `daily-report-csv-artifact-unexpired-metadata-binding` cases; accepted #3074 advances the harness clock     | Fresh candidate requires its own full CI; old/peer CI supplies no credit                                              |
+| Task-scoped canonical change                                   | Only this Markdown differs from accepted dev; original document retained; formatting, diff/scope and ancestry receipts in `document-checks.txt` and `candidate-evidence.json` | New exact SHA must receive original Claude2 review, own CI and normal protected merge; handoff/PR record its identity |
+
+The parent's complete current NEXT is preserved in the snapshots and helper
+floor. Continue the original handoff §2 and the corrected Agency login → exact
+query/detail/refresh → export preview/create/status/signed CSV sequence above,
+including same completed fare/route truth, durable readback, 403/owner isolation
+and access-log evidence on a bound shared release. Accepted R11 ancestry in
+source `2bb73091a279551c0134abc5e845b51db9480ec8` is already established;
+stale deployment observations do not justify a new deployment. Runtime evidence
+still requires actual same-source user operation; generic full16 or Source proof
+cannot substitute. Full44issues134caps/Final108 original-order 2keys3scopes/
+59cases14req/full16/69setup15uploads37roles16lineage3sameorders/
+GUX21-229-3800-22800/storage-scanner-readback-exactcleanup/native/manual/
+providers/prodHOLD remain in force. This continuation starts no product server,
+browser, HTTP or PG journey, Compose infrastructure, deployment or new hosted
+workflow dispatch. Normal candidate CI remains a separate lifecycle gate.
