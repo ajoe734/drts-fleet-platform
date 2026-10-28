@@ -6343,7 +6343,7 @@ def dependency_ready_blocked_task_records(
     config: dict[str, Any],
     status: dict[str, Any] | None,
     *,
-    limit: int = 8,
+    limit: int | None = 8,
     include_held: bool = False,
 ) -> list[dict[str, Any]]:
     if not isinstance(status, dict):
@@ -6419,6 +6419,190 @@ def has_explicit_candidate_ci_resume(payload: dict[str, Any], record: dict[str, 
     )
 
 
+CHAIR_BLOCKED_TASK_WINDOW = 8
+# Bounded admission past the window: at most this many recovery-ready records
+# are appended per review. Any Chair action on one (resume, or a helper) takes
+# it out of the dependency-ready set, so the next ones rotate in.
+CHAIR_CI_RECOVERY_RESERVE = 2
+
+
+def candidate_ci_recovery_ready(record: dict[str, Any]) -> bool:
+    """Structurally explicit-positive: eligible recovery context (identity,
+    retained handoff, exactly one open blocker) whose board CI evidence is
+    success for that exact candidate. No free text is inspected."""
+    recovery = record.get("candidate_ci_recovery")
+    task = record.get("task") or {}
+    return (
+        isinstance(recovery, dict)
+        and str(task.get("ci_status") or "").lower() == "success"
+        and task.get("ci_sha") == recovery["candidate_sha"]
+    )
+
+
+# Exact protocol token a Chair/operator writes to request the explicit route.
+# It only orders admission into the bounded reserve; eligibility and any
+# resume still come from the structural R1-R4 checks, never from this text.
+CANDIDATE_CI_RECOVERY_REQUEST_PATTERN = re.compile(r"(?<![\w-])resume_basis\s*=\s*candidate_ci_recovered(?![\w-])")
+
+
+def candidate_ci_recovery_requested(record: dict[str, Any]) -> bool:
+    task = record.get("task") or {}
+    return bool(CANDIDATE_CI_RECOVERY_REQUEST_PATTERN.search(str(task.get("next") or "")))
+
+
+def chair_blocked_task_selection(
+    config: dict[str, Any],
+    status: dict[str, Any] | None,
+    *,
+    include_held: bool = False,
+) -> list[dict[str, Any]]:
+    """The bounded blocked-task list the Chair prompt, context validation and
+    reassignment synthesis share.
+
+    Keeps the held/phase-sorted window unchanged, then appends, in their
+    original relative order, at most CHAIR_CI_RECOVERY_RESERVE out-of-window
+    records that are ready for explicit candidate CI recovery, so a fixed
+    window cannot starve them while the batch stays bounded. Ready records
+    that are also explicitly requested take the reserve first, so earlier
+    green records that legitimately stay blocked cannot hold it forever.
+    """
+    records = dependency_ready_blocked_task_records(config, status, limit=None, include_held=include_held)
+    window = records[:CHAIR_BLOCKED_TASK_WINDOW]
+    ready = [
+        (index, record) for index, record in enumerate(records[CHAIR_BLOCKED_TASK_WINDOW:])
+        if candidate_ci_recovery_ready(record)
+    ]
+    prioritized = [item for item in ready if candidate_ci_recovery_requested(item[1])]
+    prioritized += [item for item in ready if not candidate_ci_recovery_requested(item[1])]
+    admitted = sorted(prioritized[:CHAIR_CI_RECOVERY_RESERVE], key=lambda item: item[0])
+    return window + [record for _, record in admitted]
+
+
+# A reasoned deferral must name exactly one task and say why, e.g.
+# "HELD-UNBLOCK: needs original human triage; no nested helper permitted".
+CHAIR_DEFERRAL_ENTRY_PATTERN = re.compile(r"\s*([A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+)\s*:\s*(\S.*?)\s*", re.DOTALL)
+CHAIR_DEFERRAL_MIN_REASON_CHARS = 24
+
+
+def chair_unblock_recursion_guarded(
+    config: dict[str, Any] | None,
+    task: dict[str, Any],
+    task_map: dict[str, dict[str, Any]],
+) -> bool:
+    """True when create_unblock_task can never materialize for this task: the
+    recursion guard escalates a governance artifact (or a deep lineage)
+    instead of generating a nested helper."""
+    max_depth = int(chair_review_settings(config or {}).get("max_unblock_lineage_depth", 1))
+    return is_governance_artifact(task) or governance_lineage_depth(task, task_map) >= max_depth
+
+
+def chair_reasoned_deferral_task_ids(
+    config: dict[str, Any] | None,
+    payload: dict[str, Any],
+    records: list[dict[str, Any]],
+    status: dict[str, Any] | None,
+) -> set[str]:
+    """Selected blocked records the Chair explicitly and specifically deferred.
+
+    Not a generic missing-action waiver. A blocked_by entry must be exactly
+    "TASK-ID: reason" with a specific reason, for a listed record whose
+    expected route is create_unblock_task and that has no action of its own,
+    and the record must be either
+    - a governance artifact the recursion guard would refuse a helper for, or
+    - any other record, but only inside a mixed recovery batch: the same
+      payload carries an explicit candidate CI recovery that matches a
+      selected record's current recovery context.
+    Such a deferral leaves the record untouched instead of rejecting the
+    review or synthesizing a helper. Outside a mixed batch, ordinary records
+    keep the existing helper route.
+    """
+    if not isinstance(status, dict):
+        return set()
+    task_map = task_index_from_status(config or {}, status)
+    action_index = chair_task_action_index(payload)
+    recovery_targets = {
+        str(record.get("task_id") or "")
+        for record in chair_blocked_task_selection(config or {}, status)
+        if matching_candidate_ci_resume(payload, record)
+    }
+    guarded = {
+        str(record.get("task_id") or ""): record
+        for record in records
+        if record.get("action") == "create_unblock_task"
+        and str(record.get("task_id") or "") not in action_index
+        and str(record.get("task_id") or "") not in recovery_targets
+        and (recovery_targets or chair_unblock_recursion_guarded(config, record.get("task") or {}, task_map))
+    }
+    return chair_deferral_entry_task_ids(payload) & set(guarded)
+
+
+def chair_deferral_entry_task_ids(payload: dict[str, Any]) -> set[str]:
+    """Task ids named by well-formed "TASK-ID: specific reason" blocked_by entries."""
+    named: set[str] = set()
+    for entry in payload.get("blocked_by") or []:
+        match = CHAIR_DEFERRAL_ENTRY_PATTERN.fullmatch(entry) if isinstance(entry, str) else None
+        if match is None:
+            continue
+        reason = match.group(2)
+        if len(reason) < CHAIR_DEFERRAL_MIN_REASON_CHARS or TASK_ID_MENTION_PATTERN.search(reason):
+            continue
+        named.add(match.group(1))
+    return named
+
+
+def stale_mixed_recovery_deferrals(
+    config: dict[str, Any] | None,
+    payload: dict[str, Any],
+    status: dict[str, Any] | None,
+) -> list[str]:
+    """Deferred task ids of a mixed batch whose explicit CI recovery is stale.
+
+    A mixed batch pairs an explicit candidate_ci_recovered resume with
+    reasoned deferrals. If any explicit recovery no longer matches a selected
+    record's current recovery context (new blocker, fingerprint/generation/PR
+    drift, dependency not done...), the batch's premise is gone: the whole
+    review is refused before any GitHub read, and nothing is synthesized for
+    its deferred records. Ordinary batches are unaffected.
+    """
+    if not isinstance(payload, dict) or not isinstance(status, dict):
+        return []
+    explicit = {
+        str(action.get("task_id") or "")
+        for action in payload.get("task_actions", []) or []
+        if isinstance(action, dict)
+        and action.get("action") == "resume_parent_task"
+        and action.get("resume_basis") == CANDIDATE_CI_RECOVERED
+    }
+    if not explicit:
+        return []
+    named = chair_deferral_entry_task_ids(payload)
+    if not named:
+        return []
+    selection = chair_blocked_task_selection(config or {}, status)
+    matched = {str(record.get("task_id") or "") for record in selection if matching_candidate_ci_resume(payload, record)}
+    if explicit <= matched:
+        return []
+    selected = {str(record.get("task_id") or "") for record in selection}
+    return sorted(named & selected)
+
+
+def matching_candidate_ci_resume(payload: dict[str, Any], record: dict[str, Any]) -> bool:
+    """The payload carries an explicit CI recovery for this record that matches
+    its current recovery context exactly (apply still re-verifies everything)."""
+    recovery = record.get("candidate_ci_recovery")
+    if not isinstance(recovery, dict):
+        return False
+    return any(
+        isinstance(action, dict)
+        and action.get("task_id") == record.get("task_id")
+        and action.get("action") == "resume_parent_task"
+        and action.get("resume_basis") == CANDIDATE_CI_RECOVERED
+        and all(action.get(key) == recovery[key] for key in
+                ("candidate_sha", "candidate_generation", "pr_url", "blocker_fingerprint"))
+        for action in payload.get("task_actions", []) or []
+    )
+
+
 def reassignment_followup_task_records(
     config: dict[str, Any],
     payload: dict[str, Any],
@@ -6440,7 +6624,7 @@ def reassignment_followup_task_records(
         return []
     ready_blocked = {
         str(item.get("task_id") or "").strip(): item
-        for item in dependency_ready_blocked_task_records(config, status)
+        for item in chair_blocked_task_selection(config, status)
         if str(item.get("task_id") or "").strip()
     }
     return [
@@ -6462,12 +6646,15 @@ def synthesize_reassignment_followup_task_actions(
         return []
     action_index = chair_task_action_index(payload)
     synthesized: list[dict[str, Any]] = []
-    for item in reassignment_followup_task_records(config, payload, status):
+    followup_records = reassignment_followup_task_records(config, payload, status)
+    deferred = chair_reasoned_deferral_task_ids(config, payload, followup_records, status)
+    deferred |= set(stale_mixed_recovery_deferrals(config, payload, status))
+    for item in followup_records:
         task_id = str(item.get("task_id") or "").strip()
         action_name = str(item.get("action") or "").strip()
         if not task_id or not action_name or action_name in action_index.get(task_id, set()):
             continue
-        if has_explicit_candidate_ci_resume(payload, item):
+        if has_explicit_candidate_ci_resume(payload, item) or task_id in deferred:
             continue
         if action_name == "create_unblock_task":
             unblock_kind = str(item.get("kind") or "manual_unblock").strip() or "manual_unblock"
@@ -6585,7 +6772,7 @@ def _chair_review_summary_lines(
         dispatch_pause_lines.append("- none")
 
     blocked_task_lines: list[str] = []
-    for item in dependency_ready_blocked_task_records(config, status, include_held=True):
+    for item in chair_blocked_task_selection(config, status, include_held=True):
         action_label = str(item.get("action") or "-")
         helper_label = str(item.get("helper_task_id") or "-")
         recovery = item.get("candidate_ci_recovery")
@@ -7118,15 +7305,23 @@ def validate_chair_review_context(
             missing = [approval_id for approval_id in pending_ids if approval_id not in action_ids]
             if missing:
                 return f"approval_triage must resolve pending approvals: {', '.join(missing[:6])}"
+    if reason in {"blocked_task_triage", "reassignment_triage"} and config is not None:
+        stale_deferrals = stale_mixed_recovery_deferrals(config, payload, status)
+        if stale_deferrals:
+            return (
+                f"{reason} mixed recovery batch is stale; refusing it without deferring "
+                + ", ".join(stale_deferrals[:6])
+            )
     if reason == "blocked_task_triage" and config is not None:
-        ready_blocked = dependency_ready_blocked_task_records(config, status)
+        ready_blocked = chair_blocked_task_selection(config, status)
         if ready_blocked:
             action_index = chair_task_action_index(payload)
+            deferred = chair_reasoned_deferral_task_ids(config, payload, ready_blocked, status)
             missing: list[str] = []
             for item in ready_blocked:
                 task_id = str(item.get("task_id") or "").strip()
                 expected_action = str(item.get("action") or "").strip()
-                if not task_id or not expected_action:
+                if not task_id or not expected_action or task_id in deferred:
                     continue
                 if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item):
                     missing.append(f"{task_id}:{expected_action}")
@@ -7136,11 +7331,12 @@ def validate_chair_review_context(
         followup_records = reassignment_followup_task_records(config, payload, status)
         if followup_records:
             action_index = chair_task_action_index(payload)
+            deferred = chair_reasoned_deferral_task_ids(config, payload, followup_records, status)
             missing: list[str] = []
             for item in followup_records:
                 task_id = str(item.get("task_id") or "").strip()
                 expected_action = str(item.get("action") or "").strip()
-                if not task_id or not expected_action:
+                if not task_id or not expected_action or task_id in deferred:
                     continue
                 if expected_action not in action_index.get(task_id, set()) and not has_explicit_candidate_ci_resume(payload, item):
                     missing.append(f"{task_id}:{expected_action}")
@@ -7826,8 +8022,7 @@ def create_chair_unblock_task(
     # child. Without this, a blocked `X-UNBLOCK` triages into `X-UNBLOCK-UNBLOCK`
     # and the pipeline self-reproduces. Escalate to a human instead of digging the
     # auto-repair lineage deeper.
-    max_depth = int(chair_review_settings(config).get("max_unblock_lineage_depth", 1))
-    if is_governance_artifact(parent) or governance_lineage_depth(parent, task_map) >= max_depth:
+    if chair_unblock_recursion_guarded(config, parent, task_map):
         escalate_governance_recursion_for_human(config, state, parent, chair_reason)
         return False
     dependency_done_statuses = {
