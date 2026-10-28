@@ -4548,9 +4548,7 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
                 self.assertFalse(supervisor.apply_supervisor_merged_acceptance_resume(self.config, self.task["id"], reason))
                 self.assert_untouched(before)
 
-    def test_routes_stay_separate_from_candidate_ci_recovery_and_chair_schema(self) -> None:
-        from control_plane.domain.chair_policy import open_blocker_fingerprint, validate_review_payload
-
+    def test_routes_stay_separate_from_candidate_ci_recovery(self) -> None:
         # A merged task has no CI-recovery route; a CI-recovery task has no merged-acceptance route.
         self.assertIsNone(supervisor.candidate_ci_recovery_context(self.board, self.task))
         self.assertIsNotNone(supervisor.merged_acceptance_resume_context(self.board, self.task))
@@ -4560,19 +4558,196 @@ class SupervisorMergedAcceptanceResumeTests(unittest.TestCase):
                            "owner", "reviewer", "candidate_sha", "candidate_branch", "candidate_generation")})
         self.assertIsNone(supervisor.merged_acceptance_resume_context(self.board, ci_task))
         self.assertIsNotNone(supervisor.candidate_ci_recovery_context(self.board, ci_task))
-        # The Chair cannot carry the new basis or status: its schema is unchanged.
-        fingerprint = open_blocker_fingerprint(self.board["blockers"], self.task["id"])[0]
+
+    def chair_action(self, board: dict | None = None, **changes) -> dict:
+        from control_plane.domain.chair_policy import open_blocker_fingerprint
+
+        board = board or self.board
         action = {"task_id": self.task["id"], "action": "resume_parent_task", "resume_status": "acceptance",
                   "resume_basis": "merged_runtime_acceptance_ready", "candidate_sha": self.task["candidate_sha"],
-                  "candidate_generation": self.task["candidate_generation"], "blocker_fingerprint": fingerprint,
-                  "reason": "Chair attempts merged acceptance"}
-        payload = {"version": 1, "decision": "blocked_task_triage", "approval_ttl_minutes": 45, "reason": "x",
-                   "blocked_by": [], "approval_actions": [], "reassignment_actions": [], "task_actions": [action],
-                   "provider_actions": [], "recommended_focus": []}
-        self.assertIsNotNone(validate_review_payload(payload))
+                  "candidate_generation": self.task["candidate_generation"], "merge_sha": self.task["merge_sha"],
+                  "blocker_fingerprint": open_blocker_fingerprint(board["blockers"], self.task["id"])[0],
+                  "reason": "Chair confirmed the runtime evidence blocker is the only remaining one"}
+        action.update(changes)
+        return action
+
+    def chair_payload(self, *actions: dict, reason: str = "blocked_task_triage") -> dict:
+        return {"version": 1, "decision": reason, "approval_ttl_minutes": 45, "reason": "r", "blocked_by": [],
+                "approval_actions": [], "reassignment_actions": [], "task_actions": list(actions),
+                "provider_actions": [], "recommended_focus": [self.task["id"]]}
+
+    def run_native_chair_review(self, payload: dict, reason: str = "blocked_task_triage") -> tuple[str | None, bool]:
+        """The Supervisor's own Chair output path: schema, reason normalization,
+        context validation, then the normal task-action dispatcher."""
+        status = supervisor.load_status(self.config)
+        payload = supervisor.normalize_chair_review_payload_for_reason(payload, reason=reason, config=self.config, status=status)
+        error = supervisor.validate_chair_review_payload(payload) or supervisor.validate_chair_review_context(
+            payload, reason=reason, approval_state={"pending": []}, config=self.config, status=status)
+        if error:
+            return error, False
+        return None, supervisor.apply_chair_task_actions(self.config, {}, payload, {})
+
+    def test_existing_chair_merged_acceptance_normal_action_reaches_same_gateway_and_protected_controls(self) -> None:
+        import copy
+        import github_bus
+
+        # The Chair context shows the existing structural eligibility; the prompt names the route.
+        records = supervisor.dependency_ready_blocked_task_records(self.config, self.board)
+        merged = records[0]["merged_acceptance_resume"]
+        action = self.chair_action()
+        self.assertEqual((merged["identity"]["merge_sha"], merged["blocker_fingerprint"]),
+                         (self.task["merge_sha"], action["blocker_fingerprint"]))
+        message = supervisor.build_chair_review_message(
+            self.config, reason="blocked_task_triage", markdown_path=self.root / "d.md", json_path=self.root / "d.json",
+            approval_state={"pending": [], "history": []}, state={}, provider_report={}, status=self.board)
+        self.assertIn(f"merged_acceptance=eligible candidate_sha={self.task['candidate_sha']} "
+                      f"candidate_generation={self.task['candidate_generation']} merge_sha={self.task['merge_sha']} "
+                      f"blocker_fingerprint={action['blocker_fingerprint']}", message)
+        self.assertIn("resume_basis=merged_runtime_acceptance_ready", message)
+        self.assertNotIn("ci_recovery=eligible candidate_sha=", message)
+
+        # Protected controls first: each stale/forged/malformed decision leaves no residue.
         before = self.path.read_bytes()
+        drifts = {
+            "stale_candidate_sha": ({"candidate_sha": "f" * 40}, None),
+            "stale_generation": ({"candidate_generation": "other-generation"}, None),
+            "stale_merge_sha": ({"merge_sha": "e" * 40}, None),
+            "stale_fingerprint": ({"blocker_fingerprint": "0" * 64}, None),
+            "wrong_status": ({"resume_status": "in_progress"}, "merged acceptance resume only resumes acceptance"),
+            "helper": ({"helper_task_id": "UNBLOCK-1"}, "merged acceptance resume must not name an unblock helper"),
+            "pr_url": ({"pr_url": "https://github.com/acme/fleet/pull/31"},
+                       "merged acceptance resume has unexpected fields: pr_url"),
+            "wrong_basis": ({"resume_basis": "merged_ready", "resume_status": None},
+                            "task_actions resume_basis is only candidate_ci_recovered or "
+                            "merged_runtime_acceptance_ready for resume_parent_task"),
+        }
+        for kind, (changes, schema_error) in drifts.items():
+            with self.subTest(kind=kind):
+                drifted = {k: v for k, v in {**action, **changes}.items() if v is not None}
+                error, changed = self.run_native_chair_review(self.chair_payload(drifted))
+                self.assertEqual(error, schema_error)
+                self.assertFalse(changed)
+                # Even an unvalidated decision cannot pass the dispatcher alone.
+                self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, drifted))
+                self.assert_untouched(before)
+
+        # Stale switch: the board changes after the Chair-bound check but before the
+        # gateway's re-read; the observed tuple binds the gateway, so nothing applies.
+        swapped = copy.deepcopy(self.board)
+        swapped["blockers"][0]["message"] = "A different runtime blocker"
+        real_load = supervisor.load_status
+        calls = []
+
+        def load_then_swap(config):
+            calls.append(1)
+            if len(calls) == 2:
+                self.path.write_text(json.dumps(swapped))
+            return real_load(config)
+
+        with mock.patch.object(supervisor, "load_status", side_effect=load_then_swap):
+            self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
+        self.assertEqual(len(calls), 2)
+        self.assert_untouched(json.dumps(swapped).encode())
+        self.path.write_bytes(before)
+
+        # The matching decision reaches the same existing gateway and its locked transition.
+        before_task = copy.deepcopy(self.task)
+        gateway = supervisor.apply_supervisor_merged_acceptance_resume
+        with mock.patch.object(github_bus, "gh_json") as reads, \
+                mock.patch.object(supervisor, "queue_delivery_event") as wake, \
+                mock.patch.object(supervisor, "apply_supervisor_merged_acceptance_resume", wraps=gateway) as spy:
+            error, changed = self.run_native_chair_review(self.chair_payload(action))
+        self.assertIsNone(error)
+        self.assertTrue(changed)
+        spy.assert_called_once_with(self.config, self.task["id"], action["reason"], chair_observation={
+            key: action[key] for key in ("candidate_sha", "candidate_generation", "merge_sha", "blocker_fingerprint")})
+        reads.assert_not_called()
+        wake.assert_not_called()
+        state = json.loads(self.path.read_text()); task = state["tasks"][0]
+        self.assertEqual(task["status"], "acceptance")
+        for key in ("owner", "reviewer", "candidate_sha", "candidate_generation", "candidate_branch",
+                    "reviewed_sha", "ci_sha", "ci_status", "merge_sha", "required_acceptance"):
+            self.assertEqual(task[key], before_task[key])
+        self.assertNotIn("acceptance_evidence", task)
+        self.assertEqual(len(state["tasks"]), 1)
+        self.assertEqual([row["status"] for row in state["blockers"]], ["resolved"])
+        rows = [json.loads(line) for line in self.runtime_log.read_text().splitlines()]
+        self.assertEqual([(row["type"], row["resume_basis"]) for row in rows],
+                         [("supervisor_merged_acceptance_resumed", "merged_runtime_acceptance_ready")])
+        # Replaying the same decision is a no-op: the task is no longer blocked.
+        snapshot = self.path.read_bytes()
         self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
-        self.assert_untouched(before)
+        self.assertEqual(self.path.read_bytes(), snapshot)
+
+    def test_explicit_merged_decision_replaces_helper_route_only_when_shown_eligible(self) -> None:
+        for reason in ("blocked_task_triage", "reassignment_triage"):
+            with self.subTest(reason=reason):
+                status = supervisor.load_status(self.config)
+                explicit = supervisor.normalize_chair_review_payload_for_reason(
+                    self.chair_payload(self.chair_action(), reason=reason), reason=reason, config=self.config, status=status)
+                self.assertEqual([a["action"] for a in explicit["task_actions"]], ["resume_parent_task"])
+                self.assertIsNone(supervisor.validate_chair_review_context(
+                    explicit, reason=reason, approval_state={"pending": []}, config=self.config, status=status))
+                # Without the explicit decision the existing helper route is unchanged.
+                plain = supervisor.normalize_chair_review_payload_for_reason(
+                    self.chair_payload(reason=reason), reason=reason, config=self.config, status=status)
+                if reason == "reassignment_triage":
+                    self.assertEqual([a["action"] for a in plain["task_actions"]], ["create_unblock_task"])
+                else:
+                    self.assertIn(f"{self.task['id']}:create_unblock_task", supervisor.validate_chair_review_context(
+                        plain, reason=reason, approval_state={"pending": []}, config=self.config, status=status) or "")
+        # A task not shown as eligible keeps requiring its helper route.
+        ineligible = json.loads(json.dumps(self.board))
+        ineligible["tasks"][0].pop("merge_sha")
+        self.assertIsNone(supervisor.dependency_ready_blocked_task_records(self.config, ineligible)[0]["merged_acceptance_resume"])
+        self.assertIn(f"{self.task['id']}:create_unblock_task", supervisor.validate_chair_review_context(
+            self.chair_payload(self.chair_action()), reason="blocked_task_triage", approval_state={"pending": []},
+            config=self.config, status=ineligible) or "")
+
+    def test_existing_chair_merged_acceptance_wiring_exact_review_own_CI_normal_protected_merge(self) -> None:
+        import copy
+        second = {"task_id": self.task["id"], "owner": "Claude", "waiting_for": "Codex", "status": "open",
+                  "message": "Second blocker", "created_at": "2026-10-27T01:00:00Z"}
+        dependency = {"id": "DEP-A", "title": "Dependency", "phase": "test", "owner": "Codex", "reviewer": "Claude",
+                      "status": "in_progress", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Open"}
+        helper = {"id": "UNBLOCK-A", "title": "Helper", "phase": "test", "owner": "Codex", "reviewer": "Claude2",
+                  "status": "in_progress", "depends_on": [], "artifacts": [], "acceptance": [], "next": "Open",
+                  "task_class": "unblock", "helper_parent": self.task["id"], "helper_kind": "manual_unblock"}
+        cases = {
+            "unmerged": {"merge_sha": None}, "short_merge_sha": {"merge_sha": "2f16b4f"},
+            "ci_red": {"ci_status": "failure"}, "ci_pending": {"ci_status": "queued"},
+            "ci_other_sha": {"ci_sha": "1" * 40}, "no_review": {"reviewed_sha": None},
+            "review_other_sha": {"reviewed_sha": "1" * 40}, "self_review": {"reviewer": "Claude"},
+            "external_gate": {"external_gate": True}, "release_gate": {"task_class": "release", "mutates_canonical": False},
+            "evidence_complete": {"acceptance_evidence": {key: "ref" for key in self.task["required_acceptance"]}},
+            "no_required_keys": {"required_acceptance": []},
+            "acceptance_review_request": {"acceptance_review_request": {"state": "pending"}},
+        }
+        for kind in [*cases, "second_blocker", "dependency", "open_helper"]:
+            with self.subTest(kind=kind):
+                board = copy.deepcopy(self.board)
+                if kind in cases:
+                    board["tasks"][0].update(cases[kind])
+                    board["tasks"][0] = {k: v for k, v in board["tasks"][0].items() if v is not None}
+                if kind == "second_blocker":
+                    board["blockers"].append(second)
+                if kind == "dependency":
+                    board["tasks"][0]["depends_on"] = ["DEP-A"]; board["tasks"].append(dependency)
+                if kind == "open_helper":
+                    board["tasks"].append(helper)
+                self.path.write_text(json.dumps(board)); before = self.path.read_bytes()
+                action = self.chair_action(board)
+                # Well-formed and fresh for this board, yet the task is not eligible.
+                self.assertIsNone(supervisor.validate_chair_review_payload(self.chair_payload(action)))
+                message = supervisor.build_chair_review_message(
+                    self.config, reason="blocked_task_triage", markdown_path=self.root / "d.md",
+                    json_path=self.root / "d.json", approval_state={"pending": [], "history": []}, state={},
+                    provider_report={}, status=board)
+                self.assertNotIn("merged_acceptance=eligible candidate_sha=", message)
+                self.assertFalse(supervisor.apply_chair_parent_resume_action(self.config, {}, action))
+                _, changed = self.run_native_chair_review(self.chair_payload(action))
+                self.assertFalse(changed)
+                self.assert_untouched(before)
 
 
 class ChairBlockedSelectionReachabilityTests(unittest.TestCase):
