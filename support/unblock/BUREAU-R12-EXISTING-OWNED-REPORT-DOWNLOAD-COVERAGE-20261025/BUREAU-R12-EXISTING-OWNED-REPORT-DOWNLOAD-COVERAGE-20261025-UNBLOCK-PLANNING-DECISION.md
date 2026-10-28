@@ -83,18 +83,90 @@ Chairman blocked-task 自動 triage 依 parent 的 blocked 狀態建立了
 上述步驟不需要本 helper 去推動 parent 的狀態機：parent 目前由其真正 owner Pi
 主動、正常地維護中，不是無人處理的卡住狀態。
 
-## 不寫入 parent 的聲明
+## Reopen 修正：取代原「不寫入 parent」的錯誤保證
 
-本 helper **不對 parent task 做任何欄位寫入**——不嘗試 `note`、`assign`、
-`resume-blocked` 或任何其他跨 task 操作，也不準備 `resolved_parent_*` 處置。
+**先前版本（candidate `c5ac83eaaee29216a3fc9c620f014aaaa933456d` /
+generation `6363369aafaa47629b909f354be9060e`）的錯誤**：上一節聲稱「本 helper
+不對 parent task 做任何欄位寫入」即可讓 parent 維持現狀。Reviewer Codex 於
+`2026-10-28T15:00:19Z` reopen，指出這個保證不成立——parent 是否被寫入，不是由
+本 helper「主動呼叫 `note`／`assign`」決定，而是由 orchestrator 在本 helper
+**完成（merge）時自動觸發**的 unblock-parent 解析決定，與本 helper 寫不寫無關。
 
-原因：parent 不是卡在缺決策，而是卡在 Pi 自己仍在積極處理的 runtime 證據缺口。
-Pi 在 `2026-10-28T06:19:43Z` 剛更新過 parent `next`，記錄了比 sibling
-MANUAL-UNBLOCK helper 更新的 run `40640729762` 結果；若本 helper 覆寫 parent 的
-`next`，只會用較舊或較籠統的敘述蓋掉 owner 的最新進度。先前已有 helper 反覆覆寫
-parent 診斷、進而觸發 triage 再建 helper 而形成自我循環的教訓，本 helper 刻意
-避免重演。本 helper 完成時，parent 應維持其現有 `blocked` 狀態與 Pi 撰寫的 `next`
-不變。
+### 呼叫鏈與實際行為（本機已查證，release `orchestrator-8295d1f33455`）
+
+| 項目           | 內容                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 觸發點         | `bin/ai_status.py:717-739` `transition_after_merge()`：helper 的 candidate 被 merge 後，CLI 會呼叫 `validate_completion_handoffs()`，再呼叫 `apply_unblock_parent_resolution()`（`:733-739`）。這一步是 merge 流程內建的，不是本 helper 選擇性呼叫的動作。                                                                                                                            |
+| Resolve 邏輯   | `bin/ai_status.py:1156-1192` `unblock_parent_resolution_fields()`：`resume_status` 取 `task.get("resolved_parent_status")`，**缺省為 `"todo"`**（`:1173`）；`parent_message` 缺省為 `f"Unblock resolution complete via {task.get('id')}: {message}"`（`:1180`）；`parent_waiting_for` 缺省為空字串。本 helper 的 task 物件目前沒有任何 `resolved_parent_*` 欄位，三者都會落到缺省值。 |
+| 寫入 parent    | `bin/ai_status.py:1201-1229` `apply_unblock_parent_resolution()`：`parent["status"] = resume_status`、`parent["next"] = parent_message`，且 `resume_status != "blocked"` 時 `parent.pop("waiting_for", None)`（`:1223-1229`）。即：parent 會被覆寫成 `status=todo`、`next=` 上述泛用完成句、`waiting_for` 被清空。                                                                    |
+| 本機再查證指令 | `python3 -B` 匯入同一 release 的 `ai_status.py`，只呼叫唯讀函式 `unblock_parent_resolution_fields(state, helper_task, message)`（未呼叫任何 writer）：exit 0，回傳 `resume_status="todo"`、`parent_message` 為上述泛用句、`parent_waiting_for=""`。確認「若照目前狀態 merge，parent 會被覆寫成 todo／泛用 next／清空 waiting_for」。                                                  |
+
+### Parent 現況（`2026-10-28T06:19:43Z` 之後本機重新查證，無變化）
+
+| 項目        | 值                                                                                                                                                                                                                                                                                              |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| status      | `blocked`                                                                                                                                                                                                                                                                                       |
+| owner       | `Pi`                                                                                                                                                                                                                                                                                            |
+| reviewer    | `Claude2`                                                                                                                                                                                                                                                                                       |
+| waiting_for | `Codex`                                                                                                                                                                                                                                                                                         |
+| next        | 2026-10-28T06:19:43Z 由 Pi 撰寫，約 2.1 KB，詳述 FULL run `40640729762` 於 step18 FAIL、三格式下載皆屬 C1 (unassigned→cancelled) 訂單、尚未滿足 `same_release_actual_daily_preview_and_three_downloads`；全文見 `ai-status.sh show BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025` |
+
+若本 helper 的 candidate 在 parent 仍是這個狀態時被 merge，`apply_unblock_parent_resolution`
+會把上述 `blocked`／Pi 的真實 next／`waiting_for=Codex` 整組覆寫掉，等同抹除
+Pi 目前的進度與 runtime 證據缺口記錄，並讓 parent 錯誤地回到 `todo`（可再被派工，
+但其實驗收仍缺 `same_release_actual_daily_preview_and_three_downloads`）。
+
+### 為何本 helper（dispatched owner）無法自行補上 `resolved_parent_*`
+
+本機已直接重現 dispatch guard（不是僅憑記憶推論）：
+
+```
+$ TASK_METADATA_JSON='{"resolved_parent_status":"blocked"}' AI_NAME=Claude \
+    python3 <release>/tools/development-orchestrator/bin/ai_status.py \
+    assign BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025-UNBLOCK-PLANNING-DECISION Claude Codex
+Dispatched workers must use their assigned task lifecycle commands
+```
+
+`ORCH_DISPATCH_ROLE=owner` 與 `ORCH_RUN_ID` 在本次 dispatch 的 shell 環境中都是
+設定值，`_guard_worker_command` 因此拒絕 `assign`。本 helper 的 owner／reviewer
+dispatch 都沒有能寫入 `resolved_parent_*` 的指令路徑。
+
+### 實際安全處置（需要 Supervisor-privileged session，無 `ORCH_DISPATCH_ROLE`/`ORCH_RUN_ID`）
+
+Merge 前，由具 Supervisor 權限（互動式、未帶 dispatch 環境變數）的 session 在本
+helper 的 task 上設定 `resolved_parent_*`，使自動解析改寫為「維持 parent 現有
+blocked 狀態與當前 next／waiting_for」，而不是落到缺省的 `todo`：
+
+```
+TASK_METADATA_JSON='{"resolved_parent_status":"blocked","resolved_parent_waiting_for":"Codex","resolved_parent_next":"<merge 前即時從 `ai-status.sh show BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025` 取得的當下 next 全文，逐字複製>"}' \
+  AI_NAME=Supervisor python3 <release>/tools/development-orchestrator/bin/ai_status.py \
+  assign BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025-UNBLOCK-PLANNING-DECISION Claude Codex
+```
+
+注意事項：
+
+- `resolved_parent_next` 必須是**執行這個指令那一刻** parent 的即時 `next`，不是
+  本文件裡列出的這份快照——Pi 仍在主動更新，複製舊快照一樣會蓋掉較新進度。
+- 設好 `resolved_parent_*` 後，才讓本 helper 的 candidate 走完 merge；merge 觸發
+  `transition_after_merge` 時就會用這三個值而非缺省值。
+- 不呼叫 parent 的 `start`、`handoff` 或任何會改變其 candidate/generation/review/CI/merge
+  身分的指令；只設定 helper 自己身上的 `resolved_parent_*` 中繼資料。
+- 若在設定與 merge 之間 Pi 又更新了 parent `next`，需重新讀取並覆寫
+  `resolved_parent_next`，以 merge 前最後一次讀到的內容為準。
+
+### 驗收對照表
+
+| Finding／驗收項                                                                    | 依據                                                                                | 舊版→修正版                                                                                       | 命令／exit code                                                                                                           | 未驗項                                                                                     |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Codex reopen：no-op 會讓自動解析把 parent 覆寫成 todo／泛用 next／清空 waiting_for | `ai_status.py:717-739`、`:1156-1192`、`:1201-1229`                                  | 舊版聲稱「不寫入即安全」（誤）→本版記錄自動解析機制、live 查證結果與需要的 `resolved_parent_*` 值 | 本機 `python3 -B` import 唯讀呼叫 `unblock_parent_resolution_fields`：exit 0，結果同上表                                  | 需 Supervisor-privileged session 實際執行 `assign` 才能完成處置，本 helper dispatch 做不到 |
+| Resolve or route missing product/contract decision                                 | 核心結論（parent 無缺失產品／合約決策，誤判 helper）未變                            | 不變                                                                                              | 不適用（文件核對）                                                                                                        | 無                                                                                         |
+| Produce task-scoped commit/push/PR evidence                                        | 本次 commit 僅改動本檔案                                                            | —                                                                                                 | `git diff --check <base>...HEAD` exit 0；`npx prettier --check` exit 0；`check_commit_trailers.py` exit 0（實際跑後更新） | hosted CI 於 PR 另記，尚未在此宣稱通過                                                     |
+| Update parent with concrete unblocked next step                                    | 本 helper dispatch 無法寫入 parent（guard 已重現）；需 Supervisor 執行上方 3 行指令 | —                                                                                                 | 見上方 guard 重現輸出                                                                                                     | 實際寫入待 Supervisor-privileged session 執行                                              |
+
+結論：**不是「本 helper 不寫 parent 就安全」，而是「本 helper 需要 Supervisor 在
+merge 前把 `resolved_parent_*` 設到位，自動解析才會維持 parent 現狀」**。本 helper
+自身的 dispatch（owner／reviewer 皆同）結構性地無法執行該設定指令；已在看板上以
+`blocker` 記錄，等待 Supervisor-privileged session 處理。
 
 ## 引用 PR / SHA
 
