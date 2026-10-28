@@ -357,7 +357,11 @@ async function fixture() {
     }
     if (text.includes("FROM ops.passenger_trip_ratings"))
       return { rows: state.rating ? [state.rating] : [] };
-    if (text.includes("FROM passenger.complaints p")) {
+    if (
+      text.includes("FROM passenger.complaints p") ||
+      text.startsWith("SELECT c.record FROM crm.phase1_complaint_cases") ||
+      text.startsWith("SELECT t.record FROM crm.phase1_complaint_timelines")
+    ) {
       const record = text.startsWith("SELECT t.record")
         ? state.timeline
         : state.complaintCase;

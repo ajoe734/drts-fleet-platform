@@ -10,6 +10,7 @@
     {
       "id": "referral-create-read-cancel-receipt",
       "firstVisitConsentEvidence": "privacy-fee-return-same-owner",
+      "firstVisitRefusalEvidence": "fallback-inactive-same-subject-zero-orders",
       "surface": "referral",
       "baseUrlEnv": "DRTS_DEV_REFERRAL_EMBED_BASE_URL",
       "route": "/embed/yuhe-residence?state=consent&entryHost={{referralEntryHost}}",

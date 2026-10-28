@@ -3004,8 +3004,8 @@ export function PassengerRidePage({
             title={authorityError ? "無法取得行程資料" : "正在載入行程"}
             detail={
               authorityError
-                ? `系統未使用展示資料替代。錯誤代碼：${authorityError}`
-                : "正在向派遣權威服務確認最新狀態。"
+                ? `請稍後重新整理頁面。錯誤代碼：${authorityError}`
+                : "正在向派車系統確認最新狀態。"
             }
           />
         </div>

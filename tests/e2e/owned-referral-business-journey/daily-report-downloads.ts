@@ -1772,6 +1772,17 @@ export function assertDailyReportHttpStatus(
   throw new DailyReportHttpFailure(stage, context);
 }
 
+// Closed operation labels only: never derive diagnostics from locator text,
+// native error messages/stacks, URLs, command bodies or owned identities.
+type EmptyDayConsumerPhase =
+  | `filters-${"tab" | "report-type" | "date-from" | "date-to" | "source" | "status" | "tenant" | "partner" | "service-product"}`
+  | `preview-${"ready" | "exchange" | "row-detached"}`
+  | `rebuild-${"ready" | "submit" | "exchange" | "command" | "result" | "readback" | "row-detached"}`
+  | `export-${DailyReportFormat}-${"ready" | "select" | "submit" | "exchange" | "command" | "result" | "notice"}`
+  | "export-distinct-jobs"
+  | `reload-${"page" | "page-status" | "jobs" | "completed" | "poll"}`
+  | `download-${DailyReportFormat}-${"completed" | "row" | "row-binding" | "ready" | "submit" | "detail" | "artifact" | "close-pages" | "validate"}`;
+
 type CapturedOpsExchange = Readonly<{
   method: string;
   url: string;
@@ -2002,6 +2013,7 @@ export async function runOwnedDailyReportDownloads(
   };
 
   await context.route(`${opsOrigin}/**`, routeHandler);
+  let emptyDayConsumerPhase: EmptyDayConsumerPhase | undefined;
   try {
     const initialPageExchange = waitForOpsExchange(
       (ex) => ex.method === "GET" && ex.pathname === "/reports",
@@ -2567,14 +2579,23 @@ export async function runOwnedDailyReportDownloads(
       result: "observed",
     });
 
+    emptyDayConsumerPhase = "filters-tab";
     await operationalTab.click();
+    emptyDayConsumerPhase = "filters-report-type";
     await reportTypeSelect.first().selectOption("daily_dispatch_record");
+    emptyDayConsumerPhase = "filters-date-from";
     await dateInputs.nth(0).fill(emptyDate);
+    emptyDayConsumerPhase = "filters-date-to";
     await dateInputs.nth(1).fill(emptyDate);
+    emptyDayConsumerPhase = "filters-source";
     await orderSourceSelect.first().selectOption(expected.orderSource);
+    emptyDayConsumerPhase = "filters-status";
     await statusSelect.first().selectOption(expected.finalStatus);
+    emptyDayConsumerPhase = "filters-tenant";
     await tenantInput.first().fill(expected.tenantId);
+    emptyDayConsumerPhase = "filters-partner";
     await partnerInput.first().fill(expected.partnerId);
+    emptyDayConsumerPhase = "filters-service-product";
     await serviceProductInput.first().fill(expected.serviceProductCode);
     const assertEmptyQuery = (query: URLSearchParams) => {
       requireFact(
@@ -2601,8 +2622,11 @@ export async function runOwnedDailyReportDownloads(
         `daily-report-empty-${phase}-zero-rows-required`,
       );
     };
+    emptyDayConsumerPhase = "preview-ready";
     await waitForEnabled(loadPreviewBtn, "daily-report-empty-preview-button");
+    emptyDayConsumerPhase = "preview-exchange";
     await emptyPreview("preview");
+    emptyDayConsumerPhase = "preview-row-detached";
     await page
       .locator("tbody tr")
       .filter({ hasText: expected.orderId })
@@ -2621,8 +2645,11 @@ export async function runOwnedDailyReportDownloads(
         ex.pathname === "/control-plane-proxy/reports/daily-dispatch-records",
       "daily-report-empty-rebuilt-preview-get",
     );
+    emptyDayConsumerPhase = "rebuild-ready";
     await waitForEnabled(regenerateBtn, "daily-report-empty-rebuild-button");
+    emptyDayConsumerPhase = "rebuild-submit";
     await regenerateBtn.click();
+    emptyDayConsumerPhase = "rebuild-exchange";
     const emptyRebuild = await emptyRebuildPost;
     assertDailyReportHttpStatus(
       emptyRebuild,
@@ -2631,6 +2658,7 @@ export async function runOwnedDailyReportDownloads(
       runtimeSha,
       evidence,
     );
+    emptyDayConsumerPhase = "rebuild-command";
     const emptyBody = object(
       JSON.parse(
         text(emptyRebuild.requestBody, "daily-report-empty-rebuild-body"),
@@ -2642,6 +2670,7 @@ export async function runOwnedDailyReportDownloads(
       ),
       "daily-report-empty-rebuild-filters-binding",
     );
+    emptyDayConsumerPhase = "rebuild-result";
     const emptyResult = unwrapEnvelopeObject(
       emptyRebuild.bytes,
       "daily-report-empty-rebuild-result",
@@ -2652,6 +2681,7 @@ export async function runOwnedDailyReportDownloads(
         Number.isFinite(Date.parse(emptyResult.generatedAt)),
       "daily-report-empty-rebuilt-count-zero-required",
     );
+    emptyDayConsumerPhase = "rebuild-readback";
     const rebuiltEmpty = await emptyRebuiltGet;
     assertDailyReportHttpStatus(
       rebuiltEmpty,
@@ -2668,6 +2698,7 @@ export async function runOwnedDailyReportDownloads(
       ).length === 0,
       "daily-report-empty-rebuilt-preview-zero-required",
     );
+    emptyDayConsumerPhase = "rebuild-row-detached";
     await page
       .locator("tbody tr")
       .filter({ hasText: expected.orderId })
@@ -2676,7 +2707,9 @@ export async function runOwnedDailyReportDownloads(
 
     const emptyJobs = {} as Record<DailyReportFormat, string>;
     for (const format of DAILY_REPORT_FORMATS) {
+      emptyDayConsumerPhase = `export-${format}-ready`;
       await waitForEnabled(exportJobBtn, `daily-report-empty-export-${format}`);
+      emptyDayConsumerPhase = `export-${format}-select`;
       await formatSelect.first().selectOption(format);
       const pending = waitForOpsExchange(
         (ex) =>
@@ -2684,7 +2717,9 @@ export async function runOwnedDailyReportDownloads(
           ex.pathname === "/control-plane-proxy/reports/jobs",
         `daily-report-empty-create-job-${format}`,
       );
+      emptyDayConsumerPhase = `export-${format}-submit`;
       await exportJobBtn.click();
+      emptyDayConsumerPhase = `export-${format}-exchange`;
       const exchange = await pending;
       assertDailyReportHttpStatus(
         exchange,
@@ -2693,6 +2728,7 @@ export async function runOwnedDailyReportDownloads(
         runtimeSha,
         evidence,
       );
+      emptyDayConsumerPhase = `export-${format}-command`;
       const command = object(
         JSON.parse(
           text(exchange.requestBody, "daily-report-empty-job-command"),
@@ -2706,17 +2742,20 @@ export async function runOwnedDailyReportDownloads(
           ),
         `daily-report-empty-${format}-job-command-binding`,
       );
+      emptyDayConsumerPhase = `export-${format}-result`;
       const accepted = unwrapEnvelopeObject(
         exchange.bytes,
         `daily-report-empty-job-${format}`,
       );
       const jobId = text(accepted.jobId, `daily-report-empty-${format}-job-id`);
+      emptyDayConsumerPhase = `export-${format}-notice`;
       await page
         .getByText(jobId, { exact: false })
         .first()
         .waitFor({ state: "visible", timeout: 15_000 });
       emptyJobs[format] = jobId;
     }
+    emptyDayConsumerPhase = "export-distinct-jobs";
     requireFact(
       new Set([...Object.values(acceptedJobs), ...Object.values(emptyJobs)])
         .size === 6,
@@ -2734,7 +2773,9 @@ export async function runOwnedDailyReportDownloads(
           ex.pathname === "/control-plane-proxy/reports/jobs",
         "daily-report-empty-reload-jobs",
       );
+      emptyDayConsumerPhase = "reload-page";
       await page.goto(`${opsOrigin}/reports`);
+      emptyDayConsumerPhase = "reload-page-status";
       assertDailyReportHttpStatus(
         await pagePending,
         "reload-reports-page",
@@ -2742,6 +2783,7 @@ export async function runOwnedDailyReportDownloads(
         runtimeSha,
         evidence,
       );
+      emptyDayConsumerPhase = "reload-jobs";
       const jobsExchange = await jobsPending;
       assertDailyReportHttpStatus(
         jobsExchange,
@@ -2754,6 +2796,7 @@ export async function runOwnedDailyReportDownloads(
         jobsExchange.bytes,
         "daily-report-empty-reload-jobs",
       );
+      emptyDayConsumerPhase = "reload-completed";
       if (
         DAILY_REPORT_FORMATS.every((format) => {
           const found = emptyListed.find((j) => j.jobId === emptyJobs[format]);
@@ -2765,6 +2808,7 @@ export async function runOwnedDailyReportDownloads(
         })
       )
         break;
+      emptyDayConsumerPhase = "reload-poll";
       if (attempt < 4)
         await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
@@ -2773,18 +2817,22 @@ export async function runOwnedDailyReportDownloads(
       EmptyDailyReportArtifactSummary
     >;
     for (const format of DAILY_REPORT_FORMATS) {
+      emptyDayConsumerPhase = `download-${format}-completed`;
       const jobId = emptyJobs[format];
       requireFact(
         emptyListed.some((j) => j.jobId === jobId && j.status === "completed"),
         `daily-report-empty-${format}-job-completed-required`,
       );
+      emptyDayConsumerPhase = `download-${format}-row`;
       const jobRow = page.locator("tbody tr").filter({ hasText: jobId });
       await jobRow.first().waitFor({ state: "visible", timeout: 15_000 });
+      emptyDayConsumerPhase = `download-${format}-row-binding`;
       requireFact(
         (await jobRow.count()) === 1 &&
           (await jobRow.first().innerText()).includes(format.toUpperCase()),
         `daily-report-empty-${format}-ui-job-binding`,
       );
+      emptyDayConsumerPhase = `download-${format}-ready`;
       const downloadBtn = jobRow
         .first()
         .getByRole("button", { name: /^(下載|Download)$/ });
@@ -2804,7 +2852,9 @@ export async function runOwnedDailyReportDownloads(
           ex.pathname === opsReportJobArtifactPathname(jobId),
         `daily-report-empty-artifact-${format}`,
       );
+      emptyDayConsumerPhase = `download-${format}-submit`;
       await downloadBtn.click();
+      emptyDayConsumerPhase = `download-${format}-detail`;
       const detail = await detailPending;
       assertDailyReportHttpStatus(
         detail,
@@ -2813,6 +2863,7 @@ export async function runOwnedDailyReportDownloads(
         runtimeSha,
         evidence,
       );
+      emptyDayConsumerPhase = `download-${format}-artifact`;
       const artifact = await artifactPending;
       assertDailyReportHttpStatus(
         artifact,
@@ -2821,8 +2872,10 @@ export async function runOwnedDailyReportDownloads(
         runtimeSha,
         evidence,
       );
+      emptyDayConsumerPhase = `download-${format}-close-pages`;
       for (const extraPage of context.pages())
         if (extraPage !== page) await extraPage.close().catch(() => undefined);
+      emptyDayConsumerPhase = `download-${format}-validate`;
       emptyDownloads[format] = await validateEmptyDailyReportArtifactDownload({
         format,
         jobId,
@@ -2849,6 +2902,7 @@ export async function runOwnedDailyReportDownloads(
         result: "observed",
       });
     }
+    emptyDayConsumerPhase = undefined;
     // The second complete source read is after all jobs: a concurrent writer
     // cannot silently turn our selected day into a nonempty day.
     const afterStartedAt = new Date().toISOString();
@@ -2962,6 +3016,15 @@ export async function runOwnedDailyReportDownloads(
         downloads: Object.freeze(emptyDownloads),
       }),
     });
+  } catch (error) {
+    // Existing typed failures retain their exact identity/status/code/context.
+    // Native failures retain only a fixed operation label; no cause or raw data.
+    if (
+      emptyDayConsumerPhase !== undefined &&
+      !(error instanceof JourneyFailure)
+    )
+      throw new JourneyFailure(`daily-report-empty-${emptyDayConsumerPhase}`);
+    throw error;
   } finally {
     for (const waiter of waiters.splice(0, waiters.length)) {
       clearTimeout(waiter.timer);
