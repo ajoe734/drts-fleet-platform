@@ -25,6 +25,8 @@ import {
   terminalizeOwnOrder,
   requireFact,
   type Origins,
+  type Role,
+  type CallOptions,
 } from "../../e2e/owned-referral-business-journey/protocol";
 
 const SHA = "a".repeat(40);
@@ -442,6 +444,181 @@ describe("owned hosted journey transport", () => {
   });
 });
 
+describe("complete canonical orders bounded native read", () => {
+  const ordinaryLimit = 1024 * 1024;
+  const ordersLimit = 8 * ordinaryLimit;
+  const canonicalPath = "/control-plane-proxy/orders";
+
+  function fullSource(bytes: number) {
+    const payload = {
+      data: {
+        items: [
+          { order_id: "synthetic-own", detail: "" },
+          { order_id: "synthetic-historical", state: "completed" },
+          { order_id: "synthetic-sibling-last", state: "cancelled" },
+        ],
+      },
+    };
+    payload.data.items[0]!.detail = "x".repeat(
+      bytes - Buffer.byteLength(JSON.stringify(payload)),
+    );
+    return JSON.stringify(payload);
+  }
+
+  // Only the external fetch response is synthetic. Exercise the real stream,
+  // NativeTransport reader, byte limit, JSON/camel conversion and envelope.
+  function streamResponse(
+    body: string,
+    headers: Record<string, string> = {},
+    status = 200,
+    readFailure?: Error,
+  ) {
+    const bytes = Buffer.from(body);
+    let offset = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (readFailure) return controller.error(readFailure);
+        if (offset === bytes.length) return controller.close();
+        controller.enqueue(bytes.subarray(offset, offset + 65536));
+        offset = Math.min(offset + 65536, bytes.length);
+      },
+    });
+    const reader = stream.getReader();
+    const cancel = vi.spyOn(reader, "cancel");
+    const release = vi.spyOn(reader, "releaseLock");
+    const getReader = vi.fn(() => reader);
+    const result = new Response(null, {
+      status,
+      headers: {
+        "content-type": "application/json",
+        "x-drts-candidate-sha": SHA,
+        ...headers,
+      },
+    });
+    Object.defineProperty(result, "body", { value: { getReader } });
+    return { result, cancel, release, getReader, stream };
+  }
+
+  it.each([
+    ["api", "/api/ordinary", ordinaryLimit],
+    ["ops", canonicalPath, ordinaryLimit + 78],
+    ["opsApi", "/api/orders", ordinaryLimit + 78],
+    ["ops", canonicalPath, ordersLimit],
+  ] as const)(
+    "reads every source row and byte for %s %s (%i bytes)",
+    async (role, path, size) => {
+      const { tx, fetcher } = setup();
+      tx.setSession(role, "synthetic-ops-session");
+      const source = fullSource(size);
+      const fixture = streamResponse(source);
+      fetcher.mockResolvedValueOnce(fixture.result);
+      const result = await tx.call(role, path);
+      expect(Buffer.from(result.bytes).toString("utf8")).toBe(source);
+      expect(result.data).toEqual(camelWire(JSON.parse(source)).data);
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(at(fetcher.mock.calls, 0)[1]).toMatchObject({
+        method: "GET",
+        redirect: "manual",
+        signal: expect.any(AbortSignal),
+      });
+      expect(fixture.getReader).toHaveBeenCalledOnce();
+      expect(fixture.cancel).toHaveBeenCalledOnce();
+      expect(fixture.release).toHaveBeenCalledOnce();
+      expect(fixture.stream.locked).toBe(false);
+    },
+  );
+
+  it.each<[Role, string, CallOptions, Record<string, string>?, number?]>([
+    ["admin", canonicalPath, {}],
+    ["api", canonicalPath, {}],
+    ["referral", canonicalPath, {}],
+    ["opsApi", canonicalPath, {}],
+    ["ops", "/api/orders", {}],
+    ["api", "/api/orders", {}],
+    ["ops", canonicalPath, { method: "POST" }],
+    ["ops", canonicalPath, { method: "HEAD" }],
+    ["ops", canonicalPath, { body: { filter: "own" } }],
+    ["ops", `${canonicalPath}/`, {}],
+    ["ops", `${canonicalPath}/synthetic-own`, {}],
+    ["ops", `${canonicalPath}-other`, {}],
+    ["ops", `${canonicalPath}?order_ids=synthetic-own`, {}],
+    ["ops", `${canonicalPath}?`, {}],
+    ["opsApi", "/api/orders?limit=1", {}],
+    ["ops", "/control-plane-proxy/reports/daily-dispatch/preview", {}],
+    ["ops", canonicalPath, { raw: true }],
+    ["ops", canonicalPath, {}, { "content-type": "application/pdf" }],
+    ["ops", canonicalPath, {}, { "content-type": "application/octet-stream" }],
+    ["ops", canonicalPath, {}, {}, 403],
+  ])(
+    "retains the ordinary byte cap for %s %s %j %j %s",
+    async (role, path, options, headers, status) => {
+      const { tx, fetcher } = setup();
+      const fixture = streamResponse(
+        fullSource(ordinaryLimit + 1),
+        headers,
+        status,
+      );
+      fetcher.mockResolvedValueOnce(fixture.result);
+      await expect(tx.call(role, path, options)).rejects.toThrow(
+        "bounded response exceeded",
+      );
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fixture.cancel).toHaveBeenCalledOnce();
+      expect(fixture.release).toHaveBeenCalledOnce();
+      expect(fixture.stream.locked).toBe(false);
+    },
+  );
+
+  it.each(["ops", "opsApi"] as const)(
+    "fails closed above the dedicated cap for %s without leaking source rows",
+    async (role) => {
+      const { tx, fetcher } = setup();
+      const fixture = streamResponse(fullSource(ordersLimit + 1));
+      fetcher.mockResolvedValueOnce(fixture.result);
+      const failure = await tx
+        .call(role, role === "ops" ? canonicalPath : "/api/orders")
+        .catch((error: unknown) => error);
+      expect(failure).toMatchObject({ stage: "bounded response exceeded" });
+      expect(JSON.stringify(failure)).not.toContain("synthetic-");
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fixture.cancel).toHaveBeenCalledOnce();
+      expect(fixture.release).toHaveBeenCalledOnce();
+      expect(fixture.stream.locked).toBe(false);
+    },
+  );
+
+  it("preserves SHA/envelope failures and releases the reader after a stream error", async () => {
+    const { tx, fetcher } = setup();
+    for (const [body, headers, expected] of [
+      [
+        fullSource(ordinaryLimit + 1),
+        { "x-drts-candidate-sha": "b".repeat(40) },
+        "runtime SHA mismatch",
+      ],
+      [
+        JSON.stringify({ private: "x".repeat(ordinaryLimit) }),
+        {},
+        "response envelope",
+      ],
+      ["x".repeat(ordinaryLimit + 1), {}, "object response required"],
+    ] as const) {
+      const fixture = streamResponse(body, headers);
+      fetcher.mockResolvedValueOnce(fixture.result);
+      await expect(tx.call("ops", canonicalPath)).rejects.toThrow(expected);
+      expect(fixture.cancel).toHaveBeenCalledOnce();
+      expect(fixture.release).toHaveBeenCalledOnce();
+    }
+    const error = new Error("synthetic stream failure");
+    const fixture = streamResponse("", {}, 200, error);
+    fetcher.mockResolvedValueOnce(fixture.result);
+    await expect(tx.call("ops", canonicalPath)).rejects.toBe(error);
+    expect(fixture.cancel).toHaveBeenCalledOnce();
+    expect(fixture.release).toHaveBeenCalledOnce();
+    expect(fixture.stream.locked).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+});
+
 describe("owned identity and actual evidence invariants", () => {
   it("stops before supply writes for an inherited fixed-subject active order", () => {
     expect(() =>
@@ -833,9 +1010,10 @@ describe("native fetch failure diagnostics", () => {
 // a second reimplementation. That function is not exported/importable here:
 // the e2e spec file registers a Playwright test() at module load, which must
 // not run under vitest.
-function actualClosedPdfFailureFacts(): (
-  error: unknown,
-) => { nativeFailureClass: string; nativeCauseCode: string } {
+function actualClosedPdfFailureFacts(): (error: unknown) => {
+  nativeFailureClass: string;
+  nativeCauseCode: string;
+} {
   const filename = path.join(
     process.cwd(),
     "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
@@ -874,9 +1052,10 @@ function actualHistoryPhase(): (
   evidence: Evidence,
   completedOrderId: string,
   caseNo: string,
-  closedPdfFailureFacts: (
-    error: unknown,
-  ) => { nativeFailureClass: string; nativeCauseCode: string },
+  closedPdfFailureFacts: (error: unknown) => {
+    nativeFailureClass: string;
+    nativeCauseCode: string;
+  },
 ) => <T>(stage: string, action: () => Promise<T>) => Promise<T> {
   const filename = path.join(
     process.cwd(),
@@ -945,9 +1124,7 @@ describe("closed phase/native-class evidence survives a non-JourneyFailure error
     const native = new TypeError(privateValue);
     native.stack = `${native.stack ?? ""}\n    at https://referral.example.test/private/${privateValue}`;
     await expect(
-      historyPhase("browser-history-restore-goto", () =>
-        Promise.resolve("ok"),
-      ),
+      historyPhase("browser-history-restore-goto", () => Promise.resolve("ok")),
     ).resolves.toBe("ok");
     await expect(
       historyPhase("browser-history-restore-assert", () => {
