@@ -157,6 +157,7 @@ export class MockServer {
   }> = [];
   records: any[] = [];
   documents: any[] = [];
+  confirmedDocuments: any[] = [];
   revision = 1;
   active: any = null;
   bytes: Buffer | null = null;
@@ -212,6 +213,10 @@ export class MockServer {
     confirmWrongDocType: false,
     confirmWrongId: false,
     confirmMissingCandidateSha: false,
+
+    canonicalDocumentMissing: false,
+    canonicalWrongKey: false,
+    canonicalWrongHash: false,
 
     readbackAbsent: false,
     readbackWrongMime: false,
@@ -300,6 +305,17 @@ export class MockServer {
                 fleet_partner_id: this.fleet,
                 revision_no: this.revision,
               },
+              documents: this.mutations.canonicalDocumentMissing
+                ? []
+                : this.confirmedDocuments.map((doc) => ({
+                    ...doc,
+                    ...(this.mutations.canonicalWrongKey
+                      ? { file_object_key: "wrong-key" }
+                      : {}),
+                    ...(this.mutations.canonicalWrongHash
+                      ? { checksum_sha256: "wrong-hash" }
+                      : {}),
+                  })),
             },
           },
           200,
@@ -439,6 +455,16 @@ export class MockServer {
         }
 
         this.revision++;
+        this.confirmedDocuments.push({
+          document_id: this.active?.documentId || "doc-1",
+          submission_id: "sub-setup-123",
+          fleet_partner_id: this.fleet,
+          document_type: this.active?.documentType,
+          file_object_key: this.active?.objectKey,
+          checksum_sha256: this.hash,
+          file_size: this.bytes!.length,
+          content_type: "application/pdf",
+        });
         return jsonResponse(
           {
             data: {
@@ -655,19 +681,23 @@ describe("uploadOperationalDocument", () => {
       headers,
     );
     expect(result.documentId).toBe("doc-1");
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
     expect(server.calls.map((c) => c.method)).toEqual([
       "GET",
       "POST",
       "PUT",
       "POST",
       "GET",
+      "GET",
     ]);
     expect(server.calls[2]?.bytes).toBeDefined();
     expect(server.calls[2]?.bytes?.length).toBe(327);
+    // Post-confirm canonical submission readback precedes the download.
+    expect(server.calls[4]?.pathname).toBe(server.parent);
+    expect(result.canonicalReadbackStatus).toBe(200);
   });
 
-  it("carries separate Fleet application proof through all five validated document hops", async () => {
+  it("carries separate Fleet application proof through all six validated document hops", async () => {
     server.expectedApplicationAuth = "Bearer existing-partner-session-dummy";
     const result = await uploadOperationalDocument(
       mockRequest,
@@ -684,6 +714,7 @@ describe("uploadOperationalDocument", () => {
       "POST",
       "PUT",
       "POST",
+      "GET",
       "GET",
     ]);
     for (const call of server.calls) {
@@ -906,7 +937,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Received: (null|"")/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects oversized response exceeding 1MB", async () => {
@@ -922,7 +953,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Response exceeded bounded limit of 1MB/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects multi-chunk response cumulatively exceeding 1MB and observes reader cancel", async () => {
@@ -940,7 +971,7 @@ describe("uploadOperationalDocument", () => {
     ).rejects.toThrow(/Response exceeded bounded limit of 1MB/);
     expect(server.readerCancelObserved).toBe(true);
     expect(server.readbackChunksRead).toBe(2);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("accepts exact 1MiB payload through byte guard before readback checksum validation", async () => {
@@ -958,7 +989,7 @@ describe("uploadOperationalDocument", () => {
     ).rejects.toThrow(
       /4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784/,
     );
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects exact 1MiB plus 1 byte payload at byte guard", async () => {
@@ -974,7 +1005,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Response exceeded bounded limit of 1MB/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects strict MIME gap on readback", async () => {
@@ -990,7 +1021,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Received: "image\/png"/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects corrupt readback content with checksum mismatch", async () => {
@@ -1008,7 +1039,7 @@ describe("uploadOperationalDocument", () => {
     ).rejects.toThrow(
       /4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784/,
     );
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("rejects absent download readback with 404", async () => {
@@ -1024,7 +1055,7 @@ describe("uploadOperationalDocument", () => {
         headers,
       ),
     ).rejects.toThrow(/Received: 404/);
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
   });
 
   it("retries PUT on 503 DOCUMENT_SCANNER_UNAVAILABLE and verifies identical payload across attempts", async () => {
@@ -1044,7 +1075,7 @@ describe("uploadOperationalDocument", () => {
     }
     const result = await promise;
     expect(result.documentId).toBe("doc-1");
-    expect(server.calls.length).toBe(8);
+    expect(server.calls.length).toBe(9);
     const putCalls = server.calls.filter((c) => c.method === "PUT");
     expect(putCalls.length).toBe(4);
     for (const call of putCalls) {
@@ -1090,7 +1121,7 @@ describe("uploadOperationalDocument", () => {
       "4028af3714fa07d2f20e758649532faef11b4818c99a2b8dc0c88170a0dc8784",
     );
 
-    expect(server.calls.length).toBe(25);
+    expect(server.calls.length).toBe(26);
     const putCalls = server.calls.filter((c) => c.method === "PUT");
     expect(putCalls.length).toBe(21);
     for (const call of putCalls) {
@@ -1208,12 +1239,13 @@ describe("uploadOperationalDocument", () => {
     expect(server.downloadReaderStarted).toBe(true);
     expect(server.downloadReaderAborted).toBe(true);
     expect(server.downloadPassedSignal).toBeTruthy();
-    expect(server.calls.length).toBe(5);
+    expect(server.calls.length).toBe(6);
     expect(server.calls.map((c) => c.method)).toEqual([
       "GET",
       "POST",
       "PUT",
       "POST",
+      "GET",
       "GET",
     ]);
   });
@@ -1446,6 +1478,60 @@ describe("uploadOperationalDocument", () => {
     ).rejects.toThrow(/Received: "wrong-key"/);
     expect(server.calls.length).toBe(4);
   });
+
+  it("rejects when canonical submission readback omits the confirmed document", async () => {
+    server.mutations.canonicalDocumentMissing = true;
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        intentPath,
+        intentBody,
+        confirmPath,
+        confirmBody,
+        headers,
+      ),
+    ).rejects.toThrow(/Received: undefined/);
+    expect(server.calls.length).toBe(5);
+    expect(server.calls[4]?.pathname).toBe(server.parent);
+    expect(server.calls.some((c) => c.url.includes("/download"))).toBe(false);
+  });
+
+  it("rejects when canonical submission readback returns a different file_object_key", async () => {
+    server.mutations.canonicalWrongKey = true;
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        intentPath,
+        intentBody,
+        confirmPath,
+        confirmBody,
+        headers,
+      ),
+    ).rejects.toThrow(/Received: "wrong-key"/);
+    expect(server.calls.length).toBe(5);
+    expect(server.calls[4]?.pathname).toBe(server.parent);
+    expect(server.calls.some((c) => c.url.includes("/download"))).toBe(false);
+  });
+
+  it("rejects when canonical submission readback returns a different checksum", async () => {
+    server.mutations.canonicalWrongHash = true;
+    await expect(
+      uploadOperationalDocument(
+        mockRequest,
+        origin,
+        intentPath,
+        intentBody,
+        confirmPath,
+        confirmBody,
+        headers,
+      ),
+    ).rejects.toThrow(/Received: "wrong-hash"/);
+    expect(server.calls.length).toBe(5);
+    expect(server.calls[4]?.pathname).toBe(server.parent);
+    expect(server.calls.some((c) => c.url.includes("/download"))).toBe(false);
+  });
 });
 
 describe("runSetup execution with actual manifest", () => {
@@ -1544,23 +1630,23 @@ describe("runSetup execution with actual manifest", () => {
 
     // Call order validation:
     // Call 0: generic driver submission creation (native, without Playwright trace)
-    // Calls 1..5: document upload 1 (authority GET, intent POST, PUT, confirm POST, download GET) (raw-fetch)
-    // Call 6: generic submission readback (native, without Playwright trace)
-    // Calls 7..11: document upload 2 (authority GET, intent POST, PUT, confirm POST, download GET) (raw-fetch)
-    expect(server.calls.length).toBe(12);
+    // Calls 1..6: document upload 1 (authority GET, intent POST, PUT, confirm POST, canonical GET, download GET) (raw-fetch)
+    // Call 7: generic submission readback (native, without Playwright trace)
+    // Calls 8..13: document upload 2 (authority GET, intent POST, PUT, confirm POST, canonical GET, download GET) (raw-fetch)
+    expect(server.calls.length).toBe(14);
     expect(server.calls[0]?.ioBoundary).toBe("raw-fetch");
     expect(server.calls[0]?.pathname).toBe(
       "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
     );
-    expect(server.calls[6]?.ioBoundary).toBe("raw-fetch");
-    expect(server.calls[6]?.pathname).toBe(
+    expect(server.calls[7]?.ioBoundary).toBe("raw-fetch");
+    expect(server.calls[7]?.pathname).toBe(
       "/control-plane-proxy/fleet-partner/supply-submissions/sub-setup-123",
     );
-    const docCalls1 = server.calls.slice(1, 6);
+    const docCalls1 = server.calls.slice(1, 7);
     for (const c of docCalls1) {
       expect(c.ioBoundary).toBe("raw-fetch");
     }
-    const docCalls2 = server.calls.slice(7, 12);
+    const docCalls2 = server.calls.slice(8, 14);
     for (const c of docCalls2) {
       expect(c.ioBoundary).toBe("raw-fetch");
     }
@@ -3114,6 +3200,10 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
       string,
       { bytes: Buffer; contentType: string; documentType: string }
     >();
+    const confirmedSupplyDocuments = new Map<
+      string,
+      Array<Record<string, unknown>>
+    >();
 
     global.fetch = vi.fn(
       async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -3133,6 +3223,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
                 submission_type: "vehicle_onboarding",
                 revision_no: 1,
               },
+              documents: confirmedSupplyDocuments.get("sub-veh-001") ?? [],
             },
           });
         }
@@ -3149,6 +3240,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
                 submission_type: "driver_onboarding",
                 revision_no: 1,
               },
+              documents: confirmedSupplyDocuments.get("sub-drv-001") ?? [],
             },
           });
         }
@@ -3194,6 +3286,23 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
           const stored = uploadedObjects.get(body.objectKey)!;
           const docId = `doc-${body.documentType}`;
           uploadedObjects.set(`${subId}:${docId}`, stored);
+          confirmedSupplyDocuments.set(subId, [
+            ...(confirmedSupplyDocuments.get(subId) ?? []).filter(
+              (item) => item.document_id !== docId,
+            ),
+            {
+              document_id: docId,
+              submission_id: subId,
+              fleet_partner_id: "fleet-demo-001",
+              document_type: body.documentType,
+              file_object_key: body.objectKey,
+              checksum_sha256: createHash("sha256")
+                .update(stored.bytes)
+                .digest("hex"),
+              file_size: stored.bytes.length,
+              content_type: stored.contentType,
+            },
+          ]);
           return jsonResponse({
             data: {
               document_id: docId,
@@ -3291,6 +3400,7 @@ describe("C125 full document families, Case attachments, Reviewer readback, and 
         { Authorization: "Bearer tok" },
       );
       expect(ev.confirmDocumentType).toBe(spec.documentType);
+      expect(ev.canonicalReadbackStatus).toBe(200);
       expect(ev.readbackContentType).toBe(spec.contentType);
       expect(ev.readbackSha256).toBe(ev.sha256);
       const reviewerSupplyReadback =

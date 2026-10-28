@@ -1246,6 +1246,68 @@ export async function uploadOperationalDocument(
     "confirm fleet_partner_id must match authoritative readback",
   ).toBe(authoritativeFleetId);
 
+  // R5: Canonical submission readback verifying the persisted document
+  // metadata, not only the confirm response.
+  const canonicalSubmissionResponse = await boundedFetch(
+    new URL(parentPrefix, origin).toString(),
+    {
+      method: "GET",
+      headers: lifecycleHeaders,
+    },
+  );
+  checkDeadline();
+  expect(
+    canonicalSubmissionResponse.status,
+    `canonical submission readback ${parentPrefix}`,
+  ).toBe(200);
+  expectCandidateRevision(
+    canonicalSubmissionResponse.headers,
+    `canonical submission readback ${parentPrefix}`,
+  );
+  const canonicalSubmissionData = JSON.parse(
+    canonicalSubmissionResponse.body.toString("utf8"),
+  ) as any;
+  const canonicalDocuments = Array.isArray(
+    canonicalSubmissionData?.data?.documents,
+  )
+    ? (canonicalSubmissionData.data.documents as Array<Record<string, unknown>>)
+    : [];
+  const canonicalDocument = canonicalDocuments.find(
+    (item) => (item.document_id || item.documentId) === documentId,
+  );
+  expect(
+    canonicalDocument,
+    `canonical submission ${expectedSubmissionId} documents must include confirmed ${documentId}`,
+  ).toBeTruthy();
+  expect(
+    canonicalDocument?.submission_id || canonicalDocument?.submissionId,
+    "canonical document submission_id must match",
+  ).toBe(expectedSubmissionId);
+  expect(
+    canonicalDocument?.fleet_partner_id || canonicalDocument?.fleetPartnerId,
+    "canonical document fleet_partner_id must match authoritative readback",
+  ).toBe(authoritativeFleetId);
+  expect(
+    canonicalDocument?.document_type || canonicalDocument?.documentType,
+    "canonical document document_type must match",
+  ).toBe(confirmDocType);
+  expect(
+    canonicalDocument?.file_object_key || canonicalDocument?.fileObjectKey,
+    "canonical document file_object_key must match",
+  ).toBe(objectKey);
+  expect(
+    canonicalDocument?.checksum_sha256 || canonicalDocument?.checksumSha256,
+    "canonical document checksum_sha256 must match",
+  ).toBe(sha256);
+  expect(
+    canonicalDocument?.file_size ?? canonicalDocument?.fileSize,
+    "canonical document file_size must match",
+  ).toBe(fileSize);
+  expect(
+    canonicalDocument?.content_type || canonicalDocument?.contentType,
+    "canonical document content_type must match",
+  ).toBe(contentType);
+
   // 4. Download READBACK
   const downloadPath = `${parentPrefix}/documents/${documentId}/download`;
   const parsedDownloadUrl = new URL(downloadPath, origin);
@@ -1300,6 +1362,7 @@ export async function uploadOperationalDocument(
     ...(confirmSubmissionId ? { confirmSubmissionId } : {}),
     ...(confirmFleetId ? { confirmFleetPartnerId: confirmFleetId } : {}),
     ...(confirmDocType ? { confirmDocumentType: confirmDocType } : {}),
+    canonicalReadbackStatus: canonicalSubmissionResponse.status,
     downloadStatus: downloadResponse.status,
     readbackSha256,
     readbackFileSize: readbackBuffer.length,
