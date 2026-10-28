@@ -61,6 +61,10 @@ import {
   ReviewDemoOpsController,
 } from "./review-demo/review-demo.controller";
 import { ReviewSupplyService } from "./review-demo/review-supply.service";
+import { PassengerTrialTripController } from "./review-demo/passenger-trial-trip.controller";
+import { PassengerTrialTripService } from "./review-demo/passenger-trial-trip.service";
+import { OwnedMobilityModule } from "../owned-mobility/owned-mobility.module";
+import { RegulatoryRegistryRepository } from "../regulatory-registry/regulatory-registry.repository";
 import { FleetPartnerModule } from "../fleet-partner/fleet-partner.module";
 import { DriverProfileModule } from "../driver-profile/driver-profile.module";
 import { RegulatoryRegistryModule } from "../regulatory-registry/regulatory-registry.module";
@@ -79,6 +83,7 @@ import {
     GeoModule,
     ServiceAreaModule,
     MultiTaxiModule,
+    OwnedMobilityModule,
     ComplaintModule,
     RegulatoryRegistryModule,
     ServiceProductModule,
@@ -101,6 +106,7 @@ import {
     PaymentRefundController,
     ReviewDemoController,
     ReviewDemoOpsController,
+    PassengerTrialTripController,
   ],
   providers: [
     PassengerJwtService,
@@ -127,6 +133,10 @@ import {
     PaymentRefundService,
     ReviewSmsPort,
     ReviewSupplyService,
+    // Stateless DB adapter, as in OwnedMobilityModule; the registry module
+    // exports only its service.
+    RegulatoryRegistryRepository,
+    PassengerTrialTripService,
     {
       provide: PAYMENT_RUNTIME,
       useFactory: () => paymentRuntimeFromEnv(process.env),

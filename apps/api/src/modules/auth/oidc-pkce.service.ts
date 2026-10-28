@@ -1307,11 +1307,13 @@ export class OidcPkceService {
     const scopes = managedRole
       ? [...getIamFleetRoleScopes(managedRole.roleCode)!]
       : ["partner:read", "partner:write"];
-    // The entry slug identifies the linked subject; the canonical Fleet
-    // master identifies the business selector and owned records.
-    const canonicalPartnerId = managedRole
-      ? matchedEntry.partnerId
-      : matchedEntry.entrySlug;
+    // The entry slug identifies the linked subject; a Fleet entry's persisted
+    // partner ID is the business selector regardless of managed-role status.
+    // Other entry kinds retain the restricted slug selector.
+    const canonicalPartnerId =
+      matchedEntry.partnerType === "fleet_partner"
+        ? matchedEntry.partnerId
+        : matchedEntry.entrySlug;
     // Preserve the legacy restricted entry role label for existing consumers;
     // it is not a Fleet human grant and has no business scopes.
     const roles = managedRole ? [managedRole.roleCode] : ["partner_admin"];

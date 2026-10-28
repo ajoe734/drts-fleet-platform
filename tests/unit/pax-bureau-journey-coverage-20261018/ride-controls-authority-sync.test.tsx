@@ -20,7 +20,7 @@ import {
 
 vi.mock(
   "../../../apps/passenger-app-web/components/review-demo/review-context",
-  () => ({ useReviewDemo: () => true }),
+  () => ({ useReviewDemo: () => true, useTrialMode: () => false }),
 );
 
 const orderA = "a7285101-412f-46fd-a7d8-a2a96cb17eac";

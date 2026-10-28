@@ -3,7 +3,7 @@ import { t } from "./translations";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useReviewDemo } from "./review-context";
+import { useReviewDemo, useTrialMode } from "./review-context";
 import { passengerPaymentDisplay } from "../../../../packages/passenger-client/src/payment/state";
 
 // Re-read cadence for the same-order payment authority while it can still
@@ -18,7 +18,9 @@ const TERMINAL_PAYMENT_STATUSES = new Set(["refunded"]);
 type PaymentRead = { status?: string } | null;
 
 export function ReviewRideControls({ orderId }: { orderId: string }) {
-  const review = useReviewDemo();
+  // The trial shows its own test-driver controls without the rehearsal UUID.
+  const trial = useTrialMode();
+  const review = useReviewDemo() && !trial;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<string | undefined>();
