@@ -12,6 +12,10 @@ import { DriverProfileService } from "../../driver-profile/driver-profile.servic
 import { reviewDemoEnabled } from "./review-demo.config";
 
 const AUTHORIZATION_ID = "bc39e4f3-72d8-4383-bdc1-2426c1330dfa";
+/** The review operator's authorization, shared-dev's default for passenger
+ * bookings (MULTI_TAXI_DEFAULT_AUTHORIZATION_ID). */
+export const REVIEW_AUTHORIZATION_ID = AUTHORIZATION_ID;
+export const REVIEW_OPERATOR_ID = "review-synthetic-operator";
 export const REVIEW_SUPPLY = ["a", "b"].map((suffix, index) => ({
   driverId: `pax-review-driver-${suffix}`,
   vehicleId: `pax-review-vehicle-${suffix}`,

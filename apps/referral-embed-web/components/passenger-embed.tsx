@@ -46,6 +46,7 @@ import type {
 } from "@drts/contracts";
 import type { EmbedContext } from "../lib/embed-context";
 import { useTranslation } from "../lib/i18n";
+import type { TranslationKey } from "../lib/translations";
 import {
   EMBED_TRIP_FALLBACK_PROGRESS,
   EMBED_TRIP_FALLBACK_SCREENS,
@@ -2086,7 +2087,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
                 ? "送出中…"
                 : pendingCommand
                   ? "重送原叫車要求"
-                  : "確認叫車"
+                  : t("embed.field.confirmRide")
             }
             theme={theme}
             variant="primary"
@@ -2198,7 +2199,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
         <div style={{ display: "grid", gap: 10 }}>
           <ReferralPlaceField
             theme={theme}
-            label="上車地點"
+            label={t("book.summary.pickup.label")}
             icon={<Icon name="pin" size={15} />}
             name="pickupAddress"
             value={form.pickupAddress}
@@ -2209,7 +2210,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
           />
           <ReferralPlaceField
             theme={theme}
-            label="下車地點"
+            label={t("book.summary.dropoff.label")}
             icon={<Icon name="pin" size={15} />}
             name="dropoffAddress"
             value={form.dropoffAddress}
@@ -2226,7 +2227,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
           >
             <EditableField
               theme={theme}
-              label="用車時間"
+              label={t("embed.field.when")}
               icon="clock"
               name="scheduledAt"
               value={form.scheduledAt}
@@ -2235,7 +2236,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             />
             <EditableField
               theme={theme}
-              label="乘客姓名"
+              label={t("embed.field.passengerName")}
               icon="user"
               name="passengerName"
               value={form.passengerName}
@@ -2244,7 +2245,7 @@ function ReferralBookingForm({ context }: { context: EmbedContext }) {
             />
             <EditableField
               theme={theme}
-              label="聯絡電話"
+              label={t("embed.field.contactPhone")}
               icon="phone"
               name="passengerPhone"
               value={form.passengerPhone}
@@ -2471,28 +2472,85 @@ function NegativeScreen({
   );
 }
 
+// Canonical dispatch aliases share translation keys and existing tone metadata.
 const tripStateLabel: Record<
   string,
-  { zh: string; tone: "warn" | "primary" | "info" | "success" | "neutral" }
+  {
+    zh: string;
+    key: TranslationKey;
+    tone: "warn" | "primary" | "info" | "success" | "neutral";
+  }
 > = {
-  matching: { zh: "媒合中", tone: "warn" },
-  created: { zh: "媒合中", tone: "warn" },
-  ready_for_dispatch: { zh: "媒合中", tone: "warn" },
-  preassigned: { zh: "媒合中", tone: "warn" },
-  redispatch_required: { zh: "重新媒合中", tone: "warn" },
-  assigned: { zh: "已派車", tone: "primary" },
-  driver_accepted: { zh: "已派車", tone: "primary" },
-  enroute_pickup: { zh: "前往上車", tone: "info" },
-  arrived_pickup: { zh: "司機已抵達", tone: "info" },
-  on_trip: { zh: "行程中", tone: "info" },
-  proof_pending: { zh: "行程中", tone: "info" },
-  enroute: { zh: "前往上車", tone: "info" },
-  inprogress: { zh: "行程中", tone: "info" },
-  completed: { zh: "已完成", tone: "success" },
-  cancelled: { zh: "已取消", tone: "neutral" },
-  no_supply: { zh: "無可用車輛", tone: "neutral" },
-  dispatch_failed: { zh: "派車失敗", tone: "neutral" },
-  dispatch_timeout: { zh: "派車失敗", tone: "neutral" },
+  matching: { zh: "媒合中", key: "embed.trip.status.matching", tone: "warn" },
+  created: { zh: "媒合中", key: "embed.trip.status.matching", tone: "warn" },
+  ready_for_dispatch: {
+    zh: "媒合中",
+    key: "embed.trip.status.matching",
+    tone: "warn",
+  },
+  preassigned: {
+    zh: "媒合中",
+    key: "embed.trip.status.matching",
+    tone: "warn",
+  },
+  redispatch_required: {
+    zh: "重新媒合中",
+    key: "embed.trip.status.rematching",
+    tone: "warn",
+  },
+  assigned: {
+    zh: "已派車",
+    key: "embed.trip.status.assigned",
+    tone: "primary",
+  },
+  driver_accepted: {
+    zh: "已派車",
+    key: "embed.trip.status.assigned",
+    tone: "primary",
+  },
+  enroute_pickup: {
+    zh: "前往上車",
+    key: "embed.trip.status.en_route",
+    tone: "info",
+  },
+  arrived_pickup: {
+    zh: "司機已抵達",
+    key: "embed.trip.status.arrived",
+    tone: "info",
+  },
+  on_trip: { zh: "行程中", key: "embed.trip.status.on_trip", tone: "info" },
+  proof_pending: {
+    zh: "行程中",
+    key: "embed.trip.status.on_trip",
+    tone: "info",
+  },
+  enroute: { zh: "前往上車", key: "embed.trip.status.en_route", tone: "info" },
+  inprogress: { zh: "行程中", key: "embed.trip.status.on_trip", tone: "info" },
+  completed: {
+    zh: "已完成",
+    key: "embed.trip.status.completed",
+    tone: "success",
+  },
+  cancelled: {
+    zh: "已取消",
+    key: "embed.trip.status.cancelled",
+    tone: "neutral",
+  },
+  no_supply: {
+    zh: "無可用車輛",
+    key: "embed.trip.status.no_supply",
+    tone: "neutral",
+  },
+  dispatch_failed: {
+    zh: "派車失敗",
+    key: "embed.trip.status.dispatch_failed",
+    tone: "neutral",
+  },
+  dispatch_timeout: {
+    zh: "派車失敗",
+    key: "embed.trip.status.dispatch_failed",
+    tone: "neutral",
+  },
 };
 
 const DEMO_TRIP_DISPATCHABLE = [
@@ -2692,7 +2750,7 @@ function TripScreen({
   context: EmbedContext;
   liveData: PassengerEmbedLiveData;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -2755,7 +2813,7 @@ function TripScreen({
       : Math.max(0, Math.ceil((deadline - observedNow) / 1000));
   const deadlineLabel =
     windowKnown && deadline !== null
-      ? new Date(deadline).toLocaleString("zh-TW", {
+      ? new Date(deadline).toLocaleString(locale === "en" ? "en-US" : "zh-TW", {
           timeZone: "Asia/Taipei",
           hour12: false,
         })
@@ -2794,8 +2852,8 @@ function TripScreen({
           activeTrip.vehicleType,
           activeTrip.quote?.vehicleType,
         ),
-        driver: activeTrip.driverName || "媒合中",
-        plate: activeTrip.plateNumber || "待更新",
+        driver: activeTrip.driverName || t("embed.trip.driverNameUnavailable"),
+        plate: activeTrip.plateNumber || t("referralLive.pending"),
         rating: 0,
         etaMin: referralLiveMinutes(activeTrip),
         cancellationWindow: activeTrip.cancellationWindow,
@@ -2838,7 +2896,9 @@ function TripScreen({
           ) {
             setRejectedWindow(windowKey);
           }
-          throw new Error(payload?.error?.message || "取消行程失敗");
+          throw new Error(
+            payload?.error?.message || t("embed.trip.cancel.failed"),
+          );
         }
         window.location.assign(
           buildHref(context, {
@@ -2848,7 +2908,11 @@ function TripScreen({
           }),
         );
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "取消行程失敗");
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : t("embed.trip.cancel.failed"),
+        );
       }
     });
   }
@@ -2858,6 +2922,7 @@ function TripScreen({
   }
   const state = tripStateLabel[trip.state] || {
     zh: "媒合中",
+    key: "embed.trip.status.matching",
     tone: "warn" as const,
   };
   return (
@@ -2875,14 +2940,18 @@ function TripScreen({
             />
           ) : null}
           <ActionButton
-            label="客服協助聯絡司機"
+            label={t("embed.trip.supportDriver")}
             theme={theme}
             variant="default"
             icon="phone"
             onClick={() => setSupportOpen((open) => !open)}
           />
           <ActionButton
-            label={isPending ? "取消中…" : "取消行程"}
+            label={t(
+              isPending
+                ? "embed.trip.cancel.pending"
+                : "embed.trip.cancel.action",
+            )}
             theme={theme}
             variant="danger"
             onClick={handleCancel}
@@ -2939,7 +3008,7 @@ function TripScreen({
         >
           <span style={{ flexShrink: 0 }}>
             <Pill theme={theme} tone={state.tone} dot>
-              {state.zh}
+              {t(state.key)}
             </Pill>
           </span>
           <span
@@ -2991,10 +3060,11 @@ function TripScreen({
                 lineHeight: 1,
               }}
             >
-              {trip.etaMin ?? "待更新"}
+              {trip.etaMin ?? t("referralLive.pending")}
             </div>
             <div style={{ fontSize: 10, color: theme.muted, marginTop: 3 }}>
-              分鐘 · 估計
+              {t("embed.field.minuteUnit")} ·{" "}
+              {t("embed.trip.estimateQualifier")}
             </div>
           </div>
         </div>
@@ -3014,22 +3084,28 @@ function TripScreen({
         style={{ fontSize: 12, color: theme.muted, lineHeight: 1.6 }}
       >
         {isClosed
-          ? "目前已無法取消此行程，請以最新行程狀態為準。"
+          ? t("embed.trip.window.closed")
           : !windowKnown
-            ? "目前未提供取消時段資訊，送出後由系統確認。"
+            ? t("embed.trip.window.unknown")
             : deadlineLabel
-              ? `可取消至 ${deadlineLabel}（台灣時間；剩餘 ${remainingSeconds} 秒）。送出時仍由系統確認行程狀態。`
-              : "目前可提出取消，系統未提供固定截止時間；送出時仍由系統確認行程狀態。"}
+              ? t("embed.trip.window.deadline", {
+                  time: deadlineLabel,
+                  seconds: remainingSeconds!,
+                })
+              : t("embed.trip.window.noDeadline")}
         {windowKnown ? (
           <div>
-            查詢時間：
+            {t("embed.trip.window.checkedAt")}
             <time dateTime={cancellation!.asOf}>
-              {new Date(cancellation!.asOf).toLocaleString("zh-TW", {
-                timeZone: "Asia/Taipei",
-                hour12: false,
-              })}
+              {new Date(cancellation!.asOf).toLocaleString(
+                locale === "en" ? "en-US" : "zh-TW",
+                {
+                  timeZone: "Asia/Taipei",
+                  hour12: false,
+                },
+              )}
             </time>
-            （台灣時間）
+            {t("embed.trip.window.timezone")}
           </div>
         ) : null}
       </div>
@@ -3160,6 +3236,7 @@ function TripsScreen({
   context: EmbedContext;
   liveData: PassengerEmbedLiveData;
 }) {
+  const { t } = useTranslation();
   const theme = buildEmbedTheme(context.accent);
   const historyItems =
     liveData?.history?.items.map((trip) => ({
@@ -3186,7 +3263,9 @@ function TripsScreen({
           justifyContent: "space-between",
         }}
       >
-        <div style={{ fontSize: 17, fontWeight: 800 }}>我的行程</div>
+        <div style={{ fontSize: 17, fontWeight: 800 }}>
+          {t("embed.history.title")}
+        </div>
         <Pill theme={theme} tone="neutral">
           本工作階段行程
         </Pill>
@@ -3212,10 +3291,7 @@ function TripsScreen({
         </Card>
       ) : null}
       {historyItems.map((trip) => {
-        const tripState = tripStateLabel[trip.state] || {
-          zh: "狀態未知",
-          tone: "neutral" as const,
-        };
+        const tripState = tripStateLabel[trip.state];
         const tone =
           trip.state === "completed"
             ? "success"
@@ -3296,7 +3372,7 @@ function TripsScreen({
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
                   <Pill theme={theme} tone={tone} dot>
-                    {tripState.zh}
+                    {tripState ? t(tripState.key) : "狀態未知"}
                   </Pill>
                   <div
                     style={{
@@ -3377,7 +3453,7 @@ function ReceiptScreen({
             receipt.downloadUrl ||
             buildHref(context, { screen: "receipt", state: "handoff" })
           }
-          label="下載收據"
+          label={t("embed.field.downloadReceipt")}
           theme={theme}
           icon="download"
         />
@@ -3458,16 +3534,21 @@ function ReceiptScreen({
         <DetailRow theme={theme} label="乘客" value={receipt.passenger} />
         <DetailRow
           theme={theme}
-          label="聯絡電話"
+          label={t("embed.field.contactPhone")}
           value={receipt.maskedPhone}
           mono
         />
         <DetailRow
           theme={theme}
-          label="司機 / 車牌"
+          label={t("embed.field.driverPlate")}
           value={`${receipt.driver} · ${receipt.plate}`}
         />
-        <DetailRow theme={theme} label="車種" value={receipt.vehicle} last />
+        <DetailRow
+          theme={theme}
+          label={t("embed.card.vehicles")}
+          value={receipt.vehicle}
+          last
+        />
         <DetailRow theme={theme} label="客服" value={REFERRAL_SUPPORT_PHONE} />
         <DetailRow
           theme={theme}
@@ -3571,6 +3652,7 @@ function OutcomeScreen({
   kind: "completed" | "cancelled";
   liveData: PassengerEmbedLiveData;
 }) {
+  const { t } = useTranslation();
   const mountedRatingUi = useRef(false);
   useEffect(() => {
     mountedRatingUi.current = true;
@@ -3750,7 +3832,7 @@ function OutcomeScreen({
                 state: "handoff",
                 ...(trip ? { orderId: trip.orderId } : {}),
               })}
-              label="查看收據"
+              label={t("embed.field.viewReceipt")}
               theme={theme}
               icon="receipt"
               dataDrtOperation="referral-receipt"
@@ -3758,7 +3840,9 @@ function OutcomeScreen({
           ) : null}
           <ActionButton
             href={buildHref(context, { screen: "book", state: "handoff" })}
-            label={completed ? "再叫一次" : "重新叫車"}
+            label={t(
+              completed ? "embed.field.rideAgain" : "embed.field.rebook",
+            )}
             theme={theme}
             variant="ghost"
           />
@@ -3842,7 +3926,7 @@ function OutcomeScreen({
                   Boolean(submitted) ||
                   Boolean(originalRating)
                 }
-                aria-label={`評分 ${n} 星`}
+                aria-label={t("embed.rating.stars", { count: n })}
                 style={{
                   border: 0,
                   padding: 0,
