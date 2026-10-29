@@ -1498,3 +1498,135 @@ describe("Codex round-2 finalization regressions", () => {
     ).toBe(1);
   });
 });
+
+describe("R08 original finalizer custody and Playwright request lease", () => {
+  it("persists interrupted exact own raw request/IDs and refuses completed when required replay is unknown", async () => {
+    const rawBody =
+      '{ "description":"SIM index only", "category":"other", "severity":"normal", "relatedOrderId":"SIM-order" }';
+    const h = await harness(async (step) => {
+      await step("own-R08-callcenter-normal-terminalization", async () => {
+        await h.finalizer.checkpointOwned("r08-own-call-custody");
+      });
+    });
+    h.custody.r08 = {
+      recording: "synthetic-index-only",
+      orderId: "SIM-order",
+      callId: "SIM-call",
+      recordingId: "SIM-index",
+      callbackTaskId: "SIM-callback",
+      producers: [],
+      result: "in-progress",
+      cleanup: "unknown",
+      transfer: {
+        orderId: "SIM-order",
+        callId: "SIM-call",
+        recordingId: "SIM-index",
+        callbackTaskId: "SIM-callback",
+        transfer: "ack-unknown",
+        replay: "not-attempted",
+        cleanup: "not-attempted",
+        unresolved: ["original-ui-transfer-unverified"],
+        recording: "synthetic-index-only",
+        finalizeRecording: {
+          dedupeKey: "finalize_recording:call:SIM-call",
+          status: "unobserved-retained",
+        },
+        command: {
+          path: "/control-plane-proxy/callcenter/sessions/SIM-call/transfer-to-complaint",
+          rawBody,
+          bodySha256: "a".repeat(64),
+          headers: { "Content-Type": "application/json" },
+        },
+      },
+    };
+    await h.finalizer.checkpoint("r08-before-UI-forward");
+    expect(await h.facts()).toMatchObject({
+      r08: {
+        callId: "SIM-call",
+        transfer: { command: { rawBody }, transfer: "ack-unknown" },
+      },
+    });
+    const result = await h.finalizer.run("completed");
+    expect(result.wholeRunPassed).toBe(false);
+    expect(result.unresolved).toContain(
+      "r08-required-original-ui-replay-unverified",
+    );
+    expect(result.unresolved).toContain("r08-own-terminal-readback-unverified");
+    const interrupted = await finalizeAfterRunner(h.finalizer, "interrupted");
+    expect(interrupted?.reason).toBe("runner-interrupted");
+    expect(h.planCalls).toEqual(["completed"]);
+    expect(await h.facts()).toMatchObject({
+      r08: { transfer: { command: { rawBody } } },
+      wholeRunPassed: false,
+    });
+  });
+
+  it("same-browser request lease withholds late bytes/custody and blocks following writes after step expiry", async () => {
+    const response = deferred<string>();
+    const entered = deferred();
+    const sent: string[] = [];
+    let accepted = false;
+    const h = await harness(
+      async (step) => {
+        await step("own-R08-callcenter-normal-terminalization", async () => {
+          await h.finalizer.guardOperation(async (assertOpen) => {
+            sent.push("cancel");
+            entered.resolve();
+            await response.promise;
+            assertOpen(); // Required before any body-derived state/fulfill.
+            accepted = true;
+            await h.finalizer.checkpointOwned("r08-late-ACK");
+          });
+          await h.finalizer.guardOperation(async () => {
+            sent.push("close");
+          });
+        });
+      },
+      { budgetMs: 150 },
+    );
+    const finishing = h.finalizer.run("failed");
+    await entered.promise;
+    const result = await finishing;
+    expect(result.steps[0]?.outcome).toBe("unknown-budget-exhausted");
+    response.resolve("SIM late body");
+    await sleep(20);
+    expect(accepted).toBe(false);
+    expect(sent).toEqual(["cancel"]);
+    await expect(
+      h.finalizer.guardOperation(async () => {
+        sent.push("orphan write");
+      }),
+    ).rejects.toThrow("business-request-after-finalization-start");
+    await expect(h.finalizer.checkpointOwned("orphan-custody")).rejects.toThrow(
+      "business-phase-after-finalization-start",
+    );
+    expect(sent).toEqual(["cancel"]);
+  });
+
+  it("fails closed when exact R08 custody contains a token instead of changing command bytes", async () => {
+    const h = await harness(async () => undefined);
+    h.custody.r08 = {
+      recording: "synthetic-index-only",
+      orderId: "SIM-order",
+      recordingId: "SIM-index",
+      result: "failed",
+      cleanup: "unknown",
+      producers: [
+        {
+          step: "sessions",
+          ack: "ack-unknown",
+          command: {
+            path: "/control-plane-proxy/callcenter/sessions",
+            rawBody: TOKEN,
+            bodySha256: "a".repeat(64),
+            headers: { "Content-Type": "application/json" },
+          },
+        },
+      ],
+    };
+    await expect(h.finalizer.checkpointOwned("r08-secret")).rejects.toThrow(
+      "business-checkpoint-not-durable",
+    );
+    expect(JSON.stringify(await h.facts())).not.toContain(TOKEN);
+  });
+});
