@@ -29,6 +29,9 @@ import {
   validateActualReceiptPdfBytes,
   consumeNativeReceiptPdfDownload,
   captureOriginalUiCancellation,
+  originalCancellationResponseFacts,
+  originalCancellationTerminalFacts,
+  waitForOriginalCancellationTerminalUI,
   object,
   text,
   integer,
@@ -50,6 +53,10 @@ import {
   originalBookingRouteFailure,
   type BookingAckResponse,
   clickAndSettleOriginalBookingAck,
+  OriginalBookingOperation,
+  closeOriginalBookingOperation,
+  settleOriginalBookingOperation,
+  NATIVE_REQUEST_TIMEOUT_MS,
   persistPrivateJson,
   readOwnedReferralCookies,
   adoptReferralSession,
@@ -104,6 +111,7 @@ import {
 } from "./run-finalization";
 import {
   EXACT_SEVEN_RECOVERY_FACTS,
+  EXACT_SEVEN_REVOKE_ROUTE,
   EXACT_SEVEN_SOURCE_FACTS,
   cleanExactSevenSupply,
   createExactSevenRecoveryState,
@@ -788,11 +796,28 @@ test(journeyName, async ({ browser, request }) => {
               `/regulatory-registry/drivers/${encodeURIComponent(id)}/work-state`,
               { method: "POST", body: { workState: "offline" } },
             ),
-          revokeBinding: (ownBindingId, ownDeviceId) =>
-            adminControl("/auth/driver/device/revoke", {
-              method: "POST",
+          // The same canonical Admin token is the "admin" and "api" session;
+          // the existing stepUp proof names the exact revoke route it sends.
+          adminSessionId: text(adminSessionId),
+          readAdminSession: () => call("api", "/api/auth/session"),
+          stepUp,
+          revokeBinding: (ownBindingId, ownDeviceId, stepUpReference) =>
+            call("api", EXACT_SEVEN_REVOKE_ROUTE.path, {
+              method: EXACT_SEVEN_REVOKE_ROUTE.method,
               body: { bindingId: ownBindingId, deviceId: ownDeviceId },
+              headers: { "x-drts-step-up-reference": stepUpReference },
             }),
+          fleetPartnerId: FLEET,
+          readSupplySubmissions: () =>
+            call(
+              "admin",
+              "/control-plane-proxy/admin/supply-review/submissions",
+            ),
+          readSupplySubmission: (id) =>
+            call(
+              "admin",
+              `/control-plane-proxy/admin/supply-review/submissions/${encodeURIComponent(id)}`,
+            ),
           persist: (facts) =>
             persistPrivateJson(
               `${DIRECTORY}/${EXACT_SEVEN_RECOVERY_FACTS}`,
@@ -1338,6 +1363,8 @@ test(journeyName, async ({ browser, request }) => {
         },
       );
       let routeStarted = false;
+      // The main booking's one budget is the existing native request deadline.
+      const mainBooking = new OriginalBookingOperation("main-original-booking");
       let finishOriginalRoute!: () => void;
       const originalRouteFinished = new Promise<void>((resolve) => {
         finishOriginalRoute = resolve;
@@ -1373,6 +1400,11 @@ test(journeyName, async ({ browser, request }) => {
             await route.continue();
             return;
           }
+          if (!mainBooking.open) {
+            // A closed operation never sends and never mutates its owner state.
+            await route.abort("blockedbyclient").catch(() => undefined);
+            return;
+          }
           routeStarted = true;
           try {
             const rawBody = text(
@@ -1383,6 +1415,11 @@ test(journeyName, async ({ browser, request }) => {
             // The UI may consume a later legitimate proposal for the same intent.
             // Select by its actual frozen command, never by response arrival order.
             await Promise.all([...observedQuoteTasks]);
+            if (!mainBooking.open) {
+              // Closed while draining quotes: no send and no owner state.
+              await route.abort("blockedbyclient").catch(() => undefined);
+              return;
+            }
             const selected = quotesById.get(text(actualCommand.quoteId));
             requireFact(
               selected,
@@ -1425,10 +1462,13 @@ test(journeyName, async ({ browser, request }) => {
                 "actual UI booking key header required",
               ),
               async () => {
-                const original = await route.fetch({
-                  maxRedirects: 0,
-                  maxRetries: 0,
-                });
+                // Recheck after the journal's durable persist await as well.
+                const original = await mainBooking.send(() =>
+                  route.fetch({
+                    maxRedirects: 0,
+                    maxRetries: 0,
+                  }),
+                );
                 try {
                   await settleRoutedOriginalBookingAck(
                     original,
@@ -1446,8 +1486,9 @@ test(journeyName, async ({ browser, request }) => {
               },
             );
           } catch (error) {
-            bookingState.routeError = originalBookingRouteFailure(error);
-            rejectOriginalResponse(bookingState.routeError);
+            const failure = originalBookingRouteFailure(error);
+            if (mainBooking.open) bookingState.routeError = failure;
+            rejectOriginalResponse(failure);
             evidence.record({
               stage: bookingState.journal?.current
                 ? "booking:send-ACK-unknown"
@@ -1460,26 +1501,36 @@ test(journeyName, async ({ browser, request }) => {
           }
         },
       );
-      const feeCheckbox = page.getByRole("checkbox", {
-        name: "我已確認費用與優惠說明",
-        exact: true,
-      });
-      await expect(feeCheckbox).not.toBeChecked();
-      await expect(
-        page.locator('[data-drt-operation="referral-create"]'),
-      ).toBeDisabled();
-      await feeCheckbox.check();
-      await expect(feeCheckbox).toBeChecked();
-      await finalizer.checkpoint("main-original-booking");
+      let mainBookingSucceeded = false;
       try {
-        await clickAndSettleOriginalBookingAck(
+        const feeCheckbox = page.getByRole("checkbox", {
+          name: "我已確認費用與優惠說明",
+          exact: true,
+        });
+        await expect(feeCheckbox).not.toBeChecked();
+        await expect(
+          page.locator('[data-drt-operation="referral-create"]'),
+        ).toBeDisabled();
+        await feeCheckbox.check();
+        await expect(feeCheckbox).toBeChecked();
+        await finalizer.checkpoint("main-original-booking");
+        mainBooking.arm(NATIVE_REQUEST_TIMEOUT_MS);
+        await settleOriginalBookingOperation(
           () => page.locator('[data-drt-operation="referral-create"]').click(),
           bookingAck,
+          mainBooking.signal,
+          () => (routeStarted ? originalRouteFinished : undefined),
         );
+        mainBookingSucceeded = true;
       } finally {
-        if (routeStarted) await originalRouteFinished;
+        // Close on every exit. A failed operation keeps its closed guard until
+        // the page closes, so a late first POST is aborted, never sent.
+        await closeOriginalBookingOperation(
+          mainBooking,
+          mainBookingSucceeded,
+          () => page.unroute(`${origins.referral}/api/referral/booking`),
+        );
       }
-      await page.unroute(`${origins.referral}/api/referral/booking`);
       if (bookingState.routeError) throw bookingState.routeError;
       requireFact(
         orderId && bookingState.quote,
@@ -2396,7 +2447,8 @@ test(journeyName, async ({ browser, request }) => {
           driver: (path, options) => call("driver", path, options),
           heartbeat: (id, state) =>
             heartbeat(id, state, ++cancellationSequence),
-          cancelFromActualUI: async (id, expectedRefusal) => {
+          cancelFromActualUI: async (id, expectedRefusal, checkpoint) => {
+            const tripURL = page.url();
             // Observe the actual cancellation-window UI. A disabled button is
             // not an attempted UI cancellation; API refusal keeps separate provenance.
             const button = page.locator(
@@ -2530,13 +2582,66 @@ test(journeyName, async ({ browser, request }) => {
                 );
                 const captured = await waiting;
                 const { payload } = captured;
+                const responseFacts = originalCancellationResponseFacts(
+                  captured,
+                  {
+                    orderId: id,
+                    runtime,
+                  },
+                );
+                await checkpoint({ response: responseFacts });
+                const cancelledHeading = page
+                  .getByText("行程已取消", { exact: true })
+                  .first();
+                // OutcomeScreen has no order-number label. Its server page
+                // selects the exact history order from orderId (or errors), so
+                // bind the real outcome DOM/route to that same URL and readback.
+                const ownRoute = page
+                  .getByText(
+                    `${text(current.pickupAddress)} → ${text(current.dropoffAddress)}`,
+                    { exact: true },
+                  )
+                  .first();
+                const terminalCheckpoint = async (
+                  phase: "before-wait" | "url-ready" | "rendered" | "failed",
+                ) => {
+                  const dom = {
+                    cancelledVisible: await cancelledHeading
+                      .isVisible()
+                      .catch(() => null),
+                    ownRouteVisible: await ownRoute
+                      .isVisible()
+                      .catch(() => null),
+                  };
+                  await checkpoint({
+                    response: responseFacts,
+                    terminal: originalCancellationTerminalFacts(
+                      page.url(),
+                      { tripURL, orderId: id },
+                      dom,
+                      phase,
+                    ),
+                  });
+                };
                 await cancelPhase("browser-cancel-terminal-ui", async () => {
                   if (captured.status === 200) {
-                    await page.waitForURL(
-                      (url) =>
-                        url.searchParams.get("screen") === "cancelled" &&
-                        url.searchParams.get("orderId") === id,
-                    );
+                    await terminalCheckpoint("before-wait");
+                    try {
+                      await waitForOriginalCancellationTerminalUI(
+                        page,
+                        id,
+                        async () => {
+                          await terminalCheckpoint("url-ready");
+                          await expect(cancelledHeading).toBeVisible();
+                          await expect(ownRoute).toBeVisible();
+                        },
+                      );
+                      await terminalCheckpoint("rendered");
+                    } catch (error) {
+                      // Diagnostic reads cannot replace the original failure.
+                      await terminalCheckpoint("failed").catch(() => undefined);
+                      throw error;
+                    }
                   } else {
                     const afterDenial = object(
                       (await referral("/api/referral/active")).data,
@@ -2988,9 +3093,18 @@ test(journeyName, async ({ browser, request }) => {
           fail = reject;
         });
         void settled.catch(() => undefined);
-        let deadline: ReturnType<typeof setTimeout> | undefined;
+        // The same 25s operation budget also ends a never-settling UI click
+        // and the route/quote drains below.
+        const operation = new OriginalBookingOperation(
+          "supplemental-original-booking",
+        );
         const url = `${origins.referral}/api/referral/booking`;
         const handle = async (route: Route) => {
+          if (!operation.open) {
+            // A closed operation never sends and never mutates its owner state.
+            await route.abort().catch(() => undefined);
+            return;
+          }
           try {
             requireFact(
               route.request().method() === "POST" &&
@@ -3004,6 +3118,11 @@ test(journeyName, async ({ browser, request }) => {
             const raw = text(route.request().postData());
             const command = object(JSON.parse(raw));
             await Promise.all([...quoteTasks]);
+            if (!operation.open) {
+              // Closed while draining quotes: no send, owner state or write.
+              await route.abort().catch(() => undefined);
+              return;
+            }
             const quote = proposals.get(text(command.quoteId));
             requireFact(
               quote,
@@ -3043,15 +3162,23 @@ test(journeyName, async ({ browser, request }) => {
                 quote,
               },
             );
+            // An abandoned caller never receives a late first POST.
+            requireFact(
+              operation.open,
+              "supplemental original booking within its operation budget",
+            );
             await state.journal.beforeSend(
               raw,
               text(route.request().headers()["idempotency-key"]),
               async () => {
-                state.actions.push("booking");
-                const original = await route.fetch({
-                  maxRedirects: 0,
-                  maxRetries: 0,
-                  timeout: 15000,
+                // Recheck after the journal's durable persist await as well.
+                const original = await operation.send(() => {
+                  state.actions.push("booking");
+                  return route.fetch({
+                    maxRedirects: 0,
+                    maxRetries: 0,
+                    timeout: 15000,
+                  });
                 });
                 try {
                   await settleRoutedOriginalBookingAck(
@@ -3085,6 +3212,7 @@ test(journeyName, async ({ browser, request }) => {
             await route.abort().catch(() => undefined);
           }
         };
+        let succeeded = false;
         try {
           await page.goto(
             `${origins.referral}/embed/${ENTRY}?state=handoff&screen=book`,
@@ -3111,12 +3239,12 @@ test(journeyName, async ({ browser, request }) => {
           await expect(create).toBeEnabled();
           await finalizer.checkpoint(`supplemental-${name}-original-booking`);
           await page.route(url, handle);
-          deadline = setTimeout(
-            () =>
-              fail(new JourneyFailure("supplemental-original-booking-timeout")),
-            25_000,
+          operation.arm(25_000, fail);
+          await clickAndSettleOriginalBookingAck(
+            () => create.click(),
+            settled,
+            operation.signal,
           );
-          await clickAndSettleOriginalBookingAck(() => create.click(), settled);
           requireFact(
             state.orderId && state.journal && state.quote,
             "supplemental original booking ACK custody",
@@ -3128,16 +3256,24 @@ test(journeyName, async ({ browser, request }) => {
             "supplemental independent exact order ID set",
           );
           controlledOrderIds.push(state.orderId);
+          succeeded = true;
           return state as typeof state & {
             orderId: string;
             journal: BookingWriteJournal;
             quote: ObjectData;
           };
         } finally {
-          clearTimeout(deadline);
           page.off("response", observeQuote);
-          await page.unroute(url, handle);
-          await Promise.all(quoteTasks);
+          // A failure (including setup before the 25s arm) closes at once and
+          // keeps its closed guard until the page closes; success unroutes.
+          await closeOriginalBookingOperation(
+            operation,
+            succeeded,
+            async () => {
+              await page.unroute(url, handle);
+              await Promise.all(quoteTasks);
+            },
+          );
         }
       };
       // Original C1 is the legal real null-final-driver/no-arrival source. Read
@@ -3241,11 +3377,15 @@ test(journeyName, async ({ browser, request }) => {
               reject = no;
             });
             void ack.catch(() => undefined);
-            const timer = setTimeout(
-              () =>
-                reject(new JourneyFailure("scheduled-original-cancel-timeout")),
-              20_000,
-            );
+            // The same 20s operation budget also ends a never-settling UI click.
+            const expired = new AbortController();
+            const timer = setTimeout(() => {
+              const timeout = new JourneyFailure(
+                "scheduled-original-cancel-timeout",
+              );
+              reject(timeout);
+              expired.abort(timeout);
+            }, 20_000);
             const handle = async (route: Route) => {
               try {
                 booking.actions.push("cancel");
@@ -3275,6 +3415,7 @@ test(journeyName, async ({ browser, request }) => {
                     .locator('[data-drt-operation="referral-cancel"]')
                     .click(),
                 ack,
+                expired.signal,
               );
             } finally {
               clearTimeout(timer);

@@ -35,7 +35,7 @@ on:
         default: ""
         type: string
       readonly_fleet_failure:
-        description: "Read only the two fixed original Fleet failure requests; never reruns them"
+        description: "Read only fixed original Fleet document and root-timeout windows; never replays"
         required: false
         default: false
         type: boolean
@@ -630,15 +630,23 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - name: Read only the fixed failure window without invoking the product
         if: inputs.readonly_ops_dashboard_timeout_failure != true
-        run: >-
-          python3 operations/verification/read-dev-fleet-document-failure-log.py
-          --output .artifacts/dev-fleet-document-failure-readback/snapshot.json
+        run: |
+          set -uo pipefail
+          read_status=0
+          python3 operations/verification/read-dev-fleet-document-failure-log.py \
+            --output .artifacts/dev-fleet-document-failure-readback/snapshot.json || read_status=1
+          python3 operations/verification/read-dev-fleet-document-failure-log.py \
+            --profile fleet-root-timeout-40891070459-v1 \
+            --output .artifacts/dev-fleet-document-failure-readback/fleet-root-timeout.json || read_status=1
+          exit "$read_status"
       - name: Preserve only the safe diagnostic projection
         if: always() && inputs.readonly_ops_dashboard_timeout_failure != true
         uses: actions/upload-artifact@v4
         with:
           name: dev-fleet-document-failure-readback-${{ github.run_id }}
-          path: .artifacts/dev-fleet-document-failure-readback/snapshot.json
+          path: |
+            .artifacts/dev-fleet-document-failure-readback/snapshot.json
+            .artifacts/dev-fleet-document-failure-readback/fleet-root-timeout.json
           if-no-files-found: error
           retention-days: 14
       - name: Read the fixed Ops dashboard window and only observed trace or instance context

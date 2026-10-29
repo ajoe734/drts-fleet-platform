@@ -563,8 +563,8 @@ async function observeReferralPrivacyConsent(
   void navigation.catch(() => {}); // Consume a navigation failure if POST rejects first.
   await control.click({ noWaitAfter: true });
   const post = await submitted;
-  // The native form returns a redirect, not JSON consent version/hash/time.
-  expect(post.status()).toBe(307);
+  // The native form completes POST with a 303 GET destination, not JSON consent.
+  expect(post.status()).toBe(303);
   expectCandidateRevision(post.headers(), "referral privacy POST");
   record({
     kind: "referral-first-privacy-post",
