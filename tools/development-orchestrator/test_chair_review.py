@@ -5862,3 +5862,244 @@ class ExistingMergedAcceptanceBoundedAdmissionTests(unittest.TestCase):
         opened = [b["task_id"] for b in state["blockers"] if b["status"] == "open"]
         self.assertNotIn("MERGED-THIRD-HELD", opened)
         self.assertEqual(len(opened), len(board["blockers"]) - 1)
+
+
+class ExistingApprovalSuccessCooldownFairnessTests(unittest.TestCase):
+    """A successful approval_triage must neither extend nor clear the shared
+    cooldown. Extending it let back-to-back approvals (each a fresh signal that
+    bypasses the cooldown) push an already-due blocked_task_triage, which may
+    not bypass, out of reach across every pending-empty gap."""
+
+    START = datetime(2026, 10, 29, 9, 0, 0, tzinfo=timezone.utc)
+
+    def setUp(self) -> None:
+        import copy
+        from datetime import timedelta
+        from test_ai_status import MERGED_BLOCKED_ACCEPTANCE_TASK, ai_status as board_commands
+
+        self.timedelta = timedelta
+        self.tmp = tempfile.TemporaryDirectory(prefix="approval-cooldown-fairness-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "chair-reviews").mkdir()
+        (self.root / "activity-log.jsonl").write_text("", encoding="utf-8")
+        self.status_path = self.root / "ai-status.json"
+        self.task = copy.deepcopy(MERGED_BLOCKED_ACCEPTANCE_TASK)
+        self.board = board_commands.default_state()
+        self.board.update({"tasks": [self.task], "agents": [], "handoffs": [], "blockers": [{
+            "task_id": self.task["id"], "owner": "Claude", "waiting_for": "Codex", "status": "open",
+            "message": "Runtime evidence blocker", "created_at": "2026-10-27T00:00:00Z"}]})
+        self.status_path.write_text(json.dumps(self.board), encoding="utf-8")
+        self.config = {
+            "agents": {"claude": {"display_name": "Claude", "provider": "claude"}},
+            "chair_review": {"enabled": True, "cooldown_seconds": 900, "review_dir": str(self.root / "chair-reviews")},
+            "paths": {
+                "status_file": str(self.status_path),
+                "state_file": str(self.root / "state.json"),
+                "approval_queue": str(self.root / "approval-queue.json"),
+                "activity_log": str(self.root / "activity-log.jsonl"),
+                "event_queue": str(self.root / "event-queue.jsonl"),
+                "chair_review_dir": str(self.root / "chair-reviews"),
+            },
+        }
+        self.state = {"queue": {"events": {}}, "workers": {}, "provider_pauses": {}, "dispatch_pauses": [],
+                      "failure_streaks": {}, "chair_review": {
+                          "last_review_at": "2026-10-29T08:00:00Z", "last_attempt_at": "2026-10-29T08:00:00Z",
+                          "cooldown_until": "2026-10-29T08:15:00Z"}}
+        self.clock = [self.START]
+        self.pending: list[dict] = []
+        clock = self.clock
+
+        class Clock(datetime):
+            @classmethod
+            def now(cls, tz=None):  # type: ignore[override]
+                return clock[0] if tz is not None else clock[0].replace(tzinfo=None)
+
+        # Only external IO is stubbed: the clock, the approval store, the brief
+        # writer, lane selection and the queue writer. The scheduler and refresh
+        # functions under test run unmodified.
+        mock.patch.object(supervisor, "datetime", Clock).start()
+        mock.patch.object(supervisor, "utc_now", side_effect=lambda: self.iso(clock[0])).start()
+        mock.patch.object(supervisor, "safe_load_approval_state",
+                          side_effect=lambda config: {"pending": [dict(item) for item in self.pending],
+                                                      "history": []}).start()
+        mock.patch.object(supervisor, "resolve_approval", side_effect=self.resolve).start()
+        mock.patch.object(supervisor, "ensure_task_brief", return_value=None).start()
+        self.choose = mock.patch.object(supervisor, "choose_chair_reviewer", return_value=("claude", "Claude")).start()
+        self.enqueue = mock.patch.object(supervisor, "enqueue_event").start()
+        self.addCleanup(mock.patch.stopall)
+
+    # Fixtures -----------------------------------------------------------
+
+    @staticmethod
+    def iso(moment: datetime) -> str:
+        return moment.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    def advance(self, seconds: int) -> None:
+        self.clock[0] = self.clock[0] + self.timedelta(seconds=seconds)
+
+    def resolve(self, config, approval_id, **kwargs) -> None:
+        self.pending[:] = [item for item in self.pending if item["approval_id"] != approval_id]
+
+    def add_approval(self) -> str:
+        approval_id = f"apr-{len(self.pending)}-{self.iso(self.clock[0])}"
+        self.pending.append({"approval_id": approval_id, "status": "pending", "created_at": self.iso(self.clock[0])})
+        return approval_id
+
+    def queue(self) -> bool:
+        return supervisor.queue_chair_review(self.config, self.state, supervisor.load_status(self.config), {})
+
+    def active_reason(self) -> str | None:
+        return (self.state["chair_review"].get("active_review") or {}).get("reason")
+
+    def payload(self, reason: str) -> dict:
+        return {"version": 1, "decision": reason, "approval_ttl_minutes": 45, "reason": "r", "blocked_by": [],
+                "approval_actions": [{"approval_id": item["approval_id"], "decision": "deny", "reason": "r"}
+                                     for item in self.pending],
+                "reassignment_actions": [], "task_actions": [], "provider_actions": [], "recommended_focus": []}
+
+    def complete(self, payload: dict | None) -> bool:
+        """The active Chair run finishes: valid outputs, or none at all."""
+        active = self.state["chair_review"]["active_review"]
+        if payload is not None:
+            Path(active["markdown_path"]).write_text("# Review\n", encoding="utf-8")
+            Path(active["json_path"]).write_text(json.dumps(payload), encoding="utf-8")
+        self.state["queue"]["events"][active["queue_event_id"]] = {"status": "completed"}
+        return supervisor.refresh_chair_review_state(self.config, self.state, provider_report={})
+
+    def dispatch_approval(self) -> None:
+        self.add_approval()
+        self.assertEqual(supervisor.chair_review_reason(
+            self.state, {"pending": self.pending}, status=supervisor.load_status(self.config), config=self.config),
+            "approval_triage")
+        self.assertTrue(supervisor.chair_review_needs_immediate_attention(
+            self.state, supervisor.load_status(self.config), {"pending": self.pending}))
+        self.assertTrue(self.queue())
+        self.assertEqual(self.active_reason(), "approval_triage")
+
+    # Tests --------------------------------------------------------------
+
+    def test_existing_approval_success_preserves_due_blocked_cadence_and_original_failure_priority_controls(self) -> None:
+        status_bytes = self.status_path.read_bytes()
+        records = supervisor.dependency_ready_blocked_task_records(self.config, supervisor.load_status(self.config))
+        self.assertEqual([record["task_id"] for record in records], [self.task["id"]])
+        self.assertIsNotNone(records[0]["merged_acceptance_resume"])
+
+        # Approvals arrive every ten minutes (< 900s); each is resolved, leaving pending empty.
+        for _ in range(3):
+            before = self.state["chair_review"]["cooldown_until"]
+            self.dispatch_approval()
+            enqueued = self.enqueue.call_count
+            # Single active Chair: nothing else is dispatched while it runs, fresh signal or not.
+            self.advance(30)
+            self.add_approval()
+            self.assertFalse(self.queue())
+            self.assertEqual(self.enqueue.call_count, enqueued)
+            self.advance(30)
+            self.assertTrue(self.complete(self.payload("approval_triage")))
+            chair = self.state["chair_review"]
+            self.assertEqual(self.pending, [])
+            self.assertIsNone(chair["active_review"])
+            self.assertEqual(chair["last_reason"], "approval_triage")
+            self.assertEqual(chair["last_review_at"], self.iso(self.clock[0]))
+            self.assertEqual(chair["failure_streak"], 0)
+            # Neither extended nor cleared: the pre-approval deadline is kept as is.
+            self.assertEqual(chair["cooldown_until"], before)
+            self.assertEqual(self.status_path.read_bytes(), status_bytes)
+            self.advance(540)
+
+        # Pending is empty and nothing new arrived: the already-due blocked review now runs.
+        self.assertFalse(supervisor.chair_review_needs_immediate_attention(
+            self.state, supervisor.load_status(self.config), {"pending": []}))
+        self.assertTrue(self.queue())
+        self.assertEqual(self.active_reason(), "blocked_task_triage")
+        self.assertEqual(self.enqueue.call_count, 4)
+        self.assertEqual(self.enqueue.call_args.args[1]["reason"], "chair_review:blocked_task_triage")
+        # Queueing the review is the only effect: no board write, phase change or vote.
+        self.assertEqual(self.status_path.read_bytes(), status_bytes)
+        self.assertEqual(json.loads(self.status_path.read_text())["tasks"][0]["status"], "blocked")
+
+    def test_successful_approval_keeps_a_live_failure_deadline_and_seen_pending_cannot_bypass_it(self) -> None:
+        # A genuine failure: the blocked review finishes without its declared outputs.
+        self.assertTrue(self.queue())
+        self.assertEqual(self.active_reason(), "blocked_task_triage")
+        self.advance(60)
+        self.assertTrue(self.complete(None))
+        failure_deadline = self.state["chair_review"]["cooldown_until"]
+        self.assertEqual(failure_deadline, self.iso(self.clock[0] + self.timedelta(seconds=900)))
+        self.assertEqual(self.state["chair_review"]["failure_streak"], 1)
+        self.advance(60)
+        self.assertFalse(self.queue())
+
+        # A fresh approval still takes priority over the due blocked review and bypasses the clock...
+        self.dispatch_approval()
+        self.advance(60)
+        self.assertTrue(self.complete(self.payload("approval_triage")))
+        # ...but its success neither clears nor extends the live failure deadline.
+        self.assertEqual(self.state["chair_review"]["cooldown_until"], failure_deadline)
+        self.assertFalse(self.queue())
+        self.assertIsNone(self.state["chair_review"]["active_review"])
+
+        # A malformed approval verdict is a failure: it backs off again and the
+        # still-pending, already-seen approval cannot bypass that clock.
+        self.advance(60)
+        self.dispatch_approval()
+        self.advance(60)
+        self.assertTrue(self.complete({"version": 1, "decision": "approval_triage"}))
+        retry_after = self.state["chair_review"]["cooldown_until"]
+        self.assertEqual(retry_after, self.iso(self.clock[0] + self.timedelta(seconds=900)))
+        self.assertEqual(self.state["chair_review"]["failure_streak"], 1)
+        self.assertEqual(len(self.pending), 1)
+        self.advance(60)
+        self.assertFalse(supervisor.chair_review_needs_immediate_attention(
+            self.state, supervisor.load_status(self.config), {"pending": self.pending}))
+        enqueued = self.enqueue.call_count
+        self.assertFalse(self.queue())
+        self.assertEqual(self.enqueue.call_count, enqueued)
+
+        # Once the real deadline passes the cadence resumes on its own.
+        self.advance(900)
+        self.assertTrue(self.queue())
+        self.assertEqual(self.active_reason(), "approval_triage")
+
+    def test_non_approval_success_still_sets_the_cooldown_and_blocks_due_work(self) -> None:
+        self.status_path.write_text(json.dumps({**self.board, "tasks": [], "blockers": []}), encoding="utf-8")
+        for reason in ("blocked_task_triage", "reassignment_triage", "provider_health_triage", "operational_review"):
+            with self.subTest(reason=reason):
+                self.advance(60)
+                self.state["chair_review"]["cooldown_until"] = "2026-10-29T08:15:00Z"
+                self.state["chair_review"]["active_review"] = {
+                    "agent_id": "claude", "agent": "Claude", "reason": reason, "queue_event_id": f"evt-{reason}",
+                    "markdown_path": str(self.root / "chair-reviews" / f"{reason}.md"),
+                    "json_path": str(self.root / "chair-reviews" / f"{reason}.json"),
+                }
+                self.assertTrue(self.complete(self.payload(reason)))
+                self.assertEqual(self.state["chair_review"]["last_reason"], reason)
+                self.assertEqual(self.state["chair_review"]["cooldown_until"],
+                                 self.iso(self.clock[0] + self.timedelta(seconds=900)))
+
+        # A real unexpired non-approval cooldown still blocks a due blocked review.
+        self.status_path.write_text(json.dumps(self.board), encoding="utf-8")
+        self.advance(60)
+        self.assertEqual(supervisor.chair_review_reason(
+            self.state, {"pending": []}, status=supervisor.load_status(self.config), config=self.config),
+            "blocked_task_triage")
+        self.assertFalse(self.queue())
+        self.enqueue.assert_not_called()
+
+    def test_approval_success_without_ready_blocked_rows_queues_no_follow_up_work(self) -> None:
+        idle = {**self.board, "tasks": [], "blockers": []}
+        self.status_path.write_text(json.dumps(idle), encoding="utf-8")
+        chair = self.state["chair_review"]
+        chair["last_operational_fingerprint"] = supervisor.operational_review_fingerprint(
+            idle, {"pending": []}, self.state)
+        chair["last_operational_review_at"] = self.iso(self.clock[0])
+        self.dispatch_approval()
+        self.advance(60)
+        self.assertTrue(self.complete(self.payload("approval_triage")))
+        self.assertEqual(chair["cooldown_until"], "2026-10-29T08:15:00Z")
+        self.advance(60)
+        self.assertIsNone(supervisor.chair_review_reason(
+            self.state, {"pending": []}, status=idle, config=self.config))
+        self.assertFalse(self.queue())
+        self.assertEqual(self.enqueue.call_count, 1)
