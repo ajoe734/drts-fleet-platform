@@ -1067,7 +1067,7 @@ describe("actual native privacy form and canonical session readback", () => {
         const response: FeeResponse = {
           url: () => url,
           request: () => ({ method: () => "POST" }),
-          status: () => change.status ?? 307,
+          status: () => change.status ?? 303,
           headers: () => ({
             "x-drts-candidate-sha": change.sha ?? "a".repeat(40),
           }),
@@ -1095,7 +1095,7 @@ describe("actual native privacy form and canonical session readback", () => {
       control,
     };
   }
-  it("preserves only redirect status then authenticated owner-bound active readback", async () => {
+  it("accepts POST 303 then authenticated owner-bound active readback", async () => {
     const { result, records, read, control } = await probe();
     await result;
     expect(control.click).toHaveBeenCalledWith({ noWaitAfter: true });
@@ -1107,6 +1107,12 @@ describe("actual native privacy form and canonical session readback", () => {
     expect(JSON.stringify(records)).not.toMatch(
       /RAM-|ref_handoff|cookie|token|body/i,
     );
+  });
+  it("rejects stale method-preserving POST 307 before canonical GET", async () => {
+    const { result, records, read } = await probe({ status: 307 });
+    await expect(result).rejects.toThrow();
+    expect(read).not.toHaveBeenCalled();
+    expect(records).toEqual([]);
   });
   it.each([
     { label: "non-redirect POST", status: 200 },
