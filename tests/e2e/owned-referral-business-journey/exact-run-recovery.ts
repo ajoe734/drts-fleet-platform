@@ -170,6 +170,18 @@ export const EXACT_SEVEN_SOURCE_FACTS =
 export const EXACT_SEVEN_RECOVERY_FACTS =
   "cancellations/exact-seven-ack-recovery-facts.json";
 const MANIFEST_MAX_BYTES = 16384;
+// The existing remote revoke route. The API's step-up policy requires a fresh
+// proof for this exact method/path in the platform realm, issued to the same
+// session that sends it; the proof request names this same route.
+export const EXACT_SEVEN_REVOKE_ROUTE = Object.freeze({
+  method: "POST" as const,
+  path: "/api/auth/driver/device/revoke",
+  actionId: "ops:driver-device:revoke",
+});
+// Exact fields the original provisionSupply stored for `${nonce}-second`.
+const SECOND_LICENSE_NO = `SIM-DL-${FULL.secondSupply.nonce}`;
+const SECOND_REGISTRATION_NO = `SIM-REG-${FULL.secondSupply.nonce}`;
+const SECOND_SUBMISSION_MAX_READS = 200;
 
 /** The existing expected runtime alone selects this profile; no other input. */
 export function selectsExactSevenProfile(runtimeSha: string) {
@@ -307,6 +319,8 @@ export type ExactSupplyState = {
     | "ambiguous-unknown"
     | "qualification-unknown"
     | "mismatch-preserved"
+    | "created-no-canonical-driver"
+    | "created-binding-not-observed-unknown"
     | "blocked-orders-unresolved"
     | "blocked-final-readback-unqualified";
   // "attempted" is durable before the request; "acknowledged-readback-pending"
@@ -321,8 +335,14 @@ export type ExactSupplyState = {
     | "write-denied"
     | "write-ack-unknown"
     | "readback-missing";
+  // The revoke's step-up proof precedes "attempted"; a proof that was not
+  // issued and verified never lets the revoke leave.
   binding:
     | "pending"
+    | "step-up-session-unverified"
+    | "step-up-proof-requested"
+    | "step-up-proof-denied"
+    | "step-up-proof-unknown"
     | "intent-not-durable-not-sent"
     | "attempted"
     | "acknowledged-readback-pending"
@@ -331,6 +351,29 @@ export type ExactSupplyState = {
     | "write-denied"
     | "write-ack-unknown"
     | "readback-missing";
+  // Only the typed status and an allowlisted transport code; never a body.
+  denial?: {
+    stage: "offline" | "revoke" | "step-up-proof";
+    httpStatus: number;
+    code?: string;
+  };
+  sourceReadback?: ExactSecondSupplyReadback;
+};
+// Counts and IDs only (no license, phone or draft value). Neither read path
+// attests PG authority, so zero observations are never a global absence.
+export type ExactSecondSupplyReadback = {
+  registryDeviceMatches: number | null;
+  submissionsListed: number | null;
+  listComplete: boolean;
+  candidates: number | null;
+  candidatesRead: number;
+  exactDriverSubmissions: number | null;
+  partialFieldMatches: number | null;
+  exactVehicleSubmissions: number | null;
+  driverSubmissionId: string | null;
+  driverSubmissionStatus: string | null;
+  absence: "not-claimed-authority-unattested";
+  refusal: string | null;
 };
 export type ExactSevenRecoveryState = {
   profile: string;
@@ -394,7 +437,20 @@ export type ExactSevenPorts = {
   readDrivers: () => Promise<unknown>;
   readVehicles: () => Promise<unknown>;
   setOffline: (driverId: string) => Promise<unknown>;
-  revokeBinding: (bindingId: string, deviceId: string) => Promise<unknown>;
+  // The same canonical Admin session sends the proof request and the revoke.
+  adminSessionId: string;
+  readAdminSession: () => Promise<unknown>;
+  // The existing stepUp helper: POST identity/step-up-proofs {method, path}.
+  stepUp: (path: string, actionId: string) => Promise<string>;
+  revokeBinding: (
+    bindingId: string,
+    deviceId: string,
+    stepUpReference: string,
+  ) => Promise<unknown>;
+  // Existing read-only Admin supply-review list/detail of the original Fleet.
+  fleetPartnerId: string;
+  readSupplySubmissions: () => Promise<unknown>;
+  readSupplySubmission: (submissionId: string) => Promise<unknown>;
   // Durable minimal typed facts; called before every write and after its ACK.
   persist: (facts: ObjectData) => Promise<void>;
   now: () => number;
@@ -781,10 +837,20 @@ function sameBindingRevoked(
   );
 }
 
+const draftOf = (detail: ObjectData, key: "driverDraft" | "vehicleDraft") =>
+  detail[key] && typeof detail[key] === "object" ? object(detail[key]) : null;
+
 /**
- * Second supply: the artifact holds no ID. Only a single registry driver that
- * already carries the exact original deterministic device binding qualifies;
- * zero or several matches stay unknown, and nothing is acted on.
+ * Second supply: the artifact holds no ID. Two existing read-only canonical
+ * paths are joined only on fields the original producer stored: the registry
+ * Driver carrying the exact `${nonce}-second-device` binding, and the Admin
+ * supply-review driver submission whose license AND registration numbers are
+ * exactly `SIM-DL-`/`SIM-REG-${nonce}-second` (its vehicle names that
+ * submission as currentDriverSubmissionId). No name, prefix or time window is
+ * used. Only one complete, mutually consistent chain qualifies; a created but
+ * unapproved draft and an approved Driver without the exact binding are told
+ * apart, and zero observations stay unknown: neither response attests
+ * PG authority, so nothing here is a global absence. Nothing is written.
  */
 export async function qualifyExactSevenSecondSupply(
   state: ExactSevenRecoveryState,
@@ -796,31 +862,137 @@ export async function qualifyExactSevenSecondSupply(
     "exact-seven:second-supply-qualification-once-after-orders",
   );
   actor.qualification = "qualification-unknown";
+  const readback: ExactSecondSupplyReadback = {
+    registryDeviceMatches: null,
+    submissionsListed: null,
+    listComplete: false,
+    candidates: null,
+    candidatesRead: 0,
+    exactDriverSubmissions: null,
+    partialFieldMatches: null,
+    exactVehicleSubmissions: null,
+    driverSubmissionId: null,
+    driverSubmissionStatus: null,
+    absence: "not-claimed-authority-unattested",
+    refusal: null,
+  };
+  actor.sourceReadback = readback;
+  const settle = async (
+    qualification: ExactSupplyState["qualification"],
+    refusal: string,
+  ) => {
+    actor.qualification = qualification;
+    readback.refusal = refusal;
+    await ports.persist(exactSevenFacts(state));
+    return false;
+  };
   let driverId: string;
+  let vehicleId: string;
   let bindingId: string;
   try {
-    const matches = records(object(await ports.readDrivers()).items).filter(
+    const devices = records(object(await ports.readDrivers()).items).filter(
       (driver) =>
         Array.isArray(driver.deviceBindings) &&
         records(driver.deviceBindings).some(
           (binding) => binding.deviceId === actor.deviceId,
         ),
     );
-    if (matches.length !== 1) {
-      actor.qualification = matches.length
-        ? "ambiguous-unknown"
-        : "not-observed-unknown";
-      await ports.persist(exactSevenFacts(state));
-      return false;
+    readback.registryDeviceMatches = devices.length;
+    const list = object(await ports.readSupplySubmissions());
+    const listed = records(list.items);
+    readback.submissionsListed = listed.length;
+    readback.listComplete =
+      list.pageInfo !== undefined &&
+      object(list.pageInfo).totalItems === listed.length;
+    if (!readback.listComplete)
+      return await settle("qualification-unknown", "submission-list-partial");
+    const candidates = listed.filter(
+      (item) =>
+        (item.submissionType === "driver_onboarding" ||
+          item.submissionType === "vehicle_onboarding") &&
+        item.fleetPartnerId === ports.fleetPartnerId,
+    );
+    readback.candidates = candidates.length;
+    if (candidates.length > SECOND_SUBMISSION_MAX_READS)
+      return await settle(
+        "qualification-unknown",
+        "submission-candidates-over-bound",
+      );
+    const details: ObjectData[] = [];
+    for (const item of candidates) {
+      const id = text(item.submissionId);
+      const detail = object(await ports.readSupplySubmission(id));
+      requireFact(
+        object(detail.submission).submissionId === id,
+        "exact-seven:second-submission-detail-binding",
+      );
+      details.push(detail);
+      readback.candidatesRead += 1;
     }
-    const binding = deviceBinding(matches[0]!, actor.deviceId);
-    driverId = text(matches[0]!.driverId);
+    const license = (detail: ObjectData) =>
+      draftOf(detail, "driverDraft")?.professionalDriverLicenseNo ===
+      SECOND_LICENSE_NO;
+    const registration = (detail: ObjectData) =>
+      draftOf(detail, "driverDraft")?.taxiDriverRegistrationNo ===
+      SECOND_REGISTRATION_NO;
+    const exact = details.filter(
+      (detail) => license(detail) && registration(detail),
+    );
+    readback.exactDriverSubmissions = exact.length;
+    readback.partialFieldMatches = details.filter(
+      (detail) => license(detail) !== registration(detail),
+    ).length;
+    if (devices.length > 1 || exact.length > 1 || readback.partialFieldMatches)
+      return await settle("ambiguous-unknown", "second-source-not-unique");
+    if (exact.length === 0)
+      return devices.length
+        ? await settle(
+            "mismatch-preserved",
+            "device-binding-without-exact-source-submission",
+          )
+        : await settle("not-observed-unknown", "no-exact-source-observed");
+    const source = object(exact[0]!.submission);
+    const submissionId = text(source.submissionId);
+    readback.driverSubmissionId = submissionId;
+    readback.driverSubmissionStatus = nullableText(source.status);
+    const vehicles = details.filter(
+      (detail) =>
+        draftOf(detail, "vehicleDraft")?.currentDriverSubmissionId ===
+        submissionId,
+    );
+    readback.exactVehicleSubmissions = vehicles.length;
+    const canonicalDriverId = nullableText(source.canonicalDriverId);
+    if (devices.length === 0) {
+      if (canonicalDriverId === null)
+        return await settle(
+          "created-no-canonical-driver",
+          "source-submission-without-canonical-driver",
+        );
+      actor.driverId = canonicalDriverId;
+      return await settle(
+        "created-binding-not-observed-unknown",
+        "canonical-driver-without-exact-device-binding",
+      );
+    }
+    const canonicalVehicleId =
+      vehicles.length === 1
+        ? nullableText(object(vehicles[0]!.submission).canonicalVehicleId)
+        : null;
+    if (devices[0]!.driverId !== canonicalDriverId || !canonicalVehicleId)
+      return await settle(
+        "mismatch-preserved",
+        "source-driver-or-vehicle-chain-mismatch",
+      );
+    const binding = deviceBinding(devices[0]!, actor.deviceId);
+    driverId = text(canonicalDriverId);
+    vehicleId = canonicalVehicleId;
     bindingId = text(binding.bindingId);
   } catch (error) {
     await ports.persist(exactSevenFacts(state)).catch(() => undefined);
     throw error;
   }
   actor.driverId = driverId;
+  actor.vehicleId = vehicleId;
   actor.bindingId = bindingId;
   actor.qualification = "qualified";
   await ports.persist(exactSevenFacts(state));
@@ -828,9 +1000,75 @@ export async function qualifyExactSevenSecondSupply(
 }
 
 /**
+ * Fresh same-session proof for exactly the revoke route, requested only after
+ * the whole gate and the exact registry requalification passed. A refused or
+ * lost proof stays recorded and the revoke is never sent; nothing is retried.
+ */
+async function revokeStepUpReference(
+  state: ExactSevenRecoveryState,
+  actor: ExactSupplyState,
+  ports: ExactSevenPorts,
+) {
+  const record = () =>
+    ports.persist(exactSevenFacts(state)).catch(() => undefined);
+  let sameSession = false;
+  try {
+    const session = object(await ports.readAdminSession());
+    const identity = object(session.identity);
+    sameSession =
+      session.active === true &&
+      identity.realm === "platform" &&
+      identity.actorType === "platform_admin" &&
+      typeof ports.adminSessionId === "string" &&
+      ports.adminSessionId.length > 0 &&
+      identity.sessionId === ports.adminSessionId;
+  } catch {
+    sameSession = false;
+  }
+  if (!sameSession) {
+    actor.binding = "step-up-session-unverified";
+    await record();
+    throw new JourneyFailure(
+      `exact-seven:${actor.actor}-revoke-step-up-session-unverified`,
+    );
+  }
+  actor.binding = "step-up-proof-requested";
+  try {
+    await ports.persist(exactSevenFacts(state));
+  } catch (error) {
+    actor.binding = "intent-not-durable-not-sent";
+    throw error;
+  }
+  try {
+    return text(
+      await ports.stepUp(
+        EXACT_SEVEN_REVOKE_ROUTE.path,
+        EXACT_SEVEN_REVOKE_ROUTE.actionId,
+      ),
+      "exact-seven:step-up-reference-required",
+    );
+  } catch (error) {
+    const failure = writeFailure(error);
+    if (failure.outcome === "write-denied") {
+      actor.binding = "step-up-proof-denied";
+      actor.denial = {
+        stage: "step-up-proof",
+        httpStatus: failure.httpStatus,
+        ...(failure.code ? { code: failure.code } : {}),
+      };
+    } else actor.binding = "step-up-proof-unknown";
+    await record();
+    throw new JourneyFailure(
+      `exact-seven:${actor.actor}-revoke-${actor.binding}-preserved`,
+    );
+  }
+}
+
+/**
  * Normal Admin offline or binding revoke for one qualified own actor. The exact
- * driver/device/binding (and the first vehicle) are requalified from live
- * registry fields before the write; the write is never retried.
+ * driver/device/binding (and the qualified vehicle) are requalified from live
+ * registry fields before the write; a revoke also carries a fresh step-up
+ * proof of the same Admin session. The write is never retried.
  */
 export async function cleanExactSevenSupply(
   state: ExactSevenRecoveryState,
@@ -862,12 +1100,12 @@ export async function cleanExactSevenSupply(
       actor.bindingId === undefined || binding.bindingId === actor.bindingId,
       "exact-seven:binding-changed",
     );
-    if (actorName === "first")
+    if (actor.vehicleId !== undefined)
       requireFact(
         records(object(await ports.readVehicles()).items).filter(
           (vehicle) => vehicle.vehicleId === actor.vehicleId,
         ).length === 1,
-        "exact-seven:first-vehicle-registry-readback",
+        `exact-seven:${actorName}-vehicle-registry-readback`,
       );
   } catch (error) {
     // A typed mismatch of the exact registry fields is a refusal; anything
@@ -891,6 +1129,10 @@ export async function cleanExactSevenSupply(
     await ports.persist(exactSevenFacts(state));
     return;
   }
+  const stepUpReference =
+    part === "revoke"
+      ? await revokeStepUpReference(state, actor, ports)
+      : undefined;
   // Durable attempted intent before the request; without it nothing is sent.
   actor[field] = "attempted";
   try {
@@ -904,10 +1146,21 @@ export async function cleanExactSevenSupply(
     ack = object(
       part === "offline"
         ? await ports.setOffline(driverId)
-        : await ports.revokeBinding(actor.bindingId, actor.deviceId),
+        : await ports.revokeBinding(
+            actor.bindingId,
+            actor.deviceId,
+            text(stepUpReference),
+          ),
     );
   } catch (error) {
-    actor[field] = writeFailure(error).outcome;
+    const failure = writeFailure(error);
+    actor[field] = failure.outcome;
+    if (failure.outcome === "write-denied")
+      actor.denial = {
+        stage: part,
+        httpStatus: failure.httpStatus,
+        ...(failure.code ? { code: failure.code } : {}),
+      };
     await record();
     throw new JourneyFailure(
       `exact-seven:${actorName}-${part}-${actor[field]}-preserved`,
