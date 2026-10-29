@@ -478,7 +478,7 @@ export function CaseReplyComposer({
               setReplyState("idle");
             }}
           >
-            補充回覆
+            {t("cases.action.respond")}
           </CanvasBtn>
         </div>
       ) : (

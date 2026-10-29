@@ -292,7 +292,7 @@ describe("C067 actual immutable reply recovery and closed display", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /送出回覆/ }));
     await screen.findByText("回覆已送出 · CASE_REPLY_RECEIVED");
-    fireEvent.click(screen.getByRole("button", { name: "補充回覆" }));
+    fireEvent.click(screen.getByRole("button", { name: "Respond" }));
     expect(
       screen.getByRole("textbox", { name: "Reply content" }),
     ).toHaveProperty("value", "");
