@@ -127,6 +127,8 @@ function memoryFetch(transport: any): typeof fetch {
     incoming.httpVersionMinor = 1;
     incoming.push(Buffer.from(await request.text()));
     incoming.push(null);
+    // The HTTP parser normally marks the complete message. Without this,
+    // IncomingMessage's auto-destroy would close the synthetic response wire.
     incoming.complete = true;
     const outgoing = new ServerResponse(incoming);
     outgoing.useChunkedEncodingByDefault = false;
@@ -211,6 +213,26 @@ describe.each(["cjs", "esm"])("OpenClaw's MCP dependency (%s)", (format) => {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
       expect(clientTransport.sessionId).toBe("synthetic-session");
+      const wrongSession = await memoryFetch(serverTransport)(
+        "http://synthetic.invalid/mcp",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-session-id": "another-synthetic-session",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 42,
+            method: "tools/list",
+          }),
+        },
+      );
+      expect(wrongSession.status).toBe(404);
+      expect(await wrongSession.json()).toMatchObject({
+        error: { message: "Session not found" },
+      });
       expect(await client.listTools()).toMatchObject({
         tools: [{ name: "public_fixture" }],
       });
