@@ -594,7 +594,8 @@ type BookingObservationPhase =
   | "booking-response-body"
   | "booking-response-release"
   | "booking-original-route"
-  | "booking-ack-persist";
+  | "booking-ack-persist"
+  | "booking-operation-drain";
 
 function bookingObservationFailure(
   phase: BookingObservationPhase,
@@ -790,10 +791,41 @@ export async function settleRoutedOriginalBookingAck<T>(
   return result.value;
 }
 
-/** A failed click stays failed; settle its one observer before owned cleanup. */
+/** Resolve once the caller's existing operation budget expires; never rejects. */
+function operationExpiry(
+  expired: AbortSignal | undefined,
+  phase: BookingObservationPhase,
+) {
+  let onExpired: (() => void) | undefined;
+  const reached = new Promise<{ kind: "expired"; failure: JourneyFailure }>(
+    (resolve) => {
+      if (!expired) return;
+      onExpired = () =>
+        resolve({
+          kind: "expired",
+          failure: bookingObservationFailure(phase, expired.reason),
+        });
+      if (expired.aborted) onExpired();
+      else expired.addEventListener("abort", onExpired, { once: true });
+    },
+  );
+  return {
+    reached,
+    dispose: () => {
+      if (onExpired) expired?.removeEventListener("abort", onExpired);
+    },
+  };
+}
+
+/**
+ * A failed click stays failed; settle its one observer before owned cleanup.
+ * An observation that already failed, or the caller's own existing operation
+ * deadline (`expired`), ends the wait for a UI click that never settles.
+ */
 export async function clickAndSettleOriginalBookingAck<T>(
   click: () => Promise<void>,
   observation: Promise<T>,
+  expired?: AbortSignal,
 ): Promise<T> {
   // Attach the rejection handler immediately, before waiting for the UI action.
   // Keep the failure as data until this same observation is awaited below.
@@ -801,16 +833,166 @@ export async function clickAndSettleOriginalBookingAck<T>(
     (value) => ({ ok: true as const, value }),
     (error: unknown) => ({ ok: false as const, error }),
   );
-  let clickFailure: JourneyFailure | undefined;
+  // The click's own late outcome stays observed after this join has returned.
+  const clicked = new Promise<void>((resolve) => resolve(click())).then(
+    () => ({ kind: "clicked" as const }),
+    (error: unknown) => ({
+      kind: "click-failed" as const,
+      failure: bookingObservationFailure("booking-ui-click", error),
+    }),
+  );
+  const observationFailed = settled.then((result) =>
+    result.ok
+      ? new Promise<never>(() => undefined)
+      : { kind: "observation-failed" as const, error: result.error },
+  );
+  const deadline = operationExpiry(expired, "booking-ui-click");
   try {
-    await click();
-  } catch (error) {
-    clickFailure = bookingObservationFailure("booking-ui-click", error);
+    const first = await Promise.race([
+      clicked,
+      observationFailed,
+      deadline.reached,
+    ]);
+    if (first.kind === "observation-failed") throw first.error;
+    // The operation deadline already expired with the click still pending. A
+    // received ACK stays durable through its own observer; it is not success.
+    if (first.kind === "expired") throw first.failure;
+    const result = await Promise.race([settled, deadline.reached]);
+    if (first.kind === "click-failed") throw first.failure;
+    if ("kind" in result) throw result.failure;
+    if (!result.ok) throw result.error;
+    return result.value;
+  } finally {
+    deadline.dispose();
   }
-  const result = await settled;
-  if (clickFailure) throw clickFailure;
-  if (!result.ok) throw result.error;
-  return result.value;
+}
+
+/**
+ * Await an owned route/quote drain only within the same existing operation
+ * budget. An abandoned drain keeps running observed; the caller is not held.
+ */
+export async function drainWithinOperationBudget(
+  drain: Promise<unknown>,
+  expired: AbortSignal,
+): Promise<void> {
+  const drained = drain.then(
+    () => ({ kind: "drained" as const }),
+    (error: unknown) => ({ kind: "drain-failed" as const, error }),
+  );
+  const deadline = operationExpiry(expired, "booking-operation-drain");
+  try {
+    const first = await Promise.race([drained, deadline.reached]);
+    if (first.kind === "drain-failed") throw first.error;
+    if (first.kind === "expired") throw first.failure;
+  } finally {
+    deadline.dispose();
+  }
+}
+
+/** Main booking click/ACK join plus its original route drain, one budget. */
+export async function settleOriginalBookingOperation<T>(
+  click: () => Promise<void>,
+  observation: Promise<T>,
+  expired: AbortSignal,
+  routeDrain: () => Promise<unknown> | undefined,
+): Promise<T> {
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  try {
+    outcome = {
+      ok: true,
+      value: await clickAndSettleOriginalBookingAck(
+        click,
+        observation,
+        expired,
+      ),
+    };
+  } catch (error) {
+    outcome = { ok: false, error };
+  }
+  const pending = routeDrain();
+  if (pending) {
+    try {
+      await drainWithinOperationBudget(pending, expired);
+    } catch (error) {
+      // The join's own failure stays primary; an abandoned drain is still
+      // reported when the join itself had succeeded.
+      if (outcome.ok) throw error;
+    }
+  }
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
+}
+
+/**
+ * One original booking operation: armed with the caller's existing budget,
+ * closed on every exit and never reopened. A closed operation sends nothing.
+ */
+export class OriginalBookingOperation {
+  private readonly controller = new AbortController();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  constructor(private readonly label: string) {}
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  get open(): boolean {
+    return !this.controller.signal.aborted;
+  }
+
+  /** Arm the existing budget; `onExpire` runs that budget's own failure first. */
+  arm(ms: number, onExpire?: (failure: JourneyFailure) => void) {
+    requireFact(
+      this.open && this.timer === undefined,
+      `${this.label} budget armed once while open`,
+    );
+    this.timer = setTimeout(() => {
+      const failure = new JourneyFailure(`${this.label}-timeout`);
+      onExpire?.(failure);
+      this.controller.abort(failure);
+    }, ms);
+  }
+
+  close() {
+    clearTimeout(this.timer);
+    if (this.open)
+      this.controller.abort(new JourneyFailure(`${this.label}-closed`));
+  }
+
+  /** Recheck immediately before the one real send, after every earlier await. */
+  async send<T>(send: () => Promise<T>): Promise<T> {
+    requireFact(this.open, `${this.label} within its operation budget`);
+    return send();
+  }
+}
+
+/**
+ * End an operation on every exit. A successful one drains (unroute and its
+ * observed quote work) within its armed budget, then closes.
+ *
+ * A failed one is closed and its drain is never run: no UI-side signal proves
+ * the page can no longer emit that first POST (a settled click does not), so
+ * its closed route guard stays registered and aborts any late POST until the
+ * page itself closes and drops it. Abandoned quote work is already observed;
+ * the caller is not held and its own failure stays primary.
+ */
+export async function closeOriginalBookingOperation(
+  operation: OriginalBookingOperation,
+  succeeded: boolean,
+  drain: () => Promise<unknown>,
+): Promise<void> {
+  if (!succeeded) {
+    operation.close();
+    return;
+  }
+  try {
+    await drainWithinOperationBudget(
+      new Promise<unknown>((resolve) => resolve(drain())),
+      operation.signal,
+    );
+  } finally {
+    operation.close();
+  }
 }
 
 export type SafeEvent = {
@@ -917,7 +1099,7 @@ const DEFAULT_RESPONSE_BYTE_LIMIT = 1024 * 1024;
 // buffer each retain at most 8 MiB (JSON parsing/conversion also uses memory).
 // Never expose a caller-selected limit or widen ordinary JSON/binary downloads.
 const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 8 * DEFAULT_RESPONSE_BYTE_LIMIT;
-const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
+export const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
 // Mirrors deploy-dev.yml curl_ready/curl_ready_auth --max-time 30 (readiness,
 // not a business deadline). No retry is added; one request, one deadline.
 const STARTUP_OPS_READINESS_TIMEOUT_MS = 30_000;
