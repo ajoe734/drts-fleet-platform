@@ -2811,17 +2811,35 @@ export async function prepareOperationalRoleSessions(
           item.activeFlag !== false &&
           !nonEmptyTrimmed(item.revokedAt),
       );
-      if (activeEntries.length === 0) {
+      // Only an own-Fleet binding can authorize the source pair. Unrelated
+      // historical entries must neither supply a fallback nor block this run.
+      const ownSourceEntries = activeEntries.filter(
+        (item) =>
+          (nonEmptyTrimmed(item.partnerId) ??
+            nonEmptyTrimmed(item.fleetPartnerId)) === config.expectedOwnFleetId,
+      );
+      if (ownSourceEntries.length === 0) {
         evidence.foreign_fleet_precondition = "missing-external-fixture";
         throw new OperationalForeignFleetFixturePreconditionError(
-          "Cannot resolve canonical (tenantId, programId) pair: no active partner entries found in Platform Admin readback",
+          `Cannot resolve canonical (tenantId, programId) pair: no active own Fleet (${config.expectedOwnFleetId}) partner entry found in Platform Admin readback`,
         );
       }
 
-      const programToTenant = new Map<string, string>();
-      for (const item of activeEntries) {
+      const sourceTenantId = nonEmptyTrimmed(ownSourceEntries[0]!.tenantId)!;
+      const sourceProgramId = nonEmptyTrimmed(ownSourceEntries[0]!.programId)!;
+      for (const item of ownSourceEntries) {
         const itemTenantId = nonEmptyTrimmed(item.tenantId);
         const itemProgramId = nonEmptyTrimmed(item.programId);
+        const fleetAlias = nonEmptyTrimmed(item.fleetPartnerId);
+        if (
+          item.partnerType !== "fleet_partner" ||
+          (fleetAlias && fleetAlias !== config.expectedOwnFleetId)
+        ) {
+          evidence.foreign_fleet_precondition = "invalid-external-fixture";
+          throw new OperationalForeignFleetFixturePreconditionError(
+            "Active own Fleet source entry has an invalid Fleet identity binding",
+          );
+        }
         if (!itemTenantId || !itemProgramId) {
           evidence.foreign_fleet_precondition = "invalid-external-fixture";
           throw new OperationalForeignFleetFixturePreconditionError(
@@ -2840,25 +2858,29 @@ export async function prepareOperationalRoleSessions(
             `Active partner entry mixes disallowed manifest tenant (${itemTenantId}) with program (${itemProgramId})`,
           );
         }
-        const priorTenant = programToTenant.get(itemProgramId);
-        if (priorTenant && priorTenant !== itemTenantId) {
+        if (
+          sourceTenantId !== itemTenantId ||
+          sourceProgramId !== itemProgramId
+        ) {
           evidence.foreign_fleet_precondition = "invalid-external-fixture";
           throw new OperationalForeignFleetFixturePreconditionError(
-            `Conflicting tenantId bindings (${priorTenant} vs ${itemTenantId}) found for programId (${itemProgramId})`,
+            "Active own Fleet source entries have ambiguous canonical (tenantId, programId) bindings",
           );
         }
-        programToTenant.set(itemProgramId, itemTenantId);
       }
 
-      const preferredSourceEntry =
-        activeEntries.find(
-          (item) =>
-            (nonEmptyTrimmed(item.partnerId) ??
-              nonEmptyTrimmed(item.fleetPartnerId)) ===
-            config.expectedOwnFleetId,
-        ) ?? activeEntries[0]!;
-      const sourceTenantId = nonEmptyTrimmed(preferredSourceEntry.tenantId)!;
-      const sourceProgramId = nonEmptyTrimmed(preferredSourceEntry.programId)!;
+      // Any active entry for the selected program still has to agree on tenant
+      // ownership, even when that entry belongs to a different partner.
+      for (const item of activeEntries) {
+        if (nonEmptyTrimmed(item.programId) !== sourceProgramId) continue;
+        const itemTenantId = nonEmptyTrimmed(item.tenantId);
+        if (itemTenantId !== sourceTenantId) {
+          evidence.foreign_fleet_precondition = "invalid-external-fixture";
+          throw new OperationalForeignFleetFixturePreconditionError(
+            `Conflicting tenantId bindings (${sourceTenantId} vs ${itemTenantId ?? "missing"}) found for programId (${sourceProgramId})`,
+          );
+        }
+      }
 
       // Stage 3C: Create run-owned canonical foreign Fleet
       evidence.stage = "foreign_fleet:create-canonical-fleet";
@@ -3946,9 +3968,8 @@ export async function teardownOperationalRoleSessions(
         "pending",
       );
       if (
-        nonEmptyTrimmed(
-          env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED,
-        ) === "true"
+        nonEmptyTrimmed(env.DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED) ===
+        "true"
       ) {
         deps.exportSession?.(
           "DRTS_OPERATIONAL_PLATFORM_ADMIN_SESSION_REVOKED",
@@ -3981,9 +4002,7 @@ export async function teardownOperationalRoleSessions(
           },
           "Platform Admin BFF proxy",
         );
-        const adminIssued = objectRecord(
-          rawAdminIssued.data ?? rawAdminIssued,
-        );
+        const adminIssued = objectRecord(rawAdminIssued.data ?? rawAdminIssued);
         const issuedToken = assertOpaqueCredential(
           adminIssued.token,
           "Platform Admin BFF issued token",
