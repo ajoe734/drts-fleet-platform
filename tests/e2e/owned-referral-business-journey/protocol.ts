@@ -1220,6 +1220,7 @@ export type CallOptions = {
   headers?: Record<string, string>;
   expected?: number[];
   raw?: boolean;
+  purpose?: "own-fleet-pre-supply-html-readiness";
 };
 const DEFAULT_RESPONSE_BYTE_LIMIT = 1024 * 1024;
 // TEN02 reads all committed orders, including historical/sibling rows, in RAM.
@@ -1230,7 +1231,7 @@ const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 8 * DEFAULT_RESPONSE_BYTE_LIMIT;
 export const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
 // Mirrors deploy-dev.yml curl_ready/curl_ready_auth --max-time 30 (readiness,
 // not a business deadline). No retry is added; one request, one deadline.
-const STARTUP_OPS_READINESS_TIMEOUT_MS = 30_000;
+const HTML_READINESS_TIMEOUT_MS = 30_000;
 export class NativeTransport {
   private readonly sessions = new Map<Role, string>();
   constructor(
@@ -1315,7 +1316,8 @@ export class NativeTransport {
     // Only the startup served-runtime GET of the raw Ops dashboard HTML, before
     // any Ops application session exists, uses the existing deploy-dev
     // curl_ready_auth Ops readiness budget (30s per request). Every business,
-    // POST/ACK, authenticated page, other role/route or variant keeps 15s.
+    // POST/ACK or variant keeps 15s, except the explicitly marked Fleet
+    // pre-supply HTML readiness call below.
     const preSessionOpsStartupProbe =
       role === "ops" &&
       path === "/dashboard" &&
@@ -1325,9 +1327,22 @@ export class NativeTransport {
       options.expected?.length === 1 &&
       options.expected[0] === 200 &&
       !this.sessions.has("ops");
+    // The original consumer marks its one root read only after the normal
+    // OwnFleet session producer succeeds and before provisioning any supply.
+    // This purpose selects a readiness budget, never authority or a retry.
+    // headers() still requires the normal Fleet helper and isolates its origin.
+    const ownFleetPreSupplyHtmlReadiness =
+      options.purpose === "own-fleet-pre-supply-html-readiness" &&
+      role === "fleet" &&
+      path === "/" &&
+      (options.method ?? "GET") === "GET" &&
+      options.body === undefined &&
+      options.raw === true &&
+      options.expected?.length === 1 &&
+      options.expected[0] === 200;
     const requestSignal = AbortSignal.timeout(
-      preSessionOpsStartupProbe
-        ? STARTUP_OPS_READINESS_TIMEOUT_MS
+      preSessionOpsStartupProbe || ownFleetPreSupplyHtmlReadiness
+        ? HTML_READINESS_TIMEOUT_MS
         : NATIVE_REQUEST_TIMEOUT_MS,
     );
     const requestStartedAt = performance.now();

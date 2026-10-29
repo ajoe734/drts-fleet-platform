@@ -965,7 +965,11 @@ test(journeyName, async ({ browser, request }) => {
         fleetPartnerId: FLEET,
         tenantId: TENANT,
       });
-      await tx.call("fleet", "/", { raw: true, expected: [200] });
+      await tx.call("fleet", "/", {
+        raw: true,
+        expected: [200],
+        purpose: "own-fleet-pre-supply-html-readiness",
+      });
       evidence.record({
         stage: "normal-own-first-key-Fleet-session",
         result: "observed",
