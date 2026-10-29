@@ -12,13 +12,33 @@ The next action is to qualify this retained evidence through the existing
 acceptance lifecycle. Another route patch, deployment or FULL run is not needed
 to obtain that evidence.
 
-**Pre-merge hold:** Supervisor must update the parent's `next` and persist this
-helper's `resolved_parent_status: blocked`, `resolved_parent_next`, and
-`resolved_parent_waiting_for: Codex` through the active status CLI before this
-helper merges. This dispatched worker attempted both writes; the gateway denied
-them. Do not merge until those fields are present. Helper completion otherwise
-defaults to `todo`, which would lose the distinction between merged Source and
-pending acceptance. Review of this document can proceed while that write waits.
+**Metadata hold cleared:** Supervisor updated the parent's `next` at
+2026-10-29T06:48:49Z and persisted this helper's
+`resolved_parent_status: blocked`, `resolved_parent_next`, and
+`resolved_parent_waiting_for: Codex`. The 12:06 UTC owner readback confirms
+those fields remain present and the parent next matches the helper disposition.
+Earlier worker write denials remain historical evidence; do not repeat them.
+Preserve the blocked disposition through this helper's review and merge so
+merged Source remains distinct from pending parent acceptance.
+
+**Security peer incorporated:** Old helper candidate
+`43c446a1049e4312494a3e7e21727baba4610c5b` / generation
+`54808fa93d0b4a57913c49b39f0749c2` had completed failing dependency-security
+CI for advisory 1243661. Original task
+`DEPENDENCY-HONO-NODE-SERVER-1243661-REMEDIATION-20261029` is now `done`,
+with both Source acceptance keys recorded for candidate
+`2bd86bc8a6cc438f84fbf6300f9afcfaaf1b2dc1`, generation
+`80c7772e87eb44feb27025b6be180bbb`, and protected merge
+`8c74514a9b594aa1fac7940c4a070f0c61bc2c3e` ([PR #3141](https://github.com/ajoe734/drts-fleet-platform/pull/3141)).
+That merge is an ancestor of fetched `origin/dev`
+`68a63e746f7a581e3d6535dd3d337f8f27264bd1`. This owner normally merged that
+published dev head into the original helper branch as
+`731af15a43fb51bd15223a7ee42bf8faea8357be`, preserving published history.
+The resulting PR diff against that dev head still contains only this support
+Markdown leaf. The accepted dependency resolution is `@hono/node-server@2.1.3`;
+no security exception or gate change is introduced by this helper. New helper
+SHA/generation needs its own Claude2 review and complete CI/security results;
+peer green checks do not grant this helper CI credit. Do not rerun the old SHA.
 
 ## Preserved parent and original finding
 
@@ -134,18 +154,24 @@ validator for this route key; it does not copy the other task's acceptance credi
 Machine-specific evidence and prepared inputs use the absolute directory
 `/home/lupin/workspace/drts-fleet-platform/.local/unblock-r12-route-dispatch-20261029/`.
 
-1. In the authorized Supervisor context, use the dispatch-specified active CLI
-   below to `note` the parent with `parent-next.txt`. Use `assign` for this
-   helper, retaining Codex/Claude2, with `TASK_METADATA_JSON` loaded from
-   `helper-disposition.json`. Read back the parent's identity and Source key,
-   and all three helper disposition fields. These are pending writes, not
-   actions this document claims to have completed.
+1. Retain the already persisted parent next and all three helper disposition
+   fields. Original Codex hands off the normally pushed new helper SHA on
+   [PR #3134](https://github.com/ajoe734/drts-fleet-platform/pull/3134) to
+   original reviewer Claude2. Require exact-new-SHA review, its own complete
+   CI/security and normal protected merge. Existing local prepared inputs and
+   worker write-denial evidence are historical; no further note/assign retry
+   is needed.
 2. After exact-SHA helper review, CI and merge finish, read fresh parent,
    dependency and open-blocker snapshots. Use the existing
    `merged_runtime_acceptance_ready` Supervisor resume transaction to restore
-   acceptance on the same parent candidate/generation. Respect the guard's
-   exact-one-open-blocker and completed-helper requirements; if it refuses,
-   report that precise reason rather than bypassing it. Do not use `start`,
+   acceptance on the same parent candidate/generation. The active release
+   still requires exactly one open blocker and rejects any unfinished helper
+   for this parent. A zero-open-blocker guard repair and any other unfinished
+   helper are separate conditions: completing this helper alone does not
+   satisfy or bypass either guard. Supervisor must evaluate fresh snapshots
+   and report the precise remaining refusal, using the original authorized
+   control-plane repair path if needed. This support-only helper does not
+   import unaccepted runtime WIP or change those guards. Do not use `start`,
    a fresh parent `handoff`, or source reopening.
 3. Original authorized parent roles qualify this run against
    `same_release_existing_daily_preview_and_three_downloads_after_dispatch_fix`
@@ -155,7 +181,7 @@ Machine-specific evidence and prepared inputs use the absolute directory
    they do not become additional gates on this specific route key.
 
 Active CLI:
-`/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-8295d1f33455/tools/development-orchestrator/bin/ai-status.sh`.
+`/home/lupin/workspace/drts-fleet-platform/.artifacts/releases/orchestrator-dac6f0b56b88/tools/development-orchestrator/bin/ai-status.sh`.
 The prepared parent `next` is 1,533 characters, within the 4,000-character limit.
 Do not remove dispatch environment fences or impersonate Supervisor to apply it.
 
@@ -168,15 +194,33 @@ The retained artifact audit SHA256 is
 Scoped Prettier, repository classification (7,552 files), `git diff --check`,
 and the document/identity/reference assertions all completed with exit 0.
 
-| Finding / acceptance                                | Source basis and change                                                     | Command / result / evidence                                                                                                                                                                                                                   | Remaining limit                                                                             |
-| --------------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Diagnose dependency-ready blocked parent            | Current parent CLI slice; frozen request, scopes and keys; this document    | Active `show`, `gh pr view 3048`: exit 0; `parent-before.json`; original route already merged, runtime key unrecorded                                                                                                                         | Parent still blocked pending authorized lifecycle action                                    |
-| Document only necessary unblock                     | Original artifact plus immutable `validateReportRows` and download consumer | Offline `python3 -` ZIP/hash/event/runtime/source assertions: exit 0; `retained-artifact-check.json`; immutable helper copy and source pins retained locally                                                                                  | Main raw files intentionally absent; original old failed field remains unknown              |
-| New runtime evidence / prior Source regression      | Official run, job and artifact; route merge ancestry and both scoped blobs  | `gh run view 40681440811`, `gh api repos/ajoe734/drts-fleet-platform/actions/artifacts/12813715678`, `git show`, `git merge-base --is-ancestor`: exit 0; `hosted-run.json`, `official-artifact-metadata.json`, `retained-artifact-check.json` | Evidence qualification only; no new unit, browser, deployment or runtime execution          |
-| Update parent next and preserve blocked disposition | Prepared `parent-next.txt`, `helper-disposition.json`                       | Parent `note`: exit 1, `Dispatched worker cannot mutate a different task`; helper metadata `assign`: exit 1, `Dispatched workers must use their assigned task lifecycle commands`; `guard-results.json`                                       | Supervisor must apply both before helper merge; current acceptance item not fully satisfied |
-| Task-scoped commit / push / PR                      | Only this specified support artifact                                        | Scoped format, classification, diff and trailer checks; final full candidate/branch/PR recorded in CLI handoff                                                                                                                                | Helper review/CI/merge remain lifecycle work; no direct `done`                              |
+| Finding / acceptance                                | Source basis and change                                                                                        | Command / result / evidence                                                                                                                                                                                                                   | Remaining limit                                                                    |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Diagnose dependency-ready blocked parent            | Current parent CLI slice; frozen request, scopes and keys; this document                                       | Active `show`, `gh pr view 3048`: exit 0; `parent-before.json`; original route already merged, runtime key unrecorded                                                                                                                         | Parent still blocked pending authorized lifecycle action                           |
+| Document only necessary unblock                     | Original artifact plus immutable `validateReportRows` and download consumer                                    | Offline `python3 -` ZIP/hash/event/runtime/source assertions: exit 0; `retained-artifact-check.json`; immutable helper copy and source pins retained locally                                                                                  | Main raw files intentionally absent; original old failed field remains unknown     |
+| New runtime evidence / prior Source regression      | Official run, job and artifact; route merge ancestry and both scoped blobs                                     | `gh run view 40681440811`, `gh api repos/ajoe734/drts-fleet-platform/actions/artifacts/12813715678`, `git show`, `git merge-base --is-ancestor`: exit 0; `hosted-run.json`, `official-artifact-metadata.json`, `retained-artifact-check.json` | Evidence qualification only; no new unit, browser, deployment or runtime execution |
+| Update parent next and preserve blocked disposition | Parent CLI slice and helper `resolved_parent_*`; prepared inputs retained                                      | Historical worker writes denied (exit 1), `guard-results.json`; Supervisor applied both at 06:48; 12:06 readback confirms exact next equality and all three fields                                                                            | Cleared; preserve fields through new handoff and merge                             |
+| Old candidate dependency-security failure           | Accepted Hono task, package override and lockfile; normal dev merge `731af15a43fb51bd15223a7ee42bf8faea8357be` | Hono task `show`, merge ancestry and resolved-lock inspection exit 0; `accepted-peer-refresh-20261029.json`                                                                                                                                   | New helper candidate requires independent own CI/security and Claude2 review       |
+| Task-scoped commit / push / PR                      | Only this specified support artifact                                                                           | Scoped format, classification, diff and trailer checks; final full candidate/branch/PR recorded in CLI handoff                                                                                                                                | Helper review/CI/merge remain lifecycle work; no direct `done`                     |
 
 This documentation change requires content, reference and formatting checks.
 Product unit tests and hosted reruns are not needed to repeat already accepted
 route code. No product server, browser runner, Docker infrastructure or
 deployment was started on this VM.
+
+The 12:06 refresh evidence is
+`accepted-peer-refresh-20261029.json` in the same absolute local directory.
+It records frozen parent/helper/peer slices, published ancestry, support-only
+scope, unchanged retained evidence hashes and scoped check results. The CLI
+handoff records the final full new candidate SHA and generation. Hosted checks
+triggered by that handoff may be pending; this document grants neither CI pass,
+helper completion nor parent acceptance in advance.
+
+Refresh checks: scoped Prettier, classification (7,556 files), commit trailers,
+diff checks and parent/peer/hash assertions completed with exit 0. An attempted
+`python3 tools/ci/dependency_security.py --help` executed the gate (the script
+has no help-only mode) and exited 1 because isolated worktree dependencies lack
+`expo/package.json`, preventing installed deepmerge mitigation verification.
+This is an environment failure, not a security pass or a reproduction of the
+old Hono finding. Do not alter the shared dependency tree or weaken the gate;
+the new candidate's hosted frozen installation must run its own security check.
