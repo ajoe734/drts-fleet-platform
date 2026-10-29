@@ -1,6 +1,7 @@
 # Report tenant query: remaining acceptance blocker
 
-Task: `CONTROL-PLANE-REPORT-LEGAL-TENANT-QUERY-20261026-UNBLOCK-MANUAL-UNBLOCK`  
+Task: `CONTROL-PLANE-REPORT-LEGAL-TENANT-QUERY-20261026-UNBLOCK-MANUAL-UNBLOCK`
+
 Owner: Codex; reviewer: Claude. Inspected 2026-10-29 UTC using the dispatch's
 active release CLI. This artifact documents the remaining blocker; it grants no
 runtime acceptance and changes no product source.
