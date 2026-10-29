@@ -2217,6 +2217,7 @@ describe("original UI cancellation response capture before navigation release", 
       envelopeOk: true,
       responseOrderMatches: true,
       responseCancelled: true,
+      cancelledAt: f.payload.data.cancelledAt,
       refusal: null,
     });
     expect(JSON.stringify(facts)).not.toContain("synthetic-private-value");
