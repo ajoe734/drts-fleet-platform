@@ -228,13 +228,17 @@ export class RunFinalizer {
   // Same-browser Playwright requests cannot use guardFetch. Keep the entire
   // request AND bounded response consumption under the original lease, so an
   // abandoned body/cleanup never sends another write or accepts late bytes.
-  async guardOperation<T>(operation: () => Promise<T>): Promise<T> {
+  async guardOperation<T>(
+    operation: (assertOpen: () => void) => Promise<T>,
+  ): Promise<T> {
     const lease = this.scope.getStore();
-    if (this.started && !lease?.open)
-      throw new JourneyFailure("business-request-after-finalization-start");
-    const value = await operation();
-    if ((lease && !lease.open) || (this.started && !lease))
-      throw new JourneyFailure("finalization-response-after-budget-exhausted");
+    const assertOpen = () => {
+      if (this.started && !lease?.open)
+        throw new JourneyFailure("business-request-after-finalization-start");
+    };
+    assertOpen();
+    const value = await operation(assertOpen);
+    assertOpen();
     return value;
   }
 
@@ -602,9 +606,11 @@ export class RunFinalizer {
   // later steps still run; a body checkpoint fails closed on its own outcome.
   private async writeFacts(status: FactsStatus) {
     let snapshot: unknown;
+    let snapshotFailed = false;
     try {
       snapshot = this.facts(status);
     } catch {
+      snapshotFailed = true;
       snapshot = {
         definitionSha: this.ports.definitionSha,
         runtimeSha: this.ports.runtimeSha,
@@ -612,7 +618,9 @@ export class RunFinalizer {
         custody: "unavailable-snapshot-failed",
       };
     }
-    const outcome = await this.durable(this.ports.checkpointFile, snapshot);
+    const persisted = await this.durable(this.ports.checkpointFile, snapshot);
+    // A durable unavailable placeholder is not durable own command custody.
+    const outcome = snapshotFailed ? ("failed" as const) : persisted;
     if (outcome !== "written" && status !== "running") {
       // Reported once while finalizing and once for the final snapshot.
       if (status === "finalized" || this.checkpointWriteFailures === 0)

@@ -402,8 +402,7 @@ test(journeyName, async ({ browser, request }) => {
       evidence.failure(error);
     },
     stopInterruptedBody: async () => {
-      await page.close();
-      await r08Run?.stop();
+      await Promise.all([page.close(), r08Run?.stop()]);
     },
     plan: (cleanup) => finalizationPlan(cleanup),
     artifacts: [
@@ -3722,7 +3721,7 @@ test(journeyName, async ({ browser, request }) => {
       evidence.record({
         stage: "r08-actual-ui-original-request-replay-readback",
         orderId: completedOrderId,
-        result: "verified",
+        result: "observed",
       });
     }
   } catch (error) {
@@ -4152,6 +4151,7 @@ test(journeyName, async ({ browser, request }) => {
           }
         : null,
       browserRatingWrite: browserRatingState.current ?? null,
+      r08: r08Run?.snapshot() ?? null,
       lowRatingMatrix: RECOVERY_ONLY
         ? null
         : { scope: LOW_RATING_MATRIX_SCOPE, cases: lowRatings },

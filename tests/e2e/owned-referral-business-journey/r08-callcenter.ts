@@ -1,4 +1,9 @@
-import type { BrowserContext, Page, Route } from "@playwright/test";
+import type {
+  APIResponse,
+  BrowserContext,
+  Page,
+  Route,
+} from "@playwright/test";
 import type { RunFinalizer } from "./run-finalization";
 import { createHash } from "node:crypto";
 import {
@@ -121,6 +126,37 @@ const stable = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
+export function assertR08OpsProof(
+  proof: R08OpsProof,
+  expected: R08OpsProof = proof,
+) {
+  const i = proof.identity;
+  const origin = new URL(proof.origin);
+  requireFact(
+    origin.protocol === "https:" &&
+      origin.origin === proof.origin &&
+      /^[a-f0-9]{40}$/.test(proof.runtimeSha) &&
+      proof.callcenterServedSha === proof.runtimeSha &&
+      proof.transportRuntimeSha === proof.runtimeSha &&
+      proof.browser?.runtimeSha === proof.runtimeSha &&
+      proof.browser.active === true &&
+      stable(proof.browser.identity) === stable(i) &&
+      proof.controlRole === "ops" &&
+      proof.bffStatus === 200 &&
+      proof.callcenterPageStatus === 200 &&
+      proof.active &&
+      i.realm === "ops" &&
+      i.actorType === "ops_user" &&
+      i.authMode === "jwt_bearer" &&
+      i.actorId === i.principalId &&
+      !!i.principalId &&
+      !!i.membershipId &&
+      !!i.sessionId &&
+      stable(proof) === stable(expected),
+    "r08-same-canonical-ops-first-party-bff-runtime",
+  );
+}
+
 /** Own original UI transfer, one exact replay and bounded normal terminalization.
  * A new instance is NOT a restart journal; later finalizer wiring must retain
  * this custody and never instantiate a replacement after an unknown ACK. */
@@ -178,31 +214,7 @@ export class R08Callcenter {
   }
 
   private assertProof(proof: R08OpsProof) {
-    const i = proof.identity;
-    const origin = new URL(proof.origin);
-    requireFact(
-      origin.protocol === "https:" &&
-        origin.origin === proof.origin &&
-        /^[a-f0-9]{40}$/.test(proof.runtimeSha) &&
-        proof.callcenterServedSha === proof.runtimeSha &&
-        proof.transportRuntimeSha === proof.runtimeSha &&
-        proof.browser?.runtimeSha === proof.runtimeSha &&
-        proof.browser.active === true &&
-        stable(proof.browser.identity) === stable(i) &&
-        proof.controlRole === "ops" &&
-        proof.bffStatus === 200 &&
-        proof.callcenterPageStatus === 200 &&
-        proof.active &&
-        i.realm === "ops" &&
-        i.actorType === "ops_user" &&
-        i.authMode === "jwt_bearer" &&
-        i.actorId === i.principalId &&
-        !!i.principalId &&
-        !!i.membershipId &&
-        !!i.sessionId &&
-        stable(proof) === stable(this.expected.proof),
-      "r08-same-canonical-ops-first-party-bff-runtime",
-    );
+    assertR08OpsProof(proof, this.expected.proof);
   }
 
   private async guard() {
@@ -561,6 +573,8 @@ export class R08Callcenter {
 }
 
 export type R08RunCustody = {
+  recording: "synthetic-index-only";
+  finalizeRecording?: R08Custody["finalizeRecording"];
   orderId: string;
   callId?: string;
   recordingId: string;
@@ -585,13 +599,17 @@ export class R08ExistingFull {
   private expectedProof?: R08OpsProof;
   private expectedCanonical?: R08Canonical;
   private cleanupStarted = false;
-  private pending?: {
-    path: string;
-    intent?: ObjectData;
-    accept: (value: ObjectData) => void;
-    resolve: () => void;
-    reject: (error: unknown) => void;
-  };
+  private closed = false;
+  private pending:
+    | {
+        started: boolean;
+        path: string;
+        intent?: ObjectData;
+        accept: (value: ObjectData) => void;
+        resolve: () => void;
+        reject: (error: unknown) => void;
+      }
+    | undefined;
   private readonly path = `${prefix}/callcenter/sessions`;
   constructor(
     private readonly ports: {
@@ -609,6 +627,7 @@ export class R08ExistingFull {
   ) {
     this.state = {
       orderId: ports.orderId,
+      recording: "synthetic-index-only",
       recordingId: `${ports.nonce}-SYNTHETIC-INDEX-ONLY`,
       producers: [],
       result: "in-progress",
@@ -619,6 +638,11 @@ export class R08ExistingFull {
     return copy(this.state);
   }
   private async save() {
+    if (this.state.callId)
+      this.state.finalizeRecording = {
+        dedupeKey: `finalize_recording:call:${this.state.callId}`,
+        status: "unobserved-retained",
+      };
     if (this.helper) this.state.transfer = this.helper.snapshot();
     await this.ports.finalizer.checkpointOwned("r08-own-call-custody");
   }
@@ -730,31 +754,69 @@ export class R08ExistingFull {
     const url = new URL(request.url());
     if (url.origin !== this.ports.origin) return route.continue();
     try {
-      await this.ports.finalizer.guardOperation(async () => {
+      await this.ports.finalizer.guardOperation(async (assertOpen) => {
+        requireFact(!this.closed, "r08-ui-command-closed");
         const pending = this.pending;
         if (request.method() === "POST") {
           requireFact(
-            pending && url.pathname === pending.path,
+            !this.closed &&
+              pending &&
+              !pending.started &&
+              url.pathname === pending.path,
             "r08-no-unowned-ui-post",
           );
+          pending.started = true;
           await this.guard();
+          assertOpen();
+          requireFact(!this.closed, "r08-ui-command-closed");
           if (this.helper && url.pathname.endsWith("/transfer-to-complaint")) {
-            await this.helper.capture({
-              request: () => request,
-              fetch: (options) =>
-                route.fetch({
-                  ...options,
-                  headers: {
-                    ...request.headers(),
-                    ...this.ports.tx.headers("ops", request.url()),
-                  },
-                }),
-              fulfill: (options) => route.fulfill(options),
-            });
+            let apiResponse: APIResponse | undefined;
+            try {
+              await this.helper.capture({
+                request: () => request,
+                fetch: async (options) => {
+                  apiResponse = await route.fetch({
+                    ...options,
+                    headers: {
+                      ...request.headers(),
+                      ...this.ports.tx.headers("ops", request.url()),
+                    },
+                  });
+                  const response = apiResponse;
+                  return {
+                    url: () => response.url(),
+                    status: () => response.status(),
+                    headers: () => response.headers(),
+                    body: () =>
+                      this.ports.finalizer.guardOperation(async (check) => {
+                        const bytes = await response.body();
+                        check();
+                        requireFact(!this.closed, "r08-ui-command-closed");
+                        return bytes;
+                      }),
+                  };
+                },
+                fulfill: (options) =>
+                  this.ports.finalizer.guardOperation(async (check) => {
+                    check();
+                    requireFact(!this.closed, "r08-ui-command-closed");
+                    await route.fulfill({
+                      status: options.response.status(),
+                      headers: options.response.headers(),
+                      body: options.body,
+                    });
+                  }),
+              });
+            } finally {
+              await apiResponse?.dispose();
+            }
           } else {
             const rawBody = request.postData();
+            const contentType =
+              new Headers(request.headers()).get("content-type") ?? "";
             requireFact(
               rawBody !== null &&
+                /^application\/json(?:\s*;|$)/i.test(contentType) &&
                 Buffer.byteLength(rawBody) <= 65536 &&
                 stable(object(JSON.parse(rawBody))) ===
                   stable(pending.intent) &&
@@ -767,7 +829,7 @@ export class R08ExistingFull {
               command: {
                 path: url.pathname,
                 rawBody,
-                headers: { "Content-Type": "application/json" },
+                headers: { "Content-Type": contentType },
                 bodySha256: digest(rawBody),
               },
             });
@@ -783,6 +845,8 @@ export class R08ExistingFull {
             });
             try {
               const bytes = await response.body();
+              assertOpen();
+              requireFact(!this.closed, "r08-ui-command-closed");
               const data = object(
                 this.checked(
                   response.status(),
@@ -795,6 +859,8 @@ export class R08ExistingFull {
               pending.accept(data); // Exact own ACK/IDs BEFORE page loadData/navigation.
               this.state.producers.at(-1)!.ack = "acknowledged";
               await this.save();
+              assertOpen();
+              requireFact(!this.closed, "r08-ui-command-closed");
               await route.fulfill({ response, body: bytes });
             } finally {
               await response.dispose();
@@ -817,6 +883,8 @@ export class R08ExistingFull {
         try {
           // Never require static assets to carry the API envelope; the actual
           // Callcenter navigation and BFF observations are checked separately.
+          assertOpen();
+          requireFact(!this.closed, "r08-ui-command-closed");
           await route.fulfill({ response });
         } finally {
           await response.dispose();
@@ -844,6 +912,7 @@ export class R08ExistingFull {
     void ack.catch(() => undefined);
     this.pending = {
       path,
+      started: false,
       ...(intent ? { intent } : {}),
       accept,
       resolve,
@@ -868,7 +937,15 @@ export class R08ExistingFull {
         this.ports.controlRole === "ops",
         "r08-real-ops-bff-required-no-direct-api-fallback",
       );
+      requireFact(
+        !this.closed && !this.ports.finalizer.started,
+        "r08-ui-command-closed",
+      );
       this.page = await this.ports.context.newPage();
+      requireFact(
+        !this.closed && !this.ports.finalizer.started,
+        "r08-ui-command-closed",
+      );
       this.page.on("dialog", (dialog) => {
         void dialog.accept(
           dialog.type() === "prompt"
@@ -917,19 +994,12 @@ export class R08ExistingFull {
       );
       this.expectedCanonical = await this.ports.canonical();
       // Validate all independent observations before creating even the own call.
-      new R08Callcenter(
-        {
-          proof: this.expectedProof,
-          canonical: this.expectedCanonical,
-          owned: {
-            callId: "preflight",
-            recordingId: this.state.recordingId,
-            callbackTaskId: "preflight",
-            orderId: this.state.orderId,
-          },
-          intent: this.intent(),
-        },
-        this.helperPorts(),
+      assertR08OpsProof(this.expectedProof);
+      requireFact(
+        this.expectedCanonical.order.orderId === this.state.orderId &&
+          this.expectedCanonical.order.status === "completed" &&
+          this.expectedCanonical.supply.known === true,
+        "r08-existing-completed-order-and-known-supply",
       );
       const before = records(
         object((await this.request(this.path)).data).items,
@@ -983,13 +1053,11 @@ export class R08ExistingFull {
       );
       // H692 normal nonvoice compatibility: attach synthetic index while no
       // order is linked, THEN link the already completed main order. No media.
-      const recording = page
-        .locator("form")
-        .filter({
-          has: page.getByRole("button", {
-            name: /Manually attach recording|手動補掛錄音/,
-          }),
-        });
+      const recording = page.locator("form").filter({
+        has: page.getByRole("button", {
+          name: /Manually attach recording|手動補掛錄音/,
+        }),
+      });
       await recording
         .locator('input[type="text"]')
         .nth(0)
@@ -1016,13 +1084,11 @@ export class R08ExistingFull {
           );
         },
       );
-      const link = page
-        .locator("form")
-        .filter({
-          has: page.getByRole("button", {
-            name: /Link existing order|連結既有訂單/,
-          }),
-        });
+      const link = page.locator("form").filter({
+        has: page.getByRole("button", {
+          name: /Link existing order|連結既有訂單/,
+        }),
+      });
       await link.locator('input[type="text"]').fill(this.state.orderId);
       await this.submit(
         `${this.sessionPath()}/link-order`,
@@ -1080,13 +1146,11 @@ export class R08ExistingFull {
         this.helperPorts(),
       );
       await this.save();
-      const transfer = page
-        .locator("form")
-        .filter({
-          has: page.getByRole("button", {
-            name: /Transfer to complaint|轉交客訴/,
-          }),
-        });
+      const transfer = page.locator("form").filter({
+        has: page.getByRole("button", {
+          name: /Transfer to complaint|轉交客訴/,
+        }),
+      });
       await transfer.locator("select").nth(0).selectOption("other");
       await transfer.locator("select").nth(1).selectOption("normal");
       await transfer.locator("textarea").fill(this.intent().description);
@@ -1100,11 +1164,12 @@ export class R08ExistingFull {
       this.state.result = "verified";
       await this.save();
     } catch (error) {
+      await this.stop();
       this.state.result = "failed";
       await this.save();
       throw error;
     } finally {
-      await this.page?.close();
+      await this.stop();
     }
   }
   private intent(): TransferCallToComplaintCommand {
@@ -1128,6 +1193,7 @@ export class R08ExistingFull {
     };
   }
   async stop() {
+    this.closed = true;
     await this.page?.close();
   }
   async cleanup() {
@@ -1228,10 +1294,18 @@ export class R08ExistingFull {
               task.callId === this.state.callId,
             "r08-partial-own-callback-only",
           );
-          await this.postCleanup(
-            `${prefix}/callcenter/callbacks/${encodeURIComponent(text(task.callbackTaskId))}/cancel`,
-            { reason: "Controlled synthetic index cleanup" },
-          );
+          if (task.status !== "cancelled") {
+            requireFact(
+              ["pending", "claimed", "in_progress"].includes(
+                String(task.status),
+              ),
+              "r08-partial-callback-normal-cancel-state",
+            );
+            await this.postCleanup(
+              `${prefix}/callcenter/callbacks/${encodeURIComponent(text(task.callbackTaskId))}/cancel`,
+              { reason: "Controlled synthetic index cleanup" },
+            );
+          }
           const queue = records(
             object((await this.request(`${prefix}/callcenter/callbacks`)).data)
               .items,
