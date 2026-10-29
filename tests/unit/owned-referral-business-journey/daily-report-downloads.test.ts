@@ -21,6 +21,8 @@ import {
 import { recordsToCsv } from "../../../apps/api/src/common/csv";
 import { resolveRouteAuthPolicy } from "../../../apps/api/src/common/auth/auth.policy";
 import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
+import { t as translate } from "../../../apps/ops-console-web/lib/translations";
+import { ApiClientError } from "../../../packages/api-client/src/index";
 import {
   recordsToPdf,
   recordsToXlsx,
@@ -73,6 +75,24 @@ const VEHICLE_ID = "veh_synthetic_owned_001";
 const PLATE_NO = "SIM-R12A0001";
 const PICKUP_ADDRESS = "新北市板橋區縣民大道二段7號";
 const DROPOFF_ADDRESS = "臺北市信義區市府路1號";
+// ReportingService.rebuildDailyDispatchRecords persistence failure (503).
+const REBUILD_FAILED_CODE = "REPORT_REBUILD_FAILED";
+const REBUILD_FAILED_MESSAGE = "Daily dispatch records could not be rebuilt.";
+const R12_08_FAULTS = [
+  "click-throws",
+  "no-hit",
+  "no-error-ui",
+  "success-notice",
+  "wrong-route",
+  "double-hit",
+  "forwarded",
+  "unroute-throws",
+  "retry-503",
+  "retry-changed-filter",
+  "retry-missing-ack",
+  "retry-foreign-row",
+  "retry-record-identity",
+] as const;
 
 describe("managed FULL hosted supplemental artifact custody", () => {
   it("selects every controlled format, independent journal and custody while excluding private siblings", async () => {
@@ -1811,6 +1831,14 @@ ${inner}
       expectedPreviewControlled: true,
       expectedRetained: true,
     })),
+    ...R12_08_FAULTS.map((r1208Fault) => ({
+      caseName: `R12-08 explicit SIM/real retry ${r1208Fault}`,
+      r1208Fault,
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    })),
   ])(
     "drives preview rebuild, 3-format job creation, /reports reload, and 3 artifact downloads in a socket-free harness ($caseName)",
     async ({
@@ -1835,6 +1863,8 @@ ${inner}
         "routeFault" in scenario ? scenario.routeFault : undefined;
       const nonReportApi =
         "nonReportApi" in scenario ? scenario.nonReportApi : undefined;
+      const r1208Fault =
+        "r1208Fault" in scenario ? scenario.r1208Fault : undefined;
       let api: ReturnType<typeof installNonReportRoleApi> | undefined;
       const routeNativeFailure: unknown =
         routeFault === "matching-hostile"
@@ -1952,6 +1982,27 @@ ${inner}
         let rebuiltInBackend = false;
         let rebuildPosts = 0;
         let rebuiltPreviewGets = 0;
+        // R12-08 browser port: page-level routes take precedence over the
+        // helper's context route, as in Playwright. Ops page error/notice
+        // state mirrors reports/page.tsx regenerate().
+        type PageRouteMatcher = (url: URL) => boolean;
+        let pageRoute:
+          | {
+              matcher: PageRouteMatcher;
+              handler: (route: Route) => Promise<void>;
+            }
+          | undefined;
+        let pageRouteCalls = 0;
+        let pageUnrouteCalls = 0;
+        let simulationAttempted = false;
+        const simulatedResponses: Array<{
+          status?: number;
+          contentType?: string;
+          body?: string;
+        }> = [];
+        const simulatedRequestBodies: string[] = [];
+        let uiErrorText: string | null = null;
+        let uiNoticeText: string | null = null;
         const alreadyMaterialized = failureCase.startsWith(
           "already materialized",
         );
@@ -2227,8 +2278,6 @@ ${inner}
               return makeLocator({
                 point: "rebuild",
                 click: async () => {
-                  rebuiltInBackend = true;
-                  rebuildPosts += 1;
                   const bodyObj = {
                     serviceDateFrom: dateFromVal,
                     serviceDateTo: dateToVal,
@@ -2238,21 +2287,152 @@ ${inner}
                     partnerId: partnerVal,
                     serviceProductCode: serviceProductVal,
                   };
+                  const rebuildUrl = `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records/rebuild`;
+                  const generatedAt = "2026-10-25T18:31:00.000Z";
+                  uiErrorText = null;
+                  uiNoticeText = null;
+                  if (pageRoute) {
+                    simulationAttempted = true;
+                    if (r1208Fault === "click-throws")
+                      throw new Error(privateMarker);
+                    if (r1208Fault === "no-hit") return;
+                    // Mirrors Playwright: a matching page route sees the
+                    // request first; only fallback() reaches the context route.
+                    const sendThroughPage = async (
+                      method: string,
+                      postData: string | null,
+                    ) => {
+                      const outcome = {
+                        fulfilled: false,
+                        fellBack: false,
+                        aborted: false,
+                      };
+                      if (!pageRoute!.matcher(new URL(rebuildUrl)))
+                        throw new Error("simulation route did not match");
+                      await pageRoute!.handler({
+                        request: () => ({
+                          method: () => method,
+                          url: () => rebuildUrl,
+                          postData: () => postData,
+                          headers: () => ({ accept: "*/*" }),
+                        }),
+                        fulfill: async (options: {
+                          status?: number;
+                          contentType?: string;
+                          body?: string;
+                        }) => {
+                          outcome.fulfilled = true;
+                          simulatedResponses.push(options);
+                          if (postData !== null)
+                            simulatedRequestBodies.push(postData);
+                        },
+                        fallback: async () => {
+                          outcome.fellBack = true;
+                          await dispatchRoute(
+                            method,
+                            rebuildUrl,
+                            postData,
+                            200,
+                            { "content-type": "application/json" },
+                            successWireBytes({ rebuiltCount: 2, generatedAt }),
+                          );
+                        },
+                        abort: async () => {
+                          outcome.aborted = true;
+                        },
+                      } as unknown as Route);
+                      return outcome;
+                    };
+                    if (r1208Fault === "wrong-route")
+                      await sendThroughPage("GET", null);
+                    const simulated = await sendThroughPage(
+                      "POST",
+                      JSON.stringify(bodyObj),
+                    );
+                    if (r1208Fault === "double-hit")
+                      await sendThroughPage("POST", JSON.stringify(bodyObj));
+                    if (r1208Fault === "forwarded")
+                      await dispatchRoute(
+                        "POST",
+                        rebuildUrl,
+                        JSON.stringify(bodyObj),
+                        200,
+                        { "content-type": "application/json" },
+                        successWireBytes({ rebuiltCount: 2, generatedAt }),
+                      );
+                    if (simulated.fulfilled) {
+                      const response = simulatedResponses.at(-1)!;
+                      // ApiClient throws ApiClientError for !ok; the page
+                      // shows its message and skips the success notice/preview.
+                      if (r1208Fault !== "no-error-ui")
+                        uiErrorText = new ApiClientError({
+                          statusCode: response.status ?? 200,
+                          code: REBUILD_FAILED_CODE,
+                          message: REBUILD_FAILED_MESSAGE,
+                          retryable: false,
+                          rawBody: String(response.body),
+                        }).message;
+                      if (r1208Fault === "success-notice")
+                        uiNoticeText = translate(
+                          "reports.ops.regenerate.done",
+                          "zh",
+                          { count: 2, time: "2026/10/26 02:31:00" },
+                        );
+                      return;
+                    }
+                  }
+                  const realRetry = simulationAttempted;
+                  rebuiltInBackend = true;
+                  rebuildPosts += 1;
+                  const retryBody =
+                    realRetry && r1208Fault === "retry-changed-filter"
+                      ? { ...bodyObj, serviceDateFrom: "2026-10-25" }
+                      : bodyObj;
+                  if (realRetry && r1208Fault === "retry-503") {
+                    await dispatchRoute(
+                      "POST",
+                      rebuildUrl,
+                      JSON.stringify(bodyObj),
+                      503,
+                      { "content-type": "application/json" },
+                      Buffer.from(
+                        JSON.stringify(
+                          deepToSnakeCase(
+                            toApiErrorEnvelope(
+                              REBUILD_FAILED_CODE,
+                              REBUILD_FAILED_MESSAGE,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                    uiErrorText = `API error 503: ${REBUILD_FAILED_MESSAGE}`;
+                    return;
+                  }
                   await dispatchRoute(
                     "POST",
-                    `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records/rebuild`,
+                    rebuildUrl,
                     faultPoint === "rebuild-command-json" &&
                       dateFromVal === "2026-10-25"
                       ? privateMarker
-                      : JSON.stringify(bodyObj),
+                      : JSON.stringify(retryBody),
                     200,
                     { "content-type": "application/json" },
-                    successWireBytes({
-                      rebuiltCount: dateFromVal === "2026-10-25" ? 0 : 2,
-                      generatedAt: "2026-10-25T18:31:00.000Z",
-                    }),
+                    realRetry && r1208Fault === "retry-missing-ack"
+                      ? Buffer.from(
+                          JSON.stringify({
+                            meta: {
+                              request_id: "x",
+                              timestamp: new Date().toISOString(),
+                            },
+                          }),
+                        )
+                      : successWireBytes({
+                          rebuiltCount: dateFromVal === "2026-10-25" ? 0 : 2,
+                          generatedAt,
+                        }),
                   );
-                  const query = new URLSearchParams(bodyObj);
+                  const query = new URLSearchParams(retryBody);
                   rebuiltPreviewGets += 1;
                   await dispatchRoute(
                     "GET",
@@ -2264,9 +2444,20 @@ ${inner}
                       ? wireBytes("not-a-list")
                       : wireBytes(
                           toApiListData(
-                            dateFromVal === "2026-10-25"
-                              ? []
-                              : [previewSiblingRow, ownRow],
+                            realRetry && r1208Fault === "retry-foreign-row"
+                              ? [siblingRow("ord_foreign_unowned_998")]
+                              : realRetry &&
+                                  r1208Fault === "retry-record-identity"
+                                ? [
+                                    previewSiblingRow,
+                                    {
+                                      ...ownRow,
+                                      recordId: "daily:other-record",
+                                    },
+                                  ]
+                                : dateFromVal === "2026-10-25"
+                                  ? []
+                                  : [previewSiblingRow, ownRow],
                           ),
                         ),
                   );
@@ -2417,13 +2608,50 @@ ${inner}
             }
             return makeLocator({});
           },
-          getByText: (textVal) =>
-            makeLocator({
+          getByText: (textVal) => {
+            if (textVal instanceof RegExp)
+              return makeLocator({
+                point: "regenerate-notice",
+                count: async () =>
+                  uiNoticeText !== null && textVal.test(uiNoticeText) ? 1 : 0,
+              });
+            if (textVal === REBUILD_FAILED_MESSAGE) {
+              const visible = () =>
+                uiErrorText !== null && uiErrorText.includes(textVal);
+              const errorLocator = {
+                first: () => errorLocator,
+                // Playwright times out when the state never arrives.
+                waitFor: async (options?: { state?: string }) => {
+                  if (visible() !== (options?.state !== "detached"))
+                    throw new Error(`timeout ${privateMarker}`);
+                },
+                count: async () => (visible() ? 1 : 0),
+                innerText: async () => uiErrorText ?? "",
+              };
+              return errorLocator as unknown as Locator;
+            }
+            return makeLocator({
               point: "notice",
               innerText: async () => String(textVal),
               count: async () =>
                 String(textVal) === lastAcceptedJobId ? 1 : 0,
-            }),
+            });
+          },
+          route: (async (matcher: PageRouteMatcher, handler: unknown) => {
+            pageRouteCalls += 1;
+            expect(pageRoute).toBeUndefined();
+            pageRoute = {
+              matcher,
+              handler: handler as (route: Route) => Promise<void>,
+            };
+          }) as unknown as Page["route"],
+          unroute: (async (matcher: PageRouteMatcher, handler: unknown) => {
+            pageUnrouteCalls += 1;
+            if (r1208Fault === "unroute-throws") throw new Error(privateMarker);
+            expect(matcher).toBe(pageRoute?.matcher);
+            expect(handler).toBe(pageRoute?.handler);
+            pageRoute = undefined;
+          }) as unknown as Page["unroute"],
           locator: (selector: string) => {
             if (selector === 'input[type="date"]') {
               return makeLocator({ count: async () => 2 });
@@ -2994,6 +3222,83 @@ ${inner}
           ).rejects.toThrow();
           return;
         }
+        if (r1208Fault) {
+          const failure = await run.then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+          const expectedStage = {
+            "click-throws": "daily-report-r12-08-sim-submit",
+            "no-hit": "daily-report-r12-08-sim-error-ui",
+            "no-error-ui": "daily-report-r12-08-sim-error-ui",
+            "success-notice":
+              "daily-report-r12-08-sim-no-success-notice-required",
+            "wrong-route":
+              "daily-report-r12-08-sim-exactly-one-rebuild-hit-required",
+            "double-hit":
+              "daily-report-r12-08-sim-exactly-one-rebuild-hit-required",
+            forwarded: "daily-report-r12-08-sim-no-forward-required",
+            "unroute-throws": "daily-report-r12-08-sim-unroute-required",
+            "retry-503": "daily-report-rebuild-status-200",
+            "retry-changed-filter":
+              "daily-report-r12-08-retry-same-filters-required",
+            "retry-missing-ack": "object response required",
+            "retry-foreign-row": "daily-report-preview-missing-own-order",
+            "retry-record-identity":
+              "daily-report-r12-08-readback-own-row-identity-required",
+          }[r1208Fault];
+          expect(failure).toBeInstanceOf(JourneyFailure);
+          expect(failure).toMatchObject({ stage: expectedStage });
+          if (r1208Fault === "retry-503")
+            expect(failure).toMatchObject({
+              status: 503,
+              code: REBUILD_FAILED_CODE,
+              context: {
+                phase: "rebuild",
+                method: "POST",
+                route: "daily-dispatch-rebuild",
+                runtimeSha: RUNTIME_SHA,
+              },
+            });
+          // Every existing control ran before R12-08 and none was dropped.
+          const stages = evidence.events.map((event) => event.stage);
+          for (const format of DAILY_REPORT_FORMATS) {
+            expect(stages).toContain(
+              `daily-report-download-${format}-verified`,
+            );
+            expect(stages).toContain(`daily-report-empty-${format}-verified`);
+          }
+          expect(stages).toContain(
+            "daily-report-nonreport-role-own-jobs-unchanged-after-denial",
+          );
+          expect(stages).toContain(
+            "daily-report-positive-after-empty-restored",
+          );
+          expect(api!.reportCalls()).toHaveLength(6);
+          expect(sourceReads).toBe(2);
+          // The interception was registered once and its removal always ran.
+          expect(pageRouteCalls).toBe(1);
+          expect(pageUnrouteCalls).toBe(1);
+          expect(pageRoute === undefined).toBe(r1208Fault !== "unroute-throws");
+          expect(unrouteCalled).toBe(true);
+          // A failed simulation or real retry never claims recovery.
+          expect(stages).not.toContain(
+            "daily-report-r12-08-real-retry-own-row-verified",
+          );
+          const retried = r1208Fault.startsWith("retry-");
+          expect(
+            stages.includes("daily-report-r12-08-sim-interception-removed"),
+          ).toBe(retried);
+          // Only an actual real retry adds a forwarded rebuild POST.
+          expect(rebuildPosts).toBe(retried ? 3 : 2);
+          expect(simulatedResponses).toHaveLength(
+            ["click-throws", "no-hit"].includes(r1208Fault) ? 0 : 1,
+          );
+          const diagnostic = JSON.stringify([failure, evidence.events]);
+          expect(diagnostic).not.toContain(privateMarker);
+          expect(diagnostic).not.toContain("synthetic-ops-jwt");
+          return;
+        }
         const result = await run;
         if (routeFault?.startsWith("unrelated-")) {
           expect(abortedRoutes).toBe(1);
@@ -3017,8 +3322,10 @@ ${inner}
         expect(result.filters.tenantId).toBe(REFERRAL_TENANT_ID);
         expect(result.preview.rebuilt).toBe(true);
         expect(result.preview.rebuildCount).toBe(2);
-        expect(rebuildPosts).toBe(2); // positive even when preexisting, then empty
-        expect(rebuiltPreviewGets).toBe(2);
+        // Positive even when preexisting, then empty; main adds the R12-08
+        // real retry (its simulated POST is never forwarded).
+        expect(rebuildPosts).toBe(cancelled ? 2 : 3);
+        expect(rebuiltPreviewGets).toBe(cancelled ? 2 : 3);
         expect(result.preview.rowCount).toBe(2);
         expect(result.preview.syntheticProvenanceVerified).toBe(
           expectedPreviewControlled,
@@ -3078,6 +3385,150 @@ ${inner}
         expect(JSON.stringify(evidence.events)).not.toContain(
           "synthetic-ops-jwt",
         );
+
+        // Original R12-08: explicit browser SIM then real retry, main only.
+        if (cancelled) {
+          expect(result.rebuildFailureRecovery).toBeUndefined();
+          expect(pageRouteCalls).toBe(0);
+          expect(simulatedResponses).toHaveLength(0);
+          expect(
+            evidence.events.some((event) =>
+              event.stage.startsWith("daily-report-r12-08-"),
+            ),
+          ).toBe(false);
+        } else {
+          const filters = buildDailyReportFilters(
+            resolveExpectedDailyDispatchRecord(
+              buildOrderFixture(),
+              buildTaskFixture(),
+              buildOwnContext(),
+            ),
+          );
+          const sentBody = JSON.stringify({
+            serviceDateFrom: filters.serviceDateFrom,
+            serviceDateTo: filters.serviceDateTo,
+            orderSource: filters.orderSource,
+            finalStatus: filters.finalStatus,
+            tenantId: filters.tenantId,
+            partnerId: filters.partnerId,
+            serviceProductCode: filters.serviceProductCode,
+          });
+          expect(pageRouteCalls).toBe(1);
+          expect(pageUnrouteCalls).toBe(1);
+          expect(pageRoute).toBeUndefined();
+          expect(simulatedRequestBodies).toEqual([sentBody]);
+          // The fulfilled body is the existing service failure as the real
+          // API producer and wire interceptor serialize it.
+          expect(simulatedResponses).toHaveLength(1);
+          expect(simulatedResponses[0]).toMatchObject({
+            status: 503,
+            contentType: "application/json",
+          });
+          const simulatedEnvelope = JSON.parse(simulatedResponses[0]!.body!);
+          const producedEnvelope = deepToSnakeCase(
+            toApiErrorEnvelope(REBUILD_FAILED_CODE, REBUILD_FAILED_MESSAGE),
+          ) as { error: Record<string, unknown> };
+          expect(Object.keys(simulatedEnvelope.error).sort()).toEqual(
+            Object.keys(
+              JSON.parse(JSON.stringify(producedEnvelope)).error,
+            ).sort(),
+          );
+          expect(simulatedEnvelope.error).toMatchObject({
+            code: producedEnvelope.error.code,
+            message: producedEnvelope.error.message,
+            retryable: producedEnvelope.error.retryable,
+            trace_id: expect.stringMatching(
+              /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+            ),
+          });
+          const serviceSource = await readFile(
+            new URL(
+              "../../../apps/api/src/modules/reporting/reporting.service.ts",
+              import.meta.url,
+            ),
+            "utf8",
+          );
+          expect(serviceSource).toMatch(
+            /new ApiRequestError\(\s*503,\s*"REPORT_REBUILD_FAILED",\s*"Daily dispatch records could not be rebuilt\.",\s*\)/,
+          );
+          expect(result.rebuildFailureRecovery).toEqual({
+            originalCase: "R12-08",
+            simulation: true,
+            faultLayer: "browser-network-interception",
+            actualBackendFaultVerified: false,
+            filters,
+            simulatedFailure: {
+              method: "POST",
+              route: "daily-dispatch-rebuild",
+              status: 503,
+              code: REBUILD_FAILED_CODE,
+              hitCount: 1,
+              forwardCount: 0,
+              requestPayloadSha256: hash(Buffer.from(sentBody)),
+              interceptionRemoved: true,
+            },
+            errorUi: {
+              errorBannerVisible: true,
+              errorCodeVisible: true,
+              successNoticeCount: 0,
+              retryEnabled: true,
+            },
+            realRetry: {
+              method: "POST",
+              route: "daily-dispatch-rebuild",
+              status: 200,
+              rebuiltCount: 2,
+              generatedAt: "2026-10-25T18:31:00.000Z",
+              requestPayloadSha256: hash(Buffer.from(sentBody)),
+              samePayloadAsSimulated: true,
+              runtimeSha: RUNTIME_SHA,
+            },
+            readback: {
+              method: "GET",
+              route: "daily-dispatch-records",
+              status: 200,
+              rowCount: 2,
+              ownRowVerified: true,
+              recordId: `daily:${ORDER_ID}`,
+              orderId: ORDER_ID,
+              orderNo: ORDER_NO,
+              serviceDate: "2026-10-26",
+              finalStatus: "completed",
+              orderSource: "tenant_portal",
+              generatedAt: "2026-10-25T18:31:00.000Z",
+              syntheticProvenanceVerified: expectedPreviewControlled,
+              provenanceQualification: expectedPreviewControlled
+                ? "all-rows-controlled-synthetic"
+                : "own-row-verified-unowned-siblings-present-raw-retention-skipped",
+              runtimeSha: RUNTIME_SHA,
+            },
+          });
+          const r1208Stages = evidence.events.map((event) => event.stage);
+          const restoredAt = r1208Stages.indexOf(
+            "daily-report-positive-after-empty-restored",
+          );
+          const simAt = r1208Stages.indexOf(
+            "daily-report-r12-08-sim-rebuild-503-ui-error-observed",
+          );
+          const removedAt = r1208Stages.indexOf(
+            "daily-report-r12-08-sim-interception-removed",
+          );
+          const recoveredAt = r1208Stages.indexOf(
+            "daily-report-r12-08-real-retry-own-row-verified",
+          );
+          expect(restoredAt).toBeGreaterThan(-1);
+          expect(simAt).toBeGreaterThan(restoredAt);
+          expect(removedAt).toBeGreaterThan(simAt);
+          expect(recoveredAt).toBeGreaterThan(removedAt);
+          // The simulated 503 is never recorded as a real HTTP failure.
+          expect(
+            evidence.events.some(
+              (event) =>
+                event.stage.startsWith("daily-report-http-") &&
+                event.result === "failed",
+            ),
+          ).toBe(false);
+        }
 
         // Original R12-10: once, main path only, after positive custody.
         if (cancelled) {
