@@ -847,7 +847,9 @@ const draftOf = (detail: ObjectData, key: "driverDraft" | "vehicleDraft") =>
  * supply-review driver submission whose license AND registration numbers are
  * exactly `SIM-DL-`/`SIM-REG-${nonce}-second` (its vehicle names that
  * submission as currentDriverSubmissionId). No name, prefix or time window is
- * used. Only one complete, mutually consistent chain qualifies; a created but
+ * used. Every candidate detail must equal its list row's Fleet, onboarding
+ * type, status and revision, and the qualifying driver and vehicle sources
+ * must be approved. Only one complete, mutually consistent chain qualifies; a created but
  * unapproved draft and an approved Driver without the exact binding are told
  * apart, and zero observations stay unknown: neither response attests
  * PG authority, so nothing here is a global absence. Nothing is written.
@@ -922,12 +924,27 @@ export async function qualifyExactSevenSecondSupply(
     for (const item of candidates) {
       const id = text(item.submissionId);
       const detail = object(await ports.readSupplySubmission(id));
+      const own = object(detail.submission);
       requireFact(
-        object(detail.submission).submissionId === id,
+        own.submissionId === id,
         "exact-seven:second-submission-detail-binding",
       );
-      details.push(detail);
       readback.candidatesRead += 1;
+      // The detail itself, not only its list row, must be the same Fleet's
+      // onboarding submission at the listed status and revision; a detail
+      // that moved on (or never matched its row) is never source authority.
+      if (
+        own.fleetPartnerId !== ports.fleetPartnerId ||
+        own.submissionType !== item.submissionType ||
+        own.status !== item.status ||
+        typeof own.revisionNo !== "number" ||
+        own.revisionNo !== item.revisionNo
+      )
+        return await settle(
+          "mismatch-preserved",
+          "submission-detail-diverged-from-list",
+        );
+      details.push(detail);
     }
     const license = (detail: ObjectData) =>
       draftOf(detail, "driverDraft")?.professionalDriverLicenseNo ===
@@ -974,15 +991,19 @@ export async function qualifyExactSevenSecondSupply(
         "canonical-driver-without-exact-device-binding",
       );
     }
-    const canonicalVehicleId =
-      vehicles.length === 1
-        ? nullableText(object(vehicles[0]!.submission).canonicalVehicleId)
-        : null;
+    const vehicleSource =
+      vehicles.length === 1 ? object(vehicles[0]!.submission) : null;
+    const canonicalVehicleId = vehicleSource
+      ? nullableText(vehicleSource.canonicalVehicleId)
+      : null;
     if (devices[0]!.driverId !== canonicalDriverId || !canonicalVehicleId)
       return await settle(
         "mismatch-preserved",
         "source-driver-or-vehicle-chain-mismatch",
       );
+    // Only an approved driver and vehicle chain authorizes any later write.
+    if (source.status !== "approved" || vehicleSource!.status !== "approved")
+      return await settle("mismatch-preserved", "source-chain-not-approved");
     const binding = deviceBinding(devices[0]!, actor.deviceId);
     driverId = text(canonicalDriverId);
     vehicleId = canonicalVehicleId;

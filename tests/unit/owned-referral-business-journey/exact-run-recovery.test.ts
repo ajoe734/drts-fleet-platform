@@ -68,11 +68,14 @@ type SubmissionRow = {
     fleetPartnerId: string;
     submissionType: string;
     status: string;
+    revisionNo: number;
     canonicalDriverId: string | null;
     canonicalVehicleId: string | null;
   };
   driverDraft: ObjectData | null;
   vehicleDraft: ObjectData | null;
+  // Fields only the detail read returns differently from its list row.
+  detail?: Partial<SubmissionRow["submission"]>;
 };
 const FLEET = "fleet-demo-001";
 const ADMIN_SESSION = "sess_synthetic_own_admin";
@@ -87,6 +90,7 @@ const driverSubmission = (
     fleetPartnerId: FLEET,
     submissionType: "driver_onboarding",
     status: "approved",
+    revisionNo: 3,
     canonicalDriverId: null,
     canonicalVehicleId: null,
     ...patch,
@@ -110,6 +114,7 @@ const vehicleSubmission = (
     fleetPartnerId: FLEET,
     submissionType: "vehicle_onboarding",
     status: canonicalVehicleId ? "approved" : "draft",
+    revisionNo: 3,
     canonicalDriverId: null,
     canonicalVehicleId,
   },
@@ -323,7 +328,14 @@ function world(
       const row = submissions.find(
         (item) => item.submission.submissionId === submissionId,
       )!;
-      return { ...structuredClone(row.submission), ...structuredClone(row) };
+      // The API detail shape: { submission, ...submission, drafts }.
+      const submission = structuredClone({ ...row.submission, ...row.detail });
+      return {
+        ...submission,
+        submission,
+        driverDraft: structuredClone(row.driverDraft),
+        vehicleDraft: structuredClone(row.vehicleDraft),
+      };
     }),
     persist: vi.fn(async (facts: ObjectData) => {
       log.push("persist");
@@ -1969,14 +1981,120 @@ describe("R6: second supply exact read-only source qualification", () => {
     },
   );
 
+  // R1 (Codex REOPEN): the exact license/registration fields alone never
+  // authorize; each detail must still be the listed Fleet onboarding row at
+  // its listed status and revision, and the chain must be approved.
+  const secondRow = (w: ReturnType<typeof world>, id: string) =>
+    w.submissions.find((row) => row.submission.submissionId === id)!;
+  it.each([
+    [
+      "a detail of another Fleet than its list row",
+      (w: ReturnType<typeof world>) =>
+        (secondRow(w, "sub_second_driver").detail = {
+          fleetPartnerId: "fleet-demo-002",
+        }),
+      "submission-detail-diverged-from-list",
+    ],
+    [
+      "a detail that is not an onboarding submission",
+      (w: ReturnType<typeof world>) =>
+        (secondRow(w, "sub_second_driver").detail = {
+          submissionType: "profile_correction",
+        }),
+      "submission-detail-diverged-from-list",
+    ],
+    [
+      "an unapproved detail at a newer revision than its list row",
+      (w: ReturnType<typeof world>) =>
+        (secondRow(w, "sub_second_driver").detail = {
+          status: "revision_requested",
+          revisionNo: 4,
+        }),
+      "submission-detail-diverged-from-list",
+    ],
+    [
+      "a vehicle detail of another Fleet",
+      (w: ReturnType<typeof world>) =>
+        (secondRow(w, "sub_second_vehicle").detail = {
+          fleetPartnerId: "fleet-demo-002",
+        }),
+      "submission-detail-diverged-from-list",
+    ],
+    [
+      "a consistent but not approved driver source",
+      (w: ReturnType<typeof world>) => {
+        const row = secondRow(w, "sub_second_driver");
+        row.submission.status = "needs_revision";
+      },
+      "source-chain-not-approved",
+    ],
+  ] as const)(
+    "refuses %s with no second offline, proof or revoke",
+    async (_label, arrange, refusal) => {
+      const w = world();
+      addSecond(w);
+      arrange(w);
+      const { state } = await gated(w);
+      expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+        false,
+      );
+      expect(second(state).qualification).not.toBe("qualified");
+      expect(second(state)).toMatchObject({
+        qualification: "mismatch-preserved",
+        sourceReadback: { refusal },
+      });
+      expect(second(state).driverId).toBeUndefined();
+      expect(second(state).bindingId).toBeUndefined();
+      await expect(
+        recovery.cleanExactSevenSupply(state, "second", "offline", w.ports),
+      ).rejects.toThrow("second-supply-not-qualified");
+      await expect(
+        recovery.cleanExactSevenSupply(state, "second", "revoke", w.ports),
+      ).rejects.toThrow("second-supply-not-qualified");
+      expect(w.writes()).toEqual([]);
+      expect(w.proofRequests()).toEqual([]);
+      expect(w.ports.setOffline).not.toHaveBeenCalled();
+      expect(w.ports.readAdminSession).not.toHaveBeenCalled();
+      expect(w.ports.revokeBinding).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still qualifies the same chain when every detail equals its list row", async () => {
+    const w = world();
+    addSecond(w);
+    for (const id of ["sub_second_driver", "sub_second_vehicle"])
+      secondRow(w, id).detail = {
+        fleetPartnerId: FLEET,
+        status: "approved",
+        revisionNo: 3,
+      };
+    const { state } = await gated(w);
+    expect(await recovery.qualifyExactSevenSecondSupply(state, w.ports)).toBe(
+      true,
+    );
+    await recovery.cleanExactSevenSupply(state, "second", "offline", w.ports);
+    await recovery.cleanExactSevenSupply(state, "second", "revoke", w.ports);
+    expect(second(state)).toMatchObject({
+      qualification: "qualified",
+      offline: "offline-verified",
+      binding: "revoked-verified",
+    });
+    expect(w.writes()).toEqual([
+      "write:offline:drv_second_own",
+      `write:revoke:drvbind_second:${FULL.secondSupply.deviceId}`,
+    ]);
+    expect(w.proofRequests()).toHaveLength(1);
+  });
+
   it("keeps a failed detail read unknown with only the partial counts", async () => {
     const w = world();
     addSecond(w);
     const { state } = await gated(w);
+    const real = vi
+      .mocked(w.ports.readSupplySubmission)
+      .getMockImplementation()!;
     vi.mocked(w.ports.readSupplySubmission)
-      .mockImplementationOnce(async () => ({
-        submission: { submissionId: "sub_first_driver" },
-      }))
+      .mockImplementationOnce(real)
       .mockRejectedValueOnce(new JourneyFailure("admin:transport"));
     await expect(
       recovery.qualifyExactSevenSecondSupply(state, w.ports),
