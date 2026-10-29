@@ -2309,11 +2309,11 @@ process.exit(99);
       // The owned-fixture source must be a real canonical own-Fleet binding,
       // rather than an arbitrary referral entry from the default seed.
       await tenantPartnerService.createPlatformPartnerEntry({
-        tenantId: "tenant-demo-001",
+        tenantId: "tenant-canonical-own-source",
         fleetPartnerId: OPERATIONAL_OWN_FLEET_PARTNER_ID,
         partnerCode: "CANONICAL_OWN_FLEET",
         partnerType: "fleet_partner",
-        programId: "program-referral-community",
+        programId: "program-canonical-own-source",
         entrySlug: "canonical-own-fleet",
         displayName: "Canonical Own Fleet",
         businessDispatchSubtype: "enterprise_dispatch",
