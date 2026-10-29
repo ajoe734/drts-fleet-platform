@@ -1412,11 +1412,11 @@ test(journeyName, async ({ browser, request }) => {
             // The UI may consume a later legitimate proposal for the same intent.
             // Select by its actual frozen command, never by response arrival order.
             await Promise.all([...observedQuoteTasks]);
-            // An abandoned caller never receives a late first POST.
-            requireFact(
-              mainBooking.open,
-              "main original booking within its operation budget",
-            );
+            if (!mainBooking.open) {
+              // Closed while draining quotes: no send and no owner state.
+              await route.abort("blockedbyclient").catch(() => undefined);
+              return;
+            }
             const selected = quotesById.get(text(actualCommand.quoteId));
             requireFact(
               selected,
@@ -1513,7 +1513,9 @@ test(journeyName, async ({ browser, request }) => {
         await finalizer.checkpoint("main-original-booking");
         mainBooking.arm(NATIVE_REQUEST_TIMEOUT_MS);
         await settleOriginalBookingOperation(
-          () => page.locator('[data-drt-operation="referral-create"]').click(),
+          mainBooking.uiAction(() =>
+            page.locator('[data-drt-operation="referral-create"]').click(),
+          ),
           bookingAck,
           mainBooking.signal,
           () => (routeStarted ? originalRouteFinished : undefined),
@@ -3061,6 +3063,11 @@ test(journeyName, async ({ browser, request }) => {
             const raw = text(route.request().postData());
             const command = object(JSON.parse(raw));
             await Promise.all([...quoteTasks]);
+            if (!operation.open) {
+              // Closed while draining quotes: no send, owner state or write.
+              await route.abort().catch(() => undefined);
+              return;
+            }
             const quote = proposals.get(text(command.quoteId));
             requireFact(
               quote,
@@ -3179,7 +3186,7 @@ test(journeyName, async ({ browser, request }) => {
           await page.route(url, handle);
           operation.arm(25_000, fail);
           await clickAndSettleOriginalBookingAck(
-            () => create.click(),
+            operation.uiAction(() => create.click()),
             settled,
             operation.signal,
           );

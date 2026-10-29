@@ -780,6 +780,205 @@ describe("original booking operation closes on every exit and never sends late",
   });
 });
 
+describe("original booking route guard outlives a pending UI action", () => {
+  // Playwright-shaped page: the latest registered handler intercepts a browser
+  // POST; with none registered the request reaches the network unguarded.
+  function page() {
+    const handlers: ((route: FakeRoute) => Promise<void>)[] = [];
+    const counts = { network: 0, aborts: 0, sends: 0 };
+    type FakeRoute = { abort(): Promise<void>; fetch(): Promise<void> };
+    return {
+      counts,
+      handlers,
+      route(handler: (route: FakeRoute) => Promise<void>) {
+        handlers.push(handler);
+      },
+      async unroute() {
+        handlers.length = 0;
+      },
+      async browserPost() {
+        const handler = handlers.at(-1);
+        if (!handler) {
+          counts.network += 1;
+          return;
+        }
+        await handler({
+          abort: async () => {
+            counts.aborts += 1;
+          },
+          fetch: async () => {
+            counts.sends += 1;
+          },
+        });
+      },
+    };
+  }
+
+  // The closed-guard part of the actual caller handlers: refuse when closed,
+  // otherwise one send through the operation's own pre-send recheck.
+  const guarded =
+    (operation: OriginalBookingOperation, quoteDrain?: Promise<unknown>) =>
+    async (route: { abort(): Promise<void>; fetch(): Promise<void> }) => {
+      if (!operation.open) return route.abort();
+      await quoteDrain;
+      if (!operation.open) return route.abort();
+      await operation.send(() => route.fetch());
+    };
+
+  it("keeps the main closed guard registered until the late click settles", async () => {
+    const s = await setup();
+    const p = page();
+    const operation = new OriginalBookingOperation("main-original-booking");
+    p.route(guarded(operation));
+    const click = deferred<void>();
+    const timeout = new Error("private URL");
+    timeout.name = "TimeoutError";
+    let succeeded = false;
+    try {
+      await settleOriginalBookingOperation(
+        operation.uiAction(() => click.promise),
+        s.observe(Promise.reject(timeout)),
+        operation.signal,
+        () => undefined, // observation failed before the route started
+      );
+      succeeded = true;
+    } catch (error) {
+      expect((error as Error).message).toBe(
+        "booking-response-wait:TimeoutError",
+      );
+    } finally {
+      await closeOriginalBookingOperation(operation, succeeded, () =>
+        p.unroute(),
+      );
+    }
+    // Caller exited; the pending click still holds the closed guard.
+    expect(operation.open).toBe(false);
+    expect(p.handlers).toHaveLength(1);
+    // The late click now emits its first POST, then settles.
+    await p.browserPost();
+    click.resolve();
+    await operation.actionSettled;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(p.counts).toEqual({ network: 0, aborts: 1, sends: 0 });
+    expect(p.handlers).toHaveLength(0);
+    expect(s.claim).not.toHaveBeenCalled();
+    expect(s.journal.current?.state).toBe("ack_unknown");
+  });
+
+  it("keeps the supplemental guard until a failed late click settles, with quotes pending", async () => {
+    const p = page();
+    const operation = new OriginalBookingOperation(
+      "supplemental-original-booking",
+    );
+    const quote = deferred<void>();
+    p.route(guarded(operation, quote.promise));
+    const click = deferred<void>();
+    const settled = deferred<void>();
+    const unhandled = await collectUnhandled(async () => {
+      let succeeded = false;
+      const caller = (async () => {
+        try {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          try {
+            operation.arm(25_000, (failure) => settled.reject(failure));
+            const joined = clickAndSettleOriginalBookingAck(
+              operation.uiAction(() => click.promise),
+              settled.promise,
+              operation.signal,
+            );
+            vi.advanceTimersByTime(25_000);
+            await joined;
+          } finally {
+            vi.useRealTimers();
+          }
+          succeeded = true;
+        } finally {
+          await closeOriginalBookingOperation(
+            operation,
+            succeeded,
+            async () => {
+              await p.unroute();
+              await Promise.all([quote.promise]);
+            },
+          );
+        }
+      })();
+      await expect(caller).rejects.toThrow(
+        "supplemental-original-booking-timeout",
+      );
+      expect(p.handlers).toHaveLength(1);
+      await p.browserPost();
+      click.reject(new Error("private late click detail"));
+      await operation.actionSettled;
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(p.handlers).toHaveLength(0);
+      quote.reject(new Error("private late quote body"));
+    });
+    expect(unhandled).toEqual([]);
+    expect(p.counts).toEqual({ network: 0, aborts: 1, sends: 0 });
+  });
+
+  it("does not resume owner state or persistence when closed during the quote drain", async () => {
+    const p = page();
+    const operation = new OriginalBookingOperation(
+      "supplemental-original-booking",
+    );
+    const quote = deferred<void>();
+    const writes: string[] = [];
+    const owner: { quote?: string; journal?: string } = {};
+    p.route(async (route) => {
+      if (!operation.open) return route.abort();
+      await Promise.all([quote.promise]);
+      if (!operation.open) return route.abort();
+      owner.quote = "quote-own";
+      owner.journal = "journal-own";
+      writes.push("quote.json");
+      await operation.send(() => route.fetch());
+    });
+    const post = p.browserPost();
+    await closeOriginalBookingOperation(operation, false, async () => {
+      await p.unroute();
+    });
+    quote.resolve();
+    await post;
+    expect(owner).toEqual({});
+    expect(writes).toEqual([]);
+    expect(p.counts).toEqual({ network: 0, aborts: 1, sends: 0 });
+  });
+
+  it("removes the guard at once when no UI action started, and after success", async () => {
+    const failed = page();
+    const early = new OriginalBookingOperation("supplemental-original-booking");
+    failed.route(guarded(early));
+    await closeOriginalBookingOperation(early, false, () => failed.unroute());
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(failed.handlers).toHaveLength(0);
+
+    const s = await setup();
+    const ok = page();
+    const operation = new OriginalBookingOperation("main-original-booking");
+    ok.route(guarded(operation));
+    let succeeded = false;
+    try {
+      await expect(
+        settleOriginalBookingOperation(
+          operation.uiAction(async () => ok.browserPost()),
+          s.observe(),
+          operation.signal,
+          () => Promise.resolve(),
+        ),
+      ).resolves.toEqual({ orderId: "order-own", quoteId: "quote-own" });
+      succeeded = true;
+    } finally {
+      await closeOriginalBookingOperation(operation, succeeded, () =>
+        ok.unroute(),
+      );
+    }
+    expect(ok.handlers).toHaveLength(0);
+    expect(ok.counts).toEqual({ network: 0, aborts: 0, sends: 1 });
+  });
+});
+
 describe("original routed server ACK before UI release", () => {
   it("persists the actual ACK before navigation and releases its exact bytes once", async () => {
     const order: string[] = [];
