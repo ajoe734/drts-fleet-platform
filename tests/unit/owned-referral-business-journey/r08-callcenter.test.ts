@@ -738,6 +738,7 @@ async function fullHarness(fault = "") {
   });
   const serve = async (url: string, method = "GET", raw?: string) => {
     const path = new URL(url).pathname;
+    h.events.push(`${method} ${path}`);
     if (path === "/callcenter")
       return response(
         url,
@@ -773,6 +774,8 @@ async function fullHarness(fault = "") {
         });
         session.callbackTask = callback;
       } else if (path.endsWith("/transfer-to-complaint")) {
+        if (fault === "transfer ACK unknown no case")
+          throw new Error("SIM transfer ACK unknown");
         Object.assign(complaint, body);
         session.linkedCaseNo = complaint.caseNo;
         callback.linkedCaseNo = complaint.caseNo;
@@ -915,6 +918,8 @@ async function fullHarness(fault = "") {
       if (this.form === "transfer") description = value;
     }
     async selectOption(value: string) {
+      if (this.form === "transfer" && fault === "before transfer capture")
+        throw new Error("SIM interrupted before transfer capture");
       void value; // external DOM form
     }
     async check() {
@@ -1148,6 +1153,75 @@ describe("R08 original FULL integration (SIM browser/HTTP, actual orchestration/
         cleanup: "verified",
       },
     });
+    expect(result.wholeRunPassed).toBe(false);
+  });
+  it("cleans known callback and call before Ops revoke when interrupted after helper allocation but before transfer capture", async () => {
+    const f = await fullHarness("before transfer capture");
+    await expect(f.run.run()).rejects.toThrow(
+      "SIM interrupted before transfer capture",
+    );
+    expect(f.run.snapshot()).toMatchObject({
+      callId: "SIM-call",
+      callbackTaskId: "SIM-callback",
+      result: "failed",
+      transfer: { transfer: "not-captured", replay: "not-attempted" },
+    });
+    expect(f.run.snapshot().transfer!.command).toBeUndefined();
+    expect(f.run.snapshot().transfer!.caseNo).toBeUndefined();
+    expect(f.writes.map((w) => w.path)).toEqual([
+      `${BASE}/callcenter/sessions`,
+      `${PATH}/recording-callback`,
+      `${PATH}/link-order`,
+      `${PATH}/callbacks`,
+    ]);
+    const result = await f.finish("runner-interrupted");
+    expect(f.run.snapshot().cleanup).toBe("verified");
+    expect(f.writes.slice(4).map((w) => w.path)).toEqual([
+      `${BASE}/callcenter/callbacks/SIM-callback/cancel`,
+      `${PATH}/close`,
+    ]);
+    const events = f.h.events;
+    const cancel = events.indexOf(
+      `POST ${BASE}/callcenter/callbacks/SIM-callback/cancel`,
+    );
+    const queue = events.indexOf(`GET ${BASE}/callcenter/callbacks`, cancel);
+    const close = events.indexOf(`POST ${PATH}/close`, queue);
+    const readback = events.indexOf(`GET ${PATH}`, close);
+    expect(cancel).toBeGreaterThan(-1);
+    expect(queue).toBeGreaterThan(cancel);
+    expect(close).toBeGreaterThan(queue);
+    expect(readback).toBeGreaterThan(close);
+    expect(events.indexOf("Ops revoked")).toBeGreaterThan(readback);
+    expect(f.h.callback.status).toBe("cancelled");
+    expect(f.h.session.status).toBe("closed");
+    expect(result.wholeRunPassed).toBe(false);
+    await expect(f.run.cleanup()).rejects.toThrow(
+      "r08-own-run-cleanup-at-most-once",
+    );
+    await f.finalizer.run("runner-interrupted");
+    expect(f.writes).toHaveLength(6);
+  });
+  it("retains an unexpected case without cleanup writes when transfer was never captured", async () => {
+    const f = await fullHarness("before transfer capture");
+    await expect(f.run.run()).rejects.toThrow();
+    f.h.session.linkedCaseNo = "SIM-unowned-case";
+    const result = await f.finish("runner-interrupted");
+    expect(f.run.snapshot().cleanup).toBe("unknown");
+    expect(f.writes).toHaveLength(4);
+    expect(result.wholeRunPassed).toBe(false);
+  });
+  it("retains ambiguous transfer custody without partial cleanup or replacement when ACK and case are unknown", async () => {
+    const f = await fullHarness("transfer ACK unknown no case");
+    await expect(f.run.run()).rejects.toThrow("SIM transfer ACK unknown");
+    expect(f.run.snapshot().transfer).toMatchObject({
+      transfer: "ack-unknown",
+      command: { path: `${PATH}/transfer-to-complaint` },
+    });
+    const result = await f.finish("runner-interrupted");
+    expect(f.run.snapshot().cleanup).toBe("unknown");
+    expect(f.writes).toHaveLength(5);
+    expect(f.h.callback.status).toBe("pending");
+    expect(f.h.session.status).toBe("active");
     expect(result.wholeRunPassed).toBe(false);
   });
   it.each(["recording ACK lost", "link ACK lost", "callback ACK lost"])(

@@ -1279,7 +1279,11 @@ export class R08ExistingFull {
         producer.ack = "acknowledged";
         await this.save();
       }
-      if (this.helper) {
+      // The helper exists before the transfer form is touched. Only captured
+      // intent or a known case requires transfer reconciliation; an interrupted
+      // form with neither still has the ordinary partial-producer custody.
+      const transfer = this.helper?.snapshot();
+      if (this.helper && (transfer?.command || transfer?.caseNo)) {
         await this.helper.reconcileOwnTransfer();
         await this.helper.cleanup({
           resolutionCode: "resolved_other",
