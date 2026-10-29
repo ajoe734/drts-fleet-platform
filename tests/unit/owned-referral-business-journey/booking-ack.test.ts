@@ -4,6 +4,8 @@ import {
   Evidence,
   JourneyFailure,
   clickAndSettleOriginalBookingAck,
+  drainWithinOperationBudget,
+  settleOriginalBookingOperation,
   observeOriginalBookingAck,
   settleRoutedOriginalBookingAck,
   originalBookingRouteFailure,
@@ -254,24 +256,24 @@ describe("original browser booking ACK observation", () => {
   });
 });
 
-describe("original booking ACK join with a never-settling UI click", () => {
-  const never = () => new Promise<void>(() => undefined);
+const never = () => new Promise<void>(() => undefined);
 
-  async function collectUnhandled(run: () => Promise<void>) {
-    const unhandled: unknown[] = [];
-    const listener = (reason: unknown) => unhandled.push(reason);
-    process.on("unhandledRejection", listener);
-    try {
-      await run();
-      // Let any late rejection reach the process-level hook.
-      await new Promise((resolve) => setImmediate(resolve));
-      await new Promise((resolve) => setImmediate(resolve));
-    } finally {
-      process.off("unhandledRejection", listener);
-    }
-    return unhandled;
+async function collectUnhandled(run: () => Promise<void>) {
+  const unhandled: unknown[] = [];
+  const listener = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", listener);
+  try {
+    await run();
+    // Let any late rejection reach the process-level hook.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  } finally {
+    process.off("unhandledRejection", listener);
   }
+  return unhandled;
+}
 
+describe("original booking ACK join with a never-settling UI click", () => {
   it("surfaces an already expired observation instead of waiting for the click", async () => {
     const s = await setup();
     const timeout = new Error("private URL");
@@ -401,6 +403,180 @@ describe("original booking ACK join with a never-settling UI click", () => {
     expired.abort(new JourneyFailure("scheduled-original-cancel-timeout"));
     expect(s.claim).toHaveBeenCalledExactlyOnceWith("order-own");
     expect(s.journal.current?.state).toBe("acknowledged");
+  });
+});
+
+describe("original booking caller drains within the existing operation budget", () => {
+  // Caller-shaped route: it drains observed quote tasks before it can finish,
+  // exactly like the main page.route handler before its own finally.
+  function stuckRoute(quoteTasks: Promise<unknown>[]) {
+    let finished = false;
+    const routeFinished = (async () => {
+      try {
+        await Promise.all([...quoteTasks]);
+      } finally {
+        finished = true;
+      }
+    })();
+    void routeFinished.catch(() => undefined);
+    return { routeFinished, finished: () => finished };
+  }
+
+  async function pendingAfterTurns(outcome: Promise<unknown>) {
+    let done = false;
+    void outcome.then(
+      () => (done = true),
+      () => (done = true),
+    );
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
+    return !done;
+  }
+
+  it("leaves a stuck route/quote drain at expiry and keeps the observation failure primary", async () => {
+    const s = await setup();
+    const timeout = new Error("private URL");
+    timeout.name = "TimeoutError";
+    const quote = deferred<unknown>();
+    const route = stuckRoute([quote.promise]);
+    const expired = new AbortController();
+    const unhandled = await collectUnhandled(async () => {
+      const outcome = settleOriginalBookingOperation(
+        never,
+        s.observe(Promise.reject(timeout)),
+        expired.signal,
+        () => route.routeFinished,
+      );
+      void outcome.catch(() => undefined);
+      // Observation already failed; only the route drain is still held.
+      expect(await pendingAfterTurns(outcome)).toBe(true);
+      expired.abort(new JourneyFailure("main-original-booking-timeout"));
+      await expect(outcome).rejects.toThrow(
+        "booking-response-wait:TimeoutError",
+      );
+      expect(route.finished()).toBe(false);
+      // The abandoned quote task still settles observed later.
+      quote.reject(new Error("private late quote body"));
+    });
+    expect(unhandled).toEqual([]);
+    expect(route.finished()).toBe(true);
+    expect(s.claim).not.toHaveBeenCalled();
+    expect(s.journal.current).toMatchObject({
+      state: "ack_unknown",
+      body: s.raw,
+      idempotencyKey: s.command.idempotencyKey,
+    });
+  });
+
+  it("reports an abandoned route drain after a durable ACK without losing it", async () => {
+    const s = await setup();
+    const route = stuckRoute([never()]);
+    const expired = new AbortController();
+    const outcome = settleOriginalBookingOperation(
+      async () => undefined,
+      s.observe(),
+      expired.signal,
+      () => route.routeFinished,
+    );
+    const rejected = expect(outcome).rejects.toThrow(
+      "main-original-booking-timeout",
+    );
+    expect(await pendingAfterTurns(outcome)).toBe(true);
+    expect(s.journal.current?.state).toBe("acknowledged");
+    expired.abort(new JourneyFailure("main-original-booking-timeout"));
+    await rejected;
+    expect(s.claim).toHaveBeenCalledExactlyOnceWith("order-own");
+    expect(s.journal.current).toMatchObject({
+      state: "acknowledged",
+      orderId: "order-own",
+      body: s.raw,
+    });
+  });
+
+  it("still drains a genuine late ACK and its route before surfacing a failed click", async () => {
+    const s = await setup();
+    const response = deferred<BookingAckResponse>();
+    const route = deferred<void>();
+    const expired = new AbortController();
+    let cleanupStarted = false;
+    const outcome = settleOriginalBookingOperation(
+      async () => {
+        throw new Error("private selector");
+      },
+      s.observe(response.promise),
+      expired.signal,
+      () => route.promise,
+    ).finally(() => {
+      cleanupStarted = true;
+    });
+    const rejected = expect(outcome).rejects.toThrow("booking-ui-click:Error");
+    response.resolve(s.response);
+    expect(await pendingAfterTurns(outcome)).toBe(true);
+    expect(s.journal.current?.state).toBe("acknowledged");
+    expect(cleanupStarted).toBe(false);
+    route.resolve();
+    await rejected;
+    expect(cleanupStarted).toBe(true);
+    expect(s.claim).toHaveBeenCalledExactlyOnceWith("order-own");
+  });
+
+  it("returns the ACK after a finished route and waits for no route that never started", async () => {
+    const s = await setup();
+    const expired = new AbortController();
+    await expect(
+      settleOriginalBookingOperation(
+        async () => undefined,
+        s.observe(),
+        expired.signal,
+        () => Promise.resolve(),
+      ),
+    ).resolves.toEqual({ orderId: "order-own", quoteId: "quote-own" });
+    const t = await setup();
+    await expect(
+      settleOriginalBookingOperation(
+        async () => undefined,
+        t.observe(),
+        expired.signal,
+        () => undefined,
+      ),
+    ).resolves.toEqual({ orderId: "order-own", quoteId: "quote-own" });
+  });
+
+  it("bounds a supplemental unroute/quote drain by the same expired signal", async () => {
+    const quote = deferred<void>();
+    const expired = new AbortController();
+    const removed = vi.spyOn(expired.signal, "removeEventListener");
+    const unhandled = await collectUnhandled(async () => {
+      const drain = drainWithinOperationBudget(
+        (async () => {
+          await Promise.resolve(); // unroute
+          await Promise.all([quote.promise]);
+        })(),
+        expired.signal,
+      );
+      void drain.catch(() => undefined);
+      expect(await pendingAfterTurns(drain)).toBe(true);
+      expired.abort(
+        new JourneyFailure("supplemental-original-booking-timeout"),
+      );
+      await expect(drain).rejects.toThrow(
+        "supplemental-original-booking-timeout",
+      );
+      expect(removed).toHaveBeenCalledWith("abort", expect.any(Function));
+      quote.reject(new Error("private late quote body"));
+    });
+    expect(unhandled).toEqual([]);
+  });
+
+  it("keeps a quote failure that settles within the budget", async () => {
+    const expired = new AbortController();
+    const failure = new JourneyFailure("supplemental actual UI quote intent");
+    await expect(
+      drainWithinOperationBudget(Promise.reject(failure), expired.signal),
+    ).rejects.toBe(failure);
+    await expect(
+      drainWithinOperationBudget(Promise.resolve(), expired.signal),
+    ).resolves.toBeUndefined();
   });
 });
 

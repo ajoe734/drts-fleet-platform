@@ -50,6 +50,9 @@ import {
   originalBookingRouteFailure,
   type BookingAckResponse,
   clickAndSettleOriginalBookingAck,
+  drainWithinOperationBudget,
+  settleOriginalBookingOperation,
+  NATIVE_REQUEST_TIMEOUT_MS,
   persistPrivateJson,
   readOwnedReferralCookies,
   adoptReferralSession,
@@ -1356,6 +1359,8 @@ test(journeyName, async ({ browser, request }) => {
         },
       );
       let routeStarted = false;
+      // The main booking's one budget is the existing native request deadline.
+      const mainBookingExpired = new AbortController();
       let finishOriginalRoute!: () => void;
       const originalRouteFinished = new Promise<void>((resolve) => {
         finishOriginalRoute = resolve;
@@ -1401,6 +1406,11 @@ test(journeyName, async ({ browser, request }) => {
             // The UI may consume a later legitimate proposal for the same intent.
             // Select by its actual frozen command, never by response arrival order.
             await Promise.all([...observedQuoteTasks]);
+            // An abandoned caller never receives a late first POST.
+            requireFact(
+              !mainBookingExpired.signal.aborted,
+              "main original booking within its operation budget",
+            );
             const selected = quotesById.get(text(actualCommand.quoteId));
             requireFact(
               selected,
@@ -1489,13 +1499,22 @@ test(journeyName, async ({ browser, request }) => {
       await feeCheckbox.check();
       await expect(feeCheckbox).toBeChecked();
       await finalizer.checkpoint("main-original-booking");
+      const mainBookingBudget = setTimeout(
+        () =>
+          mainBookingExpired.abort(
+            new JourneyFailure("main-original-booking-timeout"),
+          ),
+        NATIVE_REQUEST_TIMEOUT_MS,
+      );
       try {
-        await clickAndSettleOriginalBookingAck(
+        await settleOriginalBookingOperation(
           () => page.locator('[data-drt-operation="referral-create"]').click(),
           bookingAck,
+          mainBookingExpired.signal,
+          () => (routeStarted ? originalRouteFinished : undefined),
         );
       } finally {
-        if (routeStarted) await originalRouteFinished;
+        clearTimeout(mainBookingBudget);
       }
       await page.unroute(`${origins.referral}/api/referral/booking`);
       if (bookingState.routeError) throw bookingState.routeError;
@@ -3007,6 +3026,9 @@ test(journeyName, async ({ browser, request }) => {
         });
         void settled.catch(() => undefined);
         let deadline: ReturnType<typeof setTimeout> | undefined;
+        // The same 25s operation budget also ends a never-settling UI click
+        // and the route/quote drains below.
+        const expired = new AbortController();
         const url = `${origins.referral}/api/referral/booking`;
         const handle = async (route: Route) => {
           try {
@@ -3060,6 +3082,11 @@ test(journeyName, async ({ browser, request }) => {
                 intendedInput: intendedInput ?? null,
                 quote,
               },
+            );
+            // An abandoned caller never receives a late first POST.
+            requireFact(
+              !expired.signal.aborted,
+              "supplemental original booking within its operation budget",
             );
             await state.journal.beforeSend(
               raw,
@@ -3129,8 +3156,6 @@ test(journeyName, async ({ browser, request }) => {
           await expect(create).toBeEnabled();
           await finalizer.checkpoint(`supplemental-${name}-original-booking`);
           await page.route(url, handle);
-          // The same 25s operation budget also ends a never-settling UI click.
-          const expired = new AbortController();
           deadline = setTimeout(() => {
             const timeout = new JourneyFailure(
               "supplemental-original-booking-timeout",
@@ -3160,10 +3185,18 @@ test(journeyName, async ({ browser, request }) => {
             quote: ObjectData;
           };
         } finally {
-          clearTimeout(deadline);
-          page.off("response", observeQuote);
-          await page.unroute(url, handle);
-          await Promise.all(quoteTasks);
+          try {
+            page.off("response", observeQuote);
+            await drainWithinOperationBudget(
+              (async () => {
+                await page.unroute(url, handle);
+                await Promise.all(quoteTasks);
+              })(),
+              expired.signal,
+            );
+          } finally {
+            clearTimeout(deadline);
+          }
         }
       };
       // Original C1 is the legal real null-final-driver/no-arrival source. Read

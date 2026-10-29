@@ -594,7 +594,8 @@ type BookingObservationPhase =
   | "booking-response-body"
   | "booking-response-release"
   | "booking-original-route"
-  | "booking-ack-persist";
+  | "booking-ack-persist"
+  | "booking-operation-drain";
 
 function bookingObservationFailure(
   phase: BookingObservationPhase,
@@ -790,6 +791,32 @@ export async function settleRoutedOriginalBookingAck<T>(
   return result.value;
 }
 
+/** Resolve once the caller's existing operation budget expires; never rejects. */
+function operationExpiry(
+  expired: AbortSignal | undefined,
+  phase: BookingObservationPhase,
+) {
+  let onExpired: (() => void) | undefined;
+  const reached = new Promise<{ kind: "expired"; failure: JourneyFailure }>(
+    (resolve) => {
+      if (!expired) return;
+      onExpired = () =>
+        resolve({
+          kind: "expired",
+          failure: bookingObservationFailure(phase, expired.reason),
+        });
+      if (expired.aborted) onExpired();
+      else expired.addEventListener("abort", onExpired, { once: true });
+    },
+  );
+  return {
+    reached,
+    dispose: () => {
+      if (onExpired) expired?.removeEventListener("abort", onExpired);
+    },
+  };
+}
+
 /**
  * A failed click stays failed; settle its one observer before owned cleanup.
  * An observation that already failed, or the caller's own existing operation
@@ -819,36 +846,81 @@ export async function clickAndSettleOriginalBookingAck<T>(
       ? new Promise<never>(() => undefined)
       : { kind: "observation-failed" as const, error: result.error },
   );
-  let onExpired: (() => void) | undefined;
-  const deadline = new Promise<{ kind: "expired"; failure: JourneyFailure }>(
-    (resolve) => {
-      if (!expired) return;
-      onExpired = () =>
-        resolve({
-          kind: "expired",
-          failure: bookingObservationFailure(
-            "booking-ui-click",
-            expired.reason,
-          ),
-        });
-      if (expired.aborted) onExpired();
-      else expired.addEventListener("abort", onExpired, { once: true });
-    },
-  );
+  const deadline = operationExpiry(expired, "booking-ui-click");
   try {
-    const first = await Promise.race([clicked, observationFailed, deadline]);
+    const first = await Promise.race([
+      clicked,
+      observationFailed,
+      deadline.reached,
+    ]);
     if (first.kind === "observation-failed") throw first.error;
     // The operation deadline already expired with the click still pending. A
     // received ACK stays durable through its own observer; it is not success.
     if (first.kind === "expired") throw first.failure;
-    const result = await Promise.race([settled, deadline]);
+    const result = await Promise.race([settled, deadline.reached]);
     if (first.kind === "click-failed") throw first.failure;
     if ("kind" in result) throw result.failure;
     if (!result.ok) throw result.error;
     return result.value;
   } finally {
-    if (onExpired) expired?.removeEventListener("abort", onExpired);
+    deadline.dispose();
   }
+}
+
+/**
+ * Await an owned route/quote drain only within the same existing operation
+ * budget. An abandoned drain keeps running observed; the caller is not held.
+ */
+export async function drainWithinOperationBudget(
+  drain: Promise<unknown>,
+  expired: AbortSignal,
+): Promise<void> {
+  const drained = drain.then(
+    () => ({ kind: "drained" as const }),
+    (error: unknown) => ({ kind: "drain-failed" as const, error }),
+  );
+  const deadline = operationExpiry(expired, "booking-operation-drain");
+  try {
+    const first = await Promise.race([drained, deadline.reached]);
+    if (first.kind === "drain-failed") throw first.error;
+    if (first.kind === "expired") throw first.failure;
+  } finally {
+    deadline.dispose();
+  }
+}
+
+/** Main booking click/ACK join plus its original route drain, one budget. */
+export async function settleOriginalBookingOperation<T>(
+  click: () => Promise<void>,
+  observation: Promise<T>,
+  expired: AbortSignal,
+  routeDrain: () => Promise<unknown> | undefined,
+): Promise<T> {
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown };
+  try {
+    outcome = {
+      ok: true,
+      value: await clickAndSettleOriginalBookingAck(
+        click,
+        observation,
+        expired,
+      ),
+    };
+  } catch (error) {
+    outcome = { ok: false, error };
+  }
+  const pending = routeDrain();
+  if (pending) {
+    try {
+      await drainWithinOperationBudget(pending, expired);
+    } catch (error) {
+      // The join's own failure stays primary; an abandoned drain is still
+      // reported when the join itself had succeeded.
+      if (outcome.ok) throw error;
+    }
+  }
+  if (!outcome.ok) throw outcome.error;
+  return outcome.value;
 }
 
 export type SafeEvent = {
@@ -955,7 +1027,7 @@ const DEFAULT_RESPONSE_BYTE_LIMIT = 1024 * 1024;
 // buffer each retain at most 8 MiB (JSON parsing/conversion also uses memory).
 // Never expose a caller-selected limit or widen ordinary JSON/binary downloads.
 const CANONICAL_ORDERS_RESPONSE_BYTE_LIMIT = 8 * DEFAULT_RESPONSE_BYTE_LIMIT;
-const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
+export const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
 // Mirrors deploy-dev.yml curl_ready/curl_ready_auth --max-time 30 (readiness,
 // not a business deadline). No retry is added; one request, one deadline.
 const STARTUP_OPS_READINESS_TIMEOUT_MS = 30_000;
