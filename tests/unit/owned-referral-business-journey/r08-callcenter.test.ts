@@ -46,7 +46,7 @@ const wire = (value: unknown): unknown => {
 };
 
 function harness() {
-  const proof: R08OpsProof = {
+  const proof = {
     origin: ORIGIN,
     runtimeSha: SHA,
     controlRole: "ops",
@@ -62,7 +62,12 @@ function harness() {
       membershipId: "SIM-membership",
       sessionId: "SIM-session",
     },
-  };
+  } as R08OpsProof;
+  Object.assign(proof, {
+    callcenterServedSha: SHA,
+    transportRuntimeSha: SHA,
+    browser: { runtimeSha: SHA, active: true, identity: clone(proof.identity) },
+  });
   const canonical: R08Canonical = {
     order: {
       orderId: "SIM-order",
@@ -222,6 +227,32 @@ function harness() {
 }
 
 describe("R08 original UI replay orchestration (SIM ports, no hosted acceptance)", () => {
+  it.each(["page SHA", "browser session", "transport runtime"])(
+    "rejects independent observed %s mismatch even in initial expectations",
+    (fault) => {
+      const h = harness();
+      Object.assign(h.expected.proof, {
+        callcenterServedSha: fault === "page SHA" ? "7".repeat(40) : SHA,
+        browser: {
+          runtimeSha: SHA,
+          active: true,
+          identity: {
+            ...h.proof.identity,
+            sessionId:
+              fault === "browser session"
+                ? "SIM-other"
+                : h.proof.identity.sessionId,
+          },
+        },
+        transportRuntimeSha:
+          fault === "transport runtime" ? "7".repeat(40) : SHA,
+      });
+      expect(() => new R08Callcenter(h.expected, h.ports)).toThrow(
+        "r08-same-canonical-ops-first-party-bff-runtime",
+      );
+    },
+  );
+
   it("checkpoints raw command before forward and successful IDs before navigation; replays bytes once", async () => {
     const h = harness();
     await h.helper.capture(h.route);
@@ -384,6 +415,20 @@ describe("R08 original UI replay orchestration (SIM ports, no hosted acceptance)
     );
     expect(h.commands).toEqual([]);
   });
+
+  it.each(["page SHA", "browser", "transport SHA"])(
+    "fails missing observed %s before forwarding",
+    async (fault) => {
+      const h = harness();
+      if (fault === "page SHA") h.proof.callcenterServedSha = "";
+      if (fault === "transport SHA") h.proof.transportRuntimeSha = "";
+      if (fault === "browser") Object.assign(h.proof, { browser: undefined });
+      await expect(h.helper.capture(h.route)).rejects.toThrow(
+        "r08-same-canonical-ops-first-party-bff-runtime",
+      );
+      expect(h.route.fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects counterfeit initial proof instead of accepting matching fake expectations", () => {
     const h = harness();

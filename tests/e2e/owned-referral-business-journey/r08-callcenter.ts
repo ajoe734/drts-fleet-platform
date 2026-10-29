@@ -1,3 +1,5 @@
+import type { BrowserContext, Page, Route } from "@playwright/test";
+import type { RunFinalizer } from "./run-finalization";
 import { createHash } from "node:crypto";
 import {
   COMPLAINT_CATEGORY_VALID_RESOLUTIONS,
@@ -6,17 +8,28 @@ import {
 } from "@drts/contracts";
 import {
   camelWire,
+  NativeTransport,
+  text,
+  records,
+  JourneyFailure,
   object,
   requireFact,
   type CallResult,
   type ObjectData,
 } from "./protocol";
 
-// Preparation only: the original FULL caller/finalizer must supply these ports.
+// The original FULL caller/finalizer supplies these observed ports.
 // No credentials, browser, role issuance, booking or recording producer here.
 export type R08OpsProof = {
   origin: string;
   runtimeSha: string;
+  callcenterServedSha: string;
+  transportRuntimeSha: string;
+  browser: {
+    runtimeSha: string;
+    active: boolean;
+    identity: R08OpsProof["identity"];
+  };
   controlRole: "ops" | "opsApi";
   bffStatus: number;
   callcenterPageStatus: number;
@@ -171,6 +184,11 @@ export class R08Callcenter {
       origin.protocol === "https:" &&
         origin.origin === proof.origin &&
         /^[a-f0-9]{40}$/.test(proof.runtimeSha) &&
+        proof.callcenterServedSha === proof.runtimeSha &&
+        proof.transportRuntimeSha === proof.runtimeSha &&
+        proof.browser?.runtimeSha === proof.runtimeSha &&
+        proof.browser.active === true &&
+        stable(proof.browser.identity) === stable(i) &&
         proof.controlRole === "ops" &&
         proof.bffStatus === 200 &&
         proof.callcenterPageStatus === 200 &&
@@ -431,6 +449,22 @@ export class R08Callcenter {
     }
   }
 
+  // Read-only recovery of an interrupted original command, never another
+  // transfer. Only the exact owned call's canonical link can supply its case.
+  async reconcileOwnTransfer() {
+    if (this.state.caseNo || !this.state.command) return;
+    await this.guard();
+    const session = this.checked(await this.ports.get(this.path()));
+    const caseNo = text(session.linkedCaseNo);
+    const complaintCase = this.checked(
+      await this.ports.get(
+        `${prefix}/complaints/${encodeURIComponent(caseNo)}`,
+      ),
+    );
+    this.acceptTransfer({ session, complaintCase });
+    await this.checkpoint();
+  }
+
   /** To be called by the original finalizer BEFORE own Ops session revocation.
    * Retains audit rows and finalize_recording queue; no broad cleanup. */
   async cleanup(command: ResolveComplaintCaseCommand) {
@@ -523,5 +557,717 @@ export class R08Callcenter {
       await this.unknown("normal-owned-cleanup-unverified");
       throw error;
     }
+  }
+}
+
+export type R08RunCustody = {
+  orderId: string;
+  callId?: string;
+  recordingId: string;
+  callbackTaskId?: string;
+  producers: {
+    step: string;
+    command: R08Command;
+    ack: "ack-unknown" | "acknowledged";
+  }[];
+  transfer?: R08Custody;
+  result: "in-progress" | "failed" | "verified";
+  cleanup: "not-attempted" | "unknown" | "verified";
+};
+
+/** Existing FULL's last extension. Uses its normal Ops issuer, browser context,
+ * canonical order/supply reader, and original finalizer. No product fetcher,
+ * booking, role, workflow, retry or runtime is created here. */
+export class R08ExistingFull {
+  private readonly state: R08RunCustody;
+  private page?: Page;
+  private helper?: R08Callcenter;
+  private expectedProof?: R08OpsProof;
+  private expectedCanonical?: R08Canonical;
+  private cleanupStarted = false;
+  private pending?: {
+    path: string;
+    intent?: ObjectData;
+    accept: (value: ObjectData) => void;
+    resolve: () => void;
+    reject: (error: unknown) => void;
+  };
+  private readonly path = `${prefix}/callcenter/sessions`;
+  constructor(
+    private readonly ports: {
+      context: BrowserContext;
+      tx: NativeTransport;
+      finalizer: RunFinalizer;
+      origin: string;
+      runtimeSha: string;
+      controlRole: "ops" | "opsApi";
+      orderId: string;
+      phone: string;
+      nonce: string;
+      canonical: () => Promise<R08Canonical>;
+    },
+  ) {
+    this.state = {
+      orderId: ports.orderId,
+      recordingId: `${ports.nonce}-SYNTHETIC-INDEX-ONLY`,
+      producers: [],
+      result: "in-progress",
+      cleanup: "not-attempted",
+    };
+  }
+  snapshot(): R08RunCustody {
+    return copy(this.state);
+  }
+  private async save() {
+    if (this.helper) this.state.transfer = this.helper.snapshot();
+    await this.ports.finalizer.checkpointOwned("r08-own-call-custody");
+  }
+  private checked(
+    status: number,
+    headers: Headers,
+    bytes: Buffer,
+    url: string,
+    expectedUrl: string,
+    raw = false,
+  ): CallResult {
+    requireFact(
+      url === expectedUrl &&
+        [200, 201].includes(status) &&
+        headers.get("x-drts-candidate-sha") === this.ports.runtimeSha &&
+        bytes.length <= 1024 * 1024,
+      "r08-browser-bff-origin-status-runtime-size",
+    );
+    if (raw) return { status, headers, bytes, data: null };
+    const envelope = object(camelWire(JSON.parse(bytes.toString("utf8"))));
+    requireFact(
+      envelope.data !== undefined && envelope.error === undefined,
+      "r08-browser-bff-success-envelope",
+    );
+    return { status, headers, bytes, data: envelope.data };
+  }
+  private request(path: string, command?: R08Command, raw = false) {
+    return this.ports.finalizer.guardOperation(async () => {
+      const url = `${this.ports.origin}${path}`;
+      // Explicit per-request headers, exact first-party origin only. The
+      // browser's shared APIRequestContext supplies its own same cookies.
+      const response = await this.ports.context.request.fetch(url, {
+        method: command ? "POST" : "GET",
+        headers: {
+          ...this.ports.tx.headers("ops", url),
+          ...(command?.headers ?? {}),
+        },
+        ...(command ? { data: Buffer.from(command.rawBody, "utf8") } : {}),
+        timeout: 15_000,
+        maxRedirects: 0,
+        maxRetries: 0,
+      });
+      try {
+        return this.checked(
+          response.status(),
+          new Headers(response.headers()),
+          await response.body(),
+          response.url(),
+          url,
+          raw,
+        );
+      } finally {
+        await response.dispose();
+      }
+    });
+  }
+  private identity(value: unknown): R08OpsProof["identity"] {
+    const i = object(value);
+    return {
+      realm: text(i.realm),
+      actorType: text(i.actorType),
+      authMode: text(i.authMode),
+      actorId: text(i.actorId),
+      principalId: text(i.principalId),
+      membershipId: text(i.membershipId),
+      sessionId: text(i.sessionId),
+    };
+  }
+  private async proof(): Promise<R08OpsProof> {
+    const page = await this.request("/callcenter", undefined, true);
+    const browser = await this.request(`${prefix}/auth/session`);
+    const transport = await this.ports.tx.call("opsApi", "/api/auth/session");
+    return {
+      origin: this.ports.origin,
+      runtimeSha: this.ports.runtimeSha,
+      callcenterPageStatus: page.status,
+      callcenterServedSha: page.headers.get("x-drts-candidate-sha") ?? "",
+      bffStatus: browser.status,
+      controlRole: this.ports.controlRole,
+      transportRuntimeSha: transport.headers.get("x-drts-candidate-sha") ?? "",
+      active: object(transport.data).active === true,
+      identity: this.identity(object(transport.data).identity),
+      browser: {
+        runtimeSha: browser.headers.get("x-drts-candidate-sha") ?? "",
+        active: object(browser.data).active === true,
+        identity: this.identity(object(browser.data).identity),
+      },
+    };
+  }
+  private async guard() {
+    requireFact(
+      this.expectedProof && this.expectedCanonical,
+      "r08-initial-observations-required",
+    );
+    requireFact(
+      stable(await this.proof()) === stable(this.expectedProof),
+      "r08-actual-browser-transport-proof-drift",
+    );
+    requireFact(
+      stable(await this.ports.canonical()) === stable(this.expectedCanonical),
+      "r08-completed-order-or-supply-drift",
+    );
+  }
+  private sessionPath() {
+    return `${this.path}/${encodeURIComponent(text(this.state.callId))}`;
+  }
+  private async route(route: Route) {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.origin !== this.ports.origin) return route.continue();
+    try {
+      await this.ports.finalizer.guardOperation(async () => {
+        const pending = this.pending;
+        if (request.method() === "POST") {
+          requireFact(
+            pending && url.pathname === pending.path,
+            "r08-no-unowned-ui-post",
+          );
+          await this.guard();
+          if (this.helper && url.pathname.endsWith("/transfer-to-complaint")) {
+            await this.helper.capture({
+              request: () => request,
+              fetch: (options) =>
+                route.fetch({
+                  ...options,
+                  headers: {
+                    ...request.headers(),
+                    ...this.ports.tx.headers("ops", request.url()),
+                  },
+                }),
+              fulfill: (options) => route.fulfill(options),
+            });
+          } else {
+            const rawBody = request.postData();
+            requireFact(
+              rawBody !== null &&
+                Buffer.byteLength(rawBody) <= 65536 &&
+                stable(object(JSON.parse(rawBody))) ===
+                  stable(pending.intent) &&
+                !new Headers(request.headers()).has("idempotency-key"),
+              "r08-original-producer-intent",
+            );
+            this.state.producers.push({
+              step: url.pathname.split("/").at(-1)!,
+              ack: "ack-unknown",
+              command: {
+                path: url.pathname,
+                rawBody,
+                headers: { "Content-Type": "application/json" },
+                bodySha256: digest(rawBody),
+              },
+            });
+            await this.save();
+            const response = await route.fetch({
+              headers: {
+                ...request.headers(),
+                ...this.ports.tx.headers("ops", request.url()),
+              },
+              timeout: 15_000,
+              maxRedirects: 0,
+              maxRetries: 0,
+            });
+            try {
+              const bytes = await response.body();
+              const data = object(
+                this.checked(
+                  response.status(),
+                  new Headers(response.headers()),
+                  bytes,
+                  response.url(),
+                  request.url(),
+                ).data,
+              );
+              pending.accept(data); // Exact own ACK/IDs BEFORE page loadData/navigation.
+              this.state.producers.at(-1)!.ack = "acknowledged";
+              await this.save();
+              await route.fulfill({ response, body: bytes });
+            } finally {
+              await response.dispose();
+            }
+            await this.guard();
+          }
+          this.pending = undefined;
+          pending.resolve();
+          return;
+        }
+        const response = await route.fetch({
+          headers: {
+            ...request.headers(),
+            ...this.ports.tx.headers("ops", request.url()),
+          },
+          timeout: 15_000,
+          maxRedirects: 0,
+          maxRetries: 0,
+        });
+        try {
+          // Never require static assets to carry the API envelope; the actual
+          // Callcenter navigation and BFF observations are checked separately.
+          await route.fulfill({ response });
+        } finally {
+          await response.dispose();
+        }
+      });
+    } catch (error) {
+      const pending = this.pending;
+      this.pending = undefined;
+      await route.abort("failed").catch(() => undefined);
+      pending?.reject(error);
+    }
+  }
+  private async submit(
+    path: string,
+    intent: ObjectData | undefined,
+    action: () => Promise<unknown>,
+    accept: (data: ObjectData) => void = () => undefined,
+  ) {
+    requireFact(!this.pending, "r08-single-ui-command-in-flight");
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    const ack = new Promise<void>((yes, no) => {
+      resolve = yes;
+      reject = no;
+    });
+    void ack.catch(() => undefined);
+    this.pending = {
+      path,
+      ...(intent ? { intent } : {}),
+      accept,
+      resolve,
+      reject,
+    };
+    // One existing write deadline also bounds a click that emits no request.
+    // A timed-out UI command is never clicked again; finally closes this page.
+    const timer = setTimeout(
+      () => reject(new JourneyFailure("r08-original-ui-observation-timeout")),
+      15_000,
+    );
+    try {
+      await Promise.all([action(), ack]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async run() {
+    await this.save();
+    try {
+      requireFact(
+        this.ports.controlRole === "ops",
+        "r08-real-ops-bff-required-no-direct-api-fallback",
+      );
+      this.page = await this.ports.context.newPage();
+      this.page.on("dialog", (dialog) => {
+        void dialog.accept(
+          dialog.type() === "prompt"
+            ? "Controlled synthetic index only"
+            : undefined,
+        );
+      });
+      await this.page.route("**/*", (route) => this.route(route));
+      const navigation = await this.page.goto(
+        `${this.ports.origin}/callcenter`,
+        { timeout: 15_000 },
+      );
+      requireFact(
+        navigation?.status() === 200 &&
+          navigation.headers()["x-drts-candidate-sha"] ===
+            this.ports.runtimeSha,
+        "r08-actual-served-callcenter-page-runtime",
+      );
+      // First-party browser fetch, on the actual page. Not a status declaration
+      // or direct-API observation. Same-origin routing injects the normal JWT.
+      const initialBrowser = await this.page.evaluate(async () => {
+        const response = await fetch("/control-plane-proxy/auth/session", {
+          redirect: "error",
+        });
+        return {
+          status: response.status,
+          sha: response.headers.get("x-drts-candidate-sha"),
+          body: await response.text(),
+        };
+      });
+      requireFact(
+        initialBrowser.status === 200 &&
+          initialBrowser.sha === this.ports.runtimeSha &&
+          Buffer.byteLength(initialBrowser.body) <= 1024 * 1024,
+        "r08-actual-browser-session-runtime",
+      );
+      const initial = object(
+        object(camelWire(JSON.parse(initialBrowser.body))).data,
+      );
+      this.expectedProof = await this.proof();
+      requireFact(
+        initial.active === true &&
+          stable(this.identity(initial.identity)) ===
+            stable(this.expectedProof.identity),
+        "r08-actual-browser-equals-native-ops-session",
+      );
+      this.expectedCanonical = await this.ports.canonical();
+      // Validate all independent observations before creating even the own call.
+      new R08Callcenter(
+        {
+          proof: this.expectedProof,
+          canonical: this.expectedCanonical,
+          owned: {
+            callId: "preflight",
+            recordingId: this.state.recordingId,
+            callbackTaskId: "preflight",
+            orderId: this.state.orderId,
+          },
+          intent: this.intent(),
+        },
+        this.helperPorts(),
+      );
+      const before = records(
+        object((await this.request(this.path)).data).items,
+      );
+      requireFact(
+        !before.some(
+          (item) =>
+            item.callerPhone === this.ports.phone &&
+            item.agentId === this.expectedProof!.identity.actorId,
+        ),
+        "r08-no-existing-own-call-intent",
+      );
+      const page = this.page;
+      await page
+        .getByRole("button", {
+          name: /^(Open call work session|開啟通話工作階段|建立通話|開啟通話|開啟新受理)$/i,
+        })
+        .first()
+        .click({ timeout: 15_000 });
+      const intake = page
+        .locator("form")
+        .filter({ has: page.locator('input[type="checkbox"]') });
+      await intake.locator("select").selectOption("complaint");
+      await intake.locator('input[type="text"]').nth(0).fill(this.ports.phone);
+      await intake
+        .locator('input[type="text"]')
+        .nth(1)
+        .fill(this.expectedProof.identity.actorId);
+      await intake.locator('input[type="checkbox"]').check();
+      const open = {
+        callType: "complaint",
+        callerPhone: this.ports.phone,
+        agentId: this.expectedProof.identity.actorId,
+        agentIdentityAnnounced: true,
+      };
+      await this.submit(
+        this.path,
+        open,
+        () =>
+          intake.locator('button[type="submit"]').click({ timeout: 15_000 }),
+        (data) => {
+          requireFact(
+            data.callerPhone === open.callerPhone &&
+              data.agentId === open.agentId &&
+              data.callType === open.callType &&
+              data.status === "active",
+            "r08-own-open-call-ack",
+          );
+          this.state.callId = text(data.callId);
+        },
+      );
+      // H692 normal nonvoice compatibility: attach synthetic index while no
+      // order is linked, THEN link the already completed main order. No media.
+      const recording = page
+        .locator("form")
+        .filter({
+          has: page.getByRole("button", {
+            name: /Manually attach recording|手動補掛錄音/,
+          }),
+        });
+      await recording
+        .locator('input[type="text"]')
+        .nth(0)
+        .fill(this.state.recordingId);
+      await this.submit(
+        `${this.sessionPath()}/recording-callback`,
+        {
+          recordingId: this.state.recordingId,
+          providerRecordingRef: "",
+          recordingUrl: "",
+          agentId: "AGENT-OPS-001",
+        },
+        () =>
+          recording.locator('button[type="submit"]').click({ timeout: 15_000 }),
+        (data) => {
+          requireFact(
+            data.callId === this.state.callId &&
+              data.recordingId === this.state.recordingId &&
+              data.recordingState === "ready" &&
+              data.linkedOrderId == null &&
+              !data.providerRecordingRef &&
+              !data.recordingUrl,
+            "r08-synthetic-index-ready-before-link",
+          );
+        },
+      );
+      const link = page
+        .locator("form")
+        .filter({
+          has: page.getByRole("button", {
+            name: /Link existing order|連結既有訂單/,
+          }),
+        });
+      await link.locator('input[type="text"]').fill(this.state.orderId);
+      await this.submit(
+        `${this.sessionPath()}/link-order`,
+        { orderId: this.state.orderId },
+        () => link.locator('button[type="submit"]').click({ timeout: 15_000 }),
+        (data) => {
+          requireFact(
+            data.callId === this.state.callId &&
+              data.linkedOrderId === this.state.orderId &&
+              data.recordingId === this.state.recordingId,
+            "r08-own-call-link-ack",
+          );
+        },
+      );
+      const callback = page
+        .locator("form")
+        .filter({ has: page.locator('input[type="datetime-local"]') });
+      const due = new Date(Date.now() + 3600_000).toISOString().slice(0, 16);
+      await callback.locator('input[type="datetime-local"]').fill(due);
+      await callback.locator("textarea").fill(`${this.ports.nonce}-INDEX-ONLY`);
+      // Browser timezone is read, not assumed when converting datetime-local.
+      const dueAt = await page.evaluate(
+        (value) => new Date(value).toISOString(),
+        due,
+      );
+      await this.submit(
+        `${this.sessionPath()}/callbacks`,
+        { dueAt, note: `${this.ports.nonce}-INDEX-ONLY` },
+        () =>
+          callback.locator('button[type="submit"]').click({ timeout: 15_000 }),
+        (data) => {
+          // finishCallbackMutation returns the actual callback task record.
+          const task = data;
+          requireFact(
+            task.callId === this.state.callId &&
+              task.linkedOrderId === this.state.orderId &&
+              task.note === `${this.ports.nonce}-INDEX-ONLY`,
+            "r08-own-callback-ack",
+          );
+          this.state.callbackTaskId = text(task.callbackTaskId);
+        },
+      );
+      this.helper = new R08Callcenter(
+        {
+          proof: this.expectedProof,
+          canonical: this.expectedCanonical,
+          owned: {
+            callId: text(this.state.callId),
+            recordingId: this.state.recordingId,
+            callbackTaskId: text(this.state.callbackTaskId),
+            orderId: this.state.orderId,
+          },
+          intent: this.intent(),
+        },
+        this.helperPorts(),
+      );
+      await this.save();
+      const transfer = page
+        .locator("form")
+        .filter({
+          has: page.getByRole("button", {
+            name: /Transfer to complaint|轉交客訴/,
+          }),
+        });
+      await transfer.locator("select").nth(0).selectOption("other");
+      await transfer.locator("select").nth(1).selectOption("normal");
+      await transfer.locator("textarea").fill(this.intent().description);
+      await this.submit(
+        `${this.sessionPath()}/transfer-to-complaint`,
+        undefined,
+        () =>
+          transfer.locator('button[type="submit"]').click({ timeout: 15_000 }),
+      );
+      await this.helper.replay();
+      this.state.result = "verified";
+      await this.save();
+    } catch (error) {
+      this.state.result = "failed";
+      await this.save();
+      throw error;
+    } finally {
+      await this.page?.close();
+    }
+  }
+  private intent(): TransferCallToComplaintCommand {
+    return {
+      category: "other",
+      severity: "normal",
+      description: `${this.ports.nonce} controlled SYNTHETIC INDEX ONLY`,
+      relatedOrderId: this.state.orderId,
+    };
+  }
+  private helperPorts(): R08Ports {
+    return {
+      proof: () => this.proof(),
+      canonical: this.ports.canonical,
+      get: (path) => this.request(path),
+      postRaw: (command) => this.request(command.path, command),
+      checkpoint: async (custody) => {
+        this.state.transfer = custody;
+        await this.save();
+      },
+    };
+  }
+  async stop() {
+    await this.page?.close();
+  }
+  async cleanup() {
+    requireFact(!this.cleanupStarted, "r08-own-run-cleanup-at-most-once");
+    this.cleanupStarted = true;
+    this.state.cleanup = "unknown";
+    await this.save();
+    try {
+      // Read-only reconciliation after unknown producer ACK. Never create a
+      // replacement call/index/link/callback or resend a producer command.
+      if (
+        !this.state.callId &&
+        this.state.producers.some((p) => p.command.path === this.path)
+      ) {
+        const open = object(
+          JSON.parse(this.state.producers[0]!.command.rawBody),
+        );
+        const matches = records(
+          object((await this.request(this.path)).data).items,
+        ).filter(
+          (item) =>
+            item.callerPhone === open.callerPhone &&
+            item.agentId === open.agentId &&
+            item.callType === open.callType &&
+            item.agentIdentityAnnounced === true,
+        );
+        requireFact(
+          matches.length === 1,
+          "r08-unknown-open-call-unique-own-readback-required",
+        );
+        this.state.callId = text(matches[0]!.callId);
+        this.state.producers[0]!.ack = "acknowledged";
+        await this.save();
+      }
+      if (!this.state.callId) {
+        requireFact(
+          this.state.producers.length === 0,
+          "r08-missing-call-id-retained",
+        );
+        this.state.cleanup = "verified";
+        await this.save();
+        return;
+      }
+      await this.guard();
+      const session = object((await this.request(this.sessionPath())).data);
+      requireFact(
+        session.callId === this.state.callId &&
+          session.callerPhone === this.ports.phone &&
+          session.agentId === this.expectedProof!.identity.actorId,
+        "r08-own-producer-session-readback",
+      );
+      const task = session.callbackTask
+        ? object(session.callbackTask)
+        : undefined;
+      for (const producer of this.state.producers.filter(
+        (p) => p.ack === "ack-unknown",
+      )) {
+        const body = object(JSON.parse(producer.command.rawBody));
+        if (producer.command.path.endsWith("/recording-callback"))
+          requireFact(
+            session.recordingId === body.recordingId &&
+              session.recordingState === "ready" &&
+              !session.providerRecordingRef &&
+              !session.recordingUrl,
+            "r08-unknown-index-readback",
+          );
+        else if (producer.command.path.endsWith("/link-order"))
+          requireFact(
+            session.linkedOrderId === body.orderId,
+            "r08-unknown-link-readback",
+          );
+        else if (producer.command.path.endsWith("/callbacks")) {
+          requireFact(
+            task &&
+              task.callId === this.state.callId &&
+              task.note === body.note &&
+              task.dueAt === body.dueAt &&
+              task.linkedOrderId === this.state.orderId,
+            "r08-unknown-callback-readback",
+          );
+          this.state.callbackTaskId = text(task.callbackTaskId);
+        } else throw new JourneyFailure("r08-unknown-producer-retained");
+        producer.ack = "acknowledged";
+        await this.save();
+      }
+      if (this.helper) {
+        await this.helper.reconcileOwnTransfer();
+        await this.helper.cleanup({
+          resolutionCode: "resolved_other",
+          closingNote: `${this.ports.nonce} controlled synthetic index cleanup`,
+        });
+      } else {
+        requireFact(!session.linkedCaseNo, "r08-unowned-case-retained");
+        // Partial producer custody: normal own callback cancel and call close.
+        if (task) {
+          requireFact(
+            task.callbackTaskId === this.state.callbackTaskId &&
+              task.callId === this.state.callId,
+            "r08-partial-own-callback-only",
+          );
+          await this.postCleanup(
+            `${prefix}/callcenter/callbacks/${encodeURIComponent(text(task.callbackTaskId))}/cancel`,
+            { reason: "Controlled synthetic index cleanup" },
+          );
+          const queue = records(
+            object((await this.request(`${prefix}/callcenter/callbacks`)).data)
+              .items,
+          ).filter((item) => item.callbackTaskId === task.callbackTaskId);
+          requireFact(
+            queue.length === 1 && queue[0]!.status === "cancelled",
+            "r08-partial-callback-terminal",
+          );
+        }
+        if (session.status !== "closed")
+          await this.postCleanup(`${this.sessionPath()}/close`, {});
+        const closed = object((await this.request(this.sessionPath())).data);
+        requireFact(
+          closed.status === "closed" &&
+            (!task || object(closed.callbackTask).status === "cancelled"),
+          "r08-partial-call-terminal",
+        );
+        await this.guard();
+      }
+      this.state.cleanup = "verified";
+      await this.save();
+    } catch (error) {
+      await this.save();
+      throw error;
+    }
+  }
+  private async postCleanup(path: string, body: unknown) {
+    await this.guard();
+    await this.save();
+    const rawBody = JSON.stringify(body);
+    await this.request(path, {
+      path,
+      rawBody,
+      headers: { "Content-Type": "application/json" },
+      bodySha256: digest(rawBody),
+    });
+    await this.guard();
   }
 }

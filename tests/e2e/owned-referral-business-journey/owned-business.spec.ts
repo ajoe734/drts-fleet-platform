@@ -98,6 +98,7 @@ import {
   parseOriginalUnknownBookingJournal,
   recoverOriginalUnknownBookingAck,
 } from "./original-journal-recovery";
+import { R08ExistingFull } from "./r08-callcenter";
 import {
   RunFinalizer,
   cancellationCleanupNeeded,
@@ -303,6 +304,7 @@ test(journeyName, async ({ browser, request }) => {
     checkpointFile: `${DIRECTORY}/cancellations/run-finalization-facts.json`,
     persist: persistPrivateJson,
     custody: () => ({
+      r08: r08Run?.snapshot(),
       orders: [
         {
           slot: "main",
@@ -399,7 +401,10 @@ test(journeyName, async ({ browser, request }) => {
       cleanupErrors.push(stage);
       evidence.failure(error);
     },
-    stopInterruptedBody: () => page.close(),
+    stopInterruptedBody: async () => {
+      await page.close();
+      await r08Run?.stop();
+    },
     plan: (cleanup) => finalizationPlan(cleanup),
     artifacts: [
       ...(RECOVERY_ONLY
@@ -468,6 +473,7 @@ test(journeyName, async ({ browser, request }) => {
         }
       | undefined;
   } = { current: undefined };
+  let r08Run: R08ExistingFull | undefined;
   let opsControlRole: "opsApi" | "ops" = "opsApi";
   let mainError: unknown;
   let finalization: FinalizationResult | undefined;
@@ -3642,6 +3648,82 @@ test(journeyName, async ({ browser, request }) => {
         recoveryOnly: RECOVERY_ONLY,
         evidence,
       });
+      // Original FULL only, AFTER all cancellation/low-rating/R12 consumers.
+      // Failure retains those actual observations and fails the whole run.
+      await finalizer.checkpoint("r08-existing-main-order-callcenter");
+      r08Run = new R08ExistingFull({
+        context,
+        tx,
+        finalizer,
+        origin: origins.ops,
+        runtimeSha: runtime,
+        controlRole: opsControlRole,
+        orderId: completedOrderId,
+        phone,
+        nonce,
+        canonical: async () => {
+          const source = await getOrder();
+          const driver = records(
+            (await adminControl("/regulatory-registry/drivers")).items,
+          ).find((item) => item.driverId === driverId);
+          const vehicle = records(
+            (await adminControl("/regulatory-registry/vehicles")).items,
+          ).find((item) => item.vehicleId === vehicleId);
+          requireFact(
+            driver && vehicle,
+            "r08-original-qualified-supply-readback-required",
+          );
+          // Keep all completed-order custody, including recording/case effects;
+          // only the nonbusiness read timestamp is excluded.
+          const { updatedAt: _updatedAt, ...order } = source;
+          void _updatedAt;
+          const lifecycle = object(vehicle.supplyLifecycle);
+          const dispatch = object(lifecycle.dispatch);
+          return {
+            order: {
+              ...order,
+              orderId: text(source.orderId),
+              status: text(source.status),
+            },
+            supply: {
+              driverId: text(driver.driverId),
+              vehicleId: text(vehicle.vehicleId),
+              known:
+                driver.licensesValid === true &&
+                driver.lifecycleStatus === "active" &&
+                driver.dispatchEligible === true &&
+                vehicle.dispatchableFlag === true &&
+                vehicle.exclusivityApproved === true &&
+                vehicle.insuranceStatus === "valid" &&
+                dispatch.eligible === true,
+              driver: {
+                workState: driver.workState,
+                licensesValid: driver.licensesValid,
+                lifecycleStatus: driver.lifecycleStatus,
+                dispatchEligible: driver.dispatchEligible,
+                eligibilityBlockedReasons: driver.eligibilityBlockedReasons,
+                deviceBindings: driver.deviceBindings,
+              },
+              vehicle: {
+                plateNo: vehicle.plateNo,
+                dispatchableFlag: vehicle.dispatchableFlag,
+                exclusivityApproved: vehicle.exclusivityApproved,
+                insuranceStatus: vehicle.insuranceStatus,
+                dispatchEligible: dispatch.eligible,
+                blockedReasons: dispatch.blockedReasons,
+                contractStatus: object(lifecycle.contract).lifecycleStatus,
+                offboardingStatus: object(lifecycle.offboarding).status,
+              },
+            },
+          };
+        },
+      });
+      await r08Run.run();
+      evidence.record({
+        stage: "r08-actual-ui-original-request-replay-readback",
+        orderId: completedOrderId,
+        result: "verified",
+      });
     }
   } catch (error) {
     mainError = bookingState.routeError ?? error;
@@ -3680,6 +3762,12 @@ test(journeyName, async ({ browser, request }) => {
       });
     }
     if (exactSevenState) await exactSevenPlan(cleanup, exactSevenState);
+    // Same order/supply guards need the original qualified state. R08 normal
+    // callback/case/call terminal readbacks precede any supply/session revoke.
+    if (r08Run)
+      await cleanup("own-R08-callcenter-normal-terminalization", () =>
+        r08Run!.cleanup(),
+      );
     // Original C1–C4 per-case terminalization, before any supply offline or
     // binding/session revoke it depends on.
     if (cancellationCleanupNeeded(cancellationHandoff, cancellations))

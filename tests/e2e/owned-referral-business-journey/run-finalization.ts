@@ -5,6 +5,7 @@ import type {
   runFourStageOwnedCancellations,
 } from "./four-stage-cancellations";
 import { JourneyFailure } from "./protocol";
+import type { R08RunCustody } from "./r08-callcenter";
 
 // Playwright 1.59.1 (installed worker/workerMain.js + timeoutManager.js): the
 // test timeout only races the test function; the body keeps running orphaned
@@ -54,6 +55,7 @@ export type OrderCustody = {
 };
 export type SessionCustody = { role: string; sessionId?: string | undefined };
 export type RunCustodySnapshot = {
+  r08?: R08RunCustody | undefined;
   orders: OrderCustody[];
   supply: {
     actor: string;
@@ -221,6 +223,30 @@ export class RunFinalizer {
         return leasedResponse(response, lease);
       });
     }) as typeof fetch;
+  }
+
+  // Same-browser Playwright requests cannot use guardFetch. Keep the entire
+  // request AND bounded response consumption under the original lease, so an
+  // abandoned body/cleanup never sends another write or accepts late bytes.
+  async guardOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const lease = this.scope.getStore();
+    if (this.started && !lease?.open)
+      throw new JourneyFailure("business-request-after-finalization-start");
+    const value = await operation();
+    if ((lease && !lease.open) || (this.started && !lease))
+      throw new JourneyFailure("finalization-response-after-budget-exhausted");
+    return value;
+  }
+
+  // Exact R08 custody is durable both in the body and within the finalizer's
+  // own cleanup step. A closed/orphaned caller cannot update the journal.
+  async checkpointOwned(phase: string) {
+    if (!this.started) return this.checkpoint(phase);
+    if (!this.scope.getStore()?.open)
+      throw new JourneyFailure("business-phase-after-finalization-start");
+    this.phases.push({ phase: safeStage(phase), atMs: this.clock.now() });
+    if ((await this.writeFacts("finalizing")) !== "written")
+      throw new JourneyFailure("business-checkpoint-not-durable");
   }
 
   // A per-case cleanup that the original helper runs in its own `finally`.
@@ -629,6 +655,10 @@ export class RunFinalizer {
       nonce: safe(this.ports.nonce),
       status,
       phases: this.phases,
+      // R08 contains only own IDs and controlled non-secret commands, never
+      // auth headers/proof/session values. Fail closed instead of altering raw
+      // command bytes if any caller accidentally supplies a secret.
+      ...(custody.r08 ? { r08: privateR08Custody(custody.r08, secrets) } : {}),
       orders: custody.orders.map((order) => ({
         slot: safeStage(order.slot),
         orderId: safe(order.orderId) ?? null,
@@ -856,6 +886,18 @@ export function cancellationCleanupNeeded(
   );
 }
 
+function privateR08Custody(custody: R08RunCustody, secrets: readonly string[]) {
+  const bytes = JSON.stringify(custody);
+  if (
+    secrets.some((secret) => bytes.includes(secret)) ||
+    /"(?:authorization|cookie|x-drts-authorization|x-serverless-authorization)"\s*:/i.test(
+      bytes,
+    )
+  )
+    throw new JourneyFailure("r08-secret-in-custody");
+  return structuredClone(custody);
+}
+
 // Explicit unresolved facts; nothing is inferred terminal from a label.
 export function unresolvedFacts(
   custody: RunCustodySnapshot,
@@ -869,6 +911,20 @@ export function unresolvedFacts(
   if (result.planError) unresolved.push("finalization-plan-aborted");
   if (result.checkpointWriteFailures)
     unresolved.push("run-finalization-facts-not-durable");
+  if (custody.r08) {
+    const r08 = custody.r08;
+    if (r08.result !== "verified" || r08.transfer?.replay !== "verified")
+      unresolved.push("r08-required-original-ui-replay-unverified");
+    if (r08.cleanup !== "verified")
+      unresolved.push("r08-own-terminal-readback-unverified");
+    for (const producer of r08.producers)
+      if (producer.ack !== "acknowledged")
+        unresolved.push(
+          `r08-${safeStage(producer.step)}-ACK-unknown-original-command-retained`,
+        );
+    for (const fact of r08.transfer?.unresolved ?? [])
+      unresolved.push(`r08-${safeStage(fact)}`);
+  }
   for (const order of custody.orders) {
     if (order.journalState === "ack_unknown" && !order.orderId)
       unresolved.push(
