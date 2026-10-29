@@ -1301,7 +1301,10 @@ describe("startup Ops HTML readiness deadline", () => {
 // Execute the original two adjacent statements rather than importing a spec
 // that registers Playwright tests. Only the session producer is an external
 // port; the original call expression and NativeTransport execute unchanged.
-function actualFleetReadiness(tx: NativeTransport) {
+function actualFleetReadiness(
+  tx: NativeTransport,
+  sessionProducer: () => Promise<unknown> = async () => ({ verified: true }),
+) {
   const filename = path.join(
     process.cwd(),
     "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
@@ -1352,8 +1355,7 @@ function actualFleetReadiness(tx: NativeTransport) {
       fleetPartnerId: "synthetic-own-fleet",
       tenantId: "synthetic-own-tenant",
     });
-    await Promise.resolve();
-    return { verified: true };
+    return await sessionProducer();
   });
   return new Function(
     "tx",
@@ -1399,6 +1401,35 @@ describe("original own Fleet pre-supply HTML readiness deadline", () => {
     },
   );
 
+  it("requires the original session producer to succeed before any root fetch", async () => {
+    const { tx, fetcher, fleetHeaders } = setup();
+    await expect(
+      actualFleetReadiness(tx, async () => {
+        throw new Error("synthetic session rejection");
+      }),
+    ).rejects.toThrow("synthetic session rejection");
+    expect(fleetHeaders).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("requires the normal Fleet authority helper even with the readiness purpose", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const tx = new NativeTransport(origins, SHA, {}, fetcher);
+    await expect(actualFleetReadiness(tx)).rejects.toThrow(
+      "normal Fleet helper required",
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("also accepts explicit GET with the same bounded readiness behavior", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(16_093, (tx) =>
+      tx.call("fleet", "/", { ...marked, method: "GET" }),
+    );
+    expect(outcome).toMatchObject({ value: { status: 200 } });
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("aborts the original Fleet consumer once at 30s with closed transport facts", async () => {
     const { outcome, chosen, fetcher } = await runVirtual(
       30_001,
@@ -1424,7 +1455,20 @@ describe("original own Fleet pre-supply HTML readiness deadline", () => {
   it.each<[string, Role, string, CallOptions]>([
     ["plain root", "fleet", "/", { raw: true, expected: [200] }],
     ["default options", "fleet", "/", {}],
-    ["POST root", "fleet", "/", { ...marked, method: "POST" }],
+    [
+      "wrong purpose",
+      "fleet",
+      "/",
+      { ...marked, purpose: "unrecognized" } as unknown as CallOptions,
+    ],
+    ...["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map(
+      (method): [string, Role, string, CallOptions] => [
+        `${method} root`,
+        "fleet",
+        "/",
+        { ...marked, method },
+      ],
+    ),
     ["GET body", "fleet", "/", { ...marked, body: {} }],
     ["null body", "fleet", "/", { ...marked, body: null }],
     ["lowercase method", "fleet", "/", { ...marked, method: "get" }],
