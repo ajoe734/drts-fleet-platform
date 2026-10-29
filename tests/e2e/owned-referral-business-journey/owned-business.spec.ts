@@ -104,6 +104,7 @@ import {
 } from "./run-finalization";
 import {
   EXACT_SEVEN_RECOVERY_FACTS,
+  EXACT_SEVEN_REVOKE_ROUTE,
   EXACT_SEVEN_SOURCE_FACTS,
   cleanExactSevenSupply,
   createExactSevenRecoveryState,
@@ -788,11 +789,28 @@ test(journeyName, async ({ browser, request }) => {
               `/regulatory-registry/drivers/${encodeURIComponent(id)}/work-state`,
               { method: "POST", body: { workState: "offline" } },
             ),
-          revokeBinding: (ownBindingId, ownDeviceId) =>
-            adminControl("/auth/driver/device/revoke", {
-              method: "POST",
+          // The same canonical Admin token is the "admin" and "api" session;
+          // the existing stepUp proof names the exact revoke route it sends.
+          adminSessionId: text(adminSessionId),
+          readAdminSession: () => call("api", "/api/auth/session"),
+          stepUp,
+          revokeBinding: (ownBindingId, ownDeviceId, stepUpReference) =>
+            call("api", EXACT_SEVEN_REVOKE_ROUTE.path, {
+              method: EXACT_SEVEN_REVOKE_ROUTE.method,
               body: { bindingId: ownBindingId, deviceId: ownDeviceId },
+              headers: { "x-drts-step-up-reference": stepUpReference },
             }),
+          fleetPartnerId: FLEET,
+          readSupplySubmissions: () =>
+            call(
+              "admin",
+              "/control-plane-proxy/admin/supply-review/submissions",
+            ),
+          readSupplySubmission: (id) =>
+            call(
+              "admin",
+              `/control-plane-proxy/admin/supply-review/submissions/${encodeURIComponent(id)}`,
+            ),
           persist: (facts) =>
             persistPrivateJson(
               `${DIRECTORY}/${EXACT_SEVEN_RECOVERY_FACTS}`,
