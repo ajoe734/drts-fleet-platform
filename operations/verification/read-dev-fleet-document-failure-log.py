@@ -738,9 +738,9 @@ def timeout_scope_query(case):
         'resource.type="cloud_run_revision" '
         f'AND resource.labels.project_id="{PROJECT}" '
         f'AND resource.labels.location="{REGION}" '
-        f'AND resource.labels.service_name="{case['service']}" '
-        f'AND resource.labels.revision_name="{case['revision']}" '
-        f'AND timestamp>="{case['start']}" AND timestamp<="{case['end']}"'
+        f'AND resource.labels.service_name="{case["service"]}" '
+        f'AND resource.labels.revision_name="{case["revision"]}" '
+        f'AND timestamp>="{case["start"]}" AND timestamp<="{case["end"]}"'
     )
 
 
