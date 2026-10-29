@@ -4,7 +4,7 @@ Task: `BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025-UNBLOCK-PLANN
 
 Parent: `BUREAU-R12-EXISTING-OWNED-REPORT-DOWNLOAD-COVERAGE-20261025`
 
-Owner: Claude；Reviewer: Codex。審查時間 2026-10-28 UTC。Helper kind：
+Owner: Claude；Reviewer: Codex。審查時間 2026-10-28 ～ 2026-10-29 UTC（第三輪）。Helper kind：
 `planning_decision`（由 `chairman-blocked-task-triage` 自動建立）。純文件交付。
 
 ## 核心結論
@@ -168,15 +168,73 @@ merge 前把 `resolved_parent_*` 設到位，自動解析才會維持 parent 現
 自身的 dispatch（owner／reviewer 皆同）結構性地無法執行該設定指令；已在看板上以
 `blocker` 記錄，等待 Supervisor-privileged session 處理。
 
+## 第三輪：resolved*parent*\* 已由 Reviewer 以同角色權限設定完成
+
+### 設定經過
+
+`2026-10-29T09:28:09Z`，本 helper 的 reviewer Codex 以它自己既有的角色權限
+（不是冒充 Supervisor，也不是本 helper 的 owner dispatch），對本 helper task
+做了一次「同角色 metadata 設定」，在本 helper 自己身上寫入以下三個欄位：
+
+| 欄位                          | 值                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `resolved_parent_status`      | `in_progress`                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `resolved_parent_waiting_for` | `Codex`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `resolved_parent_next`        | 說明此次 callback 只是讓 parent 從 `blocked` 回到 `in_progress`；保留 parent 既有的 candidate/generation/review/CI/merge 身分（`H 27b7fb31d3777c5e986d54990b2f5a69f497635e` / `gen 730b74df53d34e13ad995906f35295c2` / `M da7c5d8c9a405107ccac6a6320aa090479107e31`）與既有兩個 Source key 的既有狀態不變；**不**代表本 helper 核可 runtime acceptance key，真正核可 `same_release_actual_daily_preview_and_three_downloads` 仍須由 Pi/Claude2 走既有的 reconcile/record-acceptance 流程。 |
+
+設定完成後，Codex 以 reviewer 身分做了一次正常的 reopen（exit 0）；
+`candidate_current` 維持 null（延續第二輪 reopen 清空的狀態），沒有恢復舊票。
+這個順序符合第二輪所要求的「由不帶 dispatch 環境變數的 session 在 merge 前設定
+`resolved_parent_*`」，差別只在實際執行者是 reviewer 以自己的角色執行，而不是另一個
+Supervisor session。
+
+### 為何填 `in_progress` 而不是第二輪建議的 `blocked`
+
+第二輪之後，有一份**獨立的唯讀查證**（不是本 helper 自己做的；它沒有核可任何東西、
+沒有改 parent 任何欄位、沒有重跑測試或部署、也沒有改 orchestrator 程式碼）確認
+parent 原本卡住驗收的 runtime 證據缺口，已經被一次新的 hosted FULL run 補齊：
+
+| 項目          | 內容                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hosted run    | workflow run `40681440811`（definition SHA `ad13694ccfc868aaa59b967200ac443029b9787a`，runtime SHA `1a3fbf8bca9e607085eb0c2e670b46763331f1da`），整輪 `completed`/`success`，`cleanup_errors: []`                                                                                                                                                                        |
+| 訂單          | `d6a8feb2-165a-40ee-b495-d2232dc9e8f5`，`finalStatus=completed`；不是先前卡住驗收的那筆 C1（unassigned→cancelled）訂單                                                                                                                                                                                                                                                   |
+| 預覽與下載    | 真實 UI 預覽回 200；CSV/XLSX/PDF 三個 job 皆回 201，三個下載皆回 200                                                                                                                                                                                                                                                                                                     |
+| 三格式 bytes  | CSV 10923 bytes（sha256 `32a0b2a210d31cace089077a920c7f2ce3dc4fe340e6321573867794c9b88899`）；XLSX 10842 bytes（sha256 `75bd0e73080979fc967585702014a241179b1af8ef73a64025eb5d3a3263fba6`）；PDF 91052 bytes（sha256 `765180059329a43d2ff400b88419bc10b67f4b7b2b3361f020d6c1878ed24c7d`）；三者 manifestHash 與內容格式（CSV 表頭 / XLSX workbook / PDF 6 頁）皆比對一致 |
+| 預覽 row      | 共 17 筆，5 筆屬可控訂單、12 筆為未驗證 sibling；依既有隱私規則對未驗證 sibling 不留原始檔，這是既有行為的延續，不是新的驗收門檻                                                                                                                                                                                                                                         |
+| 服務 revision | api/admin/ops/fleet/referral 五個服務 before/after revision 皆為同一 runtime SHA `1a3fbf8bca9e607085eb0c2e670b46763331f1da`，一致度 100%，`cleanup_errors: []`                                                                                                                                                                                                           |
+| 來源          | 官方 ZIP `Owned40681440811-...-12813715678.zip`（2202085 bytes，sha256 `d21fb4145e497013485827babb3e9b6428ba3851d18ba73fd24bfcce0900c040`，43 個成員，CRC 乾淨）                                                                                                                                                                                                         |
+
+因此這次 callback 的正確值是把 parent 帶回 `in_progress`（脫離 blocked，讓它繼續走
+正常流程），而不是重複建議 `blocked`，也不是由本 helper 自己核可 runtime key。本
+helper 不是 `same_release_actual_daily_preview_and_three_downloads` 的 reviewer，
+該 key 的正式核可仍屬 parent 的 owner Pi 與 reviewer Claude2。
+
+### 候選狀態
+
+舊 candidate `c90e9fd56ae3d92beb902e0e4cbcb55ba1773331`（對應
+[PR #3119](https://github.com/ajoe734/drts-fleet-platform/pull/3119)）已在 reviewer
+第二次 reopen 時被清空候選票。即使該 PR 目前仍為 open、其 51 項 checks 中 39 項
+success、12 項 skip，依然不能沿用舊票；本輪必須走全新 handoff，產生新的 candidate
+SHA／generation，交由 Codex 重新做獨立審查。
+
+### 本次變更範圍
+
+- 僅於本檔案新增本節，並在下方「引用 PR / SHA」表格新增一列。
+- 不改 parent 的任何欄位，也不改 parent 的 candidate/generation/review/CI/merge 身分。
+- 不改本 helper 自己的 `resolved_parent_*`：已由 reviewer 以其角色設定完成；本 helper
+  的 owner dispatch 依然沒有、也不需要去寫它，guard 行為與第二輪描述一致，沒有改變。
+- 不新增 helper、runner 或 FULL run；不改 orchestrator 程式碼。
+
 ## 引用 PR / SHA
 
-| 參照                      | 值                                                                                                             |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Parent candidate          | `27b7fb31d3777c5e986d54990b2f5a69f497635e`（generation `730b74df53d34e13ad995906f35295c2`）                    |
-| Parent PR                 | [#3074](https://github.com/ajoe734/drts-fleet-platform/pull/3074) → `da7c5d8c9a405107ccac6a6320aa090479107e31` |
-| qs remediation PR         | [#3073](https://github.com/ajoe734/drts-fleet-platform/pull/3073) → `a086b02f94073b304c1ab9a075bce8c486b95657` |
-| Bounded-read PR           | [#3099](https://github.com/ajoe734/drts-fleet-platform/pull/3099) → `78a4c348a07deaf005014f30d772e21af56ba2c6` |
-| Manual-unblock helper PR  | [#3100](https://github.com/ajoe734/drts-fleet-platform/pull/3100) → `074c8ffc06a59fd94116c2388ad83b500ba80369` |
-| Ops-exchange isolation PR | [#3107](https://github.com/ajoe734/drts-fleet-platform/pull/3107) → `8992293d0ceff8aa76a0789e582b670a521ac80f` |
-| Latest hosted FULL run    | workflow run `40640729762`，definition/runtime `40bdf7d15da3d1e81ba9aa2bac22f8cc96a12073`                      |
-| Triage fix (context only) | `8295d1f334553b98068a26c5c747330ec43ef02b`（`ORCH-EXISTING-BLOCKED-TRIAGE-INELIGIBLE-HELPER-ACTION-20261028`） |
+| 參照                            | 值                                                                                                                                                                                                                                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Parent candidate                | `27b7fb31d3777c5e986d54990b2f5a69f497635e`（generation `730b74df53d34e13ad995906f35295c2`）                                                                                                                                                                                                                  |
+| Parent PR                       | [#3074](https://github.com/ajoe734/drts-fleet-platform/pull/3074) → `da7c5d8c9a405107ccac6a6320aa090479107e31`                                                                                                                                                                                               |
+| qs remediation PR               | [#3073](https://github.com/ajoe734/drts-fleet-platform/pull/3073) → `a086b02f94073b304c1ab9a075bce8c486b95657`                                                                                                                                                                                               |
+| Bounded-read PR                 | [#3099](https://github.com/ajoe734/drts-fleet-platform/pull/3099) → `78a4c348a07deaf005014f30d772e21af56ba2c6`                                                                                                                                                                                               |
+| Manual-unblock helper PR        | [#3100](https://github.com/ajoe734/drts-fleet-platform/pull/3100) → `074c8ffc06a59fd94116c2388ad83b500ba80369`                                                                                                                                                                                               |
+| Ops-exchange isolation PR       | [#3107](https://github.com/ajoe734/drts-fleet-platform/pull/3107) → `8992293d0ceff8aa76a0789e582b670a521ac80f`                                                                                                                                                                                               |
+| Latest hosted FULL run          | workflow run `40640729762`，definition/runtime `40bdf7d15da3d1e81ba9aa2bac22f8cc96a12073`                                                                                                                                                                                                                    |
+| Runtime-key-fulfilling FULL run | workflow run `40681440811`，definition `ad13694ccfc868aaa59b967200ac443029b9787a` / runtime `1a3fbf8bca9e607085eb0c2e670b46763331f1da`，main 訂單 `d6a8feb2-165a-40ee-b495-d2232dc9e8f5`，三格式 bytes 10923/10842/91052，官方 ZIP sha256 `d21fb4145e497013485827babb3e9b6428ba3851d18ba73fd24bfcce0900c040` |
+| Triage fix (context only)       | `8295d1f334553b98068a26c5c747330ec43ef02b`（`ORCH-EXISTING-BLOCKED-TRIAGE-INELIGIBLE-HELPER-ACTION-20261028`）                                                                                                                                                                                               |
