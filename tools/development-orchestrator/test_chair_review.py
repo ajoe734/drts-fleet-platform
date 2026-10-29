@@ -1802,6 +1802,230 @@ class ChairmanFlowTests(unittest.TestCase):
             # The pause the chair already looked at must not manufacture a bypass.
             self.assertFalse(requeued)
 
+    _VALID_CHAIR_PAYLOAD = {
+        "version": 1, "decision": "blocked_task_triage", "approval_ttl_minutes": 45,
+        "reason": "r", "blocked_by": [], "approval_actions": [], "reassignment_actions": [],
+        "task_actions": [], "provider_actions": [], "recommended_focus": [],
+    }
+
+    def _activity_records(self, tmpdir: str) -> list[dict]:
+        return [
+            json.loads(line)
+            for line in (Path(tmpdir) / "activity-log.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
+    def _live_chair_worker_with_json_only(self, tmpdir: str) -> tuple[dict, dict, Path, Path]:
+        """The 134234 shape: decision packet written, Markdown not yet, worker
+        still bookkept as running. The JSON is backdated well past the old 15s
+        mtime grace so any age-based gate would already have fired."""
+        import os
+        import time
+
+        config, state = self._chair_seam_env(tmpdir)
+        markdown_path = Path(state["chair_review"]["active_review"]["markdown_path"])
+        json_path = Path(state["chair_review"]["active_review"]["json_path"])
+        json_path.write_text(json.dumps(self._VALID_CHAIR_PAYLOAD), encoding="utf-8")
+        old = time.time() - 60
+        os.utime(json_path, (old, old))
+        state["workers"]["run-chair"]["status"] = "running"
+        state["workers"]["run-chair"]["pid"] = 999999
+        return config, state, markdown_path, json_path
+
+    def test_active_alive_worker_with_incomplete_output_pair_waits_instead_of_being_killed(self) -> None:
+        """Real 134234: the chair wrote JSON, was still genuinely running, and
+        was killed for missing Markdown past a fixed 15s mtime age. A real
+        worker (claude2 121818) took 23.36s between the JSON and Markdown
+        writes and still produced a valid review. Liveness, not age, must gate
+        the wait -- and the wait must end in exactly one apply once the pair
+        completes."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config, state, markdown_path, _json_path = self._live_chair_worker_with_json_only(tmpdir)
+            with (
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+                self.assertFalse(changed)
+                self.assertEqual(state["workers"]["run-chair"]["status"], "running")
+                self.assertIsNotNone(state["chair_review"]["active_review"])
+                self.assertNotIn("failure_streak", state["chair_review"])
+                self.assertNotIn("cooldown_until", state["chair_review"])
+                self.assertNotIn("last_review_at", state["chair_review"])
+                self.assertEqual(self._activity_records(tmpdir), [])
+
+                # The worker finishes its second write; the pair is now complete.
+                markdown_path.write_text("# review\n", encoding="utf-8")
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+                self.assertTrue(changed)
+                self.assertIsNone(state["chair_review"]["active_review"])
+                self.assertEqual(state["chair_review"]["failure_streak"], 0)
+                self.assertEqual(state["chair_review"]["last_decision"]["decision"], "blocked_task_triage")
+
+                # Settled: a further pass must not apply the same review again.
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+                self.assertFalse(changed)
+            terminate.assert_not_called()
+            types = [record["type"] for record in self._activity_records(tmpdir)]
+            self.assertEqual(types.count("chair_review_applied"), 1)
+            self.assertNotIn("chair_review_invalid_worker_terminated", types)
+            self.assertNotIn("chair_review_invalid_schema", types)
+            self.assertNotIn("chair_review_missing_output", types)
+
+    def test_waiting_incomplete_pair_is_still_preempted_by_pending_approvals(self) -> None:
+        """Waiting on a live worker must not shield it from the existing
+        pending-approval preemption that runs before any output inspection."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config, state, _markdown_path, _json_path = self._live_chair_worker_with_json_only(tmpdir)
+            pending = {"pending": [{"approval_id": "ap-1", "status": "pending"}], "history": []}
+            with (
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value=pending),
+                mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+            self.assertTrue(changed)
+            terminate.assert_called_once_with(999999)
+            self.assertEqual(state["workers"]["run-chair"]["status"], "superseded")
+            self.assertIsNone(state["chair_review"]["active_review"])
+            types = [record["type"] for record in self._activity_records(tmpdir)]
+            self.assertIn("chair_review_preempted", types)
+            self.assertNotIn("chair_review_invalid_schema", types)
+
+    def test_waiting_incomplete_pair_does_not_suppress_worker_stall_and_reap(self) -> None:
+        """The chair wait defers to the worker's own lifecycle; poll_workers
+        must still mark the same live worker stalled, and after twice the
+        stall window terminate it -- at which point the incomplete pair is
+        rejected through the ordinary declared-output path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config, state, _markdown_path, _json_path = self._live_chair_worker_with_json_only(tmpdir)
+            config["supervisor"] = {"stall_after_seconds": 300}
+            config["providers"] = {}
+            config["agents"] = {"gemini2": {"id": "gemini2", "display_name": "Gemini2"}}
+            worker = state["workers"]["run-chair"]
+            worker["request_snapshot"] = {
+                "reason": "chair_review:blocked_task_triage",
+                "metadata": {"mode": "coordination"},
+                "target_files": [
+                    state["chair_review"]["active_review"]["markdown_path"],
+                    state["chair_review"]["active_review"]["json_path"],
+                ],
+            }
+            state["queue"]["events"]["evt-chair"] = {"status": "started"}
+            worker["last_event_at"] = _ago_iso(seconds=400)
+            no_approvals = {"pending": [], "history": []}
+            with (
+                mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                mock.patch.object(supervisor, "load_approval_state", return_value=no_approvals),
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value=no_approvals),
+                mock.patch.object(supervisor, "load_provider_report", return_value={}),
+                mock.patch.object(supervisor, "retry_due_workers", return_value=False),
+                mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
+            ):
+                supervisor.poll_workers(config, state, provider_report={})
+                self.assertEqual(worker["status"], "stalled")
+                terminate.assert_not_called()
+                # Stalled is still an active status: the chair keeps waiting,
+                # it neither kills the worker nor takes over the stall decision.
+                self.assertFalse(supervisor.refresh_chair_review_state(config, state, provider_report={}))
+                self.assertIsNotNone(state["chair_review"]["active_review"])
+
+                worker["last_event_at"] = _ago_iso(seconds=700)
+                supervisor.poll_workers(config, state, provider_report={})
+                terminate.assert_called_once_with(999999)
+                self.assertTrue(supervisor.is_terminal_worker(worker))
+
+                self.assertTrue(supervisor.refresh_chair_review_state(config, state, provider_report={}))
+                self.assertIsNone(state["chair_review"]["active_review"])
+                self.assertEqual(state["chair_review"]["failure_streak"], 1)
+            records = self._activity_records(tmpdir)
+            types = [record["type"] for record in records]
+            self.assertEqual(types.count("worker_stalled"), 1)
+            rejection = next(record for record in records if record["type"] == "chair_review_invalid_schema")
+            self.assertIn("declared output missing", rejection["message"])
+
+    def test_terminal_worker_missing_output_is_rejected_immediately_without_grace_wait(self) -> None:
+        """A worker whose process has already exited gets the original
+        missing-output rejection right away, even though the JSON file is
+        fresh (well inside the old 15s window): it is never going to produce
+        the missing Markdown, so there is nothing worth waiting for."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config, state = self._chair_seam_env(tmpdir)
+            json_path = Path(state["chair_review"]["active_review"]["json_path"])
+            json_path.write_text(json.dumps(self._VALID_CHAIR_PAYLOAD), encoding="utf-8")
+            state["workers"]["run-chair"]["status"] = "running"
+            state["workers"]["run-chair"]["pid"] = 999999
+            with (
+                mock.patch.object(supervisor, "pid_is_alive", return_value=False),
+                mock.patch.object(supervisor, "safe_load_approval_state", return_value={"pending": [], "history": []}),
+                mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
+            ):
+                changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+            self.assertTrue(changed)
+            terminate.assert_called_once_with(999999)
+            self.assertEqual(state["workers"]["run-chair"]["status"], "failed")
+            self.assertIsNone(state["chair_review"]["active_review"])
+            self.assertEqual(state["chair_review"]["failure_streak"], 1)
+            records = self._activity_records(tmpdir)
+            types = [record["type"] for record in records]
+            self.assertIn("chair_review_invalid_worker_terminated", types)
+            # JSON exists, so the declared-output rejection is reported through
+            # the invalid-output event; chair_review_missing_output is reserved
+            # for a review that produced no decision packet at all.
+            rejection = next(record for record in records if record["type"] == "chair_review_invalid_schema")
+            self.assertIn("declared output missing", rejection["message"])
+            self.assertIn(str(Path(tmpdir) / "chair-reviews" / "x.md"), rejection["message"])
+
+    def test_complete_pair_with_invalid_packet_fails_immediately_even_while_worker_alive(self) -> None:
+        """Only an incomplete pair waits. Once both declared files exist, a
+        malformed, schema-invalid or context-invalid packet is the worker's
+        final answer and is rejected at once, live process or not."""
+        import os
+        import time
+
+        broken_schema = dict(self._VALID_CHAIR_PAYLOAD, version=2)
+        cases = [
+            ("malformed_json", "blocked_task_triage", "{bad json", {"pending": [], "history": []},
+             "decision packet is not valid JSON"),
+            ("schema_invalid", "blocked_task_triage", json.dumps(broken_schema), {"pending": [], "history": []},
+             "version must be 1"),
+            # approval_triage is exempt from preemption, so a pending approval
+            # here reaches context validation instead of superseding the review.
+            ("context_invalid", "approval_triage", json.dumps(dict(self._VALID_CHAIR_PAYLOAD, decision="approval_triage")),
+             {"pending": [{"approval_id": "ap-1", "status": "pending"}], "history": []},
+             "approval_triage must resolve pending approvals"),
+        ]
+        for label, reason, json_text, approvals, expected in cases:
+            with self.subTest(label), tempfile.TemporaryDirectory() as tmpdir:
+                config, state = self._chair_seam_env(tmpdir)
+                active = state["chair_review"]["active_review"]
+                active["reason"] = reason
+                Path(active["markdown_path"]).write_text("# review\n", encoding="utf-8")
+                json_path = Path(active["json_path"])
+                json_path.write_text(json_text, encoding="utf-8")
+                old = time.time() - 60
+                os.utime(json_path, (old, old))
+                state["workers"]["run-chair"]["status"] = "running"
+                state["workers"]["run-chair"]["pid"] = 999999
+                with (
+                    mock.patch.object(supervisor, "pid_is_alive", return_value=True),
+                    mock.patch.object(supervisor, "safe_load_approval_state", return_value=approvals),
+                    mock.patch.object(supervisor, "terminate_worker_pid", return_value=True) as terminate,
+                ):
+                    changed = supervisor.refresh_chair_review_state(config, state, provider_report={})
+                self.assertTrue(changed)
+                terminate.assert_called_once_with(999999)
+                self.assertEqual(state["workers"]["run-chair"]["status"], "failed")
+                self.assertIsNone(state["chair_review"]["active_review"])
+                self.assertEqual(state["chair_review"]["failure_streak"], 1)
+                records = self._activity_records(tmpdir)
+                types = [record["type"] for record in records]
+                self.assertIn("chair_review_invalid_worker_terminated", types)
+                rejection = next(record for record in records if record["type"] == "chair_review_invalid_schema")
+                self.assertIn(expected, rejection["message"])
+                self.assertNotIn("declared output missing", rejection["message"])
+
     def test_settled_chair_review_stops_retaining_its_queue_event(self) -> None:
         """The reference must be released, or the fix would leak events forever."""
         with tempfile.TemporaryDirectory() as tmpdir:
