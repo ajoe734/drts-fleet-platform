@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, rename } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { Page } from "@playwright/test";
 
 export type ObjectData = Record<string, unknown>;
 export type Role =
@@ -259,6 +260,20 @@ export async function captureOriginalUiCancellation<
   // a response/request method again; only the captured RAM values are returned.
   await route.fulfill({ response, body: bytes });
   return captured;
+}
+
+/** Keep navigation readiness separate from the actual rendered outcome. */
+export async function waitForOriginalCancellationTerminalUI(
+  page: Pick<Page, "waitForURL">,
+  orderId: string,
+  assertRendered: () => Promise<void>,
+): Promise<void> {
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("screen") === "cancelled" &&
+      url.searchParams.get("orderId") === orderId,
+  );
+  await assertRendered();
 }
 
 export function object(value: unknown): ObjectData {

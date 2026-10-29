@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
+import type { Page } from "@playwright/test";
 import * as ts from "typescript";
 import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
@@ -11,6 +13,7 @@ import {
   Evidence,
   consumeNativeReceiptPdfDownload,
   captureOriginalUiCancellation,
+  waitForOriginalCancellationTerminalUI,
   validateActualReceiptPdfBytes,
   JourneyFailure,
   NativeTransport,
@@ -1644,6 +1647,137 @@ describe("actual native receipt PDF bytes without user routing", () => {
         expect(f.ports.readFile).not.toHaveBeenCalled();
       } finally {
         await f.cleanup();
+      }
+    },
+  );
+});
+
+/** No browser/server: only the protocol event source is controlled. Installed
+ * Page -> Frame -> Waiter -> URL matcher, timeouts and channel validation run.
+ * Loading through @playwright/test selects the exact version used by the caller.
+ */
+function nativeCancellationPage(initialURL: string, loadStates: string[]) {
+  const localRequire = createRequire(import.meta.url);
+  const testRequire = createRequire(localRequire.resolve("@playwright/test"));
+  const playwrightRequire = createRequire(testRequire.resolve("playwright"));
+  const core = path.dirname(
+    playwrightRequire.resolve("playwright-core/package.json"),
+  );
+  type Connection = {
+    onmessage: (message: { id: number; method: string }) => void;
+    dispatch(message: object): void;
+    close(): void;
+  };
+  type Owner = { _channel: unknown };
+  const { Connection: NativeConnection } = localRequire(
+    path.join(core, "lib/client/connection.js"),
+  ) as { Connection: new (platform: unknown) => Connection };
+  const { ChannelOwner } = localRequire(
+    path.join(core, "lib/client/channelOwner.js"),
+  ) as {
+    ChannelOwner: new (
+      connection: Connection,
+      type: string,
+      guid: string,
+      initializer: object,
+    ) => Owner;
+  };
+  const { Frame } = localRequire(path.join(core, "lib/client/frame.js")) as {
+    Frame: new (
+      parent: Owner,
+      type: string,
+      guid: string,
+      initializer: object,
+    ) => Owner;
+  };
+  const { Page: NativePage } = localRequire(
+    path.join(core, "lib/client/page.js"),
+  ) as {
+    Page: new (
+      parent: Owner,
+      type: string,
+      guid: string,
+      initializer: object,
+    ) => Page;
+  };
+  const { TimeoutSettings } = localRequire(
+    path.join(core, "lib/client/timeoutSettings.js"),
+  ) as { TimeoutSettings: new (platform: unknown) => unknown };
+  const { nodePlatform } = localRequire(
+    path.join(core, "lib/server/utils/nodePlatform.js"),
+  ) as { nodePlatform: unknown };
+  const connection = new NativeConnection(nodePlatform);
+  connection.onmessage = ({ id, method }) => {
+    // Only bookkeeping/timeout configuration may leave the actual waiter.
+    if (!["waitForEventInfo", "setDefaultNavigationTimeoutNoReply"].includes(method))
+      throw new Error(`Unexpected native command: ${method}`);
+    queueMicrotask(() => connection.dispatch({ id, result: {} }));
+  };
+  const context = new ChannelOwner(connection, "BrowserContext", "context", {});
+  Object.assign(context, {
+    _options: {},
+    _timeoutSettings: new TimeoutSettings(nodePlatform),
+  });
+  const frame = new Frame(context, "Frame", "frame", {
+    url: initialURL,
+    name: "",
+    loadStates,
+  });
+  const page = new NativePage(context, "Page", "page", {
+    mainFrame: frame._channel,
+    isClosed: false,
+  });
+  const event = (method: string, params: object) =>
+    connection.dispatch({ guid: "frame", method, params });
+  return {
+    page,
+    event,
+    close: () => connection.close(),
+    version: (localRequire(path.join(core, "package.json")) as { version: string })
+      .version,
+  };
+}
+
+describe("original cancellation terminal UI native navigation boundary", () => {
+  const ownURL =
+    "https://referral.example.test/embed/entry?screen=cancelled&orderId=own";
+
+  it("reproduces the original native TimeoutError after matching URL and DOMContentLoaded without load", async () => {
+    const f = nativeCancellationPage(ownURL, ["commit", "domcontentloaded"]);
+    try {
+      expect(f.version).toBe("1.59.1");
+      await expect(
+        f.page.waitForURL(
+          (url) =>
+            url.searchParams.get("screen") === "cancelled" &&
+            url.searchParams.get("orderId") === "own",
+          { timeout: 30 },
+        ),
+      ).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(f.page.url()).toBe(ownURL);
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each(["already-navigated", "navigation-after-wait"])(
+    "accepts %s at DOM readiness only after the real rendered assertion",
+    async (timing) => {
+      const f = nativeCancellationPage(
+        timing === "already-navigated" ? ownURL : ownURL.replace("cancelled", "trip"),
+        timing === "already-navigated" ? ["commit", "domcontentloaded"] : ["commit"],
+      );
+      try {
+        const rendered = vi.fn(async () => undefined);
+        const pending = waitForOriginalCancellationTerminalUI(f.page, "own", rendered);
+        if (timing === "navigation-after-wait") {
+          f.event("navigated", { url: ownURL, name: "", newDocument: {} });
+          f.event("loadstate", { add: "domcontentloaded" });
+        }
+        await pending;
+        expect(rendered).toHaveBeenCalledOnce();
+      } finally {
+        f.close();
       }
     },
   );
