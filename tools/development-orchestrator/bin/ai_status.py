@@ -2100,8 +2100,10 @@ def validate_merged_acceptance_resume(state: dict[str, Any], task: dict[str, Any
     ):
         raise SystemExit("Merged acceptance resume cannot bypass an unfinished unblock helper")
     fingerprint, open_count = open_blocker_fingerprint(state.get("blockers"), task_id)
-    if open_count != 1:
-        raise SystemExit("Merged acceptance resume requires exactly one open blocker")
+    # Zero or one: with zero nothing is resolved and historical blockers stay
+    # untouched; the exact fingerprint below still binds the observation.
+    if open_count > 1:
+        raise SystemExit("Merged acceptance resume allows at most one open blocker")
     if os.environ.get("TASK_RESUME_BLOCKER_FINGERPRINT", "").strip() != fingerprint:
         raise SystemExit("Open blockers changed after the Supervisor observation")
 

@@ -199,6 +199,27 @@ export class CallcenterService implements OnModuleInit {
     });
   }
 
+  announceAgentIdentityForWrite(
+    callId: string,
+    command: AnnounceCallAgentIdentityCommand,
+    requestId?: string,
+  ) {
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.announceAgentIdentity(callId, command, requestId, write),
+    );
+  }
+
+  quoteEtaForWrite(
+    callId: string,
+    command: QuoteCallEtaCommand,
+    requestId?: string,
+  ) {
+    this.assertPositiveEta(command.etaMinutes);
+    return this.runPhoneSessionWrite(callId, (write) =>
+      this.quoteEta(callId, command, requestId, write),
+    );
+  }
+
   attachRecordingCallbackForWrite(
     callId: string,
     command: AttachCallRecordingCommand,
@@ -669,30 +690,43 @@ export class CallcenterService implements OnModuleInit {
     callId: string,
     command: AnnounceCallAgentIdentityCommand,
     requestId?: string,
+    write?: PhoneSessionWrite,
   ) {
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     const announcedAt = command.announcedAt ?? new Date().toISOString();
     session.agentId = command.agentId?.trim() || session.agentId;
     session.agentIdentityAnnounced = true;
     session.agentIdentityAnnouncedAt = announcedAt;
-    this.persistSessions([session], "announce_agent_identity");
-
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "announce_agent_identity",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          agentId: session.agentId,
-          agentIdentityAnnouncedAt: announcedAt,
+    const audit = () =>
+      this.recordAudit(
+        {
+          actorId: session.agentId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "callcenter",
+          actionName: "announce_agent_identity",
+          resourceType: "call_session",
+          resourceId: session.callId,
+          newValuesSummary: {
+            agentId: session.agentId,
+            agentIdentityAnnouncedAt: announcedAt,
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
+
+    if (write)
+      return this.finishPhoneSessionMutation(
+        session,
+        write,
+        "announce_agent_identity",
+        audit,
+        () => undefined,
+      );
+    this.persistSessions([session], "announce_agent_identity");
+    audit();
 
     return this.cloneSession(session);
   }
@@ -714,12 +748,13 @@ export class CallcenterService implements OnModuleInit {
     if (session.linkedOrderId && !session.recordingId) {
       this.syncRecordingFlagsWithoutAttachment(session);
     }
+    if (write) this.enqueueFinalizeRecordingWorkItem(session, write);
     return this.finishPhoneSessionMutation(
       session,
       write,
       "close_call_session",
       () => {
-        this.enqueueFinalizeRecordingWorkItem(session);
+        if (!write) this.enqueueFinalizeRecordingWorkItem(session);
         this.recordAudit(
           {
             actorId: session.agentId,
@@ -741,30 +776,47 @@ export class CallcenterService implements OnModuleInit {
     );
   }
 
-  quoteEta(callId: string, command: QuoteCallEtaCommand, requestId?: string) {
+  quoteEta(
+    callId: string,
+    command: QuoteCallEtaCommand,
+    requestId?: string,
+    write?: PhoneSessionWrite,
+  ) {
     this.assertPositiveEta(command.etaMinutes);
-    const session = this.requireSession(callId);
+    const session = write
+      ? this.cloneSession(this.requireWriteSession(callId, write))
+      : this.requireSession(callId);
     session.lastEtaQuotedMinutes = command.etaMinutes;
     session.lastEtaQuotedAt = command.quotedAt ?? new Date().toISOString();
-    this.persistSessions([session], "quote_call_eta");
-
-    this.recordAudit(
-      {
-        actorId: session.agentId,
-        actorType: "ops_user",
-        tenantId: null,
-        moduleName: "callcenter",
-        actionName: "quote_call_eta",
-        resourceType: "call_session",
-        resourceId: session.callId,
-        newValuesSummary: {
-          linkedOrderId: session.linkedOrderId,
-          etaMinutes: session.lastEtaQuotedMinutes,
-          quotedAt: session.lastEtaQuotedAt,
+    const audit = () =>
+      this.recordAudit(
+        {
+          actorId: session.agentId,
+          actorType: "ops_user",
+          tenantId: null,
+          moduleName: "callcenter",
+          actionName: "quote_call_eta",
+          resourceType: "call_session",
+          resourceId: session.callId,
+          newValuesSummary: {
+            linkedOrderId: session.linkedOrderId,
+            etaMinutes: session.lastEtaQuotedMinutes,
+            quotedAt: session.lastEtaQuotedAt,
+          },
         },
-      },
-      requestId,
-    );
+        requestId,
+      );
+
+    if (write)
+      return this.finishPhoneSessionMutation(
+        session,
+        write,
+        "quote_call_eta",
+        audit,
+        () => undefined,
+      );
+    this.persistSessions([session], "quote_call_eta");
+    audit();
 
     return this.cloneSession(session);
   }
@@ -1001,6 +1053,7 @@ export class CallcenterService implements OnModuleInit {
     this.addFlag(session, "recording_pending_callback");
     this.addFlag(session, "recording_pending");
 
+    if (write) this.enqueueFinalizeRecordingWorkItem(session, write);
     return this.finishPhoneSessionMutation(
       session,
       write,
@@ -1023,7 +1076,7 @@ export class CallcenterService implements OnModuleInit {
           requestId,
         );
 
-        this.enqueueFinalizeRecordingWorkItem(session);
+        if (!write) this.enqueueFinalizeRecordingWorkItem(session);
       },
       () => this.notifyRecordingStateChange(session, requestId, write),
     );
@@ -1446,7 +1499,9 @@ export class CallcenterService implements OnModuleInit {
 
     const now = new Date().toISOString();
     const newStatus =
-      command.outcome === "succeeded" || command.outcome === "answered"
+      command.outcome === "succeeded" ||
+      command.outcome === "answered" ||
+      command.outcome === "connected"
         ? "in_progress"
         : "pending";
     const currentAttemptCount = (session.callbackTask.attemptCount ?? 0) + 1;
@@ -1869,25 +1924,39 @@ export class CallcenterService implements OnModuleInit {
     });
   }
 
-  private enqueueFinalizeRecordingWorkItem(session: CallSessionRecord) {
+  private enqueueFinalizeRecordingWorkItem(
+    session: CallSessionRecord,
+    write?: PhoneSessionWrite,
+  ) {
     if (!this.callcenterRepository?.isEnabled()) {
       return;
     }
 
-    void this.callcenterRepository
-      .enqueueFinalizeRecording({
-        callId: session.callId,
-        brandId: null,
-        recordingId: session.recordingId,
-        linkedOrderId: session.linkedOrderId,
-        endedAt: session.endedAt,
-      })
-      .catch((error: unknown) => {
-        this.callcenterRepository!.reportPersistenceFailure(
-          error,
-          "enqueue_finalize_recording",
-        );
+    const enqueue = () =>
+      this.callcenterRepository!.enqueueFinalizeRecording(
+        {
+          callId: session.callId,
+          brandId: null,
+          recordingId: session.recordingId,
+          linkedOrderId: session.linkedOrderId,
+          endedAt: session.endedAt,
+        },
+        write?.executor,
+      );
+    if (write) {
+      // The original transaction awaits notify before COMMIT. A recorder job
+      // must survive with the pending/closed session, before its success ACK.
+      write.notify.push(async () => {
+        await enqueue();
       });
+      return;
+    }
+    void enqueue().catch((error: unknown) => {
+      this.callcenterRepository!.reportPersistenceFailure(
+        error,
+        "enqueue_finalize_recording",
+      );
+    });
   }
 
   async recoverPendingRecordingCalls(): Promise<{

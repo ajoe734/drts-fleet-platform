@@ -269,6 +269,62 @@ export type DailyReportDownloadsEvidence = Readonly<{
   }>;
   // Main path only (original R12-10); supplemental cases omit this field.
   nonReportRoleDenial?: NonReportRoleDownloadDenialEvidence;
+  // Main path only (original R12-08); supplemental cases omit this field.
+  rebuildFailureRecovery?: RebuildFailureRecoveryEvidence;
+}>;
+
+/** Original R12-08 (save failure then recovery). The failure is an explicit
+ * browser-network simulation of the existing reporting envelope; it is never
+ * evidence of an actual backend/PG outage. Only the retry is real.
+ */
+export type RebuildFailureRecoveryEvidence = Readonly<{
+  originalCase: "R12-08";
+  simulation: true;
+  faultLayer: "browser-network-interception";
+  actualBackendFaultVerified: false;
+  filters: DailyReportFilters;
+  simulatedFailure: Readonly<{
+    method: "POST";
+    route: "daily-dispatch-rebuild";
+    status: 503;
+    code: "REPORT_REBUILD_FAILED";
+    hitCount: 1;
+    forwardCount: 0;
+    requestPayloadSha256: string;
+    interceptionRemoved: true;
+  }>;
+  errorUi: Readonly<{
+    errorBannerVisible: true;
+    errorCodeVisible: true;
+    successNoticeCount: 0;
+    retryEnabled: true;
+  }>;
+  realRetry: Readonly<{
+    method: "POST";
+    route: "daily-dispatch-rebuild";
+    status: number;
+    rebuiltCount: number;
+    generatedAt: string;
+    requestPayloadSha256: string;
+    samePayloadAsSimulated: true;
+    runtimeSha: string;
+  }>;
+  readback: Readonly<{
+    method: "GET";
+    route: "daily-dispatch-records";
+    status: number;
+    rowCount: number;
+    ownRowVerified: true;
+    orderId: string;
+    orderNo: string;
+    serviceDate: string;
+    finalStatus: string;
+    orderSource: string;
+    generatedAt: string;
+    syntheticProvenanceVerified: boolean;
+    provenanceQualification: DailyReportProvenanceQualification;
+    runtimeSha: string;
+  }>;
 }>;
 
 export type NonReportRoleDeniedProbe = Readonly<{
@@ -640,6 +696,20 @@ export function countCanonicalDailySource(
   return Object.freeze({ count, ownPresent });
 }
 
+// TEN02 empty-day candidates, nearest first and bounded: -1, +1, -2, +2, ...,
+// -31, +31 days from the positive Taipei service date. The first pair is the
+// original adjacent pair; nothing outside +/-31 is ever considered.
+export const EMPTY_DAY_MAX_DISTANCE = 31;
+export const EMPTY_DAY_CANDIDATE_OFFSETS: readonly number[] = Object.freeze(
+  Array.from(
+    { length: EMPTY_DAY_MAX_DISTANCE * 2 },
+    (_, index) => (index % 2 === 0 ? -1 : 1) * (Math.floor(index / 2) + 1),
+  ),
+);
+
+// Selects the first candidate whose exact positive filters (tenant, partner,
+// normalized source, product, finalStatus) count zero in the same complete
+// canonical read already in RAM. No further source read and no other filter.
 export function adjacentEmptyDayFromSource(
   source: unknown,
   positive: DailyReportFilters,
@@ -652,15 +722,28 @@ export function adjacentEmptyDayFromSource(
   );
   const ms = Date.parse(`${positive.serviceDateFrom}T00:00:00.000Z`);
   requireFact(Number.isFinite(ms), "daily-report-valid-positive-date-required");
-  for (const offset of [-1, 1]) {
+  for (const offset of EMPTY_DAY_CANDIDATE_OFFSETS) {
     const day = new Date(ms + offset * 86_400_000).toISOString().slice(0, 10);
     const empty = { ...positive, serviceDateFrom: day, serviceDateTo: day };
     if (countCanonicalDailySource(source, empty, ownOrderId).count === 0)
       return day;
   }
   throw new JourneyFailure(
-    "daily-report-no-authoritatively-empty-adjacent-day",
+    `daily-report-no-authoritatively-empty-adjacent-day:nearest-first-${EMPTY_DAY_MAX_DISTANCE}-occupied`,
   );
+}
+
+// TEN02 empty preview: zero items AND an explicit pageInfo.totalItems === 0.
+// An empty first page alone never proves an empty day.
+export function requireEmptyDailyReportList(bytes: Buffer, stage: string) {
+  requireFact(
+    unwrapEnvelopeList(bytes, stage).length === 0,
+    `${stage}-zero-rows-required`,
+  );
+  const pageInfo = object(
+    object(object(camelWire(JSON.parse(bytes.toString("utf8")))).data).pageInfo,
+  );
+  requireFact(pageInfo.totalItems === 0, `${stage}-total-items-zero-required`);
 }
 
 export function validateDailyPreviewRows(
@@ -2053,6 +2136,367 @@ export async function probeOwnedReportJobsWithNonReportRole(input: {
   });
 }
 
+const DAILY_REBUILD_PATHNAME =
+  "/control-plane-proxy/reports/daily-dispatch-records/rebuild";
+const DAILY_RECORDS_PATHNAME =
+  "/control-plane-proxy/reports/daily-dispatch-records";
+// The existing ReportingService.rebuildDailyDispatchRecords persistence
+// failure (ApiRequestError 503) as the global filter serializes it. Fixed
+// synthetic trace: this body is a labelled simulation, not a backend reply.
+const SIMULATED_REBUILD_FAILURE = Object.freeze({
+  status: 503,
+  code: "REPORT_REBUILD_FAILED",
+  message: "Daily dispatch records could not be rebuilt.",
+  traceId: "00000000-0000-4000-8000-000000000508",
+} as const);
+// reports.ops.regenerate.done in both Ops locales.
+const REBUILD_SUCCESS_NOTICE =
+  /^(已於 .+ 重算 \d+ 筆紀錄。|Regenerated \d+ record\(s\) at .+\.)$/;
+
+/** Original R12-08 on the main path: one existing Ops rebuild POST is answered
+ * in the browser with the existing 503 envelope and never forwarded; the real
+ * page must show its error and keep retry usable. The interception is always
+ * removed, then the unchanged-filter retry must reach the real backend and the
+ * fresh preview must return the same own row. Simulation only proves the UI
+ * failure/retry path; it grants no backend or PG outage credit.
+ */
+async function runRebuildFailureSimulationAndRealRetry(input: {
+  page: Page;
+  regenerateBtn: Locator;
+  opsOrigin: string;
+  expected: DailyRowExpectation;
+  expectedFilters: DailyReportFilters;
+  originalOwnRow: ObjectData;
+  controlledOrderIds: ReadonlySet<string>;
+  runtimeSha: string;
+  waitForOpsExchange: (
+    predicate: (request: CapturedOpsRequest) => boolean,
+    stage: string,
+  ) => Promise<CapturedOpsExchange>;
+  forwardedDailyRecordRequests: () => number;
+  evidence: Evidence;
+}): Promise<RebuildFailureRecoveryEvidence> {
+  const {
+    page,
+    regenerateBtn,
+    opsOrigin,
+    expected,
+    expectedFilters,
+    originalOwnRow,
+    controlledOrderIds,
+    runtimeSha,
+    waitForOpsExchange,
+    forwardedDailyRecordRequests,
+    evidence,
+  } = input;
+  // Closed operation labels only, as for the empty-day consumer: native
+  // browser errors never carry locator text, URLs or bodies into evidence.
+  let phase:
+    | "sim-route"
+    | "sim-ready"
+    | "sim-submit"
+    | "sim-error-ui"
+    | "sim-success-notice"
+    | "sim-retry-unlocked"
+    | "retry-ready"
+    | "retry-submit"
+    | "retry-ui" = "sim-route";
+  try {
+    const filtersMatch = (candidate: (key: string) => unknown, size: number) =>
+      size === Object.keys(expectedFilters).length &&
+      Object.entries(expectedFilters).every(
+        ([key, val]) => candidate(key) === val,
+      );
+
+    let hitCount = 0;
+    let otherRequestCount = 0;
+    let fulfilled = false;
+    let simulatedBody: string | null = null;
+    const matcher = (url: URL) =>
+      url.origin === opsOrigin && url.pathname === DAILY_REBUILD_PATHNAME;
+    const simulationHandler = async (route: Route) => {
+      const request = route.request();
+      if (request.method().toUpperCase() !== "POST") {
+        otherRequestCount += 1;
+        await route.fallback();
+        return;
+      }
+      hitCount += 1;
+      if (hitCount > 1) {
+        await route.abort("failed").catch(() => undefined);
+        return;
+      }
+      simulatedBody = request.postData();
+      await route.fulfill({
+        status: SIMULATED_REBUILD_FAILURE.status,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: SIMULATED_REBUILD_FAILURE.code,
+            message: SIMULATED_REBUILD_FAILURE.message,
+            retryable: false,
+            trace_id: SIMULATED_REBUILD_FAILURE.traceId,
+          },
+        }),
+      });
+      fulfilled = true;
+    };
+
+    const forwardedBefore = forwardedDailyRecordRequests();
+    const errorText = page.getByText(SIMULATED_REBUILD_FAILURE.message, {
+      exact: false,
+    });
+    let interceptionRemoved = false;
+    await page.route(matcher, simulationHandler);
+    try {
+      phase = "sim-ready";
+      await waitForEnabled(
+        regenerateBtn,
+        "daily-report-r12-08-sim-rebuild-button",
+      );
+      phase = "sim-submit";
+      await regenerateBtn.click();
+      phase = "sim-error-ui";
+      await errorText.first().waitFor({ state: "visible", timeout: 15_000 });
+      requireFact(
+        (await errorText.count()) === 1 &&
+          (await errorText.first().innerText()).includes(
+            SIMULATED_REBUILD_FAILURE.code,
+          ),
+        "daily-report-r12-08-sim-error-ui-required",
+      );
+      phase = "sim-success-notice";
+      requireFact(
+        (await page.getByText(REBUILD_SUCCESS_NOTICE).count()) === 0,
+        "daily-report-r12-08-sim-no-success-notice-required",
+      );
+      phase = "sim-retry-unlocked";
+      await waitForEnabled(
+        regenerateBtn,
+        "daily-report-r12-08-sim-retry-unlocked",
+      );
+    } finally {
+      // Always remove only this interception, whatever failed above.
+      await page.unroute(matcher, simulationHandler).then(
+        () => {
+          interceptionRemoved = true;
+        },
+        () => undefined,
+      );
+    }
+    requireFact(
+      interceptionRemoved,
+      "daily-report-r12-08-sim-unroute-required",
+    );
+    requireFact(
+      hitCount === 1 && fulfilled && otherRequestCount === 0,
+      "daily-report-r12-08-sim-exactly-one-rebuild-hit-required",
+    );
+    // Neither the rebuild nor a follow-up preview may reach the real BFF.
+    requireFact(
+      forwardedDailyRecordRequests() === forwardedBefore,
+      "daily-report-r12-08-sim-no-forward-required",
+    );
+    let simulatedCommand: ObjectData;
+    try {
+      simulatedCommand = object(JSON.parse(text(simulatedBody)));
+    } catch {
+      throw new JourneyFailure("daily-report-r12-08-sim-command-required");
+    }
+    requireFact(
+      filtersMatch(
+        (key) => simulatedCommand[key],
+        Object.keys(simulatedCommand).length,
+      ),
+      "daily-report-r12-08-sim-filters-binding",
+    );
+    const simulatedPayloadSha256 = hash(Buffer.from(simulatedBody!, "utf8"));
+    evidence.record({
+      stage: "daily-report-r12-08-sim-rebuild-503-ui-error-observed",
+      status: SIMULATED_REBUILD_FAILURE.status,
+      code: SIMULATED_REBUILD_FAILURE.code,
+      requestMethod: "POST",
+      sha256: simulatedPayloadSha256,
+      result: "observed",
+    });
+    evidence.record({
+      stage: "daily-report-r12-08-sim-interception-removed",
+      result: "cleaned",
+    });
+
+    // Real retry: same page, same unchanged filters, one normal UI POST.
+    const retryPost = waitForOpsExchange(
+      (ex) => ex.method === "POST" && ex.pathname === DAILY_REBUILD_PATHNAME,
+      "daily-report-r12-08-retry-rebuild-post",
+    );
+    const retryGet = waitForOpsExchange(
+      (ex) => ex.method === "GET" && ex.pathname === DAILY_RECORDS_PATHNAME,
+      "daily-report-r12-08-retry-rebuilt-preview-get",
+    );
+    phase = "retry-ready";
+    await waitForEnabled(regenerateBtn, "daily-report-r12-08-retry-button");
+    phase = "retry-submit";
+    await regenerateBtn.click();
+    const retryExchange = await retryPost;
+    assertDailyReportHttpStatus(
+      retryExchange,
+      "rebuild",
+      [200, 201],
+      runtimeSha,
+      evidence,
+    );
+    const retryBody = text(
+      retryExchange.requestBody,
+      "daily-report-r12-08-retry-command-required",
+    );
+    let retryCommand: ObjectData;
+    try {
+      retryCommand = object(JSON.parse(retryBody));
+    } catch {
+      throw new JourneyFailure("daily-report-r12-08-retry-command-required");
+    }
+    const retryPayloadSha256 = hash(Buffer.from(retryBody, "utf8"));
+    requireFact(
+      filtersMatch(
+        (key) => retryCommand[key],
+        Object.keys(retryCommand).length,
+      ) && retryPayloadSha256 === simulatedPayloadSha256,
+      "daily-report-r12-08-retry-same-filters-required",
+    );
+    const retryAck = unwrapEnvelopeObject(
+      retryExchange.bytes,
+      "daily-report-r12-08-retry-result",
+    );
+    const retryCount = integer(
+      retryAck.rebuiltCount,
+      "daily-report-r12-08-retry-count",
+    );
+    const retryGeneratedAt = text(
+      retryAck.generatedAt,
+      "daily-report-r12-08-retry-generated-at",
+    );
+    requireFact(
+      retryCount > 0 && Number.isFinite(Date.parse(retryGeneratedAt)),
+      "daily-report-r12-08-retry-positive-ack-required",
+    );
+    const readbackExchange = await retryGet;
+    assertDailyReportHttpStatus(
+      readbackExchange,
+      "rebuilt-preview",
+      [200],
+      runtimeSha,
+      evidence,
+    );
+    requireFact(
+      filtersMatch(
+        (key) => readbackExchange.searchParams.get(key),
+        [...new Set(readbackExchange.searchParams.keys())].length,
+      ),
+      "daily-report-r12-08-readback-same-filters-required",
+    );
+    const readback = validateReportRows(
+      unwrapEnvelopeList(
+        readbackExchange.bytes,
+        "daily-report-r12-08-readback",
+      ),
+      expected,
+      runtimeSha,
+      readbackExchange.runtimeSha,
+      controlledOrderIds,
+      evidence,
+    );
+    const identityKeys = [
+      "orderId",
+      "orderNo",
+      "serviceDate",
+      "finalStatus",
+      "orderSource",
+      "tenantId",
+      "partnerId",
+      "serviceProductCode",
+    ] as const;
+    requireFact(
+      identityKeys.every(
+        (key) =>
+          typeof originalOwnRow[key] === "string" &&
+          readback.ownRow[key] === originalOwnRow[key],
+      ),
+      "daily-report-r12-08-readback-own-row-identity-required",
+    );
+    phase = "retry-ui";
+    await errorText.first().waitFor({ state: "detached", timeout: 15_000 });
+    const uiOwnRow = page
+      .locator("tbody tr")
+      .filter({ hasText: expected.orderId });
+    await uiOwnRow.first().waitFor({ state: "visible", timeout: 15_000 });
+    requireFact(
+      (await uiOwnRow.count()) === 1,
+      "daily-report-r12-08-ui-own-row-required",
+    );
+    evidence.record({
+      stage: "daily-report-r12-08-real-retry-own-row-verified",
+      orderId: expected.orderId,
+      status: retryExchange.status,
+      sha256: retryPayloadSha256,
+      result: "observed",
+    });
+    const own = readback.ownRow;
+    return Object.freeze({
+      originalCase: "R12-08",
+      simulation: true,
+      faultLayer: "browser-network-interception",
+      actualBackendFaultVerified: false,
+      filters: expectedFilters,
+      simulatedFailure: Object.freeze({
+        method: "POST",
+        route: "daily-dispatch-rebuild",
+        status: 503,
+        code: "REPORT_REBUILD_FAILED",
+        hitCount: 1,
+        forwardCount: 0,
+        requestPayloadSha256: simulatedPayloadSha256,
+        interceptionRemoved: true,
+      }),
+      errorUi: Object.freeze({
+        errorBannerVisible: true,
+        errorCodeVisible: true,
+        successNoticeCount: 0,
+        retryEnabled: true,
+      }),
+      realRetry: Object.freeze({
+        method: "POST",
+        route: "daily-dispatch-rebuild",
+        status: retryExchange.status,
+        rebuiltCount: retryCount,
+        generatedAt: retryGeneratedAt,
+        requestPayloadSha256: retryPayloadSha256,
+        samePayloadAsSimulated: true,
+        runtimeSha,
+      }),
+      readback: Object.freeze({
+        method: "GET",
+        route: "daily-dispatch-records",
+        status: readbackExchange.status,
+        rowCount: readback.rowCount,
+        ownRowVerified: true,
+        orderId: own.orderId as string,
+        orderNo: own.orderNo as string,
+        serviceDate: own.serviceDate as string,
+        finalStatus: own.finalStatus as string,
+        orderSource: own.orderSource as string,
+        generatedAt: readback.generatedAt,
+        syntheticProvenanceVerified: readback.syntheticProvenanceVerified,
+        provenanceQualification: readback.provenanceQualification,
+        runtimeSha,
+      }),
+    });
+  } catch (error) {
+    if (!(error instanceof JourneyFailure))
+      throw new JourneyFailure(`daily-report-r12-08-${phase}`);
+    throw error;
+  }
+}
+
 export type RunOwnedDailyReportDownloadsParams = {
   context: BrowserContext;
   page: Page;
@@ -2151,6 +2595,9 @@ export async function runOwnedDailyReportDownloads(
     timer: ReturnType<typeof setTimeout>;
   };
   const waiters: PendingWaiter[] = [];
+  // Daily-record requests that reached this real-forwarding handler (R12-08
+  // proves its browser simulation forwarded none of them).
+  let forwardedDailyRecordRequests = 0;
 
   const waitForOpsExchange = (
     predicate: (request: CapturedOpsRequest) => boolean,
@@ -2199,6 +2646,12 @@ export async function runOwnedDailyReportDownloads(
     };
     const startedAt = performance.now();
     let failurePhase: "fetch" | "body" | "validate" = "fetch";
+    if (
+      parsedUrl.pathname.startsWith(
+        "/control-plane-proxy/reports/daily-dispatch-records",
+      )
+    )
+      forwardedDailyRecordRequests += 1;
 
     try {
       requireFact(
@@ -2875,8 +3328,9 @@ export async function runOwnedDailyReportDownloads(
           })
         : undefined;
 
-    // TEN02: independent adjacent day, selected from a complete committed
-    // canonical read, NOT from an empty report preview. Keep full orders in RAM.
+    // TEN02: independent nearest-first (+/-31) empty day, selected from a
+    // complete committed canonical read, NOT from an empty report preview.
+    // Keep full orders in RAM.
     const beforeStartedAt = new Date().toISOString();
     const beforeOrders = await readCanonicalOrders();
     const beforeReadAt = new Date().toISOString();
@@ -2968,10 +3422,9 @@ export async function runOwnedDailyReportDownloads(
       const exchange = await pending;
       assertDailyReportHttpStatus(exchange, phase, [200], runtimeSha, evidence);
       assertEmptyQuery(exchange.searchParams);
-      requireFact(
-        unwrapEnvelopeList(exchange.bytes, `daily-report-empty-${phase}`)
-          .length === 0,
-        `daily-report-empty-${phase}-zero-rows-required`,
+      requireEmptyDailyReportList(
+        exchange.bytes,
+        `daily-report-empty-${phase}`,
       );
     };
     emptyDayConsumerPhase = "preview-ready";
@@ -3345,6 +3798,25 @@ export async function runOwnedDailyReportDownloads(
       result: "observed",
     });
 
+    // Original R12-08 runs once, on the main path only, after every existing
+    // positive/empty/restore control; supplemental cases keep their flow.
+    const rebuildFailureRecovery =
+      params.supplementalExpected === undefined
+        ? await runRebuildFailureSimulationAndRealRetry({
+            page,
+            regenerateBtn,
+            opsOrigin,
+            expected,
+            expectedFilters,
+            originalOwnRow: validatedPreview.ownRow,
+            controlledOrderIds: controlledOrderIdSet,
+            runtimeSha,
+            waitForOpsExchange,
+            forwardedDailyRecordRequests: () => forwardedDailyRecordRequests,
+            evidence,
+          })
+        : undefined;
+
     return Object.freeze({
       definitionSha,
       runtimeSha,
@@ -3399,6 +3871,7 @@ export async function runOwnedDailyReportDownloads(
             }),
           }
         : {}),
+      ...(rebuildFailureRecovery ? { rebuildFailureRecovery } : {}),
     });
   } catch (error) {
     // Existing typed failures retain their exact identity/status/code/context.

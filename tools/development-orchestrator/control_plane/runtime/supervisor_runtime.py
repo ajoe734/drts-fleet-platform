@@ -6878,7 +6878,7 @@ def _chair_review_summary_lines(
             f" reviewer={merged['identity']['reviewer']}"
             f" required_acceptance={'|'.join(merged['identity']['required_acceptance'])}"
             f" depends_on={'|'.join(merged['depends_on']) or '-'}"
-            f" blocker_fingerprint={merged['blocker_fingerprint']}"
+            f" blocker_fingerprint={merged['blocker_fingerprint']} open_blockers={merged['open_blockers']}"
             if isinstance(merged, dict) else ""
         )
         blocked_task_lines.append(
@@ -6982,8 +6982,10 @@ def build_chair_review_message(
         "- `create_unblock_task` 只能用在下方 Dependency-ready blocked tasks；它會建立 task-scoped unblock child task，不會直接把 parent 從 blocked 改成 todo/done。\n"
         "- `resume_parent_task` 一般只能用在已經有 completed unblock child 的 blocked parent；它會把 parent 轉回可派工狀態，讓 owner 繼續主線執行。\n"
         "- 唯一例外：摘要標示 `ci_recovery=eligible` 的 blocked task（僅限剛好一個 open blocker），若你實際確認唯一剩餘阻礙是原交審 candidate 的 CI 且已恢復，可明確輸出 `resume_parent_task` 並附 `resume_basis=candidate_ci_recovered`、`resume_status=in_progress`、摘要中的完整 `candidate_sha` / `candidate_generation` / `pr_url` / `blocker_fingerprint` 與具體 reason，不需新 helper。Supervisor 會重讀同 PR/head/branch 的 own-workflow CI 並比對 open blocker 集合，只沿原 handoff 恢復獨立 review；這不批准 Source、不適用仍有其他未解 blocker，普通 note 不會執行此動作。\n"
-        "- 另一對等例外：摘要標示 `merged_acceptance=eligible` 的 blocked task（剛好一個 open blocker、已獨立 review、同 SHA own CI 成功、已 merge、仍有 outstanding required acceptance keys），若你實際確認該 blocker 是唯一剩餘阻礙，可明確輸出 `resume_parent_task` 並附 `resume_basis=merged_runtime_acceptance_ready`、`resume_status=acceptance`、以及摘要中那一行完整的 `candidate_sha` / `candidate_generation` / `merge_sha` / `candidate_branch` / `owner` / `reviewer` / `required_acceptance`（字串陣列）/ `depends_on`（字串陣列，可為空）/ `blocker_fingerprint` 與具體 reason，不需新 helper、不要附 `pr_url` 或 helper。這九項必須原樣抄自同一行摘要，任何一項與 Supervisor 重讀的現況不符都會整個拒絕、零殘留，不會改用重讀到的新值。Supervisor 會在既有 taskboard lock 下重新核對這個完整快照，只讓原 owner/reviewer 繼續記錄 required acceptance；這不核准任何 acceptance key、不寫 evidence、不適用仍有其他未解 blocker 或尚未 merge 的任務。\n"
+        "- 另一對等例外：摘要標示 `merged_acceptance=eligible` 的 blocked task（該行帶 `open_blockers=0` 或 `open_blockers=1`、已獨立 review、同 SHA own CI 成功、已 merge、仍有 outstanding required acceptance keys）。若 `open_blockers=1`，你必須實際確認那一個 open blocker 是唯一剩餘阻礙；若 `open_blockers=0`，代表這個已 merge 的任務目前沒有任何 open blocker（原 blocker 已 resolved 或原本就沒有），不需要、也不要去確認或捏造一個不存在的 blocker，`blocker_fingerprint` 在這種情況下就是既有的空集合 fingerprint，照樣原樣抄錄即可。兩種 open_blockers 值都可明確輸出 `resume_parent_task` 並附 `resume_basis=merged_runtime_acceptance_ready`、`resume_status=acceptance`、以及摘要中那一行完整的 `candidate_sha` / `candidate_generation` / `merge_sha` / `candidate_branch` / `owner` / `reviewer` / `required_acceptance`（字串陣列）/ `depends_on`（字串陣列，可為空）/ `blocker_fingerprint` 與具體 reason，不需新 helper、不要附 `pr_url`、`helper` 或 `open_blockers`。這九項必須原樣抄自同一行摘要，任何一項與 Supervisor 重讀的現況不符都會整個拒絕、零殘留，不會改用重讀到的新值。Supervisor 會在既有 taskboard lock 下重新核對這個完整快照，只讓原 owner/reviewer 繼續記錄 required acceptance；這不核准任何 acceptance key、不寫 evidence、不適用 `open_blockers` 為 2 或以上（仍有其他未解 blocker）或尚未 merge 的任務。\n"
         "- `wait_for_parent_resolution` 表示 helper 明確保留 blocked，或主任务又回報了更新的阻塞；舊 helper done 不能再次恢復派工。保留阻塞與 next，具體落實剩餘 routing/產品修復後由 Supervisor 明確 resume，不要重建同一 helper 或只重試 owner。若同一行另有 `merged_acceptance=eligible`，舊 helper 歷史照舊不動，唯一可選的是上述明確 merged acceptance resume（不建新 helper、不經舊 helper resume）；不選則保持原狀。\n"
+        "- 理由延期（不建 helper、也不給該任務任何 action）只限下方摘要中預期 `action=create_unblock_task`、且本輪沒有自己 `task_actions` 的被選中 blocked task，並且必須符合下列其一：(1) governance artifact 或 lineage 深度已達上限、recursion guard 會拒絕替它建 child 的既有 helper/治理列；(2) 它預設的穩定 helper ID（`<TASK-ID>-UNBLOCK-<KIND>`）已保留在 board 上或 archive 裡；(3) 其他一般任務，只有在同一份 JSON 同時帶有一個與某個被選中任務現況完全吻合的明確 `resume_parent_task`（`resume_basis=candidate_ci_recovered` 或 `merged_runtime_acceptance_ready`）的 mixed batch 裡才可延期。此外的一般任務（包括看起來只差真人 operator、已有人追蹤或已在 blocked_by / recommended_focus 評論過的）都不構成豁免，仍須輸出 `create_unblock_task`。這不是「所有 blocked 列都可延期」，也不要為此新建 helper-of-helper、history 或 archive 任務。mixed batch 裡的明確 resume 只要與現況不符（stale 或 malformed），整批會在任何動作前被拒絕，其中的延期一併失效。\n"
+        "- 延期項目寫在 `blocked_by`，每一項的精確格式是 `TASK-ID: 具體理由`（ASCII `:` 或全形 `：` 皆可）：字串開頭剛好一個被選中的任務 ID，冒號後的理由至少 24 個字元，且理由裡不得再出現任何其他像任務 ID 的 token（例如 `ORIGINAL-PARENT`、`RGP-002`、`H3-HOLD` 都會讓該項失效；`PD-4` 這種字母加一或兩位數字的里程碑標籤與一般自然語言敘述不受影響）。裸 ID（只寫 `\"HELD-UNBLOCK\"`、沒有冒號與理由）、理由太短、理由夾帶其他 ID 樣式 token、或不符上述資格的任務，引擎都不承認為延期，該任務仍算缺 action，`blocked_task_triage` 會整批拒絕。合法範例：`\"HELD-UNBLOCK：既有治理 helper，recursion guard 禁止再建 nested helper，維持原 blocker 與 owner/reviewer 不動。\"`\n"
         "- blocked task 若是 branch/commit/worktree/push 污染，`unblock_kind=history_repair`；若是 product/contract/canonical 決策缺口，`unblock_kind=planning_decision`；其他才用 `manual_unblock`。\n"
         "- 若 Chair review reason 是 `reassignment_triage`，且 `blocked_by` / `recommended_focus` 已明確指出某個 dependency-ready blocked task 的 unblock route，請直接輸出對應 `task_actions` (`create_unblock_task` 或 `resume_parent_task`)，不要只留在 `recommended_focus`。\n"
         "- 若 Chair review reason 是 `blocked_task_triage`，對摘要中的 actionable blocked task 採取 `create_unblock_task` 或 `resume_parent_task`；`wait_for_parent_resolution` 只供追蹤剩餘阻塞，不能把舊證據當成新修復。\n"
@@ -8508,13 +8510,21 @@ def merged_acceptance_resume_context(status: dict[str, Any], task: dict[str, Any
         for row in status.get("tasks", []) or []
     ):
         return None
+    # Zero or one open blocker: a merged candidate whose runtime evidence has
+    # landed may carry no open blocker at all. The exact fingerprint (the
+    # empty-set digest for zero) still binds the Chair's view to both rereads;
+    # two or more stay rejected. candidate_ci_recovery_context keeps exactly one.
     fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), task_id)
-    if open_count != 1:
+    if open_count > 1:
         return None
     return {
         "identity": identity,
         "blocker_fingerprint": fingerprint,
         "depends_on": sorted(str(value) for value in task.get("depends_on") or []),
+        # Display-only, mirroring candidate_ci_recovery_context's open_blockers:
+        # lets the Chair prompt distinguish the zero-open row from the
+        # one-open row without adding a field to the nine-key observed wire.
+        "open_blockers": open_count,
     }
 
 
@@ -9007,13 +9017,19 @@ def refresh_chair_review_state(
         if missing_outputs:
             error = error or "declared output missing: " + ", ".join(missing_outputs)
         if error:
+            if missing_outputs and active_worker is not None and pid_is_alive(active_worker.get("pid")):
+                # The decision packet and the Markdown report are two separate
+                # writes from one still-running worker; a real review has taken
+                # 23+ seconds between them and still produced a valid pair
+                # (claude2 121818, JSON 12:19:21.507 -> MD 12:19:44.868, applied
+                # 12:19:58). Killing a genuinely alive worker on a fixed
+                # JSON-mtime age punished it for not having finished yet. Its
+                # own lifecycle -- stall/reap/TTL, pending-approval preemption
+                # above -- is what decides whether it is actually stuck.
+                # Only an incomplete pair waits: once both files exist, a
+                # malformed or invalid packet is final and fails immediately.
+                return False
             if active_worker is not None:
-                try:
-                    output_age_seconds = time.time() - json_path.stat().st_mtime
-                except OSError:
-                    output_age_seconds = 0.0
-                if output_age_seconds < float(chair_review_settings(config).get("invalid_output_grace_seconds", 15)):
-                    return False
                 terminate_worker_pid(active_worker.get("pid"))
                 active_worker["status"] = "failed"
                 active_worker["last_event_at"] = utc_now()
@@ -9048,9 +9064,13 @@ def refresh_chair_review_state(
         chair_state["last_reason"] = active.get("reason")
         chair_state["last_decision"] = payload
         chair_state["failure_streak"] = 0
-        chair_state["cooldown_until"] = (
-            datetime.now(timezone.utc) + timedelta(seconds=float(chair_review_settings(config).get("cooldown_seconds", 900)))
-        ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        # Approvals bypass the cooldown as fresh signals, so a successful one must
+        # neither extend nor clear it: extending let back-to-back approvals starve
+        # an already-due blocked_task_triage, and clearing would drop a live failure backoff.
+        if str(active.get("reason") or "") != "approval_triage":
+            chair_state["cooldown_until"] = (
+                datetime.now(timezone.utc) + timedelta(seconds=float(chair_review_settings(config).get("cooldown_seconds", 900)))
+            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         chair_state["active_review"] = None
         write_activity_log(
             config,

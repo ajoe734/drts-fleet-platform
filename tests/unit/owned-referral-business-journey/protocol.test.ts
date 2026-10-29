@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
+import type { Page } from "@playwright/test";
 import * as ts from "typescript";
 import { parsePdf } from "../billing-pdf-chinese-printable-content-20261016/pdf-parser";
 
@@ -11,6 +13,9 @@ import {
   Evidence,
   consumeNativeReceiptPdfDownload,
   captureOriginalUiCancellation,
+  waitForOriginalCancellationTerminalUI,
+  originalCancellationResponseFacts,
+  originalCancellationTerminalFacts,
   validateActualReceiptPdfBytes,
   JourneyFailure,
   NativeTransport,
@@ -27,7 +32,12 @@ import {
   type Origins,
   type Role,
   type CallOptions,
+  object,
+  text,
+  type ObjectData,
 } from "../../e2e/owned-referral-business-journey/protocol";
+import { resolveActiveTripScreenOrder } from "../../e2e/owned-referral-business-journey/daily-report-downloads";
+import type { runFourStageOwnedCancellations } from "../../e2e/owned-referral-business-journey/four-stage-cancellations";
 
 const SHA = "a".repeat(40);
 const origins: Origins = {
@@ -1039,56 +1049,54 @@ describe("native fetch failure diagnostics", () => {
   });
 });
 
-describe("startup Ops HTML readiness deadline", () => {
-  // Drives the actual NativeTransport.call with only the external ports
-  // controlled: AbortSignal.timeout (chosen deadline), performance.now
-  // (virtual clock) and fetch (a server ready at readyAtMs). No timer waits.
-  async function runVirtual(
-    readyAtMs: number,
-    request: (tx: NativeTransport) => Promise<unknown>,
-    prepare: (tx: NativeTransport) => void = () => undefined,
-  ) {
-    const { tx, fetcher } = setup();
-    prepare(tx);
-    let now = 0;
-    let deadline = Number.POSITIVE_INFINITY;
-    let controller = new AbortController();
-    const timeout = vi
-      .spyOn(AbortSignal, "timeout")
-      .mockImplementation((ms) => {
-        deadline = ms;
-        controller = new AbortController();
-        return controller.signal;
+// Drives the actual NativeTransport.call with only the external ports
+// controlled: AbortSignal.timeout (chosen deadline), performance.now
+// (virtual clock) and fetch (a server ready at readyAtMs). No timer waits.
+async function runVirtual(
+  readyAtMs: number,
+  request: (tx: NativeTransport) => Promise<unknown>,
+  prepare: (tx: NativeTransport) => void = () => undefined,
+) {
+  const { tx, fetcher } = setup();
+  prepare(tx);
+  let now = 0;
+  let deadline = Number.POSITIVE_INFINITY;
+  let controller = new AbortController();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    deadline = ms;
+    controller = new AbortController();
+    return controller.signal;
+  });
+  const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+  fetcher.mockImplementation(async (_url, options) => {
+    expect(options?.signal).toBe(controller.signal);
+    if (readyAtMs <= deadline) {
+      now = readyAtMs;
+      return new Response("<html>synthetic dashboard</html>", {
+        status: 200,
+        headers: { "x-drts-candidate-sha": SHA, "content-type": "text/html" },
       });
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
-    fetcher.mockImplementation(async (_url, options) => {
-      expect(options?.signal).toBe(controller.signal);
-      if (readyAtMs <= deadline) {
-        now = readyAtMs;
-        return new Response("<html>synthetic dashboard</html>", {
-          status: 200,
-          headers: { "x-drts-candidate-sha": SHA, "content-type": "text/html" },
-        });
-      }
-      now = deadline;
-      controller.abort(new DOMException("synthetic", "TimeoutError"));
-      throw new DOMException("synthetic", "TimeoutError");
-    });
-    try {
-      const outcome = await request(tx).then(
-        (value) => ({ value }),
-        (error: unknown) => ({ error }),
-      );
-      return {
-        outcome,
-        chosen: timeout.mock.calls.map(([ms]) => ms),
-        fetcher,
-      };
-    } finally {
-      timeout.mockRestore();
-      clock.mockRestore();
     }
+    now = deadline;
+    controller.abort(new DOMException("synthetic", "TimeoutError"));
+    throw new DOMException("synthetic", "TimeoutError");
+  });
+  try {
+    const outcome = await request(tx).then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+    return {
+      outcome,
+      chosen: timeout.mock.calls.map(([ms]) => ms),
+      fetcher,
+    };
+  } finally {
+    timeout.mockRestore();
+    clock.mockRestore();
   }
+}
+describe("startup Ops HTML readiness deadline", () => {
   const startup = (tx: NativeTransport) =>
     tx.call("ops", "/dashboard", { raw: true, expected: [200] });
 
@@ -1286,6 +1294,299 @@ describe("startup Ops HTML readiness deadline", () => {
           requestDurationMs: 15_000,
         }),
       );
+    },
+  );
+});
+
+// Execute the original two adjacent statements rather than importing a spec
+// that registers Playwright tests. Only the session producer is an external
+// port; the original call expression and NativeTransport execute unchanged.
+function actualFleetReadiness(
+  tx: NativeTransport,
+  sessionProducer: () => Promise<unknown> = async () => ({ verified: true }),
+) {
+  const filename = path.join(
+    process.cwd(),
+    "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+  );
+  const source = ts.createSourceFile(
+    filename,
+    readFileSync(filename, "utf8"),
+    ts.ScriptTarget.ES2022,
+    true,
+  );
+  const calls: ts.CallExpression[] = [];
+  const visit = (node: ts.Node) => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.getText(source) === "tx.call" &&
+      node.arguments[0]?.getText(source) === '"fleet"' &&
+      node.arguments[1]?.getText(source) === '"/"'
+    )
+      calls.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  expect(calls).toHaveLength(1);
+  const call = at(calls, 0);
+  const statement = call.parent.parent;
+  requireFact(ts.isExpressionStatement(statement), "original Fleet statement");
+  const block = statement.parent;
+  requireFact(ts.isBlock(block), "original Fleet setup block");
+  const index = block.statements.indexOf(statement);
+  const producer = at(block.statements, index - 1);
+  expect(producer.getText(source)).toContain(
+    "fleet = await prepareOperationalFleetSession(",
+  );
+  const supply = block.statements.findIndex((node) =>
+    node.getText(source).startsWith("const provisionSupply ="),
+  );
+  expect(supply).toBeGreaterThan(index);
+  // No second marker, business call, or alternate consumer is authorized.
+  expect(
+    source.text.match(/purpose: "own-fleet-pre-supply-html-readiness"/g),
+  ).toHaveLength(1);
+  const { outputText } = ts.transpileModule(
+    `async function probe() { let fleet; ${producer.getText(source)} return await ${call.getText(source)}; }`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  );
+  const prepare = vi.fn(async (configuration: unknown) => {
+    expect(configuration).toEqual({
+      fleetPartnerId: "synthetic-own-fleet",
+      tenantId: "synthetic-own-tenant",
+    });
+    return await sessionProducer();
+  });
+  return new Function(
+    "tx",
+    "prepareOperationalFleetSession",
+    "FLEET",
+    "TENANT",
+    `${outputText} return probe();`,
+  )(
+    tx,
+    prepare,
+    "synthetic-own-fleet",
+    "synthetic-own-tenant",
+  ) as Promise<unknown>;
+}
+
+describe("original own Fleet pre-supply HTML readiness deadline", () => {
+  const purpose = "own-fleet-pre-supply-html-readiness" as const;
+  const marked: CallOptions = { raw: true, expected: [200], purpose };
+
+  it.each([5_000, 16_093])(
+    "original Fleet consumer accepts the single HTML 200 at %ims after its own session producer",
+    async (readyAt) => {
+      const { outcome, chosen, fetcher } = await runVirtual(
+        readyAt,
+        actualFleetReadiness,
+      );
+      expect(outcome).toEqual({
+        value: expect.objectContaining({ status: 200, data: null }),
+      });
+      expect(chosen).toEqual([30_000]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      const [url, init] = at(fetcher.mock.calls, 0);
+      expect(url).toBe("https://fleet.example.test/");
+      expect(init?.method).toBe("GET");
+      expect(init?.redirect).toBe("manual");
+      expect(init?.body).toBeUndefined();
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-drts-authorization")).toBe("Bearer genuine-fleet");
+      expect(headers.get("x-serverless-authorization")).toBe(
+        "Bearer cloud-fleet",
+      );
+      expect(headers.get("purpose")).toBeNull();
+    },
+  );
+
+  it("requires the original session producer to succeed before any root fetch", async () => {
+    const { tx, fetcher, fleetHeaders } = setup();
+    await expect(
+      actualFleetReadiness(tx, async () => {
+        throw new Error("synthetic session rejection");
+      }),
+    ).rejects.toThrow("synthetic session rejection");
+    expect(fleetHeaders).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("requires the normal Fleet authority helper even with the readiness purpose", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const tx = new NativeTransport(origins, SHA, {}, fetcher);
+    await expect(actualFleetReadiness(tx)).rejects.toThrow(
+      "normal Fleet helper required",
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("also accepts explicit GET with the same bounded readiness behavior", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(16_093, (tx) =>
+      tx.call("fleet", "/", { ...marked, method: "GET" }),
+    );
+    expect(outcome).toMatchObject({ value: { status: 200 } });
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts the original Fleet consumer once at 30s with closed transport facts", async () => {
+    const { outcome, chosen, fetcher } = await runVirtual(
+      30_001,
+      actualFleetReadiness,
+    );
+    expect(chosen).toEqual([30_000]);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({
+      error: {
+        stage: "fleet:transport",
+        transportFacts: {
+          nativeFailureClass: "TimeoutError",
+          nativeCauseCode: "UNKNOWN",
+          requestAborted: true,
+          requestDurationMs: 30_000,
+          requestMethod: "GET",
+          requestRoute: "/",
+        },
+      },
+    });
+  });
+
+  it.each<[string, Role, string, CallOptions]>([
+    ["plain root", "fleet", "/", { raw: true, expected: [200] }],
+    ["default options", "fleet", "/", {}],
+    [
+      "wrong purpose",
+      "fleet",
+      "/",
+      { ...marked, purpose: "unrecognized" } as unknown as CallOptions,
+    ],
+    ...["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].map(
+      (method): [string, Role, string, CallOptions] => [
+        `${method} root`,
+        "fleet",
+        "/",
+        { ...marked, method },
+      ],
+    ),
+    ["GET body", "fleet", "/", { ...marked, body: {} }],
+    ["null body", "fleet", "/", { ...marked, body: null }],
+    ["lowercase method", "fleet", "/", { ...marked, method: "get" }],
+    ["query", "fleet", "/?x=1", marked],
+    ["normalized alias", "fleet", "/./", marked],
+    ["absolute URL", "fleet", "https://fleet.example.test/", marked],
+    ["other route", "fleet", "/dashboard", marked],
+    ["not raw", "fleet", "/", { purpose, expected: [200] }],
+    ["raw false", "fleet", "/", { ...marked, raw: false }],
+    ["default statuses", "fleet", "/", { purpose, raw: true }],
+    ["widened statuses", "fleet", "/", { ...marked, expected: [200, 503] }],
+    ["wrong status", "fleet", "/", { ...marked, expected: [201] }],
+    ["empty statuses", "fleet", "/", { ...marked, expected: [] }],
+    ["duplicate statuses", "fleet", "/", { ...marked, expected: [200, 200] }],
+    ...(
+      [
+        "admin",
+        "ops",
+        "api",
+        "opsApi",
+        "referral",
+        "referralApi",
+        "publicApi",
+        "driver",
+      ] as Role[]
+    ).map((role): [string, Role, string, CallOptions] => [
+      role,
+      role,
+      "/",
+      marked,
+    ]),
+    [
+      "business write",
+      "fleet",
+      "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+      { ...marked, method: "POST", body: {} },
+    ],
+    [
+      "unmarked business write",
+      "fleet",
+      "/control-plane-proxy/fleet-partner/supply-submissions/drivers",
+      { method: "POST", body: {} },
+    ],
+  ])(
+    "keeps 15s for %s at the same 16093ms server response",
+    async (_name, role, route, options) => {
+      const { outcome, chosen, fetcher } = await runVirtual(16_093, (tx) =>
+        tx.call(role, route, options),
+      );
+      expect(chosen).toEqual([15_000]);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+      expect(outcome).toMatchObject({
+        error: {
+          transportFacts: {
+            nativeFailureClass: "TimeoutError",
+            requestAborted: true,
+            requestDurationMs: 15_000,
+          },
+        },
+      });
+    },
+  );
+
+  it.each([
+    [
+      "HTTP 503",
+      () =>
+        new Response("unavailable", {
+          status: 503,
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+      "fleet:request",
+    ],
+    [
+      "wrong SHA",
+      () =>
+        new Response("<html/>", {
+          headers: { "x-drts-candidate-sha": "b".repeat(40) },
+        }),
+      "fleet:runtime SHA mismatch",
+    ],
+    [
+      "oversize",
+      () =>
+        new Response(new Uint8Array(1024 * 1024 + 1), {
+          headers: { "x-drts-candidate-sha": SHA },
+        }),
+      "bounded response exceeded",
+    ],
+  ] as const)(
+    "still rejects %s without retry",
+    async (_name, reply, message) => {
+      const { tx, fetcher } = setup();
+      fetcher.mockImplementationOnce(async () => reply());
+      await expect(actualFleetReadiness(tx)).rejects.toThrow(message);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    [
+      "spoofed authority",
+      "/",
+      { ...marked, headers: { "x-drts-authorization": "Bearer spoof" } },
+      "caller cannot replace authority",
+    ],
+    [
+      "foreign origin",
+      "https://foreign.example.test/",
+      marked,
+      "role origin isolation",
+    ],
+  ] as const)(
+    "rejects %s before fetch",
+    async (_name, route, options, message) => {
+      const { tx, fetcher } = setup();
+      await expect(tx.call("fleet", route, options)).rejects.toThrow(message);
+      expect(fetcher).not.toHaveBeenCalled();
     },
   );
 });
@@ -1649,6 +1950,311 @@ describe("actual native receipt PDF bytes without user routing", () => {
   );
 });
 
+/** No browser/server: only the protocol event source is controlled. Installed
+ * Page -> Frame -> Waiter -> URL matcher, timeouts and channel validation run.
+ * Loading through @playwright/test selects the exact version used by the caller.
+ */
+function nativeCancellationPage(initialURL: string, loadStates: string[]) {
+  const localRequire = createRequire(import.meta.url);
+  const testRequire = createRequire(localRequire.resolve("@playwright/test"));
+  const playwrightRequire = createRequire(testRequire.resolve("playwright"));
+  const core = path.dirname(
+    playwrightRequire.resolve("playwright-core/package.json"),
+  );
+  type Connection = {
+    onmessage: (message: { id: number; method: string }) => void;
+    dispatch(message: object): void;
+    close(): void;
+  };
+  type Owner = { _channel: unknown };
+  const { Connection: NativeConnection } = localRequire(
+    path.join(core, "lib/client/connection.js"),
+  ) as { Connection: new (platform: unknown) => Connection };
+  const { ChannelOwner } = localRequire(
+    path.join(core, "lib/client/channelOwner.js"),
+  ) as {
+    ChannelOwner: new (
+      connection: Connection,
+      type: string,
+      guid: string,
+      initializer: object,
+    ) => Owner;
+  };
+  const { Frame } = localRequire(path.join(core, "lib/client/frame.js")) as {
+    Frame: new (
+      parent: Owner,
+      type: string,
+      guid: string,
+      initializer: object,
+    ) => Owner;
+  };
+  const { Page: NativePage } = localRequire(
+    path.join(core, "lib/client/page.js"),
+  ) as {
+    Page: new (
+      parent: Owner,
+      type: string,
+      guid: string,
+      initializer: object,
+    ) => Page;
+  };
+  const { TimeoutSettings } = localRequire(
+    path.join(core, "lib/client/timeoutSettings.js"),
+  ) as { TimeoutSettings: new (platform: unknown) => unknown };
+  const { nodePlatform } = localRequire(
+    path.join(core, "lib/server/utils/nodePlatform.js"),
+  ) as { nodePlatform: unknown };
+  const connection = new NativeConnection(nodePlatform);
+  connection.onmessage = ({ id, method }) => {
+    // Only bookkeeping/timeout configuration may leave the actual waiter.
+    if (
+      !["waitForEventInfo", "setDefaultNavigationTimeoutNoReply"].includes(
+        method,
+      )
+    )
+      throw new Error(`Unexpected native command: ${method}`);
+    queueMicrotask(() => connection.dispatch({ id, result: {} }));
+  };
+  const context = new ChannelOwner(connection, "BrowserContext", "context", {});
+  Object.assign(context, {
+    _options: {},
+    _timeoutSettings: new TimeoutSettings(nodePlatform),
+  });
+  const frame = new Frame(context, "Frame", "frame", {
+    url: initialURL,
+    name: "",
+    loadStates,
+  });
+  const page = new NativePage(context, "Page", "page", {
+    mainFrame: frame._channel,
+    isClosed: false,
+  });
+  // The old caller uses this default; the fixed consumer retains its explicit
+  // production 30s budget. A short native default keeps baseline probes bounded.
+  page.setDefaultNavigationTimeout(100);
+  const event = (method: string, params: object) =>
+    connection.dispatch({ guid: "frame", method, params });
+  return {
+    page,
+    event,
+    close: () => connection.close(),
+    version: (
+      localRequire(path.join(core, "package.json")) as { version: string }
+    ).version,
+  };
+}
+
+describe("original cancellation terminal UI native navigation boundary", () => {
+  const ownURL =
+    "https://referral.example.test/embed/entry?screen=cancelled&orderId=own";
+
+  it("reproduces the original native TimeoutError after matching URL and DOMContentLoaded without load", async () => {
+    const f = nativeCancellationPage(ownURL, ["commit", "domcontentloaded"]);
+    try {
+      expect(f.version).toBe("1.59.1");
+      await expect(
+        f.page.waitForURL(
+          (url) =>
+            url.searchParams.get("screen") === "cancelled" &&
+            url.searchParams.get("orderId") === "own",
+          { timeout: 30 },
+        ),
+      ).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(f.page.url()).toBe(ownURL);
+    } finally {
+      f.close();
+    }
+  });
+
+  it.each(["already-navigated", "navigation-after-wait"])(
+    "accepts %s at DOM readiness only after the real rendered assertion",
+    async (timing) => {
+      const f = nativeCancellationPage(
+        timing === "already-navigated"
+          ? ownURL
+          : ownURL.replace("cancelled", "trip"),
+        timing === "already-navigated"
+          ? ["commit", "domcontentloaded"]
+          : ["commit"],
+      );
+      try {
+        const rendered = vi.fn(async () => undefined);
+        const pending = waitForOriginalCancellationTerminalUI(
+          f.page,
+          "own",
+          rendered,
+        );
+        if (timing === "navigation-after-wait") {
+          f.event("navigated", { url: ownURL, name: "", newDocument: {} });
+          f.event("loadstate", { add: "domcontentloaded" });
+        }
+        await pending;
+        expect(rendered).toHaveBeenCalledOnce();
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+  it.each([
+    [
+      "wrong selected order",
+      ownURL.replace("orderId=own", "orderId=other"),
+      ["commit", "domcontentloaded", "load"],
+    ],
+    [
+      "trip URL despite cancelled API",
+      ownURL.replace("cancelled", "trip"),
+      ["commit", "domcontentloaded", "load"],
+    ],
+    ["commit without document readiness", ownURL, ["commit"]],
+  ])(
+    "rejects %s with the native bounded timeout before checking DOM",
+    async (_name, url, states) => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const f = nativeCancellationPage(url as string, states as string[]);
+      try {
+        const rendered = vi.fn(async () => undefined);
+        const pending = waitForOriginalCancellationTerminalUI(
+          f.page,
+          "own",
+          rendered,
+        );
+        const assertion = expect(pending).rejects.toMatchObject({
+          name: "TimeoutError",
+        });
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(rendered).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        await assertion;
+        expect(rendered).not.toHaveBeenCalled();
+      } finally {
+        f.close();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("propagates a real navigation error instead of accepting API success", async () => {
+    const f = nativeCancellationPage(ownURL.replace("cancelled", "trip"), [
+      "commit",
+    ]);
+    try {
+      const rendered = vi.fn(async () => undefined);
+      const pending = waitForOriginalCancellationTerminalUI(
+        f.page,
+        "own",
+        rendered,
+      );
+      const assertion = expect(pending).rejects.toThrow(
+        "controlled navigation failure",
+      );
+      f.event("navigated", {
+        url: ownURL,
+        name: "",
+        error: "controlled navigation failure",
+      });
+      await assertion;
+      expect(rendered).not.toHaveBeenCalled();
+    } finally {
+      f.close();
+    }
+  });
+
+  it("keeps a rendered outcome failure and rejects a later selected-order redirect", async () => {
+    const f = nativeCancellationPage(ownURL, ["commit", "domcontentloaded"]);
+    try {
+      const missingDOM = new Error("controlled cancelled DOM absent");
+      await expect(
+        waitForOriginalCancellationTerminalUI(f.page, "own", async () => {
+          throw missingDOM;
+        }),
+      ).rejects.toBe(missingDOM);
+      await expect(
+        waitForOriginalCancellationTerminalUI(f.page, "own", async () => {
+          f.event("navigated", {
+            url: ownURL.replace("orderId=own", "orderId=other"),
+            name: "",
+          });
+        }),
+      ).rejects.toThrow(
+        "rendered cancellation retains exact selected-order URL",
+      );
+    } finally {
+      f.close();
+    }
+  });
+
+  it("projects URL/DOM facts without retaining URL credentials, tokens or arbitrary destinations", () => {
+    const privateValue = "synthetic-private-value";
+    const facts = originalCancellationTerminalFacts(
+      `https://user:${privateValue}@other.example.test/private/${privateValue}?screen=${privateValue}&orderId=other&token=${privateValue}`,
+      { tripURL: ownURL, orderId: "own" },
+      { cancelledVisible: false, ownRouteVisible: null },
+      "failed",
+    );
+    expect(facts).toEqual({
+      phase: "failed",
+      sameOrigin: false,
+      samePath: false,
+      sameOrder: false,
+      screen: "OTHER",
+      cancelledVisible: false,
+      ownRouteVisible: null,
+    });
+    expect(JSON.stringify(facts)).not.toContain(privateValue);
+  });
+});
+
+type ActualCancellationCaller = Parameters<
+  typeof runFourStageOwnedCancellations
+>[0]["cancelFromActualUI"];
+
+/** Execute the real original caller closure, not a second implementation of
+ * its click/capture/wait/catch sequence. Only HTTP/DOM/action ports are supplied.
+ */
+function actualCancellationCaller(
+  bindings: ObjectData,
+): ActualCancellationCaller {
+  const filename = path.join(
+    process.cwd(),
+    "tests/e2e/owned-referral-business-journey/owned-business.spec.ts",
+  );
+  const source = ts.createSourceFile(
+    filename,
+    readFileSync(filename, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  let caller: ts.Expression | undefined;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isPropertyAssignment(node) &&
+      node.name.getText(source) === "cancelFromActualUI"
+    )
+      caller = node.initializer;
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  const windowReader = source.statements.find(
+    (node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) &&
+      node.name?.text === "readCancellationWindowSnapshot",
+  );
+  requireFact(
+    caller && windowReader,
+    "actual cancellation caller and window reader required",
+  );
+  const { outputText } = ts.transpileModule(
+    `${windowReader.getText(source)}\nconst caller = ${caller.getText(source)};`,
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  );
+  return new Function(
+    ...Object.keys(bindings),
+    `${outputText}\nreturn caller;`,
+  )(...Object.values(bindings)) as ActualCancellationCaller;
+}
+
 describe("original UI cancellation response capture before navigation release", () => {
   const expected = {
     url: "https://referral.example.test/api/referral/cancel/owned-case",
@@ -1727,6 +2333,138 @@ describe("original UI cancellation response capture before navigation release", 
     };
   }
 
+  it.each([true, false])(
+    "runs the actual C1 caller with native navigation and rendered outcome=%s",
+    async (hasOutcome) => {
+      const f = fixture();
+      const tripURL = `https://referral.example.test/embed/entry?screen=trip&orderId=${expected.orderId}`;
+      const native = nativeCancellationPage(tripURL, ["commit"]);
+      const checkpoints: Parameters<
+        Parameters<ActualCancellationCaller>[2]
+      >[0][] = [];
+      let observe:
+        | ((
+            route: typeof f.route & { abort(): Promise<void> },
+          ) => Promise<void>)
+        | undefined;
+      const route = { ...f.route, abort: vi.fn(async () => undefined) };
+      const button = {
+        click: vi.fn(async () => {
+          requireFact(observe, "original route armed before click");
+          await observe(route);
+        }),
+        isDisabled: async () => false,
+      };
+      const locator = (visible: () => boolean) => ({
+        first() {
+          return this;
+        },
+        isVisible: async () => visible(),
+      });
+      const ownRoute = locator(() => hasOutcome),
+        heading = locator(() => hasOutcome);
+      const unroute = vi.fn(async () => undefined);
+      const evidence = new Evidence();
+      f.route.fulfill.mockImplementation(async () => {
+        native.event("navigated", {
+          url: tripURL.replace("screen=trip", "screen=cancelled"),
+          name: "",
+          newDocument: {},
+        });
+        native.event("loadstate", { add: "domcontentloaded" });
+        // Intentionally no load: this is the real native boundary regression.
+      });
+      const caller = actualCancellationCaller({
+        page: {
+          url: () => native.page.url(),
+          waitForURL: native.page.waitForURL.bind(native.page),
+          locator: () => button,
+          getByText: (value: string) =>
+            value === "行程已取消"
+              ? heading
+              : value === "甲地 → 乙地"
+                ? ownRoute
+                : locator(() => true),
+          route: async (_url: string, handler: typeof observe) => {
+            observe = handler;
+          },
+          unroute,
+        },
+        // Controlled DOM assertion boundary only; no wait/navigation logic is mocked.
+        expect: (value: typeof heading | typeof button) => ({
+          toBeEnabled: async () =>
+            expect(await button.isDisabled()).toBe(false),
+          toBeVisible: async () =>
+            expect(await (value as typeof heading).isVisible()).toBe(true),
+        }),
+        referral: async () => ({
+          data: {
+            active: true,
+            trip: {
+              orderId: expected.orderId,
+              orderNo: "O-original-own",
+              pickupAddress: "甲地",
+              dropoffAddress: "乙地",
+            },
+          },
+        }),
+        resolveActiveTripScreenOrder,
+        object,
+        text,
+        requireFact,
+        JourneyFailure,
+        evidence,
+        origins,
+        runtime: SHA,
+        nonce: "controlled",
+        closedPdfFailureFacts: actualClosedPdfFailureFacts(),
+        captureOriginalUiCancellation,
+        originalCancellationResponseFacts,
+        originalCancellationTerminalFacts,
+        waitForOriginalCancellationTerminalUI,
+      });
+      try {
+        const pending = caller(expected.orderId, false, async (observation) => {
+          checkpoints.push(structuredClone(observation));
+        });
+        if (hasOutcome) {
+          await expect(pending).resolves.toMatchObject({
+            status: 200,
+            command: f.command,
+            requestSource: "actual-ui",
+          });
+        } else {
+          await expect(pending).rejects.toBeInstanceOf(Error);
+        }
+        expect(checkpoints[0]).toMatchObject({
+          response: {
+            status: 200,
+            runtimeSha: SHA,
+            command: f.command,
+            responseSha256: hash(f.bytes),
+          },
+        });
+        expect(checkpoints.at(-1)?.terminal).toMatchObject({
+          phase: hasOutcome ? "rendered" : "failed",
+          sameOrder: true,
+          screen: "cancelled",
+          cancelledVisible: hasOutcome,
+          ownRouteVisible: hasOutcome,
+        });
+        expect(f.route.fetch).toHaveBeenCalledOnce();
+        expect(f.route.fulfill).toHaveBeenCalledOnce();
+        expect(button.click).toHaveBeenCalledOnce();
+        expect(unroute).toHaveBeenCalledOnce();
+        expect(route.abort).not.toHaveBeenCalled();
+        expect(
+          evidence.events.filter((event) => event.result === "failed"),
+        ).toHaveLength(hasOutcome ? 0 : 2);
+      } finally {
+        native.close();
+      }
+    },
+  );
+
   it("reads the one original POST bytes, headers and command before unchanged fulfill", async () => {
     const f = fixture();
     const snapshot = await captureOriginalUiCancellation(f.route, expected);
@@ -1749,6 +2487,40 @@ describe("original UI cancellation response capture before navigation release", 
     );
     expect(JSON.parse(Buffer.from(snapshot.bytes).toString("utf8"))).toEqual(
       f.payload,
+    );
+  });
+
+  it("retains exact original command/status/runtime and byte hashes without exporting payload or headers", async () => {
+    const f = fixture();
+    const captured = await captureOriginalUiCancellation(f.route, expected);
+    captured.headers.set("set-cookie", "synthetic-private-value");
+    captured.payload.privateValue = "synthetic-private-value";
+    const facts = originalCancellationResponseFacts(captured, expected);
+    expect(facts).toEqual({
+      orderId: expected.orderId,
+      requestMethod: "POST",
+      command: f.command,
+      commandSha256: hash(Buffer.from(JSON.stringify(f.command))),
+      status: 200,
+      runtimeSha: SHA,
+      responseBytes: f.bytes.length,
+      responseSha256: hash(f.bytes),
+      envelopeOk: true,
+      responseOrderMatches: true,
+      responseCancelled: true,
+      cancelledAt: f.payload.data.cancelledAt,
+      refusal: null,
+    });
+    expect(JSON.stringify(facts)).not.toContain("synthetic-private-value");
+    expect(() =>
+      originalCancellationResponseFacts(captured, {
+        ...expected,
+        runtime: "b".repeat(40),
+      }),
+    ).toThrow("runtime binding");
+    captured.command.privateValue = "synthetic-private-value";
+    expect(() => originalCancellationResponseFacts(captured, expected)).toThrow(
+      "bounded original UI cancellation command",
     );
   });
 
@@ -1795,6 +2567,15 @@ describe("original UI cancellation response capture before navigation release", 
     expect(snapshot.status).toBe(409);
     expect(snapshot.data).toEqual(payload);
     expect(snapshot.bytes).toBe(f.bytes);
+    expect(originalCancellationResponseFacts(snapshot, expected)).toMatchObject(
+      {
+        status: 409,
+        envelopeOk: false,
+        responseCancelled: false,
+        responseOrderMatches: false,
+        refusal: "ORDER_NOT_CANCELABLE",
+      },
+    );
     expect(f.route.fetch).toHaveBeenCalledTimes(1);
     expect(f.route.fulfill).toHaveBeenCalledTimes(1);
   });

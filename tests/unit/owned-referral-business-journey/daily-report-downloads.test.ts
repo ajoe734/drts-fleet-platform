@@ -21,6 +21,8 @@ import {
 import { recordsToCsv } from "../../../apps/api/src/common/csv";
 import { resolveRouteAuthPolicy } from "../../../apps/api/src/common/auth/auth.policy";
 import { deepToSnakeCase } from "../../../apps/api/src/common/snake-case.interceptor";
+import { t as translate } from "../../../apps/ops-console-web/lib/translations";
+import { ApiClientError } from "../../../packages/api-client/src/index";
 import {
   recordsToPdf,
   recordsToXlsx,
@@ -31,6 +33,9 @@ import {
   adjacentEmptyDayFromSource,
   countCanonicalDailySource,
   validateEmptyDailyReportArtifactDownload,
+  requireEmptyDailyReportList,
+  EMPTY_DAY_CANDIDATE_OFFSETS,
+  EMPTY_DAY_MAX_DISTANCE,
   DAILY_REPORT_FORMATS,
   DAILY_REPORT_MIME_TYPES,
   DailyReportHttpFailure,
@@ -73,6 +78,24 @@ const VEHICLE_ID = "veh_synthetic_owned_001";
 const PLATE_NO = "SIM-R12A0001";
 const PICKUP_ADDRESS = "新北市板橋區縣民大道二段7號";
 const DROPOFF_ADDRESS = "臺北市信義區市府路1號";
+// ReportingService.rebuildDailyDispatchRecords persistence failure (503).
+const REBUILD_FAILED_CODE = "REPORT_REBUILD_FAILED";
+const REBUILD_FAILED_MESSAGE = "Daily dispatch records could not be rebuilt.";
+const R12_08_FAULTS = [
+  "click-throws",
+  "no-hit",
+  "no-error-ui",
+  "success-notice",
+  "wrong-route",
+  "double-hit",
+  "forwarded",
+  "unroute-throws",
+  "retry-503",
+  "retry-changed-filter",
+  "retry-missing-ack",
+  "retry-foreign-row",
+  "retry-row-identity",
+] as const;
 
 describe("managed FULL hosted supplemental artifact custody", () => {
   it("selects every controlled format, independent journal and custody while excluding private siblings", async () => {
@@ -211,7 +234,6 @@ function buildDailyDispatchRow(
   overrides: Partial<ObjectData> = {},
 ): ObjectData {
   return {
-    recordId: `daily:${ORDER_ID}`,
     serviceDate: "2026-10-26",
     orderId: ORDER_ID,
     orderNo: ORDER_NO,
@@ -333,6 +355,34 @@ function cancelledCase() {
   });
   delete row.caseKind;
   return { order, expected, row };
+}
+
+// A canonical createdAt at 02:10 Asia/Taipei on the given Taipei calendar day.
+function taipeiCreatedAt(day: string): string {
+  return new Date(`${day}T02:10:00.000+08:00`).toISOString();
+}
+
+// Plain UTC calendar arithmetic for expected values only; the selection under
+// test always runs through adjacentEmptyDayFromSource itself.
+function shiftDay(day: string, offset: number): string {
+  return new Date(Date.parse(`${day}T00:00:00.000Z`) + offset * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+// The authorized nearest-first bounded order, written out independently.
+const NEAREST_FIRST_OFFSETS = Array.from({ length: 31 }, (_, index) => [
+  -(index + 1),
+  index + 1,
+]).flat();
+
+function occupantOn(
+  base: ObjectData,
+  orderId: string,
+  day: string,
+  overrides: Partial<ObjectData> = {},
+): ObjectData {
+  return { ...base, orderId, createdAt: taipeiCreatedAt(day), ...overrides };
 }
 
 // R12-10 external API port. Only fetch/env are controlled: the helper, the
@@ -972,12 +1022,10 @@ ${inner}
     );
     const ownRow = buildDailyDispatchRow();
     const controlledSiblingRow = buildDailyDispatchRow({
-      recordId: `daily:${CONTROLLED_SIBLING_ORDER_ID}`,
       orderId: CONTROLLED_SIBLING_ORDER_ID,
       orderNo: "DRT-20261026-0002",
     });
     const unverifiedSiblingRow = buildDailyDispatchRow({
-      recordId: "daily:ord_unverified_sibling",
       orderId: "ord_unverified_sibling",
       orderNo: "DRT-20261026-0003",
     });
@@ -1464,14 +1512,411 @@ ${inner}
         ORDER_ID,
       ).count,
     ).toBe(1);
-    expect(() =>
-      adjacentEmptyDayFromSource(occupied, positive, ORDER_ID),
-    ).toThrow("daily-report-no-authoritatively-empty-adjacent-day");
+    // Both adjacent days occupied: the bounded nearest-first search continues
+    // to D-2 (2026-10-24), which is genuinely empty, instead of failing.
+    expect(adjacentEmptyDayFromSource(occupied, positive, ORDER_ID)).toBe(
+      "2026-10-24",
+    );
     expect(() =>
       adjacentEmptyDayFromSource({ items: [] }, positive, ORDER_ID),
     ).toThrow("daily-report-authoritative-own-positive-source-required");
     expect(() =>
       adjacentEmptyDayFromSource({ rows: [] }, positive, ORDER_ID),
+    ).toThrow(JourneyFailure);
+  });
+
+  // Hosted run 40948572369 shape: C1 (finalStatus=cancelled) whose D-1 and D+1
+  // both hold matching rows. The pre-fix adjacent-only helper threw
+  // daily-report-no-authoritatively-empty-adjacent-day; D-2 is genuinely empty.
+  it("TEN02: both adjacent days occupied under cancelled positive filters selects the nearest genuinely empty D-2", () => {
+    const c1 = cancelledCase();
+    const positive = buildDailyReportFilters(c1.expected);
+    expect(positive.finalStatus).toBe("cancelled");
+    expect(positive.serviceDateFrom).toBe("2026-10-26");
+    const source = {
+      items: [
+        c1.order,
+        occupantOn(c1.order, "occupied-prior", "2026-10-25"),
+        occupantOn(c1.order, "occupied-next", "2026-10-27"),
+        // Completed rows on D-2 do not occupy the cancelled query.
+        occupantOn(buildOrderFixture(), "completed-on-d-2", "2026-10-24"),
+      ],
+    };
+    const countOn = (day: string) =>
+      countCanonicalDailySource(
+        source,
+        { ...positive, serviceDateFrom: day, serviceDateTo: day },
+        ORDER_ID,
+      ).count;
+    expect(countOn("2026-10-25")).toBe(1);
+    expect(countOn("2026-10-27")).toBe(1);
+    expect(countOn("2026-10-24")).toBe(0);
+    expect(adjacentEmptyDayFromSource(source, positive, ORDER_ID)).toBe(
+      "2026-10-24",
+    );
+    // Deterministic: the same snapshot always yields the same first zero.
+    expect(adjacentEmptyDayFromSource(source, positive, ORDER_ID)).toBe(
+      "2026-10-24",
+    );
+  });
+
+  it("TEN02: empty-day candidates are exactly -1,+1,-2,+2,...,-31,+31", () => {
+    expect(EMPTY_DAY_MAX_DISTANCE).toBe(31);
+    expect(EMPTY_DAY_CANDIDATE_OFFSETS).toHaveLength(62);
+    expect([...EMPTY_DAY_CANDIDATE_OFFSETS]).toEqual(NEAREST_FIRST_OFFSETS);
+    expect(EMPTY_DAY_CANDIDATE_OFFSETS.slice(0, 2)).toEqual([-1, 1]);
+    expect(Object.isFrozen(EMPTY_DAY_CANDIDATE_OFFSETS)).toBe(true);
+  });
+
+  it("TEN02: keeps the original -1 then +1 precedence and walks nearest-first to the first zero", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const own = buildOrderFixture();
+    // Every other candidate day is empty unless occupied below.
+    expect(
+      adjacentEmptyDayFromSource({ items: [own] }, positive, ORDER_ID),
+    ).toBe("2026-10-25");
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [own, occupantOn(own, "occupied-prior", "2026-10-25")],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-27");
+    // Occupy the first k candidates; the (k+1)th is selected. k covers the
+    // original pair, the first rings, the +/-15 middle and the +/-31 edge
+    // (the exhaustive list is pinned by the candidate-order test above).
+    for (const k of [0, 1, 2, 3, 4, 5, 28, 29, 30, 31, 59, 60, 61]) {
+      const items = [
+        own,
+        ...NEAREST_FIRST_OFFSETS.slice(0, k).map((offset) =>
+          occupantOn(own, `occupied-${offset}`, shiftDay("2026-10-26", offset)),
+        ),
+      ];
+      expect(adjacentEmptyDayFromSource({ items }, positive, ORDER_ID)).toBe(
+        shiftDay("2026-10-26", NEAREST_FIRST_OFFSETS[k]!),
+      );
+    }
+    // -2 is tried before +2, +2 before -3.
+    const ring1 = [
+      own,
+      occupantOn(own, "p1", "2026-10-25"),
+      occupantOn(own, "n1", "2026-10-27"),
+    ];
+    expect(
+      adjacentEmptyDayFromSource({ items: ring1 }, positive, ORDER_ID),
+    ).toBe("2026-10-24");
+    expect(
+      adjacentEmptyDayFromSource(
+        { items: [...ring1, occupantOn(own, "p2", "2026-10-24")] },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-28");
+  });
+
+  it("TEN02: all 62 bounded candidates occupied fails closed without searching beyond +/-31", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const own = buildOrderFixture();
+    const items = [
+      own,
+      ...NEAREST_FIRST_OFFSETS.map((offset) =>
+        occupantOn(own, `occupied-${offset}`, shiftDay("2026-10-26", offset)),
+      ),
+    ];
+    // D-32 (2026-09-24) and D+32 (2026-11-27) are genuinely empty but outside
+    // the bound: they must never be selected.
+    for (const day of ["2026-09-24", "2026-11-27"])
+      expect(
+        countCanonicalDailySource(
+          { items },
+          { ...positive, serviceDateFrom: day, serviceDateTo: day },
+          ORDER_ID,
+        ).count,
+      ).toBe(0);
+    const failure = (() => {
+      try {
+        adjacentEmptyDayFromSource({ items }, positive, ORDER_ID);
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    })();
+    expect(failure).toBeInstanceOf(JourneyFailure);
+    expect(failure).toMatchObject({
+      stage:
+        "daily-report-no-authoritatively-empty-adjacent-day:nearest-first-31-occupied",
+    });
+    // Freeing only D+31 (the last candidate) selects it.
+    expect(
+      adjacentEmptyDayFromSource(
+        { items: items.filter((item) => item.orderId !== "occupied-31") },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-11-26");
+  });
+
+  it("TEN02: rows outside the exact positive filters never occupy a candidate; reservationWindowStart and Taipei midnight decide the date", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const own = buildOrderFixture();
+    const foreign = NEAREST_FIRST_OFFSETS.flatMap((offset) => {
+      const day = shiftDay("2026-10-26", offset);
+      return [
+        occupantOn(own, `tenant-${offset}`, day, { tenantId: "other" }),
+        occupantOn(own, `partner-${offset}`, day, { partnerId: "other" }),
+        occupantOn(own, `status-${offset}`, day, { status: "cancelled" }),
+        occupantOn(own, `product-${offset}`, day, {
+          businessDispatchSubtype: "other",
+        }),
+        occupantOn(own, `source-${offset}`, day, { orderSource: "concierge" }),
+      ];
+    });
+    expect(
+      adjacentEmptyDayFromSource(
+        { items: [own, ...foreign] },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-25");
+    // Canonical tenant_portal and legacy portal normalize to the same source:
+    // a tenant_portal row does occupy D-1 for the portal positive order.
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            occupantOn(own, "canonical-tenant-portal", "2026-10-25", {
+              orderSource: "tenant_portal",
+            }),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-27");
+    // reservationWindowStart wins over createdAt.
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            occupantOn(own, "reserved-elsewhere", "2026-10-25", {
+              reservationWindowStart: taipeiCreatedAt("2026-12-31"),
+            }),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-25");
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            occupantOn(own, "reserved-on-d-1", "2026-12-31", {
+              reservationWindowStart: taipeiCreatedAt("2026-10-25"),
+            }),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-27");
+    // Taipei midnight: 2026-10-24T16:00Z is 2026-10-25 00:00 Asia/Taipei.
+    const midnight = (orderId: string, createdAt: string) => ({
+      ...own,
+      orderId,
+      createdAt,
+    });
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            midnight("before-d-1", "2026-10-24T15:59:59.999Z"),
+            midnight("late-d", "2026-10-26T15:59:59.999Z"),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-25");
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            midnight("start-d-1", "2026-10-24T16:00:00.000Z"),
+            midnight("late-d", "2026-10-26T15:59:59.999Z"),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-27");
+    expect(
+      adjacentEmptyDayFromSource(
+        {
+          items: [
+            own,
+            midnight("start-d-1", "2026-10-24T16:00:00.000Z"),
+            midnight("start-d+1", "2026-10-26T16:00:00.000Z"),
+          ],
+        },
+        positive,
+        ORDER_ID,
+      ),
+    ).toBe("2026-10-24");
+  });
+
+  it.each([
+    // [positive Taipei day, occupied days, expected selection]
+    ["2028-03-01", ["2028-02-29", "2028-03-02"], "2028-02-28"],
+    ["2028-03-01", [], "2028-02-29"],
+    ["2027-03-01", [], "2027-02-28"],
+    ["2027-01-01", [], "2026-12-31"],
+    ["2027-01-01", ["2026-12-31", "2027-01-02"], "2026-12-30"],
+    ["2026-12-31", ["2026-12-30"], "2027-01-01"],
+    ["2026-10-31", ["2026-10-30", "2026-11-01"], "2026-10-29"],
+  ] as const)(
+    "TEN02: month/year/leap boundary from %s with %j occupied selects %s",
+    (positiveDay, occupiedDays, selected) => {
+      const positive = {
+        ...buildDailyReportFilters(
+          resolveExpectedDailyDispatchRecord(
+            buildOrderFixture(),
+            buildTaskFixture(),
+            buildOwnContext(),
+          ),
+        ),
+        serviceDateFrom: positiveDay,
+        serviceDateTo: positiveDay,
+      };
+      const own = buildOrderFixture({
+        createdAt: taipeiCreatedAt(positiveDay),
+      });
+      const items = [
+        own,
+        ...occupiedDays.map((day) => occupantOn(own, `occupied-${day}`, day)),
+      ];
+      expect(adjacentEmptyDayFromSource({ items }, positive, ORDER_ID)).toBe(
+        selected,
+      );
+    },
+  );
+
+  it("TEN02: missing, malformed or own-positive-less sources are rejected, never treated as an empty day", () => {
+    const positive = buildDailyReportFilters(
+      resolveExpectedDailyDispatchRecord(
+        buildOrderFixture(),
+        buildTaskFixture(),
+        buildOwnContext(),
+      ),
+    );
+    const own = buildOrderFixture();
+    const sources: unknown[] = [
+      null,
+      undefined,
+      {},
+      { items: null },
+      { items: "not-an-array" },
+      { items: [] },
+      // Own positive missing while other matching rows exist on D.
+      { items: [occupantOn(own, "someone-else", "2026-10-26")] },
+      // Own order moved off the positive date.
+      { items: [occupantOn(own, ORDER_ID, "2026-10-25")] },
+      // Own order present but under another status.
+      { items: [{ ...own, status: "cancelled" }] },
+      // A malformed matching row on a candidate day cannot be counted as zero.
+      {
+        items: [
+          own,
+          occupantOn(own, "malformed-source", "2026-10-25", {
+            orderSource: null,
+          }),
+        ],
+      },
+      {
+        items: [
+          own,
+          occupantOn(own, "malformed-time", "2026-10-25", {
+            createdAt: null,
+          }),
+        ],
+      },
+    ];
+    for (const source of sources)
+      expect(() =>
+        adjacentEmptyDayFromSource(source, positive, ORDER_ID),
+      ).toThrow(JourneyFailure);
+    expect(() =>
+      adjacentEmptyDayFromSource({ items: [] }, positive, ORDER_ID),
+    ).toThrow("daily-report-authoritative-own-positive-source-required");
+  });
+
+  it("TEN02: empty preview requires zero items and an explicit pageInfo.totalItems === 0", () => {
+    const stage = "daily-report-empty-preview";
+    expect(() =>
+      requireEmptyDailyReportList(successWireBytes(toApiListData([])), stage),
+    ).not.toThrow();
+    expect(() =>
+      requireEmptyDailyReportList(
+        Buffer.from(JSON.stringify({ ok: true, data: toApiListData([]) })),
+        stage,
+      ),
+    ).not.toThrow();
+    // totalItems > 0 with an empty first page is not an empty day.
+    expect(() =>
+      requireEmptyDailyReportList(
+        successWireBytes(toApiListData([], { totalItems: 1, totalPages: 1 })),
+        stage,
+      ),
+    ).toThrow(`${stage}-total-items-zero-required`);
+    expect(() =>
+      requireEmptyDailyReportList(
+        successWireBytes(toApiListData([buildDailyDispatchRow()])),
+        stage,
+      ),
+    ).toThrow(`${stage}-zero-rows-required`);
+    // No pageInfo, or a bare legacy array, cannot prove totalItems === 0.
+    expect(() =>
+      requireEmptyDailyReportList(successWireBytes({ items: [] }), stage),
+    ).toThrow(JourneyFailure);
+    expect(() =>
+      requireEmptyDailyReportList(
+        Buffer.from(JSON.stringify({ ok: true, data: [] })),
+        stage,
+      ),
+    ).toThrow(JourneyFailure);
+    expect(() =>
+      requireEmptyDailyReportList(
+        successWireBytes({
+          ...toApiListData([]),
+          pageInfo: { ...toApiListData([]).pageInfo, totalItems: "0" },
+        }),
+        stage,
+      ),
     ).toThrow(JourneyFailure);
   });
 
@@ -1717,6 +2162,46 @@ ${inner}
     },
     {
       caseName:
+        "adjacent days occupied selects the nearest genuinely empty day for the full empty consumer",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "adjacent days occupied then source changes on the selected day after empty jobs must fail",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "adjacent days occupied then source changes positive count after empty jobs must fail",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "empty preview nonzero totalItems with empty first page must fail",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
+        "cancelled null row with adjacent days occupied selects the nearest genuinely empty day",
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    },
+    {
+      caseName:
         "cancelled null row uses normal UI filter rebuild and all immutable formats",
       previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
       jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
@@ -1811,6 +2296,14 @@ ${inner}
       expectedPreviewControlled: true,
       expectedRetained: true,
     })),
+    ...R12_08_FAULTS.map((r1208Fault) => ({
+      caseName: `R12-08 explicit SIM/real retry ${r1208Fault}`,
+      r1208Fault,
+      previewSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      jobSiblingOrderId: CONTROLLED_SIBLING_ORDER_ID,
+      expectedPreviewControlled: true,
+      expectedRetained: true,
+    })),
   ])(
     "drives preview rebuild, 3-format job creation, /reports reload, and 3 artifact downloads in a socket-free harness ($caseName)",
     async ({
@@ -1835,6 +2328,8 @@ ${inner}
         "routeFault" in scenario ? scenario.routeFault : undefined;
       const nonReportApi =
         "nonReportApi" in scenario ? scenario.nonReportApi : undefined;
+      const r1208Fault =
+        "r1208Fault" in scenario ? scenario.r1208Fault : undefined;
       let api: ReturnType<typeof installNonReportRoleApi> | undefined;
       const routeNativeFailure: unknown =
         routeFault === "matching-hostile"
@@ -1926,6 +2421,15 @@ ${inner}
           restoreClock = () => clock.mockRestore();
         }
         const cancelled = failureCase.startsWith("cancelled null");
+        // TEN02 nearest-first: matching rows on D-1 and D+1 move the genuinely
+        // empty day to D-2; otherwise the original D-1 is the empty day.
+        const adjacentOccupied = failureCase.includes("adjacent days occupied");
+        const emptyDay = adjacentOccupied ? "2026-10-24" : "2026-10-25";
+        const sourceChange = failureCase.includes("source changes positive")
+          ? "positive"
+          : failureCase.includes("source changes")
+            ? "empty"
+            : undefined;
         const cancelledSource = cancelledCase();
         const ownRow = cancelled
           ? cancelledSource.row
@@ -1936,7 +2440,6 @@ ${inner}
             );
         const siblingRow = (orderId: string) => ({
           ...ownRow,
-          recordId: `daily:${orderId}`,
           orderId,
           orderNo: "DRT-20261026-0000",
         });
@@ -1952,6 +2455,27 @@ ${inner}
         let rebuiltInBackend = false;
         let rebuildPosts = 0;
         let rebuiltPreviewGets = 0;
+        // R12-08 browser port: page-level routes take precedence over the
+        // helper's context route, as in Playwright. Ops page error/notice
+        // state mirrors reports/page.tsx regenerate().
+        type PageRouteMatcher = (url: URL) => boolean;
+        let pageRoute:
+          | {
+              matcher: PageRouteMatcher;
+              handler: (route: Route) => Promise<void>;
+            }
+          | undefined;
+        let pageRouteCalls = 0;
+        let pageUnrouteCalls = 0;
+        let simulationAttempted = false;
+        const simulatedResponses: Array<{
+          status?: number;
+          contentType?: string;
+          body?: string;
+        }> = [];
+        const simulatedRequestBodies: string[] = [];
+        let uiErrorText: string | null = null;
+        let uiNoticeText: string | null = null;
         const alreadyMaterialized = failureCase.startsWith(
           "already materialized",
         );
@@ -2130,7 +2654,7 @@ ${inner}
                     serviceProductCode: serviceProductVal,
                   });
                   const rows =
-                    dateFromVal === "2026-10-25"
+                    dateFromVal === emptyDay
                       ? []
                       : rebuiltInBackend || alreadyMaterialized
                         ? [previewSiblingRow, ownRow]
@@ -2141,12 +2665,11 @@ ${inner}
                     null,
                     previewFailure === true ||
                       (typedFault === "exchange-http" &&
-                        dateFromVal === "2026-10-25")
+                        dateFromVal === emptyDay)
                       ? 503
                       : 200,
                     { "content-type": "application/json" },
-                    typedFault === "exchange-http" &&
-                      dateFromVal === "2026-10-25"
+                    typedFault === "exchange-http" && dateFromVal === emptyDay
                       ? errorWireBytes()
                       : failureCase === "preview-invalid-json"
                         ? Buffer.from("not-json")
@@ -2218,7 +2741,16 @@ ${inner}
                                                   },
                                                 }),
                                               )
-                                            : wireBytes(toApiListData(rows)),
+                                            : failureCase.startsWith(
+                                                  "empty preview nonzero totalItems",
+                                                ) && dateFromVal === emptyDay
+                                              ? wireBytes(
+                                                  toApiListData([], {
+                                                    totalItems: 1,
+                                                    totalPages: 1,
+                                                  }),
+                                                )
+                                              : wireBytes(toApiListData(rows)),
                   );
                 },
               });
@@ -2227,8 +2759,6 @@ ${inner}
               return makeLocator({
                 point: "rebuild",
                 click: async () => {
-                  rebuiltInBackend = true;
-                  rebuildPosts += 1;
                   const bodyObj = {
                     serviceDateFrom: dateFromVal,
                     serviceDateTo: dateToVal,
@@ -2238,21 +2768,152 @@ ${inner}
                     partnerId: partnerVal,
                     serviceProductCode: serviceProductVal,
                   };
+                  const rebuildUrl = `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records/rebuild`;
+                  const generatedAt = "2026-10-25T18:31:00.000Z";
+                  uiErrorText = null;
+                  uiNoticeText = null;
+                  if (pageRoute) {
+                    simulationAttempted = true;
+                    if (r1208Fault === "click-throws")
+                      throw new Error(privateMarker);
+                    if (r1208Fault === "no-hit") return;
+                    // Mirrors Playwright: a matching page route sees the
+                    // request first; only fallback() reaches the context route.
+                    const sendThroughPage = async (
+                      method: string,
+                      postData: string | null,
+                    ) => {
+                      const outcome = {
+                        fulfilled: false,
+                        fellBack: false,
+                        aborted: false,
+                      };
+                      if (!pageRoute!.matcher(new URL(rebuildUrl)))
+                        throw new Error("simulation route did not match");
+                      await pageRoute!.handler({
+                        request: () => ({
+                          method: () => method,
+                          url: () => rebuildUrl,
+                          postData: () => postData,
+                          headers: () => ({ accept: "*/*" }),
+                        }),
+                        fulfill: async (options: {
+                          status?: number;
+                          contentType?: string;
+                          body?: string;
+                        }) => {
+                          outcome.fulfilled = true;
+                          simulatedResponses.push(options);
+                          if (postData !== null)
+                            simulatedRequestBodies.push(postData);
+                        },
+                        fallback: async () => {
+                          outcome.fellBack = true;
+                          await dispatchRoute(
+                            method,
+                            rebuildUrl,
+                            postData,
+                            200,
+                            { "content-type": "application/json" },
+                            successWireBytes({ rebuiltCount: 2, generatedAt }),
+                          );
+                        },
+                        abort: async () => {
+                          outcome.aborted = true;
+                        },
+                      } as unknown as Route);
+                      return outcome;
+                    };
+                    if (r1208Fault === "wrong-route")
+                      await sendThroughPage("GET", null);
+                    const simulated = await sendThroughPage(
+                      "POST",
+                      JSON.stringify(bodyObj),
+                    );
+                    if (r1208Fault === "double-hit")
+                      await sendThroughPage("POST", JSON.stringify(bodyObj));
+                    if (r1208Fault === "forwarded")
+                      await dispatchRoute(
+                        "POST",
+                        rebuildUrl,
+                        JSON.stringify(bodyObj),
+                        200,
+                        { "content-type": "application/json" },
+                        successWireBytes({ rebuiltCount: 2, generatedAt }),
+                      );
+                    if (simulated.fulfilled) {
+                      const response = simulatedResponses.at(-1)!;
+                      // ApiClient throws ApiClientError for !ok; the page
+                      // shows its message and skips the success notice/preview.
+                      if (r1208Fault !== "no-error-ui")
+                        uiErrorText = new ApiClientError({
+                          statusCode: response.status ?? 200,
+                          code: REBUILD_FAILED_CODE,
+                          message: REBUILD_FAILED_MESSAGE,
+                          retryable: false,
+                          rawBody: String(response.body),
+                        }).message;
+                      if (r1208Fault === "success-notice")
+                        uiNoticeText = translate(
+                          "reports.ops.regenerate.done",
+                          "zh",
+                          { count: 2, time: "2026/10/26 02:31:00" },
+                        );
+                      return;
+                    }
+                  }
+                  const realRetry = simulationAttempted;
+                  rebuiltInBackend = true;
+                  rebuildPosts += 1;
+                  const retryBody =
+                    realRetry && r1208Fault === "retry-changed-filter"
+                      ? { ...bodyObj, serviceDateFrom: "2026-10-25" }
+                      : bodyObj;
+                  if (realRetry && r1208Fault === "retry-503") {
+                    await dispatchRoute(
+                      "POST",
+                      rebuildUrl,
+                      JSON.stringify(bodyObj),
+                      503,
+                      { "content-type": "application/json" },
+                      Buffer.from(
+                        JSON.stringify(
+                          deepToSnakeCase(
+                            toApiErrorEnvelope(
+                              REBUILD_FAILED_CODE,
+                              REBUILD_FAILED_MESSAGE,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                    uiErrorText = `API error 503: ${REBUILD_FAILED_MESSAGE}`;
+                    return;
+                  }
                   await dispatchRoute(
                     "POST",
-                    `${OPS_ORIGIN}/control-plane-proxy/reports/daily-dispatch-records/rebuild`,
+                    rebuildUrl,
                     faultPoint === "rebuild-command-json" &&
-                      dateFromVal === "2026-10-25"
+                      dateFromVal === emptyDay
                       ? privateMarker
-                      : JSON.stringify(bodyObj),
+                      : JSON.stringify(retryBody),
                     200,
                     { "content-type": "application/json" },
-                    successWireBytes({
-                      rebuiltCount: dateFromVal === "2026-10-25" ? 0 : 2,
-                      generatedAt: "2026-10-25T18:31:00.000Z",
-                    }),
+                    realRetry && r1208Fault === "retry-missing-ack"
+                      ? Buffer.from(
+                          JSON.stringify({
+                            meta: {
+                              request_id: "x",
+                              timestamp: new Date().toISOString(),
+                            },
+                          }),
+                        )
+                      : successWireBytes({
+                          rebuiltCount: dateFromVal === emptyDay ? 0 : 2,
+                          generatedAt,
+                        }),
                   );
-                  const query = new URLSearchParams(bodyObj);
+                  const query = new URLSearchParams(retryBody);
                   rebuiltPreviewGets += 1;
                   await dispatchRoute(
                     "GET",
@@ -2264,9 +2925,17 @@ ${inner}
                       ? wireBytes("not-a-list")
                       : wireBytes(
                           toApiListData(
-                            dateFromVal === "2026-10-25"
-                              ? []
-                              : [previewSiblingRow, ownRow],
+                            realRetry && r1208Fault === "retry-foreign-row"
+                              ? [siblingRow("ord_foreign_unowned_998")]
+                              : realRetry && r1208Fault === "retry-row-identity"
+                                ? [
+                                    previewSiblingRow,
+                                    // Same orderId, another contract identity.
+                                    { ...ownRow, orderNo: "DRT-20261026-0099" },
+                                  ]
+                                : dateFromVal === emptyDay
+                                  ? []
+                                  : [previewSiblingRow, ownRow],
                           ),
                         ),
                   );
@@ -2281,7 +2950,7 @@ ${inner}
                   if (
                     routeFault &&
                     routeFault !== "matching-command-binding" &&
-                    dateFromVal === "2026-10-25" &&
+                    dateFromVal === emptyDay &&
                     format === "csv"
                   ) {
                     const unrelated = routeFault.startsWith("unrelated-");
@@ -2312,10 +2981,10 @@ ${inner}
                     );
                     if (!unrelated) return;
                   }
-                  const jobId = `job_harness_${dateFromVal === "2026-10-25" ? "empty_" : ""}${format}`;
+                  const jobId = `job_harness_${dateFromVal === emptyDay ? "empty_" : ""}${format}`;
                   lastAcceptedJobId = jobId;
                   const rows =
-                    dateFromVal === "2026-10-25"
+                    dateFromVal === emptyDay
                       ? []
                       : [
                           jobSiblingRow,
@@ -2330,7 +2999,7 @@ ${inner}
                     format,
                     jobId,
                     rows,
-                    dateFromVal === "2026-10-25" || cancelled
+                    dateFromVal === emptyDay || cancelled
                       ? {
                           filters: {
                             ...buildDailyReportFilters(
@@ -2367,7 +3036,7 @@ ${inner}
                     `${OPS_ORIGIN}/control-plane-proxy/reports/jobs`,
                     JSON.stringify(
                       routeFault === "matching-command-binding" &&
-                        dateFromVal === "2026-10-25"
+                        dateFromVal === emptyDay
                         ? {
                             ...reqBody,
                             filters: {
@@ -2417,13 +3086,50 @@ ${inner}
             }
             return makeLocator({});
           },
-          getByText: (textVal) =>
-            makeLocator({
+          getByText: (textVal) => {
+            if (textVal instanceof RegExp)
+              return makeLocator({
+                point: "regenerate-notice",
+                count: async () =>
+                  uiNoticeText !== null && textVal.test(uiNoticeText) ? 1 : 0,
+              });
+            if (textVal === REBUILD_FAILED_MESSAGE) {
+              const visible = () =>
+                uiErrorText !== null && uiErrorText.includes(textVal);
+              const errorLocator = {
+                first: () => errorLocator,
+                // Playwright times out when the state never arrives.
+                waitFor: async (options?: { state?: string }) => {
+                  if (visible() !== (options?.state !== "detached"))
+                    throw new Error(`timeout ${privateMarker}`);
+                },
+                count: async () => (visible() ? 1 : 0),
+                innerText: async () => uiErrorText ?? "",
+              };
+              return errorLocator as unknown as Locator;
+            }
+            return makeLocator({
               point: "notice",
               innerText: async () => String(textVal),
               count: async () =>
                 String(textVal) === lastAcceptedJobId ? 1 : 0,
-            }),
+            });
+          },
+          route: (async (matcher: PageRouteMatcher, handler: unknown) => {
+            pageRouteCalls += 1;
+            expect(pageRoute).toBeUndefined();
+            pageRoute = {
+              matcher,
+              handler: handler as (route: Route) => Promise<void>,
+            };
+          }) as unknown as Page["route"],
+          unroute: (async (matcher: PageRouteMatcher, handler: unknown) => {
+            pageUnrouteCalls += 1;
+            if (r1208Fault === "unroute-throws") throw new Error(privateMarker);
+            expect(matcher).toBe(pageRoute?.matcher);
+            expect(handler).toBe(pageRoute?.handler);
+            pageRoute = undefined;
+          }) as unknown as Page["unroute"],
           locator: (selector: string) => {
             if (selector === 'input[type="date"]') {
               return makeLocator({ count: async () => 2 });
@@ -2489,7 +3195,7 @@ ${inner}
                   if (target === ORDER_ID) {
                     return makeLocator({
                       point: "own-row",
-                      count: async () => (dateFromVal === "2026-10-25" ? 0 : 1),
+                      count: async () => (dateFromVal === emptyDay ? 0 : 1),
                       innerText: async () =>
                         `${ORDER_ID} ${ORDER_NO} 2026-10-26 ${PICKUP_ADDRESS} ${DROPOFF_ADDRESS} ${DRIVER_ID} ${VEHICLE_ID} ${PLATE_NO}`,
                     });
@@ -2614,16 +3320,25 @@ ${inner}
           }),
           readCanonicalOrders: async () => {
             sourceReads += 1;
+            const positiveOrder = cancelled
+              ? cancelledSource.order
+              : buildOrderFixture();
             return {
               items: [
-                cancelled ? cancelledSource.order : buildOrderFixture(),
-                ...(failureCase.startsWith("source changes") &&
-                sourceReads === 2
+                positiveOrder,
+                ...(adjacentOccupied
                   ? [
-                      buildOrderFixture({
-                        orderId: "writer-created-order",
-                        createdAt: "2026-10-24T18:10:00.000Z",
-                      }),
+                      occupantOn(positiveOrder, "occupied-prior", "2026-10-25"),
+                      occupantOn(positiveOrder, "occupied-next", "2026-10-27"),
+                    ]
+                  : []),
+                ...(sourceChange && sourceReads === 2
+                  ? [
+                      occupantOn(
+                        positiveOrder,
+                        "writer-created-order",
+                        sourceChange === "positive" ? "2026-10-26" : emptyDay,
+                      ),
                     ]
                   : []),
               ],
@@ -2966,9 +3681,22 @@ ${inner}
           ).rejects.toThrow();
           return;
         }
-        if (failureCase.startsWith("source changes")) {
+        if (failureCase.startsWith("empty preview nonzero totalItems")) {
+          await expect(run).rejects.toMatchObject({
+            stage: "daily-report-empty-preview-total-items-zero-required",
+          });
+          expect(sourceReads).toBe(1);
+          expect(unrouteCalled).toBe(true);
+          expect(
+            createdJobs.filter((job) => job.jobId.includes("_empty_")),
+          ).toHaveLength(0);
+          return;
+        }
+        if (sourceChange) {
           await expect(run).rejects.toThrow(
-            "daily-report-empty-day-authoritative-source-control-required",
+            sourceChange === "positive"
+              ? "daily-report-empty-positive-source-count-stable-required"
+              : "daily-report-empty-day-authoritative-source-control-required",
           );
           expect(api!.reportCalls()).toHaveLength(6);
           expect(sourceReads).toBe(2);
@@ -2994,6 +3722,83 @@ ${inner}
           ).rejects.toThrow();
           return;
         }
+        if (r1208Fault) {
+          const failure = await run.then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+          const expectedStage = {
+            "click-throws": "daily-report-r12-08-sim-submit",
+            "no-hit": "daily-report-r12-08-sim-error-ui",
+            "no-error-ui": "daily-report-r12-08-sim-error-ui",
+            "success-notice":
+              "daily-report-r12-08-sim-no-success-notice-required",
+            "wrong-route":
+              "daily-report-r12-08-sim-exactly-one-rebuild-hit-required",
+            "double-hit":
+              "daily-report-r12-08-sim-exactly-one-rebuild-hit-required",
+            forwarded: "daily-report-r12-08-sim-no-forward-required",
+            "unroute-throws": "daily-report-r12-08-sim-unroute-required",
+            "retry-503": "daily-report-rebuild-status-200",
+            "retry-changed-filter":
+              "daily-report-r12-08-retry-same-filters-required",
+            "retry-missing-ack": "object response required",
+            "retry-foreign-row": "daily-report-preview-missing-own-order",
+            "retry-row-identity":
+              "daily-report-preview-own-order-field-mismatch",
+          }[r1208Fault];
+          expect(failure).toBeInstanceOf(JourneyFailure);
+          expect(failure).toMatchObject({ stage: expectedStage });
+          if (r1208Fault === "retry-503")
+            expect(failure).toMatchObject({
+              status: 503,
+              code: REBUILD_FAILED_CODE,
+              context: {
+                phase: "rebuild",
+                method: "POST",
+                route: "daily-dispatch-rebuild",
+                runtimeSha: RUNTIME_SHA,
+              },
+            });
+          // Every existing control ran before R12-08 and none was dropped.
+          const stages = evidence.events.map((event) => event.stage);
+          for (const format of DAILY_REPORT_FORMATS) {
+            expect(stages).toContain(
+              `daily-report-download-${format}-verified`,
+            );
+            expect(stages).toContain(`daily-report-empty-${format}-verified`);
+          }
+          expect(stages).toContain(
+            "daily-report-nonreport-role-own-jobs-unchanged-after-denial",
+          );
+          expect(stages).toContain(
+            "daily-report-positive-after-empty-restored",
+          );
+          expect(api!.reportCalls()).toHaveLength(6);
+          expect(sourceReads).toBe(2);
+          // The interception was registered once and its removal always ran.
+          expect(pageRouteCalls).toBe(1);
+          expect(pageUnrouteCalls).toBe(1);
+          expect(pageRoute === undefined).toBe(r1208Fault !== "unroute-throws");
+          expect(unrouteCalled).toBe(true);
+          // A failed simulation or real retry never claims recovery.
+          expect(stages).not.toContain(
+            "daily-report-r12-08-real-retry-own-row-verified",
+          );
+          const retried = r1208Fault.startsWith("retry-");
+          expect(
+            stages.includes("daily-report-r12-08-sim-interception-removed"),
+          ).toBe(retried);
+          // Only an actual real retry adds a forwarded rebuild POST.
+          expect(rebuildPosts).toBe(retried ? 3 : 2);
+          expect(simulatedResponses).toHaveLength(
+            ["click-throws", "no-hit"].includes(r1208Fault) ? 0 : 1,
+          );
+          const diagnostic = JSON.stringify([failure, evidence.events]);
+          expect(diagnostic).not.toContain(privateMarker);
+          expect(diagnostic).not.toContain("synthetic-ops-jwt");
+          return;
+        }
         const result = await run;
         if (routeFault?.startsWith("unrelated-")) {
           expect(abortedRoutes).toBe(1);
@@ -3017,8 +3822,10 @@ ${inner}
         expect(result.filters.tenantId).toBe(REFERRAL_TENANT_ID);
         expect(result.preview.rebuilt).toBe(true);
         expect(result.preview.rebuildCount).toBe(2);
-        expect(rebuildPosts).toBe(2); // positive even when preexisting, then empty
-        expect(rebuiltPreviewGets).toBe(2);
+        // Positive even when preexisting, then empty; main adds the R12-08
+        // real retry (its simulated POST is never forwarded).
+        expect(rebuildPosts).toBe(cancelled ? 2 : 3);
+        expect(rebuiltPreviewGets).toBe(cancelled ? 2 : 3);
         expect(result.preview.rowCount).toBe(2);
         expect(result.preview.syntheticProvenanceVerified).toBe(
           expectedPreviewControlled,
@@ -3033,7 +3840,7 @@ ${inner}
         expect(result.filters.finalStatus).toBe(
           cancelled ? "cancelled" : "completed",
         );
-        expect(result.emptyDay.serviceDate).toBe("2026-10-25");
+        expect(result.emptyDay.serviceDate).toBe(emptyDay);
         expect(result.emptyDay.sourceBefore.emptyCount).toBe(0);
         expect(result.emptyDay.sourceAfter.ownPositivePresent).toBe(true);
         expect(result.emptyDay.restoredPositiveRow).toBe(true);
@@ -3078,6 +3885,149 @@ ${inner}
         expect(JSON.stringify(evidence.events)).not.toContain(
           "synthetic-ops-jwt",
         );
+
+        // Original R12-08: explicit browser SIM then real retry, main only.
+        if (cancelled) {
+          expect(result.rebuildFailureRecovery).toBeUndefined();
+          expect(pageRouteCalls).toBe(0);
+          expect(simulatedResponses).toHaveLength(0);
+          expect(
+            evidence.events.some((event) =>
+              event.stage.startsWith("daily-report-r12-08-"),
+            ),
+          ).toBe(false);
+        } else {
+          const filters = buildDailyReportFilters(
+            resolveExpectedDailyDispatchRecord(
+              buildOrderFixture(),
+              buildTaskFixture(),
+              buildOwnContext(),
+            ),
+          );
+          const sentBody = JSON.stringify({
+            serviceDateFrom: filters.serviceDateFrom,
+            serviceDateTo: filters.serviceDateTo,
+            orderSource: filters.orderSource,
+            finalStatus: filters.finalStatus,
+            tenantId: filters.tenantId,
+            partnerId: filters.partnerId,
+            serviceProductCode: filters.serviceProductCode,
+          });
+          expect(pageRouteCalls).toBe(1);
+          expect(pageUnrouteCalls).toBe(1);
+          expect(pageRoute).toBeUndefined();
+          expect(simulatedRequestBodies).toEqual([sentBody]);
+          // The fulfilled body is the existing service failure as the real
+          // API producer and wire interceptor serialize it.
+          expect(simulatedResponses).toHaveLength(1);
+          expect(simulatedResponses[0]).toMatchObject({
+            status: 503,
+            contentType: "application/json",
+          });
+          const simulatedEnvelope = JSON.parse(simulatedResponses[0]!.body!);
+          const producedEnvelope = deepToSnakeCase(
+            toApiErrorEnvelope(REBUILD_FAILED_CODE, REBUILD_FAILED_MESSAGE),
+          ) as { error: Record<string, unknown> };
+          expect(Object.keys(simulatedEnvelope.error).sort()).toEqual(
+            Object.keys(
+              JSON.parse(JSON.stringify(producedEnvelope)).error,
+            ).sort(),
+          );
+          expect(simulatedEnvelope.error).toMatchObject({
+            code: producedEnvelope.error.code,
+            message: producedEnvelope.error.message,
+            retryable: producedEnvelope.error.retryable,
+            trace_id: expect.stringMatching(
+              /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+            ),
+          });
+          const serviceSource = await readFile(
+            new URL(
+              "../../../apps/api/src/modules/reporting/reporting.service.ts",
+              import.meta.url,
+            ),
+            "utf8",
+          );
+          expect(serviceSource).toMatch(
+            /new ApiRequestError\(\s*503,\s*"REPORT_REBUILD_FAILED",\s*"Daily dispatch records could not be rebuilt\.",\s*\)/,
+          );
+          expect(result.rebuildFailureRecovery).toEqual({
+            originalCase: "R12-08",
+            simulation: true,
+            faultLayer: "browser-network-interception",
+            actualBackendFaultVerified: false,
+            filters,
+            simulatedFailure: {
+              method: "POST",
+              route: "daily-dispatch-rebuild",
+              status: 503,
+              code: REBUILD_FAILED_CODE,
+              hitCount: 1,
+              forwardCount: 0,
+              requestPayloadSha256: hash(Buffer.from(sentBody)),
+              interceptionRemoved: true,
+            },
+            errorUi: {
+              errorBannerVisible: true,
+              errorCodeVisible: true,
+              successNoticeCount: 0,
+              retryEnabled: true,
+            },
+            realRetry: {
+              method: "POST",
+              route: "daily-dispatch-rebuild",
+              status: 200,
+              rebuiltCount: 2,
+              generatedAt: "2026-10-25T18:31:00.000Z",
+              requestPayloadSha256: hash(Buffer.from(sentBody)),
+              samePayloadAsSimulated: true,
+              runtimeSha: RUNTIME_SHA,
+            },
+            readback: {
+              method: "GET",
+              route: "daily-dispatch-records",
+              status: 200,
+              rowCount: 2,
+              ownRowVerified: true,
+              orderId: ORDER_ID,
+              orderNo: ORDER_NO,
+              serviceDate: "2026-10-26",
+              finalStatus: "completed",
+              orderSource: "tenant_portal",
+              generatedAt: "2026-10-25T18:31:00.000Z",
+              syntheticProvenanceVerified: expectedPreviewControlled,
+              provenanceQualification: expectedPreviewControlled
+                ? "all-rows-controlled-synthetic"
+                : "own-row-verified-unowned-siblings-present-raw-retention-skipped",
+              runtimeSha: RUNTIME_SHA,
+            },
+          });
+          const r1208Stages = evidence.events.map((event) => event.stage);
+          const restoredAt = r1208Stages.indexOf(
+            "daily-report-positive-after-empty-restored",
+          );
+          const simAt = r1208Stages.indexOf(
+            "daily-report-r12-08-sim-rebuild-503-ui-error-observed",
+          );
+          const removedAt = r1208Stages.indexOf(
+            "daily-report-r12-08-sim-interception-removed",
+          );
+          const recoveredAt = r1208Stages.indexOf(
+            "daily-report-r12-08-real-retry-own-row-verified",
+          );
+          expect(restoredAt).toBeGreaterThan(-1);
+          expect(simAt).toBeGreaterThan(restoredAt);
+          expect(removedAt).toBeGreaterThan(simAt);
+          expect(recoveredAt).toBeGreaterThan(removedAt);
+          // The simulated 503 is never recorded as a real HTTP failure.
+          expect(
+            evidence.events.some(
+              (event) =>
+                event.stage.startsWith("daily-report-http-") &&
+                event.result === "failed",
+            ),
+          ).toBe(false);
+        }
 
         // Original R12-10: once, main path only, after positive custody.
         if (cancelled) {
