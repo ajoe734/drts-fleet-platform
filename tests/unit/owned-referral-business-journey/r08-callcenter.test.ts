@@ -32,6 +32,18 @@ const close = {
   closingNote: "SIM owned index cleanup",
 };
 const clone = <T>(value: T): T => structuredClone(value);
+// SIM wire fixture matches the global SnakeCaseInterceptor response boundary.
+const wire = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(wire);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
+        wire(item),
+      ]),
+    );
+  return value;
+};
 
 function harness() {
   const proof: R08OpsProof = {
@@ -125,18 +137,18 @@ function harness() {
       commands.push(clone(command));
       events.push(`POST ${command.path}`);
       if (command.path === `${PATH}/transfer-to-complaint`)
-        return result({ session, complaintCase: complaint });
+        return result({ session, complaintCase: complaint }, 201);
       if (command.path === `${BASE}/callcenter/callbacks/SIM-callback/cancel`) {
         callback.status = "cancelled";
-        return result(callback);
+        return result(callback, 201);
       }
       if (command.path === `${BASE}/complaints/SIM-case/close`) {
         complaint.status = "closed";
-        return result(complaint);
+        return result(complaint, 201);
       }
       if (command.path === `${PATH}/close`) {
         session.status = "closed";
-        return result(session);
+        return result(session, 201);
       }
       throw new Error("SIM unexpected POST");
     }),
@@ -155,14 +167,11 @@ function harness() {
   const helper = new R08Callcenter(expected, ports);
   const response = {
     url: () => `${ORIGIN}${PATH}/transfer-to-complaint`,
-    status: () => 200,
+    status: () => 201,
     headers: () => ({ "x-drts-candidate-sha": SHA }),
     body: async () =>
       Buffer.from(
-        JSON.stringify({
-          ok: true,
-          data: { session, complaintCase: complaint },
-        }),
+        JSON.stringify(wire({ data: { session, complaintCase: complaint } })),
       ),
   };
   const request = {
@@ -336,6 +345,25 @@ describe("R08 original UI replay orchestration (SIM ports, no hosted acceptance)
       "r08-same-canonical-ops-first-party-bff-runtime",
     );
   });
+
+  it.each(["BFF403", "runtime"])(
+    "known original UI %s blocks replay even with an older successful proof",
+    async (fault) => {
+      const h = harness();
+      if (fault === "BFF403") h.response.status = () => 403;
+      else
+        h.response.headers = () => ({ "x-drts-candidate-sha": "7".repeat(40) });
+      await expect(h.helper.capture(h.route)).rejects.toThrow(
+        "r08-original-ui-bff-denial-or-runtime",
+      );
+      await expect(h.helper.replay()).rejects.toThrow(
+        "r08-one-original-replay-only",
+      );
+      expect(h.commands).toEqual([]);
+      expect(h.route.fulfill).not.toHaveBeenCalled();
+      expect(h.helper.snapshot().command!.rawBody).toBe(RAW);
+    },
+  );
 
   it.each(["runtime", "403", "case", "recording", "order", "callback"])(
     "rejects replay response %s drift",

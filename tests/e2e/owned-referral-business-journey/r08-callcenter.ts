@@ -5,6 +5,7 @@ import {
   type TransferCallToComplaintCommand,
 } from "@drts/contracts";
 import {
+  camelWire,
   object,
   requireFact,
   type CallResult,
@@ -119,6 +120,7 @@ export class R08Callcenter {
   };
   private readonly state: R08Custody;
   private captureStarted = false;
+  private replayEligible = false;
   private replayStarted = false;
   private cleanupStarted = false;
 
@@ -210,9 +212,9 @@ export class R08Callcenter {
     return `${prefix}/callcenter/sessions/${encodeURIComponent(this.state.callId)}`;
   }
 
-  private checked(result: CallResult): ObjectData {
+  private checked(result: CallResult, post = false): ObjectData {
     requireFact(
-      result.status === 200 &&
+      (result.status === 200 || (post && result.status === 201)) &&
         result.headers.get("x-drts-candidate-sha") ===
           this.expected.proof.runtimeSha,
       "r08-normal-bff-ack-runtime",
@@ -313,25 +315,44 @@ export class R08Callcenter {
       };
       this.state.transfer = "ack-unknown";
       await this.checkpoint(); // Exact intent and known IDs BEFORE forwarding.
+      this.replayEligible = true;
       const response = await route.fetch({
         maxRedirects: 0,
         maxRetries: 0,
         timeout: 15000,
       });
+      // A known BFF denial or foreign runtime is not an uncertain business ACK
+      // and cannot authorize a resend, even if an older proof was successful.
+      if (
+        ![200, 201].includes(response.status()) ||
+        new Headers(response.headers()).get("x-drts-candidate-sha") !==
+          this.expected.proof.runtimeSha ||
+        response.url() !== request.url()
+      ) {
+        this.replayEligible = false;
+        requireFact(false, "r08-original-ui-bff-denial-or-runtime");
+      }
       const bytes = await response.body();
       requireFact(bytes.length <= 1024 * 1024, "r08-bounded-ui-response");
-      const payload = object(JSON.parse(bytes.toString("utf8")));
+      const payload = object(camelWire(JSON.parse(bytes.toString("utf8"))));
+      if (payload.data === undefined || payload.error !== undefined)
+        this.replayEligible = false;
       requireFact(
-        response.url() === request.url() && payload.ok === true,
+        response.url() === request.url() &&
+          payload.data !== undefined &&
+          payload.error === undefined,
         "r08-ui-success-envelope",
       );
       this.acceptTransfer(
-        this.checked({
-          status: response.status(),
-          headers: new Headers(response.headers()),
-          data: payload.data,
-          bytes,
-        }),
+        this.checked(
+          {
+            status: response.status(),
+            headers: new Headers(response.headers()),
+            data: payload.data,
+            bytes,
+          },
+          true,
+        ),
       );
       this.state.transfer = "acknowledged";
       await this.checkpoint(); // Capture success/IDs BEFORE UI can navigate.
@@ -375,7 +396,7 @@ export class R08Callcenter {
 
   async replay() {
     requireFact(
-      !this.replayStarted && !!this.state.command,
+      !this.replayStarted && this.replayEligible && !!this.state.command,
       "r08-one-original-replay-only",
     );
     this.replayStarted = true;
@@ -384,7 +405,7 @@ export class R08Callcenter {
       this.state.replay = "ack-unknown";
       await this.checkpoint(); // Never replay again if ACK/checkpoint is unknown.
       this.acceptTransfer(
-        this.checked(await this.ports.postRaw(copy(this.state.command))),
+        this.checked(await this.ports.postRaw(copy(this.state.command)), true),
       );
       await this.checkpoint();
       await this.readTuple();
@@ -432,6 +453,7 @@ export class R08Callcenter {
             headers: { "Content-Type": "application/json" },
             bodySha256: digest(rawBody),
           }),
+          true,
         );
         await this.guard();
       };
