@@ -8508,8 +8508,12 @@ def merged_acceptance_resume_context(status: dict[str, Any], task: dict[str, Any
         for row in status.get("tasks", []) or []
     ):
         return None
+    # Zero or one open blocker: a merged candidate whose runtime evidence has
+    # landed may carry no open blocker at all. The exact fingerprint (the
+    # empty-set digest for zero) still binds the Chair's view to both rereads;
+    # two or more stay rejected. candidate_ci_recovery_context keeps exactly one.
     fingerprint, open_count = open_blocker_fingerprint(status.get("blockers"), task_id)
-    if open_count != 1:
+    if open_count > 1:
         return None
     return {
         "identity": identity,
