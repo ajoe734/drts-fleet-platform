@@ -846,7 +846,7 @@ async function fullHarness(fault = "") {
   );
   tx.setSession("ops", "SIM-NORMAL-OPS-TOKEN");
   tx.setSession("opsApi", "SIM-NORMAL-OPS-TOKEN");
-  const finalizer = new RunFinalizer({
+  const finalizer: InstanceType<typeof RunFinalizer> = new RunFinalizer({
     definitionSha: SHA,
     runtimeSha: SHA,
     nonce: "SIM-full",
@@ -1036,7 +1036,7 @@ async function fullHarness(fault = "") {
       },
     },
   };
-  const run = new R08ExistingFull({
+  const run: InstanceType<typeof R08ExistingFull> = new R08ExistingFull({
     context: context as unknown as import("@playwright/test").BrowserContext,
     tx,
     finalizer,
